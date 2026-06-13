@@ -1,6 +1,5 @@
 """graphify-mcp — an MCP server exposing the Graphify knowledge graph."""
 
-from graphify_mcp.server import main, mcp
+from graphify_mcp.server import __version__, main, mcp
 
-__version__ = "0.1.0"
-__all__ = ["main", "mcp", "__version__"]
+__all__ = ["__version__", "main", "mcp"]

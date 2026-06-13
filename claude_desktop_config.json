@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "graphify": {
-      "command": "graphify-mcp",
+      "command": "graphify-mcp-server",
       "env": {
         "GRAPHIFY_PROJECT_DIR": "/ABSOLUTE/PATH/your-project"
       }

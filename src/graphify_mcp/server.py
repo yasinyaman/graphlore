@@ -46,11 +46,19 @@ from collections import Counter, deque
 from pathlib import Path
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import Context, FastMCP
+from mcp.types import (
+    ClientCapabilities,
+    SamplingCapability,
+    SamplingMessage,
+    TextContent,
+)
 
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
+
+__version__ = "0.1.0"
 
 PROJECT_DIR = Path(os.environ.get("GRAPHIFY_PROJECT_DIR", ".")).resolve()
 OUT_DIR_NAME = os.environ.get("GRAPHIFY_OUT_DIR", "graphify-out")
@@ -71,6 +79,13 @@ mcp = FastMCP(
         "analysis tools when you want structured output to chain on."
     ),
 )
+
+# FastMCP doesn't forward a version to the underlying MCP server, so clients
+# would otherwise report the mcp library's version. Surface our own instead.
+try:  # pragma: no cover - guards against private-attr changes upstream
+    mcp._mcp_server.version = __version__
+except Exception:
+    pass
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -145,6 +160,25 @@ def _node_label(n: dict) -> str:
     return str(n.get("label") or n.get("name") or n.get("id") or "?")
 
 
+def _node_line(n: dict) -> Any:
+    """Source line across schema variants.
+
+    graphify stores the line as ``source_location`` like ``"L295"`` (or a range
+    ``"L295-L312"``); other graph schemas use line/lineno/start_line.
+    """
+    for k in ("line", "lineno", "start_line"):
+        v = n.get(k)
+        if v not in (None, ""):
+            return v
+    digits = ""
+    for ch in str(n.get("source_location") or "").lstrip("Ll"):
+        if ch.isdigit():
+            digits += ch
+        else:
+            break
+    return int(digits) if digits else ""
+
+
 def _edge_ends(e: dict) -> tuple[str, str]:
     return (
         str(e.get("source") or e.get("from") or e.get("src") or "?"),
@@ -195,6 +229,47 @@ def _git(args: list[str]) -> str | None:
 # Roughly ~4 chars per token; good enough for budgeting display.
 def _approx_tokens(text: str) -> int:
     return max(1, len(text) // 4)
+
+
+# Env var -> graphify backend name, for detecting a user-supplied API key.
+_BACKEND_ENV = {
+    "GEMINI_API_KEY": "gemini",
+    "GOOGLE_API_KEY": "gemini",
+    "OPENAI_API_KEY": "openai",
+    "ANTHROPIC_API_KEY": "claude",
+    "DEEPSEEK_API_KEY": "deepseek",
+    "KIMI_API_KEY": "kimi",
+    "MOONSHOT_API_KEY": "kimi",
+}
+
+
+def _detect_backend() -> str | None:
+    """Name of the graphify LLM backend a user key is present for, else None."""
+    for env, name in _BACKEND_ENV.items():
+        if os.environ.get(env):
+            return name
+    return None
+
+
+def _client_supports_sampling(ctx: Context) -> bool:
+    """Capability test: does the connected MCP client offer host-LLM sampling?"""
+    try:
+        return ctx.session.check_client_capability(
+            ClientCapabilities(sampling=SamplingCapability())
+        )
+    except Exception:
+        return False
+
+
+def _read_labels() -> dict[str, str]:
+    """graphify-out/.graphify_labels.json — community id -> name (CLI-written)."""
+    lp = _out_dir() / ".graphify_labels.json"
+    if not lp.exists():
+        return {}
+    try:
+        return json.loads(lp.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
 
 
 # ---------------------------------------------------------------------------
@@ -422,6 +497,162 @@ def graphify_communities(as_json: bool = False) -> str:
     return _fmt({"communities": items}, as_json, "\n".join(text))
 
 
+@mcp.tool(annotations={"title": "Sampling/LLM status", "readOnlyHint": True})
+def graphify_sampling_status(ctx: Context, as_json: bool = False) -> str:
+    """Capability test: how can semantic naming be produced in this session?
+
+    Reports whether the connected client supports host-LLM **sampling** (so the
+    server needs no API key), whether a backend **API key** is configured as a
+    fallback, and which method graphify_label_communities will pick.
+    """
+    sampling = _client_supports_sampling(ctx)
+    backend = _detect_backend()
+    cli = shutil.which(GRAPHIFY_BIN) is not None
+    if sampling:
+        method = "sampling"
+        advice = "graphify_label_communities() will use the host LLM — no API key needed."
+    elif backend and cli:
+        method = "cli"
+        advice = (
+            f"Host sampling unsupported; the '{backend}' backend key will be used via "
+            'graphify_label_communities(method="cli").'
+        )
+    else:
+        method = "placeholder"
+        advice = (
+            "No host sampling and no backend key — names stay as 'Community N'. "
+            "Set GEMINI_API_KEY / OPENAI_API_KEY / ... or connect a sampling-capable client."
+        )
+    payload = {
+        "host_sampling_supported": sampling,
+        "backend_key_detected": backend,
+        "graphify_cli_available": cli,
+        "preferred_method": method,
+        "advice": advice,
+    }
+    text = (
+        f"Host LLM sampling : {'SUPPORTED' if sampling else 'not supported'}\n"
+        f"Backend API key   : {backend or 'none detected'}\n"
+        f"graphify CLI      : {'available' if cli else 'missing'}\n"
+        f"-> preferred method: {method}\n{advice}"
+    )
+    return _fmt(payload, as_json, text)
+
+
+@mcp.tool(
+    annotations={
+        "title": "Name communities (host LLM / key)",
+        "readOnlyHint": False,
+        "destructiveHint": False,
+    }
+)
+async def graphify_label_communities(
+    ctx: Context,
+    method: str = "auto",
+    limit: int = 12,
+    sample_size: int = 18,
+    as_json: bool = False,
+) -> str:
+    """Give the Leiden communities human-readable names.
+
+    Args:
+        method: "auto" -> host-LLM sampling if the client supports it, else a
+            configured backend key (graphify CLI), else "Community N" placeholders.
+            "sampling" -> force host-LLM sampling (no API key needed).
+            "cli" -> force the graphify backend (GEMINI_API_KEY/OPENAI_API_KEY/...
+            or a local ollama). "placeholder" -> no LLM at all.
+        limit: Only the largest `limit` communities are named, to stay cheap.
+        sample_size: Member labels per community handed to the model.
+    """
+    graph = _load_graph()
+    if isinstance(graph, str):
+        return graph
+    nodes, _ = _nodes_edges(graph)
+    comms: dict[Any, list[str]] = {}
+    for n in nodes:
+        c = n.get("community", n.get("cluster"))
+        if c is not None:
+            comms.setdefault(c, []).append(_node_label(n))
+    if not comms:
+        return "Nodes carry no community info. Try graphify_build(cluster_only=True)."
+    ordered = sorted(comms.items(), key=lambda kv: -len(kv[1]))[:limit]
+
+    sampling_ok = _client_supports_sampling(ctx)
+    chosen = method
+    if method == "auto":
+        if sampling_ok:
+            chosen = "sampling"
+        elif _detect_backend() and shutil.which(GRAPHIFY_BIN):
+            chosen = "cli"
+        else:
+            chosen = "placeholder"
+
+    names: dict[Any, str] = {}
+    note = ""
+    if chosen == "sampling":
+        if not sampling_ok:
+            return (
+                "ERROR: method='sampling' but the connected client does not support MCP "
+                "sampling. Use method='cli' with a backend key, or call "
+                "graphify_sampling_status() to see the options."
+            )
+        for cid, members in ordered:
+            prompt = (
+                "Name this software module in 2-4 words from its members. "
+                "Reply with ONLY the title.\nMembers: " + ", ".join(members[:sample_size])
+            )
+            try:
+                res = await ctx.session.create_message(
+                    messages=[
+                        SamplingMessage(
+                            role="user",
+                            content=TextContent(type="text", text=prompt),
+                        )
+                    ],
+                    system_prompt="You label code modules with a concise Title Case name.",
+                    max_tokens=16,
+                )
+                txt = res.content.text if isinstance(res.content, TextContent) else str(res.content)
+                names[cid] = txt.strip().strip('".') or f"Community {cid}"
+            except Exception as e:  # noqa: BLE001 - degrade per-community, keep going
+                names[cid] = f"Community {cid}"
+                note = f"(some names fell back: {type(e).__name__})"
+    elif chosen == "cli":
+        out = _run_cli(["label", str(PROJECT_DIR)])
+        if out.startswith("ERROR"):
+            return (
+                out + "\n\nNo usable backend for method='cli'. Set GEMINI_API_KEY / "
+                "OPENAI_API_KEY / ... (or run ollama), or use a sampling-capable client "
+                "with method='sampling'."
+            )
+        labels = _read_labels()
+        names = {cid: labels.get(str(cid), f"Community {cid}") for cid, _ in ordered}
+    else:  # placeholder
+        names = {cid: f"Community {cid}" for cid, _ in ordered}
+
+    items = [
+        {"id": cid, "name": names[cid], "size": len(members), "members": members[:5]}
+        for cid, members in ordered
+    ]
+    payload = {
+        "method": chosen,
+        "host_sampling_supported": sampling_ok,
+        "labeled": len(items),
+        "total_communities": len(comms),
+        "communities": items,
+    }
+    head = (
+        f"Named the {len(items)} largest of {len(comms)} communities via '{chosen}'"
+        + (f" {note}" if note else "")
+        + ":"
+    )
+    text = [head] + [
+        f"  [{it['id']}] {it['name']}  ({it['size']} nodes: {', '.join(it['members'])})"
+        for it in items
+    ]
+    return _fmt(payload, as_json, "\n".join(text))
+
+
 @mcp.tool(annotations={"title": "Search nodes", "readOnlyHint": True})
 def graphify_search(pattern: str, limit: int = 25, as_json: bool = False) -> str:
     """Search nodes by text in their name/label (case-insensitive)."""
@@ -554,14 +785,14 @@ def graphify_node_details(node: str, as_json: bool = False) -> str:
         "label": _node_label(n),
         "type": n.get("type", ""),
         "file": n.get("file") or n.get("path") or n.get("source_file", ""),
-        "line": n.get("line") or n.get("lineno") or n.get("start_line", ""),
+        "line": _node_line(n),
         "community": n.get("community", n.get("cluster", "")),
         "doc": n.get("doc") or n.get("docstring") or n.get("summary") or n.get("description", ""),
     }
     # include any other interesting keys verbatim
     extra = {k: v for k, v in n.items() if k not in {
         "id", "name", "label", "type", "file", "path", "source_file",
-        "line", "lineno", "start_line", "community", "cluster",
+        "line", "lineno", "start_line", "source_location", "community", "cluster",
         "doc", "docstring", "summary", "description",
     }}
     if extra:

@@ -6,6 +6,20 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+- `graphify-mcp-server` console script and `python -m graphify_mcp` entry point,
+  both collision-free with the `graphify-mcp` script that `graphifyy` also ships.
+- `graphify_label_communities` — names Leiden communities via **host-LLM MCP
+  sampling** (no server API key), a backend key (`method="cli"`), or placeholders.
+- `graphify_sampling_status` — capability test reporting whether the client
+  supports sampling, whether a backend key is set, and the preferred method.
+
+### Fixed
+- `graphify_node_details` now reads the source line from graphify's real
+  `source_location` field (e.g. `"L295"`), not just `line`/`lineno`/`start_line`,
+  so `file:line` references resolve against actual graph output.
+- Server now reports its own version over MCP instead of the `mcp` library's.
+
 ## [0.1.0] - 2026-06-13
 
 ### Added

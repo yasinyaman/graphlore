@@ -84,6 +84,38 @@ def test_node_details(project):
     assert data["community"] == 0
 
 
+def test_node_line_helper():
+    assert server._node_line({"line": 7}) == 7
+    assert server._node_line({"line": 0}) == 0  # falsy but valid
+    assert server._node_line({"source_location": "L295"}) == 295
+    assert server._node_line({"source_location": "L295-L312"}) == 295  # range -> start
+    assert server._node_line({}) == ""
+
+
+def test_node_details_real_graphify_schema(tmp_path, monkeypatch):
+    """graphify's real output uses source_file + source_location='L295', not line."""
+    out = tmp_path / "graphify-out"
+    out.mkdir()
+    graph = {
+        "directed": True,
+        "nodes": [{
+            "id": "graphify_overview",
+            "label": "graphify_overview()",
+            "source_file": "src/graphify_mcp/server.py",
+            "source_location": "L295",
+            "community": 12,
+        }],
+        "links": [],
+    }
+    (out / "graph.json").write_text(json.dumps(graph), encoding="utf-8")
+    monkeypatch.setattr(server, "PROJECT_DIR", tmp_path)
+    data = json.loads(server.graphify_node_details("graphify_overview", as_json=True))
+    assert data["file"] == "src/graphify_mcp/server.py"
+    assert data["line"] == 295
+    # source_location is consumed as the line, not echoed back in extra
+    assert "source_location" not in data.get("extra", {})
+
+
 def test_missing_graph_errors(empty_project):
     assert "not found" in server.graphify_overview()
     assert "not found" in server.graphify_god_nodes()
@@ -124,5 +156,101 @@ def test_tool_and_prompt_registration(project):
     names, prompts = asyncio.run(_collect())
     assert "graphify_overview" in names
     assert "graphify_subgraph" in names
-    assert len(names) == 14
+    assert "graphify_sampling_status" in names
+    assert "graphify_label_communities" in names
+    assert len(names) == 16
     assert prompts == {"onboard", "trace_bug", "explain_flow"}
+
+
+def test_version_reported_over_mcp():
+    import graphify_mcp
+
+    assert server.__version__ == graphify_mcp.__version__
+    # FastMCP otherwise reports the mcp library version; we override it.
+    assert server.mcp._mcp_server.version == server.__version__
+
+
+def test_main_module_wired():
+    import importlib
+
+    mod = importlib.import_module("graphify_mcp.__main__")  # must not run main()
+    assert mod.main is server.main
+
+
+def test_detect_backend(monkeypatch):
+    for env in server._BACKEND_ENV:
+        monkeypatch.delenv(env, raising=False)
+    assert server._detect_backend() is None
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    assert server._detect_backend() == "openai"
+
+
+# --- host-LLM sampling: capability test + naming round-trip (in-memory) -------
+
+def _run_in_memory(project, tool, args, sampling_callback=None):
+    """Drive a tool over a real in-memory MCP session (optionally with sampling)."""
+    import asyncio
+
+    from mcp.shared.memory import create_connected_server_and_client_session as connect
+
+    async def _go():
+        async with connect(server.mcp, sampling_callback=sampling_callback) as client:
+            await client.initialize()
+            res = await client.call_tool(tool, args)
+            return res.content[0].text
+
+    return asyncio.run(_go())
+
+
+async def _first_member_host_llm(context, params):
+    """Stand-in for the host model: name a community after its first member."""
+    from mcp.types import CreateMessageResult, TextContent
+
+    text = params.messages[0].content.text
+    first = text.split("Members:", 1)[-1].split(",")[0].strip()
+    return CreateMessageResult(
+        role="assistant",
+        content=TextContent(type="text", text=first),
+        model="stub-host-model",
+    )
+
+
+def test_sampling_status_supported(project):
+    out = _run_in_memory(
+        project, "graphify_sampling_status", {"as_json": True},
+        sampling_callback=_first_member_host_llm,
+    )
+    data = json.loads(out)
+    assert data["host_sampling_supported"] is True
+    assert data["preferred_method"] == "sampling"
+
+
+def test_sampling_status_unsupported(project):
+    data = json.loads(_run_in_memory(project, "graphify_sampling_status", {"as_json": True}))
+    assert data["host_sampling_supported"] is False  # no sampling_callback -> not advertised
+
+
+def test_label_communities_via_sampling(project):
+    out = _run_in_memory(
+        project, "graphify_label_communities", {"method": "auto", "as_json": True},
+        sampling_callback=_first_member_host_llm,
+    )
+    data = json.loads(out)
+    assert data["method"] == "sampling"
+    assert data["labeled"] >= 1
+    # the stub names each community after its first member -> proves the round-trip
+    assert all(c["name"] == c["members"][0] for c in data["communities"])
+
+
+def test_label_communities_sampling_unsupported_errors(project):
+    out = _run_in_memory(project, "graphify_label_communities", {"method": "sampling"})
+    assert "does not support" in out
+
+
+def test_label_communities_placeholder(project):
+    out = _run_in_memory(
+        project, "graphify_label_communities", {"method": "placeholder", "as_json": True}
+    )
+    data = json.loads(out)
+    assert data["method"] == "placeholder"
+    assert all(c["name"] == f"Community {c['id']}" for c in data["communities"])

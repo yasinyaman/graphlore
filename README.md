@@ -29,8 +29,15 @@ pip install -e ".[dev]"
 ## Running
 
 ```bash
-GRAPHIFY_PROJECT_DIR=/path/to/repo graphify-mcp
+GRAPHIFY_PROJECT_DIR=/path/to/repo graphify-mcp-server
+# equivalently, collision-proof:
+GRAPHIFY_PROJECT_DIR=/path/to/repo python -m graphify_mcp
 ```
+
+> **Heads-up:** `graphifyy` ships its own `graphify-mcp` console script (its
+> embedded server), so if both packages are installed the bare `graphify-mcp`
+> command resolves to whichever was installed last. Use `graphify-mcp-server`
+> or `python -m graphify_mcp` to always launch *this* server.
 
 ### Claude Code
 
@@ -77,6 +84,28 @@ graph.json analysis (read-only, no CLI needed, `as_json=True` for structured out
 | `graphify_node_details` | Node metadata: type, source file/line, docstring, community |
 | `graphify_freshness` | Is the graph stale vs. the current git HEAD? Recommends `update` |
 
+Semantic naming (uses the **host model via MCP sampling** — no API key — or a backend key):
+
+| Tool | Purpose |
+|---|---|
+| `graphify_sampling_status` | Capability test: reports whether the client supports host-LLM sampling, whether a backend key is set, and which method will be used |
+| `graphify_label_communities` | Give Leiden communities human-readable names. `method="auto"` (sampling → key → placeholder), `"sampling"`, `"cli"`, or `"placeholder"` |
+
+## Naming communities without an API key (MCP sampling)
+
+The Leiden clustering is keyless, but turning `Community 7` into `Authentication`
+needs a model. Three ways, in `graphify_label_communities`'s preference order:
+
+1. **Host-LLM sampling** — the server asks the *connected client* to run the
+   completion via MCP `sampling/createMessage`. The model the user already uses
+   (e.g. Claude in a sampling-capable client) does the naming; **the server holds
+   no API key**. Subject to client support — call `graphify_sampling_status`
+   first; it degrades gracefully when unsupported.
+2. **Backend API key** (`method="cli"`) — set `GEMINI_API_KEY` / `OPENAI_API_KEY`
+   / `ANTHROPIC_API_KEY` / … (or run a local **ollama**) and graphify's own
+   backend names them. This option always remains available.
+3. **Placeholders** — no model anywhere: names stay `Community N`.
+
 ## Resources
 
 - `graphify://report` — GRAPH_REPORT.md
@@ -97,6 +126,7 @@ Reusable templates that orchestrate the tools for the assistant:
 - **Server instructions** describe the recommended flow (overview → targeted subgraph/query → build update).
 - **`as_json` output** on every analysis tool returns structured data the model can chain on instead of re-parsing prose.
 - **Token budgeting** (`graphify_subgraph`) keeps context small on large graphs — the core of Graphify's ~71× compression.
+- **Host-LLM sampling** (`graphify_label_communities`) lets the server borrow the client's model via MCP `sampling/createMessage`, so semantic naming works with no server-side API key — with a capability test (`graphify_sampling_status`) and a backend-key fallback.
 
 ## Typical workflow
 

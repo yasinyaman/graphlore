@@ -23,3 +23,6 @@ graphify-out/
 .vscode/
 .idea/
 .DS_Store
+
+# Claude Code (per-user local settings; shared .claude/ config can still be committed)
+.claude/settings.local.json

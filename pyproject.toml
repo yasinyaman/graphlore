@@ -36,7 +36,12 @@ Issues = "https://github.com/yasinyaman/graphify-mcp/issues"
 "Graphify" = "https://graphify.net"
 
 [project.scripts]
+# `graphify-mcp` is convenient for standalone installs, but `graphifyy` ships a
+# console script of the same name (its embedded server), so whichever is
+# installed last wins. `graphify-mcp-server` is collision-free; prefer it (or
+# `python -m graphify_mcp`) when both packages are installed.
 graphify-mcp = "graphify_mcp.server:main"
+graphify-mcp-server = "graphify_mcp.server:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/graphify_mcp"]
