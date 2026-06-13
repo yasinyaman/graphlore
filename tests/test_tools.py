@@ -177,6 +177,69 @@ def test_main_module_wired():
     assert mod.main is server.main
 
 
+def _write_graph(tmp_path, graph):
+    out = tmp_path / "graphify-out"
+    out.mkdir()
+    (out / "graph.json").write_text(json.dumps(graph), encoding="utf-8")
+
+
+def test_overview_and_surprises_share_one_definition(tmp_path, monkeypatch):
+    """overview now counts is_surprise like surprises, and neither counts a mere
+    INFERRED-confidence edge as a surprise (no false inflation)."""
+    _write_graph(tmp_path, {
+        "nodes": [
+            {"id": "A", "label": "A", "community": 0},
+            {"id": "B", "label": "B", "community": 1},
+            {"id": "C", "label": "C", "community": 0},
+        ],
+        "edges": [
+            {"source": "A", "target": "B", "is_surprise": True, "relation": "x"},
+            {"source": "A", "target": "C", "relation": "y"},
+            {"source": "B", "target": "C", "type": "inferred", "relation": "z"},  # not a surprise
+        ],
+    })
+    monkeypatch.setattr(server, "PROJECT_DIR", tmp_path)
+    ov = json.loads(server.graphify_overview(as_json=True))
+    su = json.loads(server.graphify_surprises(as_json=True))
+    assert ov["surprise_edges"] == 1  # only the is_surprise edge; inferred is NOT counted
+    assert su["fallback"] is False
+    assert {"from": "A", "to": "B", "relation": "x"} in su["surprises"]
+
+
+def test_load_graph_caches_by_mtime(tmp_path, monkeypatch):
+    _write_graph(tmp_path, {"nodes": [{"id": "A", "label": "A"}], "links": []})
+    monkeypatch.setattr(server, "PROJECT_DIR", tmp_path)
+    a = server._load_graph()
+    b = server._load_graph()
+    assert a is b  # same object returned from cache while mtime is unchanged
+
+
+def test_freshness_flags_untracked_file(tmp_path, monkeypatch):
+    import shutil as _sh
+    import subprocess
+
+    import pytest
+    if _sh.which("git") is None:
+        pytest.skip("git not available")
+    _write_graph(tmp_path, {"nodes": [], "links": []})
+
+    def git(*args):
+        subprocess.run(["git", *args], cwd=tmp_path, capture_output=True, check=True)
+
+    git("init")
+    git("config", "user.email", "t@example.com")
+    git("config", "user.name", "Test")
+    git("add", ".")
+    git("commit", "-m", "init")
+    monkeypatch.setattr(server, "PROJECT_DIR", tmp_path)
+
+    # A brand-new untracked .py is a real rebuild trigger that `git diff HEAD` misses.
+    (tmp_path / "new_module.py").write_text("x = 1\n", encoding="utf-8")
+    data = json.loads(server.graphify_freshness(as_json=True))
+    assert data["stale"] is True
+    assert any("new_module.py" in f for f in data["uncommitted_or_untracked_files"])
+
+
 def test_detect_backend(monkeypatch):
     for env in server._BACKEND_ENV:
         monkeypatch.delenv(env, raising=False)

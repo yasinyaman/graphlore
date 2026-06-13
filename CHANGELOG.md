@@ -19,6 +19,20 @@ All notable changes to this project are documented here. The format is based on
   `source_location` field (e.g. `"L295"`), not just `line`/`lineno`/`start_line`,
   so `file:line` references resolve against actual graph output.
 - Server now reports its own version over MCP instead of the `mcp` library's.
+- `graphify_subgraph` no longer re-serializes the whole edge list on every edge
+  during the budget check — a running counter replaces the O(n²) `json.dumps`.
+- `graphify_freshness` now detects newly-added **untracked** files (via
+  `git status --porcelain`), compares against graphify's `built_at_commit`
+  (robust across checkouts where mtime resets), and ignores its own
+  `graphify-out/` output.
+- `graphify_overview` and `graphify_surprises` now share one surprise-edge
+  definition (`_is_surprise_edge`); an INFERRED *confidence* is no longer
+  miscounted as a surprise, and the two tools agree.
+
+### Changed
+- `_load_graph` caches the parsed graph by path + mtime, so a multi-MB
+  `graph.json` isn't re-parsed on every tool call.
+- Community-naming sampling `max_tokens` raised 16 → 24 to avoid clipped names.
 
 ## [0.1.0] - 2026-06-13
 

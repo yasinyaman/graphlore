@@ -131,8 +131,14 @@ def _run_cli(args: list[str], cwd: Path | None = None) -> str:
     return out + (f"\n[stderr]\n{err}" if err else "")
 
 
+# Parsed graph.json cache, keyed by path -> (mtime, data). Avoids re-parsing a
+# multi-MB graph on every tool call; keyed on path (not just mtime) so distinct
+# graphs in tests can't collide on a coarse-resolution mtime.
+_GRAPH_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+
+
 def _load_graph() -> dict[str, Any] | str:
-    """Load graph.json; return a descriptive error message if missing."""
+    """Load graph.json (cached by path+mtime); return an error message if missing."""
     gp = _graph_path()
     if not gp.exists():
         return (
@@ -140,7 +146,14 @@ def _load_graph() -> dict[str, Any] | str:
             f"(project directory: {PROJECT_DIR})."
         )
     try:
-        return json.loads(gp.read_text(encoding="utf-8"))
+        mtime = gp.stat().st_mtime
+        key = str(gp)
+        cached = _GRAPH_CACHE.get(key)
+        if cached is not None and cached[0] == mtime:
+            return cached[1]
+        data = json.loads(gp.read_text(encoding="utf-8"))
+        _GRAPH_CACHE[key] = (mtime, data)
+        return data
     except json.JSONDecodeError as e:
         return f"ERROR: failed to parse graph.json: {e}"
 
@@ -188,6 +201,20 @@ def _edge_ends(e: dict) -> tuple[str, str]:
 
 def _edge_rel(e: dict) -> str:
     return str(e.get("relation") or e.get("label") or e.get("type") or "->")
+
+
+def _is_surprise_edge(e: dict) -> bool:
+    """A genuinely flagged surprise edge.
+
+    Note: an "inferred" confidence (graphify's EXTRACTED/INFERRED/AMBIGUOUS) is
+    NOT a surprise — only an explicit surprise flag or type counts. Used by both
+    graphify_overview and graphify_surprises so they agree on one definition.
+    """
+    return bool(
+        e.get("surprise")
+        or e.get("is_surprise")
+        or str(e.get("type", "")).lower() == "surprise"
+    )
 
 
 def _resolve_node(nodes: list[dict], key: str) -> dict | None:
@@ -385,10 +412,7 @@ def graphify_overview(top_n: int = 8, as_json: bool = False) -> str:
     labels = {_node_id(n): _node_label(n) for n in nodes}
     comms = {n.get("community", n.get("cluster")) for n in nodes}
     comms.discard(None)
-    surprises = sum(
-        1 for e in edges
-        if e.get("surprise") or str(e.get("type", "")).lower() in ("surprise", "inferred")
-    )
+    surprises = sum(1 for e in edges if _is_surprise_edge(e))
     top = degree.most_common(top_n)
     god = [{"node": labels.get(nid, nid), "degree": d} for nid, d in top]
 
@@ -446,11 +470,7 @@ def graphify_surprises(limit: int = 20, as_json: bool = False) -> str:
     if isinstance(graph, str):
         return graph
     nodes, edges = _nodes_edges(graph)
-    flagged = [
-        e for e in edges
-        if e.get("surprise") or e.get("is_surprise")
-        or str(e.get("type", "")).lower() in ("surprise", "inferred")
-    ]
+    flagged = [e for e in edges if _is_surprise_edge(e)]
     fallback = False
     if not flagged:
         comm = {_node_id(n): n.get("community", n.get("cluster")) for n in nodes}
@@ -468,7 +488,7 @@ def graphify_surprises(limit: int = 20, as_json: bool = False) -> str:
     header = (
         f"No flagged surprise edges; first {limit} of {len(flagged)} cross-community edges:"
         if fallback else
-        f"First {limit} of {len(flagged)} surprise/inferred edges:"
+        f"First {limit} of {len(flagged)} flagged surprise edges:"
     )
     text = [header] + [f"  {i['from']} —{i['relation']}→ {i['to']}" for i in items]
     return _fmt({"surprises": items, "fallback": fallback}, as_json, "\n".join(text))
@@ -610,7 +630,7 @@ async def graphify_label_communities(
                         )
                     ],
                     system_prompt="You label code modules with a concise Title Case name.",
-                    max_tokens=16,
+                    max_tokens=24,
                 )
                 txt = res.content.text if isinstance(res.content, TextContent) else str(res.content)
                 names[cid] = txt.strip().strip('".') or f"Community {cid}"
@@ -729,6 +749,7 @@ def graphify_subgraph(
     collected_edges: list[dict] = []
     seen_pairs: set[tuple[str, str, str]] = set()
     truncated = False
+    running_chars = 2  # the enclosing "[]" of the JSON array
 
     while frontier:
         cur, depth = frontier.popleft()
@@ -738,15 +759,16 @@ def graphify_subgraph(
             key = tuple(sorted((cur, nb)) + [rel])  # type: ignore
             if key not in seen_pairs:
                 seen_pairs.add(key)
-                collected_edges.append(
-                    {"from": labels.get(cur, cur), "to": labels.get(nb, nb), "relation": rel}
-                )
+                edge = {"from": labels.get(cur, cur), "to": labels.get(nb, nb), "relation": rel}
+                collected_edges.append(edge)
+                # Maintain a running size estimate instead of re-serializing the
+                # whole list on every edge (which is O(n^2)). +2 ≈ the ", " separator.
+                running_chars += len(json.dumps(edge, ensure_ascii=False)) + 2
             if nb not in visited:
                 visited.add(nb)
                 frontier.append((nb, depth + 1))
-            # budget check
-            approx = _approx_tokens(json.dumps(collected_edges))
-            if approx >= budget_tokens:
+            # budget check (O(1))
+            if running_chars // 4 >= budget_tokens:
                 truncated = True
                 frontier.clear()
                 break
@@ -813,8 +835,10 @@ def graphify_node_details(node: str, as_json: bool = False) -> str:
 def graphify_freshness(as_json: bool = False) -> str:
     """Check whether graph.json is stale relative to the current git HEAD.
 
-    Compares the graph file mtime against the latest commit time and lists files
-    changed since. Recommends graphify_build(update=True) if stale.
+    Prefers the commit graphify recorded the graph was built from
+    (``built_at_commit``) over the file mtime — robust across checkouts where
+    mtime is reset — and flags both modified and newly-added (untracked) files.
+    Recommends graphify_build(update=True) if stale.
     """
     gp = _graph_path()
     if not gp.exists():
@@ -825,27 +849,48 @@ def graphify_freshness(as_json: bool = False) -> str:
     if head is None:
         return _fmt(payload, as_json,
                     "graph.json exists, but this is not a git repo (or git unavailable).")
-    commit_ts = _git(["log", "-1", "--format=%ct"])
-    changed = _git(["diff", "--name-only", "HEAD"]) or ""  # uncommitted working-tree changes
-    changed_files = [f for f in changed.splitlines() if f.strip()]
-    commit_time = float(commit_ts) if commit_ts else 0.0
-    stale = commit_time > graph_mtime or bool(changed_files)
+
+    # Modified AND untracked files — `git diff --name-only HEAD` misses new files.
+    # Skip graphify's own output dir so an un-gitignored graphify-out/ doesn't
+    # mark the graph perpetually stale.
+    status = _git(["status", "--porcelain"]) or ""
+    changed_files = []
+    for line in status.splitlines():
+        f = line[3:].strip()
+        if f and f != OUT_DIR_NAME and not f.startswith(OUT_DIR_NAME + "/"):
+            changed_files.append(f)
+
+    # Prefer the commit graphify built the graph from; fall back to mtime vs commit.
+    built_at = None
+    g = _load_graph()
+    if isinstance(g, dict):
+        built_at = g.get("built_at_commit")
+    if built_at:
+        behind = not (head.startswith(built_at) or built_at.startswith(head))
+        commit_reason = "graph was built from an older commit" if behind else None
+    else:
+        commit_ts = _git(["log", "-1", "--format=%ct"])
+        commit_time = float(commit_ts) if commit_ts else 0.0
+        behind = commit_time > graph_mtime
+        commit_reason = "HEAD commit is newer than the graph" if behind else None
+
+    stale = behind or bool(changed_files)
     payload.update({
         "head": head[:10],
+        "built_at_commit": built_at[:10] if built_at else None,
         "graph_mtime": graph_mtime,
-        "head_commit_time": commit_time,
         "stale": stale,
-        "uncommitted_changed_files": changed_files[:50],
+        "uncommitted_or_untracked_files": changed_files[:50],
         "recommendation": "graphify_build(update=True)" if stale else "graph is fresh",
     })
     if not stale:
-        text = f"Graph is fresh (HEAD {head[:10]}, no newer commit or uncommitted changes)."
+        text = f"Graph is fresh (HEAD {head[:10]}, no newer commit or pending changes)."
     else:
         why = []
-        if commit_time > graph_mtime:
-            why.append("HEAD commit is newer than the graph")
+        if commit_reason:
+            why.append(commit_reason)
         if changed_files:
-            why.append(f"{len(changed_files)} uncommitted file(s) changed")
+            why.append(f"{len(changed_files)} uncommitted/untracked file(s) changed")
         text = (
             f"Graph is STALE: {', '.join(why)}.\n"
             f"Run graphify_build(update=True) to re-sync."
