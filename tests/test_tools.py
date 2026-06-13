@@ -158,7 +158,8 @@ def test_tool_and_prompt_registration(project):
     assert "graphify_subgraph" in names
     assert "graphify_sampling_status" in names
     assert "graphify_label_communities" in names
-    assert len(names) == 16
+    assert "graphify_validate" in names
+    assert len(names) == 17
     assert prompts == {"onboard", "trace_bug", "explain_flow"}
 
 
@@ -238,6 +239,37 @@ def test_freshness_flags_untracked_file(tmp_path, monkeypatch):
     data = json.loads(server.graphify_freshness(as_json=True))
     assert data["stale"] is True
     assert any("new_module.py" in f for f in data["uncommitted_or_untracked_files"])
+    # additions without deletions -> incremental update is the right action
+    assert data["recommended_action"] == "update"
+
+
+def test_freshness_recommends_rebuild_on_deletion(tmp_path, monkeypatch):
+    import shutil as _sh
+    import subprocess
+
+    import pytest
+    if _sh.which("git") is None:
+        pytest.skip("git not available")
+    _write_graph(tmp_path, {"nodes": [], "links": []})
+    (tmp_path / "mod.py").write_text("x = 1\n", encoding="utf-8")
+
+    def git(*args):
+        subprocess.run(["git", *args], cwd=tmp_path, capture_output=True, check=True)
+
+    git("init")
+    git("config", "user.email", "t@example.com")
+    git("config", "user.name", "Test")
+    git("add", ".")
+    git("commit", "-m", "init")
+    monkeypatch.setattr(server, "PROJECT_DIR", tmp_path)
+
+    # Deleting a tracked source file: incremental update would keep phantom nodes,
+    # so freshness should steer to a full rebuild.
+    (tmp_path / "mod.py").unlink()
+    data = json.loads(server.graphify_freshness(as_json=True))
+    assert data["stale"] is True
+    assert data["recommended_action"] == "rebuild"
+    assert "mod.py" in data["deleted_or_renamed"]
 
 
 # --- opt-in path containment -------------------------------------------------
@@ -296,6 +328,38 @@ def test_main_http_transport_forces_containment(monkeypatch):
     server.main()
     assert seen.get("transport") == "streamable-http"
     assert server.RESTRICT_PATHS is True  # HTTP auto-enables path containment
+
+
+# --- graphify_validate (read-only graph linter) ------------------------------
+
+def test_validate_healthy_fixture(project):
+    data = json.loads(server.graphify_validate(as_json=True))
+    assert data["healthy"] is True
+    assert data["total_issues"] == 0
+
+
+def test_validate_detects_structural_issues(tmp_path, monkeypatch):
+    _write_graph(tmp_path, {
+        "nodes": [
+            {"id": "A", "label": "A"},
+            {"id": "B", "label": "B"},
+            {"id": "C", "label": "C"},   # no edges -> orphan
+        ],
+        "edges": [
+            {"source": "A", "target": "B", "type": "calls"},
+            {"source": "A", "target": "B", "type": "calls"},   # duplicate
+            {"source": "A", "target": "Z", "type": "calls"},   # dangling (Z not a node)
+            {"source": "B", "target": "B", "type": "loops"},   # self-loop
+        ],
+    })
+    monkeypatch.setattr(server, "PROJECT_DIR", tmp_path)
+    data = json.loads(server.graphify_validate(as_json=True))
+    assert data["healthy"] is False
+    assert data["issues"]["duplicate_edges"] == 1
+    assert data["issues"]["dangling_edges"] == 1
+    assert data["issues"]["self_loops"] == 1
+    assert data["issues"]["orphan_nodes"] == 1
+    assert data["examples"]["dangling"][0]["missing"] == ["Z"]
 
 
 def test_detect_backend(monkeypatch):

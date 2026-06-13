@@ -101,7 +101,8 @@ graph.json analysis (read-only, no CLI needed, `as_json=True` for structured out
 | `graphify_neighbors` | 1-hop neighbors of a node |
 | `graphify_subgraph` | **Token-budgeted** BFS subgraph around a node — the cheap way to feed the model just the relevant slice |
 | `graphify_node_details` | Node metadata: type, source file/line, docstring, community |
-| `graphify_freshness` | Is the graph stale vs. the current git HEAD? Recommends `update` |
+| `graphify_freshness` | Is the graph stale vs. git HEAD? Returns `recommended_action` (fresh/update/rebuild) + `reason` — deletions/large changes steer to a full rebuild |
+| `graphify_validate` | Lint the graph for dangling/duplicate/self-loop edges and orphan nodes (read-only) |
 
 Semantic naming (uses the **host model via MCP sampling** — no API key — or a backend key):
 

@@ -42,6 +42,14 @@ All notable changes to this project are documented here. The format is based on
   `graphify_build` to extract arbitrary paths.
 - `graphify_overview` now reports `id_collisions` and warns when distinct nodes
   collapse to one id (degrees/neighbors would otherwise be silently understated).
+- `graphify_validate` — read-only graph linter: dangling edges (endpoint not in
+  the node set), duplicate edges, self-loops, and orphan (degree-0) nodes.
+- `graphify_freshness` now returns a `recommended_action` (fresh / update /
+  rebuild) with a `reason`: deletions, renames, or a large change set steer to a
+  full rebuild, since incremental `update` can't drop nodes for removed code.
+- Fixed a latent bug in `graphify_freshness`'s changed-file list: `_git` stripped
+  the leading status column, mangling the first file name for unstaged
+  modifications/deletions (` M`/` D`). `_git` now `rstrip`s only.
 
 ## [0.1.0] - 2026-06-13
 

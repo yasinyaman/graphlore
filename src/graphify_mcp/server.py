@@ -278,7 +278,9 @@ def _git(args: list[str]) -> str | None:
         )
         if proc.returncode != 0:
             return None
-        return proc.stdout.strip()
+        # rstrip only: `git status --porcelain` encodes status in leading columns
+        # (e.g. " D path"), so a leading space must be preserved for parsing.
+        return proc.stdout.rstrip()
     except Exception:
         return None
 
@@ -880,7 +882,10 @@ def graphify_freshness(as_json: bool = False) -> str:
     Prefers the commit graphify recorded the graph was built from
     (``built_at_commit``) over the file mtime — robust across checkouts where
     mtime is reset — and flags both modified and newly-added (untracked) files.
-    Recommends graphify_build(update=True) if stale.
+
+    Returns a ``recommended_action`` (fresh / update / rebuild) with a ``reason``:
+    deletions, renames, or a large change set call for a full rebuild, since
+    incremental update can't drop nodes for code that no longer exists.
     """
     gp = _graph_path()
     if not gp.exists():
@@ -896,11 +901,15 @@ def graphify_freshness(as_json: bool = False) -> str:
     # Skip graphify's own output dir so an un-gitignored graphify-out/ doesn't
     # mark the graph perpetually stale.
     status = _git(["status", "--porcelain"]) or ""
-    changed_files = []
+    changed_files: list[str] = []
+    removed: list[str] = []  # deleted/renamed -> old nodes linger under incremental update
     for line in status.splitlines():
-        f = line[3:].strip()
-        if f and f != OUT_DIR_NAME and not f.startswith(OUT_DIR_NAME + "/"):
-            changed_files.append(f)
+        code, f = line[:2], line[3:].strip()
+        if not f or f == OUT_DIR_NAME or f.startswith(OUT_DIR_NAME + "/"):
+            continue
+        changed_files.append(f)
+        if "D" in code or "R" in code:
+            removed.append(f)
 
     # Prefer the commit graphify built the graph from; fall back to mtime vs commit.
     built_at = None
@@ -917,26 +926,130 @@ def graphify_freshness(as_json: bool = False) -> str:
         commit_reason = "HEAD commit is newer than the graph" if behind else None
 
     stale = behind or bool(changed_files)
+
+    # Pick an action. Incremental `update` never shrinks the graph, so deletions/
+    # renames (or a large change set) need a full rebuild to avoid phantom nodes.
+    if not stale:
+        action, reason = "fresh", "graph matches HEAD with no pending changes"
+    elif removed:
+        action = "rebuild"
+        reason = (
+            f"{len(removed)} file(s) deleted/renamed — incremental update keeps phantom "
+            "nodes for removed code, so a full rebuild is recommended"
+        )
+    elif len(changed_files) > 25:
+        action = "rebuild"
+        reason = f"{len(changed_files)} files changed (large change set) — full rebuild is safer"
+    else:
+        action = "update"
+        bits = [commit_reason] if commit_reason else []
+        if changed_files:
+            bits.append(f"{len(changed_files)} file(s) changed, no deletions")
+        reason = "; ".join(bits) or "graph is behind HEAD"
+    command = {
+        "fresh": "graph is fresh",
+        "update": "graphify_build(update=True)",
+        "rebuild": 'graphify_build(".")  # full rebuild',
+    }[action]
+
     payload.update({
         "head": head[:10],
         "built_at_commit": built_at[:10] if built_at else None,
         "graph_mtime": graph_mtime,
         "stale": stale,
         "uncommitted_or_untracked_files": changed_files[:50],
-        "recommendation": "graphify_build(update=True)" if stale else "graph is fresh",
+        "deleted_or_renamed": removed[:50],
+        "recommended_action": action,
+        "reason": reason,
+        "recommendation": command,
     })
     if not stale:
         text = f"Graph is fresh (HEAD {head[:10]}, no newer commit or pending changes)."
     else:
-        why = []
-        if commit_reason:
-            why.append(commit_reason)
-        if changed_files:
-            why.append(f"{len(changed_files)} uncommitted/untracked file(s) changed")
+        text = f"Graph is STALE: {reason}.\nRecommended: {command}"
+    return _fmt(payload, as_json, text)
+
+
+@mcp.tool(annotations={"title": "Validate graph", "readOnlyHint": True})
+def graphify_validate(limit: int = 15, as_json: bool = False) -> str:
+    """Lint graph.json for structural problems (read-only).
+
+    Reports edges whose endpoints aren't in the node set (dangling), duplicate
+    edges, self-loops, and orphan (degree-0) nodes — so you know how much to
+    trust the graph or whether a rebuild is warranted. Does not modify anything.
+    """
+    graph = _load_graph()
+    if isinstance(graph, str):
+        return graph
+    nodes, edges = _nodes_edges(graph)
+    node_ids = {_node_id(n) for n in nodes}
+    labels = {_node_id(n): _node_label(n) for n in nodes}
+
+    dangling: list[dict] = []
+    self_loops: list[dict] = []
+    duplicates: list[dict] = []
+    seen: set[tuple[str, str, str]] = set()
+    degree: Counter[str] = Counter()
+    for e in edges:
+        s, t = _edge_ends(e)
+        rel = _edge_rel(e)
+        degree[s] += 1
+        degree[t] += 1
+        missing = [x for x in (s, t) if x not in node_ids]
+        if missing:
+            dangling.append({"from": s, "to": t, "relation": rel, "missing": missing})
+        if s == t:
+            self_loops.append({"node": labels.get(s, s), "relation": rel})
+        key = (s, t, rel)
+        if key in seen:
+            duplicates.append({"from": labels.get(s, s), "to": labels.get(t, t), "relation": rel})
+        else:
+            seen.add(key)
+    orphans = [_node_label(n) for n in nodes if degree.get(_node_id(n), 0) == 0]
+
+    issues = {
+        "dangling_edges": len(dangling),
+        "self_loops": len(self_loops),
+        "duplicate_edges": len(duplicates),
+        "orphan_nodes": len(orphans),
+    }
+    total = sum(issues.values())
+    payload = {
+        "nodes": len(nodes),
+        "edges": len(edges),
+        "total_issues": total,
+        "healthy": total == 0,
+        "issues": issues,
+        "examples": {
+            "dangling": dangling[:limit],
+            "self_loops": self_loops[:limit],
+            "duplicate_edges": duplicates[:limit],
+            "orphan_nodes": orphans[:limit],
+        },
+    }
+    if total == 0:
         text = (
-            f"Graph is STALE: {', '.join(why)}.\n"
-            f"Run graphify_build(update=True) to re-sync."
+            f"Graph looks healthy: {len(nodes)} nodes, {len(edges)} edges, "
+            "no dangling/duplicate/self-loop edges or orphan nodes."
         )
+    else:
+        lines = [f"{total} structural issue(s) in {len(nodes)} nodes / {len(edges)} edges:"]
+        if dangling:
+            lines.append(f"  {len(dangling)} dangling edge(s) (endpoint not in node set), e.g.:")
+            lines += [
+                f"    {labels.get(d['from'], d['from'])} —{d['relation']}→ "
+                f"{labels.get(d['to'], d['to'])}  (missing: {', '.join(d['missing'])})"
+                for d in dangling[:5]
+            ]
+        if self_loops:
+            lines.append(f"  {len(self_loops)} self-loop(s)")
+        if duplicates:
+            lines.append(f"  {len(duplicates)} duplicate edge(s)")
+        if orphans:
+            lines.append(
+                f"  {len(orphans)} orphan node(s) (degree 0), e.g.: " + ", ".join(orphans[:8])
+            )
+        text = "\n".join(lines)
     return _fmt(payload, as_json, text)
 
 
