@@ -49,6 +49,21 @@ Add the contents of `claude_desktop_config.json` to your Claude Desktop config:
 - macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
 - Windows: `%APPDATA%\Claude\claude_desktop_config.json`
 
+### Transport (stdio default, optional HTTP)
+
+stdio is the default and the right choice for a per-developer local server. To
+serve over HTTP instead (e.g. a shared graph for a team or a web MCP client):
+
+```bash
+GRAPHIFY_TRANSPORT=streamable-http GRAPHIFY_HOST=127.0.0.1 GRAPHIFY_PORT=8000 \
+  GRAPHIFY_PROJECT_DIR=/path/to/repo graphify-mcp-server
+```
+
+Any HTTP transport **force-enables path containment** (`GRAPHIFY_RESTRICT_PATHS`)
+so a network client can't drive `graphify_build` to extract arbitrary filesystem
+paths. HTTP binds `127.0.0.1` by default; if you expose it beyond localhost
+(`GRAPHIFY_HOST=0.0.0.0`), put it behind your own auth / reverse proxy.
+
 ## Environment variables
 
 | Variable | Default | Description |
@@ -57,6 +72,10 @@ Add the contents of `claude_desktop_config.json` to your Claude Desktop config:
 | `GRAPHIFY_OUT_DIR` | `graphify-out` | Output folder name |
 | `GRAPHIFY_BIN` | `graphify` | CLI path |
 | `GRAPHIFY_TIMEOUT` | `600` | CLI timeout (seconds) |
+| `GRAPHIFY_RESTRICT_PATHS` | `0` | Confine `graphify_build`'s `path` to the project dir (auto-on for HTTP) |
+| `GRAPHIFY_TRANSPORT` | `stdio` | `stdio` \| `streamable-http` \| `sse` |
+| `GRAPHIFY_HOST` | `127.0.0.1` | Bind host for HTTP transports |
+| `GRAPHIFY_PORT` | `8000` | Bind port for HTTP transports |
 
 ## Tools
 

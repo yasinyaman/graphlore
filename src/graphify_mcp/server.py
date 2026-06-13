@@ -65,6 +65,15 @@ OUT_DIR_NAME = os.environ.get("GRAPHIFY_OUT_DIR", "graphify-out")
 GRAPHIFY_BIN = os.environ.get("GRAPHIFY_BIN", "graphify")
 CLI_TIMEOUT = int(os.environ.get("GRAPHIFY_TIMEOUT", "600"))
 
+# Opt-in: confine graphify_build's `path` to PROJECT_DIR. Off by default so the
+# documented absolute/sibling-repo path keeps working; force-enabled for HTTP.
+RESTRICT_PATHS = os.environ.get("GRAPHIFY_RESTRICT_PATHS", "").lower() in ("1", "true", "yes")
+
+# Transport: "stdio" (default) | "streamable-http" | "sse". HTTP binds HOST:PORT.
+TRANSPORT = os.environ.get("GRAPHIFY_TRANSPORT", "stdio").lower()
+HTTP_HOST = os.environ.get("GRAPHIFY_HOST", "127.0.0.1")
+HTTP_PORT = int(os.environ.get("GRAPHIFY_PORT", "8000"))
+
 mcp = FastMCP(
     "graphify",
     instructions=(
@@ -98,6 +107,27 @@ def _out_dir() -> Path:
 
 def _graph_path() -> Path:
     return _out_dir() / "graph.json"
+
+
+def _path_escapes_project(path: str) -> str | None:
+    """Opt-in containment for a build path.
+
+    Returns an error string if GRAPHIFY_RESTRICT_PATHS is set and `path` resolves
+    outside PROJECT_DIR; otherwise None. Off by default so the documented
+    absolute / sibling-repo path keeps working.
+    """
+    if not RESTRICT_PATHS:
+        return None
+    p = Path(path)
+    resolved = (p if p.is_absolute() else PROJECT_DIR / p).resolve()
+    try:
+        resolved.relative_to(PROJECT_DIR)
+    except ValueError:
+        return (
+            f"ERROR: path '{path}' escapes the project directory ({PROJECT_DIR}); "
+            "GRAPHIFY_RESTRICT_PATHS is enabled. Unset it or pass a contained path."
+        )
+    return None
 
 
 def _fmt(payload: Any, as_json: bool, text: str) -> str:
@@ -321,6 +351,9 @@ def graphify_build(
         cluster_only: True -> rerun clustering only, without re-extraction.
         no_viz: True -> skip the HTML visualization (faster for development).
     """
+    err = _path_escapes_project(path)
+    if err:
+        return err
     args = [path]
     if mode:
         args += ["--mode", mode]
@@ -413,6 +446,9 @@ def graphify_overview(top_n: int = 8, as_json: bool = False) -> str:
     comms = {n.get("community", n.get("cluster")) for n in nodes}
     comms.discard(None)
     surprises = sum(1 for e in edges if _is_surprise_edge(e))
+    # Diagnostic: distinct nodes that collapse to one id (e.g. id-less nodes
+    # sharing a label) silently distort degrees/adjacency.
+    id_collisions = len(nodes) - len({_node_id(n) for n in nodes})
     top = degree.most_common(top_n)
     god = [{"node": labels.get(nid, nid), "degree": d} for nid, d in top]
 
@@ -421,6 +457,7 @@ def graphify_overview(top_n: int = 8, as_json: bool = False) -> str:
         "edges": len(edges),
         "communities": len(comms),
         "surprise_edges": surprises,
+        "id_collisions": id_collisions,
         "god_nodes": god,
         "suggested_next": [
             f"graphify_subgraph(\"{god[0]['node']}\")" if god else "graphify_communities()",
@@ -434,6 +471,11 @@ def graphify_overview(top_n: int = 8, as_json: bool = False) -> str:
         f"Top {len(god)} god nodes:",
     ]
     lines += [f"  {g['node']} — degree {g['degree']}" for g in god]
+    if id_collisions:
+        lines.append(
+            f"\nWarning: {id_collisions} node id collision(s) — distinct nodes share an "
+            "id/label and were merged; degrees/neighbors may be understated."
+        )
     lines.append("\nSuggested next steps: " + "; ".join(payload["suggested_next"]))
     return _fmt(payload, as_json, "\n".join(lines))
 
@@ -1003,8 +1045,21 @@ def explain_flow(flow: str) -> str:
 
 
 def main() -> None:
-    """Console-script entry point (stdio transport)."""
-    mcp.run()
+    """Console-script entry point.
+
+    Transport is selected by GRAPHIFY_TRANSPORT (default ``stdio``); ``sse`` and
+    ``streamable-http`` serve over HTTP on GRAPHIFY_HOST:GRAPHIFY_PORT. Any HTTP
+    transport force-enables path containment (GRAPHIFY_RESTRICT_PATHS), since the
+    build tool would otherwise let a network client extract arbitrary paths.
+    """
+    if TRANSPORT in ("streamable-http", "http", "sse"):
+        global RESTRICT_PATHS
+        RESTRICT_PATHS = True
+        mcp.settings.host = HTTP_HOST
+        mcp.settings.port = HTTP_PORT
+        mcp.run(transport="sse" if TRANSPORT == "sse" else "streamable-http")
+    else:
+        mcp.run(transport="stdio")
 
 
 if __name__ == "__main__":

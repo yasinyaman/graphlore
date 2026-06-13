@@ -240,6 +240,64 @@ def test_freshness_flags_untracked_file(tmp_path, monkeypatch):
     assert any("new_module.py" in f for f in data["uncommitted_or_untracked_files"])
 
 
+# --- opt-in path containment -------------------------------------------------
+
+def test_path_containment_opt_in(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "PROJECT_DIR", tmp_path)
+    # off by default -> documented absolute/sibling path still allowed
+    monkeypatch.setattr(server, "RESTRICT_PATHS", False)
+    assert server._path_escapes_project("../../etc") is None
+    # on -> contained ok, escaping rejected
+    monkeypatch.setattr(server, "RESTRICT_PATHS", True)
+    assert server._path_escapes_project("sub/dir") is None
+    err = server._path_escapes_project("../../etc")
+    assert err and "escapes the project" in err
+
+
+def test_build_rejects_escaping_path_when_restricted(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "PROJECT_DIR", tmp_path)
+    monkeypatch.setattr(server, "RESTRICT_PATHS", True)
+    # guard returns before the CLI is ever invoked
+    assert "escapes the project" in server.graphify_build("/etc")
+
+
+# --- node-id collision diagnostic --------------------------------------------
+
+def test_overview_flags_id_collisions(tmp_path, monkeypatch):
+    _write_graph(tmp_path, {
+        "nodes": [
+            {"label": "X"},          # no id -> _node_id falls back to label "X"
+            {"label": "X"},          # collides with the first
+            {"id": "Y", "label": "Y"},
+        ],
+        "edges": [],
+    })
+    monkeypatch.setattr(server, "PROJECT_DIR", tmp_path)
+    data = json.loads(server.graphify_overview(as_json=True))
+    assert data["id_collisions"] == 1
+    assert "collision" in server.graphify_overview().lower()
+
+
+# --- transport selection -----------------------------------------------------
+
+def test_main_dispatches_stdio_by_default(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(server, "TRANSPORT", "stdio")
+    monkeypatch.setattr(server.mcp, "run", lambda **kw: seen.update(kw))
+    server.main()
+    assert seen.get("transport") == "stdio"
+
+
+def test_main_http_transport_forces_containment(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(server, "TRANSPORT", "streamable-http")
+    monkeypatch.setattr(server, "RESTRICT_PATHS", False)
+    monkeypatch.setattr(server.mcp, "run", lambda **kw: seen.update(kw))
+    server.main()
+    assert seen.get("transport") == "streamable-http"
+    assert server.RESTRICT_PATHS is True  # HTTP auto-enables path containment
+
+
 def test_detect_backend(monkeypatch):
     for env in server._BACKEND_ENV:
         monkeypatch.delenv(env, raising=False)

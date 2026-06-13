@@ -34,6 +34,15 @@ All notable changes to this project are documented here. The format is based on
   `graph.json` isn't re-parsed on every tool call.
 - Community-naming sampling `max_tokens` raised 16 → 24 to avoid clipped names.
 
+### Added (transport & hardening)
+- Optional HTTP transport: `GRAPHIFY_TRANSPORT=streamable-http|sse` serves over
+  `GRAPHIFY_HOST:GRAPHIFY_PORT` (stdio stays the default).
+- Opt-in build-path containment via `GRAPHIFY_RESTRICT_PATHS`; **auto-enabled**
+  whenever an HTTP transport is selected, so a network client can't drive
+  `graphify_build` to extract arbitrary paths.
+- `graphify_overview` now reports `id_collisions` and warns when distinct nodes
+  collapse to one id (degrees/neighbors would otherwise be silently understated).
+
 ## [0.1.0] - 2026-06-13
 
 ### Added
