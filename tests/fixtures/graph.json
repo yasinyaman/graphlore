@@ -1,0 +1,15 @@
+{
+  "nodes": [
+    {"id": "Client", "label": "Client", "type": "class", "community": 0, "file": "httpx/_client.py", "line": 50, "doc": "Synchronous HTTP client."},
+    {"id": "AsyncClient", "label": "AsyncClient", "type": "class", "community": 0, "file": "httpx/_client.py", "line": 900, "doc": "Asynchronous HTTP client."},
+    {"id": "Response", "label": "Response", "type": "class", "community": 1, "file": "httpx/_models.py", "line": 400},
+    {"id": "Request", "label": "Request", "type": "class", "community": 1, "file": "httpx/_models.py", "line": 200},
+    {"id": "DigestAuth", "label": "DigestAuth", "type": "class", "community": 2, "file": "httpx/_auth.py", "line": 120}
+  ],
+  "edges": [
+    {"source": "Client", "target": "Request", "type": "calls"},
+    {"source": "Client", "target": "Response", "type": "returns"},
+    {"source": "AsyncClient", "target": "Request", "type": "calls"},
+    {"source": "DigestAuth", "target": "Response", "type": "inferred", "surprise": true}
+  ]
+}
