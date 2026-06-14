@@ -13,6 +13,8 @@ CLI-backed tools:
 
 graph.json analysis tools (no CLI needed):
   - graphify_overview   : one-shot orientation (call this first)
+  - graphify_locate     : semantic search (semble) -> enclosing node -> token-budgeted
+                          subgraph + hidden_links  [needs the optional [semble] extra]
   - graphify_god_nodes  : highest-degree nodes
   - graphify_surprises  : unexpected cross-domain connections
   - graphify_communities: Leiden community summaries
@@ -20,7 +22,13 @@ graph.json analysis tools (no CLI needed):
   - graphify_neighbors  : 1-hop neighbors of a node
   - graphify_subgraph   : token-budgeted BFS subgraph around a node
   - graphify_node_details: node detail with source file/line refs
-  - graphify_freshness  : is the graph stale vs the current git HEAD?
+  - graphify_freshness  : is the graph stale vs git HEAD? (cosmetic-vs-structural aware)
+  - graphify_validate   : lint graph.json (dangling / duplicate / self-loop / orphan)
+
+Community naming:
+  - graphify_label_communities : name Leiden clusters (host-LLM sampling / backend key)
+  - graphify_sampling_status   : report which naming options are available
+  - graphify_set_labels        : assistant-pushed {id: name} (no key, no sampling)
 
 Resources:
   - graphify://report          : GRAPH_REPORT.md
@@ -31,6 +39,10 @@ Prompts:
   - onboard      : orient an assistant to the codebase
   - trace_bug    : investigate a symptom through the graph
   - explain_flow : explain how a named flow/feature works
+
+Internal layout: config.py (shared PROJECT_DIR), graph.py (graph.json load +
+node/edge/traversal helpers), spans.py (tree-sitter/ast span engine + structural
+diff), and this module (the FastMCP surface: tools, resources, prompts, main).
 
 Usage:
   GRAPHIFY_PROJECT_DIR=/path/to/repo python server.py
@@ -139,9 +151,12 @@ mcp = FastMCP(
         "Graphify knowledge graph tools for understanding a codebase.\n"
         "Recommended flow:\n"
         "  1. Call graphify_overview first for orientation.\n"
-        "  2. Use graphify_subgraph / graphify_neighbors / graphify_query for "
-        "targeted, token-cheap exploration around a node or question.\n"
-        "  3. graphify_build (with update=True) re-syncs after code changes.\n"
+        "  2. To find code by what it DOES, call graphify_locate('<natural-language "
+        "question>') — one call returns the enclosing node, its token-budgeted "
+        "subgraph, and hidden_links (similar-but-disconnected code).\n"
+        "  3. Otherwise use graphify_subgraph / graphify_neighbors / graphify_query "
+        "for targeted, token-cheap exploration around a node or question.\n"
+        "  4. graphify_build (with update=True) re-syncs after code changes.\n"
         "Most analysis tools read graph.json directly and are read-only; only "
         "graphify_build and graphify_add modify state. Pass as_json=True on "
         "analysis tools when you want structured output to chain on."
