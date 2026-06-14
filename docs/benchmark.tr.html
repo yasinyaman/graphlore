@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>graphify-mcp — benchmark (httpx + JS/TS · Go · Java)</title>
+<title>graphify-mcp — benchmark (httpx + 5 dil)</title>
 <style>
   :root{
     --bg:#0f1115;--panel:#171a21;--panel2:#1d212a;--line:#2a2f3a;
@@ -52,7 +52,7 @@
 <div class="wrap">
   <div class="lang"><a href="benchmark.html">English →</a></div>
   <h1>graphify-mcp — token verimliliği benchmark'ı</h1>
-  <p class="sub">Başlık: <code>encode/httpx</code> üzerinde 6 sorgunun ortalaması (gönderme · kimlik doğrulama · yönlendirme · içerik çözme · çerezler · zaman aşımı) — 2.101 düğümlük graf. Her sorgu bir ajanı bir kod alanına yönlendirir; token = modelin bağlamına ulaşan miktar (≈ karakter/4). <strong><a href="#multilang" style="color:var(--teal);text-decoration:none">JS/TS · Go · Java üzerinde doğrulandı ↓</a></strong></p>
+  <p class="sub">Başlık: <code>encode/httpx</code> üzerinde 6 sorgunun ortalaması (gönderme · kimlik doğrulama · yönlendirme · içerik çözme · çerezler · zaman aşımı) — 2.101 düğümlük graf. Her sorgu bir ajanı bir kod alanına yönlendirir; token = modelin bağlamına ulaşan miktar (≈ karakter/4). <strong><a href="#multilang" style="color:var(--teal);text-decoration:none">JS/TS · Go · Java · Rust · C++ üzerinde doğrulandı ↓</a></strong></p>
 
   <div class="cards">
     <div class="card"><div class="l">grep + read'e karşı</div><div class="n win">263× az</div></div>
@@ -112,7 +112,7 @@
   <p style="color:var(--muted);font-size:14px;margin:12px 0 0">~500 token (bir <code>locate</code> + hedefli okuma) gerçek bir mimari deseni ortaya çıkardı — httpx'in kasıtlı paralel sync/async implementasyonları — ki bunu <code>_client.py</code>'yi (~16k token) okumak gösterirdi. <code>unreachable</code> kovasında test dosyaları da vardı (ilgili ama refactor adayı değil); <code>distance</code> alanı üretim-paralellerini (3–4) bu gürültüden ayırır.</p>
 
   <h2 id="multilang">Diller arası — gerçek HTTP-istemci repoları</h2>
-  <p style="color:var(--muted);font-size:14px;margin:0 0 14px">Span birleştirme ve freshness kontrolü <strong>yalnızca Python'a özgü değil</strong>. Üç dilde daha bir HTTP istemcisi için AST-tabanlı (LLM'siz) graf kurup aynı tür sorguları çalıştırdım (gönderme · redirect · timeout/retry · header/auth · transport). <em>Span-join precision</em> = çözülen node'un gerçek tree-sitter span'ının chunk'ı içerdiği semble isabetlerinin oranı; <em>qualname</em> = FQN kurtaran seed'ler (ör. <code>Got.request</code>, <code>resty.Client.Get</code>); <em>locate vs grep</em> = bir temsili sorguda harita token'ı vs naif grep+okuma.</p>
+  <p style="color:var(--muted);font-size:14px;margin:0 0 14px">Span birleştirme ve freshness kontrolü <strong>yalnızca Python'a özgü değil</strong>. <strong>Beş dilde daha</strong> bir HTTP istemcisi için AST-tabanlı (LLM'siz) graf kurup aynı tür sorguları çalıştırdım (gönderme · redirect · timeout/retry · header/auth · transport). <em>Span-join precision</em> = çözülen node'un gerçek tree-sitter span'ının chunk'ı içerdiği semble isabetlerinin oranı; <em>qualname</em> = FQN kurtaran seed'ler (ör. <code>Got.request</code>, <code>resty.Client.Get</code>); <em>locate vs grep</em> = bir temsili sorguda harita token'ı vs naif grep+okuma.</p>
   <img src="benchmark-multilang.svg" alt="Diller arası span-join precision — Python %91, JS/TS %85, Java %83, Go %80" style="width:100%;max-width:760px;margin:4px 0 18px">
   <table>
     <thead><tr><th>Dil</th><th>Repo</th><th style="text-align:right">Graf node</th><th style="text-align:right">Span-join precision</th><th style="text-align:right">Qualname</th><th style="text-align:right">Gizli / sorgu</th><th style="text-align:right">locate vs grep</th></tr></thead>
@@ -121,10 +121,12 @@
       <tr><td>JavaScript / TS</td><td><code>sindresorhus/got</code></td><td class="num">380</td><td class="num">%89 <span style="color:var(--faint)">(48/54)</span></td><td class="num">%67</td><td class="num">3,2</td><td class="num">494×</td></tr>
       <tr><td>Go</td><td><code>go-resty/resty</code></td><td class="num">1.398</td><td class="num">%80 <span style="color:var(--faint)">(43/54)</span></td><td class="num">%67</td><td class="num">4,7</td><td class="num">748×</td></tr>
       <tr><td>Java</td><td><code>square/retrofit</code></td><td class="num">630</td><td class="num">%83 <span style="color:var(--faint)">(45/54)</span></td><td class="num">%50</td><td class="num">5,5</td><td class="num">208×</td></tr>
+      <tr><td>Rust</td><td><code>algesten/ureq</code></td><td class="num">1.612</td><td class="num">%69 <span style="color:var(--faint)">(37/54)</span></td><td class="num">%83</td><td class="num">5,3</td><td class="num">477×</td></tr>
+      <tr><td>C++</td><td><code>libcpr/cpr</code></td><td class="num">347</td><td class="num">%69 <span style="color:var(--faint)">(37/54)</span></td><td class="num">%100</td><td class="num">4,2</td><td class="num">223×</td></tr>
     </tbody>
   </table>
   <div class="note">
-    Python stdlib <code>ast</code> kullanır (kesin, decorator-farkında); JS/TS · Go · Java ise otomatik dil tespitiyle tree-sitter kullanır — <strong>tek araç, sıfır dil-başına konfigürasyon</strong>. Precision çok farklı graflarda (380–2.101 node) <strong>%80–91</strong> arasında tutar, gizli-bağ çapraz-kontrolü sorgu başına 3–6 aday çıkarmaya devam eder, ve locate grep+okumadan <strong>200–750× ucuz</strong> kalır. İçerilmeyen kalan kısım çoğunlukla iki sembole yayılan ya da dosya başındaki (kapsayan sembol yok) chunk'lardır — yanlış yönlendirme değil.
+    Python stdlib <code>ast</code> kullanır (kesin, decorator-farkında); JS/TS · Go · Java · Rust · C++ ise otomatik dil tespitiyle tree-sitter kullanır — <strong>tek araç, sıfır dil-başına konfigürasyon</strong>. Precision altı çok farklı grafta (347–2.101 node) <strong>%69–91</strong> arasında, gizli-bağ çapraz-kontrolü sorgu başına 3–6 aday çıkarmaya devam eder, ve locate grep+okumadan <strong>200–750× ucuz</strong> kalır. Rust ve C++ %69'da geride — içerilmeyen kalan kısımları çoğunlukla <code>impl</code>-bloğu / dosya-başı chunk'lar olup tanıtılan sembole çözülme yine doğru (FQN'leri <strong>%83–100</strong> kurtarırlar) — yanlış yönlendirme değil.
   </div>
 
   <h2>Freshness diller arası doğru</h2>
@@ -136,10 +138,12 @@
       <tr><td>JavaScript / TS</td><td><code>as-promise/index.ts</code></td><td class="yes">kozmetik ✓</td><td class="yes">yapısal ✓</td></tr>
       <tr><td>Go</td><td><code>circuit_breaker.go</code></td><td class="yes">kozmetik ✓</td><td class="yes">yapısal ✓</td></tr>
       <tr><td>Java</td><td><code>AndroidMainExecutor.java</code></td><td class="yes">kozmetik ✓</td><td class="yes">yapısal ✓</td></tr>
+      <tr><td>Rust</td><td><code>agent.rs</code></td><td class="yes">kozmetik ✓</td><td class="yes">yapısal ✓</td></tr>
+      <tr><td>C++</td><td><code>accept_encoding.cpp</code></td><td class="yes">kozmetik ✓</td><td class="yes">yapısal ✓</td></tr>
     </tbody>
   </table>
 
-  <footer>Ölçüm 2026-06 · semble 0.3.4 (potion-code-16M) + graphify, tree-sitter backend · httpx headline = 6 sorgu; diller-arası = repo başına 6 sorgu × 54 isabet (<code>got</code> / <code>resty</code> / <code>retrofit</code>) · token ≈ karakter/4. Tekrar üret: <code>benchmarks/multilang.py</code>. Sayılar kod tabanı ve sorguya göre değişir.</footer>
+  <footer>Ölçüm 2026-06 · semble 0.3.4 (potion-code-16M) + graphify, tree-sitter backend · httpx headline = 6 sorgu; diller-arası = repo başına 6 sorgu × 54 isabet (<code>got</code> / <code>resty</code> / <code>retrofit</code> / <code>ureq</code> / <code>cpr</code>) · token ≈ karakter/4. Tekrar üret: <code>benchmarks/multilang.py</code>. Sayılar kod tabanı ve sorguya göre değişir.</footer>
 </div>
 </body>
 </html>

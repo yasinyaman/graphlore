@@ -407,10 +407,17 @@ _TS_SYMBOL_HINTS = (
     "enum", "trait", "impl", "module", "object", "type", "subroutine",
     "procedure", "package", "namespace",
 )
-# NB: no "_expression" here — function_expression (a named def that carries a
-# "name" field) must pass; non-definition *_expression nodes match no symbol hint
-# and have no "name" field, so they are already excluded by the caller.
-_TS_NON_SYMBOL_SUFFIXES = ("_type", "_body", "_parameters", "_specifier", "_clause")
+# NB: no "_expression" (function_expression is a named def) and no "_specifier"
+# (C++ class_specifier / struct_specifier / enum_specifier ARE definitions). The
+# excluded nodes match a hint substring but are never name-bearing definitions.
+_TS_NON_SYMBOL_SUFFIXES = ("_type", "_body", "_parameters", "_clause")
+# Call / reference / sub-declarator nodes that match a hint substring ("function")
+# but are NOT definitions — chiefly C/C++, where a templated call like
+# `holds_alternative<T>(x)` parses as `template_function` and a real definition's
+# name sits under a nested `function_declarator`.
+_TS_CALL_TYPES = frozenset({
+    "template_function", "template_method", "call_expression", "function_declarator",
+})
 # Parser cache keyed by language name; value is a parser or None (unavailable).
 _TS_PARSERS: dict[str, Any] = {}
 
@@ -447,7 +454,7 @@ def _ts_parser_for(rel: str) -> tuple[Any, str | None]:
 
 def _is_ts_symbol(node_type: str) -> bool:
     t = node_type.lower()
-    if t.endswith(_TS_NON_SYMBOL_SUFFIXES):
+    if t in _TS_CALL_TYPES or t.endswith(_TS_NON_SYMBOL_SUFFIXES):
         return False
     return any(h in t for h in _TS_SYMBOL_HINTS)
 
@@ -493,7 +500,7 @@ def _ts_region_start(child: Any, def_line: int) -> int:
     prev = child.prev_named_sibling
     while prev is not None:
         ptype = prev.type.lower()
-        if not ("comment" in ptype or "decorator" in ptype or "annotation" in ptype):
+        if not any(h in ptype for h in ("comment", "decorator", "annotation", "attribute")):
             break
         prev_end = prev.end_point[0] + 1
         if prev_end < start - 1:  # a blank-line gap -> detached, not a doc comment
@@ -515,11 +522,15 @@ def _ts_receiver_type(recv: Any) -> str | None:
 
 
 def _ts_bound_function(node: Any) -> tuple[str, Any] | None:
-    """An *anonymous* function bound to a name — ``const f = () => …``,
-    ``var h = func(){}`` — so the binding name becomes the qualname (the arrow/closure
-    itself carries no ``name`` field). ``None`` for non-function bindings or for a
-    function that has its own name (handled by the normal path)."""
-    name = node.child_by_field_name("name")
+    """An *anonymous* function bound to a name, so the binding name becomes the
+    qualname (the arrow/closure carries no ``name`` field of its own). Covers
+    ``const f = () => …`` / ``var h = func(){}`` (name+value), object properties
+    ``{ foo: () => … }`` (key+value), and class fields ``handler = (r) => …``
+    (property+value). ``None`` for non-function bindings or a function that already
+    has its own name (handled by the normal path)."""
+    name = (node.child_by_field_name("name")
+            or node.child_by_field_name("key")
+            or node.child_by_field_name("property"))
     value = node.child_by_field_name("value")
     if name is None or value is None or not name.type.endswith("identifier"):
         return None
@@ -529,6 +540,22 @@ def _ts_bound_function(node: Any) -> tuple[str, Any] | None:
     if value.child_by_field_name("name") is not None:
         return None
     return name.text.decode("utf-8", "replace"), value
+
+
+def _ts_declarator_name(node: Any) -> str | None:
+    """C/C++ function name, which lives in a declarator chain rather than a ``name``
+    field: ``function_definition > function_declarator > identifier /
+    qualified_identifier / field_identifier``. ``Session::Get`` -> ``Session.Get``."""
+    decl = node.child_by_field_name("declarator")
+    for _ in range(8):  # bounded unwrap
+        if decl is None:
+            return None
+        if decl.type in ("identifier", "field_identifier", "destructor_name"):
+            return decl.text.decode("utf-8", "replace")
+        if decl.type == "qualified_identifier":
+            return decl.text.decode("utf-8", "replace").replace("::", ".")
+        decl = decl.child_by_field_name("declarator")
+    return None
 
 
 def _spans_treesitter(src: bytes, rel: str) -> list[tuple[int, int, int, str]]:
@@ -563,11 +590,20 @@ def _spans_treesitter(src: bytes, rel: str) -> list[tuple[int, int, int, str]]:
                 end = child.end_point[0] + 1
                 spans.append((_ts_region_start(child, def_line), end, def_line, qual))
                 walk(child, qual + ".")
-            elif is_sym and (type_node := child.child_by_field_name("type")) is not None:
-                # a definition-like block with no `name` field but a `type` field —
-                # e.g. Rust `impl Pool { ... }` — contributes its type to the
-                # qualname chain (so methods read `Pool.acquire`) without a span.
+            elif is_sym and "impl" in child.type.lower() \
+                    and (type_node := child.child_by_field_name("type")) is not None:
+                # Rust `impl Pool { ... }`: no `name` field, but the `type` field
+                # contributes to the qualname chain (so methods read `Pool.acquire`)
+                # without a span. Restricted to impl-like nodes so a C++
+                # function_definition's `type` (its return type) isn't mistaken for one.
                 walk(child, f"{prefix}{type_node.text.decode('utf-8', 'replace')}.")
+            elif is_sym and (dname := _ts_declarator_name(child)) is not None:
+                # C/C++ function/method: the name lives in the declarator chain
+                qual = f"{prefix}{dname}"
+                def_line = child.start_point[0] + 1
+                end = child.end_point[0] + 1
+                spans.append((_ts_region_start(child, def_line), end, def_line, qual))
+                walk(child, qual + ".")
             elif (bound := _ts_bound_function(child)) is not None:
                 # anonymous function bound to a name: `const f = () => …`
                 bname, fn = bound

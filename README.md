@@ -14,7 +14,7 @@ One MCP call turns a natural-language question into a **navigational map**, not 
 
 - 🔎 **Semantic + structural, one call** — semble finds the relevant code, the graph gives its neighborhood. ~235 tokens to orient vs ~61k for grep+read (**263× fewer** on httpx).
 - 🔗 **`hidden_links`** — semantically similar code that is *structurally disconnected* (duplication / missing-abstraction / sync-async-twin candidates) that neither search nor the graph surfaces alone.
-- 🌍 **Multi-language, zero config** — Python via stdlib `ast`; JS/TS · Go · Java · 165+ more via tree-sitter with automatic language detection. **Span-join precision holds at 80–91%** on real HTTP-client repos ([benchmark](#benchmark)).
+- 🌍 **Multi-language, zero config** — Python via stdlib `ast`; JS/TS · Go · Java · Rust · C++ · 165+ more via tree-sitter with automatic language detection. **Span-join precision 69–91%** on real HTTP-client repos in six languages ([benchmark](#benchmark)).
 - 🕒 **Cosmetic-aware freshness** — `graphify_freshness` ignores comment/format-only edits (in every language) so a reformat never triggers a needless rebuild.
 
 ## Installation
@@ -226,7 +226,7 @@ would. The `unreachable` bucket also held test files (related, not refactor targ
 the `distance` field separates production parallels (3–4) from that noise.
 
 **Across languages — real HTTP-client repos.** The span join and freshness check aren't
-Python-only. I built AST-only graphs for an HTTP client in three more languages and ran the
+Python-only. I built AST-only graphs for an HTTP client in five more languages and ran the
 same kind of queries (send · redirects · timeout/retry · headers/auth · transport):
 
 ![Span-join precision across languages — Python 91%, JS/TS 85%, Java 83%, Go 80%](docs/benchmark-multilang.svg)
@@ -237,20 +237,24 @@ same kind of queries (send · redirects · timeout/retry · headers/auth · tran
 | JavaScript / TS | `sindresorhus/got` | 89% (48/54) | 67% | 3.2 | 494× |
 | Go | `go-resty/resty` | 80% (43/54) | 67% | 4.7 | 748× |
 | Java | `square/retrofit` | 83% (45/54) | 50% | 5.5 | 208× |
+| Rust | `algesten/ureq` | 69% (37/54) | 83% | 5.3 | 477× |
+| C++ | `libcpr/cpr` | 69% (37/54) | 100% | 4.2 | 223× |
 
-Python uses the stdlib `ast`; JS/TS · Go · Java go through tree-sitter with automatic language
-detection — **one tool, zero per-language config**. *Span-join precision* = share of semantic
-hits whose resolved node's real span actually contains the chunk. It holds at **80–91%** across
-380–2,101-node graphs, hidden-links keep surfacing 3–6/query, and locate stays **200–750×
-cheaper** than grep+read. `graphify_freshness`'s cosmetic-vs-structural check is correct in
-every language too (comment/reformat → cosmetic; operator/rename → structural). Reproduce with
+Python uses the stdlib `ast`; JS/TS · Go · Java · Rust · C++ go through tree-sitter with
+automatic language detection — **one tool, zero per-language config**. *Span-join precision* =
+share of semantic hits whose resolved node's real span actually contains the chunk. It's
+**69–91%** across six 347–2,101-node graphs, hidden-links keep surfacing 3–6/query, and locate
+stays **200–750× cheaper** than grep+read. Rust and C++ trail at 69% — their misses are mostly
+`impl`-block / file-top chunks where the resolution is still correct (they recover qualified
+names at 83–100%). `graphify_freshness`'s cosmetic-vs-structural check is correct in every
+language too (comment/reformat → cosmetic; operator/rename → structural). Reproduce with
 [`benchmarks/multilang.py`](benchmarks/multilang.py).
 
 → **[Full benchmark report](https://htmlpreview.github.io/?https://github.com/yasinyaman/graphify-mcp/blob/master/docs/benchmark.html)** (interactive HTML, per-query breakdown + the cross-language tables) — or open [`docs/benchmark.html`](docs/benchmark.html) locally. ([Türkçe](https://htmlpreview.github.io/?https://github.com/yasinyaman/graphify-mcp/blob/master/docs/benchmark.tr.html))
 
 <sub>Measured 2026-06 with semble 0.3.4 + graphify (tree-sitter backend). httpx headline = 6
 queries (per-query locate 189–286 tokens); cross-language = 6 queries × 54 hits each on
-`got` / `resty` / `retrofit`. Numbers vary by codebase and query.</sub>
+`got` / `resty` / `retrofit` / `ureq` / `cpr`. Numbers vary by codebase and query.</sub>
 
 ## Resources
 

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>graphify-mcp — benchmark (httpx + JS/TS · Go · Java)</title>
+<title>graphify-mcp — benchmark (httpx + 5 languages)</title>
 <style>
   :root{
     --bg:#0f1115;--panel:#171a21;--panel2:#1d212a;--line:#2a2f3a;
@@ -49,7 +49,7 @@
 <div class="wrap">
   <div style="text-align:right;margin-bottom:6px"><a href="benchmark.tr.html" style="color:#9aa3b2;font-size:13px;text-decoration:none">Türkçe →</a></div>
   <h1>graphify-mcp — token-efficiency benchmark</h1>
-  <p class="sub">Headline: mean over 6 queries (send · auth · redirects · decoding · cookies · timeouts) on <code>encode/httpx</code> (2,101-node graph). Each query orients an agent to a code area; tokens = what reaches the model's context (≈ chars/4). <strong><a href="#multilang" style="color:var(--teal);text-decoration:none">Validated across JS/TS · Go · Java ↓</a></strong></p>
+  <p class="sub">Headline: mean over 6 queries (send · auth · redirects · decoding · cookies · timeouts) on <code>encode/httpx</code> (2,101-node graph). Each query orients an agent to a code area; tokens = what reaches the model's context (≈ chars/4). <strong><a href="#multilang" style="color:var(--teal);text-decoration:none">Validated across JS/TS · Go · Java · Rust · C++ ↓</a></strong></p>
 
   <div class="cards">
     <div class="card"><div class="l">vs grep + read</div><div class="n win">263× fewer</div></div>
@@ -109,7 +109,7 @@
   <p style="color:var(--muted);font-size:14px;margin:12px 0 0">~500 tokens (one <code>locate</code> + a targeted read) surfaced a real architectural pattern — httpx's deliberate parallel sync/async implementations — that reading <code>_client.py</code> (~16k tokens) would. The <code>unreachable</code> bucket also held test files (related, not refactor targets); the <code>distance</code> field separates production parallels (3–4) from that noise.</p>
 
   <h2 id="multilang">Across languages — real HTTP-client repos</h2>
-  <p style="color:var(--muted);font-size:14px;margin:0 0 14px">The span join and the freshness check are <strong>not Python-only</strong>. I built AST-only graphs for an HTTP client in three more languages and ran the same kind of queries (send · redirects · timeout/retry · headers/auth · transport). <em>Span-join precision</em> = share of semble hits whose resolved node's real tree-sitter span actually contains the chunk; <em>qualname</em> = seeds that recover an FQN (e.g. <code>Got.request</code>, <code>resty.Client.Get</code>); <em>locate vs grep</em> = map tokens vs a naive grep+read for one representative query.</p>
+  <p style="color:var(--muted);font-size:14px;margin:0 0 14px">The span join and the freshness check are <strong>not Python-only</strong>. I built AST-only graphs for an HTTP client in <strong>five more languages</strong> and ran the same kind of queries (send · redirects · timeout/retry · headers/auth · transport). <em>Span-join precision</em> = share of semble hits whose resolved node's real tree-sitter span actually contains the chunk; <em>qualname</em> = seeds that recover an FQN (e.g. <code>Got.request</code>, <code>resty.Client.Get</code>); <em>locate vs grep</em> = map tokens vs a naive grep+read for one representative query.</p>
   <img src="benchmark-multilang.svg" alt="Span-join precision across languages — Python 91%, JS/TS 85%, Java 83%, Go 80%" style="width:100%;max-width:760px;margin:4px 0 18px">
   <table>
     <thead><tr><th>Language</th><th>Repo</th><th style="text-align:right">Graph nodes</th><th style="text-align:right">Span-join precision</th><th style="text-align:right">Qualname</th><th style="text-align:right">Hidden / q</th><th style="text-align:right">locate vs grep</th></tr></thead>
@@ -118,10 +118,12 @@
       <tr><td>JavaScript / TS</td><td><code>sindresorhus/got</code></td><td class="num">380</td><td class="num">89% <span style="color:var(--faint)">(48/54)</span></td><td class="num">67%</td><td class="num">3.2</td><td class="num">494×</td></tr>
       <tr><td>Go</td><td><code>go-resty/resty</code></td><td class="num">1,398</td><td class="num">80% <span style="color:var(--faint)">(43/54)</span></td><td class="num">67%</td><td class="num">4.7</td><td class="num">748×</td></tr>
       <tr><td>Java</td><td><code>square/retrofit</code></td><td class="num">630</td><td class="num">83% <span style="color:var(--faint)">(45/54)</span></td><td class="num">50%</td><td class="num">5.5</td><td class="num">208×</td></tr>
+      <tr><td>Rust</td><td><code>algesten/ureq</code></td><td class="num">1,612</td><td class="num">69% <span style="color:var(--faint)">(37/54)</span></td><td class="num">83%</td><td class="num">5.3</td><td class="num">477×</td></tr>
+      <tr><td>C++</td><td><code>libcpr/cpr</code></td><td class="num">347</td><td class="num">69% <span style="color:var(--faint)">(37/54)</span></td><td class="num">100%</td><td class="num">4.2</td><td class="num">223×</td></tr>
     </tbody>
   </table>
   <div class="note">
-    Python uses the stdlib <code>ast</code> (exact, decorator-aware); JS/TS · Go · Java use tree-sitter with automatic language detection — <strong>one tool, zero per-language config</strong>. Precision holds at <strong>80–91%</strong> across very different graphs (380–2,101 nodes), the hidden-links cross-check keeps surfacing 3–6 candidates/query, and locate stays <strong>200–750× cheaper</strong> than grep+read. The non-contained remainder is mostly chunks that span two symbols or sit at file top (no enclosing symbol) — not misroutes.
+    Python uses the stdlib <code>ast</code> (exact, decorator-aware); JS/TS · Go · Java · Rust · C++ use tree-sitter with automatic language detection — <strong>one tool, zero per-language config</strong>. Precision is <strong>69–91%</strong> across six very different graphs (347–2,101 nodes), the hidden-links cross-check keeps surfacing 3–6 candidates/query, and locate stays <strong>200–750× cheaper</strong> than grep+read. Rust and C++ trail at 69% — their non-contained remainder is mostly <code>impl</code>-block / file-top chunks where resolution to the introduced symbol is still correct (they recover qualified names at <strong>83–100%</strong>) — not misroutes.
   </div>
 
   <h2>Freshness is correct across languages</h2>
@@ -133,10 +135,12 @@
       <tr><td>JavaScript / TS</td><td><code>as-promise/index.ts</code></td><td class="yes">cosmetic ✓</td><td class="yes">structural ✓</td></tr>
       <tr><td>Go</td><td><code>circuit_breaker.go</code></td><td class="yes">cosmetic ✓</td><td class="yes">structural ✓</td></tr>
       <tr><td>Java</td><td><code>AndroidMainExecutor.java</code></td><td class="yes">cosmetic ✓</td><td class="yes">structural ✓</td></tr>
+      <tr><td>Rust</td><td><code>agent.rs</code></td><td class="yes">cosmetic ✓</td><td class="yes">structural ✓</td></tr>
+      <tr><td>C++</td><td><code>accept_encoding.cpp</code></td><td class="yes">cosmetic ✓</td><td class="yes">structural ✓</td></tr>
     </tbody>
   </table>
 
-  <footer>Measured 2026-06 · semble 0.3.4 (potion-code-16M) + graphify, tree-sitter backend · httpx headline = 6 queries; cross-language = 6 queries × 54 hits each on <code>got</code> / <code>resty</code> / <code>retrofit</code> · tokens ≈ chars/4. Reproduce: <code>benchmarks/multilang.py</code>. Numbers vary by codebase and query.</footer>
+  <footer>Measured 2026-06 · semble 0.3.4 (potion-code-16M) + graphify, tree-sitter backend · httpx headline = 6 queries; cross-language = 6 queries × 54 hits each on <code>got</code> / <code>resty</code> / <code>retrofit</code> / <code>ureq</code> / <code>cpr</code> · tokens ≈ chars/4. Reproduce: <code>benchmarks/multilang.py</code>. Numbers vary by codebase and query.</footer>
 </div>
 </body>
 </html>

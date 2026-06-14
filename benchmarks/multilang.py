@@ -97,6 +97,32 @@ REPOS = [
         ],
         "spotcheck": "convert the response body", "grep": "Converter",
     },
+    {
+        "lang": "Rust", "name": "algesten/ureq", "dir": BENCH / "ureq/src",
+        "ext": ".rs",
+        "queries": [
+            "send an http request and read the response",
+            "connection pool and agent configuration",
+            "follow redirects",
+            "set request timeout",
+            "tls certificate handling",
+            "parse the response body",
+        ],
+        "spotcheck": "set request timeout", "grep": "timeout",
+    },
+    {
+        "lang": "C++", "name": "libcpr/cpr", "dir": BENCH / "cpr/cpr",
+        "ext": ".cpp",
+        "queries": [
+            "perform a GET and POST request",
+            "set the request timeout",
+            "session options and configuration",
+            "parse the response",
+            "add request headers and authentication",
+            "redirect handling",
+        ],
+        "spotcheck": "perform a GET and POST request", "grep": "Get",
+    },
 ]
 
 

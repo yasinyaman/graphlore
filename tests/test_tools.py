@@ -1460,8 +1460,11 @@ def test_is_ts_symbol_classification():
     assert server._is_ts_symbol("method_declaration")
     assert server._is_ts_symbol("struct_item")
     assert server._is_ts_symbol("function_expression")   # named function expr must pass
+    assert server._is_ts_symbol("class_specifier")       # C++ class/struct IS a def
     assert not server._is_ts_symbol("function_type")     # type look-alike excluded
     assert not server._is_ts_symbol("class_body")
+    assert not server._is_ts_symbol("template_function")  # a C++ call, not a def
+    assert not server._is_ts_symbol("function_declarator")
     assert not server._is_ts_symbol("identifier")
 
 
@@ -1529,6 +1532,35 @@ def test_spans_treesitter_go_receiver_qualname(tmp_path, monkeypatch):
     quals = {q for _rs, _e, _dl, q in server._spans_for_file("c.go")}
     assert "Client.Get" in quals and "Helper" in quals
     assert server._span_qualname("c.go", 3) == "Client.Get"
+
+
+def test_spans_treesitter_object_and_class_field_arrows(tmp_path, monkeypatch):
+    # object-property arrows and class-field arrows bind the property/field name
+    _skip_without_treesitter()
+    monkeypatch.setattr(server, "PROJECT_DIR", tmp_path)
+    server._SPAN_CACHE.clear()
+    server._TS_PARSERS.clear()
+    (tmp_path / "z.js").write_bytes(
+        b"const obj = { arrowProp: (x) => x + 1, shorthand() { return 1; } };\n"
+        b"class Service { handler = (req) => { return req; }; }\n")
+    quals = {q for _rs, _e, _dl, q in server._spans_for_file("z.js")}
+    assert {"arrowProp", "shorthand", "Service", "Service.handler"} <= quals
+
+
+def test_spans_treesitter_cpp_declarator_names(tmp_path, monkeypatch):
+    # C++ names live in a declarator chain; a qualified method reads Class.method,
+    # and template calls / nested declarators don't leak in as bogus symbols
+    _skip_without_treesitter()
+    monkeypatch.setattr(server, "PROJECT_DIR", tmp_path)
+    server._SPAN_CACHE.clear()
+    server._TS_PARSERS.clear()
+    (tmp_path / "t.cpp").write_bytes(
+        b"namespace cpr {\nResponse Session::Get() {\n  return holds_alternative<int>(r);\n}\n"
+        b"int helper(int x){ return x; }\n}\n")
+    quals = {q for _rs, _e, _dl, q in server._spans_for_file("t.cpp")}
+    assert "cpr.Session.Get" in quals and "cpr.helper" in quals
+    assert not any("holds_alternative" in q for q in quals)        # the call isn't a def
+    assert not any(q.endswith("Get.Session.Get") for q in quals)   # no declarator double-count
 
 
 def test_spans_treesitter_named_function_expression(tmp_path, monkeypatch):

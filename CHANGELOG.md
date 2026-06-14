@@ -104,15 +104,19 @@ All notable changes to this project are documented here. The format is based on
   annotation** lines into `region_start` (mirroring the Python decorator path), so
   a chunk that starts on the doc comment above a Go/Java/JS method resolves to that
   method. Measured on real repos this lifted Go span-join precision from 48%→80%.
-- tree-sitter **qualname** quality: an anonymous function bound to a name
-  (`const f = () => …`, `var h = func(){}`) now takes the binding name as its
-  qualname, and a method receiver is type-qualified (Go `func (c *Client) Get()` →
-  `Client.Get`). On `got` this lifted span-join precision 85%→89% and qualname
-  recovery 50%→67%.
-- **Multi-language validation benchmark** (`benchmarks/multilang.py` + the new
+- Broader tree-sitter symbol/qualname coverage: an anonymous function bound to a
+  name (`const f = () => …`, object property `{ foo: () => … }`, class field
+  `handler = (r) => …`, `var h = func(){}`) takes the binding name; a method
+  receiver is type-qualified (Go `func (c *Client) Get()` → `Client.Get`); C/C++
+  function names are read from the declarator chain (`Session::Get` → `Session.Get`)
+  and template calls / sub-declarators no longer leak in as bogus symbols; `region_start`
+  also absorbs Rust `#[attribute]` lines. C++ `class_specifier`/`struct_specifier` are
+  recognized as definitions.
+- **Multi-language validation benchmark** (`benchmarks/multilang.py` + the
   "Across languages" section in `docs/benchmark*.html`): on real HTTP-client repos
-  (`got` JS/TS, `resty` Go, `retrofit` Java) span-join precision holds at 80–89%
-  (vs 91% for Python/httpx), locate stays 200–748× cheaper than grep+read, and the
+  in five more languages (`got` JS/TS, `resty` Go, `retrofit` Java, `ureq` Rust,
+  `cpr` C++) span-join precision is 69–91% (vs 91% for Python/httpx), qualname
+  recovery 50–100%, locate 200–748× cheaper than grep+read, and the
   cosmetic-vs-structural freshness check is correct in every language.
 
 ### Added (Phase 3 hardening)
