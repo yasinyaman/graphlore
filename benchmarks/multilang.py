@@ -127,7 +127,7 @@ REPOS = [
 
 
 def _reset(project_dir: Path):
-    s.PROJECT_DIR = project_dir
+    s.config.PROJECT_DIR = project_dir
     s._GRAPH_CACHE.clear()
     s._SPAN_CACHE.clear()
     s._TS_PARSERS.clear()

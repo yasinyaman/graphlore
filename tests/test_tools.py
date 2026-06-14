@@ -2,7 +2,7 @@
 
 import json
 
-from graphify_mcp import server
+from graphify_mcp import server, spans
 
 
 def test_overview(project):
@@ -108,7 +108,7 @@ def test_node_details_real_graphify_schema(tmp_path, monkeypatch):
         "links": [],
     }
     (out / "graph.json").write_text(json.dumps(graph), encoding="utf-8")
-    monkeypatch.setattr(server, "PROJECT_DIR", tmp_path)
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     data = json.loads(server.graphify_node_details("graphify_overview", as_json=True))
     assert data["file"] == "src/graphify_mcp/server.py"
     assert data["line"] == 295
@@ -201,7 +201,7 @@ def test_overview_and_surprises_share_one_definition(tmp_path, monkeypatch):
             {"source": "B", "target": "C", "type": "inferred", "relation": "z"},  # not a surprise
         ],
     })
-    monkeypatch.setattr(server, "PROJECT_DIR", tmp_path)
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     ov = json.loads(server.graphify_overview(as_json=True))
     su = json.loads(server.graphify_surprises(as_json=True))
     assert ov["surprise_edges"] == 1  # only the is_surprise edge; inferred is NOT counted
@@ -211,7 +211,7 @@ def test_overview_and_surprises_share_one_definition(tmp_path, monkeypatch):
 
 def test_load_graph_caches_by_mtime(tmp_path, monkeypatch):
     _write_graph(tmp_path, {"nodes": [{"id": "A", "label": "A"}], "links": []})
-    monkeypatch.setattr(server, "PROJECT_DIR", tmp_path)
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     a = server._load_graph()
     b = server._load_graph()
     assert a is b  # same object returned from cache while mtime is unchanged
@@ -234,7 +234,7 @@ def test_freshness_flags_untracked_file(tmp_path, monkeypatch):
     git("config", "user.name", "Test")
     git("add", ".")
     git("commit", "-m", "init")
-    monkeypatch.setattr(server, "PROJECT_DIR", tmp_path)
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
 
     # A brand-new untracked .py is a real rebuild trigger that `git diff HEAD` misses.
     (tmp_path / "new_module.py").write_text("x = 1\n", encoding="utf-8")
@@ -263,7 +263,7 @@ def test_freshness_recommends_rebuild_on_deletion(tmp_path, monkeypatch):
     git("config", "user.name", "Test")
     git("add", ".")
     git("commit", "-m", "init")
-    monkeypatch.setattr(server, "PROJECT_DIR", tmp_path)
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
 
     # Deleting a tracked source file: incremental update would keep phantom nodes,
     # so freshness should steer to a full rebuild.
@@ -305,7 +305,7 @@ def test_freshness_unquotes_spaced_path_for_cosmetic_classification(tmp_path, mo
     # built_at_commit == HEAD so the graph isn't "behind"; the only freshness
     # signal is the pending cosmetic edit below.
     _write_graph(tmp_path, {"nodes": [], "links": [], "built_at_commit": head})
-    monkeypatch.setattr(server, "PROJECT_DIR", tmp_path)
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
 
     # Comment-only edit -> AST-identical to HEAD -> cosmetic, not structural.
     spaced.write_text("# just a comment\nx = 1\n", encoding="utf-8")
@@ -340,7 +340,7 @@ def test_freshness_parses_spaced_rename(tmp_path, monkeypatch):
     git("config", "user.name", "Test")
     git("add", ".")
     git("commit", "-m", "init")
-    monkeypatch.setattr(server, "PROJECT_DIR", tmp_path)
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
 
     git("mv", "old name.py", "new name.py")
     data = json.loads(server.graphify_freshness(as_json=True))
@@ -355,7 +355,7 @@ def test_freshness_parses_spaced_rename(tmp_path, monkeypatch):
 # --- opt-in path containment -------------------------------------------------
 
 def test_path_containment_opt_in(tmp_path, monkeypatch):
-    monkeypatch.setattr(server, "PROJECT_DIR", tmp_path)
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     # off by default -> documented absolute/sibling path still allowed
     monkeypatch.setattr(server, "RESTRICT_PATHS", False)
     assert server._path_escapes_project("../../etc") is None
@@ -367,7 +367,7 @@ def test_path_containment_opt_in(tmp_path, monkeypatch):
 
 
 def test_build_rejects_escaping_path_when_restricted(tmp_path, monkeypatch):
-    monkeypatch.setattr(server, "PROJECT_DIR", tmp_path)
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     monkeypatch.setattr(server, "RESTRICT_PATHS", True)
     # guard returns before the CLI is ever invoked
     assert "escapes the project" in server.graphify_build("/etc")
@@ -384,7 +384,7 @@ def test_overview_flags_id_collisions(tmp_path, monkeypatch):
         ],
         "edges": [],
     })
-    monkeypatch.setattr(server, "PROJECT_DIR", tmp_path)
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     data = json.loads(server.graphify_overview(as_json=True))
     assert data["id_collisions"] == 1
     assert "collision" in server.graphify_overview().lower()
@@ -432,7 +432,7 @@ def test_validate_detects_structural_issues(tmp_path, monkeypatch):
             {"source": "B", "target": "B", "type": "loops"},   # self-loop
         ],
     })
-    monkeypatch.setattr(server, "PROJECT_DIR", tmp_path)
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     data = json.loads(server.graphify_validate(as_json=True))
     assert data["healthy"] is False
     assert data["issues"]["duplicate_edges"] == 1
@@ -531,7 +531,7 @@ _SPAN_NODES = [
 
 def _span_project(tmp_path, monkeypatch):
     (tmp_path / "m.py").write_text(_SPAN_SRC, encoding="utf-8")
-    monkeypatch.setattr(server, "PROJECT_DIR", tmp_path)
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     server._SPAN_CACHE.clear()
 
 
@@ -579,7 +579,7 @@ def test_node_for_location_walks_outward_past_ended_sibling(tmp_path, monkeypatc
     # sibling `earlier` (greatest line <= 6). This makes the outward walk
     # load-bearing — the two answers diverge.
     (tmp_path / "w.py").write_text(_OUTWARD_SRC, encoding="utf-8")
-    monkeypatch.setattr(server, "PROJECT_DIR", tmp_path)
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     server._SPAN_CACHE.clear()
     nodes = [
         {"id": "Box", "label": "Box", "source_file": "w.py",
@@ -606,7 +606,7 @@ def test_span_qualname_returns_fqn(tmp_path, monkeypatch):
 
 
 def test_spans_for_file_non_python_and_missing(tmp_path, monkeypatch):
-    monkeypatch.setattr(server, "PROJECT_DIR", tmp_path)
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     server._SPAN_CACHE.clear()
     (tmp_path / "notes.txt").write_text("class NotCode:\n", encoding="utf-8")
     assert server._spans_for_file("notes.txt") == []          # non-Python ignored
@@ -617,7 +617,7 @@ def test_spans_for_file_confined_to_project(tmp_path, monkeypatch):
     # a chunk path escaping PROJECT_DIR must not get parsed (defense in depth)
     proj = tmp_path / "proj"
     proj.mkdir()
-    monkeypatch.setattr(server, "PROJECT_DIR", proj)
+    monkeypatch.setattr(server.config, "PROJECT_DIR", proj)
     server._SPAN_CACHE.clear()
     outside = tmp_path / "outside.py"
     outside.write_text("def secret():\n    return 1\n", encoding="utf-8")
@@ -626,7 +626,7 @@ def test_spans_for_file_confined_to_project(tmp_path, monkeypatch):
 
 
 def test_spans_for_file_unparseable_is_cached_empty(tmp_path, monkeypatch):
-    monkeypatch.setattr(server, "PROJECT_DIR", tmp_path)
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     server._SPAN_CACHE.clear()
     (tmp_path / "broken.py").write_text("def (:\n", encoding="utf-8")  # syntax error
     assert server._spans_for_file("broken.py") == []
@@ -636,7 +636,7 @@ def test_spans_for_file_unparseable_is_cached_empty(tmp_path, monkeypatch):
 def test_node_for_location_falls_back_without_source(tmp_path, monkeypatch):
     # nodes reference a file with no source on disk -> span path is inert and the
     # point heuristic still resolves (guards the non-Python / source-less path).
-    monkeypatch.setattr(server, "PROJECT_DIR", tmp_path)
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     server._SPAN_CACHE.clear()
     nodes = [
         {"id": "f", "label": "f", "source_file": "gone.py",
@@ -722,7 +722,7 @@ def test_spans_property_setter_resolve_by_line(tmp_path, monkeypatch):
         "        self._v = v\n"     # 7
     )
     (tmp_path / "p.py").write_text(src, encoding="utf-8")
-    monkeypatch.setattr(server, "PROJECT_DIR", tmp_path)
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     server._SPAN_CACHE.clear()
     nodes = [
         {"id": "getter", "label": "val", "source_file": "p.py",
@@ -736,7 +736,7 @@ def test_spans_property_setter_resolve_by_line(tmp_path, monkeypatch):
 
 def test_spans_for_file_handles_bom(tmp_path, monkeypatch):
     # a UTF-8 BOM would make read_text(utf-8)+ast choke; parsing bytes honors it.
-    monkeypatch.setattr(server, "PROJECT_DIR", tmp_path)
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     server._SPAN_CACHE.clear()
     (tmp_path / "bom.py").write_bytes(b"\xef\xbb\xbfdef alpha():\n    return 1\n")
     quals = [q for _rs, _e, _dl, q in server._spans_for_file("bom.py")]
@@ -746,7 +746,7 @@ def test_spans_for_file_handles_bom(tmp_path, monkeypatch):
 def test_spans_for_file_survives_pathological_nesting(tmp_path, monkeypatch):
     # a flat but very deep AST can overflow the recursive walk; the contract is a
     # graceful empty/partial list, never an escaping RecursionError.
-    monkeypatch.setattr(server, "PROJECT_DIR", tmp_path)
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     server._SPAN_CACHE.clear()
     (tmp_path / "deep.py").write_text("x = a" + ".b" * 8000 + "\n", encoding="utf-8")
     assert isinstance(server._spans_for_file("deep.py"), list)   # does not raise
@@ -754,8 +754,8 @@ def test_spans_for_file_survives_pathological_nesting(tmp_path, monkeypatch):
 
 def test_span_cache_is_bounded(tmp_path, monkeypatch):
     # the per-file span cache must not grow without bound (long-lived HTTP + churn)
-    monkeypatch.setattr(server, "PROJECT_DIR", tmp_path)
-    monkeypatch.setattr(server, "_SPAN_CACHE_MAX", 8)
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    monkeypatch.setattr(spans, "_SPAN_CACHE_MAX", 8)
     server._SPAN_CACHE.clear()
     for i in range(20):
         f = tmp_path / f"mod_{i}.py"
@@ -809,7 +809,7 @@ def test_locate_cross_check_flags_hidden_link(tmp_path, monkeypatch):
         ],
         "edges": [{"source": "A", "target": "B", "type": "calls"}],
     })
-    monkeypatch.setattr(server, "PROJECT_DIR", tmp_path)
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     fake = _FakeIndex(
         search_hits=[_FakeHit("a.py", 1)],
         related_hits=[_FakeHit("b.py", 1), _FakeHit("c.py", 1)],
@@ -917,7 +917,7 @@ def test_set_labels_persists_and_patches_html(tmp_path, monkeypatch):
         '"community_name": "Community 0" ... "community_name": "Community 2" ... '
         '{"0": "Community 0", "2": "Community 2"}', encoding="utf-8",
     )
-    monkeypatch.setattr(server, "PROJECT_DIR", tmp_path)
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
 
     data = json.loads(server.graphify_set_labels(
         {"0": "Authentication", "2": "Tests", "99": "Nope"}, as_json=True))
@@ -961,7 +961,7 @@ def test_surprises_ignores_uncommunitied_target(tmp_path, monkeypatch):
             {"source": "A", "target": "B", "type": "uses"},  # 0 -> 0: same community
         ],
     })
-    monkeypatch.setattr(server, "PROJECT_DIR", tmp_path)
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     data = json.loads(server.graphify_surprises(as_json=True))
     assert data["fallback"] is True
     assert data["surprises"] == []
@@ -1007,7 +1007,7 @@ def test_validate_with_label_fallback_ids(tmp_path, monkeypatch):
             {"source": "A", "target": "Z", "type": "calls"},  # Z dangling
         ],
     })
-    monkeypatch.setattr(server, "PROJECT_DIR", tmp_path)
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     data = json.loads(server.graphify_validate(as_json=True))
     assert data["issues"]["dangling_edges"] == 1
 
@@ -1029,7 +1029,7 @@ def test_locate_hidden_links_ordered_nearest_first(tmp_path, monkeypatch):
             {"source": "n3", "target": "C", "type": "x"},
         ],
     })
-    monkeypatch.setattr(server, "PROJECT_DIR", tmp_path)
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     fake = _FakeIndex(
         search_hits=[_FakeHit("A.py", 1)],
         related_hits=[_FakeHit("C.py", 1), _FakeHit("D.py", 1), _FakeHit("B.py", 1)],
@@ -1049,7 +1049,7 @@ def test_set_labels_no_placeholders_message(tmp_path, monkeypatch):
         encoding="utf-8",
     )
     (out / "graph.html").write_text("already named, no placeholders", encoding="utf-8")
-    monkeypatch.setattr(server, "PROJECT_DIR", tmp_path)
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     data = json.loads(server.graphify_set_labels({"0": "Auth"}, as_json=True))
     assert data["graph_html_patched"] == 0
     assert "no 'Community N' placeholders" in server.graphify_set_labels({"0": "Auth"})
@@ -1079,7 +1079,7 @@ def test_freshness_rename_reports_old_path(tmp_path, monkeypatch):
     git("add", ".")
     git("commit", "-m", "init")
     git("mv", "old.py", "new.py")
-    monkeypatch.setattr(server, "PROJECT_DIR", tmp_path)
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     data = json.loads(server.graphify_freshness(as_json=True))
     assert data["recommended_action"] == "rebuild"
     assert "old.py" in data["deleted_or_renamed"]
@@ -1098,7 +1098,7 @@ def test_freshness_large_changeset_rebuild(tmp_path, monkeypatch):
     git("commit", "-m", "init")
     for i in range(30):
         (tmp_path / f"f{i}.py").write_text("x = 1\n", encoding="utf-8")
-    monkeypatch.setattr(server, "PROJECT_DIR", tmp_path)
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     data = json.loads(server.graphify_freshness(as_json=True))
     assert data["recommended_action"] == "rebuild"
     assert "large change set" in data["reason"]
@@ -1121,7 +1121,7 @@ def test_freshness_fresh_state(tmp_path, monkeypatch):
     git("commit", "-m", "init")
     future = time.time() + 30
     os.utime(out / "graph.json", (future, future))  # graph newer than the commit
-    monkeypatch.setattr(server, "PROJECT_DIR", tmp_path)
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     data = json.loads(server.graphify_freshness(as_json=True))
     assert data["stale"] is False
     assert data["recommended_action"] == "fresh"
@@ -1150,7 +1150,7 @@ def test_ast_equivalent_detects_cosmetic_vs_structural(tmp_path, monkeypatch):
     git = _git_init(tmp_path)
     git("add", "m.py")
     git("commit", "-m", "init")
-    monkeypatch.setattr(server, "PROJECT_DIR", tmp_path)
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     # comment + blank line + reflow only -> AST-identical -> cosmetic
     (tmp_path / "m.py").write_text(
         "def f(x):\n    # tweak\n\n    return x + 1\n", encoding="utf-8")
@@ -1175,7 +1175,7 @@ def test_freshness_cosmetic_change_stays_fresh(tmp_path, monkeypatch):
     git("commit", "-m", "init")
     _write_graph(tmp_path, {"nodes": [], "links": [], "built_at_commit": _head(tmp_path)})
     server._GRAPH_CACHE.clear()
-    monkeypatch.setattr(server, "PROJECT_DIR", tmp_path)
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     (tmp_path / "m.py").write_text("def f():\n    # note\n    return 1\n", encoding="utf-8")
     data = json.loads(server.graphify_freshness(as_json=True))
     assert data["recommended_action"] == "fresh"
@@ -1192,7 +1192,7 @@ def test_freshness_structural_change_updates(tmp_path, monkeypatch):
     git("commit", "-m", "init")
     _write_graph(tmp_path, {"nodes": [], "links": [], "built_at_commit": _head(tmp_path)})
     server._GRAPH_CACHE.clear()
-    monkeypatch.setattr(server, "PROJECT_DIR", tmp_path)
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     (tmp_path / "m.py").write_text("def f():\n    return 999\n", encoding="utf-8")
     data = json.loads(server.graphify_freshness(as_json=True))
     assert data["recommended_action"] == "update"
@@ -1402,7 +1402,7 @@ def test_freshness_cosmetic_change_while_behind_updates(tmp_path, monkeypatch):
     git("commit", "-m", "c2")
     _write_graph(tmp_path, {"nodes": [], "links": [], "built_at_commit": c1})
     server._GRAPH_CACHE.clear()
-    monkeypatch.setattr(server, "PROJECT_DIR", tmp_path)
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     # a cosmetic-only working-tree edit must NOT mask the behind-HEAD staleness
     (tmp_path / "m.py").write_text("def f():\n    # note\n    return 1\n", encoding="utf-8")
     data = json.loads(server.graphify_freshness(as_json=True))
@@ -1420,7 +1420,7 @@ def test_freshness_large_cosmetic_set_skips_ast_and_rebuilds(tmp_path, monkeypat
     git("commit", "-m", "init")
     _write_graph(tmp_path, {"nodes": [], "links": [], "built_at_commit": _head(tmp_path)})
     server._GRAPH_CACHE.clear()
-    monkeypatch.setattr(server, "PROJECT_DIR", tmp_path)
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     # individually-cosmetic edits to 26 tracked files: the >25 gate must SKIP the AST
     # diff (so cosmetic stays empty) and route straight to a rebuild
     for i in range(26):
@@ -1470,7 +1470,7 @@ def test_is_ts_symbol_classification():
 
 def test_spans_treesitter_go_and_rust(tmp_path, monkeypatch):
     _skip_without_treesitter()
-    monkeypatch.setattr(server, "PROJECT_DIR", tmp_path)
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     server._SPAN_CACHE.clear()
     server._TS_PARSERS.clear()
     (tmp_path / "main.go").write_bytes(
@@ -1490,7 +1490,7 @@ def test_spans_treesitter_absorbs_leading_doc_comment(tmp_path, monkeypatch):
     # span's region_start must absorb them so a chunk starting on the doc comment
     # still resolves to the symbol it documents.
     _skip_without_treesitter()
-    monkeypatch.setattr(server, "PROJECT_DIR", tmp_path)
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     server._SPAN_CACHE.clear()
     server._TS_PARSERS.clear()
     (tmp_path / "x.go").write_bytes(
@@ -1506,7 +1506,7 @@ def test_spans_treesitter_absorbs_leading_doc_comment(tmp_path, monkeypatch):
 def test_spans_treesitter_anonymous_bound_function(tmp_path, monkeypatch):
     # an arrow / anonymous function bound to a name takes the binding name as qualname
     _skip_without_treesitter()
-    monkeypatch.setattr(server, "PROJECT_DIR", tmp_path)
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     server._SPAN_CACHE.clear()
     server._TS_PARSERS.clear()
     (tmp_path / "a.js").write_bytes(
@@ -1522,7 +1522,7 @@ def test_spans_treesitter_anonymous_bound_function(tmp_path, monkeypatch):
 def test_spans_treesitter_go_receiver_qualname(tmp_path, monkeypatch):
     # Go method receivers become Type.method, not a bare method name
     _skip_without_treesitter()
-    monkeypatch.setattr(server, "PROJECT_DIR", tmp_path)
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     server._SPAN_CACHE.clear()
     server._TS_PARSERS.clear()
     (tmp_path / "c.go").write_bytes(
@@ -1537,7 +1537,7 @@ def test_spans_treesitter_go_receiver_qualname(tmp_path, monkeypatch):
 def test_spans_treesitter_object_and_class_field_arrows(tmp_path, monkeypatch):
     # object-property arrows and class-field arrows bind the property/field name
     _skip_without_treesitter()
-    monkeypatch.setattr(server, "PROJECT_DIR", tmp_path)
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     server._SPAN_CACHE.clear()
     server._TS_PARSERS.clear()
     (tmp_path / "z.js").write_bytes(
@@ -1551,7 +1551,7 @@ def test_spans_treesitter_cpp_declarator_names(tmp_path, monkeypatch):
     # C++ names live in a declarator chain; a qualified method reads Class.method,
     # and template calls / nested declarators don't leak in as bogus symbols
     _skip_without_treesitter()
-    monkeypatch.setattr(server, "PROJECT_DIR", tmp_path)
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     server._SPAN_CACHE.clear()
     server._TS_PARSERS.clear()
     (tmp_path / "t.cpp").write_bytes(
@@ -1565,7 +1565,7 @@ def test_spans_treesitter_cpp_declarator_names(tmp_path, monkeypatch):
 
 def test_spans_treesitter_named_function_expression(tmp_path, monkeypatch):
     _skip_without_treesitter()
-    monkeypatch.setattr(server, "PROJECT_DIR", tmp_path)
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     server._SPAN_CACHE.clear()
     (tmp_path / "z.js").write_bytes(b"const x = function bar() {\n  return 1;\n};\n")
     quals = {q for _rs, _e, _dl, q in server._spans_for_file("z.js")}
@@ -1574,7 +1574,7 @@ def test_spans_treesitter_named_function_expression(tmp_path, monkeypatch):
 
 def test_uppercase_py_uses_ast_decorator_aware_path(tmp_path, monkeypatch):
     # an uppercase .PY extension must still take the decorator-aware ast path
-    monkeypatch.setattr(server, "PROJECT_DIR", tmp_path)
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     server._SPAN_CACHE.clear()
     src = b"import functools\n@functools.cache\ndef decorated():\n    return 1\n"
     (tmp_path / "U.PY").write_bytes(src)
@@ -1591,7 +1591,7 @@ def test_freshness_structural_change_non_python(tmp_path, monkeypatch):
     _write_graph(tmp_path, {"nodes": [], "links": [], "built_at_commit": _head(tmp_path)})
     server._GRAPH_CACHE.clear()
     server._TS_PARSERS.clear()
-    monkeypatch.setattr(server, "PROJECT_DIR", tmp_path)
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     (tmp_path / "app.js").write_bytes(b"function f() {\n  return 2;\n}\n")   # value change
     data = json.loads(server.graphify_freshness(as_json=True))
     assert data["recommended_action"] == "update"
@@ -1601,7 +1601,7 @@ def test_freshness_structural_change_non_python(tmp_path, monkeypatch):
 
 def test_spans_treesitter_javascript(tmp_path, monkeypatch):
     _skip_without_treesitter()
-    monkeypatch.setattr(server, "PROJECT_DIR", tmp_path)
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     server._SPAN_CACHE.clear()
     (tmp_path / "app.js").write_bytes(_JS_SRC)
     spans = {q: (rs, e, dl) for rs, e, dl, q in server._spans_for_file("app.js")}
@@ -1612,7 +1612,7 @@ def test_spans_treesitter_javascript(tmp_path, monkeypatch):
 
 def test_node_for_location_resolves_non_python_via_treesitter(tmp_path, monkeypatch):
     _skip_without_treesitter()
-    monkeypatch.setattr(server, "PROJECT_DIR", tmp_path)
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     server._SPAN_CACHE.clear()
     (tmp_path / "app.js").write_bytes(_JS_SRC)
     nodes = [
@@ -1631,7 +1631,7 @@ def test_node_for_location_resolves_non_python_via_treesitter(tmp_path, monkeypa
 
 def test_structurally_equal_non_python(tmp_path, monkeypatch):
     _skip_without_treesitter()
-    monkeypatch.setattr(server, "PROJECT_DIR", tmp_path)
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     server._TS_PARSERS.clear()
     old = b"function f(){\n  return 1;\n}\n"
     cosmetic = b"function f() {\n  // a note\n  return 1;\n}\n"   # comment + reformat
@@ -1661,7 +1661,7 @@ def test_freshness_cosmetic_change_non_python(tmp_path, monkeypatch):
     _write_graph(tmp_path, {"nodes": [], "links": [], "built_at_commit": _head(tmp_path)})
     server._GRAPH_CACHE.clear()
     server._TS_PARSERS.clear()
-    monkeypatch.setattr(server, "PROJECT_DIR", tmp_path)
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     (tmp_path / "app.js").write_bytes(b"function f() {\n  // tweak\n  return 1;\n}\n")
     data = json.loads(server.graphify_freshness(as_json=True))
     assert data["recommended_action"] == "fresh"
@@ -1671,9 +1671,9 @@ def test_freshness_cosmetic_change_non_python(tmp_path, monkeypatch):
 def test_span_backend_graceful_without_treesitter(tmp_path, monkeypatch):
     # tree-sitter unavailable -> non-Python files yield no spans and structural
     # comparison is undetermined (None), so the caller degrades safely
-    monkeypatch.setattr(server, "PROJECT_DIR", tmp_path)
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     server._SPAN_CACHE.clear()
-    monkeypatch.setattr(server, "_ts_parser_for", lambda rel: (None, None))
+    monkeypatch.setattr(spans, "_ts_parser_for", lambda rel: (None, None))
     (tmp_path / "app.js").write_bytes(b"function f(){ return 1; }\n")
     assert server._spans_for_file("app.js") == []
     assert server._structurally_equal("app.js", b"a", b"a // c") is None

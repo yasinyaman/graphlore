@@ -30,6 +30,11 @@ All notable changes to this project are documented here. The format is based on
   miscounted as a surprise, and the two tools agree.
 
 ### Changed
+- Internal refactor (no behaviour change): the 2,000-line `server.py` is split into
+  layered modules — `config.py` (shared `PROJECT_DIR`), `graph.py` (graph.json load +
+  node/edge/traversal helpers), `spans.py` (the tree-sitter/ast span + structural-diff
+  engine) — leaving `server.py` as the MCP surface (tools/resources/prompts). Same
+  108 tests, same benchmark numbers.
 - `_load_graph` caches the parsed graph by path + mtime, so a multi-MB
   `graph.json` isn't re-parsed on every tool call.
 - Community-naming sampling `max_tokens` raised 16 → 24 to avoid clipped names.
