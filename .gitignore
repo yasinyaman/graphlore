@@ -26,3 +26,6 @@ graphify-out/
 
 # Claude Code (per-user local settings; shared .claude/ config can still be committed)
 .claude/settings.local.json
+
+# Local MCP client config (machine-specific absolute paths)
+.mcp.json

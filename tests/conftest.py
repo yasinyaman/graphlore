@@ -21,12 +21,12 @@ def project(tmp_path, monkeypatch):
     out.mkdir()
     shutil.copy(FIXTURES / "graph.json", out / "graph.json")
     shutil.copy(FIXTURES / "GRAPH_REPORT.md", out / "GRAPH_REPORT.md")
-    monkeypatch.setattr(server, "PROJECT_DIR", tmp_path)
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     return tmp_path
 
 
 @pytest.fixture()
 def empty_project(tmp_path, monkeypatch):
     """A temp project dir with no graph built yet."""
-    monkeypatch.setattr(server, "PROJECT_DIR", tmp_path)
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     return tmp_path

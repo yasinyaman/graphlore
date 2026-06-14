@@ -19,6 +19,18 @@ project README for the `.mcp.json` / Claude Desktop config.
 2. If missing or stale: `graphify_build(".", update=True)` (AST-only update needs
    no API key; `mode="deep"` adds semantic edges but needs a backend key).
 
+## Find code by what it does — `graphify_locate`
+
+For a *behavioral* question ("where is retry/backoff handled?", "how are redirects
+followed?"), reach for `graphify_locate("<natural-language question>")` first: one
+call runs semantic search, maps the top hit to its **enclosing graph node**, and
+returns the token-budgeted subgraph around it **plus `hidden_links`** — semantically
+similar code that is structurally disconnected (duplication / missing-abstraction /
+sync-async-twin candidates that neither search nor the graph surfaces alone). Works
+across Python, JS/TS, Go, Java, Rust, C++ and 165+ languages. Needs the optional
+`[semble]` extra; without it, fall back to `graphify_search` (name-based) and the
+structural flow below.
+
 ## Canonical flow (cheap → targeted)
 
 1. **`graphify_overview()`** — ALWAYS first. Size, god nodes, community count,
@@ -36,7 +48,9 @@ project README for the `.mcp.json` / Claude Desktop config.
 Supporting tools: `graphify_search` (find nodes by name), `graphify_neighbors`
 (1-hop), `graphify_god_nodes` (most connected), `graphify_surprises`
 (unexpected cross-domain couplings), `graphify_path(a, b)` (exact route between
-two nodes), `graphify_explain(node)` (everything about one node).
+two nodes), `graphify_explain(node)` (everything about one node),
+`graphify_validate()` (lint graph.json for dangling/duplicate/self-loop/orphan
+issues — gauge how much to trust the graph).
 
 ## Token discipline (the whole point)
 
@@ -51,9 +65,10 @@ instead of re-parsing prose.
 - **Onboarding** → overview → communities → `graphify_subgraph` on the top 2-3
   god nodes → `graphify_surprises` for hidden coupling → write a short
   architecture summary. (The `onboard` MCP prompt scripts this.)
-- **Tracing a bug** → `graphify_search` the symptom → `graphify_subgraph` around
-  the best match → `graphify_path` between suspects → check `graphify_surprises`.
-  (The `trace_bug` MCP prompt scripts this.)
+- **Tracing a bug** → `graphify_locate("<symptom in plain words>")` (or
+  `graphify_search` without the `[semble]` extra) → `graphify_subgraph` around the
+  best match → `graphify_path` between suspects → check `graphify_surprises` and the
+  `hidden_links` locate returned. (The `trace_bug` MCP prompt scripts this.)
 - **Explaining a flow** → `graphify_query` the flow for entry points →
   `graphify_subgraph(hops=2)` around them → `graphify_node_details` for
   `file:line`. (The `explain_flow` MCP prompt scripts this.)
@@ -63,7 +78,10 @@ instead of re-parsing prose.
 Leiden clusters are numbered (`Community 7`) until a model names them.
 `graphify_sampling_status()` reports the options; `graphify_label_communities()`
 then names them via **host-LLM sampling** (no server API key), a backend key
-(`method="cli"`), or placeholders — `method="auto"` picks the best available.
+(`method="cli"`), or placeholders — `method="auto"` picks the best available. In a
+client that lacks MCP sampling (e.g. Claude Code), read a community's members and
+push your own names with `graphify_set_labels({"<id>": "<name>", ...})` — no key,
+no sampling required.
 
 ## After code changes
 

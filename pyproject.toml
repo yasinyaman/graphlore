@@ -27,6 +27,11 @@ dependencies = [
 
 [project.optional-dependencies]
 graphify = ["graphifyy"]
+semble = ["semble>=0.3"]
+# Multi-language span/structure backend for graphify_locate and graphify_freshness
+# (Python works without it via stdlib ast). tree-sitter also ships with graphify.
+treesitter = ["tree-sitter>=0.22", "tree-sitter-language-pack>=1.0"]
+all = ["graphifyy", "semble>=0.3", "tree-sitter>=0.22", "tree-sitter-language-pack>=1.0"]
 dev = ["pytest>=8.0", "ruff>=0.6"]
 
 [project.urls]

@@ -21,7 +21,9 @@ jobs:
       - name: Install
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          # include the tree-sitter extra so the multi-language backend tests run
+          # (they self-skip when it's absent) rather than silently no-op in CI
+          pip install -e ".[dev,treesitter]"
       - name: Lint (ruff)
         run: ruff check .
       - name: Test (pytest)
