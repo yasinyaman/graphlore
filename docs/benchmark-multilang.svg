@@ -1,0 +1,46 @@
+<svg viewBox="0 0 760 300" xmlns="http://www.w3.org/2000/svg" role="img"
+     aria-label="Span-join precision across languages on real HTTP-client repos: Python 91%, JavaScript/TypeScript 85%, Java 83%, Go 80%.">
+  <style>
+    text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;fill:#3a3f4b}
+    .t{font-size:15px;font-weight:600}.s{font-size:12px;fill:#6b7280}
+    .lbl{font-size:13px;fill:#3a3f4b}.repo{font-size:11px;fill:#9aa3b2}
+    .v{font-size:13px;font-weight:600;fill:#1d9e75}
+    .track{fill:#e3e6eb}
+    @media (prefers-color-scheme: dark){
+      text{fill:#cdd2db}.s{fill:#9aa3b2}.lbl{fill:#cdd2db}.repo{fill:#7b8494}.track{fill:#262b34}
+    }
+  </style>
+  <text class="t" x="10" y="26">Span-join precision across languages</text>
+  <text class="s" x="10" y="46">share of semantic hits resolved to the symbol whose real tree-sitter span contains them — real HTTP-client repos, higher is better</text>
+
+  <!-- track = 480px for 100%; bar = 480 * precision -->
+  <!-- Python 91% -->
+  <text class="lbl" x="200" y="86" text-anchor="end">Python</text>
+  <text class="repo" x="200" y="101" text-anchor="end">encode/httpx</text>
+  <rect class="track" x="210" y="78" width="480" height="22" rx="3"/>
+  <rect x="210" y="78" width="437" height="22" rx="3" fill="#1d9e75"/>
+  <text class="v" x="655" y="94">91%</text>
+
+  <!-- JS/TS 85% -->
+  <text class="lbl" x="200" y="136" text-anchor="end">JavaScript / TS</text>
+  <text class="repo" x="200" y="151" text-anchor="end">sindresorhus/got</text>
+  <rect class="track" x="210" y="128" width="480" height="22" rx="3"/>
+  <rect x="210" y="128" width="408" height="22" rx="3" fill="#1d9e75"/>
+  <text class="v" x="626" y="144">85%</text>
+
+  <!-- Java 83% -->
+  <text class="lbl" x="200" y="186" text-anchor="end">Java</text>
+  <text class="repo" x="200" y="201" text-anchor="end">square/retrofit</text>
+  <rect class="track" x="210" y="178" width="480" height="22" rx="3"/>
+  <rect x="210" y="178" width="398" height="22" rx="3" fill="#1d9e75"/>
+  <text class="v" x="616" y="194">83%</text>
+
+  <!-- Go 80% -->
+  <text class="lbl" x="200" y="236" text-anchor="end">Go</text>
+  <text class="repo" x="200" y="251" text-anchor="end">go-resty/resty</text>
+  <rect class="track" x="210" y="228" width="480" height="22" rx="3"/>
+  <rect x="210" y="228" width="384" height="22" rx="3" fill="#1d9e75"/>
+  <text class="v" x="602" y="244">80%</text>
+
+  <text class="s" x="10" y="288">Python uses the stdlib ast; JS/TS · Go · Java use tree-sitter with automatic language detection — one tool, zero per-language config.</text>
+</svg>

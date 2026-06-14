@@ -8,6 +8,15 @@ A Python MCP server that exposes the [Graphify](https://graphify.net) knowledge 
 
 > Note: Graphify ships its own embedded MCP server (`graphify ./raw --mcp`). This project adds analysis tools, token-budgeted subgraph extraction, git freshness checks, per-community resources, reusable prompts, and LLM-friendly tool annotations + structured (JSON) output on top.
 
+### Why `graphify_locate`
+
+One MCP call turns a natural-language question into a **navigational map**, not a wall of code:
+
+- 🔎 **Semantic + structural, one call** — semble finds the relevant code, the graph gives its neighborhood. ~235 tokens to orient vs ~61k for grep+read (**263× fewer** on httpx).
+- 🔗 **`hidden_links`** — semantically similar code that is *structurally disconnected* (duplication / missing-abstraction / sync-async-twin candidates) that neither search nor the graph surfaces alone.
+- 🌍 **Multi-language, zero config** — Python via stdlib `ast`; JS/TS · Go · Java · 165+ more via tree-sitter with automatic language detection. **Span-join precision holds at 80–91%** on real HTTP-client repos ([benchmark](#benchmark)).
+- 🕒 **Cosmetic-aware freshness** — `graphify_freshness` ignores comment/format-only edits (in every language) so a reformat never triggers a needless rebuild.
+
 ## Installation
 
 ```bash
@@ -61,8 +70,18 @@ GRAPHIFY_TRANSPORT=streamable-http GRAPHIFY_HOST=127.0.0.1 GRAPHIFY_PORT=8000 \
 
 Any HTTP transport **force-enables path containment** (`GRAPHIFY_RESTRICT_PATHS`)
 so a network client can't drive `graphify_build` to extract arbitrary filesystem
-paths. HTTP binds `127.0.0.1` by default; if you expose it beyond localhost
-(`GRAPHIFY_HOST=0.0.0.0`), put it behind your own auth / reverse proxy.
+paths. HTTP binds `127.0.0.1` by default. To expose it beyond localhost, set
+`GRAPHIFY_API_KEY` — every request must then send `Authorization: Bearer <key>`
+(constant-time checked, 401 otherwise); binding a non-loopback host without a key
+prints a warning.
+
+```bash
+GRAPHIFY_TRANSPORT=streamable-http GRAPHIFY_HOST=0.0.0.0 GRAPHIFY_API_KEY=$(openssl rand -hex 16) \
+  GRAPHIFY_PROJECT_DIR=/path/to/repo graphify-mcp-server
+```
+
+For a smaller tool surface (helps some models pick the right tool), set
+`GRAPHIFY_TOOLSET=lean` to expose only the core exploration tools.
 
 ## Environment variables
 
@@ -76,6 +95,8 @@ paths. HTTP binds `127.0.0.1` by default; if you expose it beyond localhost
 | `GRAPHIFY_TRANSPORT` | `stdio` | `stdio` \| `streamable-http` \| `sse` |
 | `GRAPHIFY_HOST` | `127.0.0.1` | Bind host for HTTP transports |
 | `GRAPHIFY_PORT` | `8000` | Bind port for HTTP transports |
+| `GRAPHIFY_API_KEY` | _(unset)_ | Require `Authorization: Bearer <key>` on HTTP transports |
+| `GRAPHIFY_TOOLSET` | `full` | `full` \| `lean` (core exploration tools only) |
 
 ## Tools
 
@@ -110,6 +131,13 @@ Semantic naming (uses the **host model via MCP sampling** — no API key — or 
 |---|---|
 | `graphify_sampling_status` | Capability test: reports whether the client supports host-LLM sampling, whether a backend key is set, and which method will be used |
 | `graphify_label_communities` | Give Leiden communities human-readable names. `method="auto"` (sampling → key → placeholder), `"sampling"`, `"cli"`, or `"placeholder"` |
+| `graphify_set_labels` | Persist **assistant-provided** community names (sampling-free fallback) to `.graphify_labels.json` and patch them into `graph.html` |
+
+Semantic bridge (optional `[semble]` extra — semantic search joined to graph structure):
+
+| Tool | Purpose |
+|---|---|
+| `graphify_locate` | NL query → enclosing graph node → token-budgeted subgraph, **plus `hidden_links`**: semantically-similar code that is structurally disconnected (duplication / missing-abstraction candidates) |
 
 ## Naming communities without an API key (MCP sampling)
 
@@ -125,6 +153,104 @@ needs a model. Three ways, in `graphify_label_communities`'s preference order:
    / `ANTHROPIC_API_KEY` / … (or run a local **ollama**) and graphify's own
    backend names them. This option always remains available.
 3. **Placeholders** — no model anywhere: names stay `Community N`.
+
+If the client can't sample and you have no backend (e.g. **Claude Code**, which
+doesn't support sampling), use the **assistant-driven fallback**: the assistant
+is already a capable model in the loop, so it reads `graphify_communities` and
+pushes names back via **`graphify_set_labels({"0": "Authentication", ...})`** —
+no key, no sampling, works in any client. The names persist to
+`.graphify_labels.json` and are patched into `graph.html`.
+
+## Semantic bridge (optional `[semble]`)
+
+`pip install "graphify-mcp[semble]"` adds `graphify_locate`, which joins
+[semble](https://github.com/MinishLab/semble)'s semantic code search to the graph
+in one call. Graphify gives **structure** (how code connects); semble gives
+**retrieval** (which code is semantically relevant) — they're complementary.
+
+`graphify_locate("how does retry backoff work")`:
+1. semble finds the most relevant code and resolves the top hit to its enclosing
+   graph node (better than label matching).
+2. returns the token-budgeted subgraph around it (**structure**).
+3. runs semble `find_related` and cross-checks: a cousin that is semantically
+   similar but **not** within the seed's structural neighborhood is flagged as a
+   `hidden_link` (with its hop distance) — a duplication / missing-abstraction /
+   implicit-coupling candidate that neither tool surfaces alone.
+
+The extra is optional: without it the core tools are unchanged and `graphify_locate`
+returns an install hint. It also pairs well with running semble's own MCP server
+alongside graphify-mcp.
+
+The chunk→node join and the freshness cosmetic-vs-structural check work
+**across languages**: Python uses the stdlib `ast` (no extra deps), and every
+other language (JS/TS, Go, Rust, Java, Ruby, C/C++, …) is handled by an optional
+**tree-sitter** backend — `pip install "graphify-mcp[treesitter]"`, also pulled in
+by graphify. Without it, non-Python files fall back to nearest-line matching.
+
+## Benchmark
+
+Averaged over **6 queries** spanning httpx subsystems (send path, digest auth,
+redirects, content decoding, cookies, timeouts) on the 2,101-node graph. Each query
+orients an agent to a code area; *tokens* = what reaches the model's context
+(≈ chars/4).
+
+![Tokens to orient an agent across 6 httpx queries — lower is better](docs/benchmark.svg)
+
+| Approach | Tokens (avg) | Calls | Structure | Semantic | Hidden links |
+|---|---|---|---|---|---|
+| Naive grep + read | 61,836 | ~14 | — | — | 0 |
+| semble alone | 1,613 | 1 | — | ✓ | 0 |
+| graphify alone | 1,107 | 1 | ✓ | — | 0 |
+| semble + graphify (separately) | 2,721 | 4 | ✓ | ✓ | 0 |
+| **`graphify_locate`** | **235** | **1** | ✓ | ✓ | **7** |
+
+`graphify_locate` averages **263× fewer tokens than grep+read** and **11.6× fewer
+than running semble and graphify separately** (one call instead of four) — and it's
+the only approach that surfaces `hidden_links` (semantically similar but structurally
+disconnected code), 5–10 per query.
+
+Those ~235 tokens are a navigational *map* (seed `file:line` + structural
+neighborhood + hidden links), not raw code — you fetch the specific code only where
+needed. That's the trade graphify-mcp optimizes: cheapest orientation plus the
+cross-check signal, then drill in precisely.
+
+**Case study — the hidden links are real.** Asked *"does httpx duplicate
+request-sending across sync and async?"*, `graphify_locate` returned the seed
+`Client._send_single_request` and flagged hidden links. Checking the source
+confirmed every production flag is a genuine sync/async twin:
+`Client._send_single_request` (`_client.py:1001`) ↔ `AsyncClient._send_single_request`
+(`:1717`); `BaseTransport.handle_request` ↔ `handle_async_request` (in every
+transport); `__enter__` ↔ `__aenter__`. ~500 tokens (one `locate` + a targeted read)
+surfaced a real architectural pattern that naively reading `_client.py` (~16k tokens)
+would. The `unreachable` bucket also held test files (related, not refactor targets) —
+the `distance` field separates production parallels (3–4) from that noise.
+
+**Across languages — real HTTP-client repos.** The span join and freshness check aren't
+Python-only. I built AST-only graphs for an HTTP client in three more languages and ran the
+same kind of queries (send · redirects · timeout/retry · headers/auth · transport):
+
+![Span-join precision across languages — Python 91%, JS/TS 85%, Java 83%, Go 80%](docs/benchmark-multilang.svg)
+
+| Language | Repo | Span-join precision | Qualname | Hidden / q | locate vs grep |
+|---|---|---|---|---|---|
+| **Python** (ast) | `encode/httpx` | **91%** (49/54) | 67% | 4.0 | 232× |
+| JavaScript / TS | `sindresorhus/got` | 85% (46/54) | 50% | 3.2 | 480× |
+| Go | `go-resty/resty` | 80% (43/54) | 67% | 4.7 | 757× |
+| Java | `square/retrofit` | 83% (45/54) | 50% | 5.5 | 208× |
+
+Python uses the stdlib `ast`; JS/TS · Go · Java go through tree-sitter with automatic language
+detection — **one tool, zero per-language config**. *Span-join precision* = share of semantic
+hits whose resolved node's real span actually contains the chunk. It holds at **80–91%** across
+380–2,101-node graphs, hidden-links keep surfacing 3–6/query, and locate stays **200–750×
+cheaper** than grep+read. `graphify_freshness`'s cosmetic-vs-structural check is correct in
+every language too (comment/reformat → cosmetic; operator/rename → structural). Reproduce with
+[`benchmarks/multilang.py`](benchmarks/multilang.py).
+
+→ **[Full benchmark report](https://htmlpreview.github.io/?https://github.com/yasinyaman/graphify-mcp/blob/master/docs/benchmark.html)** (interactive HTML, per-query breakdown + the cross-language tables) — or open [`docs/benchmark.html`](docs/benchmark.html) locally. ([Türkçe](https://htmlpreview.github.io/?https://github.com/yasinyaman/graphify-mcp/blob/master/docs/benchmark.tr.html))
+
+<sub>Measured 2026-06 with semble 0.3.4 + graphify (tree-sitter backend). httpx headline = 6
+queries (per-query locate 189–286 tokens); cross-language = 6 queries × 54 hits each on
+`got` / `resty` / `retrofit`. Numbers vary by codebase and query.</sub>
 
 ## Resources
 

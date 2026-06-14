@@ -1,0 +1,28 @@
+<svg viewBox="0 0 760 300" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif" role="img" aria-label="Mean tokens to orient an agent across six httpx queries: naive grep and read 61,836; semble alone 1,613; graphify alone 1,107; semble plus graphify separately 2,721; graphify-mcp locate 235.">
+  <style>
+    text { fill: #57606a; }
+    .v { font-weight: 600; }
+    @media (prefers-color-scheme: dark) { text { fill: #8b949e; } }
+  </style>
+  <text x="20" y="26" font-size="15" font-weight="600">Tokens to orient an agent · mean of 6 httpx queries · log scale</text>
+
+  <text x="190" y="64" font-size="13" text-anchor="end">Naive grep + read</text>
+  <rect x="200" y="49" width="428" height="22" rx="3" fill="#e24b4a"/>
+  <text x="636" y="65" font-size="13" class="v">61,836</text>
+
+  <text x="190" y="114" font-size="13" text-anchor="end">semble alone</text>
+  <rect x="200" y="99" width="185" height="22" rx="3" fill="#888780"/>
+  <text x="393" y="115" font-size="13" class="v">1,613</text>
+
+  <text x="190" y="164" font-size="13" text-anchor="end">graphify alone</text>
+  <rect x="200" y="149" width="160" height="22" rx="3" fill="#888780"/>
+  <text x="368" y="165" font-size="13" class="v">1,107</text>
+
+  <text x="190" y="214" font-size="13" text-anchor="end">semble + graphify (separate)</text>
+  <rect x="200" y="199" width="220" height="22" rx="3" fill="#ba7517"/>
+  <text x="428" y="215" font-size="13" class="v">2,721</text>
+
+  <text x="190" y="264" font-size="13" text-anchor="end" font-weight="600">graphify-mcp locate</text>
+  <rect x="200" y="249" width="57" height="22" rx="3" fill="#1d9e75"/>
+  <text x="265" y="265" font-size="13" class="v">235  ·  +7 hidden links</text>
+</svg>
