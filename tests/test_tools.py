@@ -1500,6 +1500,37 @@ def test_spans_treesitter_absorbs_leading_doc_comment(tmp_path, monkeypatch):
     assert server._node_for_location(nodes, "x.go", 3)["id"] == "Handler"   # doc-comment chunk
 
 
+def test_spans_treesitter_anonymous_bound_function(tmp_path, monkeypatch):
+    # an arrow / anonymous function bound to a name takes the binding name as qualname
+    _skip_without_treesitter()
+    monkeypatch.setattr(server, "PROJECT_DIR", tmp_path)
+    server._SPAN_CACHE.clear()
+    server._TS_PARSERS.clear()
+    (tmp_path / "a.js").write_bytes(
+        b"const fetchUser = (id) => {\n  return get(id);\n};\n"
+        b"const retry = async function () {\n  return 1;\n};\n")
+    quals = {q for _rs, _e, _dl, q in server._spans_for_file("a.js")}
+    assert "fetchUser" in quals and "retry" in quals
+    nodes = [{"id": "fetchUser", "label": "fetchUser", "source_file": "a.js",
+              "source_location": "L1", "file_type": "code"}]
+    assert server._node_for_location(nodes, "a.js", 2)["id"] == "fetchUser"  # chunk in body
+
+
+def test_spans_treesitter_go_receiver_qualname(tmp_path, monkeypatch):
+    # Go method receivers become Type.method, not a bare method name
+    _skip_without_treesitter()
+    monkeypatch.setattr(server, "PROJECT_DIR", tmp_path)
+    server._SPAN_CACHE.clear()
+    server._TS_PARSERS.clear()
+    (tmp_path / "c.go").write_bytes(
+        b"package m\ntype Client struct{}\n"
+        b"func (c *Client) Get(u string) error { return nil }\n"
+        b"func Helper() int { return 1 }\n")
+    quals = {q for _rs, _e, _dl, q in server._spans_for_file("c.go")}
+    assert "Client.Get" in quals and "Helper" in quals
+    assert server._span_qualname("c.go", 3) == "Client.Get"
+
+
 def test_spans_treesitter_named_function_expression(tmp_path, monkeypatch):
     _skip_without_treesitter()
     monkeypatch.setattr(server, "PROJECT_DIR", tmp_path)

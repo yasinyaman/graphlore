@@ -503,6 +503,34 @@ def _ts_region_start(child: Any, def_line: int) -> int:
     return start
 
 
+def _ts_receiver_type(recv: Any) -> str | None:
+    """The receiver's type name in a method receiver, e.g. Go ``(c *Client)`` -> ``Client``."""
+    stack = list(recv.named_children)
+    while stack:
+        n = stack.pop(0)
+        if n.type == "type_identifier":
+            return n.text.decode("utf-8", "replace")
+        stack.extend(n.named_children)
+    return None
+
+
+def _ts_bound_function(node: Any) -> tuple[str, Any] | None:
+    """An *anonymous* function bound to a name — ``const f = () => …``,
+    ``var h = func(){}`` — so the binding name becomes the qualname (the arrow/closure
+    itself carries no ``name`` field). ``None`` for non-function bindings or for a
+    function that has its own name (handled by the normal path)."""
+    name = node.child_by_field_name("name")
+    value = node.child_by_field_name("value")
+    if name is None or value is None or not name.type.endswith("identifier"):
+        return None
+    vt = value.type.lower()
+    if not any(h in vt for h in ("function", "arrow", "lambda", "closure", "func")):
+        return None
+    if value.child_by_field_name("name") is not None:
+        return None
+    return name.text.decode("utf-8", "replace"), value
+
+
 def _spans_treesitter(src: bytes, rel: str) -> list[tuple[int, int, int, str]]:
     """def/class/etc. spans for any tree-sitter-supported language (optional dep).
 
@@ -526,7 +554,11 @@ def _spans_treesitter(src: bytes, rel: str) -> list[tuple[int, int, int, str]]:
             is_sym = _is_ts_symbol(child.type)
             name_node = child.child_by_field_name("name") if is_sym else None
             if name_node is not None:
-                qual = f"{prefix}{name_node.text.decode('utf-8', 'replace')}"
+                base = name_node.text.decode("utf-8", "replace")
+                recv = child.child_by_field_name("receiver")  # Go method: prefix type
+                if recv is not None and (rt := _ts_receiver_type(recv)):
+                    base = f"{rt}.{base}"
+                qual = f"{prefix}{base}"
                 def_line = child.start_point[0] + 1
                 end = child.end_point[0] + 1
                 spans.append((_ts_region_start(child, def_line), end, def_line, qual))
@@ -536,6 +568,14 @@ def _spans_treesitter(src: bytes, rel: str) -> list[tuple[int, int, int, str]]:
                 # e.g. Rust `impl Pool { ... }` — contributes its type to the
                 # qualname chain (so methods read `Pool.acquire`) without a span.
                 walk(child, f"{prefix}{type_node.text.decode('utf-8', 'replace')}.")
+            elif (bound := _ts_bound_function(child)) is not None:
+                # anonymous function bound to a name: `const f = () => …`
+                bname, fn = bound
+                qual = f"{prefix}{bname}"
+                def_line = fn.start_point[0] + 1
+                end = fn.end_point[0] + 1
+                spans.append((def_line, end, def_line, qual))
+                walk(fn, qual + ".")
             else:
                 walk(child, prefix)
 

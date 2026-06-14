@@ -234,8 +234,8 @@ same kind of queries (send · redirects · timeout/retry · headers/auth · tran
 | Language | Repo | Span-join precision | Qualname | Hidden / q | locate vs grep |
 |---|---|---|---|---|---|
 | **Python** (ast) | `encode/httpx` | **91%** (49/54) | 67% | 4.0 | 232× |
-| JavaScript / TS | `sindresorhus/got` | 85% (46/54) | 50% | 3.2 | 480× |
-| Go | `go-resty/resty` | 80% (43/54) | 67% | 4.7 | 757× |
+| JavaScript / TS | `sindresorhus/got` | 89% (48/54) | 67% | 3.2 | 494× |
+| Go | `go-resty/resty` | 80% (43/54) | 67% | 4.7 | 748× |
 | Java | `square/retrofit` | 83% (45/54) | 50% | 5.5 | 208× |
 
 Python uses the stdlib `ast`; JS/TS · Go · Java go through tree-sitter with automatic language
