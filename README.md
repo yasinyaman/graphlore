@@ -17,6 +17,21 @@ One MCP call turns a natural-language question into a **navigational map**, not 
 - 🌍 **Multi-language, zero config** — Python via stdlib `ast`; JS/TS · Go · Java · Rust · C++ · 165+ more via tree-sitter with automatic language detection. **Span-join precision 69–91%** on real HTTP-client repos in six languages ([benchmark](#benchmark)).
 - 🕒 **Cosmetic-aware freshness** — `graphify_freshness` ignores comment/format-only edits (in every language) so a reformat never triggers a needless rebuild.
 
+### One call beats running semble and graphify separately
+
+semble finds **what's relevant**; graphify gives **how it connects**. They're complementary — but stitching them by hand means four calls, ~2.7k tokens, and manually aligning semble's line ranges to graph nodes. graphify-mcp does that join *for* you, in one call:
+
+| _per query_ | semble alone | graphify alone | both, by hand | **`graphify_locate`** |
+|---|:-:|:-:|:-:|:-:|
+| Semantic search | ✓ | — | ✓ | ✓ |
+| Graph structure | — | ✓ | ✓ | ✓ |
+| Chunk → symbol join | — | — | _you wire it_ | **✓ automatic** |
+| `hidden_links` cross-check | — | — | — | **✓ only here** |
+| Calls | 1 | 1 | **4** | **1** |
+| Tokens to orient | 1,613 | 1,107 | 2,721 | **235** |
+
+→ **11.6× fewer tokens than running the two separately — in a single call**, and `hidden_links` (semantically similar code that is *structurally disconnected*) is a signal *neither tool produces alone*. So the combined tool isn't just convenience: it's cheaper, and it surfaces something the parts can't. ([full benchmark ↓](#benchmark))
+
 ## Installation
 
 ```bash
