@@ -1465,7 +1465,25 @@ def test_is_ts_symbol_classification():
     assert not server._is_ts_symbol("class_body")
     assert not server._is_ts_symbol("template_function")  # a C++ call, not a def
     assert not server._is_ts_symbol("function_declarator")
+    assert not server._is_ts_symbol("type_parameter")     # generic <T>, not a def
+    assert not server._is_ts_symbol("type_binding")        # impl Iterator<Item=X>
     assert not server._is_ts_symbol("identifier")
+
+
+def test_spans_treesitter_excludes_type_params_and_bindings(tmp_path, monkeypatch):
+    # generic type parameters (<T>) and associated-type bindings (impl Iterator<Item=T>)
+    # carry a name but are not definitions — they must not leak into qualnames
+    _skip_without_treesitter()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    server._SPAN_CACHE.clear()
+    server._TS_PARSERS.clear()
+    (tmp_path / "x.rs").write_bytes(
+        b"type Alias = u32;\n"
+        b"fn parse<T: Clone>(x: T) -> impl Iterator<Item = T> { std::iter::once(x) }\n"
+        b"struct S;\nimpl S { fn run(&self) {} }\n")
+    quals = {q for _rs, _e, _dl, q in server._spans_for_file("x.rs")}
+    assert {"Alias", "parse", "S", "S.run"} <= quals          # real defs captured
+    assert not any(q.split(".")[-1] in {"T", "Item"} for q in quals)  # no type-level noise
 
 
 def test_spans_treesitter_go_and_rust(tmp_path, monkeypatch):

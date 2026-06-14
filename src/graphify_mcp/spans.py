@@ -50,12 +50,15 @@ _TS_SYMBOL_HINTS = (
 # (C++ class_specifier / struct_specifier / enum_specifier ARE definitions). The
 # excluded nodes match a hint substring but are never name-bearing definitions.
 _TS_NON_SYMBOL_SUFFIXES = ("_type", "_body", "_parameters", "_clause")
-# Call / reference / sub-declarator nodes that match a hint substring ("function")
-# but are NOT definitions — chiefly C/C++, where a templated call like
-# `holds_alternative<T>(x)` parses as `template_function` and a real definition's
-# name sits under a nested `function_declarator`.
+# Nodes that match a hint substring ("function"/"type") but are NOT definitions:
+# C/C++ calls/sub-declarators (`holds_alternative<T>(x)` -> template_function, a real
+# name under a nested function_declarator), and type-level constructs — generic
+# parameters (`<T>`) and associated-type bindings (`impl Iterator<Item = X>`) that
+# carry a `name` field yet name no symbol.
 _TS_CALL_TYPES = frozenset({
     "template_function", "template_method", "call_expression", "function_declarator",
+    "type_binding", "type_parameter", "constrained_type_parameter",
+    "optional_type_parameter", "type_argument", "type_arguments",
 })
 # Parser cache keyed by language name; value is a parser or None (unavailable).
 _TS_PARSERS: dict[str, Any] = {}
@@ -235,7 +238,10 @@ def _spans_treesitter(src: bytes, rel: str) -> list[tuple[int, int, int, str]]:
                 # contributes to the qualname chain (so methods read `Pool.acquire`)
                 # without a span. Restricted to impl-like nodes so a C++
                 # function_definition's `type` (its return type) isn't mistaken for one.
-                walk(child, f"{prefix}{type_node.text.decode('utf-8', 'replace')}.")
+                # Strip generics: `impl ConfigBuilder<X>` -> `ConfigBuilder.`, not the
+                # full `ConfigBuilder<X>.`.
+                base = type_node.child_by_field_name("type") or type_node
+                walk(child, f"{prefix}{base.text.decode('utf-8', 'replace')}.")
             elif is_sym and (dname := _ts_declarator_name(child)) is not None:
                 # C/C++ function/method: the name lives in the declarator chain
                 qual = f"{prefix}{dname}"
