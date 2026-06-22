@@ -59,9 +59,11 @@ GRAPHIFY_PROJECT_DIR=/path/to/repo python -m graphify_mcp
 ```
 
 > **Heads-up:** `graphifyy` ships its own `graphify-mcp` console script (its
-> embedded server), so if both packages are installed the bare `graphify-mcp`
-> command resolves to whichever was installed last. Use `graphify-mcp-server`
-> or `python -m graphify_mcp` to always launch *this* server.
+> embedded server). To avoid a silent collision, this package deliberately
+> doesn't define a bare `graphify-mcp` of its own — use `graphify-mcp-server`
+> or `python -m graphify_mcp` to always launch *this* server. The boot banner
+> on stderr (`graphify-mcp vX.Y.Z | transport=… | project=…`) confirms which
+> server and project dir you're actually running.
 
 ### Claude Code
 
@@ -90,6 +92,11 @@ paths. HTTP binds `127.0.0.1` by default. To expose it beyond localhost, set
 (constant-time checked, 401 otherwise); binding a non-loopback host without a key
 prints a warning.
 
+The CLI is always invoked as an argument list with **no shell** (`subprocess.run`
+with `shell=False`), so a build `path` or query string can't inject shell commands.
+For a shared/network deployment, also consider lowering `GRAPHIFY_TIMEOUT` (default
+`600`s) so a single slow `graphify_build` can't tie up a worker for ten minutes.
+
 ```bash
 GRAPHIFY_TRANSPORT=streamable-http GRAPHIFY_HOST=0.0.0.0 GRAPHIFY_API_KEY=$(openssl rand -hex 16) \
   GRAPHIFY_PROJECT_DIR=/path/to/repo graphify-mcp-server
@@ -112,6 +119,28 @@ For a smaller tool surface (helps some models pick the right tool), set
 | `GRAPHIFY_PORT` | `8000` | Bind port for HTTP transports |
 | `GRAPHIFY_API_KEY` | _(unset)_ | Require `Authorization: Bearer <key>` on HTTP transports |
 | `GRAPHIFY_TOOLSET` | `full` | `full` \| `lean` (core exploration tools only) |
+| `GRAPHIFY_TOKENIZER` | _(heuristic)_ | `tiktoken` → exact token counts (needs the `[tiktoken]` extra); else chars/3.5 estimate |
+
+## Keeping the graph fresh
+
+The analysis tools surface staleness for you: `graphify_overview` and
+`graphify_subgraph` carry a lightweight `graph_age` ("built 3 commits ago"), and
+`graphify_freshness` gives a full `recommended_action` (fresh / update / rebuild).
+To stop thinking about it, regenerate on every commit with a git **post-commit
+hook** — the recommended first-class auto-update flow:
+
+```sh
+# .git/hooks/post-commit   (then: chmod +x .git/hooks/post-commit)
+#!/bin/sh
+# incremental, viz-free, backgrounded so the commit returns immediately
+graphify . --update --no-viz >/dev/null 2>&1 &
+```
+
+Incremental `--update` only re-extracts changed files. It can't *drop* nodes for
+deleted/renamed code, so after those `graphify_freshness` still recommends a full
+`graphify .` rebuild — run that occasionally (or from a `post-merge` hook). An
+agent can also just call `graphify_build(update=True)` when `graph_age` /
+`graphify_freshness` says the graph drifted.
 
 ## Tools
 
@@ -269,7 +298,11 @@ language too (comment/reformat → cosmetic; operator/rename → structural). Re
 
 <sub>Measured 2026-06 with semble 0.3.4 + graphify (tree-sitter backend). httpx headline = 6
 queries (per-query locate 189–286 tokens); cross-language = 6 queries × 54 hits each on
-`got` / `resty` / `retrofit` / `ureq` / `cpr`. Numbers vary by codebase and query.</sub>
+`got` / `resty` / `retrofit` / `ureq` / `cpr`. **Sample bias:** every repo benchmarked here is
+an HTTP-client library — a deliberately uniform family chosen for cross-language comparability.
+Token savings and span-join precision will differ on other architectures (data pipelines, GUI
+apps, sprawling monorepos), so treat these as indicative, not guarantees. Numbers vary by
+codebase and query.</sub>
 
 ## Resources
 

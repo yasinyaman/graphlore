@@ -6,13 +6,30 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-06-22
+
 ### Added
 - `graphify-mcp-server` console script and `python -m graphify_mcp` entry point,
   both collision-free with the `graphify-mcp` script that `graphifyy` also ships.
+- Boot banner on stderr at startup — `graphify-mcp vX.Y.Z | transport=… |
+  toolset=… | project=…` — so it's immediately clear which server (and project
+  dir) a client connected to, even when `graphifyy`'s same-named script is around.
+- Lightweight `graph_age` field on `graphify_overview` and `graphify_subgraph`
+  (e.g. "built 3 commits ago" / "built at HEAD" / "built at an unreachable
+  commit") so staleness is visible without a separate `graphify_freshness` call.
+  Git-only and cheap; `null` when there's no recorded build commit or no git repo.
+  README now documents a first-class **post-commit-hook auto-update** flow to keep
+  the graph fresh automatically.
 - `graphify_label_communities` — names Leiden communities via **host-LLM MCP
   sampling** (no server API key), a backend key (`method="cli"`), or placeholders.
 - `graphify_sampling_status` — capability test reporting whether the client
   supports sampling, whether a backend key is set, and the preferred method.
+
+### Removed
+- The bare `graphify-mcp` console script (shipped in 0.1.0). `graphifyy` ships a
+  script of the same name, so a bare `graphify-mcp` resolved to whichever package
+  installed last and could silently launch the wrong server. **Breaking:** invoke
+  the server via `graphify-mcp-server` or `python -m graphify_mcp` instead.
 
 ### Fixed
 - `graphify_node_details` now reads the source line from graphify's real
@@ -28,6 +45,12 @@ All notable changes to this project are documented here. The format is based on
 - `graphify_overview` and `graphify_surprises` now share one surprise-edge
   definition (`_is_surprise_edge`); an INFERRED *confidence* is no longer
   miscounted as a surprise, and the two tools agree.
+- Span extraction no longer mistakes a **call/invocation** for a definition. A
+  Java `method_invocation` (and C# `invocation_expression`, Ruby `method_call`,
+  PHP `function_call_expression`, …) exposes the callee under a `name` field, so a
+  call like `get(u)` inside a method body used to leak in as a phantom symbol
+  (`Class.method.get`) and pull chunk resolution to it. Caught by the new Java
+  golden span test.
 
 ### Changed
 - Internal refactor (no behaviour change): the 2,000-line `server.py` is split into
@@ -38,6 +61,31 @@ All notable changes to this project are documented here. The format is based on
 - `_load_graph` caches the parsed graph by path + mtime, so a multi-MB
   `graph.json` isn't re-parsed on every tool call.
 - Community-naming sampling `max_tokens` raised 16 → 24 to avoid clipped names.
+- Token budgeting is now conservative: `~3.5` chars/token (vs the old `4.0`) plus
+  a JSON-envelope allowance, so `approx_tokens` and `budget_tokens` reflect the
+  whole returned payload and stop systematically under-reporting. Documented as an
+  estimate (±~20%). Optional **exact** counting via the `[tiktoken]` extra +
+  `GRAPHIFY_TOKENIZER=tiktoken` (the budget cap stays heuristic, so it's fast
+  either way; the reported `approx_tokens` becomes exact).
+- Tightened the `mcp` dependency bound from `>=1.2.0` to `>=1.26,<2.0`. The server
+  uses streamable-HTTP, tool annotations and host-LLM sampling, which the old floor
+  didn't have (it installed but failed at runtime); the upper bound guards against a
+  breaking 2.0 SDK. Tested against mcp 1.26–1.27.
+- Docs: the benchmark numbers now carry an explicit **sample-bias** note (every repo
+  measured is an HTTP-client library, so results may differ on other architectures),
+  and the HTTP hardening section documents the no-shell subprocess invocation and the
+  `GRAPHIFY_TIMEOUT` knob for shared deployments.
+- Pinned the optional tree-sitter extras: `tree-sitter>=0.22,<1.0` (the stable
+  `Parser(Language)` core API) and `tree-sitter-language-pack>=1.6,<2.0` (the
+  bundled grammars churn, so the 1.x cap keeps golden span tests from silently
+  regressing on a grammar update). Added per-language golden span tests for Java
+  and TypeScript (Python · JS · Go · Rust · C++ already covered).
+- CI now runs **mypy** (non-strict baseline over the package) and **pytest with
+  coverage** (term + XML report, floored at 80% via `--cov`); push-CI also fixed to
+  trigger on `master`, the actual default branch. Tool `annotations=` now use typed
+  `ToolAnnotations` objects instead of plain dicts, so the type checker validates the
+  tool metadata FastMCP turns into each tool's schema. Added a corrupt-`graph.json`
+  test alongside the existing missing-graph / unreachable-`built_at` ones.
 
 ### Added (transport & hardening)
 - Optional HTTP transport: `GRAPHIFY_TRANSPORT=streamable-http|sse` serves over
@@ -52,6 +100,11 @@ All notable changes to this project are documented here. The format is based on
 - `graphify_freshness` now returns a `recommended_action` (fresh / update /
   rebuild) with a `reason`: deletions, renames, or a large change set steer to a
   full rebuild, since incremental `update` can't drop nodes for removed code.
+- `graphify_freshness` now verifies that the recorded `built_at_commit` is
+  actually reachable in the clone (`git cat-file -e`). When it isn't (shallow
+  clone, gc, rebase or squash), it reports `built_commit_reachable: false` and
+  recommends a full rebuild — incremental update can't trust an unknown base —
+  instead of mislabeling it "an older commit" and offering an update.
 - Fixed a latent bug in `graphify_freshness`'s changed-file list: `_git` stripped
   the leading status column, mangling the first file name for unstaged
   modifications/deletions (` M`/` D`). `_git` now `rstrip`s only.

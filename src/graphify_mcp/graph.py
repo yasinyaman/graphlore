@@ -6,6 +6,7 @@ location from :mod:`graphify_mcp.config`.
 from __future__ import annotations
 
 import json
+import os
 from collections import deque
 from pathlib import Path
 from typing import Any
@@ -130,9 +131,50 @@ def _adjacency(edges: list[dict]) -> dict[str, list[tuple[str, str]]]:
     return adj
 
 
-# Roughly ~4 chars per token; good enough for budgeting display.
+# Token-estimate heuristic. 4.0 chars/token is the common English rule of thumb,
+# but code — dotted identifiers, punctuation, camelCase — packs more tokens per
+# char, so we use a conservative 3.5 (≈ +14%) to avoid systematically
+# UNDER-reporting how much of a budget a subgraph consumes. The result is an
+# estimate (±~20%), not an exact tokenizer count.
+_CHARS_PER_TOKEN = 3.5
+# Fixed allowance for the JSON envelope around the edge array (the wrapper keys
+# center/hops/nodes/truncated/approx_tokens), so the budget and the reported token
+# count reflect the whole returned payload, not just the bare edge list.
+_PAYLOAD_ENVELOPE_CHARS = 96
+
+
 def _approx_tokens(text: str) -> int:
-    return max(1, len(text) // 4)
+    """Conservative chars→tokens estimate (see ``_CHARS_PER_TOKEN``); an estimate, not exact."""
+    return max(1, int(len(text) / _CHARS_PER_TOKEN))
+
+
+# Optional exact token counting. _TIKTOKEN_ENC: None = not yet probed, False =
+# unavailable (extra not installed), else a cached encoder.
+_TIKTOKEN_ENC: Any = None
+
+
+def _tiktoken_encoder() -> Any:
+    global _TIKTOKEN_ENC
+    if _TIKTOKEN_ENC is None:
+        try:
+            import tiktoken
+
+            _TIKTOKEN_ENC = tiktoken.get_encoding("cl100k_base")
+        except Exception:
+            _TIKTOKEN_ENC = False
+    return _TIKTOKEN_ENC or None
+
+
+def _count_tokens(text: str) -> int:
+    """Token count for ``text``: exact via tiktoken when ``GRAPHIFY_TOKENIZER=tiktoken``
+    and the optional ``[tiktoken]`` extra is installed, else the conservative
+    chars/3.5 estimate (``_approx_tokens``). Falls back silently if tiktoken is
+    requested but unavailable, so it's always safe to call."""
+    if os.environ.get("GRAPHIFY_TOKENIZER", "").strip().lower() == "tiktoken":
+        enc = _tiktoken_encoder()
+        if enc is not None:
+            return max(1, len(enc.encode(text)))
+    return _approx_tokens(text)
 
 
 def _bfs_subgraph(
@@ -150,9 +192,9 @@ def _bfs_subgraph(
     visited = {start_id}
     frontier = deque([(start_id, 0)])
     collected_edges: list[dict] = []
-    seen_pairs: set[tuple[str, str, str]] = set()
+    seen_pairs: set[tuple[str, ...]] = set()
     truncated = False
-    running_chars = 2  # the enclosing "[]" of the JSON array
+    running_chars = 2 + _PAYLOAD_ENVELOPE_CHARS  # "[]" of the edge array + JSON envelope
 
     while frontier:
         cur, depth = frontier.popleft()
@@ -169,12 +211,17 @@ def _bfs_subgraph(
             if nb not in visited:
                 visited.add(nb)
                 frontier.append((nb, depth + 1))
-            if running_chars // 4 >= budget_tokens:
+            if running_chars / _CHARS_PER_TOKEN >= budget_tokens:
                 truncated = True
                 frontier.clear()
                 break
 
-    return visited, collected_edges, truncated, _approx_tokens(json.dumps(collected_edges))
+    # Report the count via _count_tokens (exact under GRAPHIFY_TOKENIZER=tiktoken,
+    # else the heuristic). The budget gate above stays on the fast char heuristic,
+    # so the cap is approximate while the reported figure can be exact.
+    serialized = json.dumps(collected_edges, ensure_ascii=False)
+    envelope_tokens = _approx_tokens("x" * _PAYLOAD_ENVELOPE_CHARS)
+    return visited, collected_edges, truncated, max(1, _count_tokens(serialized) + envelope_tokens)
 
 
 def _hop_distances(

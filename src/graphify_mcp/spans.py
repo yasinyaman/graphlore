@@ -98,6 +98,12 @@ def _is_ts_symbol(node_type: str) -> bool:
     t = node_type.lower()
     if t in _TS_CALL_TYPES or t.endswith(_TS_NON_SYMBOL_SUFFIXES):
         return False
+    # Calls/invocations expose the callee under a `name` field but define nothing —
+    # Java `method_invocation`, C# `invocation_expression`, Ruby `method_call`, PHP
+    # `function_call_expression`, etc. Match by substring so we don't have to
+    # enumerate every grammar's spelling (`call_expression` is also caught here).
+    if "invocation" in t or "call" in t:
+        return False
     return any(h in t for h in _TS_SYMBOL_HINTS)
 
 
@@ -115,7 +121,7 @@ def _spans_python(src: bytes) -> list[tuple[int, int, int, str]]:
 
     def walk(node: ast.AST, prefix: str) -> None:
         for child in ast.iter_child_nodes(node):
-            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
                 qual = f"{prefix}{child.name}"
                 def_line = child.lineno
                 decos = [d.lineno for d in getattr(child, "decorator_list", [])]
@@ -459,7 +465,7 @@ def _structurally_equal(rel: str, old_src: Any, new_src: Any) -> bool | None:
         return None
 
     def _b(s: Any) -> bytes:
-        return s if isinstance(s, (bytes, bytearray)) else str(s).encode("utf-8", "replace")
+        return bytes(s) if isinstance(s, bytes | bytearray) else str(s).encode("utf-8", "replace")
 
     try:
         a = _ts_skeleton(parser.parse(_b(old_src)).root_node)
