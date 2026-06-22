@@ -65,6 +65,7 @@ from mcp.types import (
     SamplingCapability,
     SamplingMessage,
     TextContent,
+    ToolAnnotations,
 )
 
 from . import config
@@ -73,6 +74,7 @@ from .graph import (  # noqa: F401  (re-exported for the tools + tests)
     _adjacency,
     _approx_tokens,
     _bfs_subgraph,
+    _count_tokens,
     _edge_ends,
     _edge_rel,
     _graph_path,
@@ -107,7 +109,7 @@ from .spans import (  # noqa: F401
 # Configuration
 # ---------------------------------------------------------------------------
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 GRAPHIFY_BIN = os.environ.get("GRAPHIFY_BIN", "graphify")
 CLI_TIMEOUT = int(os.environ.get("GRAPHIFY_TIMEOUT", "600"))
@@ -211,6 +213,9 @@ def _run_cli(args: list[str], cwd: Path | None = None) -> str:
             "graphify install. Alternatively set the GRAPHIFY_BIN environment variable."
         )
     try:
+        # Argument list + shell=False (the default): every element is passed as a
+        # literal argv entry, so a build `path` or query string can never inject a
+        # shell command. Never switch this to a joined string / shell=True.
         proc = subprocess.run(
             [GRAPHIFY_BIN, *args],
             cwd=str(cwd or config.PROJECT_DIR),
@@ -240,6 +245,31 @@ def _git(args: list[str]) -> str | None:
         return proc.stdout.rstrip()
     except Exception:
         return None
+
+
+def _graph_age() -> str | None:
+    """Lightweight 'how stale is the graph' note for embedding in frequent tool
+    outputs, so staleness is visible even without a separate graphify_freshness
+    call. Git-only and cheap (no AST/structural diff). Returns None when it can't
+    be determined (no recorded build commit, or not a git repo)."""
+    g = _load_graph()
+    if not isinstance(g, dict):
+        return None
+    built_at = g.get("built_at_commit")
+    if not built_at:
+        return None
+    head = _git(["rev-parse", "HEAD"])
+    if head is None:
+        return None
+    if head.startswith(built_at) or built_at.startswith(head):
+        return "built at HEAD"
+    if _git(["cat-file", "-e", f"{built_at}^{{commit}}"]) is None:
+        return "built at an unreachable commit (rebuild recommended)"
+    ahead = _git(["rev-list", "--count", f"{built_at}..HEAD"])
+    if ahead and ahead.isdigit() and int(ahead) > 0:
+        n = int(ahead)
+        return f"built {n} commit{'' if n == 1 else 's'} ago"
+    return "built at a divergent commit"
 
 
 def _semble_index() -> Any:
@@ -297,7 +327,7 @@ def _read_labels() -> dict[str, str]:
 # ---------------------------------------------------------------------------
 
 
-@mcp.tool(annotations={"title": "Build/update graph", "destructiveHint": False})
+@mcp.tool(annotations=ToolAnnotations(title="Build/update graph", destructiveHint=False))
 def graphify_build(
     path: str = ".",
     mode: str = "",
@@ -333,7 +363,7 @@ def graphify_build(
     return result
 
 
-@mcp.tool(annotations={"title": "Query graph", "readOnlyHint": True})
+@mcp.tool(annotations=ToolAnnotations(title="Query graph", readOnlyHint=True))
 def graphify_query(question: str, dfs: bool = False, budget: int = 0) -> str:
     """Run a natural-language query against the graph.
 
@@ -353,19 +383,19 @@ def graphify_query(question: str, dfs: bool = False, budget: int = 0) -> str:
     return _run_cli(args)
 
 
-@mcp.tool(annotations={"title": "Path between nodes", "readOnlyHint": True})
+@mcp.tool(annotations=ToolAnnotations(title="Path between nodes", readOnlyHint=True))
 def graphify_path(node_a: str, node_b: str) -> str:
     """Find the exact path between two nodes (e.g. "DigestAuth" -> "Response")."""
     return _run_cli(["path", node_a, node_b])
 
 
-@mcp.tool(annotations={"title": "Explain node", "readOnlyHint": True})
+@mcp.tool(annotations=ToolAnnotations(title="Explain node", readOnlyHint=True))
 def graphify_explain(node: str) -> str:
     """Return everything Graphify knows about a node."""
     return _run_cli(["explain", node])
 
 
-@mcp.tool(annotations={"title": "Add external source", "destructiveHint": False})
+@mcp.tool(annotations=ToolAnnotations(title="Add external source", destructiveHint=False))
 def graphify_add(url: str, author: str = "", contributor: str = "") -> str:
     """Add an external source to the graph (arXiv paper, tweet, etc.). http/https only.
 
@@ -389,7 +419,7 @@ def graphify_add(url: str, author: str = "", contributor: str = "") -> str:
 # ---------------------------------------------------------------------------
 
 
-@mcp.tool(annotations={"title": "Codebase overview", "readOnlyHint": True})
+@mcp.tool(annotations=ToolAnnotations(title="Codebase overview", readOnlyHint=True))
 def graphify_overview(top_n: int = 8, as_json: bool = False) -> str:
     """One-shot orientation: call this FIRST.
 
@@ -424,12 +454,14 @@ def graphify_overview(top_n: int = 8, as_json: bool = False) -> str:
     active = _registered_tool_names()
     if active:
         suggested = [s for s in suggested if s.split("(", 1)[0] in active]
+    age = _graph_age()
     payload = {
         "nodes": len(nodes),
         "edges": len(edges),
         "communities": len(comms),
         "surprise_edges": surprises,
         "id_collisions": id_collisions,
+        "graph_age": age,
         "god_nodes": god,
         "suggested_next": suggested,
     }
@@ -439,6 +471,8 @@ def graphify_overview(top_n: int = 8, as_json: bool = False) -> str:
         f"Top {len(god)} god nodes:",
     ]
     lines += [f"  {g['node']} — degree {g['degree']}" for g in god]
+    if age:
+        lines.append(f"\nGraph age: {age} (graphify_freshness for detail).")
     if id_collisions:
         lines.append(
             f"\nWarning: {id_collisions} node id collision(s) — distinct nodes share an "
@@ -449,7 +483,7 @@ def graphify_overview(top_n: int = 8, as_json: bool = False) -> str:
     return _fmt(payload, as_json, "\n".join(lines))
 
 
-@mcp.tool(annotations={"title": "God nodes", "readOnlyHint": True})
+@mcp.tool(annotations=ToolAnnotations(title="God nodes", readOnlyHint=True))
 def graphify_god_nodes(top_n: int = 10, as_json: bool = False) -> str:
     """List the highest-degree (most connected) 'god nodes'."""
     graph = _load_graph()
@@ -474,7 +508,7 @@ def graphify_god_nodes(top_n: int = 10, as_json: bool = False) -> str:
     return _fmt({"god_nodes": items}, as_json, "\n".join(text))
 
 
-@mcp.tool(annotations={"title": "Surprise edges", "readOnlyHint": True})
+@mcp.tool(annotations=ToolAnnotations(title="Surprise edges", readOnlyHint=True))
 def graphify_surprises(limit: int = 20, as_json: bool = False) -> str:
     """List unexpected cross-file/cross-domain connections (surprise edges)."""
     graph = _load_graph()
@@ -506,7 +540,7 @@ def graphify_surprises(limit: int = 20, as_json: bool = False) -> str:
     return _fmt({"surprises": items, "fallback": fallback}, as_json, "\n".join(text))
 
 
-@mcp.tool(annotations={"title": "Communities", "readOnlyHint": True})
+@mcp.tool(annotations=ToolAnnotations(title="Communities", readOnlyHint=True))
 def graphify_communities(as_json: bool = False) -> str:
     """Summarize Leiden communities with sizes and sample members."""
     graph = _load_graph()
@@ -529,7 +563,7 @@ def graphify_communities(as_json: bool = False) -> str:
     return _fmt({"communities": items}, as_json, "\n".join(text))
 
 
-@mcp.tool(annotations={"title": "Sampling/LLM status", "readOnlyHint": True})
+@mcp.tool(annotations=ToolAnnotations(title="Sampling/LLM status", readOnlyHint=True))
 def graphify_sampling_status(ctx: Context, as_json: bool = False) -> str:
     """Capability test: how can semantic naming be produced in this session?
 
@@ -573,11 +607,11 @@ def graphify_sampling_status(ctx: Context, as_json: bool = False) -> str:
 
 
 @mcp.tool(
-    annotations={
-        "title": "Name communities (host LLM / key)",
-        "readOnlyHint": False,
-        "destructiveHint": False,
-    }
+    annotations=ToolAnnotations(
+        title="Name communities (host LLM / key)",
+        readOnlyHint=False,
+        destructiveHint=False,
+    )
 )
 async def graphify_label_communities(
     ctx: Context,
@@ -692,7 +726,7 @@ async def graphify_label_communities(
     return _fmt(payload, as_json, "\n".join(text))
 
 
-@mcp.tool(annotations={"title": "Set community names", "destructiveHint": False})
+@mcp.tool(annotations=ToolAnnotations(title="Set community names", destructiveHint=False))
 def graphify_set_labels(
     names: dict[str, str], regenerate: bool = True, as_json: bool = False
 ) -> str:
@@ -771,7 +805,7 @@ def graphify_set_labels(
     return _fmt(payload, as_json, "\n".join(lines))
 
 
-@mcp.tool(annotations={"title": "Search nodes", "readOnlyHint": True})
+@mcp.tool(annotations=ToolAnnotations(title="Search nodes", readOnlyHint=True))
 def graphify_search(pattern: str, limit: int = 25, as_json: bool = False) -> str:
     """Search nodes by text in their name/label (case-insensitive)."""
     graph = _load_graph()
@@ -798,7 +832,7 @@ def graphify_search(pattern: str, limit: int = 25, as_json: bool = False) -> str
     return _fmt({"matches": items, "total": len(hits)}, as_json, "\n".join(text))
 
 
-@mcp.tool(annotations={"title": "Node neighbors", "readOnlyHint": True})
+@mcp.tool(annotations=ToolAnnotations(title="Node neighbors", readOnlyHint=True))
 def graphify_neighbors(node: str, as_json: bool = False) -> str:
     """List the direct (1-hop) neighbors of a node, with relations."""
     graph = _load_graph()
@@ -817,7 +851,7 @@ def graphify_neighbors(node: str, as_json: bool = False) -> str:
     return _fmt({"node": _node_label(n), "neighbors": neigh}, as_json, "\n".join(text))
 
 
-@mcp.tool(annotations={"title": "Token-budgeted subgraph", "readOnlyHint": True})
+@mcp.tool(annotations=ToolAnnotations(title="Token-budgeted subgraph", readOnlyHint=True))
 def graphify_subgraph(
     node: str, hops: int = 2, budget_tokens: int = 1500, as_json: bool = False
 ) -> str:
@@ -830,6 +864,9 @@ def graphify_subgraph(
         node: Center node (exact or fuzzy match).
         hops: BFS depth from the center.
         budget_tokens: Approximate cap on returned size; expansion stops when hit.
+            ``approx_tokens`` is a conservative estimate (~3.5 chars/token, ±~20%);
+            set ``GRAPHIFY_TOKENIZER=tiktoken`` (with the ``[tiktoken]`` extra) for an
+            exact count. The cap itself stays heuristic, so it's fast either way.
     """
     graph = _load_graph()
     if isinstance(graph, str):
@@ -846,6 +883,7 @@ def graphify_subgraph(
         adj, labels, sid, hops, budget_tokens
     )
 
+    age = _graph_age()
     payload = {
         "center": _node_label(start),
         "hops": hops,
@@ -853,18 +891,20 @@ def graphify_subgraph(
         "edges": collected_edges,
         "truncated": truncated,
         "approx_tokens": approx_tokens,
+        "graph_age": age,
     }
     text = [
         f"Subgraph around {_node_label(start)} (≤{hops} hops, "
-        f"~{payload['approx_tokens']} tokens"
-        + (", TRUNCATED at budget" if truncated else "") + "):",
+        f"~{payload['approx_tokens']} est. tokens"
+        + (", TRUNCATED at budget" if truncated else "") + "):"
+        + (f"  [graph age: {age}]" if age else ""),
         f"{len(visited)} nodes, {len(collected_edges)} edges\n",
     ]
     text += [f"  {e['from']} —{e['relation']}→ {e['to']}" for e in collected_edges]
     return _fmt(payload, as_json, "\n".join(text))
 
 
-@mcp.tool(annotations={"title": "Locate + structural context", "readOnlyHint": True})
+@mcp.tool(annotations=ToolAnnotations(title="Locate + structural context", readOnlyHint=True))
 def graphify_locate(
     query: str,
     top_k: int = 3,
@@ -912,16 +952,16 @@ def graphify_locate(
     fp0, sl0, el0 = _loc(hits[0])
     seed = _node_for_location(nodes, fp0, sl0, el0)
     if seed is None:
-        payload = {
+        payload: dict[str, Any] = {
             "query": query,
             "seed": None,
             "semantic_hits": semantic_hits,
             "note": "top hit did not map to a graph node; showing semantic results only",
         }
-        text = f"Top match {fp0}:{sl0} has no graph node. Semantic hits:\n" + "\n".join(
+        note_text = f"Top match {fp0}:{sl0} has no graph node. Semantic hits:\n" + "\n".join(
             f"  {h['file']}:{h['lines']}" for h in semantic_hits
         )
-        return _fmt(payload, as_json, text)
+        return _fmt(payload, as_json, note_text)
 
     labels = {_node_id(x): _node_label(x) for x in nodes}
     adj = _adjacency(edges)
@@ -969,7 +1009,9 @@ def graphify_locate(
         seed_qual = _span_qualname(str(seed_file), int(_node_line(seed)))
     except (TypeError, ValueError):
         seed_qual = None
-    seed_obj = {"node": _node_label(seed), "file": seed_file, "line": _node_line(seed)}
+    seed_obj: dict[str, Any] = {
+        "node": _node_label(seed), "file": seed_file, "line": _node_line(seed),
+    }
     if seed_qual and seed_qual != _node_label(seed):
         seed_obj["qualname"] = seed_qual  # span-recovered FQN, e.g. Client._send_single_request
     payload = {
@@ -985,7 +1027,7 @@ def graphify_locate(
         "semantic_cousins": cousins,
         "hidden_links": hidden,
     }
-    text = [
+    text: list[str] = [
         f"Query: {query!r}",
         f"Seed: {_node_label(seed)}"
         + (f" [{seed_qual}]" if seed_qual and seed_qual != _node_label(seed) else "")
@@ -1006,7 +1048,7 @@ def graphify_locate(
     return _fmt(payload, as_json, "\n".join(text))
 
 
-@mcp.tool(annotations={"title": "Node details", "readOnlyHint": True})
+@mcp.tool(annotations=ToolAnnotations(title="Node details", readOnlyHint=True))
 def graphify_node_details(node: str, as_json: bool = False) -> str:
     """Show a node's full metadata: type, source file/line, docstring, community."""
     graph = _load_graph()
@@ -1072,7 +1114,7 @@ def _ast_equivalent(path: str, ref: str) -> bool | None:
     return _structurally_equal(path, old_src, new_src)
 
 
-@mcp.tool(annotations={"title": "Graph freshness", "readOnlyHint": True})
+@mcp.tool(annotations=ToolAnnotations(title="Graph freshness", readOnlyHint=True))
 def graphify_freshness(as_json: bool = False) -> str:
     """Check whether graph.json is stale relative to the current git HEAD.
 
@@ -1082,7 +1124,10 @@ def graphify_freshness(as_json: bool = False) -> str:
 
     Returns a ``recommended_action`` (fresh / update / rebuild) with a ``reason``:
     deletions, renames, or a large change set call for a full rebuild, since
-    incremental update can't drop nodes for code that no longer exists.
+    incremental update can't drop nodes for code that no longer exists. If
+    ``built_at_commit`` is recorded but unreachable in this clone (shallow clone,
+    gc, rebase or squash), incremental update can't trust its base, so a full
+    rebuild is recommended rather than a crash or a misleading "older commit".
     """
     gp = _graph_path()
     if not gp.exists():
@@ -1126,9 +1171,22 @@ def graphify_freshness(as_json: bool = False) -> str:
     g = _load_graph()
     if isinstance(g, dict):
         built_at = g.get("built_at_commit")
+    built_unreachable = False
     if built_at:
-        behind = not (head.startswith(built_at) or built_at.startswith(head))
-        commit_reason = "graph was built from an older commit" if behind else None
+        # `built_at` has only been a string so far. Verify git actually knows the
+        # commit: a shallow clone, gc, rebase or squash can leave a recorded build
+        # commit that no longer exists in this clone. An incremental `update` against
+        # an unknown base can't be trusted, so treat an unreachable build commit like
+        # missing provenance and steer to a full rebuild (rather than reporting it as
+        # merely "an older commit" and offering update).
+        reachable = _git(["cat-file", "-e", f"{built_at}^{{commit}}"]) is not None
+        if reachable:
+            behind = not (head.startswith(built_at) or built_at.startswith(head))
+            commit_reason = "graph was built from an older commit" if behind else None
+        else:
+            built_unreachable = True
+            behind = True
+            commit_reason = "build commit unknown or unreachable"
     else:
         commit_ts = _git(["log", "-1", "--format=%ct"])
         commit_time = float(commit_ts) if commit_ts else 0.0
@@ -1159,6 +1217,13 @@ def graphify_freshness(as_json: bool = False) -> str:
             )
         else:
             action, reason = "fresh", "graph matches HEAD with no pending changes"
+    elif built_unreachable:
+        action = "rebuild"
+        reason = (
+            "the commit the graph was built from is unknown or unreachable in this "
+            "clone (shallow clone, gc, rebase or squash) — incremental update can't "
+            "trust its base, so a full rebuild is recommended"
+        )
     elif removed:
         action = "rebuild"
         reason = (
@@ -1184,6 +1249,7 @@ def graphify_freshness(as_json: bool = False) -> str:
     payload.update({
         "head": head[:10],
         "built_at_commit": built_at[:10] if built_at else None,
+        "built_commit_reachable": (not built_unreachable) if built_at else None,
         "graph_mtime": graph_mtime,
         "stale": stale,
         "uncommitted_or_untracked_files": changed_files[:50],
@@ -1202,7 +1268,7 @@ def graphify_freshness(as_json: bool = False) -> str:
     return _fmt(payload, as_json, text)
 
 
-@mcp.tool(annotations={"title": "Validate graph", "readOnlyHint": True})
+@mcp.tool(annotations=ToolAnnotations(title="Validate graph", readOnlyHint=True))
 def graphify_validate(limit: int = 15, as_json: bool = False) -> str:
     """Lint graph.json for structural problems (read-only).
 
@@ -1473,12 +1539,23 @@ def main() -> None:
     surface to the core exploration tools.
     """
     _apply_toolset()
-    if TRANSPORT in ("streamable-http", "http", "sse"):
+    is_http = TRANSPORT in ("streamable-http", "http", "sse")
+    transport = ("sse" if TRANSPORT == "sse" else "streamable-http") if is_http else "stdio"
+    # Boot banner. `graphifyy` ships a same-named embedded server, so logging our
+    # own name + version + transport here makes it unmistakable from the start
+    # which server (and which project dir) a client actually connected to.
+    where = f" {HTTP_HOST}:{HTTP_PORT}" if is_http else ""
+    print(
+        f"graphify-mcp v{__version__} | transport={transport}{where} | "
+        f"toolset={TOOLSET} | project={config.PROJECT_DIR}",
+        file=sys.stderr,
+        flush=True,
+    )
+    if is_http:
         global RESTRICT_PATHS
         RESTRICT_PATHS = True
         mcp.settings.host = HTTP_HOST
         mcp.settings.port = HTTP_PORT
-        transport = "sse" if TRANSPORT == "sse" else "streamable-http"
         if API_KEY:
             import uvicorn
 
@@ -1496,7 +1573,7 @@ def main() -> None:
                     "GRAPHIFY_API_KEY to require bearer auth.",
                     file=sys.stderr,
                 )
-            mcp.run(transport=transport)
+            mcp.run(transport="sse" if TRANSPORT == "sse" else "streamable-http")
     else:
         mcp.run(transport="stdio")
 

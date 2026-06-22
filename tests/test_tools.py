@@ -77,6 +77,43 @@ def test_subgraph_budget_truncates(project):
     assert data["truncated"] is True
 
 
+def test_approx_tokens_uses_conservative_divisor():
+    # 3.5 chars/token (denser, code-aware): 35 chars -> 10 tokens.
+    # The old 4.0 rule of thumb would under-report this as 8.
+    assert server._approx_tokens("x" * 35) == 10
+
+
+def test_subgraph_approx_tokens_not_underreported(project):
+    """Reported approx_tokens must not undercount the serialized payload: it should
+    clear the naive len(serialized)//4 lower bound (3.5 divisor + JSON envelope)."""
+    data = json.loads(server.graphify_subgraph("Client", hops=2, as_json=True))
+    serialized = json.dumps(data["edges"], ensure_ascii=False)
+    assert data["approx_tokens"] >= len(serialized) // 4
+
+
+def test_count_tokens_heuristic_by_default(monkeypatch):
+    monkeypatch.delenv("GRAPHIFY_TOKENIZER", raising=False)
+    s = "def foo(x): return bar(x) + baz(x)"
+    assert server._count_tokens(s) == server._approx_tokens(s)
+
+
+def test_count_tokens_tiktoken_exact(monkeypatch):
+    import importlib.util
+
+    import pytest
+    if importlib.util.find_spec("tiktoken") is None:
+        pytest.skip("tiktoken extra not installed")
+    import tiktoken
+
+    import graphify_mcp.graph as g
+    g._TIKTOKEN_ENC = None  # reset the lazy probe so the env switch is honored
+    monkeypatch.setenv("GRAPHIFY_TOKENIZER", "tiktoken")
+    s = "def handle_request(self, request, *, follow_redirects=True): return self._send(request)"
+    enc = tiktoken.get_encoding("cl100k_base")
+    assert server._count_tokens(s) == len(enc.encode(s))     # exact, not the heuristic
+    assert server._count_tokens(s) != server._approx_tokens(s)
+
+
 def test_node_details(project):
     data = json.loads(server.graphify_node_details("Client", as_json=True))
     assert data["file"] == "httpx/_client.py"
@@ -119,6 +156,17 @@ def test_node_details_real_graphify_schema(tmp_path, monkeypatch):
 def test_missing_graph_errors(empty_project):
     assert "not found" in server.graphify_overview()
     assert "not found" in server.graphify_god_nodes()
+
+
+def test_corrupt_graph_json_errors_gracefully(tmp_path, monkeypatch):
+    # malformed graph.json must surface a parse error, not raise, across tools.
+    out = tmp_path / "graphify-out"
+    out.mkdir()
+    (out / "graph.json").write_text("{ not valid json", encoding="utf-8")
+    server._GRAPH_CACHE.clear()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    assert "failed to parse" in server.graphify_overview()
+    assert "failed to parse" in server.graphify_subgraph("X", as_json=True)
 
 
 def test_report_resource(project):
@@ -1411,6 +1459,88 @@ def test_freshness_cosmetic_change_while_behind_updates(tmp_path, monkeypatch):
     assert data["cosmetic_changes"] == ["m.py"]
 
 
+def test_freshness_unreachable_built_at_recommends_rebuild(tmp_path, monkeypatch):
+    """A recorded built_at_commit git can't resolve (shallow clone / gc / rebase /
+    squash) must steer to a full rebuild with a clear reason — not crash, and not be
+    reported as merely 'an older commit' that an incremental update could catch up."""
+    _require_git()
+    (tmp_path / "m.py").write_text("x = 1\n", encoding="utf-8")
+    git = _git_init(tmp_path)
+    git("add", ".")
+    git("commit", "-m", "init")
+    # syntactically valid but non-existent commit, as if history was rewritten away
+    ghost = "1234567890abcdef1234567890abcdef12345678"
+    _write_graph(tmp_path, {"nodes": [], "links": [], "built_at_commit": ghost})
+    server._GRAPH_CACHE.clear()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    data = json.loads(server.graphify_freshness(as_json=True))
+    assert data["stale"] is True
+    assert data["built_commit_reachable"] is False
+    assert data["recommended_action"] == "rebuild"
+    assert "unreachable" in data["reason"]
+
+
+def test_freshness_reachable_built_at_marks_reachable(tmp_path, monkeypatch):
+    """A built_at_commit at HEAD that git knows reports built_commit_reachable=True
+    and stays fresh (guards against the reachability check false-positiving)."""
+    _require_git()
+    (tmp_path / "m.py").write_text("x = 1\n", encoding="utf-8")
+    git = _git_init(tmp_path)
+    git("add", ".")
+    git("commit", "-m", "init")
+    _write_graph(tmp_path, {"nodes": [], "links": [], "built_at_commit": _head(tmp_path)})
+    server._GRAPH_CACHE.clear()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    data = json.loads(server.graphify_freshness(as_json=True))
+    assert data["built_commit_reachable"] is True
+    assert data["recommended_action"] == "fresh"
+
+
+def test_graph_age_reports_commits_behind(tmp_path, monkeypatch):
+    """overview/subgraph carry a lightweight graph_age so an agent sees staleness
+    without a separate graphify_freshness call."""
+    _require_git()
+    (tmp_path / "m.py").write_text("x = 1\n", encoding="utf-8")
+    git = _git_init(tmp_path)
+    git("add", ".")
+    git("commit", "-m", "c1")
+    c1 = _head(tmp_path)
+    (tmp_path / "n.py").write_text("y = 2\n", encoding="utf-8")  # advance HEAD by one commit
+    git("add", ".")
+    git("commit", "-m", "c2")
+    _write_graph(tmp_path, {
+        "nodes": [{"id": "A", "label": "A"}, {"id": "B", "label": "B"}],
+        "edges": [{"source": "A", "target": "B", "relation": "x"}],
+        "built_at_commit": c1,
+    })
+    server._GRAPH_CACHE.clear()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    ov = json.loads(server.graphify_overview(as_json=True))
+    sg = json.loads(server.graphify_subgraph("A", as_json=True))
+    assert ov["graph_age"] == "built 1 commit ago"
+    assert sg["graph_age"] == "built 1 commit ago"
+
+
+def test_graph_age_built_at_head(tmp_path, monkeypatch):
+    _require_git()
+    (tmp_path / "m.py").write_text("x = 1\n", encoding="utf-8")
+    git = _git_init(tmp_path)
+    git("add", ".")
+    git("commit", "-m", "c1")
+    _write_graph(tmp_path, {
+        "nodes": [{"id": "A", "label": "A"}], "edges": [],
+        "built_at_commit": _head(tmp_path),
+    })
+    server._GRAPH_CACHE.clear()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    assert json.loads(server.graphify_overview(as_json=True))["graph_age"] == "built at HEAD"
+
+
+def test_graph_age_none_without_git(project):
+    # the `project` fixture is not a git repo -> no cheap age signal -> graph_age is None
+    assert json.loads(server.graphify_overview(as_json=True))["graph_age"] is None
+
+
 def test_freshness_large_cosmetic_set_skips_ast_and_rebuilds(tmp_path, monkeypatch):
     _require_git()
     git = _git_init(tmp_path)
@@ -1465,6 +1595,8 @@ def test_is_ts_symbol_classification():
     assert not server._is_ts_symbol("class_body")
     assert not server._is_ts_symbol("template_function")  # a C++ call, not a def
     assert not server._is_ts_symbol("function_declarator")
+    assert not server._is_ts_symbol("method_invocation")  # Java call, not a def
+    assert not server._is_ts_symbol("invocation_expression")  # C# call, not a def
     assert not server._is_ts_symbol("type_parameter")     # generic <T>, not a def
     assert not server._is_ts_symbol("type_binding")        # impl Iterator<Item=X>
     assert not server._is_ts_symbol("identifier")
@@ -1645,6 +1777,44 @@ def test_node_for_location_resolves_non_python_via_treesitter(tmp_path, monkeypa
     assert server._node_for_location(nodes, "app.js", 3)["id"] == "fetch"
     assert server._span_qualname("app.js", 3) == "Service.fetch"
     assert server._node_for_location(nodes, "app.js", 7)["id"] == "helper"
+
+
+def test_spans_treesitter_java(tmp_path, monkeypatch):
+    # Java: class + method chain to Class.method; a chunk in the body resolves to it.
+    _skip_without_treesitter()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    server._SPAN_CACHE.clear()
+    server._TS_PARSERS.clear()
+    (tmp_path / "Api.java").write_bytes(
+        b"class Api {\n"                  # 1
+        b"    int fetch(String u) {\n"    # 2
+        b"        return get(u);\n"       # 3
+        b"    }\n"                        # 4
+        b"}\n")                           # 5
+    spans = {q: (rs, e, dl) for rs, e, dl, q in server._spans_for_file("Api.java")}
+    assert "Api" in spans and "Api.fetch" in spans
+    assert spans["Api.fetch"][2] == 2                              # method def_line
+    assert server._span_qualname("Api.java", 3) == "Api.fetch"     # chunk inside the body
+
+
+def test_spans_treesitter_typescript(tmp_path, monkeypatch):
+    # TypeScript (the "JS/TS" benchmark claim): interface + class + typed async method.
+    _skip_without_treesitter()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    server._SPAN_CACHE.clear()
+    server._TS_PARSERS.clear()
+    (tmp_path / "client.ts").write_bytes(
+        b"interface Fetcher {\n"                            # 1
+        b"  fetch(url: string): number;\n"                  # 2
+        b"}\n"                                              # 3
+        b"class Api {\n"                                    # 4
+        b"  async send(url: string): Promise<number> {\n"   # 5
+        b"    return get(url);\n"                           # 6
+        b"  }\n"                                            # 7
+        b"}\n")                                             # 8
+    quals = {q for _rs, _e, _dl, q in server._spans_for_file("client.ts")}
+    assert {"Fetcher", "Api", "Api.send"} <= quals
+    assert server._span_qualname("client.ts", 6) == "Api.send"     # chunk inside send()
 
 
 def test_structurally_equal_non_python(tmp_path, monkeypatch):
