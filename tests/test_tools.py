@@ -209,7 +209,14 @@ def test_tool_and_prompt_registration(project):
     assert "graphify_validate" in names
     assert "graphify_locate" in names
     assert "graphify_set_labels" in names
-    assert len(names) == 19
+    assert "graphify_prune" in names
+    assert "graphify_fetch" in names
+    assert "graphify_impact" in names
+    assert "graphify_cycles" in names
+    assert "graphify_skeleton" in names
+    assert "graphify_duplication_scan" in names
+    assert "graphify_diff" in names
+    assert len(names) == 26
     assert prompts == {"onboard", "trace_bug", "explain_flow"}
 
 
@@ -300,7 +307,10 @@ def test_freshness_recommends_rebuild_on_deletion(tmp_path, monkeypatch):
     import pytest
     if _sh.which("git") is None:
         pytest.skip("git not available")
-    _write_graph(tmp_path, {"nodes": [], "links": []})
+    _write_graph(tmp_path, {
+        "nodes": [{"id": "M", "label": "M", "source_file": "mod.py", "line": 1}],
+        "links": [],
+    })
     (tmp_path / "mod.py").write_text("x = 1\n", encoding="utf-8")
 
     def git(*args):
@@ -320,6 +330,7 @@ def test_freshness_recommends_rebuild_on_deletion(tmp_path, monkeypatch):
     assert data["stale"] is True
     assert data["recommended_action"] == "rebuild"
     assert "mod.py" in data["deleted_or_renamed"]
+    assert "mod.py" in data["phantom_files"]  # node still points at the deleted file
 
 
 def test_freshness_unquotes_spaced_path_for_cosmetic_classification(tmp_path, monkeypatch):
@@ -377,7 +388,10 @@ def test_freshness_parses_spaced_rename(tmp_path, monkeypatch):
     import pytest
     if _sh.which("git") is None:
         pytest.skip("git not available")
-    _write_graph(tmp_path, {"nodes": [], "links": []})
+    _write_graph(tmp_path, {
+        "nodes": [{"id": "O", "label": "O", "source_file": "old name.py", "line": 1}],
+        "links": [],
+    })
     (tmp_path / "old name.py").write_text("x = 1\n", encoding="utf-8")
 
     def git(*args):
@@ -880,6 +894,206 @@ def test_locate_without_semble_degrades(project, monkeypatch):
     assert "semble" in out and "pip install" in out
 
 
+def test_duplication_scan_flags_distant_cousins(tmp_path, monkeypatch):
+    # A--B connected; C is semantically related to A but structurally unreachable.
+    _write_graph(tmp_path, {
+        "nodes": [
+            {"id": "A", "label": "A", "source_file": "a.py", "source_location": "L1"},
+            {"id": "B", "label": "B", "source_file": "b.py", "source_location": "L1"},
+            {"id": "C", "label": "C", "source_file": "c.py", "source_location": "L1"},
+        ],
+        "edges": [{"source": "A", "target": "B", "type": "calls"}],
+    })
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+
+    class _QueryIndex:  # search varies by label so only A seeds a scan
+        def search(self, query, top_k=3):
+            return [_FakeHit("a.py", 1)] if query == "A" else []
+
+        def find_related(self, hit, top_k=8):
+            return [_FakeHit("b.py", 1), _FakeHit("c.py", 1)]
+
+    monkeypatch.setattr(server, "_semble_index", lambda: _QueryIndex())
+    data = json.loads(server.graphify_duplication_scan(min_distance=2, as_json=True))
+    assert data["seeds_scanned"] == 1
+    pairs = {frozenset((p["a"], p["b"])): p for p in data["pairs"]}
+    assert frozenset(("A", "C")) in pairs           # unreachable -> hidden link
+    assert frozenset(("A", "B")) not in pairs       # direct neighbour -> excluded
+    assert pairs[frozenset(("A", "C"))]["distance"] == "unreachable"
+
+
+def test_duplication_scan_without_semble_degrades(project, monkeypatch):
+    monkeypatch.setattr(server, "_semble_index", lambda: None)
+    out = server.graphify_duplication_scan()
+    assert "semble" in out and "pip install" in out
+
+
+# --- graphify_diff: structural changeset between refs --------------------------
+
+def test_diff_classifies_structural_vs_cosmetic(tmp_path, monkeypatch):
+    _require_git()
+    git = _git_init(tmp_path)
+    (tmp_path / "m.py").write_text("def f():\n    return 1\n", encoding="utf-8")
+    (tmp_path / "g.py").write_text("def g():\n    return 2\n", encoding="utf-8")
+    git("add", ".")
+    git("commit", "-m", "c1")
+    (tmp_path / "m.py").write_text("def f():\n    return 999\n", encoding="utf-8")  # logic
+    (tmp_path / "g.py").write_text(  # comment-only
+        "def g():\n    # note\n    return 2\n", encoding="utf-8")
+    (tmp_path / "h.py").write_text("def h():\n    return 3\n", encoding="utf-8")  # new file
+    git("add", ".")
+    git("commit", "-m", "c2")
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+
+    data = json.loads(server.graphify_diff("HEAD~1", "HEAD", as_json=True))
+    struct = {(r["kind"], r.get("path")) for r in data["structural"]}
+    assert ("modified", "m.py") in struct      # logic change -> structural
+    assert ("added", "h.py") in struct         # new file -> structural
+    assert {r.get("path") for r in data["cosmetic"]} == {"g.py"}  # comment-only
+    assert data["structural_change_count"] == 2
+    assert data["cosmetic_change_count"] == 1
+
+
+def test_diff_handles_delete_and_pure_rename(tmp_path, monkeypatch):
+    _require_git()
+    git = _git_init(tmp_path)
+    (tmp_path / "old.py").write_text("def a():\n    return 1\n", encoding="utf-8")
+    (tmp_path / "del.py").write_text("def d():\n    return 2\n", encoding="utf-8")
+    git("add", ".")
+    git("commit", "-m", "c1")
+    git("mv", "old.py", "new.py")   # identical content -> pure rename
+    (tmp_path / "del.py").unlink()
+    git("add", "-A")
+    git("commit", "-m", "c2")
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+
+    data = json.loads(server.graphify_diff("HEAD~1", "HEAD", as_json=True))
+    assert "del.py" in {r["path"] for r in data["structural"] if r["kind"] == "removed"}
+    renames = [r for r in data["structural"] + data["cosmetic"] if r["kind"] == "renamed"]
+    assert len(renames) == 1
+    assert renames[0]["from"] == "old.py" and renames[0]["to"] == "new.py"
+    assert renames[0]["structural"] is False   # content identical -> cosmetic rename
+
+
+# --- pluggable semantic backend (#6) -------------------------------------------
+
+def test_semantic_index_defaults_to_semble(monkeypatch):
+    monkeypatch.delenv("GRAPHIFY_SEMANTIC_BACKEND", raising=False)
+    sentinel = object()
+    monkeypatch.setattr(server, "_semble_index", lambda: sentinel)
+    assert server._semantic_index() is sentinel  # default path routes through semble
+
+
+def test_semantic_index_loads_custom_backend(monkeypatch, tmp_path):
+    import sys
+    import types
+    mod = types.ModuleType("fake_sem_backend")
+
+    class Factory:
+        @classmethod
+        def from_path(cls, path):
+            return ("index", path)
+
+    mod.Factory = Factory
+    sys.modules["fake_sem_backend"] = mod
+    try:
+        monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+        monkeypatch.setenv("GRAPHIFY_SEMANTIC_BACKEND", "fake_sem_backend:Factory")
+        assert server._semantic_index() == ("index", str(tmp_path))
+    finally:
+        del sys.modules["fake_sem_backend"]
+
+
+def test_semantic_index_bad_spec_degrades(monkeypatch):
+    monkeypatch.setenv("GRAPHIFY_SEMANTIC_BACKEND", "no_such_module:Nope")
+    assert server._semantic_index() is None              # missing module -> None
+    monkeypatch.setenv("GRAPHIFY_SEMANTIC_BACKEND", "malformed-no-colon")
+    assert server._semantic_index() is None              # malformed spec -> None
+
+
+def test_custom_backend_keeps_locate_in_lean(monkeypatch):
+    # even without semble installed, a configured custom backend keeps locate in lean
+    monkeypatch.setenv("GRAPHIFY_SEMANTIC_BACKEND", "some.module:Index")
+    import importlib.util
+    real = importlib.util.find_spec
+    monkeypatch.setattr(
+        importlib.util, "find_spec",
+        lambda name: None if name == "semble" else real(name),
+    )
+    assert "graphify_locate" in server._effective_lean_tools()
+
+
+def test_diff_unknown_ref_and_no_changes(tmp_path, monkeypatch):
+    _require_git()
+    git = _git_init(tmp_path)
+    (tmp_path / "m.py").write_text("x = 1\n", encoding="utf-8")
+    git("add", ".")
+    git("commit", "-m", "c1")
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    assert "not found" in server.graphify_diff("HEAD", "no-such-ref")
+    same = json.loads(server.graphify_diff("HEAD", "HEAD", as_json=True))
+    assert same["structural_change_count"] == 0 and same["cosmetic_change_count"] == 0
+
+
+# --- watch mode (#10): structural-change decision + opt-in guard ----------------
+
+def test_structural_changes_splits_kinds(tmp_path, monkeypatch):
+    _require_git()
+    git = _git_init(tmp_path)
+    (tmp_path / "s.py").write_text("def f():\n    return 1\n", encoding="utf-8")
+    (tmp_path / "c.py").write_text("def g():\n    return 2\n", encoding="utf-8")
+    (tmp_path / "d.py").write_text("def h():\n    return 3\n", encoding="utf-8")
+    git("add", ".")
+    git("commit", "-m", "c1")
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    (tmp_path / "s.py").write_text("def f():\n    return 999\n", encoding="utf-8")  # structural
+    (tmp_path / "c.py").write_text(  # cosmetic
+        "def g():\n    # c\n    return 2\n", encoding="utf-8")
+    (tmp_path / "d.py").unlink()  # removed
+    (tmp_path / "n.py").write_text("def n():\n    return 4\n", encoding="utf-8")  # new file
+    structural, removed = server._structural_changes(
+        ["s.py", "c.py", "d.py", "n.py", "graphify-out/graph.json"], "HEAD")
+    assert set(structural) == {"s.py", "n.py"}  # cosmetic + out-dir dropped
+    assert removed == ["d.py"]
+
+
+def test_graph_watcher_triggers_only_on_structural_change(tmp_path, monkeypatch):
+    _require_git()
+    git = _git_init(tmp_path)
+    (tmp_path / "c.py").write_text("def g():\n    return 2\n", encoding="utf-8")
+    git("add", ".")
+    git("commit", "-m", "c1")
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    calls: list = []
+    w = server._GraphWatcher(ref="HEAD", trigger=lambda s, r: calls.append((s, r)))
+
+    (tmp_path / "c.py").write_text("def g():\n    # x\n    return 2\n", encoding="utf-8")
+    assert w.maybe_trigger(["c.py"]) is False and calls == []   # cosmetic -> no regraph
+
+    (tmp_path / "c.py").write_text("def g():\n    return 99\n", encoding="utf-8")
+    assert w.maybe_trigger(["c.py"]) is True                    # structural -> regraph
+    assert calls and calls[0] == (["c.py"], [])
+
+
+def test_start_watch_disabled_by_default(monkeypatch):
+    monkeypatch.delenv("GRAPHIFY_WATCH", raising=False)
+    assert server._start_watch() is None
+
+
+def test_start_watch_without_watchdog_degrades(monkeypatch):
+    import builtins
+    monkeypatch.setenv("GRAPHIFY_WATCH", "1")
+    real_import = builtins.__import__
+
+    def fake_import(name, *a, **k):
+        if name.startswith("watchdog"):
+            raise ImportError("no watchdog here")
+        return real_import(name, *a, **k)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+    assert server._start_watch() is None  # missing extra -> logged + skipped, no crash
+
+
 def test_detect_backend(monkeypatch):
     for env in server._BACKEND_ENV:
         monkeypatch.delenv(env, raising=False)
@@ -1121,7 +1335,10 @@ def test_freshness_rename_reports_old_path(tmp_path, monkeypatch):
     import pytest
     if _sh.which("git") is None:
         pytest.skip("git not available")
-    _write_graph(tmp_path, {"nodes": [], "links": []})
+    _write_graph(tmp_path, {
+        "nodes": [{"id": "O", "label": "O", "source_file": "old.py", "line": 1}],
+        "links": [],
+    })
     (tmp_path / "old.py").write_text("x = 1\n", encoding="utf-8")
     git = _git_init(tmp_path)
     git("add", ".")
@@ -1865,3 +2082,367 @@ def test_span_backend_graceful_without_treesitter(tmp_path, monkeypatch):
     (tmp_path / "app.js").write_bytes(b"function f(){ return 1; }\n")
     assert server._spans_for_file("app.js") == []
     assert server._structurally_equal("app.js", b"a", b"a // c") is None
+
+
+# --- graphify_prune: phantom-node garbage collection ---------------------------
+
+def test_prune_removes_only_missing_file_nodes(tmp_path, monkeypatch):
+    """A node whose source file is gone is pruned with its incident edges; a node
+    for a live file and a file-less node are both kept."""
+    (tmp_path / "live.py").write_text("x = 1\n", encoding="utf-8")
+    _write_graph(tmp_path, {
+        "nodes": [
+            {"id": "A", "label": "A", "source_file": "live.py", "line": 1},
+            {"id": "B", "label": "B", "source_file": "gone.py", "line": 1},
+            {"id": "C", "label": "C", "source_file": "gone.py", "line": 5},
+            {"id": "ext", "label": "Paper", "source_file": ""},  # no file -> never pruned
+        ],
+        "edges": [
+            {"source": "A", "target": "B", "type": "calls"},
+            {"source": "B", "target": "C", "type": "calls"},
+        ],
+    })
+    server._GRAPH_CACHE.clear()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+
+    # dry run reports the two phantom nodes + both incident edges, writes nothing
+    dry = json.loads(server.graphify_prune(as_json=True))  # dry_run defaults True
+    assert dry["dry_run"] is True
+    assert dry["removable_nodes"] == 2
+    assert dry["removable_edges"] == 2
+    assert [f["file"] for f in dry["files"]] == ["gone.py"]
+    on_disk = json.loads((tmp_path / "graphify-out" / "graph.json").read_text())
+    assert len(on_disk["nodes"]) == 4  # untouched
+
+    # apply: gone.py nodes + their edges drop; live + file-less nodes remain
+    server._GRAPH_CACHE.clear()
+    applied = json.loads(server.graphify_prune(dry_run=False, as_json=True))
+    assert applied["removable_nodes"] == 2
+    g = json.loads((tmp_path / "graphify-out" / "graph.json").read_text())
+    assert {n["id"] for n in g["nodes"]} == {"A", "ext"}
+    assert g["edges"] == []  # both edges touched a pruned node
+
+
+def test_prune_nothing_when_all_files_present(tmp_path, monkeypatch):
+    (tmp_path / "a.py").write_text("x = 1\n", encoding="utf-8")
+    _write_graph(tmp_path, {
+        "nodes": [{"id": "A", "label": "A", "source_file": "a.py", "line": 1}],
+        "edges": [],
+    })
+    server._GRAPH_CACHE.clear()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    data = json.loads(server.graphify_prune(dry_run=False, as_json=True))
+    assert data["removable_nodes"] == 0
+    assert "Nothing to prune" in server.graphify_prune()
+
+
+def test_prune_ignores_paths_outside_project(tmp_path, monkeypatch):
+    """An absolute / escaping source path can't be safely verified, so it's never
+    pruned even though it doesn't resolve under the project."""
+    _write_graph(tmp_path, {
+        "nodes": [{"id": "X", "label": "X", "source_file": "/etc/passwd", "line": 1}],
+        "edges": [],
+    })
+    server._GRAPH_CACHE.clear()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    data = json.loads(server.graphify_prune(dry_run=False, as_json=True))
+    assert data["removable_nodes"] == 0
+
+
+def test_freshness_stops_forcing_rebuild_after_prune(tmp_path, monkeypatch):
+    """The loop closes: a lingering phantom forces a rebuild; once graphify_prune
+    drops it, freshness no longer does."""
+    _require_git()
+    (tmp_path / "mod.py").write_text("x = 1\n", encoding="utf-8")
+    _write_graph(tmp_path, {
+        "nodes": [{"id": "M", "label": "M", "source_file": "mod.py", "line": 1}],
+        "links": [],
+    })
+    git = _git_init(tmp_path)
+    git("add", ".")
+    git("commit", "-m", "init")
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+
+    (tmp_path / "mod.py").unlink()
+    server._GRAPH_CACHE.clear()
+    before = json.loads(server.graphify_freshness(as_json=True))
+    assert before["recommended_action"] == "rebuild"
+    assert "mod.py" in before["phantom_files"]
+
+    server._GRAPH_CACHE.clear()
+    server.graphify_prune(dry_run=False)
+    server._GRAPH_CACHE.clear()
+    after = json.loads(server.graphify_freshness(as_json=True))
+    assert after["recommended_action"] != "rebuild"
+    assert after["phantom_files"] == []
+
+
+# --- graphify_fetch: token-budgeted source hydration ---------------------------
+
+def _fetch_project(tmp_path, monkeypatch, src, nodes, name="m.py"):
+    (tmp_path / name).write_text(src, encoding="utf-8")
+    _write_graph(tmp_path, {"nodes": nodes, "edges": []})
+    server._SPAN_CACHE.clear()
+    server._GRAPH_CACHE.clear()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+
+
+def test_fetch_returns_enclosing_span(tmp_path, monkeypatch):
+    src = (
+        "import os\n"            # 1
+        "\n"                     # 2
+        "def alpha(x):\n"        # 3
+        "    y = x + 1\n"        # 4
+        "    return y\n"         # 5
+        "\n"                     # 6
+        "def beta():\n"          # 7
+        "    return alpha(2)\n"  # 8
+    )
+    _fetch_project(tmp_path, monkeypatch, src, [
+        {"id": "alpha", "label": "alpha", "source_file": "m.py", "line": 3},
+        {"id": "beta", "label": "beta", "source_file": "m.py", "line": 7},
+    ])
+    item = json.loads(server.graphify_fetch(["alpha"], as_json=True))["fetched"][0]
+    assert item["lines"] == "3-5"
+    assert item["spanned"] is True
+    assert "def alpha" in item["code"] and "return y" in item["code"]
+    assert "def beta" not in item["code"]  # the next symbol is not pulled in
+
+
+def test_fetch_shared_budget_truncates_keeping_first(tmp_path, monkeypatch):
+    lines = ["def big1():"] + [f"    a{i} = {i}" for i in range(30)] + ["    return 1", ""]
+    big2_line = len(lines) + 1
+    lines += ["def big2():"] + [f"    b{i} = {i}" for i in range(30)] + ["    return 2"]
+    _fetch_project(tmp_path, monkeypatch, "\n".join(lines) + "\n", [
+        {"id": "big1", "label": "big1", "source_file": "m.py", "line": 1},
+        {"id": "big2", "label": "big2", "source_file": "m.py", "line": big2_line},
+    ])
+    data = json.loads(server.graphify_fetch(["big1", "big2"], budget_tokens=5, as_json=True))
+    assert data["truncated"] is True
+    assert [it["node"] for it in data["fetched"]] == ["big1"]  # first block always kept
+
+
+def test_fetch_context_lines_expand_and_clamp(tmp_path, monkeypatch):
+    src = "# header\n\ndef f():\n    return 1\n\n# trailer\n"  # lines 1-6, f at 3-4
+    _fetch_project(tmp_path, monkeypatch, src,
+                   [{"id": "f", "label": "f", "source_file": "m.py", "line": 3}])
+    base = json.loads(server.graphify_fetch(["f"], as_json=True))["fetched"][0]
+    assert base["lines"] == "3-4"
+    ctx = json.loads(server.graphify_fetch(["f"], context_lines=2, as_json=True))["fetched"][0]
+    assert ctx["lines"] == "1-6"  # clamped to file bounds
+    assert "# header" in ctx["code"] and "# trailer" in ctx["code"]
+
+
+def test_fetch_reports_not_found(project):
+    data = json.loads(server.graphify_fetch(["NoSuchNode"], as_json=True))
+    assert data["not_found"] == ["NoSuchNode"]
+    assert data["fetched"] == []
+
+
+def test_fetch_source_unavailable_when_file_missing(project):
+    # fixture nodes point at httpx/*.py, which don't exist under the temp project
+    data = json.loads(server.graphify_fetch(["Client"], as_json=True))
+    item = data["fetched"][0]
+    assert item["node"] == "Client"
+    assert item["code"] is None
+    assert "unavailable" in item["note"]
+
+
+def test_fetch_dedupes_same_node_and_requires_input(tmp_path, monkeypatch):
+    _fetch_project(tmp_path, monkeypatch, "def f():\n    return 1\n",
+                   [{"id": "f", "label": "f", "source_file": "m.py", "line": 1}])
+    data = json.loads(server.graphify_fetch(["f", "f"], as_json=True))
+    assert len(data["fetched"]) == 1
+    assert "ERROR" in server.graphify_fetch([])
+
+
+# --- adjacency cache -----------------------------------------------------------
+
+def test_adjacency_cached_on_edges_identity():
+    from graphify_mcp import graph as g
+    edges = [{"source": "A", "target": "B", "type": "x"},
+             {"source": "B", "target": "C", "type": "y"}]
+    a1 = g._adjacency(edges)
+    a2 = g._adjacency(edges)
+    assert a1 is a2  # same edges list -> cached object reused, not rebuilt
+    # correctness is unchanged: undirected, both endpoints present
+    assert {n for n, _ in a1["B"]} == {"A", "C"}
+    # a distinct list object (even identical content) rebuilds
+    a3 = g._adjacency([{"source": "A", "target": "B", "type": "x"}])
+    assert a3 is not a1
+
+
+def test_directed_adjacency_splits_and_caches():
+    from graphify_mcp import graph as g
+    edges = [{"source": "A", "target": "B", "type": "calls"}]
+    f1, r1 = g._directed_adjacency(edges)
+    f2, r2 = g._directed_adjacency(edges)
+    assert f1 is f2 and r1 is r2          # cached on edges-list identity
+    assert f1["A"] == [("B", "calls")]    # forward: A depends on B
+    assert r1["B"] == [("A", "calls")]    # reverse: B's dependents = A
+    assert "A" not in r1                   # nothing depends on A here
+
+
+# --- graphify_impact: reverse-dependency / blast radius ------------------------
+
+def test_impact_dependents_blast_radius(project):
+    # fixture: Client->Request, AsyncClient->Request, so both depend on Request
+    data = json.loads(server.graphify_impact("Request", as_json=True))  # default dependents
+    assert data["direction"] == "dependents"
+    assert {it["node"]: it["distance"] for it in data["impacted"]} == {
+        "Client": 1, "AsyncClient": 1}
+
+
+def test_impact_dependencies_direction(project):
+    # Client uses Request + Response
+    data = json.loads(
+        server.graphify_impact("Client", direction="dependencies", as_json=True))
+    assert {it["node"] for it in data["impacted"]} == {"Request", "Response"}
+
+
+def test_impact_includes_inferred_edge_dependents(project):
+    # Response is referenced by Client (returns) and DigestAuth (inferred/surprise)
+    data = json.loads(server.graphify_impact("Response", as_json=True))
+    assert {it["node"] for it in data["impacted"]} == {"Client", "DigestAuth"}
+
+
+def test_impact_no_dependents_is_empty(project):
+    # nothing points at Client in the fixture
+    data = json.loads(server.graphify_impact("Client", as_json=True))
+    assert data["impacted"] == []
+
+
+def test_impact_invalid_direction_and_unknown_node(project):
+    assert "ERROR" in server.graphify_impact("Client", direction="sideways")
+    assert "No node matching" in server.graphify_impact("Nope")
+
+
+# --- graphify_cycles: circular dependencies ------------------------------------
+
+def test_find_cycles_separates_two_sccs():
+    from graphify_mcp import graph as g
+    edges = [
+        {"source": "A", "target": "B"}, {"source": "B", "target": "A"},   # 2-cycle
+        {"source": "C", "target": "D"}, {"source": "D", "target": "E"},
+        {"source": "E", "target": "C"},                                    # 3-cycle
+        {"source": "B", "target": "C"},                                    # one-way bridge
+    ]
+    forward, _ = g._directed_adjacency(edges)
+    cycles, self_loops = g._find_cycles(forward)
+    assert [len(c) for c in cycles] == [3, 2]  # largest first; bridge doesn't merge them
+    assert self_loops == []
+
+
+def test_cycles_detects_scc(tmp_path, monkeypatch):
+    _write_graph(tmp_path, {
+        "nodes": [{"id": x, "label": x} for x in ("A", "B", "C", "D")],
+        "edges": [
+            {"source": "A", "target": "B", "type": "calls"},
+            {"source": "B", "target": "C", "type": "calls"},
+            {"source": "C", "target": "A", "type": "calls"},  # A->B->C->A
+            {"source": "C", "target": "D", "type": "calls"},  # tail, not in the cycle
+        ],
+    })
+    server._GRAPH_CACHE.clear()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    data = json.loads(server.graphify_cycles(as_json=True))
+    assert data["cycle_count"] == 1
+    assert data["cycles"][0]["size"] == 3
+    assert set(data["cycles"][0]["nodes"]) == {"A", "B", "C"}
+    assert data["self_loops"] == []
+
+
+def test_cycles_reports_self_loop(tmp_path, monkeypatch):
+    _write_graph(tmp_path, {
+        "nodes": [{"id": "A", "label": "A"}],
+        "edges": [{"source": "A", "target": "A", "type": "recurses"}],
+    })
+    server._GRAPH_CACHE.clear()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    data = json.loads(server.graphify_cycles(as_json=True))
+    assert data["self_loops"] == ["A"]
+    assert data["cycle_count"] == 0
+
+
+def test_cycles_acyclic_fixture(project):
+    data = json.loads(server.graphify_cycles(as_json=True))
+    assert data["cycle_count"] == 0
+    assert data["self_loops"] == []
+    assert "acyclic" in server.graphify_cycles()
+
+
+# --- graphify_skeleton: signature extraction -----------------------------------
+
+def test_skeleton_file_strips_bodies_keeps_decorators(tmp_path, monkeypatch):
+    src = (
+        "class Client:\n"            # 1
+        "    def __init__(self):\n"  # 2
+        "        self.x = 1\n"       # 3
+        "    @property\n"            # 4
+        "    def base(self):\n"      # 5
+        "        return self.x\n"    # 6
+        "\n"                         # 7
+        "def helper(a, b):\n"        # 8
+        "    return a + b\n"         # 9
+    )
+    (tmp_path / "m.py").write_text(src, encoding="utf-8")
+    _write_graph(tmp_path, {
+        "nodes": [{"id": "Client", "label": "Client", "source_file": "m.py", "line": 1}],
+        "edges": [],
+    })
+    server._SPAN_CACHE.clear()
+    server._GRAPH_CACHE.clear()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    data = json.loads(server.graphify_skeleton(file="m.py", as_json=True))
+    quals = {sym["qualname"] for s in data["sections"] for sym in s["symbols"]}
+    assert quals == {"Client", "Client.__init__", "Client.base", "helper"}
+    headers = "\n".join(sym["header"] for s in data["sections"] for sym in s["symbols"])
+    assert "self.x = 1" not in headers and "return a + b" not in headers  # bodies gone
+    assert "@property" in headers and "def base(self):" in headers        # header kept
+
+
+def test_skeleton_node_limits_to_symbol_subtree(tmp_path, monkeypatch):
+    src = (
+        "class A:\n"            # 1
+        "    def m(self):\n"   # 2
+        "        return 1\n"   # 3
+        "\n"                   # 4
+        "class B:\n"           # 5
+        "    def n(self):\n"   # 6
+        "        return 2\n"   # 7
+    )
+    (tmp_path / "m.py").write_text(src, encoding="utf-8")
+    _write_graph(tmp_path, {
+        "nodes": [{"id": "A", "label": "A", "source_file": "m.py", "line": 1}],
+        "edges": [],
+    })
+    server._SPAN_CACHE.clear()
+    server._GRAPH_CACHE.clear()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    data = json.loads(server.graphify_skeleton(node="A", as_json=True))
+    quals = {sym["qualname"] for s in data["sections"] for sym in s["symbols"]}
+    assert quals == {"A", "A.m"}  # class B and B.n excluded
+
+
+def test_skeleton_community_spans_member_files(tmp_path, monkeypatch):
+    (tmp_path / "a.py").write_text("def fa():\n    return 1\n", encoding="utf-8")
+    (tmp_path / "b.py").write_text("def fb():\n    return 2\n", encoding="utf-8")
+    (tmp_path / "c.py").write_text("def fc():\n    return 3\n", encoding="utf-8")
+    _write_graph(tmp_path, {
+        "nodes": [
+            {"id": "fa", "label": "fa", "source_file": "a.py", "line": 1, "community": 5},
+            {"id": "fb", "label": "fb", "source_file": "b.py", "line": 1, "community": 5},
+            {"id": "fc", "label": "fc", "source_file": "c.py", "line": 1, "community": 9},
+        ],
+        "edges": [],
+    })
+    server._SPAN_CACHE.clear()
+    server._GRAPH_CACHE.clear()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    data = json.loads(server.graphify_skeleton(community="5", as_json=True))
+    assert {s["file"] for s in data["sections"]} == {"a.py", "b.py"}  # c.py is community 9
+
+
+def test_skeleton_requires_exactly_one_scope(project):
+    assert "ERROR" in server.graphify_skeleton()
+    assert "ERROR" in server.graphify_skeleton(file="x", node="y")
