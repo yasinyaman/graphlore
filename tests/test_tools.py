@@ -2628,3 +2628,20 @@ def test_api_uses_treesitter_js_go_java(tmp_path, monkeypatch):
     assert symbols["retrofit2"] == {"Retrofit"}
     assert symbols["org.junit.Assert"] == {"assertEquals"}     # static import
     assert "java.util" in packages and "java.util" not in symbols  # wildcard
+
+
+def test_api_uses_for_source_public_contract():
+    # the stable public seam for external consumers (e.g. kapsam): importable from
+    # the package root, accepts bytes or str, dispatches on the rel extension
+    from graphify_mcp import api_uses_for_source
+
+    packages, symbols, paths = api_uses_for_source(
+        "from fastapi import Depends\nimport numpy as np\nnp.linalg.norm([1])\n",
+        "app.py",
+    )
+    assert symbols == {"fastapi": {"Depends"}, "numpy": {"linalg"}}
+    assert paths["numpy"] == {"numpy.linalg.norm"}
+    assert api_uses_for_source(b"import requests\n", "APP.PY")[0] == {"requests"}
+    # non-Python goes to the tree-sitter path; without the backend it degrades empty
+    result = api_uses_for_source(b"import got from 'got';\n", "a.js")
+    assert isinstance(result, tuple) and len(result) == 3

@@ -17,6 +17,10 @@ All notable changes to this project are documented here. The format is based on
   detected and excluded. Python via stdlib `ast`; JS/TS, Go and Java via the
   optional `[treesitter]` extra. New `apis.py` engine module with a bounded
   per-(path, mtime) cache like the span index.
+- `api_uses_for_source(src, rel)` — public, stable entry point for external
+  consumers (importable from the package root): the same extraction on a source
+  blob you already hold, with no file IO / caching / project-dir confinement.
+  The underscore-prefixed extractors behind it remain internal.
 
 ## [0.2.0] - 2026-06-22
 
