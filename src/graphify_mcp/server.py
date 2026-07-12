@@ -31,6 +31,8 @@ graph.json analysis tools (no CLI needed):
   - graphify_prune      : drop phantom nodes for deleted/renamed source files
   - graphify_validate   : lint graph.json (dangling / duplicate / self-loop / orphan)
   - graphify_cycles     : circular dependencies (SCCs) in the directed graph
+  - graphify_package_apis: symbol-level external API surface (which names each
+                          package is actually used for — upgrade-audit input)
 
 Community naming:
   - graphify_label_communities : name Leiden clusters (host-LLM sampling / backend key)
@@ -76,6 +78,12 @@ from mcp.types import (
 )
 
 from . import config
+from .apis import (  # noqa: F401  (re-exported for the tools + tests)
+    _API_CACHE,
+    _API_CACHE_MAX,
+    _api_uses_for_file,
+    _api_uses_python,
+)
 from .graph import (  # noqa: F401  (re-exported for the tools + tests)
     _CHARS_PER_TOKEN,
     _GRAPH_CACHE,
@@ -2191,6 +2199,168 @@ def graphify_cycles(max_cycles: int = 20, as_json: bool = False) -> str:
         head = self_loop_labels[:20]
         more = f" (+{len(self_loops) - len(head)} more)" if len(self_loops) > len(head) else ""
         lines.append(f"\n{len(self_loops)} self-loop(s): " + ", ".join(head) + more)
+    return _fmt(payload, as_json, "\n".join(lines))
+
+
+def _first_party_prefixes() -> list[str]:
+    """Package-name prefixes that belong to the project itself.
+
+    Top-level python packages/modules under the root or ``src/``, plus the Go
+    module path from ``go.mod`` when present — so self-imports don't show up as
+    external API surface.
+    """
+    prefixes: list[str] = []
+    root = config.PROJECT_DIR
+    for base in (root, root / "src"):
+        try:
+            entries = list(base.iterdir()) if base.is_dir() else []
+        except OSError:
+            entries = []
+        for p in entries:
+            if p.is_dir() and (p / "__init__.py").exists():
+                prefixes.append(p.name)
+            elif p.suffix == ".py":
+                prefixes.append(p.stem)
+    gomod = root / "go.mod"
+    try:
+        if gomod.is_file():
+            for ln in gomod.read_text(encoding="utf-8", errors="replace").splitlines():
+                if ln.strip().startswith("module "):
+                    prefixes.append(ln.strip().split()[1])
+                    break
+    except OSError:
+        pass
+    return prefixes
+
+
+_API_SURFACE_NOTE = (
+    "lower bound: dynamic import / getattr / import * / wrapper indirection are "
+    "invisible; zero visible symbols means no visibility, not no usage"
+)
+
+
+@mcp.tool(annotations=ToolAnnotations(title="External package API surface", readOnlyHint=True))
+def graphify_package_apis(package: str = "", limit: int = 20, as_json: bool = False) -> str:
+    """Symbol-level external API surface: which names each package is actually used for.
+
+    The difference between "this module imports fastapi" (package level) and "this
+    module uses Depends, APIRouter, CORSMiddleware from fastapi" (symbol level). A
+    version upgrade is audited at the symbol level — a breaking change in a release
+    note only matters if it touches a symbol you use, so cross this list with the
+    changelog before bumping a dependency.
+
+    Symbols come from real use sites in the files the graph knows: from-imports
+    (``from fastapi import Depends``) plus attribute access through import aliases
+    (``np.array(...)`` -> numpy: array). ``qualified_paths`` resolves full chains
+    (``numpy.linalg.norm``) — the precise input for a version-diff check. Python is
+    parsed with the stdlib ast; JS/TS, Go and Java need the optional [treesitter]
+    extra. First-party packages (the project's own modules) are excluded and
+    reported in ``first_party_skipped``.
+
+    The result is a LOWER BOUND ("at least these must be audited"): dynamic import,
+    ``getattr(pkg, name)``, ``import *`` and use through a wrapper are invisible. A
+    package with zero visible symbols reads "no visibility", not "no usage".
+
+    Args:
+        package: Report one package in detail (per-symbol file lists). Empty = all.
+        limit: Cap on packages listed in the summary view (most-used first).
+    """
+    graph = _load_graph()
+    if isinstance(graph, str):
+        return graph
+    nodes, _edges = _nodes_edges(graph)
+    files = sorted({_norm_relpath(_node_file(n)) for n in nodes} - {""})
+
+    first_party = _first_party_prefixes()
+    skipped: set[str] = set()
+
+    def _internal(pkg: str) -> bool:
+        return any(pkg == fp or pkg.startswith(fp + "/") for fp in first_party)
+
+    pkg_files: dict[str, set[str]] = {}
+    pkg_syms: dict[str, set[str]] = {}
+    pkg_paths: dict[str, set[str]] = {}
+    sym_files: dict[str, dict[str, set[str]]] = {}
+    for f in files:
+        packages, symbols, paths = _api_uses_for_file(f)
+        for pkg in packages:
+            if _internal(pkg):
+                skipped.add(pkg)
+                continue
+            pkg_files.setdefault(pkg, set()).add(f)
+            for s in symbols.get(pkg, ()):
+                pkg_syms.setdefault(pkg, set()).add(s)
+                sym_files.setdefault(pkg, {}).setdefault(s, set()).add(f)
+            pkg_paths.setdefault(pkg, set()).update(paths.get(pkg, ()))
+
+    if package:
+        match = next((p for p in pkg_files if p.lower() == package.lower()), None)
+        if match is None:
+            known = ", ".join(sorted(pkg_files)[:30]) or "(none found)"
+            return f"No external package '{package}' in the scanned files. Known: {known}"
+        per_symbol = {s: sorted(fs) for s, fs in sorted(sym_files.get(match, {}).items())}
+        payload: dict[str, Any] = {
+            "package": match,
+            "files": sorted(pkg_files[match]),
+            "symbols": sorted(pkg_syms.get(match, ())),
+            "qualified_paths": sorted(pkg_paths.get(match, ())),
+            "symbol_files": per_symbol,
+            "note": _API_SURFACE_NOTE,
+        }
+        lines = [
+            f"{match} — {len(payload['symbols'])} symbol(s) across "
+            f"{len(payload['files'])} file(s) ({_API_SURFACE_NOTE}):"
+        ]
+        lines += [f"  {s}: {', '.join(fs)}" for s, fs in per_symbol.items()]
+        if not per_symbol:
+            lines.append("  no symbols visible (package-level import only)")
+        if payload["qualified_paths"]:
+            lines.append("qualified paths: " + ", ".join(payload["qualified_paths"]))
+        return _fmt(payload, as_json, "\n".join(lines))
+
+    ranked = sorted(
+        pkg_files,
+        key=lambda p: (-len(pkg_files[p]), -len(pkg_syms.get(p, ())), p),
+    )
+    shown = ranked[:limit]
+    payload = {
+        "files_scanned": len(files),
+        "packages": [
+            {
+                "package": p,
+                "file_count": len(pkg_files[p]),
+                "symbols": sorted(pkg_syms.get(p, ())),
+                "qualified_paths": sorted(pkg_paths.get(p, ())),
+            }
+            for p in shown
+        ],
+        "first_party_skipped": sorted(skipped),
+        "truncated": len(ranked) > len(shown),
+        "note": _API_SURFACE_NOTE,
+    }
+    if not ranked:
+        return _fmt(
+            payload, as_json,
+            f"No external package use visible in {len(files)} graph file(s) "
+            f"({_API_SURFACE_NOTE}).",
+        )
+    lines = [
+        f"External API surface across {len(files)} graph file(s) ({_API_SURFACE_NOTE}):"
+    ]
+    for p in shown:
+        syms = sorted(pkg_syms.get(p, ()))
+        if syms:
+            head = ", ".join(syms[:8]) + (f" (+{len(syms) - 8} more)" if len(syms) > 8 else "")
+            lines.append(f"  {p} — {len(syms)} symbol(s) in {len(pkg_files[p])} file(s): {head}")
+        else:
+            lines.append(
+                f"  {p} — imported in {len(pkg_files[p])} file(s), no symbols visible "
+                "(surface unknown)"
+            )
+    if payload["truncated"]:
+        lines.append(f"  … +{len(ranked) - len(shown)} more package(s); raise `limit`.")
+    if skipped:
+        lines.append("first-party (skipped): " + ", ".join(sorted(skipped)))
     return _fmt(payload, as_json, "\n".join(lines))
 
 

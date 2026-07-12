@@ -216,7 +216,8 @@ def test_tool_and_prompt_registration(project):
     assert "graphify_skeleton" in names
     assert "graphify_duplication_scan" in names
     assert "graphify_diff" in names
-    assert len(names) == 26
+    assert "graphify_package_apis" in names
+    assert len(names) == 27
     assert prompts == {"onboard", "trace_bug", "explain_flow"}
 
 
@@ -2446,3 +2447,184 @@ def test_skeleton_community_spans_member_files(tmp_path, monkeypatch):
 def test_skeleton_requires_exactly_one_scope(project):
     assert "ERROR" in server.graphify_skeleton()
     assert "ERROR" in server.graphify_skeleton(file="x", node="y")
+
+
+# ---------------------------------------------------------------------------
+# External package API surface (apis.py + graphify_package_apis)
+# ---------------------------------------------------------------------------
+
+_API_PY_SRC = """\
+import numpy as np
+import os.path
+import importlib
+from fastapi import Depends, Query
+from fastapi import APIRouter as Router
+from fastapi.middleware.cors import CORSMiddleware
+from .internal import helper       # relative: internal, skipped
+from legacy import *               # star: unknowable, skipped
+import requests                    # package-level only, no use site
+
+def handler():
+    np.array([1])
+    np.linalg.norm([1])            # full chain, resolved once
+    return os.path.join("a", "b")
+"""
+
+
+def test_api_uses_python_from_imports_and_aliases():
+    packages, symbols, paths = server._api_uses_python(_API_PY_SRC.encode())
+    assert symbols["fastapi"] == {"Depends", "Query", "APIRouter", "CORSMiddleware"}
+    # symbols come from the import's real name, and deep modules keep the full path
+    assert "fastapi.middleware.cors.CORSMiddleware" in paths["fastapi"]
+    assert "fastapi.Depends" in paths["fastapi"]
+    # alias use sites: np.array + the full np.linalg.norm chain (never bare np.linalg)
+    assert symbols["numpy"] == {"array", "linalg"}
+    assert paths["numpy"] == {"numpy.array", "numpy.linalg.norm"}
+    # `import os.path` binds `os`; os.path.join resolves through it
+    assert "os.path.join" in paths["os"]
+    # relative + star imports contribute no symbols; star still names the package
+    assert "internal" not in symbols and ".internal" not in packages
+    assert "legacy" in packages and "legacy" not in symbols
+    # imported but never attribute-accessed -> package visible, zero symbols
+    assert "requests" in packages and "requests" not in symbols
+
+
+def test_api_uses_python_asname_binds_full_module():
+    _, symbols, paths = server._api_uses_python(
+        b"import matplotlib.pyplot as plt\nplt.plot([1])\n"
+    )
+    assert symbols["matplotlib"] == {"plot"}
+    assert paths["matplotlib"] == {"matplotlib.pyplot.plot"}
+
+
+def test_api_uses_python_unparseable_and_shadow_free():
+    assert server._api_uses_python(b"def (:\n") == (set(), {}, {})
+    # a non-imported name is never resolved as an alias
+    _, symbols, _ = server._api_uses_python(b"x = obj.attr\n")
+    assert symbols == {}
+
+
+def test_api_uses_for_file_cached_and_confined(tmp_path, monkeypatch):
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", proj)
+    server._API_CACHE.clear()
+    (proj / "m.py").write_text("from fastapi import Depends\n", encoding="utf-8")
+    packages, symbols, _ = server._api_uses_for_file("m.py")
+    assert symbols["fastapi"] == {"Depends"}
+    assert str((proj / "m.py").resolve()) in server._API_CACHE
+    # escaping paths must not be read (same confinement as the span index)
+    outside = tmp_path / "outside.py"
+    outside.write_text("from secretpkg import key\n", encoding="utf-8")
+    assert server._api_uses_for_file(str(outside)) == (set(), {}, {})
+    assert server._api_uses_for_file("../outside.py") == (set(), {}, {})
+    assert server._api_uses_for_file("missing.py") == (set(), {}, {})
+
+
+def _api_project(tmp_path, monkeypatch):
+    (tmp_path / "app.py").write_text(
+        "import numpy as np\n"
+        "from fastapi import Depends, APIRouter\n"
+        "import myproj.util\n"           # first-party: excluded from the surface
+        "def f():\n    return np.array([1])\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "worker.py").write_text(
+        "from fastapi import Depends\nimport requests\n", encoding="utf-8",
+    )
+    pkg = tmp_path / "myproj"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text("", encoding="utf-8")
+    _write_graph(tmp_path, {
+        "nodes": [
+            {"id": "f", "label": "f", "file": "app.py", "line": 4},
+            {"id": "w", "label": "w", "file": "worker.py", "line": 1},
+        ],
+        "edges": [],
+    })
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    server._API_CACHE.clear()
+    server._GRAPH_CACHE.clear()
+
+
+def test_package_apis_aggregates_across_files(tmp_path, monkeypatch):
+    _api_project(tmp_path, monkeypatch)
+    data = json.loads(server.graphify_package_apis(as_json=True))
+    by_pkg = {p["package"]: p for p in data["packages"]}
+    assert by_pkg["fastapi"]["symbols"] == ["APIRouter", "Depends"]
+    assert by_pkg["fastapi"]["file_count"] == 2
+    assert by_pkg["numpy"]["symbols"] == ["array"]
+    assert by_pkg["requests"]["symbols"] == []          # visible package, no symbols
+    assert data["first_party_skipped"] == ["myproj"]     # self-import never external
+    assert "lower bound" in data["note"]
+    # fastapi (2 files) ranks above numpy/requests (1 file)
+    assert data["packages"][0]["package"] == "fastapi"
+
+
+def test_package_apis_single_package_detail(tmp_path, monkeypatch):
+    _api_project(tmp_path, monkeypatch)
+    data = json.loads(server.graphify_package_apis(package="fastapi", as_json=True))
+    assert data["symbol_files"]["Depends"] == ["app.py", "worker.py"]
+    assert data["symbol_files"]["APIRouter"] == ["app.py"]
+    assert sorted(data["qualified_paths"]) == ["fastapi.APIRouter", "fastapi.Depends"]
+    text = server.graphify_package_apis(package="fastapi")
+    assert "Depends: app.py, worker.py" in text
+
+
+def test_package_apis_unknown_package_lists_known(tmp_path, monkeypatch):
+    _api_project(tmp_path, monkeypatch)
+    out = server.graphify_package_apis(package="django")
+    assert "No external package 'django'" in out
+    assert "fastapi" in out
+
+
+def test_package_apis_respects_limit_and_truncates(tmp_path, monkeypatch):
+    _api_project(tmp_path, monkeypatch)
+    data = json.loads(server.graphify_package_apis(limit=1, as_json=True))
+    assert len(data["packages"]) == 1 and data["truncated"] is True
+
+
+def test_package_apis_requires_graph(empty_project):
+    assert "ERROR" in server.graphify_package_apis()
+
+
+def test_api_uses_treesitter_js_go_java(tmp_path, monkeypatch):
+    _skip_without_treesitter()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    server._API_CACHE.clear()
+    server._TS_PARSERS.clear()
+
+    (tmp_path / "a.js").write_bytes(
+        b"import got, {HTTPError as E} from 'got';\n"
+        b"import * as fs from 'node:fs';\n"
+        b"import './local.js';\n"
+        b"const {promisify} = require('util');\n"
+        b"got.extend({});\n"
+        b"fs.promises.readFile('x');\n"
+    )
+    packages, symbols, paths = server._api_uses_for_file("a.js")
+    assert symbols["got"] == {"HTTPError", "extend"}          # import name + use site
+    assert "node:fs.promises.readFile" in paths["node:fs"]     # namespace chain
+    assert symbols["util"] == {"promisify"}                    # destructured require
+    assert not any("local" in p for p in packages)             # relative source skipped
+
+    (tmp_path / "b.go").write_bytes(
+        b"package main\n"
+        b'import (\n  r "github.com/go-resty/resty/v2"\n  "fmt"\n)\n'
+        b"func main() {\n  c := r.New()\n  fmt.Println(c)\n}\n"
+        b"var x *r.Client\n"
+    )
+    _, symbols, paths = server._api_uses_for_file("b.go")
+    assert symbols["github.com/go-resty/resty/v2"] == {"New", "Client"}
+    assert "fmt.Println" in paths["fmt"]
+
+    (tmp_path / "C.java").write_bytes(
+        b"import retrofit2.Retrofit;\n"
+        b"import static org.junit.Assert.assertEquals;\n"
+        b"import java.util.*;\n"
+        b"class C {}\n"
+    )
+    packages, symbols, _ = server._api_uses_for_file("C.java")
+    assert symbols["retrofit2"] == {"Retrofit"}
+    assert symbols["org.junit.Assert"] == {"assertEquals"}     # static import
+    assert "java.util" in packages and "java.util" not in symbols  # wildcard

@@ -6,6 +6,18 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+- `graphify_package_apis` — symbol-level external API surface: which names each
+  external package is actually used for ("uses `Depends`, `APIRouter` from
+  fastapi", not just "imports fastapi"), the input a version-upgrade audit needs.
+  Captures from-imports and attribute access through import aliases
+  (`np.array(...)` → `numpy: array`) plus qualified paths (`numpy.linalg.norm`)
+  from real use sites; an honest lower bound (dynamic import / `getattr` /
+  `import *` / wrapper indirection are invisible). First-party packages are
+  detected and excluded. Python via stdlib `ast`; JS/TS, Go and Java via the
+  optional `[treesitter]` extra. New `apis.py` engine module with a bounded
+  per-(path, mtime) cache like the span index.
+
 ## [0.2.0] - 2026-06-22
 
 ### Added

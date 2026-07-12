@@ -182,6 +182,7 @@ graph.json analysis (read-only, no CLI needed, `as_json=True` for structured out
 | `graphify_validate` | Lint the graph for dangling/duplicate/self-loop edges and orphan nodes (read-only) |
 | `graphify_duplication_scan` | **Repo-wide** hidden-link / duplication audit — the batch form of `locate`'s `hidden_links` (similar-but-structurally-far pairs); needs `[semble]`, outside lean |
 | `graphify_cycles` | Circular dependencies — strongly-connected node groups in the directed graph (an architectural smell), self-loops listed separately |
+| `graphify_package_apis` | **Symbol-level external API surface** — which names each external package is actually used for (`fastapi: Depends, APIRouter`), with qualified paths (`numpy.linalg.norm`) for version-diff audits; a lower bound (dynamic/star/getattr use is invisible). Python via stdlib ast; JS/TS, Go, Java need `[treesitter]` |
 
 Semantic naming (uses the **host model via MCP sampling** — no API key — or a backend key):
 
