@@ -120,6 +120,9 @@ For a smaller tool surface (helps some models pick the right tool), set
 | `GRAPHIFY_API_KEY` | _(unset)_ | Require `Authorization: Bearer <key>` on HTTP transports |
 | `GRAPHIFY_TOOLSET` | `full` | `full` \| `lean` (core exploration tools only) |
 | `GRAPHIFY_TOKENIZER` | _(heuristic)_ | `tiktoken` → exact token counts (needs the `[tiktoken]` extra); else chars/3.5 estimate |
+| `GRAPHIFY_SEMANTIC_BACKEND` | `semble` | Semantic backend for `locate`/`duplication_scan`. `semble` (offline default) or a `module.path:Factory` implementing the `SemanticIndex` protocol (`search`/`find_related`; results expose `.chunk.file_path/.start_line/.end_line`) — plug in local sentence-transformers, an OpenAI-compatible / on-prem vLLM endpoint, etc. |
+| `GRAPHIFY_WATCH` | `0` | `1` → watch the project for **structural** source changes and re-sync the graph automatically (needs the `[watch]` extra; cosmetic edits are ignored) |
+| `GRAPHIFY_WATCH_DEBOUNCE` | `2.0` | Seconds to coalesce a burst of file events before re-graphing (watch mode) |
 
 ## Keeping the graph fresh
 
@@ -136,9 +139,13 @@ hook** — the recommended first-class auto-update flow:
 graphify . --update --no-viz >/dev/null 2>&1 &
 ```
 
-Incremental `--update` only re-extracts changed files. It can't *drop* nodes for
-deleted/renamed code, so after those `graphify_freshness` still recommends a full
-`graphify .` rebuild — run that occasionally (or from a `post-merge` hook). An
+Incremental `--update` only re-extracts changed files — it can't *drop* nodes for
+deleted/renamed code on its own. `graphify_prune` closes that gap: it surgically
+removes the phantom nodes (and their edges) for source files that are gone from the
+working tree, so after a delete/rename you can `graphify_prune` (preview with
+`dry_run=True`) + `graphify_build(update=True)` instead of a full rebuild.
+`graphify_freshness` knows about this — it only steers to a rebuild while phantom
+nodes for the removed files still linger, and reports them in `phantom_files`. An
 agent can also just call `graphify_build(update=True)` when `graph_age` /
 `graphify_freshness` says the graph drifted.
 
@@ -165,9 +172,17 @@ graph.json analysis (read-only, no CLI needed, `as_json=True` for structured out
 | `graphify_search` | Node search |
 | `graphify_neighbors` | 1-hop neighbors of a node |
 | `graphify_subgraph` | **Token-budgeted** BFS subgraph around a node — the cheap way to feed the model just the relevant slice |
+| `graphify_impact` | Reverse-dependency / **blast radius** — what breaks if a node changes (`direction=dependents`/`dependencies`/`both`), ordered by hop distance |
 | `graphify_node_details` | Node metadata: type, source file/line, docstring, community |
-| `graphify_freshness` | Is the graph stale vs. git HEAD? Returns `recommended_action` (fresh/update/rebuild) + `reason` — deletions/large changes steer to a full rebuild |
+| `graphify_skeleton` | def/class **signatures** (decorators kept, bodies stripped) for a file/node/community — the middle layer between the map and full code |
+| `graphify_fetch` | **Token-budgeted** source hydration — reads the real code for a node (its enclosing def/class span ± context), the map→code other half of `subgraph`/`locate` |
+| `graphify_freshness` | Is the graph stale vs. git HEAD? Returns `recommended_action` (fresh/update/rebuild) + `reason` — lingering phantom nodes / large changes steer to a rebuild |
+| `graphify_diff` | Structural changeset between two git refs (default `HEAD~1..HEAD`) — added/removed/renamed/modified, with cosmetic-only changes separated (file-level, for review/audit) |
+| `graphify_prune` | Drop phantom nodes (and their edges) for deleted/renamed source files — the surgical alternative to a full rebuild (`dry_run=True` to preview) |
 | `graphify_validate` | Lint the graph for dangling/duplicate/self-loop edges and orphan nodes (read-only) |
+| `graphify_duplication_scan` | **Repo-wide** hidden-link / duplication audit — the batch form of `locate`'s `hidden_links` (similar-but-structurally-far pairs); needs `[semble]`, outside lean |
+| `graphify_cycles` | Circular dependencies — strongly-connected node groups in the directed graph (an architectural smell), self-loops listed separately |
+| `graphify_package_apis` | **Symbol-level external API surface** — which names each external package is actually used for (`fastapi: Depends, APIRouter`), with qualified paths (`numpy.linalg.norm`) for version-diff audits; a lower bound (dynamic/star/getattr use is invisible). Python via stdlib ast; JS/TS, Go, Java need `[treesitter]` |
 
 Semantic naming (uses the **host model via MCP sampling** — no API key — or a backend key):
 

@@ -83,6 +83,15 @@ def _node_line(n: dict) -> Any:
     return int(digits) if digits else ""
 
 
+def _node_file(n: dict) -> str:
+    """Source file of a node across schema variants (file / path / source_file).
+
+    Empty string when the node carries no source file (external-source / concept
+    nodes), so callers can skip nodes that don't correspond to a file on disk.
+    """
+    return str(n.get("file") or n.get("path") or n.get("source_file") or "")
+
+
 def _edge_ends(e: dict) -> tuple[str, str]:
     return (
         str(e.get("source") or e.get("from") or e.get("src") or "?"),
@@ -120,7 +129,11 @@ def _resolve_node(nodes: list[dict], key: str) -> dict | None:
     return None
 
 
-def _adjacency(edges: list[dict]) -> dict[str, list[tuple[str, str]]]:
+# node id -> list of (neighbor id, relation); the shape every traversal walks.
+_Adj = dict[str, list[tuple[str, str]]]
+
+
+def _build_adjacency(edges: list[dict]) -> _Adj:
     """Undirected adjacency: node -> list of (neighbor, relation)."""
     adj: dict[str, list[tuple[str, str]]] = {}
     for e in edges:
@@ -129,6 +142,66 @@ def _adjacency(edges: list[dict]) -> dict[str, list[tuple[str, str]]]:
         adj.setdefault(s, []).append((t, rel))
         adj.setdefault(t, []).append((s, rel))
     return adj
+
+
+# Adjacency cache keyed by id(edges) with an identity guard: if the previous edges
+# list was freed and its id recycled, the stored reference won't be `is`-identical
+# to the new list, so a stale hit is impossible. _load_graph hands back the SAME
+# edges list while the parsed graph stays cached (path+mtime), so repeat
+# subgraph/locate/neighbors calls reuse the built adjacency; a changed graph file
+# re-parses to a fresh list and misses. Bounded FIFO so old graphs don't pin memory.
+_ADJ_CACHE: dict[int, tuple[list[dict], _Adj]] = {}
+_ADJ_CACHE_MAX = 8
+
+
+def _adjacency(edges: list[dict]) -> _Adj:
+    """Undirected adjacency for `edges`, cached on the edges-list identity.
+
+    Repeat traversals over an unchanged graph reuse the built adjacency instead of
+    rebuilding it every call; a reload (changed file) hands a fresh list, which
+    misses and rebuilds. See _ADJ_CACHE.
+    """
+    cached = _ADJ_CACHE.get(id(edges))
+    if cached is not None and cached[0] is edges:
+        return cached[1]
+    adj = _build_adjacency(edges)
+    if id(edges) not in _ADJ_CACHE and len(_ADJ_CACHE) >= _ADJ_CACHE_MAX:
+        _ADJ_CACHE.pop(next(iter(_ADJ_CACHE)), None)  # FIFO: drop the oldest entry
+    _ADJ_CACHE[id(edges)] = (edges, adj)
+    return adj
+
+
+def _build_directed_adjacency(edges: list[dict]) -> tuple[_Adj, _Adj]:
+    """Directed adjacency, preserving edge orientation that _adjacency flattens away.
+
+    Returns (forward, reverse): ``forward[s]`` lists the targets ``s`` points at
+    (what s depends on), ``reverse[t]`` lists the sources pointing at ``t`` (what
+    depends on t). Reverse is the blast radius — who breaks if t changes.
+    """
+    forward: dict[str, list[tuple[str, str]]] = {}
+    reverse: dict[str, list[tuple[str, str]]] = {}
+    for e in edges:
+        s, t = _edge_ends(e)
+        rel = _edge_rel(e)
+        forward.setdefault(s, []).append((t, rel))
+        reverse.setdefault(t, []).append((s, rel))
+    return forward, reverse
+
+
+# Same id(edges)+identity-guard scheme as _ADJ_CACHE (see there).
+_DIR_ADJ_CACHE: dict[int, tuple[list[dict], tuple[_Adj, _Adj]]] = {}
+
+
+def _directed_adjacency(edges: list[dict]) -> tuple[_Adj, _Adj]:
+    """(forward, reverse) directed adjacency for `edges`, cached on list identity."""
+    cached = _DIR_ADJ_CACHE.get(id(edges))
+    if cached is not None and cached[0] is edges:
+        return cached[1]
+    pair = _build_directed_adjacency(edges)
+    if id(edges) not in _DIR_ADJ_CACHE and len(_DIR_ADJ_CACHE) >= _ADJ_CACHE_MAX:
+        _DIR_ADJ_CACHE.pop(next(iter(_DIR_ADJ_CACHE)), None)  # FIFO
+    _DIR_ADJ_CACHE[id(edges)] = (edges, pair)
+    return pair
 
 
 # Token-estimate heuristic. 4.0 chars/token is the common English rule of thumb,
@@ -222,6 +295,76 @@ def _bfs_subgraph(
     serialized = json.dumps(collected_edges, ensure_ascii=False)
     envelope_tokens = _approx_tokens("x" * _PAYLOAD_ENVELOPE_CHARS)
     return visited, collected_edges, truncated, max(1, _count_tokens(serialized) + envelope_tokens)
+
+
+def _strongly_connected_components(forward: _Adj, node_ids: list[str]) -> list[list[str]]:
+    """Tarjan's SCC, iterative (no recursion limit on deep/large graphs).
+
+    Each returned component is a maximal set of mutually-reachable nodes; a component
+    of size >= 2 (or a single node with a self-edge) contains a cycle.
+    """
+    index: dict[str, int] = {}
+    low: dict[str, int] = {}
+    on_stack: dict[str, bool] = {}
+    stack: list[str] = []
+    counter = 0
+    out: list[list[str]] = []
+    for root in node_ids:
+        if root in index:
+            continue
+        work: list[tuple[str, int]] = [(root, 0)]
+        while work:
+            v, pi = work[-1]
+            if pi == 0:
+                index[v] = low[v] = counter
+                counter += 1
+                stack.append(v)
+                on_stack[v] = True
+            recursed = False
+            neigh = forward.get(v, [])
+            j = pi
+            while j < len(neigh):
+                w = neigh[j][0]
+                if w not in index:
+                    work[-1] = (v, j + 1)
+                    work.append((w, 0))
+                    recursed = True
+                    break
+                if on_stack.get(w):
+                    low[v] = min(low[v], index[w])
+                j += 1
+            if recursed:
+                continue
+            if low[v] == index[v]:  # v is an SCC root: pop the component
+                comp: list[str] = []
+                while True:
+                    w = stack.pop()
+                    on_stack[w] = False
+                    comp.append(w)
+                    if w == v:
+                        break
+                out.append(comp)
+            work.pop()
+            if work:  # fold v's lowlink back into its parent
+                low[work[-1][0]] = min(low[work[-1][0]], low[v])
+    return out
+
+
+def _find_cycles(forward: _Adj) -> tuple[list[list[str]], list[str]]:
+    """(cycles, self_loops) from a directed adjacency.
+
+    ``cycles`` are SCCs of size >= 2 (mutually-dependent node groups), largest first;
+    ``self_loops`` are nodes with an edge to themselves (reported separately, since a
+    self-edge is a degenerate 1-node cycle).
+    """
+    ids: set[str] = set(forward)
+    for lst in forward.values():
+        for w, _ in lst:
+            ids.add(w)
+    self_loops = {s for s in forward for w, _ in forward[s] if w == s}
+    sccs = _strongly_connected_components(forward, sorted(ids))
+    cycles = sorted((c for c in sccs if len(c) >= 2), key=lambda c: (-len(c), min(c)))
+    return cycles, sorted(self_loops)
 
 
 def _hop_distances(
