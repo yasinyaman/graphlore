@@ -328,6 +328,35 @@ def _api_uses_treesitter(src: bytes, rel: str) -> ApiUses:
 
 
 # ---------------------------------------------------------------------------
+# Public entry points
+# ---------------------------------------------------------------------------
+
+
+def api_uses_for_source(src: bytes | str, rel: str) -> ApiUses:
+    """PUBLIC: external-package API uses for one source blob — the stable contract
+    for external consumers (importable as ``from graphify_mcp.apis import
+    api_uses_for_source``); the underscore-prefixed extractors behind it are
+    internal and may be renamed.
+
+    ``rel`` is the file's (relative) path and only selects the parser — ``.py``
+    goes through the stdlib ``ast``, anything else through the optional
+    tree-sitter backend (empty result when that backend or the language is
+    unavailable). No file IO, no caching, no project-dir confinement: the caller
+    owns the source bytes.
+
+    Returns ``(packages, symbols, paths)``:
+      * ``packages``: every absolutely-imported package, even with no visible symbol
+      * ``symbols``:  package -> short symbol names used (``numpy: {array}``)
+      * ``paths``:    package -> qualified use paths (``numpy: {numpy.linalg.norm}``)
+    All three are lower bounds — see the module docstring for what is invisible.
+    """
+    data = src if isinstance(src, bytes) else src.encode("utf-8", "replace")
+    if str(rel).lower().endswith(".py"):
+        return _api_uses_python(data)
+    return _api_uses_treesitter(data, str(rel))
+
+
+# ---------------------------------------------------------------------------
 # Per-file entry point
 # ---------------------------------------------------------------------------
 
@@ -361,7 +390,6 @@ def _api_uses_for_file(file_path: str) -> ApiUses:
     except OSError:
         _api_cache_put(key, (mtime, _empty()))
         return _empty()
-    uses = (_api_uses_python(src) if rel.lower().endswith(".py")
-            else _api_uses_treesitter(src, rel))
+    uses = api_uses_for_source(src, rel)
     _api_cache_put(key, (mtime, uses))
     return uses
