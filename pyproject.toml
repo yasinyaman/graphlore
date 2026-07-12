@@ -43,10 +43,13 @@ treesitter = ["tree-sitter>=0.22,<1.0", "tree-sitter-language-pack>=1.6,<2.0"]
 # Exact token counting for the budgeted subgraph tools (opt-in via
 # GRAPHIFY_TOKENIZER=tiktoken); without it the conservative chars/3.5 estimate is used.
 tiktoken = ["tiktoken>=0.7"]
+# Opt-in filesystem watcher (GRAPHIFY_WATCH=1) that re-syncs the graph on structural
+# source changes. Off by default so the stdio server stays light.
+watch = ["watchdog>=4.0"]
 all = [
     "graphifyy", "semble>=0.3",
     "tree-sitter>=0.22,<1.0", "tree-sitter-language-pack>=1.6,<2.0",
-    "tiktoken>=0.7",
+    "tiktoken>=0.7", "watchdog>=4.0",
 ]
 dev = ["pytest>=8.0", "ruff>=0.6", "pytest-cov>=5.0", "mypy>=1.11"]
 
