@@ -54,6 +54,22 @@ All notable changes to this project are documented here. The format is based on
   consumers (importable from the package root): the same extraction on a source
   blob you already hold, with no file IO / caching / project-dir confinement.
   The underscore-prefixed extractors behind it remain internal.
+- Seven new analysis tools: `graphify_impact` (reverse-dependency blast radius,
+  ordered by hop distance), `graphify_duplication_scan` (repo-wide hidden-link
+  audit — semantically similar but structurally distant pairs),
+  `graphify_fetch` (hydrate a node's source, token-capped), `graphify_skeleton`
+  (def/class signatures with bodies stripped), `graphify_diff` (file-level
+  structural changeset between two git refs, cosmetic-only changes separated),
+  `graphify_prune` (drop phantom nodes for deleted/renamed files — the surgical
+  alternative to a rebuild, `dry_run` preview), and `graphify_cycles`
+  (Tarjan-SCC dependency cycles).
+- Pluggable semantic backend: `GRAPHIFY_SEMANTIC_BACKEND` selects `semble`
+  (offline default) or any `module.path:Factory` implementing the
+  `SemanticIndex` protocol (`search`/`find_related`); `graphify_locate` and
+  `graphify_duplication_scan` dispatch through it.
+- Opt-in filesystem watcher: `GRAPHIFY_WATCH=1` re-syncs the graph on
+  structural source changes (cosmetic edits ignored), debounced via
+  `GRAPHIFY_WATCH_DEBOUNCE`; ships as the optional `[watch]` extra (watchdog).
 
 ## [0.2.0] - 2026-06-22
 
