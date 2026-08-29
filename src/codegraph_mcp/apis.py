@@ -334,7 +334,7 @@ def _api_uses_treesitter(src: bytes, rel: str) -> ApiUses:
 
 def api_uses_for_source(src: bytes | str, rel: str) -> ApiUses:
     """PUBLIC: external-package API uses for one source blob — the stable contract
-    for external consumers (importable as ``from graphify_mcp.apis import
+    for external consumers (importable as ``from codegraph_mcp.apis import
     api_uses_for_source``); the underscore-prefixed extractors behind it are
     internal and may be renamed.
 

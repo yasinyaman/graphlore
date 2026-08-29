@@ -51,7 +51,7 @@ Prompts:
 
 Internal layout: config.py (shared PROJECT_DIR), graph.py (graph.json load +
 node/edge/traversal helpers), spans.py (tree-sitter/ast span engine + structural
-diff), and this module (the FastMCP surface: tools, resources, prompts, main).
+diff), and this module (the MCPServer surface: tools, resources, prompts, main).
 
 Usage:
   GRAPHIFY_PROJECT_DIR=/path/to/repo python server.py
@@ -64,13 +64,17 @@ import os
 import shutil
 import subprocess
 import sys
+import warnings
 from collections import Counter
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Annotated, Any, Protocol
 
-from mcp.server.fastmcp import Context, FastMCP
+from mcp import MCPDeprecationWarning
+from mcp.server.mcpserver import Context, MCPServer, Resolve, Sample
+from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import (
     ClientCapabilities,
+    CreateMessageResult,
     SamplingCapability,
     SamplingMessage,
     TextContent,
@@ -167,8 +171,9 @@ LEAN_TOOLS = frozenset({
     "graphify_freshness",
 })
 
-mcp = FastMCP(
-    "graphify",
+mcp = MCPServer(
+    "codegraph",
+    version=__version__,
     instructions=(
         "Graphify knowledge graph tools for understanding a codebase.\n"
         "Recommended flow:\n"
@@ -184,13 +189,6 @@ mcp = FastMCP(
         "analysis tools when you want structured output to chain on."
     ),
 )
-
-# FastMCP doesn't forward a version to the underlying MCP server, so clients
-# would otherwise report the mcp library's version. Surface our own instead.
-try:  # pragma: no cover - guards against private-attr changes upstream
-    mcp._mcp_server.version = __version__
-except Exception:
-    pass
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -375,7 +373,13 @@ def _detect_backend() -> str | None:
 
 
 def _client_supports_sampling(ctx: Context) -> bool:
-    """Capability test: does the connected MCP client offer host-LLM sampling?"""
+    """Capability test: does the connected MCP client offer host-LLM sampling?
+
+    Advertising the sampling capability is sufficient on every protocol
+    revision: naming goes through a `Sample` resolver, which the SDK carries
+    over the legacy in-call back-channel or, on >= 2026-07-28 (where that
+    back-channel is gone), as input-required rounds of the tool call itself.
+    """
     try:
         return ctx.session.check_client_capability(
             ClientCapabilities(sampling=SamplingCapability())
@@ -488,7 +492,7 @@ def _skeleton_lines(file_path: str, prefix: str | None = None) -> list[tuple[str
 # ---------------------------------------------------------------------------
 
 
-@mcp.tool(annotations=ToolAnnotations(title="Build/update graph", destructiveHint=False))
+@mcp.tool(annotations=ToolAnnotations(title="Build/update graph", destructive_hint=False))
 def graphify_build(
     path: str = ".",
     mode: str = "",
@@ -524,7 +528,7 @@ def graphify_build(
     return result
 
 
-@mcp.tool(annotations=ToolAnnotations(title="Query graph", readOnlyHint=True))
+@mcp.tool(annotations=ToolAnnotations(title="Query graph", read_only_hint=True))
 def graphify_query(question: str, dfs: bool = False, budget: int = 0) -> str:
     """Run a natural-language query against the graph.
 
@@ -544,19 +548,19 @@ def graphify_query(question: str, dfs: bool = False, budget: int = 0) -> str:
     return _run_cli(args)
 
 
-@mcp.tool(annotations=ToolAnnotations(title="Path between nodes", readOnlyHint=True))
+@mcp.tool(annotations=ToolAnnotations(title="Path between nodes", read_only_hint=True))
 def graphify_path(node_a: str, node_b: str) -> str:
     """Find the exact path between two nodes (e.g. "DigestAuth" -> "Response")."""
     return _run_cli(["path", node_a, node_b])
 
 
-@mcp.tool(annotations=ToolAnnotations(title="Explain node", readOnlyHint=True))
+@mcp.tool(annotations=ToolAnnotations(title="Explain node", read_only_hint=True))
 def graphify_explain(node: str) -> str:
     """Return everything Graphify knows about a node."""
     return _run_cli(["explain", node])
 
 
-@mcp.tool(annotations=ToolAnnotations(title="Add external source", destructiveHint=False))
+@mcp.tool(annotations=ToolAnnotations(title="Add external source", destructive_hint=False))
 def graphify_add(url: str, author: str = "", contributor: str = "") -> str:
     """Add an external source to the graph (arXiv paper, tweet, etc.). http/https only.
 
@@ -580,7 +584,7 @@ def graphify_add(url: str, author: str = "", contributor: str = "") -> str:
 # ---------------------------------------------------------------------------
 
 
-@mcp.tool(annotations=ToolAnnotations(title="Codebase overview", readOnlyHint=True))
+@mcp.tool(annotations=ToolAnnotations(title="Codebase overview", read_only_hint=True))
 def graphify_overview(top_n: int = 8, as_json: bool = False) -> str:
     """One-shot orientation: call this FIRST.
 
@@ -644,7 +648,7 @@ def graphify_overview(top_n: int = 8, as_json: bool = False) -> str:
     return _fmt(payload, as_json, "\n".join(lines))
 
 
-@mcp.tool(annotations=ToolAnnotations(title="God nodes", readOnlyHint=True))
+@mcp.tool(annotations=ToolAnnotations(title="God nodes", read_only_hint=True))
 def graphify_god_nodes(top_n: int = 10, as_json: bool = False) -> str:
     """List the highest-degree (most connected) 'god nodes'."""
     graph = _load_graph()
@@ -669,7 +673,7 @@ def graphify_god_nodes(top_n: int = 10, as_json: bool = False) -> str:
     return _fmt({"god_nodes": items}, as_json, "\n".join(text))
 
 
-@mcp.tool(annotations=ToolAnnotations(title="Surprise edges", readOnlyHint=True))
+@mcp.tool(annotations=ToolAnnotations(title="Surprise edges", read_only_hint=True))
 def graphify_surprises(limit: int = 20, as_json: bool = False) -> str:
     """List unexpected cross-file/cross-domain connections (surprise edges)."""
     graph = _load_graph()
@@ -701,7 +705,7 @@ def graphify_surprises(limit: int = 20, as_json: bool = False) -> str:
     return _fmt({"surprises": items, "fallback": fallback}, as_json, "\n".join(text))
 
 
-@mcp.tool(annotations=ToolAnnotations(title="Communities", readOnlyHint=True))
+@mcp.tool(annotations=ToolAnnotations(title="Communities", read_only_hint=True))
 def graphify_communities(as_json: bool = False) -> str:
     """Summarize Leiden communities with sizes and sample members."""
     graph = _load_graph()
@@ -724,7 +728,7 @@ def graphify_communities(as_json: bool = False) -> str:
     return _fmt({"communities": items}, as_json, "\n".join(text))
 
 
-@mcp.tool(annotations=ToolAnnotations(title="Sampling/LLM status", readOnlyHint=True))
+@mcp.tool(annotations=ToolAnnotations(title="Sampling/LLM status", read_only_hint=True))
 def graphify_sampling_status(ctx: Context, as_json: bool = False) -> str:
     """Capability test: how can semantic naming be produced in this session?
 
@@ -767,30 +771,14 @@ def graphify_sampling_status(ctx: Context, as_json: bool = False) -> str:
     return _fmt(payload, as_json, text)
 
 
-@mcp.tool(
-    annotations=ToolAnnotations(
-        title="Name communities (host LLM / key)",
-        readOnlyHint=False,
-        destructiveHint=False,
-    )
-)
-async def graphify_label_communities(
-    ctx: Context,
-    method: str = "auto",
-    limit: int = 12,
-    sample_size: int = 18,
-    as_json: bool = False,
-) -> str:
-    """Give the Leiden communities human-readable names.
+def _communities_for_naming(limit: int) -> tuple[list[tuple[Any, list[str]]], int] | str:
+    """Largest-first (community id, member labels) pairs to name, plus the total count.
 
-    Args:
-        method: "auto" -> host-LLM sampling if the client supports it, else a
-            configured backend key (graphify CLI), else "Community N" placeholders.
-            "sampling" -> force host-LLM sampling (no API key needed).
-            "cli" -> force the graphify backend (GEMINI_API_KEY/OPENAI_API_KEY/...
-            or a local ollama). "placeholder" -> no LLM at all.
-        limit: Only the largest `limit` communities are named, to stay cheap.
-        sample_size: Member labels per community handed to the model.
+    Returns an error/notice string when the graph is unavailable or carries no
+    community info. Called from both the Sample resolver and the tool body (the
+    graph read is cached). The ordering is deterministic for a given graph.json,
+    which keeps the sampling prompt identical across input-required retry
+    rounds — a >= 2026-07-28 protocol requirement.
     """
     graph = _load_graph()
     if isinstance(graph, str):
@@ -803,7 +791,125 @@ async def graphify_label_communities(
             comms.setdefault(c, []).append(_node_label(n))
     if not comms:
         return "Nodes carry no community info. Try graphify_build(cluster_only=True)."
-    ordered = sorted(comms.items(), key=lambda kv: -len(kv[1]))[:limit]
+    return sorted(comms.items(), key=lambda kv: -len(kv[1]))[:limit], len(comms)
+
+
+def _naming_request(
+    ordered: list[tuple[Any, list[str]]], sample_size: int
+) -> tuple[list[SamplingMessage], str, int]:
+    """The batched naming request: (messages, system_prompt, max_tokens).
+
+    Shared by the Sample resolver (modern transport) and the tool body's
+    legacy-protocol path so both send byte-identical prompts. One request
+    carries every community (a JSON name map) rather than one request each:
+    required on the modern transport, and a single round-trip on the legacy one.
+    """
+    lines = "\n".join(f"{cid}: {', '.join(m[:sample_size])}" for cid, m in ordered)
+    prompt = (
+        "Name each software module in 2-4 Title Case words from its member symbols. "
+        "Reply with ONLY a JSON object mapping each id to its name, "
+        'e.g. {"0": "Auth Layer", "1": "Graph Engine"}.\n'
+        f"Modules:\n{lines}"
+    )
+    messages = [SamplingMessage(role="user", content=TextContent(type="text", text=prompt))]
+    return messages, "You label code modules with concise Title Case names.", 48 * len(ordered) + 64
+
+
+def _resolve_host_naming(
+    ctx: Context, method: str = "auto", limit: int = 12, sample_size: int = 18
+) -> Sample | None:
+    """Resolver: the batched `sampling/createMessage` where only a resolver can.
+
+    Used solely on protocols without an in-call back-channel (>= 2026-07-28):
+    there the SDK carries the Sample marker as input-required rounds and
+    injects the result as the tool's `host_naming` argument. When the session
+    can send in-call requests (`can_send_request` — the legacy protocols),
+    this returns None and the tool body samples directly instead: that path
+    can catch a failing host model and degrade to placeholder names, which a
+    resolver cannot (Sample has no error arm — a failure would error the whole
+    tool call). Also None when sampling isn't the (potential) method, the
+    client can't sample, or there is nothing to name.
+    """
+    if method not in ("auto", "sampling") or not _client_supports_sampling(ctx):
+        return None
+    if ctx.session.can_send_request:
+        return None
+    got = _communities_for_naming(limit)
+    if isinstance(got, str):
+        return None
+    ordered, _total = got
+    if not ordered:
+        return None
+    messages, system, max_tokens = _naming_request(ordered, sample_size)
+    return Sample(messages, system_prompt=system, max_tokens=max_tokens)
+
+
+def _names_from_sampling(
+    res: CreateMessageResult | None, ordered: list[tuple[Any, list[str]]]
+) -> tuple[dict[Any, str], str]:
+    """Parse the batched naming reply; placeholders + a note for anything unusable."""
+    if not ordered:
+        return {}, ""
+    placeholders = {cid: f"Community {cid}" for cid, _ in ordered}
+    if res is None or not isinstance(res.content, TextContent):
+        return placeholders, "(sampling returned no usable text; placeholder names)"
+    text = res.content.text
+    start, end = text.find("{"), text.rfind("}")  # tolerate ``` fences / prose around
+    if start < 0 or end <= start:
+        return placeholders, "(sampling reply had no JSON object; placeholder names)"
+    try:
+        raw = json.loads(text[start : end + 1])
+    except json.JSONDecodeError:
+        return placeholders, "(sampling reply was not valid JSON; placeholder names)"
+    names: dict[Any, str] = {}
+    missing = 0
+    for cid, _members in ordered:
+        val = raw.get(str(cid)) if isinstance(raw, dict) else None
+        name = str(val).strip().strip('".') if val is not None else ""
+        if not name:
+            name = f"Community {cid}"
+            missing += 1
+        names[cid] = name
+    note = f"({missing} name(s) missing from the reply; placeholders kept)" if missing else ""
+    return names, note
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        title="Name communities (host LLM / key)",
+        read_only_hint=False,
+        destructive_hint=False,
+    )
+)
+async def graphify_label_communities(
+    ctx: Context,
+    method: str = "auto",
+    limit: int = 12,
+    sample_size: int = 18,
+    as_json: bool = False,
+    # Framework-filled (absent from the tool's input schema): the batched
+    # host-LLM naming result, or None when sampling doesn't apply. Keyword-only
+    # with NO default on purpose: a `= None` default makes Python 3.10's
+    # get_type_hints wrap the annotation in an implicit Optional, burying the
+    # Resolve marker in a union — which the SDK rejects with InvalidSignature.
+    *,
+    host_naming: Annotated[CreateMessageResult | None, Resolve(_resolve_host_naming)],
+) -> str:
+    """Give the Leiden communities human-readable names.
+
+    Args:
+        method: "auto" -> host-LLM sampling if the client supports it, else a
+            configured backend key (graphify CLI), else "Community N" placeholders.
+            "sampling" -> force host-LLM sampling (no API key needed).
+            "cli" -> force the graphify backend (GEMINI_API_KEY/OPENAI_API_KEY/...
+            or a local ollama). "placeholder" -> no LLM at all.
+        limit: Only the largest `limit` communities are named, to stay cheap.
+        sample_size: Member labels per community handed to the model.
+    """
+    got = _communities_for_naming(limit)
+    if isinstance(got, str):
+        return got
+    ordered, total = got
 
     sampling_ok = _client_supports_sampling(ctx)
     chosen = method
@@ -825,27 +931,26 @@ async def graphify_label_communities(
                 "no key/sampling needed), use method='cli' with a backend key/ollama, or "
                 "call graphify_sampling_status() for the options."
             )
-        for cid, members in ordered:
-            prompt = (
-                "Name this software module in 2-4 words from its members. "
-                "Reply with ONLY the title.\nMembers: " + ", ".join(members[:sample_size])
-            )
+        fail_note = ""
+        if host_naming is None and ordered and ctx.session.can_send_request:
+            # Legacy protocol: sample from the body, where a failing host model
+            # can be caught and degraded — the Sample resolver path can't (no
+            # error arm), and on >= 2026-07-28 no in-call request is possible
+            # at all, so the resolver already handled that case.
+            messages, system, max_tokens = _naming_request(ordered, sample_size)
             try:
-                res = await ctx.session.create_message(
-                    messages=[
-                        SamplingMessage(
-                            role="user",
-                            content=TextContent(type="text", text=prompt),
-                        )
-                    ],
-                    system_prompt="You label code modules with a concise Title Case name.",
-                    max_tokens=24,
-                )
-                txt = res.content.text if isinstance(res.content, TextContent) else str(res.content)
-                names[cid] = txt.strip().strip('".') or f"Community {cid}"
-            except Exception as e:  # noqa: BLE001 - degrade per-community, keep going
-                names[cid] = f"Community {cid}"
-                note = f"(some names fell back: {type(e).__name__})"
+                with warnings.catch_warnings():
+                    # Deliberate legacy-only use of the deprecated API; modern
+                    # protocols go through the Sample resolver instead.
+                    warnings.simplefilter("ignore", MCPDeprecationWarning)
+                    host_naming = await ctx.session.create_message(
+                        messages=messages, system_prompt=system, max_tokens=max_tokens
+                    )
+            except Exception as e:  # noqa: BLE001 - degrade, keep the tool alive
+                fail_note = f"(sampling failed: {type(e).__name__}; placeholder names)"
+        names, note = _names_from_sampling(host_naming, ordered)
+        if fail_note:
+            note = fail_note
     elif chosen == "cli":
         out = _run_cli(["label", str(config.PROJECT_DIR)])
         if out.startswith("ERROR"):
@@ -867,11 +972,11 @@ async def graphify_label_communities(
         "method": chosen,
         "host_sampling_supported": sampling_ok,
         "labeled": len(items),
-        "total_communities": len(comms),
+        "total_communities": total,
         "communities": items,
     }
     head = (
-        f"Named the {len(items)} largest of {len(comms)} communities via '{chosen}'"
+        f"Named the {len(items)} largest of {total} communities via '{chosen}'"
         + (f" {note}" if note else "")
         + ":"
     )
@@ -887,7 +992,7 @@ async def graphify_label_communities(
     return _fmt(payload, as_json, "\n".join(text))
 
 
-@mcp.tool(annotations=ToolAnnotations(title="Set community names", destructiveHint=False))
+@mcp.tool(annotations=ToolAnnotations(title="Set community names", destructive_hint=False))
 def graphify_set_labels(
     names: dict[str, str], regenerate: bool = True, as_json: bool = False
 ) -> str:
@@ -966,7 +1071,7 @@ def graphify_set_labels(
     return _fmt(payload, as_json, "\n".join(lines))
 
 
-@mcp.tool(annotations=ToolAnnotations(title="Search nodes", readOnlyHint=True))
+@mcp.tool(annotations=ToolAnnotations(title="Search nodes", read_only_hint=True))
 def graphify_search(pattern: str, limit: int = 25, as_json: bool = False) -> str:
     """Search nodes by text in their name/label (case-insensitive)."""
     graph = _load_graph()
@@ -993,7 +1098,7 @@ def graphify_search(pattern: str, limit: int = 25, as_json: bool = False) -> str
     return _fmt({"matches": items, "total": len(hits)}, as_json, "\n".join(text))
 
 
-@mcp.tool(annotations=ToolAnnotations(title="Node neighbors", readOnlyHint=True))
+@mcp.tool(annotations=ToolAnnotations(title="Node neighbors", read_only_hint=True))
 def graphify_neighbors(node: str, as_json: bool = False) -> str:
     """List the direct (1-hop) neighbors of a node, with relations."""
     graph = _load_graph()
@@ -1012,7 +1117,7 @@ def graphify_neighbors(node: str, as_json: bool = False) -> str:
     return _fmt({"node": _node_label(n), "neighbors": neigh}, as_json, "\n".join(text))
 
 
-@mcp.tool(annotations=ToolAnnotations(title="Token-budgeted subgraph", readOnlyHint=True))
+@mcp.tool(annotations=ToolAnnotations(title="Token-budgeted subgraph", read_only_hint=True))
 def graphify_subgraph(
     node: str, hops: int = 2, budget_tokens: int = 1500, as_json: bool = False
 ) -> str:
@@ -1065,7 +1170,7 @@ def graphify_subgraph(
     return _fmt(payload, as_json, "\n".join(text))
 
 
-@mcp.tool(annotations=ToolAnnotations(title="Impact / blast radius", readOnlyHint=True))
+@mcp.tool(annotations=ToolAnnotations(title="Impact / blast radius", read_only_hint=True))
 def graphify_impact(
     node: str,
     direction: str = "dependents",
@@ -1162,7 +1267,7 @@ def graphify_impact(
     return _fmt(payload, as_json, text)
 
 
-@mcp.tool(annotations=ToolAnnotations(title="Locate + structural context", readOnlyHint=True))
+@mcp.tool(annotations=ToolAnnotations(title="Locate + structural context", read_only_hint=True))
 def graphify_locate(
     query: str,
     top_k: int = 3,
@@ -1178,7 +1283,7 @@ def graphify_locate(
     semantically-similar code elsewhere — flagging `hidden_links`: cousins that
     are similar but NOT structurally connected to the seed (duplication /
     missing-abstraction / implicit-coupling candidates). Needs the optional
-    `semble` extra: pip install 'graphify-mcp[semble]'.
+    `semble` extra: pip install 'codegraph-mcp[semble]'.
     """
     graph = _load_graph()
     if isinstance(graph, str):
@@ -1189,7 +1294,7 @@ def graphify_locate(
     if index is None:
         return (
             "ERROR: graphify_locate needs the optional 'semble' extra. "
-            "Install with: pip install 'graphify-mcp[semble]'."
+            "Install with: pip install 'codegraph-mcp[semble]'."
         )
     hits = index.search(query, top_k=top_k)
     if not hits:
@@ -1306,7 +1411,7 @@ def graphify_locate(
     return _fmt(payload, as_json, "\n".join(text))
 
 
-@mcp.tool(annotations=ToolAnnotations(title="Duplication scan", readOnlyHint=True))
+@mcp.tool(annotations=ToolAnnotations(title="Duplication scan", read_only_hint=True))
 def graphify_duplication_scan(
     node_budget: int = 50,
     related_k: int = 8,
@@ -1344,7 +1449,7 @@ def graphify_duplication_scan(
     if index is None:
         return (
             "ERROR: graphify_duplication_scan needs the optional 'semble' extra. "
-            "Install with: pip install 'graphify-mcp[semble]'."
+            "Install with: pip install 'codegraph-mcp[semble]'."
         )
     labels = {_node_id(x): _node_label(x) for x in nodes}
     adj = _adjacency(edges)
@@ -1415,7 +1520,7 @@ def graphify_duplication_scan(
     return _fmt(payload, as_json, "\n".join(lines))
 
 
-@mcp.tool(annotations=ToolAnnotations(title="Node details", readOnlyHint=True))
+@mcp.tool(annotations=ToolAnnotations(title="Node details", read_only_hint=True))
 def graphify_node_details(node: str, as_json: bool = False) -> str:
     """Show a node's full metadata: type, source file/line, docstring, community."""
     graph = _load_graph()
@@ -1455,7 +1560,7 @@ def graphify_node_details(node: str, as_json: bool = False) -> str:
     return _fmt(detail, as_json, "\n".join(text))
 
 
-@mcp.tool(annotations=ToolAnnotations(title="Fetch node source", readOnlyHint=True))
+@mcp.tool(annotations=ToolAnnotations(title="Fetch node source", read_only_hint=True))
 def graphify_fetch(
     nodes: list[str],
     context_lines: int = 0,
@@ -1575,7 +1680,7 @@ def graphify_fetch(
     return _fmt(payload, as_json, text)
 
 
-@mcp.tool(annotations=ToolAnnotations(title="Signature skeleton", readOnlyHint=True))
+@mcp.tool(annotations=ToolAnnotations(title="Signature skeleton", read_only_hint=True))
 def graphify_skeleton(
     file: str = "",
     node: str = "",
@@ -1709,7 +1814,7 @@ def _ast_equivalent_refs(path_a: str, ref_a: str, path_b: str, ref_b: str) -> bo
     return _structurally_equal(path_b, old_src, new_src)
 
 
-@mcp.tool(annotations=ToolAnnotations(title="Graph freshness", readOnlyHint=True))
+@mcp.tool(annotations=ToolAnnotations(title="Graph freshness", read_only_hint=True))
 def graphify_freshness(as_json: bool = False) -> str:
     """Check whether graph.json is stale relative to the current git HEAD.
 
@@ -1874,7 +1979,7 @@ def graphify_freshness(as_json: bool = False) -> str:
     return _fmt(payload, as_json, text)
 
 
-@mcp.tool(annotations=ToolAnnotations(title="Structural diff", readOnlyHint=True))
+@mcp.tool(annotations=ToolAnnotations(title="Structural diff", read_only_hint=True))
 def graphify_diff(
     ref_a: str = "HEAD~1",
     ref_b: str = "HEAD",
@@ -1976,7 +2081,7 @@ def graphify_diff(
 
 @mcp.tool(
     annotations=ToolAnnotations(
-        title="Prune phantom nodes", readOnlyHint=False, destructiveHint=True
+        title="Prune phantom nodes", read_only_hint=False, destructive_hint=True
     )
 )
 def graphify_prune(dry_run: bool = True, as_json: bool = False) -> str:
@@ -2067,7 +2172,7 @@ def graphify_prune(dry_run: bool = True, as_json: bool = False) -> str:
     return _fmt(payload, as_json, "\n".join(lines))
 
 
-@mcp.tool(annotations=ToolAnnotations(title="Validate graph", readOnlyHint=True))
+@mcp.tool(annotations=ToolAnnotations(title="Validate graph", read_only_hint=True))
 def graphify_validate(limit: int = 15, as_json: bool = False) -> str:
     """Lint graph.json for structural problems (read-only).
 
@@ -2150,7 +2255,7 @@ def graphify_validate(limit: int = 15, as_json: bool = False) -> str:
     return _fmt(payload, as_json, text)
 
 
-@mcp.tool(annotations=ToolAnnotations(title="Dependency cycles", readOnlyHint=True))
+@mcp.tool(annotations=ToolAnnotations(title="Dependency cycles", read_only_hint=True))
 def graphify_cycles(max_cycles: int = 20, as_json: bool = False) -> str:
     """Detect circular dependencies (strongly-connected components) in the graph.
 
@@ -2239,7 +2344,7 @@ _API_SURFACE_NOTE = (
 )
 
 
-@mcp.tool(annotations=ToolAnnotations(title="External package API surface", readOnlyHint=True))
+@mcp.tool(annotations=ToolAnnotations(title="External package API surface", read_only_hint=True))
 def graphify_package_apis(package: str = "", limit: int = 20, as_json: bool = False) -> str:
     """Symbol-level external API surface: which names each package is actually used for.
 
@@ -2468,6 +2573,29 @@ def explain_flow(flow: str) -> str:
     )
 
 
+def _transport_security() -> TransportSecuritySettings | None:
+    """GRAPHIFY_ALLOWED_HOSTS -> the SDK's DNS-rebinding settings, or None.
+
+    Unset returns None, i.e. the SDK default: protection auto-enabled with a
+    loopback-only Host allowlist whenever the server binds a loopback host.
+    That default rejects reverse-proxied requests whose Host header wasn't
+    rewritten (e.g. nginx on a public name proxying to 127.0.0.1), so:
+    "*" disables the protection entirely (for a trusted proxy in front), and a
+    comma-separated list allowlists those hosts — entries may carry ports,
+    ":*" port wildcards included — plus their derived http/https origins.
+    """
+    raw = os.environ.get("GRAPHIFY_ALLOWED_HOSTS", "").strip()
+    if not raw:
+        return None
+    if raw == "*":
+        return TransportSecuritySettings(enable_dns_rebinding_protection=False)
+    hosts = [h.strip() for h in raw.split(",") if h.strip()]
+    origins = [f"http://{h}" for h in hosts] + [f"https://{h}" for h in hosts]
+    return TransportSecuritySettings(
+        enable_dns_rebinding_protection=True, allowed_hosts=hosts, allowed_origins=origins
+    )
+
+
 def _bearer_auth_asgi(app: Any, api_key: str) -> Any:
     """Wrap an ASGI app to require ``Authorization: Bearer <api_key>``.
 
@@ -2611,7 +2739,7 @@ def _start_watch() -> Any:
     except ImportError:
         print(
             "GRAPHIFY_WATCH is set but the 'watchdog' extra isn't installed; "
-            "install with: pip install 'graphify-mcp[watch]'.",
+            "install with: pip install 'codegraph-mcp[watch]'.",
             file=sys.stderr,
         )
         return None
@@ -2632,7 +2760,7 @@ def _start_watch() -> Any:
             if paths:
                 watcher.maybe_trigger(paths)
         except Exception as e:  # noqa: BLE001 - a background regraph must never crash the server
-            print(f"graphify-mcp watch: regraph failed ({type(e).__name__}: {e})", file=sys.stderr)
+            print(f"codegraph-mcp watch: regraph failed ({type(e).__name__}: {e})", file=sys.stderr)
 
     class _Handler(FileSystemEventHandler):  # type: ignore[misc]
         def on_any_event(self, event: Any) -> None:
@@ -2653,7 +2781,7 @@ def _start_watch() -> Any:
     observer.daemon = True
     observer.start()
     print(
-        f"graphify-mcp watch: watching {config.PROJECT_DIR} "
+        f"codegraph-mcp watch: watching {config.PROJECT_DIR} "
         f"(structural changes -> graphify_build update; debounce {debounce}s)",
         file=sys.stderr,
         flush=True,
@@ -2671,17 +2799,19 @@ def main() -> None:
     GRAPHIFY_API_KEY to require bearer auth on HTTP; GRAPHIFY_TOOLSET=lean trims the
     surface to the core exploration tools. GRAPHIFY_WATCH=1 starts a background watcher
     that re-syncs the graph on structural source changes (needs the [watch] extra).
+    GRAPHIFY_ALLOWED_HOSTS tunes the SDK's DNS-rebinding Host allowlist ("*" disables
+    it) — needed when a reverse proxy in front doesn't rewrite the Host header.
     """
     _apply_toolset()
     _start_watch()  # no-op unless GRAPHIFY_WATCH is set
     is_http = TRANSPORT in ("streamable-http", "http", "sse")
     transport = ("sse" if TRANSPORT == "sse" else "streamable-http") if is_http else "stdio"
-    # Boot banner. `graphifyy` ships a same-named embedded server, so logging our
-    # own name + version + transport here makes it unmistakable from the start
-    # which server (and which project dir) a client actually connected to.
+    # Boot banner: name + version + transport + project dir, so it's clear from
+    # the first stderr line which server and project a client connected to
+    # (graphify's own embedded MCP server is a common neighbor in configs).
     where = f" {HTTP_HOST}:{HTTP_PORT}" if is_http else ""
     print(
-        f"graphify-mcp v{__version__} | transport={transport}{where} | "
+        f"codegraph-mcp v{__version__} | transport={transport}{where} | "
         f"toolset={TOOLSET} | project={config.PROJECT_DIR}",
         file=sys.stderr,
         flush=True,
@@ -2689,12 +2819,18 @@ def main() -> None:
     if is_http:
         global RESTRICT_PATHS
         RESTRICT_PATHS = True
-        mcp.settings.host = HTTP_HOST
-        mcp.settings.port = HTTP_PORT
+        security = _transport_security()
         if API_KEY:
             import uvicorn
 
-            base = mcp.sse_app() if transport == "sse" else mcp.streamable_http_app()
+            # host= must match the uvicorn bind host: the SDK auto-enables DNS
+            # rebinding protection (Host-header allowlist) for loopback hosts,
+            # and a mismatched default would reject legitimate remote clients.
+            base = (
+                mcp.sse_app(host=HTTP_HOST, transport_security=security)
+                if transport == "sse"
+                else mcp.streamable_http_app(host=HTTP_HOST, transport_security=security)
+            )
             app = _bearer_auth_asgi(base, API_KEY)
             uvicorn.run(
                 app, host=HTTP_HOST, port=HTTP_PORT,
@@ -2708,7 +2844,12 @@ def main() -> None:
                     "GRAPHIFY_API_KEY to require bearer auth.",
                     file=sys.stderr,
                 )
-            mcp.run(transport="sse" if TRANSPORT == "sse" else "streamable-http")
+            mcp.run(
+                transport="sse" if TRANSPORT == "sse" else "streamable-http",
+                host=HTTP_HOST,
+                port=HTTP_PORT,
+                transport_security=security,
+            )
     else:
         mcp.run(transport="stdio")
 
