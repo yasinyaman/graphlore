@@ -4,7 +4,7 @@ Web-framework routing is a graph edge no AST extractor emits: the URL pattern
 lives in a decorator or a registration call, the handler is an ordinary
 function, and the "this URL hits that code" link exists only in the framework's
 conventions. This module recognizes the common registration idioms so
-``graphify_routes`` can answer "where is this endpoint" in one hop.
+``graphlore_routes`` can answer "where is this endpoint" in one hop.
 
 Recognized idioms (v1):
   * **Python** (stdlib ``ast``): Flask ``@app.route("/x", methods=[...])``,

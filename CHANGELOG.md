@@ -12,6 +12,14 @@ All notable changes to this project are documented here. The format is based on
   project `graphify-mcp`; they now say `codegraph-mcp`.
 
 ### Changed
+- **Tool surface renamed: `graphify_*` → `graphlore_*`** (and the resources
+  `graphify://…` → `graphlore://…`), completing the package rename below so
+  the commands an assistant sees carry the product's own name. All 28 tools
+  are affected (`graphlore_locate`, `graphlore_build`, …); the bundled
+  explore skill moved to `graphlore-explore` accordingly. `GRAPHIFY_*`
+  environment variables and the `graphify-out/` output directory are
+  intentionally unchanged — they configure/name artifacts of the wrapped
+  Graphify CLI (`graphifyy`), not this package.
 - **Project renamed: `graphify-mcp` → `graphlore`** (before any PyPI release,
   so no published users are affected). The Python module is now `graphlore`,
   the MCP server announces itself as `graphlore`, and the console script is
@@ -21,9 +29,7 @@ All notable changes to this project are documented here. The format is based on
   GitHub URLs redirect. (An intermediate rename to `codegraph-mcp` lived for
   a day and was dropped: "codegraph" is already crowded in the MCP niche —
   codegraph-ai/CodeGraph, two GitHub repos literally named codegraph-mcp,
-  plus codegraph and codegraph-mcp-server on PyPI.) Tool names (`graphify_*`)
-  and `GRAPHIFY_*` environment variables are intentionally unchanged — they
-  name the wrapped Graphify backend, not this package.
+  plus codegraph and codegraph-mcp-server on PyPI.)
 - **Upgraded to MCP Python SDK v2** (`mcp>=2.1,<3.0`, was `>=1.26,<2.0`). The
   server now builds on `mcp.server.mcpserver.MCPServer` (v1's `FastMCP`); tool
   and prompt surfaces are unchanged. Notable internals:
@@ -35,7 +41,7 @@ All notable changes to this project are documented here. The format is based on
     port=...)`, `streamable_http_app(host=...)`) — v2 removed
     `settings.host/port`. The `host=` passed to the app factories also feeds the
     SDK's DNS-rebinding protection, which auto-enables on loopback hosts.
-  - Host-LLM sampling (`graphify_label_communities`, `graphify_sampling_status`)
+  - Host-LLM sampling (`graphlore_label_communities`, `graphlore_sampling_status`)
     now names all communities in **one batched** `sampling/createMessage`
     request (a JSON name map) instead of one request per community, and picks
     its transport per protocol: on 2026-07-28+ (no in-call back-channel) a v2
@@ -51,7 +57,7 @@ All notable changes to this project are documented here. The format is based on
     `create_connected_server_and_client_session` helper is gone).
 
 ### Added
-- `code_only` flag on `graphify_build` — appends the CLI's `--code-only`, so a
+- `code_only` flag on `graphlore_build` — appends the CLI's `--code-only`, so a
   repo containing doc/paper/image files can be indexed via local AST with no
   LLM API key (those files otherwise demand semantic extraction and the build
   errors without a key).
@@ -70,7 +76,7 @@ All notable changes to this project are documented here. The format is based on
   artifact — and the README / `docs/benchmark*.html` cross-language tables now
   carry a "Calls (locate vs naive)" column (89–95% fewer calls; span-join
   percentages follow the overload-family re-count above).
-- **`graphify_routes`** — framework route → handler table: which URL patterns
+- **`graphlore_routes`** — framework route → handler table: which URL patterns
   hit which code, each row joined back to its graph node and qualified name
   (`GET /items/{id} -> read_item (app.py:5)`). Recognizes the common
   registration idioms per language — Python: Flask `@app.route` /
@@ -90,14 +96,14 @@ All notable changes to this project are documented here. The format is based on
   per-(path, mtime) cache and a public `routes_for_source(src, rel)` seam,
   mirroring `apis.py`.
 - **`GRAPHIFY_TOOLSET=locate`** — a minimal, mega-tool-style surface of five
-  tools: `graphify_locate` (the one-call orient), `graphify_fetch` (map → code),
-  plus `graphify_overview` / `graphify_build` / `graphify_freshness` to stay
+  tools: `graphlore_locate` (the one-call orient), `graphlore_fetch` (map → code),
+  plus `graphlore_overview` / `graphlore_build` / `graphlore_freshness` to stay
   oriented and in sync. Inspired by single-tool code-graph servers where a
   smaller surface measurably improves tool selection. Needs a semantic backend
   (the `[semble]` extra or `GRAPHIFY_SEMANTIC_BACKEND`); without one the server
   falls back to the lean surface with a stderr warning instead of advertising a
-  locate tool that can only return an install hint. `graphify_overview` now
-  suggests `graphify_locate(...)` first whenever it is on the active surface, so
+  locate tool that can only return an install hint. `graphlore_overview` now
+  suggests `graphlore_locate(...)` first whenever it is on the active surface, so
   the trimmed mode keeps a non-empty `suggested_next`.
 - `GRAPHIFY_ALLOWED_HOSTS` — Host-header allowlist for the HTTP transports'
   DNS-rebinding protection (comma-separated, `:*` port wildcards; `*` disables
@@ -105,7 +111,7 @@ All notable changes to this project are documented here. The format is based on
   allowlist when the server binds a loopback host, which rejects
   reverse-proxied requests whose `Host` wasn't rewritten; this variable is the
   escape hatch (v1 enforced no Host check).
-- `graphify_package_apis` — symbol-level external API surface: which names each
+- `graphlore_package_apis` — symbol-level external API surface: which names each
   external package is actually used for ("uses `Depends`, `APIRouter` from
   fastapi", not just "imports fastapi"), the input a version-upgrade audit needs.
   Captures from-imports and attribute access through import aliases
@@ -119,19 +125,19 @@ All notable changes to this project are documented here. The format is based on
   consumers (importable from the package root): the same extraction on a source
   blob you already hold, with no file IO / caching / project-dir confinement.
   The underscore-prefixed extractors behind it remain internal.
-- Seven new analysis tools: `graphify_impact` (reverse-dependency blast radius,
-  ordered by hop distance), `graphify_duplication_scan` (repo-wide hidden-link
+- Seven new analysis tools: `graphlore_impact` (reverse-dependency blast radius,
+  ordered by hop distance), `graphlore_duplication_scan` (repo-wide hidden-link
   audit — semantically similar but structurally distant pairs),
-  `graphify_fetch` (hydrate a node's source, token-capped), `graphify_skeleton`
-  (def/class signatures with bodies stripped), `graphify_diff` (file-level
+  `graphlore_fetch` (hydrate a node's source, token-capped), `graphlore_skeleton`
+  (def/class signatures with bodies stripped), `graphlore_diff` (file-level
   structural changeset between two git refs, cosmetic-only changes separated),
-  `graphify_prune` (drop phantom nodes for deleted/renamed files — the surgical
-  alternative to a rebuild, `dry_run` preview), and `graphify_cycles`
+  `graphlore_prune` (drop phantom nodes for deleted/renamed files — the surgical
+  alternative to a rebuild, `dry_run` preview), and `graphlore_cycles`
   (Tarjan-SCC dependency cycles).
 - Pluggable semantic backend: `GRAPHIFY_SEMANTIC_BACKEND` selects `semble`
   (offline default) or any `module.path:Factory` implementing the
-  `SemanticIndex` protocol (`search`/`find_related`); `graphify_locate` and
-  `graphify_duplication_scan` dispatch through it.
+  `SemanticIndex` protocol (`search`/`find_related`); `graphlore_locate` and
+  `graphlore_duplication_scan` dispatch through it.
 - Opt-in filesystem watcher: `GRAPHIFY_WATCH=1` re-syncs the graph on
   structural source changes (cosmetic edits ignored), debounced via
   `GRAPHIFY_WATCH_DEBOUNCE`; ships as the optional `[watch]` extra (watchdog).

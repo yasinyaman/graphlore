@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Multi-language validation benchmark for graphlore.
 
-Proves the tree-sitter span join (graphify_locate) and the cosmetic-vs-structural
+Proves the tree-sitter span join (graphlore_locate) and the cosmetic-vs-structural
 freshness check on REAL HTTP-client repos in JS/TS, Go and Java — the same kind of
 queries the Python/httpx benchmark uses.
 
@@ -192,7 +192,7 @@ def measure_repo(repo) -> dict:
                 contained += 1
             elif r is None:
                 no_span += 1
-        data = json.loads(s.graphify_locate(q, as_json=True))
+        data = json.loads(s.graphlore_locate(q, as_json=True))
         seed = data.get("seed") or {}
         if seed:
             seeds += 1
@@ -201,7 +201,7 @@ def measure_repo(repo) -> dict:
         hidden_total += len(data.get("hidden_links") or [])
 
     # token spot-check: locate map vs naive grep+read for one query
-    locate_txt = s.graphify_locate(repo["spotcheck"])
+    locate_txt = s.graphlore_locate(repo["spotcheck"])
     locate_tokens = max(1, len(locate_txt) // 4)
     grep_files = subprocess.run(
         ["grep", "-rli", "--include", f"*{repo['ext']}", repo["grep"], "."],

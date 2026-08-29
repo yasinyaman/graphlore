@@ -5,46 +5,46 @@ Wraps graphify (https://graphify.net) so an AI assistant can query the
 codebase knowledge graph during development.
 
 CLI-backed tools:
-  - graphify_build      : build / update the graph from a folder
-  - graphify_query      : natural-language graph query
-  - graphify_path       : path between two nodes
-  - graphify_explain    : full explanation of a single node
-  - graphify_add        : add an external source by URL (paper, tweet)
+  - graphlore_build      : build / update the graph from a folder
+  - graphlore_query      : natural-language graph query
+  - graphlore_path       : path between two nodes
+  - graphlore_explain    : full explanation of a single node
+  - graphlore_add        : add an external source by URL (paper, tweet)
 
 graph.json analysis tools (no CLI needed):
-  - graphify_overview   : one-shot orientation (call this first)
-  - graphify_locate     : semantic search (semble) -> enclosing node -> token-budgeted
+  - graphlore_overview   : one-shot orientation (call this first)
+  - graphlore_locate     : semantic search (semble) -> enclosing node -> token-budgeted
                           subgraph + hidden_links  [needs the optional [semble] extra]
-  - graphify_duplication_scan: repo-wide hidden-link / duplication audit  [needs [semble]]
-  - graphify_god_nodes  : highest-degree nodes
-  - graphify_surprises  : unexpected cross-domain connections
-  - graphify_communities: Leiden community summaries
-  - graphify_search     : node name/label search
-  - graphify_neighbors  : 1-hop neighbors of a node
-  - graphify_subgraph   : token-budgeted BFS subgraph around a node
-  - graphify_impact     : reverse-dependency / blast-radius (what breaks if this changes)
-  - graphify_node_details: node detail with source file/line refs
-  - graphify_fetch       : hydrate nodes into their real source code (token-budgeted)
-  - graphify_skeleton    : def/class signatures (bodies stripped) for a file/node/community
-  - graphify_freshness  : is the graph stale vs git HEAD? (cosmetic-vs-structural aware)
-  - graphify_diff       : structural changeset between two git refs (file-level)
-  - graphify_prune      : drop phantom nodes for deleted/renamed source files
-  - graphify_validate   : lint graph.json (dangling / duplicate / self-loop / orphan)
-  - graphify_cycles     : circular dependencies (SCCs) in the directed graph
-  - graphify_package_apis: symbol-level external API surface (which names each
+  - graphlore_duplication_scan: repo-wide hidden-link / duplication audit  [needs [semble]]
+  - graphlore_god_nodes  : highest-degree nodes
+  - graphlore_surprises  : unexpected cross-domain connections
+  - graphlore_communities: Leiden community summaries
+  - graphlore_search     : node name/label search
+  - graphlore_neighbors  : 1-hop neighbors of a node
+  - graphlore_subgraph   : token-budgeted BFS subgraph around a node
+  - graphlore_impact     : reverse-dependency / blast-radius (what breaks if this changes)
+  - graphlore_node_details: node detail with source file/line refs
+  - graphlore_fetch       : hydrate nodes into their real source code (token-budgeted)
+  - graphlore_skeleton    : def/class signatures (bodies stripped) for a file/node/community
+  - graphlore_freshness  : is the graph stale vs git HEAD? (cosmetic-vs-structural aware)
+  - graphlore_diff       : structural changeset between two git refs (file-level)
+  - graphlore_prune      : drop phantom nodes for deleted/renamed source files
+  - graphlore_validate   : lint graph.json (dangling / duplicate / self-loop / orphan)
+  - graphlore_cycles     : circular dependencies (SCCs) in the directed graph
+  - graphlore_package_apis: symbol-level external API surface (which names each
                           package is actually used for — upgrade-audit input)
-  - graphify_routes     : framework route -> handler table (FastAPI/Flask/Django,
+  - graphlore_routes     : framework route -> handler table (FastAPI/Flask/Django,
                           Express/NestJS, gin/chi/net-http, Spring)
 
 Community naming:
-  - graphify_label_communities : name Leiden clusters (host-LLM sampling / backend key)
-  - graphify_sampling_status   : report which naming options are available
-  - graphify_set_labels        : assistant-pushed {id: name} (no key, no sampling)
+  - graphlore_label_communities : name Leiden clusters (host-LLM sampling / backend key)
+  - graphlore_sampling_status   : report which naming options are available
+  - graphlore_set_labels        : assistant-pushed {id: name} (no key, no sampling)
 
 Resources:
-  - graphify://report          : GRAPH_REPORT.md
-  - graphify://graph           : graph.json
-  - graphify://community/{id}  : per-community wiki
+  - graphlore://report          : GRAPH_REPORT.md
+  - graphlore://graph           : graph.json
+  - graphlore://community/{id}  : per-community wiki
 
 Prompts:
   - onboard      : orient an assistant to the codebase
@@ -149,7 +149,7 @@ __version__ = "0.2.0"
 GRAPHIFY_BIN = os.environ.get("GRAPHIFY_BIN", "graphify")
 CLI_TIMEOUT = int(os.environ.get("GRAPHIFY_TIMEOUT", "600"))
 
-# Opt-in: confine graphify_build's `path` to config.PROJECT_DIR. Off by default so the
+# Opt-in: confine graphlore_build's `path` to config.PROJECT_DIR. Off by default so the
 # documented absolute/sibling-repo path keeps working; force-enabled for HTTP.
 RESTRICT_PATHS = os.environ.get("GRAPHIFY_RESTRICT_PATHS", "").lower() in ("1", "true", "yes")
 
@@ -169,18 +169,18 @@ API_KEY = os.environ.get("GRAPHIFY_API_KEY", "")
 TOOLSET = os.environ.get("GRAPHIFY_TOOLSET", "full").strip().lower()
 # A coherent, mostly dependency-free core that still supports the whole documented
 # flow: build -> orient (overview) -> find (search) -> traverse (subgraph/
-# neighbors) -> jump to source (node_details). graphify_locate is included too but
+# neighbors) -> jump to source (node_details). graphlore_locate is included too but
 # needs the optional [semble] extra, so _effective_lean_tools drops it when absent.
 LEAN_TOOLS = frozenset({
-    "graphify_build",
-    "graphify_overview",
-    "graphify_locate",
-    "graphify_search",
-    "graphify_neighbors",
-    "graphify_subgraph",
-    "graphify_node_details",
-    "graphify_communities",
-    "graphify_freshness",
+    "graphlore_build",
+    "graphlore_overview",
+    "graphlore_locate",
+    "graphlore_search",
+    "graphlore_neighbors",
+    "graphlore_subgraph",
+    "graphlore_node_details",
+    "graphlore_communities",
+    "graphlore_freshness",
 })
 # Mega-tool-style surface: one way in (locate), one way to the code (fetch), plus
 # the minimum to stay oriented and in sync. Requires a semantic backend — without
@@ -188,11 +188,11 @@ LEAN_TOOLS = frozenset({
 # _effective_toolset_tools) rather than advertising a locate tool that can only
 # return an install hint.
 LOCATE_TOOLS = frozenset({
-    "graphify_locate",
-    "graphify_fetch",
-    "graphify_overview",
-    "graphify_build",
-    "graphify_freshness",
+    "graphlore_locate",
+    "graphlore_fetch",
+    "graphlore_overview",
+    "graphlore_build",
+    "graphlore_freshness",
 })
 # None = no trim (full surface). Unknown GRAPHIFY_TOOLSET values behave as full.
 TOOLSETS: dict[str, frozenset[str] | None] = {
@@ -207,15 +207,15 @@ mcp = MCPServer(
     instructions=(
         "Graphify knowledge graph tools for understanding a codebase.\n"
         "Recommended flow:\n"
-        "  1. Call graphify_overview first for orientation.\n"
-        "  2. To find code by what it DOES, call graphify_locate('<natural-language "
+        "  1. Call graphlore_overview first for orientation.\n"
+        "  2. To find code by what it DOES, call graphlore_locate('<natural-language "
         "question>') — one call returns the enclosing node, its token-budgeted "
         "subgraph, and hidden_links (similar-but-disconnected code).\n"
-        "  3. Otherwise use graphify_subgraph / graphify_neighbors / graphify_query "
+        "  3. Otherwise use graphlore_subgraph / graphlore_neighbors / graphlore_query "
         "for targeted, token-cheap exploration around a node or question.\n"
-        "  4. graphify_build (with update=True) re-syncs after code changes.\n"
+        "  4. graphlore_build (with update=True) re-syncs after code changes.\n"
         "Most analysis tools read graph.json directly and are read-only; only "
-        "graphify_build and graphify_add modify state. Pass as_json=True on "
+        "graphlore_build and graphlore_add modify state. Pass as_json=True on "
         "analysis tools when you want structured output to chain on."
     ),
 )
@@ -314,7 +314,7 @@ def _git(args: list[str]) -> str | None:
 
 def _graph_age() -> str | None:
     """Lightweight 'how stale is the graph' note for embedding in frequent tool
-    outputs, so staleness is visible even without a separate graphify_freshness
+    outputs, so staleness is visible even without a separate graphlore_freshness
     call. Git-only and cheap (no AST/structural diff). Returns None when it can't
     be determined (no recorded build commit, or not a git repo)."""
     g = _load_graph()
@@ -494,8 +494,8 @@ def _node_file_missing(rel: object) -> bool:
 def _files_with_nodes(nodes: list[dict], files: list[str]) -> list[str]:
     """Subset of `files` that still have at least one graph node (order-preserving).
 
-    Lets graphify_freshness force a rebuild only for deletions whose phantom nodes
-    actually linger — so once graphify_prune drops them, the deletion stops driving
+    Lets graphlore_freshness force a rebuild only for deletions whose phantom nodes
+    actually linger — so once graphlore_prune drops them, the deletion stops driving
     a rebuild.
     """
     have = {_norm_relpath(_node_file(n)) for n in nodes if _node_file(n)}
@@ -610,7 +610,7 @@ def _skeleton_lines(file_path: str, prefix: str | None = None) -> list[tuple[str
 
 
 @mcp.tool(annotations=ToolAnnotations(title="Build/update graph", destructive_hint=False))
-def graphify_build(
+def graphlore_build(
     path: str = ".",
     mode: str = "",
     update: bool = False,
@@ -654,7 +654,7 @@ def graphify_build(
 
 
 @mcp.tool(annotations=ToolAnnotations(title="Query graph", read_only_hint=True))
-def graphify_query(question: str, dfs: bool = False, budget: int = 0) -> str:
+def graphlore_query(question: str, dfs: bool = False, budget: int = 0) -> str:
     """Run a natural-language query against the graph.
 
     Args:
@@ -674,19 +674,19 @@ def graphify_query(question: str, dfs: bool = False, budget: int = 0) -> str:
 
 
 @mcp.tool(annotations=ToolAnnotations(title="Path between nodes", read_only_hint=True))
-def graphify_path(node_a: str, node_b: str) -> str:
+def graphlore_path(node_a: str, node_b: str) -> str:
     """Find the exact path between two nodes (e.g. "DigestAuth" -> "Response")."""
     return _run_cli(["path", node_a, node_b])
 
 
 @mcp.tool(annotations=ToolAnnotations(title="Explain node", read_only_hint=True))
-def graphify_explain(node: str) -> str:
+def graphlore_explain(node: str) -> str:
     """Return everything Graphify knows about a node."""
     return _run_cli(["explain", node])
 
 
 @mcp.tool(annotations=ToolAnnotations(title="Add external source", destructive_hint=False))
-def graphify_add(url: str, author: str = "", contributor: str = "") -> str:
+def graphlore_add(url: str, author: str = "", contributor: str = "") -> str:
     """Add an external source to the graph (arXiv paper, tweet, etc.). http/https only.
 
     Args:
@@ -710,7 +710,7 @@ def graphify_add(url: str, author: str = "", contributor: str = "") -> str:
 
 
 @mcp.tool(annotations=ToolAnnotations(title="Codebase overview", read_only_hint=True))
-def graphify_overview(top_n: int = 8, as_json: bool = False) -> str:
+def graphlore_overview(top_n: int = 8, as_json: bool = False) -> str:
     """One-shot orientation: call this FIRST.
 
     Returns graph size, top god nodes, community count, surprise-edge count and
@@ -736,9 +736,9 @@ def graphify_overview(top_n: int = 8, as_json: bool = False) -> str:
     god = [{"node": labels.get(nid, nid), "degree": d} for nid, d in top]
 
     suggested = [
-        f"graphify_subgraph(\"{god[0]['node']}\")" if god else "graphify_communities()",
-        "graphify_communities()",
-        "graphify_surprises()",
+        f"graphlore_subgraph(\"{god[0]['node']}\")" if god else "graphlore_communities()",
+        "graphlore_communities()",
+        "graphlore_surprises()",
     ]
     # Don't steer toward a tool the active surface has dropped (e.g. lean mode).
     active = _registered_tool_names()
@@ -746,8 +746,8 @@ def graphify_overview(top_n: int = 8, as_json: bool = False) -> str:
         suggested = [s for s in suggested if s.split("(", 1)[0] in active]
         # locate is the recommended way in whenever it's live — and under the
         # locate toolset it's the only suggestion left standing.
-        if "graphify_locate" in active:
-            suggested.insert(0, 'graphify_locate("<natural-language question>")')
+        if "graphlore_locate" in active:
+            suggested.insert(0, 'graphlore_locate("<natural-language question>")')
     age = _graph_age()
     payload = {
         "nodes": len(nodes),
@@ -766,7 +766,7 @@ def graphify_overview(top_n: int = 8, as_json: bool = False) -> str:
     ]
     lines += [f"  {g['node']} — degree {g['degree']}" for g in god]
     if age:
-        lines.append(f"\nGraph age: {age} (graphify_freshness for detail).")
+        lines.append(f"\nGraph age: {age} (graphlore_freshness for detail).")
     if id_collisions:
         lines.append(
             f"\nWarning: {id_collisions} node id collision(s) — distinct nodes share an "
@@ -778,7 +778,7 @@ def graphify_overview(top_n: int = 8, as_json: bool = False) -> str:
 
 
 @mcp.tool(annotations=ToolAnnotations(title="God nodes", read_only_hint=True))
-def graphify_god_nodes(top_n: int = 10, as_json: bool = False) -> str:
+def graphlore_god_nodes(top_n: int = 10, as_json: bool = False) -> str:
     """List the highest-degree (most connected) 'god nodes'."""
     graph = _load_graph()
     if isinstance(graph, str):
@@ -803,7 +803,7 @@ def graphify_god_nodes(top_n: int = 10, as_json: bool = False) -> str:
 
 
 @mcp.tool(annotations=ToolAnnotations(title="Surprise edges", read_only_hint=True))
-def graphify_surprises(limit: int = 20, as_json: bool = False) -> str:
+def graphlore_surprises(limit: int = 20, as_json: bool = False) -> str:
     """List unexpected cross-file/cross-domain connections (surprise edges)."""
     graph = _load_graph()
     if isinstance(graph, str):
@@ -835,7 +835,7 @@ def graphify_surprises(limit: int = 20, as_json: bool = False) -> str:
 
 
 @mcp.tool(annotations=ToolAnnotations(title="Communities", read_only_hint=True))
-def graphify_communities(as_json: bool = False) -> str:
+def graphlore_communities(as_json: bool = False) -> str:
     """Summarize Leiden communities with sizes and sample members."""
     graph = _load_graph()
     if isinstance(graph, str):
@@ -848,7 +848,7 @@ def graphify_communities(as_json: bool = False) -> str:
             comms.setdefault(c, []).append(_node_label(n))
     if not comms:
         return _err(
-            "Nodes carry no community info. Try graphify_build(cluster_only=True).",
+            "Nodes carry no community info. Try graphlore_build(cluster_only=True).",
             as_json,
         )
     ordered = sorted(comms.items(), key=lambda kv: -len(kv[1]))
@@ -861,30 +861,30 @@ def graphify_communities(as_json: bool = False) -> str:
 
 
 @mcp.tool(annotations=ToolAnnotations(title="Sampling/LLM status", read_only_hint=True))
-def graphify_sampling_status(ctx: Context, as_json: bool = False) -> str:
+def graphlore_sampling_status(ctx: Context, as_json: bool = False) -> str:
     """Capability test: how can semantic naming be produced in this session?
 
     Reports whether the connected client supports host-LLM **sampling** (so the
     server needs no API key), whether a backend **API key** is configured as a
-    fallback, and which method graphify_label_communities will pick.
+    fallback, and which method graphlore_label_communities will pick.
     """
     sampling = _client_supports_sampling(ctx)
     backend = _detect_backend()
     cli = shutil.which(GRAPHIFY_BIN) is not None
     if sampling:
         method = "sampling"
-        advice = "graphify_label_communities() will use the host LLM — no API key needed."
+        advice = "graphlore_label_communities() will use the host LLM — no API key needed."
     elif backend and cli:
         method = "cli"
         advice = (
             f"Host sampling unsupported; the '{backend}' backend key will be used via "
-            'graphify_label_communities(method="cli").'
+            'graphlore_label_communities(method="cli").'
         )
     else:
         method = "placeholder"
         advice = (
             "No host sampling and no backend key — names stay as 'Community N'. "
-            "Name them yourself with graphify_set_labels (assistant-driven, no key), or "
+            "Name them yourself with graphlore_set_labels (assistant-driven, no key), or "
             "set GEMINI_API_KEY / OPENAI_API_KEY / ... or run a local ollama."
         )
     payload = {
@@ -922,7 +922,7 @@ def _communities_for_naming(limit: int) -> tuple[list[tuple[Any, list[str]]], in
         if c is not None:
             comms.setdefault(c, []).append(_node_label(n))
     if not comms:
-        return "Nodes carry no community info. Try graphify_build(cluster_only=True)."
+        return "Nodes carry no community info. Try graphlore_build(cluster_only=True)."
     return sorted(comms.items(), key=lambda kv: -len(kv[1]))[:limit], len(comms)
 
 
@@ -1013,7 +1013,7 @@ def _names_from_sampling(
         destructive_hint=False,
     )
 )
-async def graphify_label_communities(
+async def graphlore_label_communities(
     ctx: Context,
     method: str = "auto",
     limit: int = 12,
@@ -1059,9 +1059,9 @@ async def graphify_label_communities(
         if not sampling_ok:
             return _err(
                 "ERROR: method='sampling' but the connected client does not support MCP "
-                "sampling. Name them yourself with graphify_set_labels (assistant-driven, "
+                "sampling. Name them yourself with graphlore_set_labels (assistant-driven, "
                 "no key/sampling needed), use method='cli' with a backend key/ollama, or "
-                "call graphify_sampling_status() for the options.",
+                "call graphlore_sampling_status() for the options.",
                 as_json,
             )
         fail_note = ""
@@ -1125,20 +1125,20 @@ async def graphify_label_communities(
     if chosen == "placeholder":
         text.append(
             "\nNo automatic naming available. Name these yourself and persist them with "
-            'graphify_set_labels({"<id>": "<name>", ...}).'
+            'graphlore_set_labels({"<id>": "<name>", ...}).'
         )
     return _fmt(payload, as_json, "\n".join(text))
 
 
 @mcp.tool(annotations=ToolAnnotations(title="Set community names", destructive_hint=False))
-def graphify_set_labels(
+def graphlore_set_labels(
     names: dict[str, str], regenerate: bool = True, as_json: bool = False
 ) -> str:
     """Persist assistant-provided community names — the sampling-free way to name
     communities in clients without MCP sampling.
 
     The calling assistant is already an LLM in the loop: it names the communities
-    itself (e.g. from graphify_communities members) and pushes them here. Names are
+    itself (e.g. from graphlore_communities members) and pushes them here. Names are
     written to graphify-out/.graphify_labels.json and, when regenerate=True, baked
     into the existing graph.html in place so the visualization shows them.
 
@@ -1160,7 +1160,7 @@ def graphify_set_labels(
         sample = sorted(valid_ids, key=lambda x: (len(x), x))[:6]
         return _err(
             f"No valid community ids in {list(provided)}. Ids come from "
-            f"graphify_communities (e.g. {sample}).",
+            f"graphlore_communities (e.g. {sample}).",
             as_json,
         )
 
@@ -1211,7 +1211,7 @@ def graphify_set_labels(
 
 
 @mcp.tool(annotations=ToolAnnotations(title="Search nodes", read_only_hint=True))
-def graphify_search(pattern: str, limit: int = 25, as_json: bool = False) -> str:
+def graphlore_search(pattern: str, limit: int = 25, as_json: bool = False) -> str:
     """Search nodes by text in their name/label (case-insensitive)."""
     graph = _load_graph()
     if isinstance(graph, str):
@@ -1238,7 +1238,7 @@ def graphify_search(pattern: str, limit: int = 25, as_json: bool = False) -> str
 
 
 @mcp.tool(annotations=ToolAnnotations(title="Node neighbors", read_only_hint=True))
-def graphify_neighbors(node: str, as_json: bool = False) -> str:
+def graphlore_neighbors(node: str, as_json: bool = False) -> str:
     """List the direct (1-hop) neighbors of a node, with relations."""
     graph = _load_graph()
     if isinstance(graph, str):
@@ -1246,7 +1246,7 @@ def graphify_neighbors(node: str, as_json: bool = False) -> str:
     nodes, edges = _nodes_edges(graph)
     n = _resolve_node(nodes, node)
     if n is None:
-        return _err(f"No node matching '{node}'. Try graphify_search.", as_json)
+        return _err(f"No node matching '{node}'. Try graphlore_search.", as_json)
     nid = _node_id(n)
     labels = {_node_id(x): _node_label(x) for x in nodes}
     adj = _adjacency(edges)
@@ -1271,7 +1271,7 @@ def graphify_neighbors(node: str, as_json: bool = False) -> str:
 
 
 @mcp.tool(annotations=ToolAnnotations(title="Token-budgeted subgraph", read_only_hint=True))
-def graphify_subgraph(
+def graphlore_subgraph(
     node: str, hops: int = 2, budget_tokens: int = 1500, as_json: bool = False
 ) -> str:
     """Extract a BFS subgraph around a node, capped at a token budget.
@@ -1293,7 +1293,7 @@ def graphify_subgraph(
     nodes, edges = _nodes_edges(graph)
     start = _resolve_node(nodes, node)
     if start is None:
-        return _err(f"No node matching '{node}'. Try graphify_search.", as_json)
+        return _err(f"No node matching '{node}'. Try graphlore_search.", as_json)
     labels = {_node_id(x): _node_label(x) for x in nodes}
     adj = _adjacency(edges)
     sid = _node_id(start)
@@ -1324,7 +1324,7 @@ def graphify_subgraph(
 
 
 @mcp.tool(annotations=ToolAnnotations(title="Impact / blast radius", read_only_hint=True))
-def graphify_impact(
+def graphlore_impact(
     node: str,
     direction: str = "dependents",
     hops: int = 3,
@@ -1355,7 +1355,7 @@ def graphify_impact(
     nodes, edges = _nodes_edges(graph)
     start = _resolve_node(nodes, node)
     if start is None:
-        return _err(f"No node matching '{node}'. Try graphify_search.", as_json)
+        return _err(f"No node matching '{node}'. Try graphlore_search.", as_json)
     direction = direction.strip().lower()
     if direction not in ("dependents", "dependencies", "both"):
         return _err(
@@ -1422,7 +1422,7 @@ def graphify_impact(
 
 
 @mcp.tool(annotations=ToolAnnotations(title="Locate + structural context", read_only_hint=True))
-def graphify_locate(
+def graphlore_locate(
     query: str,
     top_k: int = 3,
     hops: int = 2,
@@ -1446,7 +1446,7 @@ def graphify_locate(
 
     index = _semantic_index()
     if index is None:
-        return _err(_no_semantic_index_error("graphify_locate"), as_json)
+        return _err(_no_semantic_index_error("graphlore_locate"), as_json)
     hits = index.search(query, top_k=top_k)
     if not hits:
         return _err(f"No semantic matches for '{query}'.", as_json)
@@ -1567,7 +1567,7 @@ def graphify_locate(
 
 
 @mcp.tool(annotations=ToolAnnotations(title="Duplication scan", read_only_hint=True))
-def graphify_duplication_scan(
+def graphlore_duplication_scan(
     node_budget: int = 50,
     related_k: int = 8,
     min_distance: int = 3,
@@ -1576,7 +1576,7 @@ def graphify_duplication_scan(
 ) -> str:
     """Repo-wide hidden-link / duplication audit — the batch form of locate's hidden_links.
 
-    graphify_locate surfaces "similar but structurally disconnected" cousins around ONE
+    graphlore_locate surfaces "similar but structurally disconnected" cousins around ONE
     seed; this sweeps the most-connected nodes and collects every such pair across the
     repo — duplication, missing abstraction, or sync/async twins that retrieval-only
     tools (which match "similar shape", not "similar yet structurally far") can't surface.
@@ -1602,7 +1602,7 @@ def graphify_duplication_scan(
     nodes, edges = _nodes_edges(graph)
     index = _semantic_index()
     if index is None:
-        return _err(_no_semantic_index_error("graphify_duplication_scan"), as_json)
+        return _err(_no_semantic_index_error("graphlore_duplication_scan"), as_json)
     labels = {_node_id(x): _node_label(x) for x in nodes}
     adj = _adjacency(edges)
     degree: Counter[str] = Counter()
@@ -1675,7 +1675,7 @@ def graphify_duplication_scan(
 
 
 @mcp.tool(annotations=ToolAnnotations(title="Node details", read_only_hint=True))
-def graphify_node_details(node: str, as_json: bool = False) -> str:
+def graphlore_node_details(node: str, as_json: bool = False) -> str:
     """Show a node's full metadata: type, source file/line, docstring, community."""
     graph = _load_graph()
     if isinstance(graph, str):
@@ -1683,7 +1683,7 @@ def graphify_node_details(node: str, as_json: bool = False) -> str:
     nodes, _ = _nodes_edges(graph)
     n = _resolve_node(nodes, node)
     if n is None:
-        return _err(f"No node matching '{node}'. Try graphify_search.", as_json)
+        return _err(f"No node matching '{node}'. Try graphlore_search.", as_json)
     # Common metadata keys across graphify schema variants.
     detail = {
         "id": _node_id(n),
@@ -1715,7 +1715,7 @@ def graphify_node_details(node: str, as_json: bool = False) -> str:
 
 
 @mcp.tool(annotations=ToolAnnotations(title="Fetch node source", read_only_hint=True))
-def graphify_fetch(
+def graphlore_fetch(
     nodes: list[str],
     context_lines: int = 0,
     budget_tokens: int = 2000,
@@ -1723,7 +1723,7 @@ def graphify_fetch(
 ) -> str:
     """Hydrate graph nodes into their real source code, under a shared token budget.
 
-    The map→code other half of graphify_locate / graphify_subgraph: those return a
+    The map→code other half of graphlore_locate / graphlore_subgraph: those return a
     cheap navigation map (file:line + neighbours); this reads the actual code for the
     nodes you've zeroed in on, so the agent needn't make a separate raw-file read.
 
@@ -1740,7 +1740,7 @@ def graphify_fetch(
         budget_tokens: Approximate shared cap on the total code returned.
     """
     if not nodes:
-        return _err("ERROR: graphify_fetch needs at least one node name.", as_json)
+        return _err("ERROR: graphlore_fetch needs at least one node name.", as_json)
     graph = _load_graph()
     if isinstance(graph, str):
         return _err(graph, as_json)
@@ -1835,7 +1835,7 @@ def graphify_fetch(
 
 
 @mcp.tool(annotations=ToolAnnotations(title="Signature skeleton", read_only_hint=True))
-def graphify_skeleton(
+def graphlore_skeleton(
     file: str = "",
     node: str = "",
     community: str = "",
@@ -1844,7 +1844,7 @@ def graphify_skeleton(
 ) -> str:
     """Signature skeleton — def/class headers (+ decorators), bodies stripped.
 
-    The middle layer between the navigation map and full source (graphify_fetch): read
+    The middle layer between the navigation map and full source (graphlore_fetch): read
     what a file / symbol / community *declares* without the bodies. Built on the same
     span engine as locate/fetch (ast for Python, tree-sitter otherwise), so it spans
     languages. Provide exactly one of:
@@ -1869,7 +1869,7 @@ def graphify_skeleton(
     elif node:
         n = _resolve_node(nodes, node)
         if n is None:
-            return _err(f"No node matching '{node}'. Try graphify_search.", as_json)
+            return _err(f"No node matching '{node}'. Try graphlore_search.", as_json)
         nf = _node_file(n)
         if not nf:
             return _err(f"Node '{_node_label(n)}' has no source file to skeletonize.", as_json)
@@ -1885,7 +1885,7 @@ def graphify_skeleton(
         ]
         if not members:
             return _err(
-                f"No community '{community}'. See graphify_communities for valid ids.",
+                f"No community '{community}'. See graphlore_communities for valid ids.",
                 as_json,
             )
         seen: set[str] = set()
@@ -1944,7 +1944,7 @@ def _ast_equivalent(path: str, ref: str) -> bool | None:
     Note: the comparison ignores line numbers, so a cosmetic edit that shifts code
     down (e.g. a comment added at the top) leaves nodes' ``source_location`` lines
     slightly stale until the next build. That's by design — the graph *structure*
-    is unchanged, and graphify_locate re-resolves locations from real spans at
+    is unchanged, and graphlore_locate re-resolves locations from real spans at
     query time — but it's why "fresh" here means structurally, not line-, current.
     """
     # `ref:./path` is CWD-relative (cwd is PROJECT_DIR) while bare `ref:path` is
@@ -1975,7 +1975,7 @@ def _ast_equivalent_refs(path_a: str, ref_a: str, path_b: str, ref_b: str) -> bo
 
 
 @mcp.tool(annotations=ToolAnnotations(title="Graph freshness", read_only_hint=True))
-def graphify_freshness(as_json: bool = False) -> str:
+def graphlore_freshness(as_json: bool = False) -> str:
     """Check whether graph.json is stale relative to the current git HEAD.
 
     Prefers the commit graphify recorded the graph was built from
@@ -1991,7 +1991,7 @@ def graphify_freshness(as_json: bool = False) -> str:
     """
     gp = _graph_path()
     if not gp.exists():
-        return _err("graph.json missing. Run graphify_build first.", as_json)
+        return _err("graph.json missing. Run graphlore_build first.", as_json)
     graph_mtime = gp.stat().st_mtime
     head = _git(["rev-parse", "HEAD"])
     payload: dict[str, Any] = {"graph_exists": True, "git": head is not None}
@@ -2109,7 +2109,7 @@ def graphify_freshness(as_json: bool = False) -> str:
             (cosmetic if _ast_equivalent(f, head) is True else structural).append(f)
 
     # A deletion/rename only forces a rebuild while its phantom nodes still linger;
-    # graphify_prune drops them, after which the deletion no longer drives a rebuild.
+    # graphlore_prune drops them, after which the deletion no longer drives a rebuild.
     phantom_removed = _files_with_nodes(nodes, removed)
     stale = behind or bool(structural) or bool(phantom_removed)
 
@@ -2136,7 +2136,7 @@ def graphify_freshness(as_json: bool = False) -> str:
         reason = (
             f"{len(phantom_removed)} file(s) deleted/renamed with nodes still in the "
             "graph — incremental update can't drop them, so a full rebuild (or "
-            "graphify_prune, then update) is recommended"
+            "graphlore_prune, then update) is recommended"
         )
     elif len(structural) > 25:
         action = "rebuild"
@@ -2150,8 +2150,8 @@ def graphify_freshness(as_json: bool = False) -> str:
         reason = "; ".join(bits) or "graph is behind HEAD"
     command = {
         "fresh": "graph is fresh",
-        "update": "graphify_build(update=True)",
-        "rebuild": 'graphify_build(".")  # full rebuild',
+        "update": "graphlore_build(update=True)",
+        "rebuild": 'graphlore_build(".")  # full rebuild',
     }[action]
 
     payload.update({
@@ -2179,7 +2179,7 @@ def graphify_freshness(as_json: bool = False) -> str:
 
 
 @mcp.tool(annotations=ToolAnnotations(title="Structural diff", read_only_hint=True))
-def graphify_diff(
+def graphlore_diff(
     ref_a: str = "HEAD~1",
     ref_b: str = "HEAD",
     budget_tokens: int = 2000,
@@ -2283,20 +2283,20 @@ def graphify_diff(
         title="Prune phantom nodes", read_only_hint=False, destructive_hint=True
     )
 )
-def graphify_prune(dry_run: bool = True, as_json: bool = False) -> str:
+def graphlore_prune(dry_run: bool = True, as_json: bool = False) -> str:
     """Drop phantom nodes for source files that no longer exist on disk.
 
-    Incremental ``graphify_build(update=True)`` re-extracts changed files but never
+    Incremental ``graphlore_build(update=True)`` re-extracts changed files but never
     *removes* nodes for deleted or renamed code, so the graph keeps phantom nodes
-    after a delete/rename — the one case graphify_freshness otherwise has to resolve
+    after a delete/rename — the one case graphlore_freshness otherwise has to resolve
     with a full rebuild. This surgically removes every node whose source file is gone
     from the working tree, plus every edge touching one, and rewrites graph.json.
-    Afterwards graphify_freshness no longer forces a rebuild for those deletions.
+    Afterwards graphlore_freshness no longer forces a rebuild for those deletions.
 
     Only nodes whose source path resolves *inside* the project and is missing on disk
     are touched; external-source / concept nodes (no file) and files outside the
     project are never pruned. Pruning whole-file removals only — a symbol deleted from
-    a still-present file is re-synced by ``graphify_build(update=True)``.
+    a still-present file is re-synced by ``graphlore_build(update=True)``.
 
     Args:
         dry_run: True (default) -> report what *would* be pruned, write nothing, so an
@@ -2371,12 +2371,12 @@ def graphify_prune(dry_run: bool = True, as_json: bool = False) -> str:
     _GRAPH_CACHE.pop(str(gp), None)
 
     lines.append(f"\ngraph.json rewritten: {gp}")
-    lines.append("Run graphify_freshness to confirm the deletions no longer force a rebuild.")
+    lines.append("Run graphlore_freshness to confirm the deletions no longer force a rebuild.")
     return _fmt(payload, as_json, "\n".join(lines))
 
 
 @mcp.tool(annotations=ToolAnnotations(title="Validate graph", read_only_hint=True))
-def graphify_validate(limit: int = 15, as_json: bool = False) -> str:
+def graphlore_validate(limit: int = 15, as_json: bool = False) -> str:
     """Lint graph.json for structural problems (read-only).
 
     Reports edges whose endpoints aren't in the node set (dangling), duplicate
@@ -2459,14 +2459,14 @@ def graphify_validate(limit: int = 15, as_json: bool = False) -> str:
 
 
 @mcp.tool(annotations=ToolAnnotations(title="Dependency cycles", read_only_hint=True))
-def graphify_cycles(max_cycles: int = 20, as_json: bool = False) -> str:
+def graphlore_cycles(max_cycles: int = 20, as_json: bool = False) -> str:
     """Detect circular dependencies (strongly-connected components) in the graph.
 
     A pure analysis on the directed edges: any group of nodes all mutually reachable
     forms a dependency cycle — an architectural smell (no clean layering, hard to
     test or extract in isolation). Members are reported as a set, not a path (the SCC
     proves mutual reachability, not one specific route). Self-loops (a node depending
-    on itself) are listed separately. Complements graphify_validate, which inspects
+    on itself) are listed separately. Complements graphlore_validate, which inspects
     dangling/duplicate/self-loop edges rather than cycles.
 
     Args:
@@ -2548,7 +2548,7 @@ _API_SURFACE_NOTE = (
 
 
 @mcp.tool(annotations=ToolAnnotations(title="External package API surface", read_only_hint=True))
-def graphify_package_apis(package: str = "", limit: int = 20, as_json: bool = False) -> str:
+def graphlore_package_apis(package: str = "", limit: int = 20, as_json: bool = False) -> str:
     """Symbol-level external API surface: which names each package is actually used for.
 
     The difference between "this module imports fastapi" (package level) and "this
@@ -2712,7 +2712,7 @@ def _route_candidate_files(graph_files: set[str]) -> set[str]:
 
 
 @mcp.tool(annotations=ToolAnnotations(title="Framework routes", read_only_hint=True))
-def graphify_routes(
+def graphlore_routes(
     framework: str = "",
     method: str = "",
     pattern: str = "",
@@ -2801,25 +2801,25 @@ def graphify_routes(
 # ---------------------------------------------------------------------------
 
 
-@mcp.resource("graphify://report")
+@mcp.resource("graphlore://report")
 def report() -> str:
     """GRAPH_REPORT.md — core nodes, surprises and suggested questions."""
     rp = _out_dir() / "GRAPH_REPORT.md"
     if not rp.exists():
-        return f"GRAPH_REPORT.md missing ({rp}). Run graphify_build first."
+        return f"GRAPH_REPORT.md missing ({rp}). Run graphlore_build first."
     return rp.read_text(encoding="utf-8")
 
 
-@mcp.resource("graphify://graph")
+@mcp.resource("graphlore://graph")
 def graph_json() -> str:
     """graph.json — the persistent, queryable graph (raw JSON)."""
     gp = _graph_path()
     if not gp.exists():
-        return f"graph.json missing ({gp}). Run graphify_build first."
+        return f"graph.json missing ({gp}). Run graphlore_build first."
     return gp.read_text(encoding="utf-8")
 
 
-@mcp.resource("graphify://community/{community_id}")
+@mcp.resource("graphlore://community/{community_id}")
 def community(community_id: str) -> str:
     """Per-community wiki: every node in one Leiden community, with its edges."""
     graph = _load_graph()
@@ -2832,7 +2832,7 @@ def community(community_id: str) -> str:
 
     members = [n for n in nodes if cid(n) == str(community_id)]
     if not members:
-        return f"No community '{community_id}'. See graphify_communities for valid ids."
+        return f"No community '{community_id}'. See graphlore_communities for valid ids."
     member_ids = {_node_id(n) for n in members}
     labels = {_node_id(n): _node_label(n) for n in nodes}
     internal, boundary = [], []
@@ -2867,10 +2867,10 @@ def onboard() -> str:
     """Orient yourself to this codebase using the knowledge graph."""
     return (
         "Help me understand this codebase using the graphify tools.\n"
-        "1. Call graphify_overview to get the lay of the land.\n"
-        "2. Call graphify_communities to see the major subsystems.\n"
-        "3. For the top 2-3 god nodes, call graphify_subgraph to see how they connect.\n"
-        "4. Call graphify_surprises and flag anything that looks like a hidden coupling.\n"
+        "1. Call graphlore_overview to get the lay of the land.\n"
+        "2. Call graphlore_communities to see the major subsystems.\n"
+        "3. For the top 2-3 god nodes, call graphlore_subgraph to see how they connect.\n"
+        "4. Call graphlore_surprises and flag anything that looks like a hidden coupling.\n"
         "Then write me a concise architecture summary: subsystems, key types, and risks."
     )
 
@@ -2880,10 +2880,10 @@ def trace_bug(symptom: str) -> str:
     """Investigate a bug symptom by tracing it through the graph."""
     return (
         f"I'm debugging this symptom: {symptom}\n"
-        "1. Use graphify_search to find nodes related to the symptom.\n"
-        "2. Use graphify_subgraph around the most relevant node to see what it touches.\n"
-        "3. Use graphify_path between suspect nodes to find the call/data route.\n"
-        "4. Check graphify_surprises for unexpected couplings that could explain it.\n"
+        "1. Use graphlore_search to find nodes related to the symptom.\n"
+        "2. Use graphlore_subgraph around the most relevant node to see what it touches.\n"
+        "3. Use graphlore_path between suspect nodes to find the call/data route.\n"
+        "4. Check graphlore_surprises for unexpected couplings that could explain it.\n"
         "Give me a ranked list of likely root-cause locations with reasoning."
     )
 
@@ -2893,9 +2893,9 @@ def explain_flow(flow: str) -> str:
     """Explain how a named flow or feature works end to end."""
     return (
         f"Explain how the '{flow}' flow works in this codebase.\n"
-        "1. graphify_query the flow to find its entry points.\n"
-        "2. graphify_subgraph around the entry point (hops=2) for the surrounding structure.\n"
-        "3. graphify_node_details on each key node for source locations.\n"
+        "1. graphlore_query the flow to find its entry points.\n"
+        "2. graphlore_subgraph around the entry point (hops=2) for the surrounding structure.\n"
+        "3. graphlore_node_details on each key node for source locations.\n"
         "Produce a step-by-step walkthrough with file:line references."
     )
 
@@ -2968,7 +2968,7 @@ def _registered_tool_names() -> set[str]:
 
 
 def _semantic_backend_available() -> bool:
-    """Whether graphify_locate has a working backend (semble or a custom one).
+    """Whether graphlore_locate has a working backend (semble or a custom one).
 
     A custom GRAPHIFY_SEMANTIC_BACKEND is only "available" when its
     ``module.path:Factory`` spec is well-formed and the module resolves — a typo'd
@@ -2991,20 +2991,20 @@ def _semantic_backend_available() -> bool:
 def _effective_lean_tools() -> set[str]:
     """LEAN_TOOLS minus tools whose optional dependency is absent.
 
-    graphify_locate needs the [semble] extra; in a default install it would only
+    graphlore_locate needs the [semble] extra; in a default install it would only
     return an install-this error, so it's dropped from the lean surface rather than
     advertised as a core tool.
     """
     lean = set(LEAN_TOOLS)
     if not _semantic_backend_available():
-        lean.discard("graphify_locate")
+        lean.discard("graphlore_locate")
     return lean
 
 
 def _effective_toolset_tools() -> set[str] | None:
     """Tool names the configured GRAPHIFY_TOOLSET keeps, or None for no trim.
 
-    ``locate`` is built around graphify_locate, so without a semantic backend the
+    ``locate`` is built around graphlore_locate, so without a semantic backend the
     whole surface would be inert — fall back to the lean surface (the documented
     degraded mode) with a stderr warning instead of erroring at boot.
     """
@@ -3059,7 +3059,7 @@ def _structural_changes(paths: list[str], ref: str) -> tuple[list[str], list[str
     they don't change the graph, so they shouldn't trigger a regraph — as are the
     output dir's own files, VCS/venv/build directories, and files the graph can't
     represent at all (junk/config/assets). The same cosmetic-vs-structural test
-    graphify_freshness uses.
+    graphlore_freshness uses.
     """
     structural: list[str] = []
     removed: list[str] = []
@@ -3089,7 +3089,7 @@ class _GraphWatcher:
 
     Reuses the structural-vs-cosmetic check so comment/format-only edits don't rebuild.
     ``trigger(structural, removed)`` runs when a regraph is warranted; the default prunes
-    first if anything was deleted, then runs an incremental ``graphify_build(update=True)``.
+    first if anything was deleted, then runs an incremental ``graphlore_build(update=True)``.
     """
 
     def __init__(self, ref: str = "HEAD", trigger: Any = None) -> None:
@@ -3106,8 +3106,8 @@ class _GraphWatcher:
     @staticmethod
     def _default_trigger(structural: list[str], removed: list[str]) -> None:
         if removed:
-            graphify_prune(dry_run=False)
-        graphify_build(update=True)
+            graphlore_prune(dry_run=False)
+        graphlore_build(update=True)
 
 
 def _start_watch() -> Any:
@@ -3180,7 +3180,7 @@ def _start_watch() -> Any:
     observer.start()
     print(
         f"graphlore watch: watching {config.PROJECT_DIR} "
-        f"(structural changes -> graphify_build update; debounce {debounce}s)",
+        f"(structural changes -> graphlore_build update; debounce {debounce}s)",
         file=sys.stderr,
         flush=True,
     )
