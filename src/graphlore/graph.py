@@ -33,7 +33,7 @@ def _load_graph() -> dict[str, Any] | str:
     gp = _graph_path()
     if not gp.exists():
         return (
-            f"ERROR: {gp} not found. Run the graphify_build tool first "
+            f"ERROR: {gp} not found. Run the graphlore_build tool first "
             f"(project directory: {config.PROJECT_DIR})."
         )
     try:
@@ -43,10 +43,19 @@ def _load_graph() -> dict[str, Any] | str:
         if cached is not None and cached[0] == mtime:
             return cached[1]
         data = json.loads(gp.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            # Callers guard errors with isinstance(graph, str), so any valid-JSON
+            # non-object (a top-level array/string/number) must become an error
+            # string here — not leak through and AttributeError inside every tool.
+            return f"ERROR: graph.json must be a JSON object, not {type(data).__name__}"
         _GRAPH_CACHE[key] = (mtime, data)
         return data
     except json.JSONDecodeError as e:
         return f"ERROR: failed to parse graph.json: {e}"
+    except (OSError, UnicodeDecodeError) as e:
+        # stat/read can fail mid-rebuild (file swapped between exists() and stat)
+        # or on undecodable bytes; both are "graph unavailable", not a crash.
+        return f"ERROR: failed to read graph.json: {e}"
 
 
 def _nodes_edges(graph: dict[str, Any]) -> tuple[list[dict], list[dict]]:
@@ -56,12 +65,28 @@ def _nodes_edges(graph: dict[str, Any]) -> tuple[list[dict], list[dict]]:
     return nodes, edges
 
 
+def _first_present(d: dict, keys: tuple[str, ...]) -> Any:
+    """First value among ``keys`` that is present and non-empty.
+
+    Key-presence based, NOT an ``or``-chain: a falsy-but-valid value (integer id
+    ``0`` in a networkx node-link export) must win, not fall through to the next
+    key or a ``"?"`` placeholder.
+    """
+    for k in keys:
+        v = d.get(k)
+        if v is not None and v != "":
+            return v
+    return None
+
+
 def _node_id(n: dict) -> str:
-    return str(n.get("id") or n.get("name") or n.get("label") or "?")
+    v = _first_present(n, ("id", "name", "label"))
+    return "?" if v is None else str(v)
 
 
 def _node_label(n: dict) -> str:
-    return str(n.get("label") or n.get("name") or n.get("id") or "?")
+    v = _first_present(n, ("label", "name", "id"))
+    return "?" if v is None else str(v)
 
 
 def _node_line(n: dict) -> Any:
@@ -89,18 +114,19 @@ def _node_file(n: dict) -> str:
     Empty string when the node carries no source file (external-source / concept
     nodes), so callers can skip nodes that don't correspond to a file on disk.
     """
-    return str(n.get("file") or n.get("path") or n.get("source_file") or "")
+    v = _first_present(n, ("file", "path", "source_file"))
+    return "" if v is None else str(v)
 
 
 def _edge_ends(e: dict) -> tuple[str, str]:
-    return (
-        str(e.get("source") or e.get("from") or e.get("src") or "?"),
-        str(e.get("target") or e.get("to") or e.get("dst") or "?"),
-    )
+    s = _first_present(e, ("source", "from", "src"))
+    t = _first_present(e, ("target", "to", "dst"))
+    return ("?" if s is None else str(s), "?" if t is None else str(t))
 
 
 def _edge_rel(e: dict) -> str:
-    return str(e.get("relation") or e.get("label") or e.get("type") or "->")
+    v = _first_present(e, ("relation", "label", "type"))
+    return "->" if v is None else str(v)
 
 
 def _is_surprise_edge(e: dict) -> bool:
@@ -108,7 +134,7 @@ def _is_surprise_edge(e: dict) -> bool:
 
     Note: an "inferred" confidence (graphify's EXTRACTED/INFERRED/AMBIGUOUS) is
     NOT a surprise — only an explicit surprise flag or type counts. Used by both
-    graphify_overview and graphify_surprises so they agree on one definition.
+    graphlore_overview and graphlore_surprises so they agree on one definition.
     """
     return bool(
         e.get("surprise")
@@ -204,6 +230,27 @@ def _directed_adjacency(edges: list[dict]) -> tuple[_Adj, _Adj]:
     return pair
 
 
+# Same id(edges)+identity-guard scheme as _ADJ_CACHE (see there).
+_EDGE_SET_CACHE: dict[int, tuple[list[dict], set[tuple[str, str, str]]]] = {}
+
+
+def _edge_set(edges: list[dict]) -> set[tuple[str, str, str]]:
+    """Directed ``(source, target, relation)`` triples, cached on list identity.
+
+    The orientation oracle for traversals over the undirected adjacency: lets
+    _bfs_subgraph emit each collected edge in its TRUE direction instead of the
+    (possibly reversed) direction it happened to be traversed in.
+    """
+    cached = _EDGE_SET_CACHE.get(id(edges))
+    if cached is not None and cached[0] is edges:
+        return cached[1]
+    es = {(*_edge_ends(e), _edge_rel(e)) for e in edges}
+    if id(edges) not in _EDGE_SET_CACHE and len(_EDGE_SET_CACHE) >= _ADJ_CACHE_MAX:
+        _EDGE_SET_CACHE.pop(next(iter(_EDGE_SET_CACHE)), None)  # FIFO
+    _EDGE_SET_CACHE[id(edges)] = (edges, es)
+    return es
+
+
 # Token-estimate heuristic. 4.0 chars/token is the common English rule of thumb,
 # but code — dotted identifiers, punctuation, camelCase — packs more tokens per
 # char, so we use a conservative 3.5 (≈ +14%) to avoid systematically
@@ -256,11 +303,15 @@ def _bfs_subgraph(
     start_id: str,
     hops: int,
     budget_tokens: int,
+    edge_set: set[tuple[str, str, str]] | None = None,
 ) -> tuple[set[str], list[dict], bool, int]:
     """BFS around start_id collecting edges until a token budget is hit.
 
     Returns (visited_ids, edges, truncated, approx_tokens). Shared by
-    graphify_subgraph and graphify_locate.
+    graphlore_subgraph and graphlore_locate. ``edge_set`` (from :func:`_edge_set`)
+    restores the true orientation of each collected edge: the undirected
+    adjacency flattens direction, and an edge reached via its reverse entry must
+    not be reported as ``B —calls→ A`` when the graph says ``A —calls→ B``.
     """
     visited = {start_id}
     frontier = deque([(start_id, 0)])
@@ -274,10 +325,14 @@ def _bfs_subgraph(
         if depth >= hops:
             continue
         for nb, rel in adj.get(cur, []):
+            src, dst = cur, nb
+            if (edge_set is not None and (src, dst, rel) not in edge_set
+                    and (dst, src, rel) in edge_set):
+                src, dst = dst, src  # traversed backwards: emit the true direction
             key = tuple(sorted((cur, nb)) + [rel])  # type: ignore
             if key not in seen_pairs:
                 seen_pairs.add(key)
-                edge = {"from": labels.get(cur, cur), "to": labels.get(nb, nb), "relation": rel}
+                edge = {"from": labels.get(src, src), "to": labels.get(dst, dst), "relation": rel}
                 collected_edges.append(edge)
                 # running size estimate instead of re-serializing the whole list (O(n^2))
                 running_chars += len(json.dumps(edge, ensure_ascii=False)) + 2
