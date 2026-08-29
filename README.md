@@ -14,7 +14,7 @@ One MCP call turns a natural-language question into a **navigational map**, not 
 
 - 🔎 **Semantic + structural, one call** — semble finds the relevant code, the graph gives its neighborhood. ~235 tokens to orient vs ~61k for grep+read (**263× fewer** on httpx).
 - 🔗 **`hidden_links`** — semantically similar code that is *structurally disconnected* (duplication / missing-abstraction / sync-async-twin candidates) that neither search nor the graph surfaces alone.
-- 🌍 **Multi-language, zero config** — Python via stdlib `ast`; JS/TS · Go · Java · Rust · C++ · 165+ more via tree-sitter with automatic language detection. **Span-join precision 69–91%** on real HTTP-client repos in six languages ([benchmark](#benchmark)).
+- 🌍 **Multi-language, zero config** — Python via stdlib `ast`; JS/TS · Go · Java · Rust · C++ · 165+ more via tree-sitter with automatic language detection. **Span-join precision 70–96%** on real HTTP-client repos in six languages ([benchmark](#benchmark)).
 - 🕒 **Cosmetic-aware freshness** — `graphify_freshness` ignores comment/format-only edits (in every language) so a reformat never triggers a needless rebuild.
 
 ### One call beats running semble and graphify separately
@@ -299,25 +299,28 @@ the `distance` field separates production parallels (3–4) from that noise.
 Python-only. I built AST-only graphs for an HTTP client in five more languages and ran the
 same kind of queries (send · redirects · timeout/retry · headers/auth · transport):
 
-![Span-join precision across languages — Python 91%, JS/TS 85%, Java 83%, Go 80%](docs/benchmark-multilang.svg)
+![Span-join precision across languages — Python 96%, Go 93%, JS/TS 89%, Java 85%](docs/benchmark-multilang.svg)
 
 | Language | Repo | Span-join precision | Qualname | Hidden / q | locate vs grep |
 |---|---|---|---|---|---|
-| **Python** (ast) | `encode/httpx` | **91%** (49/54) | 67% | 4.0 | 232× |
-| JavaScript / TS | `sindresorhus/got` | 89% (48/54) | 67% | 3.2 | 494× |
-| Go | `go-resty/resty` | 80% (43/54) | 67% | 4.7 | 748× |
-| Java | `square/retrofit` | 83% (45/54) | 50% | 5.5 | 208× |
-| Rust | `algesten/ureq` | 69% (37/54) | 83% | 5.3 | 477× |
-| C++ | `libcpr/cpr` | 69% (37/54) | 100% | 4.2 | 223× |
+| **Python** (ast) | `encode/httpx` | **96%** (52/54) | 67% | 3.2 | 272× |
+| JavaScript / TS | `sindresorhus/got` | 89% (48/54) | 67% | 2.3 | 583× |
+| Go | `go-resty/resty` | 93% (50/54) | 100% | 1.8 | 911× |
+| Java | `square/retrofit` | 85% (46/54) | 50% | 2.3 | 217× |
+| Rust | `algesten/ureq` | 70% (38/54) | 83% | 3.7 | 577× |
+| C++ | `libcpr/cpr` | 72% (39/54) | 100% | 4.3 | 195× |
 
 Python uses the stdlib `ast`; JS/TS · Go · Java · Rust · C++ go through tree-sitter with
 automatic language detection — **one tool, zero per-language config**. *Span-join precision* =
-share of semantic hits whose resolved node's real span actually contains the chunk. It's
-**69–91%** across six 347–2,101-node graphs, hidden-links keep surfacing 3–6/query, and locate
-stays **200–750× cheaper** than grep+read. Rust and C++ trail at 69% — their misses are mostly
-`impl`-block / file-top chunks where the resolution is still correct (they recover qualified
-names at 83–100%). `graphify_freshness`'s cosmetic-vs-structural check is correct in every
-language too (comment/reformat → cosmetic; operator/rename → structural). Reproduce with
+share of semantic hits landing inside the resolved symbol's real span (any overload of it —
+C++ collapses same-name overloads into one graph node while each keeps its own span; cpr's
+`Session::SetOption` has 46). It's **70–96%** across six 350–2,095-node graphs, hidden-links
+keep surfacing 2–4/query, and locate stays **195–911× cheaper** than grep+read. Rust and C++
+trail at 70–72% — their misses are mostly file-top/whole-file chunks and namespace-level free
+functions where the resolution is still correct (they recover qualified names at 83–100%).
+`graphify_freshness`'s cosmetic-vs-structural check is correct in every language too
+(comment/reformat → cosmetic; operator/rename → structural). Re-measured 2026-08 on the MCP v2
+SDK, Python 3.14, fresh repo HEADs. Reproduce with
 [`benchmarks/multilang.py`](benchmarks/multilang.py).
 
 → **[Full benchmark report](https://htmlpreview.github.io/?https://github.com/yasinyaman/codegraph-mcp/blob/master/docs/benchmark.html)** (interactive HTML, per-query breakdown + the cross-language tables) — or open [`docs/benchmark.html`](docs/benchmark.html) locally. ([Türkçe](https://htmlpreview.github.io/?https://github.com/yasinyaman/codegraph-mcp/blob/master/docs/benchmark.tr.html))

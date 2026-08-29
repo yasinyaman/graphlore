@@ -1,5 +1,5 @@
 <svg viewBox="0 0 760 390" xmlns="http://www.w3.org/2000/svg" role="img"
-     aria-label="Span-join precision across six languages on real HTTP-client repos: Python 91%, JavaScript/TypeScript 89%, Java 83%, Go 80%, Rust 69%, C++ 69%.">
+     aria-label="Span-join precision across six languages on real HTTP-client repos: Python 96%, Go 93%, JavaScript/TypeScript 89%, Java 85%, C++ 72%, Rust 70%.">
   <style>
     text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;fill:#3a3f4b}
     .t{font-size:15px;font-weight:600}.s{font-size:12px;fill:#6b7280}
@@ -11,49 +11,49 @@
     }
   </style>
   <text class="t" x="10" y="24">Span-join precision across six languages</text>
-  <text class="s" x="10" y="43">share of semantic hits resolved to the symbol whose real tree-sitter span contains them — real HTTP-client repos, higher is better</text>
+  <text class="s" x="10" y="43">share of semantic hits landing inside the resolved symbol's real tree-sitter span (any overload) — real HTTP-client repos, higher is better</text>
 
-  <!-- Python 91% -->
+  <!-- Python 96% -->
   <text class="lbl" x="200" y="74" text-anchor="end">Python</text>
   <text class="repo" x="200" y="89" text-anchor="end">encode/httpx</text>
   <rect class="track" x="210" y="66" width="480" height="22" rx="3"/>
-  <rect x="210" y="66" width="437" height="22" rx="3" fill="#1d9e75"/>
-  <text class="v" x="655" y="82">91%</text>
+  <rect x="210" y="66" width="461" height="22" rx="3" fill="#1d9e75"/>
+  <text class="v" x="679" y="82">96%</text>
+
+  <!-- Go 93% -->
+  <text class="lbl" x="200" y="122" text-anchor="end">Go</text>
+  <text class="repo" x="200" y="137" text-anchor="end">go-resty/resty</text>
+  <rect class="track" x="210" y="114" width="480" height="22" rx="3"/>
+  <rect x="210" y="114" width="446" height="22" rx="3" fill="#1d9e75"/>
+  <text class="v" x="664" y="130">93%</text>
 
   <!-- JS/TS 89% -->
-  <text class="lbl" x="200" y="122" text-anchor="end">JavaScript / TS</text>
-  <text class="repo" x="200" y="137" text-anchor="end">sindresorhus/got</text>
-  <rect class="track" x="210" y="114" width="480" height="22" rx="3"/>
-  <rect x="210" y="114" width="427" height="22" rx="3" fill="#1d9e75"/>
-  <text class="v" x="645" y="130">89%</text>
-
-  <!-- Java 83% -->
-  <text class="lbl" x="200" y="170" text-anchor="end">Java</text>
-  <text class="repo" x="200" y="185" text-anchor="end">square/retrofit</text>
+  <text class="lbl" x="200" y="170" text-anchor="end">JavaScript / TS</text>
+  <text class="repo" x="200" y="185" text-anchor="end">sindresorhus/got</text>
   <rect class="track" x="210" y="162" width="480" height="22" rx="3"/>
-  <rect x="210" y="162" width="398" height="22" rx="3" fill="#1d9e75"/>
-  <text class="v" x="616" y="178">83%</text>
+  <rect x="210" y="162" width="427" height="22" rx="3" fill="#1d9e75"/>
+  <text class="v" x="645" y="178">89%</text>
 
-  <!-- Go 80% -->
-  <text class="lbl" x="200" y="218" text-anchor="end">Go</text>
-  <text class="repo" x="200" y="233" text-anchor="end">go-resty/resty</text>
+  <!-- Java 85% -->
+  <text class="lbl" x="200" y="218" text-anchor="end">Java</text>
+  <text class="repo" x="200" y="233" text-anchor="end">square/retrofit</text>
   <rect class="track" x="210" y="210" width="480" height="22" rx="3"/>
-  <rect x="210" y="210" width="384" height="22" rx="3" fill="#1d9e75"/>
-  <text class="v" x="602" y="226">80%</text>
+  <rect x="210" y="210" width="408" height="22" rx="3" fill="#1d9e75"/>
+  <text class="v" x="626" y="226">85%</text>
 
-  <!-- Rust 69% -->
-  <text class="lbl" x="200" y="266" text-anchor="end">Rust</text>
-  <text class="repo" x="200" y="281" text-anchor="end">algesten/ureq</text>
+  <!-- C++ 72% -->
+  <text class="lbl" x="200" y="266" text-anchor="end">C++</text>
+  <text class="repo" x="200" y="281" text-anchor="end">libcpr/cpr</text>
   <rect class="track" x="210" y="258" width="480" height="22" rx="3"/>
-  <rect x="210" y="258" width="331" height="22" rx="3" fill="#34b88a"/>
-  <text class="v" x="549" y="274">69%</text>
+  <rect x="210" y="258" width="346" height="22" rx="3" fill="#34b88a"/>
+  <text class="v" x="564" y="274">72%</text>
 
-  <!-- C++ 69% -->
-  <text class="lbl" x="200" y="314" text-anchor="end">C++</text>
-  <text class="repo" x="200" y="329" text-anchor="end">libcpr/cpr</text>
+  <!-- Rust 70% -->
+  <text class="lbl" x="200" y="314" text-anchor="end">Rust</text>
+  <text class="repo" x="200" y="329" text-anchor="end">algesten/ureq</text>
   <rect class="track" x="210" y="306" width="480" height="22" rx="3"/>
-  <rect x="210" y="306" width="331" height="22" rx="3" fill="#34b88a"/>
-  <text class="v" x="549" y="322">69%</text>
+  <rect x="210" y="306" width="336" height="22" rx="3" fill="#34b88a"/>
+  <text class="v" x="554" y="322">70%</text>
 
-  <text class="s" x="10" y="368">Python uses the stdlib ast; the rest use tree-sitter with automatic language detection — one tool, zero per-language config. Rust/C++ (impl-block &amp; declarator idioms) trail but recover FQNs at 83–100%.</text>
+  <text class="s" x="10" y="368">Python uses the stdlib ast; the rest use tree-sitter with automatic language detection — one tool, zero per-language config. Rust/C++ (file-top chunks &amp; namespace-level idioms) trail but recover FQNs at 83–100%.</text>
 </svg>
