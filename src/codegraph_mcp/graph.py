@@ -1,7 +1,7 @@
 """graph.json loading + schema-tolerant node/edge/traversal helpers.
 
 Pure graph-data utilities with no dependency on the MCP surface; reads the project
-location from :mod:`graphify_mcp.config`.
+location from :mod:`codegraph_mcp.config`.
 """
 from __future__ import annotations
 

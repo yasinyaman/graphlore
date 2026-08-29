@@ -5,13 +5,15 @@ description: Explore, understand, or debug a codebase through its Graphify knowl
 
 # Exploring a codebase with Graphify
 
-The `graphify` MCP server exposes a codebase knowledge graph as tools. Reach for
-it **before** grepping or reading many files: it answers structural questions
-("what connects to X", "which subsystems exist", "where does this flow run")
-cheaply, returning just the relevant slice instead of whole files.
+The `codegraph` MCP server (the `codegraph-mcp` package; tools are named
+`graphify_*` after the Graphify graph they read) exposes a codebase knowledge
+graph as tools. Reach for it **before** grepping or reading many files: it
+answers structural questions ("what connects to X", "which subsystems exist",
+"where does this flow run") cheaply, returning just the relevant slice instead
+of whole files.
 
-If the graphify tools are not available, the MCP server isn't connected — see the
-project README for the `.mcp.json` / Claude Desktop config.
+If the graphify_* tools are not available, the MCP server isn't connected — see
+the project README for the `.mcp.json` / Claude Desktop config.
 
 ## Preconditions: make sure the graph exists and is fresh
 
