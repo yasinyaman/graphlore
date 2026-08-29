@@ -2,7 +2,7 @@
 
 import json
 
-from graphify_mcp import server, spans
+from codegraph_mcp import server, spans
 
 
 def test_overview(project):
@@ -105,7 +105,7 @@ def test_count_tokens_tiktoken_exact(monkeypatch):
         pytest.skip("tiktoken extra not installed")
     import tiktoken
 
-    import graphify_mcp.graph as g
+    import codegraph_mcp.graph as g
     g._TIKTOKEN_ENC = None  # reset the lazy probe so the env switch is honored
     monkeypatch.setenv("GRAPHIFY_TOKENIZER", "tiktoken")
     s = "def handle_request(self, request, *, follow_redirects=True): return self._send(request)"
@@ -138,7 +138,7 @@ def test_node_details_real_graphify_schema(tmp_path, monkeypatch):
         "nodes": [{
             "id": "graphify_overview",
             "label": "graphify_overview()",
-            "source_file": "src/graphify_mcp/server.py",
+            "source_file": "src/codegraph_mcp/server.py",
             "source_location": "L295",
             "community": 12,
         }],
@@ -147,7 +147,7 @@ def test_node_details_real_graphify_schema(tmp_path, monkeypatch):
     (out / "graph.json").write_text(json.dumps(graph), encoding="utf-8")
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     data = json.loads(server.graphify_node_details("graphify_overview", as_json=True))
-    assert data["file"] == "src/graphify_mcp/server.py"
+    assert data["file"] == "src/codegraph_mcp/server.py"
     assert data["line"] == 295
     # source_location is consumed as the line, not echoed back in extra
     assert "source_location" not in data.get("extra", {})
@@ -222,17 +222,17 @@ def test_tool_and_prompt_registration(project):
 
 
 def test_version_reported_over_mcp():
-    import graphify_mcp
+    import codegraph_mcp
 
-    assert server.__version__ == graphify_mcp.__version__
-    # FastMCP otherwise reports the mcp library version; we override it.
-    assert server.mcp._mcp_server.version == server.__version__
+    assert server.__version__ == codegraph_mcp.__version__
+    # An unversioned MCPServer reports an empty string; we pass version= explicitly.
+    assert server.mcp.version == server.__version__
 
 
 def test_main_module_wired():
     import importlib
 
-    mod = importlib.import_module("graphify_mcp.__main__")  # must not run main()
+    mod = importlib.import_module("codegraph_mcp.__main__")  # must not run main()
     assert mod.main is server.main
 
 
@@ -1105,15 +1105,21 @@ def test_detect_backend(monkeypatch):
 
 # --- host-LLM sampling: capability test + naming round-trip (in-memory) -------
 
-def _run_in_memory(project, tool, args, sampling_callback=None):
+def _run_in_memory(project, tool, args, sampling_callback=None, mode="auto"):
     """Drive a tool over a real in-memory MCP session (optionally with sampling)."""
     import asyncio
 
-    from mcp.shared.memory import create_connected_server_and_client_session as connect
+    from mcp import Client
 
     async def _go():
-        async with connect(server.mcp, sampling_callback=sampling_callback) as client:
-            await client.initialize()
+        # v2 Client connects to an MCPServer in-process; the context manager
+        # performs the handshake itself. mode="auto" negotiates the modern
+        # protocol, where the Sample resolver rides input-required rounds;
+        # mode="legacy" pins the pre-2026-07-28 handshake, where it rides the
+        # server->client back-channel.
+        async with Client(
+            server.mcp, sampling_callback=sampling_callback, mode=mode
+        ) as client:
             res = await client.call_tool(tool, args)
             return res.content[0].text
 
@@ -1121,14 +1127,22 @@ def _run_in_memory(project, tool, args, sampling_callback=None):
 
 
 async def _first_member_host_llm(context, params):
-    """Stand-in for the host model: name a community after its first member."""
+    """Stand-in for the host model: name each community after its first member.
+
+    Parses the batched naming prompt ("<id>: member, member, ..." lines after
+    "Modules:") and answers with the JSON name map the server asks for.
+    """
     from mcp.types import CreateMessageResult, TextContent
 
     text = params.messages[0].content.text
-    first = text.split("Members:", 1)[-1].split(",")[0].strip()
+    names = {}
+    for line in text.split("Modules:", 1)[-1].strip().splitlines():
+        cid, sep, members = line.partition(":")
+        if sep:
+            names[cid.strip()] = members.split(",")[0].strip()
     return CreateMessageResult(
         role="assistant",
-        content=TextContent(type="text", text=first),
+        content=TextContent(type="text", text=json.dumps(names)),
         model="stub-host-model",
     )
 
@@ -1149,21 +1163,103 @@ def test_sampling_status_unsupported(project):
 
 
 def test_label_communities_via_sampling(project):
-    out = _run_in_memory(
-        project, "graphify_label_communities", {"method": "auto", "as_json": True},
-        sampling_callback=_first_member_host_llm,
-    )
-    data = json.loads(out)
-    assert data["method"] == "sampling"
-    assert data["labeled"] >= 1
-    # the stub names each community after its first member -> proves the round-trip
-    assert all(c["name"] == c["members"][0] for c in data["communities"])
+    # "auto" = modern protocol (input-required rounds), "legacy" = back-channel;
+    # host naming must round-trip on both.
+    for mode in ("auto", "legacy"):
+        out = _run_in_memory(
+            project, "graphify_label_communities", {"method": "auto", "as_json": True},
+            sampling_callback=_first_member_host_llm, mode=mode,
+        )
+        data = json.loads(out)
+        assert data["method"] == "sampling", mode
+        assert data["labeled"] >= 1, mode
+        # the stub names each community after its first member -> proves the round-trip
+        assert all(c["name"] == c["members"][0] for c in data["communities"]), mode
 
 
 def test_label_communities_sampling_unsupported_errors(project):
     out = _run_in_memory(project, "graphify_label_communities", {"method": "sampling"})
     assert "does not support" in out
     assert "graphify_set_labels" in out  # points to the assistant-driven fallback
+
+
+def test_label_communities_sampling_failure_degrades_on_legacy(project):
+    """A failing host model must not error the call on the legacy protocol."""
+    async def _boom(context, params):
+        raise RuntimeError("host model exploded")
+
+    out = _run_in_memory(
+        project, "graphify_label_communities", {"method": "sampling", "as_json": True},
+        sampling_callback=_boom, mode="legacy",
+    )
+    data = json.loads(out)
+    assert data["method"] == "sampling"
+    assert all(c["name"] == f"Community {c['id']}" for c in data["communities"])
+
+
+def test_label_communities_empty_batch_skips_sampling(project):
+    """limit=0 -> nothing to name -> no host-LLM request on either protocol."""
+    calls = {"n": 0}
+
+    async def _counting(context, params):
+        calls["n"] += 1
+        return await _first_member_host_llm(context, params)
+
+    for mode in ("auto", "legacy"):
+        out = _run_in_memory(
+            project, "graphify_label_communities",
+            {"method": "sampling", "limit": 0, "as_json": True},
+            sampling_callback=_counting, mode=mode,
+        )
+        data = json.loads(out)
+        assert data["labeled"] == 0, mode
+    assert calls["n"] == 0
+
+
+def test_label_communities_schema_hides_resolver_param():
+    """The framework-filled `host_naming` arg must not leak into the tool schema."""
+    import asyncio
+
+    from mcp import Client
+
+    async def _go():
+        async with Client(server.mcp) as client:
+            tools = await client.list_tools()
+            return {t.name: t.input_schema for t in tools.tools}
+
+    props = asyncio.run(_go())["graphify_label_communities"]["properties"]
+    assert "host_naming" not in props
+    assert {"method", "limit", "sample_size", "as_json"} <= set(props)
+
+
+def test_names_from_sampling_fallbacks():
+    """Broken / partial host replies degrade to placeholders with a note."""
+    from mcp.types import CreateMessageResult, TextContent
+
+    def _res(text):
+        return CreateMessageResult(
+            role="assistant", model="m", content=TextContent(type="text", text=text)
+        )
+
+    ordered = [(0, ["a", "b"]), (1, ["c"])]
+
+    assert server._names_from_sampling(None, []) == ({}, "")  # nothing to name
+
+    names, note = server._names_from_sampling(None, ordered)
+    assert names == {0: "Community 0", 1: "Community 1"} and note
+
+    names, note = server._names_from_sampling(_res("no braces here"), ordered)
+    assert names[0] == "Community 0" and "no JSON" in note
+
+    names, note = server._names_from_sampling(_res("{bad json}"), ordered)
+    assert names[1] == "Community 1" and "not valid JSON" in note
+
+    # fenced reply, one id missing -> that one falls back, the other sticks
+    names, note = server._names_from_sampling(
+        _res('```json\n{"0": "Auth Layer", "9": "Ignored"}\n```'), ordered
+    )
+    assert names == {0: "Auth Layer", 1: "Community 1"}
+    assert "missing" in note
 
 
 def test_set_labels_persists_and_patches_html(tmp_path, monkeypatch):
@@ -1552,7 +1648,7 @@ def test_main_http_with_api_key_wraps_served_app_with_auth(monkeypatch):
     monkeypatch.setattr(server, "TRANSPORT", "streamable-http")
     monkeypatch.setattr(server, "API_KEY", "k")
     monkeypatch.setattr(server, "RESTRICT_PATHS", False)
-    monkeypatch.setattr(server.mcp, "streamable_http_app", lambda: base_app)
+    monkeypatch.setattr(server.mcp, "streamable_http_app", lambda **kw: base_app)
     monkeypatch.setattr(server.mcp, "run", lambda **kw: seen.setdefault("ran", kw))
     monkeypatch.setattr(uvicorn, "run", lambda app, **kw: seen.update(uvicorn=kw, app=app))
     server.main()
@@ -1578,16 +1674,51 @@ def test_main_http_sse_with_api_key_wraps_sse_app(monkeypatch):
 
     seen = {}
 
-    def _boom():
+    def _boom(**kw):
         raise AssertionError("sse transport must wrap sse_app, not streamable_http_app")
 
     monkeypatch.setattr(server, "TRANSPORT", "sse")
     monkeypatch.setattr(server, "API_KEY", "k")
-    monkeypatch.setattr(server.mcp, "sse_app", lambda: (lambda *a: None))
+    monkeypatch.setattr(server.mcp, "sse_app", lambda **kw: (lambda *a: None))
     monkeypatch.setattr(server.mcp, "streamable_http_app", _boom)
     monkeypatch.setattr(uvicorn, "run", lambda app, **kw: seen.update(app=app))
     server.main()
     assert "app" in seen   # sse_app was selected + wrapped (streamable_http_app untouched)
+
+
+def test_transport_security_env(monkeypatch):
+    monkeypatch.delenv("GRAPHIFY_ALLOWED_HOSTS", raising=False)
+    assert server._transport_security() is None  # SDK default (loopback allowlist)
+
+    monkeypatch.setenv("GRAPHIFY_ALLOWED_HOSTS", "*")
+    sec = server._transport_security()
+    assert sec is not None and sec.enable_dns_rebinding_protection is False
+
+    monkeypatch.setenv("GRAPHIFY_ALLOWED_HOSTS", "graphify.example.com:*, other.example.com")
+    sec = server._transport_security()
+    assert sec.enable_dns_rebinding_protection is True
+    assert sec.allowed_hosts == ["graphify.example.com:*", "other.example.com"]
+    assert "https://graphify.example.com:*" in sec.allowed_origins
+    assert "http://other.example.com" in sec.allowed_origins
+
+
+def test_main_http_allowed_hosts_wires_transport_security(monkeypatch):
+    _skip_without_uvicorn()
+    import uvicorn
+
+    seen = {}
+    monkeypatch.setattr(server, "TRANSPORT", "streamable-http")
+    monkeypatch.setattr(server, "API_KEY", "k")
+    monkeypatch.setattr(server, "RESTRICT_PATHS", False)
+    monkeypatch.setenv("GRAPHIFY_ALLOWED_HOSTS", "graphify.example.com:*")
+    monkeypatch.setattr(
+        server.mcp, "streamable_http_app",
+        lambda **kw: seen.update(kw) or (lambda *a: None),
+    )
+    monkeypatch.setattr(uvicorn, "run", lambda app, **kw: None)
+    server.main()
+    assert seen["host"] == server.HTTP_HOST
+    assert seen["transport_security"].allowed_hosts == ["graphify.example.com:*"]
 
 
 def test_main_http_no_apikey_nonloopback_warns(monkeypatch, capsys):
@@ -2260,7 +2391,7 @@ def test_fetch_dedupes_same_node_and_requires_input(tmp_path, monkeypatch):
 # --- adjacency cache -----------------------------------------------------------
 
 def test_adjacency_cached_on_edges_identity():
-    from graphify_mcp import graph as g
+    from codegraph_mcp import graph as g
     edges = [{"source": "A", "target": "B", "type": "x"},
              {"source": "B", "target": "C", "type": "y"}]
     a1 = g._adjacency(edges)
@@ -2274,7 +2405,7 @@ def test_adjacency_cached_on_edges_identity():
 
 
 def test_directed_adjacency_splits_and_caches():
-    from graphify_mcp import graph as g
+    from codegraph_mcp import graph as g
     edges = [{"source": "A", "target": "B", "type": "calls"}]
     f1, r1 = g._directed_adjacency(edges)
     f2, r2 = g._directed_adjacency(edges)
@@ -2321,7 +2452,7 @@ def test_impact_invalid_direction_and_unknown_node(project):
 # --- graphify_cycles: circular dependencies ------------------------------------
 
 def test_find_cycles_separates_two_sccs():
-    from graphify_mcp import graph as g
+    from codegraph_mcp import graph as g
     edges = [
         {"source": "A", "target": "B"}, {"source": "B", "target": "A"},   # 2-cycle
         {"source": "C", "target": "D"}, {"source": "D", "target": "E"},
@@ -2633,7 +2764,7 @@ def test_api_uses_treesitter_js_go_java(tmp_path, monkeypatch):
 def test_api_uses_for_source_public_contract():
     # the stable public seam for external consumers (e.g. kapsam): importable from
     # the package root, accepts bytes or str, dispatches on the rel extension
-    from graphify_mcp import api_uses_for_source
+    from codegraph_mcp import api_uses_for_source
 
     packages, symbols, paths = api_uses_for_source(
         "from fastapi import Depends\nimport numpy as np\nnp.linalg.norm([1])\n",

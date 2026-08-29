@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Multi-language validation benchmark for graphify-mcp.
+"""Multi-language validation benchmark for codegraph-mcp.
 
 Proves the tree-sitter span join (graphify_locate) and the cosmetic-vs-structural
 freshness check on REAL HTTP-client repos in JS/TS, Go and Java — the same kind of
@@ -40,7 +40,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from graphify_mcp import server as s  # noqa: E402
+from codegraph_mcp import server as s  # noqa: E402
 
 BENCH = Path("/tmp/ml-bench")
 

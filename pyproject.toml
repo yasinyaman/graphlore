@@ -3,14 +3,14 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "graphify-mcp"
+name = "codegraph-mcp"
 version = "0.2.0"
 description = "MCP server exposing the Graphify codebase knowledge graph as tools, prompts and resources."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [{ name = "yasinyaman" }]
-keywords = ["mcp", "graphify", "knowledge-graph", "ai", "codebase", "claude"]
+keywords = ["mcp", "codegraph", "graphify", "knowledge-graph", "ai", "codebase", "claude"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
@@ -22,12 +22,13 @@ classifiers = [
     "Topic :: Software Development :: Libraries",
 ]
 dependencies = [
-    # Floor is the tested baseline (mcp 1.26–1.27). This server uses the
-    # streamable-HTTP transport (`mcp.streamable_http_app`), tool annotations, and
-    # host-LLM sampling (`check_client_capability` / `create_message`) — none of
-    # which exist in the old `>=1.2.0` floor, so that floor would install but fail
-    # at runtime. Upper bound guards against a breaking 2.0 SDK release.
-    "mcp>=1.26,<2.0",
+    # Floor is the tested baseline (mcp 2.1, the v2 SDK). This server uses the
+    # v2 API surface: `mcp.server.mcpserver.MCPServer` (with per-call HTTP
+    # transport options: `run(host=..., port=...)` / `streamable_http_app(host=...)`),
+    # tool annotations, and host-LLM sampling (`check_client_capability` /
+    # `create_message`). The in-memory `Client(server)` used by the test suite is
+    # also v2-only. Upper bound guards against a breaking 3.0 release.
+    "mcp>=2.1,<3.0",
 ]
 
 [project.optional-dependencies]
@@ -54,21 +55,19 @@ all = [
 dev = ["pytest>=8.0", "ruff>=0.6", "pytest-cov>=5.0", "mypy>=1.11"]
 
 [project.urls]
-Homepage = "https://github.com/yasinyaman/graphify-mcp"
-Repository = "https://github.com/yasinyaman/graphify-mcp"
-Issues = "https://github.com/yasinyaman/graphify-mcp/issues"
+Homepage = "https://github.com/yasinyaman/codegraph-mcp"
+Repository = "https://github.com/yasinyaman/codegraph-mcp"
+Issues = "https://github.com/yasinyaman/codegraph-mcp/issues"
 "Graphify" = "https://graphify.net"
 
 [project.scripts]
-# Only collision-free entry points. `graphifyy` ships its own `graphify-mcp`
-# console script (its embedded server), so a bare `graphify-mcp` declared here
-# would be shadowed by whichever package installed last — silently launching the
-# wrong server. Use `graphify-mcp-server` or `python -m graphify_mcp`; both
-# always run THIS package.
-graphify-mcp-server = "graphify_mcp.server:main"
+# The rename from graphify-mcp freed us to claim the bare name: `graphifyy`
+# ships a `graphify-mcp` script (its embedded server), which is why the old
+# entry point had to be the clunky `graphify-mcp-server`. No collision now.
+codegraph-mcp = "codegraph_mcp.server:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/graphify_mcp"]
+packages = ["src/codegraph_mcp"]
 
 [tool.ruff]
 line-length = 100
@@ -87,11 +86,11 @@ pythonpath = ["src"]
 # third-party deps that ship no stubs (mcp, semble, tree-sitter). The MCP tool
 # signatures are fully typed — FastMCP derives each tool's JSON schema from them.
 python_version = "3.10"
-files = ["src/graphify_mcp"]
+files = ["src/codegraph_mcp"]
 ignore_missing_imports = true
 
 [tool.coverage.run]
-source = ["graphify_mcp"]
+source = ["codegraph_mcp"]
 
 [tool.coverage.report]
 show_missing = true

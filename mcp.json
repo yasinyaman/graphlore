@@ -1,7 +1,7 @@
 {
   "mcpServers": {
-    "graphify": {
-      "command": "graphify-mcp-server",
+    "codegraph": {
+      "command": "codegraph-mcp",
       "env": {
         "GRAPHIFY_PROJECT_DIR": "."
       }

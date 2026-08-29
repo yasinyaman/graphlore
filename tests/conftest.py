@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from graphify_mcp import server
+from codegraph_mcp import server
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
