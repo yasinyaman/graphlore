@@ -8,19 +8,25 @@ conventions. This module recognizes the common registration idioms so
 
 Recognized idioms (v1):
   * **Python** (stdlib ``ast``): Flask ``@app.route("/x", methods=[...])``,
-    Flask/FastAPI verb decorators ``@app.get("/x")`` / ``@router.post(...)``
-    (labelled flask vs fastapi by which package the file imports), Django
-    ``path()`` / ``re_path()`` / ``url()`` calls — only in files that import
-    django, which kills false positives from local functions named ``path``.
+    verb decorators ``@app.get("/x")`` / ``@router.post(...)`` — only in files
+    that import a known web framework (fastapi/flask/sanic/quart/litestar,
+    which also picks the label), so a registry-style ``@hooks.post("event")``
+    in a framework-free file never fabricates a route; Django ``path()`` /
+    ``re_path()`` / ``url()`` calls — only in files that import django, which
+    kills false positives from local functions named ``path``.
   * **JS/TS** (tree-sitter): Express/Koa-router style ``app.get('/x', h)`` —
-    the receiver must be a plain identifier and the first argument a string
-    literal starting with ``/`` (that filter is what keeps ``map.get('key')``
-    out); NestJS ``@Controller('prefix')`` + ``@Get(':id')`` method decorators.
+    only in files that import/require a server framework (express/fastify/
+    koa-router/…), which keeps HTTP-client call sites (``axios.get('/x')``)
+    out; the receiver must be a plain identifier and the first argument a
+    string literal starting with ``/`` (that filter is what keeps
+    ``map.get('key')`` out); NestJS ``@Controller('prefix')`` + ``@Get(':id')``
+    method decorators.
   * **Go** (tree-sitter): verb methods (gin/echo ``r.GET``, chi ``r.Get``),
     ``Handle``/``HandleFunc`` (with the Go 1.22 ``"GET /items/{id}"`` pattern
-    split into method + path), and chi ``r.Route("/api", func(r) {...})``
-    nesting via prefix-carrying recursion. Framework labelled from the import
-    paths (gin/echo/chi/gorilla, else net-http).
+    split into method + path, and the gin 3-arg ``r.Handle("GET", "/x", h)``
+    form), and chi ``r.Route("/api", func(r) {...})`` nesting via
+    prefix-carrying recursion. Framework labelled from the import paths
+    (gin/echo/chi/gorilla, else net-http).
   * **Java** (tree-sitter): Spring ``@GetMapping``-family + ``@RequestMapping``
     (class-level prefix joined onto method-level paths).
 
@@ -59,6 +65,24 @@ _ROUTES_CACHE_MAX = 4096
 _HTTP_METHODS = frozenset({"get", "post", "put", "delete", "patch", "options", "head", "trace"})
 # Go 1.22 net/http pattern syntax: "GET /items/{id}" -> method + path.
 _GO_122_PATTERN = re.compile(r"^([A-Z]+) (/.*)$")
+
+# Python web frameworks sharing the @app.get/@router.post verb-decorator idiom,
+# in label priority order (fastapi first: with both flask and fastapi imported,
+# the shortcut style is fastapi's). The import both GATES the match — a file
+# importing none of these must not turn @hooks.post("event") into a route — and
+# picks the framework label.
+_PY_VERB_FRAMEWORKS = (
+    ("fastapi", "fastapi"),
+    ("flask", "flask"),
+    ("sanic", "sanic"),
+    ("quart", "quart"),
+    ("litestar", "litestar"),
+)
+
+# JS/TS server frameworks whose import/require gates Express-style verb-call
+# detection; without the gate, HTTP-client request sites (axios.get('/api/x'),
+# apiClient.post('/login', body)) are indistinguishable from registrations.
+_JS_SERVER_FRAMEWORKS = ("express", "fastify", "koa-router", "@koa/router", "restify", "polka")
 
 
 def _routes_cache_put(key: str, value: tuple[float, list[RouteRow]]) -> None:
@@ -102,9 +126,11 @@ def _routes_python(src: bytes) -> list[RouteRow]:
             imported.update(a.name.split(".")[0] for a in node.names)
         elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
             imported.add(node.module.split(".")[0])
-    # Flask >=2 has the same `@app.get` shortcuts as FastAPI; the import set is
-    # the cheap disambiguator, defaulting to fastapi when both (or neither) show.
-    verb_framework = "flask" if ("flask" in imported and "fastapi" not in imported) else "fastapi"
+    # The import set gates AND labels verb-decorator matching (see
+    # _PY_VERB_FRAMEWORKS); None = no web framework imported, no verb rows.
+    verb_framework = next(
+        (label for mod, label in _PY_VERB_FRAMEWORKS if mod in imported), None
+    )
 
     def _first_pattern(call: ast.Call) -> str | None:
         if call.args and isinstance(call.args[0], ast.Constant) and \
@@ -123,7 +149,7 @@ def _routes_python(src: bytes) -> list[RouteRow]:
                     continue
                 attr = dec.func.attr
                 pattern = _first_pattern(dec)
-                if pattern is None:
+                if pattern is None or verb_framework is None:
                     continue
                 if attr == "route":  # Flask style, one row per declared method
                     methods = ["GET"]
@@ -134,7 +160,8 @@ def _routes_python(src: bytes) -> list[RouteRow]:
                                 if isinstance(e, ast.Constant) and isinstance(e.value, str)
                             ]
                             methods = declared or methods
-                    rows += [_row("flask", m, pattern, node.name, node.lineno)
+                    label = "flask" if "flask" in imported else verb_framework
+                    rows += [_row(label, m, pattern, node.name, node.lineno)
                              for m in methods]
                 elif attr in _HTTP_METHODS:
                     rows.append(_row(verb_framework, attr, pattern, node.name, node.lineno))
@@ -165,6 +192,33 @@ def _routes_js(root: Any) -> list[RouteRow]:
     verbs = _HTTP_METHODS | {"all"}
     nest_verbs = {"Get": "GET", "Post": "POST", "Put": "PUT", "Delete": "DELETE",
                   "Patch": "PATCH", "Options": "OPTIONS", "Head": "HEAD", "All": "ANY"}
+
+    imports: set[str] = set()
+
+    def collect_imports(node: Any) -> None:
+        for child in node.named_children:
+            if child.type == "import_statement":
+                src = child.child_by_field_name("source")
+                if src is not None:
+                    imports.add(_strip_quotes(_text(src)))
+            elif child.type == "call_expression":
+                fn = child.child_by_field_name("function")
+                args = child.child_by_field_name("arguments")
+                if (fn is not None and args is not None and fn.type == "identifier"
+                        and _text(fn) == "require"):
+                    strings = [a for a in args.named_children if "string" in a.type]
+                    if strings:
+                        imports.add(_strip_quotes(_text(strings[0])))
+            collect_imports(child)
+
+    collect_imports(root)
+    # Same gate idea as the Python verb decorators: without a server-framework
+    # import in the file, identifier.verb('/x', …) is far likelier an HTTP-client
+    # request site than a route registration.
+    server_framework = any(
+        imp == fw or imp.startswith(fw + "/")
+        for imp in imports for fw in _JS_SERVER_FRAMEWORKS
+    )
 
     def string_arg(args: Any, index: int = 0) -> str | None:
         strings = [a for a in args.named_children if "string" in a.type]
@@ -235,8 +289,9 @@ def _routes_js(root: Any) -> list[RouteRow]:
                     prop = fn.child_by_field_name("property")
                     # Plain-identifier receiver only: excludes router.route('/x')
                     # .get(h) chains (documented v1 cut) and this.x receivers.
-                    if (obj is not None and prop is not None and obj.type == "identifier"
-                            and _text(prop) in verbs):
+                    # Gated on a server-framework import (see above).
+                    if (server_framework and obj is not None and prop is not None
+                            and obj.type == "identifier" and _text(prop) in verbs):
                         pattern = string_arg(args)
                         if pattern is not None and pattern.startswith("/"):
                             handler = "<inline>"
@@ -326,10 +381,19 @@ def _routes_go(root: Any) -> list[RouteRow]:
                     elif name in ("Handle", "HandleFunc") and n_args >= 2 \
                             and pattern is not None:
                         m = _GO_122_PATTERN.match(pattern)
+                        strings = [
+                            _strip_quotes(_text(a)) for a in args.named_children
+                            if a.type in ("interpreted_string_literal", "raw_string_literal")
+                        ]
                         if m:
                             method, pat = m.group(1), m.group(2)
                         elif pattern.startswith("/"):
                             method, pat = "ANY", pattern
+                        elif (len(strings) >= 2 and strings[0].upper() in verb_upper
+                                and strings[1].startswith("/")):
+                            # gin 3-arg form: r.Handle("GET", "/x", handler) — the
+                            # first literal is the METHOD, the second the path.
+                            method, pat = strings[0].upper(), strings[1]
                         else:
                             walk(child, prefix)
                             continue
@@ -385,16 +449,22 @@ def _routes_java(root: Any) -> list[RouteRow]:
                 stack.extend(n.named_children)
         return ""
 
-    def request_method(ann: Any) -> str:
+    def request_methods(ann: Any) -> list[str]:
         args = ann.child_by_field_name("arguments")
         if args is None:
-            return "ANY"
+            return ["ANY"]
         for p in args.named_children:
             key = p.child_by_field_name("key")
             value = p.child_by_field_name("value")
             if key is not None and _text(key) == "method" and value is not None:
-                return _text(value).rsplit(".", 1)[-1].upper()  # RequestMethod.GET -> GET
-        return "ANY"
+                # method = RequestMethod.GET, or an array
+                # method = {RequestMethod.GET, RequestMethod.POST} — one row each,
+                # never the raw array text (which would yield a garbage 'POST}').
+                elems = (list(value.named_children)
+                         if value.type == "element_value_array_initializer" else [value])
+                methods = [_text(el).rsplit(".", 1)[-1].upper() for el in elems]
+                return [m for m in methods if m] or ["ANY"]
+        return ["ANY"]
 
     def walk(node: Any) -> None:
         for child in node.named_children:
@@ -417,9 +487,10 @@ def _routes_java(root: Any) -> list[RouteRow]:
                                 "spring", mappings[ann_name],
                                 _join_path(prefix, annotation_path(ann)), handler, line))
                         elif ann_name == "RequestMapping":
-                            rows.append(_row(
-                                "spring", request_method(ann),
-                                _join_path(prefix, annotation_path(ann)), handler, line))
+                            for meth in request_methods(ann):
+                                rows.append(_row(
+                                    "spring", meth,
+                                    _join_path(prefix, annotation_path(ann)), handler, line))
                 walk(child)  # nested classes
             else:
                 walk(child)

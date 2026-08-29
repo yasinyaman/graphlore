@@ -20,7 +20,11 @@ build an AST-only graph per repo — no LLM/API key needed):
 Run:
   /path/to/venv/bin/python benchmarks/multilang.py [--json results.json]
 
-Every number it prints is measured live — nothing is hard-coded. It reports, per repo:
+Span, token, hidden-link and freshness numbers are measured live. The one
+exception is the locate side of the call-count row: locate is 1 tool call / 0
+agent file reads BY CONSTRUCTION (it is a single call whose reply embeds the
+map), so those two constants are the tool's contract, not a measurement — the
+naive side of the same row IS measured from the live grep. It reports, per repo:
   * span-join precision  — % of semble hits whose resolved node's real tree-sitter
     span actually CONTAINS the chunk (true containment), replicating the httpx metric
   * qualname recovery    — % of locate seeds that recover a span FQN (e.g. Service.fetch)
@@ -136,8 +140,6 @@ def _reset(project_dir: Path):
     s._GRAPH_CACHE.clear()
     s._SPAN_CACHE.clear()
     s._TS_PARSERS.clear()
-    if hasattr(s, "_SEMBLE_CACHE"):
-        s._SEMBLE_CACHE.clear()
 
 
 def _node_span_contains(node, fp, line):
@@ -293,7 +295,7 @@ def main(argv=None):
               f"  vs grep+read {r['grep_tokens']} tok ({r['grep_files']} files)"
               f"  -> {r['ratio']:.0f}x fewer")
 
-    print("\n=== Call-count spot-check (same query/grep as above) ===")
+    print("\n=== Call-count spot-check (same query/grep; locate side by construction) ===")
     for r in results:
         print(f"  {r['lang']:6} locate: {r['locate_calls']} call / "
               f"{r['locate_file_reads']} file reads  vs naive: {r['naive_calls']} calls "
