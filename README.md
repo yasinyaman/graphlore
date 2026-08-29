@@ -110,7 +110,12 @@ GRAPHIFY_TRANSPORT=streamable-http GRAPHIFY_HOST=0.0.0.0 GRAPHIFY_API_KEY=$(open
 ```
 
 For a smaller tool surface (helps some models pick the right tool), set
-`GRAPHIFY_TOOLSET=lean` to expose only the core exploration tools.
+`GRAPHIFY_TOOLSET=lean` to expose only the core exploration tools — or
+`GRAPHIFY_TOOLSET=locate` for the minimal locate-first surface: orient with one
+`graphify_locate` call, hydrate code with `graphify_fetch`, stay in sync with
+`graphify_build`/`graphify_freshness`. `locate` needs a semantic backend (the
+`[semble]` extra or `GRAPHIFY_SEMANTIC_BACKEND`) and falls back to `lean` without
+one.
 
 ## Environment variables
 
@@ -126,7 +131,7 @@ For a smaller tool surface (helps some models pick the right tool), set
 | `GRAPHIFY_PORT` | `8000` | Bind port for HTTP transports |
 | `GRAPHIFY_API_KEY` | _(unset)_ | Require `Authorization: Bearer <key>` on HTTP transports |
 | `GRAPHIFY_ALLOWED_HOSTS` | _(unset)_ | DNS-rebinding `Host` allowlist for HTTP (comma-separated, `:*` port wildcards; `*` disables). Unset = SDK default: loopback-only when bound to loopback |
-| `GRAPHIFY_TOOLSET` | `full` | `full` \| `lean` (core exploration tools only) |
+| `GRAPHIFY_TOOLSET` | `full` | `full` \| `lean` (core exploration tools only) \| `locate` (minimal locate-first surface; falls back to `lean` without a semantic backend) |
 | `GRAPHIFY_TOKENIZER` | _(heuristic)_ | `tiktoken` → exact token counts (needs the `[tiktoken]` extra); else chars/3.5 estimate |
 | `GRAPHIFY_SEMANTIC_BACKEND` | `semble` | Semantic backend for `locate`/`duplication_scan`. `semble` (offline default) or a `module.path:Factory` implementing the `SemanticIndex` protocol (`search`/`find_related`; results expose `.chunk.file_path/.start_line/.end_line`) — plug in local sentence-transformers, an OpenAI-compatible / on-prem vLLM endpoint, etc. |
 | `GRAPHIFY_WATCH` | `0` | `1` → watch the project for **structural** source changes and re-sync the graph automatically (needs the `[watch]` extra; cosmetic edits are ignored) |

@@ -151,9 +151,10 @@ HTTP_PORT = int(os.environ.get("GRAPHIFY_PORT", "8000"))
 # (rely on binding to localhost or a fronting proxy).
 API_KEY = os.environ.get("GRAPHIFY_API_KEY", "")
 
-# Tool surface: "full" (default, all tools) | "lean" (core exploration set only).
-# A smaller surface can help models pick the right tool; opt-in so the documented
-# full surface is unchanged by default.
+# Tool surface: "full" (default, all tools) | "lean" (core exploration set only)
+# | "locate" (minimal locate-first surface). A smaller surface can help models
+# pick the right tool; opt-in so the documented full surface is unchanged by
+# default.
 TOOLSET = os.environ.get("GRAPHIFY_TOOLSET", "full").strip().lower()
 # A coherent, mostly dependency-free core that still supports the whole documented
 # flow: build -> orient (overview) -> find (search) -> traverse (subgraph/
@@ -170,6 +171,24 @@ LEAN_TOOLS = frozenset({
     "graphify_communities",
     "graphify_freshness",
 })
+# Mega-tool-style surface: one way in (locate), one way to the code (fetch), plus
+# the minimum to stay oriented and in sync. Requires a semantic backend — without
+# one the server falls back to the lean surface at boot (see
+# _effective_toolset_tools) rather than advertising a locate tool that can only
+# return an install hint.
+LOCATE_TOOLS = frozenset({
+    "graphify_locate",
+    "graphify_fetch",
+    "graphify_overview",
+    "graphify_build",
+    "graphify_freshness",
+})
+# None = no trim (full surface). Unknown GRAPHIFY_TOOLSET values behave as full.
+TOOLSETS: dict[str, frozenset[str] | None] = {
+    "full": None,
+    "lean": LEAN_TOOLS,
+    "locate": LOCATE_TOOLS,
+}
 
 mcp = MCPServer(
     "graphlore",
@@ -624,6 +643,10 @@ def graphify_overview(top_n: int = 8, as_json: bool = False) -> str:
     active = _registered_tool_names()
     if active:
         suggested = [s for s in suggested if s.split("(", 1)[0] in active]
+        # locate is the recommended way in whenever it's live — and under the
+        # locate toolset it's the only suggestion left standing.
+        if "graphify_locate" in active:
+            suggested.insert(0, 'graphify_locate("<natural-language question>")')
     age = _graph_age()
     payload = {
         "nodes": len(nodes),
@@ -2645,6 +2668,15 @@ def _registered_tool_names() -> set[str]:
         return set()
 
 
+def _semantic_backend_available() -> bool:
+    """Whether graphify_locate has a working backend (semble or a custom one)."""
+    import importlib.util
+
+    backend = os.environ.get("GRAPHIFY_SEMANTIC_BACKEND", "").strip().lower()
+    has_custom_backend = backend not in ("", "semble")
+    return has_custom_backend or importlib.util.find_spec("semble") is not None
+
+
 def _effective_lean_tools() -> set[str]:
     """LEAN_TOOLS minus tools whose optional dependency is absent.
 
@@ -2652,27 +2684,46 @@ def _effective_lean_tools() -> set[str]:
     return an install-this error, so it's dropped from the lean surface rather than
     advertised as a core tool.
     """
-    import importlib.util
-
     lean = set(LEAN_TOOLS)
-    backend = os.environ.get("GRAPHIFY_SEMANTIC_BACKEND", "").strip().lower()
-    has_custom_backend = backend not in ("", "semble")
-    if importlib.util.find_spec("semble") is None and not has_custom_backend:
+    if not _semantic_backend_available():
         lean.discard("graphify_locate")
     return lean
 
 
+def _effective_toolset_tools() -> set[str] | None:
+    """Tool names the configured GRAPHIFY_TOOLSET keeps, or None for no trim.
+
+    ``locate`` is built around graphify_locate, so without a semantic backend the
+    whole surface would be inert — fall back to the lean surface (the documented
+    degraded mode) with a stderr warning instead of erroring at boot.
+    """
+    keep = TOOLSETS.get(TOOLSET)
+    if keep is None:
+        return None
+    if TOOLSET == "locate" and not _semantic_backend_available():
+        print(
+            "codegraph-mcp: GRAPHIFY_TOOLSET=locate needs the [semble] extra "
+            "(or GRAPHIFY_SEMANTIC_BACKEND); falling back to the lean toolset.",
+            file=sys.stderr,
+            flush=True,
+        )
+        return _effective_lean_tools()
+    if TOOLSET == "lean":
+        return _effective_lean_tools()
+    return set(keep)
+
+
 def _lean_removals(names: list[str], lean: set[str] | frozenset[str] = LEAN_TOOLS) -> list[str]:
-    """Tool names to drop for the lean surface (everything outside ``lean``)."""
+    """Tool names to drop for a trimmed surface (everything outside ``lean``)."""
     return [n for n in names if n not in lean]
 
 
 def _apply_toolset() -> None:
-    """If GRAPHIFY_TOOLSET=lean, unregister the non-core tools (no-op otherwise)."""
-    if TOOLSET != "lean":
+    """Unregister the tools the configured GRAPHIFY_TOOLSET drops (no-op for full)."""
+    keep = _effective_toolset_tools()
+    if keep is None:
         return
-    lean = _effective_lean_tools()
-    for name in _lean_removals(list(_registered_tool_names()), lean):
+    for name in _lean_removals(list(_registered_tool_names()), keep):
         mcp.remove_tool(name)
 
 
@@ -2802,7 +2853,9 @@ def main() -> None:
     transport force-enables path containment (GRAPHIFY_RESTRICT_PATHS), since the
     build tool would otherwise let a network client extract arbitrary paths. Set
     GRAPHIFY_API_KEY to require bearer auth on HTTP; GRAPHIFY_TOOLSET=lean trims the
-    surface to the core exploration tools. GRAPHIFY_WATCH=1 starts a background watcher
+    surface to the core exploration tools and GRAPHIFY_TOOLSET=locate to a minimal
+    locate-first set (falls back to lean without a semantic backend).
+    GRAPHIFY_WATCH=1 starts a background watcher
     that re-syncs the graph on structural source changes (needs the [watch] extra).
     GRAPHIFY_ALLOWED_HOSTS tunes the SDK's DNS-rebinding Host allowlist ("*" disables
     it) — needed when a reverse proxy in front doesn't rewrite the Host header.
