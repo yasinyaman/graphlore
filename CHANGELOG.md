@@ -6,7 +6,40 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Changed
+- **Upgraded to MCP Python SDK v2** (`mcp>=2.1,<3.0`, was `>=1.26,<2.0`). The
+  server now builds on `mcp.server.mcpserver.MCPServer` (v1's `FastMCP`); tool
+  and prompt surfaces are unchanged. Notable internals:
+  - Server version is passed as `MCPServer(..., version=...)` instead of the old
+    private `_mcp_server.version` override.
+  - `ToolAnnotations` hints use the v2 snake_case field names
+    (`read_only_hint`, `destructive_hint`).
+  - HTTP transports take host/port per call (`mcp.run(transport=..., host=...,
+    port=...)`, `streamable_http_app(host=...)`) — v2 removed
+    `settings.host/port`. The `host=` passed to the app factories also feeds the
+    SDK's DNS-rebinding protection, which auto-enables on loopback hosts.
+  - Host-LLM sampling (`graphify_label_communities`, `graphify_sampling_status`)
+    now names all communities in **one batched** `sampling/createMessage`
+    request (a JSON name map) instead of one request per community, and picks
+    its transport per protocol: on 2026-07-28+ (no in-call back-channel) a v2
+    `Resolve`/`Sample` resolver carries the request as input-required rounds;
+    on older protocols the tool body samples directly over the back-channel,
+    preserving the pre-v2 graceful degradation — a failing host model yields
+    placeholder names plus a note instead of erroring the call. (On the
+    resolver path that degradation is impossible: `Sample` has no error arm,
+    so a host-model failure surfaces as a tool error there.) Unusable or
+    partial replies degrade to placeholder names with an explanatory note,
+    and an empty naming batch (`limit=0`) no longer sends a request at all.
+  - The test suite drives tools through the v2 in-process `Client` (the v1
+    `create_connected_server_and_client_session` helper is gone).
+
 ### Added
+- `GRAPHIFY_ALLOWED_HOSTS` — Host-header allowlist for the HTTP transports'
+  DNS-rebinding protection (comma-separated, `:*` port wildcards; `*` disables
+  it). The MCP v2 SDK auto-enables that protection with a loopback-only
+  allowlist when the server binds a loopback host, which rejects
+  reverse-proxied requests whose `Host` wasn't rewritten; this variable is the
+  escape hatch (v1 enforced no Host check).
 - `graphify_package_apis` — symbol-level external API surface: which names each
   external package is actually used for ("uses `Depends`, `APIRouter` from
   fastapi", not just "imports fastapi"), the input a version-upgrade audit needs.

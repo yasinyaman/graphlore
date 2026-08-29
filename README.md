@@ -92,6 +92,13 @@ paths. HTTP binds `127.0.0.1` by default. To expose it beyond localhost, set
 (constant-time checked, 401 otherwise); binding a non-loopback host without a key
 prints a warning.
 
+When bound to a loopback host, the MCP SDK auto-enables **DNS-rebinding
+protection**: only `Host: 127.0.0.1 / localhost / ::1` requests are accepted. A
+reverse proxy in front (nginx/caddy on a public name forwarding to
+`127.0.0.1`) must therefore rewrite the `Host` header — or set
+`GRAPHIFY_ALLOWED_HOSTS` to the public name(s) (comma-separated, `:*` port
+wildcards allowed; `*` disables the protection for a trusted proxy).
+
 The CLI is always invoked as an argument list with **no shell** (`subprocess.run`
 with `shell=False`), so a build `path` or query string can't inject shell commands.
 For a shared/network deployment, also consider lowering `GRAPHIFY_TIMEOUT` (default
@@ -118,6 +125,7 @@ For a smaller tool surface (helps some models pick the right tool), set
 | `GRAPHIFY_HOST` | `127.0.0.1` | Bind host for HTTP transports |
 | `GRAPHIFY_PORT` | `8000` | Bind port for HTTP transports |
 | `GRAPHIFY_API_KEY` | _(unset)_ | Require `Authorization: Bearer <key>` on HTTP transports |
+| `GRAPHIFY_ALLOWED_HOSTS` | _(unset)_ | DNS-rebinding `Host` allowlist for HTTP (comma-separated, `:*` port wildcards; `*` disables). Unset = SDK default: loopback-only when bound to loopback |
 | `GRAPHIFY_TOOLSET` | `full` | `full` \| `lean` (core exploration tools only) |
 | `GRAPHIFY_TOKENIZER` | _(heuristic)_ | `tiktoken` → exact token counts (needs the `[tiktoken]` extra); else chars/3.5 estimate |
 | `GRAPHIFY_SEMANTIC_BACKEND` | `semble` | Semantic backend for `locate`/`duplication_scan`. `semble` (offline default) or a `module.path:Factory` implementing the `SemanticIndex` protocol (`search`/`find_related`; results expose `.chunk.file_path/.start_line/.end_line`) — plug in local sentence-transformers, an OpenAI-compatible / on-prem vLLM endpoint, etc. |
@@ -207,7 +215,10 @@ needs a model. Three ways, in `graphify_label_communities`'s preference order:
    completion via MCP `sampling/createMessage`. The model the user already uses
    (e.g. Claude in a sampling-capable client) does the naming; **the server holds
    no API key**. Subject to client support — call `graphify_sampling_status`
-   first; it degrades gracefully when unsupported.
+   first; it degrades gracefully when unsupported. All communities are named in
+   a single batched request, carried over whichever transport the negotiated
+   protocol allows (the legacy back-channel, or input-required rounds on MCP
+   2026-07-28+), so it works with both older and modern clients.
 2. **Backend API key** (`method="cli"`) — set `GEMINI_API_KEY` / `OPENAI_API_KEY`
    / `ANTHROPIC_API_KEY` / … (or run a local **ollama**) and graphify's own
    backend names them. This option always remains available.
@@ -335,7 +346,7 @@ Reusable templates that orchestrate the tools for the assistant:
 
 ## LLM-friendliness
 
-- **Tool annotations** (`readOnlyHint`, `destructiveHint`, titles) tell the model which tools are safe to call freely vs. which mutate state.
+- **Tool annotations** (`read_only_hint`, `destructive_hint`, titles) tell the model which tools are safe to call freely vs. which mutate state.
 - **Server instructions** describe the recommended flow (overview → targeted subgraph/query → build update).
 - **`as_json` output** on every analysis tool returns structured data the model can chain on instead of re-parsing prose.
 - **Token budgeting** (`graphify_subgraph`) keeps context small on large graphs — the core of Graphify's ~71× compression.
