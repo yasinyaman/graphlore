@@ -1,19 +1,19 @@
 # Contributing
 
-Thanks for your interest in improving codegraph-mcp!
+Thanks for your interest in improving graphlore!
 
 ## Development setup
 
 ```bash
-git clone https://github.com/yasinyaman/codegraph-mcp
-cd codegraph-mcp
+git clone https://github.com/yasinyaman/graphlore
+cd graphlore
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev,treesitter]"   # treesitter so the multi-language tests run, not skip
 ```
 
 ## Project layout
 
-`src/codegraph_mcp/` is split into layers (bottom → top):
+`src/graphlore/` is split into layers (bottom → top):
 
 - **`config.py`** — shared `PROJECT_DIR` / `OUT_DIR_NAME` (read by attribute so tests can repoint it).
 - **`graph.py`** — `graph.json` loading + schema-tolerant `_node_*` / `_edge_*` / traversal helpers.

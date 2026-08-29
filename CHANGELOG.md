@@ -7,15 +7,18 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Changed
-- **Project renamed: `graphify-mcp` → `codegraph-mcp`** (before any PyPI
-  release, so no published users are affected). The Python module is now
-  `codegraph_mcp`, the MCP server announces itself as `codegraph`, and the
-  console script is the bare `codegraph-mcp` — the collision with the
-  `graphify-mcp` script that `graphifyy` ships (which forced the old
-  `graphify-mcp-server` entry point) is gone. The repository moved to
-  `github.com/yasinyaman/codegraph-mcp`; old GitHub URLs redirect. Tool names
-  (`graphify_*`) and `GRAPHIFY_*` environment variables are intentionally
-  unchanged — they name the wrapped Graphify backend, not this package.
+- **Project renamed: `graphify-mcp` → `graphlore`** (before any PyPI release,
+  so no published users are affected). The Python module is now `graphlore`,
+  the MCP server announces itself as `graphlore`, and the console script is
+  the bare `graphlore` — the collision with the `graphify-mcp` script that
+  `graphifyy` ships (which forced the old `graphify-mcp-server` entry point)
+  is gone. The repository moved to `github.com/yasinyaman/graphlore`; old
+  GitHub URLs redirect. (An intermediate rename to `codegraph-mcp` lived for
+  a day and was dropped: "codegraph" is already crowded in the MCP niche —
+  codegraph-ai/CodeGraph, two GitHub repos literally named codegraph-mcp,
+  plus codegraph and codegraph-mcp-server on PyPI.) Tool names (`graphify_*`)
+  and `GRAPHIFY_*` environment variables are intentionally unchanged — they
+  name the wrapped Graphify backend, not this package.
 - **Upgraded to MCP Python SDK v2** (`mcp>=2.1,<3.0`, was `>=1.26,<2.0`). The
   server now builds on `mcp.server.mcpserver.MCPServer` (v1's `FastMCP`); tool
   and prompt surfaces are unchanged. Notable internals:
