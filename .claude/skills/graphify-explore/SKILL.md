@@ -49,8 +49,9 @@ Supporting tools: `graphify_search` (find nodes by name), `graphify_neighbors`
 (1-hop), `graphify_god_nodes` (most connected), `graphify_surprises`
 (unexpected cross-domain couplings), `graphify_path(a, b)` (exact route between
 two nodes), `graphify_explain(node)` (everything about one node),
-`graphify_validate()` (lint graph.json for dangling/duplicate/self-loop/orphan
-issues — gauge how much to trust the graph).
+`graphify_cycles()` (dependency cycles via SCCs), `graphify_validate()` (lint
+graph.json for dangling/duplicate/self-loop/orphan issues — gauge how much to
+trust the graph).
 
 ## Token discipline (the whole point)
 
@@ -59,6 +60,11 @@ On large graphs, never dump the full graph. Use `graphify_subgraph` with a
 `truncated` and `approx_tokens` so you can tell when you hit the budget. Pass
 `as_json=True` on any analysis tool when you want to chain on structured output
 instead of re-parsing prose.
+
+When structure isn't enough, escalate in steps instead of Reading whole files:
+`graphify_skeleton("<file-or-node>")` gives def/class **signatures** (bodies
+stripped) — the middle layer between the map and full code — and
+`graphify_fetch("<node>")` hydrates just that node's source, token-capped.
 
 ## Task recipes
 
@@ -72,6 +78,15 @@ instead of re-parsing prose.
 - **Explaining a flow** → `graphify_query` the flow for entry points →
   `graphify_subgraph(hops=2)` around them → `graphify_node_details` for
   `file:line`. (The `explain_flow` MCP prompt scripts this.)
+- **Before a refactor** → `graphify_impact("<node>")` — the reverse-dependency
+  **blast radius**, ordered by hop distance: what breaks if this changes.
+- **Reviewing a changeset** → `graphify_diff(base, head)` — the file-level
+  structural changes between two git refs, cosmetic-only edits separated.
+- **Hunting duplication** → `graphify_duplication_scan()` — repo-wide
+  hidden-link audit: semantically similar but structurally distant pairs
+  (needs the `[semble]` extra).
+- **Auditing a dependency upgrade** → `graphify_package_apis("<package>")` —
+  which symbols of the external package are actually used, and from where.
 
 ## Naming communities (optional, for readable subsystems)
 
@@ -86,4 +101,6 @@ no sampling required.
 ## After code changes
 
 Re-sync before trusting the graph again: `graphify_freshness()` →
-`graphify_build(".", update=True)`.
+`graphify_build(".", update=True)`. After deleting or renaming source files,
+`graphify_prune()` (preview with `dry_run=True`) drops the phantom nodes —
+the surgical alternative to a full rebuild.
