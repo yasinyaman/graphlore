@@ -436,6 +436,18 @@ def test_build_rejects_escaping_path_when_restricted(tmp_path, monkeypatch):
     assert "escapes the project" in server.graphify_build("/etc")
 
 
+def test_build_wires_flags_to_cli_args(tmp_path, monkeypatch):
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    captured = []
+    monkeypatch.setattr(server, "_run_cli", lambda args: captured.append(args) or "ok")
+
+    server.graphify_build(".", update=True, cluster_only=True, code_only=True)
+    assert captured[-1] == [".", "--update", "--cluster-only", "--no-viz", "--code-only"]
+
+    server.graphify_build(".", no_viz=False)
+    assert captured[-1] == ["."]
+
+
 # --- node-id collision diagnostic --------------------------------------------
 
 def test_overview_flags_id_collisions(tmp_path, monkeypatch):
