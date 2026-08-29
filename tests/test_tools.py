@@ -897,7 +897,7 @@ def test_locate_cross_check_flags_hidden_link(tmp_path, monkeypatch):
     assert data["structure"]["nodes"] >= 2  # A + B reached structurally
     cousins = {c["node"]: c for c in data["semantic_cousins"]}
     assert cousins["B"]["linked"] is True and cousins["B"]["distance"] == 1
-    assert cousins["C"]["linked"] is False and cousins["C"]["distance"] == "unreachable"
+    assert cousins["C"]["linked"] is False and cousins["C"]["distance"] == ">4"
     hidden = {c["node"] for c in data["hidden_links"]}
     assert "C" in hidden and "B" not in hidden  # the emergent signal
 
@@ -933,7 +933,7 @@ def test_duplication_scan_flags_distant_cousins(tmp_path, monkeypatch):
     pairs = {frozenset((p["a"], p["b"])): p for p in data["pairs"]}
     assert frozenset(("A", "C")) in pairs           # unreachable -> hidden link
     assert frozenset(("A", "B")) not in pairs       # direct neighbour -> excluded
-    assert pairs[frozenset(("A", "C"))]["distance"] == "unreachable"
+    assert pairs[frozenset(("A", "C"))]["distance"] == ">6"
 
 
 def test_duplication_scan_without_semble_degrades(project, monkeypatch):
@@ -1026,15 +1026,21 @@ def test_semantic_index_bad_spec_degrades(monkeypatch):
 
 
 def test_custom_backend_keeps_locate_in_lean(monkeypatch):
-    # even without semble installed, a configured custom backend keeps locate in lean
-    monkeypatch.setenv("GRAPHIFY_SEMANTIC_BACKEND", "some.module:Index")
+    # even without semble installed, an IMPORTABLE custom backend keeps locate in
+    # lean — while a typo'd spec (unimportable module, or no colon) must NOT
+    # advertise a locate tool whose every call could only error.
     import importlib.util
     real = importlib.util.find_spec
     monkeypatch.setattr(
         importlib.util, "find_spec",
         lambda name: None if name == "semble" else real(name),
     )
+    monkeypatch.setenv("GRAPHIFY_SEMANTIC_BACKEND", "json:JSONDecoder")
     assert "graphify_locate" in server._effective_lean_tools()
+    monkeypatch.setenv("GRAPHIFY_SEMANTIC_BACKEND", "no_such_module:Index")
+    assert "graphify_locate" not in server._effective_lean_tools()
+    monkeypatch.setenv("GRAPHIFY_SEMANTIC_BACKEND", "malformed-no-colon")
+    assert "graphify_locate" not in server._effective_lean_tools()
 
 
 def test_diff_unknown_ref_and_no_changes(tmp_path, monkeypatch):
@@ -1410,7 +1416,7 @@ def test_locate_hidden_links_ordered_nearest_first(tmp_path, monkeypatch):
     data = json.loads(server.graphify_locate("x", hops=2, related_k=10, as_json=True))
     assert [c["node"] for c in data["hidden_links"]] == ["B", "C", "D"]
     dist = {c["node"]: c["distance"] for c in data["hidden_links"]}
-    assert dist["B"] == 3 and dist["C"] == 4 and dist["D"] == "unreachable"
+    assert dist["B"] == 3 and dist["C"] == 4 and dist["D"] == ">4"
 
 
 def test_set_labels_no_placeholders_message(tmp_path, monkeypatch):
