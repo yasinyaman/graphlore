@@ -353,11 +353,11 @@ Several MCP servers give an agent a pre-indexed code graph. The closest neighbor
 despite the name): a Rust/SQLite indexer with the same goal and a different set of
 trade-offs — both MIT, both local-only.
 
-| | [codegraph](https://github.com/colbymchenry/codegraph) (Rust) | codegraph-mcp (this project) |
+| | [codegraph](https://github.com/colbymchenry/codegraph) (Rust) | graphlore (this project) |
 |---|---|---|
 | Answer shape | **verbatim source + call paths in one `codegraph_explore` call** — zero file reads, at the cost of more retrieval context resident per session | token-budgeted *map* (seed + neighborhood + `hidden_links`, ~235 tokens); `graphlore_fetch` hydrates code only where needed |
 | Semantics | none by design — structural mapping + SQLite FTS5 | semble embeddings: natural-language `locate`, `hidden_links`, `duplication_scan`; backend pluggable (`GRAPHIFY_SEMANTIC_BACKEND`) |
-| Reference resolution | deep: call→definition matching, dynamic-dispatch hops, **cross-language bridging** (Swift↔Obj-C, React Native) | AST-extracted edges from the Graphify backend; span join binds search hits to symbols (57–96% precision above) |
+| Reference resolution | deep: call→definition matching, dynamic-dispatch hops, **cross-language bridging** (Swift↔Obj-C, React Native) | AST-extracted edges from the Graphify backend; span join binds search hits to symbols (70–96% precision above) |
 | Framework routes | 17 frameworks, deep recognition | `graphlore_routes`: 4 languages × common frameworks (FastAPI/Flask/Django, Express/NestJS, gin/chi/net-http, Spring), joined to graph nodes |
 | Architecture analysis | impact/blast-radius | Leiden communities (+ LLM naming), cycles (SCCs), god nodes, impact, duplication scan, symbol-level package-API audits |
 | Freshness | native FS watcher (FSEvents/inotify), debounced auto-sync | git-aware `freshness` with a **cosmetic-vs-structural** check (a reformat never triggers a rebuild), post-commit hook, optional watchdog watcher |
@@ -367,7 +367,7 @@ trade-offs — both MIT, both local-only.
 Pick **codegraph** when you want verbatim answers in one call with zero setup and
 deep route/dispatch resolution — its benchmarks (88% fewer tool calls, zero file
 reads) target exactly that, and its cross-language bridging has no counterpart
-here. Pick **codegraph-mcp** when context is the scarce resource (orient for ~235
+here. Pick **graphlore** when context is the scarce resource (orient for ~235
 tokens, then fetch precisely), when you want semantic signals no structural-only
 index can produce (`hidden_links`: similar-but-disconnected code), or when you
 want architecture-level analysis (communities, cycles, package-API audits) and a
@@ -376,7 +376,7 @@ shared HTTP deployment.
 Two adjacent servers are complements, not competitors: **Graphify's own embedded
 MCP server** (`graphify ./raw --mcp`) exposes build/query around the same graph
 this project wraps (see the note at the top), and **semble's MCP server** offers
-raw semantic chunk search — codegraph-mcp is the join of those two ideas plus the
+raw semantic chunk search — graphlore is the join of those two ideas plus the
 analysis layer.
 
 ## Resources
