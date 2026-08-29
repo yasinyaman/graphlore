@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Fixed
+- Rename leftovers in the docs artifacts: `docs/benchmark.html`,
+  `docs/benchmark.tr.html` and `docs/benchmark.svg` still titled/labelled the
+  project `graphify-mcp`; they now say `codegraph-mcp`.
+
 ### Changed
 - **Project renamed: `graphify-mcp` → `graphlore`** (before any PyPI release,
   so no published users are affected). The Python module is now `graphlore`,
@@ -50,6 +55,15 @@ All notable changes to this project are documented here. The format is based on
   repo containing doc/paper/image files can be indexed via local AST with no
   LLM API key (those files otherwise demand semantic extraction and the build
   errors without a key).
+- **Benchmark call/read metrics + `--json`** — `benchmarks/multilang.py` now
+  also measures the agent-efficiency axis: locate = 1 tool call / 0 file reads
+  vs the naive baseline's 1 grep + N file-read calls (N = the files the same
+  grep matches, so both metrics share one baseline), and `--json PATH`
+  persists the full result set. The 2026-08 re-run (semble 0.5.5) is committed
+  as `benchmarks/results-multilang.json` — the first persisted benchmark
+  artifact — and the README / `docs/benchmark*.html` cross-language tables now
+  carry a "Calls (locate vs naive)" column (89–95% fewer calls; span-join
+  percentages follow the overload-family re-count above).
 - **`graphify_routes`** — framework route → handler table: which URL patterns
   hit which code, each row joined back to its graph node and qualified name
   (`GET /items/{id} -> read_item (app.py:5)`). Recognizes the common

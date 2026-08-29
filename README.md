@@ -14,7 +14,7 @@ One MCP call turns a natural-language question into a **navigational map**, not 
 
 - 🔎 **Semantic + structural, one call** — semble finds the relevant code, the graph gives its neighborhood. ~235 tokens to orient vs ~61k for grep+read (**263× fewer** on httpx).
 - 🔗 **`hidden_links`** — semantically similar code that is *structurally disconnected* (duplication / missing-abstraction / sync-async-twin candidates) that neither search nor the graph surfaces alone.
-- 🌍 **Multi-language, zero config** — Python via stdlib `ast`; JS/TS · Go · Java · Rust · C++ · 165+ more via tree-sitter with automatic language detection. **Span-join precision 70–96%** on real HTTP-client repos in six languages ([benchmark](#benchmark)).
+- 🌍 **Multi-language, zero config** — Python via stdlib `ast`; JS/TS · Go · Java · Rust · C++ · 165+ more via tree-sitter with automatic language detection. **Span-join precision 70–96%** on real HTTP-client repos in six languages, at **1 tool call / 0 file reads** per orientation ([benchmark](#benchmark)).
 - 🕒 **Cosmetic-aware freshness** — `graphify_freshness` ignores comment/format-only edits (in every language) so a reformat never triggers a needless rebuild.
 
 ### One call beats running semble and graphify separately
@@ -307,33 +307,40 @@ same kind of queries (send · redirects · timeout/retry · headers/auth · tran
 
 ![Span-join precision across languages — Python 96%, Go 93%, JS/TS 89%, Java 85%](docs/benchmark-multilang.svg)
 
-| Language | Repo | Span-join precision | Qualname | Hidden / q | locate vs grep |
-|---|---|---|---|---|---|
-| **Python** (ast) | `encode/httpx` | **96%** (52/54) | 67% | 3.2 | 272× |
-| JavaScript / TS | `sindresorhus/got` | 89% (48/54) | 67% | 2.3 | 583× |
-| Go | `go-resty/resty` | 93% (50/54) | 100% | 1.8 | 911× |
-| Java | `square/retrofit` | 85% (46/54) | 50% | 2.3 | 217× |
-| Rust | `algesten/ureq` | 70% (38/54) | 83% | 3.7 | 577× |
-| C++ | `libcpr/cpr` | 72% (39/54) | 100% | 4.3 | 195× |
+| Language | Repo | Span-join precision | Qualname | Hidden / q | locate vs grep | Calls (locate vs naive) |
+|---|---|---|---|---|---|---|
+| **Python** (ast) | `encode/httpx` | **96%** (52/54) | 67% | 3.2 | 272× | 1 vs 15 (0 vs 14 reads) |
+| JavaScript / TS | `sindresorhus/got` | 89% (48/54) | 67% | 2.3 | 583× | 1 vs 9 (0 vs 8 reads) |
+| Go | `go-resty/resty` | 93% (50/54) | 100% | 1.8 | 911× | 1 vs 17 (0 vs 16 reads) |
+| Java | `square/retrofit` | 85% (46/54) | 50% | 2.3 | 217× | 1 vs 18 (0 vs 17 reads) |
+| Rust | `algesten/ureq` | 70% (38/54) | 83% | 3.7 | 577× | 1 vs 22 (0 vs 21 reads) |
+| C++ | `libcpr/cpr` | 72% (39/54) | 100% | 4.3 | 195× | 1 vs 16 (0 vs 15 reads) |
 
 Python uses the stdlib `ast`; JS/TS · Go · Java · Rust · C++ go through tree-sitter with
 automatic language detection — **one tool, zero per-language config**. *Span-join precision* =
 share of semantic hits landing inside the resolved symbol's real span (any overload of it —
 C++ collapses same-name overloads into one graph node while each keeps its own span; cpr's
 `Session::SetOption` has 46). It's **70–96%** across six 350–2,095-node graphs, hidden-links
-keep surfacing 2–4/query, and locate stays **195–911× cheaper** than grep+read. Rust and C++
+keep surfacing 2–4/query, and locate stays **195–911× cheaper** than grep+read. Orientation is
+also **one tool call with zero file reads** by construction, where the grep-driven baseline
+spends 9–22 calls opening 8–21 files per query — **89–95% fewer calls**, on the same grep
+baseline as the token numbers. Rust and C++
 trail at 70–72% — their misses are mostly file-top/whole-file chunks and namespace-level free
 functions where the resolution is still correct (they recover qualified names at 83–100%).
 `graphify_freshness`'s cosmetic-vs-structural check is correct in every language too
 (comment/reformat → cosmetic; operator/rename → structural). Re-measured 2026-08 on the MCP v2
 SDK, Python 3.14, fresh repo HEADs. Reproduce with
-[`benchmarks/multilang.py`](benchmarks/multilang.py).
+[`benchmarks/multilang.py`](benchmarks/multilang.py) (`--json` persists a run;
+[`benchmarks/results-multilang.json`](benchmarks/results-multilang.json) is the committed
+record of the call/token baseline — its span-join counts predate the overload-family
+re-count above).
 
 → **[Full benchmark report](https://htmlpreview.github.io/?https://github.com/yasinyaman/graphlore/blob/master/docs/benchmark.html)** (interactive HTML, per-query breakdown + the cross-language tables) — or open [`docs/benchmark.html`](docs/benchmark.html) locally. ([Türkçe](https://htmlpreview.github.io/?https://github.com/yasinyaman/graphlore/blob/master/docs/benchmark.tr.html))
 
-<sub>Measured 2026-06 with semble 0.3.4 + graphify (tree-sitter backend). httpx headline = 6
-queries (per-query locate 189–286 tokens); cross-language = 6 queries × 54 hits each on
-`got` / `resty` / `retrofit` / `ureq` / `cpr`. **Sample bias:** every repo benchmarked here is
+<sub>httpx headline measured 2026-06 with semble 0.3.4 (6 queries, per-query locate 189–286
+tokens); cross-language table re-measured 2026-08 with semble 0.5.5 + the tree-sitter span
+backend — 6 queries × 54 hits each on `httpx` / `got` / `resty` / `retrofit` / `ureq` / `cpr`,
+call counts from the same run. **Sample bias:** every repo benchmarked here is
 an HTTP-client library — a deliberately uniform family chosen for cross-language comparability.
 Token savings and span-join precision will differ on other architectures (data pipelines, GUI
 apps, sprawling monorepos), so treat these as indicative, not guarantees. Numbers vary by
