@@ -422,6 +422,93 @@ def _no_semantic_index_error(tool: str) -> str:
     )
 
 
+class _DisplayLabels:
+    """Node-id -> display-label map that qualifies ambiguous labels lazily.
+
+    graphify labels methods bare (``.auth_flow()``), so distinct nodes across
+    classes/files render identically in subgraph arrows and node lists. For a
+    label shared by more than one node, the first render resolves the
+    span-recovered FQN (``DigestAuth.auth_flow()``); when no span is available
+    it falls back to ``label (file:Lline)``, and a node with no source file at
+    all keeps its bare label. Unique labels — the overwhelming majority — are
+    returned untouched with no span work, and resolution is memoized, so only
+    the ambiguous ids that actually get rendered pay the parse cost (served
+    from the bounded span cache thereafter).
+    """
+
+    def __init__(self, nodes: list[dict]) -> None:
+        self._label: dict[str, str] = {}
+        self._node: dict[str, dict] = {}
+        counts: Counter[str] = Counter()
+        for n in nodes:
+            nid = _node_id(n)
+            self._label[nid] = lbl = _node_label(n)
+            self._node[nid] = n
+            counts[lbl] += 1
+        self._counts = counts
+        self._resolved: dict[str, str] = {}
+
+    def get(self, nid: str, default: str | None = None) -> str | None:
+        base = self._label.get(nid)
+        if base is None:
+            return default
+        if self._counts.get(base, 0) <= 1:
+            return base
+        got = self._resolved.get(nid)
+        if got is None:
+            self._resolved[nid] = got = self._qualified(nid, base)
+        return got
+
+    def __getitem__(self, nid: str) -> str:
+        got = self.get(nid)
+        if got is None:
+            raise KeyError(nid)
+        return got
+
+    def __contains__(self, nid: str) -> bool:
+        return nid in self._label
+
+    def __len__(self) -> int:
+        return len(self._label)
+
+    def _qualified(self, nid: str, base: str) -> str:
+        n = self._node[nid]
+        file, line = _node_file(n), _node_line(n)
+        if not file:
+            return base  # nothing to qualify by
+        qual = None
+        try:
+            if line not in (None, ""):
+                qual = _span_qualname(str(file), int(line))
+        except Exception:
+            qual = None
+        if qual and qual != base:
+            # keep the call-marker convention of method labels: `.foo()` -> `Bar.foo()`
+            return f"{qual}()" if base.startswith(".") and base.endswith("()") else qual
+        loc = f"{file}:L{line}" if line not in (None, "") else str(file)
+        return f"{base} ({loc})"
+
+
+# Same id(nodes)+identity-guard scheme as graph._ADJ_CACHE: _load_graph hands back
+# the SAME nodes list while the parsed graph stays cached, so repeat calls reuse
+# one _DisplayLabels (and its memoized qualifications) instead of rebuilding the
+# map in every tool body.
+_LABELS_CACHE: dict[int, tuple[list[dict], _DisplayLabels]] = {}
+_LABELS_CACHE_MAX = 8
+
+
+def _display_labels(nodes: list[dict]) -> _DisplayLabels:
+    """Display-label map for `nodes`, cached on the nodes-list identity."""
+    cached = _LABELS_CACHE.get(id(nodes))
+    if cached is not None and cached[0] is nodes:
+        return cached[1]
+    labels = _DisplayLabels(nodes)
+    if id(nodes) not in _LABELS_CACHE and len(_LABELS_CACHE) >= _LABELS_CACHE_MAX:
+        _LABELS_CACHE.pop(next(iter(_LABELS_CACHE)), None)  # FIFO: drop the oldest
+    _LABELS_CACHE[id(nodes)] = (nodes, labels)
+    return labels
+
+
 # Env var -> graphify backend name, for detecting a user-supplied API key.
 _BACKEND_ENV = {
     "GEMINI_API_KEY": "gemini",
@@ -725,7 +812,7 @@ def graphlore_overview(top_n: int = 8, as_json: bool = False) -> str:
         s, t = _edge_ends(e)
         degree[s] += 1
         degree[t] += 1
-    labels = {_node_id(n): _node_label(n) for n in nodes}
+    labels = _display_labels(nodes)
     comms = {n.get("community", n.get("cluster")) for n in nodes}
     comms.discard(None)
     surprises = sum(1 for e in edges if _is_surprise_edge(e))
@@ -789,7 +876,7 @@ def graphlore_god_nodes(top_n: int = 10, as_json: bool = False) -> str:
         s, t = _edge_ends(e)
         degree[s] += 1
         degree[t] += 1
-    labels = {_node_id(n): _node_label(n) for n in nodes}
+    labels = _display_labels(nodes)
     types = {_node_id(n): n.get("type", "") for n in nodes}
     items = [
         {"node": labels.get(nid, nid), "type": types.get(nid, ""), "degree": d}
@@ -820,7 +907,7 @@ def graphlore_surprises(limit: int = 20, as_json: bool = False) -> str:
             and comm.get(_edge_ends(e)[0]) != comm.get(_edge_ends(e)[1])
         ]
         fallback = True
-    labels = {_node_id(n): _node_label(n) for n in nodes}
+    labels = _display_labels(nodes)
     items = []
     for e in flagged[:limit]:
         s, t = _edge_ends(e)
@@ -1248,7 +1335,7 @@ def graphlore_neighbors(node: str, as_json: bool = False) -> str:
     if n is None:
         return _err(f"No node matching '{node}'. Try graphlore_search.", as_json)
     nid = _node_id(n)
-    labels = {_node_id(x): _node_label(x) for x in nodes}
+    labels = _display_labels(nodes)
     adj = _adjacency(edges)
     es = _edge_set(edges)
     # The adjacency is undirected; recover each edge's true orientation so an
@@ -1294,7 +1381,7 @@ def graphlore_subgraph(
     start = _resolve_node(nodes, node)
     if start is None:
         return _err(f"No node matching '{node}'. Try graphlore_search.", as_json)
-    labels = {_node_id(x): _node_label(x) for x in nodes}
+    labels = _display_labels(nodes)
     adj = _adjacency(edges)
     sid = _node_id(start)
 
@@ -1363,7 +1450,7 @@ def graphlore_impact(
             "'dependencies' (what this node references), or 'both'.",
             as_json,
         )
-    labels = {_node_id(x): _node_label(x) for x in nodes}
+    labels = _display_labels(nodes)
     sid = _node_id(start)
     forward, reverse = _directed_adjacency(edges)
 
@@ -1477,7 +1564,7 @@ def graphlore_locate(
         )
         return _fmt(payload, as_json, note_text)
 
-    labels = {_node_id(x): _node_label(x) for x in nodes}
+    labels = _display_labels(nodes)
     adj = _adjacency(edges)
     seed_id = _node_id(seed)
     visited, sub_edges, truncated, tokens = _bfs_subgraph(
@@ -1603,7 +1690,7 @@ def graphlore_duplication_scan(
     index = _semantic_index()
     if index is None:
         return _err(_no_semantic_index_error("graphlore_duplication_scan"), as_json)
-    labels = {_node_id(x): _node_label(x) for x in nodes}
+    labels = _display_labels(nodes)
     adj = _adjacency(edges)
     degree: Counter[str] = Counter()
     for e in edges:
@@ -2388,7 +2475,7 @@ def graphlore_validate(limit: int = 15, as_json: bool = False) -> str:
         return _err(graph, as_json)
     nodes, edges = _nodes_edges(graph)
     node_ids = {_node_id(n) for n in nodes}
-    labels = {_node_id(n): _node_label(n) for n in nodes}
+    labels = _display_labels(nodes)
 
     dangling: list[dict] = []
     self_loops: list[dict] = []
@@ -2476,7 +2563,7 @@ def graphlore_cycles(max_cycles: int = 20, as_json: bool = False) -> str:
     if isinstance(graph, str):
         return _err(graph, as_json)
     nodes, edges = _nodes_edges(graph)
-    labels = {_node_id(x): _node_label(x) for x in nodes}
+    labels = _display_labels(nodes)
     forward, _reverse = _directed_adjacency(edges)
     cycles, self_loops = _find_cycles(forward)
     total = len(cycles)
@@ -2834,7 +2921,7 @@ def community(community_id: str) -> str:
     if not members:
         return f"No community '{community_id}'. See graphlore_communities for valid ids."
     member_ids = {_node_id(n) for n in members}
-    labels = {_node_id(n): _node_label(n) for n in nodes}
+    labels = _display_labels(nodes)
     internal, boundary = [], []
     for e in edges:
         s, t = _edge_ends(e)

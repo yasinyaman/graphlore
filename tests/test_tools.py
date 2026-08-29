@@ -3095,3 +3095,79 @@ def test_routes_tool_limit_truncates(tmp_path, monkeypatch):
     server._ROUTES_CACHE.clear()
     data = json.loads(server.graphlore_routes(limit=1, as_json=True))
     assert len(data["routes"]) == 1 and data["truncated"] is True and data["count"] == 2
+
+
+# --- ambiguous display labels are qualified via the span engine -------------
+
+
+def _ambiguous_label_graph(tmp_path):
+    (tmp_path / "svc.py").write_text(
+        "class Alpha:\n"
+        "    def run(self):\n"
+        "        return 1\n"
+        "\n"
+        "\n"
+        "class Beta:\n"
+        "    def run(self):\n"
+        "        return 2\n",
+        encoding="utf-8",
+    )
+    _write_graph(tmp_path, {
+        "nodes": [
+            {"id": "svc", "label": "svc.py", "source_file": "svc.py", "source_location": "L1"},
+            {"id": "alpha_run", "label": ".run()", "source_file": "svc.py",
+             "source_location": "L2"},
+            {"id": "beta_run", "label": ".run()", "source_file": "svc.py",
+             "source_location": "L7"},
+            {"id": "solo", "label": ".solo()", "source_file": "svc.py", "source_location": "L2"},
+        ],
+        "links": [
+            {"source": "svc", "target": "alpha_run", "relation": "contains"},
+            {"source": "svc", "target": "beta_run", "relation": "contains"},
+            {"source": "svc", "target": "solo", "relation": "contains"},
+        ],
+    })
+
+
+def test_ambiguous_labels_qualified_in_subgraph(tmp_path, monkeypatch):
+    """Two nodes both labelled `.run()` must render as Alpha.run() / Beta.run()."""
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    _ambiguous_label_graph(tmp_path)
+    out = server.graphlore_subgraph("svc.py", hops=1)
+    assert "Alpha.run()" in out
+    assert "Beta.run()" in out
+    # the unique label is untouched — no span work, no qualifier
+    assert ".solo()" in out and "Alpha.solo" not in out
+
+
+def test_ambiguous_labels_fall_back_to_file_line(tmp_path, monkeypatch):
+    """No resolvable span (missing source) -> `label (file:Lline)` qualifier;
+    a node with no file at all keeps its bare label."""
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    _write_graph(tmp_path, {
+        "nodes": [
+            {"id": "root", "label": "root"},
+            {"id": "x1", "label": ".go()", "source_file": "gone.py", "source_location": "L3"},
+            {"id": "x2", "label": ".go()", "source_file": "gone.py", "source_location": "L9"},
+            {"id": "c1", "label": "Fixed"},
+            {"id": "c2", "label": "Fixed"},
+        ],
+        "links": [
+            {"source": "root", "target": "x1", "relation": "contains"},
+            {"source": "root", "target": "x2", "relation": "contains"},
+            {"source": "root", "target": "c1", "relation": "mentions"},
+            {"source": "root", "target": "c2", "relation": "mentions"},
+        ],
+    })
+    out = server.graphlore_subgraph("root", hops=1)
+    assert ".go() (gone.py:L3)" in out
+    assert ".go() (gone.py:L9)" in out
+    assert "Fixed" in out  # fileless ambiguity: bare label, nothing to qualify by
+
+
+def test_display_labels_cached_on_nodes_identity(tmp_path, monkeypatch):
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    _ambiguous_label_graph(tmp_path)
+    graph = server._load_graph()
+    nodes, _ = server._nodes_edges(graph)
+    assert server._display_labels(nodes) is server._display_labels(nodes)
