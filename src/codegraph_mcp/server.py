@@ -888,8 +888,12 @@ async def graphify_label_communities(
     sample_size: int = 18,
     as_json: bool = False,
     # Framework-filled (absent from the tool's input schema): the batched
-    # host-LLM naming result, or None when sampling doesn't apply.
-    host_naming: Annotated[CreateMessageResult | None, Resolve(_resolve_host_naming)] = None,
+    # host-LLM naming result, or None when sampling doesn't apply. Keyword-only
+    # with NO default on purpose: a `= None` default makes Python 3.10's
+    # get_type_hints wrap the annotation in an implicit Optional, burying the
+    # Resolve marker in a union — which the SDK rejects with InvalidSignature.
+    *,
+    host_naming: Annotated[CreateMessageResult | None, Resolve(_resolve_host_naming)],
 ) -> str:
     """Give the Leiden communities human-readable names.
 
