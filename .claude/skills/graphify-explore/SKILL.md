@@ -5,7 +5,7 @@ description: Explore, understand, or debug a codebase through its Graphify knowl
 
 # Exploring a codebase with Graphify
 
-The `codegraph` MCP server (the `codegraph-mcp` package; tools are named
+The `graphlore` MCP server (tools are named
 `graphify_*` after the Graphify graph they read) exposes a codebase knowledge
 graph as tools. Reach for it **before** grepping or reading many files: it
 answers structural questions ("what connects to X", "which subsystems exist",

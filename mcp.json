@@ -1,7 +1,7 @@
 {
   "mcpServers": {
-    "codegraph": {
-      "command": "codegraph-mcp",
+    "graphlore": {
+      "command": "graphlore",
       "env": {
         "GRAPHIFY_PROJECT_DIR": "."
       }
