@@ -495,6 +495,7 @@ def graphify_build(
     update: bool = False,
     cluster_only: bool = False,
     no_viz: bool = True,
+    code_only: bool = False,
 ) -> str:
     """Build or update a knowledge graph from a folder. (Writes to graphify-out/.)
 
@@ -504,6 +505,8 @@ def graphify_build(
         update: True -> re-extract only changed files and merge into the existing graph.
         cluster_only: True -> rerun clustering only, without re-extraction.
         no_viz: True -> skip the HTML visualization (faster for development).
+        code_only: True -> index only code via local AST (no LLM key needed); skips
+            doc/paper/image files that would otherwise require semantic extraction.
     """
     err = _path_escapes_project(path)
     if err:
@@ -517,6 +520,8 @@ def graphify_build(
         args.append("--cluster-only")
     if no_viz:
         args.append("--no-viz")
+    if code_only:
+        args.append("--code-only")
     result = _run_cli(args)
     gp = _graph_path()
     if gp.exists():
