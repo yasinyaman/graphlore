@@ -3,14 +3,14 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "codegraph-mcp"
+name = "graphlore"
 version = "0.2.0"
 description = "MCP server exposing the Graphify codebase knowledge graph as tools, prompts and resources."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [{ name = "yasinyaman" }]
-keywords = ["mcp", "codegraph", "graphify", "knowledge-graph", "ai", "codebase", "claude"]
+keywords = ["mcp", "graphlore", "graphify", "knowledge-graph", "ai", "codebase", "claude"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
@@ -55,19 +55,19 @@ all = [
 dev = ["pytest>=8.0", "ruff>=0.6", "pytest-cov>=5.0", "mypy>=1.11"]
 
 [project.urls]
-Homepage = "https://github.com/yasinyaman/codegraph-mcp"
-Repository = "https://github.com/yasinyaman/codegraph-mcp"
-Issues = "https://github.com/yasinyaman/codegraph-mcp/issues"
+Homepage = "https://github.com/yasinyaman/graphlore"
+Repository = "https://github.com/yasinyaman/graphlore"
+Issues = "https://github.com/yasinyaman/graphlore/issues"
 "Graphify" = "https://graphify.net"
 
 [project.scripts]
 # The rename from graphify-mcp freed us to claim the bare name: `graphifyy`
 # ships a `graphify-mcp` script (its embedded server), which is why the old
 # entry point had to be the clunky `graphify-mcp-server`. No collision now.
-codegraph-mcp = "codegraph_mcp.server:main"
+graphlore = "graphlore.server:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/codegraph_mcp"]
+packages = ["src/graphlore"]
 
 [tool.ruff]
 line-length = 100
@@ -86,11 +86,11 @@ pythonpath = ["src"]
 # third-party deps that ship no stubs (mcp, semble, tree-sitter). The MCP tool
 # signatures are fully typed — FastMCP derives each tool's JSON schema from them.
 python_version = "3.10"
-files = ["src/codegraph_mcp"]
+files = ["src/graphlore"]
 ignore_missing_imports = true
 
 [tool.coverage.run]
-source = ["codegraph_mcp"]
+source = ["graphlore"]
 
 [tool.coverage.report]
 show_missing = true

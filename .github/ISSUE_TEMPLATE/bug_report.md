@@ -1,6 +1,6 @@
 ---
 name: Bug report
-about: Report a problem with codegraph-mcp
+about: Report a problem with graphlore
 title: "[bug] "
 labels: bug
 ---
@@ -17,7 +17,7 @@ A clear description of what went wrong.
 What you expected instead.
 
 **Environment**
-- codegraph-mcp version:
+- graphlore version:
 - graphify (graphifyy) version:
 - Python version:
 - OS:

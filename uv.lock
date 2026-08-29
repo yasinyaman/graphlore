@@ -394,68 +394,6 @@ wheels = [
 ]
 
 [[package]]
-name = "codegraph-mcp"
-version = "0.2.0"
-source = { editable = "." }
-dependencies = [
-    { name = "mcp" },
-]
-
-[package.optional-dependencies]
-all = [
-    { name = "graphifyy" },
-    { name = "semble" },
-    { name = "tiktoken" },
-    { name = "tree-sitter" },
-    { name = "tree-sitter-language-pack" },
-    { name = "watchdog" },
-]
-dev = [
-    { name = "mypy" },
-    { name = "pytest" },
-    { name = "pytest-cov" },
-    { name = "ruff" },
-]
-graphify = [
-    { name = "graphifyy" },
-]
-semble = [
-    { name = "semble" },
-]
-tiktoken = [
-    { name = "tiktoken" },
-]
-treesitter = [
-    { name = "tree-sitter" },
-    { name = "tree-sitter-language-pack" },
-]
-watch = [
-    { name = "watchdog" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "graphifyy", marker = "extra == 'all'" },
-    { name = "graphifyy", marker = "extra == 'graphify'" },
-    { name = "mcp", specifier = ">=2.1,<3.0" },
-    { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.11" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
-    { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=5.0" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6" },
-    { name = "semble", marker = "extra == 'all'", specifier = ">=0.3" },
-    { name = "semble", marker = "extra == 'semble'", specifier = ">=0.3" },
-    { name = "tiktoken", marker = "extra == 'all'", specifier = ">=0.7" },
-    { name = "tiktoken", marker = "extra == 'tiktoken'", specifier = ">=0.7" },
-    { name = "tree-sitter", marker = "extra == 'all'", specifier = ">=0.22,<1.0" },
-    { name = "tree-sitter", marker = "extra == 'treesitter'", specifier = ">=0.22,<1.0" },
-    { name = "tree-sitter-language-pack", marker = "extra == 'all'", specifier = ">=1.6,<2.0" },
-    { name = "tree-sitter-language-pack", marker = "extra == 'treesitter'", specifier = ">=1.6,<2.0" },
-    { name = "watchdog", marker = "extra == 'all'", specifier = ">=4.0" },
-    { name = "watchdog", marker = "extra == 'watch'", specifier = ">=4.0" },
-]
-provides-extras = ["graphify", "semble", "treesitter", "tiktoken", "watch", "all", "dev"]
-
-[[package]]
 name = "colorama"
 version = "0.4.6"
 source = { registry = "https://pypi.org/simple" }
@@ -725,6 +663,68 @@ sdist = { url = "https://files.pythonhosted.org/packages/32/26/eb008210742185a8b
 wheels = [
     { url = "https://files.pythonhosted.org/packages/56/88/56f51b27287812cbe275f416f5c627749699e110ca331e9355edabf37b2c/graphifyy-0.8.39-py3-none-any.whl", hash = "sha256:f7fcb2b24e05067c27723fffd205acb286dca46124fe9efc6af1a14ecb2ebe3d", size = 775668, upload-time = "2026-06-12T19:43:27.863Z" },
 ]
+
+[[package]]
+name = "graphlore"
+version = "0.2.0"
+source = { editable = "." }
+dependencies = [
+    { name = "mcp" },
+]
+
+[package.optional-dependencies]
+all = [
+    { name = "graphifyy" },
+    { name = "semble" },
+    { name = "tiktoken" },
+    { name = "tree-sitter" },
+    { name = "tree-sitter-language-pack" },
+    { name = "watchdog" },
+]
+dev = [
+    { name = "mypy" },
+    { name = "pytest" },
+    { name = "pytest-cov" },
+    { name = "ruff" },
+]
+graphify = [
+    { name = "graphifyy" },
+]
+semble = [
+    { name = "semble" },
+]
+tiktoken = [
+    { name = "tiktoken" },
+]
+treesitter = [
+    { name = "tree-sitter" },
+    { name = "tree-sitter-language-pack" },
+]
+watch = [
+    { name = "watchdog" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "graphifyy", marker = "extra == 'all'" },
+    { name = "graphifyy", marker = "extra == 'graphify'" },
+    { name = "mcp", specifier = ">=2.1,<3.0" },
+    { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.11" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
+    { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=5.0" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6" },
+    { name = "semble", marker = "extra == 'all'", specifier = ">=0.3" },
+    { name = "semble", marker = "extra == 'semble'", specifier = ">=0.3" },
+    { name = "tiktoken", marker = "extra == 'all'", specifier = ">=0.7" },
+    { name = "tiktoken", marker = "extra == 'tiktoken'", specifier = ">=0.7" },
+    { name = "tree-sitter", marker = "extra == 'all'", specifier = ">=0.22,<1.0" },
+    { name = "tree-sitter", marker = "extra == 'treesitter'", specifier = ">=0.22,<1.0" },
+    { name = "tree-sitter-language-pack", marker = "extra == 'all'", specifier = ">=1.6,<2.0" },
+    { name = "tree-sitter-language-pack", marker = "extra == 'treesitter'", specifier = ">=1.6,<2.0" },
+    { name = "watchdog", marker = "extra == 'all'", specifier = ">=4.0" },
+    { name = "watchdog", marker = "extra == 'watch'", specifier = ">=4.0" },
+]
+provides-extras = ["graphify", "semble", "treesitter", "tiktoken", "watch", "all", "dev"]
 
 [[package]]
 name = "h11"
