@@ -46,6 +46,10 @@ All notable changes to this project are documented here. The format is based on
     `create_connected_server_and_client_session` helper is gone).
 
 ### Added
+- `code_only` flag on `graphify_build` — appends the CLI's `--code-only`, so a
+  repo containing doc/paper/image files can be indexed via local AST with no
+  LLM API key (those files otherwise demand semantic extraction and the build
+  errors without a key).
 - `GRAPHIFY_ALLOWED_HOSTS` — Host-header allowlist for the HTTP transports'
   DNS-rebinding protection (comma-separated, `:*` port wildcards; `*` disables
   it). The MCP v2 SDK auto-enables that protection with a loopback-only
