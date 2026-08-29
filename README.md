@@ -1,6 +1,6 @@
-# graphify-mcp
+# codegraph-mcp
 
-[![CI](https://github.com/yasinyaman/graphify-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/yasinyaman/graphify-mcp/actions/workflows/ci.yml)
+[![CI](https://github.com/yasinyaman/codegraph-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/yasinyaman/codegraph-mcp/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 
@@ -19,7 +19,7 @@ One MCP call turns a natural-language question into a **navigational map**, not 
 
 ### One call beats running semble and graphify separately
 
-semble finds **what's relevant**; graphify gives **how it connects**. They're complementary — but stitching them by hand means four calls, ~2.7k tokens, and manually aligning semble's line ranges to graph nodes. graphify-mcp does that join *for* you, in one call:
+semble finds **what's relevant**; graphify gives **how it connects**. They're complementary — but stitching them by hand means four calls, ~2.7k tokens, and manually aligning semble's line ranges to graph nodes. codegraph-mcp does that join *for* you, in one call:
 
 | _per query_ | semble alone | graphify alone | both, by hand | **`graphify_locate`** |
 |---|:-:|:-:|:-:|:-:|
@@ -35,8 +35,8 @@ semble finds **what's relevant**; graphify gives **how it connects**. They're co
 ## Installation
 
 ```bash
-# graphify-mcp itself
-pip install graphify-mcp
+# codegraph-mcp itself
+pip install codegraph-mcp
 
 # plus the Graphify CLI it wraps (needed for build/query/path/explain/add)
 pip install graphifyy && graphify install
@@ -45,25 +45,25 @@ pip install graphifyy && graphify install
 From source:
 
 ```bash
-git clone https://github.com/yasinyaman/graphify-mcp
-cd graphify-mcp
+git clone https://github.com/yasinyaman/codegraph-mcp
+cd codegraph-mcp
 pip install -e ".[dev]"
 ```
 
 ## Running
 
 ```bash
-GRAPHIFY_PROJECT_DIR=/path/to/repo graphify-mcp-server
-# equivalently, collision-proof:
-GRAPHIFY_PROJECT_DIR=/path/to/repo python -m graphify_mcp
+GRAPHIFY_PROJECT_DIR=/path/to/repo codegraph-mcp
+# equivalently:
+GRAPHIFY_PROJECT_DIR=/path/to/repo python -m codegraph_mcp
 ```
 
-> **Heads-up:** `graphifyy` ships its own `graphify-mcp` console script (its
-> embedded server). To avoid a silent collision, this package deliberately
-> doesn't define a bare `graphify-mcp` of its own — use `graphify-mcp-server`
-> or `python -m graphify_mcp` to always launch *this* server. The boot banner
-> on stderr (`graphify-mcp vX.Y.Z | transport=… | project=…`) confirms which
-> server and project dir you're actually running.
+> **Renamed from `graphify-mcp`:** the old name collided with the
+> `graphify-mcp` console script that `graphifyy` ships for its embedded
+> server, which forced the clunky `graphify-mcp-server` entry point. As
+> `codegraph-mcp` the bare command is ours. The boot banner on stderr
+> (`codegraph-mcp vX.Y.Z | transport=… | project=…`) confirms which server
+> and project dir you're actually running.
 
 ### Claude Code
 
@@ -82,7 +82,7 @@ serve over HTTP instead (e.g. a shared graph for a team or a web MCP client):
 
 ```bash
 GRAPHIFY_TRANSPORT=streamable-http GRAPHIFY_HOST=127.0.0.1 GRAPHIFY_PORT=8000 \
-  GRAPHIFY_PROJECT_DIR=/path/to/repo graphify-mcp-server
+  GRAPHIFY_PROJECT_DIR=/path/to/repo codegraph-mcp
 ```
 
 Any HTTP transport **force-enables path containment** (`GRAPHIFY_RESTRICT_PATHS`)
@@ -106,7 +106,7 @@ For a shared/network deployment, also consider lowering `GRAPHIFY_TIMEOUT` (defa
 
 ```bash
 GRAPHIFY_TRANSPORT=streamable-http GRAPHIFY_HOST=0.0.0.0 GRAPHIFY_API_KEY=$(openssl rand -hex 16) \
-  GRAPHIFY_PROJECT_DIR=/path/to/repo graphify-mcp-server
+  GRAPHIFY_PROJECT_DIR=/path/to/repo codegraph-mcp
 ```
 
 For a smaller tool surface (helps some models pick the right tool), set
@@ -233,7 +233,7 @@ no key, no sampling, works in any client. The names persist to
 
 ## Semantic bridge (optional `[semble]`)
 
-`pip install "graphify-mcp[semble]"` adds `graphify_locate`, which joins
+`pip install "codegraph-mcp[semble]"` adds `graphify_locate`, which joins
 [semble](https://github.com/MinishLab/semble)'s semantic code search to the graph
 in one call. Graphify gives **structure** (how code connects); semble gives
 **retrieval** (which code is semantically relevant) — they're complementary.
@@ -249,12 +249,12 @@ in one call. Graphify gives **structure** (how code connects); semble gives
 
 The extra is optional: without it the core tools are unchanged and `graphify_locate`
 returns an install hint. It also pairs well with running semble's own MCP server
-alongside graphify-mcp.
+alongside codegraph-mcp.
 
 The chunk→node join and the freshness cosmetic-vs-structural check work
 **across languages**: Python uses the stdlib `ast` (no extra deps), and every
 other language (JS/TS, Go, Rust, Java, Ruby, C/C++, …) is handled by an optional
-**tree-sitter** backend — `pip install "graphify-mcp[treesitter]"`, also pulled in
+**tree-sitter** backend — `pip install "codegraph-mcp[treesitter]"`, also pulled in
 by graphify. Without it, non-Python files fall back to nearest-line matching.
 
 ## Benchmark
@@ -281,7 +281,7 @@ disconnected code), 5–10 per query.
 
 Those ~235 tokens are a navigational *map* (seed `file:line` + structural
 neighborhood + hidden links), not raw code — you fetch the specific code only where
-needed. That's the trade graphify-mcp optimizes: cheapest orientation plus the
+needed. That's the trade codegraph-mcp optimizes: cheapest orientation plus the
 cross-check signal, then drill in precisely.
 
 **Case study — the hidden links are real.** Asked *"does httpx duplicate
@@ -320,7 +320,7 @@ names at 83–100%). `graphify_freshness`'s cosmetic-vs-structural check is corr
 language too (comment/reformat → cosmetic; operator/rename → structural). Reproduce with
 [`benchmarks/multilang.py`](benchmarks/multilang.py).
 
-→ **[Full benchmark report](https://htmlpreview.github.io/?https://github.com/yasinyaman/graphify-mcp/blob/master/docs/benchmark.html)** (interactive HTML, per-query breakdown + the cross-language tables) — or open [`docs/benchmark.html`](docs/benchmark.html) locally. ([Türkçe](https://htmlpreview.github.io/?https://github.com/yasinyaman/graphify-mcp/blob/master/docs/benchmark.tr.html))
+→ **[Full benchmark report](https://htmlpreview.github.io/?https://github.com/yasinyaman/codegraph-mcp/blob/master/docs/benchmark.html)** (interactive HTML, per-query breakdown + the cross-language tables) — or open [`docs/benchmark.html`](docs/benchmark.html) locally. ([Türkçe](https://htmlpreview.github.io/?https://github.com/yasinyaman/codegraph-mcp/blob/master/docs/benchmark.tr.html))
 
 <sub>Measured 2026-06 with semble 0.3.4 + graphify (tree-sitter backend). httpx headline = 6
 queries (per-query locate 189–286 tokens); cross-language = 6 queries × 54 hits each on
@@ -363,8 +363,8 @@ Reusable templates that orchestrate the tools for the assistant:
 ## Project layout
 
 ```
-graphify-mcp/
-├── src/graphify_mcp/      # package (server.py, __init__.py)
+codegraph-mcp/
+├── src/codegraph_mcp/      # package (server.py, __init__.py)
 ├── tests/                 # pytest suite + fixture graph.json
 ├── .github/workflows/     # CI (ruff + pytest, py 3.10–3.12)
 ├── pyproject.toml         # packaging + console script

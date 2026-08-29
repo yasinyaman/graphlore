@@ -1,19 +1,19 @@
 # Contributing
 
-Thanks for your interest in improving graphify-mcp!
+Thanks for your interest in improving codegraph-mcp!
 
 ## Development setup
 
 ```bash
-git clone https://github.com/yasinyaman/graphify-mcp
-cd graphify-mcp
+git clone https://github.com/yasinyaman/codegraph-mcp
+cd codegraph-mcp
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev,treesitter]"   # treesitter so the multi-language tests run, not skip
 ```
 
 ## Project layout
 
-`src/graphify_mcp/` is split into layers (bottom → top):
+`src/codegraph_mcp/` is split into layers (bottom → top):
 
 - **`config.py`** — shared `PROJECT_DIR` / `OUT_DIR_NAME` (read by attribute so tests can repoint it).
 - **`graph.py`** — `graph.json` loading + schema-tolerant `_node_*` / `_edge_*` / traversal helpers.

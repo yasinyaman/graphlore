@@ -2,7 +2,7 @@
 
 import json
 
-from graphify_mcp import server, spans
+from codegraph_mcp import server, spans
 
 
 def test_overview(project):
@@ -105,7 +105,7 @@ def test_count_tokens_tiktoken_exact(monkeypatch):
         pytest.skip("tiktoken extra not installed")
     import tiktoken
 
-    import graphify_mcp.graph as g
+    import codegraph_mcp.graph as g
     g._TIKTOKEN_ENC = None  # reset the lazy probe so the env switch is honored
     monkeypatch.setenv("GRAPHIFY_TOKENIZER", "tiktoken")
     s = "def handle_request(self, request, *, follow_redirects=True): return self._send(request)"
@@ -138,7 +138,7 @@ def test_node_details_real_graphify_schema(tmp_path, monkeypatch):
         "nodes": [{
             "id": "graphify_overview",
             "label": "graphify_overview()",
-            "source_file": "src/graphify_mcp/server.py",
+            "source_file": "src/codegraph_mcp/server.py",
             "source_location": "L295",
             "community": 12,
         }],
@@ -147,7 +147,7 @@ def test_node_details_real_graphify_schema(tmp_path, monkeypatch):
     (out / "graph.json").write_text(json.dumps(graph), encoding="utf-8")
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     data = json.loads(server.graphify_node_details("graphify_overview", as_json=True))
-    assert data["file"] == "src/graphify_mcp/server.py"
+    assert data["file"] == "src/codegraph_mcp/server.py"
     assert data["line"] == 295
     # source_location is consumed as the line, not echoed back in extra
     assert "source_location" not in data.get("extra", {})
@@ -222,9 +222,9 @@ def test_tool_and_prompt_registration(project):
 
 
 def test_version_reported_over_mcp():
-    import graphify_mcp
+    import codegraph_mcp
 
-    assert server.__version__ == graphify_mcp.__version__
+    assert server.__version__ == codegraph_mcp.__version__
     # An unversioned MCPServer reports an empty string; we pass version= explicitly.
     assert server.mcp.version == server.__version__
 
@@ -232,7 +232,7 @@ def test_version_reported_over_mcp():
 def test_main_module_wired():
     import importlib
 
-    mod = importlib.import_module("graphify_mcp.__main__")  # must not run main()
+    mod = importlib.import_module("codegraph_mcp.__main__")  # must not run main()
     assert mod.main is server.main
 
 
@@ -2391,7 +2391,7 @@ def test_fetch_dedupes_same_node_and_requires_input(tmp_path, monkeypatch):
 # --- adjacency cache -----------------------------------------------------------
 
 def test_adjacency_cached_on_edges_identity():
-    from graphify_mcp import graph as g
+    from codegraph_mcp import graph as g
     edges = [{"source": "A", "target": "B", "type": "x"},
              {"source": "B", "target": "C", "type": "y"}]
     a1 = g._adjacency(edges)
@@ -2405,7 +2405,7 @@ def test_adjacency_cached_on_edges_identity():
 
 
 def test_directed_adjacency_splits_and_caches():
-    from graphify_mcp import graph as g
+    from codegraph_mcp import graph as g
     edges = [{"source": "A", "target": "B", "type": "calls"}]
     f1, r1 = g._directed_adjacency(edges)
     f2, r2 = g._directed_adjacency(edges)
@@ -2452,7 +2452,7 @@ def test_impact_invalid_direction_and_unknown_node(project):
 # --- graphify_cycles: circular dependencies ------------------------------------
 
 def test_find_cycles_separates_two_sccs():
-    from graphify_mcp import graph as g
+    from codegraph_mcp import graph as g
     edges = [
         {"source": "A", "target": "B"}, {"source": "B", "target": "A"},   # 2-cycle
         {"source": "C", "target": "D"}, {"source": "D", "target": "E"},
@@ -2764,7 +2764,7 @@ def test_api_uses_treesitter_js_go_java(tmp_path, monkeypatch):
 def test_api_uses_for_source_public_contract():
     # the stable public seam for external consumers (e.g. kapsam): importable from
     # the package root, accepts bytes or str, dispatches on the rel extension
-    from graphify_mcp import api_uses_for_source
+    from codegraph_mcp import api_uses_for_source
 
     packages, symbols, paths = api_uses_for_source(
         "from fastapi import Depends\nimport numpy as np\nnp.linalg.norm([1])\n",

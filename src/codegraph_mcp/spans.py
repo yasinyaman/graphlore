@@ -4,7 +4,7 @@ Resolves a semble chunk ``(file, line[..end])`` to the graph node whose *real* l
 range contains it — Python via the stdlib ``ast`` (decorator-aware), every other
 language via an optional tree-sitter backend with automatic language detection. Also
 provides the comment-stripped structural comparison behind cosmetic-vs-structural
-freshness. Reads the project root from :mod:`graphify_mcp.config`.
+freshness. Reads the project root from :mod:`codegraph_mcp.config`.
 """
 from __future__ import annotations
 

@@ -172,7 +172,7 @@ LEAN_TOOLS = frozenset({
 })
 
 mcp = MCPServer(
-    "graphify",
+    "codegraph",
     version=__version__,
     instructions=(
         "Graphify knowledge graph tools for understanding a codebase.\n"
@@ -1279,7 +1279,7 @@ def graphify_locate(
     semantically-similar code elsewhere — flagging `hidden_links`: cousins that
     are similar but NOT structurally connected to the seed (duplication /
     missing-abstraction / implicit-coupling candidates). Needs the optional
-    `semble` extra: pip install 'graphify-mcp[semble]'.
+    `semble` extra: pip install 'codegraph-mcp[semble]'.
     """
     graph = _load_graph()
     if isinstance(graph, str):
@@ -1290,7 +1290,7 @@ def graphify_locate(
     if index is None:
         return (
             "ERROR: graphify_locate needs the optional 'semble' extra. "
-            "Install with: pip install 'graphify-mcp[semble]'."
+            "Install with: pip install 'codegraph-mcp[semble]'."
         )
     hits = index.search(query, top_k=top_k)
     if not hits:
@@ -1445,7 +1445,7 @@ def graphify_duplication_scan(
     if index is None:
         return (
             "ERROR: graphify_duplication_scan needs the optional 'semble' extra. "
-            "Install with: pip install 'graphify-mcp[semble]'."
+            "Install with: pip install 'codegraph-mcp[semble]'."
         )
     labels = {_node_id(x): _node_label(x) for x in nodes}
     adj = _adjacency(edges)
@@ -2735,7 +2735,7 @@ def _start_watch() -> Any:
     except ImportError:
         print(
             "GRAPHIFY_WATCH is set but the 'watchdog' extra isn't installed; "
-            "install with: pip install 'graphify-mcp[watch]'.",
+            "install with: pip install 'codegraph-mcp[watch]'.",
             file=sys.stderr,
         )
         return None
@@ -2756,7 +2756,7 @@ def _start_watch() -> Any:
             if paths:
                 watcher.maybe_trigger(paths)
         except Exception as e:  # noqa: BLE001 - a background regraph must never crash the server
-            print(f"graphify-mcp watch: regraph failed ({type(e).__name__}: {e})", file=sys.stderr)
+            print(f"codegraph-mcp watch: regraph failed ({type(e).__name__}: {e})", file=sys.stderr)
 
     class _Handler(FileSystemEventHandler):  # type: ignore[misc]
         def on_any_event(self, event: Any) -> None:
@@ -2777,7 +2777,7 @@ def _start_watch() -> Any:
     observer.daemon = True
     observer.start()
     print(
-        f"graphify-mcp watch: watching {config.PROJECT_DIR} "
+        f"codegraph-mcp watch: watching {config.PROJECT_DIR} "
         f"(structural changes -> graphify_build update; debounce {debounce}s)",
         file=sys.stderr,
         flush=True,
@@ -2802,12 +2802,12 @@ def main() -> None:
     _start_watch()  # no-op unless GRAPHIFY_WATCH is set
     is_http = TRANSPORT in ("streamable-http", "http", "sse")
     transport = ("sse" if TRANSPORT == "sse" else "streamable-http") if is_http else "stdio"
-    # Boot banner. `graphifyy` ships a same-named embedded server, so logging our
-    # own name + version + transport here makes it unmistakable from the start
-    # which server (and which project dir) a client actually connected to.
+    # Boot banner: name + version + transport + project dir, so it's clear from
+    # the first stderr line which server and project a client connected to
+    # (graphify's own embedded MCP server is a common neighbor in configs).
     where = f" {HTTP_HOST}:{HTTP_PORT}" if is_http else ""
     print(
-        f"graphify-mcp v{__version__} | transport={transport}{where} | "
+        f"codegraph-mcp v{__version__} | transport={transport}{where} | "
         f"toolset={TOOLSET} | project={config.PROJECT_DIR}",
         file=sys.stderr,
         flush=True,
