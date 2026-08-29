@@ -55,6 +55,12 @@ All notable changes to this project are documented here. The format is based on
   repo containing doc/paper/image files can be indexed via local AST with no
   LLM API key (those files otherwise demand semantic extraction and the build
   errors without a key).
+- README **"Comparison — when to use which"** section: an honest side-by-side
+  with [colbymchenry/codegraph](https://github.com/colbymchenry/codegraph)
+  (same goal, different trade-offs: verbatim-code mega-tool vs token-budgeted
+  map, structural-only vs semantic hidden_links, watcher vs git-aware
+  freshness), plus one-liners on Graphify's embedded MCP server and semble's
+  own MCP server as complements.
 - **Benchmark call/read metrics + `--json`** — `benchmarks/multilang.py` now
   also measures the agent-efficiency axis: locate = 1 tool call / 0 file reads
   vs the naive baseline's 1 grep + N file-read calls (N = the files the same
