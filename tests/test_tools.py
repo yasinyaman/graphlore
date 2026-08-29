@@ -217,7 +217,8 @@ def test_tool_and_prompt_registration(project):
     assert "graphify_duplication_scan" in names
     assert "graphify_diff" in names
     assert "graphify_package_apis" in names
-    assert len(names) == 27
+    assert "graphify_routes" in names
+    assert len(names) == 28
     assert prompts == {"onboard", "trace_bug", "explain_flow"}
 
 
@@ -2838,3 +2839,253 @@ def test_api_uses_for_source_public_contract():
     # non-Python goes to the tree-sitter path; without the backend it degrades empty
     result = api_uses_for_source(b"import got from 'got';\n", "a.js")
     assert isinstance(result, tuple) and len(result) == 3
+
+
+# ---------------------------------------------------------------------------
+# graphify_routes — framework route -> handler extraction
+# ---------------------------------------------------------------------------
+
+
+def test_routes_python_fastapi_flask_django():
+    src = (
+        "import flask\n"
+        "from django.urls import path, re_path\n"
+        "from fastapi import FastAPI\n"
+        "import functools\n"
+        "\n"
+        "@app.route('/x', methods=['GET', 'POST'])\n"
+        "def x(): ...\n"
+        "\n"
+        "@bp.route('/y')\n"
+        "def y(): ...\n"
+        "\n"
+        "@router.get('/items/{id}')\n"
+        "async def item(): ...\n"
+        "\n"
+        "@functools.lru_cache\n"
+        "def cached(): ...\n"
+        "\n"
+        "urlpatterns = [\n"
+        "    path('polls/', views.index),\n"
+        "    re_path(r'^auth/$', AuthView.as_view()),\n"
+        "]\n"
+    )
+    rows = server._routes_python(src.encode())
+    by_key = {(r["method"], r["pattern"]) for r in rows}
+    assert ("GET", "/x") in by_key and ("POST", "/x") in by_key   # methods= expands
+    assert ("GET", "/y") in by_key                                # route default = GET
+    assert ("GET", "/items/{id}") in by_key                       # verb decorator
+    assert ("ANY", "polls/") in by_key and ("ANY", "^auth/$") in by_key
+    django = [r for r in rows if r["framework"] == "django"]
+    assert {r["handler"] for r in django} == {"views.index", "AuthView.as_view()"}
+    assert not any(r["handler"] == "cached" for r in rows)        # lru_cache is no route
+
+
+def test_routes_python_django_gate_and_flask_labeling():
+    # a local path() in a file with no django import must not register
+    rows = server._routes_python(b"def path(a, b): ...\npath('x/', y)\n")
+    assert rows == []
+    # flask-only import labels the shared verb shortcut flask; fastapi wins otherwise
+    flask_rows = server._routes_python(b"import flask\n@app.get('/a')\ndef a(): ...\n")
+    assert flask_rows[0]["framework"] == "flask"
+    fast_rows = server._routes_python(b"import fastapi\n@app.get('/a')\ndef a(): ...\n")
+    assert fast_rows[0]["framework"] == "fastapi"
+
+
+def test_routes_for_source_public_contract():
+    from graphlore import routes_for_source
+
+    rows = routes_for_source(
+        "from fastapi import FastAPI\n@app.get('/ping')\ndef ping(): ...\n", "app.py")
+    assert rows == [{"framework": "fastapi", "method": "GET", "pattern": "/ping",
+                     "handler": "ping", "line": 3}]
+    assert routes_for_source(b"import flask\n@app.get('/b')\ndef b(): ...\n", "APP.PY")
+    # non-Python goes to the tree-sitter path; without the backend it degrades empty
+    assert isinstance(routes_for_source(b"app.get('/x', h);\n", "a.js"), list)
+
+
+def test_routes_for_file_cached_and_confined(tmp_path, monkeypatch):
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    server._ROUTES_CACHE.clear()
+    (tmp_path / "app.py").write_text(
+        "import flask\n@app.route('/z')\ndef z(): ...\n", encoding="utf-8")
+    first = server._routes_for_file("app.py")
+    assert first[0]["pattern"] == "/z"
+    assert server._routes_for_file("app.py") is first          # (path, mtime) cache hit
+    assert server._routes_for_file("../outside.py") == []      # traversal confined
+    assert server._routes_for_file("/etc/passwd") == []
+    assert server._routes_for_file("missing.py") == []
+
+
+def test_routes_js_express_and_negatives(tmp_path, monkeypatch):
+    _skip_without_treesitter()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    server._ROUTES_CACHE.clear()
+    server._TS_PARSERS.clear()
+    (tmp_path / "app.js").write_bytes(
+        b"const express = require('express');\n"
+        b"const app = express();\n"
+        b"app.get('/users', listUsers);\n"
+        b"router.post('/users/:id', (req, res) => {});\n"
+        b"app.all('/every', h);\n"
+        b"headers.get('x-id');\n"          # no leading slash -> not a route
+        b"router.route('/x').get(h);\n"    # chained receiver -> v1 cut
+    )
+    rows = server._routes_for_file("app.js")
+    assert {(r["method"], r["pattern"]) for r in rows} == {
+        ("GET", "/users"), ("POST", "/users/:id"), ("ANY", "/every")}
+    handlers = {r["pattern"]: r["handler"] for r in rows}
+    assert handlers["/users"] == "listUsers" and handlers["/users/:id"] == "<inline>"
+
+
+def test_routes_ts_nestjs_controller_prefix(tmp_path, monkeypatch):
+    _skip_without_treesitter()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    server._ROUTES_CACHE.clear()
+    server._TS_PARSERS.clear()
+    (tmp_path / "cats.controller.ts").write_bytes(
+        b"@Controller('cats')\n"
+        b"export class CatsController {\n"
+        b"  @Get(':id')\n"
+        b"  findOne() { return 1; }\n"
+        b"  @Post()\n"
+        b"  create() {}\n"
+        b"}\n"
+    )
+    rows = server._routes_for_file("cats.controller.ts")
+    assert {(r["method"], r["pattern"], r["handler"]) for r in rows} == {
+        ("GET", "/cats/:id", "findOne"), ("POST", "/cats", "create")}
+    assert all(r["framework"] == "nestjs" for r in rows)
+
+
+def test_routes_go_gin_chi_nethttp(tmp_path, monkeypatch):
+    _skip_without_treesitter()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    server._ROUTES_CACHE.clear()
+    server._TS_PARSERS.clear()
+    (tmp_path / "chi.go").write_bytes(
+        b"package main\n"
+        b'import (\n\t"net/http"\n\t"github.com/go-chi/chi/v5"\n)\n'
+        b"func main() {\n"
+        b"\tr := chi.NewRouter()\n"
+        b"\tr.Route(\"/api\", func(r chi.Router) {\n"
+        b"\t\tr.Get(\"/users\", listUsers)\n"
+        b"\t})\n"
+        b"\thttp.HandleFunc(\"/health\", health)\n"
+        b"\tmux.HandleFunc(\"GET /items/{id}\", getItem)\n"
+        b"\treq.Header.Get(\"Accept\")\n"     # not a route: no leading slash
+        b"}\n"
+    )
+    rows = server._routes_for_file("chi.go")
+    assert {(r["method"], r["pattern"]) for r in rows} == {
+        ("GET", "/api/users"),            # chi Route nesting joins the prefix
+        ("ANY", "/health"),
+        ("GET", "/items/{id}"),           # Go 1.22 "GET /x" pattern split
+    }
+    (tmp_path / "g.go").write_bytes(
+        b"package main\n"
+        b'import "github.com/gin-gonic/gin"\n'
+        b"func main() {\n\tr := gin.Default()\n\tr.GET(\"/ping\", pong)\n}\n"
+    )
+    gin_rows = server._routes_for_file("g.go")
+    assert gin_rows[0]["framework"] == "gin" and gin_rows[0]["method"] == "GET"
+
+
+def test_routes_java_spring_mappings(tmp_path, monkeypatch):
+    _skip_without_treesitter()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    server._ROUTES_CACHE.clear()
+    server._TS_PARSERS.clear()
+    (tmp_path / "C.java").write_bytes(
+        b"import org.springframework.web.bind.annotation.*;\n"
+        b"@RestController\n"
+        b"@RequestMapping(\"/api\")\n"
+        b"public class C {\n"
+        b"  @GetMapping(\"/users\")\n"
+        b"  public String list() { return \"\"; }\n"
+        b"  @RequestMapping(value = \"/misc\", method = RequestMethod.POST,"
+        b" produces = \"application/json\")\n"
+        b"  public String misc() { return \"\"; }\n"
+        b"}\n"
+    )
+    rows = server._routes_for_file("C.java")
+    assert {(r["method"], r["pattern"], r["handler"]) for r in rows} == {
+        ("GET", "/api/users", "list"),
+        ("POST", "/api/misc", "misc"),    # produces= string never read as the path
+    }
+
+
+def _routes_project(tmp_path, monkeypatch):
+    """A FastAPI handler whose graph node the tool can join routes back to."""
+    (tmp_path / "app.py").write_text(
+        "from fastapi import FastAPI\n"
+        "app = FastAPI()\n"
+        "\n"
+        "@app.get('/items/{id}')\n"
+        "def read_item(id):\n"
+        "    return id\n",
+        encoding="utf-8",
+    )
+    _write_graph(tmp_path, {
+        "nodes": [
+            {"id": "read_item", "label": "read_item", "file": "app.py", "line": 5,
+             "file_type": "code"},
+        ],
+        "edges": [],
+    })
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    server._ROUTES_CACHE.clear()
+    server._SPAN_CACHE.clear()
+
+
+def test_routes_tool_joins_node_and_filters(tmp_path, monkeypatch):
+    _routes_project(tmp_path, monkeypatch)
+    data = json.loads(server.graphify_routes(as_json=True))
+    assert data["count"] == 1
+    row = data["routes"][0]
+    assert row["method"] == "GET" and row["pattern"] == "/items/{id}"
+    assert row["node"] == "read_item" and row["qualname"] == "read_item"
+    assert row["file"] == "app.py"
+    assert json.loads(server.graphify_routes(pattern="items", as_json=True))["count"] == 1
+    assert json.loads(server.graphify_routes(framework="django", as_json=True))["count"] == 0
+    assert json.loads(server.graphify_routes(method="post", as_json=True))["count"] == 0
+    text = server.graphify_routes()
+    assert "GET /items/{id} -> read_item" in text and "app.py:5" in text
+
+
+def test_routes_tool_scans_urls_py_outside_graph(tmp_path, monkeypatch):
+    _routes_project(tmp_path, monkeypatch)
+    sub = tmp_path / "polls"
+    sub.mkdir()
+    # urls.py has no extracted symbols, so it's absent from the graph on purpose
+    (sub / "urls.py").write_text(
+        "from django.urls import path\n"
+        "urlpatterns = [path('polls/', views.index)]\n",
+        encoding="utf-8",
+    )
+    data = json.loads(server.graphify_routes(framework="django", as_json=True))
+    assert data["count"] == 1
+    assert data["routes"][0]["file"] == "polls/urls.py"
+
+
+def test_routes_tool_requires_graph(empty_project):
+    assert "ERROR" in server.graphify_routes()
+
+
+def test_routes_tool_limit_truncates(tmp_path, monkeypatch):
+    _routes_project(tmp_path, monkeypatch)
+    # grow the graph-known file to several routes, then cap the listing
+    (tmp_path / "app.py").write_text(
+        "from fastapi import FastAPI\n"
+        "app = FastAPI()\n"
+        "\n"
+        "@app.get('/items/{id}')\n"
+        "def read_item(id): ...\n"
+        "\n"
+        "@app.post('/items')\n"
+        "def create_item(): ...\n",
+        encoding="utf-8",
+    )
+    server._ROUTES_CACHE.clear()
+    data = json.loads(server.graphify_routes(limit=1, as_json=True))
+    assert len(data["routes"]) == 1 and data["truncated"] is True and data["count"] == 2

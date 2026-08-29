@@ -51,7 +51,8 @@ Supporting tools: `graphify_search` (find nodes by name), `graphify_neighbors`
 (1-hop), `graphify_god_nodes` (most connected), `graphify_surprises`
 (unexpected cross-domain couplings), `graphify_path(a, b)` (exact route between
 two nodes), `graphify_explain(node)` (everything about one node),
-`graphify_cycles()` (dependency cycles via SCCs), `graphify_validate()` (lint
+`graphify_cycles()` (dependency cycles via SCCs), `graphify_routes()` (framework
+route → handler table, joined to graph nodes), `graphify_validate()` (lint
 graph.json for dangling/duplicate/self-loop/orphan issues — gauge how much to
 trust the graph).
 
@@ -89,6 +90,9 @@ stripped) — the middle layer between the map and full code — and
   (needs the `[semble]` extra).
 - **Auditing a dependency upgrade** → `graphify_package_apis("<package>")` —
   which symbols of the external package are actually used, and from where.
+- **Finding an endpoint** → `graphify_routes(pattern="/items")` — which URL
+  patterns hit which handlers (FastAPI/Flask/Django, Express/NestJS,
+  gin/chi/net-http, Spring), each row joined to its graph node and `file:line`.
 
 ## Naming communities (optional, for readable subsystems)
 
