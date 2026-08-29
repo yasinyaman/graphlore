@@ -3171,3 +3171,24 @@ def test_display_labels_cached_on_nodes_identity(tmp_path, monkeypatch):
     graph = server._load_graph()
     nodes, _ = server._nodes_edges(graph)
     assert server._display_labels(nodes) is server._display_labels(nodes)
+
+
+def test_validate_orphans_use_qualified_labels(tmp_path, monkeypatch):
+    """Same-label orphan nodes must be distinguishable in validate output."""
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    _write_graph(tmp_path, {
+        "nodes": [
+            {"id": "a", "label": "A"},
+            {"id": "b", "label": "B"},
+            {"id": "p_init", "label": "__init__.py", "source_file": "pkg/__init__.py",
+             "source_location": "L1"},
+            {"id": "q_init", "label": "__init__.py", "source_file": "qkg/__init__.py",
+             "source_location": "L1"},
+        ],
+        "links": [{"source": "a", "target": "b", "relation": "x"}],
+    })
+    data = json.loads(server.graphlore_validate(as_json=True))
+    orphans = data["examples"]["orphan_nodes"]
+    assert "__init__.py (pkg/__init__.py:L1)" in orphans
+    assert "__init__.py (qkg/__init__.py:L1)" in orphans
+    assert "__init__.py" not in orphans  # no bare, indistinguishable entries
