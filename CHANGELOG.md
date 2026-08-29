@@ -50,6 +50,16 @@ All notable changes to this project are documented here. The format is based on
   repo containing doc/paper/image files can be indexed via local AST with no
   LLM API key (those files otherwise demand semantic extraction and the build
   errors without a key).
+- **`GRAPHIFY_TOOLSET=locate`** — a minimal, mega-tool-style surface of five
+  tools: `graphify_locate` (the one-call orient), `graphify_fetch` (map → code),
+  plus `graphify_overview` / `graphify_build` / `graphify_freshness` to stay
+  oriented and in sync. Inspired by single-tool code-graph servers where a
+  smaller surface measurably improves tool selection. Needs a semantic backend
+  (the `[semble]` extra or `GRAPHIFY_SEMANTIC_BACKEND`); without one the server
+  falls back to the lean surface with a stderr warning instead of advertising a
+  locate tool that can only return an install hint. `graphify_overview` now
+  suggests `graphify_locate(...)` first whenever it is on the active surface, so
+  the trimmed mode keeps a non-empty `suggested_next`.
 - `GRAPHIFY_ALLOWED_HOSTS` — Host-header allowlist for the HTTP transports'
   DNS-rebinding protection (comma-separated, `:*` port wildcards; `*` disables
   it). The MCP v2 SDK auto-enables that protection with a loopback-only

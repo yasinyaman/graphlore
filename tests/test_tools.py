@@ -1798,6 +1798,56 @@ def test_overview_suggestions_respect_active_tools(project, monkeypatch):
     assert "graphify_communities()" in data["suggested_next"]
 
 
+def test_locate_toolset_membership_is_valid():
+    names = {t.name for t in server.mcp._tool_manager.list_tools()}
+    assert server.LOCATE_TOOLS <= names        # no typos: every locate tool exists
+
+
+def test_toolsets_dict_covers_documented_values():
+    assert set(server.TOOLSETS) == {"full", "lean", "locate"}
+    assert server.TOOLSETS["full"] is None
+    assert server.TOOLSETS["locate"] == server.LOCATE_TOOLS
+
+
+def test_locate_toolset_with_semble(monkeypatch):
+    import importlib.util as iu
+    monkeypatch.setattr(iu, "find_spec", lambda name: object())
+    monkeypatch.setattr(server, "TOOLSET", "locate")
+    assert server._effective_toolset_tools() == set(server.LOCATE_TOOLS)
+
+
+def test_locate_toolset_falls_back_to_lean_without_semble(monkeypatch, capsys):
+    import importlib.util as iu
+    monkeypatch.setattr(iu, "find_spec", lambda name: None if name == "semble" else object())
+    monkeypatch.delenv("GRAPHIFY_SEMANTIC_BACKEND", raising=False)
+    monkeypatch.setattr(server, "TOOLSET", "locate")
+    assert server._effective_toolset_tools() == server._effective_lean_tools()
+    assert "falling back" in capsys.readouterr().err
+
+
+def test_apply_toolset_locate_removes_non_core(monkeypatch):
+    # record removals instead of trimming the module-global server for real
+    import importlib.util as iu
+    monkeypatch.setattr(iu, "find_spec", lambda name: object())
+    monkeypatch.setattr(server, "TOOLSET", "locate")
+    removed: list[str] = []
+    monkeypatch.setattr(server.mcp, "remove_tool", removed.append)
+    server._apply_toolset()
+    names = {t.name for t in server.mcp._tool_manager.list_tools()}
+    assert set(removed) == names - server.LOCATE_TOOLS
+    assert not set(removed) & server.LOCATE_TOOLS
+
+
+def test_overview_suggests_locate_when_active(project, monkeypatch):
+    monkeypatch.setattr(
+        server, "_registered_tool_names",
+        lambda: {"graphify_locate", "graphify_fetch", "graphify_overview"},
+    )
+    data = json.loads(server.graphify_overview(as_json=True))
+    assert data["suggested_next"], "locate surface must still suggest a next step"
+    assert data["suggested_next"][0].startswith("graphify_locate(")
+
+
 def test_freshness_cosmetic_change_while_behind_updates(tmp_path, monkeypatch):
     _require_git()
     (tmp_path / "m.py").write_text("def f():\n    return 1\n", encoding="utf-8")
