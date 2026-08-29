@@ -22,12 +22,13 @@ classifiers = [
     "Topic :: Software Development :: Libraries",
 ]
 dependencies = [
-    # Floor is the tested baseline (mcp 1.26–1.27). This server uses the
-    # streamable-HTTP transport (`mcp.streamable_http_app`), tool annotations, and
-    # host-LLM sampling (`check_client_capability` / `create_message`) — none of
-    # which exist in the old `>=1.2.0` floor, so that floor would install but fail
-    # at runtime. Upper bound guards against a breaking 2.0 SDK release.
-    "mcp>=1.26,<2.0",
+    # Floor is the tested baseline (mcp 2.1, the v2 SDK). This server uses the
+    # v2 API surface: `mcp.server.mcpserver.MCPServer` (with per-call HTTP
+    # transport options: `run(host=..., port=...)` / `streamable_http_app(host=...)`),
+    # tool annotations, and host-LLM sampling (`check_client_capability` /
+    # `create_message`). The in-memory `Client(server)` used by the test suite is
+    # also v2-only. Upper bound guards against a breaking 3.0 release.
+    "mcp>=2.1,<3.0",
 ]
 
 [project.optional-dependencies]
