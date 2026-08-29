@@ -299,7 +299,7 @@ def _count_tokens(text: str) -> int:
 
 def _bfs_subgraph(
     adj: dict[str, list[tuple[str, str]]],
-    labels: dict[str, str],
+    labels: Any,  # id -> display label; dict or server._DisplayLabels (duck-typed .get)
     start_id: str,
     hops: int,
     budget_tokens: int,

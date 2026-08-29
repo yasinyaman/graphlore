@@ -12,6 +12,15 @@ All notable changes to this project are documented here. The format is based on
   project `graphify-mcp`; they now say `codegraph-mcp`.
 
 ### Changed
+- **Ambiguous node labels are qualified at render time.** graphify labels
+  methods bare (`.auth_flow()`), so distinct nodes across classes/files used to
+  render identically in subgraph arrows and node lists. Wherever a label is
+  shared by more than one node, tools now show the span-recovered FQN
+  (`DigestAuth.auth_flow()`), falling back to `label (file:Lline)` when no span
+  is available; unique labels are untouched. Lazy + memoized (only ambiguous
+  ids that actually render pay the parse cost) and cached per loaded graph —
+  this also collapses the eleven per-tool `{id: label}` rebuilds into one
+  shared `_display_labels()` helper.
 - **Tool surface renamed: `graphify_*` → `graphlore_*`** (and the resources
   `graphify://…` → `graphlore://…`), completing the package rename below so
   the commands an assistant sees carry the product's own name. All 28 tools
