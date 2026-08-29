@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>graphify-mcp — benchmark (httpx + 5 dil)</title>
+<title>codegraph-mcp — benchmark (httpx + 5 dil)</title>
 <style>
   :root{
     --bg:#0f1115;--panel:#171a21;--panel2:#1d212a;--line:#2a2f3a;
@@ -51,7 +51,7 @@
 <body>
 <div class="wrap">
   <div class="lang"><a href="benchmark.html">English →</a></div>
-  <h1>graphify-mcp — token verimliliği benchmark'ı</h1>
+  <h1>codegraph-mcp — token verimliliği benchmark'ı</h1>
   <p class="sub">Başlık: <code>encode/httpx</code> üzerinde 6 sorgunun ortalaması (gönderme · kimlik doğrulama · yönlendirme · içerik çözme · çerezler · zaman aşımı) — 2.101 düğümlük graf. Her sorgu bir ajanı bir kod alanına yönlendirir; token = modelin bağlamına ulaşan miktar (≈ karakter/4). <strong><a href="#multilang" style="color:var(--teal);text-decoration:none">JS/TS · Go · Java · Rust · C++ üzerinde doğrulandı ↓</a></strong></p>
 
   <div class="cards">
@@ -67,7 +67,7 @@
     <div class="row"><div class="name">semble + graphify (ayrı)</div><div class="track"><div class="bar" style="width:48%;background:var(--amber)"></div><span class="val">2.721</span></div></div>
     <div class="row"><div class="name">semble tek başına</div><div class="track"><div class="bar" style="width:40%;background:var(--gray)"></div><span class="val">1.613</span></div></div>
     <div class="row"><div class="name">graphify tek başına</div><div class="track"><div class="bar" style="width:35%;background:var(--gray)"></div><span class="val">1.107</span></div></div>
-    <div class="row win"><div class="name">graphify-mcp locate</div><div class="track"><div class="bar" style="width:12%;background:var(--teal)"></div><span class="val">235&nbsp;&nbsp;·&nbsp;&nbsp;+7 gizli bağ</span></div></div>
+    <div class="row win"><div class="name">codegraph-mcp locate</div><div class="track"><div class="bar" style="width:12%;background:var(--teal)"></div><span class="val">235&nbsp;&nbsp;·&nbsp;&nbsp;+7 gizli bağ</span></div></div>
   </div>
 
   <h2>Yeteneğe göre</h2>
@@ -78,7 +78,7 @@
       <tr><td>semble tek başına</td><td class="num">1.613</td><td class="num">1</td><td class="no">—</td><td class="yes">✓</td><td class="num">0</td></tr>
       <tr><td>graphify tek başına</td><td class="num">1.107</td><td class="num">1</td><td class="yes">✓</td><td class="no">—</td><td class="num">0</td></tr>
       <tr><td>semble + graphify (ayrı)</td><td class="num">2.721</td><td class="num">4</td><td class="yes">✓</td><td class="yes">✓</td><td class="num">0</td></tr>
-      <tr class="win"><td>graphify-mcp locate</td><td class="num">235</td><td class="num">1</td><td class="yes">✓</td><td class="yes">✓</td><td class="num">7</td></tr>
+      <tr class="win"><td>codegraph-mcp locate</td><td class="num">235</td><td class="num">1</td><td class="yes">✓</td><td class="yes">✓</td><td class="num">7</td></tr>
     </tbody>
   </table>
 
@@ -96,7 +96,7 @@
   </table>
 
   <div class="note">
-    Bu ~235 token bir navigasyon <em>haritasıdır</em> (seed <code>file:line</code> + yapısal komşuluk + gizli bağlar), ham kod değil — kodu yalnızca gereken yerde çekersin. semble'ın ~1.600 token'ı okunabilir kod parçalarıdır; iki gösterim birbirini tamamlar. graphify-mcp en ucuz yönelme + çapraz-kontrol sinyali için optimize eder; sonra seçerek derine inersin.
+    Bu ~235 token bir navigasyon <em>haritasıdır</em> (seed <code>file:line</code> + yapısal komşuluk + gizli bağlar), ham kod değil — kodu yalnızca gereken yerde çekersin. semble'ın ~1.600 token'ı okunabilir kod parçalarıdır; iki gösterim birbirini tamamlar. codegraph-mcp en ucuz yönelme + çapraz-kontrol sinyali için optimize eder; sonra seçerek derine inersin.
   </div>
 
   <h2>Vaka çalışması — gizli bağlar gerçek</h2>
@@ -113,20 +113,20 @@
 
   <h2 id="multilang">Diller arası — gerçek HTTP-istemci repoları</h2>
   <p style="color:var(--muted);font-size:14px;margin:0 0 14px">Span birleştirme ve freshness kontrolü <strong>yalnızca Python'a özgü değil</strong>. <strong>Beş dilde daha</strong> bir HTTP istemcisi için AST-tabanlı (LLM'siz) graf kurup aynı tür sorguları çalıştırdım (gönderme · redirect · timeout/retry · header/auth · transport). <em>Span-join precision</em> = çözülen node'un gerçek tree-sitter span'ının chunk'ı içerdiği semble isabetlerinin oranı; <em>qualname</em> = FQN kurtaran seed'ler (ör. <code>Got.request</code>, <code>resty.Client.Get</code>); <em>locate vs grep</em> = bir temsili sorguda harita token'ı vs naif grep+okuma.</p>
-  <img src="benchmark-multilang.svg" alt="Diller arası span-join precision — Python %91, JS/TS %85, Java %83, Go %80" style="width:100%;max-width:760px;margin:4px 0 18px">
+  <img src="benchmark-multilang.svg" alt="Diller arası span-join precision — Python %96, Go %93, JS/TS %89, Java %85" style="width:100%;max-width:760px;margin:4px 0 18px">
   <table>
-    <thead><tr><th>Dil</th><th>Repo</th><th style="text-align:right">Graf node</th><th style="text-align:right">Span-join precision</th><th style="text-align:right">Qualname</th><th style="text-align:right">Gizli / sorgu</th><th style="text-align:right">locate vs grep</th></tr></thead>
+    <thead><tr><th>Dil</th><th>Repo</th><th style="text-align:right">Graf node</th><th style="text-align:right">Span-join precision</th><th style="text-align:right">Qualname</th><th style="text-align:right">Gizli / sorgu</th><th style="text-align:right">locate vs grep</th><th style="text-align:right">Çağrı (locate vs naif)</th></tr></thead>
     <tbody>
-      <tr class="win"><td>Python <span style="color:var(--faint)">(ast)</span></td><td><code>encode/httpx</code></td><td class="num">2.101</td><td class="num">%91 <span style="color:var(--faint)">(49/54)</span></td><td class="num">%67</td><td class="num">4,0</td><td class="num">232×</td></tr>
-      <tr><td>JavaScript / TS</td><td><code>sindresorhus/got</code></td><td class="num">380</td><td class="num">%89 <span style="color:var(--faint)">(48/54)</span></td><td class="num">%67</td><td class="num">3,2</td><td class="num">494×</td></tr>
-      <tr><td>Go</td><td><code>go-resty/resty</code></td><td class="num">1.398</td><td class="num">%80 <span style="color:var(--faint)">(43/54)</span></td><td class="num">%67</td><td class="num">4,7</td><td class="num">748×</td></tr>
-      <tr><td>Java</td><td><code>square/retrofit</code></td><td class="num">630</td><td class="num">%83 <span style="color:var(--faint)">(45/54)</span></td><td class="num">%50</td><td class="num">5,5</td><td class="num">208×</td></tr>
-      <tr><td>Rust</td><td><code>algesten/ureq</code></td><td class="num">1.612</td><td class="num">%69 <span style="color:var(--faint)">(37/54)</span></td><td class="num">%83</td><td class="num">5,3</td><td class="num">477×</td></tr>
-      <tr><td>C++</td><td><code>libcpr/cpr</code></td><td class="num">347</td><td class="num">%69 <span style="color:var(--faint)">(37/54)</span></td><td class="num">%100</td><td class="num">4,2</td><td class="num">223×</td></tr>
+      <tr class="win"><td>Python <span style="color:var(--faint)">(ast)</span></td><td><code>encode/httpx</code></td><td class="num">2.095</td><td class="num">%96 <span style="color:var(--faint)">(52/54)</span></td><td class="num">%67</td><td class="num">3,2</td><td class="num">272×</td><td class="num">1 vs 15 <span style="color:var(--faint)">(0 vs 14 okuma)</span></td></tr>
+      <tr><td>JavaScript / TS</td><td><code>sindresorhus/got</code></td><td class="num">556</td><td class="num">%89 <span style="color:var(--faint)">(48/54)</span></td><td class="num">%67</td><td class="num">2,3</td><td class="num">583×</td><td class="num">1 vs 9 <span style="color:var(--faint)">(0 vs 8 okuma)</span></td></tr>
+      <tr><td>Go</td><td><code>go-resty/resty</code></td><td class="num">1.277</td><td class="num">%93 <span style="color:var(--faint)">(50/54)</span></td><td class="num">%100</td><td class="num">1,8</td><td class="num">911×</td><td class="num">1 vs 17 <span style="color:var(--faint)">(0 vs 16 okuma)</span></td></tr>
+      <tr><td>Java</td><td><code>square/retrofit</code></td><td class="num">497</td><td class="num">%85 <span style="color:var(--faint)">(46/54)</span></td><td class="num">%50</td><td class="num">2,3</td><td class="num">217×</td><td class="num">1 vs 18 <span style="color:var(--faint)">(0 vs 17 okuma)</span></td></tr>
+      <tr><td>Rust</td><td><code>algesten/ureq</code></td><td class="num">1.444</td><td class="num">%70 <span style="color:var(--faint)">(38/54)</span></td><td class="num">%83</td><td class="num">3,7</td><td class="num">577×</td><td class="num">1 vs 22 <span style="color:var(--faint)">(0 vs 21 okuma)</span></td></tr>
+      <tr><td>C++</td><td><code>libcpr/cpr</code></td><td class="num">350</td><td class="num">%57 <span style="color:var(--faint)">(31/54)</span></td><td class="num">%100</td><td class="num">4,3</td><td class="num">195×</td><td class="num">1 vs 16 <span style="color:var(--faint)">(0 vs 15 okuma)</span></td></tr>
     </tbody>
   </table>
   <div class="note">
-    Python stdlib <code>ast</code> kullanır (kesin, decorator-farkında); JS/TS · Go · Java · Rust · C++ ise otomatik dil tespitiyle tree-sitter kullanır — <strong>tek araç, sıfır dil-başına konfigürasyon</strong>. Precision altı çok farklı grafta (347–2.101 node) <strong>%69–91</strong> arasında, gizli-bağ çapraz-kontrolü sorgu başına 3–6 aday çıkarmaya devam eder, ve locate grep+okumadan <strong>200–750× ucuz</strong> kalır. Rust ve C++ %69'da geride — içerilmeyen kalan kısımları çoğunlukla <code>impl</code>-bloğu / dosya-başı chunk'lar olup tanıtılan sembole çözülme yine doğru (FQN'leri <strong>%83–100</strong> kurtarırlar) — yanlış yönlendirme değil.
+    Python stdlib <code>ast</code> kullanır (kesin, decorator-farkında); JS/TS · Go · Java · Rust · C++ ise otomatik dil tespitiyle tree-sitter kullanır — <strong>tek araç, sıfır dil-başına konfigürasyon</strong>. Precision altı çok farklı grafta (350–2.095 node) <strong>%57–96</strong> arasında, gizli-bağ çapraz-kontrolü sorgu başına 2–4 aday çıkarmaya devam eder, ve locate grep+okumadan <strong>195–911× ucuz</strong> kalır — üstelik <strong>1 araç çağrısı / 0 dosya okuma</strong> ile; grep-güdümlü taban çizgisi aynı sorgu için 9–22 çağrıyla 8–21 dosya açar (<strong>%89–95 daha az çağrı</strong>, token sayılarıyla aynı grep tabanı). C++ %57 ve Rust %70 ile geride — içerilmeyen kalan kısımları çoğunlukla <code>impl</code>-bloğu / dosya-başı chunk'lar olup tanıtılan sembole çözülme yine doğru (FQN'leri <strong>%83–100</strong> kurtarırlar) — yanlış yönlendirme değil.
   </div>
 
   <h2>Freshness diller arası doğru</h2>
@@ -143,7 +143,7 @@
     </tbody>
   </table>
 
-  <footer>Ölçüm 2026-06 · semble 0.3.4 (potion-code-16M) + graphify, tree-sitter backend · httpx headline = 6 sorgu; diller-arası = repo başına 6 sorgu × 54 isabet (<code>got</code> / <code>resty</code> / <code>retrofit</code> / <code>ureq</code> / <code>cpr</code>) · token ≈ karakter/4. Tekrar üret: <code>benchmarks/multilang.py</code>. Sayılar kod tabanı ve sorguya göre değişir.</footer>
+  <footer>httpx headline ölçümü 2026-06 (semble 0.3.4, potion-code-16M); diller-arası tablo + çağrı sayıları 2026-08'de yeniden ölçüldü (semble 0.5.5, tree-sitter span backend) · repo başına 6 sorgu × 54 isabet (<code>httpx</code> / <code>got</code> / <code>resty</code> / <code>retrofit</code> / <code>ureq</code> / <code>cpr</code>) · token ≈ karakter/4. Tekrar üret: <code>benchmarks/multilang.py --json</code> (commit'lenmiş koşu: <code>benchmarks/results-multilang.json</code>). Sayılar kod tabanı ve sorguya göre değişir.</footer>
 </div>
 </body>
 </html>
