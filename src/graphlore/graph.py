@@ -33,7 +33,7 @@ def _load_graph() -> dict[str, Any] | str:
     gp = _graph_path()
     if not gp.exists():
         return (
-            f"ERROR: {gp} not found. Run the graphify_build tool first "
+            f"ERROR: {gp} not found. Run the graphlore_build tool first "
             f"(project directory: {config.PROJECT_DIR})."
         )
     try:
@@ -134,7 +134,7 @@ def _is_surprise_edge(e: dict) -> bool:
 
     Note: an "inferred" confidence (graphify's EXTRACTED/INFERRED/AMBIGUOUS) is
     NOT a surprise — only an explicit surprise flag or type counts. Used by both
-    graphify_overview and graphify_surprises so they agree on one definition.
+    graphlore_overview and graphlore_surprises so they agree on one definition.
     """
     return bool(
         e.get("surprise")
@@ -308,7 +308,7 @@ def _bfs_subgraph(
     """BFS around start_id collecting edges until a token budget is hit.
 
     Returns (visited_ids, edges, truncated, approx_tokens). Shared by
-    graphify_subgraph and graphify_locate. ``edge_set`` (from :func:`_edge_set`)
+    graphlore_subgraph and graphlore_locate. ``edge_set`` (from :func:`_edge_set`)
     restores the true orientation of each collected edge: the undirected
     adjacency flattens direction, and an edge reached via its reverse entry must
     not be reported as ``B —calls→ A`` when the graph says ``A —calls→ B``.
