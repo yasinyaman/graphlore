@@ -2497,7 +2497,11 @@ def graphlore_validate(limit: int = 15, as_json: bool = False) -> str:
             duplicates.append({"from": labels.get(s, s), "to": labels.get(t, t), "relation": rel})
         else:
             seen.add(key)
-    orphans = [_node_label(n) for n in nodes if degree.get(_node_id(n), 0) == 0]
+    orphans = [
+        labels.get(_node_id(n), _node_label(n))
+        for n in nodes
+        if degree.get(_node_id(n), 0) == 0
+    ]
 
     issues = {
         "dangling_edges": len(dangling),
