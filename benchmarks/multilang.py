@@ -143,11 +143,18 @@ def _node_span_contains(node, fp, line):
         nl = int(s._node_line(node))
     except (TypeError, ValueError):
         return None
-    own = [sp for sp in s._spans_for_file(fp) if sp[2] == nl]
+    spans = s._spans_for_file(fp)
+    own = [sp for sp in spans if sp[2] == nl]
     if not own:
         return None  # node has no span (module-level / not a tracked symbol)
-    sp = max(own, key=lambda x: x[1] - x[0])  # the symbol's full region
-    return sp[0] <= line <= sp[1]
+    # Same-qualname family: C++/Java overloads collapse into ONE graph node
+    # (pointing at the first definition) while every overload keeps its own
+    # span. A chunk inside ANY overload of that symbol is a correct join, so
+    # containment is checked against the whole family, not just the span
+    # starting at the node's recorded line (cpr's Session::SetOption has 46).
+    quals = {sp[3] for sp in own}
+    family = [sp for sp in spans if sp[3] in quals]
+    return any(sp[0] <= line <= sp[1] for sp in family)
 
 
 def measure_repo(repo) -> dict:
