@@ -33,6 +33,8 @@ graph.json analysis tools (no CLI needed):
   - graphify_cycles     : circular dependencies (SCCs) in the directed graph
   - graphify_package_apis: symbol-level external API surface (which names each
                           package is actually used for — upgrade-audit input)
+  - graphify_routes     : framework route -> handler table (FastAPI/Flask/Django,
+                          Express/NestJS, gin/chi/net-http, Spring)
 
 Community naming:
   - graphify_label_communities : name Leiden clusters (host-LLM sampling / backend key)
@@ -111,6 +113,13 @@ from .graph import (  # noqa: F401  (re-exported for the tools + tests)
     _nodes_edges,
     _out_dir,
     _resolve_node,
+)
+from .routes import (  # noqa: F401  (re-exported for the tools + tests)
+    _ROUTES_CACHE,
+    _ROUTES_CACHE_MAX,
+    _routes_for_file,
+    _routes_python,
+    routes_for_source,
 )
 from .spans import (  # noqa: F401
     _SPAN_CACHE,
@@ -2494,6 +2503,127 @@ def graphify_package_apis(package: str = "", limit: int = 20, as_json: bool = Fa
         lines.append(f"  … +{len(ranked) - len(shown)} more package(s); raise `limit`.")
     if skipped:
         lines.append("first-party (skipped): " + ", ".join(sorted(skipped)))
+    return _fmt(payload, as_json, "\n".join(lines))
+
+
+_ROUTES_NOTE = (
+    "lower bound: non-literal patterns, dynamic registration and chained builders "
+    "(router.route().get(), gorilla .Methods()) are invisible; zero routes means "
+    "no visibility, not no routes"
+)
+
+
+def _route_candidate_files(graph_files: set[str]) -> set[str]:
+    """Well-known route files the graph may not know about, beyond ``graph_files``.
+
+    Django's ``urls.py`` is the one file shape that systematically holds zero
+    extracted symbols (it's all module-level calls), so it can be absent from the
+    graph entirely. A pruned, capped walk picks those up; anything else outside
+    the graph (say a route-only ``routes.ts``) stays a documented limitation —
+    this must not grow into a filesystem scanner.
+    """
+    skip = {".git", "node_modules", ".venv", "venv", "dist", "build", "target",
+            "__pycache__", config.OUT_DIR_NAME}
+    found: set[str] = set()
+    root = config.PROJECT_DIR
+    try:
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames[:] = [d for d in dirnames if d not in skip and not d.startswith(".")]
+            if "urls.py" in filenames:
+                try:
+                    rel = (Path(dirpath) / "urls.py").resolve().relative_to(root.resolve())
+                except (ValueError, OSError):
+                    continue
+                found.add(rel.as_posix())
+                if len(found) >= 200:
+                    break
+    except OSError:
+        pass
+    return found - graph_files
+
+
+@mcp.tool(annotations=ToolAnnotations(title="Framework routes", read_only_hint=True))
+def graphify_routes(
+    framework: str = "",
+    method: str = "",
+    pattern: str = "",
+    limit: int = 50,
+    as_json: bool = False,
+) -> str:
+    """Framework route -> handler table: which URL patterns hit which code.
+
+    Scans the files the graph knows (plus any ``urls.py`` the graph missed) for
+    the common registration idioms — Python: Flask ``@app.route`` / FastAPI-style
+    verb decorators / Django ``path()``; JS/TS: Express-style ``app.get('/x', h)``
+    and NestJS ``@Controller``+``@Get``; Go: gin/echo/chi verb methods,
+    ``HandleFunc`` (Go 1.22 ``"GET /x"`` patterns split), chi ``Route`` nesting;
+    Java: Spring ``@GetMapping``-family and ``@RequestMapping``. Each row is
+    joined back to its graph node and qualified name, so a route answers "where
+    is this endpoint" in one hop. Python is parsed with the stdlib ast; JS/TS,
+    Go and Java need the optional [treesitter] extra.
+
+    The result is a LOWER BOUND: non-literal patterns, dynamic registration and
+    chained builders (``router.route().get()``, gorilla ``.Methods()``) are
+    invisible; gorilla chains surface as method ``ANY``. Zero routes reads "no
+    visibility", not "no routes".
+
+    Args:
+        framework: Keep only this framework label (exact, case-insensitive) —
+            e.g. "fastapi", "flask", "django", "express", "nestjs", "gin",
+            "chi", "net-http", "spring".
+        method: Keep only this HTTP method (exact, case-insensitive; "ANY" for
+            rows the idiom doesn't pin to one method).
+        pattern: Keep only URL patterns containing this substring (case-insensitive).
+        limit: Cap on routes listed (sorted by file then line).
+    """
+    graph = _load_graph()
+    if isinstance(graph, str):
+        return graph
+    nodes, _edges = _nodes_edges(graph)
+    graph_files = {_norm_relpath(_node_file(n)) for n in nodes} - {""}
+    files = sorted(graph_files | _route_candidate_files(graph_files))
+
+    rows: list[dict[str, Any]] = []
+    for f in files:
+        for r in _routes_for_file(f):
+            node = _node_for_location(nodes, f, r["line"])
+            rows.append({
+                **r,
+                "file": f,
+                "node": _node_label(node) if node is not None else "",
+                "qualname": _span_qualname(f, r["line"]) or "",
+            })
+
+    if framework:
+        rows = [r for r in rows if r["framework"].lower() == framework.lower()]
+    if method:
+        rows = [r for r in rows if r["method"].lower() == method.lower()]
+    if pattern:
+        rows = [r for r in rows if pattern.lower() in r["pattern"].lower()]
+
+    rows.sort(key=lambda r: (r["file"], r["line"]))
+    shown = rows[:limit]
+    payload: dict[str, Any] = {
+        "files_scanned": len(files),
+        "routes": shown,
+        "count": len(rows),
+        "truncated": len(rows) > len(shown),
+        "note": _ROUTES_NOTE,
+    }
+    if not rows:
+        return _fmt(
+            payload, as_json,
+            f"No framework routes visible in {len(files)} scanned file(s) "
+            f"({_ROUTES_NOTE}).",
+        )
+    lines = [f"{len(rows)} route(s) across {len(files)} scanned file(s) ({_ROUTES_NOTE}):"]
+    for r in shown:
+        lines.append(
+            f"  {r['method']} {r['pattern']} -> {r['handler']}  "
+            f"({r['file']}:{r['line']})  [{r['framework']}]"
+        )
+    if payload["truncated"]:
+        lines.append(f"  … +{len(rows) - len(shown)} more route(s); raise `limit`.")
     return _fmt(payload, as_json, "\n".join(lines))
 
 

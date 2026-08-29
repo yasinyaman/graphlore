@@ -50,6 +50,25 @@ All notable changes to this project are documented here. The format is based on
   repo containing doc/paper/image files can be indexed via local AST with no
   LLM API key (those files otherwise demand semantic extraction and the build
   errors without a key).
+- **`graphify_routes`** — framework route → handler table: which URL patterns
+  hit which code, each row joined back to its graph node and qualified name
+  (`GET /items/{id} -> read_item (app.py:5)`). Recognizes the common
+  registration idioms per language — Python: Flask `@app.route` /
+  Flask-FastAPI verb decorators (labelled by the file's imports) / Django
+  `path()`-family (gated on a django import, so a local `path()` never
+  registers); JS/TS: Express-style verb calls (plain-identifier receiver +
+  leading-`/` literal, which keeps `map.get('key')` out) and NestJS
+  `@Controller`+`@Get`; Go: gin/echo/chi verb methods, `Handle`/`HandleFunc`
+  with Go 1.22 `"GET /x"` patterns split into method + path, and chi
+  `Route(...)` closure nesting with prefix propagation; Java: Spring
+  `@GetMapping`-family and `@RequestMapping` (class prefix joined). Scans the
+  files the graph knows plus any `urls.py` the graph missed (capped, pruned
+  walk). An honest lower bound: dynamic registration, chained builders
+  (`router.route().get()`, gorilla `.Methods()`) and variable-bound group
+  prefixes are invisible. Python via stdlib `ast`; JS/TS, Go and Java via the
+  optional `[treesitter]` extra. New `routes.py` engine module with a bounded
+  per-(path, mtime) cache and a public `routes_for_source(src, rel)` seam,
+  mirroring `apis.py`.
 - **`GRAPHIFY_TOOLSET=locate`** — a minimal, mega-tool-style surface of five
   tools: `graphify_locate` (the one-call orient), `graphify_fetch` (map → code),
   plus `graphify_overview` / `graphify_build` / `graphify_freshness` to stay
