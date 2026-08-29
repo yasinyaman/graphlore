@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Multi-language validation benchmark for graphlore.
 
-Proves the tree-sitter span join (graphify_locate) and the cosmetic-vs-structural
+Proves the tree-sitter span join (graphlore_locate) and the cosmetic-vs-structural
 freshness check on REAL HTTP-client repos in JS/TS, Go and Java — the same kind of
 queries the Python/httpx benchmark uses.
 
@@ -18,23 +18,32 @@ build an AST-only graph per repo — no LLM/API key needed):
   # (the Python row reuses an existing /tmp/httpx-demo graph; drop that entry to skip)
 
 Run:
-  /path/to/venv/bin/python benchmarks/multilang.py
+  /path/to/venv/bin/python benchmarks/multilang.py [--json results.json]
 
-Every number it prints is measured live — nothing is hard-coded. It reports, per repo:
+Span, token, hidden-link and freshness numbers are measured live. The one
+exception is the locate side of the call-count row: locate is 1 tool call / 0
+agent file reads BY CONSTRUCTION (it is a single call whose reply embeds the
+map), so those two constants are the tool's contract, not a measurement — the
+naive side of the same row IS measured from the live grep. It reports, per repo:
   * span-join precision  — % of semble hits whose resolved node's real tree-sitter
     span actually CONTAINS the chunk (true containment), replicating the httpx metric
   * qualname recovery    — % of locate seeds that recover a span FQN (e.g. Service.fetch)
   * hidden links / query — the structural-cross-check signal
   * token spot-check     — locate map tokens vs a naive grep+read, for one query
+  * call spot-check      — 1 locate call / 0 file reads vs the naive baseline's
+    1 grep + N file-read calls (N = the files the same grep matches, i.e. what a
+    grep-driven agent would open) — both metrics share one baseline
 and a per-language freshness correctness check (comment/reformat = cosmetic,
-operator/value edit = structural).
+operator/value edit = structural). --json persists the full result set.
 """
 from __future__ import annotations
 
+import argparse
 import json
 import re
 import subprocess
 import sys
+from datetime import date
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -131,8 +140,6 @@ def _reset(project_dir: Path):
     s._GRAPH_CACHE.clear()
     s._SPAN_CACHE.clear()
     s._TS_PARSERS.clear()
-    if hasattr(s, "_SEMBLE_CACHE"):
-        s._SEMBLE_CACHE.clear()
 
 
 def _node_span_contains(node, fp, line):
@@ -185,7 +192,7 @@ def measure_repo(repo) -> dict:
                 contained += 1
             elif r is None:
                 no_span += 1
-        data = json.loads(s.graphify_locate(q, as_json=True))
+        data = json.loads(s.graphlore_locate(q, as_json=True))
         seed = data.get("seed") or {}
         if seed:
             seeds += 1
@@ -194,7 +201,7 @@ def measure_repo(repo) -> dict:
         hidden_total += len(data.get("hidden_links") or [])
 
     # token spot-check: locate map vs naive grep+read for one query
-    locate_txt = s.graphify_locate(repo["spotcheck"])
+    locate_txt = s.graphlore_locate(repo["spotcheck"])
     locate_tokens = max(1, len(locate_txt) // 4)
     grep_files = subprocess.run(
         ["grep", "-rli", "--include", f"*{repo['ext']}", repo["grep"], "."],
@@ -208,6 +215,9 @@ def measure_repo(repo) -> dict:
             pass
     grep_tokens = max(1, grep_bytes // 4)
 
+    # call/read accounting for the same query+grep baseline: locate is one tool
+    # call reading zero files; the naive agent runs 1 grep then opens each match.
+    naive_calls = 1 + len(grep_files)
     return {
         "lang": repo["lang"], "name": repo["name"], "nodes": len(nodes),
         "hits": total, "contained": contained, "no_span": no_span,
@@ -218,6 +228,9 @@ def measure_repo(repo) -> dict:
         "spot_query": repo["spotcheck"], "locate_tokens": locate_tokens,
         "grep_tokens": grep_tokens, "grep_files": len(grep_files),
         "ratio": grep_tokens / locate_tokens,
+        "locate_calls": 1, "locate_file_reads": 0,
+        "naive_calls": naive_calls, "naive_file_reads": len(grep_files),
+        "call_reduction": 1 - 1 / naive_calls,
     }
 
 
@@ -255,7 +268,13 @@ def freshness_check(repo) -> dict:
     }
 
 
-def main():
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument(
+        "--json", metavar="PATH", default=None,
+        help="also write the full results as JSON to PATH (for docs provenance)")
+    args = parser.parse_args(argv)
+
     results = [measure_repo(r) for r in REPOS]
     fresh = [freshness_check(r) for r in REPOS]
 
@@ -276,12 +295,28 @@ def main():
               f"  vs grep+read {r['grep_tokens']} tok ({r['grep_files']} files)"
               f"  -> {r['ratio']:.0f}x fewer")
 
+    print("\n=== Call-count spot-check (same query/grep; locate side by construction) ===")
+    for r in results:
+        print(f"  {r['lang']:6} locate: {r['locate_calls']} call / "
+              f"{r['locate_file_reads']} file reads  vs naive: {r['naive_calls']} calls "
+              f"({r['naive_file_reads']} file reads)"
+              f"  -> {r['call_reduction']*100:.0f}% fewer calls")
+
     print("\n=== Freshness correctness (cosmetic vs structural) ===")
     for f in fresh:
         print(f"  {f['lang']:6} {f.get('file','?'):40} cosmetic={f['cosmetic']} (expect True)  "
               f"structural={f['structural']} (expect False)")
 
+    payload = {
+        "results": results,
+        "freshness": fresh,
+        "measured": date.today().isoformat(),
+    }
     print("\nJSON:", json.dumps({"results": results, "freshness": fresh}, default=str))
+    if args.json:
+        Path(args.json).write_text(
+            json.dumps(payload, indent=2, default=str) + "\n", encoding="utf-8")
+        print(f"results written to {args.json}")
 
 
 if __name__ == "__main__":

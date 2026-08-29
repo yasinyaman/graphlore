@@ -6,14 +6,14 @@ from graphlore import server, spans
 
 
 def test_overview(project):
-    out = server.graphify_overview()
+    out = server.graphlore_overview()
     assert "5 nodes" in out
     assert "3 communities" in out
     assert "Client" in out
 
 
 def test_overview_json(project):
-    data = json.loads(server.graphify_overview(as_json=True))
+    data = json.loads(server.graphlore_overview(as_json=True))
     assert data["nodes"] == 5
     assert data["edges"] == 4
     assert data["communities"] == 3
@@ -22,37 +22,37 @@ def test_overview_json(project):
 
 
 def test_god_nodes(project):
-    data = json.loads(server.graphify_god_nodes(as_json=True))
+    data = json.loads(server.graphlore_god_nodes(as_json=True))
     nodes = {g["node"]: g["degree"] for g in data["god_nodes"]}
     assert nodes["Client"] == 2
     assert nodes["AsyncClient"] == 1
 
 
 def test_surprises(project):
-    data = json.loads(server.graphify_surprises(as_json=True))
+    data = json.loads(server.graphlore_surprises(as_json=True))
     assert data["fallback"] is False
     assert {"from": "DigestAuth", "to": "Response", "relation": "inferred"} in data["surprises"]
 
 
 def test_communities(project):
-    data = json.loads(server.graphify_communities(as_json=True))
+    data = json.loads(server.graphlore_communities(as_json=True))
     assert len(data["communities"]) == 3
     biggest = data["communities"][0]
     assert biggest["size"] == 2
 
 
 def test_search(project):
-    data = json.loads(server.graphify_search("client", as_json=True))
+    data = json.loads(server.graphlore_search("client", as_json=True))
     labels = {m["node"] for m in data["matches"]}
     assert labels == {"Client", "AsyncClient"}
 
 
 def test_search_no_match(project):
-    assert "No nodes match" in server.graphify_search("zzz")
+    assert "No nodes match" in server.graphlore_search("zzz")
 
 
 def test_neighbors(project):
-    data = json.loads(server.graphify_neighbors("Client", as_json=True))
+    data = json.loads(server.graphlore_neighbors("Client", as_json=True))
     rels = {(n["relation"], n["node"]) for n in data["neighbors"]}
     assert ("calls", "Request") in rels
     assert ("returns", "Response") in rels
@@ -60,12 +60,12 @@ def test_neighbors(project):
 
 def test_neighbors_fuzzy(project):
     # case-insensitive substring match still resolves
-    data = json.loads(server.graphify_neighbors("async", as_json=True))
+    data = json.loads(server.graphlore_neighbors("async", as_json=True))
     assert data["node"] == "AsyncClient"
 
 
 def test_subgraph(project):
-    data = json.loads(server.graphify_subgraph("Client", hops=2, as_json=True))
+    data = json.loads(server.graphlore_subgraph("Client", hops=2, as_json=True))
     assert data["center"] == "Client"
     assert data["nodes"] >= 3
     assert data["approx_tokens"] > 0
@@ -73,7 +73,7 @@ def test_subgraph(project):
 
 def test_subgraph_budget_truncates(project):
     # tiny budget forces truncation
-    data = json.loads(server.graphify_subgraph("Client", hops=5, budget_tokens=1, as_json=True))
+    data = json.loads(server.graphlore_subgraph("Client", hops=5, budget_tokens=1, as_json=True))
     assert data["truncated"] is True
 
 
@@ -86,7 +86,7 @@ def test_approx_tokens_uses_conservative_divisor():
 def test_subgraph_approx_tokens_not_underreported(project):
     """Reported approx_tokens must not undercount the serialized payload: it should
     clear the naive len(serialized)//4 lower bound (3.5 divisor + JSON envelope)."""
-    data = json.loads(server.graphify_subgraph("Client", hops=2, as_json=True))
+    data = json.loads(server.graphlore_subgraph("Client", hops=2, as_json=True))
     serialized = json.dumps(data["edges"], ensure_ascii=False)
     assert data["approx_tokens"] >= len(serialized) // 4
 
@@ -115,7 +115,7 @@ def test_count_tokens_tiktoken_exact(monkeypatch):
 
 
 def test_node_details(project):
-    data = json.loads(server.graphify_node_details("Client", as_json=True))
+    data = json.loads(server.graphlore_node_details("Client", as_json=True))
     assert data["file"] == "httpx/_client.py"
     assert data["line"] == 50
     assert data["community"] == 0
@@ -136,8 +136,8 @@ def test_node_details_real_graphify_schema(tmp_path, monkeypatch):
     graph = {
         "directed": True,
         "nodes": [{
-            "id": "graphify_overview",
-            "label": "graphify_overview()",
+            "id": "graphlore_overview",
+            "label": "graphlore_overview()",
             "source_file": "src/graphlore/server.py",
             "source_location": "L295",
             "community": 12,
@@ -146,7 +146,7 @@ def test_node_details_real_graphify_schema(tmp_path, monkeypatch):
     }
     (out / "graph.json").write_text(json.dumps(graph), encoding="utf-8")
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
-    data = json.loads(server.graphify_node_details("graphify_overview", as_json=True))
+    data = json.loads(server.graphlore_node_details("graphlore_overview", as_json=True))
     assert data["file"] == "src/graphlore/server.py"
     assert data["line"] == 295
     # source_location is consumed as the line, not echoed back in extra
@@ -154,8 +154,8 @@ def test_node_details_real_graphify_schema(tmp_path, monkeypatch):
 
 
 def test_missing_graph_errors(empty_project):
-    assert "not found" in server.graphify_overview()
-    assert "not found" in server.graphify_god_nodes()
+    assert "not found" in server.graphlore_overview()
+    assert "not found" in server.graphlore_god_nodes()
 
 
 def test_corrupt_graph_json_errors_gracefully(tmp_path, monkeypatch):
@@ -165,8 +165,8 @@ def test_corrupt_graph_json_errors_gracefully(tmp_path, monkeypatch):
     (out / "graph.json").write_text("{ not valid json", encoding="utf-8")
     server._GRAPH_CACHE.clear()
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
-    assert "failed to parse" in server.graphify_overview()
-    assert "failed to parse" in server.graphify_subgraph("X", as_json=True)
+    assert "failed to parse" in server.graphlore_overview()
+    assert "failed to parse" in server.graphlore_subgraph("X", as_json=True)
 
 
 def test_report_resource(project):
@@ -190,7 +190,7 @@ def test_community_resource_unknown(project):
 
 
 def test_add_rejects_non_http(project):
-    assert "only http/https" in server.graphify_add("ftp://x")
+    assert "only http/https" in server.graphlore_add("ftp://x")
 
 
 def test_tool_and_prompt_registration(project):
@@ -202,22 +202,23 @@ def test_tool_and_prompt_registration(project):
         return {t.name for t in tools}, {p.name for p in prompts}
 
     names, prompts = asyncio.run(_collect())
-    assert "graphify_overview" in names
-    assert "graphify_subgraph" in names
-    assert "graphify_sampling_status" in names
-    assert "graphify_label_communities" in names
-    assert "graphify_validate" in names
-    assert "graphify_locate" in names
-    assert "graphify_set_labels" in names
-    assert "graphify_prune" in names
-    assert "graphify_fetch" in names
-    assert "graphify_impact" in names
-    assert "graphify_cycles" in names
-    assert "graphify_skeleton" in names
-    assert "graphify_duplication_scan" in names
-    assert "graphify_diff" in names
-    assert "graphify_package_apis" in names
-    assert len(names) == 27
+    assert "graphlore_overview" in names
+    assert "graphlore_subgraph" in names
+    assert "graphlore_sampling_status" in names
+    assert "graphlore_label_communities" in names
+    assert "graphlore_validate" in names
+    assert "graphlore_locate" in names
+    assert "graphlore_set_labels" in names
+    assert "graphlore_prune" in names
+    assert "graphlore_fetch" in names
+    assert "graphlore_impact" in names
+    assert "graphlore_cycles" in names
+    assert "graphlore_skeleton" in names
+    assert "graphlore_duplication_scan" in names
+    assert "graphlore_diff" in names
+    assert "graphlore_package_apis" in names
+    assert "graphlore_routes" in names
+    assert len(names) == 28
     assert prompts == {"onboard", "trace_bug", "explain_flow"}
 
 
@@ -258,8 +259,8 @@ def test_overview_and_surprises_share_one_definition(tmp_path, monkeypatch):
         ],
     })
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
-    ov = json.loads(server.graphify_overview(as_json=True))
-    su = json.loads(server.graphify_surprises(as_json=True))
+    ov = json.loads(server.graphlore_overview(as_json=True))
+    su = json.loads(server.graphlore_surprises(as_json=True))
     assert ov["surprise_edges"] == 1  # only the is_surprise edge; inferred is NOT counted
     assert su["fallback"] is False
     assert {"from": "A", "to": "B", "relation": "x"} in su["surprises"]
@@ -294,7 +295,7 @@ def test_freshness_flags_untracked_file(tmp_path, monkeypatch):
 
     # A brand-new untracked .py is a real rebuild trigger that `git diff HEAD` misses.
     (tmp_path / "new_module.py").write_text("x = 1\n", encoding="utf-8")
-    data = json.loads(server.graphify_freshness(as_json=True))
+    data = json.loads(server.graphlore_freshness(as_json=True))
     assert data["stale"] is True
     assert any("new_module.py" in f for f in data["uncommitted_or_untracked_files"])
     # additions without deletions -> incremental update is the right action
@@ -327,7 +328,7 @@ def test_freshness_recommends_rebuild_on_deletion(tmp_path, monkeypatch):
     # Deleting a tracked source file: incremental update would keep phantom nodes,
     # so freshness should steer to a full rebuild.
     (tmp_path / "mod.py").unlink()
-    data = json.loads(server.graphify_freshness(as_json=True))
+    data = json.loads(server.graphlore_freshness(as_json=True))
     assert data["stale"] is True
     assert data["recommended_action"] == "rebuild"
     assert "mod.py" in data["deleted_or_renamed"]
@@ -369,7 +370,7 @@ def test_freshness_unquotes_spaced_path_for_cosmetic_classification(tmp_path, mo
 
     # Comment-only edit -> AST-identical to HEAD -> cosmetic, not structural.
     spaced.write_text("# just a comment\nx = 1\n", encoding="utf-8")
-    data = json.loads(server.graphify_freshness(as_json=True))
+    data = json.loads(server.graphlore_freshness(as_json=True))
 
     assert "my module.py" in data["cosmetic_changes"]
     assert data["structural_changes"] == []
@@ -406,7 +407,7 @@ def test_freshness_parses_spaced_rename(tmp_path, monkeypatch):
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
 
     git("mv", "old name.py", "new name.py")
-    data = json.loads(server.graphify_freshness(as_json=True))
+    data = json.loads(server.graphlore_freshness(as_json=True))
 
     assert data["recommended_action"] == "rebuild"
     assert "old name.py" in data["deleted_or_renamed"]
@@ -433,7 +434,7 @@ def test_build_rejects_escaping_path_when_restricted(tmp_path, monkeypatch):
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     monkeypatch.setattr(server, "RESTRICT_PATHS", True)
     # guard returns before the CLI is ever invoked
-    assert "escapes the project" in server.graphify_build("/etc")
+    assert "escapes the project" in server.graphlore_build("/etc")
 
 
 def test_build_wires_flags_to_cli_args(tmp_path, monkeypatch):
@@ -441,10 +442,10 @@ def test_build_wires_flags_to_cli_args(tmp_path, monkeypatch):
     captured = []
     monkeypatch.setattr(server, "_run_cli", lambda args: captured.append(args) or "ok")
 
-    server.graphify_build(".", update=True, cluster_only=True, code_only=True)
+    server.graphlore_build(".", update=True, cluster_only=True, code_only=True)
     assert captured[-1] == [".", "--update", "--cluster-only", "--no-viz", "--code-only"]
 
-    server.graphify_build(".", no_viz=False)
+    server.graphlore_build(".", no_viz=False)
     assert captured[-1] == ["."]
 
 
@@ -460,9 +461,9 @@ def test_overview_flags_id_collisions(tmp_path, monkeypatch):
         "edges": [],
     })
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
-    data = json.loads(server.graphify_overview(as_json=True))
+    data = json.loads(server.graphlore_overview(as_json=True))
     assert data["id_collisions"] == 1
-    assert "collision" in server.graphify_overview().lower()
+    assert "collision" in server.graphlore_overview().lower()
 
 
 # --- transport selection -----------------------------------------------------
@@ -485,10 +486,10 @@ def test_main_http_transport_forces_containment(monkeypatch):
     assert server.RESTRICT_PATHS is True  # HTTP auto-enables path containment
 
 
-# --- graphify_validate (read-only graph linter) ------------------------------
+# --- graphlore_validate (read-only graph linter) ------------------------------
 
 def test_validate_healthy_fixture(project):
-    data = json.loads(server.graphify_validate(as_json=True))
+    data = json.loads(server.graphlore_validate(as_json=True))
     assert data["healthy"] is True
     assert data["total_issues"] == 0
 
@@ -508,7 +509,7 @@ def test_validate_detects_structural_issues(tmp_path, monkeypatch):
         ],
     })
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
-    data = json.loads(server.graphify_validate(as_json=True))
+    data = json.loads(server.graphlore_validate(as_json=True))
     assert data["healthy"] is False
     assert data["issues"]["duplicate_edges"] == 1
     assert data["issues"]["dangling_edges"] == 1
@@ -517,7 +518,7 @@ def test_validate_detects_structural_issues(tmp_path, monkeypatch):
     assert data["examples"]["dangling"][0]["missing"] == ["Z"]
 
 
-# --- semantic bridge: _node_for_location, _bfs_subgraph, graphify_locate ------
+# --- semantic bridge: _node_for_location, _bfs_subgraph, graphlore_locate ------
 
 def test_node_for_location():
     nodes = [
@@ -731,7 +732,7 @@ def test_locate_enriches_seed_with_qualname(tmp_path, monkeypatch):
     server._GRAPH_CACHE.clear()
     fake = _FakeIndex(search_hits=[_FakeHit("m.py", 9)], related_hits=[])
     monkeypatch.setattr(server, "_semble_index", lambda: fake)
-    data = json.loads(server.graphify_locate("status error", as_json=True))
+    data = json.loads(server.graphlore_locate("status error", as_json=True))
     assert data["seed"]["node"] == "is_error"
     assert data["seed"]["qualname"] == "Cattr.is_error"   # span-recovered FQN
 
@@ -759,7 +760,7 @@ def test_locate_seed_qualname_names_resolved_node_not_inner_closure(tmp_path, mo
     server._GRAPH_CACHE.clear()
     fake = _FakeIndex(search_hits=[_FakeHit("m.py", 23)], related_hits=[])
     monkeypatch.setattr(server, "_semble_index", lambda: fake)
-    data = json.loads(server.graphify_locate("inner", as_json=True))
+    data = json.loads(server.graphlore_locate("inner", as_json=True))
     assert data["seed"]["node"] == "b"
     assert "qualname" not in data["seed"]           # NOT 'b.inner'
 
@@ -773,14 +774,14 @@ def test_locate_seed_qualname_suppressed_and_module_top_safe(tmp_path, monkeypat
         server, "_semble_index",
         lambda: _FakeIndex(search_hits=[_FakeHit("m.py", 17)], related_hits=[]),
     )
-    data = json.loads(server.graphify_locate("alpha", as_json=True))
+    data = json.loads(server.graphlore_locate("alpha", as_json=True))
     assert data["seed"]["node"] == "a" and "qualname" not in data["seed"]
     # module-top hit (line 1, no enclosing symbol): qualname None, key omitted, no crash
     monkeypatch.setattr(
         server, "_semble_index",
         lambda: _FakeIndex(search_hits=[_FakeHit("m.py", 1)], related_hits=[]),
     )
-    data2 = json.loads(server.graphify_locate("imports", as_json=True))
+    data2 = json.loads(server.graphlore_locate("imports", as_json=True))
     assert "qualname" not in data2["seed"]
 
 
@@ -891,19 +892,19 @@ def test_locate_cross_check_flags_hidden_link(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(server, "_semble_index", lambda: fake)
 
-    data = json.loads(server.graphify_locate("anything", as_json=True))
+    data = json.loads(server.graphlore_locate("anything", as_json=True))
     assert data["seed"]["node"] == "A"
     assert data["structure"]["nodes"] >= 2  # A + B reached structurally
     cousins = {c["node"]: c for c in data["semantic_cousins"]}
     assert cousins["B"]["linked"] is True and cousins["B"]["distance"] == 1
-    assert cousins["C"]["linked"] is False and cousins["C"]["distance"] == "unreachable"
+    assert cousins["C"]["linked"] is False and cousins["C"]["distance"] == ">4"
     hidden = {c["node"] for c in data["hidden_links"]}
     assert "C" in hidden and "B" not in hidden  # the emergent signal
 
 
 def test_locate_without_semble_degrades(project, monkeypatch):
     monkeypatch.setattr(server, "_semble_index", lambda: None)
-    out = server.graphify_locate("anything")
+    out = server.graphlore_locate("anything")
     assert "semble" in out and "pip install" in out
 
 
@@ -927,21 +928,21 @@ def test_duplication_scan_flags_distant_cousins(tmp_path, monkeypatch):
             return [_FakeHit("b.py", 1), _FakeHit("c.py", 1)]
 
     monkeypatch.setattr(server, "_semble_index", lambda: _QueryIndex())
-    data = json.loads(server.graphify_duplication_scan(min_distance=2, as_json=True))
+    data = json.loads(server.graphlore_duplication_scan(min_distance=2, as_json=True))
     assert data["seeds_scanned"] == 1
     pairs = {frozenset((p["a"], p["b"])): p for p in data["pairs"]}
     assert frozenset(("A", "C")) in pairs           # unreachable -> hidden link
     assert frozenset(("A", "B")) not in pairs       # direct neighbour -> excluded
-    assert pairs[frozenset(("A", "C"))]["distance"] == "unreachable"
+    assert pairs[frozenset(("A", "C"))]["distance"] == ">6"
 
 
 def test_duplication_scan_without_semble_degrades(project, monkeypatch):
     monkeypatch.setattr(server, "_semble_index", lambda: None)
-    out = server.graphify_duplication_scan()
+    out = server.graphlore_duplication_scan()
     assert "semble" in out and "pip install" in out
 
 
-# --- graphify_diff: structural changeset between refs --------------------------
+# --- graphlore_diff: structural changeset between refs --------------------------
 
 def test_diff_classifies_structural_vs_cosmetic(tmp_path, monkeypatch):
     _require_git()
@@ -958,7 +959,7 @@ def test_diff_classifies_structural_vs_cosmetic(tmp_path, monkeypatch):
     git("commit", "-m", "c2")
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
 
-    data = json.loads(server.graphify_diff("HEAD~1", "HEAD", as_json=True))
+    data = json.loads(server.graphlore_diff("HEAD~1", "HEAD", as_json=True))
     struct = {(r["kind"], r.get("path")) for r in data["structural"]}
     assert ("modified", "m.py") in struct      # logic change -> structural
     assert ("added", "h.py") in struct         # new file -> structural
@@ -980,7 +981,7 @@ def test_diff_handles_delete_and_pure_rename(tmp_path, monkeypatch):
     git("commit", "-m", "c2")
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
 
-    data = json.loads(server.graphify_diff("HEAD~1", "HEAD", as_json=True))
+    data = json.loads(server.graphlore_diff("HEAD~1", "HEAD", as_json=True))
     assert "del.py" in {r["path"] for r in data["structural"] if r["kind"] == "removed"}
     renames = [r for r in data["structural"] + data["cosmetic"] if r["kind"] == "renamed"]
     assert len(renames) == 1
@@ -1025,15 +1026,21 @@ def test_semantic_index_bad_spec_degrades(monkeypatch):
 
 
 def test_custom_backend_keeps_locate_in_lean(monkeypatch):
-    # even without semble installed, a configured custom backend keeps locate in lean
-    monkeypatch.setenv("GRAPHIFY_SEMANTIC_BACKEND", "some.module:Index")
+    # even without semble installed, an IMPORTABLE custom backend keeps locate in
+    # lean — while a typo'd spec (unimportable module, or no colon) must NOT
+    # advertise a locate tool whose every call could only error.
     import importlib.util
     real = importlib.util.find_spec
     monkeypatch.setattr(
         importlib.util, "find_spec",
         lambda name: None if name == "semble" else real(name),
     )
-    assert "graphify_locate" in server._effective_lean_tools()
+    monkeypatch.setenv("GRAPHIFY_SEMANTIC_BACKEND", "json:JSONDecoder")
+    assert "graphlore_locate" in server._effective_lean_tools()
+    monkeypatch.setenv("GRAPHIFY_SEMANTIC_BACKEND", "no_such_module:Index")
+    assert "graphlore_locate" not in server._effective_lean_tools()
+    monkeypatch.setenv("GRAPHIFY_SEMANTIC_BACKEND", "malformed-no-colon")
+    assert "graphlore_locate" not in server._effective_lean_tools()
 
 
 def test_diff_unknown_ref_and_no_changes(tmp_path, monkeypatch):
@@ -1043,8 +1050,8 @@ def test_diff_unknown_ref_and_no_changes(tmp_path, monkeypatch):
     git("add", ".")
     git("commit", "-m", "c1")
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
-    assert "not found" in server.graphify_diff("HEAD", "no-such-ref")
-    same = json.loads(server.graphify_diff("HEAD", "HEAD", as_json=True))
+    assert "not found" in server.graphlore_diff("HEAD", "no-such-ref")
+    same = json.loads(server.graphlore_diff("HEAD", "HEAD", as_json=True))
     assert same["structural_change_count"] == 0 and same["cosmetic_change_count"] == 0
 
 
@@ -1161,7 +1168,7 @@ async def _first_member_host_llm(context, params):
 
 def test_sampling_status_supported(project):
     out = _run_in_memory(
-        project, "graphify_sampling_status", {"as_json": True},
+        project, "graphlore_sampling_status", {"as_json": True},
         sampling_callback=_first_member_host_llm,
     )
     data = json.loads(out)
@@ -1170,7 +1177,7 @@ def test_sampling_status_supported(project):
 
 
 def test_sampling_status_unsupported(project):
-    data = json.loads(_run_in_memory(project, "graphify_sampling_status", {"as_json": True}))
+    data = json.loads(_run_in_memory(project, "graphlore_sampling_status", {"as_json": True}))
     assert data["host_sampling_supported"] is False  # no sampling_callback -> not advertised
 
 
@@ -1179,7 +1186,7 @@ def test_label_communities_via_sampling(project):
     # host naming must round-trip on both.
     for mode in ("auto", "legacy"):
         out = _run_in_memory(
-            project, "graphify_label_communities", {"method": "auto", "as_json": True},
+            project, "graphlore_label_communities", {"method": "auto", "as_json": True},
             sampling_callback=_first_member_host_llm, mode=mode,
         )
         data = json.loads(out)
@@ -1190,9 +1197,9 @@ def test_label_communities_via_sampling(project):
 
 
 def test_label_communities_sampling_unsupported_errors(project):
-    out = _run_in_memory(project, "graphify_label_communities", {"method": "sampling"})
+    out = _run_in_memory(project, "graphlore_label_communities", {"method": "sampling"})
     assert "does not support" in out
-    assert "graphify_set_labels" in out  # points to the assistant-driven fallback
+    assert "graphlore_set_labels" in out  # points to the assistant-driven fallback
 
 
 def test_label_communities_sampling_failure_degrades_on_legacy(project):
@@ -1201,7 +1208,7 @@ def test_label_communities_sampling_failure_degrades_on_legacy(project):
         raise RuntimeError("host model exploded")
 
     out = _run_in_memory(
-        project, "graphify_label_communities", {"method": "sampling", "as_json": True},
+        project, "graphlore_label_communities", {"method": "sampling", "as_json": True},
         sampling_callback=_boom, mode="legacy",
     )
     data = json.loads(out)
@@ -1219,7 +1226,7 @@ def test_label_communities_empty_batch_skips_sampling(project):
 
     for mode in ("auto", "legacy"):
         out = _run_in_memory(
-            project, "graphify_label_communities",
+            project, "graphlore_label_communities",
             {"method": "sampling", "limit": 0, "as_json": True},
             sampling_callback=_counting, mode=mode,
         )
@@ -1239,7 +1246,7 @@ def test_label_communities_schema_hides_resolver_param():
             tools = await client.list_tools()
             return {t.name: t.input_schema for t in tools.tools}
 
-    props = asyncio.run(_go())["graphify_label_communities"]["properties"]
+    props = asyncio.run(_go())["graphlore_label_communities"]["properties"]
     assert "host_naming" not in props
     assert {"method", "limit", "sample_size", "as_json"} <= set(props)
 
@@ -1290,7 +1297,7 @@ def test_set_labels_persists_and_patches_html(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
 
-    data = json.loads(server.graphify_set_labels(
+    data = json.loads(server.graphlore_set_labels(
         {"0": "Authentication", "2": "Tests", "99": "Nope"}, as_json=True))
     assert data["labeled"] == 2
     assert data["unknown_ids"] == ["99"]
@@ -1304,13 +1311,13 @@ def test_set_labels_persists_and_patches_html(tmp_path, monkeypatch):
 
 
 def test_set_labels_rejects_unknown_only(project):
-    out = server.graphify_set_labels({"999": "X"})
+    out = server.graphlore_set_labels({"999": "X"})
     assert "No valid community ids" in out
 
 
 def test_label_communities_placeholder(project):
     out = _run_in_memory(
-        project, "graphify_label_communities", {"method": "placeholder", "as_json": True}
+        project, "graphlore_label_communities", {"method": "placeholder", "as_json": True}
     )
     data = json.loads(out)
     assert data["method"] == "placeholder"
@@ -1333,20 +1340,20 @@ def test_surprises_ignores_uncommunitied_target(tmp_path, monkeypatch):
         ],
     })
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
-    data = json.loads(server.graphify_surprises(as_json=True))
+    data = json.loads(server.graphlore_surprises(as_json=True))
     assert data["fallback"] is True
     assert data["surprises"] == []
 
 
 def test_locate_no_semantic_matches(project, monkeypatch):
     monkeypatch.setattr(server, "_semble_index", lambda: _FakeIndex([], []))
-    assert "No semantic matches" in server.graphify_locate("nothing here")
+    assert "No semantic matches" in server.graphlore_locate("nothing here")
 
 
 def test_locate_seed_not_in_graph(project, monkeypatch):
     fake = _FakeIndex(search_hits=[_FakeHit("not_in_graph.py", 1)], related_hits=[])
     monkeypatch.setattr(server, "_semble_index", lambda: fake)
-    data = json.loads(server.graphify_locate("x", as_json=True))
+    data = json.loads(server.graphlore_locate("x", as_json=True))
     assert data["seed"] is None
     assert "note" in data and data["semantic_hits"]
 
@@ -1379,7 +1386,7 @@ def test_validate_with_label_fallback_ids(tmp_path, monkeypatch):
         ],
     })
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
-    data = json.loads(server.graphify_validate(as_json=True))
+    data = json.loads(server.graphlore_validate(as_json=True))
     assert data["issues"]["dangling_edges"] == 1
 
 
@@ -1406,10 +1413,10 @@ def test_locate_hidden_links_ordered_nearest_first(tmp_path, monkeypatch):
         related_hits=[_FakeHit("C.py", 1), _FakeHit("D.py", 1), _FakeHit("B.py", 1)],
     )
     monkeypatch.setattr(server, "_semble_index", lambda: fake)
-    data = json.loads(server.graphify_locate("x", hops=2, related_k=10, as_json=True))
+    data = json.loads(server.graphlore_locate("x", hops=2, related_k=10, as_json=True))
     assert [c["node"] for c in data["hidden_links"]] == ["B", "C", "D"]
     dist = {c["node"]: c["distance"] for c in data["hidden_links"]}
-    assert dist["B"] == 3 and dist["C"] == 4 and dist["D"] == "unreachable"
+    assert dist["B"] == 3 and dist["C"] == 4 and dist["D"] == ">4"
 
 
 def test_set_labels_no_placeholders_message(tmp_path, monkeypatch):
@@ -1421,9 +1428,9 @@ def test_set_labels_no_placeholders_message(tmp_path, monkeypatch):
     )
     (out / "graph.html").write_text("already named, no placeholders", encoding="utf-8")
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
-    data = json.loads(server.graphify_set_labels({"0": "Auth"}, as_json=True))
+    data = json.loads(server.graphlore_set_labels({"0": "Auth"}, as_json=True))
     assert data["graph_html_patched"] == 0
-    assert "no 'Community N' placeholders" in server.graphify_set_labels({"0": "Auth"})
+    assert "no 'Community N' placeholders" in server.graphlore_set_labels({"0": "Auth"})
 
 
 def _git_init(tmp_path):
@@ -1454,7 +1461,7 @@ def test_freshness_rename_reports_old_path(tmp_path, monkeypatch):
     git("commit", "-m", "init")
     git("mv", "old.py", "new.py")
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
-    data = json.loads(server.graphify_freshness(as_json=True))
+    data = json.loads(server.graphlore_freshness(as_json=True))
     assert data["recommended_action"] == "rebuild"
     assert "old.py" in data["deleted_or_renamed"]
     assert all(" -> " not in p for p in data["deleted_or_renamed"])
@@ -1473,7 +1480,7 @@ def test_freshness_large_changeset_rebuild(tmp_path, monkeypatch):
     for i in range(30):
         (tmp_path / f"f{i}.py").write_text("x = 1\n", encoding="utf-8")
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
-    data = json.loads(server.graphify_freshness(as_json=True))
+    data = json.loads(server.graphlore_freshness(as_json=True))
     assert data["recommended_action"] == "rebuild"
     assert "large change set" in data["reason"]
 
@@ -1496,7 +1503,7 @@ def test_freshness_fresh_state(tmp_path, monkeypatch):
     future = time.time() + 30
     os.utime(out / "graph.json", (future, future))  # graph newer than the commit
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
-    data = json.loads(server.graphify_freshness(as_json=True))
+    data = json.loads(server.graphlore_freshness(as_json=True))
     assert data["stale"] is False
     assert data["recommended_action"] == "fresh"
 
@@ -1551,7 +1558,7 @@ def test_freshness_cosmetic_change_stays_fresh(tmp_path, monkeypatch):
     server._GRAPH_CACHE.clear()
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     (tmp_path / "m.py").write_text("def f():\n    # note\n    return 1\n", encoding="utf-8")
-    data = json.loads(server.graphify_freshness(as_json=True))
+    data = json.loads(server.graphlore_freshness(as_json=True))
     assert data["recommended_action"] == "fresh"
     assert data["stale"] is False
     assert data["cosmetic_changes"] == ["m.py"]
@@ -1568,7 +1575,7 @@ def test_freshness_structural_change_updates(tmp_path, monkeypatch):
     server._GRAPH_CACHE.clear()
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     (tmp_path / "m.py").write_text("def f():\n    return 999\n", encoding="utf-8")
-    data = json.loads(server.graphify_freshness(as_json=True))
+    data = json.loads(server.graphlore_freshness(as_json=True))
     assert data["recommended_action"] == "update"
     assert data["structural_changes"] == ["m.py"]
     assert data["cosmetic_changes"] == []
@@ -1759,9 +1766,9 @@ def test_lean_toolset_membership_is_valid():
 
 def test_lean_removals_keeps_core_drops_rest():
     removals = server._lean_removals(
-        ["graphify_locate", "graphify_overview", "graphify_add", "graphify_explain"])
-    assert "graphify_add" in removals and "graphify_explain" in removals
-    assert "graphify_locate" not in removals and "graphify_overview" not in removals
+        ["graphlore_locate", "graphlore_overview", "graphlore_add", "graphlore_explain"])
+    assert "graphlore_add" in removals and "graphlore_explain" in removals
+    assert "graphlore_locate" not in removals and "graphlore_overview" not in removals
 
 
 def test_apply_toolset_full_is_noop(monkeypatch):
@@ -1773,29 +1780,79 @@ def test_apply_toolset_full_is_noop(monkeypatch):
 
 def test_effective_lean_tools_gates_locate_on_semble(monkeypatch):
     import importlib.util as iu
-    # semble absent -> graphify_locate (needs the extra) is dropped from lean
+    # semble absent -> graphlore_locate (needs the extra) is dropped from lean
     monkeypatch.setattr(iu, "find_spec", lambda name: None if name == "semble" else object())
-    assert "graphify_locate" not in server._effective_lean_tools()
+    assert "graphlore_locate" not in server._effective_lean_tools()
     # semble present -> it stays
     monkeypatch.setattr(iu, "find_spec", lambda name: object())
-    assert "graphify_locate" in server._effective_lean_tools()
+    assert "graphlore_locate" in server._effective_lean_tools()
 
 
 def test_lean_set_supports_documented_flow():
     # the lean core must let you resolve a node to source and search by name
     # without the optional semble extra
-    assert {"graphify_node_details", "graphify_search", "graphify_subgraph"} <= server.LEAN_TOOLS
+    assert {"graphlore_node_details", "graphlore_search", "graphlore_subgraph"} <= server.LEAN_TOOLS
 
 
 def test_overview_suggestions_respect_active_tools(project, monkeypatch):
     # when surprises is trimmed from the active surface, overview must not steer to it
     monkeypatch.setattr(
         server, "_registered_tool_names",
-        lambda: {"graphify_subgraph", "graphify_communities", "graphify_overview"},
+        lambda: {"graphlore_subgraph", "graphlore_communities", "graphlore_overview"},
     )
-    data = json.loads(server.graphify_overview(as_json=True))
-    assert all("graphify_surprises" not in s for s in data["suggested_next"])
-    assert "graphify_communities()" in data["suggested_next"]
+    data = json.loads(server.graphlore_overview(as_json=True))
+    assert all("graphlore_surprises" not in s for s in data["suggested_next"])
+    assert "graphlore_communities()" in data["suggested_next"]
+
+
+def test_locate_toolset_membership_is_valid():
+    names = {t.name for t in server.mcp._tool_manager.list_tools()}
+    assert server.LOCATE_TOOLS <= names        # no typos: every locate tool exists
+
+
+def test_toolsets_dict_covers_documented_values():
+    assert set(server.TOOLSETS) == {"full", "lean", "locate"}
+    assert server.TOOLSETS["full"] is None
+    assert server.TOOLSETS["locate"] == server.LOCATE_TOOLS
+
+
+def test_locate_toolset_with_semble(monkeypatch):
+    import importlib.util as iu
+    monkeypatch.setattr(iu, "find_spec", lambda name: object())
+    monkeypatch.setattr(server, "TOOLSET", "locate")
+    assert server._effective_toolset_tools() == set(server.LOCATE_TOOLS)
+
+
+def test_locate_toolset_falls_back_to_lean_without_semble(monkeypatch, capsys):
+    import importlib.util as iu
+    monkeypatch.setattr(iu, "find_spec", lambda name: None if name == "semble" else object())
+    monkeypatch.delenv("GRAPHIFY_SEMANTIC_BACKEND", raising=False)
+    monkeypatch.setattr(server, "TOOLSET", "locate")
+    assert server._effective_toolset_tools() == server._effective_lean_tools()
+    assert "falling back" in capsys.readouterr().err
+
+
+def test_apply_toolset_locate_removes_non_core(monkeypatch):
+    # record removals instead of trimming the module-global server for real
+    import importlib.util as iu
+    monkeypatch.setattr(iu, "find_spec", lambda name: object())
+    monkeypatch.setattr(server, "TOOLSET", "locate")
+    removed: list[str] = []
+    monkeypatch.setattr(server.mcp, "remove_tool", removed.append)
+    server._apply_toolset()
+    names = {t.name for t in server.mcp._tool_manager.list_tools()}
+    assert set(removed) == names - server.LOCATE_TOOLS
+    assert not set(removed) & server.LOCATE_TOOLS
+
+
+def test_overview_suggests_locate_when_active(project, monkeypatch):
+    monkeypatch.setattr(
+        server, "_registered_tool_names",
+        lambda: {"graphlore_locate", "graphlore_fetch", "graphlore_overview"},
+    )
+    data = json.loads(server.graphlore_overview(as_json=True))
+    assert data["suggested_next"], "locate surface must still suggest a next step"
+    assert data["suggested_next"][0].startswith("graphlore_locate(")
 
 
 def test_freshness_cosmetic_change_while_behind_updates(tmp_path, monkeypatch):
@@ -1814,7 +1871,7 @@ def test_freshness_cosmetic_change_while_behind_updates(tmp_path, monkeypatch):
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     # a cosmetic-only working-tree edit must NOT mask the behind-HEAD staleness
     (tmp_path / "m.py").write_text("def f():\n    # note\n    return 1\n", encoding="utf-8")
-    data = json.loads(server.graphify_freshness(as_json=True))
+    data = json.loads(server.graphlore_freshness(as_json=True))
     assert data["stale"] is True
     assert data["recommended_action"] != "fresh"
     assert data["cosmetic_changes"] == ["m.py"]
@@ -1834,7 +1891,7 @@ def test_freshness_unreachable_built_at_recommends_rebuild(tmp_path, monkeypatch
     _write_graph(tmp_path, {"nodes": [], "links": [], "built_at_commit": ghost})
     server._GRAPH_CACHE.clear()
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
-    data = json.loads(server.graphify_freshness(as_json=True))
+    data = json.loads(server.graphlore_freshness(as_json=True))
     assert data["stale"] is True
     assert data["built_commit_reachable"] is False
     assert data["recommended_action"] == "rebuild"
@@ -1852,14 +1909,14 @@ def test_freshness_reachable_built_at_marks_reachable(tmp_path, monkeypatch):
     _write_graph(tmp_path, {"nodes": [], "links": [], "built_at_commit": _head(tmp_path)})
     server._GRAPH_CACHE.clear()
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
-    data = json.loads(server.graphify_freshness(as_json=True))
+    data = json.loads(server.graphlore_freshness(as_json=True))
     assert data["built_commit_reachable"] is True
     assert data["recommended_action"] == "fresh"
 
 
 def test_graph_age_reports_commits_behind(tmp_path, monkeypatch):
     """overview/subgraph carry a lightweight graph_age so an agent sees staleness
-    without a separate graphify_freshness call."""
+    without a separate graphlore_freshness call."""
     _require_git()
     (tmp_path / "m.py").write_text("x = 1\n", encoding="utf-8")
     git = _git_init(tmp_path)
@@ -1876,8 +1933,8 @@ def test_graph_age_reports_commits_behind(tmp_path, monkeypatch):
     })
     server._GRAPH_CACHE.clear()
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
-    ov = json.loads(server.graphify_overview(as_json=True))
-    sg = json.loads(server.graphify_subgraph("A", as_json=True))
+    ov = json.loads(server.graphlore_overview(as_json=True))
+    sg = json.loads(server.graphlore_subgraph("A", as_json=True))
     assert ov["graph_age"] == "built 1 commit ago"
     assert sg["graph_age"] == "built 1 commit ago"
 
@@ -1894,12 +1951,12 @@ def test_graph_age_built_at_head(tmp_path, monkeypatch):
     })
     server._GRAPH_CACHE.clear()
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
-    assert json.loads(server.graphify_overview(as_json=True))["graph_age"] == "built at HEAD"
+    assert json.loads(server.graphlore_overview(as_json=True))["graph_age"] == "built at HEAD"
 
 
 def test_graph_age_none_without_git(project):
     # the `project` fixture is not a git repo -> no cheap age signal -> graph_age is None
-    assert json.loads(server.graphify_overview(as_json=True))["graph_age"] is None
+    assert json.loads(server.graphlore_overview(as_json=True))["graph_age"] is None
 
 
 def test_freshness_large_cosmetic_set_skips_ast_and_rebuilds(tmp_path, monkeypatch):
@@ -1916,7 +1973,7 @@ def test_freshness_large_cosmetic_set_skips_ast_and_rebuilds(tmp_path, monkeypat
     # diff (so cosmetic stays empty) and route straight to a rebuild
     for i in range(26):
         (tmp_path / f"f{i}.py").write_text("x = 1  # touched\n", encoding="utf-8")
-    data = json.loads(server.graphify_freshness(as_json=True))
+    data = json.loads(server.graphlore_freshness(as_json=True))
     assert data["recommended_action"] == "rebuild"
     assert "large change set" in data["reason"]
     assert data["cosmetic_changes"] == []
@@ -2104,7 +2161,7 @@ def test_freshness_structural_change_non_python(tmp_path, monkeypatch):
     server._TS_PARSERS.clear()
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     (tmp_path / "app.js").write_bytes(b"function f() {\n  return 2;\n}\n")   # value change
-    data = json.loads(server.graphify_freshness(as_json=True))
+    data = json.loads(server.graphlore_freshness(as_json=True))
     assert data["recommended_action"] == "update"
     assert data["structural_changes"] == ["app.js"]
     assert data["cosmetic_changes"] == []
@@ -2212,7 +2269,7 @@ def test_freshness_cosmetic_change_non_python(tmp_path, monkeypatch):
     server._TS_PARSERS.clear()
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     (tmp_path / "app.js").write_bytes(b"function f() {\n  // tweak\n  return 1;\n}\n")
-    data = json.loads(server.graphify_freshness(as_json=True))
+    data = json.loads(server.graphlore_freshness(as_json=True))
     assert data["recommended_action"] == "fresh"
     assert data["cosmetic_changes"] == ["app.js"]
 
@@ -2228,7 +2285,7 @@ def test_span_backend_graceful_without_treesitter(tmp_path, monkeypatch):
     assert server._structurally_equal("app.js", b"a", b"a // c") is None
 
 
-# --- graphify_prune: phantom-node garbage collection ---------------------------
+# --- graphlore_prune: phantom-node garbage collection ---------------------------
 
 def test_prune_removes_only_missing_file_nodes(tmp_path, monkeypatch):
     """A node whose source file is gone is pruned with its incident edges; a node
@@ -2250,7 +2307,7 @@ def test_prune_removes_only_missing_file_nodes(tmp_path, monkeypatch):
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
 
     # dry run reports the two phantom nodes + both incident edges, writes nothing
-    dry = json.loads(server.graphify_prune(as_json=True))  # dry_run defaults True
+    dry = json.loads(server.graphlore_prune(as_json=True))  # dry_run defaults True
     assert dry["dry_run"] is True
     assert dry["removable_nodes"] == 2
     assert dry["removable_edges"] == 2
@@ -2260,7 +2317,7 @@ def test_prune_removes_only_missing_file_nodes(tmp_path, monkeypatch):
 
     # apply: gone.py nodes + their edges drop; live + file-less nodes remain
     server._GRAPH_CACHE.clear()
-    applied = json.loads(server.graphify_prune(dry_run=False, as_json=True))
+    applied = json.loads(server.graphlore_prune(dry_run=False, as_json=True))
     assert applied["removable_nodes"] == 2
     g = json.loads((tmp_path / "graphify-out" / "graph.json").read_text())
     assert {n["id"] for n in g["nodes"]} == {"A", "ext"}
@@ -2275,9 +2332,9 @@ def test_prune_nothing_when_all_files_present(tmp_path, monkeypatch):
     })
     server._GRAPH_CACHE.clear()
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
-    data = json.loads(server.graphify_prune(dry_run=False, as_json=True))
+    data = json.loads(server.graphlore_prune(dry_run=False, as_json=True))
     assert data["removable_nodes"] == 0
-    assert "Nothing to prune" in server.graphify_prune()
+    assert "Nothing to prune" in server.graphlore_prune()
 
 
 def test_prune_ignores_paths_outside_project(tmp_path, monkeypatch):
@@ -2289,12 +2346,12 @@ def test_prune_ignores_paths_outside_project(tmp_path, monkeypatch):
     })
     server._GRAPH_CACHE.clear()
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
-    data = json.loads(server.graphify_prune(dry_run=False, as_json=True))
+    data = json.loads(server.graphlore_prune(dry_run=False, as_json=True))
     assert data["removable_nodes"] == 0
 
 
 def test_freshness_stops_forcing_rebuild_after_prune(tmp_path, monkeypatch):
-    """The loop closes: a lingering phantom forces a rebuild; once graphify_prune
+    """The loop closes: a lingering phantom forces a rebuild; once graphlore_prune
     drops it, freshness no longer does."""
     _require_git()
     (tmp_path / "mod.py").write_text("x = 1\n", encoding="utf-8")
@@ -2309,19 +2366,19 @@ def test_freshness_stops_forcing_rebuild_after_prune(tmp_path, monkeypatch):
 
     (tmp_path / "mod.py").unlink()
     server._GRAPH_CACHE.clear()
-    before = json.loads(server.graphify_freshness(as_json=True))
+    before = json.loads(server.graphlore_freshness(as_json=True))
     assert before["recommended_action"] == "rebuild"
     assert "mod.py" in before["phantom_files"]
 
     server._GRAPH_CACHE.clear()
-    server.graphify_prune(dry_run=False)
+    server.graphlore_prune(dry_run=False)
     server._GRAPH_CACHE.clear()
-    after = json.loads(server.graphify_freshness(as_json=True))
+    after = json.loads(server.graphlore_freshness(as_json=True))
     assert after["recommended_action"] != "rebuild"
     assert after["phantom_files"] == []
 
 
-# --- graphify_fetch: token-budgeted source hydration ---------------------------
+# --- graphlore_fetch: token-budgeted source hydration ---------------------------
 
 def _fetch_project(tmp_path, monkeypatch, src, nodes, name="m.py"):
     (tmp_path / name).write_text(src, encoding="utf-8")
@@ -2346,7 +2403,7 @@ def test_fetch_returns_enclosing_span(tmp_path, monkeypatch):
         {"id": "alpha", "label": "alpha", "source_file": "m.py", "line": 3},
         {"id": "beta", "label": "beta", "source_file": "m.py", "line": 7},
     ])
-    item = json.loads(server.graphify_fetch(["alpha"], as_json=True))["fetched"][0]
+    item = json.loads(server.graphlore_fetch(["alpha"], as_json=True))["fetched"][0]
     assert item["lines"] == "3-5"
     assert item["spanned"] is True
     assert "def alpha" in item["code"] and "return y" in item["code"]
@@ -2361,7 +2418,7 @@ def test_fetch_shared_budget_truncates_keeping_first(tmp_path, monkeypatch):
         {"id": "big1", "label": "big1", "source_file": "m.py", "line": 1},
         {"id": "big2", "label": "big2", "source_file": "m.py", "line": big2_line},
     ])
-    data = json.loads(server.graphify_fetch(["big1", "big2"], budget_tokens=5, as_json=True))
+    data = json.loads(server.graphlore_fetch(["big1", "big2"], budget_tokens=5, as_json=True))
     assert data["truncated"] is True
     assert [it["node"] for it in data["fetched"]] == ["big1"]  # first block always kept
 
@@ -2370,22 +2427,22 @@ def test_fetch_context_lines_expand_and_clamp(tmp_path, monkeypatch):
     src = "# header\n\ndef f():\n    return 1\n\n# trailer\n"  # lines 1-6, f at 3-4
     _fetch_project(tmp_path, monkeypatch, src,
                    [{"id": "f", "label": "f", "source_file": "m.py", "line": 3}])
-    base = json.loads(server.graphify_fetch(["f"], as_json=True))["fetched"][0]
+    base = json.loads(server.graphlore_fetch(["f"], as_json=True))["fetched"][0]
     assert base["lines"] == "3-4"
-    ctx = json.loads(server.graphify_fetch(["f"], context_lines=2, as_json=True))["fetched"][0]
+    ctx = json.loads(server.graphlore_fetch(["f"], context_lines=2, as_json=True))["fetched"][0]
     assert ctx["lines"] == "1-6"  # clamped to file bounds
     assert "# header" in ctx["code"] and "# trailer" in ctx["code"]
 
 
 def test_fetch_reports_not_found(project):
-    data = json.loads(server.graphify_fetch(["NoSuchNode"], as_json=True))
+    data = json.loads(server.graphlore_fetch(["NoSuchNode"], as_json=True))
     assert data["not_found"] == ["NoSuchNode"]
     assert data["fetched"] == []
 
 
 def test_fetch_source_unavailable_when_file_missing(project):
     # fixture nodes point at httpx/*.py, which don't exist under the temp project
-    data = json.loads(server.graphify_fetch(["Client"], as_json=True))
+    data = json.loads(server.graphlore_fetch(["Client"], as_json=True))
     item = data["fetched"][0]
     assert item["node"] == "Client"
     assert item["code"] is None
@@ -2395,9 +2452,9 @@ def test_fetch_source_unavailable_when_file_missing(project):
 def test_fetch_dedupes_same_node_and_requires_input(tmp_path, monkeypatch):
     _fetch_project(tmp_path, monkeypatch, "def f():\n    return 1\n",
                    [{"id": "f", "label": "f", "source_file": "m.py", "line": 1}])
-    data = json.loads(server.graphify_fetch(["f", "f"], as_json=True))
+    data = json.loads(server.graphlore_fetch(["f", "f"], as_json=True))
     assert len(data["fetched"]) == 1
-    assert "ERROR" in server.graphify_fetch([])
+    assert "ERROR" in server.graphlore_fetch([])
 
 
 # --- adjacency cache -----------------------------------------------------------
@@ -2427,11 +2484,11 @@ def test_directed_adjacency_splits_and_caches():
     assert "A" not in r1                   # nothing depends on A here
 
 
-# --- graphify_impact: reverse-dependency / blast radius ------------------------
+# --- graphlore_impact: reverse-dependency / blast radius ------------------------
 
 def test_impact_dependents_blast_radius(project):
     # fixture: Client->Request, AsyncClient->Request, so both depend on Request
-    data = json.loads(server.graphify_impact("Request", as_json=True))  # default dependents
+    data = json.loads(server.graphlore_impact("Request", as_json=True))  # default dependents
     assert data["direction"] == "dependents"
     assert {it["node"]: it["distance"] for it in data["impacted"]} == {
         "Client": 1, "AsyncClient": 1}
@@ -2440,28 +2497,28 @@ def test_impact_dependents_blast_radius(project):
 def test_impact_dependencies_direction(project):
     # Client uses Request + Response
     data = json.loads(
-        server.graphify_impact("Client", direction="dependencies", as_json=True))
+        server.graphlore_impact("Client", direction="dependencies", as_json=True))
     assert {it["node"] for it in data["impacted"]} == {"Request", "Response"}
 
 
 def test_impact_includes_inferred_edge_dependents(project):
     # Response is referenced by Client (returns) and DigestAuth (inferred/surprise)
-    data = json.loads(server.graphify_impact("Response", as_json=True))
+    data = json.loads(server.graphlore_impact("Response", as_json=True))
     assert {it["node"] for it in data["impacted"]} == {"Client", "DigestAuth"}
 
 
 def test_impact_no_dependents_is_empty(project):
     # nothing points at Client in the fixture
-    data = json.loads(server.graphify_impact("Client", as_json=True))
+    data = json.loads(server.graphlore_impact("Client", as_json=True))
     assert data["impacted"] == []
 
 
 def test_impact_invalid_direction_and_unknown_node(project):
-    assert "ERROR" in server.graphify_impact("Client", direction="sideways")
-    assert "No node matching" in server.graphify_impact("Nope")
+    assert "ERROR" in server.graphlore_impact("Client", direction="sideways")
+    assert "No node matching" in server.graphlore_impact("Nope")
 
 
-# --- graphify_cycles: circular dependencies ------------------------------------
+# --- graphlore_cycles: circular dependencies ------------------------------------
 
 def test_find_cycles_separates_two_sccs():
     from graphlore import graph as g
@@ -2489,7 +2546,7 @@ def test_cycles_detects_scc(tmp_path, monkeypatch):
     })
     server._GRAPH_CACHE.clear()
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
-    data = json.loads(server.graphify_cycles(as_json=True))
+    data = json.loads(server.graphlore_cycles(as_json=True))
     assert data["cycle_count"] == 1
     assert data["cycles"][0]["size"] == 3
     assert set(data["cycles"][0]["nodes"]) == {"A", "B", "C"}
@@ -2503,19 +2560,19 @@ def test_cycles_reports_self_loop(tmp_path, monkeypatch):
     })
     server._GRAPH_CACHE.clear()
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
-    data = json.loads(server.graphify_cycles(as_json=True))
+    data = json.loads(server.graphlore_cycles(as_json=True))
     assert data["self_loops"] == ["A"]
     assert data["cycle_count"] == 0
 
 
 def test_cycles_acyclic_fixture(project):
-    data = json.loads(server.graphify_cycles(as_json=True))
+    data = json.loads(server.graphlore_cycles(as_json=True))
     assert data["cycle_count"] == 0
     assert data["self_loops"] == []
-    assert "acyclic" in server.graphify_cycles()
+    assert "acyclic" in server.graphlore_cycles()
 
 
-# --- graphify_skeleton: signature extraction -----------------------------------
+# --- graphlore_skeleton: signature extraction -----------------------------------
 
 def test_skeleton_file_strips_bodies_keeps_decorators(tmp_path, monkeypatch):
     src = (
@@ -2537,7 +2594,7 @@ def test_skeleton_file_strips_bodies_keeps_decorators(tmp_path, monkeypatch):
     server._SPAN_CACHE.clear()
     server._GRAPH_CACHE.clear()
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
-    data = json.loads(server.graphify_skeleton(file="m.py", as_json=True))
+    data = json.loads(server.graphlore_skeleton(file="m.py", as_json=True))
     quals = {sym["qualname"] for s in data["sections"] for sym in s["symbols"]}
     assert quals == {"Client", "Client.__init__", "Client.base", "helper"}
     headers = "\n".join(sym["header"] for s in data["sections"] for sym in s["symbols"])
@@ -2563,7 +2620,7 @@ def test_skeleton_node_limits_to_symbol_subtree(tmp_path, monkeypatch):
     server._SPAN_CACHE.clear()
     server._GRAPH_CACHE.clear()
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
-    data = json.loads(server.graphify_skeleton(node="A", as_json=True))
+    data = json.loads(server.graphlore_skeleton(node="A", as_json=True))
     quals = {sym["qualname"] for s in data["sections"] for sym in s["symbols"]}
     assert quals == {"A", "A.m"}  # class B and B.n excluded
 
@@ -2583,17 +2640,17 @@ def test_skeleton_community_spans_member_files(tmp_path, monkeypatch):
     server._SPAN_CACHE.clear()
     server._GRAPH_CACHE.clear()
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
-    data = json.loads(server.graphify_skeleton(community="5", as_json=True))
+    data = json.loads(server.graphlore_skeleton(community="5", as_json=True))
     assert {s["file"] for s in data["sections"]} == {"a.py", "b.py"}  # c.py is community 9
 
 
 def test_skeleton_requires_exactly_one_scope(project):
-    assert "ERROR" in server.graphify_skeleton()
-    assert "ERROR" in server.graphify_skeleton(file="x", node="y")
+    assert "ERROR" in server.graphlore_skeleton()
+    assert "ERROR" in server.graphlore_skeleton(file="x", node="y")
 
 
 # ---------------------------------------------------------------------------
-# External package API surface (apis.py + graphify_package_apis)
+# External package API surface (apis.py + graphlore_package_apis)
 # ---------------------------------------------------------------------------
 
 _API_PY_SRC = """\
@@ -2692,7 +2749,7 @@ def _api_project(tmp_path, monkeypatch):
 
 def test_package_apis_aggregates_across_files(tmp_path, monkeypatch):
     _api_project(tmp_path, monkeypatch)
-    data = json.loads(server.graphify_package_apis(as_json=True))
+    data = json.loads(server.graphlore_package_apis(as_json=True))
     by_pkg = {p["package"]: p for p in data["packages"]}
     assert by_pkg["fastapi"]["symbols"] == ["APIRouter", "Depends"]
     assert by_pkg["fastapi"]["file_count"] == 2
@@ -2706,29 +2763,29 @@ def test_package_apis_aggregates_across_files(tmp_path, monkeypatch):
 
 def test_package_apis_single_package_detail(tmp_path, monkeypatch):
     _api_project(tmp_path, monkeypatch)
-    data = json.loads(server.graphify_package_apis(package="fastapi", as_json=True))
+    data = json.loads(server.graphlore_package_apis(package="fastapi", as_json=True))
     assert data["symbol_files"]["Depends"] == ["app.py", "worker.py"]
     assert data["symbol_files"]["APIRouter"] == ["app.py"]
     assert sorted(data["qualified_paths"]) == ["fastapi.APIRouter", "fastapi.Depends"]
-    text = server.graphify_package_apis(package="fastapi")
+    text = server.graphlore_package_apis(package="fastapi")
     assert "Depends: app.py, worker.py" in text
 
 
 def test_package_apis_unknown_package_lists_known(tmp_path, monkeypatch):
     _api_project(tmp_path, monkeypatch)
-    out = server.graphify_package_apis(package="django")
+    out = server.graphlore_package_apis(package="django")
     assert "No external package 'django'" in out
     assert "fastapi" in out
 
 
 def test_package_apis_respects_limit_and_truncates(tmp_path, monkeypatch):
     _api_project(tmp_path, monkeypatch)
-    data = json.loads(server.graphify_package_apis(limit=1, as_json=True))
+    data = json.loads(server.graphlore_package_apis(limit=1, as_json=True))
     assert len(data["packages"]) == 1 and data["truncated"] is True
 
 
 def test_package_apis_requires_graph(empty_project):
-    assert "ERROR" in server.graphify_package_apis()
+    assert "ERROR" in server.graphlore_package_apis()
 
 
 def test_api_uses_treesitter_js_go_java(tmp_path, monkeypatch):
@@ -2788,3 +2845,253 @@ def test_api_uses_for_source_public_contract():
     # non-Python goes to the tree-sitter path; without the backend it degrades empty
     result = api_uses_for_source(b"import got from 'got';\n", "a.js")
     assert isinstance(result, tuple) and len(result) == 3
+
+
+# ---------------------------------------------------------------------------
+# graphlore_routes — framework route -> handler extraction
+# ---------------------------------------------------------------------------
+
+
+def test_routes_python_fastapi_flask_django():
+    src = (
+        "import flask\n"
+        "from django.urls import path, re_path\n"
+        "from fastapi import FastAPI\n"
+        "import functools\n"
+        "\n"
+        "@app.route('/x', methods=['GET', 'POST'])\n"
+        "def x(): ...\n"
+        "\n"
+        "@bp.route('/y')\n"
+        "def y(): ...\n"
+        "\n"
+        "@router.get('/items/{id}')\n"
+        "async def item(): ...\n"
+        "\n"
+        "@functools.lru_cache\n"
+        "def cached(): ...\n"
+        "\n"
+        "urlpatterns = [\n"
+        "    path('polls/', views.index),\n"
+        "    re_path(r'^auth/$', AuthView.as_view()),\n"
+        "]\n"
+    )
+    rows = server._routes_python(src.encode())
+    by_key = {(r["method"], r["pattern"]) for r in rows}
+    assert ("GET", "/x") in by_key and ("POST", "/x") in by_key   # methods= expands
+    assert ("GET", "/y") in by_key                                # route default = GET
+    assert ("GET", "/items/{id}") in by_key                       # verb decorator
+    assert ("ANY", "polls/") in by_key and ("ANY", "^auth/$") in by_key
+    django = [r for r in rows if r["framework"] == "django"]
+    assert {r["handler"] for r in django} == {"views.index", "AuthView.as_view()"}
+    assert not any(r["handler"] == "cached" for r in rows)        # lru_cache is no route
+
+
+def test_routes_python_django_gate_and_flask_labeling():
+    # a local path() in a file with no django import must not register
+    rows = server._routes_python(b"def path(a, b): ...\npath('x/', y)\n")
+    assert rows == []
+    # flask-only import labels the shared verb shortcut flask; fastapi wins otherwise
+    flask_rows = server._routes_python(b"import flask\n@app.get('/a')\ndef a(): ...\n")
+    assert flask_rows[0]["framework"] == "flask"
+    fast_rows = server._routes_python(b"import fastapi\n@app.get('/a')\ndef a(): ...\n")
+    assert fast_rows[0]["framework"] == "fastapi"
+
+
+def test_routes_for_source_public_contract():
+    from graphlore import routes_for_source
+
+    rows = routes_for_source(
+        "from fastapi import FastAPI\n@app.get('/ping')\ndef ping(): ...\n", "app.py")
+    assert rows == [{"framework": "fastapi", "method": "GET", "pattern": "/ping",
+                     "handler": "ping", "line": 3}]
+    assert routes_for_source(b"import flask\n@app.get('/b')\ndef b(): ...\n", "APP.PY")
+    # non-Python goes to the tree-sitter path; without the backend it degrades empty
+    assert isinstance(routes_for_source(b"app.get('/x', h);\n", "a.js"), list)
+
+
+def test_routes_for_file_cached_and_confined(tmp_path, monkeypatch):
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    server._ROUTES_CACHE.clear()
+    (tmp_path / "app.py").write_text(
+        "import flask\n@app.route('/z')\ndef z(): ...\n", encoding="utf-8")
+    first = server._routes_for_file("app.py")
+    assert first[0]["pattern"] == "/z"
+    assert server._routes_for_file("app.py") is first          # (path, mtime) cache hit
+    assert server._routes_for_file("../outside.py") == []      # traversal confined
+    assert server._routes_for_file("/etc/passwd") == []
+    assert server._routes_for_file("missing.py") == []
+
+
+def test_routes_js_express_and_negatives(tmp_path, monkeypatch):
+    _skip_without_treesitter()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    server._ROUTES_CACHE.clear()
+    server._TS_PARSERS.clear()
+    (tmp_path / "app.js").write_bytes(
+        b"const express = require('express');\n"
+        b"const app = express();\n"
+        b"app.get('/users', listUsers);\n"
+        b"router.post('/users/:id', (req, res) => {});\n"
+        b"app.all('/every', h);\n"
+        b"headers.get('x-id');\n"          # no leading slash -> not a route
+        b"router.route('/x').get(h);\n"    # chained receiver -> v1 cut
+    )
+    rows = server._routes_for_file("app.js")
+    assert {(r["method"], r["pattern"]) for r in rows} == {
+        ("GET", "/users"), ("POST", "/users/:id"), ("ANY", "/every")}
+    handlers = {r["pattern"]: r["handler"] for r in rows}
+    assert handlers["/users"] == "listUsers" and handlers["/users/:id"] == "<inline>"
+
+
+def test_routes_ts_nestjs_controller_prefix(tmp_path, monkeypatch):
+    _skip_without_treesitter()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    server._ROUTES_CACHE.clear()
+    server._TS_PARSERS.clear()
+    (tmp_path / "cats.controller.ts").write_bytes(
+        b"@Controller('cats')\n"
+        b"export class CatsController {\n"
+        b"  @Get(':id')\n"
+        b"  findOne() { return 1; }\n"
+        b"  @Post()\n"
+        b"  create() {}\n"
+        b"}\n"
+    )
+    rows = server._routes_for_file("cats.controller.ts")
+    assert {(r["method"], r["pattern"], r["handler"]) for r in rows} == {
+        ("GET", "/cats/:id", "findOne"), ("POST", "/cats", "create")}
+    assert all(r["framework"] == "nestjs" for r in rows)
+
+
+def test_routes_go_gin_chi_nethttp(tmp_path, monkeypatch):
+    _skip_without_treesitter()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    server._ROUTES_CACHE.clear()
+    server._TS_PARSERS.clear()
+    (tmp_path / "chi.go").write_bytes(
+        b"package main\n"
+        b'import (\n\t"net/http"\n\t"github.com/go-chi/chi/v5"\n)\n'
+        b"func main() {\n"
+        b"\tr := chi.NewRouter()\n"
+        b"\tr.Route(\"/api\", func(r chi.Router) {\n"
+        b"\t\tr.Get(\"/users\", listUsers)\n"
+        b"\t})\n"
+        b"\thttp.HandleFunc(\"/health\", health)\n"
+        b"\tmux.HandleFunc(\"GET /items/{id}\", getItem)\n"
+        b"\treq.Header.Get(\"Accept\")\n"     # not a route: no leading slash
+        b"}\n"
+    )
+    rows = server._routes_for_file("chi.go")
+    assert {(r["method"], r["pattern"]) for r in rows} == {
+        ("GET", "/api/users"),            # chi Route nesting joins the prefix
+        ("ANY", "/health"),
+        ("GET", "/items/{id}"),           # Go 1.22 "GET /x" pattern split
+    }
+    (tmp_path / "g.go").write_bytes(
+        b"package main\n"
+        b'import "github.com/gin-gonic/gin"\n'
+        b"func main() {\n\tr := gin.Default()\n\tr.GET(\"/ping\", pong)\n}\n"
+    )
+    gin_rows = server._routes_for_file("g.go")
+    assert gin_rows[0]["framework"] == "gin" and gin_rows[0]["method"] == "GET"
+
+
+def test_routes_java_spring_mappings(tmp_path, monkeypatch):
+    _skip_without_treesitter()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    server._ROUTES_CACHE.clear()
+    server._TS_PARSERS.clear()
+    (tmp_path / "C.java").write_bytes(
+        b"import org.springframework.web.bind.annotation.*;\n"
+        b"@RestController\n"
+        b"@RequestMapping(\"/api\")\n"
+        b"public class C {\n"
+        b"  @GetMapping(\"/users\")\n"
+        b"  public String list() { return \"\"; }\n"
+        b"  @RequestMapping(value = \"/misc\", method = RequestMethod.POST,"
+        b" produces = \"application/json\")\n"
+        b"  public String misc() { return \"\"; }\n"
+        b"}\n"
+    )
+    rows = server._routes_for_file("C.java")
+    assert {(r["method"], r["pattern"], r["handler"]) for r in rows} == {
+        ("GET", "/api/users", "list"),
+        ("POST", "/api/misc", "misc"),    # produces= string never read as the path
+    }
+
+
+def _routes_project(tmp_path, monkeypatch):
+    """A FastAPI handler whose graph node the tool can join routes back to."""
+    (tmp_path / "app.py").write_text(
+        "from fastapi import FastAPI\n"
+        "app = FastAPI()\n"
+        "\n"
+        "@app.get('/items/{id}')\n"
+        "def read_item(id):\n"
+        "    return id\n",
+        encoding="utf-8",
+    )
+    _write_graph(tmp_path, {
+        "nodes": [
+            {"id": "read_item", "label": "read_item", "file": "app.py", "line": 5,
+             "file_type": "code"},
+        ],
+        "edges": [],
+    })
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    server._ROUTES_CACHE.clear()
+    server._SPAN_CACHE.clear()
+
+
+def test_routes_tool_joins_node_and_filters(tmp_path, monkeypatch):
+    _routes_project(tmp_path, monkeypatch)
+    data = json.loads(server.graphlore_routes(as_json=True))
+    assert data["count"] == 1
+    row = data["routes"][0]
+    assert row["method"] == "GET" and row["pattern"] == "/items/{id}"
+    assert row["node"] == "read_item" and row["qualname"] == "read_item"
+    assert row["file"] == "app.py"
+    assert json.loads(server.graphlore_routes(pattern="items", as_json=True))["count"] == 1
+    assert json.loads(server.graphlore_routes(framework="django", as_json=True))["count"] == 0
+    assert json.loads(server.graphlore_routes(method="post", as_json=True))["count"] == 0
+    text = server.graphlore_routes()
+    assert "GET /items/{id} -> read_item" in text and "app.py:5" in text
+
+
+def test_routes_tool_scans_urls_py_outside_graph(tmp_path, monkeypatch):
+    _routes_project(tmp_path, monkeypatch)
+    sub = tmp_path / "polls"
+    sub.mkdir()
+    # urls.py has no extracted symbols, so it's absent from the graph on purpose
+    (sub / "urls.py").write_text(
+        "from django.urls import path\n"
+        "urlpatterns = [path('polls/', views.index)]\n",
+        encoding="utf-8",
+    )
+    data = json.loads(server.graphlore_routes(framework="django", as_json=True))
+    assert data["count"] == 1
+    assert data["routes"][0]["file"] == "polls/urls.py"
+
+
+def test_routes_tool_requires_graph(empty_project):
+    assert "ERROR" in server.graphlore_routes()
+
+
+def test_routes_tool_limit_truncates(tmp_path, monkeypatch):
+    _routes_project(tmp_path, monkeypatch)
+    # grow the graph-known file to several routes, then cap the listing
+    (tmp_path / "app.py").write_text(
+        "from fastapi import FastAPI\n"
+        "app = FastAPI()\n"
+        "\n"
+        "@app.get('/items/{id}')\n"
+        "def read_item(id): ...\n"
+        "\n"
+        "@app.post('/items')\n"
+        "def create_item(): ...\n",
+        encoding="utf-8",
+    )
+    server._ROUTES_CACHE.clear()
+    data = json.loads(server.graphlore_routes(limit=1, as_json=True))
+    assert len(data["routes"]) == 1 and data["truncated"] is True and data["count"] == 2
