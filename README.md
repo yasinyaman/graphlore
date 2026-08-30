@@ -4,17 +4,35 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 
-A Python MCP server that turns a codebase into a queryable knowledge graph for AI
-coding agents. It exposes the [Graphify](https://graphify.net) graph as 28 MCP
-tools, prompts and resources — so an assistant explores your code structurally
-and cheaply (token-budgeted maps, not walls of source) instead of grepping and
+A Python MCP server that makes a [Graphify](https://graphify.net) codebase
+knowledge graph navigable — and joins it to the real source through a span
+engine. Graphify builds the graph (graphlore ships no extractor of its own);
+graphlore exposes it as 28 MCP tools, prompts and resources, and resolves every
+node to its true `start..end` symbol range — so an assistant orients structurally
+and cheaply (token-budgeted maps, then exact spans) instead of grepping and
 reading file after file.
 
-> Note: Graphify ships its own embedded MCP server (`graphify ./raw --mcp`). This
-> project adds the analysis layer on top: semantic locate with `hidden_links`,
-> token-budgeted subgraph extraction, git-aware freshness, impact/cycles/route/API
-> analyses, per-community resources, reusable prompts, and LLM-friendly tool
-> annotations + structured (JSON) output.
+> **Relationship to Graphify's own MCP server.** Graphify ships an embedded MCP
+> server (`graphify ./raw --mcp`), and the two overlap more than they differ.
+> Graph navigation (query, node lookup, neighbors, communities, god nodes,
+> stats, shortest path), token-budgeted subgraph rendering, an HTTP transport
+> with API-key auth and DNS-rebinding protection, and multi-project serving are
+> all already there — and it has PR triage tools graphlore does not.
+>
+> What graphlore adds is the **span engine**: real `start..end` symbol ranges via
+> stdlib `ast` and tree-sitter, and the layer that only becomes possible once you
+> have them — semantic `locate` with `hidden_links` (a semantic chunk joined to
+> the *enclosing* symbol, not a nearest-line guess), source hydration
+> (`graphlore_fetch` / `graphlore_skeleton`), framework route → handler and
+> package-API extraction, and cosmetic-vs-structural git freshness.
+
+**Known limits.** One project per server process (`GRAPHLORE_PROJECT_DIR`; use
+Graphify's embedded server if you need several repos from one process). No
+PR/review tooling. No extractor: `graphifyy` must be installed, and
+`graphlore_build`/`query`/`path`/`explain`/`add` are thin wrappers over its CLI.
+`graphlore_locate` and `graphlore_duplication_scan` need the optional `[semble]`
+extra; non-Python spans, routes and package APIs need `[treesitter]`, without
+which non-Python files fall back to nearest-line matching.
 
 ### Why `graphlore_locate`
 
@@ -151,11 +169,11 @@ graph.json analysis (read-only, no CLI needed, `as_json=True` for structured out
 | `graphlore_overview` | **Call first** — size, god nodes, communities, surprises, suggested next steps |
 | `graphlore_god_nodes` | Most connected nodes |
 | `graphlore_communities` | Leiden community summaries |
-| `graphlore_surprises` | Unexpected cross-domain connections |
+| `graphlore_surprises` | Unexpected cross-file connections — listed from the graph's own flags when it has them, otherwise **computed** by scoring cross-file edges (confidence, file-type/directory/community crossing), with resolver noise and test↔source coupling suppressed; says plainly when nothing is computable rather than printing an empty list |
 | `graphlore_search` | Node search |
 | `graphlore_neighbors` | 1-hop neighbors of a node |
-| `graphlore_subgraph` | **Token-budgeted** BFS subgraph around a node — the cheap way to feed the model just the relevant slice |
-| `graphlore_impact` | Reverse-dependency / **blast radius** — what breaks if a node changes (`direction=dependents`/`dependencies`/`both`), ordered by hop distance |
+| `graphlore_subgraph` | Token-budgeted BFS subgraph around a node — the cheap way to feed the model just the relevant slice (Graphify's embedded server does this too; pairing it with `fetch`/`locate` is what's specific here) |
+| `graphlore_impact` | Reverse-dependency / **blast radius** — what breaks if a node changes (`direction=dependents`/`dependencies`/`both`), filterable by relation (`relations="calls"`, `"code"`, `"imports"`, `"types"`), ordered by hop distance, each row carrying the recorded reference site |
 | `graphlore_node_details` | Node metadata: type, source file/line, docstring, community |
 | `graphlore_skeleton` | def/class **signatures** (decorators kept, bodies stripped) for a file/node/community — the middle layer between the map and full code |
 | `graphlore_fetch` | **Token-budgeted** source hydration — reads the real code for a node (its enclosing def/class span ± context), the map→code other half of `subgraph`/`locate` |
@@ -300,7 +318,7 @@ disconnected code), 5–10 per query.
 Those ~235 tokens are a navigational *map* (seed `file:line` + structural
 neighborhood + hidden links), not raw code — you fetch the specific code only where
 needed. That's the trade graphlore optimizes: cheapest orientation plus the
-cross-check signal, then drill in precisely.
+cross-check signal, then drill in precisely. The `graphify alone` row is its own token-budgeted subgraph output — the gap to 235 is the semantic seed (landing on the right node instead of a degree-sorted expansion), not a budgeting difference.
 
 **Case study — the hidden links are real.** Asked *"does httpx duplicate
 request-sending across sync and async?"*, `graphlore_locate` returned the seed
@@ -377,7 +395,7 @@ Reusable templates that orchestrate the tools for the assistant:
 - **Tool annotations** (`read_only_hint`, `destructive_hint`, titles) tell the model which tools are safe to call freely vs. which mutate state.
 - **Server instructions** describe the recommended flow (locate/overview → targeted subgraph/fetch → build update).
 - **`as_json` output** on every analysis tool — including error and no-match paths — returns structured data the model can chain on instead of re-parsing prose.
-- **Token budgeting** (`graphlore_subgraph`, `graphlore_fetch`, `graphlore_skeleton`) keeps context small on large graphs — the core of Graphify's ~71× compression.
+- **Token budgeting on source, not just structure** — budgeted subgraph rendering is Graphify's own (its embedded server does the same); graphlore extends the discipline to *code*: `graphlore_fetch` and `graphlore_skeleton` hydrate real spans under a cap, so escalating map → signatures → source never blows the context.
 - **Unambiguous names** — when several nodes share a bare label (five `.auth_flow()`s across auth classes), rendered output qualifies them with the span-recovered FQN (`DigestAuth.auth_flow()`) or a `file:line` suffix, so an arrow always names exactly one symbol.
 - **Host-LLM sampling** (`graphlore_label_communities`) lets the server borrow the client's model via MCP `sampling/createMessage`, so semantic naming works with no server-side API key — with a capability test (`graphlore_sampling_status`) and a backend-key fallback.
 

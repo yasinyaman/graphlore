@@ -7,6 +7,30 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Fixed
+- **`graphlore_surprises` was effectively dead on every AST-built graph.** It
+  keyed on a `surprise`/`is_surprise` flag no graphify writer emits, and its
+  only fallback needed community info those graphs also lack — so it printed an
+  empty list under a header that read as "this codebase has no surprising
+  couplings". It now scores cross-file edges itself (confidence, file-type /
+  directory / community crossing, peripheral→hub), suppressing resolver noise
+  and routine test↔source coupling, and reports a `basis` of `flagged` /
+  `computed` / `none` — the last naming exactly which signals are missing
+  instead of implying a clean codebase. `graphlore_overview` no longer asserts
+  "0 surprise edges" when the graph simply carries no flags.
+- **`graphlore_impact` walked every edge type and reported no reference site.**
+  It gains `relations=` (presets `all`/`code`/`calls`/`imports`/`types`, or
+  literal relation names, orthogonal to `direction`; an unmatched filter names
+  the graph's actual vocabulary instead of returning nothing) and each row now
+  carries the traversed edge's recorded position, marked `site_kind=reference`
+  or `definition` so a definition line is never misread as a call site. When a
+  filter excludes containment, the node's own members are seeded so a class's
+  methods stay reachable.
+- Docs corrected against an audit of the wrapped CLI: token budgeting, HTTP
+  auth, multi-project serving and general graph navigation exist in Graphify's
+  own embedded MCP server and are no longer presented as things graphlore adds.
+  The README now states the real differentiator (the span engine and what it
+  makes possible) and the honest limits (no extractor, one project per process,
+  no PR tooling).
 - `graphlore_package_apis` (JS/TS): clearly-internal import sources are no
   longer counted as npm packages — absolute paths (`/lib/x`, whose "package"
   was the empty string), package.json `#` subpath imports, and the common
@@ -25,7 +49,8 @@ All notable changes to this project are documented here. The format is based on
   three registered tools had zero coverage.
 - Rename leftovers in the docs artifacts: `docs/benchmark.html`,
   `docs/benchmark.tr.html` and `docs/benchmark.svg` still titled/labelled the
-  project `graphify-mcp`; they now say `codegraph-mcp`.
+  project `graphify-mcp`; they now say `graphlore` (matching the final rename —
+  the intermediate `codegraph-mcp` title never shipped).
 
 ### Changed
 - **README rewritten for the graphlore surface** — restructured around the

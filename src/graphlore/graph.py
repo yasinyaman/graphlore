@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 from collections import deque
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
@@ -140,6 +141,180 @@ def _is_surprise_edge(e: dict) -> bool:
         or e.get("is_surprise")
         or str(e.get("type", "")).lower() == "surprise"
     )
+
+
+# --- computed surprises -----------------------------------------------------
+# A graph built by local AST extraction carries no surprise flag and often no
+# community info, so the flag check above returns nothing on it. Rather than
+# reporting an empty list (which reads as "this codebase has no surprising
+# couplings" when it means "this tool computed nothing"), score the edges.
+
+# Containment/import scaffolding: structurally expected, never surprising.
+_SURPRISE_STRUCTURAL_RELS = frozenset({"contains", "method", "imports", "imports_from"})
+_LANG_FAMILY = {
+    ".py": "python", ".pyi": "python",
+    ".js": "js", ".jsx": "js", ".mjs": "js", ".cjs": "js",
+    ".ts": "js", ".tsx": "js",
+    ".go": "go", ".rs": "rust", ".java": "jvm", ".kt": "jvm", ".scala": "jvm",
+    ".rb": "ruby", ".php": "php", ".cs": "dotnet",
+    ".c": "c", ".h": "c", ".cc": "c", ".cpp": "c", ".hpp": "c", ".cxx": "c",
+}
+_TEST_DIR_PARTS = frozenset({"test", "tests", "spec", "specs", "__tests__", "testing", "e2e"})
+
+
+def _lang_family(path: str) -> str | None:
+    dot = path.rfind(".")
+    return _LANG_FAMILY.get(path[dot:].lower()) if dot > 0 else None
+
+
+def _is_test_path(path: str) -> bool:
+    parts = path.split("/")
+    if any(p.lower() in _TEST_DIR_PARTS for p in parts[:-1]):
+        return True
+    stem = parts[-1].lower().rsplit(".", 1)[0]
+    return stem.startswith("test_") or stem.endswith(("_test", ".test", ".spec"))
+
+
+def _dir_distance(a: str, b: str) -> tuple[int, bool]:
+    """(tree distance between the two dirnames, do their top-level dirs differ)."""
+    da, db = a.split("/")[:-1], b.split("/")[:-1]
+    common = 0
+    for x, y in zip(da, db, strict=False):
+        if x != y:
+            break
+        common += 1
+    return (len(da) - common) + (len(db) - common), da[:1] != db[:1]
+
+
+def _is_file_hub_node(n: dict) -> bool:
+    """A node standing for a whole file (label == its own basename)."""
+    f = _node_file(n)
+    return bool(f) and _node_label(n) == f.rsplit("/", 1)[-1]
+
+
+def _computed_surprises(
+    nodes: list[dict], edges: list[dict]
+) -> tuple[list[dict], dict[str, Any]]:
+    """Score cross-file edges for "surprisingness" when the graph carries no flag.
+
+    Returns (ranked candidates, diagnostics). Diagnostics name *why* edges were
+    skipped and which signals the graph lacks, so a caller can distinguish
+    "nothing surprising here" from "nothing computable here" — the distinction
+    the flag-only check silently collapsed.
+
+    One O(N+E) pass plus a sort of the survivors; no betweenness, so it stays
+    usable on large graphs.
+    """
+    byid = {_node_id(n): n for n in nodes}
+    degree: dict[str, int] = {}
+    for e in edges:
+        s, t = _edge_ends(e)
+        degree[s] = degree.get(s, 0) + 1
+        degree[t] = degree.get(t, 0) + 1
+    comm = {nid: n.get("community", n.get("cluster")) for nid, n in byid.items()}
+    has_comm = any(c is not None for c in comm.values())
+    ranked_deg = sorted(degree.values())
+    # Reaching the graph's biggest hub is the least surprising thing in it, so
+    # the peripheral->hub bonus stops applying at the god-node cut.
+    god_cut = max(20, ranked_deg[int(len(ranked_deg) * 0.99)] if ranked_deg else 20)
+
+    skipped: dict[str, int] = {}
+    confidences: set[str] = set()
+    scored: list[dict] = []
+
+    for e in edges:
+        rel = _edge_rel(e).strip().lower()
+        if rel in _SURPRISE_STRUCTURAL_RELS:
+            skipped["structural"] = skipped.get("structural", 0) + 1
+            continue
+        sid, tid = _edge_ends(e)
+        nu, nv = byid.get(sid), byid.get(tid)
+        if nu is None or nv is None:
+            skipped["dangling"] = skipped.get("dangling", 0) + 1
+            continue
+        fu, fv = _node_file(nu), _node_file(nv)
+        if not fu or not fv:
+            skipped["no_source_file"] = skipped.get("no_source_file", 0) + 1
+            continue
+        if fu == fv:
+            skipped["same_file"] = skipped.get("same_file", 0) + 1
+            continue
+        if _is_file_hub_node(nu) or _is_file_hub_node(nv):
+            skipped["file_hub"] = skipped.get("file_hub", 0) + 1
+            continue
+
+        conf = str(e.get("confidence") or "EXTRACTED").upper()
+        confidences.add(conf)
+        cat_u = str(nu.get("file_type") or "code").lower()
+        cat_v = str(nv.get("file_type") or "code").lower()
+        lang_u, lang_v = _lang_family(fu), _lang_family(fv)
+        cross_lang = bool(lang_u and lang_v and lang_u != lang_v)
+        # An inferred call/uses edge that also crosses a language or code<->doc
+        # boundary is usually the resolver guessing, not a real coupling; a
+        # test<->source edge is routine. Both withhold the structural bonuses.
+        resolver_noise = conf == "INFERRED" and rel in ("calls", "uses", "indirect_call") and (
+            cross_lang or {cat_u, cat_v} == {"code", "document"}
+        )
+        test_bridge = _is_test_path(fu) != _is_test_path(fv)
+        suppress = resolver_noise or test_bridge
+
+        score = 0
+        why: list[str] = []
+        if not resolver_noise:
+            score += {"AMBIGUOUS": 3, "INFERRED": 2}.get(conf, 1)
+            if conf in ("AMBIGUOUS", "INFERRED"):
+                why.append(f"{conf.lower()} link — the resolver guessed this target")
+        if not suppress:
+            if cat_u != cat_v:
+                score += 2
+                why.append(f"crosses file types ({cat_u} ↔ {cat_v})")
+            dist, cross_top = _dir_distance(fu, fv)
+            if cross_top:
+                score += 2
+                why.append("crosses top-level directories")
+            elif dist >= 2:
+                score += 1
+                why.append("distant directories")
+            if has_comm and comm.get(sid) is not None and comm.get(tid) is not None \
+                    and comm[sid] != comm[tid]:
+                score += 1
+                why.append(f"bridges community {comm[sid]} → {comm[tid]}")
+        du, dv = degree.get(sid, 0), degree.get(tid, 0)
+        if min(du, dv) <= 2 and 5 <= max(du, dv) < god_cut:
+            score += 1
+            why.append("peripheral node reaches a well-connected node")
+        if rel == "semantically_similar_to":
+            score = int(score * 1.5)
+        if test_bridge:
+            why.append("(test ↔ source: routine coupling, structural bonuses withheld)")
+
+        scored.append({
+            "from": _node_label(nu), "to": _node_label(nv), "relation": _edge_rel(e),
+            "from_file": fu, "to_file": fv, "score": score,
+            "strength": "strong" if score >= 5 else ("moderate" if score >= 3 else "weak"),
+            "why": why,
+        })
+
+    scored.sort(key=lambda c: (-c["score"], c["from_file"], c["to_file"]))
+    seen_pairs: set[tuple[str, str, str]] = set()
+    per_target: dict[str, int] = {}
+    items: list[dict] = []
+    for c in scored:
+        key = (c["from_file"], c["to_file"], c["relation"])
+        if key in seen_pairs or per_target.get(c["to"], 0) >= 2:
+            continue  # one row per file pair+relation, and no target may dominate
+        seen_pairs.add(key)
+        per_target[c["to"]] = per_target.get(c["to"], 0) + 1
+        items.append(c)
+
+    diagnostics = {
+        "scorable_edges": len(scored),
+        "skipped": skipped,
+        "has_community_info": has_comm,
+        "confidence_values": sorted(confidences),
+        "max_score": max((c["score"] for c in items), default=0),
+    }
+    return items, diagnostics
 
 
 # Exact id/label -> node index, keyed by id(nodes) with an identity guard (same
@@ -460,3 +635,72 @@ def _hop_distances(
                 dist[nb] = d + 1
                 frontier.append((nb, d + 1))
     return dist
+
+
+# node id -> list of (neighbor id, the whole edge dict). _directed_adjacency keeps
+# only the relation, which is all hop-counting needs; impact also wants the
+# traversed edge's own recorded position (the reference site), so it needs the edge.
+_EAdj = dict[str, list[tuple[str, dict]]]
+
+
+def _build_directed_edge_adjacency(edges: list[dict]) -> tuple[_EAdj, _EAdj]:
+    """(forward, reverse) directed adjacency carrying each traversed edge."""
+    forward: _EAdj = {}
+    reverse: _EAdj = {}
+    for e in edges:
+        s, t = _edge_ends(e)
+        forward.setdefault(s, []).append((t, e))
+        reverse.setdefault(t, []).append((s, e))
+    return forward, reverse
+
+
+# Same id(edges)+identity-guard scheme as _ADJ_CACHE (see there).
+_DIR_EDGE_ADJ_CACHE: dict[int, tuple[list[dict], tuple[_EAdj, _EAdj]]] = {}
+
+
+def _directed_edge_adjacency(edges: list[dict]) -> tuple[_EAdj, _EAdj]:
+    """(forward, reverse) edge-carrying adjacency, cached on the edges-list identity."""
+    cached = _DIR_EDGE_ADJ_CACHE.get(id(edges))
+    if cached is not None and cached[0] is edges:
+        return cached[1]
+    pair = _build_directed_edge_adjacency(edges)
+    if id(edges) not in _DIR_EDGE_ADJ_CACHE and len(_DIR_EDGE_ADJ_CACHE) >= _ADJ_CACHE_MAX:
+        _DIR_EDGE_ADJ_CACHE.pop(next(iter(_DIR_EDGE_ADJ_CACHE)), None)  # FIFO
+    _DIR_EDGE_ADJ_CACHE[id(edges)] = (edges, pair)
+    return pair
+
+
+def _hop_records(
+    adj: _EAdj,
+    start_id: str,
+    max_hops: int,
+    relations: frozenset[str] | None = None,
+    seeds: Iterable[str] = (),
+) -> dict[str, tuple[int, str, dict | None]]:
+    """Like :func:`_hop_distances`, but records HOW each node was reached.
+
+    Returns ``{node_id: (distance, reached_via_id, discovery_edge)}`` — the edge
+    that first reached the node on a shortest path. ``relations=None`` walks
+    every edge type, so the distances match _hop_distances exactly. ``seeds`` are
+    extra depth-0 entries (used to keep a class's own members reachable when
+    containment edges are filtered out); they carry ``None`` as their edge so
+    callers can tell them from real hits.
+    """
+    out: dict[str, tuple[int, str, dict | None]] = {start_id: (0, "", None)}
+    frontier = deque([(start_id, 0)])
+    for s in seeds:
+        if s not in out:
+            out[s] = (0, "", None)
+            frontier.append((s, 0))
+    while frontier:
+        cur, d = frontier.popleft()
+        if d >= max_hops:
+            continue
+        for nb, e in adj.get(cur, []):
+            if relations is not None and _edge_rel(e).strip().lower() not in relations:
+                continue
+            if nb in out:
+                continue
+            out[nb] = (d + 1, cur, e)
+            frontier.append((nb, d + 1))
+    return out
