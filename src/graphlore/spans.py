@@ -9,10 +9,12 @@ freshness. Reads the project root from :mod:`graphlore.config`.
 from __future__ import annotations
 
 import ast
+from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from . import config
-from .graph import _node_line
+from .graph import _node_file, _node_line
 
 # Per-file span index, keyed by absolute path -> (mtime, spans). A span is
 # ``(region_start, end_line, def_line, qualname)`` for each def/class:
@@ -27,10 +29,62 @@ _SPAN_CACHE: dict[str, tuple[float, list[tuple[int, int, int, str]]]] = {}
 _SPAN_CACHE_MAX = 4096
 
 
-def _span_cache_put(key: str, value: tuple[float, list[tuple[int, int, int, str]]]) -> None:
-    if key not in _SPAN_CACHE and len(_SPAN_CACHE) >= _SPAN_CACHE_MAX:
-        _SPAN_CACHE.pop(next(iter(_SPAN_CACHE)), None)  # FIFO: drop the oldest entry
-    _SPAN_CACHE[key] = value
+def _resolve_in_project(file_path: object) -> Path | None:
+    """Resolve a (possibly hostile) path to an absolute path confined to PROJECT_DIR.
+
+    This is the single security boundary for every per-file analyzer: an empty,
+    absolute-outside, or ``..``-escaping path returns None, so no engine ever
+    reads a file outside the project — even though most outputs are only
+    line/name metadata.
+    """
+    rel = _norm_relpath(file_path)
+    if not rel:
+        return None
+    try:
+        full = (config.PROJECT_DIR / rel).resolve()
+        full.relative_to(config.PROJECT_DIR.resolve())
+    except (ValueError, OSError):
+        return None
+    return full
+
+
+def _cached_file_analysis(
+    cache: dict[str, tuple[float, Any]],
+    file_path: object,
+    compute: Callable[[bytes, str], Any],
+    empty: Callable[[], Any],
+    cache_max: int | None = None,
+) -> Any:
+    """Shared per-file pipeline behind the span / API / route indexes.
+
+    Confine to PROJECT_DIR, stat the mtime, serve the ``(path, mtime)`` cache,
+    else read bytes and call ``compute(src, rel)`` — caching the result (or
+    ``empty()`` on a read failure) with bounded-FIFO eviction so a long-lived
+    process with file churn doesn't retain entries for deleted files forever.
+    """
+    full = _resolve_in_project(file_path)
+    if full is None:
+        return empty()
+    try:
+        mtime = full.stat().st_mtime
+    except OSError:
+        return empty()
+    key = str(full)
+    cached = cache.get(key)
+    if cached is not None and cached[0] == mtime:
+        return cached[1]
+    try:
+        src = full.read_bytes()
+    except OSError:
+        result = empty()
+    else:
+        result = compute(src, _norm_relpath(file_path))
+    # Resolved at call time (not a frozen default) so tests can shrink the bound.
+    limit = _SPAN_CACHE_MAX if cache_max is None else cache_max
+    if key not in cache and len(cache) >= limit:
+        cache.pop(next(iter(cache)), None)  # FIFO: drop the oldest entry
+    cache[key] = (mtime, result)
+    return result
 
 
 def _norm_relpath(p: object) -> str:
@@ -282,38 +336,15 @@ def _spans_for_file(file_path: str) -> list[tuple[int, int, int, str]]:
     unsupported / missing / unparseable files (cached either way so a broken file
     isn't re-parsed). Cached by (path, mtime).
     """
-    rel = _norm_relpath(file_path)
-    if not rel:
-        return []
-    # Confine to PROJECT_DIR: this is the only code that reads a source file from
-    # a (semble-supplied) chunk path, so an absolute or ``..`` path must not parse
-    # files outside the project, even though the output is only line/name metadata.
-    try:
-        full = (config.PROJECT_DIR / rel).resolve()
-        full.relative_to(config.PROJECT_DIR.resolve())
-    except (ValueError, OSError):
-        return []
-    try:
-        mtime = full.stat().st_mtime
-    except OSError:
-        return []
-    key = str(full)
-    cached = _SPAN_CACHE.get(key)
-    if cached is not None and cached[0] == mtime:
-        return cached[1]
-
     # Read bytes so a BOM / coding cookie is honored. Span extraction is
     # best-effort: any failure degrades to [] so the caller falls back to the
     # point heuristic rather than breaking the whole locate.
-    try:
-        src = full.read_bytes()
-    except OSError:
-        _span_cache_put(key, (mtime, []))
-        return []
-    spans = _spans_python(src) if rel.lower().endswith(".py") else _spans_treesitter(src, rel)
-    spans.sort(key=lambda s: s[0])
-    _span_cache_put(key, (mtime, spans))
-    return spans
+    def compute(src: bytes, rel: str) -> list[tuple[int, int, int, str]]:
+        spans = _spans_python(src) if rel.lower().endswith(".py") else _spans_treesitter(src, rel)
+        spans.sort(key=lambda s: s[0])
+        return spans
+
+    return _cached_file_analysis(_SPAN_CACHE, file_path, compute, list)
 
 
 def _enclosing_spans(
@@ -347,6 +378,30 @@ def _span_qualname(file_path: str, line: int, end_line: int | None = None) -> st
     return spans[0][3] if spans else None
 
 
+# file (normalized relpath) -> nodes index, keyed by id(nodes) with an identity
+# guard — the same scheme as graph._ADJ_CACHE. _node_for_location is called in
+# loops (per semantic hit in locate, per seed/related pair in duplication_scan,
+# per route row), so the full-node scan it replaced was O(calls x N).
+_FILE_NODES_CACHE: dict[int, tuple[list[dict], dict[str, list[dict]]]] = {}
+_FILE_NODES_CACHE_MAX = 8
+
+
+def _nodes_by_file(nodes: list[dict]) -> dict[str, list[dict]]:
+    """Normalized-relpath -> nodes map for `nodes`, cached on list identity."""
+    cached = _FILE_NODES_CACHE.get(id(nodes))
+    if cached is not None and cached[0] is nodes:
+        return cached[1]
+    by_file: dict[str, list[dict]] = {}
+    for n in nodes:
+        rel = _norm_relpath(_node_file(n))
+        if rel:
+            by_file.setdefault(rel, []).append(n)
+    if id(nodes) not in _FILE_NODES_CACHE and len(_FILE_NODES_CACHE) >= _FILE_NODES_CACHE_MAX:
+        _FILE_NODES_CACHE.pop(next(iter(_FILE_NODES_CACHE)), None)  # FIFO
+    _FILE_NODES_CACHE[id(nodes)] = (nodes, by_file)
+    return by_file
+
+
 def _node_for_location(
     nodes: list[dict], file_path: str, line: int, end_line: int | None = None
 ) -> dict | None:
@@ -370,10 +425,7 @@ def _node_for_location(
     target = _norm_relpath(file_path)
     if not target:
         return None
-    same_file = [
-        n for n in nodes
-        if _norm_relpath(n.get("file") or n.get("path") or n.get("source_file")) == target
-    ]
+    same_file = _nodes_by_file(nodes).get(target, [])
     if not same_file:
         return None
     hi = end_line if end_line is not None else line
