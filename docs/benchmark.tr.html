@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>codegraph-mcp — benchmark (httpx + 5 dil)</title>
+<title>graphlore — benchmark (httpx + 5 dil)</title>
 <style>
   :root{
     --bg:#0f1115;--panel:#171a21;--panel2:#1d212a;--line:#2a2f3a;
@@ -51,7 +51,7 @@
 <body>
 <div class="wrap">
   <div class="lang"><a href="benchmark.html">English →</a></div>
-  <h1>codegraph-mcp — token verimliliği benchmark'ı</h1>
+  <h1>graphlore — token verimliliği benchmark'ı</h1>
   <p class="sub">Başlık: <code>encode/httpx</code> üzerinde 6 sorgunun ortalaması (gönderme · kimlik doğrulama · yönlendirme · içerik çözme · çerezler · zaman aşımı) — 2.101 düğümlük graf. Her sorgu bir ajanı bir kod alanına yönlendirir; token = modelin bağlamına ulaşan miktar (≈ karakter/4). <strong><a href="#multilang" style="color:var(--teal);text-decoration:none">JS/TS · Go · Java · Rust · C++ üzerinde doğrulandı ↓</a></strong></p>
 
   <div class="cards">
@@ -67,7 +67,7 @@
     <div class="row"><div class="name">semble + graphify (ayrı)</div><div class="track"><div class="bar" style="width:48%;background:var(--amber)"></div><span class="val">2.721</span></div></div>
     <div class="row"><div class="name">semble tek başına</div><div class="track"><div class="bar" style="width:40%;background:var(--gray)"></div><span class="val">1.613</span></div></div>
     <div class="row"><div class="name">graphify tek başına</div><div class="track"><div class="bar" style="width:35%;background:var(--gray)"></div><span class="val">1.107</span></div></div>
-    <div class="row win"><div class="name">codegraph-mcp locate</div><div class="track"><div class="bar" style="width:12%;background:var(--teal)"></div><span class="val">235&nbsp;&nbsp;·&nbsp;&nbsp;+7 gizli bağ</span></div></div>
+    <div class="row win"><div class="name">graphlore locate</div><div class="track"><div class="bar" style="width:12%;background:var(--teal)"></div><span class="val">235&nbsp;&nbsp;·&nbsp;&nbsp;+7 gizli bağ</span></div></div>
   </div>
 
   <h2>Yeteneğe göre</h2>
@@ -78,7 +78,7 @@
       <tr><td>semble tek başına</td><td class="num">1.613</td><td class="num">1</td><td class="no">—</td><td class="yes">✓</td><td class="num">0</td></tr>
       <tr><td>graphify tek başına</td><td class="num">1.107</td><td class="num">1</td><td class="yes">✓</td><td class="no">—</td><td class="num">0</td></tr>
       <tr><td>semble + graphify (ayrı)</td><td class="num">2.721</td><td class="num">4</td><td class="yes">✓</td><td class="yes">✓</td><td class="num">0</td></tr>
-      <tr class="win"><td>codegraph-mcp locate</td><td class="num">235</td><td class="num">1</td><td class="yes">✓</td><td class="yes">✓</td><td class="num">7</td></tr>
+      <tr class="win"><td>graphlore locate</td><td class="num">235</td><td class="num">1</td><td class="yes">✓</td><td class="yes">✓</td><td class="num">7</td></tr>
     </tbody>
   </table>
 
@@ -96,11 +96,11 @@
   </table>
 
   <div class="note">
-    Bu ~235 token bir navigasyon <em>haritasıdır</em> (seed <code>file:line</code> + yapısal komşuluk + gizli bağlar), ham kod değil — kodu yalnızca gereken yerde çekersin. semble'ın ~1.600 token'ı okunabilir kod parçalarıdır; iki gösterim birbirini tamamlar. codegraph-mcp en ucuz yönelme + çapraz-kontrol sinyali için optimize eder; sonra seçerek derine inersin.
+    Bu ~235 token bir navigasyon <em>haritasıdır</em> (seed <code>file:line</code> + yapısal komşuluk + gizli bağlar), ham kod değil — kodu yalnızca gereken yerde çekersin. semble'ın ~1.600 token'ı okunabilir kod parçalarıdır; iki gösterim birbirini tamamlar. graphlore en ucuz yönelme + çapraz-kontrol sinyali için optimize eder; sonra seçerek derine inersin.
   </div>
 
   <h2>Vaka çalışması — gizli bağlar gerçek</h2>
-  <p style="color:var(--muted);font-size:14px;margin:0 0 12px">"httpx sync/async istek-gönderme mantığını tekrarlıyor mu?" sorusuna <code>graphify_locate</code> (canlı MCP) seed <code>Client._send_single_request</code>'i döndürdü ve gizli bağları işaretledi — üretim kodundaki her işaret kaynakta gerçek bir sync/async ikizi çıktı:</p>
+  <p style="color:var(--muted);font-size:14px;margin:0 0 12px">"httpx sync/async istek-gönderme mantığını tekrarlıyor mu?" sorusuna <code>graphlore_locate</code> (canlı MCP) seed <code>Client._send_single_request</code>'i döndürdü ve gizli bağları işaretledi — üretim kodundaki her işaret kaynakta gerçek bir sync/async ikizi çıktı:</p>
   <table>
     <thead><tr><th>locate işaretledi</th><th>httpx kaynağında doğrulandı</th></tr></thead>
     <tbody>

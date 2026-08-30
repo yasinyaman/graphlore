@@ -4,9 +4,17 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 
-A Python MCP server that exposes the [Graphify](https://graphify.net) knowledge graph as MCP tools, prompts and resources — so an AI assistant can explore your codebase through the graph during development, cheaply (token-budgeted) and structurally.
+A Python MCP server that turns a codebase into a queryable knowledge graph for AI
+coding agents. It exposes the [Graphify](https://graphify.net) graph as 28 MCP
+tools, prompts and resources — so an assistant explores your code structurally
+and cheaply (token-budgeted maps, not walls of source) instead of grepping and
+reading file after file.
 
-> Note: Graphify ships its own embedded MCP server (`graphify ./raw --mcp`). This project adds analysis tools, token-budgeted subgraph extraction, git freshness checks, per-community resources, reusable prompts, and LLM-friendly tool annotations + structured (JSON) output on top.
+> Note: Graphify ships its own embedded MCP server (`graphify ./raw --mcp`). This
+> project adds the analysis layer on top: semantic locate with `hidden_links`,
+> token-budgeted subgraph extraction, git-aware freshness, impact/cycles/route/API
+> analyses, per-community resources, reusable prompts, and LLM-friendly tool
+> annotations + structured (JSON) output.
 
 ### Why `graphlore_locate`
 
@@ -49,6 +57,10 @@ git clone https://github.com/yasinyaman/graphlore
 cd graphlore
 pip install -e ".[dev]"
 ```
+
+Optional extras: `[semble]` (semantic locate + duplication scan), `[treesitter]`
+(non-Python span/API/route engines; usually already present via graphify),
+`[tiktoken]` (exact token counts), `[watch]` (filesystem watcher).
 
 ## Running
 
@@ -101,8 +113,11 @@ wildcards allowed; `*` disables the protection for a trusted proxy).
 
 The CLI is always invoked as an argument list with **no shell** (`subprocess.run`
 with `shell=False`), so a build `path` or query string can't inject shell commands.
-For a shared/network deployment, also consider lowering `GRAPHIFY_TIMEOUT` (default
-`600`s) so a single slow `graphlore_build` can't tie up a worker for ten minutes.
+Per-file analyzers (spans/APIs/routes/fetch) are confined to the project
+directory through a single path-resolution boundary, so a hostile path in a
+graph or chunk can't read files outside the project. For a shared/network
+deployment, also consider lowering `GRAPHIFY_TIMEOUT` (default `600`s) so a
+single slow `graphlore_build` can't tie up a worker for ten minutes.
 
 ```bash
 GRAPHIFY_TRANSPORT=streamable-http GRAPHIFY_HOST=0.0.0.0 GRAPHIFY_API_KEY=$(openssl rand -hex 16) \
@@ -117,25 +132,65 @@ For a smaller tool surface (helps some models pick the right tool), set
 `[semble]` extra or `GRAPHIFY_SEMANTIC_BACKEND`) and falls back to `lean` without
 one.
 
-## Environment variables
+## Tools
 
-| Variable | Default | Description |
-|---|---|---|
-| `GRAPHIFY_PROJECT_DIR` | `.` | Project root to extract the graph from |
-| `GRAPHIFY_OUT_DIR` | `graphify-out` | Output folder name |
-| `GRAPHIFY_BIN` | `graphify` | CLI path |
-| `GRAPHIFY_TIMEOUT` | `600` | CLI timeout (seconds) |
-| `GRAPHIFY_RESTRICT_PATHS` | `0` | Confine `graphlore_build`'s `path` to the project dir (auto-on for HTTP) |
-| `GRAPHIFY_TRANSPORT` | `stdio` | `stdio` \| `streamable-http` \| `sse` |
-| `GRAPHIFY_HOST` | `127.0.0.1` | Bind host for HTTP transports |
-| `GRAPHIFY_PORT` | `8000` | Bind port for HTTP transports |
-| `GRAPHIFY_API_KEY` | _(unset)_ | Require `Authorization: Bearer <key>` on HTTP transports |
-| `GRAPHIFY_ALLOWED_HOSTS` | _(unset)_ | DNS-rebinding `Host` allowlist for HTTP (comma-separated, `:*` port wildcards; `*` disables). Unset = SDK default: loopback-only when bound to loopback |
-| `GRAPHIFY_TOOLSET` | `full` | `full` \| `lean` (core exploration tools only) \| `locate` (minimal locate-first surface; falls back to `lean` without a semantic backend) |
-| `GRAPHIFY_TOKENIZER` | _(heuristic)_ | `tiktoken` → exact token counts (needs the `[tiktoken]` extra); else chars/3.5 estimate |
-| `GRAPHIFY_SEMANTIC_BACKEND` | `semble` | Semantic backend for `locate`/`duplication_scan`. `semble` (offline default) or a `module.path:Factory` implementing the `SemanticIndex` protocol (`search`/`find_related`; results expose `.chunk.file_path/.start_line/.end_line`) — plug in local sentence-transformers, an OpenAI-compatible / on-prem vLLM endpoint, etc. |
-| `GRAPHIFY_WATCH` | `0` | `1` → watch the project for **structural** source changes and re-sync the graph automatically (needs the `[watch]` extra; cosmetic edits are ignored) |
-| `GRAPHIFY_WATCH_DEBOUNCE` | `2.0` | Seconds to coalesce a burst of file events before re-graphing (watch mode) |
+CLI-backed (the first two write state; the rest are read-only):
+
+| Tool | Purpose |
+|---|---|
+| `graphlore_build` | Build/update the graph (`update`, `cluster_only`, `code_only`, `mode="deep"`) |
+| `graphlore_add` | Add a source by URL (arXiv, tweet) |
+| `graphlore_query` | Natural-language query (`dfs`, `budget`) |
+| `graphlore_path` | Exact path between two nodes |
+| `graphlore_explain` | Everything about a node |
+
+graph.json analysis (read-only, no CLI needed, `as_json=True` for structured output):
+
+| Tool | Purpose |
+|---|---|
+| `graphlore_overview` | **Call first** — size, god nodes, communities, surprises, suggested next steps |
+| `graphlore_god_nodes` | Most connected nodes |
+| `graphlore_communities` | Leiden community summaries |
+| `graphlore_surprises` | Unexpected cross-domain connections |
+| `graphlore_search` | Node search |
+| `graphlore_neighbors` | 1-hop neighbors of a node |
+| `graphlore_subgraph` | **Token-budgeted** BFS subgraph around a node — the cheap way to feed the model just the relevant slice |
+| `graphlore_impact` | Reverse-dependency / **blast radius** — what breaks if a node changes (`direction=dependents`/`dependencies`/`both`), ordered by hop distance |
+| `graphlore_node_details` | Node metadata: type, source file/line, docstring, community |
+| `graphlore_skeleton` | def/class **signatures** (decorators kept, bodies stripped) for a file/node/community — the middle layer between the map and full code |
+| `graphlore_fetch` | **Token-budgeted** source hydration — reads the real code for a node (its enclosing def/class span ± context), the map→code other half of `subgraph`/`locate` |
+| `graphlore_freshness` | Is the graph stale vs. git HEAD? Returns `recommended_action` (fresh/update/rebuild) + `reason` — lingering phantom nodes / large changes steer to a rebuild; junk files (`.DS_Store`, logs) land in `non_source_changes` and never hold the graph stale |
+| `graphlore_diff` | Structural changeset between two git refs (default `HEAD~1..HEAD`) — added/removed/renamed/modified, with cosmetic-only changes separated (file-level, for review/audit) |
+| `graphlore_prune` | Drop phantom nodes (and their edges) for deleted/renamed source files — the surgical alternative to a full rebuild (`dry_run=True` to preview) |
+| `graphlore_validate` | Lint the graph for dangling/duplicate/self-loop edges and orphan nodes (read-only) |
+| `graphlore_duplication_scan` | **Repo-wide** hidden-link / duplication audit — the batch form of `locate`'s `hidden_links` (similar-but-structurally-far pairs); needs `[semble]`, outside lean |
+| `graphlore_cycles` | Circular dependencies — strongly-connected node groups in the directed graph (an architectural smell), self-loops listed separately |
+| `graphlore_package_apis` | **Symbol-level external API surface** — which names each external package is actually used for (`fastapi: Depends, APIRouter`), with qualified paths (`numpy.linalg.norm`) for version-diff audits; a lower bound (dynamic/star/getattr use is invisible). Python via stdlib ast; JS/TS, Go, Java need `[treesitter]` |
+| `graphlore_routes` | **Framework route → handler table** — which URL patterns hit which code, joined back to graph nodes (`GET /items/{id} -> read_item (app.py:5)`). FastAPI/Flask/Sanic/Quart/Litestar/Django, Express/NestJS (import-gated, so `axios.get('/x')` never registers), gin/chi/net-http (incl. Go 1.22 `"GET /x"` patterns, gin 3-arg `Handle`, chi nesting), Spring (method arrays split per verb); a lower bound (dynamic/chained registration is invisible). Python via stdlib ast; the rest need `[treesitter]` |
+
+Semantic naming (uses the **host model via MCP sampling** — no API key — or a backend key):
+
+| Tool | Purpose |
+|---|---|
+| `graphlore_sampling_status` | Capability test: reports whether the client supports host-LLM sampling, whether a backend key is set, and which method will be used |
+| `graphlore_label_communities` | Give Leiden communities human-readable names. `method="auto"` (sampling → key → placeholder), `"sampling"`, `"cli"`, or `"placeholder"` |
+| `graphlore_set_labels` | Persist **assistant-provided** community names (sampling-free fallback) to `.graphify_labels.json` and patch them into `graph.html` |
+
+Semantic bridge (optional `[semble]` extra — semantic search joined to graph structure):
+
+| Tool | Purpose |
+|---|---|
+| `graphlore_locate` | NL query → enclosing graph node → token-budgeted subgraph, **plus `hidden_links`**: semantically-similar code that is structurally disconnected (duplication / missing-abstraction candidates) |
+
+## Typical workflow
+
+1. `graphlore_locate("where do we retry failed requests?")` — one-call orientation
+   (or `graphlore_overview()` → `graphlore_subgraph("SomeNode")` without the semble extra)
+2. `graphlore_fetch(["Client._send_single_request"])` — hydrate exactly the code you zeroed in on
+3. `graphlore_impact("Response")` / `graphlore_cycles()` / `graphlore_routes()` — targeted analysis
+4. `graphlore_query("how does the auth flow work?")` — free-form questions via the CLI
+5. After code changes: `graphlore_freshness()` → `graphlore_build(update=True)`
+   (plus `graphlore_prune()` after deletes/renames)
 
 ## Keeping the graph fresh
 
@@ -162,55 +217,38 @@ nodes for the removed files still linger, and reports them in `phantom_files`. A
 agent can also just call `graphlore_build(update=True)` when `graph_age` /
 `graphlore_freshness` says the graph drifted.
 
-## Tools
+There's also an opt-in filesystem watcher (`GRAPHIFY_WATCH=1`, the `[watch]`
+extra): it re-syncs the graph on structural source changes, ignores cosmetic
+edits and non-source churn (VCS internals, virtualenvs, its own output), and
+debounces via `GRAPHIFY_WATCH_DEBOUNCE`.
 
-CLI-backed (the first two write state; the rest are read-only):
+## Semantic bridge (optional `[semble]`)
 
-| Tool | Purpose |
-|---|---|
-| `graphlore_build` | Build/update the graph (`--update`, `--cluster-only`, `--mode deep`) |
-| `graphlore_add` | Add a source by URL (arXiv, tweet) |
-| `graphlore_query` | Natural-language query (`--dfs`, `--budget`) |
-| `graphlore_path` | Exact path between two nodes |
-| `graphlore_explain` | Everything about a node |
+`pip install "graphlore[semble]"` adds `graphlore_locate`, which joins
+[semble](https://github.com/MinishLab/semble)'s semantic code search to the graph
+in one call. Graphify gives **structure** (how code connects); semble gives
+**retrieval** (which code is semantically relevant) — they're complementary.
 
-graph.json analysis (read-only, no CLI needed, `as_json=True` for structured output):
+`graphlore_locate("how does retry backoff work")`:
+1. semble finds the most relevant code and resolves the top hit to its enclosing
+   graph node (better than label matching).
+2. returns the token-budgeted subgraph around it (**structure**).
+3. runs semble `find_related` and cross-checks: a cousin that is semantically
+   similar but **not** within the seed's structural neighborhood is flagged as a
+   `hidden_link` (with its hop distance) — a duplication / missing-abstraction /
+   implicit-coupling candidate that neither tool surfaces alone.
 
-| Tool | Purpose |
-|---|---|
-| `graphlore_overview` | **Call first** — size, god nodes, communities, surprises, suggested next steps |
-| `graphlore_god_nodes` | Most connected nodes |
-| `graphlore_communities` | Leiden community summaries |
-| `graphlore_surprises` | Unexpected cross-domain connections |
-| `graphlore_search` | Node search |
-| `graphlore_neighbors` | 1-hop neighbors of a node |
-| `graphlore_subgraph` | **Token-budgeted** BFS subgraph around a node — the cheap way to feed the model just the relevant slice |
-| `graphlore_impact` | Reverse-dependency / **blast radius** — what breaks if a node changes (`direction=dependents`/`dependencies`/`both`), ordered by hop distance |
-| `graphlore_node_details` | Node metadata: type, source file/line, docstring, community |
-| `graphlore_skeleton` | def/class **signatures** (decorators kept, bodies stripped) for a file/node/community — the middle layer between the map and full code |
-| `graphlore_fetch` | **Token-budgeted** source hydration — reads the real code for a node (its enclosing def/class span ± context), the map→code other half of `subgraph`/`locate` |
-| `graphlore_freshness` | Is the graph stale vs. git HEAD? Returns `recommended_action` (fresh/update/rebuild) + `reason` — lingering phantom nodes / large changes steer to a rebuild |
-| `graphlore_diff` | Structural changeset between two git refs (default `HEAD~1..HEAD`) — added/removed/renamed/modified, with cosmetic-only changes separated (file-level, for review/audit) |
-| `graphlore_prune` | Drop phantom nodes (and their edges) for deleted/renamed source files — the surgical alternative to a full rebuild (`dry_run=True` to preview) |
-| `graphlore_validate` | Lint the graph for dangling/duplicate/self-loop edges and orphan nodes (read-only) |
-| `graphlore_duplication_scan` | **Repo-wide** hidden-link / duplication audit — the batch form of `locate`'s `hidden_links` (similar-but-structurally-far pairs); needs `[semble]`, outside lean |
-| `graphlore_cycles` | Circular dependencies — strongly-connected node groups in the directed graph (an architectural smell), self-loops listed separately |
-| `graphlore_package_apis` | **Symbol-level external API surface** — which names each external package is actually used for (`fastapi: Depends, APIRouter`), with qualified paths (`numpy.linalg.norm`) for version-diff audits; a lower bound (dynamic/star/getattr use is invisible). Python via stdlib ast; JS/TS, Go, Java need `[treesitter]` |
-| `graphlore_routes` | **Framework route → handler table** — which URL patterns hit which code, joined back to graph nodes (`GET /items/{id} -> read_item (app.py:5)`). FastAPI/Flask/Django, Express/NestJS, gin/chi/net-http (incl. Go 1.22 `"GET /x"` patterns, chi nesting), Spring; a lower bound (dynamic/chained registration is invisible). Python via stdlib ast; the rest need `[treesitter]` |
+The extra is optional: without it the core tools are unchanged and `graphlore_locate`
+returns an install hint. Any other embedding backend can be plugged in via
+`GRAPHIFY_SEMANTIC_BACKEND=module.path:Factory` (implementing `search` /
+`find_related`). It also pairs well with running semble's own MCP server
+alongside graphlore.
 
-Semantic naming (uses the **host model via MCP sampling** — no API key — or a backend key):
-
-| Tool | Purpose |
-|---|---|
-| `graphlore_sampling_status` | Capability test: reports whether the client supports host-LLM sampling, whether a backend key is set, and which method will be used |
-| `graphlore_label_communities` | Give Leiden communities human-readable names. `method="auto"` (sampling → key → placeholder), `"sampling"`, `"cli"`, or `"placeholder"` |
-| `graphlore_set_labels` | Persist **assistant-provided** community names (sampling-free fallback) to `.graphify_labels.json` and patch them into `graph.html` |
-
-Semantic bridge (optional `[semble]` extra — semantic search joined to graph structure):
-
-| Tool | Purpose |
-|---|---|
-| `graphlore_locate` | NL query → enclosing graph node → token-budgeted subgraph, **plus `hidden_links`**: semantically-similar code that is structurally disconnected (duplication / missing-abstraction candidates) |
+The chunk→node join and the freshness cosmetic-vs-structural check work
+**across languages**: Python uses the stdlib `ast` (no extra deps), and every
+other language (JS/TS, Go, Rust, Java, Ruby, C/C++, …) is handled by an optional
+**tree-sitter** backend — `pip install "graphlore[treesitter]"`, also pulled in
+by graphify. Without it, non-Python files fall back to nearest-line matching.
 
 ## Naming communities without an API key (MCP sampling)
 
@@ -236,32 +274,6 @@ is already a capable model in the loop, so it reads `graphlore_communities` and
 pushes names back via **`graphlore_set_labels({"0": "Authentication", ...})`** —
 no key, no sampling, works in any client. The names persist to
 `.graphify_labels.json` and are patched into `graph.html`.
-
-## Semantic bridge (optional `[semble]`)
-
-`pip install "graphlore[semble]"` adds `graphlore_locate`, which joins
-[semble](https://github.com/MinishLab/semble)'s semantic code search to the graph
-in one call. Graphify gives **structure** (how code connects); semble gives
-**retrieval** (which code is semantically relevant) — they're complementary.
-
-`graphlore_locate("how does retry backoff work")`:
-1. semble finds the most relevant code and resolves the top hit to its enclosing
-   graph node (better than label matching).
-2. returns the token-budgeted subgraph around it (**structure**).
-3. runs semble `find_related` and cross-checks: a cousin that is semantically
-   similar but **not** within the seed's structural neighborhood is flagged as a
-   `hidden_link` (with its hop distance) — a duplication / missing-abstraction /
-   implicit-coupling candidate that neither tool surfaces alone.
-
-The extra is optional: without it the core tools are unchanged and `graphlore_locate`
-returns an install hint. It also pairs well with running semble's own MCP server
-alongside graphlore.
-
-The chunk→node join and the freshness cosmetic-vs-structural check work
-**across languages**: Python uses the stdlib `ast` (no extra deps), and every
-other language (JS/TS, Go, Rust, Java, Ruby, C/C++, …) is handled by an optional
-**tree-sitter** backend — `pip install "graphlore[treesitter]"`, also pulled in
-by graphify. Without it, non-Python files fall back to nearest-line matching.
 
 ## Benchmark
 
@@ -298,7 +310,7 @@ confirmed every production flag is a genuine sync/async twin:
 (`:1717`); `BaseTransport.handle_request` ↔ `handle_async_request` (in every
 transport); `__enter__` ↔ `__aenter__`. ~500 tokens (one `locate` + a targeted read)
 surfaced a real architectural pattern that naively reading `_client.py` (~16k tokens)
-would. The `unreachable` bucket also held test files (related, not refactor targets) —
+would. The far-distance bucket also held test files (related, not refactor targets) —
 the `distance` field separates production parallels (3–4) from that noise.
 
 **Across languages — real HTTP-client repos.** The span join and freshness check aren't
@@ -346,39 +358,6 @@ Token savings and span-join precision will differ on other architectures (data p
 apps, sprawling monorepos), so treat these as indicative, not guarantees. Numbers vary by
 codebase and query.</sub>
 
-## Comparison — when to use which
-
-Several MCP servers give an agent a pre-indexed code graph. The closest neighbor is
-[colbymchenry/codegraph](https://github.com/colbymchenry/codegraph) (no relation,
-despite the name): a Rust/SQLite indexer with the same goal and a different set of
-trade-offs — both MIT, both local-only.
-
-| | [codegraph](https://github.com/colbymchenry/codegraph) (Rust) | graphlore (this project) |
-|---|---|---|
-| Answer shape | **verbatim source + call paths in one `codegraph_explore` call** — zero file reads, at the cost of more retrieval context resident per session | token-budgeted *map* (seed + neighborhood + `hidden_links`, ~235 tokens); `graphlore_fetch` hydrates code only where needed |
-| Semantics | none by design — structural mapping + SQLite FTS5 | semble embeddings: natural-language `locate`, `hidden_links`, `duplication_scan`; backend pluggable (`GRAPHIFY_SEMANTIC_BACKEND`) |
-| Reference resolution | deep: call→definition matching, dynamic-dispatch hops, **cross-language bridging** (Swift↔Obj-C, React Native) | AST-extracted edges from the Graphify backend; span join binds search hits to symbols (70–96% precision above) |
-| Framework routes | 17 frameworks, deep recognition | `graphlore_routes`: 4 languages × common frameworks (FastAPI/Flask/Django, Express/NestJS, gin/chi/net-http, Spring), joined to graph nodes |
-| Architecture analysis | impact/blast-radius | Leiden communities (+ LLM naming), cycles (SCCs), god nodes, impact, duplication scan, symbol-level package-API audits |
-| Freshness | native FS watcher (FSEvents/inotify), debounced auto-sync | git-aware `freshness` with a **cosmetic-vs-structural** check (a reformat never triggers a rebuild), post-commit hook, optional watchdog watcher |
-| Tool surface | one primary mega-tool (secondaries hidden) | 28 tools, trimmable: `GRAPHIFY_TOOLSET=lean` / `locate` (locate-first, mega-tool-style) |
-| Deployment | zero-config CLI, bundled runtime, stdio | pip + graphify CLI; stdio or **HTTP with bearer auth** for a team-shared graph; MCP prompts/resources/sampling |
-
-Pick **codegraph** when you want verbatim answers in one call with zero setup and
-deep route/dispatch resolution — its benchmarks (88% fewer tool calls, zero file
-reads) target exactly that, and its cross-language bridging has no counterpart
-here. Pick **graphlore** when context is the scarce resource (orient for ~235
-tokens, then fetch precisely), when you want semantic signals no structural-only
-index can produce (`hidden_links`: similar-but-disconnected code), or when you
-want architecture-level analysis (communities, cycles, package-API audits) and a
-shared HTTP deployment.
-
-Two adjacent servers are complements, not competitors: **Graphify's own embedded
-MCP server** (`graphify ./raw --mcp`) exposes build/query around the same graph
-this project wraps (see the note at the top), and **semble's MCP server** offers
-raw semantic chunk search — graphlore is the join of those two ideas plus the
-analysis layer.
-
 ## Resources
 
 - `graphlore://report` — GRAPH_REPORT.md
@@ -396,28 +375,53 @@ Reusable templates that orchestrate the tools for the assistant:
 ## LLM-friendliness
 
 - **Tool annotations** (`read_only_hint`, `destructive_hint`, titles) tell the model which tools are safe to call freely vs. which mutate state.
-- **Server instructions** describe the recommended flow (overview → targeted subgraph/query → build update).
-- **`as_json` output** on every analysis tool returns structured data the model can chain on instead of re-parsing prose.
-- **Token budgeting** (`graphlore_subgraph`) keeps context small on large graphs — the core of Graphify's ~71× compression.
+- **Server instructions** describe the recommended flow (locate/overview → targeted subgraph/fetch → build update).
+- **`as_json` output** on every analysis tool — including error and no-match paths — returns structured data the model can chain on instead of re-parsing prose.
+- **Token budgeting** (`graphlore_subgraph`, `graphlore_fetch`, `graphlore_skeleton`) keeps context small on large graphs — the core of Graphify's ~71× compression.
+- **Unambiguous names** — when several nodes share a bare label (five `.auth_flow()`s across auth classes), rendered output qualifies them with the span-recovered FQN (`DigestAuth.auth_flow()`) or a `file:line` suffix, so an arrow always names exactly one symbol.
 - **Host-LLM sampling** (`graphlore_label_communities`) lets the server borrow the client's model via MCP `sampling/createMessage`, so semantic naming works with no server-side API key — with a capability test (`graphlore_sampling_status`) and a backend-key fallback.
 
-## Typical workflow
+## Environment variables
 
-1. `graphlore_overview()` — orientation
-2. `graphlore_communities()` — subsystems
-3. `graphlore_subgraph("SomeNode")` — token-cheap targeted exploration
-4. `graphlore_query("how does the auth flow work?")` — questions
-5. After code changes: `graphlore_freshness()` → `graphlore_build(".", update=True)`
+| Variable | Default | Description |
+|---|---|---|
+| `GRAPHIFY_PROJECT_DIR` | `.` | Project root to extract the graph from |
+| `GRAPHIFY_OUT_DIR` | `graphify-out` | Output folder name |
+| `GRAPHIFY_BIN` | `graphify` | CLI path |
+| `GRAPHIFY_TIMEOUT` | `600` | CLI timeout (seconds) |
+| `GRAPHIFY_RESTRICT_PATHS` | `0` | Confine `graphlore_build`'s `path` to the project dir (auto-on for HTTP) |
+| `GRAPHIFY_TRANSPORT` | `stdio` | `stdio` \| `streamable-http` \| `sse` |
+| `GRAPHIFY_HOST` | `127.0.0.1` | Bind host for HTTP transports |
+| `GRAPHIFY_PORT` | `8000` | Bind port for HTTP transports |
+| `GRAPHIFY_API_KEY` | _(unset)_ | Require `Authorization: Bearer <key>` on HTTP transports |
+| `GRAPHIFY_ALLOWED_HOSTS` | _(unset)_ | DNS-rebinding `Host` allowlist for HTTP (comma-separated, `:*` port wildcards; `*` disables). Unset = SDK default: loopback-only when bound to loopback |
+| `GRAPHIFY_TOOLSET` | `full` | `full` \| `lean` (core exploration tools only) \| `locate` (minimal locate-first surface; falls back to `lean` without a semantic backend) |
+| `GRAPHIFY_TOKENIZER` | _(heuristic)_ | `tiktoken` → exact token counts (needs the `[tiktoken]` extra); else chars/3.5 estimate |
+| `GRAPHIFY_SEMANTIC_BACKEND` | `semble` | Semantic index: `semble`, or `module.path:Factory` implementing `search`/`find_related` (validated at boot) |
+| `GRAPHIFY_WATCH` | `0` | Filesystem watcher: auto re-sync on structural changes (`[watch]` extra) |
+| `GRAPHIFY_WATCH_DEBOUNCE` | `2.0` | Watcher debounce window (seconds) |
+
+> `GRAPHIFY_*` names are kept (not renamed to `GRAPHLORE_*`) because they
+> configure the wrapped Graphify CLI and its artifacts (`graphify-out/`,
+> `.graphify_labels.json`) as much as this server.
 
 ## Project layout
 
 ```
 graphlore/
-├── src/graphlore/      # package (server.py, __init__.py)
-├── tests/                 # pytest suite + fixture graph.json
-├── .github/workflows/     # CI (ruff + pytest, py 3.10–3.12)
-├── pyproject.toml         # packaging + console script
-├── mcp.json               # Claude Code example config
+├── src/graphlore/          # package
+│   ├── server.py           #   MCP server: 28 tools, prompts, resources, transports
+│   ├── graph.py            #   graph.json loading, node/edge accessors, BFS, adjacency
+│   ├── spans.py            #   span engine: ast + tree-sitter, chunk→node join, structural diff
+│   ├── apis.py             #   symbol-level external-API extraction
+│   ├── routes.py           #   framework route → handler extraction
+│   └── config.py           #   project dir / out dir
+├── tests/                  # pytest suite (in-process MCP client + unit tests)
+├── benchmarks/             # multilang benchmark + committed results JSON
+├── docs/                   # benchmark reports (HTML/SVG)
+├── .claude/skills/         # graphlore-explore skill for Claude Code
+├── .github/workflows/      # CI: ruff + mypy + pytest on py 3.10–3.12
+├── mcp.json                # Claude Code example config
 └── claude_desktop_config.json
 ```
 
@@ -426,6 +430,7 @@ graphlore/
 ```bash
 pip install -e ".[dev]"
 ruff check .
+mypy
 pytest -q
 ```
 
