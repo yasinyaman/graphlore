@@ -143,12 +143,36 @@ def _is_surprise_edge(e: dict) -> bool:
     )
 
 
+# Exact id/label -> node index, keyed by id(nodes) with an identity guard (same
+# scheme as _ADJ_CACHE below). _resolve_node runs once per requested node in
+# graphlore_fetch and once per call in most node-centric tools, so the exact
+# pass — the overwhelmingly common case — should not rescan all N nodes.
+_RESOLVE_CACHE: dict[int, tuple[list[dict], dict[str, dict]]] = {}
+_RESOLVE_CACHE_MAX = 8
+
+
+def _exact_node_index(nodes: list[dict]) -> dict[str, dict]:
+    cached = _RESOLVE_CACHE.get(id(nodes))
+    if cached is not None and cached[0] is nodes:
+        return cached[1]
+    index: dict[str, dict] = {}
+    # setdefault in list order preserves the linear scan's first-match winner
+    # even when one node's label collides with a later node's id.
+    for n in nodes:
+        index.setdefault(_node_id(n), n)
+        index.setdefault(_node_label(n), n)
+    if id(nodes) not in _RESOLVE_CACHE and len(_RESOLVE_CACHE) >= _RESOLVE_CACHE_MAX:
+        _RESOLVE_CACHE.pop(next(iter(_RESOLVE_CACHE)), None)  # FIFO
+    _RESOLVE_CACHE[id(nodes)] = (nodes, index)
+    return index
+
+
 def _resolve_node(nodes: list[dict], key: str) -> dict | None:
     """Match a node by exact id/label, else case-insensitive substring."""
+    exact = _exact_node_index(nodes).get(key)
+    if exact is not None:
+        return exact
     k = key.lower()
-    for n in nodes:
-        if _node_id(n) == key or _node_label(n) == key:
-            return n
     for n in nodes:
         if k in _node_label(n).lower() or k in _node_id(n).lower():
             return n

@@ -28,6 +28,14 @@ All notable changes to this project are documented here. The format is based on
   project `graphify-mcp`; they now say `codegraph-mcp`.
 
 ### Changed
+- **Internals: one confinement boundary, indexed lookups.** The PROJECT_DIR
+  confinement check that five per-file analyzers hand-copied is now a single
+  `spans._resolve_in_project()`, and the span/API/route per-file caches share
+  one `_cached_file_analysis()` pipeline (same mtime-keyed, bounded-FIFO
+  semantics). `_resolve_node`'s exact id/label pass and `_node_for_location`'s
+  same-file lookup are served from indexes cached on the nodes-list identity
+  (the `_ADJ_CACHE` scheme) instead of rescanning all N nodes per call — the
+  latter ran once per semantic hit / route row / duplication pair.
 - **Ambiguous node labels are qualified at render time.** graphify labels
   methods bare (`.auth_flow()`), so distinct nodes across classes/files used to
   render identically in subgraph arrows and node lists. Wherever a label is
