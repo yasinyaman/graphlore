@@ -56,10 +56,16 @@ All notable changes to this project are documented here. The format is based on
   `graphify://…` → `graphlore://…`), completing the package rename below so
   the commands an assistant sees carry the product's own name. All 28 tools
   are affected (`graphlore_locate`, `graphlore_build`, …); the bundled
-  explore skill moved to `graphlore-explore` accordingly. `GRAPHIFY_*`
-  environment variables and the `graphify-out/` output directory are
-  intentionally unchanged — they configure/name artifacts of the wrapped
-  Graphify CLI (`graphifyy`), not this package.
+  explore skill moved to `graphlore-explore` accordingly. The `graphify-out/`
+  output directory and `.graphify_labels.json` keep their names — they are
+  artifacts of the wrapped Graphify CLI (`graphifyy`), not this package.
+- **Environment variables renamed to `GRAPHLORE_*`, with `GRAPHIFY_*` as a
+  legacy fallback.** All settings (`GRAPHLORE_PROJECT_DIR`,
+  `GRAPHLORE_TOOLSET`, `GRAPHLORE_TRANSPORT`, …) now read the new spelling
+  first via one `config.env()` accessor and fall back to the pre-rename
+  `GRAPHIFY_*` names, so existing configs keep working; when both are set,
+  `GRAPHLORE_*` wins. Server messages/docs lead with the new names; the
+  bundled `mcp.json` / `claude_desktop_config.json` templates are updated.
 - **Project renamed: `graphify-mcp` → `graphlore`** (before any PyPI release,
   so no published users are affected). The Python module is now `graphlore`,
   the MCP server announces itself as `graphlore`, and the console script is

@@ -3,7 +3,7 @@
     "graphlore": {
       "command": "graphlore",
       "env": {
-        "GRAPHIFY_PROJECT_DIR": "/ABSOLUTE/PATH/your-project"
+        "GRAPHLORE_PROJECT_DIR": "/ABSOLUTE/PATH/your-project"
       }
     }
   }

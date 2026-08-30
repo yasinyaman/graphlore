@@ -3,7 +3,7 @@
     "graphlore": {
       "command": "graphlore",
       "env": {
-        "GRAPHIFY_PROJECT_DIR": "."
+        "GRAPHLORE_PROJECT_DIR": "."
       }
     }
   }
