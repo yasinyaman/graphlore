@@ -35,8 +35,7 @@ from __future__ import annotations
 import ast
 from typing import Any
 
-from . import config
-from .spans import _norm_relpath, _ts_parser_for
+from .spans import _cached_file_analysis, _ts_parser_for
 
 # (packages, symbols, paths): every absolutely-imported package (even with no
 # visible symbol), package -> short symbols used, package -> qualified use paths.
@@ -46,12 +45,6 @@ ApiUses = tuple[set[str], dict[str, set[str]], dict[str, set[str]]]
 # bounded-FIFO scheme as spans._SPAN_CACHE (see there for the rationale).
 _API_CACHE: dict[str, tuple[float, ApiUses]] = {}
 _API_CACHE_MAX = 4096
-
-
-def _api_cache_put(key: str, value: tuple[float, ApiUses]) -> None:
-    if key not in _API_CACHE and len(_API_CACHE) >= _API_CACHE_MAX:
-        _API_CACHE.pop(next(iter(_API_CACHE)), None)  # FIFO: drop the oldest entry
-    _API_CACHE[key] = value
 
 
 def _empty() -> ApiUses:
@@ -382,27 +375,6 @@ def _api_uses_for_file(file_path: str) -> ApiUses:
     either way). Confined to PROJECT_DIR like the span index. Cached by
     (path, mtime).
     """
-    rel = _norm_relpath(file_path)
-    if not rel:
-        return _empty()
-    try:
-        full = (config.PROJECT_DIR / rel).resolve()
-        full.relative_to(config.PROJECT_DIR.resolve())
-    except (ValueError, OSError):
-        return _empty()
-    try:
-        mtime = full.stat().st_mtime
-    except OSError:
-        return _empty()
-    key = str(full)
-    cached = _API_CACHE.get(key)
-    if cached is not None and cached[0] == mtime:
-        return cached[1]
-    try:
-        src = full.read_bytes()
-    except OSError:
-        _api_cache_put(key, (mtime, _empty()))
-        return _empty()
-    uses = api_uses_for_source(src, rel)
-    _api_cache_put(key, (mtime, uses))
-    return uses
+    return _cached_file_analysis(
+        _API_CACHE, file_path, api_uses_for_source, _empty, _API_CACHE_MAX
+    )

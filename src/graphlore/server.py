@@ -131,6 +131,7 @@ from .spans import (  # noqa: F401
     _is_ts_symbol,
     _node_for_location,
     _norm_relpath,
+    _resolve_in_project,
     _span_qualname,
     _spans_for_file,
     _spans_python,
@@ -571,18 +572,10 @@ def _node_file_missing(rel: object) -> bool:
 
     False for an empty path, a path that escapes config.PROJECT_DIR (can't safely
     verify, so never prune it), or a file that's still present — so only a
-    genuinely-removed in-project file is treated as a phantom. Mirrors the
-    PROJECT_DIR confinement in spans._spans_for_file.
+    genuinely-removed in-project file is treated as a phantom.
     """
-    rel = _norm_relpath(rel)
-    if not rel:
-        return False
-    try:
-        full = (config.PROJECT_DIR / rel).resolve()
-        full.relative_to(config.PROJECT_DIR.resolve())
-    except (ValueError, OSError):
-        return False
-    return not full.exists()
+    full = _resolve_in_project(rel)
+    return full is not None and not full.exists()
 
 
 def _files_with_nodes(nodes: list[dict], files: list[str]) -> list[str]:
@@ -637,17 +630,11 @@ def _read_source_lines(
     """Read lines [lo, hi] (1-indexed, inclusive, clamped to the file) of a source file.
 
     Returns (lines, clamped_lo, clamped_hi), or None when the path is empty, escapes
-    config.PROJECT_DIR, is unreadable, or clamps to an empty range. Confined to the
-    project exactly like spans._spans_for_file — this is the only place that returns
-    raw source bytes, so it must not read outside the project.
+    config.PROJECT_DIR, is unreadable, or clamps to an empty range. This is the only
+    place that returns raw source text, so it must not read outside the project.
     """
-    rel = _norm_relpath(file_path)
-    if not rel:
-        return None
-    try:
-        full = (config.PROJECT_DIR / rel).resolve()
-        full.relative_to(config.PROJECT_DIR.resolve())
-    except (ValueError, OSError):
+    full = _resolve_in_project(file_path)
+    if full is None:
         return None
     try:
         text = full.read_text(encoding="utf-8", errors="replace")

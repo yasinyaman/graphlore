@@ -47,9 +47,8 @@ import ast
 import re
 from typing import Any
 
-from . import config
 from .apis import _strip_quotes
-from .spans import _norm_relpath, _ts_parser_for
+from .spans import _cached_file_analysis, _ts_parser_for
 
 # One recognized registration: framework label, upper-cased HTTP method (ANY
 # when the idiom doesn't pin one), URL pattern, handler name ("<inline>" for
@@ -83,12 +82,6 @@ _PY_VERB_FRAMEWORKS = (
 # detection; without the gate, HTTP-client request sites (axios.get('/api/x'),
 # apiClient.post('/login', body)) are indistinguishable from registrations.
 _JS_SERVER_FRAMEWORKS = ("express", "fastify", "koa-router", "@koa/router", "restify", "polka")
-
-
-def _routes_cache_put(key: str, value: tuple[float, list[RouteRow]]) -> None:
-    if key not in _ROUTES_CACHE and len(_ROUTES_CACHE) >= _ROUTES_CACHE_MAX:
-        _ROUTES_CACHE.pop(next(iter(_ROUTES_CACHE)), None)  # FIFO: drop the oldest
-    _ROUTES_CACHE[key] = value
 
 
 def _row(framework: str, method: str, pattern: str, handler: str, line: int) -> RouteRow:
@@ -557,27 +550,6 @@ def _routes_for_file(file_path: str) -> list[RouteRow]:
     either way). Confined to PROJECT_DIR like the span index. Cached by
     (path, mtime).
     """
-    rel = _norm_relpath(file_path)
-    if not rel:
-        return []
-    try:
-        full = (config.PROJECT_DIR / rel).resolve()
-        full.relative_to(config.PROJECT_DIR.resolve())
-    except (ValueError, OSError):
-        return []
-    try:
-        mtime = full.stat().st_mtime
-    except OSError:
-        return []
-    key = str(full)
-    cached = _ROUTES_CACHE.get(key)
-    if cached is not None and cached[0] == mtime:
-        return cached[1]
-    try:
-        src = full.read_bytes()
-    except OSError:
-        _routes_cache_put(key, (mtime, []))
-        return []
-    rows = routes_for_source(src, rel)
-    _routes_cache_put(key, (mtime, rows))
-    return rows
+    return _cached_file_analysis(
+        _ROUTES_CACHE, file_path, routes_for_source, list, _ROUTES_CACHE_MAX
+    )
