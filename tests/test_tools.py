@@ -2,6 +2,7 @@
 
 import json
 
+from graphlore import graph as graph_mod
 from graphlore import server, spans
 
 
@@ -3307,3 +3308,139 @@ def test_graphlore_env_spelling_reaches_semantic_backend(monkeypatch):
     monkeypatch.delenv("GRAPHIFY_SEMANTIC_BACKEND", raising=False)
     monkeypatch.setenv("GRAPHLORE_SEMANTIC_BACKEND", "malformed-no-colon")
     assert server._semantic_index() is None  # read via the new spelling
+
+
+# --- computed surprises + impact relation filter / sites --------------------
+
+
+def test_hop_records_matches_hop_distances_unfiltered():
+    """The backward-compat guarantee: with no relation filter, _hop_records must
+    produce exactly the distances _hop_distances does."""
+    edges = [
+        {"source": "A", "target": "B", "relation": "calls"},
+        {"source": "B", "target": "C", "relation": "imports"},
+        {"source": "A", "target": "C", "relation": "uses"},
+    ]
+    plain = graph_mod._adjacency(edges)
+    eadj, _rev = graph_mod._directed_edge_adjacency(edges)
+    dist = graph_mod._hop_distances(plain, "A", 3)
+    recs = graph_mod._hop_records(eadj, "A", 3)
+    assert {k: v[0] for k, v in recs.items()} == {
+        k: v for k, v in dist.items() if k in recs
+    }
+    assert recs["B"][2]["relation"] == "calls"  # discovery edge is recorded
+
+
+def test_computed_surprises_scores_and_skips():
+    nodes = [
+        {"id": "a", "label": "helper()", "source_file": "pkg/util.py", "file_type": "code"},
+        {"id": "b", "label": "view()", "source_file": "web/views.py", "file_type": "code"},
+        {"id": "f", "label": "views.py", "source_file": "web/views.py", "file_type": "code"},
+    ]
+    edges = [
+        # cross top-level dir + inferred -> scores; the structural edge and the
+        # whole-file hub edge must both be skipped
+        {"source": "b", "target": "a", "relation": "calls", "confidence": "INFERRED"},
+        {"source": "f", "target": "a", "relation": "contains"},
+        {"source": "f", "target": "a", "relation": "calls"},
+    ]
+    items, diag = graph_mod._computed_surprises(nodes, edges)
+    assert len(items) == 1
+    assert items[0]["from"] == "view()" and items[0]["to"] == "helper()"
+    assert items[0]["score"] >= 3 and items[0]["strength"] in ("moderate", "strong")
+    assert any("top-level" in w for w in items[0]["why"])
+    assert diag["skipped"]["structural"] == 1 and diag["skipped"]["file_hub"] == 1
+
+
+def test_surprises_computed_basis_when_no_flags(tmp_path, monkeypatch):
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    _write_graph(tmp_path, {
+        "nodes": [
+            {"id": "a", "label": "helper()", "source_file": "pkg/util.py"},
+            {"id": "b", "label": "view()", "source_file": "web/views.py"},
+        ],
+        "links": [{"source": "b", "target": "a", "relation": "calls",
+                   "confidence": "INFERRED"}],
+    })
+    data = json.loads(server.graphlore_surprises(as_json=True))
+    assert data["basis"] == "computed" and data["fallback"] is True
+    assert data["surprises"] and data["surprises"][0]["why"]
+    assert "computes candidates" in server.graphlore_overview()
+
+
+def test_surprises_names_why_it_cannot_compute(tmp_path, monkeypatch):
+    """Nothing scorable must give a named reason, never an empty list under a
+    header that reads as 'this codebase has no surprising couplings'."""
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    _write_graph(tmp_path, {
+        "nodes": [
+            {"id": "a", "label": "A", "source_file": "same.py"},
+            {"id": "b", "label": "B", "source_file": "same.py"},
+        ],
+        "links": [{"source": "a", "target": "b", "relation": "contains"}],
+    })
+    out = server.graphlore_surprises()
+    assert "Cannot compute surprises" in out
+    assert "structural" in out and "Signals absent" in out
+    data = json.loads(server.graphlore_surprises(as_json=True))
+    assert data["basis"] == "none" and data["surprises"] == []
+
+
+def _impact_graph(tmp_path):
+    _write_graph(tmp_path, {
+        "nodes": [
+            {"id": "core", "label": "Core", "source_file": "app/core.py",
+             "source_location": "L10"},
+            {"id": "caller", "label": "caller()", "source_file": "app/api.py",
+             "source_location": "L5"},
+            {"id": "doc", "label": "notes.md", "source_file": "docs/notes.md",
+             "source_location": "L1"},
+        ],
+        "links": [
+            {"source": "caller", "target": "core", "relation": "calls",
+             "source_file": "app/api.py", "source_location": "L7"},
+            {"source": "doc", "target": "core", "relation": "rationale_for"},
+        ],
+    })
+
+
+def test_impact_relation_filter_and_sites(tmp_path, monkeypatch):
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    _impact_graph(tmp_path)
+
+    unfiltered = json.loads(server.graphlore_impact("Core", as_json=True))
+    assert {i["node"] for i in unfiltered["impacted"]} == {"caller()", "notes.md"}
+    assert unfiltered["relations"] == "all"
+
+    filtered = json.loads(server.graphlore_impact("Core", relations="calls", as_json=True))
+    assert [i["node"] for i in filtered["impacted"]] == ["caller()"]
+    assert filtered["relations"] == "calls"
+    assert filtered["relation_counts"] == {"calls": 1}
+
+    hit = filtered["impacted"][0]
+    assert hit["site"] == "app/api.py:L7" and hit["site_kind"] == "reference"
+    # the edge with no recorded position falls back to the node's definition
+    doc_row = next(i for i in unfiltered["impacted"] if i["node"] == "notes.md")
+    assert doc_row["site_kind"] == "definition" and doc_row["site"].startswith("docs/notes.md")
+    assert "def: " in server.graphlore_impact("Core")  # text marks the fallback
+
+
+def test_impact_unknown_relation_reports_vocabulary(tmp_path, monkeypatch):
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    _impact_graph(tmp_path)
+    out = server.graphlore_impact("Core", relations="frobnicate")
+    assert "No edges with relation(s) 'frobnicate'" in out
+    assert "This graph uses" in out and "calls" in out  # names the real vocabulary
+    data = json.loads(server.graphlore_impact("Core", relations="frobnicate", as_json=True))
+    assert "error" in data  # structured consumers get it as JSON, not prose
+
+
+def test_impact_relation_presets_parse():
+    assert server._impact_relations("") is None
+    assert server._impact_relations("all") is None
+    assert server._impact_relations("calls,all") is None  # 'all' wins outright
+    assert server._impact_relations("calls") == frozenset({"calls", "indirect_call"})
+    assert "inherits" in (server._impact_relations("types") or set())
+    assert server._impact_relations("calls,defines") == frozenset(
+        {"calls", "indirect_call", "defines"}
+    )

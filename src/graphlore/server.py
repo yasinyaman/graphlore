@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
-"""Graphify MCP Server — exposes the graphify CLI and graph as MCP tools.
+"""graphlore MCP Server — a Graphify graph, joined to real source spans.
 
-Wraps graphify (https://graphify.net) so an AI assistant can query the
-codebase knowledge graph during development.
+Wraps the graphify CLI (https://graphify.net) so an AI assistant can query the
+codebase knowledge graph during development. Graphify builds the graph and ships
+its own embedded MCP server for navigating it; what this module adds is the span
+engine (ast + tree-sitter ``start..end`` ranges) and the tools that need it —
+locate/hidden_links, fetch, skeleton, routes, package_apis, and
+cosmetic-vs-structural freshness. Single-project: one PROJECT_DIR per process.
 
 CLI-backed tools:
   - graphlore_build      : build / update the graph from a folder
@@ -98,14 +102,17 @@ from .graph import (  # noqa: F401  (re-exported for the tools + tests)
     _adjacency,
     _approx_tokens,
     _bfs_subgraph,
+    _computed_surprises,
     _count_tokens,
     _directed_adjacency,
+    _directed_edge_adjacency,
     _edge_ends,
     _edge_rel,
     _edge_set,
     _find_cycles,
     _graph_path,
     _hop_distances,
+    _hop_records,
     _is_surprise_edge,
     _load_graph,
     _node_file,
@@ -835,6 +842,13 @@ def graphlore_overview(top_n: int = 8, as_json: bool = False) -> str:
         "edges": len(edges),
         "communities": len(comms),
         "surprise_edges": surprises,
+        # basis distinguishes "the graph flags none" from "the graph carries no
+        # flags at all" — under "computed" the zero above says nothing about the
+        # codebase, and graphlore_surprises does the actual scoring on demand.
+        "surprises": {
+            "count": surprises if surprises else None,
+            "basis": "flagged" if surprises else "computed",
+        },
         "id_collisions": id_collisions,
         "graph_age": age,
         "god_nodes": god,
@@ -842,7 +856,10 @@ def graphlore_overview(top_n: int = 8, as_json: bool = False) -> str:
     }
     lines = [
         f"{len(nodes)} nodes, {len(edges)} edges, {len(comms)} communities, "
-        f"{surprises} surprise edges.\n",
+        + (
+            f"{surprises} flagged surprise edges.\n" if surprises else
+            "no surprise flags (graphlore_surprises computes candidates).\n"
+        ),
         f"Top {len(god)} god nodes:",
     ]
     lines += [f"  {g['node']} — degree {g['degree']}" for g in god]
@@ -885,34 +902,83 @@ def graphlore_god_nodes(top_n: int = 10, as_json: bool = False) -> str:
 
 @mcp.tool(annotations=ToolAnnotations(title="Surprise edges", read_only_hint=True))
 def graphlore_surprises(limit: int = 20, as_json: bool = False) -> str:
-    """List unexpected cross-file/cross-domain connections (surprise edges)."""
+    """List unexpected cross-file/cross-domain connections (surprise edges).
+
+    Three tiers, reported in ``basis`` so "nothing surprising" is never confused
+    with "nothing computable":
+      - ``flagged``  — the graph carries explicit surprise flags; they are listed.
+      - ``computed`` — no flags (every AST-built graph): cross-file edges are
+        scored heuristically (confidence, file-type / directory / community
+        crossing, peripheral→hub), with resolver-noise and test↔source couplings
+        suppressed. These are leads, not graph annotations.
+      - ``none``     — nothing was scorable; the reason is named explicitly
+        instead of printing an empty list under a promising header.
+    """
     graph = _load_graph()
     if isinstance(graph, str):
         return _err(graph, as_json)
     nodes, edges = _nodes_edges(graph)
-    flagged = [e for e in edges if _is_surprise_edge(e)]
-    fallback = False
-    if not flagged:
-        comm = {_node_id(n): n.get("community", n.get("cluster")) for n in nodes}
-        flagged = [
-            e for e in edges
-            if comm.get(_edge_ends(e)[0]) is not None
-            and comm.get(_edge_ends(e)[1]) is not None
-            and comm.get(_edge_ends(e)[0]) != comm.get(_edge_ends(e)[1])
-        ]
-        fallback = True
     labels = _display_labels(nodes)
-    items = []
-    for e in flagged[:limit]:
-        s, t = _edge_ends(e)
-        items.append({"from": labels.get(s, s), "to": labels.get(t, t), "relation": _edge_rel(e)})
-    header = (
-        f"No flagged surprise edges; first {limit} of {len(flagged)} cross-community edges:"
-        if fallback else
-        f"First {limit} of {len(flagged)} flagged surprise edges:"
-    )
-    text = [header] + [f"  {i['from']} —{i['relation']}→ {i['to']}" for i in items]
-    return _fmt({"surprises": items, "fallback": fallback}, as_json, "\n".join(text))
+
+    flagged = [e for e in edges if _is_surprise_edge(e)]
+    if flagged:
+        items = []
+        for e in flagged[:limit]:
+            s, t = _edge_ends(e)
+            items.append(
+                {"from": labels.get(s, s), "to": labels.get(t, t), "relation": _edge_rel(e)}
+            )
+        text = [f"First {limit} of {len(flagged)} flagged surprise edges:"]
+        text += [f"  {i['from']} —{i['relation']}→ {i['to']}" for i in items]
+        payload = {"surprises": items, "basis": "flagged", "fallback": False}
+        return _fmt(payload, as_json, "\n".join(text))
+
+    computed, diag = _computed_surprises(nodes, edges)
+    items = computed[:limit]
+    if not items:
+        skipped = ", ".join(
+            f"{n} {k.replace('_', ' ')}" for k, n in sorted(diag["skipped"].items())
+        )
+        missing = []
+        if not diag["has_community_info"]:
+            missing.append("no community info")
+        if len(diag["confidence_values"]) <= 1:
+            missing.append(
+                f"no confidence variation (all {diag['confidence_values'][0]})"
+                if diag["confidence_values"] else "no confidence data"
+            )
+        text = [
+            "Cannot compute surprises for this graph — this is a limit of the "
+            "available signals, not a finding that the codebase has none.",
+            f"  Nothing scorable: {skipped or 'no edges at all'}.",
+            f"  Signals absent: no surprise flags{', ' + ', '.join(missing) if missing else ''}.",
+            "  Rebuild with clustering / an LLM backend (graphlore_build) to get "
+            "community and inferred-confidence signals.",
+        ]
+        payload = {"surprises": [], "basis": "none", "diagnostics": diag, "fallback": True}
+        return _fmt(payload, as_json, "\n".join(text))
+
+    text = [
+        f"No surprise flags in this graph; computed {len(computed)} candidate(s) from "
+        f"{diag['scorable_edges']} scorable cross-file edges "
+        f"(heuristic — leads, not graph annotations):"
+    ]
+    for i in items:
+        text.append(
+            f"  [{i['strength']} {i['score']}] {i['from']} —{i['relation']}→ {i['to']}"
+            f"  ({i['from_file']} → {i['to_file']})"
+        )
+        if i["why"]:
+            text.append(f"      {'; '.join(i['why'])}")
+    if diag["max_score"] <= 2:
+        text.append(
+            "  All candidates scored weak — this graph is single-language and "
+            "AST-only, so the strongest available signals are weak. Treat as leads."
+        )
+    payload = {
+        "surprises": items, "basis": "computed", "diagnostics": diag, "fallback": True,
+    }
+    return _fmt(payload, as_json, "\n".join(text))
 
 
 @mcp.tool(annotations=ToolAnnotations(title="Communities", read_only_hint=True))
@@ -1404,6 +1470,50 @@ def graphlore_subgraph(
     return _fmt(payload, as_json, "\n".join(text))
 
 
+# Relation presets for graphlore_impact. "code" mirrors the graphify CLI's own
+# `affected` default set so the two agree on what counts as a dependency.
+_IMPACT_CODE_RELATIONS = frozenset({
+    "calls", "indirect_call", "references", "imports", "imports_from",
+    "dynamic_import", "re_exports", "inherits", "extends", "implements",
+    "uses", "mixes_in", "embeds", "requires",
+})
+IMPACT_RELATION_PRESETS: dict[str, frozenset[str] | None] = {
+    "all": None,  # no filter — walk every edge type
+    "code": _IMPACT_CODE_RELATIONS,
+    "calls": frozenset({"calls", "indirect_call"}),
+    "imports": frozenset({"imports", "imports_from", "dynamic_import",
+                          "re_exports", "requires"}),
+    "types": frozenset({"inherits", "extends", "implements", "mixes_in",
+                        "embeds", "uses"}),
+}
+# Structural containment: never a dependency, but walked one hop out from the
+# seed so a class's own members stay reachable when containment is filtered out.
+_IMPACT_MEMBER_RELATIONS = frozenset({"method", "contains"})
+
+
+def _impact_relations(spec: str) -> frozenset[str] | None:
+    """Parse graphlore_impact's `relations`; "" / "all" -> None (walk everything).
+
+    Presets and literal relation names share one namespace, so "calls,defines"
+    works on a graph carrying arbitrary relation vocabularies.
+    """
+    spec = (spec or "").strip().lower()
+    if not spec or spec == "all":
+        return None
+    wanted: set[str] = set()
+    for part in (p.strip() for p in spec.replace(" ", ",").split(",")):
+        if not part:
+            continue
+        if part in IMPACT_RELATION_PRESETS:
+            preset = IMPACT_RELATION_PRESETS[part]
+            if preset is None:  # "all" mixed into a list wins outright
+                return None
+            wanted |= preset
+        else:
+            wanted.add(part)
+    return frozenset(wanted) or None
+
+
 @mcp.tool(annotations=ToolAnnotations(title="Impact / blast radius", read_only_hint=True))
 def graphlore_impact(
     node: str,
@@ -1411,6 +1521,7 @@ def graphlore_impact(
     hops: int = 3,
     budget_tokens: int = 1500,
     as_json: bool = False,
+    relations: str = "",
 ) -> str:
     """Reverse-dependency / blast-radius analysis: what's affected if `node` changes.
 
@@ -1424,11 +1535,23 @@ def graphlore_impact(
     query pure vector/embedding retrieval can't answer. Note the blast radius includes
     any INFERRED / surprise edges in the graph, so it can be wider than call-graph-only.
 
+    Each row also reports the traversed edge's own recorded position as `site`.
+    `site_kind="reference"` means the graph recorded where the reference occurs;
+    `site_kind="definition"` means it did not, and the row falls back to where the
+    impacted node itself is defined. `site` is ONE recorded occurrence, not an
+    exhaustive list of call sites.
+
     Args:
         node: Center node (exact or fuzzy match).
-        direction: "dependents" | "dependencies" | "both".
+        direction: Which adjacency to walk — "dependents" | "dependencies" | "both".
         hops: Max dependency hops to walk out from `node`.
         budget_tokens: Approximate cap on the returned list; trimmed when hit.
+        relations: Which edges may be traversed — orthogonal to `direction`, which
+            only picks the adjacency. Comma-separated presets and/or literal
+            relation names: "all" (default, walk everything), "code", "calls",
+            "imports", "types", or e.g. "calls,inherits". When a filter excludes
+            containment, the node's own members are still seeded so a class's
+            methods stay reachable.
     """
     graph = _load_graph()
     if isinstance(graph, str):
@@ -1444,33 +1567,75 @@ def graphlore_impact(
             "'dependencies' (what this node references), or 'both'.",
             as_json,
         )
+    rel_filter = _impact_relations(relations)
     labels = _display_labels(nodes)
+    byid = {_node_id(n): n for n in nodes}
     sid = _node_id(start)
-    forward, reverse = _directed_adjacency(edges)
+    forward, reverse = _directed_edge_adjacency(edges)
+
+    # When the filter excludes containment, seed the node's own members so a
+    # class's methods stay reachable (an unfiltered walk reaches them through the
+    # containment edges themselves).
+    seeds: list[str] = []
+    if rel_filter is not None and not (rel_filter & _IMPACT_MEMBER_RELATIONS):
+        seeds = [
+            nb for nb, e in forward.get(sid, [])
+            if _edge_rel(e).strip().lower() in _IMPACT_MEMBER_RELATIONS
+        ]
 
     if direction == "dependents":
-        dist = _hop_distances(reverse, sid, hops)
+        recs = _hop_records(reverse, sid, hops, rel_filter, seeds)
     elif direction == "dependencies":
-        dist = _hop_distances(forward, sid, hops)
+        recs = _hop_records(forward, sid, hops, rel_filter, seeds)
     else:
-        dist = dict(_hop_distances(reverse, sid, hops))
-        for nid, d in _hop_distances(forward, sid, hops).items():
-            if nid not in dist or d < dist[nid]:
-                dist[nid] = d  # nearest hop in either direction
+        recs = dict(_hop_records(reverse, sid, hops, rel_filter, seeds))
+        for nid, r in _hop_records(forward, sid, hops, rel_filter, seeds).items():
+            if nid not in recs or r[0] < recs[nid][0]:
+                recs[nid] = r  # nearest hop in either direction
 
-    ranked = sorted(
-        ((nid, d) for nid, d in dist.items() if nid != sid),
-        key=lambda kv: (kv[1], labels.get(kv[0], kv[0])),
-    )
+    hits: list[tuple[str, int, str, dict]] = []
+    for nid, (d, via, edge) in recs.items():
+        # edge is None for the start node and for seeded members: scaffolding,
+        # not something that actually depends on the node.
+        if nid == sid or edge is None:
+            continue
+        hits.append((nid, d, via, edge))
+    ranked = sorted(hits, key=lambda h: (h[1], labels.get(h[0], h[0])))
+    if rel_filter is not None and not ranked:
+        vocab = sorted({_edge_rel(e).strip() for e in edges} - {"->"})
+        if not (rel_filter & {v.lower() for v in vocab}):
+            return _err(
+                f"No edges with relation(s) '{relations}'. This graph uses: "
+                + ", ".join(vocab[:20]) + ("…" if len(vocab) > 20 else "") + ".",
+                as_json,
+            )
     impacted: list[dict[str, Any]] = []
+    relation_counts: Counter[str] = Counter()
     truncated = False
     running_chars = 2 + _PAYLOAD_ENVELOPE_CHARS
-    for nid, d in ranked:
-        item = {"node": labels.get(nid, nid), "distance": d}
+    for nid, d, via, e in ranked:
+        item: dict[str, Any] = {"node": labels.get(nid, nid), "distance": d}
+        rel = _edge_rel(e).strip()
+        if rel and rel != "->":
+            item["relation"] = rel
+        if via and via != sid:
+            item["via"] = labels.get(via, via)
+        sf, sl = str(e.get("source_file") or ""), str(e.get("source_location") or "")
+        if sf and sl:
+            # Where the graph recorded the reference itself.
+            item["site"] = f"{sf}:{sl}"
+            item["site_kind"] = "reference"
+        else:
+            n = byid.get(nid)
+            f, ln = (_node_file(n), _node_line(n)) if n else ("", "")
+            if f and ln != "":
+                item["site"] = f"{f}:{ln}"
+                item["site_kind"] = "definition"  # NOT a reference site
         running_chars += len(json.dumps(item, ensure_ascii=False)) + 2
         if impacted and running_chars / _CHARS_PER_TOKEN >= budget_tokens:
             truncated = True
             break
+        relation_counts[rel or "->"] += 1
         impacted.append(item)
 
     approx = _count_tokens(json.dumps(impacted, ensure_ascii=False))
@@ -1478,6 +1643,8 @@ def graphlore_impact(
         "node": _node_label(start),
         "direction": direction,
         "hops": hops,
+        "relations": relations.strip().lower() or "all",
+        "relation_counts": dict(relation_counts.most_common()),
         "count": len(impacted),
         "impacted": impacted,
         "truncated": truncated,
@@ -1488,17 +1655,29 @@ def graphlore_impact(
         "dependencies": "are used by",
         "both": "are connected to",
     }[direction]
+    rel_note = f", relations={relations.strip().lower()}" if rel_filter is not None else ""
     if not impacted:
-        text = f"Nothing {verb} {_node_label(start)} within {hops} hop(s)."
+        text = f"Nothing {verb} {_node_label(start)} within {hops} hop(s){rel_note}."
     else:
         head = (
             f"{len(impacted)} node(s) {verb} {_node_label(start)} "
-            f"(≤{hops} hops, direction={direction})"
+            f"(≤{hops} hops, direction={direction}{rel_note})"
             + (", TRUNCATED at budget" if truncated else "") + ":"
         )
-        text = "\n".join(
-            [head] + [f"  {it['node']}  (distance {it['distance']})" for it in impacted]
-        )
+        rows = []
+        for it in impacted:
+            row = f"  {it['node']}  (distance {it['distance']}"
+            row += f" via {it['via']}" if it.get("via") else ""
+            row += ")"
+            if it.get("relation"):
+                row += f"  [{it['relation']}]"
+            if it.get("site"):
+                # 'def:' marks the fallback so a definition can't be misread as a
+                # recorded reference site.
+                prefix = "def: " if it.get("site_kind") == "definition" else ""
+                row += f"  {prefix}{it['site']}"
+            rows.append(row)
+        text = "\n".join([head] + rows)
     return _fmt(payload, as_json, text)
 
 
