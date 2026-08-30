@@ -8,6 +8,30 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import overload
 
-PROJECT_DIR = Path(os.environ.get("GRAPHIFY_PROJECT_DIR", ".")).resolve()
-OUT_DIR_NAME = os.environ.get("GRAPHIFY_OUT_DIR", "graphify-out")
+
+@overload
+def env(name: str) -> str | None: ...
+@overload
+def env(name: str, default: str) -> str: ...
+
+
+def env(name: str, default: str | None = None) -> str | None:
+    """Read a server setting: ``GRAPHLORE_<name>`` first, ``GRAPHIFY_<name>`` as
+    the legacy fallback.
+
+    The ``GRAPHIFY_*`` spellings predate the graphlore rename and are still
+    honored so existing configs keep working; new configs should use
+    ``GRAPHLORE_*``. (Artifacts of the wrapped Graphify CLI — the ``graphify``
+    binary, ``graphify-out/``, ``.graphify_labels.json`` — keep their own names
+    regardless.)
+    """
+    value = os.environ.get(f"GRAPHLORE_{name}")
+    if value is None:
+        value = os.environ.get(f"GRAPHIFY_{name}")
+    return default if value is None else value
+
+
+PROJECT_DIR = Path(env("PROJECT_DIR", ".")).resolve()
+OUT_DIR_NAME = env("OUT_DIR", "graphify-out")
