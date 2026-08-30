@@ -7,6 +7,22 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Fixed
+- `graphlore_package_apis` (JS/TS): clearly-internal import sources are no
+  longer counted as npm packages — absolute paths (`/lib/x`, whose "package"
+  was the empty string), package.json `#` subpath imports, and the common
+  bundler aliases `~/x` and `@/x`. A scoped `@app/utils` is still counted:
+  without reading tsconfig it is indistinguishable from a real scoped npm
+  package (documented over-approximation).
+- `benchmarks/multilang.py` no longer aborts the whole run (discarding every
+  measured repo) when a REPOS entry's graph is missing — the row is skipped
+  with a stderr note, since the documented setup only builds a subset. The
+  freshness table also stops claiming "expect False" for the token-change
+  fallback edit, which is a comment in the C-family (expectation unreliable)
+  — the row is flagged instead.
+- The CLI-backed tools (`graphlore_query`/`path`/`explain`) and `_run_cli`'s
+  plumbing (arg wiring incl. `--graph`, missing-binary message, timeout,
+  exit-code formatting, exec-OSError) are now covered by tests — previously
+  three registered tools had zero coverage.
 - Rename leftovers in the docs artifacts: `docs/benchmark.html`,
   `docs/benchmark.tr.html` and `docs/benchmark.svg` still titled/labelled the
   project `graphify-mcp`; they now say `codegraph-mcp`.

@@ -3192,3 +3192,99 @@ def test_validate_orphans_use_qualified_labels(tmp_path, monkeypatch):
     assert "__init__.py (pkg/__init__.py:L1)" in orphans
     assert "__init__.py (qkg/__init__.py:L1)" in orphans
     assert "__init__.py" not in orphans  # no bare, indistinguishable entries
+
+
+# --- CLI-backed tools (query/path/explain) and _run_cli plumbing ------------
+
+
+class _FakeProc:
+    def __init__(self, stdout="", stderr="", returncode=0):
+        self.stdout, self.stderr, self.returncode = stdout, stderr, returncode
+
+
+def _fake_cli(monkeypatch, tmp_path, run):
+    """Route _run_cli through fakes: binary 'found', subprocess.run replaced."""
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    monkeypatch.setattr(server.shutil, "which", lambda _b: "/fake/graphify")
+    monkeypatch.setattr(server.subprocess, "run", run)
+
+
+def test_query_path_explain_wire_cli_args(tmp_path, monkeypatch):
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(list(argv))
+        return _FakeProc(stdout="ok")
+
+    _fake_cli(monkeypatch, tmp_path, run)
+    assert server.graphlore_query("who calls send?", dfs=True, budget=1500) == "ok"
+    assert calls[-1][1:] == ["query", "who calls send?", "--dfs", "--budget", "1500"]
+    assert server.graphlore_path("DigestAuth", "Response") == "ok"
+    assert calls[-1][1:] == ["path", "DigestAuth", "Response"]
+    assert server.graphlore_explain("Client") == "ok"
+    assert calls[-1][1:] == ["explain", "Client"]
+
+
+def test_query_passes_graph_flag_when_graph_exists(tmp_path, monkeypatch):
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(list(argv))
+        return _FakeProc(stdout="ok")
+
+    _fake_cli(monkeypatch, tmp_path, run)
+    _write_graph(tmp_path, {"nodes": [], "links": []})
+    server.graphlore_query("q")
+    assert calls[-1][-2] == "--graph" and calls[-1][-1].endswith("graph.json")
+
+
+def test_run_cli_missing_binary_is_clean_error(tmp_path, monkeypatch):
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    monkeypatch.setattr(server.shutil, "which", lambda _b: None)
+    out = server.graphlore_explain("Client")
+    assert out.startswith("ERROR:") and "pip install graphifyy" in out
+
+
+def test_run_cli_timeout_and_exit_code_and_oserror(tmp_path, monkeypatch):
+    def run_timeout(argv, **kwargs):
+        raise server.subprocess.TimeoutExpired(cmd=argv, timeout=1)
+
+    _fake_cli(monkeypatch, tmp_path, run_timeout)
+    assert "did not finish within" in server.graphlore_path("A", "B")
+
+    def run_fail(argv, **kwargs):
+        return _FakeProc(stderr="boom", returncode=3)
+
+    monkeypatch.setattr(server.subprocess, "run", run_fail)
+    assert server.graphlore_explain("X") == "ERROR (exit 3):\nboom"
+
+    def run_oserror(argv, **kwargs):
+        raise FileNotFoundError("interpreter gone")
+
+    monkeypatch.setattr(server.subprocess, "run", run_oserror)
+    out = server.graphlore_query("q")
+    assert out.startswith("ERROR: failed to run") and "interpreter gone" in out
+
+
+def test_js_internal_sources_not_counted_as_packages():
+    src = (
+        b"import {helper} from '@app/utils';\n"      # tsconfig-style alias: kept (ambiguous)
+        b"import abs from '/lib/x';\n"               # absolute: internal
+        b"import sub from '#internal/thing';\n"      # package.json subpath import
+        b"import home from '~/shared/util';\n"       # bundler alias
+        b"import aliased from '@/components/Btn';\n" # bare-@ alias (invalid npm scope)
+        b"const fs = require('/srv/local');\n"
+        b"require('#hooks');\n"
+        b"import got from 'got';\n"
+    )
+    from graphlore import api_uses_for_source
+
+    packages, _symbols, _paths = api_uses_for_source(src, "app.ts")
+    if not packages:
+        import pytest
+
+        pytest.skip("tree-sitter backend not installed")
+    assert "got" in packages
+    assert "@app/utils" in packages  # documented over-approximation
+    assert "" not in packages
+    assert not any(p.startswith(("/", "#", "~", "@/")) for p in packages)

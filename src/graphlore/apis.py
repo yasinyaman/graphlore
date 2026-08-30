@@ -143,6 +143,17 @@ def _js_package(source: str) -> str:
     return "/".join(parts[:2]) if source.startswith("@") else parts[0]
 
 
+def _js_internal_source(source: str) -> bool:
+    """Heuristically internal, i.e. NOT an npm package: relative imports
+    (``./x``), absolute paths (``/lib/x`` — whose "package" would be the empty
+    string), package.json ``#`` subpath imports, and the common bundler aliases
+    ``~/x`` and ``@/x``. A scoped ``@app/utils`` stays external: without reading
+    tsconfig it is indistinguishable from a real scoped npm package, so counting
+    it keeps the audit an over-approximation there rather than dropping real
+    packages."""
+    return not source or source.startswith((".", "/", "#", "~", "@/"))
+
+
 def _api_uses_js(root: Any) -> ApiUses:
     """import statements + member-expression chains through an alias (JS/TS/TSX).
 
@@ -158,7 +169,7 @@ def _api_uses_js(root: Any) -> ApiUses:
         if src_node is None:
             return
         source = _strip_quotes(src_node.text.decode("utf-8", "replace"))
-        if not source or source.startswith("."):
+        if _js_internal_source(source):
             return
         pkg = _js_package(source)
         uses[0].add(pkg)
@@ -200,7 +211,8 @@ def _api_uses_js(root: Any) -> ApiUses:
                 name = child.child_by_field_name("name")
                 if (value is not None and value.type == "call_expression"
                         and name is not None
-                        and (source := require_source(value)) is not None):
+                        and (source := require_source(value)) is not None
+                        and not _js_internal_source(source)):
                     pkg = _js_package(source)
                     uses[0].add(pkg)
                     if name.type == "identifier":
@@ -213,7 +225,8 @@ def _api_uses_js(root: Any) -> ApiUses:
                                         [p.text.decode("utf-8", "replace")])
                     continue
             if t == "call_expression" and (source := require_source(child)) is not None:
-                uses[0].add(_js_package(source))  # bare require('pkg')
+                if not _js_internal_source(source):
+                    uses[0].add(_js_package(source))  # bare require('pkg')
                 continue
             if t == "member_expression":
                 chain: list[str] = []
