@@ -1747,7 +1747,7 @@ def test_main_http_no_apikey_nonloopback_warns(monkeypatch, capsys):
     monkeypatch.setattr(server.mcp, "run", lambda **kw: None)
     server.main()
     err = capsys.readouterr().err
-    assert "WARNING" in err and "GRAPHIFY_API_KEY" in err
+    assert "WARNING" in err and "GRAPHLORE_API_KEY" in err
 
 
 def test_main_http_no_apikey_loopback_no_warn(monkeypatch, capsys):
@@ -3288,3 +3288,22 @@ def test_js_internal_sources_not_counted_as_packages():
     assert "@app/utils" in packages  # documented over-approximation
     assert "" not in packages
     assert not any(p.startswith(("/", "#", "~", "@/")) for p in packages)
+
+
+# --- GRAPHLORE_* env spelling with GRAPHIFY_* legacy fallback ---------------
+
+
+def test_env_prefers_graphlore_and_falls_back_to_graphify(monkeypatch):
+    monkeypatch.delenv("GRAPHLORE_TOOLSET", raising=False)
+    monkeypatch.delenv("GRAPHIFY_TOOLSET", raising=False)
+    assert server.config.env("TOOLSET", "full") == "full"      # default
+    monkeypatch.setenv("GRAPHIFY_TOOLSET", "lean")
+    assert server.config.env("TOOLSET", "full") == "lean"      # legacy honored
+    monkeypatch.setenv("GRAPHLORE_TOOLSET", "locate")
+    assert server.config.env("TOOLSET", "full") == "locate"    # new name wins
+
+
+def test_graphlore_env_spelling_reaches_semantic_backend(monkeypatch):
+    monkeypatch.delenv("GRAPHIFY_SEMANTIC_BACKEND", raising=False)
+    monkeypatch.setenv("GRAPHLORE_SEMANTIC_BACKEND", "malformed-no-colon")
+    assert server._semantic_index() is None  # read via the new spelling

@@ -65,9 +65,9 @@ Optional extras: `[semble]` (semantic locate + duplication scan), `[treesitter]`
 ## Running
 
 ```bash
-GRAPHIFY_PROJECT_DIR=/path/to/repo graphlore
+GRAPHLORE_PROJECT_DIR=/path/to/repo graphlore
 # equivalently:
-GRAPHIFY_PROJECT_DIR=/path/to/repo python -m graphlore
+GRAPHLORE_PROJECT_DIR=/path/to/repo python -m graphlore
 ```
 
 > **Renamed from `graphify-mcp`:** the old name collided with the
@@ -79,7 +79,7 @@ GRAPHIFY_PROJECT_DIR=/path/to/repo python -m graphlore
 
 ### Claude Code
 
-Copy `mcp.json` to a `.mcp.json` at your project root. `GRAPHIFY_PROJECT_DIR: "."` uses the project root.
+Copy `mcp.json` to a `.mcp.json` at your project root. `GRAPHLORE_PROJECT_DIR: "."` uses the project root.
 
 ### Claude Desktop / Cowork
 
@@ -93,14 +93,14 @@ stdio is the default and the right choice for a per-developer local server. To
 serve over HTTP instead (e.g. a shared graph for a team or a web MCP client):
 
 ```bash
-GRAPHIFY_TRANSPORT=streamable-http GRAPHIFY_HOST=127.0.0.1 GRAPHIFY_PORT=8000 \
-  GRAPHIFY_PROJECT_DIR=/path/to/repo graphlore
+GRAPHLORE_TRANSPORT=streamable-http GRAPHLORE_HOST=127.0.0.1 GRAPHLORE_PORT=8000 \
+  GRAPHLORE_PROJECT_DIR=/path/to/repo graphlore
 ```
 
-Any HTTP transport **force-enables path containment** (`GRAPHIFY_RESTRICT_PATHS`)
+Any HTTP transport **force-enables path containment** (`GRAPHLORE_RESTRICT_PATHS`)
 so a network client can't drive `graphlore_build` to extract arbitrary filesystem
 paths. HTTP binds `127.0.0.1` by default. To expose it beyond localhost, set
-`GRAPHIFY_API_KEY` — every request must then send `Authorization: Bearer <key>`
+`GRAPHLORE_API_KEY` — every request must then send `Authorization: Bearer <key>`
 (constant-time checked, 401 otherwise); binding a non-loopback host without a key
 prints a warning.
 
@@ -108,7 +108,7 @@ When bound to a loopback host, the MCP SDK auto-enables **DNS-rebinding
 protection**: only `Host: 127.0.0.1 / localhost / ::1` requests are accepted. A
 reverse proxy in front (nginx/caddy on a public name forwarding to
 `127.0.0.1`) must therefore rewrite the `Host` header — or set
-`GRAPHIFY_ALLOWED_HOSTS` to the public name(s) (comma-separated, `:*` port
+`GRAPHLORE_ALLOWED_HOSTS` to the public name(s) (comma-separated, `:*` port
 wildcards allowed; `*` disables the protection for a trusted proxy).
 
 The CLI is always invoked as an argument list with **no shell** (`subprocess.run`
@@ -116,20 +116,20 @@ with `shell=False`), so a build `path` or query string can't inject shell comman
 Per-file analyzers (spans/APIs/routes/fetch) are confined to the project
 directory through a single path-resolution boundary, so a hostile path in a
 graph or chunk can't read files outside the project. For a shared/network
-deployment, also consider lowering `GRAPHIFY_TIMEOUT` (default `600`s) so a
+deployment, also consider lowering `GRAPHLORE_TIMEOUT` (default `600`s) so a
 single slow `graphlore_build` can't tie up a worker for ten minutes.
 
 ```bash
-GRAPHIFY_TRANSPORT=streamable-http GRAPHIFY_HOST=0.0.0.0 GRAPHIFY_API_KEY=$(openssl rand -hex 16) \
-  GRAPHIFY_PROJECT_DIR=/path/to/repo graphlore
+GRAPHLORE_TRANSPORT=streamable-http GRAPHLORE_HOST=0.0.0.0 GRAPHLORE_API_KEY=$(openssl rand -hex 16) \
+  GRAPHLORE_PROJECT_DIR=/path/to/repo graphlore
 ```
 
 For a smaller tool surface (helps some models pick the right tool), set
-`GRAPHIFY_TOOLSET=lean` to expose only the core exploration tools — or
-`GRAPHIFY_TOOLSET=locate` for the minimal locate-first surface: orient with one
+`GRAPHLORE_TOOLSET=lean` to expose only the core exploration tools — or
+`GRAPHLORE_TOOLSET=locate` for the minimal locate-first surface: orient with one
 `graphlore_locate` call, hydrate code with `graphlore_fetch`, stay in sync with
 `graphlore_build`/`graphlore_freshness`. `locate` needs a semantic backend (the
-`[semble]` extra or `GRAPHIFY_SEMANTIC_BACKEND`) and falls back to `lean` without
+`[semble]` extra or `GRAPHLORE_SEMANTIC_BACKEND`) and falls back to `lean` without
 one.
 
 ## Tools
@@ -217,10 +217,10 @@ nodes for the removed files still linger, and reports them in `phantom_files`. A
 agent can also just call `graphlore_build(update=True)` when `graph_age` /
 `graphlore_freshness` says the graph drifted.
 
-There's also an opt-in filesystem watcher (`GRAPHIFY_WATCH=1`, the `[watch]`
+There's also an opt-in filesystem watcher (`GRAPHLORE_WATCH=1`, the `[watch]`
 extra): it re-syncs the graph on structural source changes, ignores cosmetic
 edits and non-source churn (VCS internals, virtualenvs, its own output), and
-debounces via `GRAPHIFY_WATCH_DEBOUNCE`.
+debounces via `GRAPHLORE_WATCH_DEBOUNCE`.
 
 ## Semantic bridge (optional `[semble]`)
 
@@ -240,7 +240,7 @@ in one call. Graphify gives **structure** (how code connects); semble gives
 
 The extra is optional: without it the core tools are unchanged and `graphlore_locate`
 returns an install hint. Any other embedding backend can be plugged in via
-`GRAPHIFY_SEMANTIC_BACKEND=module.path:Factory` (implementing `search` /
+`GRAPHLORE_SEMANTIC_BACKEND=module.path:Factory` (implementing `search` /
 `find_related`). It also pairs well with running semble's own MCP server
 alongside graphlore.
 
@@ -385,25 +385,26 @@ Reusable templates that orchestrate the tools for the assistant:
 
 | Variable | Default | Description |
 |---|---|---|
-| `GRAPHIFY_PROJECT_DIR` | `.` | Project root to extract the graph from |
-| `GRAPHIFY_OUT_DIR` | `graphify-out` | Output folder name |
-| `GRAPHIFY_BIN` | `graphify` | CLI path |
-| `GRAPHIFY_TIMEOUT` | `600` | CLI timeout (seconds) |
-| `GRAPHIFY_RESTRICT_PATHS` | `0` | Confine `graphlore_build`'s `path` to the project dir (auto-on for HTTP) |
-| `GRAPHIFY_TRANSPORT` | `stdio` | `stdio` \| `streamable-http` \| `sse` |
-| `GRAPHIFY_HOST` | `127.0.0.1` | Bind host for HTTP transports |
-| `GRAPHIFY_PORT` | `8000` | Bind port for HTTP transports |
-| `GRAPHIFY_API_KEY` | _(unset)_ | Require `Authorization: Bearer <key>` on HTTP transports |
-| `GRAPHIFY_ALLOWED_HOSTS` | _(unset)_ | DNS-rebinding `Host` allowlist for HTTP (comma-separated, `:*` port wildcards; `*` disables). Unset = SDK default: loopback-only when bound to loopback |
-| `GRAPHIFY_TOOLSET` | `full` | `full` \| `lean` (core exploration tools only) \| `locate` (minimal locate-first surface; falls back to `lean` without a semantic backend) |
-| `GRAPHIFY_TOKENIZER` | _(heuristic)_ | `tiktoken` → exact token counts (needs the `[tiktoken]` extra); else chars/3.5 estimate |
-| `GRAPHIFY_SEMANTIC_BACKEND` | `semble` | Semantic index: `semble`, or `module.path:Factory` implementing `search`/`find_related` (validated at boot) |
-| `GRAPHIFY_WATCH` | `0` | Filesystem watcher: auto re-sync on structural changes (`[watch]` extra) |
-| `GRAPHIFY_WATCH_DEBOUNCE` | `2.0` | Watcher debounce window (seconds) |
+| `GRAPHLORE_PROJECT_DIR` | `.` | Project root to extract the graph from |
+| `GRAPHLORE_OUT_DIR` | `graphify-out` | Output folder name |
+| `GRAPHLORE_BIN` | `graphify` | CLI path |
+| `GRAPHLORE_TIMEOUT` | `600` | CLI timeout (seconds) |
+| `GRAPHLORE_RESTRICT_PATHS` | `0` | Confine `graphlore_build`'s `path` to the project dir (auto-on for HTTP) |
+| `GRAPHLORE_TRANSPORT` | `stdio` | `stdio` \| `streamable-http` \| `sse` |
+| `GRAPHLORE_HOST` | `127.0.0.1` | Bind host for HTTP transports |
+| `GRAPHLORE_PORT` | `8000` | Bind port for HTTP transports |
+| `GRAPHLORE_API_KEY` | _(unset)_ | Require `Authorization: Bearer <key>` on HTTP transports |
+| `GRAPHLORE_ALLOWED_HOSTS` | _(unset)_ | DNS-rebinding `Host` allowlist for HTTP (comma-separated, `:*` port wildcards; `*` disables). Unset = SDK default: loopback-only when bound to loopback |
+| `GRAPHLORE_TOOLSET` | `full` | `full` \| `lean` (core exploration tools only) \| `locate` (minimal locate-first surface; falls back to `lean` without a semantic backend) |
+| `GRAPHLORE_TOKENIZER` | _(heuristic)_ | `tiktoken` → exact token counts (needs the `[tiktoken]` extra); else chars/3.5 estimate |
+| `GRAPHLORE_SEMANTIC_BACKEND` | `semble` | Semantic index: `semble`, or `module.path:Factory` implementing `search`/`find_related` (validated at boot) |
+| `GRAPHLORE_WATCH` | `0` | Filesystem watcher: auto re-sync on structural changes (`[watch]` extra) |
+| `GRAPHLORE_WATCH_DEBOUNCE` | `2.0` | Watcher debounce window (seconds) |
 
-> `GRAPHIFY_*` names are kept (not renamed to `GRAPHLORE_*`) because they
-> configure the wrapped Graphify CLI and its artifacts (`graphify-out/`,
-> `.graphify_labels.json`) as much as this server.
+> Every variable is also honored under its legacy `GRAPHIFY_*` spelling (the
+> pre-rename names); when both are set, `GRAPHLORE_*` wins. Artifacts of the
+> wrapped Graphify CLI keep their own names regardless (`graphify-out/`,
+> `.graphify_labels.json`, the `graphify` binary).
 
 ## Project layout
 
