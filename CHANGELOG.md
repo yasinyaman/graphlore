@@ -28,6 +28,13 @@ All notable changes to this project are documented here. The format is based on
   project `graphify-mcp`; they now say `codegraph-mcp`.
 
 ### Changed
+- **README rewritten for the graphlore surface** — restructured around the
+  locate-first workflow, tools/tables refreshed for all 28 `graphlore_*` names
+  and the newer behaviors (junk-file-tolerant freshness, qualified ambiguous
+  labels, pluggable semantic backend, watcher), project-layout/dev sections
+  updated (mypy in CI), and the "Comparison — when to use which" section
+  removed. `docs/benchmark*.html`/`.svg` retitled from `codegraph-mcp` to
+  `graphlore` (measurement numbers untouched).
 - **Internals: one confinement boundary, indexed lookups.** The PROJECT_DIR
   confinement check that five per-file analyzers hand-copied is now a single
   `spans._resolve_in_project()`, and the span/API/route per-file caches share

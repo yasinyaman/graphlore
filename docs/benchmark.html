@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>codegraph-mcp — benchmark (httpx + 5 languages)</title>
+<title>graphlore — benchmark (httpx + 5 languages)</title>
 <style>
   :root{
     --bg:#0f1115;--panel:#171a21;--panel2:#1d212a;--line:#2a2f3a;
@@ -48,7 +48,7 @@
 <body>
 <div class="wrap">
   <div style="text-align:right;margin-bottom:6px"><a href="benchmark.tr.html" style="color:#9aa3b2;font-size:13px;text-decoration:none">Türkçe →</a></div>
-  <h1>codegraph-mcp — token-efficiency benchmark</h1>
+  <h1>graphlore — token-efficiency benchmark</h1>
   <p class="sub">Headline: mean over 6 queries (send · auth · redirects · decoding · cookies · timeouts) on <code>encode/httpx</code> (2,101-node graph). Each query orients an agent to a code area; tokens = what reaches the model's context (≈ chars/4). <strong><a href="#multilang" style="color:var(--teal);text-decoration:none">Validated across JS/TS · Go · Java · Rust · C++ ↓</a></strong></p>
 
   <div class="cards">
@@ -64,7 +64,7 @@
     <div class="row"><div class="name">semble + graphify (separate)</div><div class="track"><div class="bar" style="width:48%;background:var(--amber)"></div><span class="val">2,721</span></div></div>
     <div class="row"><div class="name">semble alone</div><div class="track"><div class="bar" style="width:40%;background:var(--gray)"></div><span class="val">1,613</span></div></div>
     <div class="row"><div class="name">graphify alone</div><div class="track"><div class="bar" style="width:35%;background:var(--gray)"></div><span class="val">1,107</span></div></div>
-    <div class="row win"><div class="name">codegraph-mcp locate</div><div class="track"><div class="bar" style="width:12%;background:var(--teal)"></div><span class="val">235&nbsp;&nbsp;·&nbsp;&nbsp;+7 hidden links</span></div></div>
+    <div class="row win"><div class="name">graphlore locate</div><div class="track"><div class="bar" style="width:12%;background:var(--teal)"></div><span class="val">235&nbsp;&nbsp;·&nbsp;&nbsp;+7 hidden links</span></div></div>
   </div>
 
   <h2>By capability</h2>
@@ -75,7 +75,7 @@
       <tr><td>semble alone</td><td class="num">1,613</td><td class="num">1</td><td class="no">—</td><td class="yes">✓</td><td class="num">0</td></tr>
       <tr><td>graphify alone</td><td class="num">1,107</td><td class="num">1</td><td class="yes">✓</td><td class="no">—</td><td class="num">0</td></tr>
       <tr><td>semble + graphify (separately)</td><td class="num">2,721</td><td class="num">4</td><td class="yes">✓</td><td class="yes">✓</td><td class="num">0</td></tr>
-      <tr class="win"><td>codegraph-mcp locate</td><td class="num">235</td><td class="num">1</td><td class="yes">✓</td><td class="yes">✓</td><td class="num">7</td></tr>
+      <tr class="win"><td>graphlore locate</td><td class="num">235</td><td class="num">1</td><td class="yes">✓</td><td class="yes">✓</td><td class="num">7</td></tr>
     </tbody>
   </table>
 
@@ -93,11 +93,11 @@
   </table>
 
   <div class="note">
-    Those ~235 tokens are a navigational <em>map</em> (seed <code>file:line</code> + structural neighborhood + hidden links), not raw code — you fetch the specific code only where needed. semble's ~1,600 tokens are readable code chunks; the two representations are complementary. codegraph-mcp optimizes for cheapest orientation plus the cross-check signal, then you drill in precisely.
+    Those ~235 tokens are a navigational <em>map</em> (seed <code>file:line</code> + structural neighborhood + hidden links), not raw code — you fetch the specific code only where needed. semble's ~1,600 tokens are readable code chunks; the two representations are complementary. graphlore optimizes for cheapest orientation plus the cross-check signal, then you drill in precisely.
   </div>
 
   <h2>Case study — the hidden links are real</h2>
-  <p style="color:var(--muted);font-size:14px;margin:0 0 12px">Asked "does httpx duplicate request-sending across sync and async?", <code>graphify_locate</code> (live over MCP) returned seed <code>Client._send_single_request</code> and flagged hidden links — every production flag checked out as a genuine sync/async twin in the source:</p>
+  <p style="color:var(--muted);font-size:14px;margin:0 0 12px">Asked "does httpx duplicate request-sending across sync and async?", <code>graphlore_locate</code> (live over MCP) returned seed <code>Client._send_single_request</code> and flagged hidden links — every production flag checked out as a genuine sync/async twin in the source:</p>
   <table>
     <thead><tr><th>Flagged by locate</th><th>Verified in httpx source</th></tr></thead>
     <tbody>
