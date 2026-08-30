@@ -6,7 +6,6 @@ location from :mod:`graphlore.config`.
 from __future__ import annotations
 
 import json
-import os
 from collections import deque
 from pathlib import Path
 from typing import Any
@@ -310,11 +309,11 @@ def _tiktoken_encoder() -> Any:
 
 
 def _count_tokens(text: str) -> int:
-    """Token count for ``text``: exact via tiktoken when ``GRAPHIFY_TOKENIZER=tiktoken``
+    """Token count for ``text``: exact via tiktoken when ``GRAPHLORE_TOKENIZER=tiktoken``
     and the optional ``[tiktoken]`` extra is installed, else the conservative
     chars/3.5 estimate (``_approx_tokens``). Falls back silently if tiktoken is
     requested but unavailable, so it's always safe to call."""
-    if os.environ.get("GRAPHIFY_TOKENIZER", "").strip().lower() == "tiktoken":
+    if config.env("TOKENIZER", "").strip().lower() == "tiktoken":
         enc = _tiktoken_encoder()
         if enc is not None:
             return max(1, len(enc.encode(text)))
@@ -368,7 +367,7 @@ def _bfs_subgraph(
                 frontier.clear()
                 break
 
-    # Report the count via _count_tokens (exact under GRAPHIFY_TOKENIZER=tiktoken,
+    # Report the count via _count_tokens (exact under GRAPHLORE_TOKENIZER=tiktoken,
     # else the heuristic). The budget gate above stays on the fast char heuristic,
     # so the cap is approximate while the reported figure can be exact.
     serialized = json.dumps(collected_edges, ensure_ascii=False)

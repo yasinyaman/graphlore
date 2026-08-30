@@ -56,7 +56,7 @@ node/edge/traversal helpers), spans.py (tree-sitter/ast span engine + structural
 diff), and this module (the MCPServer surface: tools, resources, prompts, main).
 
 Usage:
-  GRAPHIFY_PROJECT_DIR=/path/to/repo python server.py
+  GRAPHLORE_PROJECT_DIR=/path/to/repo python server.py
 """
 
 from __future__ import annotations
@@ -147,27 +147,27 @@ from .spans import (  # noqa: F401
 
 __version__ = "0.2.0"
 
-GRAPHIFY_BIN = os.environ.get("GRAPHIFY_BIN", "graphify")
-CLI_TIMEOUT = int(os.environ.get("GRAPHIFY_TIMEOUT", "600"))
+GRAPHIFY_BIN = config.env("BIN", "graphify")
+CLI_TIMEOUT = int(config.env("TIMEOUT", "600"))
 
 # Opt-in: confine graphlore_build's `path` to config.PROJECT_DIR. Off by default so the
 # documented absolute/sibling-repo path keeps working; force-enabled for HTTP.
-RESTRICT_PATHS = os.environ.get("GRAPHIFY_RESTRICT_PATHS", "").lower() in ("1", "true", "yes")
+RESTRICT_PATHS = config.env("RESTRICT_PATHS", "").lower() in ("1", "true", "yes")
 
 # Transport: "stdio" (default) | "streamable-http" | "sse". HTTP binds HOST:PORT.
-TRANSPORT = os.environ.get("GRAPHIFY_TRANSPORT", "stdio").lower()
-HTTP_HOST = os.environ.get("GRAPHIFY_HOST", "127.0.0.1")
-HTTP_PORT = int(os.environ.get("GRAPHIFY_PORT", "8000"))
+TRANSPORT = config.env("TRANSPORT", "stdio").lower()
+HTTP_HOST = config.env("HOST", "127.0.0.1")
+HTTP_PORT = int(config.env("PORT", "8000"))
 # Opt-in bearer auth for the HTTP transports: when set, every HTTP/WS request must
-# carry ``Authorization: Bearer <GRAPHIFY_API_KEY>``. Unset = today's behaviour
+# carry ``Authorization: Bearer <GRAPHLORE_API_KEY>``. Unset = today's behaviour
 # (rely on binding to localhost or a fronting proxy).
-API_KEY = os.environ.get("GRAPHIFY_API_KEY", "")
+API_KEY = config.env("API_KEY", "")
 
 # Tool surface: "full" (default, all tools) | "lean" (core exploration set only)
 # | "locate" (minimal locate-first surface). A smaller surface can help models
 # pick the right tool; opt-in so the documented full surface is unchanged by
 # default.
-TOOLSET = os.environ.get("GRAPHIFY_TOOLSET", "full").strip().lower()
+TOOLSET = config.env("TOOLSET", "full").strip().lower()
 # A coherent, mostly dependency-free core that still supports the whole documented
 # flow: build -> orient (overview) -> find (search) -> traverse (subgraph/
 # neighbors) -> jump to source (node_details). graphlore_locate is included too but
@@ -195,7 +195,7 @@ LOCATE_TOOLS = frozenset({
     "graphlore_build",
     "graphlore_freshness",
 })
-# None = no trim (full surface). Unknown GRAPHIFY_TOOLSET values behave as full.
+# None = no trim (full surface). Unknown GRAPHLORE_TOOLSET values behave as full.
 TOOLSETS: dict[str, frozenset[str] | None] = {
     "full": None,
     "lean": LEAN_TOOLS,
@@ -229,7 +229,7 @@ mcp = MCPServer(
 def _path_escapes_project(path: str) -> str | None:
     """Opt-in containment for a build path.
 
-    Returns an error string if GRAPHIFY_RESTRICT_PATHS is set and `path` resolves
+    Returns an error string if GRAPHLORE_RESTRICT_PATHS is set and `path` resolves
     outside config.PROJECT_DIR; otherwise None. Off by default so the documented
     absolute / sibling-repo path keeps working.
     """
@@ -242,7 +242,7 @@ def _path_escapes_project(path: str) -> str | None:
     except ValueError:
         return (
             f"ERROR: path '{path}' escapes the project directory ({config.PROJECT_DIR}); "
-            "GRAPHIFY_RESTRICT_PATHS is enabled. Unset it or pass a contained path."
+            "GRAPHLORE_RESTRICT_PATHS is enabled. Unset it or pass a contained path."
         )
     return None
 
@@ -271,7 +271,7 @@ def _run_cli(args: list[str], cwd: Path | None = None) -> str:
     if shutil.which(GRAPHIFY_BIN) is None:
         return (
             f"ERROR: '{GRAPHIFY_BIN}' not found. Install with: pip install graphifyy && "
-            "graphify install. Alternatively set the GRAPHIFY_BIN environment variable."
+            "graphify install. Alternatively set the GRAPHLORE_BIN environment variable."
         )
     try:
         # Argument list + shell=False (the default): every element is passed as a
@@ -341,7 +341,7 @@ def _graph_age() -> str | None:
 class SemanticIndex(Protocol):
     """Pluggable semantic-search backend (semble is the default).
 
-    Implement this and point ``GRAPHIFY_SEMANTIC_BACKEND`` at ``your.module:Factory``
+    Implement this and point ``GRAPHLORE_SEMANTIC_BACKEND`` at ``your.module:Factory``
     to swap in a stronger backend — local sentence-transformers, an OpenAI-compatible
     or on-prem vLLM endpoint, etc. ``Factory`` is called ``Factory.from_path(project)``
     (or ``Factory(project)``). Each result of both methods MUST expose
@@ -390,14 +390,14 @@ def _load_custom_semantic_index(spec: str) -> Any:
 
 
 def _semantic_index() -> Any:
-    """The active semantic index, dispatched by ``GRAPHIFY_SEMANTIC_BACKEND``.
+    """The active semantic index, dispatched by ``GRAPHLORE_SEMANTIC_BACKEND``.
 
     Default (unset or ``semble``) keeps today's offline behaviour. Any other value is
     treated as a ``module.path:Factory`` spec implementing :class:`SemanticIndex`. The
     semble path stays a separate ``_semble_index`` call so it remains the offline-first
     default and so tests can stub it directly.
     """
-    backend = os.environ.get("GRAPHIFY_SEMANTIC_BACKEND", "").strip()
+    backend = config.env("SEMANTIC_BACKEND", "").strip()
     if not backend or backend.lower() == "semble":
         return _semble_index()
     return _load_custom_semantic_index(backend)
@@ -406,15 +406,15 @@ def _semantic_index() -> Any:
 def _no_semantic_index_error(tool: str) -> str:
     """Why _semantic_index() returned None, with the right fix for the active config.
 
-    With a custom GRAPHIFY_SEMANTIC_BACKEND configured, the failure is that spec —
+    With a custom GRAPHLORE_SEMANTIC_BACKEND configured, the failure is that spec —
     telling the user to install semble would misdiagnose it (semble may even be
     installed but deliberately bypassed).
     """
-    backend = os.environ.get("GRAPHIFY_SEMANTIC_BACKEND", "").strip()
+    backend = config.env("SEMANTIC_BACKEND", "").strip()
     if backend and backend.lower() != "semble":
         return (
             f"ERROR: {tool}: semantic backend '{backend}' failed to load. Check the "
-            "GRAPHIFY_SEMANTIC_BACKEND 'module.path:Factory' spec (or unset it to use "
+            "GRAPHLORE_SEMANTIC_BACKEND 'module.path:Factory' spec (or unset it to use "
             "the default semble backend)."
         )
     return (
@@ -1365,7 +1365,7 @@ def graphlore_subgraph(
         hops: BFS depth from the center.
         budget_tokens: Approximate cap on returned size; expansion stops when hit.
             ``approx_tokens`` is a conservative estimate (~3.5 chars/token, ±~20%);
-            set ``GRAPHIFY_TOKENIZER=tiktoken`` (with the ``[tiktoken]`` extra) for an
+            set ``GRAPHLORE_TOKENIZER=tiktoken`` (with the ``[tiktoken]`` extra) for an
             exact count. The cap itself stays heuristic, so it's fast either way.
     """
     graph = _load_graph()
@@ -2986,7 +2986,7 @@ def explain_flow(flow: str) -> str:
 
 
 def _transport_security() -> TransportSecuritySettings | None:
-    """GRAPHIFY_ALLOWED_HOSTS -> the SDK's DNS-rebinding settings, or None.
+    """GRAPHLORE_ALLOWED_HOSTS -> the SDK's DNS-rebinding settings, or None.
 
     Unset returns None, i.e. the SDK default: protection auto-enabled with a
     loopback-only Host allowlist whenever the server binds a loopback host.
@@ -2996,7 +2996,7 @@ def _transport_security() -> TransportSecuritySettings | None:
     comma-separated list allowlists those hosts — entries may carry ports,
     ":*" port wildcards included — plus their derived http/https origins.
     """
-    raw = os.environ.get("GRAPHIFY_ALLOWED_HOSTS", "").strip()
+    raw = config.env("ALLOWED_HOSTS", "").strip()
     if not raw:
         return None
     if raw == "*":
@@ -3045,7 +3045,7 @@ def _bearer_auth_asgi(app: Any, api_key: str) -> Any:
 
 
 def _registered_tool_names() -> set[str]:
-    """Names of tools currently registered (reflects any GRAPHIFY_TOOLSET trim)."""
+    """Names of tools currently registered (reflects any GRAPHLORE_TOOLSET trim)."""
     try:
         return {t.name for t in mcp._tool_manager.list_tools()}
     except Exception:  # pragma: no cover - guards against private-attr changes
@@ -3055,13 +3055,13 @@ def _registered_tool_names() -> set[str]:
 def _semantic_backend_available() -> bool:
     """Whether graphlore_locate has a working backend (semble or a custom one).
 
-    A custom GRAPHIFY_SEMANTIC_BACKEND is only "available" when its
+    A custom GRAPHLORE_SEMANTIC_BACKEND is only "available" when its
     ``module.path:Factory`` spec is well-formed and the module resolves — a typo'd
     spec must NOT advertise a locate surface whose every call can only error.
     """
     import importlib.util
 
-    backend = os.environ.get("GRAPHIFY_SEMANTIC_BACKEND", "").strip()
+    backend = config.env("SEMANTIC_BACKEND", "").strip()
     if backend and backend.lower() != "semble":
         if ":" not in backend:
             return False
@@ -3087,7 +3087,7 @@ def _effective_lean_tools() -> set[str]:
 
 
 def _effective_toolset_tools() -> set[str] | None:
-    """Tool names the configured GRAPHIFY_TOOLSET keeps, or None for no trim.
+    """Tool names the configured GRAPHLORE_TOOLSET keeps, or None for no trim.
 
     ``locate`` is built around graphlore_locate, so without a semantic backend the
     whole surface would be inert — fall back to the lean surface (the documented
@@ -3098,8 +3098,8 @@ def _effective_toolset_tools() -> set[str] | None:
         return None
     if TOOLSET == "locate" and not _semantic_backend_available():
         print(
-            "graphlore: GRAPHIFY_TOOLSET=locate needs the [semble] extra "
-            "(or GRAPHIFY_SEMANTIC_BACKEND); falling back to the lean toolset.",
+            "graphlore: GRAPHLORE_TOOLSET=locate needs the [semble] extra "
+            "(or GRAPHLORE_SEMANTIC_BACKEND); falling back to the lean toolset.",
             file=sys.stderr,
             flush=True,
         )
@@ -3115,7 +3115,7 @@ def _lean_removals(names: list[str], lean: set[str] | frozenset[str] = LEAN_TOOL
 
 
 def _apply_toolset() -> None:
-    """Unregister the tools the configured GRAPHIFY_TOOLSET drops (no-op for full)."""
+    """Unregister the tools the configured GRAPHLORE_TOOLSET drops (no-op for full)."""
     keep = _effective_toolset_tools()
     if keep is None:
         return
@@ -3124,7 +3124,7 @@ def _apply_toolset() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Watch mode (opt-in: GRAPHIFY_WATCH=1) — proactive freshness
+# Watch mode (opt-in: GRAPHLORE_WATCH=1) — proactive freshness
 # ---------------------------------------------------------------------------
 
 
@@ -3198,18 +3198,18 @@ class _GraphWatcher:
 def _start_watch() -> Any:
     """Start the opt-in filesystem watcher; return the observer, or None if off/unavailable.
 
-    Enabled by ``GRAPHIFY_WATCH`` in (1/true/yes). Needs the optional ``watchdog`` extra;
+    Enabled by ``GRAPHLORE_WATCH`` in (1/true/yes). Needs the optional ``watchdog`` extra;
     if it's missing, log and skip rather than fail. Events are debounced
-    (``GRAPHIFY_WATCH_DEBOUNCE`` seconds, default 2) and only structural changes regraph.
+    (``GRAPHLORE_WATCH_DEBOUNCE`` seconds, default 2) and only structural changes regraph.
     """
-    if os.environ.get("GRAPHIFY_WATCH", "").strip().lower() not in ("1", "true", "yes"):
+    if config.env("WATCH", "").strip().lower() not in ("1", "true", "yes"):
         return None
     try:
         from watchdog.events import FileSystemEventHandler
         from watchdog.observers import Observer
     except ImportError:
         print(
-            "GRAPHIFY_WATCH is set but the 'watchdog' extra isn't installed; "
+            "GRAPHLORE_WATCH is set but the 'watchdog' extra isn't installed; "
             "install with: pip install 'graphlore[watch]'.",
             file=sys.stderr,
         )
@@ -3218,7 +3218,7 @@ def _start_watch() -> Any:
     import threading
 
     watcher = _GraphWatcher()
-    debounce = float(os.environ.get("GRAPHIFY_WATCH_DEBOUNCE", "2.0"))
+    debounce = float(config.env("WATCH_DEBOUNCE", "2.0"))
     pending: set[str] = set()
     lock = threading.Lock()
     timer: dict[str, Any] = {}
@@ -3275,20 +3275,20 @@ def _start_watch() -> Any:
 def main() -> None:
     """Console-script entry point.
 
-    Transport is selected by GRAPHIFY_TRANSPORT (default ``stdio``); ``sse`` and
-    ``streamable-http`` serve over HTTP on GRAPHIFY_HOST:GRAPHIFY_PORT. Any HTTP
-    transport force-enables path containment (GRAPHIFY_RESTRICT_PATHS), since the
+    Transport is selected by GRAPHLORE_TRANSPORT (default ``stdio``); ``sse`` and
+    ``streamable-http`` serve over HTTP on GRAPHLORE_HOST:GRAPHLORE_PORT. Any HTTP
+    transport force-enables path containment (GRAPHLORE_RESTRICT_PATHS), since the
     build tool would otherwise let a network client extract arbitrary paths. Set
-    GRAPHIFY_API_KEY to require bearer auth on HTTP; GRAPHIFY_TOOLSET=lean trims the
-    surface to the core exploration tools and GRAPHIFY_TOOLSET=locate to a minimal
+    GRAPHLORE_API_KEY to require bearer auth on HTTP; GRAPHLORE_TOOLSET=lean trims the
+    surface to the core exploration tools and GRAPHLORE_TOOLSET=locate to a minimal
     locate-first set (falls back to lean without a semantic backend).
-    GRAPHIFY_WATCH=1 starts a background watcher
+    GRAPHLORE_WATCH=1 starts a background watcher
     that re-syncs the graph on structural source changes (needs the [watch] extra).
-    GRAPHIFY_ALLOWED_HOSTS tunes the SDK's DNS-rebinding Host allowlist ("*" disables
+    GRAPHLORE_ALLOWED_HOSTS tunes the SDK's DNS-rebinding Host allowlist ("*" disables
     it) — needed when a reverse proxy in front doesn't rewrite the Host header.
     """
     _apply_toolset()
-    _start_watch()  # no-op unless GRAPHIFY_WATCH is set
+    _start_watch()  # no-op unless GRAPHLORE_WATCH is set
     is_http = TRANSPORT in ("streamable-http", "http", "sse")
     transport = ("sse" if TRANSPORT == "sse" else "streamable-http") if is_http else "stdio"
     # Boot banner: name + version + transport + project dir, so it's clear from
@@ -3324,9 +3324,9 @@ def main() -> None:
         else:
             if HTTP_HOST not in ("127.0.0.1", "localhost", "::1"):
                 print(
-                    f"WARNING: serving HTTP on {HTTP_HOST} without GRAPHIFY_API_KEY — "
+                    f"WARNING: serving HTTP on {HTTP_HOST} without GRAPHLORE_API_KEY — "
                     "anyone who can reach this port can drive the server. Set "
-                    "GRAPHIFY_API_KEY to require bearer auth.",
+                    "GRAPHLORE_API_KEY to require bearer auth.",
                     file=sys.stderr,
                 )
             mcp.run(
