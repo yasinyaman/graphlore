@@ -164,11 +164,15 @@ def _node_span_contains(node, fp, line):
     return any(sp[0] <= line <= sp[1] for sp in family)
 
 
-def measure_repo(repo) -> dict:
+def measure_repo(repo) -> dict | None:
     _reset(repo["dir"])
     graph = s._load_graph()
     if isinstance(graph, str):
-        raise SystemExit(f"{repo['name']}: {graph}")
+        # A missing graph (repo not cloned/built) skips the row instead of
+        # aborting the whole run and discarding every measured repo so far —
+        # the documented setup only builds a subset of REPOS.
+        print(f"SKIP {repo['name']}: {graph}", file=sys.stderr)
+        return None
     nodes, _ = s._nodes_edges(graph)
     index = s._semble_index()
     if index is None:
@@ -259,10 +263,16 @@ def freshness_check(repo) -> dict:
             new = lines[dl - 1].replace(name, name + b"_x", 1)
             structural = b"\n".join(lines[:dl - 1] + [new] + lines[dl:])
             break
+    edit = "rename"
     if structural is None:                  # no resolvable symbol — make a token change
+        # `/*x*/` is a comment in the C-family/Go/Rust/Java (stripped by the
+        # skeleton -> compares True) and a syntax error in Python (-> None), so
+        # on this fallback the usual "expect False" does NOT hold; the row is
+        # flagged instead of silently reporting the feature broken.
         structural = re.sub(rb"\breturn\b", b"return  /*x*/", original, count=1)
+        edit = "token-fallback"
     return {
-        "lang": repo["lang"], "file": rel,
+        "lang": repo["lang"], "file": rel, "structural_edit": edit,
         "cosmetic": s._structurally_equal(rel, original, cosmetic),
         "structural": s._structurally_equal(rel, original, structural),
     }
@@ -275,8 +285,16 @@ def main(argv=None):
         help="also write the full results as JSON to PATH (for docs provenance)")
     args = parser.parse_args(argv)
 
-    results = [measure_repo(r) for r in REPOS]
-    fresh = [freshness_check(r) for r in REPOS]
+    results = []
+    fresh = []
+    for repo in REPOS:
+        res = measure_repo(repo)
+        if res is None:
+            continue
+        results.append(res)
+        fresh.append(freshness_check(repo))
+    if not results:
+        raise SystemExit("no repo graphs found — run the setup in the module docstring first")
 
     print("\n=== Span-join + locate (measured on real repos) ===")
     c = ("Lang", "repo", "nodes", "hits", "precision", "qualname", "hid/q")
@@ -304,8 +322,10 @@ def main(argv=None):
 
     print("\n=== Freshness correctness (cosmetic vs structural) ===")
     for f in fresh:
+        note = ("expect False" if f.get("structural_edit") == "rename"
+                else "token-fallback edit; expectation unreliable")
         print(f"  {f['lang']:6} {f.get('file','?'):40} cosmetic={f['cosmetic']} (expect True)  "
-              f"structural={f['structural']} (expect False)")
+              f"structural={f['structural']} ({note})")
 
     payload = {
         "results": results,
