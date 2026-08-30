@@ -69,7 +69,7 @@ import sys
 import warnings
 from collections import Counter
 from pathlib import Path
-from typing import Annotated, Any, Protocol
+from typing import Annotated, Any, Protocol, overload
 
 import anyio.to_thread
 from mcp import MCPDeprecationWarning
@@ -447,6 +447,13 @@ class _DisplayLabels:
             counts[lbl] += 1
         self._counts = counts
         self._resolved: dict[str, str] = {}
+
+    # dict.get-style overloads: with a str default the result is always str,
+    # so call sites like `labels.get(n, n)` type-check as str.
+    @overload
+    def get(self, nid: str) -> str | None: ...
+    @overload
+    def get(self, nid: str, default: str) -> str: ...
 
     def get(self, nid: str, default: str | None = None) -> str | None:
         base = self._label.get(nid)
