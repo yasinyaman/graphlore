@@ -15,6 +15,11 @@ of whole files.
 If the graphlore_* tools are not available, the MCP server isn't connected — see
 the project README for the `.mcp.json` / Claude Desktop config.
 
+The server reads one project — the directory it was started with; there is no
+per-call project argument, so a question about another repo needs another server.
+`graphlore_build` requires the `graphify` CLI on PATH: graphlore has no extractor
+of its own.
+
 ## Preconditions: make sure the graph exists and is fresh
 
 1. `graphlore_freshness()` — is `graph.json` stale vs. the current git HEAD?
@@ -56,7 +61,7 @@ route → handler table, joined to graph nodes), `graphlore_validate()` (lint
 graph.json for dangling/duplicate/self-loop/orphan issues — gauge how much to
 trust the graph).
 
-## Token discipline (the whole point)
+## Token discipline
 
 On large graphs, never dump the full graph. Use `graphlore_subgraph` with a
 `budget_tokens` cap and widen `hops` only as needed — the result reports
