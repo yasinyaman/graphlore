@@ -125,6 +125,11 @@ Graphify CLI included — and points `GRAPHLORE_PROJECT_DIR` at the project you
 opened. The first start downloads the dependencies and can take a while; later
 starts come from uv's cache. Without `uv`, use the manual setup below.
 
+**Start a new session after updating the plugin.** A client keeps the tool
+schemas it loaded earlier in the session, so after an update mid-session the
+server already has the new parameters (results mention them) while tools loaded
+before the update still show the old ones — no `scope`, no `verbose`.
+
 ### Claude Code (manual)
 
 Copy `mcp.json` to a `.mcp.json` at your project root. `GRAPHLORE_PROJECT_DIR: "."` uses the project root.
@@ -205,7 +210,7 @@ graph.json analysis (read-only, no CLI needed, `as_json=True` for structured out
 | `graphlore_overview` | **Call first** — size, god nodes, communities, surprises, suggested next steps |
 | `graphlore_god_nodes` | Most connected nodes, ranked inside the [scope](#analysis-scope) |
 | `graphlore_communities` | Leiden community summaries |
-| `graphlore_surprises` | Unexpected cross-file connections — listed from the graph's own flags when it has them, otherwise **computed** by scoring cross-file edges (confidence, file-type/directory/community crossing), with resolver noise, test↔source coupling and consumer directories (`bench/`, `examples/` → the package) scored down, and inferred edges into modules the source file never imports dropped; says plainly when nothing is computable rather than printing an empty list |
+| `graphlore_surprises` | Unexpected cross-file connections — listed from the graph's own flags when it has them, otherwise **computed** by scoring cross-file edges (confidence, file-type/directory/community crossing), with resolver noise, anything test code uses (the source under test, shared test fakes) and consumers — a directory or a script nothing depends on, using the package — scored down, and inferred edges into modules the source file never imports dropped; says plainly when nothing is computable rather than printing an empty list |
 | `graphlore_search` | Node search |
 | `graphlore_neighbors` | 1-hop neighbors of a node |
 | `graphlore_subgraph` | Token-budgeted BFS subgraph around a node — the cheap way to feed the model just the relevant slice (Graphify's embedded server does this too; pairing it with `fetch`/`locate` is what's specific here) |
@@ -217,11 +222,11 @@ graph.json analysis (read-only, no CLI needed, `as_json=True` for structured out
 | `graphlore_diff` | Structural changeset between two git refs (default `HEAD~1..HEAD`) — added/removed/renamed/modified, with cosmetic-only changes separated (file-level, for review/audit) |
 | `graphlore_prune` | Drop phantom nodes (and their edges) for deleted/renamed source files — the surgical alternative to a full rebuild (`dry_run=True` to preview) |
 | `graphlore_validate` | Lint the graph for dangling/duplicate/self-loop edges and orphan nodes (read-only). Recursion is counted apart, not as an issue |
-| `graphlore_duplication_scan` | **Repo-wide** hidden-link / duplication audit — the batch form of `locate`'s `hidden_links`. Compares definition with definition (same kind, similar size), keeps only structurally distant pairs, and reports the similarity score and `file:line` of both sides; test ↔ source pairs need `include_tests=True`. Needs `[semble]`, outside lean |
-| `graphlore_cycles` | Circular dependencies **by kind**: import cycles between modules first (import edges lifted to file level), then call cycles, then the rest — each with one concrete loop. `kind="imports"` asks for one kind; recursion is listed apart |
-| `graphlore_layers` | **Layer rules** — give `{"layer prefix": ["prefixes it may import"]}` (inline, or a JSON file in the repository) and get the import edges that break them, grouped by layer with `file:line`. The same check as an AST-based dependency test, read from the graph |
-| `graphlore_unreferenced` | **Dead-code candidates** — functions, methods and classes with no incoming graph reference, not registered by a decorator (routes, click/typer commands, validators, fixtures), and not mentioned anywhere else in the repository's text. Each with `file:line` and a mention count; a lower bound on what is alive, not proof of death |
-| `graphlore_same_names` | Classes and top-level functions that **share a name across modules**, with how many modules import each — the exact, model-free first tier of a duplication review |
+| `graphlore_duplication_scan` | **Repo-wide** duplication audit in two tiers. **Identical bodies** (exact, no model, always runs): function and method bodies hashed after normalizing whitespace, comments and docstrings, reported as groups — the small helper copied into three modules. **Hidden links** (semantic, needs `[semble]`): definitions that are similar but structurally distant, each pair with its score and both `file:line`s; on semble, pairs under 0.7 are left out by default (`min_score=0` lists them), and test ↔ source pairs need `include_tests=True`. Outside lean |
+| `graphlore_cycles` | Circular dependencies **by kind**. Import cycles between modules come first, each import read back from the source and classified: **runtime** cycles (a loop of module-level imports — the ones that fail at start-up), then **deferred** (closes through an import inside a function) and **type-only** (closes under `if TYPE_CHECKING:`). Then call cycles, then the rest — each with one concrete loop. `kind="imports"` asks for one kind; recursion is listed apart |
+| `graphlore_layers` | **Layer rules** — give `{"layer prefix": ["prefixes it may import"]}` (inline, or a JSON file in the repository) and get the import edges that break them, grouped by layer with `file:line` and when the import runs (module-level / `TYPE_CHECKING` / inside a function). An import the source contradicts — `import yaml` linked to a first-party `yaml.py` — is not checked and is listed apart. The same check as an AST-based dependency test, read from the graph |
+| `graphlore_unreferenced` | **Dead-code candidates** — functions, methods and classes with no incoming graph reference, not registered by a decorator (routes, click/typer commands, validators, fixtures), and not mentioned anywhere else in the repository's text. Another definition of the same name and its uses are not mentions, so the unused one of two same-named classes is still found. Each with `file:line` and a mention count; a lower bound on what is alive, not proof of death |
+| `graphlore_same_names` | Classes and top-level functions that **share a name across modules** (within one language; closures are not compared), each copy with how many modules import it and whether its own file uses it — the model-free companion of the duplication scan's identical-bodies tier |
 | `graphlore_package_apis` | **Symbol-level external API surface** — which names each external package is actually used for (`fastapi: Depends, APIRouter`), with qualified paths (`numpy.linalg.norm`) for version-diff audits; a lower bound (dynamic/star/getattr use is invisible). Python via stdlib ast; JS/TS, Go, Java need `[treesitter]` |
 | `graphlore_routes` | **Framework route → handler table** — which URL patterns hit which code, joined back to graph nodes (`GET /items/{id} -> read_item (app.py:5)`). FastAPI/Flask/Sanic/Quart/Litestar/Django, Express/NestJS (import-gated, so `axios.get('/x')` never registers), gin/chi/net-http (incl. Go 1.22 `"GET /x"` patterns, gin 3-arg `Handle`, chi nesting), Spring (method arrays split per verb); a lower bound (dynamic/chained registration is invisible). Python via stdlib ast; the rest need `[treesitter]` |
 
@@ -510,10 +515,11 @@ graphlore/
 │   ├── server.py           #   MCP server: 32 tools, prompts, resources, transports
 │   ├── graph.py            #   graph.json loading, node/edge accessors, BFS, adjacency
 │   ├── spans.py            #   span engine: ast + tree-sitter, chunk→node join, structural diff
+│   ├── imports.py          #   import statements read from source: what they can mean, when they run
 │   ├── scope.py            #   analysis scope: vendored / external / test filtering
 │   ├── apis.py             #   symbol-level external-API extraction
 │   ├── routes.py           #   framework route → handler extraction
-│   ├── review.py           #   unreferenced code, same-named symbols, layer rules
+│   ├── review.py           #   unreferenced code, same-named symbols, identical bodies, layer rules
 │   └── config.py           #   project dir / out dir
 ├── tests/                  # pytest suite (in-process MCP client + unit tests)
 ├── benchmarks/             # multilang benchmark + committed results JSON

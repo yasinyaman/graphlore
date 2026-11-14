@@ -3826,8 +3826,12 @@ def test_cycles_reports_import_cycles_between_modules_first(tmp_path, monkeypatc
     # one concrete loop, closed on its start
     assert first["path"][0] == first["path"][-1] and len(first["path"]) == 4
     assert data["implicit_package_imports_ignored"] == 1
+    # no source on disk: the imports cannot be read, so they count as module-level
+    assert first["import_kind"] == "runtime" and set(first["hops"]) == {"unclassified"}
+    assert data["runtime_import_cycle_count"] == 1
     text = server.graphlore_cycles()
-    assert text.index("Import cycles between modules: 1") < text.index("Call cycles")
+    assert text.index("Runtime import cycles between modules") < text.index("Call cycles")
+    assert "assumed to run at import time" in text
     assert "Call cycles (functions calling each other): none." in text
 
     only_calls = json.loads(server.graphlore_cycles(kind="calls", as_json=True))
@@ -4058,7 +4062,7 @@ def test_layers_reports_violations_grouped_by_layer(tmp_path, monkeypatch):
     core = next(entry for entry in data["layers"] if entry["layer"] == "pkg/core")
     assert core["violations"] == [{
         "from_file": "pkg/core/util.py", "to_file": "pkg/api/routes.py",
-        "to_layer": "pkg/api", "site": "pkg/core/util.py:L1",
+        "to_layer": "pkg/api", "site": "pkg/core/util.py:L1", "import": "unclassified",
     }]
     api = next(entry for entry in data["layers"] if entry["layer"] == "pkg/api")
     assert api["violations"] == [] and api["imports_checked"] == 1  # api -> core: allowed
@@ -4319,3 +4323,499 @@ def test_review_prompt_names_the_review_tools():
         "graphlore_validate", "graphlore_cycles", "graphlore_layers",
         "graphlore_unreferenced", "graphlore_same_names", "graphlore_surprises")]
     assert order == sorted(order)
+
+
+# --- import statements read from the source ----------------------------------
+
+
+def _write(root, rel, text):
+    path = root / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def test_python_imports_are_classified_by_when_they_run():
+    src = (
+        "from __future__ import annotations\n"      # 1
+        "import os\n"                                # 2
+        "from typing import TYPE_CHECKING\n"         # 3
+        "import typing as t\n"                       # 4
+        "if TYPE_CHECKING:\n"
+        "    from pkg.a import A\n"                  # 6
+        "else:\n"
+        "    from pkg.b import B\n"                  # 8
+        "if t.TYPE_CHECKING:\n"
+        "    import pkg.c\n"                         # 10
+        "try:\n"
+        "    import fast\n"                          # 12
+        "except ImportError:\n"
+        "    fast = None\n"
+        "class K:\n"
+        "    from . import sibling\n"                # 16
+        "    def m(self):\n"
+        "        from .late import go\n"             # 18
+        "        return go\n"
+    )
+    got = {i.line: (i.kind, i.level, i.module, i.names) for i in server._python_imports(
+        src.encode())}
+    assert got[2] == ("module-level", 0, ("os",), ())
+    assert got[6] == ("type-checking", 0, ("pkg", "a"), ("A",))
+    assert got[8][0] == "module-level"       # the else branch runs
+    assert got[10] == ("type-checking", 0, ("pkg", "c"), ())
+    assert got[12][0] == "module-level"      # try/except runs at import time
+    assert got[16] == ("module-level", 1, (), ("sibling",))  # so does a class body
+    assert got[18] == ("deferred", 1, ("late",), ("go",))
+    assert server._python_imports(b"def broken(:\n") is None
+
+
+def _yaml_project(tmp_path):
+    """A first-party module named like an installed package, three packages deep."""
+    for pkg in ("pkg", "pkg/adapters", "pkg/adapters/outbound", "pkg/adapters/inbound"):
+        _write(tmp_path, f"{pkg}/__init__.py", "")
+    _write(tmp_path, "pkg/adapters/outbound/yaml.py", "def dump(x):\n    return str(x)\n")
+    _write(tmp_path, "pkg/adapters/outbound/writer.py",
+           "from . import yaml\nfrom .yaml import dump\n")
+    _write(tmp_path, "pkg/adapters/inbound/http.py",
+           "import yaml\nfrom yaml import safe_load\n"
+           "from pkg.adapters.outbound.writer import dump\n")
+    _write(tmp_path, "scripts/yaml.py", "X = 1\n")
+    _write(tmp_path, "scripts/run.py", "import yaml\n")
+    _write(tmp_path, "src/lib/tool.py", "import app.util\n")
+    _write(tmp_path, "src/app/__init__.py", "")
+    _write(tmp_path, "src/app/util.py", "Y = 2\n")
+    _write(tmp_path, "web/main.ts", "import type { A } from './types'\nimport b from './b'\n")
+
+
+def test_import_checker_rejects_a_package_import_linked_to_a_namesake_module(
+        tmp_path, monkeypatch):
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    _yaml_project(tmp_path)
+    check = server.ImportChecker()
+    edge = {"relation": "imports_from", "source_location": "L1"}
+    deep = "pkg/adapters/outbound/yaml.py"
+    # `import yaml` in another package is PyYAML: a module inside a package is
+    # reached as pkg.adapters.outbound.yaml, never as bare `yaml`
+    assert check.kind("pkg/adapters/inbound/http.py", deep, edge) is None
+    assert check.rejected == [{
+        "from_file": "pkg/adapters/inbound/http.py", "to_file": deep,
+        "site": "pkg/adapters/inbound/http.py:L1",
+    }]
+    # the relative import next to it really is that module
+    assert check.kind("pkg/adapters/outbound/writer.py", deep, edge) == "module-level"
+    # a dotted absolute import resolves from the project root
+    assert check.kind("pkg/adapters/inbound/http.py", "pkg/adapters/outbound/writer.py",
+                      edge) == "module-level"
+    # a script's own directory is on sys.path: here `import yaml` IS the neighbour
+    assert check.kind("scripts/run.py", "scripts/yaml.py", edge) == "module-level"
+    # a conventional source root
+    assert check.kind("src/lib/tool.py", "src/app/util.py", edge) == "module-level"
+    assert check.kind("src/lib/tool.py", "src/app/__init__.py", edge) == "module-level"
+    # a Python import can never mean a non-Python file (`import mcp` -> mcp.json)
+    assert check.kind("scripts/run.py", "yaml.json", edge) is None
+
+
+def test_import_checker_keeps_what_it_cannot_read(tmp_path, monkeypatch):
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    _yaml_project(tmp_path)
+    check = server.ImportChecker()
+    assert check.kind("gone.py", "pkg/x.py", {"relation": "imports"}) == "unclassified"
+    assert check.kind("web/main.ts", "web/b.ts",
+                      {"relation": "imports", "source_location": "L2"}) == "unclassified"
+    assert check.unclassified == 2 and check.rejected == []
+    assert check.kind("web/main.ts", "web/types.ts",
+                      {"relation": "imports", "source_location": "L1"}) == "type-checking"
+    assert check.kind("web/main.ts", "web/lazy.ts",
+                      {"relation": "dynamic_import"}) == "deferred"
+
+
+def _cycle_project(tmp_path):
+    """a <-> b at module level; c <-> d through a function; e <-> f through
+    TYPE_CHECKING; and http.py importing PyYAML next to a first-party yaml.py."""
+    files = {
+        "pkg/__init__.py": "",
+        "pkg/a.py": "from pkg import b\n",
+        "pkg/b.py": "from pkg.a import thing\n",
+        "pkg/c.py": "def run():\n    from pkg import d\n    return d\n",
+        "pkg/d.py": "from pkg.c import run\n",
+        "pkg/e.py": "from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n"
+                    "    from pkg.f import F\n",
+        "pkg/f.py": "from pkg.e import E\n",
+        "pkg/out/__init__.py": "",
+        "pkg/out/yaml.py": "from pkg.http import load\n",
+        "pkg/http.py": "import yaml\n\ndef load():\n    return yaml\n",
+    }
+    for rel, text in files.items():
+        _write(tmp_path, rel, text)
+    names = ["a", "b", "c", "d", "e", "f", "http"]
+    nodes = [{"id": n, "label": f"{n}.py", "source_file": f"pkg/{n}.py"} for n in names]
+    nodes.append({"id": "yaml", "label": "yaml.py", "source_file": "pkg/out/yaml.py"})
+    pairs = [("a", "b"), ("b", "a"), ("c", "d"), ("d", "c"), ("e", "f"), ("f", "e"),
+             ("http", "yaml"), ("yaml", "http")]
+    _write_graph(tmp_path, {"nodes": nodes, "links": [
+        {"source": s, "target": t, "relation": "imports_from", "source_location": "L1"}
+        for s, t in pairs
+    ]})
+
+
+def test_cycles_separates_runtime_deferred_and_type_only_import_cycles(tmp_path, monkeypatch):
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    _cycle_project(tmp_path)
+    data = json.loads(server.graphlore_cycles(kind="imports", as_json=True))
+    by_tier = {c["import_kind"]: c for c in data["cycles"]}
+    assert [c["import_kind"] for c in data["cycles"]] == ["runtime", "deferred", "type-only"]
+    assert set(by_tier["runtime"]["nodes"]) == {"pkg/a.py", "pkg/b.py"}
+    assert by_tier["runtime"]["hops"] == ["module-level", "module-level"]
+    # the loop is led by the import the tier depends on
+    assert by_tier["deferred"]["path"] == ["pkg/c.py", "pkg/d.py", "pkg/c.py"]
+    assert by_tier["deferred"]["hops"] == ["deferred", "module-level"]
+    assert by_tier["type-only"]["path"] == ["pkg/e.py", "pkg/f.py", "pkg/e.py"]
+    assert by_tier["type-only"]["hops"] == ["type-checking", "module-level"]
+    assert (data["runtime_import_cycle_count"], data["deferred_import_cycle_count"],
+            data["type_only_import_cycle_count"]) == (1, 1, 1)
+    # http.py's `import yaml` is PyYAML: no http <-> yaml cycle, and it says why
+    assert data["import_edges_rejected"] == 1
+    assert data["rejected_imports"][0]["to_file"] == "pkg/out/yaml.py"
+    text = server.graphlore_cycles(kind="imports")
+    assert "pkg/c.py →[in a function] pkg/d.py → pkg/c.py" in text
+    assert "pkg/e.py →[TYPE_CHECKING] pkg/f.py → pkg/e.py" in text
+    assert "1 import edge(s) ignored" in text and "assumed" not in text
+
+
+def test_cycles_says_no_runtime_import_cycle_in_one_line(tmp_path, monkeypatch):
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    _cycle_project(tmp_path)
+    (tmp_path / "pkg" / "b.py").write_text("X = 1\n", encoding="utf-8")  # break a <-> b
+    lines = server.graphlore_cycles(kind="imports").splitlines()
+    assert lines[0] == "Runtime import cycles between modules: none."
+    assert lines[1].startswith("Deferred import cycles") and lines[1].endswith(": 1")
+
+
+def test_layers_ignores_a_namesake_import_and_says_when_a_violation_runs(
+        tmp_path, monkeypatch):
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    _cycle_project(tmp_path)
+    rules = {"pkg/http.py": [], "pkg/out": [], "pkg/e.py": [], "pkg/f.py": [],
+             "pkg/c.py": [], "pkg/d.py": []}
+    data = json.loads(server.graphlore_layers(rules=rules, as_json=True))
+    violations = {
+        (v["from_file"], v["to_file"]): v["import"]
+        for entry in data["layers"] for v in entry["violations"]
+    }
+    assert ("pkg/http.py", "pkg/out/yaml.py") not in violations  # PyYAML, not the module
+    assert data["rejected_import_count"] == 1
+    assert violations[("pkg/out/yaml.py", "pkg/http.py")] == "module-level"
+    assert violations[("pkg/e.py", "pkg/f.py")] == "type-checking"
+    assert violations[("pkg/c.py", "pkg/d.py")] == "deferred"
+    text = server.graphlore_layers(rules=rules)
+    assert "imports pkg/f.py  [under TYPE_CHECKING]" in text
+    assert "imports pkg/d.py  [inside a function]" in text
+    assert "1 import edge(s) not checked" in text
+
+
+# --- unreferenced: namesakes and hook bases -----------------------------------
+
+
+def test_unreferenced_lists_a_dead_class_whose_name_another_class_has(tmp_path, monkeypatch):
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    _write(tmp_path, "pkg/a.py",
+           "class ExportRequest:\n    name: str = ''\n\n\n"
+           "def export(req: ExportRequest):\n    return ExportRequest()\n")
+    _write(tmp_path, "pkg/b.py", "class ExportRequest:\n    path: str = ''\n")
+    _write(tmp_path, "pkg/c.py", "class Lonely:\n    pass\n")
+    _write(tmp_path, "docs/api.md", "Lonely is described here.\n")
+
+    def cls(nid, label, file):
+        return {"id": nid, "label": label, "source_file": file, "source_location": "L1",
+                "file_type": "code", "_callable_class": True}
+
+    _write_graph(tmp_path, {
+        "nodes": [
+            {"id": "fa", "label": "a.py", "source_file": "pkg/a.py", "file_type": "code"},
+            {"id": "fb", "label": "b.py", "source_file": "pkg/b.py", "file_type": "code"},
+            {"id": "fc", "label": "c.py", "source_file": "pkg/c.py", "file_type": "code"},
+            cls("ea", "ExportRequest", "pkg/a.py"), cls("eb", "ExportRequest", "pkg/b.py"),
+            cls("lo", "Lonely", "pkg/c.py"),
+        ],
+        "links": [
+            {"source": "fa", "target": "ea", "relation": "contains"},
+            {"source": "fb", "target": "eb", "relation": "contains"},
+            {"source": "fc", "target": "lo", "relation": "contains"},
+        ],
+    })
+    data = json.loads(server.graphlore_unreferenced(as_json=True))
+    # the unused one is listed although its name occurs four times in a.py: those
+    # are the OTHER class and its uses. The used one is not listed.
+    assert data["unreferenced"] == [{
+        "node": "ExportRequest", "kind": "class", "file": "pkg/b.py", "line": 1,
+        "mentions": 0, "also_defined": ["pkg/a.py:1"],
+    }]
+    assert data["mentioned_elsewhere"] == 2  # a.py's class (its own file), and Lonely
+    text = server.graphlore_unreferenced()
+    assert "ExportRequest [class]  pkg/b.py:1  mentions: 0" in text  # location once
+    assert "name shared with pkg/a.py:1" in text
+
+
+def test_unreferenced_hook_note_needs_a_base_that_can_call_the_method(tmp_path, monkeypatch):
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    _write(tmp_path, "m.py",
+           "from abc import ABC\n"                       # 1
+           "\n"
+           "\n"
+           "class BaseParser(ABC):\n"                    # 4
+           "    def old_parse(self):\n"                  # 5
+           "        return 1\n"
+           "\n"
+           "    def feed(self):\n"                       # 8
+           "        return self.on_token()\n"
+           "\n"
+           "\n"
+           "class Json(BaseParser):\n"                   # 12
+           "    def on_token(self):\n"                   # 13
+           "        return 2\n"
+           "\n"
+           "    def extra(self):\n"                      # 16
+           "        return 3\n"
+           "\n"
+           "\n"
+           "class Boom(ValueError):\n"                   # 20
+           "    def detail(self):\n"                     # 21
+           "        return 4\n")
+
+    def fn(nid, label, line, **extra):
+        return {"id": nid, "label": label, "source_file": "m.py",
+                "source_location": f"L{line}", "file_type": "code", **extra}
+
+    _write_graph(tmp_path, {
+        "nodes": [
+            {"id": "f", "label": "m.py", "source_file": "m.py", "file_type": "code"},
+            fn("base", "BaseParser", 4, _callable_class=True),
+            fn("json", "Json", 12, _callable_class=True),
+            fn("boom", "Boom", 20, _callable_class=True),
+            fn("old", ".old_parse()", 5), fn("feed", ".feed()", 8),
+            fn("tok", ".on_token()", 13), fn("extra", ".extra()", 16),
+            fn("detail", ".detail()", 21),
+            {"id": "abc", "label": "ABC", "source_file": ""},
+        ],
+        "links": [
+            *({"source": "f", "target": c, "relation": "contains"}
+              for c in ("base", "json", "boom")),
+            {"source": "base", "target": "old", "relation": "method"},
+            {"source": "base", "target": "feed", "relation": "method"},
+            {"source": "json", "target": "tok", "relation": "method"},
+            {"source": "json", "target": "extra", "relation": "method"},
+            {"source": "boom", "target": "detail", "relation": "method"},
+            {"source": "base", "target": "abc", "relation": "inherits"},
+            {"source": "json", "target": "base", "relation": "inherits"},
+            {"source": "f", "target": "feed", "relation": "calls"},
+        ],
+    })
+    data = json.loads(server.graphlore_unreferenced(include_mentioned=True, as_json=True))
+    notes = {r["node"]: r.get("note", "") for r in data["unreferenced"]}
+    # its only base is ABC: nothing above BaseParser can call old_parse()
+    assert notes[".old_parse()"] == ""
+    # BaseParser.feed() calls self.on_token(): the subclass method is a hook
+    assert "subclass of BaseParser: may override a hook" in notes[".on_token()"]
+    # same subclass, but the base never mentions extra(); and exceptions call nothing
+    assert notes[".extra()"] == "" and notes[".detail()"] == ""
+    assert server._class_bases("class X(A, b.C[T], metaclass=M):") == ["A", "C"]
+    assert server._class_bases("export class H extends Base implements I, J {") == [
+        "Base", "I", "J"]
+    assert server._class_bases("class Repo : IRepo<T>(), Other") == ["IRepo", "Other"]
+    assert server._class_bases("class Plain():") == []
+
+
+# --- same names: nesting from the source, one language at a time --------------
+
+
+def test_same_names_skips_closures_and_other_languages(tmp_path, monkeypatch):
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    _write(tmp_path, "pkg/a.py", "def withheld(x):\n    return x\n\n\nY = withheld(1)\n")
+    _write(tmp_path, "pkg/routes.py",
+           "def make_app():\n    def withheld(x):\n        return x\n    return withheld\n")
+    _write(tmp_path, "pkg/b.py", "def withheld(x):\n    return x\n")
+    _write(tmp_path, "web/app.js", "function withheld(x) { return x; }\n")
+
+    def fn(nid, file, line):
+        return {"id": nid, "label": "withheld()", "source_file": file,
+                "source_location": f"L{line}", "file_type": "code"}
+
+    files = {"fa": "pkg/a.py", "fr": "pkg/routes.py", "fb": "pkg/b.py", "fj": "web/app.js"}
+    _write_graph(tmp_path, {
+        "nodes": [
+            *({"id": k, "label": v.rsplit("/", 1)[-1], "source_file": v, "file_type": "code"}
+              for k, v in files.items()),
+            fn("wa", "pkg/a.py", 1), fn("wr", "pkg/routes.py", 2),
+            fn("wb", "pkg/b.py", 1), fn("wj", "web/app.js", 1),
+        ],
+        # the graph hangs the closure directly on its file: only the source knows
+        "links": [{"source": f, "target": t, "relation": "contains"}
+                  for f, t in (("fa", "wa"), ("fr", "wr"), ("fb", "wb"), ("fj", "wj"))],
+    })
+    data = json.loads(server.graphlore_same_names(as_json=True))
+    assert len(data["names"]) == 1
+    group = data["names"][0]
+    assert group["name"] == "withheld" and group["language"] == "python"
+    used = {d["file"]: d["used_in_own_file"] for d in group["definitions"]}
+    assert used == {"pkg/a.py": True, "pkg/b.py": False}  # neither the closure nor the JS
+    assert "used in its own file: no" in server.graphlore_same_names()
+
+    mixed = json.loads(server.graphlore_same_names(across_languages=True, as_json=True))
+    assert {d["file"] for d in mixed["names"][0]["definitions"]} == {
+        "pkg/a.py", "pkg/b.py", "web/app.js"}
+
+
+# --- duplication scan: the exact tier ----------------------------------------
+
+
+def _quote_project(tmp_path):
+    body = "    return '\"' + identifier.replace('\"', '\"\"') + '\"'\n"
+    _write(tmp_path, "pkg/a.py", "def _quote(identifier):\n" + body)
+    _write(tmp_path, "pkg/b.py",
+           "def _quote(identifier):\n    \"\"\"Quote it.\"\"\"\n    # same thing\n" + body)
+    _write(tmp_path, "pkg/c.py",
+           "class Sql:\n    def quoted(self, identifier):\n"
+           + body.replace("    return", "        return   ")
+           + "\n    def name(self):\n        return self._name\n")
+    _write(tmp_path, "pkg/d.py",
+           "class Other:\n    def name(self):\n        return self._name\n\n\n"
+           "def different(identifier):\n    return identifier.replace('a', 'b').strip() + '!'\n")
+    _write(tmp_path, "tests/test_q.py", "def helper(identifier):\n" + body)
+
+    def fn(nid, label, file, line):
+        return {"id": nid, "label": label, "source_file": file,
+                "source_location": f"L{line}", "file_type": "code"}
+
+    _write_graph(tmp_path, {
+        "nodes": [
+            fn("qa", "_quote()", "pkg/a.py", 1), fn("qb", "_quote()", "pkg/b.py", 1),
+            fn("qc", ".quoted()", "pkg/c.py", 2), fn("nc", ".name()", "pkg/c.py", 5),
+            fn("nd", ".name()", "pkg/d.py", 2), fn("dd", "different()", "pkg/d.py", 6),
+            fn("qt", "helper()", "tests/test_q.py", 1),
+        ],
+        "links": [],
+    })
+
+
+def test_duplication_scan_reports_identical_bodies_without_a_model(tmp_path, monkeypatch):
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    monkeypatch.setattr(server, "_semble_index", lambda: None)
+    _quote_project(tmp_path)
+    data = json.loads(server.graphlore_duplication_scan(as_json=True))
+    # one group: docstring, comment, layout and the function's own name aside.
+    # The two trivial `return self._name` bodies are not a finding.
+    assert data["identical_group_count"] == 1
+    group = data["identical_bodies"][0]
+    assert group["copies"] == 3 and group["lines"] == 1
+    assert [d["site"] for d in group["definitions"]] == [
+        "pkg/a.py:1", "pkg/b.py:1", "pkg/c.py:2"]
+    assert data["semantic_tier"] == "unavailable" and data["pairs"] == []
+    text = server.graphlore_duplication_scan()
+    # an ambiguous label is not given a location the row already prints
+    assert "[3 copies, 1 line(s)] _quote() (pkg/a.py:1), _quote() (pkg/b.py:1)" in text
+    assert "Semantic tier not run" in text and "pip install" in text
+
+    with_tests = json.loads(server.graphlore_duplication_scan(include_tests=True, as_json=True))
+    assert with_tests["identical_bodies"][0]["copies"] == 4
+    assert server._body_fingerprints("pkg/d.py").keys() == {6}  # only the non-trivial body
+
+
+def test_duplication_scan_drops_low_scores_on_semble_by_default(tmp_path, monkeypatch):
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    _write_graph(tmp_path, {
+        "nodes": [
+            {"id": "A", "label": "Settings", "source_file": "a.py", "source_location": "L1"},
+            {"id": "B", "label": "Settings", "source_file": "b.py", "source_location": "L1"},
+            {"id": "C", "label": "C", "source_file": "c.py", "source_location": "L1"},
+        ],
+        "edges": [],
+    })
+
+    class _Index:
+        def search(self, query, top_k=3):
+            return [_ScoredHit("a.py", 1)] if query == "Settings" else []
+
+        def find_related(self, hit, top_k=8):
+            return [_ScoredHit("b.py", 1, score=0.92), _ScoredHit("c.py", 1, score=0.55)]
+
+    monkeypatch.setattr(server, "_semble_index", lambda: _Index())
+    data = json.loads(server.graphlore_duplication_scan(as_json=True))
+    # both namesakes seed a scan (the stub answers either with the same chunk)
+    assert data["score_floor"] == 0.7 and data["skipped"] == {"below_min_score": 2}
+    # the location is printed once: the label carries none of its own
+    assert data["pairs"][0]["a"] == "Settings" and data["pairs"][0]["a_site"] == "a.py:1"
+    text = server.graphlore_duplication_scan()
+    assert "0.92  Settings (a.py:1)  ~  Settings (b.py:1)" in text
+    assert "usually code with the same role" in text and "min_score=0" in text
+    everything = json.loads(server.graphlore_duplication_scan(min_score=0, as_json=True))
+    assert [p["score"] for p in everything["pairs"]] == [0.92, 0.55, 0.55]
+    # a custom backend's scale is unknown: no default floor there
+    monkeypatch.setenv("GRAPHLORE_SEMANTIC_BACKEND", "custom.mod:Factory")
+    monkeypatch.setattr(server, "_load_custom_semantic_index", lambda spec: _Index())
+    custom = json.loads(server.graphlore_duplication_scan(as_json=True))
+    assert custom["score_floor"] == 0.0 and len(custom["pairs"]) == 3
+
+
+def test_display_labels_name_carries_no_location(tmp_path, monkeypatch):
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    _write(tmp_path, "a.py", "def run():\n    return 1\n\n\nclass K:\n"
+                             "    def go(self):\n        return 2\n")
+    nodes = [
+        {"id": "r1", "label": "run()", "source_file": "a.py", "source_location": "L1"},
+        {"id": "r2", "label": "run()", "source_file": "b.py", "source_location": "L9"},
+        {"id": "g1", "label": ".go()", "source_file": "a.py", "source_location": "L6"},
+        {"id": "g2", "label": ".go()", "source_file": "b.py", "source_location": "L3"},
+        {"id": "u", "label": "unique()", "source_file": "a.py", "source_location": "L1"},
+    ]
+    labels = server._DisplayLabels(nodes)
+    # a top-level function's qualified name is its label: get() falls back to the
+    # location, keeping the call marker; name() leaves it bare
+    assert labels.get("r1") == "run() (a.py:L1)" and labels.name("r1") == "run()"
+    assert labels.get("g1") == "K.go()" and labels.name("g1") == "K.go()"
+    assert labels.name("g2") == ".go()" and labels.name("u") == "unique()"
+    assert labels.name("missing", "fallback") == "fallback"
+
+
+# --- surprises: leaf scripts and test support --------------------------------
+
+
+def test_surprises_treat_a_leaf_script_and_test_support_as_expected():
+    nodes = [
+        _fn("core", "open()", "pkg/core/db.py"), _fn("close", "close()", "pkg/core/db.py"),
+        _fn("api", "serve()", "pkg/api/app.py"),
+        _fn("bench", "bench()", "bench/run.py"), _fn("demo", "demo()", "demo/show.py"),
+        # docker/ is depended upon (the package reads its config module), but
+        # nothing depends on the fixture script itself
+        _fn("cfg", "settings()", "docker/config.py"),
+        _fn("smoke", "make_catalog()", "docker/smoke/make_catalog.py"),
+        _fn("table", "table()", "docker/smoke/make_catalog.py"),
+        _fn("smoke_file", "make_catalog.py", "docker/smoke/make_catalog.py"),
+        _fn("lookup", "lookup()", "pkg/core/lookup.py"),
+        _fn("lookup_file", "lookup.py", "pkg/core/lookup.py"),
+        _fn("t", "test_db()", "tests/unit/test_db.py"),
+        _fn("fake", "FakeDb", "tests/fakes/db.py"),
+        _fn("leak", "prod_helper()", "pkg/core/leak.py"),
+    ]
+    edges = [
+        {"source": "bench", "target": "core", "relation": "calls"},
+        {"source": "demo", "target": "close", "relation": "calls"},
+        {"source": "api", "target": "cfg", "relation": "calls"},
+        {"source": "smoke", "target": "core", "relation": "calls"},
+        {"source": "t", "target": "fake", "relation": "calls"},
+        {"source": "leak", "target": "fake", "relation": "calls"},
+        # a resolver guess from the package into the script: lookup.py imports
+        # nothing from docker/, so this must not make the script look depended upon
+        {"source": "lookup_file", "target": "core", "relation": "imports"},
+        {"source": "lookup", "target": "table", "relation": "calls", "confidence": "INFERRED"},
+    ]
+    items, diag = graph_mod._computed_surprises(nodes, edges)
+    by_from = {i["from"]: i for i in items}
+    assert diag["skipped"]["inferred_unimported"] == 1
+    smoke = by_from["make_catalog()"]
+    assert any("docker/smoke/make_catalog.py only consumes pkg/" in w for w in smoke["why"])
+    assert not any("top-level" in w for w in smoke["why"])
+    # test -> shared fakes in another test directory: routine, like test -> source
+    assert any("from test code" in w for w in by_from["test_db()"]["why"])
+    assert by_from["test_db()"]["strength"] == "weak"
+    # production code reaching into test code is NOT routine: it keeps its bonuses
+    leak = by_from["prod_helper()"]
+    assert any("top-level" in w for w in leak["why"]) and leak["score"] > smoke["score"]

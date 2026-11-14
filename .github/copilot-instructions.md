@@ -11,7 +11,7 @@ graphlore is a Python MCP server (MCP Python SDK v2: `mcp.server.mcpserver.MCPSe
 
 ## Layout
 
-`src/graphlore/` is layered `config.py` → `graph.py` → `spans.py` → `scope.py` → `apis.py` / `routes.py` → `review.py` → `server.py`. `server.py` holds the whole MCP surface (32 tools, resources, prompts, `main()`). All tests are in `tests/test_tools.py` and call tool functions directly.
+`src/graphlore/` is layered `config.py` → `graph.py` → `spans.py` → `imports.py` → `scope.py` → `apis.py` / `routes.py` → `review.py` → `server.py`. `server.py` holds the whole MCP surface (32 tools, resources, prompts, `main()`). All tests are in `tests/test_tools.py` and call tool functions directly.
 
 ## Rules
 
@@ -25,6 +25,8 @@ graphlore is a Python MCP server (MCP Python SDK v2: `mcp.server.mcpserver.MCPSe
 - graph.json analysis tools must work with no `graphify` binary and no optional extras.
 - Set `read_only_hint` / `destructive_hint` on every tool to match what it does.
 - A tool that ranks or audits the graph takes `scope: str = ""` and goes through `_scope_view`; it reports `view.payload()` and wraps its text in `_with_note`, so what the scope left out (vendored/minified files, external nodes) is always stated.
+- A tool that lifts import edges to file level passes `ImportChecker().kind` (one instance per call) and reports `checker.rejected`; graphify resolves imports by name and gets same-named modules wrong.
+- A row that prints its own `file:line` uses `labels.name(id)`, not `labels.get(id)`, so the location is shown once.
 - `config.PROJECT_DIR` can change at runtime (`graphlore_project`); never cache a value derived from it without keying on it.
 
 ## When a tool is added or changed
