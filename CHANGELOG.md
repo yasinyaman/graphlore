@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-14
+
+An agent's-eye review: results that say how they were reached, what they
+left out and whether their files changed; real MCP structured results; an
+offline switch; and a smaller default tool surface.
+
 ### Added
 - Tool results carry MCP `structuredContent` and `isError`. The payload a tool
   builds for `as_json=True` is now sent as `structuredContent` on every call,
