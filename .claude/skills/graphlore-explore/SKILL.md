@@ -200,6 +200,13 @@ no sampling required.
 
 ## After code changes
 
+Answers say when the files they rest on changed since the build:
+`file_changed_since_build` on each `graphlore_fetch` entry (and `span_mismatch`
+when the graph's line now lands in another symbol: the code shown is not the
+node you asked for), and a `build_drift.changed_files` list on
+`graphlore_locate`, `graphlore_impact` and `graphlore_subgraph`. Treat edges into
+those files as leads and read the current code before relying on them.
+
 Re-sync before trusting the graph again: `graphlore_freshness()` →
 `graphlore_build(".", update=True)`. After deleting or renaming source files,
 `graphlore_prune()` (preview with `dry_run=True`) drops the phantom nodes —

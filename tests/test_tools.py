@@ -5812,3 +5812,114 @@ def test_edge_rows_carry_inferred_and_resolved_flags(tmp_path, monkeypatch):
     flagged = {(e["from"], e["to"]): e for e in sub["edges"]}
     assert flagged[("other()", "tool()")]["confidence"] == "INFERRED"
     assert "confidence" not in flagged[("tool()", "_helper()")]
+
+
+# --- Per-file drift: what changed since the graph was built -----------------------
+
+_A_PY = "def alpha():\n    return 1\n\n\ndef beta():\n    return 2\n"
+
+
+def _drift_repo(tmp_path, monkeypatch, project_sub=""):
+    """A git repo whose graph records the commit it was built from."""
+    import shutil as _sh
+    import subprocess
+
+    import pytest
+    if _sh.which("git") is None:
+        pytest.skip("git not available")
+    git = _git_init(tmp_path)
+    proj = tmp_path / project_sub if project_sub else tmp_path
+    _write(proj, "pkg/a.py", _A_PY)
+    _write(proj, "pkg/b.py", "from pkg.a import alpha\n\n\ndef gamma():\n    return alpha()\n")
+    _write(proj, "pkg/c.py", "X = 1\n")
+    git("add", ".")
+    git("commit", "-m", "init")
+    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=tmp_path, capture_output=True,
+                          text=True, check=True).stdout.strip()
+    _write_graph(proj, {
+        "built_at_commit": head,
+        "nodes": [
+            {"id": "alpha", "label": "alpha()", "source_file": "pkg/a.py", "line": 1},
+            {"id": "beta", "label": "beta()", "source_file": "pkg/a.py", "line": 5},
+            {"id": "gamma", "label": "gamma()", "source_file": "pkg/b.py", "line": 4},
+            {"id": "x", "label": "X", "source_file": "pkg/c.py", "line": 1},
+        ],
+        "edges": [{"source": "gamma", "target": "alpha", "relation": "calls"}],
+    })
+    server._GRAPH_CACHE.clear()
+    server._SPAN_CACHE.clear()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", proj)
+    monkeypatch.setenv("GRAPHLORE_RESOLVE", "0")
+    return git, proj
+
+
+def test_build_drift_unknown_without_a_build_commit(project, monkeypatch):
+    def no_git(*a, **kw):
+        raise AssertionError("no git call expected")
+
+    monkeypatch.setattr(server, "_git", no_git)
+    drift = server._build_drift()
+    assert drift.known is False and "no build commit" in drift.reason
+    item = json.loads(server.graphlore_fetch(["Client"], as_json=True))
+    assert item["build_drift"]["known"] is False
+
+
+def test_build_drift_sees_committed_uncommitted_deleted_renamed_untracked(tmp_path, monkeypatch):
+    git, proj = _drift_repo(tmp_path, monkeypatch)
+    assert server._build_drift().changed == frozenset()
+    _write(proj, "pkg/a.py", _A_PY + "\n# edited\n")          # unstaged edit
+    git("mv", "pkg/b.py", "pkg/b2.py")                        # staged rename
+    git("commit", "-m", "rename")                             # ... committed
+    (proj / "pkg/c.py").unlink()                              # deletion
+    _write(proj, "pkg/new.py", "Y = 2\n")                     # untracked
+    drift = server._build_drift()
+    assert drift.known is True
+    assert drift.changed == frozenset(
+        {"pkg/a.py", "pkg/b.py", "pkg/b2.py", "pkg/c.py", "pkg/new.py"})
+
+
+def test_build_drift_unreachable_commit(tmp_path, monkeypatch):
+    _git, proj = _drift_repo(tmp_path, monkeypatch)
+    g = json.loads((proj / "graphify-out/graph.json").read_text())
+    g["built_at_commit"] = "0123456789abcdef0123456789abcdef01234567"
+    (proj / "graphify-out/graph.json").write_text(json.dumps(g))
+    server._GRAPH_CACHE.clear()
+    drift = server._build_drift()
+    assert drift.known is False and "not in this clone" in drift.reason
+
+
+def test_build_drift_paths_are_relative_to_a_project_in_a_subdirectory(tmp_path, monkeypatch):
+    _git, proj = _drift_repo(tmp_path, monkeypatch, project_sub="svc")
+    _write(proj, "pkg/a.py", _A_PY + "# edited\n")
+    assert server._build_drift().changed == frozenset({"pkg/a.py"})
+
+
+def test_fetch_flags_a_file_changed_since_the_build(tmp_path, monkeypatch):
+    _git, proj = _drift_repo(tmp_path, monkeypatch)
+    data = json.loads(server.graphlore_fetch(["beta", "gamma"], as_json=True))
+    assert [f["file_changed_since_build"] for f in data["fetched"]] == [False, False]
+    assert data["build_drift"] == {"known": True, "since": data["build_drift"]["since"],
+                                   "changed_files": []}
+    # four lines inserted on top: the graph's line 5 now lands in alpha, not beta
+    _write(proj, "pkg/a.py", "def zeta():\n    return 0\n\n\n" + _A_PY)
+    server._SPAN_CACHE.clear()
+    data = json.loads(server.graphlore_fetch(["beta", "gamma"], as_json=True))
+    beta, gamma = data["fetched"]
+    assert beta["file_changed_since_build"] is True and beta["span_mismatch"] is True
+    assert gamma["file_changed_since_build"] is False and "span_mismatch" not in gamma
+    assert data["build_drift"]["changed_files"] == ["pkg/a.py"]
+    text = server.graphlore_fetch(["beta"])
+    assert "[file changed since the graph was built; the span at the graph's line is" in text
+
+
+def test_impact_and_subgraph_name_changed_files(tmp_path, monkeypatch):
+    _git, proj = _drift_repo(tmp_path, monkeypatch)
+    _write(proj, "pkg/b.py", "from pkg.a import alpha\n\n\ndef gamma():\n    return alpha() + 1\n")
+    imp = json.loads(server.graphlore_impact("alpha", as_json=True))
+    assert imp["build_drift"]["changed_files"] == ["pkg/b.py"]
+    assert "Changed since the graph was built" in server.graphlore_impact("alpha")
+    sub = json.loads(server.graphlore_subgraph("alpha", as_json=True))
+    assert sub["build_drift"]["changed_files"] == ["pkg/b.py"]
+    # a file outside the answer is not named
+    assert "pkg/b.py" not in json.dumps(
+        json.loads(server.graphlore_subgraph("X", as_json=True))["build_drift"])

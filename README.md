@@ -342,7 +342,16 @@ vendored files out of the graph itself, list them in `.graphifyignore` —
 The analysis tools surface staleness for you: `graphlore_overview` and
 `graphlore_subgraph` carry a lightweight `graph_age` ("built 3 commits ago"), and
 `graphlore_freshness` gives a full `recommended_action` (fresh / update / rebuild).
-To stop thinking about it, regenerate on every commit with a git **post-commit
+The answers themselves say which of *their* files changed: when the graph records
+the commit it was built from, `graphlore_fetch` flags each entry
+(`file_changed_since_build`, plus `span_mismatch` when the graph's line now lands
+in a different symbol), and `graphlore_locate`, `graphlore_impact` and
+`graphlore_subgraph` carry a `build_drift` block listing the changed files the
+answer rests on. The comparison is the build commit against the working tree
+(committed, staged and unstaged changes and untracked files, two git calls per
+answer); a file that was already dirty when the graph was built reads as
+changed. Without a recorded build commit or git, `build_drift.known` is false and
+says why. To stop thinking about it, regenerate on every commit with a git **post-commit
 hook** — the recommended first-class auto-update flow:
 
 ```sh

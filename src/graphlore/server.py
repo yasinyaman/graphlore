@@ -93,7 +93,7 @@ import subprocess
 import sys
 import warnings
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from contextvars import ContextVar
 from pathlib import Path
 from typing import Annotated, Any, NamedTuple, Protocol, TypeVar, overload
@@ -542,6 +542,90 @@ def _graph_age() -> str | None:
         n = int(ahead)
         return f"built {n} commit{'' if n == 1 else 's'} ago"
     return "built at a divergent commit"
+
+
+class _Drift(NamedTuple):
+    """Which project files differ from what the graph was built from.
+
+    ``known`` is False when that cannot be told (no recorded build commit, no git,
+    a build commit this clone lacks); ``reason`` then says why. ``changed`` holds
+    project-relative paths: committed, staged and unstaged changes since the build
+    commit, both sides of a rename, deletions, and untracked files.
+    """
+
+    known: bool
+    reason: str
+    commit: str
+    changed: frozenset[str]
+
+
+def _build_drift() -> _Drift:
+    """Files changed since the graph's build commit (two git calls, not cached: a
+    cached answer could say "unchanged" right after an edit).
+
+    graphify builds from the working tree, so a file already dirty at build time
+    reads as changed — the safe direction for a "check before you trust it" flag.
+    """
+    g = _load_graph()
+    built_at = g.get("built_at_commit") if isinstance(g, dict) else None
+    if not built_at or not isinstance(built_at, str):
+        return _Drift(False, "the graph records no build commit", "", frozenset())
+    diff = _git(["diff", "--relative", "--no-renames", "--name-only", "-z", built_at, "--"])
+    if diff is None:
+        reason = (
+            "not a git repository (or git unavailable)" if _git(["rev-parse", "HEAD"]) is None
+            else f"build commit {built_at[:10]} is not in this clone"
+        )
+        return _Drift(False, reason, built_at, frozenset())
+    untracked = _git(["ls-files", "--others", "--exclude-standard", "-z"]) or ""
+    out_dir = config.OUT_DIR_NAME.rstrip("/") + "/"
+    changed = frozenset(
+        p for p in (*diff.split("\0"), *untracked.split("\0"))
+        if p and not p.startswith(out_dir)
+    )
+    return _Drift(True, "", built_at, changed)
+
+
+def _file_changed(drift: _Drift, file: str) -> bool | None:
+    """True / False for a project-relative file, None when drift is unknown."""
+    if not drift.known:
+        return None
+    return _norm_relpath(file) in drift.changed
+
+
+def _drift_note(drift: _Drift, files: Iterable[str]) -> tuple[dict[str, Any], str]:
+    """(payload, text) on whether the files an answer rests on changed since the
+    build. The text is empty when nothing changed or drift is unknown (the payload
+    still says which)."""
+    if not drift.known:
+        return {"known": False, "reason": drift.reason}, ""
+    rel = sorted({_norm_relpath(f) for f in files if f})
+    changed = [f for f in rel if f in drift.changed]
+    payload: dict[str, Any] = {
+        "known": True, "since": drift.commit[:10], "changed_files": changed,
+    }
+    if not changed:
+        return payload, ""
+    shown = ", ".join(changed[:_LEFT_OUT_LISTED])
+    more = len(changed) - _LEFT_OUT_LISTED
+    text = (
+        f"Changed since the graph was built ({drift.commit[:10]}): {shown}"
+        + (f", +{more} more" if more > 0 else "")
+        + ". Edges and line numbers for these files may be out of date — "
+        "graphlore_freshness says whether to update."
+    )
+    return payload, text
+
+
+def _files_of(nodes: list[dict], ids: Iterable[str]) -> list[str]:
+    """Source files of the nodes with these ids (via the cached id index)."""
+    index = _exact_node_index(nodes)
+    files = []
+    for nid in ids:
+        n = index.get(nid)
+        if n is not None and _node_id(n) == nid and _node_file(n):
+            files.append(_node_file(n))
+    return files
 
 
 class SemanticIndex(Protocol):
@@ -2242,6 +2326,9 @@ def graphlore_subgraph(
     if not collected_edges:
         payload["note"] = _EMPTY_NOTE
         text.append(_EMPTY_NOTE)
+    payload["build_drift"], drift_text = _drift_note(_build_drift(), _files_of(nodes, visited))
+    if drift_text:
+        text.append("\n" + drift_text)
     if matched_text:
         text.append("\n" + matched_text)
     return _fmt(payload, as_json, _with_note("\n".join(text), view))
@@ -2321,6 +2408,9 @@ def graphlore_impact(
     Results are ordered by hop distance — within one distance production code
     before tests, most connected first — and capped at a token budget; a
     truncated result says how many rows were dropped and how many were tests.
+    ``complete`` is false whenever the budget or the hop limit cut the answer
+    (``beyond_hops`` counts the nodes one hop past ``hops``). ``build_drift``
+    lists the answer's files changed since the graph was built.
     The blast radius includes INFERRED edges (the resolver guessed the target):
     each row carries its edge's ``confidence``, and ``strict=True`` walks only
     extracted edges, for proof rather than leads. It also includes the calls
@@ -2540,6 +2630,10 @@ def graphlore_impact(
             f"\n(Incomplete: {beyond_hops} more node(s) lie one hop past hops={hops}; "
             "raise hops to include them.)"
         )
+    payload["build_drift"], drift_text = _drift_note(
+        _build_drift(), _files_of(nodes, [sid, *(h[0] for h in hits)]))
+    if drift_text:
+        rationale_note += "\n" + drift_text
     if matched_text:
         rationale_note += "\n" + matched_text
     verb = {
@@ -2951,6 +3045,12 @@ def graphlore_locate(
     }
     if seed_qual and seed_qual != _node_label(seed):
         seed_obj["qualname"] = seed_qual  # span-recovered FQN, e.g. Client._send_single_request
+    drift = _build_drift()
+    seed_obj["file_changed_since_build"] = _file_changed(drift, seed_file) if seed_file else None
+    answer_files = [str(seed_file or "")]
+    answer_files += [str(h["file"]) for h in semantic_hits if h.get("file")]
+    answer_files += [str(c["file"]) for c in calls_into if c.get("file")]
+    drift_payload, drift_text = _drift_note(drift, answer_files)
     left_out = {nb for nb, _rel_name in adj.get(seed_id, []) if nb not in visited}
     payload = {
         "query": query,
@@ -2969,6 +3069,7 @@ def graphlore_locate(
         "calls_into_total": len(callees),
         "semantic_cousins": cousins,
         "hidden_links": hidden,
+        "build_drift": drift_payload,
     }
     text: list[str] = [
         f"Query: {query!r}",
@@ -3009,6 +3110,8 @@ def graphlore_locate(
     if linked:
         text.append(f"\nCousins already connected ({len(linked)}):")
         text += [f"  {c['node']}  distance={c['distance']}" for c in linked]
+    if drift_text:
+        text.append("\n" + drift_text)
     return _fmt(payload, as_json, "\n".join(text))
 
 
@@ -3381,8 +3484,13 @@ def graphlore_fetch(
 
     For each node: resolve it, find the def/class span enclosing its source line, and
     return exactly those lines (± ``context_lines``). One budget is shared across all
-    nodes — once it's hit the remaining nodes are dropped and ``truncated`` is set
-    (the first code block is always included, so the result is never empty). Falls
+    nodes — once it's hit the remaining nodes are named in ``not_fetched`` and
+    ``truncated`` is set (the first code block is always included, so the result is
+    never empty). A name resolves like graphlore_neighbors: an ambiguous or
+    substring match carries ``matched``, a miss lands in ``not_found`` with
+    ``did_you_mean`` candidates. Each entry says ``file_changed_since_build``
+    (null when the graph records no build commit) and sets ``span_mismatch`` when
+    the graph's line in a changed file now lands in a different symbol. Falls
     back to a point read (the node's line ± ``context_lines``) when no span is
     available (no source on disk, or an unsupported language).
 
@@ -3401,6 +3509,7 @@ def graphlore_fetch(
     fetched: list[dict[str, Any]] = []
     not_found: list[str] = []
     not_fetched: list[str] = []
+    drift = _build_drift()
     seen_ids: set[str] = set()
     running = 0
     code_blocks = 0
@@ -3440,6 +3549,18 @@ def graphlore_fetch(
         block = _read_source_lines(f, lo - context_lines, hi + context_lines) if (
             f and lo > 0
         ) else None
+        changed = _file_changed(drift, f) if f else None
+        # The span comes from the live file at the graph's line. In a file edited
+        # since the build that line can land in a different symbol: say so.
+        mismatch = bool(
+            changed and spanned and qual
+            and _bare_name(qual) != _bare_name(_node_label(n))
+        )
+        provenance: dict[str, Any] = {"file_changed_since_build": changed}
+        if mismatch:
+            provenance["span_mismatch"] = True
+        if matched:
+            provenance.update(requested=q, matched=matched)
         if block is None:
             fetched.append({
                 "node": _node_label(n),
@@ -3447,7 +3568,7 @@ def graphlore_fetch(
                 "file": f or None, "line": line or None, "lines": None,
                 "code": None, "tokens": 0, "spanned": spanned,
                 "note": "source unavailable (no file on disk or outside the project)",
-                **({"requested": q, "matched": matched} if matched else {}),
+                **provenance,
             })
             continue
 
@@ -3467,7 +3588,7 @@ def graphlore_fetch(
             "qualname": qual if qual and qual != _node_label(n) else None,
             "file": f, "line": line or None, "lines": f"{clo}-{chi}",
             "code": code, "tokens": toks, "spanned": spanned,
-            **({"requested": q, "matched": matched} if matched else {}),
+            **provenance,
         })
 
     payload: dict[str, Any] = {
@@ -3484,6 +3605,7 @@ def graphlore_fetch(
         )
     if not_found:
         payload["did_you_mean"] = {q: _suggestions(all_nodes, q) for q in not_found}
+    payload["build_drift"], _ = _drift_note(drift, (it["file"] for it in fetched if it["file"]))
     parts: list[str] = []
     for it in fetched:
         head = it["qualname"] or it["node"]
@@ -3491,6 +3613,14 @@ def graphlore_fetch(
             f"{it['file']}:{it['lines']}" if it.get("lines")
             else (f"{it['file']}:{it['line']}" if it.get("file") else "(no source location)")
         )
+        if it.get("file_changed_since_build"):
+            head += "  [file changed since the graph was built"
+            if it.get("span_mismatch"):
+                head += (
+                    f"; the span at the graph's line is {it['qualname'] or '?'}, not "
+                    f"{it['node']} — the line is stale, rebuild or search for it"
+                )
+            head += "]"
         if it.get("matched"):
             m = it["matched"]
             how = "by substring" if m["by"] == "substring" else f"{m['count']} nodes"
