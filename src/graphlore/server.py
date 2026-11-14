@@ -83,6 +83,8 @@ Usage:
 
 from __future__ import annotations
 
+import functools
+import inspect
 import json
 import os
 import re
@@ -91,14 +93,17 @@ import subprocess
 import sys
 import warnings
 from collections import Counter
+from collections.abc import Callable
+from contextvars import ContextVar
 from pathlib import Path
-from typing import Annotated, Any, Protocol, overload
+from typing import Annotated, Any, Protocol, TypeVar, overload
 
 import anyio.to_thread
 from mcp import MCPDeprecationWarning
 from mcp.server.mcpserver import Context, MCPServer, Resolve, Sample
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import (
+    CallToolResult,
     ClientCapabilities,
     CreateMessageResult,
     SamplingCapability,
@@ -335,23 +340,130 @@ def _path_escapes_project(path: str) -> str | None:
     return None
 
 
-def _fmt(payload: Any, as_json: bool, text: str) -> str:
-    """Return structured JSON or a human-readable string."""
-    if as_json:
-        return json.dumps(payload, ensure_ascii=False, indent=2)
-    return text
+class _CallRecord:
+    """What the running tool call last formatted: set by ``_fmt`` / ``_err``,
+    read by the ``_tool`` wrapper to build the MCP result."""
+
+    __slots__ = ("payload", "out", "is_error")
+
+    def __init__(self) -> None:
+        self.payload: Any = None
+        self.out: str | None = None
+        self.is_error = False
 
 
-def _err(message: str, as_json: bool) -> str:
+# A ContextVar, not a thread-local: the async tool runs on the event loop, where
+# concurrent calls share one thread. The record itself is mutable so a write from
+# an anyio.to_thread worker (which runs in a copy of the context) is still seen.
+_CALL: ContextVar[_CallRecord | None] = ContextVar("graphlore_call", default=None)
+
+
+def _record(payload: Any, out: str, is_error: bool) -> None:
+    rec = _CALL.get()
+    if rec is not None:
+        rec.payload, rec.out, rec.is_error = payload, out, is_error
+
+
+def _fmt(payload: Any, as_json: bool, text: str, *, is_error: bool = False) -> str:
+    """Return structured JSON or a human-readable string.
+
+    Over MCP the payload also travels as the result's ``structuredContent``
+    whichever form the text takes; ``is_error=True`` marks a failure that still
+    has a payload worth returning.
+    """
+    out = json.dumps(payload, ensure_ascii=False, indent=2) if as_json else text
+    _record(payload, out, is_error)
+    return out
+
+
+def _err(message: str, as_json: bool, **extra: Any) -> str:
     """Error / no-match reply that honors ``as_json``.
 
     The documented contract is "pass as_json=True … to chain on", so a structured
     consumer running json.loads on the reply must get parseable JSON on EVERY
-    path — error and no-match included — not bare prose.
+    path — error and no-match included — not bare prose. ``error`` is always the
+    message string; ``extra`` adds sibling keys (``code``, ``did_you_mean``).
+    Over MCP the result carries ``isError: true``.
     """
-    if as_json:
-        return json.dumps({"error": message}, ensure_ascii=False)
-    return message
+    payload = {"error": message, **extra}
+    out = json.dumps(payload, ensure_ascii=False) if as_json else message
+    _record(payload, out, True)
+    return out
+
+
+def _structured_enabled() -> bool:
+    """GRAPHLORE_STRUCTURED=0 turns structuredContent / isError off (read per call)."""
+    return config.env("STRUCTURED", "1").strip().lower() not in ("0", "false", "no", "off")
+
+
+def _tool_result(out: str, rec: _CallRecord) -> CallToolResult | str:
+    """The MCP result for a tool's string reply.
+
+    When the reply is exactly what ``_fmt`` / ``_err`` produced, its payload is the
+    structuredContent (round-tripped through JSON, so it equals the as_json=True
+    text). A reply built some other way (the CLI passthroughs' raw output) has no
+    payload, and is an error when it carries the ``ERROR`` prefix.
+    """
+    if not _structured_enabled():
+        return out
+    content: list[TextContent] = [TextContent(type="text", text=out)]
+    if rec.out is out and isinstance(rec.payload, dict):
+        structured = json.loads(json.dumps(rec.payload, ensure_ascii=False, default=str))
+        return CallToolResult(
+            content=content, structured_content=structured, is_error=rec.is_error,
+        )
+    return CallToolResult(content=content, is_error=out.startswith("ERROR"))
+
+
+_F = TypeVar("_F", bound=Callable[..., Any])
+
+
+def _tool(*, annotations: ToolAnnotations) -> Callable[[_F], _F]:
+    """Register a tool whose MCP result carries structuredContent and isError.
+
+    Use this instead of ``@mcp.tool``. The tool function itself stays a plain
+    ``-> str`` function (the module attribute is the undecorated function, so tests
+    and internal callers get the string). The registered wrapper publishes no
+    outputSchema (``structured_output=False``): a schema would oblige structured
+    content on every successful result, and the payload shapes vary per path.
+    The SDK reads the signature through ``__wrapped__``, so ``ctx: Context`` and
+    ``Resolve`` parameters are injected as before.
+    """
+    def decorator(fn: _F) -> _F:
+        wrapper: Callable[..., Any]
+        if inspect.iscoroutinefunction(fn):
+            @functools.wraps(fn)
+            async def async_wrapper(*args: Any, **kwargs: Any) -> CallToolResult | str:
+                rec = _CallRecord()
+                token = _CALL.set(rec)
+                try:
+                    out = await fn(*args, **kwargs)
+                finally:
+                    _CALL.reset(token)
+                return _tool_result(out, rec)
+            wrapper = async_wrapper
+        else:
+            @functools.wraps(fn)
+            def sync_wrapper(*args: Any, **kwargs: Any) -> CallToolResult | str:
+                rec = _CallRecord()
+                token = _CALL.set(rec)
+                try:
+                    out = fn(*args, **kwargs)
+                finally:
+                    _CALL.reset(token)
+                return _tool_result(out, rec)
+            wrapper = sync_wrapper
+        mcp.add_tool(wrapper, annotations=annotations, structured_output=False)
+        return fn
+    return decorator
+
+
+def _cli_reply(out: str) -> str:
+    """A CLI passthrough's reply: unchanged text, with ``{"output": ...}`` as its
+    payload on success and isError on an ``ERROR`` result."""
+    if out.startswith("ERROR"):
+        return _err(out, False)
+    return _fmt({"output": out}, False, out)
 
 
 def _run_cli(args: list[str], cwd: Path | None = None) -> str:
@@ -973,7 +1085,7 @@ def _out_dir_git_note(project: Path | None = None) -> str:
     )
 
 
-@mcp.tool(
+@_tool(
     annotations=ToolAnnotations(
         title="Active project", read_only_hint=False, destructive_hint=False,
         idempotent_hint=True,
@@ -1117,7 +1229,7 @@ def _vendored_build_note() -> str:
     )
 
 
-@mcp.tool(annotations=ToolAnnotations(title="Build/update graph", destructive_hint=False))
+@_tool(annotations=ToolAnnotations(title="Build/update graph", destructive_hint=False))
 def graphlore_build(
     path: str = ".",
     mode: str = "",
@@ -1199,10 +1311,10 @@ def graphlore_build(
         git_note = _out_dir_git_note()
     if git_note:
         notes.append(git_note)
-    return result + ("\n\n" + "\n".join(notes) if notes else "")
+    return _cli_reply(result + ("\n\n" + "\n".join(notes) if notes else ""))
 
 
-@mcp.tool(annotations=ToolAnnotations(title="Query graph", read_only_hint=True))
+@_tool(annotations=ToolAnnotations(title="Query graph", read_only_hint=True))
 def graphlore_query(question: str, dfs: bool = False, budget: int = 0) -> str:
     """Run a natural-language query against the graph.
 
@@ -1219,22 +1331,22 @@ def graphlore_query(question: str, dfs: bool = False, budget: int = 0) -> str:
     gp = _graph_path()
     if gp.exists():
         args += ["--graph", str(gp)]
-    return _run_cli(args)
+    return _cli_reply(_run_cli(args))
 
 
-@mcp.tool(annotations=ToolAnnotations(title="Path between nodes", read_only_hint=True))
+@_tool(annotations=ToolAnnotations(title="Path between nodes", read_only_hint=True))
 def graphlore_path(node_a: str, node_b: str) -> str:
     """Find the exact path between two nodes (e.g. "DigestAuth" -> "Response")."""
-    return _run_cli(["path", node_a, node_b])
+    return _cli_reply(_run_cli(["path", node_a, node_b]))
 
 
-@mcp.tool(annotations=ToolAnnotations(title="Explain node", read_only_hint=True))
+@_tool(annotations=ToolAnnotations(title="Explain node", read_only_hint=True))
 def graphlore_explain(node: str) -> str:
     """Return everything Graphify knows about a node."""
-    return _run_cli(["explain", node])
+    return _cli_reply(_run_cli(["explain", node]))
 
 
-@mcp.tool(annotations=ToolAnnotations(title="Add external source", destructive_hint=False))
+@_tool(annotations=ToolAnnotations(title="Add external source", destructive_hint=False))
 def graphlore_add(url: str, author: str = "", contributor: str = "") -> str:
     """Add an external source to the graph (arXiv paper, tweet, etc.). http/https only.
 
@@ -1250,7 +1362,7 @@ def graphlore_add(url: str, author: str = "", contributor: str = "") -> str:
         args += ["--author", author]
     if contributor:
         args += ["--contributor", contributor]
-    return _run_cli(args)
+    return _cli_reply(_run_cli(args))
 
 
 # ---------------------------------------------------------------------------
@@ -1258,7 +1370,7 @@ def graphlore_add(url: str, author: str = "", contributor: str = "") -> str:
 # ---------------------------------------------------------------------------
 
 
-@mcp.tool(annotations=ToolAnnotations(title="Codebase overview", read_only_hint=True))
+@_tool(annotations=ToolAnnotations(title="Codebase overview", read_only_hint=True))
 def graphlore_overview(top_n: int = 8, as_json: bool = False) -> str:
     """One-shot orientation: call this FIRST.
 
@@ -1345,7 +1457,7 @@ def graphlore_overview(top_n: int = 8, as_json: bool = False) -> str:
     return _fmt(payload, as_json, "\n".join(lines))
 
 
-@mcp.tool(annotations=ToolAnnotations(title="God nodes", read_only_hint=True))
+@_tool(annotations=ToolAnnotations(title="God nodes", read_only_hint=True))
 def graphlore_god_nodes(top_n: int = 10, as_json: bool = False, scope: str = "") -> str:
     """List the highest-degree (most connected) 'god nodes'.
 
@@ -1386,7 +1498,7 @@ def graphlore_god_nodes(top_n: int = 10, as_json: bool = False, scope: str = "")
     return _fmt(payload, as_json, _with_note("\n".join(text), view))
 
 
-@mcp.tool(annotations=ToolAnnotations(title="Surprise edges", read_only_hint=True))
+@_tool(annotations=ToolAnnotations(title="Surprise edges", read_only_hint=True))
 def graphlore_surprises(limit: int = 20, as_json: bool = False, scope: str = "") -> str:
     """List unexpected cross-file/cross-domain connections (surprise edges).
 
@@ -1494,7 +1606,7 @@ def graphlore_surprises(limit: int = 20, as_json: bool = False, scope: str = "")
     return _fmt(payload, as_json, _with_note("\n".join(text), view))
 
 
-@mcp.tool(annotations=ToolAnnotations(title="Communities", read_only_hint=True))
+@_tool(annotations=ToolAnnotations(title="Communities", read_only_hint=True))
 def graphlore_communities(as_json: bool = False) -> str:
     """Summarize Leiden communities with sizes and sample members."""
     graph = _load_graph()
@@ -1507,10 +1619,8 @@ def graphlore_communities(as_json: bool = False) -> str:
         if c is not None:
             comms.setdefault(c, []).append(_node_label(n))
     if not comms:
-        return _err(
-            "Nodes carry no community info. Try graphlore_build(cluster_only=True).",
-            as_json,
-        )
+        msg = "Nodes carry no community info. Try graphlore_build(cluster_only=True)."
+        return _fmt({"communities": [], "note": msg}, as_json, msg)
     ordered = sorted(comms.items(), key=lambda kv: -len(kv[1]))
     items = [{"id": c, "size": len(m), "members": m} for c, m in ordered]
     text = [f"{len(comms)} communities:\n"]
@@ -1520,7 +1630,7 @@ def graphlore_communities(as_json: bool = False) -> str:
     return _fmt({"communities": items}, as_json, "\n".join(text))
 
 
-@mcp.tool(annotations=ToolAnnotations(title="Sampling/LLM status", read_only_hint=True))
+@_tool(annotations=ToolAnnotations(title="Sampling/LLM status", read_only_hint=True))
 def graphlore_sampling_status(ctx: Context, as_json: bool = False) -> str:
     """Capability test: how can semantic naming be produced in this session?
 
@@ -1666,7 +1776,7 @@ def _names_from_sampling(
     return names, note
 
 
-@mcp.tool(
+@_tool(
     annotations=ToolAnnotations(
         title="Name communities (host LLM / key)",
         read_only_hint=False,
@@ -1790,7 +1900,7 @@ async def graphlore_label_communities(
     return _fmt(payload, as_json, "\n".join(text))
 
 
-@mcp.tool(annotations=ToolAnnotations(title="Set community names", destructive_hint=False))
+@_tool(annotations=ToolAnnotations(title="Set community names", destructive_hint=False))
 def graphlore_set_labels(
     names: dict[str, str], regenerate: bool = True, as_json: bool = False
 ) -> str:
@@ -1870,7 +1980,7 @@ def graphlore_set_labels(
     return _fmt(payload, as_json, "\n".join(lines))
 
 
-@mcp.tool(annotations=ToolAnnotations(title="Search nodes", read_only_hint=True))
+@_tool(annotations=ToolAnnotations(title="Search nodes", read_only_hint=True))
 def graphlore_search(pattern: str, limit: int = 25, as_json: bool = False) -> str:
     """Search nodes by text in their name/label (case-insensitive)."""
     graph = _load_graph()
@@ -1880,7 +1990,12 @@ def graphlore_search(pattern: str, limit: int = 25, as_json: bool = False) -> st
     p = pattern.lower()
     hits = [n for n in nodes if p in _node_label(n).lower() or p in _node_id(n).lower()]
     if not hits:
-        return _err(f"No nodes match '{pattern}'.", as_json)
+        # An empty answer is a valid result, not a failure: no isError over MCP.
+        msg = f"No nodes match '{pattern}'."
+        return _fmt(
+            {"matches": [], "total": 0, "shown": 0, "truncated": False, "note": msg},
+            as_json, msg,
+        )
     degree: Counter[str] = Counter()
     for e in edges:
         s, t = _edge_ends(e)
@@ -1897,7 +2012,7 @@ def graphlore_search(pattern: str, limit: int = 25, as_json: bool = False) -> st
     return _fmt({"matches": items, "total": len(hits)}, as_json, "\n".join(text))
 
 
-@mcp.tool(annotations=ToolAnnotations(title="Node neighbors", read_only_hint=True))
+@_tool(annotations=ToolAnnotations(title="Node neighbors", read_only_hint=True))
 def graphlore_neighbors(node: str, as_json: bool = False, scope: str = "") -> str:
     """List the direct (1-hop) neighbors of a node, with relations.
 
@@ -1962,7 +2077,7 @@ def graphlore_neighbors(node: str, as_json: bool = False, scope: str = "") -> st
     return _fmt(payload, as_json, _with_note("\n".join(text), view))
 
 
-@mcp.tool(annotations=ToolAnnotations(title="Token-budgeted subgraph", read_only_hint=True))
+@_tool(annotations=ToolAnnotations(title="Token-budgeted subgraph", read_only_hint=True))
 def graphlore_subgraph(
     node: str, hops: int = 2, budget_tokens: int = 1500, as_json: bool = False,
     scope: str = "",
@@ -2102,7 +2217,7 @@ def _impact_relations(spec: str) -> frozenset[str] | None:
     return frozenset(wanted) or None
 
 
-@mcp.tool(annotations=ToolAnnotations(title="Impact / blast radius", read_only_hint=True))
+@_tool(annotations=ToolAnnotations(title="Impact / blast radius", read_only_hint=True))
 def graphlore_impact(
     node: str,
     direction: str = "dependents",
@@ -2371,7 +2486,7 @@ def graphlore_impact(
     return _fmt(payload, as_json, _with_note(text + rationale_note, view))
 
 
-@mcp.tool(annotations=ToolAnnotations(title="Tests for a symbol", read_only_hint=True))
+@_tool(annotations=ToolAnnotations(title="Tests for a symbol", read_only_hint=True))
 def graphlore_tests_for(
     node: str, limit: int = 30, as_json: bool = False, strict: bool = False
 ) -> str:
@@ -2544,7 +2659,7 @@ def graphlore_tests_for(
     return _fmt(payload, as_json, "\n".join(lines))
 
 
-@mcp.tool(annotations=ToolAnnotations(title="Locate + structural context", read_only_hint=True))
+@_tool(annotations=ToolAnnotations(title="Locate + structural context", read_only_hint=True))
 def graphlore_locate(
     query: str,
     top_k: int = 3,
@@ -2586,7 +2701,11 @@ def graphlore_locate(
         return _err(_no_semantic_index_error("graphlore_locate"), as_json)
     hits = index.search(query, top_k=top_k)
     if not hits:
-        return _err(f"No semantic matches for '{query}'.", as_json)
+        msg = f"No semantic matches for '{query}'."
+        return _fmt(
+            {"query": query, "seed": None, "semantic_hits": [], "note": msg},
+            as_json, msg,
+        )
 
     def _loc(h: Any) -> tuple[str, int, int]:
         c = h.chunk
@@ -2805,7 +2924,7 @@ def _site(n: dict) -> str:
     return f"{f}:{ln}" if f and ln not in (None, "") else (f or "")
 
 
-@mcp.tool(annotations=ToolAnnotations(title="Duplication scan", read_only_hint=True))
+@_tool(annotations=ToolAnnotations(title="Duplication scan", read_only_hint=True))
 def graphlore_duplication_scan(
     node_budget: int = 50,
     related_k: int = 8,
@@ -3087,7 +3206,7 @@ def graphlore_duplication_scan(
     return _fmt(payload, as_json, _with_note("\n".join(lines) + skip_note, view))
 
 
-@mcp.tool(annotations=ToolAnnotations(title="Node details", read_only_hint=True))
+@_tool(annotations=ToolAnnotations(title="Node details", read_only_hint=True))
 def graphlore_node_details(node: str, as_json: bool = False) -> str:
     """Show a node's full metadata: type, source file/line, docstring, community."""
     graph = _load_graph()
@@ -3127,7 +3246,7 @@ def graphlore_node_details(node: str, as_json: bool = False) -> str:
     return _fmt(detail, as_json, "\n".join(text))
 
 
-@mcp.tool(annotations=ToolAnnotations(title="Fetch node source", read_only_hint=True))
+@_tool(annotations=ToolAnnotations(title="Fetch node source", read_only_hint=True))
 def graphlore_fetch(
     nodes: list[str],
     context_lines: int = 0,
@@ -3244,10 +3363,11 @@ def graphlore_fetch(
         + (f"; {len(not_found)} not found: {', '.join(not_found)}" if not_found else "")
     )
     text = summary + ("\n\n" + "\n\n".join(parts) if parts else "")
-    return _fmt(payload, as_json, text)
+    # Every requested name missing is a failure; a partial miss is not.
+    return _fmt(payload, as_json, text, is_error=bool(not_found) and not fetched)
 
 
-@mcp.tool(annotations=ToolAnnotations(title="Signature skeleton", read_only_hint=True))
+@_tool(annotations=ToolAnnotations(title="Signature skeleton", read_only_hint=True))
 def graphlore_skeleton(
     file: str = "",
     node: str = "",
@@ -3387,7 +3507,7 @@ def _ast_equivalent_refs(path_a: str, ref_a: str, path_b: str, ref_b: str) -> bo
     return _structurally_equal(path_b, old_src, new_src)
 
 
-@mcp.tool(annotations=ToolAnnotations(title="Graph freshness", read_only_hint=True))
+@_tool(annotations=ToolAnnotations(title="Graph freshness", read_only_hint=True))
 def graphlore_freshness(as_json: bool = False) -> str:
     """Check whether graph.json is stale relative to the current git HEAD.
 
@@ -3428,6 +3548,7 @@ def graphlore_freshness(as_json: bool = False) -> str:
             payload, as_json,
             "ERROR: `git status` failed or timed out — freshness cannot be "
             "determined (not assuming the tree is clean).",
+            is_error=True,
         )
 
     # Porcelain paths are REPO-ROOT-relative; PROJECT_DIR may be a subdirectory of
@@ -3591,7 +3712,7 @@ def graphlore_freshness(as_json: bool = False) -> str:
     return _fmt(payload, as_json, text)
 
 
-@mcp.tool(annotations=ToolAnnotations(title="Structural diff", read_only_hint=True))
+@_tool(annotations=ToolAnnotations(title="Structural diff", read_only_hint=True))
 def graphlore_diff(
     ref_a: str = "HEAD~1",
     ref_b: str = "HEAD",
@@ -3691,7 +3812,7 @@ def graphlore_diff(
     return _fmt(payload, as_json, "\n".join(lines))
 
 
-@mcp.tool(
+@_tool(
     annotations=ToolAnnotations(
         title="Prune phantom nodes", read_only_hint=False, destructive_hint=True
     )
@@ -3788,7 +3909,7 @@ def graphlore_prune(dry_run: bool = True, as_json: bool = False) -> str:
     return _fmt(payload, as_json, "\n".join(lines))
 
 
-@mcp.tool(annotations=ToolAnnotations(title="Validate graph", read_only_hint=True))
+@_tool(annotations=ToolAnnotations(title="Validate graph", read_only_hint=True))
 def graphlore_validate(limit: int = 15, as_json: bool = False, scope: str = "") -> str:
     """Lint graph.json for structural problems (read-only).
 
@@ -3929,7 +4050,7 @@ _IMPORT_HOP_ARROWS = {
 _CYCLE_IGNORED_RELATIONS = frozenset({"contains", "method", "rationale_for"})
 
 
-@mcp.tool(annotations=ToolAnnotations(title="Dependency cycles", read_only_hint=True))
+@_tool(annotations=ToolAnnotations(title="Dependency cycles", read_only_hint=True))
 def graphlore_cycles(
     max_cycles: int = 20, as_json: bool = False, kind: str = "all", scope: str = ""
 ) -> str:
@@ -4152,7 +4273,7 @@ def graphlore_cycles(
     return _fmt(payload, as_json, _with_note("\n".join(lines), view))
 
 
-@mcp.tool(annotations=ToolAnnotations(title="Unreferenced code", read_only_hint=True))
+@_tool(annotations=ToolAnnotations(title="Unreferenced code", read_only_hint=True))
 def graphlore_unreferenced(
     scope: str = "",
     include_mentioned: bool = False,
@@ -4277,7 +4398,7 @@ _LAYER_IMPORT_NOTES = {
 _LAYERS_DEFAULT_FILE = ".graphlore-layers.json"
 
 
-@mcp.tool(annotations=ToolAnnotations(title="Layer rules", read_only_hint=True))
+@_tool(annotations=ToolAnnotations(title="Layer rules", read_only_hint=True))
 def graphlore_layers(
     rules: dict[str, list[str]] | None = None,
     rules_file: str = "",
@@ -4391,7 +4512,7 @@ def graphlore_layers(
     return _fmt(payload, as_json, "\n".join(lines))
 
 
-@mcp.tool(annotations=ToolAnnotations(title="Same-named symbols", read_only_hint=True))
+@_tool(annotations=ToolAnnotations(title="Same-named symbols", read_only_hint=True))
 def graphlore_same_names(
     kinds: str = "class,function",
     scope: str = "",
@@ -4510,7 +4631,7 @@ _API_SURFACE_NOTE = (
 )
 
 
-@mcp.tool(annotations=ToolAnnotations(title="External package API surface", read_only_hint=True))
+@_tool(annotations=ToolAnnotations(title="External package API surface", read_only_hint=True))
 def graphlore_package_apis(package: str = "", limit: int = 20, as_json: bool = False) -> str:
     """Symbol-level external API surface: which names each package is actually used for.
 
@@ -4674,7 +4795,7 @@ def _route_candidate_files(graph_files: set[str]) -> set[str]:
     return found - graph_files
 
 
-@mcp.tool(annotations=ToolAnnotations(title="Framework routes", read_only_hint=True))
+@_tool(annotations=ToolAnnotations(title="Framework routes", read_only_hint=True))
 def graphlore_routes(
     framework: str = "",
     method: str = "",
