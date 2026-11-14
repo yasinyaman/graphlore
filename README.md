@@ -61,12 +61,17 @@ semble finds **what's relevant**; graphify gives **how it connects**. They're co
 ## Installation
 
 ```bash
-# graphlore itself
-pip install graphlore
+# graphlore itself (from GitHub; it is not on PyPI yet)
+pip install "graphlore @ git+https://github.com/yasinyaman/graphlore"
 
 # plus the Graphify CLI it wraps (needed for build/query/path/explain/add)
 pip install graphifyy && graphify install
 ```
+
+Once the first release is on PyPI this becomes `pip install graphlore`. Until
+then, wherever this README or a server message says
+`pip install "graphlore[extra]"`, use the same GitHub form:
+`pip install "graphlore[semble] @ git+https://github.com/yasinyaman/graphlore"`.
 
 From source:
 
@@ -95,7 +100,31 @@ GRAPHLORE_PROJECT_DIR=/path/to/repo python -m graphlore
 > (`graphlore vX.Y.Z | transport=… | project=…`) confirms which server
 > and project dir you're actually running.
 
-### Claude Code
+### Claude Code plugin
+
+This repository is also a Claude Code plugin marketplace. Installing the plugin
+adds the MCP server and the `graphlore-explore` skill, with no `pip install` and
+no `.mcp.json` to write:
+
+```
+/plugin install graphlore --marketplace yasinyaman/graphlore
+```
+
+On Claude Code older than 2.1.275, add the marketplace first:
+
+```
+/plugin marketplace add yasinyaman/graphlore
+/plugin install graphlore@graphlore
+```
+
+The plugin starts the server with [`uvx`](https://docs.astral.sh/uv/) from its
+own copy of this repository, so **`uv` must be installed**. It installs the
+`graphify`, `treesitter` and `semble` extras into an isolated environment — the
+Graphify CLI included — and points `GRAPHLORE_PROJECT_DIR` at the project you
+opened. The first start downloads the dependencies and can take a while; later
+starts come from uv's cache. Without `uv`, use the manual setup below.
+
+### Claude Code (manual)
 
 Copy `mcp.json` to a `.mcp.json` at your project root. `GRAPHLORE_PROJECT_DIR: "."` uses the project root.
 
@@ -438,8 +467,9 @@ graphlore/
 ├── tests/                  # pytest suite (in-process MCP client + unit tests)
 ├── benchmarks/             # multilang benchmark + committed results JSON
 ├── docs/                   # benchmark reports (HTML/SVG)
-├── .claude/skills/         # graphlore-explore skill for Claude Code
-├── .github/workflows/      # CI: ruff + mypy + pytest on py 3.10–3.12
+├── .claude-plugin/         # Claude Code plugin + marketplace manifests (the repo root is the plugin)
+├── .claude/skills/         # graphlore-explore skill for Claude Code (shipped by the plugin)
+├── .github/workflows/      # CI: ruff + mypy + pytest on py 3.10–3.12; PyPI publish on release
 ├── mcp.json                # Claude Code example config
 └── claude_desktop_config.json
 ```

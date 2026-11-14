@@ -238,6 +238,26 @@ def test_main_module_wired():
     assert mod.main is server.main
 
 
+def test_claude_plugin_manifests_stay_in_sync():
+    """The repo root doubles as a Claude Code plugin + marketplace. The manifest
+    version is one more copy of the package version, the marketplace entry must
+    name the same plugin, and the server must launch this package's entry point."""
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent / ".claude-plugin"
+    plugin = json.loads((root / "plugin.json").read_text(encoding="utf-8"))
+    market = json.loads((root / "marketplace.json").read_text(encoding="utf-8"))
+
+    assert plugin["version"] == server.__version__
+    assert [p["name"] for p in market["plugins"]] == [plugin["name"]]
+    assert market["plugins"][0]["source"] == "./"
+    for rel in plugin["skills"]:
+        assert (root.parent / rel).is_dir()  # the shipped skill directory exists
+    srv = plugin["mcpServers"]["graphlore"]
+    assert srv["args"][-1] == "graphlore"  # the console script from pyproject
+    assert srv["env"]["GRAPHLORE_PROJECT_DIR"] == "${CLAUDE_PROJECT_DIR}"
+
+
 def _write_graph(tmp_path, graph):
     out = tmp_path / "graphify-out"
     out.mkdir()

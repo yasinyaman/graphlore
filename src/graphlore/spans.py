@@ -142,7 +142,9 @@ def _ts_parser_for(rel: str) -> tuple[Any, str | None]:
         return None, None
     if lang not in _TS_PARSERS:
         try:
-            _TS_PARSERS[lang] = Parser(get_language(lang))
+            # Some pack releases type get_language's argument as a Literal of
+            # every grammar name, while detect_language_from_path returns str.
+            _TS_PARSERS[lang] = Parser(get_language(lang))  # type: ignore[arg-type]
         except Exception:
             _TS_PARSERS[lang] = None
     return _TS_PARSERS[lang], lang
