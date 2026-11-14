@@ -86,7 +86,7 @@ A tool is registered with `@_tool(annotations=ToolAnnotations(...))` in `server.
 - `.claude/skills/graphlore-explore/SKILL.md` (shipped to users by the plugin)
 - `CHANGELOG.md` under `[Unreleased]` — every behavior change gets an entry there (Keep a Changelog format)
 
-The version is duplicated in `pyproject.toml`, `server.__version__` and `.claude-plugin/plugin.json` (a test compares the last two), and recorded in `uv.lock`; run `uv lock` after a bump. The release steps, including the PyPI publish workflow, are under "Releasing" in `CONTRIBUTING.md`.
+The version is duplicated in `pyproject.toml`, `server.__version__`, `.claude-plugin/plugin.json` and `server.json` (twice there; tests compare the last three), and recorded in `uv.lock`; run `uv lock` after a bump. The release steps, including the PyPI publish workflow, are under "Releasing" in `CONTRIBUTING.md`.
 
 ## Documentation layout
 
@@ -98,6 +98,10 @@ The version is duplicated in `pyproject.toml`, `server.__version__` and `.claude
 - `docs/benchmark.md` — method and results (`docs/benchmark*.html` are the rendered reports)
 
 Links from the README into the repository are absolute (`https://github.com/yasinyaman/graphlore/blob/master/...`) because relative links break on PyPI; links between the `docs/` files are relative. The README's first paragraph and its FAQ headings are written to be quoted by search engines and AI assistants: keep them plain, literal and true to the code.
+
+## MCP Registry entry
+
+`server.json` at the root is the manifest for the official MCP Registry (schema `2025-12-11`). Its `name` (`io.github.yasinyaman/graphlore`) must also appear as `mcp-name: ...` in `README.md`: the registry verifies PyPI ownership by finding that string in the package's README, so the HTML comment under the README title is load-bearing. The description is limited to 100 characters, the environment variables it lists must be ones the server reads, and its toolset choices must match `TOOLSETS`; `test_mcp_registry_manifest_stays_in_sync` checks all of this. Publishing is a manual step after a PyPI release (see "Releasing" in `CONTRIBUTING.md`).
 
 ## Claude Code plugin
 
