@@ -546,7 +546,32 @@ Reusable templates that orchestrate the tools for the assistant:
 - **MCP structured results.** Over the protocol every analysis tool's payload also arrives as `structuredContent` (the same object `as_json=True` prints), whichever text form was asked for, and failures — node not found, missing graph, a failed CLI call — set `isError: true`. An empty but valid answer (no search hits) is not an error. No `outputSchema` is published: payload shapes differ per path. `GRAPHLORE_STRUCTURED=0` falls back to plain text results.
 - **Token budgeting on source, not just structure** — budgeted subgraph rendering is Graphify's own (its embedded server does the same); graphlore extends the discipline to *code*: `graphlore_fetch` and `graphlore_skeleton` hydrate real spans under a cap, so escalating map → signatures → source never blows the context.
 - **Unambiguous names** — when several nodes share a bare label (five `.auth_flow()`s across auth classes), rendered output qualifies them with the span-recovered FQN (`DigestAuth.auth_flow()`) or a `file:line` suffix, so an arrow always names exactly one symbol.
+- **Repository text is framed as data.** `graphlore_fetch`, `graphlore_skeleton`, `graphlore_node_details` (the docstring) and the `query` / `path` / `explain` passthroughs put the code and text they quote between `=== repo text <nonce> ===` markers, with a per-call random nonce redrawn if it occurs in the text, so a comment in the repository cannot close the frame and pose as graphlore. JSON replies say `content_trust: "untrusted_repo_text"` and name the `untrusted_fields`. A docstring that says "ignore previous instructions" is still a docstring.
 - **Host-LLM sampling** (`graphlore_label_communities`) lets the server borrow the client's model via MCP `sampling/createMessage`, so semantic naming works with no server-side API key — with a capability test (`graphlore_sampling_status`) and a backend-key fallback.
+
+## What reaches the network, and when
+
+The graph.json analysis tools read local files only. These are the exceptions:
+
+| Path | When it goes out | With `GRAPHLORE_OFFLINE=1` |
+|---|---|---|
+| `graphlore_add` | Always: it fetches the URL | Refused |
+| `graphlore_build` | `mode="deep"`, and a default build of doc/paper/image files, which graphify extracts with an LLM backend when a key is set | `mode` refused; `code_only` forced (local AST only) unless `cluster_only`, and the result says so |
+| `graphlore_label_communities(method="cli")` | graphify calls the LLM backend whose key is set | Refused; `method="auto"` skips it. Sampling still works: that request goes to your MCP client, not out of the server |
+| `graphlore_query` / `path` / `explain` | Up to graphify: they are its own commands | Run, with the backend keys removed from the CLI's environment |
+| Semantic search (`[semble]`: `graphlore_locate`, `graphlore_duplication_scan`) | First use: semble downloads its embedding model from the Hugging Face Hub, then caches it | `HF_HUB_OFFLINE=1` / `TRANSFORMERS_OFFLINE=1` are set before semble is imported, so only a cached model loads; otherwise the error says how to prefetch it |
+| `GRAPHLORE_TOKENIZER=tiktoken` | First use: tiktoken fetches its encoding file unless cached | Not loaded; the chars/3.5 estimate is used |
+| tree-sitter grammars (`[treesitter]`) | First use of a language: the grammar is downloaded from GitHub releases and cached | Only grammars already in the cache are used; other files get no spans |
+| A custom `GRAPHLORE_SEMANTIC_BACKEND` | Whatever that code does | **Not constrained** — graphlore cannot see inside it |
+| HTTP transports | Inbound only (the server listens) | Unchanged |
+
+What graphlore enforces is its own side: it refuses the calls above, strips the
+`*_API_KEY` variables it knows (`GEMINI_API_KEY`, `OPENAI_API_KEY`,
+`ANTHROPIC_API_KEY`, …) from the graphify subprocess, and sets the Hugging Face
+offline flags for itself and its children. What the `graphify` binary or a
+custom backend does beyond that is theirs. For a guarantee, pair the switch with
+a network policy (an egress firewall, a container without a route out). The
+boot banner on stderr prints `egress=offline` or `egress=on-demand`.
 
 ## Environment variables
 
@@ -568,6 +593,8 @@ Reusable templates that orchestrate the tools for the assistant:
 | `GRAPHLORE_RESOLVE` | `1` | Resolve calls and imports made through a module object (`mod.func()`) from the source at read time; `0` reads graph.json as it is |
 | `GRAPHLORE_WATCH` | `0` | Filesystem watcher: auto re-sync on structural changes (`[watch]` extra) |
 | `GRAPHLORE_WATCH_DEBOUNCE` | `2.0` | Watcher debounce window (seconds) |
+| `GRAPHLORE_OFFLINE` | `0` | Refuse every path graphlore knows reaches the network (see [What reaches the network](#what-reaches-the-network-and-when)) |
+| `GRAPHLORE_STRUCTURED` | `1` | `0` → plain-text tool results, without `structuredContent` / `isError` |
 
 > Every variable is also honored under its legacy `GRAPHIFY_*` spelling (the
 > pre-rename names); when both are set, `GRAPHLORE_*` wins. Artifacts of the
