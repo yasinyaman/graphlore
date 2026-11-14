@@ -219,8 +219,10 @@ def test_tool_and_prompt_registration(project):
     assert "graphlore_diff" in names
     assert "graphlore_package_apis" in names
     assert "graphlore_routes" in names
-    assert len(names) == 28
-    assert prompts == {"onboard", "trace_bug", "explain_flow"}
+    assert {"graphlore_project", "graphlore_unreferenced", "graphlore_layers",
+            "graphlore_same_names"} <= names
+    assert len(names) == 32
+    assert prompts == {"onboard", "trace_bug", "explain_flow", "review"}
 
 
 def test_version_reported_over_mcp():
@@ -3419,7 +3421,7 @@ def _impact_graph(tmp_path):
         "links": [
             {"source": "caller", "target": "core", "relation": "calls",
              "source_file": "app/api.py", "source_location": "L7"},
-            {"source": "doc", "target": "core", "relation": "rationale_for"},
+            {"source": "doc", "target": "core", "relation": "documents"},
         ],
     })
 
@@ -3464,3 +3466,856 @@ def test_impact_relation_presets_parse():
     assert server._impact_relations("calls,defines") == frozenset(
         {"calls", "indirect_call", "defines"}
     )
+
+
+def test_impact_leaves_rationale_nodes_out(tmp_path, monkeypatch):
+    """A docstring node points at the code it describes; it does not depend on it."""
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    _write_graph(tmp_path, {
+        "nodes": [
+            {"id": "cls", "label": "LiveSettings", "source_file": "app/s.py",
+             "source_location": "L3"},
+            {"id": "doc", "label": "Settings read at runtime.", "file_type": "rationale",
+             "source_file": "app/s.py", "source_location": "L4"},
+            {"id": "user", "label": "load()", "source_file": "app/m.py",
+             "source_location": "L9"},
+            {"id": "doc2", "label": "Loads them.", "file_type": "rationale",
+             "source_file": "app/m.py", "source_location": "L10"},
+        ],
+        "links": [
+            {"source": "doc", "target": "cls", "relation": "rationale_for"},
+            {"source": "user", "target": "cls", "relation": "uses"},
+            {"source": "doc2", "target": "user", "relation": "rationale_for"},
+        ],
+    })
+    data = json.loads(server.graphlore_impact("LiveSettings", as_json=True))
+    assert [i["node"] for i in data["impacted"]] == ["load()"]
+    assert data["rationale_nodes_skipped"] == 2  # its own docstring + load()'s
+    assert "2 docstring/rationale node(s) left out" in server.graphlore_impact("LiveSettings")
+    # asked for by name, the relation is walked again
+    named = json.loads(
+        server.graphlore_impact("LiveSettings", relations="rationale_for", as_json=True))
+    assert [i["node"] for i in named["impacted"]] == ["Settings read at runtime."]
+    assert named["rationale_nodes_skipped"] == 0
+
+
+# --- active project + build result ------------------------------------------
+
+
+def _fake_build(monkeypatch, log, writes=None):
+    """Replace _run_cli: return `log`, and write a graph.json where `writes` says."""
+    def run(args, cwd=None):
+        if writes is not None:
+            writes.mkdir(parents=True, exist_ok=True)
+            (writes / "graph.json").write_text(
+                json.dumps({"nodes": [{"id": "A", "label": "A"}], "links": []}),
+                encoding="utf-8",
+            )
+        return log
+
+    monkeypatch.setattr(server, "_run_cli", run)
+
+
+_BUILD_LOG = "\n".join([
+    "[graphify extract] scanning /repo",
+    "[graphify extract] found 774 code, 0 docs, 0 papers, 0 images",
+    "[graphify extract] 2 file(s) skipped as potentially sensitive: .env, keys.pem",
+    "[graphify extract] AST extraction on 774 code files...",
+    "  AST cache: 0/774 files served from cache (0%); 774 to extract",
+    "  AST extraction: 100/774 uncached files (12%) [8 workers]",
+    "  AST extraction: 200/774 uncached files (25%) [8 workers]",
+    "  AST extraction: 774/774 uncached files (100%) [8 workers]",
+    "  warning: 3 .sql file(s) contributed nothing to the graph: tree_sitter_sql "
+    "not installed.",
+    "  warning: 5 code file(s) yielded no symbols (0.01 MB)",
+    "[graphify extract] wrote /repo/graphify-out/graph.json: 13159 nodes, 32928 edges, "
+    "476 communities",
+    "[graphify extract] next: run `graphify cluster-only /repo`",
+])
+
+
+def test_build_returns_counts_and_warnings_by_default(tmp_path, monkeypatch):
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    _fake_build(monkeypatch, _BUILD_LOG, writes=tmp_path / "graphify-out")
+    out = server.graphlore_build(".")
+    assert "13159 nodes, 32928 edges, 476 communities" in out
+    assert "tree_sitter_sql" in out and "yielded no symbols" in out
+    assert "potentially sensitive" in out and "found 774 code" in out
+    assert "AST extraction" not in out and "next: run" not in out  # progress + hints
+    assert "verbose=True" in out and "graph.json ready" in out
+
+    full = server.graphlore_build(".", verbose=True)
+    assert "AST extraction: 200/774" in full and "next: run" in full
+
+
+def test_build_log_that_cannot_be_condensed_is_returned_whole(tmp_path, monkeypatch):
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    assert server._condense_build_log("ok") == "ok"  # never emptier than the log
+    _fake_build(monkeypatch, "ERROR (exit 2):\n  step 3/9 (33%) blew up")
+    assert server.graphlore_build(".") == "ERROR (exit 2):\n  step 3/9 (33%) blew up"
+
+
+def test_build_outside_the_project_says_the_graph_is_not_read(tmp_path, monkeypatch):
+    project, sibling = tmp_path / "proj", tmp_path / "sibling"
+    project.mkdir()
+    sibling.mkdir()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", project)
+    monkeypatch.setattr(server, "RESTRICT_PATHS", False)
+    _fake_build(monkeypatch, "wrote graph.json: 1 nodes, 0 edges", sibling / "graphify-out")
+    out = server.graphlore_build(str(sibling), code_only=True)
+    assert "will NOT see it" in out and f'graphlore_project("{sibling}")' in out
+    assert "graph.json ready" not in out
+    assert "not found" in server.graphlore_overview()  # the read tools really don't
+
+    # a subfolder of the project is the same case: graphify writes inside it
+    (project / "pkg").mkdir()
+    _fake_build(monkeypatch, "wrote graph.json: 1 nodes, 0 edges",
+                project / "pkg" / "graphify-out")
+    assert "will NOT see it" in server.graphlore_build("pkg")
+
+    # ...and switching makes the same graph readable
+    assert "switched from" in server.graphlore_project(str(sibling))
+    assert json.loads(server.graphlore_overview(as_json=True))["nodes"] == 1
+
+
+def test_project_reports_switches_and_refuses(tmp_path, monkeypatch):
+    project, other = tmp_path / "proj", tmp_path / "other"
+    project.mkdir()
+    other.mkdir()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", project)
+    monkeypatch.setattr(server, "RESTRICT_PATHS", False)
+    data = json.loads(server.graphlore_project(as_json=True))
+    assert data["project_dir"] == str(project) and data["switched"] is False
+    assert data["graph_exists"] is False
+    assert "No graph here yet" in server.graphlore_project()
+
+    _write_graph(other, {"nodes": [{"id": "A", "label": "A"}], "links": []})
+    # the output directory itself is accepted and resolved to its project
+    data = json.loads(server.graphlore_project(str(other / "graphify-out"), as_json=True))
+    assert data["switched"] is True and data["project_dir"] == str(other)
+    assert data["previous_project_dir"] == str(project) and data["nodes"] == 1
+    assert server.config.PROJECT_DIR == other
+
+    assert "not a directory" in server.graphlore_project(str(tmp_path / "missing"))
+    assert server.config.PROJECT_DIR == other  # a refused switch changes nothing
+
+    monkeypatch.setattr(server, "RESTRICT_PATHS", True)
+    refused = json.loads(server.graphlore_project(str(project), as_json=True))
+    assert "GRAPHLORE_RESTRICT_PATHS" in refused["error"]
+    assert server.config.PROJECT_DIR == other
+
+
+def test_build_notes_an_unignored_output_dir(tmp_path, monkeypatch):
+    import shutil as _sh
+
+    import pytest
+    if _sh.which("git") is None:
+        pytest.skip("git not available")
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    git = _git_init(tmp_path)
+    _fake_build(monkeypatch, "wrote graph.json: 1 nodes, 0 edges", tmp_path / "graphify-out")
+    out = server.graphlore_build(".")
+    assert "neither ignored nor tracked by git" in out and ".gitignore" in out
+    assert not (tmp_path / "graphify-out" / ".gitignore").exists()  # it only says so
+
+    (tmp_path / ".gitignore").write_text("graphify-out/\n", encoding="utf-8")
+    assert "neither ignored" not in server.graphlore_build(".")
+
+    (tmp_path / ".gitignore").unlink()
+    git("add", "-A")  # tracked on purpose (a shared graph) is not warned about either
+    assert "neither ignored" not in server.graphlore_build(".")
+    assert server._out_dir_git_note(tmp_path / "nowhere") == ""
+
+
+# --- analysis scope: vendored / external / tests ----------------------------
+
+
+def test_scope_parsing():
+    scope = server._parse_scope("src/pkg/, !docs  -tests +vendored **/*.py")
+    assert scope.include == ("src/pkg", "**/*.py") and scope.exclude == ("docs",)
+    assert scope.tests is False and scope.vendored is True and scope.external is False
+    assert server._parse_scope("").tests is None  # unsaid: each tool's own default
+    everything = server._parse_scope("all")
+    assert everything.tests and everything.vendored and everything.external
+    assert "unknown scope flag '+bogus'" in server._parse_scope("+bogus")
+
+
+def test_vendored_detection_by_path_name_and_content(tmp_path, monkeypatch):
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    assert server._vendored_by_path("node_modules/x/index.js")
+    assert server._vendored_by_path("web/vendor/jquery.js")
+    assert server._vendored_by_path("static/app.min.js")
+    assert server._vendored_by_path("static/assets/decorate-BgofJUJ5.js")  # build hash
+    assert server._vendored_by_path("static/main.3f2a1b9c.css")
+    assert not server._vendored_by_path("static/my-settings.js")  # a word, not a hash
+    assert not server._vendored_by_path("src/chart-utils2024.js")
+    assert not server._vendored_by_path("src/vendor.py")  # a file is not a vendor dir
+
+    (tmp_path / "bundle.js").write_text("var a=1;" * 4000, encoding="utf-8")
+    (tmp_path / "app.js").write_text("function f() {\n  return 1;\n}\n" * 50,
+                                     encoding="utf-8")
+    (tmp_path / "data.py").write_text("X = '" + "y" * 9000 + "'\n", encoding="utf-8")
+    assert server._is_vendored_file("bundle.js")
+    assert not server._is_vendored_file("app.js")
+    assert not server._is_vendored_file("data.py")  # only JS/CSS is sniffed
+    assert not server._is_vendored_file("missing.js")
+
+
+def _vendored_graph(tmp_path):
+    """First-party code, a vendored bundle full of self-loops, externals and a test."""
+    _write_graph(tmp_path, {
+        "nodes": [
+            {"id": "app", "label": "app.py", "source_file": "pkg/app.py"},
+            {"id": "run", "label": "run()", "source_file": "pkg/app.py",
+             "source_location": "L3"},
+            {"id": "help", "label": "helper()", "source_file": "pkg/app.py",
+             "source_location": "L9"},
+            {"id": "t", "label": "test_run()", "source_file": "tests/test_app.py",
+             "source_location": "L2"},
+            {"id": "v", "label": "bundle-BgofJUJ5.js",
+             "source_file": "static/bundle-BgofJUJ5.js"},
+            {"id": "va", "label": "a()", "source_file": "static/bundle-BgofJUJ5.js"},
+            {"id": "vb", "label": "re()", "source_file": "static/bundle-BgofJUJ5.js"},
+            {"id": "typing", "label": "typing", "type": "external", "external": True,
+             "source_file": ""},
+            {"id": "us", "label": "_", "source_file": ""},  # an unresolved name
+        ],
+        "links": [
+            {"source": "app", "target": "run", "relation": "contains"},
+            {"source": "app", "target": "help", "relation": "contains"},
+            {"source": "run", "target": "help", "relation": "calls"},
+            {"source": "t", "target": "run", "relation": "calls"},
+            {"source": "help", "target": "help", "relation": "calls"},  # recursion
+            {"source": "v", "target": "va", "relation": "contains"},
+            {"source": "v", "target": "vb", "relation": "contains"},
+            {"source": "va", "target": "vb", "relation": "calls"},
+            {"source": "vb", "target": "va", "relation": "calls"},
+            {"source": "va", "target": "va", "relation": "calls"},
+            {"source": "vb", "target": "vb", "relation": "calls"},
+        ] + [
+            {"source": src, "target": "typing", "relation": "imports"}
+            for src in ("app", "run", "help", "t", "v", "va", "vb")
+        ] + [
+            {"source": src, "target": "us", "relation": "calls"}
+            for src in ("run", "help", "t", "va", "vb")
+        ],
+    })
+
+
+def test_default_scope_shows_first_party_code_only(tmp_path, monkeypatch):
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    _vendored_graph(tmp_path)
+    data = json.loads(server.graphlore_god_nodes(as_json=True))
+    names = [g["node"] for g in data["god_nodes"]]
+    assert names and set(names) <= {"app.py", "run()", "helper()", "test_run()"}
+    left = data["scope"]["left_out"]
+    assert left["vendored_nodes"] == 3 and left["external_nodes"] == 2
+    assert left["vendored_files"] == ["static/bundle-BgofJUJ5.js"]
+    text = server.graphlore_god_nodes()
+    assert "3 node(s) from 1 vendored/minified file(s)" in text and "2 external" in text
+
+    everything = json.loads(server.graphlore_god_nodes(scope="all", as_json=True))
+    assert {"typing", "_"} <= {g["node"] for g in everything["god_nodes"]}
+    assert everything["scope"]["left_out"]["vendored_nodes"] == 0
+
+    # overview ranks inside the same default scope and says what it left out
+    overview = json.loads(server.graphlore_overview(as_json=True))
+    assert "typing" not in {g["node"] for g in overview["god_nodes"]}
+    assert overview["scope"]["left_out"]["vendored_nodes"] == 3
+    assert "Left out of analysis" in server.graphlore_overview()
+
+
+def test_scope_filters_tests_and_paths(tmp_path, monkeypatch):
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    _vendored_graph(tmp_path)
+    data = json.loads(server.graphlore_god_nodes(scope="-tests", as_json=True))
+    assert "test_run()" not in {g["node"] for g in data["god_nodes"]}
+    assert data["scope"]["left_out"]["test_nodes"] == 1
+    only = json.loads(server.graphlore_god_nodes(scope="tests", as_json=True))
+    assert only["scope"]["left_out"]["filtered_nodes"] == 3  # the three pkg/ nodes
+    out = json.loads(server.graphlore_god_nodes(scope="!pkg", as_json=True))
+    assert {g["node"] for g in out["god_nodes"]} <= {"test_run()"}
+    bad = json.loads(server.graphlore_god_nodes(scope="+bogus", as_json=True))
+    assert "unknown scope flag" in bad["error"]
+
+
+def test_scope_hands_back_the_same_lists_when_nothing_is_left_out(project):
+    nodes, edges = server._nodes_edges(server._load_graph())
+    view = server._scoped(nodes, edges)
+    assert view.nodes is nodes and view.edges is edges and view.note() == ""
+    scoped = server._scoped(nodes, edges, "httpx/_client.py")
+    assert scoped.nodes is not nodes and len(scoped.nodes) == 2
+    # a filtered view is built once per graph, so identity-keyed caches keep hitting
+    assert server._scoped(nodes, edges, "httpx/_client.py").edges is scoped.edges
+
+
+def test_a_graph_without_file_info_has_no_externals():
+    # no file key at all is a schema without file info, not an unresolved reference
+    assert not server._is_external_node({"id": "A", "label": "A"})
+    assert server._is_external_node({"id": "get", "label": "get", "source_file": ""})
+    assert server._is_external_node({"id": "json", "label": "json", "type": "external"})
+    assert not server._is_external_node({"id": "f", "label": "f()", "source_file": "a.py"})
+
+
+def test_validate_leaves_out_vendored_and_does_not_count_recursion(tmp_path, monkeypatch):
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    _vendored_graph(tmp_path)
+    data = json.loads(server.graphlore_validate(as_json=True))
+    assert data["healthy"] is True and data["issues"]["self_loops"] == 0
+    assert data["recursive_calls"] == 1  # helper() calls itself: not an issue
+    assert data["examples"]["recursive_calls"] == ["helper()"]
+    assert "recursion — not an issue" in server.graphlore_validate()
+    everything = json.loads(server.graphlore_validate(scope="all", as_json=True))
+    assert everything["recursive_calls"] == 3 and everything["healthy"] is True
+
+
+def test_file_hub_node_accepts_a_path_label():
+    assert graph_mod._is_file_hub_node({"label": "a.py", "source_file": "pkg/a.py"})
+    # graphify >= 0.9 labels a package entry file with part of its path
+    assert graph_mod._is_file_hub_node(
+        {"label": "pkg/__init__.py", "source_file": "src/pkg/__init__.py"})
+    assert not graph_mod._is_file_hub_node({"label": "f()", "source_file": "pkg/a.py"})
+
+
+# --- cycles by relation kind --------------------------------------------------
+
+
+def _layered_graph(tmp_path):
+    """models -> util -> routes -> models at file level, via file and symbol imports."""
+    _write_graph(tmp_path, {
+        "nodes": [
+            {"id": "init", "label": "core/__init__.py", "source_file": "pkg/core/__init__.py"},
+            {"id": "models", "label": "models.py", "source_file": "pkg/core/models.py"},
+            {"id": "util", "label": "util.py", "source_file": "pkg/core/util.py"},
+            {"id": "routes", "label": "routes.py", "source_file": "pkg/api/routes.py"},
+            {"id": "schema", "label": "TableSchema", "source_file": "pkg/core/models.py",
+             "source_location": "L7", "_callable_class": True},
+            {"id": "norm", "label": "norm()", "source_file": "pkg/core/util.py",
+             "source_location": "L4"},
+            {"id": "health", "label": "health()", "source_file": "pkg/api/routes.py",
+             "source_location": "L12"},
+            {"id": "json", "label": "json", "type": "external", "source_file": ""},
+        ],
+        "links": [
+            {"source": "models", "target": "schema", "relation": "contains"},
+            {"source": "util", "target": "norm", "relation": "contains"},
+            {"source": "routes", "target": "health", "relation": "contains"},
+            {"source": "models", "target": "init", "relation": "imports_from",
+             "source_location": "L4"},  # `from . import util`: the package itself
+            {"source": "models", "target": "util", "relation": "imports_from",
+             "source_location": "L4"},
+            {"source": "util", "target": "routes", "relation": "imports_from",
+             "source_file": "pkg/core/util.py", "source_location": "L1"},
+            {"source": "routes", "target": "schema", "relation": "imports",
+             "source_file": "pkg/api/routes.py", "source_location": "L3"},  # file -> symbol
+            {"source": "models", "target": "json", "relation": "imports"},
+            {"source": "norm", "target": "health", "relation": "calls"},
+        ],
+    })
+
+
+def test_cycles_reports_import_cycles_between_modules_first(tmp_path, monkeypatch):
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    _layered_graph(tmp_path)
+    data = json.loads(server.graphlore_cycles(as_json=True))
+    assert data["import_cycle_count"] == 1 and data["call_cycle_count"] == 0
+    first = data["cycles"][0]
+    assert first["kind"] == "imports" and first["size"] == 3
+    assert set(first["nodes"]) == {
+        "pkg/core/models.py", "pkg/core/util.py", "pkg/api/routes.py"}
+    # one concrete loop, closed on its start
+    assert first["path"][0] == first["path"][-1] and len(first["path"]) == 4
+    assert data["implicit_package_imports_ignored"] == 1
+    text = server.graphlore_cycles()
+    assert text.index("Import cycles between modules: 1") < text.index("Call cycles")
+    assert "Call cycles (functions calling each other): none." in text
+
+    only_calls = json.loads(server.graphlore_cycles(kind="calls", as_json=True))
+    assert only_calls["cycles"] == [] and only_calls["import_cycle_count"] is None
+    assert "ERROR" in server.graphlore_cycles(kind="sideways")
+
+
+def test_cycles_says_no_import_cycle_in_one_line(tmp_path, monkeypatch):
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    _write_graph(tmp_path, {
+        "nodes": [
+            {"id": "a", "label": "renderHead()", "source_file": "ui/a.js"},
+            {"id": "b", "label": "openCatalog()", "source_file": "ui/a.js"},
+            {"id": "c", "label": "Shape", "source_file": "ui/shape.py"},
+            {"id": "d", "label": "Canvas", "source_file": "ui/canvas.py"},
+        ],
+        "links": [
+            {"source": "a", "target": "b", "relation": "calls"},
+            {"source": "b", "target": "a", "relation": "calls"},
+            {"source": "c", "target": "d", "relation": "references"},
+            {"source": "d", "target": "c", "relation": "uses"},
+        ],
+    })
+    text = server.graphlore_cycles()
+    assert "Import cycles between modules: none." in text.splitlines()[0]
+    assert "renderHead() → openCatalog() → renderHead()" in text
+    data = json.loads(server.graphlore_cycles(as_json=True))
+    assert [c["kind"] for c in data["cycles"]] == ["calls", "other"]
+    assert set(data["cycles"][1]["nodes"]) == {"Shape", "Canvas"}
+    imports = server.graphlore_cycles(kind="imports")
+    assert imports.strip() == "Import cycles between modules: none."
+
+
+# --- unreferenced code -------------------------------------------------------
+
+
+def _dead_code_project(tmp_path):
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "app.py").write_text(
+        "import click\n"                       # 1
+        "\n"
+        "\n"
+        "class Service:\n"                     # 4
+        "    def run(self):\n"                 # 5
+        "        return used()\n"
+        "\n"
+        "    def export(self):\n"              # 8
+        "        return 1\n"
+        "\n"
+        "    def __repr__(self):\n"            # 11
+        "        return 'S'\n"
+        "\n"
+        "\n"
+        "def used():\n"                        # 15
+        "    return 1\n"
+        "\n"
+        "\n"
+        "@click.command()\n"                   # 19
+        "def serve():\n"                       # 20
+        "    return Service().run()\n"
+        "\n"
+        "\n"
+        "def _dead():\n"                       # 24
+        "    return _dead()\n"
+        "\n"
+        "\n"
+        "def from_template():\n"               # 28
+        "    return 2\n"
+        "\n"
+        "\n"
+        "def only_tested():\n"                 # 32
+        "    return 3\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "index.html").write_text(
+        "<a onclick=\"from_template()\">go</a>\n", encoding="utf-8")
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tests / "test_app.py").write_text(
+        "def test_only():\n    assert only_tested() == 3\n", encoding="utf-8")
+
+    def fn(nid, label, line, file="pkg/app.py", **extra):
+        return {"id": nid, "label": label, "source_file": file,
+                "source_location": f"L{line}", "file_type": "code", **extra}
+
+    _write_graph(tmp_path, {
+        "nodes": [
+            {"id": "app", "label": "app.py", "source_file": "pkg/app.py", "file_type": "code"},
+            fn("svc", "Service", 4, _callable_class=True),
+            fn("run", ".run()", 5), fn("export", ".export()", 8),
+            fn("repr", ".__repr__()", 11),
+            fn("used", "used()", 15), fn("serve", "serve()", 20),
+            fn("dead", "_dead()", 24), fn("tpl", "from_template()", 28),
+            fn("tested", "only_tested()", 32),
+            {"id": "tfile", "label": "test_app.py", "source_file": "tests/test_app.py",
+             "file_type": "code"},
+            fn("test", "test_only()", 1, file="tests/test_app.py"),
+            {"id": "rat", "label": "Why.", "file_type": "rationale",
+             "source_file": "pkg/app.py", "source_location": "L25"},
+        ],
+        "links": [
+            *({"source": "app", "target": t, "relation": "contains"}
+              for t in ("svc", "used", "serve", "dead", "tpl", "tested")),
+            *({"source": "svc", "target": t, "relation": "method"}
+              for t in ("run", "export", "repr")),
+            {"source": "tfile", "target": "test", "relation": "contains"},
+            {"source": "run", "target": "used", "relation": "calls"},
+            {"source": "serve", "target": "svc", "relation": "calls"},
+            {"source": "serve", "target": "run", "relation": "calls"},
+            {"source": "dead", "target": "dead", "relation": "calls"},  # recursion only
+            {"source": "rat", "target": "dead", "relation": "rationale_for"},
+            {"source": "test", "target": "tested", "relation": "calls"},
+            {"source": "tfile", "target": "svc", "relation": "imports"},
+        ],
+    })
+
+
+def test_unreferenced_applies_three_filters(tmp_path, monkeypatch):
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    _dead_code_project(tmp_path)
+    data = json.loads(server.graphlore_unreferenced(as_json=True))
+    rows = {r["node"]: r for r in data["unreferenced"]}
+    # recursion and a docstring are not references; nothing else mentions _dead
+    assert rows["_dead()"]["file"] == "pkg/app.py" and rows["_dead()"]["line"] == 24
+    assert rows["_dead()"]["mentions"] == 0
+    # a public method of a class other files use is listed, but marked
+    assert "may be API" in rows[".export()"]["note"]
+    assert set(rows) == {"_dead()", ".export()"}
+    assert data["registered_by_decorator"] == {"command": 1}  # serve(): a click command
+    assert data["mentioned_elsewhere"] == 1                   # from_template(): the HTML
+    assert data["no_graph_reference"] == 4 and data["unreferenced_count"] == 2
+    # dunder methods and collected tests are never candidates
+    assert data["examined"] == 8
+
+    listed = json.loads(server.graphlore_unreferenced(include_mentioned=True, as_json=True))
+    by_name = {r["node"]: r for r in listed["unreferenced"]}
+    assert by_name["from_template()"]["mentions"] == 1
+
+    text = server.graphlore_unreferenced()
+    assert "@command ×1" in text and "pkg/app.py:24" in text
+
+
+def test_unreferenced_can_discount_test_references(tmp_path, monkeypatch):
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    _dead_code_project(tmp_path)
+    data = json.loads(server.graphlore_unreferenced(
+        count_test_references=False, include_mentioned=True, as_json=True))
+    row = next(r for r in data["unreferenced"] if r["node"] == "only_tested()")
+    assert row["mentions"] == 1  # the test file still names it, and that is shown
+    scoped = json.loads(server.graphlore_unreferenced(scope="tests", as_json=True))
+    assert scoped["examined"] == 0 and scoped["unreferenced"] == []
+
+
+def test_unreferenced_reads_old_schema_and_decorator_edges(tmp_path, monkeypatch):
+    """No `_callable` markers, no source on disk: label convention + decorator edges."""
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    _write_graph(tmp_path, {
+        "nodes": [
+            {"id": "f", "label": "m.py", "source_file": "m.py"},
+            {"id": "h", "label": "health()", "source_file": "m.py", "source_location": "L3"},
+            {"id": "g", "label": "gone()", "source_file": "m.py", "source_location": "L9"},
+            {"id": "get", "label": "get", "source_file": ""},
+        ],
+        "links": [
+            {"source": "f", "target": "h", "relation": "contains"},
+            {"source": "f", "target": "g", "relation": "contains"},
+            {"source": "h", "target": "get", "relation": "references", "context": "decorator"},
+        ],
+    })
+    data = json.loads(server.graphlore_unreferenced(as_json=True))
+    assert [r["node"] for r in data["unreferenced"]] == ["gone()"]
+    assert data["registered_by_decorator"] == {"get": 1}
+
+
+def test_unreferenced_marks_methods_of_subclasses(tmp_path, monkeypatch):
+    """A visitor's visit_X is called by its base class; the graph cannot see that,
+    and gives the nested class no node — so the source is what says it."""
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    (tmp_path / "m.py").write_text(
+        "import ast\n"
+        "\n"
+        "\n"
+        "def scan(tree):\n"                          # 4
+        "    class _Visitor(ast.NodeVisitor):\n"     # 5
+        "        def visit_Name(self, node):\n"      # 6
+        "            return node\n"
+        "\n"
+        "    class _Plain():\n"                      # 9
+        "        def leftover(self):\n"              # 10
+        "            return 1\n"
+        "\n"
+        "    return _Visitor().visit(tree), _Plain()\n",
+        encoding="utf-8",
+    )
+    _write_graph(tmp_path, {
+        "nodes": [
+            {"id": "f", "label": "m.py", "source_file": "m.py"},
+            {"id": "scan", "label": "scan()", "source_file": "m.py", "source_location": "L4"},
+            {"id": "v", "label": "visit_Name()", "source_file": "m.py",
+             "source_location": "L6"},
+            {"id": "l", "label": "leftover()", "source_file": "m.py",
+             "source_location": "L10"},
+        ],
+        "links": [
+            {"source": "f", "target": "scan", "relation": "contains"},
+            {"source": "scan", "target": "v", "relation": "contains"},
+            {"source": "scan", "target": "l", "relation": "contains"},
+            {"source": "f", "target": "scan", "relation": "calls"},
+        ],
+    })
+    data = json.loads(server.graphlore_unreferenced(as_json=True))
+    rows = {r["node"]: r for r in data["unreferenced"]}
+    assert "may override a hook" in rows["visit_Name()"]["note"]
+    assert "note" not in rows["leftover()"]  # `class _Plain():` names no base
+    assert [r["node"] for r in data["unreferenced"]] == ["leftover()", "visit_Name()"]
+
+
+# --- layer rules ---------------------------------------------------------------
+
+
+def test_layers_reports_violations_grouped_by_layer(tmp_path, monkeypatch):
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    _layered_graph(tmp_path)
+    rules = {"pkg/core/": [], "pkg/api": ["pkg/core"]}
+    data = json.loads(server.graphlore_layers(rules=rules, as_json=True))
+    assert data["violation_count"] == 1 and data["imports_checked"] == 4
+    core = next(entry for entry in data["layers"] if entry["layer"] == "pkg/core")
+    assert core["violations"] == [{
+        "from_file": "pkg/core/util.py", "to_file": "pkg/api/routes.py",
+        "to_layer": "pkg/api", "site": "pkg/core/util.py:L1",
+    }]
+    api = next(entry for entry in data["layers"] if entry["layer"] == "pkg/api")
+    assert api["violations"] == [] and api["imports_checked"] == 1  # api -> core: allowed
+    text = server.graphlore_layers(rules=rules)
+    assert "pkg/core/util.py:L1  imports pkg/api/routes.py" in text
+
+    allowed = json.loads(server.graphlore_layers(
+        rules={"pkg/core": ["*"], "pkg/api": ["pkg/core"]}, as_json=True))
+    assert allowed["violation_count"] == 0
+
+
+def test_layers_strict_and_unmatched_prefixes(tmp_path, monkeypatch):
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    _layered_graph(tmp_path)
+    # api may import nothing, but pkg/core is not a declared layer: only strict objects
+    loose = json.loads(server.graphlore_layers(rules={"pkg/api": []}, as_json=True))
+    assert loose["violation_count"] == 0
+    strict = json.loads(server.graphlore_layers(rules={"pkg/api": []}, strict=True,
+                                                as_json=True))
+    assert strict["violation_count"] == 1
+    v = strict["layers"][0]["violations"][0]
+    assert v["to_layer"] is None and v["imported"] == "TableSchema"
+
+    typo = json.loads(server.graphlore_layers(
+        rules={"pkg/cor": ["pkg/apii"]}, as_json=True))
+    assert typo["unmatched_prefixes"] == ["pkg/apii", "pkg/cor"]
+    assert "No graph file matches" in server.graphlore_layers(rules={"pkg/cor": []})
+
+
+def test_layers_rules_from_a_file(tmp_path, monkeypatch):
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    _layered_graph(tmp_path)
+    assert "no layer rules" in server.graphlore_layers()
+    (tmp_path / ".graphlore-layers.json").write_text(
+        json.dumps({"layers": {"pkg/core": [], "pkg/api": ["pkg/core"]}}), encoding="utf-8")
+    data = json.loads(server.graphlore_layers(as_json=True))
+    assert data["violation_count"] == 1
+    assert data["rules_source"] == ".graphlore-layers.json"
+
+    (tmp_path / "arch.json").write_text("{not json", encoding="utf-8")
+    assert "could not read layer rules" in server.graphlore_layers(rules_file="arch.json")
+    assert "no layer rules" in server.graphlore_layers(rules_file="../outside.json")
+    bad = json.loads(server.graphlore_layers(rules={"pkg/core": 3}, as_json=True))
+    assert "must be a list" in bad["error"]
+    assert "non-empty object" in server.graphlore_layers(rules={})
+
+
+# --- same-named symbols -----------------------------------------------------
+
+
+def test_same_names_lists_definitions_with_importer_counts(tmp_path, monkeypatch):
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+
+    def node(nid, label, file, line, **extra):
+        return {"id": nid, "label": label, "source_file": file,
+                "source_location": f"L{line}", **extra}
+
+    _write_graph(tmp_path, {
+        "nodes": [
+            {"id": "fa", "label": "a.py", "source_file": "pkg/a.py"},
+            {"id": "fb", "label": "b.py", "source_file": "pkg/b.py"},
+            {"id": "fc", "label": "c.py", "source_file": "pkg/c.py"},
+            {"id": "ft", "label": "test_a.py", "source_file": "tests/test_a.py"},
+            node("sa", "Settings", "pkg/a.py", 3, _callable_class=True),
+            node("sb", "Settings", "pkg/b.py", 8, _callable_class=True),
+            node("ma", "main()", "pkg/a.py", 20), node("mb", "main()", "pkg/b.py", 30),
+            node("pa", "parse()", "pkg/a.py", 40), node("pb", "parse()", "pkg/b.py", 50),
+            node("meth_a", ".load()", "pkg/a.py", 5), node("meth_b", ".load()", "pkg/b.py", 9),
+            node("ta", "helper()", "tests/test_a.py", 1),
+            node("ha", "helper()", "pkg/a.py", 60),
+        ],
+        "links": [
+            *({"source": f, "target": t, "relation": "contains"} for f, t in (
+                ("fa", "sa"), ("fb", "sb"), ("fa", "ma"), ("fb", "mb"), ("fa", "pa"),
+                ("fb", "pb"), ("ft", "ta"), ("fa", "ha"))),
+            {"source": "sa", "target": "meth_a", "relation": "method"},
+            {"source": "sb", "target": "meth_b", "relation": "method"},
+            {"source": "fc", "target": "sa", "relation": "imports"},
+            {"source": "ft", "target": "sa", "relation": "imports"},
+            {"source": "fc", "target": "meth_b", "relation": "calls"},
+        ],
+    })
+    data = json.loads(server.graphlore_same_names(as_json=True))
+    assert [g["name"] for g in data["names"]] == ["Settings", "parse"]  # classes first
+    settings = data["names"][0]
+    assert settings["modules"] == 2 and settings["kinds"] == ["class"]
+    first, second = settings["definitions"]
+    assert (first["file"], first["line"], first["imported_by"]) == ("pkg/a.py", 3, 2)
+    # nobody imports the second copy, though one file reaches it through a method
+    assert (second["file"], second["imported_by"], second["referenced_by"]) == (
+        "pkg/b.py", 0, 1)
+    # main() is conventional, .load() is a method, helper() only repeats in a test
+    assert data["scope"]["left_out"]["test_nodes"] == 2
+
+    with_tests = json.loads(server.graphlore_same_names(scope="+tests", as_json=True))
+    assert "helper" in {g["name"] for g in with_tests["names"]}
+    only_functions = json.loads(server.graphlore_same_names(kinds="functions", as_json=True))
+    assert [g["name"] for g in only_functions["names"]] == ["parse"]
+    assert "ERROR" in server.graphlore_same_names(kinds="variables")
+    assert "pkg/b.py:8  imported by 0 module(s)" in server.graphlore_same_names()
+
+
+# --- duplication scan: definition vs definition ------------------------------
+
+
+class _ScoredHit(_FakeHit):
+    def __init__(self, file_path, start_line, end_line=None, score=None):
+        super().__init__(file_path, start_line, end_line)
+        self.score = score
+
+
+def test_duplication_scan_compares_definitions_and_reports_scores(tmp_path, monkeypatch):
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    body = "".join(f"    x{i} = {i}\n" for i in range(8))
+    (tmp_path / "a.py").write_text(
+        "def load_rows():\n" + body + "    return x0\n", encoding="utf-8")       # 1-10
+    (tmp_path / "b.py").write_text(
+        "def read_rows():\n" + body + "    return x1\n"                         # 1-10
+        "\n\ndef tiny():\n    return 1\n"                                        # 13-14
+        "\n\nclass Rows:\n" + body.replace("    x", "    y") + "    z = 1\n",    # 17-26
+        encoding="utf-8")
+    (tmp_path / "test_a.py").write_text(
+        "def test_load_rows():\n" + body + "    assert x0 == 0\n", encoding="utf-8")
+
+    def node(nid, label, file, line, **extra):
+        return {"id": nid, "label": label, "source_file": file,
+                "source_location": f"L{line}", "file_type": "code", **extra}
+
+    _write_graph(tmp_path, {
+        "nodes": [
+            {"id": "fa", "label": "a.py", "source_file": "a.py", "file_type": "code"},
+            {"id": "fb", "label": "b.py", "source_file": "b.py", "file_type": "code"},
+            {"id": "ft", "label": "test_a.py", "source_file": "test_a.py",
+             "file_type": "code"},
+            node("load", "load_rows()", "a.py", 1), node("read", "read_rows()", "b.py", 1),
+            node("tiny", "tiny()", "b.py", 13),
+            node("rows", "Rows", "b.py", 17, _callable_class=True),
+            node("test", "test_load_rows()", "test_a.py", 1),
+        ],
+        "links": [
+            {"source": "fa", "target": "load", "relation": "contains"},
+            *({"source": "fb", "target": t, "relation": "contains"}
+              for t in ("read", "tiny", "rows")),
+            {"source": "ft", "target": "test", "relation": "contains"},
+        ],
+    })
+    queries = []
+
+    class _Index:
+        def search(self, query, top_k=3):
+            queries.append(query)
+            if "def load_rows" in query:
+                # a chunk that only MENTIONS the name ranks first; the anchor must
+                # be the hit that overlaps the seed's own span
+                return [_ScoredHit("b.py", 13, 14), _ScoredHit("a.py", 1, 10)]
+            return []
+
+        def find_related(self, hit, top_k=8):
+            assert (hit.chunk.file_path, hit.chunk.start_line) == ("a.py", 1)
+            return [
+                _ScoredHit("b.py", 1, 10, score=0.91),      # same kind, same size
+                _ScoredHit("b.py", 13, 14, score=0.88),     # a 2-line function
+                _ScoredHit("b.py", 17, 26, score=0.87),     # a class
+                _ScoredHit("test_a.py", 1, 10, score=0.95),  # its own test
+            ]
+
+    monkeypatch.setattr(server, "_semble_index", lambda: _Index())
+    data = json.loads(server.graphlore_duplication_scan(as_json=True))
+    assert data["seeded_by"] == "definition size"
+    assert queries[0].startswith("def load_rows():")  # searched by its source, not its label
+    assert data["pairs"] == [{
+        "a": "load_rows()", "a_site": "a.py:1", "b": "read_rows()", "b_site": "b.py:1",
+        "score": 0.91, "distance": ">6",
+    }]
+    assert data["skipped"] == {"different_size": 1, "different_kind": 1, "test_source": 1}
+    # tiny() is too short to seed; the other three find no chunk of their own
+    assert data["seeds_scanned"] == 1 and data["seeds_unanchored"] == 3
+    text = server.graphlore_duplication_scan()
+    assert "0.91  load_rows() (a.py:1)  ~  read_rows() (b.py:1)" in text
+    assert "include_tests=True" in text
+
+    with_tests = json.loads(server.graphlore_duplication_scan(include_tests=True, as_json=True))
+    assert with_tests["pairs"][0]["b"] == "test_load_rows()"  # best score first
+    floor = json.loads(server.graphlore_duplication_scan(
+        include_tests=True, min_score=0.93, as_json=True))
+    assert [p["b"] for p in floor["pairs"]] == ["test_load_rows()"]
+
+
+def test_semantic_tools_say_the_first_call_downloads_a_model(project, monkeypatch):
+    monkeypatch.setattr(server, "_semble_index", lambda: None)
+    out = server.graphlore_duplication_scan()
+    assert "Hugging Face" in out and "graphlore_same_names" in out
+    for tool in (server.graphlore_locate, server.graphlore_duplication_scan):
+        assert "downloads" in tool.__doc__ and "SEMBLE_MODEL_NAME" in tool.__doc__
+
+
+# --- surprises: expected coupling and name-resolved edges ---------------------
+
+
+def _fn(nid, label, file):
+    return {"id": nid, "label": label, "source_file": file, "file_type": "code"}
+
+
+def test_surprises_score_consumer_directories_as_expected_coupling():
+    nodes = [
+        _fn("core", "open()", "pkg/core/db.py"), _fn("api", "serve()", "pkg/api/app.py"),
+        _fn("close", "close()", "pkg/core/db.py"),
+        _fn("bench", "bench()", "bench/run.py"), _fn("demo", "demo()", "demo/show.py"),
+    ]
+    edges = [
+        {"source": "bench", "target": "core", "relation": "calls"},
+        {"source": "demo", "target": "close", "relation": "calls"},
+        {"source": "api", "target": "core", "relation": "calls"},
+    ]
+    items, _diag = graph_mod._computed_surprises(nodes, edges)
+    by_from = {i["from"]: i for i in items}
+    # two directories nothing depends on, both using the package: what they are for
+    assert by_from["bench()"]["strength"] == "weak"
+    assert any("only consumes pkg/" in w for w in by_from["bench()"]["why"])
+    assert not any("top-level" in w for w in by_from["demo()"]["why"])
+    # an edge between two parts of the package outranks them
+    assert by_from["serve()"]["score"] > by_from["bench()"]["score"]
+
+
+def test_surprises_drop_inferred_edges_into_unimported_modules(tmp_path, monkeypatch):
+    nodes = [
+        _fn("smoke", "open_cursor()", "scripts/smoke.py"),
+        _fn("smoke_file", "smoke.py", "scripts/smoke.py"),
+        _fn("table", "table()", "other/schema.py"),
+        _fn("conn", "connect()", "pkg/db.py"),
+        _fn("pkg_init", "pkg/__init__.py", "pkg/__init__.py"),
+        _fn("deep", "query()", "pkg/sql/run.py"),
+    ]
+    edges = [
+        {"source": "smoke_file", "target": "conn", "relation": "imports"},
+        {"source": "smoke_file", "target": "pkg_init", "relation": "imports_from"},
+        # same-named function in a module the file never imports: a resolver guess
+        {"source": "smoke", "target": "table", "relation": "calls", "confidence": "INFERRED"},
+        # inferred, but the module is imported / reached through its package
+        {"source": "smoke", "target": "conn", "relation": "calls", "confidence": "INFERRED"},
+        {"source": "smoke", "target": "deep", "relation": "calls", "confidence": "INFERRED"},
+    ]
+    items, diag = graph_mod._computed_surprises(nodes, edges)
+    assert diag["skipped"]["inferred_unimported"] == 1
+    assert {i["to"] for i in items} == {"connect()", "query()"}
+
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    _write_graph(tmp_path, {"nodes": nodes, "links": edges})
+    assert "1 inferred edge(s) dropped" in server.graphlore_surprises()
+    # a file whose imports the graph never recorded cannot be judged: kept
+    kept, _ = graph_mod._computed_surprises(nodes, edges[2:])
+    assert "table()" in {i["to"] for i in kept}
+
+
+def test_review_prompt_names_the_review_tools():
+    text = server.review()
+    order = [text.index(name) for name in (
+        "graphlore_validate", "graphlore_cycles", "graphlore_layers",
+        "graphlore_unreferenced", "graphlore_same_names", "graphlore_surprises")]
+    assert order == sorted(order)
