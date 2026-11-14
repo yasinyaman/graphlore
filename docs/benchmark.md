@@ -7,6 +7,10 @@ and the two run separately.
 Back to the [README](../README.md) · [Tool reference](tools.md) ·
 [Concepts](concepts.md) · [Configuration](configuration.md)
 
+This page measures one tool, `graphlore_locate`, on six libraries. For every
+tool on 20 repositories in 14 languages — what works in each language and what
+does not — see the [polyglot audit](benchmark-polyglot.md).
+
 ## Results on httpx
 
 Averaged over **6 queries** spanning httpx subsystems (send path, digest auth,
