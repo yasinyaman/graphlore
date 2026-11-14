@@ -61,12 +61,17 @@ semble finds **what's relevant**; graphify gives **how it connects**. They're co
 ## Installation
 
 ```bash
-# graphlore itself
-pip install graphlore
+# graphlore itself (from GitHub; it is not on PyPI yet)
+pip install "graphlore @ git+https://github.com/yasinyaman/graphlore"
 
 # plus the Graphify CLI it wraps (needed for build/query/path/explain/add)
 pip install graphifyy && graphify install
 ```
+
+Once the first release is on PyPI this becomes `pip install graphlore`. Until
+then, wherever this README or a server message says
+`pip install "graphlore[extra]"`, use the same GitHub form:
+`pip install "graphlore[semble] @ git+https://github.com/yasinyaman/graphlore"`.
 
 From source:
 
@@ -464,7 +469,7 @@ graphlore/
 ├── docs/                   # benchmark reports (HTML/SVG)
 ├── .claude-plugin/         # Claude Code plugin + marketplace manifests (the repo root is the plugin)
 ├── .claude/skills/         # graphlore-explore skill for Claude Code (shipped by the plugin)
-├── .github/workflows/      # CI: ruff + mypy + pytest on py 3.10–3.12
+├── .github/workflows/      # CI: ruff + mypy + pytest on py 3.10–3.12; PyPI publish on release
 ├── mcp.json                # Claude Code example config
 └── claude_desktop_config.json
 ```
