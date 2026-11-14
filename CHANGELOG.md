@@ -13,6 +13,24 @@ All notable changes to this project are documented here. The format is based on
   `graphlore_fetch` with every name missing, a failed `git status` in
   `graphlore_freshness`) set `isError: true`. Tool functions still return a
   string; `GRAPHLORE_STRUCTURED=0` restores plain-text results.
+- A name that matches nothing comes back with `did_you_mean`: the closest
+  node names (stdlib `difflib`, pool bounded on large graphs), in the text and
+  in JSON next to `code: "not_found"`. `graphlore_fetch` lists them per
+  missing name.
+- Every budget or limit cut says what it left out. `graphlore_fetch` names the
+  requested nodes it did not fetch (`not_fetched`); `graphlore_skeleton` names
+  the files left out; `graphlore_locate` counts the seed's direct neighbors left
+  out of the structure and the callees past the five in `calls_into`;
+  `graphlore_search`, `graphlore_god_nodes`, `graphlore_surprises` and
+  `graphlore_package_apis` report `total` and `truncated`;
+  `graphlore_freshness` reports the real length of each capped list in
+  `counts`; the `graphlore://community/{id}` resource says when it shows 50 of
+  more boundary edges. Each adds a one-line `hint`.
+- `graphlore_impact` reports `beyond_hops` (nodes one hop past `hops`) and
+  `complete`, false whenever the budget or the hop limit cut the answer.
+- `graphlore_neighbors`, `graphlore_subgraph` and `graphlore_locate`'s
+  structure mark inferred / ambiguous edges (`confidence`) and edges graphlore
+  resolved from the source (`resolved_by`), as `graphlore_impact` already did.
 
 ### Changed
 - No `outputSchema` is advertised. Before, the SDK derived
@@ -24,6 +42,14 @@ All notable changes to this project are documented here. The format is based on
   and `graphlore_communities` on a graph without communities returns
   `{"communities": [], "note"}`, in place of `{"error": ...}`. The text is
   unchanged.
+- `graphlore_node_details`, `graphlore_fetch` and `graphlore_skeleton(node=)`
+  resolve names like the node-centric tools: a code definition before a doc
+  heading of the same name, and a `matched` block naming the other candidates.
+  They used to take the first exact or substring match silently, so the node
+  they pick for an ambiguous name can change.
+- A substring fallback is reported everywhere (`matched.by: "substring"`);
+  before, `'async'` resolving to `AsyncClient` looked like an exact hit.
+  `matched` gains `by` (`label`, `name`, `path` or `substring`).
 
 ## [0.4.1] - 2026-11-14
 

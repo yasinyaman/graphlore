@@ -28,6 +28,8 @@ graphlore is a Python MCP server (MCP Python SDK v2: `mcp.server.mcpserver.MCPSe
 - A tool that lifts import edges to file level passes `ImportChecker().kind` (one instance per call) and reports `checker.rejected`; graphify resolves imports by name and gets same-named modules wrong.
 - A new source reader (`imports.py`, `resolve.py`) covers every language the project already parses — Python via `ast`, the rest via tree-sitter, as in `apis.py` — or says per language why there is nothing to read. Don't add a Python-only analysis.
 - A row that prints its own `file:line` uses `labels.name(id)`, not `labels.get(id)`, so the location is shown once.
+- Every tool taking a node name resolves it with `_pick_node`, reports `_matched(key, picked)` and answers a miss with `_not_found` (adds `did_you_mean`); never `_resolve_node` directly.
+- A budget or limit that drops rows says so: `truncated` plus a count or the names left out, and a `hint`.
 - Node-centric tools (impact, subgraph, neighbors, tests_for) use `_pick_node` + `_matched` for the node, `_nav_view` for edges and scope (it includes the calls `resolve.py` adds from the source), order production code before tests, and attach `_EMPTY_NOTE` to an empty result.
 - `config.PROJECT_DIR` can change at runtime (`graphlore_project`); never cache a value derived from it without keying on it.
 

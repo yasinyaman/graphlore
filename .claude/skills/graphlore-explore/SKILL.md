@@ -83,15 +83,28 @@ issues — gauge how much to trust the graph).
   session — do not conclude the parameter does not exist.
 
 - **A name can match several nodes** (a function and a README heading, two
-  `Settings` classes). The node-centric tools say "Matched N nodes ...; using
-  X" and list the others with their ids — check that X is the one you meant, and
-  pass the id if it is not.
+  `Settings` classes). Every tool that takes a node name (node-centric tools,
+  `graphlore_node_details`, `graphlore_fetch`, `graphlore_skeleton`) says
+  "Matched N nodes ...; using X" and lists the others with their ids — check
+  that X is the one you meant, and pass the id if it is not.
+- **A name that matches nothing exactly** falls back to a substring match, and
+  the answer says so ("'async' is not a node id or name; matched 3 by
+  substring"). Treat that as a guess. A name that matches nothing at all comes
+  back with `did_you_mean` candidates.
+- **Cuts are stated.** A budget or limit that drops rows sets `truncated` and
+  says what it left out: `not_fetched` (fetch), `files_left_out` (skeleton),
+  `total` (search, god_nodes, surprises, package_apis), `counts` (freshness).
+  `graphlore_impact` adds `complete`: false when the budget or the hop limit
+  cut the answer (`beyond_hops` counts the nodes one hop further). Don't read an
+  incomplete blast radius as the whole one.
 - **An empty answer is about the index, not the code.** "Nothing depends on X"
   means no edge was indexed. graphlore adds the calls made through an imported
   module (`mod.func()`, how tests usually call code) from the source — Python,
   and JS/TS default and dynamic imports — but calls through an object, a
   callback or dynamic dispatch stay invisible.
-- **Inferred edges are leads.** `graphlore_impact` marks them `inferred`;
+- **Inferred edges are leads.** `graphlore_impact`, `graphlore_neighbors` and
+  `graphlore_subgraph` mark them `inferred` (and edges graphlore resolved from
+  the source `resolved`);
   `strict=True` walks only the edges the extractor resolved, for when you need
   proof rather than candidates.
 - **Hub functions:** `graphlore_impact` and `graphlore_subgraph` list production

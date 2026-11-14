@@ -5632,3 +5632,183 @@ def test_fetch_all_missing_is_error_partial_is_not(tmp_path, monkeypatch):
     res = _call_over_mcp("graphlore_fetch", {"nodes": ["alpha", "zz_missing"]})
     assert res.is_error is False
     assert res.structured_content["not_found"] == ["zz_missing"]
+
+
+# --- How a name resolved, and what a cut left out ---------------------------------
+
+def test_substring_match_is_reported(project):
+    data = json.loads(server.graphlore_neighbors("async", as_json=True))
+    assert data["node"] == "AsyncClient"
+    assert data["matched"]["by"] == "substring"
+    assert data["matched"]["count"] == 1 and data["matched"]["others"] == []
+    assert "'async' is not a node id or name; matched 1 by substring" in (
+        server.graphlore_neighbors("async"))
+    # several substring hits: the first in graph order is used, the rest listed
+    data = json.loads(server.graphlore_subgraph("client", as_json=True))
+    assert data["center"] == "Client"
+    assert data["matched"]["by"] == "substring" and data["matched"]["count"] == 2
+    assert [o["id"] for o in data["matched"]["others"]] == ["AsyncClient"]
+    # an exact name says nothing
+    assert "matched" not in json.loads(server.graphlore_neighbors("Client", as_json=True))
+
+
+def test_node_details_fetch_skeleton_resolve_like_the_node_tools(tmp_path, monkeypatch):
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    _module_call_project(tmp_path)
+    # `tool` is both a function and a README heading: the code definition wins and
+    # the heading is named as the other match, as in the node-centric tools
+    detail = json.loads(server.graphlore_node_details("tool", as_json=True))
+    assert detail["id"] == "fn_tool"
+    assert detail["matched"]["count"] == 2 and detail["matched"]["others"][0]["id"] == "doc"
+    assert "Matched 2 nodes for 'tool'" in server.graphlore_node_details("tool")
+
+    item = json.loads(server.graphlore_fetch(["tool"], as_json=True))["fetched"][0]
+    assert item["node"] == "tool()" and item["requested"] == "tool"
+    assert item["matched"]["using"] == "fn_tool"
+    assert "def tool():" in item["code"]
+    assert "[asked 'tool': matched 2 nodes" in server.graphlore_fetch(["tool"])
+    # an exact id carries no matched block
+    assert "matched" not in json.loads(
+        server.graphlore_fetch(["fn_tool"], as_json=True))["fetched"][0]
+
+    sk = json.loads(server.graphlore_skeleton(node="tool", as_json=True))
+    assert sk["matched"]["using"] == "fn_tool"
+    assert sk["sections"][0]["file"] == "pkg/server.py"
+
+
+def test_not_found_suggests_close_names(project):
+    data = json.loads(server.graphlore_neighbors("Clinet", as_json=True))
+    assert data["code"] == "not_found"
+    assert data["did_you_mean"][0]["label"] == "Client"
+    assert data["did_you_mean"][0]["site"] == "httpx/_client.py:50"
+    text = server.graphlore_impact("Respnose")
+    assert text.startswith("No node matching 'Respnose'. Did you mean: Response")
+    assert text.endswith("Try graphlore_search.")
+    # nothing close: no suggestion, still a not-found error
+    data = json.loads(server.graphlore_node_details("qqqqqqqq", as_json=True))
+    assert data["did_you_mean"] == [] and "No node matching" in data["error"]
+    # fetch reports suggestions per missing name
+    fetched = json.loads(server.graphlore_fetch(["Clinet"], as_json=True))
+    assert fetched["not_found"] == ["Clinet"]
+    assert fetched["did_you_mean"]["Clinet"][0]["label"] == "Client"
+
+
+def test_close_matches_pool_is_bounded(monkeypatch):
+    nodes = [{"id": f"n{i}", "label": f"symbol_{i:05d}"} for i in range(50_000)]
+    nodes.append({"id": "target", "label": "handle_request"})
+    seen = []
+    real = graph_mod.difflib.get_close_matches
+
+    def spy(word, possibilities, **kw):
+        seen.append(len(possibilities))
+        return real(word, possibilities, **kw)
+
+    monkeypatch.setattr(graph_mod.difflib, "get_close_matches", spy)
+    graph_mod._NAME_CACHE.clear()
+    hits = graph_mod._close_matches(nodes, "handle_requst")
+    assert [graph_mod._node_id(n) for n in hits] == ["target"]
+    assert seen and seen[0] <= graph_mod._CLOSE_MATCH_POOL
+
+
+def test_fetch_names_what_the_budget_left_out(tmp_path, monkeypatch):
+    lines = []
+    nodes = []
+    for k in range(1, 4):
+        nodes.append({"id": f"big{k}", "label": f"big{k}", "source_file": "m.py",
+                      "line": len(lines) + 1})
+        lines += [f"def big{k}():"] + [f"    a{i} = {i}" for i in range(30)] + ["    return 1", ""]
+    _fetch_project(tmp_path, monkeypatch, "\n".join(lines) + "\n", nodes)
+    data = json.loads(server.graphlore_fetch(
+        ["big1", "big2", "big3"], budget_tokens=50, as_json=True))
+    assert [f["node"] for f in data["fetched"]] == ["big1"]
+    assert data["truncated"] is True
+    assert data["not_fetched"] == ["big2", "big3"]
+    assert "not_fetched" in data["hint"]
+    text = server.graphlore_fetch(["big1", "big2", "big3"], budget_tokens=50)
+    assert "not fetched: big2, big3" in text
+
+
+def test_skeleton_names_files_left_out(tmp_path, monkeypatch):
+    nodes = []
+    for k in range(4):
+        _write(tmp_path, f"m{k}.py", "".join(
+            f"def f{k}_{i}(a, b, c):\n    return a\n\n" for i in range(20)))
+        nodes.append({"id": f"f{k}", "label": f"f{k}_0", "source_file": f"m{k}.py",
+                      "line": 1, "community": 7})
+    _write_graph(tmp_path, {"nodes": nodes, "edges": []})
+    server._GRAPH_CACHE.clear()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    data = json.loads(server.graphlore_skeleton(community="7", budget_tokens=60, as_json=True))
+    assert data["truncated"] is True
+    assert len(data["sections"]) == 1
+    assert data["files_left_out"] == ["m1.py", "m2.py", "m3.py"]
+    assert data["files_left_out_count"] == 3
+    assert "3 file(s) left out: m1.py, m2.py, m3.py" in server.graphlore_skeleton(
+        community="7", budget_tokens=60)
+
+
+def test_listing_tools_report_totals(project):
+    data = json.loads(server.graphlore_search("e", limit=2, as_json=True))
+    assert data["shown"] == 2 and data["total"] > 2 and data["truncated"] is True
+    assert "(first 2; raise limit" in server.graphlore_search("e", limit=2)
+    data = json.loads(server.graphlore_search("Client", as_json=True))
+    assert data["truncated"] is False
+    data = json.loads(server.graphlore_god_nodes(top_n=1, as_json=True))
+    assert data["total"] == 5 and data["truncated"] is True
+    data = json.loads(server.graphlore_surprises(limit=5, as_json=True))
+    assert data["total"] == 1 and data["truncated"] is False
+
+
+def test_freshness_counts_past_the_list_cap(tmp_path, monkeypatch):
+    import shutil as _sh
+
+    import pytest
+    if _sh.which("git") is None:
+        pytest.skip("git not available")
+    _write_graph(tmp_path, {"nodes": [], "links": []})
+    git = _git_init(tmp_path)
+    git("add", ".")
+    git("commit", "-m", "init")
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    for i in range(60):
+        (tmp_path / f"new_{i:02d}.txt").write_text("x\n", encoding="utf-8")
+    data = json.loads(server.graphlore_freshness(as_json=True))
+    assert len(data["uncommitted_or_untracked_files"]) == server._FRESHNESS_LIST_CAP
+    assert data["counts"]["uncommitted_or_untracked_files"] == 60
+    assert data["truncated"] is True
+
+
+def test_impact_says_when_the_hop_limit_cut_it_short(tmp_path, monkeypatch):
+    chain = ["a", "b", "c", "d"]
+    _write_graph(tmp_path, {
+        "nodes": [{"id": x, "label": x} for x in chain],
+        "edges": [{"source": chain[i], "target": chain[i + 1], "relation": "calls"}
+                  for i in range(3)],
+    })
+    server._GRAPH_CACHE.clear()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    monkeypatch.setenv("GRAPHLORE_RESOLVE", "0")
+    short = json.loads(server.graphlore_impact("d", hops=1, as_json=True))
+    assert [r["node"] for r in short["impacted"]] == ["c"]
+    assert short["beyond_hops"] == 1 and short["complete"] is False
+    assert "Raise hops past 1" in short["hint"]
+    assert "Incomplete: 1 more node(s) lie one hop past hops=1" in server.graphlore_impact(
+        "d", hops=1)
+    full = json.loads(server.graphlore_impact("d", hops=3, as_json=True))
+    assert full["beyond_hops"] == 0 and full["complete"] is True and "hint" not in full
+
+
+def test_edge_rows_carry_inferred_and_resolved_flags(tmp_path, monkeypatch):
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    _module_call_project(tmp_path)
+    rows = json.loads(server.graphlore_neighbors("tool()", as_json=True))["neighbors"]
+    by_node = {r["node"]: r for r in rows}
+    assert by_node["other()"]["confidence"] == "INFERRED"
+    assert by_node["main()"]["resolved_by"] == "graphlore"  # server.tool() in cli.py
+    assert "confidence" not in by_node["_helper()"] and "resolved_by" not in by_node["_helper()"]
+    text = server.graphlore_neighbors("tool()")
+    assert "←calls— other()  [inferred]" in text
+    sub = json.loads(server.graphlore_subgraph("tool()", hops=1, as_json=True))
+    flagged = {(e["from"], e["to"]): e for e in sub["edges"]}
+    assert flagged[("other()", "tool()")]["confidence"] == "INFERRED"
+    assert "confidence" not in flagged[("tool()", "_helper()")]
