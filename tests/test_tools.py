@@ -921,7 +921,8 @@ def test_locate_cross_check_flags_hidden_link(tmp_path, monkeypatch):
     cousins = {c["node"]: c for c in data["semantic_cousins"]}
     assert cousins["B"]["linked"] is True and cousins["B"]["distance"] == 1
     assert cousins["C"]["linked"] is False and cousins["C"]["distance"] == ">4"
-    hidden = {c["node"] for c in data["hidden_links"]}
+    hidden = {c["node"] for c in data["semantic_cousins"] if not c["linked"]}
+    assert data["hidden_link_count"] == len(hidden)
     assert "C" in hidden and "B" not in hidden  # the emergent signal
 
 
@@ -1437,8 +1438,9 @@ def test_locate_hidden_links_ordered_nearest_first(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(server, "_semble_index", lambda: fake)
     data = json.loads(server.graphlore_locate("x", hops=2, related_k=10, as_json=True))
-    assert [c["node"] for c in data["hidden_links"]] == ["B", "C", "D"]
-    dist = {c["node"]: c["distance"] for c in data["hidden_links"]}
+    hidden = [c for c in data["semantic_cousins"] if not c["linked"]]
+    assert [c["node"] for c in hidden] == ["B", "C", "D"]
+    dist = {c["node"]: c["distance"] for c in hidden}
     assert dist["B"] == 3 and dist["C"] == 4 and dist["D"] == ">4"
 
 
@@ -5429,6 +5431,8 @@ def test_locate_skips_file_headers_and_names_what_the_seed_calls(tmp_path, monke
     assert data["header_hits_skipped"] == 1
     assert [(h["file"], h["qualname"]) for h in data["also_matched"]] == [
         ("pkg/apis.py", "_api_uses")]
+    # ... and marked in semantic_hits, which still lists every hit in rank order
+    assert [h.get("header", False) for h in data["semantic_hits"]] == [False, True, False]
     # the implementation, from the graph: graph.py, most specific callee first
     # (_find_cycles has one caller, _load_graph two) — edges graphlore resolved
     assert [(c["node"], c["file"], c["callers"]) for c in data["calls_into"]] == [
@@ -5780,24 +5784,32 @@ def test_freshness_counts_past_the_list_cap(tmp_path, monkeypatch):
     assert data["truncated"] is True
 
 
-def test_impact_says_when_the_hop_limit_cut_it_short(tmp_path, monkeypatch):
+def test_impact_complete_means_nothing_was_dropped_within_the_hops(tmp_path, monkeypatch):
     chain = ["a", "b", "c", "d"]
     _write_graph(tmp_path, {
-        "nodes": [{"id": x, "label": x} for x in chain],
+        "nodes": [{"id": x, "label": x} for x in chain]
+                 + [{"id": f"u{i}", "label": f"user_{i}"} for i in range(30)],
         "edges": [{"source": chain[i], "target": chain[i + 1], "relation": "calls"}
-                  for i in range(3)],
+                  for i in range(3)]
+                 + [{"source": f"u{i}", "target": "d", "relation": "calls"} for i in range(30)],
     })
     server._GRAPH_CACHE.clear()
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     monkeypatch.setenv("GRAPHLORE_RESOLVE", "0")
-    short = json.loads(server.graphlore_impact("d", hops=1, as_json=True))
-    assert [r["node"] for r in short["impacted"]] == ["c"]
-    assert short["beyond_hops"] == 1 and short["complete"] is False
-    assert "Raise hops past 1" in short["hint"]
-    assert "Incomplete: 1 more node(s) lie one hop past hops=1" in server.graphlore_impact(
-        "d", hops=1)
-    full = json.loads(server.graphlore_impact("d", hops=3, as_json=True))
-    assert full["beyond_hops"] == 0 and full["complete"] is True and "hint" not in full
+    # every node within the one hop asked for is listed: complete, whatever lies
+    # further out; beyond_hops says what hops=2 would add
+    short = json.loads(server.graphlore_impact("c", hops=1, as_json=True))
+    assert [r["node"] for r in short["impacted"]] == ["b"]
+    assert short["complete"] is True and short["beyond_hops"] == 1
+    assert short["hint"] == "hops=2 would add 1 node(s)."
+    assert "Within hops=1 this is everything; hops=2 would add 1 node(s)." in (
+        server.graphlore_impact("c", hops=1))
+    full = json.loads(server.graphlore_impact("c", hops=3, as_json=True))
+    assert full["complete"] is True and full["beyond_hops"] == 0 and "hint" not in full
+    # the budget dropping rows inside the hops is what makes an answer incomplete
+    cut = json.loads(server.graphlore_impact("d", hops=1, budget_tokens=60, as_json=True))
+    assert cut["truncated"] is True and cut["complete"] is False
+    assert cut["hint"].startswith("Raise budget_tokens")
 
 
 def test_edge_rows_carry_inferred_and_resolved_flags(tmp_path, monkeypatch):
@@ -6134,3 +6146,84 @@ def test_plugin_pins_the_full_toolset():
                          / ".claude-plugin" / "plugin.json").read_text())
     # the shipped skill uses review and naming tools that lean leaves out
     assert plugin["mcpServers"]["graphlore"]["env"]["GRAPHLORE_TOOLSET"] == "full"
+
+
+# --- Round five: surprises from import-less files, compact scope, locate ----------
+
+def test_surprises_judge_a_file_whose_imports_the_graph_did_not_record(tmp_path, monkeypatch):
+    # pilot.py imports only the standard library, so the graph has no import edge
+    # from it; a guessed indirect_call into another layer must still be dropped
+    _write(tmp_path, "domain/olap/pilot.py",
+           "import math\n\n\ndef outcome(rows):\n    def inner():\n"
+           "        return dict(rows=len(rows))\n    return inner()\n")
+    _write(tmp_path, "application/olap/views.py", "class View:\n    def rows(self):\n"
+           "        return []\n")
+    _write(tmp_path, "application/olap/api.py",
+           "from application.olap.views import View\n\n\ndef serve():\n"
+           "    return View().rows()\n")
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    nodes = [
+        _fn("outcome", "outcome()", "domain/olap/pilot.py"),
+        _fn("rows", ".rows()", "application/olap/views.py"),
+        _fn("serve", "serve()", "application/olap/api.py"),
+        _fn("api_file", "api.py", "application/olap/api.py"),
+        _fn("views_file", "views.py", "application/olap/views.py"),
+    ]
+    edges = [
+        {"source": "outcome", "target": "rows", "relation": "indirect_call",
+         "confidence": "INFERRED", "source_location": "L6"},
+        {"source": "api_file", "target": "views_file", "relation": "imports_from"},
+        {"source": "serve", "target": "rows", "relation": "calls", "confidence": "INFERRED"},
+    ]
+    checker = server.ImportChecker()
+    items, diag = graph_mod._computed_surprises(nodes, edges, checker.kind, checker.reaches)
+    assert diag["skipped"]["inferred_unimported"] == 1
+    assert "outcome()" not in {i["from"] for i in items}
+    # without the source check the guess survived (the 0.5.0 behaviour)
+    items, _diag = graph_mod._computed_surprises(nodes, edges, checker.kind)
+    assert "outcome()" in {i["from"] for i in items}
+    # a file the checker cannot read is not judged either way
+    assert checker.reaches("domain/olap/missing.py", "application/olap/views.py") is None
+    assert checker.reaches("domain/olap/pilot.py", "application/olap/views.py") is False
+    assert checker.reaches("application/olap/api.py", "application/olap/views.py") is True
+
+
+def test_scope_payload_summarizes_vendored_files(tmp_path, monkeypatch):
+    nodes = [{"id": "app", "label": "app()", "source_file": "src/app.py"}]
+    for i in range(25):
+        d = "web/vendor/carbon" if i < 20 else "web/lib"
+        nodes.append({"id": f"v{i}", "label": f"v{i}", "source_file": f"{d}/f{i:02d}.min.js"})
+    _write_graph(tmp_path, {"nodes": nodes, "edges": []})
+    server._GRAPH_CACHE.clear()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    left = json.loads(server.graphlore_god_nodes(as_json=True))["scope"]["left_out"]
+    assert left["vendored_file_count"] == 25 and left["vendored_nodes"] == 25
+    assert len(left["vendored_files"]) == 3
+    assert left["vendored_dirs"] == [{"dir": "web/vendor/carbon", "files": 20},
+                                     {"dir": "web/lib", "files": 5}]
+    # the full list lives in graphlore_validate
+    full = json.loads(server.graphlore_validate(as_json=True))["vendored_files"]
+    assert len(full) == 25
+    assert "25 vendored/minified file(s)" in server.graphlore_validate()
+
+
+def test_locate_lists_each_cousin_once(tmp_path, monkeypatch):
+    _write_graph(tmp_path, {
+        "nodes": [{"id": x, "label": x, "source_file": f"{x.lower()}.py",
+                   "source_location": "L1"} for x in "ABCD"],
+        "edges": [{"source": "A", "target": "B", "type": "calls"}],
+    })
+    server._GRAPH_CACHE.clear()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    fake = _FakeIndex(
+        search_hits=[_FakeHit("a.py", 1)],
+        related_hits=[_FakeHit("b.py", 1), _FakeHit("c.py", 1), _FakeHit("d.py", 1)],
+    )
+    monkeypatch.setattr(server, "_semble_index", lambda: fake)
+    data = json.loads(server.graphlore_locate("anything", as_json=True))
+    assert "hidden_links" not in data
+    nodes = [c["node"] for c in data["semantic_cousins"]]
+    assert sorted(nodes) == ["B", "C", "D"] and len(nodes) == len(set(nodes))
+    # hidden links (linked: false) come first, then the connected cousins
+    assert [c["linked"] for c in data["semantic_cousins"]] == [False, False, True]
+    assert data["hidden_link_count"] == 2

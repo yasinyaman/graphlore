@@ -437,6 +437,30 @@ class ImportChecker:
         # of nodes): the one that runs earliest decides.
         return min(kinds, key=lambda k: _RUNTIME_RANK[k])
 
+    def reaches(self, importer: str, imported: str) -> bool | None:
+        """Can any import statement in ``importer``'s own source mean ``imported``?
+
+        For a file whose imports the graph did not record: False when the source
+        was read and none of its statements can import that file (a script that
+        imports only the standard library imports nothing of the project). None
+        when it cannot tell — a language it does not read, a compiled language
+        (imports resolved by the build), missing or unparseable source.
+        """
+        importer, imported = _norm_relpath(importer), _norm_relpath(imported)
+        low = importer.lower()
+        if low.endswith(_COMPILED_EXTS):
+            return None
+        if low.endswith(_JS_EXTS):
+            js = _js_for_file(importer)
+            if js is None:
+                return None
+            return any(_js_can_mean(i.specifier, importer, imported) for i in js.imports)
+        stmts = _imports_for_file(importer)
+        target = _module_parts(imported)
+        if stmts is None or target is None:
+            return None
+        return any(self._can_mean(st, importer, target) for st in stmts)
+
     def resolve_js(self, importer: str, specifier: str, files: set[str]) -> str | None:
         """The one file of ``files`` a JS/TS specifier names from ``importer``."""
         found = [f for f in files if _js_can_mean(specifier, importer, f)]

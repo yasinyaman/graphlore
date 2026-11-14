@@ -339,7 +339,8 @@ def _file_import_edges(
 
 
 def _computed_surprises(
-    nodes: list[dict], edges: list[dict], import_kind: ImportKind | None = None
+    nodes: list[dict], edges: list[dict], import_kind: ImportKind | None = None,
+    reaches: Callable[[str, str], bool | None] | None = None,
 ) -> tuple[list[dict], dict[str, Any]]:
     """Score cross-file edges for "surprisingness" when the graph carries no flag.
 
@@ -349,7 +350,9 @@ def _computed_surprises(
     the flag-only check silently collapsed.
 
     One O(N+E) pass plus a sort of the survivors; no betweenness, so it stays
-    usable on large graphs.
+    usable on large graphs. ``reaches(importer, imported)`` (``ImportChecker.
+    reaches``) answers from the source for a file whose imports the graph did not
+    record: False means none of its import statements can mean that file.
     """
     byid = {_node_id(n): n for n in nodes}
     degree: dict[str, int] = {}
@@ -381,16 +384,26 @@ def _computed_surprises(
         got = file_imports.get(fu, ())
         return fv in got or any(_is_package_entry_of(g, fv) for g in got)
 
+    source_says: dict[tuple[str, str], bool | None] = {}
+
     def _name_guess(e: dict, rel: str, fu: str, fv: str) -> bool:
         """The resolver guessed this target, and the source file imports neither
         the target's module nor its package: a same-named function in an
-        unrelated directory, not a coupling. Only judged for a file whose
-        imports the graph recorded at all."""
+        unrelated directory, not a coupling. Judged from the graph's import edges
+        when it recorded any for the file; otherwise from the file's own import
+        statements (``reaches``), so a file importing only the standard library —
+        which leaves no import edge at all — is judged too, not exempted."""
         conf = str(e.get("confidence") or "EXTRACTED").upper()
-        return (
-            conf in ("INFERRED", "AMBIGUOUS") and rel in _SURPRISE_NAME_RESOLVED_RELS
-            and fu in has_imports and not _imported(fu, fv)
-        )
+        if conf not in ("INFERRED", "AMBIGUOUS") or rel not in _SURPRISE_NAME_RESOLVED_RELS:
+            return False
+        if fu in has_imports:
+            return not _imported(fu, fv)
+        if reaches is None:
+            return False
+        key = (fu, fv)
+        if key not in source_says:
+            source_says[key] = reaches(fu, fv)
+        return source_says[key] is False
 
     # Who depends on what, by top-level directory and by file — counted over the
     # edges that can be trusted: a resolver guess from the package into a script
