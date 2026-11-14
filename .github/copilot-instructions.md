@@ -21,7 +21,7 @@ graphlore is a Python MCP server (MCP Python SDK v2: `mcp.server.mcpserver.MCPSe
 - `graph.json` shape varies: use `_node_id`, `_node_label`, `_node_file`, `_node_line`, `_edge_ends`, `_edge_rel`, `_nodes_edges`. Read other fields with `.get()` and a fallback; community is `n.get("community", n.get("cluster"))`.
 - Paths from the graph, a semantic chunk or a file/node argument are resolved through `spans._resolve_in_project` before any read. `graphlore_build`'s `path` is deliberately outside this (opt-in `RESTRICT_PATHS`).
 - `_run_cli` passes an argv list with no shell. Never build a shell string.
-- A path that can reach the network checks `config.offline()` and is listed in the README's network table; `_run_cli` uses `_cli_env()`.
+- A path that can reach the network checks `config.offline()` and is listed in the network table in `docs/configuration.md`; `_run_cli` uses `_cli_env()`.
 - Text replies that quote repository content wrap it in `_frame_repo_text(...)` and set `content_trust` / `untrusted_fields` in the payload.
 - Optional dependencies (`semble`, `tree-sitter`, `tiktoken`, `watchdog`, `uvicorn`) are imported inside functions and degrade to a fallback or install hint.
 - graph.json analysis tools must work with no `graphify` binary and no optional extras.
@@ -37,4 +37,4 @@ graphlore is a Python MCP server (MCP Python SDK v2: `mcp.server.mcpserver.MCPSe
 
 ## When a tool is added or changed
 
-Also update: the tool list in the `server.py` docstring, `LEAN_TOOLS` / `LOCATE_TOOLS` if relevant (`lean` is the default surface), `_instructions` / the prompt steps if the tool belongs in the recommended flow, `test_tool_and_prompt_registration` (asserts exactly 33 tools), the README tool tables and "33" counts, `.claude/skills/graphlore-explore/SKILL.md`, and `CHANGELOG.md` under `[Unreleased]`.
+Also update: the tool list in the `server.py` docstring, `LEAN_TOOLS` / `LOCATE_TOOLS` if relevant (`lean` is the default surface), `_instructions` / the prompt steps if the tool belongs in the recommended flow, `test_tool_and_prompt_registration` (asserts exactly 33 tools), the tool tables in `docs/tools.md` (and the README's `lean` table and "33" counts), `.claude/skills/graphlore-explore/SKILL.md`, and `CHANGELOG.md` under `[Unreleased]`.
