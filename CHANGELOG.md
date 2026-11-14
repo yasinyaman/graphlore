@@ -128,6 +128,15 @@ All notable changes to this project are documented here. The format is based on
     `create_connected_server_and_client_session` helper is gone).
 
 ### Added
+- **Claude Code plugin + marketplace.** The repository root is now a Claude
+  Code plugin (`.claude-plugin/plugin.json`) listed by its own marketplace
+  (`.claude-plugin/marketplace.json`), so
+  `/plugin install graphlore --marketplace yasinyaman/graphlore` adds the MCP
+  server and the `graphlore-explore` skill in one step. The server is launched
+  with `uvx` from the plugin's own copy of the source (extras `graphify`,
+  `treesitter`, `semble`; `uv` required), so the server always matches the
+  installed plugin version, and `GRAPHLORE_PROJECT_DIR` is set to the opened
+  project. A test keeps the manifest version equal to `server.__version__`.
 - `code_only` flag on `graphlore_build` — appends the CLI's `--code-only`, so a
   repo containing doc/paper/image files can be indexed via local AST with no
   LLM API key (those files otherwise demand semantic extraction and the build

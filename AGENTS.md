@@ -70,10 +70,19 @@ A tool is registered with `@mcp.tool(annotations=ToolAnnotations(...))` in `serv
 - the tool list in the `server.py` module docstring, and `LEAN_TOOLS` / `LOCATE_TOOLS` if it belongs in a trimmed surface
 - `test_tool_and_prompt_registration` in `tests/test_tools.py`, which asserts the exact tool count (28)
 - the README tool tables and its "28 tools" counts
-- `.claude/skills/graphlore-explore/SKILL.md`
+- `.claude/skills/graphlore-explore/SKILL.md` (shipped to users by the plugin)
 - `CHANGELOG.md` under `[Unreleased]` — every behavior change gets an entry there (Keep a Changelog format)
 
-The version is duplicated in `pyproject.toml` and `server.__version__`, and recorded in `uv.lock`; run `uv lock` after a bump.
+The version is duplicated in `pyproject.toml`, `server.__version__` and `.claude-plugin/plugin.json` (a test compares the last two), and recorded in `uv.lock`; run `uv lock` after a bump.
+
+## Claude Code plugin
+
+The repository root is itself a Claude Code plugin and its own marketplace (`.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json` with `"source": "./"`). Consequences:
+
+- `.claude/skills/` is what the plugin ships to users, not only a project-local skill directory. Anything added there is installed for everyone.
+- The plugin's MCP server runs `uvx --from "graphlore[graphify,treesitter,semble] @ ${CLAUDE_PLUGIN_ROOT}" graphlore`, i.e. it builds this package from the installed copy of the repo. Renaming the console script, the package or those extras breaks the plugin.
+- Users stay on the manifest's `version` until it changes, so a fix reaches plugin users only with a version bump.
+- Check manifest changes with `claude plugin validate .`. It passes with one expected warning: a `CLAUDE.md` at the plugin root is not loaded as plugin context (it is for people working on this repo), so `--strict` fails by design.
 
 ## Tests
 

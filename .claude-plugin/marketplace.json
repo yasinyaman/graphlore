@@ -1,0 +1,17 @@
+{
+  "name": "graphlore",
+  "description": "graphlore: a Graphify codebase knowledge graph joined to real source spans, as a Claude Code plugin.",
+  "owner": {
+    "name": "yasinyaman",
+    "url": "https://github.com/yasinyaman"
+  },
+  "plugins": [
+    {
+      "name": "graphlore",
+      "source": "./",
+      "description": "MCP server and exploration skill for navigating a Graphify knowledge graph: semantic locate with hidden links, token-budgeted subgraphs and source hydration, impact, routes, freshness.",
+      "category": "development",
+      "tags": ["mcp", "graphify", "knowledge-graph", "codebase", "code-search"]
+    }
+  ]
+}
