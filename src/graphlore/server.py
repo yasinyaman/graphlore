@@ -216,7 +216,7 @@ from .spans import (  # noqa: F401
 # Configuration
 # ---------------------------------------------------------------------------
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 GRAPHIFY_BIN = config.env("BIN", "graphify")
 CLI_TIMEOUT = int(config.env("TIMEOUT", "600"))
