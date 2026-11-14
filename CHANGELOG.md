@@ -26,6 +26,11 @@ Fifth round of feedback: 0.5.0 re-run on the same three repositories.
   the connected ones. The `hidden_links` list, which repeated the same
   entries, is replaced by `hidden_link_count`. Header chunks the answer
   skips are marked `header: true` in `semantic_hits`.
+- The server instructions, the README and the shipped skill no longer name a
+  `hidden_links` key; the README's tool table and scope section describe the
+  fields 0.5.0 added (`not_fetched`, `did_you_mean`, `complete` /
+  `beyond_hops`, `vendored_dirs`), and the typical workflow marks the steps
+  that need `GRAPHLORE_TOOLSET=full`.
 
 ### Fixed
 - `graphlore_surprises` ranked a guessed edge from a file that imports nothing

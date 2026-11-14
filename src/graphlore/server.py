@@ -5,7 +5,7 @@ Wraps the graphify CLI (https://graphify.net) so an AI assistant can query the
 codebase knowledge graph during development. Graphify builds the graph and ships
 its own embedded MCP server for navigating it; what this module adds is the span
 engine (ast + tree-sitter ``start..end`` ranges) and the tools that need it —
-locate/hidden_links, fetch, skeleton, routes, package_apis, and
+locate/hidden links, fetch, skeleton, routes, package_apis, and
 cosmetic-vs-structural freshness. One active project at a time: PROJECT_DIR,
 switchable with graphlore_project.
 
@@ -22,7 +22,7 @@ CLI-backed tools:
 graph.json analysis tools (no CLI needed):
   - graphlore_overview   : one-shot orientation (call this first)
   - graphlore_locate     : semantic search (semble) -> enclosing node -> token-budgeted
-                          subgraph + hidden_links  [needs the optional [semble] extra]
+                          subgraph + hidden links  [needs the optional [semble] extra]
   - graphlore_duplication_scan: repo-wide duplication audit — identical bodies
                           (exact), then hidden links  [the latter needs [semble]]
   - graphlore_god_nodes  : highest-degree nodes
@@ -322,7 +322,8 @@ def _instructions(active: set[str] | frozenset[str] | None = None) -> str:
         steps.append(
             "To find code by what it DOES, call graphlore_locate('<natural-language "
             "question>') — one call returns the enclosing node, its token-budgeted "
-            "subgraph, and hidden_links (similar-but-disconnected code)."
+            "subgraph, and hidden links (similar-but-disconnected code: the "
+            "semantic_cousins with linked=false)."
         )
     nav = _any_of(active, "graphlore_subgraph", "graphlore_neighbors", "graphlore_impact",
                   "graphlore_query")
@@ -3369,7 +3370,7 @@ def graphlore_duplication_scan(
     renamed copy still matches; trivial bodies (``return self.x``) are left out.
     This is the tier that finds the small helper copied into three modules.
 
-    Tier 2 — ``pairs`` (semantic, the batch form of locate's hidden_links): each
+    Tier 2 — ``pairs`` (semantic, the batch form of locate's hidden links): each
     seed is a function, method or class (largest bodies first), anchored to the
     semantic chunk that holds its own source, and its semantic neighbours are kept
     only when they are
