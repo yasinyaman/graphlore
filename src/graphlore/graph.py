@@ -794,6 +794,10 @@ _TIKTOKEN_ENC: Any = None
 
 def _tiktoken_encoder() -> Any:
     global _TIKTOKEN_ENC
+    if _TIKTOKEN_ENC is None and config.offline():
+        # tiktoken fetches its encoding file on first use unless it is cached;
+        # offline, count with the heuristic (and probe again once back online)
+        return None
     if _TIKTOKEN_ENC is None:
         try:
             import tiktoken

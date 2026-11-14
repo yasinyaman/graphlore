@@ -141,6 +141,10 @@ def _ts_parser_for(rel: str) -> tuple[Any, str | None]:
     if not lang:
         return None, None
     if lang not in _TS_PARSERS:
+        if config.offline() and not _grammar_cached(lang):
+            # get_language downloads an uncached grammar; offline, do without it
+            # (not cached as None, so it is tried once the switch is off)
+            return None, None
         try:
             # Some pack releases type get_language's argument as a Literal of
             # every grammar name, while detect_language_from_path returns str.
@@ -148,6 +152,20 @@ def _ts_parser_for(rel: str) -> tuple[Any, str | None]:
         except Exception:
             _TS_PARSERS[lang] = None
     return _TS_PARSERS[lang], lang
+
+
+def _grammar_cached(lang: str) -> bool:
+    """Whether tree-sitter-language-pack has ``lang`` on disk already. A pack too
+    old to say (no ``downloaded_languages``) is trusted, since it then bundles its
+    grammars rather than downloading them."""
+    try:
+        from tree_sitter_language_pack import downloaded_languages
+    except ImportError:
+        return True
+    try:
+        return lang in set(downloaded_languages())
+    except Exception:  # noqa: BLE001 - a cache probe that fails reads as "not cached"
+        return False
 
 
 def _is_ts_symbol(node_type: str) -> bool:

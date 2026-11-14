@@ -41,6 +41,23 @@ All notable changes to this project are documented here. The format is based on
   structure mark inferred / ambiguous edges (`confidence`) and edges graphlore
   resolved from the source (`resolved_by`), as `graphlore_impact` already did.
 
+- `GRAPHLORE_OFFLINE=1` refuses what graphlore knows reaches the network:
+  `graphlore_add`, `graphlore_build(mode=...)` and
+  `graphlore_label_communities(method="cli")` (which `auto` then skips). A
+  default build is forced to `--code-only`, the graphify subprocess loses the
+  LLM backend keys from its environment, `HF_HUB_OFFLINE` /
+  `TRANSFORMERS_OFFLINE` are set before semble loads, tiktoken is not loaded
+  and only cached tree-sitter grammars are used. The boot banner prints
+  `egress=offline` or `egress=on-demand`, and the README has a table of every
+  network path and what the switch does to it, including what it cannot
+  constrain (the graphify binary itself, a custom semantic backend).
+- Repository text in replies is framed as data. `graphlore_fetch`,
+  `graphlore_skeleton`, `graphlore_node_details` and the `query` / `path` /
+  `explain` passthroughs put quoted code and text between
+  `=== repo text <nonce> ===` markers whose nonce is random per call and
+  redrawn if it occurs in the text, and JSON replies carry
+  `content_trust: "untrusted_repo_text"` with `untrusted_fields`.
+
 ### Changed
 - No `outputSchema` is advertised. Before, the SDK derived
   `{"result": string}` from each `-> str` signature and sent the reply text
