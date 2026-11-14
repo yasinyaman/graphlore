@@ -6,6 +6,132 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-14
+
+Second and third rounds of feedback: the 0.3.0 review recipe run on the same
+774-file repository through the MCP tools, then a side-by-side run with the
+hosted Graphify connector on this repository.
+
+### Added
+- **Calls through an imported module are resolved from the source.** graphify's
+  local extractor records `from pkg import f; f()` but not
+  `from pkg import mod; mod.f()`, nor often the import of `mod` — so a tool that
+  four tests call as `server.graphlore_unreferenced(...)` had no caller and no
+  test in the graph. New `resolve.py` adds those call edges (following
+  re-exports) and the missing module imports at read time, marked
+  `resolved_by: "graphlore"`; graph.json is never modified. `graphlore_impact`,
+  `graphlore_neighbors`, `graphlore_subgraph`, `graphlore_tests_for`,
+  `graphlore_unreferenced`, `graphlore_cycles` and `graphlore_layers` read them,
+  and `graphlore_validate` reports how many there are. Per language it adds
+  what the extractor is seen to leave out: in Python every call through a
+  module object; in JS/TS calls through a default import and through a
+  dynamically imported module (namespace imports and `require` are already
+  linked); in Go and Java nothing, graphify links those itself. One parse per
+  Python and JS/TS file, once per process; `GRAPHLORE_RESOLVE=0` turns it off.
+- **`graphlore_tests_for`** — the tests that exercise a symbol: `direct` (they
+  call it, with the call line), `through_one_caller` (a production function or
+  a test helper in between), and `weak` matches kept apart (a test file that
+  imports its module, a test named after it).
+- `graphlore_impact`, `graphlore_subgraph` and `graphlore_neighbors` take the
+  `scope` argument (`-tests`, a path prefix, ...). Unlike the audit tools they
+  leave nothing out by default.
+- `graphlore_impact(strict=True)` walks only edges the extractor resolved; every
+  row carries its edge's `confidence` (and `resolved_by` when graphlore added
+  the edge), and inferred rows are marked in the text.
+- `graphlore_locate` lists the other top hits under the seed (`also_matched`,
+  production code before tests).
+- **`graphlore_cycles` classifies import cycles by when their imports run.**
+  Each import edge is read back from the importing file (new `imports.py`):
+  `runtime` cycles — a loop of module-level imports, the ones that can fail at
+  start-up — come first, then `deferred` (the loop needs an import inside a
+  function) and `type-only` (it needs one under `if TYPE_CHECKING:`). Each cycle
+  carries `import_kind` and `hops` (the kind of every import on its loop), the
+  payload adds `runtime_` / `deferred_` / `type_only_import_cycle_count`, and a
+  repository without a runtime cycle says so in one line. Python is read with
+  `ast`; JS/TS with tree-sitter (`import()` or `require` inside a function is
+  deferred, `import type` is type-only); Go, Java, Kotlin, Scala, C#, Rust and
+  Swift import at compile time and are always module-level. An import in any
+  other language counts as module-level — unless the graph recorded it on a
+  function, which makes it deferred — and the result says so when a reported
+  runtime cycle rests on one.
+- **`graphlore_duplication_scan` has an exact tier, `identical_bodies`.** Every
+  function and method body is hashed after normalizing whitespace, comments and
+  the docstring (Python via `ast`, other languages via tree-sitter), and bodies
+  that occur more than once are reported as groups with `file:line` for each
+  copy. No model, and it covers the small helpers that the semantic tier's
+  largest-first seeding never reaches. Without the `[semble]` extra the tool now
+  returns this tier instead of an error.
+- `graphlore_same_names` reports `used_in_own_file` for each copy and takes
+  `across_languages`.
+- `graphlore_layers` violations carry `import` (module-level / type-checking /
+  deferred), and the result lists `rejected_imports`.
+- `graphlore_unreferenced` rows carry `also_defined` when another definition
+  shares the name.
+- README: start a new session after updating the plugin — a client keeps the
+  tool schemas it loaded before the update.
+
+### Changed
+- **`graphlore_impact` and `graphlore_subgraph` put production code before
+  tests.** Rows at one distance were alphabetical, so a hub function's budget
+  went to test helpers named `_build` and `_graph` and no production caller was
+  shown. They are now ordered non-test first, then most connected, and a
+  truncated result says how many rows (or direct neighbors) were dropped and how
+  many of them were tests. `graphlore_neighbors` is ordered the same way.
+- **An ambiguous name is no longer resolved silently** in `graphlore_impact`,
+  `graphlore_subgraph`, `graphlore_neighbors` and `graphlore_tests_for`. A name
+  shared by several nodes — a function and a README heading, two `Settings`
+  classes — resolves to a source definition first, and the result says "Matched
+  N nodes ...; using X" with the others' ids (`matched` in JSON). A bare name
+  matches its callable (`graphlore_locate` finds `graphlore_locate()`), a path
+  names its file's node, and `Client.send` prefers the method of that class.
+- An empty answer from those tools says that no edge was indexed — not that
+  the code has none — and what kinds of call the index cannot see.
+- `graphlore_duplication_scan` leaves out semantic pairs scoring under 0.7 on
+  the semble backend (`min_score=0` lists them) and says what the score is. On
+  the reporting repository every pair between 0.49 and 0.64 was two classes
+  with the same role, not copied code. A custom backend gets no default floor.
+- `graphlore_same_names` compares names within one language family, and reads
+  nesting from the source: a closure that graphify hangs directly on its file
+  is no longer compared with top-level functions.
+- `graphlore_surprises`: a *script* nothing depends on counts as a consumer even
+  when its directory is depended upon (`docker/smoke/make_catalog.py`), consumer
+  detection ignores resolver guesses, and anything test code uses — shared test
+  fakes in another test directory included — is routine coupling. Non-test code
+  that depends on test code keeps its bonuses.
+- `graphlore_unreferenced` names the base in its hook note ("method of a
+  subclass of NodeVisitor") and gives it only when that base can call the
+  method: a base outside the project, or a project base that defines or mentions
+  a method of that name.
+
+### Fixed
+- "Nothing depend on ..." now reads "Nothing depends on ...".
+- **A third-party import linked to a first-party module of the same name** —
+  `import yaml` (PyYAML) recorded by graphify as an import of
+  `pkg/.../export/yaml.py`, or `import mcp` as an import of `mcp.json` — was
+  reported as a layer violation and could close an import cycle. Import edges
+  are now checked against the importing file's own statements before they are
+  lifted to file level: an absolute import can only mean a module whose dotted
+  path starts in a directory that is not itself a package, and a bare one-word
+  import only one that starts at the project root, a source root, a
+  distribution root or a directory above the importing file. The JS/TS
+  equivalent: a relative specifier is resolved to its file, a bare one-word
+  specifier is an npm package, and a path alias is kept. Rejected edges are
+  counted and shown, in `graphlore_cycles`, `graphlore_layers` and
+  `graphlore_surprises`.
+- **`graphlore_unreferenced` missed a dead class when another class had its
+  name.** The text cross-check counted the other class and its uses as
+  mentions. A file that defines its own symbol of that name is now left out of
+  the count.
+- `graphlore_unreferenced` marked methods of a class whose only base is `ABC`
+  as possible hook overrides. Marker and data bases (`ABC`, `Protocol`,
+  `BaseModel`, exceptions) no longer trigger the note.
+- A label that already carried its location was printed with it twice in
+  `graphlore_duplication_scan` and `graphlore_unreferenced` rows
+  (`Settings (a.py:L35) (a.py:35)`).
+- An ambiguous top-level function label lost its `()` when qualified and was
+  left ambiguous (`run` for both `run()`); it is now shown as
+  `run() (file:Lline)`.
+
 ## [0.3.0] - 2026-11-14
 
 Feedback from a review session on a 774-file Python + JS repository (graphify

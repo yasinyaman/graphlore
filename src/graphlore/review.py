@@ -7,6 +7,8 @@ function, a name mentioned in a template or a config file), the files under
 """
 from __future__ import annotations
 
+import ast
+import hashlib
 import os
 import re
 from collections import Counter
@@ -16,18 +18,30 @@ from . import config
 from .graph import (
     _IMPORT_RELATIONS,
     _NON_DEPENDENCY_RELATIONS,
+    _bare_name,
     _edge_ends,
     _file_import_edges,
     _is_file_hub_node,
     _is_test_path,
+    _lang_family,
     _node_file,
     _node_id,
     _node_label,
     _node_line,
     _rel,
 )
+from .imports import ImportChecker
 from .scope import _clean_pattern, _path_matches, _vendored_by_path
-from .spans import _norm_relpath, _resolve_in_project, _spans_for_file
+from .spans import (
+    _cached_file_analysis,
+    _is_ts_symbol,
+    _norm_relpath,
+    _resolve_in_project,
+    _spans_for_file,
+    _ts_bound_function,
+    _ts_parser_for,
+    _ts_skeleton,
+)
 
 # Extensions whose nodes are source definitions (not config keys or doc headings).
 _CODE_EXTS = frozenset({
@@ -38,14 +52,6 @@ _CODE_EXTS = frozenset({
 })
 _IDENT = re.compile(r"[A-Za-z_$][A-Za-z0-9_$]*")
 _DECORATOR_LINE = re.compile(r"^\s*@\s*([A-Za-z_][\w.]*)")
-
-
-def _bare_name(label: str) -> str:
-    """``.dump()`` -> ``dump``, ``helper()`` -> ``helper``, ``TableSchema`` -> itself."""
-    name = label.strip()
-    if name.endswith("()"):
-        name = name[:-2]
-    return name.lstrip(".").rsplit(".", 1)[-1]
 
 
 def _int_line(n: dict) -> int:
@@ -83,6 +89,7 @@ class _Definitions:
                 self.parent.setdefault(t, s)
             elif s != t and rel not in _NON_DEPENDENCY_RELATIONS:
                 self.incoming.setdefault(t, []).append((s, e))
+        self._classes: dict[str, list[str]] | None = None
         self.kind: dict[str, str] = {}
         for nid, n in self.byid.items():
             k = self._kind(n, nid in has_methods, nid in contained)
@@ -107,6 +114,17 @@ class _Definitions:
         if (has_methods or contained) and _IDENT.fullmatch(label):
             return "class"
         return ""
+
+    def classes_named(self, name: str) -> list[str]:
+        """Ids of the project's class definitions with this bare name."""
+        if self._classes is None:
+            self._classes = {}
+            for nid, kind in self.kind.items():
+                if kind == "class":
+                    self._classes.setdefault(
+                        _bare_name(_node_label(self.byid[nid])), []
+                    ).append(nid)
+        return self._classes.get(name, [])
 
     def is_top_level(self, nid: str) -> bool:
         """Defined directly in a file (not a method, not nested in a function)."""
@@ -153,32 +171,122 @@ _MENTION_MAX_BYTES = 1_000_000
 _MENTION_MAX_FILES = 20_000
 
 
-# The line opening a class that names a base: `class V(ast.NodeVisitor):`,
-# `class Handler extends Base {`, `class Repo : IRepo`. Empty parentheses don't count.
-_CLASS_WITH_BASE = re.compile(
+# The line opening a class: `class V(ast.NodeVisitor):`, `class Handler extends
+# Base {`, `class Repo : IRepo`. Group 1 is the class name, group 2 what follows it.
+_CLASS_LINE = re.compile(
     r"^\s*(?:(?:export|public|private|protected|abstract|final|default|static|open|"
-    r"sealed|data)\s+)*class\s+[\w$]+\s*(?:<[^>]*>)?\s*"
-    r"(?:\((?!\s*\))|extends\b|implements\b|:\s*[\w$])"
+    r"sealed|data)\s+)*class\s+([\w$]+)\s*(?:<[^>]*>)?\s*(.*)$"
 )
 _INHERITANCE_RELATIONS = frozenset({"inherits", "extends", "implements", "mixes_in"})
+# Bases that never call back into a subclass's ordinary methods: markers, data
+# containers and the exception hierarchy. A method under only these is not a hook.
+_NON_HOOK_BASES = frozenset({
+    "ABC", "ABCMeta", "object", "Object", "Protocol", "Generic", "BaseModel", "Enum",
+    "IntEnum", "StrEnum", "Flag", "IntFlag", "NamedTuple", "TypedDict", "Exception",
+    "BaseException", "Any",
+})
+_NON_HOOK_SUFFIXES = ("Error", "Exception", "Warning")
 
 
-def _in_subclass(file: str, line: int, lines: _SourceLines) -> bool:
-    """Is the definition at ``line`` written directly inside a class that has a base?
+def _class_bases(text: str) -> list[str]:
+    """Base-class names on a class line, last dotted segment, generics stripped.
 
-    Read from the source, because graphify gives no node to a class nested in a
-    function — exactly where visitor and event-handler subclasses tend to live.
+    ``class X(A, b.C[T], metaclass=M):`` -> [A, C]; ``class X extends A implements
+    I, J {`` -> [A, I, J]; ``class X : A(), B`` -> [A, B]. [] when it names none.
+    """
+    m = _CLASS_LINE.match(text)
+    if not m:
+        return []
+    rest = m.group(2).strip()
+    raw: list[str] = []
+    if rest.startswith("("):
+        depth, cur = 0, ""
+        for ch in rest[1:]:
+            if ch in "([{":
+                depth += 1
+            elif ch in ")]}":
+                if depth == 0:
+                    break
+                depth -= 1
+            if ch == "," and depth == 0:
+                raw.append(cur)
+                cur = ""
+            else:
+                cur += ch
+        raw.append(cur)
+        raw = [r for r in raw if "=" not in r]  # metaclass=..., total=...
+    elif rest.startswith(("extends", "implements")):
+        for part in re.split(r"\bextends\b|\bimplements\b", rest.split("{")[0]):
+            raw += part.split(",")
+    elif rest.startswith(":"):
+        raw = rest[1:].split("{")[0].split(",")
+    out: list[str] = []
+    for r in raw:
+        name = re.split(r"[\[<(]", r.strip())[0].strip().split()[-1:] or [""]
+        last = name[0].rsplit(".", 1)[-1]
+        if last and _IDENT.fullmatch(last):
+            out.append(last)
+    return out
+
+
+def _is_non_hook_base(name: str) -> bool:
+    return name in _NON_HOOK_BASES or name.endswith(_NON_HOOK_SUFFIXES)
+
+
+def _enclosing_class_bases(file: str, line: int, lines: _SourceLines) -> list[str] | None:
+    """Bases of the class the definition at ``line`` is written directly inside.
+
+    None when it is not inside a class. Read from the source, because graphify
+    gives no node to a class nested in a function — exactly where visitor and
+    event-handler subclasses tend to live.
     """
     spans = _spans_for_file(file)
     own = next((s for s in spans if s[2] == line), None)
     if own is None:
-        return False
+        return None
     outer = [s for s in spans if s[0] <= own[0] and s[1] >= own[1] and s is not own]
     if not outer:
-        return False
+        return None
     parent = min(outer, key=lambda s: s[1] - s[0])
     text = lines.get(file)
-    return 0 < parent[2] <= len(text) and bool(_CLASS_WITH_BASE.match(text[parent[2] - 1]))
+    if not 0 < parent[2] <= len(text) or not _CLASS_LINE.match(text[parent[2] - 1]):
+        return None
+    return _class_bases(text[parent[2] - 1])
+
+
+def _hook_base(
+    name: str, bases: list[str], defs: _Definitions, lines: _SourceLines, depth: int = 0
+) -> str | None:
+    """The base class that may call a subclass's method ``name``, if any.
+
+    A base outside the project (a framework class such as ``ast.NodeVisitor``)
+    may: its code is not here to read. A base inside the project does only if it
+    defines or mentions a method of that name, or one of ITS bases may. Marker
+    and data bases (``ABC``, ``Protocol``, ``BaseModel``, exceptions) never do.
+    """
+    for base in bases:
+        if _is_non_hook_base(base):
+            continue
+        project = defs.classes_named(base)
+        if not project:
+            return base
+        for nid in project:
+            n = defs.byid[nid]
+            file, line = _node_file(n), _int_line(n)
+            if any(_bare_name(_node_label(defs.byid[m])) == name
+                   for m in defs.members.get(nid, ()) if m in defs.byid):
+                return base
+            span = _span_for(file, line)
+            text = lines.get(file)
+            if span is not None and any(
+                tok == name for tok in _IDENT.findall("\n".join(text[span[0] - 1:span[1]]))
+            ):
+                return base
+            if depth < 4 and 0 < line <= len(text):
+                above = _hook_base(name, _class_bases(text[line - 1]), defs, lines, depth + 1)
+                if above:
+                    return above
+    return None
 
 
 def _span_for(file: str, line: int) -> tuple[int, int] | None:
@@ -246,15 +354,17 @@ def _decorators(
     return out
 
 
-def _count_mentions(names: set[str]) -> tuple[Counter[str], int, bool]:
-    """How often each name occurs as a whole identifier in the project's text files.
+def _count_mentions(names: set[str]) -> tuple[dict[str, Counter[str]], int, bool]:
+    """How often each name occurs as a whole identifier, per text file of the project.
 
     Walks ``config.PROJECT_DIR`` once: templates, configs and docs count too, since
     a function named in ``pyproject.toml`` or called from an HTML attribute is not
     dead. Hidden directories, dependency and build trees, vendored or oversized
-    files and binaries are skipped. Returns (counts, files read, hit the file cap).
+    files and binaries are skipped. Returns ({name: {file: count}}, files read,
+    hit the file cap) — per file, so that a second class of the same name and its
+    uses can be told apart from uses of the candidate.
     """
-    counts: Counter[str] = Counter()
+    counts: dict[str, Counter[str]] = {}
     if not names:
         return counts, 0, False
     root = config.PROJECT_DIR.resolve()
@@ -286,7 +396,7 @@ def _count_mentions(names: set[str]) -> tuple[Counter[str], int, bool]:
             scanned += 1
             for tok in _IDENT.findall(raw.decode("utf-8", "replace")):
                 if tok in names:
-                    counts[tok] += 1
+                    counts.setdefault(tok, Counter())[rel] += 1
         if capped:
             break
     return counts, scanned, capped
@@ -359,14 +469,26 @@ def _unreferenced(
             remaining.append((nid, n, kind, name))
 
     names = {name for _nid, _n, _kind, name in remaining}
-    totals, files_scanned, capped = _count_mentions(names)
-    subclasses = {
-        _edge_ends(e)[0] for e in all_edges if _rel(e) in _INHERITANCE_RELATIONS
-    }
-    # every definition of a name accounts for one occurrence of it: its own
-    definitions_of: Counter[str] = Counter(
-        _bare_name(_node_label(defs.byid[nid])) for nid in defs.kind
-    )
+    per_file, files_scanned, capped = _count_mentions(names)
+    graph_bases: dict[str, list[str]] = {}  # class id -> base names the graph recorded
+    for e in all_edges:
+        if _rel(e) in _INHERITANCE_RELATIONS:
+            src, dst = _edge_ends(e)
+            base = defs.byid.get(dst)
+            graph_bases.setdefault(src, []).append(
+                _bare_name(_node_label(base)) if base else dst
+            )
+    # Where each candidate name is defined (any kind). A name's occurrences in a
+    # file that has its OWN symbol of that name belong to that symbol: a candidate
+    # has no incoming import edge, so no such file can be using this one instead.
+    defined_in: dict[str, dict[str, list[int]]] = {}
+    for other in defs.kind:
+        on = defs.byid[other]
+        bare = _bare_name(_node_label(on))
+        if bare in names:
+            defined_in.setdefault(bare, {}).setdefault(_node_file(on), []).append(
+                _int_line(on)
+            )
     items: list[dict[str, Any]] = []
     for nid, n, kind, name in remaining:
         file, line = _node_file(n), _int_line(n)
@@ -375,15 +497,34 @@ def _unreferenced(
         if span is not None:
             body = "\n".join(lines.get(file)[span[0] - 1:span[1]])
             own = max(1, sum(1 for tok in _IDENT.findall(body) if tok == name))
-        others = max(0, definitions_of[name] - 1)
+        homes = defined_in.get(name, {})
+        mentions = 0
+        for where, count in per_file.get(name, {}).items():
+            if where == file:
+                # its own body, and the `def` line of any namesake next to it
+                count -= own + max(0, len(homes.get(file, ())) - 1)
+            elif where in homes:
+                continue  # that file's own symbol of this name, and its uses
+            mentions += max(0, count)
         item: dict[str, Any] = {
             "id": nid, "name": name, "kind": kind, "file": file, "line": line or None,
-            "mentions": max(0, totals[name] - own - others),
+            "mentions": mentions,
         }
+        namesakes = sorted(
+            f"{f}:{ln}" for f, lns in homes.items() for ln in lns
+            if (f, ln) != (file, line)
+        )
+        if namesakes:
+            item["also_defined"] = namesakes[:5]
         parent = defs.parent.get(nid, "")
-        if parent in subclasses or _in_subclass(file, line, lines):
+        bases = list(graph_bases.get(parent, ()))
+        bases += _enclosing_class_bases(file, line, lines) or []
+        hook = _hook_base(name, bases, defs, lines) if bases else None
+        if hook:
             # called through the base class, which the graph cannot follow
-            item["note"] = "method of a subclass: may override a hook its base class calls"
+            item["note"] = (
+                f"method of a subclass of {hook}: may override a hook its base class calls"
+            )
         elif kind == "method" and not name.startswith("_") and parent in defs.byid:
             if defs.referencing_files(parent):
                 item["note"] = "public method of a class used elsewhere: unused here, may be API"
@@ -407,26 +548,63 @@ def _unreferenced(
 _CONVENTIONAL_NAMES = frozenset({"main", "setup", "teardown"})
 
 
+def _is_nested_definition(n: dict) -> bool:
+    """Written inside another function or class, by the source's own nesting.
+
+    The graph's containment is not enough: graphify sometimes hangs a closure
+    directly on its file. The span engine's qualified name does not lie.
+    """
+    line = _int_line(n)
+    span = next((sp for sp in _spans_for_file(_node_file(n)) if sp[2] == line), None)
+    return span is not None and "." in span[3]
+
+
+def _used_in_own_file(nid: str, n: dict, defs: _Definitions, lines: _SourceLines) -> bool:
+    """Does the definition's own file refer to it, by a graph edge or by name?"""
+    file, line = _node_file(n), _int_line(n)
+    family = {nid, *defs.members.get(nid, ())}
+    for target in family:
+        for src, _e in defs.incoming.get(target, ()):
+            sn = defs.byid.get(src)
+            if src not in family and sn is not None and _node_file(sn) == file:
+                return True
+    name = _bare_name(_node_label(n))
+    text = lines.get(file)
+    span = _span_for(file, line)
+    if not text or span is None:
+        return False
+    outside = text[:span[0] - 1] + text[span[1]:]
+    return any(tok == name for tok in _IDENT.findall("\n".join(outside)))
+
+
 def _same_named(
     scoped_nodes: list[dict], all_nodes: list[dict], all_edges: list[dict],
     kinds: frozenset[str] = frozenset({"class", "function"}),
+    across_languages: bool = False,
 ) -> list[dict[str, Any]]:
-    """Top-level classes / functions that share a name across different files."""
+    """Top-level classes / functions that share a name across different files.
+
+    Names are compared within one language family unless ``across_languages``: a
+    Python function and a JavaScript function of the same name are not copies of
+    each other.
+    """
     defs = _Definitions(all_nodes, all_edges)
-    groups: dict[str, list[tuple[str, dict, str]]] = {}
+    lines = _SourceLines()
+    groups: dict[tuple[str, str], list[tuple[str, dict, str]]] = {}
     for n in scoped_nodes:
         nid = _node_id(n)
         kind = defs.kind.get(nid)
-        if kind not in kinds or not defs.is_top_level(nid):
+        if kind not in kinds or not defs.is_top_level(nid) or _is_nested_definition(n):
             continue
         name = _bare_name(_node_label(n))
         if not name or name in _CONVENTIONAL_NAMES or (
             name.startswith("__") and name.endswith("__")
         ):
             continue
-        groups.setdefault(name, []).append((nid, n, kind))
+        family = "" if across_languages else (_lang_family(_node_file(n)) or "")
+        groups.setdefault((name, family), []).append((nid, n, kind))
     out: list[dict[str, Any]] = []
-    for name, members in groups.items():
+    for (name, family), members in groups.items():
         if len({_node_file(n) for _nid, n, _k in members}) < 2:
             continue
         definitions: list[dict[str, Any]] = []
@@ -435,10 +613,12 @@ def _same_named(
                 "id": nid, "kind": kind, "file": _node_file(n), "line": _int_line(n) or None,
                 "imported_by": len(defs.referencing_files(nid, _IMPORT_RELATIONS)),
                 "referenced_by": len(defs.referencing_files(nid)),
+                "used_in_own_file": _used_in_own_file(nid, n, defs, lines),
             })
         definitions.sort(key=lambda d: (-d["imported_by"], -d["referenced_by"], d["file"]))
         out.append({
             "name": name,
+            "language": family or None,
             "kinds": sorted({d["kind"] for d in definitions}),
             "modules": len({d["file"] for d in definitions}),
             "definitions": definitions,
@@ -449,6 +629,146 @@ def _same_named(
         -g["modules"],
         g["name"],
     ))
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Identical bodies
+# ---------------------------------------------------------------------------
+
+# A body smaller than this says nothing when it repeats: `return self.x`, `pass`,
+# `raise NotImplementedError`. Counted in AST nodes (Python, operators and load /
+# store contexts aside) or leaf tokens (tree-sitter, punctuation included).
+_BODY_MIN_NODES = 8
+_BODY_MIN_TOKENS = 14
+_AST_NOISE = (ast.expr_context, ast.operator, ast.boolop, ast.unaryop, ast.cmpop)
+_TS_FUNCTION_HINTS = ("function", "method", "arrow", "constructor", "func", "lambda")
+
+# rel path -> (mtime, {def line: (digest, body lines)}); the span cache's scheme.
+_BODY_CACHE: dict[str, tuple[float, Any]] = {}
+
+
+def _digest(text: str) -> str:
+    return hashlib.sha1(text.encode("utf-8", "replace"), usedforsecurity=False).hexdigest()
+
+
+def _python_bodies(src: bytes) -> dict[int, tuple[str, int]]:
+    try:
+        tree = ast.parse(src)
+    except Exception:  # noqa: BLE001 - unparseable file: no fingerprints
+        return {}
+    out: dict[int, tuple[str, int]] = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            continue
+        body = list(node.body)
+        if (body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant)
+                and isinstance(body[0].value.value, str)):
+            body = body[1:]  # the docstring is not the body
+        size = sum(
+            1 for stmt in body for x in ast.walk(stmt) if not isinstance(x, _AST_NOISE)
+        )
+        if size < _BODY_MIN_NODES:
+            continue
+        # ast.dump carries no positions or comments, so two copies that differ
+        # only in layout, comments or docstring dump identically.
+        dumped = "\n".join(ast.dump(stmt) for stmt in body)
+        end = getattr(node, "end_lineno", None) or node.lineno
+        out[node.lineno] = (_digest(dumped), end - body[0].lineno + 1)
+    return out
+
+
+def _treesitter_bodies(src: bytes, rel: str) -> dict[int, tuple[str, int]]:
+    parser, _lang = _ts_parser_for(rel)
+    if parser is None:
+        return {}
+    try:
+        root = parser.parse(src).root_node
+    except Exception:  # noqa: BLE001
+        return {}
+    out: dict[int, tuple[str, int]] = {}
+
+    def record(fn: Any) -> None:
+        body = fn.child_by_field_name("body")
+        if body is None:
+            return
+        skeleton = _ts_skeleton(body)  # comments dropped, whitespace is no token
+        if skeleton is None or sum(1 for part in skeleton if len(part) == 2) < _BODY_MIN_TOKENS:
+            return
+        out[fn.start_point[0] + 1] = (
+            _digest(repr(skeleton)), body.end_point[0] - body.start_point[0] + 1
+        )
+
+    def walk(node: Any) -> None:
+        for child in node.named_children:
+            bound = _ts_bound_function(child)
+            if bound is not None:
+                record(bound[1])
+            elif _is_ts_symbol(child.type) and any(
+                h in child.type.lower() for h in _TS_FUNCTION_HINTS
+            ):
+                record(child)
+            walk(child)
+
+    try:
+        walk(root)
+    except RecursionError:
+        pass
+    return out
+
+
+def _body_fingerprints(file: str) -> dict[int, tuple[str, int]]:
+    """{def line: (digest of the normalized body, body line count)} for one file.
+
+    Normalized means: whitespace, comments and (Python) the docstring do not
+    count, and neither does the function's own name or signature — a renamed copy
+    still matches. Python via ``ast``, other languages via tree-sitter when
+    present. Bodies too small to mean anything are left out.
+    """
+    def compute(src: bytes, rel: str) -> dict[int, tuple[str, int]]:
+        if rel.lower().endswith((".py", ".pyi")):
+            return _python_bodies(src)
+        return _treesitter_bodies(src, rel)
+
+    return _cached_file_analysis(_BODY_CACHE, file, compute, dict)
+
+
+def _identical_bodies(
+    scoped_nodes: list[dict], all_nodes: list[dict], all_edges: list[dict],
+    include_tests: bool = False,
+) -> list[dict[str, Any]]:
+    """Functions and methods whose normalized bodies are identical, as groups.
+
+    Exact and model-free, and it covers every size the semantic tier's
+    largest-first seeding never reaches: small helpers are what gets copied.
+    """
+    defs = _Definitions(all_nodes, all_edges)
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for n in scoped_nodes:
+        nid = _node_id(n)
+        if defs.kind.get(nid) not in ("function", "method"):
+            continue
+        file, line = _node_file(n), _int_line(n)
+        if not include_tests and _is_test_path(file):
+            continue
+        fp = _body_fingerprints(file).get(line)
+        if fp is None:
+            continue
+        groups.setdefault(fp[0], []).append(
+            {"id": nid, "file": file, "line": line, "lines": fp[1]}
+        )
+    out: list[dict[str, Any]] = []
+    for members in groups.values():
+        if len(members) < 2:
+            continue
+        members.sort(key=lambda d: (d["file"], d["line"]))
+        out.append({
+            "copies": len(members),
+            "lines": max(d["lines"] for d in members),
+            "definitions": [{"id": d["id"], "file": d["file"], "line": d["line"]}
+                            for d in members],
+        })
+    out.sort(key=lambda g: (-g["copies"] * g["lines"], g["definitions"][0]["file"]))
     return out
 
 
@@ -499,8 +819,12 @@ def _layer_violations(
 
     An import is allowed inside one layer, into any prefix the layer lists, and —
     unless ``strict`` — into files that belong to no declared layer. Imports of
-    external packages are never checked.
+    external packages are never checked. Each edge is first checked against the
+    importing file's own statements: one the source contradicts (``import yaml``
+    linked to a first-party ``yaml.py``) is dropped and listed under
+    ``rejected_imports``, and a violation says when its import runs.
     """
+    checker = ImportChecker()
     files = sorted({_norm_relpath(_node_file(n)) for n in nodes} - {""})
     layers: dict[str, dict[str, Any]] = {
         layer: {"layer": layer, "may_import": allowed, "files": 0,
@@ -512,7 +836,7 @@ def _layer_violations(
         if layer is not None:
             layers[layer]["files"] += 1
     seen: set[tuple[str, str, str]] = set()
-    for sf, tf, e, dst in _file_import_edges(nodes, edges):
+    for sf, tf, e, dst, kind in _file_import_edges(nodes, edges, checker.kind):
         src_layer = _layer_of(sf, rules)
         if src_layer is None:
             continue
@@ -533,7 +857,7 @@ def _layer_violations(
             continue
         violation: dict[str, Any] = {
             "from_file": sf, "to_file": tf, "to_layer": dst_layer,
-            "site": f"{sf}:{loc}" if loc else sf,
+            "site": f"{sf}:{loc}" if loc else sf, "import": kind,
         }
         if not _is_file_hub_node(dst):
             violation["imported"] = _node_label(dst)
@@ -550,4 +874,5 @@ def _layer_violations(
         "violation_count": sum(len(entry["violations"]) for entry in layers.values()),
         "imports_checked": sum(entry["imports_checked"] for entry in layers.values()),
         "unmatched_prefixes": unmatched,
+        "rejected_imports": checker.rejected,
     }

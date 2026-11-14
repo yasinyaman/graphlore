@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 from collections import deque
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any
 
@@ -127,6 +127,14 @@ def _edge_ends(e: dict) -> tuple[str, str]:
 def _edge_rel(e: dict) -> str:
     v = _first_present(e, ("relation", "label", "type"))
     return "->" if v is None else str(v)
+
+
+def _bare_name(label: str) -> str:
+    """``.dump()`` -> ``dump``, ``helper()`` -> ``helper``, ``TableSchema`` -> itself."""
+    name = label.strip()
+    if name.endswith("()"):
+        name = name[:-2]
+    return name.lstrip(".").rsplit(".", 1)[-1]
 
 
 def _is_surprise_edge(e: dict) -> bool:
@@ -259,16 +267,35 @@ def _is_file_hub_node(n: dict) -> bool:
     return label == f.rsplit("/", 1)[-1] or f == label or f.endswith("/" + label)
 
 
-def _file_import_edges(nodes: list[dict], edges: list[dict]) -> list[tuple[str, str, dict, dict]]:
-    """Import edges lifted to file level: ``(source file, target file, edge, target node)``.
+# When the import behind an edge runs (see graphlore.imports, which reads it from
+# the source). Unclassified = the source could not be read as Python; such an
+# import is assumed to run at import time.
+IMPORT_MODULE_LEVEL = "module-level"
+IMPORT_DEFERRED = "deferred"            # inside a function body
+IMPORT_TYPE_CHECKING = "type-checking"  # under `if TYPE_CHECKING:`
+IMPORT_UNCLASSIFIED = "unclassified"
+_IMPORT_RUNS_AT_IMPORT = frozenset({IMPORT_MODULE_LEVEL, IMPORT_UNCLASSIFIED})
+# (importing file, imported file, edge) -> one of the kinds above, or None when
+# the import statement cannot mean that file at all (the resolver matched a name).
+ImportKind = Callable[[str, str, dict], "str | None"]
+
+
+def _file_import_edges(
+    nodes: list[dict], edges: list[dict], kind_of: ImportKind | None = None
+) -> list[tuple[str, str, dict, dict, str]]:
+    """Import edges lifted to file level:
+    ``(source file, target file, edge, target node, import kind)``.
 
     graphify records an import as file -> file (``imports_from``) or as file ->
     imported symbol (``imports``); both say "this module imports that module".
     Edges with an endpoint outside the repository (no source file) and imports
-    within one file are dropped.
+    within one file are dropped. With ``kind_of`` (an
+    :class:`graphlore.imports.ImportChecker`'s ``kind``), an edge the source
+    contradicts is dropped too and the rest carry when their import runs; without
+    it every edge is ``IMPORT_UNCLASSIFIED``.
     """
     byid = {_node_id(n): n for n in nodes}
-    out: list[tuple[str, str, dict, dict]] = []
+    out: list[tuple[str, str, dict, dict, str]] = []
     for e in edges:
         if _rel(e) not in _IMPORT_RELATIONS:
             continue
@@ -277,13 +304,22 @@ def _file_import_edges(nodes: list[dict], edges: list[dict]) -> list[tuple[str, 
         if src is None or dst is None:
             continue
         sf, tf = _node_file(src), _node_file(dst)
-        if sf and tf and sf != tf:
-            out.append((sf, tf, e, dst))
+        if not (sf and tf) or sf == tf:
+            continue
+        kind = IMPORT_UNCLASSIFIED if kind_of is None else kind_of(sf, tf, e)
+        if kind is None:
+            continue
+        if kind == IMPORT_UNCLASSIFIED and kind_of is not None and not _is_file_hub_node(src) \
+                and _node_label(src).endswith("()"):
+            # The source could not be read, but the graph recorded this import
+            # on a function rather than on its file: it runs when that is called.
+            kind = IMPORT_DEFERRED
+        out.append((sf, tf, e, dst, kind))
     return out
 
 
 def _computed_surprises(
-    nodes: list[dict], edges: list[dict]
+    nodes: list[dict], edges: list[dict], import_kind: ImportKind | None = None
 ) -> tuple[list[dict], dict[str, Any]]:
     """Score cross-file edges for "surprisingness" when the graph carries no flag.
 
@@ -318,23 +354,44 @@ def _computed_surprises(
             src = byid.get(_edge_ends(e)[0])
             if src is not None and _node_file(src):
                 has_imports.add(_node_file(src))
-    for sf, tf, _e, _dst in _file_import_edges(nodes, edges):
+    for sf, tf, _e, _dst, _kind in _file_import_edges(nodes, edges, import_kind):
         file_imports.setdefault(sf, set()).add(tf)
-    dependents_of: dict[str, set[str]] = {}  # top-level dir -> dirs depending on it
+
+    def _imported(fu: str, fv: str) -> bool:
+        got = file_imports.get(fu, ())
+        return fv in got or any(_is_package_entry_of(g, fv) for g in got)
+
+    def _name_guess(e: dict, rel: str, fu: str, fv: str) -> bool:
+        """The resolver guessed this target, and the source file imports neither
+        the target's module nor its package: a same-named function in an
+        unrelated directory, not a coupling. Only judged for a file whose
+        imports the graph recorded at all."""
+        conf = str(e.get("confidence") or "EXTRACTED").upper()
+        return (
+            conf in ("INFERRED", "AMBIGUOUS") and rel in _SURPRISE_NAME_RESOLVED_RELS
+            and fu in has_imports and not _imported(fu, fv)
+        )
+
+    # Who depends on what, by top-level directory and by file — counted over the
+    # edges that can be trusted: a resolver guess from the package into a script
+    # must not make that script look depended upon. Test code is nobody's
+    # dependent here; it uses everything.
+    dependents_of: dict[str, set[str]] = {}
+    file_dependents: dict[str, set[str]] = {}
     for e in edges:
-        if _rel(e) in _NON_DEPENDENCY_RELATIONS:
+        rel = _rel(e)
+        if rel in _NON_DEPENDENCY_RELATIONS:
             continue
         sid, tid = _edge_ends(e)
         nu, nv = byid.get(sid), byid.get(tid)
         if nu is None or nv is None:
             continue
         fu, fv = _node_file(nu), _node_file(nv)
-        if fu and fv and _top_dir(fu) != _top_dir(fv) and not _is_test_path(fu):
+        if not (fu and fv) or fu == fv or _is_test_path(fu) or _name_guess(e, rel, fu, fv):
+            continue
+        file_dependents.setdefault(fv, set()).add(fu)
+        if _top_dir(fu) != _top_dir(fv):
             dependents_of.setdefault(_top_dir(fv), set()).add(_top_dir(fu))
-
-    def _imported(fu: str, fv: str) -> bool:
-        got = file_imports.get(fu, ())
-        return fv in got or any(_is_package_entry_of(g, fv) for g in got)
 
     skipped: dict[str, int] = {}
     confidences: set[str] = set()
@@ -363,12 +420,7 @@ def _computed_surprises(
 
         conf = str(e.get("confidence") or "EXTRACTED").upper()
         confidences.add(conf)
-        # The resolver guessed this target, and the source file imports neither
-        # the target's module nor its package: a same-named function in an
-        # unrelated directory, not a coupling. Only judged for a file whose
-        # imports the graph recorded at all.
-        if (conf in ("INFERRED", "AMBIGUOUS") and rel in _SURPRISE_NAME_RESOLVED_RELS
-                and fu in has_imports and not _imported(fu, fv)):
+        if _name_guess(e, rel, fu, fv):
             skipped["inferred_unimported"] = skipped.get("inferred_unimported", 0) + 1
             continue
         cat_u = str(nu.get("file_type") or "code").lower()
@@ -376,20 +428,24 @@ def _computed_surprises(
         lang_u, lang_v = _lang_family(fu), _lang_family(fv)
         cross_lang = bool(lang_u and lang_v and lang_u != lang_v)
         # An inferred call/uses edge that also crosses a language or code<->doc
-        # boundary is usually the resolver guessing, not a real coupling; a
-        # test<->source edge is routine. Both withhold the structural bonuses.
+        # boundary is usually the resolver guessing, not a real coupling. Both
+        # this and the two expected couplings below withhold the structural bonuses.
         resolver_noise = conf == "INFERRED" and rel in ("calls", "uses", "indirect_call") and (
             cross_lang or {cat_u, cat_v} == {"code", "document"}
         )
-        test_bridge = _is_test_path(fu) != _is_test_path(fv)
-        # A directory nothing depends on (bench/, demo/, examples/, docker/) using
-        # a directory that several others depend on is what it is there for.
+        # Test code using anything — the source under test, or shared fakes and
+        # fixtures in another test directory — is routine. (Non-test code that
+        # depends on test code is not, and keeps its bonuses.)
+        from_test = _is_test_path(fu)
+        # A directory nothing depends on (bench/, demo/, examples/), or a script
+        # nothing depends on (docker/smoke/make_catalog.py), using a directory
+        # that several others depend on is what it is there for.
         top_u, top_v = _top_dir(fu), _top_dir(fv)
         consumer_edge = (
-            top_u != top_v and not dependents_of.get(top_u)
-            and len(dependents_of.get(top_v, ())) >= 2
+            top_u != top_v and len(dependents_of.get(top_v, ())) >= 2
+            and (not dependents_of.get(top_u) or not file_dependents.get(fu))
         )
-        suppress = resolver_noise or test_bridge or consumer_edge
+        suppress = resolver_noise or from_test or consumer_edge
 
         score = 0
         why: list[str] = []
@@ -418,11 +474,12 @@ def _computed_surprises(
             why.append("peripheral node reaches a well-connected node")
         if rel == "semantically_similar_to":
             score = int(score * 1.5)
-        if test_bridge:
-            why.append("(test ↔ source: routine coupling, structural bonuses withheld)")
+        if from_test:
+            why.append("(from test code: routine coupling, structural bonuses withheld)")
         elif consumer_edge:
+            what = f"{top_u}/" if not dependents_of.get(top_u) else fu
             why.append(
-                f"({top_u}/ only consumes {top_v}/: expected coupling, "
+                f"({what} only consumes {top_v}/: expected coupling, "
                 "structural bonuses withheld)"
             )
 
@@ -640,6 +697,7 @@ def _bfs_subgraph(
     hops: int,
     budget_tokens: int,
     edge_set: set[tuple[str, str, str]] | None = None,
+    order: Callable[[tuple[str, str]], Any] | None = None,
 ) -> tuple[set[str], list[dict], bool, int]:
     """BFS around start_id collecting edges until a token budget is hit.
 
@@ -648,6 +706,8 @@ def _bfs_subgraph(
     restores the true orientation of each collected edge: the undirected
     adjacency flattens direction, and an edge reached via its reverse entry must
     not be reported as ``B —calls→ A`` when the graph says ``A —calls→ B``.
+    ``order`` is a sort key over a node's ``(neighbor, relation)`` entries: what
+    comes first is what the budget keeps.
     """
     visited = {start_id}
     frontier = deque([(start_id, 0)])
@@ -660,7 +720,8 @@ def _bfs_subgraph(
         cur, depth = frontier.popleft()
         if depth >= hops:
             continue
-        for nb, rel in adj.get(cur, []):
+        neighbours = adj.get(cur, [])
+        for nb, rel in (sorted(neighbours, key=order) if order else neighbours):
             src, dst = cur, nb
             if (edge_set is not None and (src, dst, rel) not in edge_set
                     and (dst, src, rel) in edge_set):
@@ -796,8 +857,14 @@ def _relation_adjacency(edges: list[dict], relations: frozenset[str]) -> _Adj:
     return forward
 
 
-def _module_import_adjacency(nodes: list[dict], edges: list[dict]) -> tuple[_Adj, int]:
-    """(file -> imported files adjacency, implicit-package edges ignored).
+def _module_import_adjacency(
+    nodes: list[dict], edges: list[dict], kind_of: ImportKind | None = None
+) -> tuple[_Adj, int]:
+    """(file -> [(imported file, import kind)], implicit-package edges ignored).
+
+    The second item of each adjacency entry is WHEN the import runs (see
+    ``IMPORT_*``), not a relation name; several edges between two files collapse
+    to the one that runs earliest.
 
     A module's import of its own package's entry file is left out when the edge
     targets the file as a whole: ``from . import x`` makes graphify link the
@@ -805,14 +872,110 @@ def _module_import_adjacency(nodes: list[dict], edges: list[dict]) -> tuple[_Adj
     its submodules, so that edge can never be the reason an import fails. An
     import of a *symbol* defined in ``__init__.py`` is kept.
     """
-    forward: _Adj = {}
+    rank = {IMPORT_MODULE_LEVEL: 0, IMPORT_UNCLASSIFIED: 1, IMPORT_DEFERRED: 2,
+            IMPORT_TYPE_CHECKING: 3}
+    best: dict[tuple[str, str], str] = {}
     implicit = 0
-    for sf, tf, e, dst in _file_import_edges(nodes, edges):
+    for sf, tf, _e, dst, kind in _file_import_edges(nodes, edges, kind_of):
         if _is_file_hub_node(dst) and _is_package_entry_of(tf, sf):
             implicit += 1
             continue
-        forward.setdefault(sf, []).append((tf, _rel(e)))
+        known = best.get((sf, tf))
+        if known is None or rank[kind] < rank[known]:
+            best[(sf, tf)] = kind
+    forward: _Adj = {}
+    for (sf, tf), kind in best.items():
+        forward.setdefault(sf, []).append((tf, kind))
     return forward, implicit
+
+
+def _shortest_path(forward: _Adj, members: set[str], src: str, dst: str) -> list[str]:
+    """Shortest ``src -> ... -> dst`` route staying inside ``members`` ([] if none)."""
+    if src == dst:
+        return [src]
+    prev: dict[str, str] = {}
+    queue = deque([src])
+    while queue:
+        cur = queue.popleft()
+        for nb, _kind in forward.get(cur, []):
+            if nb not in members or nb in prev or nb == src:
+                continue
+            prev[nb] = cur
+            if nb == dst:
+                path = [dst]
+                while path[-1] != src:
+                    path.append(prev[path[-1]])
+                return path[::-1]
+            queue.append(nb)
+    return []
+
+
+# The three kinds of import cycle, most serious first, with the import kinds
+# each one's loops may use.
+_IMPORT_CYCLE_TIERS: tuple[tuple[str, frozenset[str]], ...] = (
+    ("runtime", _IMPORT_RUNS_AT_IMPORT),
+    ("deferred", _IMPORT_RUNS_AT_IMPORT | {IMPORT_DEFERRED}),
+    ("type-only", _IMPORT_RUNS_AT_IMPORT | {IMPORT_DEFERRED, IMPORT_TYPE_CHECKING}),
+)
+
+
+def _tiered_import_cycles(forward: _Adj) -> list[dict[str, Any]]:
+    """Import cycles between modules, classified by when their imports run.
+
+    ``runtime``   — some loop consists of module-level imports only: it can fail
+                    at start-up.
+    ``deferred``  — the group only closes through an import inside a function.
+    ``type-only`` — the group only closes through an import under
+                    ``if TYPE_CHECKING:``; it exists for the type checker alone.
+    A group is reported once, in the first tier where it is a cycle, with one
+    loop through an import that tier needed (``path``) and the kind of each hop
+    (``hops``).
+    """
+    out: list[dict[str, Any]] = []
+    seen: set[frozenset[str]] = set()
+    lower_of: dict[str, int] = {}  # node -> its cycle group in the previous tier
+
+    def _apart(u: str, v: str) -> bool:
+        gu, gv = lower_of.get(u), lower_of.get(v)
+        return gu is None or gv is None or gu != gv
+
+    for tier, allowed in _IMPORT_CYCLE_TIERS:
+        sub: _Adj = {
+            s: [(t, k) for t, k in lst if k in allowed] for s, lst in forward.items()
+        }
+        groups = _find_cycles(sub)[0]
+        for comp in groups:
+            key = frozenset(comp)
+            if key in seen:
+                continue
+            seen.add(key)
+            members = set(comp)
+            path: list[str] = []
+            if tier != "runtime":
+                # Lead with an import this tier added that joins two parts the
+                # earlier tiers kept apart — the edge the cycle depends on.
+                newest = IMPORT_DEFERRED if tier == "deferred" else IMPORT_TYPE_CHECKING
+                for u in sorted(members):
+                    for v, k in sorted(sub.get(u, [])):
+                        if k == newest and v in members and _apart(u, v):
+                            back = _shortest_path(sub, members, v, u)
+                            if back:
+                                path = [u, *back]
+                                break
+                    if path:
+                        break
+            if not path:
+                path = _cycle_path(sub, comp)
+            kinds = {(u, v): k for u in members for v, k in sub.get(u, [])}
+            out.append({
+                "tier": tier, "nodes": comp, "path": path,
+                "hops": [kinds.get((a, b), IMPORT_UNCLASSIFIED)
+                         for a, b in zip(path, path[1:], strict=False)],
+            })
+        for i, comp in enumerate(groups):
+            for n in comp:
+                lower_of[n] = i
+    return out
 
 
 def _hop_distances(
@@ -872,6 +1035,7 @@ def _hop_records(
     relations: frozenset[str] | None = None,
     seeds: Iterable[str] = (),
     exclude: frozenset[str] = frozenset(),
+    edge_ok: Callable[[dict], bool] | None = None,
 ) -> dict[str, tuple[int, str, dict | None]]:
     """Like :func:`_hop_distances`, but records HOW each node was reached.
 
@@ -881,7 +1045,8 @@ def _hop_records(
     extra depth-0 entries (used to keep a class's own members reachable when
     containment edges are filtered out); they carry ``None`` as their edge so
     callers can tell them from real hits. ``exclude`` names relations never
-    walked, whatever ``relations`` says.
+    walked, whatever ``relations`` says; ``edge_ok`` rejects single edges (an
+    inferred one, under a strict walk).
     """
     out: dict[str, tuple[int, str, dict | None]] = {start_id: (0, "", None)}
     frontier = deque([(start_id, 0)])
@@ -896,6 +1061,8 @@ def _hop_records(
         for nb, e in adj.get(cur, []):
             rel = _rel(e)
             if rel in exclude or (relations is not None and rel not in relations):
+                continue
+            if edge_ok is not None and not edge_ok(e):
                 continue
             if nb in out:
                 continue

@@ -114,15 +114,15 @@ _FLAGS = {
 
 @dataclass(frozen=True)
 class Scope:
-    """A parsed ``scope`` argument. ``tests`` is None when the caller did not say,
-    so each tool keeps its own default for test code."""
+    """A parsed ``scope`` argument. A flag is None when the caller did not say,
+    so each tool keeps its own default for it."""
 
     spec: str = ""
     include: tuple[str, ...] = ()
     exclude: tuple[str, ...] = ()
     tests: bool | None = None
-    external: bool = False
-    vendored: bool = False
+    external: bool | None = None
+    vendored: bool | None = None
 
 
 def _parse_scope(spec: str) -> Scope | str:
@@ -132,8 +132,8 @@ def _parse_scope(spec: str) -> Scope | str:
       ``src/pkg``, ``**/*.py``   keep only files under this prefix / matching this glob
       ``!docs``                  leave these files out
       ``+tests`` / ``-tests``    include / leave out test code
-      ``+external``              include nodes standing for external packages
-      ``+vendored``              include vendored and minified files
+      ``+external`` / ``-external``  include / leave out nodes for external packages
+      ``+vendored`` / ``-vendored``  include / leave out vendored and minified files
       ``all``                    everything: +tests +external +vendored
     """
     include: list[str] = []
@@ -163,8 +163,8 @@ def _parse_scope(spec: str) -> Scope | str:
         include=tuple(include),
         exclude=tuple(exclude),
         tests=flags.get("tests"),
-        external=flags.get("external", False),
-        vendored=flags.get("vendored", False),
+        external=flags.get("external"),
+        vendored=flags.get("vendored"),
     )
 
 
@@ -238,7 +238,10 @@ _SCOPE_CACHE: dict[tuple[int, int], tuple[list[dict], list[dict], dict[str, Scop
 _SCOPE_CACHE_MAX = 8
 
 
-def _build_view(nodes: list[dict], edges: list[dict], scope: Scope, tests: bool) -> ScopeView:
+def _build_view(
+    nodes: list[dict], edges: list[dict], scope: Scope, tests: bool, external: bool,
+    vendored: bool,
+) -> ScopeView:
     view = ScopeView(nodes=nodes, edges=edges, scope=scope)
     vendored_cache: dict[str, bool] = {}
     vendored_files: set[str] = set()
@@ -247,21 +250,21 @@ def _build_view(nodes: list[dict], edges: list[dict], scope: Scope, tests: bool)
     for n in nodes:
         rel = _norm_relpath(_node_file(n))
         reason = ""
-        if rel and not scope.vendored:
+        if rel and not vendored:
             is_v = vendored_cache.get(rel)
             if is_v is None:
                 is_v = vendored_cache[rel] = _is_vendored_file(rel)
             if is_v:
                 reason = "vendored"
                 vendored_files.add(rel)
-        if not reason and not scope.external and _is_external_node(n):
+        if not reason and not external and _is_external_node(n):
             reason = "external"
         if not reason and not tests and rel and _is_test_path(rel):
             reason = "tests"
         if not reason and (scope.include or scope.exclude):
             if scope.include and not (rel and any(_path_matches(p, rel) for p in scope.include)):
                 # an explicitly included external node has no path to match
-                if not (scope.external and _is_external_node(n)):
+                if not (external and _is_external_node(n)):
                     reason = "filtered"
             if not reason and rel and any(_path_matches(p, rel) for p in scope.exclude):
                 reason = "filtered"
@@ -291,18 +294,24 @@ def _build_view(nodes: list[dict], edges: list[dict], scope: Scope, tests: bool)
 
 
 def _scoped(
-    nodes: list[dict], edges: list[dict], spec: str = "", default_tests: bool = True
+    nodes: list[dict], edges: list[dict], spec: str = "", default_tests: bool = True,
+    navigation: bool = False,
 ) -> ScopeView | str:
     """The view of ``nodes``/``edges`` that ``spec`` keeps, or an error string.
 
     ``default_tests`` is what a tool does about test code when the spec does not
-    say (``+tests`` / ``-tests`` always win).
+    say (``+tests`` / ``-tests`` always win). ``navigation`` is for the tools that
+    walk out from one node the caller named (impact, subgraph, neighbors): they
+    leave nothing out unless the spec asks, where the tools that rank or audit
+    the whole graph leave out vendored files and external nodes by default.
     """
     scope = _parse_scope(spec)
     if isinstance(scope, str):
         return scope
     tests = default_tests if scope.tests is None else scope.tests
-    key = f"{config.PROJECT_DIR}\0{scope.spec}\0{tests}"
+    external = navigation if scope.external is None else scope.external
+    vendored = navigation if scope.vendored is None else scope.vendored
+    key = f"{config.PROJECT_DIR}\0{scope.spec}\0{tests}\0{external}\0{vendored}"
     ident = (id(nodes), id(edges))
     cached = _SCOPE_CACHE.get(ident)
     if cached is not None and cached[0] is nodes and cached[1] is edges:
@@ -316,5 +325,5 @@ def _scoped(
     if view is None:
         if len(views) >= 16:
             views.pop(next(iter(views)), None)
-        view = views[key] = _build_view(nodes, edges, scope, tests)
+        view = views[key] = _build_view(nodes, edges, scope, tests, external, vendored)
     return view

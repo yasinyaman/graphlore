@@ -11,7 +11,7 @@ graphlore is a Python MCP server (MCP Python SDK v2: `mcp.server.mcpserver.MCPSe
 
 ## Layout
 
-`src/graphlore/` is layered `config.py` → `graph.py` → `spans.py` → `scope.py` → `apis.py` / `routes.py` → `review.py` → `server.py`. `server.py` holds the whole MCP surface (32 tools, resources, prompts, `main()`). All tests are in `tests/test_tools.py` and call tool functions directly.
+`src/graphlore/` is layered `config.py` → `graph.py` → `spans.py` → `scope.py` → `apis.py` / `routes.py` → `imports.py` → `resolve.py` → `review.py` → `server.py`. `server.py` holds the whole MCP surface (33 tools, resources, prompts, `main()`). All tests are in `tests/test_tools.py` and call tool functions directly.
 
 ## Rules
 
@@ -25,8 +25,12 @@ graphlore is a Python MCP server (MCP Python SDK v2: `mcp.server.mcpserver.MCPSe
 - graph.json analysis tools must work with no `graphify` binary and no optional extras.
 - Set `read_only_hint` / `destructive_hint` on every tool to match what it does.
 - A tool that ranks or audits the graph takes `scope: str = ""` and goes through `_scope_view`; it reports `view.payload()` and wraps its text in `_with_note`, so what the scope left out (vendored/minified files, external nodes) is always stated.
+- A tool that lifts import edges to file level passes `ImportChecker().kind` (one instance per call) and reports `checker.rejected`; graphify resolves imports by name and gets same-named modules wrong.
+- A new source reader (`imports.py`, `resolve.py`) covers every language the project already parses — Python via `ast`, the rest via tree-sitter, as in `apis.py` — or says per language why there is nothing to read. Don't add a Python-only analysis.
+- A row that prints its own `file:line` uses `labels.name(id)`, not `labels.get(id)`, so the location is shown once.
+- Node-centric tools (impact, subgraph, neighbors, tests_for) use `_pick_node` + `_matched` for the node, `_nav_view` for edges and scope (it includes the calls `resolve.py` adds from the source), order production code before tests, and attach `_EMPTY_NOTE` to an empty result.
 - `config.PROJECT_DIR` can change at runtime (`graphlore_project`); never cache a value derived from it without keying on it.
 
 ## When a tool is added or changed
 
-Also update: the tool list in the `server.py` docstring, `LEAN_TOOLS` / `LOCATE_TOOLS` if relevant, `test_tool_and_prompt_registration` (asserts exactly 32 tools), the README tool tables and "32" counts, `.claude/skills/graphlore-explore/SKILL.md`, and `CHANGELOG.md` under `[Unreleased]`.
+Also update: the tool list in the `server.py` docstring, `LEAN_TOOLS` / `LOCATE_TOOLS` if relevant, `test_tool_and_prompt_registration` (asserts exactly 33 tools), the README tool tables and "33" counts, `.claude/skills/graphlore-explore/SKILL.md`, and `CHANGELOG.md` under `[Unreleased]`.
