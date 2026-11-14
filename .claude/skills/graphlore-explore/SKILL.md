@@ -40,8 +40,10 @@ call runs semantic search, maps the top hit to its **enclosing graph node**, and
 returns the token-budgeted subgraph around it **plus `hidden_links`** — semantically
 similar code that is structurally disconnected (duplication / missing-abstraction /
 sync-async-twin candidates that neither search nor the graph surfaces alone). Read
-the "Also matched" lines under the seed: a question often has two homes (the tool
-that exposes a behavior and the module that implements it). Works
+the lines under the seed: a question often has two homes (the tool that exposes
+a behavior and the module that implements it). "Seed calls into" lists what the
+seed calls in other files — where the implementation lives when the seed is a thin
+wrapper — and "Also matched" lists the other top hits by definition. Works
 across Python, JS/TS, Go, Java, Rust, C++ and 165+ languages. Needs the optional
 `[semble]` extra; without it, fall back to `graphlore_search` (name-based) and the
 structural flow below. The first semantic call downloads semble's embedding model
@@ -73,6 +75,12 @@ two nodes), `graphlore_explain(node)` (everything about one node),
 issues — gauge how much to trust the graph).
 
 ## Reading an answer: ambiguity, empty results, inferred edges
+
+- **Which version is answering.** `graphlore_overview()` and `graphlore_project()`
+  print the server version. If a tool's schema lacks a parameter this skill
+  mentions (`scope`, `strict`, `verbose`) while the version is current, the
+  client loaded that tool before a plugin update: say so and ask for a new
+  session — do not conclude the parameter does not exist.
 
 - **A name can match several nodes** (a function and a README heading, two
   `Settings` classes). The node-centric tools say "Matched N nodes ...; using
