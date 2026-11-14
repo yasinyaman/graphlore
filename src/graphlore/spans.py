@@ -142,7 +142,16 @@ def _ts_parser_for(rel: str) -> tuple[Any, str | None]:
         return None, None
     if lang not in _TS_PARSERS:
         try:
-            _TS_PARSERS[lang] = Parser(get_language(lang))
+            # `lang` is the plain str detect_language_from_path() returns; the
+            # pack's 1.6.0-1.6.2 stubs type get_language's argument as a Literal
+            # of language names (later 1.x accept str). An unknown name raises
+            # and is caught below. The ignore sits on its own statement so the
+            # Parser(...) argument stays checked: on pack 1.8.0/1.9.x
+            # get_language returns a Language that tree_sitter.Parser rejects,
+            # and mypy should keep saying so. No cast to the pack's
+            # SupportedLanguage: 1.8.0 does not export that name.
+            language = get_language(lang)  # type: ignore[arg-type]
+            _TS_PARSERS[lang] = Parser(language)
         except Exception:
             _TS_PARSERS[lang] = None
     return _TS_PARSERS[lang], lang
