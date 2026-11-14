@@ -12,6 +12,14 @@ node to its true `start..end` symbol range — so an assistant orients structura
 and cheaply (token-budgeted maps, then exact spans) instead of grepping and
 reading file after file.
 
+graphlore is a read-mostly view of a code graph, **not an agent memory**: it has
+no remember/recall tools, keeps no notes between sessions, and the only thing it
+persists of its own is community names (`graphlore_set_labels`). Nor does it
+replace grep. An exact identifier is found faster with `rg`; graphlore earns its
+place on multi-hop questions (who calls this, what breaks if it changes) and on
+orientation in unfamiliar code, and every answer carries `file:line` so it can be
+checked with a plain read.
+
 > **Relationship to Graphify's own MCP server.** Graphify ships an embedded MCP
 > server (`graphify ./raw --mcp`), and the two overlap more than they differ.
 > Graph navigation (query, node lookup, neighbors, communities, god nodes,
@@ -447,6 +455,15 @@ Averaged over **6 queries** spanning httpx subsystems (send path, digest auth,
 redirects, content decoding, cookies, timeouts) on the 2,101-node graph. Each query
 orients an agent to a code area; *tokens* = what reaches the model's context
 (≈ chars/4).
+
+> **How tokens are counted here vs. at runtime.** The benchmark divides by 4;
+> the server's own budgets and `approx_tokens` divide by 3.5 (deliberately
+> conservative), or count exactly with `GRAPHLORE_TOKENIZER=tiktoken`. A runtime
+> figure therefore reads about 14% higher than the same text would here. The
+> ratios between approaches are unaffected, since both sides use the same
+> divisor; but the grep side counts file *bytes* and the locate side reply
+> *characters*, which slightly flatters grep on non-ASCII source. The numbers
+> were not re-measured for this note.
 
 ![Tokens to orient an agent across 6 httpx queries — lower is better](docs/benchmark.svg)
 
