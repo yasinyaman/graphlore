@@ -4569,6 +4569,65 @@ def test_unreferenced_lists_a_dead_class_whose_name_another_class_has(tmp_path, 
     assert "name shared with pkg/a.py:1" in text
 
 
+def test_unreferenced_keeps_a_method_alive_when_a_namesake_function_calls_it(
+        tmp_path, monkeypatch):
+    """A route handler named like the service method it calls. The handler's file
+    defines its own `remove_example`, but `review.remove_example(...)` in its body
+    can only be the method."""
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    _write(tmp_path, "pkg/review.py",
+           "class ReviewService:\n"                                # 1
+           "    def remove_example(self, db, name):\n"             # 2
+           "        return db, name\n"
+           "\n"
+           "    def rename_tag(self, old, new):\n"                 # 5
+           "        return old, new\n")
+    _write(tmp_path, "pkg/routes.py",
+           "async def remove_example(db_name, name, http):\n"      # 1
+           "    removed = review.remove_example(db_name, name)\n"
+           "    return removed\n"
+           "\n\n"
+           "def rename_tag(old, new):\n"                           # 6
+           "    return rename_tag(old.strip(), new)\n")            # bare: its own name
+
+    def fn(nid, label, file, line):
+        return {"id": nid, "label": label, "source_file": file,
+                "source_location": f"L{line}", "file_type": "code"}
+
+    _write_graph(tmp_path, {
+        "nodes": [
+            {"id": "f_rev", "label": "review.py", "source_file": "pkg/review.py",
+             "file_type": "code"},
+            {"id": "f_rt", "label": "routes.py", "source_file": "pkg/routes.py",
+             "file_type": "code"},
+            {"id": "svc", "label": "ReviewService", "source_file": "pkg/review.py",
+             "source_location": "L1", "file_type": "code", "_callable_class": True},
+            fn("m_rm", ".remove_example()", "pkg/review.py", 2),
+            fn("m_rn", ".rename_tag()", "pkg/review.py", 5),
+            fn("h_rm", "remove_example()", "pkg/routes.py", 1),
+            fn("h_rn", "rename_tag()", "pkg/routes.py", 6),
+        ],
+        "links": [
+            {"source": "f_rev", "target": "svc", "relation": "contains"},
+            {"source": "svc", "target": "m_rm", "relation": "method"},
+            {"source": "svc", "target": "m_rn", "relation": "method"},
+            {"source": "f_rt", "target": "h_rm", "relation": "contains"},
+            {"source": "f_rt", "target": "h_rn", "relation": "contains"},
+            {"source": "f_rt", "target": "svc", "relation": "references"},
+        ],
+    })
+    data = json.loads(server.graphlore_unreferenced(include_mentioned=True, as_json=True))
+    mentions = {(r["node"], r["file"]): r["mentions"] for r in data["unreferenced"]}
+    # called as `review.remove_example(...)` from the handler of the same name
+    assert mentions[(".remove_example()", "pkg/review.py")] == 1
+    # the other file only ever says `rename_tag` bare: its own function
+    assert mentions[(".rename_tag()", "pkg/review.py")] == 0
+    listed = {r["node"] for r in json.loads(
+        server.graphlore_unreferenced(as_json=True))["unreferenced"]}
+    assert ".remove_example()" not in listed
+    assert ".rename_tag()" in listed
+
+
 def test_unreferenced_hook_note_needs_a_base_that_can_call_the_method(tmp_path, monkeypatch):
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     _write(tmp_path, "m.py",
@@ -5303,3 +5362,148 @@ def test_identical_bodies_in_other_languages(tmp_path, monkeypatch):
     groups = [[d["site"] for d in g["definitions"]] for g in data["identical_bodies"]]
     # a JS function and a TS arrow function with the same body; two Go functions
     assert sorted(groups) == [["a.js:1", "b.ts:1"], ["d.go:3", "d.go:7"]]
+
+
+# --- 0.4.1: locate's second home, resolved import sites, established pairs ---
+
+
+def test_locate_skips_file_headers_and_names_what_the_seed_calls(tmp_path, monkeypatch):
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    _write(tmp_path, "pkg/__init__.py", "")
+    _write(tmp_path, "pkg/graph.py",
+           '"""Graph helpers."""\n'                                  # 1
+           "import json\n"
+           "\n\n"
+           "def _find_cycles(forward):\n"                             # 5
+           "    return sorted(forward)\n"
+           "\n\n"
+           "def _load_graph():\n"                                     # 9
+           "    return json.loads('{}')\n")
+    _write(tmp_path, "pkg/server.py",
+           '"""The tools."""\n'                                       # 1
+           "from pkg import graph\n"
+           "\n\n"
+           "def graphlore_cycles():\n"                                # 5
+           "    return graph._find_cycles(graph._load_graph())\n"
+           "\n\n"
+           "def graphlore_other():\n"                                 # 9
+           "    return graph._load_graph()\n")
+    _write(tmp_path, "pkg/apis.py",
+           '"""API surface extraction: nothing about cycles."""\n'    # 1
+           "import ast\n"
+           "\n\n"
+           "def _api_uses():\n"                                       # 5
+           "    return ast\n")
+
+    def fn(nid, label, file, line):
+        return {"id": nid, "label": label, "source_file": file,
+                "source_location": f"L{line}", "file_type": "code"}
+
+    def hub(nid, file):
+        return {"id": nid, "label": file.rsplit("/", 1)[-1], "source_file": file,
+                "source_location": "L1", "file_type": "code"}
+
+    _write_graph(tmp_path, {
+        "nodes": [
+            hub("f_graph", "pkg/graph.py"), hub("f_server", "pkg/server.py"),
+            hub("f_apis", "pkg/apis.py"),
+            fn("find", "_find_cycles()", "pkg/graph.py", 5),
+            fn("load", "_load_graph()", "pkg/graph.py", 9),
+            fn("tool", "graphlore_cycles()", "pkg/server.py", 5),
+            fn("other", "graphlore_other()", "pkg/server.py", 9),
+            fn("api", "_api_uses()", "pkg/apis.py", 5),
+        ],
+        "edges": [],
+    })
+    fake = _FakeIndex(
+        search_hits=[_FakeHit("pkg/server.py", 5, 6),      # the tool: the seed
+                     _FakeHit("pkg/apis.py", 1, 2),        # a module docstring
+                     _FakeHit("pkg/apis.py", 5, 6)],       # a real definition
+        related_hits=[],
+    )
+    monkeypatch.setattr(server, "_semble_index", lambda: fake)
+    data = json.loads(server.graphlore_locate("where are cycles detected?", as_json=True))
+    assert data["seed"]["node"] == "graphlore_cycles()"
+    # the header hit is counted, not listed; the other hit is named by its definition
+    assert data["header_hits_skipped"] == 1
+    assert [(h["file"], h["qualname"]) for h in data["also_matched"]] == [
+        ("pkg/apis.py", "_api_uses")]
+    # the implementation, from the graph: graph.py, most specific callee first
+    # (_find_cycles has one caller, _load_graph two) — edges graphlore resolved
+    assert [(c["node"], c["file"], c["callers"]) for c in data["calls_into"]] == [
+        ("_find_cycles()", "pkg/graph.py", 1), ("_load_graph()", "pkg/graph.py", 2)]
+    text = server.graphlore_locate("where are cycles detected?")
+    assert "Seed calls into — the implementation may live here:" in text
+    assert "_find_cycles()  (pkg/graph.py:5)" in text
+    assert "_api_uses  (pkg/apis.py:5-6)" in text and "pkg/apis.py:1-2" not in text
+
+
+def test_a_resolved_import_reports_the_line_it_was_read_from(tmp_path, monkeypatch):
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    _module_call_project(tmp_path)
+    data = json.loads(server.graphlore_impact(
+        "pkg/graph.py", hops=1, relations="imports", as_json=True))
+    row = next(r for r in data["impacted"] if r["node"] == "test_server.py")
+    # `import pkg.graph as graph_mod` is on line 2 of the test file: a reference
+    # site graphlore read itself, not the file's first line as a fallback
+    assert row["site"] == "tests/test_server.py:L2" and row["site_kind"] == "reference"
+    assert row["resolved_by"] == "graphlore"
+    assert "def: " not in server.graphlore_impact(
+        "pkg/graph.py", hops=1, relations="imports", scope="tests")
+
+
+def test_surprises_do_not_score_an_imported_target_as_a_guess():
+    nodes = [
+        _fn("cli_file", "catalog.py", "pkg/adapters/cli/catalog.py"),
+        _fn("cmd", "add()", "pkg/adapters/cli/catalog.py"),
+        _fn("svc_file", "service.py", "pkg/application/service.py"),
+        _fn("svc", "add_entry()", "pkg/application/service.py"),
+        _fn("far", "lookup()", "tools/misc.py"),
+        _fn("far_file", "misc.py", "tools/misc.py"),
+        _fn("stray", "add_entry()", "pkg/other/x.py"),
+    ]
+    edges = [
+        {"source": "cli_file", "target": "svc_file", "relation": "imports_from"},
+        {"source": "far_file", "target": "cli_file", "relation": "imports_from"},
+        # the file imports that module: the import resolves it, nobody guessed
+        {"source": "cmd", "target": "svc", "relation": "calls", "confidence": "INFERRED"},
+        # nothing backs this one
+        {"source": "far", "target": "stray", "relation": "calls", "confidence": "AMBIGUOUS"},
+    ]
+    items, _diag = graph_mod._computed_surprises(nodes, edges[:3])
+    backed = next(i for i in items if i["from"] == "add()")
+    assert not any("guessed" in w for w in backed["why"])
+    plain = [dict(e, confidence="EXTRACTED") for e in edges[:3]]
+    extracted, _ = graph_mod._computed_surprises(nodes, plain)
+    assert backed["score"] == next(i for i in extracted if i["from"] == "add()")["score"]
+
+
+def test_surprises_treat_a_heavily_used_directory_pair_as_a_dependency():
+    assert graph_mod._diverging("pkg/adapters/cli/x.py", "pkg/application/svc/y.py") == (
+        "pkg/adapters", "pkg/application")
+    assert graph_mod._diverging("a/x.py", "a/y.py") == ("a/x.py", "a/y.py")
+    nodes = [_fn("lone_src", "lone()", "pkg/jobs/nightly.py"),
+             _fn("lone_dst", "purge()", "pkg/storage/blob.py")]
+    edges = [{"source": "lone_src", "target": "lone_dst", "relation": "calls"}]
+    for i in range(12):  # an inbound adapter using the application layer everywhere
+        nodes += [_fn(f"h{i}", f"handler{i}()", f"pkg/adapters/cli/c{i}.py"),
+                  _fn(f"u{i}", f"use_case{i}()", f"pkg/application/u{i}.py")]
+        edges.append({"source": f"h{i}", "target": f"u{i}", "relation": "calls"})
+    items, _diag = graph_mod._computed_surprises(nodes, edges)
+    by_from = {i["from"]: i for i in items}
+    adapter = by_from["handler0()"]
+    assert any("12 edges join pkg/adapters and pkg/application" in w for w in adapter["why"])
+    assert not any("distant directories" in w for w in adapter["why"])
+    # the one edge between two other directories is the lead, and outranks them
+    assert by_from["lone()"]["score"] > adapter["score"]
+    assert items[0]["from"] == "lone()"
+
+
+def test_project_and_overview_say_which_version_is_answering(project):
+    version = f"graphlore {server.__version__}"
+    data = json.loads(server.graphlore_project(as_json=True))
+    assert data["server"] == version
+    text = server.graphlore_project()
+    assert f"Server: {version}." in text and "start a new session" in text
+    assert json.loads(server.graphlore_overview(as_json=True))["server"] == version
+    assert server.graphlore_overview().rstrip().endswith(f"Server: {version}")

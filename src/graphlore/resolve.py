@@ -55,6 +55,7 @@ class _Binding(NamedTuple):
     module: tuple[str, ...]   # dotted path of the statement's module
     name: str | None          # the from-imported name, None for `import a.b [as m]`
     rooted: bool              # `import a.b.c` with no alias: the name is the root `a`
+    line: int = 0             # line of the import statement
 
 
 class _FileCalls(NamedTuple):
@@ -89,15 +90,17 @@ def _python_module_calls(src: bytes) -> _FileCalls | None:
                 for a in child.names:
                     parts = tuple(a.name.split("."))
                     if a.asname:
-                        bindings[a.asname] = _Binding(0, parts, None, False)
+                        bindings[a.asname] = _Binding(0, parts, None, False, child.lineno)
                     else:
-                        bindings.setdefault(parts[0], _Binding(0, parts[:1], None, True))
+                        bindings.setdefault(
+                            parts[0], _Binding(0, parts[:1], None, True, child.lineno)
+                        )
             elif isinstance(child, ast.ImportFrom):
                 module = tuple(child.module.split(".")) if child.module else ()
                 for a in child.names:
                     if a.name != "*":
                         bindings[a.asname or a.name] = _Binding(
-                            child.level or 0, module, a.name, False
+                            child.level or 0, module, a.name, False, child.lineno
                         )
             elif isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
                 walk(child, (child.lineno, *stack))
@@ -244,7 +247,8 @@ def _build(nodes: list[dict], edges: list[dict]) -> Resolved:
                 added.append({
                     "source": hub[file], "target": hub[target_file],
                     "relation": "imports_from", "confidence": "EXTRACTED",
-                    "source_file": file, "context": "import", "resolved_by": RESOLVED_BY,
+                    "source_file": file, "source_location": f"L{b.line}",
+                    "context": "import", "resolved_by": RESOLVED_BY,
                 })
         for stack, line, chain in analysis.calls:
             target_file = module_file(file, analysis.bindings[chain[0]], chain[1:-1])

@@ -234,6 +234,25 @@ def _top_dir(path: str) -> str:
     return head if sep else "."
 
 
+# From this many edges on, two directories are joined by a dependency, not by a
+# surprise: an inbound adapter using the application layer in dozens of places is
+# the architecture, not a finding.
+_ESTABLISHED_PAIR_EDGES = 10
+
+
+def _diverging(a: str, b: str) -> tuple[str, str]:
+    """Where two file paths part ways: ``pkg/adapters/cli/x.py`` and
+    ``pkg/application/svc/y.py`` -> (``pkg/adapters``, ``pkg/application``).
+    Two files in one directory diverge at the files themselves."""
+    pa, pb = a.split("/"), b.split("/")
+    common = 0
+    for x, y in zip(pa[:-1], pb[:-1], strict=False):
+        if x != y:
+            break
+        common += 1
+    return "/".join(pa[: common + 1]), "/".join(pb[: common + 1])
+
+
 def _is_package_entry_of(entry: str, member: str) -> bool:
     """True if ``entry`` is the entry file (``__init__.py``, ``index.ts``, ``mod.rs``)
     of a package directory that contains ``member``."""
@@ -378,6 +397,9 @@ def _computed_surprises(
     # dependent here; it uses everything.
     dependents_of: dict[str, set[str]] = {}
     file_dependents: dict[str, set[str]] = {}
+    # ...and how many edges join each pair of directories. One edge between two
+    # parts of a codebase is a lead; dozens are a dependency someone designed.
+    pair_edges: dict[tuple[str, str], int] = {}
     for e in edges:
         rel = _rel(e)
         if rel in _NON_DEPENDENCY_RELATIONS:
@@ -390,6 +412,7 @@ def _computed_surprises(
         if not (fu and fv) or fu == fv or _is_test_path(fu) or _name_guess(e, rel, fu, fv):
             continue
         file_dependents.setdefault(fv, set()).add(fu)
+        pair_edges[_diverging(fu, fv)] = pair_edges.get(_diverging(fu, fv), 0) + 1
         if _top_dir(fu) != _top_dir(fv):
             dependents_of.setdefault(_top_dir(fv), set()).add(_top_dir(fu))
 
@@ -445,13 +468,21 @@ def _computed_surprises(
             top_u != top_v and len(dependents_of.get(top_v, ())) >= 2
             and (not dependents_of.get(top_u) or not file_dependents.get(fu))
         )
-        suppress = resolver_noise or from_test or consumer_edge
+        pair = _diverging(fu, fv)
+        established = pair_edges.get(pair, 0) >= _ESTABLISHED_PAIR_EDGES
+        suppress = resolver_noise or from_test or consumer_edge or established
+        # An inferred edge into a module the source file imports is resolved by
+        # that import, not guessed: it scores like an extracted one.
+        guessed = (
+            conf in ("AMBIGUOUS", "INFERRED")
+            and not (rel in _SURPRISE_NAME_RESOLVED_RELS and _imported(fu, fv))
+        )
 
         score = 0
         why: list[str] = []
         if not resolver_noise:
-            score += {"AMBIGUOUS": 3, "INFERRED": 2}.get(conf, 1)
-            if conf in ("AMBIGUOUS", "INFERRED"):
+            score += {"AMBIGUOUS": 3, "INFERRED": 2}.get(conf, 1) if guessed else 1
+            if guessed:
                 why.append(f"{conf.lower()} link — the resolver guessed this target")
         if not suppress:
             if cat_u != cat_v:
@@ -481,6 +512,11 @@ def _computed_surprises(
             why.append(
                 f"({what} only consumes {top_v}/: expected coupling, "
                 "structural bonuses withheld)"
+            )
+        elif established:
+            why.append(
+                f"({pair_edges[pair]} edges join {pair[0]} and {pair[1]}: an established "
+                "dependency, structural bonuses withheld)"
             )
 
         scored.append({
