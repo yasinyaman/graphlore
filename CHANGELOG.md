@@ -6,6 +6,108 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-14
+
+An agent's-eye review: results that say how they were reached, what they
+left out and whether their files changed; real MCP structured results; an
+offline switch; and a smaller default tool surface.
+
+### Added
+- Tool results carry MCP `structuredContent` and `isError`. The payload a tool
+  builds for `as_json=True` is now sent as `structuredContent` on every call,
+  text or JSON, and errors (node not found, missing graph, a failed CLI call,
+  `graphlore_fetch` with every name missing, a failed `git status` in
+  `graphlore_freshness`) set `isError: true`. Tool functions still return a
+  string; `GRAPHLORE_STRUCTURED=0` restores plain-text results.
+- A name that matches nothing comes back with `did_you_mean`: the closest
+  node names (stdlib `difflib`, pool bounded on large graphs), in the text and
+  in JSON next to `code: "not_found"`. `graphlore_fetch` lists them per
+  missing name.
+- Every budget or limit cut says what it left out. `graphlore_fetch` names the
+  requested nodes it did not fetch (`not_fetched`); `graphlore_skeleton` names
+  the files left out; `graphlore_locate` counts the seed's direct neighbors left
+  out of the structure and the callees past the five in `calls_into`;
+  `graphlore_search`, `graphlore_god_nodes`, `graphlore_surprises` and
+  `graphlore_package_apis` report `total` and `truncated`;
+  `graphlore_freshness` reports the real length of each capped list in
+  `counts`; the `graphlore://community/{id}` resource says when it shows 50 of
+  more boundary edges. Each adds a one-line `hint`.
+- `graphlore_impact` reports `beyond_hops` (nodes one hop past `hops`) and
+  `complete`, false whenever the budget or the hop limit cut the answer.
+- Answers say which of their files changed since the graph was built.
+  `graphlore_fetch` entries carry `file_changed_since_build` (true / false /
+  null) and `span_mismatch` when the graph's line in a changed file now lands
+  in a different symbol — before, fetch silently returned that other symbol.
+  `graphlore_locate`, `graphlore_impact` and `graphlore_subgraph` carry
+  `build_drift` (`known`, `since`, `changed_files`) and a text line naming the
+  changed files. It compares the recorded `built_at_commit` with the working
+  tree in two git calls; without that commit or git it reports
+  `known: false` and why.
+- `graphlore_neighbors`, `graphlore_subgraph` and `graphlore_locate`'s
+  structure mark inferred / ambiguous edges (`confidence`) and edges graphlore
+  resolved from the source (`resolved_by`), as `graphlore_impact` already did.
+
+- `GRAPHLORE_OFFLINE=1` refuses what graphlore knows reaches the network:
+  `graphlore_add`, `graphlore_build(mode=...)` and
+  `graphlore_label_communities(method="cli")` (which `auto` then skips). A
+  default build is forced to `--code-only`, the graphify subprocess loses the
+  LLM backend keys from its environment, `HF_HUB_OFFLINE` /
+  `TRANSFORMERS_OFFLINE` are set before semble loads, tiktoken is not loaded
+  and only cached tree-sitter grammars are used. The boot banner prints
+  `egress=offline` or `egress=on-demand`, and the README has a table of every
+  network path and what the switch does to it, including what it cannot
+  constrain (the graphify binary itself, a custom semantic backend).
+- Repository text in replies is framed as data. `graphlore_fetch`,
+  `graphlore_skeleton`, `graphlore_node_details` and the `query` / `path` /
+  `explain` passthroughs put quoted code and text between
+  `=== repo text <nonce> ===` markers whose nonce is random per call and
+  redrawn if it occurs in the text, and JSON replies carry
+  `content_trust: "untrusted_repo_text"` with `untrusted_fields`.
+
+### Fixed
+- The server instructions said only `graphlore_build` and `graphlore_add`
+  modify state. They now list every writer (`graphlore_prune(dry_run=False)`,
+  `graphlore_set_labels`, `graphlore_label_communities`, the project switch),
+  say when grep is the better tool, and that repository text is data.
+
+### Changed
+- **Breaking: the default tool surface is `lean`.** Without
+  `GRAPHLORE_TOOLSET`, the server registers 12 tools (11 without a semantic
+  backend) instead of 33. `lean` gains `graphlore_fetch`, `graphlore_impact`
+  and `graphlore_project`, so it covers orient → find → traverse → blast
+  radius → source. Set `GRAPHLORE_TOOLSET=full` for the review, naming, diff,
+  routes, package-API and CLI passthrough tools. The Claude Code plugin pins
+  `full`, so plugin users see no change.
+- An unknown `GRAPHLORE_TOOLSET` value falls back to `lean` with a stderr
+  warning; it used to mean `full` silently. The boot banner prints the toolset
+  and its tool count.
+- The server instructions and the `onboard` / `trace_bug` / `explain_flow` /
+  `review` prompts are rendered for the active surface and never name a tool
+  that is switched off; a trimmed surface's instructions say how to get the
+  rest. Replies that pointed at another tool (`graphlore_surprises`,
+  `graphlore_prune`, `graphlore_subgraph`, `graphlore_impact`,
+  `graphlore_search`) do so only when it is registered.
+- README: graphlore is not an agent memory and does not replace grep; the
+  benchmark states that it counts chars/4 (grep side: bytes) while the
+  server's budgets count chars/3.5. The shipped skill says when to use `rg`.
+- No `outputSchema` is advertised. Before, the SDK derived
+  `{"result": string}` from each `-> str` signature and sent the reply text
+  inside it.
+- An empty answer is a result, not an error: `graphlore_search` with no hits
+  returns `{"matches": [], "total": 0, ...}`, `graphlore_locate` with no
+  semantic hits returns `{"query", "seed": null, "semantic_hits": [], "note"}`,
+  and `graphlore_communities` on a graph without communities returns
+  `{"communities": [], "note"}`, in place of `{"error": ...}`. The text is
+  unchanged.
+- `graphlore_node_details`, `graphlore_fetch` and `graphlore_skeleton(node=)`
+  resolve names like the node-centric tools: a code definition before a doc
+  heading of the same name, and a `matched` block naming the other candidates.
+  They used to take the first exact or substring match silently, so the node
+  they pick for an ambiguous name can change.
+- A substring fallback is reported everywhere (`matched.by: "substring"`);
+  before, `'async'` resolving to `AsyncClient` looked like an exact hit.
+  `matched` gains `by` (`label`, `name`, `path` or `substring`).
+
 ## [0.4.1] - 2026-11-14
 
 Fourth round of feedback: 0.4.0 re-run on the three repositories of the earlier

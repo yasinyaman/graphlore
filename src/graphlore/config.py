@@ -33,5 +33,11 @@ def env(name: str, default: str | None = None) -> str | None:
     return default if value is None else value
 
 
+def offline() -> bool:
+    """``GRAPHLORE_OFFLINE=1``: refuse every path graphlore knows reaches the network
+    (read per call, so tests and a restarted watcher see the current value)."""
+    return (env("OFFLINE", "") or "").strip().lower() in ("1", "true", "yes", "on")
+
+
 PROJECT_DIR = Path(env("PROJECT_DIR", ".")).resolve()
 OUT_DIR_NAME = env("OUT_DIR", "graphify-out")
