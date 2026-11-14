@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-14
+
 Second and third rounds of feedback: the 0.3.0 review recipe run on the same
 774-file repository through the MCP tools, then a side-by-side run with the
 hosted Graphify connector on this repository.
