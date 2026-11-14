@@ -52,6 +52,8 @@ _CODE_EXTS = frozenset({
 })
 _IDENT = re.compile(r"[A-Za-z_$][A-Za-z0-9_$]*")
 _DECORATOR_LINE = re.compile(r"^\s*@\s*([A-Za-z_][\w.]*)")
+# An identifier, and whether it is reached as an attribute (`obj.name`).
+_MENTION = re.compile(r"(\.\s*)?([A-Za-z_$][A-Za-z0-9_$]*)")
 
 
 def _int_line(n: dict) -> int:
@@ -354,19 +356,23 @@ def _decorators(
     return out
 
 
-def _count_mentions(names: set[str]) -> tuple[dict[str, Counter[str]], int, bool]:
+def _count_mentions(
+    names: set[str],
+) -> tuple[dict[str, Counter[str]], dict[str, Counter[str]], int, bool]:
     """How often each name occurs as a whole identifier, per text file of the project.
 
     Walks ``config.PROJECT_DIR`` once: templates, configs and docs count too, since
     a function named in ``pyproject.toml`` or called from an HTML attribute is not
     dead. Hidden directories, dependency and build trees, vendored or oversized
-    files and binaries are skipped. Returns ({name: {file: count}}, files read,
-    hit the file cap) — per file, so that a second class of the same name and its
+    files and binaries are skipped. Returns ({name: {file: count}}, the same for
+    attribute accesses only (``obj.name``), files read, hit the file cap) — per
+    file and per form, so that a second definition of the same name and its bare
     uses can be told apart from uses of the candidate.
     """
     counts: dict[str, Counter[str]] = {}
+    attrs: dict[str, Counter[str]] = {}
     if not names:
-        return counts, 0, False
+        return counts, attrs, 0, False
     root = config.PROJECT_DIR.resolve()
     scanned = 0
     capped = False
@@ -394,12 +400,15 @@ def _count_mentions(names: set[str]) -> tuple[dict[str, Counter[str]], int, bool
                 capped = True
                 break
             scanned += 1
-            for tok in _IDENT.findall(raw.decode("utf-8", "replace")):
+            for m in _MENTION.finditer(raw.decode("utf-8", "replace")):
+                tok = m.group(2)
                 if tok in names:
                     counts.setdefault(tok, Counter())[rel] += 1
+                    if m.group(1):
+                        attrs.setdefault(tok, Counter())[rel] += 1
         if capped:
             break
-    return counts, scanned, capped
+    return counts, attrs, scanned, capped
 
 
 def _is_test_definition(name: str, file: str) -> bool:
@@ -469,7 +478,7 @@ def _unreferenced(
             remaining.append((nid, n, kind, name))
 
     names = {name for _nid, _n, _kind, name in remaining}
-    per_file, files_scanned, capped = _count_mentions(names)
+    per_file, per_file_attrs, files_scanned, capped = _count_mentions(names)
     graph_bases: dict[str, list[str]] = {}  # class id -> base names the graph recorded
     for e in all_edges:
         if _rel(e) in _INHERITANCE_RELATIONS:
@@ -478,9 +487,12 @@ def _unreferenced(
             graph_bases.setdefault(src, []).append(
                 _bare_name(_node_label(base)) if base else dst
             )
-    # Where each candidate name is defined (any kind). A name's occurrences in a
-    # file that has its OWN symbol of that name belong to that symbol: a candidate
-    # has no incoming import edge, so no such file can be using this one instead.
+    # Where each candidate name is defined (any kind). In a file that has its OWN
+    # symbol of that name, the `def` line and every bare use (`name(...)`,
+    # `x: name`) belong to that symbol: a candidate has no incoming import edge,
+    # so the file cannot be using this one by its bare name. An attribute access
+    # (`obj.name`, `mod.name`) can never mean the file's own module-level symbol,
+    # and is how a method is called: it still counts.
     defined_in: dict[str, dict[str, list[int]]] = {}
     for other in defs.kind:
         on = defs.byid[other]
@@ -504,7 +516,8 @@ def _unreferenced(
                 # its own body, and the `def` line of any namesake next to it
                 count -= own + max(0, len(homes.get(file, ())) - 1)
             elif where in homes:
-                continue  # that file's own symbol of this name, and its uses
+                attrs_here = per_file_attrs.get(name)
+                count = attrs_here[where] if attrs_here else 0
             mentions += max(0, count)
         item: dict[str, Any] = {
             "id": nid, "name": name, "kind": kind, "file": file, "line": line or None,

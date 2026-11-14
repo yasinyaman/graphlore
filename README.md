@@ -129,6 +129,9 @@ starts come from uv's cache. Without `uv`, use the manual setup below.
 schemas it loaded earlier in the session, so after an update mid-session the
 server already has the new parameters (results mention them) while tools loaded
 before the update still show the old ones — no `scope`, no `verbose`.
+`graphlore_project()` and `graphlore_overview()` print the server version, so the
+mismatch can be seen: a schema that lacks a parameter this README describes,
+next to a current version number, means the session predates the update.
 
 ### Claude Code (manual)
 
@@ -201,16 +204,16 @@ Project selection:
 
 | Tool | Purpose |
 |---|---|
-| `graphlore_project` | Show the directory the server reads, or switch it to another one — a second repository, or one just built with `graphlore_build("/abs/path")`. Changes no file; refused under `GRAPHLORE_RESTRICT_PATHS` (always on over HTTP) |
+| `graphlore_project` | Show the directory the server reads, or switch it to another one — a second repository, or one just built with `graphlore_build("/abs/path")`. Changes no file; refused under `GRAPHLORE_RESTRICT_PATHS` (always on over HTTP). Also names the server version |
 
 graph.json analysis (read-only, no CLI needed, `as_json=True` for structured output):
 
 | Tool | Purpose |
 |---|---|
-| `graphlore_overview` | **Call first** — size, god nodes, communities, surprises, suggested next steps |
+| `graphlore_overview` | **Call first** — size, god nodes, communities, surprises, suggested next steps, and the server version |
 | `graphlore_god_nodes` | Most connected nodes, ranked inside the [scope](#analysis-scope) |
 | `graphlore_communities` | Leiden community summaries |
-| `graphlore_surprises` | Unexpected cross-file connections — listed from the graph's own flags when it has them, otherwise **computed** by scoring cross-file edges (confidence, file-type/directory/community crossing), with resolver noise, anything test code uses (the source under test, shared test fakes) and consumers — a directory or a script nothing depends on, using the package — scored down, and inferred edges into modules the source file never imports dropped; says plainly when nothing is computable rather than printing an empty list |
+| `graphlore_surprises` | Unexpected cross-file connections — listed from the graph's own flags when it has them, otherwise **computed** by scoring cross-file edges (confidence, file-type/directory/community crossing), with resolver noise, anything test code uses (the source under test, shared test fakes) and consumers — a directory or a script nothing depends on, using the package — scored down, as is a pair of directories that many edges already join (an adapter using the application layer is the architecture); an inferred edge into a module the source file imports scores like an extracted one, and one into a module it never imports is dropped; says plainly when nothing is computable rather than printing an empty list |
 | `graphlore_search` | Node search |
 | `graphlore_neighbors` | 1-hop neighbors of a node, production code before tests; takes `scope` |
 | `graphlore_subgraph` | Token-budgeted BFS subgraph around a node — the cheap way to feed the model just the relevant slice (Graphify's embedded server does this too; pairing it with `fetch`/`locate` is what's specific here). Walks production code before tests, so a hub's budget goes to its real callers; takes `scope`, and a truncated result says how many direct neighbors were left out and how many were tests |
@@ -243,7 +246,7 @@ Semantic bridge (optional `[semble]` extra — semantic search joined to graph s
 
 | Tool | Purpose |
 |---|---|
-| `graphlore_locate` | NL query → enclosing graph node → token-budgeted subgraph, **plus `hidden_links`**: semantically-similar code that is structurally disconnected (duplication / missing-abstraction candidates). The other top hits are listed under the seed (`also_matched`, production code first) — a question often has two homes |
+| `graphlore_locate` | NL query → enclosing graph node → token-budgeted subgraph, **plus `hidden_links`**: semantically-similar code that is structurally disconnected (duplication / missing-abstraction candidates). A question often has two homes, so two lists follow the seed: `calls_into` (what the seed calls in other files, most specific first — the implementation behind a thin tool) and `also_matched` (the other top hits by the definition they fall in; hits on a file's docstring-and-imports header are counted, not listed) |
 
 ### What graphlore adds to the graph it reads
 
