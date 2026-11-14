@@ -220,8 +220,8 @@ def test_tool_and_prompt_registration(project):
     assert "graphlore_package_apis" in names
     assert "graphlore_routes" in names
     assert {"graphlore_project", "graphlore_unreferenced", "graphlore_layers",
-            "graphlore_same_names"} <= names
-    assert len(names) == 32
+            "graphlore_same_names", "graphlore_tests_for"} <= names
+    assert len(names) == 33
     assert prompts == {"onboard", "trace_bug", "explain_flow", "review"}
 
 
@@ -3633,7 +3633,7 @@ def test_build_notes_an_unignored_output_dir(tmp_path, monkeypatch):
 def test_scope_parsing():
     scope = server._parse_scope("src/pkg/, !docs  -tests +vendored **/*.py")
     assert scope.include == ("src/pkg", "**/*.py") and scope.exclude == ("docs",)
-    assert scope.tests is False and scope.vendored is True and scope.external is False
+    assert scope.tests is False and scope.vendored is True and scope.external is None
     assert server._parse_scope("").tests is None  # unsaid: each tool's own default
     everything = server._parse_scope("all")
     assert everything.tests and everything.vendored and everything.external
@@ -4819,3 +4819,286 @@ def test_surprises_treat_a_leaf_script_and_test_support_as_expected():
     # production code reaching into test code is NOT routine: it keeps its bonuses
     leak = by_from["prod_helper()"]
     assert any("top-level" in w for w in leak["why"]) and leak["score"] > smoke["score"]
+
+
+# --- calls through an imported module, resolved from the source --------------
+
+
+def _module_call_project(tmp_path):
+    """tests call the code under test as `server.tool()`: the shape graphify's
+    local extractor leaves without a call edge."""
+    _write(tmp_path, "pkg/__init__.py", "")
+    _write(tmp_path, "pkg/graph.py", "def _helper():\n    return 1\n")
+    _write(tmp_path, "pkg/server.py",
+           "from .graph import _helper  # re-exported for the tests\n"   # 1
+           "\n\n"
+           "def tool():\n"                                               # 4
+           "    return _helper()\n"
+           "\n\n"
+           "def other():\n"                                              # 8
+           "    return tool()\n")
+    _write(tmp_path, "pkg/cli.py",
+           "from pkg import server\n\n\n"
+           "def main():\n"                                               # 4
+           "    return server.tool()\n")
+    _write(tmp_path, "tests/test_server.py",
+           "from pkg import server\n"                                    # 1
+           "import pkg.graph as graph_mod\n"
+           "\n\n"
+           "def _make():\n"                                              # 5
+           "    return server.tool()\n"
+           "\n\n"
+           "def test_tool():\n"                                          # 9
+           "    assert server.tool() == 1\n"
+           "\n\n"
+           "def test_via_helper():\n"                                    # 13
+           "    assert _make() == 1\n"
+           "\n\n"
+           "def test_reexport():\n"                                      # 17
+           "    assert server._helper() == graph_mod._helper()\n"
+           "\n\n"
+           "def test_tool_naming_only():\n"                              # 21
+           "    assert True\n")
+
+    def fn(nid, label, file, line):
+        return {"id": nid, "label": label, "source_file": file,
+                "source_location": f"L{line}", "file_type": "code"}
+
+    def hub(nid, file):
+        return {"id": nid, "label": file.rsplit("/", 1)[-1], "source_file": file,
+                "source_location": "L1", "file_type": "code"}
+
+    _write_graph(tmp_path, {
+        "nodes": [
+            hub("f_graph", "pkg/graph.py"), hub("f_server", "pkg/server.py"),
+            hub("f_cli", "pkg/cli.py"), hub("f_test", "tests/test_server.py"),
+            fn("helper", "_helper()", "pkg/graph.py", 1),
+            fn("fn_tool", "tool()", "pkg/server.py", 4), fn("other", "other()", "pkg/server.py", 8),
+            fn("main", "main()", "pkg/cli.py", 4),
+            fn("make", "_make()", "tests/test_server.py", 5),
+            fn("t_tool", "test_tool()", "tests/test_server.py", 9),
+            fn("t_via", "test_via_helper()", "tests/test_server.py", 13),
+            fn("t_re", "test_reexport()", "tests/test_server.py", 17),
+            fn("t_name", "test_tool_naming_only()", "tests/test_server.py", 21),
+            {"id": "doc", "label": "tool", "source_file": "README.md",
+             "source_location": "L9", "file_type": "document"},
+        ],
+        "links": [
+            {"source": "f_graph", "target": "helper", "relation": "contains"},
+            {"source": "f_server", "target": "fn_tool", "relation": "contains"},
+            {"source": "f_server", "target": "other", "relation": "contains"},
+            {"source": "f_cli", "target": "main", "relation": "contains"},
+            *({"source": "f_test", "target": t, "relation": "contains"}
+              for t in ("make", "t_tool", "t_via", "t_re", "t_name")),
+            # what the extractor does record: direct-name calls and one guess
+            {"source": "fn_tool", "target": "helper", "relation": "calls",
+             "confidence": "EXTRACTED", "source_file": "pkg/server.py",
+             "source_location": "L5"},
+            {"source": "other", "target": "fn_tool", "relation": "calls",
+             "confidence": "INFERRED", "source_file": "pkg/server.py",
+             "source_location": "L9"},
+            {"source": "t_via", "target": "make", "relation": "calls",
+             "confidence": "EXTRACTED"},
+            {"source": "f_server", "target": "helper", "relation": "imports"},
+        ],
+    })
+
+
+def test_resolved_edges_add_calls_through_an_imported_module(tmp_path, monkeypatch):
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    _module_call_project(tmp_path)
+    nodes, edges = server._nodes_edges(server._load_graph())
+    in_graph = len(edges)
+    resolved = server._resolved(nodes, edges)
+    added = resolved.edges[len(edges):]
+    calls = {(e["source"], e["target"], e["source_location"])
+             for e in added if e["relation"] == "calls"}
+    assert calls == {
+        ("main", "fn_tool", "L5"), ("make", "fn_tool", "L6"), ("t_tool", "fn_tool", "L10"),
+        # server._helper is a re-export: followed to where it is defined
+        ("t_re", "helper", "L18"),
+    }
+    assert all(e["resolved_by"] == "graphlore" and e["confidence"] == "EXTRACTED"
+               for e in added)
+    imports = {(e["source"], e["target"]) for e in added if e["relation"] == "imports_from"}
+    assert imports == {("f_cli", "f_server"), ("f_test", "f_server"), ("f_test", "f_graph")}
+    assert (resolved.calls, resolved.imports) == (4, 3)
+    assert server._resolved(nodes, edges).edges is resolved.edges  # built once per graph
+    assert len(edges) == in_graph  # the loaded graph itself is never touched
+
+    monkeypatch.setenv("GRAPHLORE_RESOLVE", "0")
+    assert server._resolved(nodes, edges).edges is edges
+
+
+def test_resolved_edges_leave_other_graphs_alone(project):
+    nodes, edges = server._nodes_edges(server._load_graph())
+    resolved = server._resolved(nodes, edges)  # no source on disk: nothing to add
+    assert resolved.edges is edges and resolved.note() == ""
+    assert server._python_module_calls(b"def broken(:\n") is None
+
+
+def test_impact_finds_callers_through_a_module_and_orders_code_before_tests(
+        tmp_path, monkeypatch):
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    _module_call_project(tmp_path)
+    data = json.loads(server.graphlore_impact(
+        "tool()", hops=1, relations="calls", as_json=True))
+    rows = data["impacted"]
+    # production callers first, then test code; none of this was in graph.json
+    assert [r["node"] for r in rows] == ["main()", "other()", "_make()", "test_tool()"]
+    assert rows[0]["resolved_by"] == "graphlore" and rows[0]["confidence"] == "EXTRACTED"
+    assert rows[0]["site"] == "pkg/cli.py:L5" and rows[1]["confidence"] == "INFERRED"
+    assert data["resolved_edges"] == {"calls": 4, "imports": 3}
+    text = server.graphlore_impact("tool()", hops=1, relations="calls")
+    assert "[calls, inferred]" in text and "graphlore resolved from the source" in text
+
+    # strict: proof only — the inferred other() -> tool() edge is not walked
+    strict = json.loads(server.graphlore_impact(
+        "tool()", hops=1, relations="calls", strict=True, as_json=True))
+    assert [r["node"] for r in strict["impacted"]] == ["main()", "_make()", "test_tool()"]
+    # scope: the same walk without test code
+    scoped = json.loads(server.graphlore_impact(
+        "tool()", hops=1, relations="calls", scope="-tests", as_json=True))
+    assert [r["node"] for r in scoped["impacted"]] == ["main()", "other()"]
+    assert scoped["scope"]["left_out"]["test_nodes"] == 6
+
+    # a tight budget is spent on production callers, and says what it dropped
+    cut = json.loads(server.graphlore_impact(
+        "tool()", hops=1, relations="calls", budget_tokens=70, as_json=True))
+    assert cut["truncated"] and [r["node"] for r in cut["impacted"]] == ["main()"]
+    assert (cut["dropped"], cut["dropped_tests"]) == (3, 2)
+    assert "3 more row(s) not shown, 2 of them tests" in server.graphlore_impact(
+        "tool()", hops=1, relations="calls", budget_tokens=70)
+
+
+def test_impact_empty_answer_is_about_the_index(tmp_path, monkeypatch):
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    _module_call_project(tmp_path)
+    monkeypatch.setenv("GRAPHLORE_RESOLVE", "0")
+    text = server.graphlore_impact("main()", hops=1, relations="calls")
+    assert text.startswith("Nothing depends on main() within 1 hop(s), relations=calls.")
+    assert "not proof the code has none" in text
+    data = json.loads(server.graphlore_impact(
+        "main()", hops=1, relations="calls", as_json=True))
+    assert data["impacted"] == [] and "not proof" in data["note"]
+    assert server.graphlore_impact(
+        "main()", direction="dependencies", hops=1, relations="calls"
+    ).startswith("Nothing is used by main()")
+
+
+def test_ambiguous_name_says_which_node_it_used(tmp_path, monkeypatch):
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    _module_call_project(tmp_path)
+    # `tool` is a README heading and a function: the function wins, and it says so
+    data = json.loads(server.graphlore_impact("tool", hops=1, relations="calls", as_json=True))
+    assert data["node"] == "tool()"
+    assert data["matched"]["count"] == 2 and data["matched"]["using"] == "fn_tool"
+    assert data["matched"]["others"] == [
+        {"id": "doc", "label": "tool", "site": "README.md:9"}]
+    text = server.graphlore_neighbors("tool")
+    assert "Matched 2 nodes for 'tool'; using tool() (pkg/server.py:4)" in text
+    assert "id=doc" in text and "pass an id to pick one" in text
+    # an id is never ambiguous, and picks the other one
+    by_id = json.loads(server.graphlore_neighbors("doc", as_json=True))
+    assert by_id["node"] == "tool" and "matched" not in by_id
+    # a path names the node standing for that file
+    assert json.loads(server.graphlore_neighbors("pkg/server.py", as_json=True))[
+        "node"] == "server.py"
+    assert "No node matching" in server.graphlore_neighbors("nothing_like_this")
+
+
+def test_neighbors_and_subgraph_take_scope_and_put_tests_last(tmp_path, monkeypatch):
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    _module_call_project(tmp_path)
+    data = json.loads(server.graphlore_neighbors("pkg/server.py", as_json=True))
+    names = [x["node"] for x in data["neighbors"]]
+    # the two importers the graph lacked are there, the test file after the code
+    assert names.index("cli.py") < names.index("test_server.py")
+    scoped = json.loads(server.graphlore_neighbors(
+        "pkg/server.py", scope="-tests", as_json=True))
+    assert "test_server.py" not in [x["node"] for x in scoped["neighbors"]]
+
+    sub = json.loads(server.graphlore_subgraph(
+        "tool()", hops=1, budget_tokens=60, as_json=True))
+    assert sub["truncated"] is True
+    shown = {e["from"] for e in sub["edges"]} | {e["to"] for e in sub["edges"]}
+    assert not shown & {"_make()", "test_tool()"}  # the budget went to code first
+    assert sub["direct_neighbors_left_out_tests"] == 2
+    assert "direct neighbor(s) not shown, 2 of them tests" in server.graphlore_subgraph(
+        "tool()", hops=1, budget_tokens=60)
+    no_tests = json.loads(server.graphlore_subgraph("tool()", scope="-tests", as_json=True))
+    assert not any("test" in e["from"] for e in no_tests["edges"])
+
+
+def test_tests_for_groups_by_strength_of_evidence(tmp_path, monkeypatch):
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    _module_call_project(tmp_path)
+    data = json.loads(server.graphlore_tests_for("tool()", as_json=True))
+    assert [r["test"] for r in data["direct"]] == ["test_tool()"]
+    assert data["direct"][0]["site"] == "tests/test_server.py:L10"
+    assert data["direct"][0]["resolved_by"] == "graphlore"
+    # through a helper in the test file: one caller between the test and the code
+    assert [(r["test"], r["via"]) for r in data["through_one_caller"]] == [
+        ("test_via_helper()", "_make()")]
+    # named after it, with no call edge at all
+    assert [w.get("test") for w in data["weak"]] == ["test_tool_naming_only()"]
+    text = server.graphlore_tests_for("tool()")
+    assert "Direct — call or reference it (1):" in text
+    assert "test_via_helper()  tests/test_server.py:13  via _make()" in text
+    assert "(named after it)" in text
+
+    helper = json.loads(server.graphlore_tests_for("_helper", as_json=True))
+    assert [r["test"] for r in helper["direct"]] == ["test_reexport()"]
+    # test_tool() reaches _helper() through tool(), a production caller
+    assert ("test_tool()", "tool()") in [
+        (r["test"], r["via"]) for r in helper["through_one_caller"]]
+
+    none = server.graphlore_tests_for("other()")
+    assert "Direct — call or reference it (0):\n  none" in none
+    assert "not proof the code has none" in none
+    # the weak hint that is left: the test file imports its module
+    weak = json.loads(server.graphlore_tests_for("other()", as_json=True))["weak"]
+    assert weak == [{"file": "tests/test_server.py", "why": "imports pkg/server.py"}]
+
+
+def test_validate_reports_what_the_graph_does_not_carry(tmp_path, monkeypatch):
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    _module_call_project(tmp_path)
+    data = json.loads(server.graphlore_validate(as_json=True))
+    assert data["resolved_edges"] == {"calls": 4, "imports": 3}
+    assert "Coverage: graph.json lacks 4 call(s)" in server.graphlore_validate()
+    # count_test_references=False: only now can tool() be seen as test-only-or-not
+    unref = json.loads(server.graphlore_unreferenced(as_json=True))
+    assert "main()" in {r["node"] for r in unref["unreferenced"]}
+    assert "tool()" not in {r["node"] for r in unref["unreferenced"]}
+
+
+def test_locate_lists_the_other_top_hits_under_the_seed(tmp_path, monkeypatch):
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    _write_graph(tmp_path, {
+        "nodes": [
+            {"id": "tool", "label": "graphlore_cycles()", "source_file": "server.py",
+             "source_location": "L1"},
+            {"id": "algo", "label": "_find_cycles()", "source_file": "graph.py",
+             "source_location": "L1"},
+            {"id": "test", "label": "test_cycles()", "source_file": "tests/test_c.py",
+             "source_location": "L1"},
+        ],
+        "edges": [],
+    })
+    fake = _FakeIndex(
+        search_hits=[_FakeHit("server.py", 1), _FakeHit("tests/test_c.py", 1),
+                     _FakeHit("graph.py", 1), _FakeHit("server.py", 1)],
+        related_hits=[],
+    )
+    monkeypatch.setattr(server, "_semble_index", lambda: fake)
+    data = json.loads(server.graphlore_locate("where are cycles detected?", top_k=4,
+                                              as_json=True))
+    assert data["seed"]["node"] == "graphlore_cycles()"
+    # the second home of the answer, production code before the test; the seed
+    # itself is not repeated
+    assert [(h["node"], h["test"]) for h in data["also_matched"]] == [
+        ("_find_cycles()", False), ("test_cycles()", True)]
+    text = server.graphlore_locate("where are cycles detected?", top_k=4)
+    assert "Also matched — the answer may live here too:" in text
+    assert text.index("_find_cycles()  (graph.py:1-1)") < text.index("[test]")

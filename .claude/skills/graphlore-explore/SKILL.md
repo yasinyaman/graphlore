@@ -39,7 +39,9 @@ followed?"), reach for `graphlore_locate("<natural-language question>")` first: 
 call runs semantic search, maps the top hit to its **enclosing graph node**, and
 returns the token-budgeted subgraph around it **plus `hidden_links`** — semantically
 similar code that is structurally disconnected (duplication / missing-abstraction /
-sync-async-twin candidates that neither search nor the graph surfaces alone). Works
+sync-async-twin candidates that neither search nor the graph surfaces alone). Read
+the "Also matched" lines under the seed: a question often has two homes (the tool
+that exposes a behavior and the module that implements it). Works
 across Python, JS/TS, Go, Java, Rust, C++ and 165+ languages. Needs the optional
 `[semble]` extra; without it, fall back to `graphlore_search` (name-based) and the
 structural flow below. The first semantic call downloads semble's embedding model
@@ -61,13 +63,31 @@ fail on a machine without network access until the model is fetched ahead of tim
    type, community, and docstring when you need to jump to source.
 
 Supporting tools: `graphlore_search` (find nodes by name), `graphlore_neighbors`
-(1-hop), `graphlore_god_nodes` (most connected), `graphlore_surprises`
+(1-hop), `graphlore_tests_for("<symbol>")` (which tests exercise it: direct,
+through one caller, weak hints), `graphlore_god_nodes` (most connected), `graphlore_surprises`
 (unexpected cross-domain couplings), `graphlore_path(a, b)` (exact route between
 two nodes), `graphlore_explain(node)` (everything about one node),
 `graphlore_cycles()` (import cycles between modules — runtime first — then call cycles),
 `graphlore_routes()` (framework route → handler table, joined to graph nodes),
 `graphlore_validate()` (lint graph.json for dangling/duplicate/self-loop/orphan
 issues — gauge how much to trust the graph).
+
+## Reading an answer: ambiguity, empty results, inferred edges
+
+- **A name can match several nodes** (a function and a README heading, two
+  `Settings` classes). The node-centric tools say "Matched N nodes ...; using
+  X" and list the others with their ids — check that X is the one you meant, and
+  pass the id if it is not.
+- **An empty answer is about the index, not the code.** "Nothing depends on X"
+  means no edge was indexed. graphlore adds the calls made through an imported
+  module (`mod.func()`, how tests usually call code) from the Python source, but
+  calls through an object, a callback or dynamic dispatch stay invisible.
+- **Inferred edges are leads.** `graphlore_impact` marks them `inferred`;
+  `strict=True` walks only the edges the extractor resolved, for when you need
+  proof rather than candidates.
+- **Hub functions:** `graphlore_impact` and `graphlore_subgraph` list production
+  callers before tests and say how many rows a budget dropped; `scope="-tests"`
+  removes test code from the walk altogether.
 
 ## Scope: whose code is being analysed
 
@@ -130,7 +150,8 @@ stripped) — the middle layer between the map and full code — and
      maintainability hotspots; `graphlore_skeleton` shows how large they are.
   7. `graphlore_surprises()` last — leads to check, not findings.
 - **Before a refactor** → `graphlore_impact("<node>")` — the reverse-dependency
-  **blast radius**, ordered by hop distance: what breaks if this changes.
+  **blast radius**, ordered by hop distance: what breaks if this changes — then
+  `graphlore_tests_for("<node>")` for the tests to run afterwards.
 - **Reviewing a changeset** → `graphlore_diff(base, head)` — the file-level
   structural changes between two git refs, cosmetic-only edits separated.
 - **Hunting duplication** → `graphlore_same_names()` and the `identical_bodies`

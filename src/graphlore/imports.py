@@ -185,6 +185,33 @@ class ImportChecker:
                 return True
         return False
 
+    def resolve(
+        self, importer: str, level: int, dotted: tuple[str, ...],
+        by_parts: dict[tuple[str, ...], str], by_last: dict[str, list[tuple[str, ...]]],
+    ) -> str | None:
+        """The first-party file a dotted module path names from ``importer``.
+
+        ``by_parts`` maps a file's module parts to the file and ``by_last`` indexes
+        those parts by their last segment. None when no file, or more than one,
+        can be meant — the same root rules as :meth:`kind`.
+        """
+        if not dotted:
+            return None
+        if level:
+            base = importer.split("/")[:-1]
+            if level - 1 > len(base):
+                return None
+            return by_parts.get(tuple(base[: len(base) - (level - 1)]) + dotted)
+        n = len(dotted)
+        found: list[str] = []
+        for parts in by_last.get(dotted[-1], ()):
+            if len(parts) < n or parts[-n:] != dotted:
+                continue
+            root = "/".join(parts[:-n])
+            if not self._package(root) and (n > 1 or self._root_like(root, importer)):
+                found.append(by_parts[parts])
+        return found[0] if len(found) == 1 else None
+
     def kind(self, importer: str, imported: str, edge: dict) -> str | None:
         """When the import behind a file-level edge runs, or None for a false edge.
 
