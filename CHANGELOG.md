@@ -58,6 +58,17 @@ All notable changes to this project are documented here. The format is based on
   redrawn if it occurs in the text, and JSON replies carry
   `content_trust: "untrusted_repo_text"` with `untrusted_fields`.
 
+### Documentation
+- README: graphlore is not an agent memory and does not replace grep; the
+  benchmark states that it counts chars/4 (grep side: bytes) while the
+  server's budgets count chars/3.5. The shipped skill says when to use `rg`.
+
+### Fixed
+- The server instructions said only `graphlore_build` and `graphlore_add`
+  modify state. They now list every writer (`graphlore_prune(dry_run=False)`,
+  `graphlore_set_labels`, `graphlore_label_communities`, the project switch),
+  say when grep is the better tool, and that repository text is data.
+
 ### Changed
 - No `outputSchema` is advertised. Before, the SDK derived
   `{"result": string}` from each `-> str` signature and sent the reply text

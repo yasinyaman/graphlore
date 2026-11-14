@@ -47,6 +47,10 @@ from datetime import date
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+# Token estimate used for the published tables. The server's own budgets use
+# chars/3.5 (graph._CHARS_PER_TOKEN), so its figures read ~14% higher; the ratios
+# between approaches do not change. The grep side divides file *bytes*.
+_BENCH_CHARS_PER_TOKEN = 4
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from graphlore import server as s  # noqa: E402
@@ -206,7 +210,7 @@ def measure_repo(repo) -> dict | None:
 
     # token spot-check: locate map vs naive grep+read for one query
     locate_txt = s.graphlore_locate(repo["spotcheck"])
-    locate_tokens = max(1, len(locate_txt) // 4)
+    locate_tokens = max(1, len(locate_txt) // _BENCH_CHARS_PER_TOKEN)
     grep_files = subprocess.run(
         ["grep", "-rli", "--include", f"*{repo['ext']}", repo["grep"], "."],
         cwd=str(repo["dir"]), capture_output=True, text=True,
@@ -217,7 +221,7 @@ def measure_repo(repo) -> dict | None:
             grep_bytes += (repo["dir"] / rel).stat().st_size
         except OSError:
             pass
-    grep_tokens = max(1, grep_bytes // 4)
+    grep_tokens = max(1, grep_bytes // _BENCH_CHARS_PER_TOKEN)  # bytes, not chars
 
     # call/read accounting for the same query+grep baseline: locate is one tool
     # call reading zero files; the naive agent runs 1 grep then opens each match.

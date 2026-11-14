@@ -12,6 +12,11 @@ answers structural questions ("what connects to X", "which subsystems exist",
 "where does this flow run") cheaply, returning just the relevant slice instead
 of whole files.
 
+It does not replace grep. For an exact identifier or string, `rg` is faster and
+exact; use graphlore when the question is about relations (callers, dependents,
+what breaks), impact, or orientation in code you don't know yet. Every answer
+carries `file:line` — confirm an edge with Read or `rg` before acting on it.
+
 If the graphlore_* tools are not available, the MCP server isn't connected — see
 the project README for the `.mcp.json` / Claude Desktop config.
 
@@ -132,9 +137,9 @@ not the project's own, check that line before drawing conclusions.
 
 On large graphs, never dump the full graph. Use `graphlore_subgraph` with a
 `budget_tokens` cap and widen `hops` only as needed — the result reports
-`truncated` and `approx_tokens` so you can tell when you hit the budget. Pass
-`as_json=True` on any analysis tool when you want to chain on structured output
-instead of re-parsing prose.
+`truncated` and `approx_tokens` so you can tell when you hit the budget. Results
+already carry their payload as MCP `structuredContent`; pass `as_json=True` when
+you also want the JSON in the text.
 
 When structure isn't enough, escalate in steps instead of Reading whole files:
 `graphlore_skeleton("<file-or-node>")` gives def/class **signatures** (bodies
