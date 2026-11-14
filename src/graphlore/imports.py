@@ -7,17 +7,29 @@ does not say whether the statement runs when the module is imported, sits under
 ``if TYPE_CHECKING:``, or inside a function — the difference between a cycle that
 breaks start-up and two modules that merely know each other.
 
-:class:`ImportChecker` answers both from the importing file's own statements.
-Python is read with the stdlib ``ast``; for other languages the edge is kept and
-reported as unclassified, except where the graph or the import line itself says
-more (a ``dynamic_import`` relation, TypeScript's ``import type``).
+:class:`ImportChecker` answers both from the importing file's own statements, per
+language, like the extractors in :mod:`graphlore.apis`:
+
+  * **Python** — stdlib ``ast``: module-level, inside a function (deferred),
+    under ``if TYPE_CHECKING:``.
+  * **JS / TS** — tree-sitter: a top-level ``import`` / ``export ... from`` /
+    ``require`` is module-level, an ``import()`` or ``require`` inside a function
+    is deferred, ``import type`` is type-only. A relative specifier is resolved
+    to its file; a bare one-word specifier is an npm package.
+  * **Go, Java, Kotlin, Scala, C#, Rust, Swift** — imports are resolved at
+    compile time: always module-level, nothing to read.
+
+Anything else is kept and reported as unclassified, unless the graph says more:
+a ``dynamic_import`` relation, or an import edge that leaves a function node.
 """
 from __future__ import annotations
 
 import ast
+import posixpath
 import re
 from typing import Any, NamedTuple
 
+from .apis import _js_internal_source, _strip_quotes
 from .graph import (
     IMPORT_DEFERRED,
     IMPORT_MODULE_LEVEL,
@@ -25,7 +37,7 @@ from .graph import (
     IMPORT_UNCLASSIFIED,
     _rel,
 )
-from .spans import _cached_file_analysis, _norm_relpath, _resolve_in_project
+from .spans import _cached_file_analysis, _norm_relpath, _resolve_in_project, _ts_parser_for
 
 # When an import statement runs (the values live in graph.py, which tiers cycles
 # by them): at import time; when its function is called; never — it sits under
@@ -39,6 +51,11 @@ _ROOT_DIR_NAMES = frozenset({"src", "lib", "python", "source", "sources"})
 # A directory holding one of these is the root of an installable distribution.
 _ROOT_MARKERS = ("pyproject.toml", "setup.py", "setup.cfg")
 _TS_TYPE_IMPORT = re.compile(r"^\s*(?:import|export)\s+type\b")
+# The JS family, longest extension first so `.d.ts` is stripped whole.
+_JS_EXTS = (".d.ts", ".tsx", ".jsx", ".mjs", ".cjs", ".mts", ".cts", ".ts", ".js")
+# Languages whose imports are resolved at compile time: an import cannot be
+# deferred or conditional, so every one of them is module-level by definition.
+_COMPILED_EXTS = (".go", ".java", ".kt", ".kts", ".scala", ".cs", ".rs", ".swift")
 
 
 class _Import(NamedTuple):
@@ -102,6 +119,168 @@ def _imports_for_file(rel: str) -> list[_Import] | None:
     return _cached_file_analysis(
         _IMPORTS_CACHE, rel, lambda src, _rel_path: _python_imports(src), lambda: None
     )
+
+
+# ---------------------------------------------------------------------------
+# JS / TS (optional tree-sitter backend)
+# ---------------------------------------------------------------------------
+
+
+class _JsImport(NamedTuple):
+    line: int
+    kind: str        # MODULE_LEVEL / DEFERRED / TYPE_CHECKING
+    specifier: str   # './lib/api.js', 'yaml', '@/store'
+
+
+class JsFile(NamedTuple):
+    """What one JS/TS file imports, binds and calls through a binding."""
+
+    imports: list[_JsImport]
+    # local name -> specifier, for names that stand for a whole module:
+    # `import * as ns`, a default import, `const m = require(..)` / `await import(..)`
+    bindings: dict[str, str]
+    # (line, bound name, property) for every `name.prop(...)` call
+    calls: list[tuple[int, str, str]]
+
+
+def _js_function_like(node_type: str) -> bool:
+    t = node_type.lower()
+    return "function" in t or t == "method_definition"
+
+
+def _js_file(root: Any) -> JsFile:
+    imports: list[_JsImport] = []
+    bindings: dict[str, str] = {}
+    raw_calls: list[tuple[int, str, str]] = []
+
+    def text(node: Any) -> str:
+        return node.text.decode("utf-8", "replace")
+
+    def dynamic_source(call: Any) -> str | None:
+        """Specifier of `require('x')` / `import('x')`, else None."""
+        fn = call.child_by_field_name("function")
+        args = call.child_by_field_name("arguments")
+        if fn is None or args is None or not (fn.type == "import" or fn.text == b"require"):
+            return None
+        for a in args.named_children:
+            if "string" in a.type:
+                return _strip_quotes(text(a)) or None
+        return None
+
+    def bind_clause(stmt: Any, source: str) -> None:
+        stack = [c for c in stmt.named_children if c.type == "import_clause"]
+        while stack:
+            n = stack.pop()
+            if n.type == "namespace_import":  # import * as ns
+                for c in n.named_children:
+                    if c.type == "identifier":
+                        bindings[text(c)] = source
+            elif n.type == "identifier":      # default import
+                bindings[text(n)] = source
+            elif n.type != "named_imports":   # { a, b } bind symbols, not the module
+                stack.extend(n.named_children)
+
+    def walk(node: Any, in_function: bool) -> None:
+        for child in node.named_children:
+            t = child.type
+            line = child.start_point[0] + 1
+            if t in ("import_statement", "export_statement"):
+                src = child.child_by_field_name("source")
+                if src is not None:
+                    source = _strip_quotes(text(src))
+                    kind = TYPE_CHECKING if _TS_TYPE_IMPORT.match(text(child)) else MODULE_LEVEL
+                    imports.append(_JsImport(line, kind, source))
+                    if t == "import_statement" and kind != TYPE_CHECKING:
+                        bind_clause(child, source)
+                    continue
+            if t == "call_expression":
+                dynamic = dynamic_source(child)
+                if dynamic is not None:
+                    imports.append(
+                        _JsImport(line, DEFERRED if in_function else MODULE_LEVEL, dynamic)
+                    )
+                    continue
+                fn = child.child_by_field_name("function")
+                if fn is not None and fn.type == "member_expression":
+                    obj = fn.child_by_field_name("object")
+                    prop = fn.child_by_field_name("property")
+                    if obj is not None and prop is not None and obj.type == "identifier":
+                        raw_calls.append((line, text(obj), text(prop)))
+            if t == "variable_declarator":  # const m = require('x') / await import('x')
+                name = child.child_by_field_name("name")
+                value = child.child_by_field_name("value")
+                if value is not None and value.type == "await_expression":
+                    value = next(iter(value.named_children), None)
+                if (name is not None and name.type == "identifier" and value is not None
+                        and value.type == "call_expression"
+                        and (bound := dynamic_source(value)) is not None):
+                    bindings[text(name)] = bound
+            walk(child, in_function or _js_function_like(t))
+
+    walk(root, False)
+    return JsFile(imports, bindings, [c for c in raw_calls if c[1] in bindings])
+
+
+# rel path -> (mtime, JsFile | None); the (path, mtime) scheme of the span cache.
+_JS_CACHE: dict[str, tuple[float, Any]] = {}
+
+
+def _js_for_file(rel: str) -> JsFile | None:
+    """Imports, module bindings and member calls of a JS/TS file; None when the
+    tree-sitter backend is absent or the file does not parse."""
+    if not rel.lower().endswith(_JS_EXTS):
+        return None
+
+    def compute(src: bytes, path: str) -> JsFile | None:
+        parser, _lang = _ts_parser_for(path)
+        if parser is None:
+            return None
+        try:
+            return _js_file(parser.parse(src).root_node)
+        except Exception:  # noqa: BLE001 - grammar drift / recursion: no visibility
+            return None
+
+    return _cached_file_analysis(_JS_CACHE, rel, compute, lambda: None)
+
+
+def _js_module_forms(path: str) -> set[str]:
+    """The extension-less ways a specifier can name a file: ``lib/api`` for
+    ``lib/api.ts``, and both ``lib/store/index`` and ``lib/store`` for an index file."""
+    low = path.lower()
+    base = next((path[: -len(ext)] for ext in _JS_EXTS if low.endswith(ext)), path)
+    forms = {base}
+    if base.endswith("/index"):
+        forms.add(base[: -len("/index")])
+    return forms
+
+
+def _js_can_mean(specifier: str, importer: str, target: str) -> bool:
+    """Can ``specifier``, written in ``importer``, name the file ``target``?"""
+    forms = _js_module_forms(target)
+    if specifier.startswith("."):
+        base = posixpath.normpath(posixpath.join(posixpath.dirname(importer), specifier))
+        # `./x.js` in TypeScript source names `x.ts`: compare without extensions
+        return base == target or bool(_js_module_forms(base) & forms)
+    if _js_internal_source(specifier):  # '/abs', '@/alias', '~/alias', '#subpath'
+        path = specifier.lstrip("/#~@").lstrip("/")
+        wanted = _js_module_forms(path)
+        return any(f == w or f.endswith("/" + w) for f in forms for w in wanted)
+    segments = specifier.split("/")
+    if len(segments) == 1:
+        # One bare word is an npm package — unless the project root, or a source
+        # root directly under it (a tsconfig `baseUrl`), holds a module of that name.
+        return any(
+            f == specifier or (
+                f.endswith("/" + specifier)
+                and f[: -len(specifier) - 1].lower() in _ROOT_DIR_NAMES
+            )
+            for f in forms
+        )
+    # `@app/utils`, `components/Button`: a scoped package or a tsconfig path
+    # alias. Which one cannot be told without the config, so the edge is kept
+    # whenever the last segment names the target.
+    last = next(iter(_js_module_forms(segments[-1])))
+    return any(f.rsplit("/", 1)[-1] == last for f in forms)
 
 
 def _module_parts(path: str) -> tuple[str, ...] | None:
@@ -216,22 +395,37 @@ class ImportChecker:
         """When the import behind a file-level edge runs, or None for a false edge.
 
         None means the importing file's own statements cannot mean ``imported``:
-        the resolver matched a name. Edges this cannot judge (non-Python, source
-        missing or unparseable) are kept as ``UNCLASSIFIED``.
+        the resolver matched a name. Edges this cannot judge (a language it does
+        not read, source missing or unparseable) are kept as ``UNCLASSIFIED``.
         """
         importer, imported = _norm_relpath(importer), _norm_relpath(imported)
         if _rel(edge) == "dynamic_import":
             return DEFERRED
-        stmts = _imports_for_file(importer)
-        if stmts is None:
-            if _TS_TYPE_IMPORT.match(self._line(importer, edge)):
-                return TYPE_CHECKING
-            self.unclassified += 1
-            return UNCLASSIFIED
-        target = _module_parts(imported)
-        kinds = (
-            [s.kind for s in stmts if self._can_mean(s, importer, target)] if target else []
-        )
+        low = importer.lower()
+        if low.endswith(_COMPILED_EXTS):
+            return MODULE_LEVEL  # resolved at compile time: never deferred
+        kinds: list[str]
+        if low.endswith(_JS_EXTS):
+            js = _js_for_file(importer)
+            if js is None or not js.imports:
+                # no tree-sitter backend (or nothing parsed): the line still says
+                # whether a TypeScript import is type-only
+                if _TS_TYPE_IMPORT.match(self._line(importer, edge)):
+                    return TYPE_CHECKING
+                self.unclassified += 1
+                return UNCLASSIFIED
+            kinds = [i.kind for i in js.imports
+                     if _js_can_mean(i.specifier, importer, imported)]
+        else:
+            stmts = _imports_for_file(importer)
+            if stmts is None:
+                self.unclassified += 1
+                return UNCLASSIFIED
+            target = _module_parts(imported)
+            kinds = (
+                [s.kind for s in stmts if self._can_mean(s, importer, target)]
+                if target else []
+            )
         if not kinds:
             self.rejected.append({
                 "from_file": importer, "to_file": imported,
@@ -242,6 +436,11 @@ class ImportChecker:
         # One edge may stand for several statements (the graph keeps one per pair
         # of nodes): the one that runs earliest decides.
         return min(kinds, key=lambda k: _RUNTIME_RANK[k])
+
+    def resolve_js(self, importer: str, specifier: str, files: set[str]) -> str | None:
+        """The one file of ``files`` a JS/TS specifier names from ``importer``."""
+        found = [f for f in files if _js_can_mean(specifier, importer, f)]
+        return found[0] if len(found) == 1 else None
 
     def _line(self, rel: str, edge: dict) -> str:
         """Source text of the line an edge was recorded at ("" when unavailable)."""

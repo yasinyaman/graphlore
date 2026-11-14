@@ -70,9 +70,9 @@ Prompts:
 
 Internal layout: config.py (shared PROJECT_DIR), graph.py (graph.json load +
 node/edge/traversal helpers), spans.py (tree-sitter/ast span engine + structural
-diff), imports.py (import statements read from source: what they can mean and
-when they run), scope.py (the analysis scope: vendored / external / test
-filtering), apis.py and routes.py (per-file extractors), resolve.py (calls and imports
+diff), scope.py (the analysis scope: vendored / external / test filtering),
+apis.py and routes.py (per-file extractors), imports.py (import statements read
+from source, per language: what they can mean and when they run), resolve.py (calls and imports
 through a module object, added at read time), review.py (unreferenced
 code, same-named symbols, identical bodies, layer rules), and this module (the
 MCPServer surface: tools, resources, prompts, main).
@@ -158,6 +158,8 @@ from .graph import (  # noqa: F401  (re-exported for the tools + tests)
 from .imports import (  # noqa: F401  (re-exported for the tools + tests)
     ImportChecker,
     _imports_for_file,
+    _js_can_mean,
+    _js_for_file,
     _python_imports,
 )
 from .resolve import (  # noqa: F401  (re-exported for the tools + tests)
@@ -921,8 +923,8 @@ def _matched(key: str, start: dict, others: list[dict]) -> tuple[dict[str, Any] 
 # index, not about the code.
 _EMPTY_NOTE = (
     "No such edge is in the index — that is not proof the code has none. Calls "
-    "through an object, a callback or dynamic dispatch are not recorded, and calls "
-    "through an imported module are resolved for Python only."
+    "through an object, a callback or dynamic dispatch are not recorded; calls "
+    "through an imported module are (graphlore adds them for Python and JS/TS)."
 )
 
 
@@ -2402,7 +2404,17 @@ def graphlore_tests_for(
         ]
 
     def is_test(n: dict) -> bool:
-        return _is_test_definition(_bare_name(_node_label(n)), _node_file(n))
+        """A test, as each language's runner finds them: by name where there is a
+        naming rule (Python, Go); otherwise anything defined in a test file —
+        and the test file itself, which is where a JS `test(...)` callback's
+        calls are recorded."""
+        file = _node_file(n)
+        if not _is_test_path(file):
+            return False
+        return (
+            _is_file_hub_node(n) or not file.lower().endswith((".py", ".go"))
+            or _is_test_definition(_bare_name(_node_label(n)), file)
+        )
 
     direct: dict[str, dict] = {}
     callers: dict[str, dict] = {}
@@ -3797,8 +3809,8 @@ def graphlore_validate(limit: int = 15, as_json: bool = False, scope: str = "") 
         recursion_note += (
             f"\nCoverage: graph.json lacks {resolved.calls} call(s) made through an "
             f"imported module (`mod.func()`) and {resolved.imports} module import(s); "
-            "graphlore resolves them from the source for impact, neighbors, subgraph, "
-            "tests_for, unreferenced, cycles and layers (Python only)."
+            "graphlore resolves them from the source (Python, JS/TS) for impact, "
+            "neighbors, subgraph, tests_for, unreferenced, cycles and layers."
         )
     if total == 0:
         text = (
@@ -3829,8 +3841,8 @@ def graphlore_validate(limit: int = 15, as_json: bool = False, scope: str = "") 
 _CYCLE_KINDS = ("all", "imports", "calls", "other")
 # Import cycles by when their imports run, most serious first.
 _IMPORT_TIER_TITLES = {
-    "runtime": "Runtime import cycles between modules (a loop of module-level imports: "
-               "can fail at start-up)",
+    "runtime": "Runtime import cycles between modules (a loop of module-level imports; "
+               "in Python and JS it can fail at start-up)",
     "deferred": "Deferred import cycles (the loop needs an import inside a function)",
     "type-only": "Type-only import cycles (the loop needs an import under "
                  "`if TYPE_CHECKING:`)",
@@ -3860,8 +3872,11 @@ def graphlore_cycles(
         ``if TYPE_CHECKING:`` — the modules know each other, nothing breaks. A
         repository without a runtime cycle says so in one line. An import edge
         the source contradicts (``import yaml`` linked to a first-party
-        ``yaml.py``) is ignored and counted. Python is classified; imports in
-        other languages count as module-level.
+        ``yaml.py``) is ignored and counted. Python is read with ``ast``; JS/TS
+        with tree-sitter (``import()`` or ``require`` inside a function is
+        deferred, ``import type`` is type-only); Go, Java, Kotlin, Scala, C#,
+        Rust and Swift import at compile time, so always module-level. Other
+        languages count as module-level and the result says so.
       - ``calls``   — functions that call each other in a loop (mutual recursion,
         redraw/rebuild loops). Often deliberate.
       - ``other``   — remaining node-level cycles that only close through another
@@ -4017,8 +4032,9 @@ def graphlore_cycles(
                     lines.append(f"      one loop: {loop}")
         if assumed:
             lines.append(
-                "(Some imports above could not be read from the source — not Python, or "
-                "the file is missing — and are assumed to run at import time.)"
+                "(Some imports above could not be read from the source — a language "
+                "graphlore does not read, or the file is missing — and are assumed to "
+                "run at import time.)"
             )
     if "imports" in wanted and checker.rejected:
         r = checker.rejected[0]

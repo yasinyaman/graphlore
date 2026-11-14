@@ -12,7 +12,15 @@ short by exactly those calls.
 ``mod.name(...)`` where ``mod`` is bound by an import to a first-party module
 that defines ``name`` (or re-exports it from one that does). Added edges are
 marked ``resolved_by: "graphlore"`` and never written back to graph.json.
-Python only; a file in another language contributes nothing.
+
+Per language, only what its extractor is seen to leave out:
+
+  * **Python** — every call through a module object, and the module import.
+  * **JS / TS** — calls through a default import (``import api from './api'``)
+    and through a dynamically imported module (``const m = await import(..)``);
+    graphify already links namespace imports and ``require``.
+  * **Go, Java** — nothing: graphify links package-selector and static calls
+    itself, so there is no gap to fill.
 """
 from __future__ import annotations
 
@@ -33,8 +41,8 @@ from .graph import (
     _node_line,
     _rel,
 )
-from .imports import ImportChecker, _module_parts
-from .spans import _cached_file_analysis, _norm_relpath
+from .imports import _JS_EXTS, ImportChecker, _js_for_file, _module_parts
+from .spans import _cached_file_analysis, _enclosing_spans, _norm_relpath
 
 RESOLVED_BY = "graphlore"
 # How far a name is followed through re-exports (`from .graph import x` in the
@@ -161,11 +169,15 @@ def _build(nodes: list[dict], edges: list[dict]) -> Resolved:
     hub: dict[str, str] = {}
     by_name: dict[str, dict[str, str]] = {}
     by_line: dict[str, dict[int, str]] = {}
+    js_files: set[str] = set()
     for n in nodes:
         file = _norm_relpath(_node_file(n))
-        if not file.lower().endswith(".py"):
+        low = file.lower()
+        if low.endswith(_JS_EXTS):
+            js_files.add(file)
+        elif not low.endswith(".py"):
             continue
-        parts = _module_parts(file)
+        parts = _module_parts(file) if low.endswith(".py") else None
         if parts is not None and parts not in by_parts:
             by_parts[parts] = file
             if parts:
@@ -183,7 +195,7 @@ def _build(nodes: list[dict], edges: list[dict]) -> Resolved:
             by_line.setdefault(file, {}).setdefault(int(_node_line(n)), nid)
         except (TypeError, ValueError):
             pass
-    if not by_parts:
+    if not by_parts and not js_files:
         return Resolved(edges)
 
     known_calls: set[tuple[str, str]] = set()
@@ -219,7 +231,7 @@ def _build(nodes: list[dict], edges: list[dict]) -> Resolved:
 
     added: list[dict] = []
     calls = imports = 0
-    for file in sorted(by_line.keys() | hub.keys()):
+    for file in sorted(f for f in by_line.keys() | hub.keys() if f not in js_files):
         analysis = _module_calls_for_file(file)
         if analysis is None:
             continue
@@ -251,6 +263,37 @@ def _build(nodes: list[dict], edges: list[dict]) -> Resolved:
                 "source_location": f"L{line}", "context": "call",
                 "resolved_by": RESOLVED_BY,
             })
+    # JS / TS: `name.prop(...)` where `name` stands for a whole module.
+    for file in sorted(js_files):
+        js = _js_for_file(file)
+        if js is None:
+            continue
+        targets: dict[str, str | None] = {}
+        for line, name, prop in js.calls:
+            specifier = js.bindings[name]
+            if specifier not in targets:
+                targets[specifier] = checker.resolve_js(file, specifier, js_files)
+            target_file = targets[specifier]
+            target = by_name.get(target_file, {}).get(prop) if target_file else None
+            if not target:
+                continue
+            # the innermost enclosing definition that has a node, else the file
+            lines = by_line.get(file, {})
+            source = next(
+                (lines[span[2]] for span in _enclosing_spans(file, line, line)
+                 if span[2] in lines),
+                hub.get(file),
+            )
+            if not source or source == target or (source, target) in known_calls:
+                continue
+            known_calls.add((source, target))
+            calls += 1
+            added.append({
+                "source": source, "target": target, "relation": "calls",
+                "confidence": "EXTRACTED", "source_file": file,
+                "source_location": f"L{line}", "context": "call",
+                "resolved_by": RESOLVED_BY,
+            })
     if not added:
         return Resolved(edges)
     return Resolved([*edges, *added], calls, imports)
@@ -265,8 +308,8 @@ _RESOLVED_CACHE_MAX = 8
 def _resolved(nodes: list[dict], edges: list[dict]) -> Resolved:
     """``edges`` plus the calls and imports graphlore can prove from the source.
 
-    Off with ``GRAPHLORE_RESOLVE=0``. Costs one AST parse per Python file of the
-    graph (cached per file by mtime), once per loaded graph.
+    Off with ``GRAPHLORE_RESOLVE=0``. Costs one parse per Python and JS/TS file
+    of the graph (cached per file by mtime), once per loaded graph.
     """
     if not _enabled():
         return Resolved(edges)

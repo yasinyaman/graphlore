@@ -20,8 +20,12 @@ hosted Graphify connector on this repository.
   `resolved_by: "graphlore"`; graph.json is never modified. `graphlore_impact`,
   `graphlore_neighbors`, `graphlore_subgraph`, `graphlore_tests_for`,
   `graphlore_unreferenced`, `graphlore_cycles` and `graphlore_layers` read them,
-  and `graphlore_validate` reports how many there are. Python only; one AST
-  parse per Python file, once per process; `GRAPHLORE_RESOLVE=0` turns it off.
+  and `graphlore_validate` reports how many there are. Per language it adds
+  what the extractor is seen to leave out: in Python every call through a
+  module object; in JS/TS calls through a default import and through a
+  dynamically imported module (namespace imports and `require` are already
+  linked); in Go and Java nothing, graphify links those itself. One parse per
+  Python and JS/TS file, once per process; `GRAPHLORE_RESOLVE=0` turns it off.
 - **`graphlore_tests_for`** — the tests that exercise a symbol: `direct` (they
   call it, with the call line), `through_one_caller` (a production function or
   a test helper in between), and `weak` matches kept apart (a test file that
@@ -41,9 +45,13 @@ hosted Graphify connector on this repository.
   function) and `type-only` (it needs one under `if TYPE_CHECKING:`). Each cycle
   carries `import_kind` and `hops` (the kind of every import on its loop), the
   payload adds `runtime_` / `deferred_` / `type_only_import_cycle_count`, and a
-  repository without a runtime cycle says so in one line. Python is classified;
-  imports in other languages count as module-level, and the result says so when
-  a reported runtime cycle rests on one.
+  repository without a runtime cycle says so in one line. Python is read with
+  `ast`; JS/TS with tree-sitter (`import()` or `require` inside a function is
+  deferred, `import type` is type-only); Go, Java, Kotlin, Scala, C#, Rust and
+  Swift import at compile time and are always module-level. An import in any
+  other language counts as module-level — unless the graph recorded it on a
+  function, which makes it deferred — and the result says so when a reported
+  runtime cycle rests on one.
 - **`graphlore_duplication_scan` has an exact tier, `identical_bodies`.** Every
   function and method body is hashed after normalizing whitespace, comments and
   the docstring (Python via `ast`, other languages via tree-sitter), and bodies
@@ -103,7 +111,9 @@ hosted Graphify connector on this repository.
   lifted to file level: an absolute import can only mean a module whose dotted
   path starts in a directory that is not itself a package, and a bare one-word
   import only one that starts at the project root, a source root, a
-  distribution root or a directory above the importing file. Rejected edges are
+  distribution root or a directory above the importing file. The JS/TS
+  equivalent: a relative specifier is resolved to its file, a bare one-word
+  specifier is an npm package, and a path alias is kept. Rejected edges are
   counted and shown, in `graphlore_cycles`, `graphlore_layers` and
   `graphlore_surprises`.
 - **`graphlore_unreferenced` missed a dead class when another class had its
