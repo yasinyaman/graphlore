@@ -149,8 +149,50 @@ def _is_surprise_edge(e: dict) -> bool:
 # reporting an empty list (which reads as "this codebase has no surprising
 # couplings" when it means "this tool computed nothing"), score the edges.
 
+# Relation vocabularies shared by the analysis tools (cycles, layers, unreferenced,
+# same-names, surprises). Compared against ``_edge_rel(e).strip().lower()``.
+_IMPORT_RELATIONS = frozenset({
+    "imports", "imports_from", "dynamic_import", "re_exports", "requires",
+})
+_CALL_RELATIONS = frozenset({"calls", "indirect_call"})
+_CONTAINMENT_RELATIONS = frozenset({"contains", "method"})
+# Edges that say nothing about one piece of code depending on another: structural
+# containment, and a docstring/comment node pointing at the code it describes.
+_NON_DEPENDENCY_RELATIONS = _CONTAINMENT_RELATIONS | {"rationale_for"}
+_FILE_KEYS = ("file", "path", "source_file")
+
+
+def _rel(e: dict) -> str:
+    """Normalized relation name of an edge (lower-case, stripped)."""
+    return _edge_rel(e).strip().lower()
+
+
+def _is_external_node(n: dict) -> bool:
+    """A node standing for code outside the repository.
+
+    Either explicitly marked (graphify >= 0.9: ``type: "external"`` on imported
+    packages such as ``json``/``pytest``), or carrying a source-file key that is
+    present but EMPTY — how graphify records a name it could not resolve to a
+    file (``Protocol``, a decorator's ``get``, gettext's ``_``). A node with no
+    file key at all is not treated as external: that is a schema without file
+    info, not an unresolved reference.
+    """
+    if n.get("external") is True or str(n.get("type", "")).lower() == "external":
+        return True
+    if _node_file(n):
+        return False
+    return any(k in n for k in _FILE_KEYS)
+
+
 # Containment/import scaffolding: structurally expected, never surprising.
 _SURPRISE_STRUCTURAL_RELS = frozenset({"contains", "method", "imports", "imports_from"})
+# Inferred edges of these kinds claim "this code refers to that code"; a resolver
+# that matched on the bare name leaves one with no import to back it.
+_SURPRISE_NAME_RESOLVED_RELS = frozenset({
+    "calls", "indirect_call", "uses", "references", "inherits", "extends", "implements",
+})
+# A package's entry file: importing it reaches the modules next to it.
+_PACKAGE_ENTRY_STEMS = frozenset({"__init__", "index", "mod"})
 _LANG_FAMILY = {
     ".py": "python", ".pyi": "python",
     ".js": "js", ".jsx": "js", ".mjs": "js", ".cjs": "js",
@@ -172,7 +214,25 @@ def _is_test_path(path: str) -> bool:
     if any(p.lower() in _TEST_DIR_PARTS for p in parts[:-1]):
         return True
     stem = parts[-1].lower().rsplit(".", 1)[0]
-    return stem.startswith("test_") or stem.endswith(("_test", ".test", ".spec"))
+    return (
+        stem.startswith("test_") or stem == "conftest"
+        or stem.endswith(("_test", ".test", ".spec"))
+    )
+
+
+def _top_dir(path: str) -> str:
+    """First path component of a project-relative file ("." for a root-level file)."""
+    head, sep, _ = path.partition("/")
+    return head if sep else "."
+
+
+def _is_package_entry_of(entry: str, member: str) -> bool:
+    """True if ``entry`` is the entry file (``__init__.py``, ``index.ts``, ``mod.rs``)
+    of a package directory that contains ``member``."""
+    d, _, name = entry.rpartition("/")
+    if name.rsplit(".", 1)[0] not in _PACKAGE_ENTRY_STEMS:
+        return False
+    return not d or member.startswith(d + "/")
 
 
 def _dir_distance(a: str, b: str) -> tuple[int, bool]:
@@ -187,9 +247,39 @@ def _dir_distance(a: str, b: str) -> tuple[int, bool]:
 
 
 def _is_file_hub_node(n: dict) -> bool:
-    """A node standing for a whole file (label == its own basename)."""
+    """A node standing for a whole file.
+
+    Its label is the file's basename, or a trailing part of its path: graphify
+    >= 0.9 labels package entry files ``pkg/__init__.py`` so they can be told apart.
+    """
     f = _node_file(n)
-    return bool(f) and _node_label(n) == f.rsplit("/", 1)[-1]
+    if not f:
+        return False
+    label = _node_label(n)
+    return label == f.rsplit("/", 1)[-1] or f == label or f.endswith("/" + label)
+
+
+def _file_import_edges(nodes: list[dict], edges: list[dict]) -> list[tuple[str, str, dict, dict]]:
+    """Import edges lifted to file level: ``(source file, target file, edge, target node)``.
+
+    graphify records an import as file -> file (``imports_from``) or as file ->
+    imported symbol (``imports``); both say "this module imports that module".
+    Edges with an endpoint outside the repository (no source file) and imports
+    within one file are dropped.
+    """
+    byid = {_node_id(n): n for n in nodes}
+    out: list[tuple[str, str, dict, dict]] = []
+    for e in edges:
+        if _rel(e) not in _IMPORT_RELATIONS:
+            continue
+        sid, tid = _edge_ends(e)
+        src, dst = byid.get(sid), byid.get(tid)
+        if src is None or dst is None:
+            continue
+        sf, tf = _node_file(src), _node_file(dst)
+        if sf and tf and sf != tf:
+            out.append((sf, tf, e, dst))
+    return out
 
 
 def _computed_surprises(
@@ -218,12 +308,40 @@ def _computed_surprises(
     # the peripheral->hub bonus stops applying at the god-node cut.
     god_cut = max(20, ranked_deg[int(len(ranked_deg) * 0.99)] if ranked_deg else 20)
 
+    # Which files import which, and which top-level directories other directories
+    # depend on. Both come from the graph's own edges, so a graph without import
+    # edges (or with a single directory) simply leaves the two checks off.
+    file_imports: dict[str, set[str]] = {}
+    has_imports: set[str] = set()
+    for e in edges:
+        if _rel(e) in _IMPORT_RELATIONS:
+            src = byid.get(_edge_ends(e)[0])
+            if src is not None and _node_file(src):
+                has_imports.add(_node_file(src))
+    for sf, tf, _e, _dst in _file_import_edges(nodes, edges):
+        file_imports.setdefault(sf, set()).add(tf)
+    dependents_of: dict[str, set[str]] = {}  # top-level dir -> dirs depending on it
+    for e in edges:
+        if _rel(e) in _NON_DEPENDENCY_RELATIONS:
+            continue
+        sid, tid = _edge_ends(e)
+        nu, nv = byid.get(sid), byid.get(tid)
+        if nu is None or nv is None:
+            continue
+        fu, fv = _node_file(nu), _node_file(nv)
+        if fu and fv and _top_dir(fu) != _top_dir(fv) and not _is_test_path(fu):
+            dependents_of.setdefault(_top_dir(fv), set()).add(_top_dir(fu))
+
+    def _imported(fu: str, fv: str) -> bool:
+        got = file_imports.get(fu, ())
+        return fv in got or any(_is_package_entry_of(g, fv) for g in got)
+
     skipped: dict[str, int] = {}
     confidences: set[str] = set()
     scored: list[dict] = []
 
     for e in edges:
-        rel = _edge_rel(e).strip().lower()
+        rel = _rel(e)
         if rel in _SURPRISE_STRUCTURAL_RELS:
             skipped["structural"] = skipped.get("structural", 0) + 1
             continue
@@ -245,6 +363,14 @@ def _computed_surprises(
 
         conf = str(e.get("confidence") or "EXTRACTED").upper()
         confidences.add(conf)
+        # The resolver guessed this target, and the source file imports neither
+        # the target's module nor its package: a same-named function in an
+        # unrelated directory, not a coupling. Only judged for a file whose
+        # imports the graph recorded at all.
+        if (conf in ("INFERRED", "AMBIGUOUS") and rel in _SURPRISE_NAME_RESOLVED_RELS
+                and fu in has_imports and not _imported(fu, fv)):
+            skipped["inferred_unimported"] = skipped.get("inferred_unimported", 0) + 1
+            continue
         cat_u = str(nu.get("file_type") or "code").lower()
         cat_v = str(nv.get("file_type") or "code").lower()
         lang_u, lang_v = _lang_family(fu), _lang_family(fv)
@@ -256,7 +382,14 @@ def _computed_surprises(
             cross_lang or {cat_u, cat_v} == {"code", "document"}
         )
         test_bridge = _is_test_path(fu) != _is_test_path(fv)
-        suppress = resolver_noise or test_bridge
+        # A directory nothing depends on (bench/, demo/, examples/, docker/) using
+        # a directory that several others depend on is what it is there for.
+        top_u, top_v = _top_dir(fu), _top_dir(fv)
+        consumer_edge = (
+            top_u != top_v and not dependents_of.get(top_u)
+            and len(dependents_of.get(top_v, ())) >= 2
+        )
+        suppress = resolver_noise or test_bridge or consumer_edge
 
         score = 0
         why: list[str] = []
@@ -287,6 +420,11 @@ def _computed_surprises(
             score = int(score * 1.5)
         if test_bridge:
             why.append("(test ↔ source: routine coupling, structural bonuses withheld)")
+        elif consumer_edge:
+            why.append(
+                f"({top_u}/ only consumes {top_v}/: expected coupling, "
+                "structural bonuses withheld)"
+            )
 
         scored.append({
             "from": _node_label(nu), "to": _node_label(nv), "relation": _edge_rel(e),
@@ -620,6 +758,63 @@ def _find_cycles(forward: _Adj) -> tuple[list[list[str]], list[str]]:
     return cycles, sorted(self_loops)
 
 
+def _cycle_path(forward: _Adj, comp: list[str]) -> list[str]:
+    """One shortest concrete route through a cycle group: ``[a, b, ..., a]``.
+
+    An SCC proves its members are mutually reachable; this names one actual loop
+    so a reader can follow it. Starts at the smallest member for a stable result.
+    """
+    members = set(comp)
+    start = min(comp)
+    prev: dict[str, str] = {}
+    queue = deque([start])
+    while queue:
+        cur = queue.popleft()
+        for nb, _rel_name in forward.get(cur, []):
+            if nb == start:
+                path = [cur]
+                while path[-1] != start:
+                    path.append(prev[path[-1]])
+                path.reverse()
+                return [*path, start]
+            if nb in members and nb not in prev:
+                prev[nb] = cur
+                queue.append(nb)
+    return []
+
+
+def _relation_adjacency(edges: list[dict], relations: frozenset[str]) -> _Adj:
+    """Directed adjacency over the edges of the given relations, self-edges dropped."""
+    forward: _Adj = {}
+    for e in edges:
+        rel = _rel(e)
+        if rel not in relations:
+            continue
+        s, t = _edge_ends(e)
+        if s != t:
+            forward.setdefault(s, []).append((t, rel))
+    return forward
+
+
+def _module_import_adjacency(nodes: list[dict], edges: list[dict]) -> tuple[_Adj, int]:
+    """(file -> imported files adjacency, implicit-package edges ignored).
+
+    A module's import of its own package's entry file is left out when the edge
+    targets the file as a whole: ``from . import x`` makes graphify link the
+    module to ``__init__.py``, but the parent package is always imported before
+    its submodules, so that edge can never be the reason an import fails. An
+    import of a *symbol* defined in ``__init__.py`` is kept.
+    """
+    forward: _Adj = {}
+    implicit = 0
+    for sf, tf, e, dst in _file_import_edges(nodes, edges):
+        if _is_file_hub_node(dst) and _is_package_entry_of(tf, sf):
+            implicit += 1
+            continue
+        forward.setdefault(sf, []).append((tf, _rel(e)))
+    return forward, implicit
+
+
 def _hop_distances(
     adj: dict[str, list[tuple[str, str]]], start_id: str, max_hops: int
 ) -> dict[str, int]:
@@ -676,6 +871,7 @@ def _hop_records(
     max_hops: int,
     relations: frozenset[str] | None = None,
     seeds: Iterable[str] = (),
+    exclude: frozenset[str] = frozenset(),
 ) -> dict[str, tuple[int, str, dict | None]]:
     """Like :func:`_hop_distances`, but records HOW each node was reached.
 
@@ -684,7 +880,8 @@ def _hop_records(
     every edge type, so the distances match _hop_distances exactly. ``seeds`` are
     extra depth-0 entries (used to keep a class's own members reachable when
     containment edges are filtered out); they carry ``None`` as their edge so
-    callers can tell them from real hits.
+    callers can tell them from real hits. ``exclude`` names relations never
+    walked, whatever ``relations`` says.
     """
     out: dict[str, tuple[int, str, dict | None]] = {start_id: (0, "", None)}
     frontier = deque([(start_id, 0)])
@@ -697,7 +894,8 @@ def _hop_records(
         if d >= max_hops:
             continue
         for nb, e in adj.get(cur, []):
-            if relations is not None and _edge_rel(e).strip().lower() not in relations:
+            rel = _rel(e)
+            if rel in exclude or (relations is not None and rel not in relations):
                 continue
             if nb in out:
                 continue
