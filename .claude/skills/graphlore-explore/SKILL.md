@@ -80,8 +80,9 @@ issues — gauge how much to trust the graph).
   pass the id if it is not.
 - **An empty answer is about the index, not the code.** "Nothing depends on X"
   means no edge was indexed. graphlore adds the calls made through an imported
-  module (`mod.func()`, how tests usually call code) from the Python source, but
-  calls through an object, a callback or dynamic dispatch stay invisible.
+  module (`mod.func()`, how tests usually call code) from the source — Python,
+  and JS/TS default and dynamic imports — but calls through an object, a
+  callback or dynamic dispatch stay invisible.
 - **Inferred edges are leads.** `graphlore_impact` marks them `inferred`;
   `strict=True` walks only the edges the extractor resolved, for when you need
   proof rather than candidates.

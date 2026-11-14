@@ -307,8 +307,14 @@ def _file_import_edges(
         if not (sf and tf) or sf == tf:
             continue
         kind = IMPORT_UNCLASSIFIED if kind_of is None else kind_of(sf, tf, e)
-        if kind is not None:
-            out.append((sf, tf, e, dst, kind))
+        if kind is None:
+            continue
+        if kind == IMPORT_UNCLASSIFIED and kind_of is not None and not _is_file_hub_node(src) \
+                and _node_label(src).endswith("()"):
+            # The source could not be read, but the graph recorded this import
+            # on a function rather than on its file: it runs when that is called.
+            kind = IMPORT_DEFERRED
+        out.append((sf, tf, e, dst, kind))
     return out
 
 

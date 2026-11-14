@@ -4418,14 +4418,28 @@ def test_import_checker_keeps_what_it_cannot_read(tmp_path, monkeypatch):
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     _yaml_project(tmp_path)
     check = server.ImportChecker()
+    _write(tmp_path, "app/boot.rb", "require_relative 'lib'\n")
     assert check.kind("gone.py", "pkg/x.py", {"relation": "imports"}) == "unclassified"
-    assert check.kind("web/main.ts", "web/b.ts",
-                      {"relation": "imports", "source_location": "L2"}) == "unclassified"
+    # a language graphlore does not read: kept, counted, never rejected
+    assert check.kind("app/boot.rb", "app/lib.rb", {"relation": "imports"}) == "unclassified"
     assert check.unclassified == 2 and check.rejected == []
-    assert check.kind("web/main.ts", "web/types.ts",
-                      {"relation": "imports", "source_location": "L1"}) == "type-checking"
-    assert check.kind("web/main.ts", "web/lazy.ts",
+    # the graph's own relation says more than the source could
+    assert check.kind("app/boot.rb", "app/lazy.rb",
                       {"relation": "dynamic_import"}) == "deferred"
+    # compile-time imports are module-level by definition, whatever the file holds
+    for importer in ("svc/main.go", "src/Main.java", "src/App.kt", "src/lib.rs"):
+        assert check.kind(importer, "svc/store.go", {"relation": "imports"}) == "module-level"
+
+    # ...and an unread import that the graph hangs on a function is deferred
+    nodes = [
+        {"id": "f", "label": "boot.rb", "source_file": "app/boot.rb"},
+        {"id": "fn", "label": "load()", "source_file": "app/boot.rb"},
+        {"id": "t", "label": "lib.rb", "source_file": "app/lib.rb"},
+    ]
+    edges = [{"source": "f", "target": "t", "relation": "imports"},
+             {"source": "fn", "target": "t", "relation": "imports"}]
+    kinds = [k for *_rest, k in graph_mod._file_import_edges(nodes, edges, check.kind)]
+    assert kinds == ["unclassified", "deferred"]
 
 
 def _cycle_project(tmp_path):
@@ -5102,3 +5116,190 @@ def test_locate_lists_the_other_top_hits_under_the_seed(tmp_path, monkeypatch):
     text = server.graphlore_locate("where are cycles detected?", top_k=4)
     assert "Also matched — the answer may live here too:" in text
     assert text.index("_find_cycles()  (graph.py:1-1)") < text.index("[test]")
+
+
+# --- JS / TS: imports and module calls read with tree-sitter -----------------
+
+
+def _js_project(tmp_path):
+    _write(tmp_path, "web/lib/api.js",
+           "export function getUser(id) { return id; }\n"
+           "export function saveUser(u) { return u; }\n"
+           "export default { getUser, saveUser };\n")
+    _write(tmp_path, "web/lib/yaml.js",
+           "import { render } from '../app.js';\n"
+           "export function dump(x) { return render(String(x)); }\n")
+    _write(tmp_path, "web/app.js",
+           "import * as api from './lib/api.js';\n"              # 1
+           "import client from './lib/api.js';\n"                # 2
+           "import yaml from 'yaml';\n"                          # 3
+           "import type { User } from './types';\n"              # 4
+           "export { dump } from './lib/reexport.js';\n"         # 5
+           "const cjs = require('./lib/cjs.js');\n"              # 6
+           "export function render(x) { return yaml.stringify(x); }\n"   # 7
+           "export function store(u) { return client.saveUser(u); }\n"   # 8
+           "export async function lazy() {\n"                    # 9
+           "  const mod = await import('./lib/yaml.js');\n"      # 10
+           "  return mod.dump(1);\n"                             # 11
+           "}\n")
+    _write(tmp_path, "web/tests/app.test.js",
+           "import * as app from '../app.js';\n"
+           "test('store', () => { expect(app.store(1)).toBeTruthy(); });\n")
+
+    def fn(nid, label, file, line):
+        return {"id": nid, "label": label, "source_file": file,
+                "source_location": f"L{line}", "file_type": "code"}
+
+    def hub(nid, file):
+        return {"id": nid, "label": file.rsplit("/", 1)[-1], "source_file": file,
+                "source_location": "L1", "file_type": "code"}
+
+    _write_graph(tmp_path, {
+        "nodes": [
+            hub("f_app", "web/app.js"), hub("f_api", "web/lib/api.js"),
+            hub("f_yaml", "web/lib/yaml.js"), hub("f_test", "web/tests/app.test.js"),
+            fn("get", "getUser()", "web/lib/api.js", 1),
+            fn("save", "saveUser()", "web/lib/api.js", 2),
+            fn("dump", "dump()", "web/lib/yaml.js", 2),
+            fn("render", "render()", "web/app.js", 7), fn("store", "store()", "web/app.js", 8),
+            fn("lazy", "lazy()", "web/app.js", 9),
+        ],
+        "links": [
+            {"source": "f_app", "target": "f_api", "relation": "imports_from",
+             "source_location": "L1"},
+            # what graphify does with `import yaml from 'yaml'` at its worst
+            {"source": "f_app", "target": "f_yaml", "relation": "imports_from",
+             "source_location": "L3"},
+            {"source": "f_yaml", "target": "f_app", "relation": "imports_from",
+             "source_location": "L1"},
+            {"source": "f_test", "target": "f_app", "relation": "imports_from",
+             "source_location": "L1"},
+            {"source": "f_test", "target": "store", "relation": "calls",
+             "source_file": "web/tests/app.test.js", "source_location": "L2"},
+            {"source": "dump", "target": "render", "relation": "calls"},
+        ],
+    })
+
+
+def test_js_imports_are_classified_like_python_ones(tmp_path, monkeypatch):
+    _skip_without_treesitter()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    _js_project(tmp_path)
+    js = server._js_for_file("web/app.js")
+    assert [(i.line, i.kind, i.specifier) for i in js.imports] == [
+        (1, "module-level", "./lib/api.js"), (2, "module-level", "./lib/api.js"),
+        (3, "module-level", "yaml"), (4, "type-checking", "./types"),
+        (5, "module-level", "./lib/reexport.js"), (6, "module-level", "./lib/cjs.js"),
+        (10, "deferred", "./lib/yaml.js"),  # import() inside a function
+    ]
+    # names that stand for a whole module — a type-only import binds nothing
+    assert js.bindings == {
+        "api": "./lib/api.js", "client": "./lib/api.js", "yaml": "yaml",
+        "cjs": "./lib/cjs.js", "mod": "./lib/yaml.js",
+    }
+    assert (8, "client", "saveUser") in js.calls and (11, "mod", "dump") in js.calls
+
+
+def test_js_specifiers_resolve_to_files_and_packages_do_not():
+    can = server._js_can_mean
+    assert can("./lib/api.js", "web/app.js", "web/lib/api.js")
+    assert can("./lib/api.js", "web/app.js", "web/lib/api.ts")   # TS source, .js specifier
+    assert can("./store", "web/app.js", "web/store/index.ts")     # a directory's index
+    assert can("../app.js", "web/lib/yaml.js", "web/app.js")
+    assert not can("./lib/api.js", "web/app.js", "web/other/api.js")
+    # one bare word is an npm package: not the project's lib/yaml.js ...
+    assert not can("yaml", "web/app.js", "web/lib/yaml.js")
+    # ... unless a source root holds a module of that name (tsconfig baseUrl)
+    assert can("yaml", "web/app.js", "src/yaml.ts") and can("yaml", "a.js", "yaml.js")
+    # aliases cannot be told from scoped packages without the config: kept
+    assert can("@/lib/api", "web/app.js", "src/lib/api.ts")
+    assert can("@app/utils", "web/app.js", "libs/utils.ts")
+    assert not can("@app/utils", "web/app.js", "libs/other.ts")
+
+
+def test_cycles_and_layers_read_js_imports(tmp_path, monkeypatch):
+    _skip_without_treesitter()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    _js_project(tmp_path)
+    data = json.loads(server.graphlore_cycles(kind="imports", as_json=True))
+    # app.js reaches lib/yaml.js only through import() inside lazy(): deferred.
+    # Its `import yaml from 'yaml'` is the npm package, not that file.
+    assert data["runtime_import_cycle_count"] == 0
+    assert data["deferred_import_cycle_count"] == 1
+    cycle = data["cycles"][0]
+    assert cycle["path"] == ["web/app.js", "web/lib/yaml.js", "web/app.js"]
+    assert cycle["hops"] == ["deferred", "module-level"]
+    text = server.graphlore_cycles(kind="imports")
+    assert text.splitlines()[0] == "Runtime import cycles between modules: none."
+    assert "web/app.js →[in a function] web/lib/yaml.js → web/app.js" in text
+
+    layers = json.loads(server.graphlore_layers(
+        rules={"web/lib": [], "web/app.js": ["web/lib"]}, as_json=True))
+    lib = next(entry for entry in layers["layers"] if entry["layer"] == "web/lib")
+    assert [(v["to_file"], v["import"]) for v in lib["violations"]] == [
+        ("web/app.js", "module-level")]
+
+    # had the file imported nothing that could mean lib/yaml.js, the edge is false
+    (tmp_path / "web" / "app.js").write_text(
+        "import yaml from 'yaml';\nexport function render(x) { return yaml; }\n",
+        encoding="utf-8")
+    again = json.loads(server.graphlore_cycles(kind="imports", as_json=True))
+    assert again["import_cycle_count"] == 0
+    assert {r["to_file"] for r in again["rejected_imports"]} == {
+        "web/lib/yaml.js", "web/lib/api.js"}
+
+
+def test_resolved_edges_add_js_calls_through_default_and_dynamic_imports(
+        tmp_path, monkeypatch):
+    _skip_without_treesitter()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    _js_project(tmp_path)
+    nodes, edges = server._nodes_edges(server._load_graph())
+    resolved = server._resolved(nodes, edges)
+    added = {(e["source"], e["target"], e["source_location"])
+             for e in resolved.edges[len(edges):]}
+    # the default import and the dynamically imported module; the enclosing
+    # function comes from the span engine
+    assert added == {("store", "save", "L8"), ("lazy", "dump", "L11")}
+    data = json.loads(server.graphlore_impact(
+        "saveUser", hops=1, relations="calls", as_json=True))
+    assert [(r["node"], r.get("resolved_by")) for r in data["impacted"]] == [
+        ("store()", "graphlore")]
+
+    # a JS test is a callback: its calls are recorded on the test file
+    tests = json.loads(server.graphlore_tests_for("store", as_json=True))
+    assert [r["test"] for r in tests["direct"]] == ["app.test.js"]
+    # ...and saveUser() is reached through store(), one caller away
+    via = json.loads(server.graphlore_tests_for("saveUser", as_json=True))
+    assert [(r["test"], r["via"]) for r in via["through_one_caller"]] == [
+        ("app.test.js", "store()")]
+
+
+def test_identical_bodies_in_other_languages(tmp_path, monkeypatch):
+    _skip_without_treesitter()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    monkeypatch.setattr(server, "_semble_index", lambda: None)
+    body = "return '\"' + identifier.replace(/\"/g, '\"\"') + '\"' + suffix(identifier, 1);"
+    _write(tmp_path, "a.js", "function quote(identifier) {\n  // one\n  " + body + "\n}\n")
+    _write(tmp_path, "b.ts",
+           "export const quoted = (identifier: string) => {\n  " + body + "\n};\n")
+    _write(tmp_path, "c.js", "function tiny(x) { return x; }\n")
+    go = ("\treturn \"\\\"\" + strings.ReplaceAll(identifier, \"\\\"\", \"x\") "
+          "+ suffix(identifier, 1)\n")
+    _write(tmp_path, "d.go",
+           "package main\n\nfunc Quote(identifier string) string {\n" + go + "}\n\n"
+           "func Quoted(identifier string) string {\n\t// same\n" + go + "}\n")
+
+    def fn(nid, label, file, line):
+        return {"id": nid, "label": label, "source_file": file,
+                "source_location": f"L{line}", "file_type": "code"}
+
+    _write_graph(tmp_path, {"nodes": [
+        fn("a", "quote()", "a.js", 1), fn("b", "quoted()", "b.ts", 1),
+        fn("c", "tiny()", "c.js", 1),
+        fn("g1", "Quote()", "d.go", 3), fn("g2", "Quoted()", "d.go", 7),
+    ], "links": []})
+    data = json.loads(server.graphlore_duplication_scan(as_json=True))
+    groups = [[d["site"] for d in g["definitions"]] for g in data["identical_bodies"]]
+    # a JS function and a TS arrow function with the same body; two Go functions
+    assert sorted(groups) == [["a.js:1", "b.ts:1"], ["d.go:3", "d.go:7"]]

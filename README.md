@@ -255,16 +255,43 @@ function could come back with no callers and no tests while four tests call it.
 graphlore closes that gap at read time: for `mod.name(...)` where `mod` is bound
 by an import to a first-party module that defines `name` (or re-exports it), it
 adds the call edge, marked `resolved_by: "graphlore"`; the missing module import
-is added the same way. `graphlore_impact`, `graphlore_neighbors`,
+is added the same way. It fills what each language's extractor is seen to leave
+out, and nothing more:
+
+| Language | Added by graphlore |
+|---|---|
+| Python | every call through a module object, and the module import |
+| JS / TS | calls through a default import (`import api from './api'`) and through a dynamically imported module (`const m = await import(...)`) — graphify already links namespace imports and `require` |
+| Go, Java | nothing — graphify links package-selector and static calls itself |
+ `graphlore_impact`, `graphlore_neighbors`,
 `graphlore_subgraph`, `graphlore_tests_for`, `graphlore_unreferenced`,
 `graphlore_cycles` and `graphlore_layers` read these edges; `graphlore_validate`
 says how many there are. graph.json is never modified.
 
-Python only. It costs one AST parse per Python file of the graph, once per
-process (about a second per hundred files); `GRAPHLORE_RESOLVE=0` turns it off.
+Python is read with the stdlib `ast`, JS/TS with the `[treesitter]` extra. It
+costs one parse per Python and JS/TS file of the graph, once per process (about
+a second per hundred files); `GRAPHLORE_RESOLVE=0` turns it off.
 A call through an object, a callback or dynamic dispatch stays invisible, which
 is why an empty answer from these tools says "no edge was indexed", not "nothing
 calls this".
+
+### Import edges, checked against the source
+
+`graphlore_cycles`, `graphlore_layers` and `graphlore_surprises` read each import
+back from the importing file before they trust it — which file it can mean, and
+when it runs:
+
+| Language | How | What is told apart |
+|---|---|---|
+| Python | stdlib `ast` | module-level · inside a function (deferred) · under `if TYPE_CHECKING:` |
+| JS / TS | `[treesitter]` | top-level `import` / `export … from` / `require` · `import()` or `require` inside a function (deferred) · `import type` |
+| Go, Java, Kotlin, Scala, C#, Rust, Swift | — | imports are resolved at compile time: always module-level |
+| anything else | — | kept as it is and counted as module-level; the result says so |
+
+An edge the source contradicts is dropped and listed: Python's `import yaml`
+linked to a first-party `yaml.py`, or a bare JS specifier (`'yaml'`) linked to
+`lib/yaml.js`. A tsconfig path alias cannot be told from a scoped package
+without the config, so those edges are kept.
 
 ### Analysis scope
 
@@ -542,10 +569,10 @@ graphlore/
 │   ├── server.py           #   MCP server: 33 tools, prompts, resources, transports
 │   ├── graph.py            #   graph.json loading, node/edge accessors, BFS, adjacency
 │   ├── spans.py            #   span engine: ast + tree-sitter, chunk→node join, structural diff
-│   ├── imports.py          #   import statements read from source: what they can mean, when they run
 │   ├── scope.py            #   analysis scope: vendored / external / test filtering
 │   ├── apis.py             #   symbol-level external-API extraction
 │   ├── routes.py           #   framework route → handler extraction
+│   ├── imports.py          #   import statements read from source: what they can mean, when they run
 │   ├── resolve.py          #   calls and imports through a module object, resolved from source
 │   ├── review.py           #   unreferenced code, same-named symbols, identical bodies, layer rules
 │   └── config.py           #   project dir / out dir
