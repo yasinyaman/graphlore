@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-11-14
+
 Fourth round of feedback: 0.4.0 re-run on the three repositories of the earlier
 rounds.
 
