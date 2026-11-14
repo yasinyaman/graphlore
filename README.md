@@ -29,7 +29,7 @@ checked with a plain read.
 >
 > What graphlore adds is the **span engine**: real `start..end` symbol ranges via
 > stdlib `ast` and tree-sitter, and the layer that only becomes possible once you
-> have them — semantic `locate` with `hidden_links` (a semantic chunk joined to
+> have them — semantic `locate` with hidden links (a semantic chunk joined to
 > the *enclosing* symbol, not a nearest-line guess), source hydration
 > (`graphlore_fetch` / `graphlore_skeleton`), framework route → handler and
 > package-API extraction, and cosmetic-vs-structural git freshness.
@@ -48,7 +48,7 @@ which non-Python files fall back to nearest-line matching.
 One MCP call turns a natural-language question into a **navigational map**, not a wall of code:
 
 - 🔎 **Semantic + structural, one call** — semble finds the relevant code, the graph gives its neighborhood. ~235 tokens to orient vs ~61k for grep+read (**263× fewer** on httpx).
-- 🔗 **`hidden_links`** — semantically similar code that is *structurally disconnected* (duplication / missing-abstraction / sync-async-twin candidates) that neither search nor the graph surfaces alone.
+- 🔗 **Hidden links** — semantically similar code that is *structurally disconnected* (duplication / missing-abstraction / sync-async-twin candidates) that neither search nor the graph surfaces alone.
 - 🌍 **Multi-language, zero config** — Python via stdlib `ast`; JS/TS · Go · Java · Rust · C++ · 165+ more via tree-sitter with automatic language detection. **Span-join precision 70–96%** on real HTTP-client repos in six languages, at **1 tool call / 0 file reads** per orientation ([benchmark](#benchmark)).
 - 🕒 **Cosmetic-aware freshness** — `graphlore_freshness` ignores comment/format-only edits (in every language) so a reformat never triggers a needless rebuild.
 
@@ -61,11 +61,11 @@ semble finds **what's relevant**; graphify gives **how it connects**. They're co
 | Semantic search | ✓ | — | ✓ | ✓ |
 | Graph structure | — | ✓ | ✓ | ✓ |
 | Chunk → symbol join | — | — | _you wire it_ | **✓ automatic** |
-| `hidden_links` cross-check | — | — | — | **✓ only here** |
+| Hidden-links cross-check | — | — | — | **✓ only here** |
 | Calls | 1 | 1 | **4** | **1** |
 | Tokens to orient | 1,613 | 1,107 | 2,721 | **235** |
 
-→ **11.6× fewer tokens than running the two separately — in a single call**, and `hidden_links` (semantically similar code that is *structurally disconnected*) is a signal *neither tool produces alone*. So the combined tool isn't just convenience: it's cheaper, and it surfaces something the parts can't. ([full benchmark ↓](#benchmark))
+→ **11.6× fewer tokens than running the two separately — in a single call**, and hidden links (semantically similar code that is *structurally disconnected*) is a signal *neither tool produces alone*. So the combined tool isn't just convenience: it's cheaper, and it surfaces something the parts can't. ([full benchmark ↓](#benchmark))
 
 ## Installation
 
@@ -241,7 +241,7 @@ Project selection:
 |---|---|
 | `graphlore_project` | Show the directory the server reads, or switch it to another one — a second repository, or one just built with `graphlore_build("/abs/path")`. Changes no file; refused under `GRAPHLORE_RESTRICT_PATHS` (always on over HTTP). Also names the server version |
 
-graph.json analysis (read-only, no CLI needed, `as_json=True` for structured output):
+graph.json analysis (read-only, no CLI needed; the payload arrives as `structuredContent`, and `as_json=True` puts it in the text too):
 
 | Tool | Purpose |
 |---|---|
@@ -249,18 +249,18 @@ graph.json analysis (read-only, no CLI needed, `as_json=True` for structured out
 | `graphlore_god_nodes` | Most connected nodes, ranked inside the [scope](#analysis-scope) |
 | `graphlore_communities` | Leiden community summaries |
 | `graphlore_surprises` | Unexpected cross-file connections — listed from the graph's own flags when it has them, otherwise **computed** by scoring cross-file edges (confidence, file-type/directory/community crossing), with resolver noise, anything test code uses (the source under test, shared test fakes) and consumers — a directory or a script nothing depends on, using the package — scored down, as is a pair of directories that many edges already join (an adapter using the application layer is the architecture); an inferred edge into a module the source file imports scores like an extracted one, and one into a module it never imports is dropped; says plainly when nothing is computable rather than printing an empty list |
-| `graphlore_search` | Node search |
-| `graphlore_neighbors` | 1-hop neighbors of a node, production code before tests; takes `scope` |
+| `graphlore_search` | Node search by name or id; `total` / `truncated` say how many matched beyond `limit` |
+| `graphlore_neighbors` | 1-hop neighbors of a node, production code before tests; takes `scope`. Inferred edges and edges graphlore resolved from the source are marked |
 | `graphlore_subgraph` | Token-budgeted BFS subgraph around a node — the cheap way to feed the model just the relevant slice (Graphify's embedded server does this too; pairing it with `fetch`/`locate` is what's specific here). Walks production code before tests, so a hub's budget goes to its real callers; takes `scope`, and a truncated result says how many direct neighbors were left out and how many were tests |
-| `graphlore_impact` | Reverse-dependency / **blast radius** — what breaks if a node changes (`direction=dependents`/`dependencies`/`both`), filterable by relation (`relations="calls"`, `"code"`, `"imports"`, `"types"`) and by `scope`. Ordered by hop distance, production code before tests; each row carries the recorded reference site and the edge's confidence, and `strict=True` walks only extracted edges. A truncated result says how many rows were dropped and how many were tests. Docstring/rationale nodes are left out and counted |
+| `graphlore_impact` | Reverse-dependency / **blast radius** — what breaks if a node changes (`direction=dependents`/`dependencies`/`both`), filterable by relation (`relations="calls"`, `"code"`, `"imports"`, `"types"`) and by `scope`. Ordered by hop distance, production code before tests; each row carries the recorded reference site and the edge's confidence, and `strict=True` walks only extracted edges. A truncated result says how many rows were dropped and how many were tests, and sets `complete: false`; `beyond_hops` says separately what one more hop would add. Docstring/rationale nodes are left out and counted |
 | `graphlore_tests_for` | **Tests for a symbol** — tests that call it directly (with the call line), tests that reach it through one caller (a production function, or a helper/fixture in the test code), and weak matches kept apart (a test file that imports its module, a test named after it) |
-| `graphlore_node_details` | Node metadata: type, source file/line, docstring, community |
-| `graphlore_skeleton` | def/class **signatures** (decorators kept, bodies stripped) for a file/node/community — the middle layer between the map and full code |
-| `graphlore_fetch` | **Token-budgeted** source hydration — reads the real code for a node (its enclosing def/class span ± context), the map→code other half of `subgraph`/`locate` |
+| `graphlore_node_details` | Node metadata: type, source file/line, docstring, community. The docstring is framed as repository text |
+| `graphlore_skeleton` | def/class **signatures** (decorators kept, bodies stripped) for a file/node/community — the middle layer between the map and full code. A budget cut names the files left out |
+| `graphlore_fetch` | **Token-budgeted** source hydration — reads the real code for a node (its enclosing def/class span ± context), the map→code other half of `subgraph`/`locate`. Names past the budget come back in `not_fetched`, missing ones with `did_you_mean`; each entry says `file_changed_since_build` |
 | `graphlore_freshness` | Is the graph stale vs. git HEAD? Returns `recommended_action` (fresh/update/rebuild) + `reason` — lingering phantom nodes / large changes steer to a rebuild; junk files (`.DS_Store`, logs) land in `non_source_changes` and never hold the graph stale |
 | `graphlore_diff` | Structural changeset between two git refs (default `HEAD~1..HEAD`) — added/removed/renamed/modified, with cosmetic-only changes separated (file-level, for review/audit) |
 | `graphlore_prune` | Drop phantom nodes (and their edges) for deleted/renamed source files — the surgical alternative to a full rebuild (`dry_run=True` to preview) |
-| `graphlore_validate` | Lint the graph for dangling/duplicate/self-loop edges and orphan nodes (read-only). Recursion is counted apart, not as an issue |
+| `graphlore_validate` | Lint the graph for dangling/duplicate/self-loop edges and orphan nodes (read-only). Recursion is counted apart, not as an issue. The one result that lists every vendored/minified file (`vendored_files`) |
 | `graphlore_duplication_scan` | **Repo-wide** duplication audit in two tiers. **Identical bodies** (exact, no model, always runs): function and method bodies hashed after normalizing whitespace, comments and docstrings, reported as groups — the small helper copied into three modules. **Hidden links** (semantic, needs `[semble]`): definitions that are similar but structurally distant, each pair with its score and both `file:line`s; on semble, pairs under 0.7 are left out by default (`min_score=0` lists them), and test ↔ source pairs need `include_tests=True`. Outside lean |
 | `graphlore_cycles` | Circular dependencies **by kind**. Import cycles between modules come first, each import read back from the source and classified: **runtime** cycles (a loop of module-level imports — the ones that fail at start-up), then **deferred** (closes through an import inside a function) and **type-only** (closes under `if TYPE_CHECKING:`). Then call cycles, then the rest — each with one concrete loop. `kind="imports"` asks for one kind; recursion is listed apart |
 | `graphlore_layers` | **Layer rules** — give `{"layer prefix": ["prefixes it may import"]}` (inline, or a JSON file in the repository) and get the import edges that break them, grouped by layer with `file:line` and when the import runs (module-level / `TYPE_CHECKING` / inside a function). An import the source contradicts — `import yaml` linked to a first-party `yaml.py` — is not checked and is listed apart. The same check as an AST-based dependency test, read from the graph |
@@ -352,6 +352,11 @@ not the project's own code, and each result says how many nodes that was:
 | `+external`, `+vendored` | bring those back |
 | `all` | the whole graph |
 
+What was left out comes back in every result as `scope.left_out`: node counts,
+`vendored_file_count`, three example paths (`vendored_files`) and the directories
+holding most of them (`vendored_dirs`), plus a one-line note in the text.
+`graphlore_validate` lists every vendored file.
+
 `graphlore_impact`, `graphlore_subgraph` and `graphlore_neighbors` take the same
 `scope` string but leave nothing out by default: they walk out from a node you
 named, and `scope="-tests"` or `scope="src"` is how to narrow the walk.
@@ -365,10 +370,11 @@ vendored files out of the graph itself, list them in `.graphifyignore` —
 1. `graphlore_locate("where do we retry failed requests?")` — one-call orientation
    (or `graphlore_overview()` → `graphlore_subgraph("SomeNode")` without the semble extra)
 2. `graphlore_fetch(["Client._send_single_request"])` — hydrate exactly the code you zeroed in on
-3. `graphlore_impact("Response")` / `graphlore_cycles()` / `graphlore_routes()` — targeted analysis
+3. `graphlore_impact("Response")` — blast radius of a change; with `GRAPHLORE_TOOLSET=full`,
+   `graphlore_cycles()` / `graphlore_routes()` for targeted analysis
    (reviewing a codebase: `graphlore_validate` → `graphlore_cycles` → `graphlore_layers` →
    `graphlore_unreferenced` → `graphlore_same_names`; the `review` prompt scripts it)
-4. `graphlore_query("how does the auth flow work?")` — free-form questions via the CLI
+4. `graphlore_query("how does the auth flow work?")` — free-form questions via the CLI (`full`)
 5. After code changes: `graphlore_freshness()` → `graphlore_build(update=True)`
    (plus `graphlore_prune()` after deletes/renames)
 
@@ -504,7 +510,7 @@ orients an agent to a code area; *tokens* = what reaches the model's context
 
 `graphlore_locate` averages **263× fewer tokens than grep+read** and **11.6× fewer
 than running semble and graphify separately** (one call instead of four) — and it's
-the only approach that surfaces `hidden_links` (semantically similar but structurally
+the only approach that surfaces hidden links (semantically similar but structurally
 disconnected code), 5–10 per query.
 
 Those ~235 tokens are a navigational *map* (seed `file:line` + structural
