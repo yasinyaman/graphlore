@@ -5507,3 +5507,128 @@ def test_project_and_overview_say_which_version_is_answering(project):
     assert f"Server: {version}." in text and "start a new session" in text
     assert json.loads(server.graphlore_overview(as_json=True))["server"] == version
     assert server.graphlore_overview().rstrip().endswith(f"Server: {version}")
+
+
+# --- MCP results: structuredContent and isError ---------------------------------
+
+def _call_over_mcp(tool, args, mode="auto"):
+    """Call a tool over an in-memory session and return the whole CallToolResult."""
+    import asyncio
+
+    from mcp import Client
+
+    async def _go():
+        async with Client(server.mcp, mode=mode) as client:
+            return await client.call_tool(tool, args)
+
+    return asyncio.run(_go())
+
+
+def test_structured_content_matches_as_json(project):
+    as_json = json.loads(server.graphlore_overview(as_json=True))
+    res = _call_over_mcp("graphlore_overview", {})
+    assert res.is_error is False
+    # Text mode still carries the payload as structuredContent ...
+    assert res.structured_content == as_json
+    assert "5 nodes" in res.content[0].text
+    # ... and as_json mode sends the same object next to the JSON text.
+    res = _call_over_mcp("graphlore_overview", {"as_json": True})
+    assert res.structured_content == as_json
+    assert json.loads(res.content[0].text) == as_json
+
+
+def test_not_found_is_error_over_protocol(project):
+    res = _call_over_mcp("graphlore_neighbors", {"node": "NoSuchThing"})
+    assert res.is_error is True
+    assert isinstance(res.structured_content["error"], str)
+    assert "NoSuchThing" in res.content[0].text
+
+
+def test_missing_graph_is_error_over_protocol(empty_project):
+    res = _call_over_mcp("graphlore_overview", {"as_json": True})
+    assert res.is_error is True
+    assert res.structured_content["error"].startswith("ERROR")
+
+
+def test_empty_search_is_not_error(project):
+    res = _call_over_mcp("graphlore_search", {"pattern": "zzz"})
+    assert res.is_error is False
+    assert res.structured_content["total"] == 0
+    assert res.structured_content["matches"] == []
+    assert "No nodes match" in res.content[0].text
+
+
+def test_no_output_schema_advertised():
+    import asyncio
+
+    from mcp import Client
+
+    async def _go():
+        async with Client(server.mcp) as client:
+            return (await client.list_tools()).tools
+
+    tools = asyncio.run(_go())
+    assert len(tools) == 33
+    assert all(t.output_schema is None for t in tools)
+    by_name = {t.name: t for t in tools}
+    # The wrapper keeps the real signature: parameters and docstrings survive.
+    assert "host_naming" not in by_name["graphlore_label_communities"].input_schema["properties"]
+    assert "ctx" not in by_name["graphlore_sampling_status"].input_schema.get("properties", {})
+    assert {"node", "hops", "budget_tokens", "as_json", "scope"} <= set(
+        by_name["graphlore_subgraph"].input_schema["properties"]
+    )
+    assert by_name["graphlore_fetch"].description.startswith("Hydrate graph nodes")
+
+
+def test_tool_functions_stay_plain_strings(project):
+    # The module attribute is the undecorated function: direct calls get a str.
+    assert isinstance(server.graphlore_overview(), str)
+    assert server.graphlore_overview.__name__ == "graphlore_overview"
+
+
+def test_cli_error_sets_is_error(tmp_path, monkeypatch):
+    _fake_cli(monkeypatch, tmp_path, lambda argv, **kw: _FakeProc(stderr="boom", returncode=3))
+    res = _call_over_mcp("graphlore_explain", {"node": "Client"})
+    assert res.is_error is True
+    assert res.content[0].text.startswith("ERROR (exit 3)")
+
+    _fake_cli(monkeypatch, tmp_path, lambda argv, **kw: _FakeProc(stdout="all good"))
+    res = _call_over_mcp("graphlore_explain", {"node": "Client"})
+    assert res.is_error is False
+    assert res.structured_content == {"output": "all good"}
+
+
+def test_structured_off_switch(project, monkeypatch):
+    monkeypatch.setenv("GRAPHLORE_STRUCTURED", "0")
+    res = _call_over_mcp("graphlore_neighbors", {"node": "NoSuchThing"})
+    assert res.structured_content is None
+    assert res.is_error is False  # plain-string replies, as before 0.5.0
+
+
+def test_concurrent_calls_keep_payloads_apart(project):
+    import asyncio
+
+    from mcp import Client
+
+    names = ["Client", "AsyncClient", "Response", "Request", "DigestAuth"]
+
+    async def _go():
+        async with Client(server.mcp) as client:
+            calls = [client.call_tool("graphlore_node_details", {"node": n}) for n in names]
+            calls.append(client.call_tool("graphlore_label_communities", {"method": "placeholder"}))
+            return await asyncio.gather(*calls)
+
+    results = asyncio.run(_go())
+    assert [r.structured_content["label"] for r in results[:5]] == names
+    assert results[5].is_error is False
+    assert results[5].structured_content["method"] == "placeholder"
+
+
+def test_fetch_all_missing_is_error_partial_is_not(tmp_path, monkeypatch):
+    _fetch_project(tmp_path, monkeypatch, "def alpha():\n    return 1\n", [
+        {"id": "alpha", "label": "alpha", "source_file": "m.py", "line": 1},
+    ])
+    assert _call_over_mcp("graphlore_fetch", {"nodes": ["zz_missing"]}).is_error is True
+    res = _call_over_mcp("graphlore_fetch", {"nodes": ["alpha", "zz_missing"]})
+    assert res.is_error is False
+    assert res.structured_content["not_found"] == ["zz_missing"]

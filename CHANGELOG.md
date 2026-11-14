@@ -6,6 +6,25 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+- Tool results carry MCP `structuredContent` and `isError`. The payload a tool
+  builds for `as_json=True` is now sent as `structuredContent` on every call,
+  text or JSON, and errors (node not found, missing graph, a failed CLI call,
+  `graphlore_fetch` with every name missing, a failed `git status` in
+  `graphlore_freshness`) set `isError: true`. Tool functions still return a
+  string; `GRAPHLORE_STRUCTURED=0` restores plain-text results.
+
+### Changed
+- No `outputSchema` is advertised. Before, the SDK derived
+  `{"result": string}` from each `-> str` signature and sent the reply text
+  inside it.
+- An empty answer is a result, not an error: `graphlore_search` with no hits
+  returns `{"matches": [], "total": 0, ...}`, `graphlore_locate` with no
+  semantic hits returns `{"query", "seed": null, "semantic_hits": [], "note"}`,
+  and `graphlore_communities` on a graph without communities returns
+  `{"communities": [], "note"}`, in place of `{"error": ...}`. The text is
+  unchanged.
+
 ## [0.4.1] - 2026-11-14
 
 Fourth round of feedback: 0.4.0 re-run on the three repositories of the earlier
