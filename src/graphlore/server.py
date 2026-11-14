@@ -232,10 +232,10 @@ from .spans import (  # noqa: F401
 # Configuration
 # ---------------------------------------------------------------------------
 
-__version__ = "0.5.0"
+__version__ = "0.5.1"
 
 # Printed by graphlore_project and graphlore_overview. A client keeps the tool
-# schemas it loaded before a plugin update; an agent that reads "graphlore 0.5.0"
+# schemas it loaded before a plugin update; an agent that reads "graphlore 0.5.1"
 # next to a schema without `scope` knows to ask for a new session instead of
 # concluding the parameter does not exist.
 _SERVER = f"graphlore {__version__}"
