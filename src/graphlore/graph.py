@@ -5,6 +5,7 @@ location from :mod:`graphlore.config`.
 """
 from __future__ import annotations
 
+import difflib
 import json
 from collections import deque
 from collections.abc import Callable, Iterable
@@ -572,6 +573,95 @@ def _exact_node_index(nodes: list[dict]) -> dict[str, dict]:
     return index
 
 
+class _NameIndex:
+    """Label -> nodes and bare name -> nodes, each list in graph order.
+
+    ``bare`` leaves file hub nodes out (a file is named by its path, not by a
+    symbol name). ``pool`` maps each lowercased bare name to its first node, the
+    candidate set for "did you mean" suggestions.
+    """
+
+    __slots__ = ("labels", "bare", "pos", "pool")
+
+    def __init__(self, nodes: list[dict]) -> None:
+        self.labels: dict[str, list[dict]] = {}
+        self.bare: dict[str, list[dict]] = {}
+        self.pos: dict[int, int] = {}
+        self.pool: dict[str, dict] = {}
+        for i, n in enumerate(nodes):
+            self.pos[id(n)] = i
+            label = _node_label(n)
+            self.labels.setdefault(label, []).append(n)
+            if not _is_file_hub_node(n):
+                name = _bare_name(label)
+                self.bare.setdefault(name, []).append(n)
+                if name:
+                    self.pool.setdefault(name.lower(), n)
+
+    def by_name(self, label: str, bare: str) -> list[dict]:
+        """Nodes labelled ``label`` or (non-hub) with bare name ``bare``, in graph order."""
+        hits = {id(n): n for n in self.labels.get(label, ())}
+        for n in self.bare.get(bare, ()):
+            hits.setdefault(id(n), n)
+        return sorted(hits.values(), key=lambda n: self.pos[id(n)])
+
+
+# Same identity-guarded FIFO scheme as _RESOLVE_CACHE.
+_NAME_CACHE: dict[int, tuple[list[dict], _NameIndex]] = {}
+
+
+def _name_index(nodes: list[dict]) -> _NameIndex:
+    cached = _NAME_CACHE.get(id(nodes))
+    if cached is not None and cached[0] is nodes:
+        return cached[1]
+    index = _NameIndex(nodes)
+    if id(nodes) not in _NAME_CACHE and len(_NAME_CACHE) >= _RESOLVE_CACHE_MAX:
+        _NAME_CACHE.pop(next(iter(_NAME_CACHE)), None)  # FIFO
+    _NAME_CACHE[id(nodes)] = (nodes, index)
+    return index
+
+
+def _substring_matches(nodes: list[dict], key: str, cap: int = 6) -> tuple[list[dict], int]:
+    """Nodes whose label or id contains ``key`` (case-insensitive), first ``cap`` in
+    graph order, and how many match in all. The first is what ``_resolve_node``
+    picks."""
+    k = key.lower()
+    hits: list[dict] = []
+    total = 0
+    for n in nodes:
+        if k in _node_label(n).lower() or k in _node_id(n).lower():
+            total += 1
+            if len(hits) < cap:
+                hits.append(n)
+    return hits, total
+
+
+# Above this many distinct names, the "did you mean" pool is narrowed before
+# difflib (whose cost is per candidate) runs.
+_CLOSE_MATCH_POOL = 5000
+
+
+def _close_matches(nodes: list[dict], key: str, n: int = 5) -> list[dict]:
+    """Nodes whose bare name is close to ``key`` (difflib ratio >= 0.6), best first.
+
+    For a name that matched nothing. The candidate pool is bounded on big graphs:
+    names of a comparable length first, then names sharing the first letter, then
+    graph order.
+    """
+    want = _bare_name(key).lower()
+    if not want:
+        return []
+    pool = _name_index(nodes).pool
+    names = list(pool)
+    if len(names) > _CLOSE_MATCH_POOL:
+        lo, hi = len(want) * 0.6, len(want) / 0.6
+        names = [s for s in names if lo <= len(s) <= hi]
+    if len(names) > _CLOSE_MATCH_POOL:
+        names = [s for s in names if s[:1] == want[:1]]
+    names = names[:_CLOSE_MATCH_POOL]
+    return [pool[s] for s in difflib.get_close_matches(want, names, n=n, cutoff=0.6)]
+
+
 def _resolve_node(nodes: list[dict], key: str) -> dict | None:
     """Match a node by exact id/label, else case-insensitive substring."""
     exact = _exact_node_index(nodes).get(key)
@@ -704,6 +794,10 @@ _TIKTOKEN_ENC: Any = None
 
 def _tiktoken_encoder() -> Any:
     global _TIKTOKEN_ENC
+    if _TIKTOKEN_ENC is None and config.offline():
+        # tiktoken fetches its encoding file on first use unless it is cached;
+        # offline, count with the heuristic (and probe again once back online)
+        return None
     if _TIKTOKEN_ENC is None:
         try:
             import tiktoken
@@ -726,6 +820,46 @@ def _count_tokens(text: str) -> int:
     return _approx_tokens(text)
 
 
+_EdgeFlags = dict[tuple[str, str, str], dict[str, str]]
+_EDGE_FLAGS_CACHE: dict[int, tuple[list[dict], _EdgeFlags]] = {}
+
+
+def _edge_flags(edges: list[dict]) -> _EdgeFlags:
+    """``(source, target, relation) -> {"confidence"?, "resolved_by"?}`` for the
+    edges whose provenance is worth showing next to them: inferred or ambiguous
+    ones, and ones graphlore resolved from the source. An extracted graph edge is
+    the default and has no entry. Cached on list identity like _edge_set."""
+    cached = _EDGE_FLAGS_CACHE.get(id(edges))
+    if cached is not None and cached[0] is edges:
+        return cached[1]
+    flags: _EdgeFlags = {}
+    for e in edges:
+        f: dict[str, str] = {}
+        conf = str(e.get("confidence") or "EXTRACTED").upper()
+        if conf != "EXTRACTED":
+            f["confidence"] = conf
+        if e.get("resolved_by"):
+            f["resolved_by"] = str(e["resolved_by"])
+        if f:
+            flags.setdefault((*_edge_ends(e), _edge_rel(e)), f)
+    if id(edges) not in _EDGE_FLAGS_CACHE and len(_EDGE_FLAGS_CACHE) >= _ADJ_CACHE_MAX:
+        _EDGE_FLAGS_CACHE.pop(next(iter(_EDGE_FLAGS_CACHE)), None)  # FIFO
+    _EDGE_FLAGS_CACHE[id(edges)] = (edges, flags)
+    return flags
+
+
+def _flag_suffix(flags: dict[str, str] | None) -> str:
+    """``, inferred`` / ``, resolved`` for a text row, as graphlore_impact prints."""
+    if not flags:
+        return ""
+    out = ""
+    if flags.get("confidence"):
+        out += ", " + flags["confidence"].lower()
+    if flags.get("resolved_by"):
+        out += ", resolved"
+    return out
+
+
 def _bfs_subgraph(
     adj: dict[str, list[tuple[str, str]]],
     labels: Any,  # id -> display label; dict or server._DisplayLabels (duck-typed .get)
@@ -734,6 +868,8 @@ def _bfs_subgraph(
     budget_tokens: int,
     edge_set: set[tuple[str, str, str]] | None = None,
     order: Callable[[tuple[str, str]], Any] | None = None,
+    *,
+    edge_flags: _EdgeFlags | None = None,
 ) -> tuple[set[str], list[dict], bool, int]:
     """BFS around start_id collecting edges until a token budget is hit.
 
@@ -743,7 +879,8 @@ def _bfs_subgraph(
     adjacency flattens direction, and an edge reached via its reverse entry must
     not be reported as ``B —calls→ A`` when the graph says ``A —calls→ B``.
     ``order`` is a sort key over a node's ``(neighbor, relation)`` entries: what
-    comes first is what the budget keeps.
+    comes first is what the budget keeps. ``edge_flags`` (from :func:`_edge_flags`)
+    adds ``confidence`` / ``resolved_by`` to the edges that carry them.
     """
     visited = {start_id}
     frontier = deque([(start_id, 0)])
@@ -766,6 +903,8 @@ def _bfs_subgraph(
             if key not in seen_pairs:
                 seen_pairs.add(key)
                 edge = {"from": labels.get(src, src), "to": labels.get(dst, dst), "relation": rel}
+                if edge_flags:
+                    edge.update(edge_flags.get((src, dst, rel), {}))
                 collected_edges.append(edge)
                 # running size estimate instead of re-serializing the whole list (O(n^2))
                 running_chars += len(json.dumps(edge, ensure_ascii=False)) + 2
@@ -1105,3 +1244,29 @@ def _hop_records(
             out[nb] = (d + 1, cur, e)
             frontier.append((nb, d + 1))
     return out
+
+
+def _beyond_hops(
+    adj: _EAdj,
+    recs: dict[str, tuple[int, str, dict | None]],
+    max_hops: int,
+    relations: frozenset[str] | None = None,
+    exclude: frozenset[str] = frozenset(),
+    edge_ok: Callable[[dict], bool] | None = None,
+) -> int:
+    """How many nodes one more hop past ``max_hops`` would add to ``recs`` (a
+    :func:`_hop_records` result walked with the same filters). Zero means the
+    walk reached everything it could: the hop limit cut nothing off."""
+    more: set[str] = set()
+    for nid, (d, _via, _edge) in recs.items():
+        if d != max_hops:
+            continue
+        for nb, e in adj.get(nid, []):
+            rel = _rel(e)
+            if rel in exclude or (relations is not None and rel not in relations):
+                continue
+            if edge_ok is not None and not edge_ok(e):
+                continue
+            if nb not in recs:
+                more.add(nb)
+    return len(more)

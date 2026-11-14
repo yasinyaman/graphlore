@@ -12,6 +12,14 @@ node to its true `start..end` symbol range — so an assistant orients structura
 and cheaply (token-budgeted maps, then exact spans) instead of grepping and
 reading file after file.
 
+graphlore is a read-mostly view of a code graph, **not an agent memory**: it has
+no remember/recall tools, keeps no notes between sessions, and the only thing it
+persists of its own is community names (`graphlore_set_labels`). Nor does it
+replace grep. An exact identifier is found faster with `rg`; graphlore earns its
+place on multi-hop questions (who calls this, what breaks if it changes) and on
+orientation in unfamiliar code, and every answer carries `file:line` so it can be
+checked with a plain read.
+
 > **Relationship to Graphify's own MCP server.** Graphify ships an embedded MCP
 > server (`graphify ./raw --mcp`), and the two overlap more than they differ.
 > Graph navigation (query, node lookup, neighbors, communities, god nodes,
@@ -123,7 +131,9 @@ own copy of this repository, so **`uv` must be installed**. It installs the
 `graphify`, `treesitter` and `semble` extras into an isolated environment — the
 Graphify CLI included — and points `GRAPHLORE_PROJECT_DIR` at the project you
 opened. The first start downloads the dependencies and can take a while; later
-starts come from uv's cache. Without `uv`, use the manual setup below.
+starts come from uv's cache. Without `uv`, use the manual setup below. The plugin
+sets `GRAPHLORE_TOOLSET=full`: its skill uses the review and naming tools that the
+default `lean` surface leaves out.
 
 **Start a new session after updating the plugin.** A client keeps the tool
 schemas it loaded earlier in the session, so after an update mid-session the
@@ -180,17 +190,42 @@ GRAPHLORE_TRANSPORT=streamable-http GRAPHLORE_HOST=0.0.0.0 GRAPHLORE_API_KEY=$(o
   GRAPHLORE_PROJECT_DIR=/path/to/repo graphlore
 ```
 
-For a smaller tool surface (helps some models pick the right tool), set
-`GRAPHLORE_TOOLSET=lean` to expose only the core exploration tools — or
-`GRAPHLORE_TOOLSET=locate` for the minimal locate-first surface: orient with one
-`graphlore_locate` call, hydrate code with `graphlore_fetch`, stay in sync with
-`graphlore_build`/`graphlore_freshness`. `locate` needs a semantic backend (the
-`[semble]` extra or `GRAPHLORE_SEMANTIC_BACKEND`) and falls back to `lean` without
-one.
+### Which toolset
+
+The server starts on the **`lean`** surface: 12 tools (11 without a semantic
+backend, which drops `graphlore_locate`) — `build`, `overview`, `locate`,
+`search`, `neighbors`, `subgraph`, `impact`, `node_details`, `fetch`,
+`communities`, `freshness` and `project`. That covers the whole explore loop:
+orient → find → traverse → blast radius → read the code. A smaller surface helps
+a model pick the right tool, and every tool definition costs context on every
+turn. Choose with `GRAPHLORE_TOOLSET`:
+
+| Value | Tools | Use when |
+|---|---|---|
+| `lean` (default) | 12 | Exploring, debugging, answering "where/how is X" |
+| `full` | all 33 | Reviewing structure (cycles, layers, dead or duplicated code), routes and package APIs, naming communities, diffs, the CLI passthroughs (`query`, `path`, `explain`, `add`) |
+| `locate` | 5 | A semantic backend is installed and you want one way in (`graphlore_locate`), one way to the code (`graphlore_fetch`), plus `overview` / `build` / `freshness`; falls back to `lean` without a backend |
+
+An unknown value falls back to `lean` with a warning on stderr; the boot banner
+prints the toolset and its tool count. The server instructions and prompts are
+rendered for the active surface, so they never name a tool that is switched
+off. **The Claude Code plugin pins `full`**, since its skill uses the review and
+naming tools.
+
+**Next to Graphify's embedded MCP server.** Running both gives the model two
+tools for the same verbs — Graphify's `query` / node lookup / `neighbors` /
+`communities` / god nodes / shortest path against graphlore's `query`,
+`node_details`, `neighbors`, `communities`, `god_nodes` and `path`. Prefer one
+server per project. If you need both (Graphify's PR triage, its multi-project
+serving), keep graphlore on `lean`, which leaves out its `query` / `path` /
+`explain` passthroughs, and tell the model which server answers what.
 
 ## Tools
 
-CLI-backed (the first two write state; the rest are read-only):
+Tools outside the default `lean` surface need `GRAPHLORE_TOOLSET=full`; see
+[Which toolset](#which-toolset).
+
+CLI-backed (the first two write state; the rest are read-only; all outside lean):
 
 | Tool | Purpose |
 |---|---|
@@ -342,7 +377,16 @@ vendored files out of the graph itself, list them in `.graphifyignore` —
 The analysis tools surface staleness for you: `graphlore_overview` and
 `graphlore_subgraph` carry a lightweight `graph_age` ("built 3 commits ago"), and
 `graphlore_freshness` gives a full `recommended_action` (fresh / update / rebuild).
-To stop thinking about it, regenerate on every commit with a git **post-commit
+The answers themselves say which of *their* files changed: when the graph records
+the commit it was built from, `graphlore_fetch` flags each entry
+(`file_changed_since_build`, plus `span_mismatch` when the graph's line now lands
+in a different symbol), and `graphlore_locate`, `graphlore_impact` and
+`graphlore_subgraph` carry a `build_drift` block listing the changed files the
+answer rests on. The comparison is the build commit against the working tree
+(committed, staged and unstaged changes and untracked files, two git calls per
+answer); a file that was already dirty when the graph was built reads as
+changed. Without a recorded build commit or git, `build_drift.known` is false and
+says why. To stop thinking about it, regenerate on every commit with a git **post-commit
 hook** — the recommended first-class auto-update flow:
 
 ```sh
@@ -439,6 +483,15 @@ redirects, content decoding, cookies, timeouts) on the 2,101-node graph. Each qu
 orients an agent to a code area; *tokens* = what reaches the model's context
 (≈ chars/4).
 
+> **How tokens are counted here vs. at runtime.** The benchmark divides by 4;
+> the server's own budgets and `approx_tokens` divide by 3.5 (deliberately
+> conservative), or count exactly with `GRAPHLORE_TOKENIZER=tiktoken`. A runtime
+> figure therefore reads about 14% higher than the same text would here. The
+> ratios between approaches are unaffected, since both sides use the same
+> divisor; but the grep side counts file *bytes* and the locate side reply
+> *characters*, which slightly flatters grep on non-ASCII source. The numbers
+> were not re-measured for this note.
+
 ![Tokens to orient an agent across 6 httpx queries — lower is better](docs/benchmark.svg)
 
 | Approach | Tokens (avg) | Calls | Structure | Semantic | Hidden links |
@@ -528,15 +581,46 @@ Reusable templates that orchestrate the tools for the assistant:
 - `onboard` — orient to the codebase (overview → communities → subgraphs → surprises → summary)
 - `trace_bug(symptom)` — find likely root-cause locations through the graph
 - `explain_flow(flow)` — end-to-end walkthrough of a named flow with file:line refs
+- `review` — review structure: cycles, layering, dead and duplicated code (needs `GRAPHLORE_TOOLSET=full`)
+
+Each prompt is rendered for the active toolset: a step whose tool is switched off
+is left out, or replaced by one that is on (`trace_bug` uses `graphlore_impact`
+where `graphlore_path` is off).
 
 ## LLM-friendliness
 
 - **Tool annotations** (`read_only_hint`, `destructive_hint`, titles) tell the model which tools are safe to call freely vs. which mutate state.
 - **Server instructions** describe the recommended flow (locate/overview → targeted subgraph/fetch → build update).
 - **`as_json` output** on every analysis tool — including error and no-match paths — returns structured data the model can chain on instead of re-parsing prose.
+- **MCP structured results.** Over the protocol every analysis tool's payload also arrives as `structuredContent` (the same object `as_json=True` prints), whichever text form was asked for, and failures — node not found, missing graph, a failed CLI call — set `isError: true`. An empty but valid answer (no search hits) is not an error. No `outputSchema` is published: payload shapes differ per path. `GRAPHLORE_STRUCTURED=0` falls back to plain text results.
 - **Token budgeting on source, not just structure** — budgeted subgraph rendering is Graphify's own (its embedded server does the same); graphlore extends the discipline to *code*: `graphlore_fetch` and `graphlore_skeleton` hydrate real spans under a cap, so escalating map → signatures → source never blows the context.
 - **Unambiguous names** — when several nodes share a bare label (five `.auth_flow()`s across auth classes), rendered output qualifies them with the span-recovered FQN (`DigestAuth.auth_flow()`) or a `file:line` suffix, so an arrow always names exactly one symbol.
+- **Repository text is framed as data.** `graphlore_fetch`, `graphlore_skeleton`, `graphlore_node_details` (the docstring) and the `query` / `path` / `explain` passthroughs put the code and text they quote between `=== repo text <nonce> ===` markers, with a per-call random nonce redrawn if it occurs in the text, so a comment in the repository cannot close the frame and pose as graphlore. JSON replies say `content_trust: "untrusted_repo_text"` and name the `untrusted_fields`. A docstring that says "ignore previous instructions" is still a docstring.
 - **Host-LLM sampling** (`graphlore_label_communities`) lets the server borrow the client's model via MCP `sampling/createMessage`, so semantic naming works with no server-side API key — with a capability test (`graphlore_sampling_status`) and a backend-key fallback.
+
+## What reaches the network, and when
+
+The graph.json analysis tools read local files only. These are the exceptions:
+
+| Path | When it goes out | With `GRAPHLORE_OFFLINE=1` |
+|---|---|---|
+| `graphlore_add` | Always: it fetches the URL | Refused |
+| `graphlore_build` | `mode="deep"`, and a default build of doc/paper/image files, which graphify extracts with an LLM backend when a key is set | `mode` refused; `code_only` forced (local AST only) unless `cluster_only`, and the result says so |
+| `graphlore_label_communities(method="cli")` | graphify calls the LLM backend whose key is set | Refused; `method="auto"` skips it. Sampling still works: that request goes to your MCP client, not out of the server |
+| `graphlore_query` / `path` / `explain` | Up to graphify: they are its own commands | Run, with the backend keys removed from the CLI's environment |
+| Semantic search (`[semble]`: `graphlore_locate`, `graphlore_duplication_scan`) | First use: semble downloads its embedding model from the Hugging Face Hub, then caches it | `HF_HUB_OFFLINE=1` / `TRANSFORMERS_OFFLINE=1` are set before semble is imported, so only a cached model loads; otherwise the error says how to prefetch it |
+| `GRAPHLORE_TOKENIZER=tiktoken` | First use: tiktoken fetches its encoding file unless cached | Not loaded; the chars/3.5 estimate is used |
+| tree-sitter grammars (`[treesitter]`) | First use of a language: the grammar is downloaded from GitHub releases and cached | Only grammars already in the cache are used; other files get no spans |
+| A custom `GRAPHLORE_SEMANTIC_BACKEND` | Whatever that code does | **Not constrained** — graphlore cannot see inside it |
+| HTTP transports | Inbound only (the server listens) | Unchanged |
+
+What graphlore enforces is its own side: it refuses the calls above, strips the
+`*_API_KEY` variables it knows (`GEMINI_API_KEY`, `OPENAI_API_KEY`,
+`ANTHROPIC_API_KEY`, …) from the graphify subprocess, and sets the Hugging Face
+offline flags for itself and its children. What the `graphify` binary or a
+custom backend does beyond that is theirs. For a guarantee, pair the switch with
+a network policy (an egress firewall, a container without a route out). The
+boot banner on stderr prints `egress=offline` or `egress=on-demand`.
 
 ## Environment variables
 
@@ -552,12 +636,14 @@ Reusable templates that orchestrate the tools for the assistant:
 | `GRAPHLORE_PORT` | `8000` | Bind port for HTTP transports |
 | `GRAPHLORE_API_KEY` | _(unset)_ | Require `Authorization: Bearer <key>` on HTTP transports |
 | `GRAPHLORE_ALLOWED_HOSTS` | _(unset)_ | DNS-rebinding `Host` allowlist for HTTP (comma-separated, `:*` port wildcards; `*` disables). Unset = SDK default: loopback-only when bound to loopback |
-| `GRAPHLORE_TOOLSET` | `full` | `full` \| `lean` (core exploration tools only) \| `locate` (minimal locate-first surface; falls back to `lean` without a semantic backend) |
+| `GRAPHLORE_TOOLSET` | `lean` | `lean` (12 core exploration tools) \| `full` (all 33) \| `locate` (minimal locate-first surface; falls back to `lean` without a semantic backend). See [Which toolset](#which-toolset) |
 | `GRAPHLORE_TOKENIZER` | _(heuristic)_ | `tiktoken` → exact token counts (needs the `[tiktoken]` extra); else chars/3.5 estimate |
 | `GRAPHLORE_SEMANTIC_BACKEND` | `semble` | Semantic index: `semble`, or `module.path:Factory` implementing `search`/`find_related` (validated at boot) |
 | `GRAPHLORE_RESOLVE` | `1` | Resolve calls and imports made through a module object (`mod.func()`) from the source at read time; `0` reads graph.json as it is |
 | `GRAPHLORE_WATCH` | `0` | Filesystem watcher: auto re-sync on structural changes (`[watch]` extra) |
 | `GRAPHLORE_WATCH_DEBOUNCE` | `2.0` | Watcher debounce window (seconds) |
+| `GRAPHLORE_OFFLINE` | `0` | Refuse every path graphlore knows reaches the network (see [What reaches the network](#what-reaches-the-network-and-when)) |
+| `GRAPHLORE_STRUCTURED` | `1` | `0` → plain-text tool results, without `structuredContent` / `isError` |
 
 > Every variable is also honored under its legacy `GRAPHIFY_*` spelling (the
 > pre-rename names); when both are set, `GRAPHLORE_*` wins. Artifacts of the
