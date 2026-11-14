@@ -28,6 +28,15 @@ All notable changes to this project are documented here. The format is based on
   more boundary edges. Each adds a one-line `hint`.
 - `graphlore_impact` reports `beyond_hops` (nodes one hop past `hops`) and
   `complete`, false whenever the budget or the hop limit cut the answer.
+- Answers say which of their files changed since the graph was built.
+  `graphlore_fetch` entries carry `file_changed_since_build` (true / false /
+  null) and `span_mismatch` when the graph's line in a changed file now lands
+  in a different symbol — before, fetch silently returned that other symbol.
+  `graphlore_locate`, `graphlore_impact` and `graphlore_subgraph` carry
+  `build_drift` (`known`, `since`, `changed_files`) and a text line naming the
+  changed files. It compares the recorded `built_at_commit` with the working
+  tree in two git calls; without that commit or git it reports
+  `known: false` and why.
 - `graphlore_neighbors`, `graphlore_subgraph` and `graphlore_locate`'s
   structure mark inferred / ambiguous edges (`confidence`) and edges graphlore
   resolved from the source (`resolved_by`), as `graphlore_impact` already did.
