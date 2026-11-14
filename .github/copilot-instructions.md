@@ -37,4 +37,4 @@ graphlore is a Python MCP server (MCP Python SDK v2: `mcp.server.mcpserver.MCPSe
 
 ## When a tool is added or changed
 
-Also update: the tool list in the `server.py` docstring, `LEAN_TOOLS` / `LOCATE_TOOLS` if relevant, `test_tool_and_prompt_registration` (asserts exactly 33 tools), the README tool tables and "33" counts, `.claude/skills/graphlore-explore/SKILL.md`, and `CHANGELOG.md` under `[Unreleased]`.
+Also update: the tool list in the `server.py` docstring, `LEAN_TOOLS` / `LOCATE_TOOLS` if relevant (`lean` is the default surface), `_instructions` / the prompt steps if the tool belongs in the recommended flow, `test_tool_and_prompt_registration` (asserts exactly 33 tools), the README tool tables and "33" counts, `.claude/skills/graphlore-explore/SKILL.md`, and `CHANGELOG.md` under `[Unreleased]`.

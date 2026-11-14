@@ -30,3 +30,15 @@ def empty_project(tmp_path, monkeypatch):
     """A temp project dir with no graph built yet."""
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     return tmp_path
+
+
+@pytest.fixture(autouse=True)
+def _full_toolset(monkeypatch):
+    """Pin the full tool surface for every test.
+
+    The default GRAPHLORE_TOOLSET is lean, and ``server.main()`` trims the shared
+    ``server.mcp`` for real; without this, the first test that calls ``main()``
+    would remove 21 tools for every test after it. Tests of the default patch
+    ``server.TOOLSET`` themselves.
+    """
+    monkeypatch.setattr(server, "TOOLSET", "full")

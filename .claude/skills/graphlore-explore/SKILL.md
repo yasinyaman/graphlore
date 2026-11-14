@@ -18,7 +18,11 @@ what breaks), impact, or orientation in code you don't know yet. Every answer
 carries `file:line` — confirm an edge with Read or `rg` before acting on it.
 
 If the graphlore_* tools are not available, the MCP server isn't connected — see
-the project README for the `.mcp.json` / Claude Desktop config.
+the project README for the `.mcp.json` / Claude Desktop config. If only some are
+(no `graphlore_cycles`, `graphlore_tests_for`, `graphlore_skeleton`…), the server
+runs a trimmed toolset: `lean` is the default outside this plugin, which sets
+`GRAPHLORE_TOOLSET=full`. Say which tool is missing instead of working around it
+silently.
 
 The server reads one project at a time — at first the directory it was started
 with. `graphlore_project()` shows it; `graphlore_project("/path/to/other/repo")`

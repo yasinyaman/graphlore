@@ -79,7 +79,8 @@ Optional dependencies (`semble`, `tree-sitter`, `tiktoken`, `watchdog`, `uvicorn
 
 A tool is registered with `@_tool(annotations=ToolAnnotations(...))` in `server.py`; keep it read-only unless it genuinely mutates state and set the matching hint. The change also touches:
 
-- the tool list in the `server.py` module docstring, and `LEAN_TOOLS` / `LOCATE_TOOLS` if it belongs in a trimmed surface
+- the tool list in the `server.py` module docstring, and `LEAN_TOOLS` / `LOCATE_TOOLS` if it belongs in a trimmed surface. `lean` is the default surface, so a tool outside it is invisible to most users unless they set `GRAPHLORE_TOOLSET=full` (the plugin does)
+- `_instructions(active)` and the prompts (`_render_prompt` steps) if the tool belongs in the recommended flow: they name a tool only when it is registered. A reply that points to another tool wraps the pointer in `_tool_hint(name, text)`
 - `test_tool_and_prompt_registration` in `tests/test_tools.py`, which asserts the exact tool count (33)
 - the README tool tables and its "33 tools" counts
 - `.claude/skills/graphlore-explore/SKILL.md` (shipped to users by the plugin)
@@ -99,4 +100,4 @@ The repository root is itself a Claude Code plugin and its own marketplace (`.cl
 
 ## Tests
 
-Everything is in `tests/test_tools.py`. Tests call tool functions directly (`server.graphlore_overview(as_json=True)`) and parse the result. The `project` fixture gives a temp project with the 5-node fixture graph; `empty_project` has no graph. Tests needing a specific shape write their own `graphify-out/graph.json` into `tmp_path` and repoint `PROJECT_DIR`. Protocol-level behavior (schemas, sampling) uses the SDK's in-memory `Client(server.mcp)` driven by `asyncio.run`; there is no pytest-asyncio. Freshness/diff tests build a real git repo in `tmp_path`.
+Everything is in `tests/test_tools.py`. `tests/conftest.py` pins `server.TOOLSET = "full"` for every test: `server.main()` trims the shared `server.mcp` for real, and the default is `lean`. Tests call tool functions directly (`server.graphlore_overview(as_json=True)`) and parse the result. The `project` fixture gives a temp project with the 5-node fixture graph; `empty_project` has no graph. Tests needing a specific shape write their own `graphify-out/graph.json` into `tmp_path` and repoint `PROJECT_DIR`. Protocol-level behavior (schemas, sampling) uses the SDK's in-memory `Client(server.mcp)` driven by `asyncio.run`; there is no pytest-asyncio. Freshness/diff tests build a real git repo in `tmp_path`.
