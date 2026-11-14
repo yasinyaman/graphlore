@@ -501,7 +501,9 @@ def _tool_result(out: str, rec: _CallRecord) -> CallToolResult | str:
     """
     if not _structured_enabled():
         return out
-    content: list[TextContent] = [TextContent(type="text", text=out)]
+    # list[Any]: the SDK's content union differs across mcp 2.x releases, and
+    # list is invariant, so list[TextContent] fails type checking on some.
+    content: list[Any] = [TextContent(type="text", text=out)]
     if rec.out is out and isinstance(rec.payload, dict):
         structured = json.loads(json.dumps(rec.payload, ensure_ascii=False, default=str))
         return CallToolResult(
