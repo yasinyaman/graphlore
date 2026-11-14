@@ -206,7 +206,7 @@ def measure_repo(repo) -> dict | None:
             seeds += 1
             if seed.get("qualname"):
                 quals += 1
-        hidden_total += len(data.get("hidden_links") or [])
+        hidden_total += sum(1 for c in data.get("semantic_cousins") or [] if not c["linked"])
 
     # token spot-check: locate map vs naive grep+read for one query
     locate_txt = s.graphlore_locate(repo["spotcheck"])

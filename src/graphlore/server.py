@@ -1888,7 +1888,8 @@ def graphlore_surprises(limit: int = 20, as_json: bool = False, scope: str = "")
         }
         return _fmt(payload, as_json, _with_note("\n".join(text), view))
 
-    computed, diag = _computed_surprises(nodes, edges, ImportChecker().kind)
+    checker = ImportChecker()
+    computed, diag = _computed_surprises(nodes, edges, checker.kind, checker.reaches)
     items = computed[:limit]
     if not items:
         skipped = ", ".join(
@@ -2605,8 +2606,8 @@ def graphlore_impact(
     Results are ordered by hop distance — within one distance production code
     before tests, most connected first — and capped at a token budget; a
     truncated result says how many rows were dropped and how many were tests.
-    ``complete`` is false whenever the budget or the hop limit cut the answer
-    (``beyond_hops`` counts the nodes one hop past ``hops``). ``build_drift``
+    ``complete`` is false only when the budget dropped rows within the hops asked
+    for; ``beyond_hops`` separately counts what one more hop would add. ``build_drift``
     lists the answer's files changed since the graph was built.
     The blast radius includes INFERRED edges (the resolver guessed the target):
     each row carries its edge's ``confidence``, and ``strict=True`` walks only
@@ -2796,23 +2797,24 @@ def graphlore_impact(
         "truncated": truncated,
         "dropped": dropped,
         "dropped_tests": dropped_tests,
-        # nodes one hop past `hops`; complete means neither the budget nor the hop
-        # limit cut the answer short
+        # complete: every node within the hops asked for is listed (the budget
+        # dropped none). beyond_hops is separate: what one more hop would add,
+        # which a caller asking for hops=1 did not ask for.
+        "complete": not truncated,
         "beyond_hops": beyond_hops,
-        "complete": not truncated and beyond_hops == 0,
         "approx_tokens": approx,
         "scope": view.payload(),
         "resolved_edges": resolved.payload(),
     }
     if matched:
         payload["matched"] = matched
-    if not payload["complete"]:
-        payload["hint"] = (
-            ("Raise budget_tokens or narrow with relations=/scope= for the rows not "
-             "shown. " if truncated else "")
-            + (f"Raise hops past {hops} for the {beyond_hops} node(s) beyond it."
-               if beyond_hops else "")
-        ).strip()
+    hint = (
+        ("Raise budget_tokens or narrow with relations=/scope= for the rows not "
+         "shown. " if truncated else "")
+        + (f"hops={hops + 1} would add {beyond_hops} node(s)." if beyond_hops else "")
+    ).strip()
+    if hint:
+        payload["hint"] = hint
     rationale_note = (
         f"\n({rationale_skipped} docstring/rationale node(s) left out — they describe "
         "code, they do not depend on it.)" if rationale_skipped else ""
@@ -2824,8 +2826,8 @@ def graphlore_impact(
         )
     if beyond_hops:
         rationale_note += (
-            f"\n(Incomplete: {beyond_hops} more node(s) lie one hop past hops={hops}; "
-            "raise hops to include them.)"
+            f"\n(Within hops={hops} this is everything{' the budget kept' if truncated else ''}; "
+            f"hops={hops + 1} would add {beyond_hops} node(s).)"
         )
     payload["build_drift"], drift_text = _drift_note(
         _build_drift(), _files_of(nodes, [sid, *(h[0] for h in hits)]))
@@ -3067,15 +3069,17 @@ def graphlore_locate(
 
     Finds the code most relevant to `query`, maps the top hit to its enclosing
     graph node, returns the token-budgeted subgraph around it, AND lists
-    semantically-similar code elsewhere — flagging `hidden_links`: cousins that
-    are similar but NOT structurally connected to the seed (duplication /
-    missing-abstraction / implicit-coupling candidates). The seed is the top hit,
+    semantically-similar code elsewhere in ``semantic_cousins``, each once with
+    ``linked``: the hidden links are the cousins with ``linked: false`` — similar
+    but NOT structurally connected to the seed (duplication /
+    missing-abstraction / implicit-coupling candidates) — and come first. The seed is the top hit,
     and a question often has two homes — the tool that exposes a behavior and the
     module that implements it — so two lists follow it: ``calls_into``, what the
     seed calls in other files (most specific callee first, from the graph), and
     ``also_matched``, the other top hits by the definition they fall in
     (production code before tests; hits on a file's header — docstring and
-    imports — are counted, not listed). Needs the optional `semble` extra:
+    imports — are counted, not listed, and marked ``header`` in
+    ``semantic_hits``). Needs the optional `semble` extra:
     pip install 'graphlore[semble]'.
 
     First call downloads a model: with the default semble backend it fetches
@@ -3106,7 +3110,7 @@ def graphlore_locate(
         c = h.chunk
         return str(c.file_path), int(c.start_line), int(c.end_line)
 
-    semantic_hits = []
+    semantic_hits: list[dict[str, Any]] = []
     hit_ids: list[str | None] = []
     for h in hits:
         fp, sl, el = _loc(h)
@@ -3172,7 +3176,10 @@ def graphlore_locate(
         d = c["distance"]
         return (1, 0) if isinstance(d, str) else (0, int(d))
 
-    hidden = sorted((c for c in cousins if not c["linked"]), key=_rank)
+    # One list: hidden links (linked: false) first, nearest first, then the
+    # cousins already connected to the seed. Each entry appears once.
+    cousins.sort(key=lambda c: (c["linked"], _rank(c)))
+    hidden = [c for c in cousins if not c["linked"]]
 
     seed_file = seed.get("file") or seed.get("path") or seed.get("source_file") or ""
     # FQN of the RESOLVED seed node (its own line), not the chunk's innermost symbol:
@@ -3202,6 +3209,7 @@ def graphlore_locate(
             header = node is not None and _is_file_hub_node(node)
         if header:
             header_hits += 1
+            hit["header"] = True  # marked in semantic_hits too, not only counted
             continue
         key = hid or f"{hit['file']}:{hit['lines']}"
         if key in listed:
@@ -3265,7 +3273,7 @@ def graphlore_locate(
         "calls_into": calls_into,
         "calls_into_total": len(callees),
         "semantic_cousins": cousins,
-        "hidden_links": hidden,
+        "hidden_link_count": len(hidden),
         "build_drift": drift_payload,
     }
     text: list[str] = [
@@ -4519,10 +4527,22 @@ def graphlore_validate(limit: int = 15, as_json: bool = False, scope: str = "") 
         },
         "scope": view.payload(),
     }
+    # The one place the full vendored/minified list is returned: every other
+    # scoped result carries only a count and a few examples.
+    default_view = _scoped(all_nodes, all_edges)
+    vendored = default_view.vendored_files if not isinstance(default_view, str) else []
+    payload["vendored_files"] = vendored
     recursion_note = (
         f"\n{len(recursive)} function(s) call themselves (recursion — not an issue)."
         if recursive else ""
     )
+    if vendored:
+        recursion_note += (
+            f"\n{len(vendored)} vendored/minified file(s), left out of the analysis "
+            "tools by default (as_json=True lists them all): "
+            + ", ".join(vendored[:3])
+            + (f", +{len(vendored) - 3} more" if len(vendored) > 3 else "") + "."
+        )
     # How complete the graph is, as well as how sound: what graphlore had to
     # resolve from the source because graph.json does not carry it.
     resolved = _resolved(all_nodes, all_edges)

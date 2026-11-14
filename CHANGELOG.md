@@ -6,6 +6,36 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+Fifth round of feedback: 0.5.0 re-run on the same three repositories.
+
+### Changed
+- Scoped results summarize the vendored/minified files they left out instead
+  of listing twenty paths on every call: `scope.left_out` keeps
+  `vendored_nodes` and `vendored_file_count`, gives three example paths in
+  `vendored_files` and the directories holding most of them in
+  `vendored_dirs`. `graphlore_validate` returns the full list
+  (`vendored_files`) and counts it in its text.
+- `graphlore_impact`'s `complete` is false only when the budget dropped rows
+  within the hops asked for. A walk that listed everything within `hops` is
+  complete even when nodes lie further out; `beyond_hops` and the hint say
+  separately what `hops + 1` would add.
+- `graphlore_locate` lists each semantic cousin once, in `semantic_cousins`
+  with `linked`: hidden links (`linked: false`) first, nearest first, then
+  the connected ones. The `hidden_links` list, which repeated the same
+  entries, is replaced by `hidden_link_count`. Header chunks the answer
+  skips are marked `header: true` in `semantic_hits`.
+
+### Fixed
+- `graphlore_surprises` ranked a guessed edge from a file that imports nothing
+  of the project at the top: an `indirect_call` from a module importing only
+  the standard library, into an unrelated class in another layer. The graph
+  records no import edge for such a file, and the name-guess rule only judged
+  files it had import edges for. A file without recorded imports is now
+  judged from its own import statements (`ImportChecker.reaches`: Python via
+  `ast`, JS/TS via tree-sitter); when none can mean the target the edge is
+  dropped and counted under `inferred_unimported`. A file whose source cannot
+  be read is still not judged.
+
 ## [0.5.0] - 2026-11-14
 
 An agent's-eye review: results that say how they were reached, what they

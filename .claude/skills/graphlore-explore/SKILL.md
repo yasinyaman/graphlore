@@ -46,9 +46,11 @@ before the read tools can see that graph.
 For a *behavioral* question ("where is retry/backoff handled?", "how are redirects
 followed?"), reach for `graphlore_locate("<natural-language question>")` first: one
 call runs semantic search, maps the top hit to its **enclosing graph node**, and
-returns the token-budgeted subgraph around it **plus `hidden_links`** — semantically
+returns the token-budgeted subgraph around it **plus hidden links** — semantically
 similar code that is structurally disconnected (duplication / missing-abstraction /
-sync-async-twin candidates that neither search nor the graph surfaces alone). Read
+sync-async-twin candidates that neither search nor the graph surfaces alone). In
+JSON they are the `semantic_cousins` entries with `linked: false`; each cousin
+appears once, hidden links first. Read
 the lines under the seed: a question often has two homes (the tool that exposes
 a behavior and the module that implements it). "Seed calls into" lists what the
 seed calls in other files — where the implementation lives when the seed is a thin
@@ -109,9 +111,10 @@ issues — gauge how much to trust the graph).
 - **Cuts are stated.** A budget or limit that drops rows sets `truncated` and
   says what it left out: `not_fetched` (fetch), `files_left_out` (skeleton),
   `total` (search, god_nodes, surprises, package_apis), `counts` (freshness).
-  `graphlore_impact` adds `complete`: false when the budget or the hop limit
-  cut the answer (`beyond_hops` counts the nodes one hop further). Don't read an
-  incomplete blast radius as the whole one.
+  `graphlore_impact` adds `complete`: false when the budget dropped rows within
+  the hops you asked for — don't read that as the whole blast radius. It is
+  true when every node within `hops` is listed; `beyond_hops` says separately
+  how many nodes one more hop would add, for when you need a wider walk.
 - **An empty answer is about the index, not the code.** "Nothing depends on X"
   means no edge was indexed. graphlore adds the calls made through an imported
   module (`mod.func()`, how tests usually call code) from the source — Python,
@@ -158,7 +161,7 @@ stripped) — the middle layer between the map and full code — and
 - **Tracing a bug** → `graphlore_locate("<symptom in plain words>")` (or
   `graphlore_search` without the `[semble]` extra) → `graphlore_subgraph` around the
   best match → `graphlore_path` between suspects → check `graphlore_surprises` and the
-  `hidden_links` locate returned. (The `trace_bug` MCP prompt scripts this.)
+  hidden links locate returned (`semantic_cousins` with `linked: false`). (The `trace_bug` MCP prompt scripts this.)
 - **Explaining a flow** → `graphlore_query` the flow for entry points →
   `graphlore_subgraph(hops=2)` around them → `graphlore_node_details` for
   `file:line`. (The `explain_flow` MCP prompt scripts this.)
