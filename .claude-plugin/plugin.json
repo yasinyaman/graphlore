@@ -1,7 +1,7 @@
 {
   "name": "graphlore",
   "displayName": "graphlore",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Navigate a Graphify codebase knowledge graph joined to real source spans: an MCP server plus an exploration skill.",
   "author": {
     "name": "yasinyaman",
