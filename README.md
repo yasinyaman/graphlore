@@ -281,7 +281,7 @@ Semantic bridge (optional `[semble]` extra — semantic search joined to graph s
 
 | Tool | Purpose |
 |---|---|
-| `graphlore_locate` | NL query → enclosing graph node → token-budgeted subgraph, **plus `hidden_links`**: semantically-similar code that is structurally disconnected (duplication / missing-abstraction candidates). A question often has two homes, so two lists follow the seed: `calls_into` (what the seed calls in other files, most specific first — the implementation behind a thin tool) and `also_matched` (the other top hits by the definition they fall in; hits on a file's docstring-and-imports header are counted, not listed) |
+| `graphlore_locate` | NL query → enclosing graph node → token-budgeted subgraph, **plus hidden links**: semantically-similar code that is structurally disconnected (duplication / missing-abstraction candidates) — the `semantic_cousins` with `linked: false`, listed first and counted in `hidden_link_count`. A question often has two homes, so two lists follow the seed: `calls_into` (what the seed calls in other files, most specific first — the implementation behind a thin tool) and `also_matched` (the other top hits by the definition they fall in; hits on a file's docstring-and-imports header are counted, not listed) |
 
 ### What graphlore adds to the graph it reads
 

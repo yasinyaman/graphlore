@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import fnmatch
 import re
+from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -168,6 +169,12 @@ def _parse_scope(spec: str) -> Scope | str:
     )
 
 
+# How much of the vendored-file list each scoped result carries: a few example
+# paths and the directories that hold most of them.
+_VENDORED_EXAMPLES = 3
+_VENDORED_DIRS_LISTED = 3
+
+
 @dataclass
 class ScopeView:
     """The nodes and edges a scope keeps, and a count of what it left out.
@@ -192,14 +199,25 @@ class ScopeView:
             self.vendored_nodes + self.external_nodes + self.test_nodes + self.filtered_nodes
         )
 
+    def vendored_dirs(self, n: int = _VENDORED_DIRS_LISTED) -> list[dict[str, Any]]:
+        """The ``n`` directories holding the most vendored/minified files."""
+        counts = Counter(f.rsplit("/", 1)[0] if "/" in f else "." for f in self.vendored_files)
+        return [{"dir": d, "files": c} for d, c in counts.most_common(n)]
+
     def payload(self) -> dict[str, Any]:
-        """The ``scope`` object every scoped tool returns."""
+        """The ``scope`` object every scoped tool returns.
+
+        It rides on every analysis result, so the vendored files are summarized —
+        a count, a few examples and the directories holding most of them — not
+        listed; graphlore_validate returns the full list.
+        """
         return {
             "spec": self.scope.spec or "default",
             "left_out": {
                 "vendored_nodes": self.vendored_nodes,
-                "vendored_files": self.vendored_files[:20],
                 "vendored_file_count": len(self.vendored_files),
+                "vendored_files": self.vendored_files[:_VENDORED_EXAMPLES],
+                "vendored_dirs": self.vendored_dirs(),
                 "external_nodes": self.external_nodes,
                 "test_nodes": self.test_nodes,
                 "filtered_nodes": self.filtered_nodes,
