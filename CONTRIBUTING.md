@@ -36,6 +36,16 @@ Please:
 - Stay schema-tolerant — graphify's `graph.json` shape can vary, so parse defensively (see the `_node_*` / `_edge_*` helpers in `graph.py`).
 - Keep the graph.json analysis tools dependency-free (no graphify CLI required); the tree-sitter span backend stays an optional `[treesitter]` extra that degrades gracefully when absent.
 
+## Releasing
+
+1. Bump the version in `pyproject.toml`, `src/graphlore/server.py` (`__version__`) and `.claude-plugin/plugin.json`, then run `uv lock`.
+2. In `CHANGELOG.md`, move the `[Unreleased]` entries under a new version heading.
+3. Merge, then publish a GitHub release whose tag is the version (`v0.3.0` or `0.3.0`).
+
+Publishing the release runs `.github/workflows/publish.yml`, which builds the package and uploads it to PyPI. It refuses to upload when the tag and the `pyproject.toml` version differ.
+
+One-time setup, before the first release: on PyPI, add a *pending trusted publisher* for the project name `graphlore` with owner `yasinyaman`, repository `graphlore`, workflow `publish.yml` and environment `pypi`. No API token is needed.
+
 ## Reporting bugs / requesting features
 
 Use the issue templates under `.github/ISSUE_TEMPLATE/`.

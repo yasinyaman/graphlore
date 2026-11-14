@@ -7,6 +7,14 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Fixed
+- README told users to `pip install graphlore`, but the package has never been
+  released on PyPI, so the command failed. Installation now shows the GitHub
+  form that works today
+  (`pip install "graphlore @ git+https://github.com/yasinyaman/graphlore"`).
+- `mypy` failed inside the `uv.lock` environment (`uv run mypy`): the pinned
+  `tree-sitter-language-pack` types `get_language`'s argument as a `Literal` of
+  grammar names while `detect_language_from_path` returns `str`. The one call
+  site carries a targeted ignore. CI, which installs unlocked, stayed green.
 - **`graphlore_surprises` was effectively dead on every AST-built graph.** It
   keyed on a `surprise`/`is_surprise` flag no graphify writer emits, and its
   only fallback needed community info those graphs also lack — so it printed an
@@ -137,6 +145,11 @@ All notable changes to this project are documented here. The format is based on
   `treesitter`, `semble`; `uv` required), so the server always matches the
   installed plugin version, and `GRAPHLORE_PROJECT_DIR` is set to the opened
   project. A test keeps the manifest version equal to `server.__version__`.
+- **PyPI publish workflow** (`.github/workflows/publish.yml`): publishing a
+  GitHub release builds the sdist and wheel and uploads them with PyPI Trusted
+  Publishing (no stored token), refusing when the release tag and the
+  `pyproject.toml` version differ. The one-time PyPI setup and the release
+  steps are in CONTRIBUTING.md under "Releasing".
 - `code_only` flag on `graphlore_build` — appends the CLI's `--code-only`, so a
   repo containing doc/paper/image files can be indexed via local AST with no
   LLM API key (those files otherwise demand semantic extraction and the build

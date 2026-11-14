@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Guidance for AI coding agents working in this repository. This file is the single source: Codex, Cursor and Copilot's agent features read it directly, and `CLAUDE.md` and `GEMINI.md` import it. `.github/copilot-instructions.md` is a condensed copy for the Copilot features that read only that file; when a rule changes here, update it there too.
+Guidance for AI coding agents working in this repository. This file is the single source: Codex, Cursor and Copilot's agent features read it directly, and `.claude/CLAUDE.md` and `GEMINI.md` import it. `.github/copilot-instructions.md` is a condensed copy for the Copilot features that read only that file; when a rule changes here, update it there too.
 
 ## What this is
 
@@ -73,7 +73,7 @@ A tool is registered with `@mcp.tool(annotations=ToolAnnotations(...))` in `serv
 - `.claude/skills/graphlore-explore/SKILL.md` (shipped to users by the plugin)
 - `CHANGELOG.md` under `[Unreleased]` — every behavior change gets an entry there (Keep a Changelog format)
 
-The version is duplicated in `pyproject.toml`, `server.__version__` and `.claude-plugin/plugin.json` (a test compares the last two), and recorded in `uv.lock`; run `uv lock` after a bump.
+The version is duplicated in `pyproject.toml`, `server.__version__` and `.claude-plugin/plugin.json` (a test compares the last two), and recorded in `uv.lock`; run `uv lock` after a bump. The release steps, including the PyPI publish workflow, are under "Releasing" in `CONTRIBUTING.md`.
 
 ## Claude Code plugin
 
@@ -82,7 +82,8 @@ The repository root is itself a Claude Code plugin and its own marketplace (`.cl
 - `.claude/skills/` is what the plugin ships to users, not only a project-local skill directory. Anything added there is installed for everyone.
 - The plugin's MCP server runs `uvx --from "graphlore[graphify,treesitter,semble] @ ${CLAUDE_PLUGIN_ROOT}" graphlore`, i.e. it builds this package from the installed copy of the repo. Renaming the console script, the package or those extras breaks the plugin.
 - Users stay on the manifest's `version` until it changes, so a fix reaches plugin users only with a version bump.
-- Check manifest changes with `claude plugin validate .`. It passes with one expected warning: a `CLAUDE.md` at the plugin root is not loaded as plugin context (it is for people working on this repo), so `--strict` fails by design.
+- Check manifest changes with `claude plugin validate --strict .`; it passes clean.
+- Claude Code's project instructions live in `.claude/CLAUDE.md`, not at the root. A `CLAUDE.md` at a plugin root is not loaded as plugin context and makes the validator warn, so don't add one there.
 
 ## Tests
 
