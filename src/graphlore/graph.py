@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import difflib
 import json
+import re
 from collections import deque
 from collections.abc import Callable, Iterable
 from pathlib import Path
@@ -130,12 +131,27 @@ def _edge_rel(e: dict) -> str:
     return "->" if v is None else str(v)
 
 
+def _node_type(n: dict) -> str:
+    """What kind of thing a node is: ``type`` where the schema has it, else
+    graphify >= 0.9's ``file_type`` (code / document / concept / rationale)."""
+    v = n.get("type") or n.get("file_type")
+    return "" if v is None else str(v)
+
+
 def _bare_name(label: str) -> str:
-    """``.dump()`` -> ``dump``, ``helper()`` -> ``helper``, ``TableSchema`` -> itself."""
+    """``.dump()`` -> ``dump``, ``helper()`` -> ``helper``, ``TableSchema`` -> itself.
+
+    A scope written with ``::`` (Ruby ``Faraday::Utils::Headers``, C++ / PHP
+    ``Session::SetOption()``) is dropped like a dotted one. Only the part before a
+    ``<`` is cut, so type arguments (``Callback<a.B>``) and ``operator<<`` survive.
+    """
     name = label.strip()
     if name.endswith("()"):
         name = name[:-2]
-    return name.lstrip(".").rsplit(".", 1)[-1]
+    head, lt, tail = name.lstrip(".").partition("<")
+    if not head:  # `<anonymous>`, `<init>`: nothing to cut
+        return name.lstrip(".")
+    return head.replace("::", ".").rsplit(".", 1)[-1] + lt + tail
 
 
 def _is_surprise_edge(e: dict) -> bool:
@@ -164,7 +180,9 @@ _IMPORT_RELATIONS = frozenset({
     "imports", "imports_from", "dynamic_import", "re_exports", "requires",
 })
 _CALL_RELATIONS = frozenset({"calls", "indirect_call"})
-_CONTAINMENT_RELATIONS = frozenset({"contains", "method"})
+# Parent -> member. graphify >= 0.9 also writes `defines` (a class's field, a
+# script's function) and `case_of` (an enum's case).
+_CONTAINMENT_RELATIONS = frozenset({"contains", "method", "defines", "case_of"})
 # Edges that say nothing about one piece of code depending on another: structural
 # containment, and a docstring/comment node pointing at the code it describes.
 _NON_DEPENDENCY_RELATIONS = _CONTAINMENT_RELATIONS | {"rationale_for"}
@@ -194,7 +212,7 @@ def _is_external_node(n: dict) -> bool:
 
 
 # Containment/import scaffolding: structurally expected, never surprising.
-_SURPRISE_STRUCTURAL_RELS = frozenset({"contains", "method", "imports", "imports_from"})
+_SURPRISE_STRUCTURAL_RELS = _CONTAINMENT_RELATIONS | {"imports", "imports_from"}
 # Inferred edges of these kinds claim "this code refers to that code"; a resolver
 # that matched on the bare name leaves one with no import to back it.
 _SURPRISE_NAME_RESOLVED_RELS = frozenset({
@@ -205,12 +223,20 @@ _PACKAGE_ENTRY_STEMS = frozenset({"__init__", "index", "mod"})
 _LANG_FAMILY = {
     ".py": "python", ".pyi": "python",
     ".js": "js", ".jsx": "js", ".mjs": "js", ".cjs": "js",
-    ".ts": "js", ".tsx": "js",
-    ".go": "go", ".rs": "rust", ".java": "jvm", ".kt": "jvm", ".scala": "jvm",
-    ".rb": "ruby", ".php": "php", ".cs": "dotnet",
-    ".c": "c", ".h": "c", ".cc": "c", ".cpp": "c", ".hpp": "c", ".cxx": "c",
+    ".ts": "js", ".tsx": "js", ".mts": "js", ".cts": "js",
+    ".go": "go", ".rs": "rust",
+    ".java": "jvm", ".kt": "jvm", ".kts": "jvm", ".scala": "jvm",
+    ".rb": "ruby", ".php": "php", ".cs": "dotnet", ".swift": "swift",
+    ".c": "c", ".h": "c", ".cc": "c", ".cpp": "c", ".hpp": "c", ".cxx": "c", ".hxx": "c",
+    ".m": "objc", ".mm": "objc", ".lua": "lua", ".zig": "zig",
+    ".ex": "elixir", ".exs": "elixir",
 }
 _TEST_DIR_PARTS = frozenset({"test", "tests", "spec", "specs", "__tests__", "testing", "e2e"})
+# A camelCase or dotted name that ends in Test(s): Gradle source sets
+# (`jvmTest`, `androidTest`), .NET projects (`Foo.Tests`, `Foo.Tests.Xml`) and the
+# file convention of the JVM, .NET, PHP and Swift (`OwnerControllerTests`).
+# `Spec` is left out: it is a production suffix too (`TypeSpec`, `FunSpec`).
+_TEST_NAME = re.compile(r"[a-z0-9.](?:Tests?|TestCase)(?:$|\.)")
 
 
 def _lang_family(path: str) -> str | None:
@@ -220,12 +246,14 @@ def _lang_family(path: str) -> str | None:
 
 def _is_test_path(path: str) -> bool:
     parts = path.split("/")
-    if any(p.lower() in _TEST_DIR_PARTS for p in parts[:-1]):
+    if any(p.lower() in _TEST_DIR_PARTS or _TEST_NAME.search(p) for p in parts[:-1]):
         return True
-    stem = parts[-1].lower().rsplit(".", 1)[0]
+    stem = parts[-1].rsplit(".", 1)[0]
+    low = stem.lower()
     return (
-        stem.startswith("test_") or stem == "conftest"
-        or stem.endswith(("_test", ".test", ".spec"))
+        low.startswith("test_") or low == "conftest"
+        or low.endswith(("_test", "_tests", ".test", ".spec", "_spec"))
+        or bool(_TEST_NAME.search(stem))
     )
 
 

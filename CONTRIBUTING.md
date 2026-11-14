@@ -27,7 +27,7 @@ graphlore/
 │   ├── review.py           #   unreferenced code, same-named symbols, identical bodies, layer rules
 │   └── config.py           #   project dir / out dir
 ├── tests/                  # pytest suite (in-process MCP client + unit tests)
-├── benchmarks/             # multilang benchmark + committed results JSON
+├── benchmarks/             # multilang benchmark, polyglot audit + committed results JSON
 ├── docs/                   # tool reference, concepts, configuration, benchmark reports
 ├── .claude-plugin/         # Claude Code plugin + marketplace manifests (the repo root is the plugin)
 ├── .claude/skills/         # graphlore-explore skill for Claude Code (shipped by the plugin)
