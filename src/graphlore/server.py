@@ -6,7 +6,8 @@ codebase knowledge graph during development. Graphify builds the graph and ships
 its own embedded MCP server for navigating it; what this module adds is the span
 engine (ast + tree-sitter ``start..end`` ranges) and the tools that need it —
 locate/hidden_links, fetch, skeleton, routes, package_apis, and
-cosmetic-vs-structural freshness. Single-project: one PROJECT_DIR per process.
+cosmetic-vs-structural freshness. One active project at a time: PROJECT_DIR,
+switchable with graphlore_project.
 
 CLI-backed tools:
   - graphlore_build      : build / update the graph from a folder
@@ -34,11 +35,19 @@ graph.json analysis tools (no CLI needed):
   - graphlore_diff       : structural changeset between two git refs (file-level)
   - graphlore_prune      : drop phantom nodes for deleted/renamed source files
   - graphlore_validate   : lint graph.json (dangling / duplicate / self-loop / orphan)
-  - graphlore_cycles     : circular dependencies (SCCs) in the directed graph
+  - graphlore_cycles     : circular dependencies by kind — import cycles between
+                          modules, call cycles, others
+  - graphlore_layers     : check import edges against layer rules (who may import whom)
+  - graphlore_unreferenced: dead-code candidates (no graph reference, not registered
+                          by a decorator, not mentioned in the repository's text)
+  - graphlore_same_names : classes / top-level functions sharing a name across modules
   - graphlore_package_apis: symbol-level external API surface (which names each
                           package is actually used for — upgrade-audit input)
   - graphlore_routes     : framework route -> handler table (FastAPI/Flask/Django,
                           Express/NestJS, gin/chi/net-http, Spring)
+
+Project selection:
+  - graphlore_project    : show / switch the project directory the server reads
 
 Community naming:
   - graphlore_label_communities : name Leiden clusters (host-LLM sampling / backend key)
@@ -54,10 +63,14 @@ Prompts:
   - onboard      : orient an assistant to the codebase
   - trace_bug    : investigate a symptom through the graph
   - explain_flow : explain how a named flow/feature works
+  - review       : review structure — cycles, layering, dead and duplicated code
 
 Internal layout: config.py (shared PROJECT_DIR), graph.py (graph.json load +
 node/edge/traversal helpers), spans.py (tree-sitter/ast span engine + structural
-diff), and this module (the MCPServer surface: tools, resources, prompts, main).
+diff), scope.py (the analysis scope: vendored / external / test filtering),
+apis.py and routes.py (per-file extractors), review.py (unreferenced code,
+same-named symbols, layer rules), and this module (the MCPServer surface: tools,
+resources, prompts, main).
 
 Usage:
   GRAPHLORE_PROJECT_DIR=/path/to/repo python server.py
@@ -67,6 +80,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -96,14 +110,17 @@ from .apis import (  # noqa: F401  (re-exported for the tools + tests)
     _api_uses_python,
 )
 from .graph import (  # noqa: F401  (re-exported for the tools + tests)
+    _CALL_RELATIONS,
     _CHARS_PER_TOKEN,
     _GRAPH_CACHE,
+    _IMPORT_RELATIONS,
     _PAYLOAD_ENVELOPE_CHARS,
     _adjacency,
     _approx_tokens,
     _bfs_subgraph,
     _computed_surprises,
     _count_tokens,
+    _cycle_path,
     _directed_adjacency,
     _directed_edge_adjacency,
     _edge_ends,
@@ -113,15 +130,29 @@ from .graph import (  # noqa: F401  (re-exported for the tools + tests)
     _graph_path,
     _hop_distances,
     _hop_records,
+    _is_external_node,
+    _is_file_hub_node,
     _is_surprise_edge,
+    _is_test_path,
     _load_graph,
+    _module_import_adjacency,
     _node_file,
     _node_id,
     _node_label,
     _node_line,
     _nodes_edges,
     _out_dir,
+    _rel,
+    _relation_adjacency,
     _resolve_node,
+)
+from .review import (  # noqa: F401  (re-exported for the tools + tests)
+    _Definitions,
+    _layer_violations,
+    _normalize_rules,
+    _same_named,
+    _span_for,
+    _unreferenced,
 )
 from .routes import (  # noqa: F401  (re-exported for the tools + tests)
     _ROUTES_CACHE,
@@ -129,6 +160,14 @@ from .routes import (  # noqa: F401  (re-exported for the tools + tests)
     _routes_for_file,
     _routes_python,
     routes_for_source,
+)
+from .scope import (  # noqa: F401  (re-exported for the tools + tests)
+    _MINIFIED_CACHE,
+    ScopeView,
+    _is_vendored_file,
+    _parse_scope,
+    _scoped,
+    _vendored_by_path,
 )
 from .spans import (  # noqa: F401
     _SPAN_CACHE,
@@ -222,8 +261,15 @@ mcp = MCPServer(
         "  3. Otherwise use graphlore_subgraph / graphlore_neighbors / graphlore_query "
         "for targeted, token-cheap exploration around a node or question.\n"
         "  4. graphlore_build (with update=True) re-syncs after code changes.\n"
+        "  5. To review a codebase: graphlore_validate, graphlore_cycles, "
+        "graphlore_layers, graphlore_unreferenced, graphlore_same_names (the `review` "
+        "prompt gives the order).\n"
+        "The server reads ONE project directory; graphlore_project shows it and "
+        "switches it (for a second repository, or one just built by path).\n"
         "Most analysis tools read graph.json directly and are read-only; only "
-        "graphlore_build and graphlore_add modify state. Pass as_json=True on "
+        "graphlore_build and graphlore_add modify state. The analysis tools leave "
+        "vendored/minified files and external packages out by default and say so; "
+        "their `scope` argument changes that. Pass as_json=True on "
         "analysis tools when you want structured output to chain on."
     ),
 )
@@ -304,10 +350,10 @@ def _run_cli(args: list[str], cwd: Path | None = None) -> str:
     return out + (f"\n[stderr]\n{err}" if err else "")
 
 
-def _git(args: list[str]) -> str | None:
+def _git(args: list[str], cwd: Path | None = None) -> str | None:
     try:
         proc = subprocess.run(
-            ["git", *args], cwd=str(config.PROJECT_DIR),
+            ["git", *args], cwd=str(cwd or config.PROJECT_DIR),
             capture_output=True, text=True, encoding="utf-8", errors="replace",
             timeout=15,
         )
@@ -399,15 +445,30 @@ def _load_custom_semantic_index(spec: str) -> Any:
 def _semantic_index() -> Any:
     """The active semantic index, dispatched by ``GRAPHLORE_SEMANTIC_BACKEND``.
 
-    Default (unset or ``semble``) keeps today's offline behaviour. Any other value is
-    treated as a ``module.path:Factory`` spec implementing :class:`SemanticIndex`. The
-    semble path stays a separate ``_semble_index`` call so it remains the offline-first
-    default and so tests can stub it directly.
+    Default (unset or ``semble``) is the local semble index: no API key and no
+    service, but NOT network-free on first use — semble downloads its embedding
+    model from the Hugging Face Hub once and caches it (see ``_MODEL_DOWNLOAD_NOTE``).
+    Any other value is treated as a ``module.path:Factory`` spec implementing
+    :class:`SemanticIndex`. The semble path stays a separate ``_semble_index`` call
+    so it remains the default and so tests can stub it directly.
     """
     backend = config.env("SEMANTIC_BACKEND", "").strip()
     if not backend or backend.lower() == "semble":
         return _semble_index()
     return _load_custom_semantic_index(backend)
+
+
+# Appended to the semble-missing error so the first-run cost is known before
+# the install, and quoted in the locate / duplication_scan descriptions.
+_MODEL_DOWNLOAD_NOTE = (
+    "With the default semble backend the first call downloads semble's embedding "
+    "model from the Hugging Face Hub (minishlab/potion-code-16M-v2 as of semble 0.7) "
+    "and caches it; later calls need no network. To fetch it ahead of time: "
+    "python -c \"from model2vec import StaticModel; "
+    "StaticModel.from_pretrained('minishlab/potion-code-16M-v2')\" — then copy "
+    "~/.cache/huggingface to a machine without network access, or set "
+    "SEMBLE_MODEL_NAME to a local copy of the model."
+)
 
 
 def _no_semantic_index_error(tool: str) -> str:
@@ -426,7 +487,7 @@ def _no_semantic_index_error(tool: str) -> str:
         )
     return (
         f"ERROR: {tool} needs the optional 'semble' extra. "
-        "Install with: pip install 'graphlore[semble]'."
+        "Install with: pip install 'graphlore[semble]'. " + _MODEL_DOWNLOAD_NOTE
     )
 
 
@@ -693,8 +754,195 @@ def _skeleton_lines(file_path: str, prefix: str | None = None) -> list[tuple[str
 
 
 # ---------------------------------------------------------------------------
+# Active project
+# ---------------------------------------------------------------------------
+
+
+def _scope_view(nodes: list[dict], edges: list[dict], scope: str, as_json: bool,
+                default_tests: bool = True) -> ScopeView | str:
+    """The scoped view for a tool call, or a ready-to-return error reply."""
+    view = _scoped(nodes, edges, scope, default_tests=default_tests)
+    return _err(view, as_json) if isinstance(view, str) else view
+
+
+def _with_note(text: str, view: ScopeView) -> str:
+    """Append the scope's left-out line to a tool's text reply."""
+    note = view.note()
+    return f"{text}\n\n{note}" if note else text
+
+
+def _out_dir_git_note(project: Path | None = None) -> str:
+    """Warn when graphify-out/ sits in a git work tree neither ignored nor tracked.
+
+    graphify writes its output into the repository it reads, and a `git add -A`
+    would then commit tens of megabytes of it. Whether the graph is ignored or
+    shared (graphify ships a merge driver for a committed graph.json) is the
+    repository's decision, so this only says so — it writes no .gitignore.
+    """
+    root = project or config.PROJECT_DIR
+    out = root / config.OUT_DIR_NAME
+    if not out.is_dir():
+        return ""
+
+    def git(args: list[str]) -> str | None:
+        return _git(args) if project is None else _git(args, project)
+
+    if git(["rev-parse", "--is-inside-work-tree"]) != "true":
+        return ""
+    if git(["check-ignore", "-q", config.OUT_DIR_NAME]) is not None:
+        return ""  # exit 0: ignored
+    if git(["ls-files", "--", config.OUT_DIR_NAME]):
+        return ""  # tracked on purpose
+    size = 0
+    try:
+        for dirpath, _dirs, files in os.walk(out):
+            for name in files:
+                try:
+                    size += os.path.getsize(os.path.join(dirpath, name))
+                except OSError:
+                    pass
+    except OSError:
+        pass
+    return (
+        f"{config.OUT_DIR_NAME}/ ({size / 1_000_000:.1f} MB) is neither ignored nor tracked "
+        f"by git in {root}, so `git add -A` would commit it. Add `{config.OUT_DIR_NAME}/` "
+        "to .gitignore, unless the graph is meant to be shared."
+    )
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        title="Active project", read_only_hint=False, destructive_hint=False,
+        idempotent_hint=True,
+    )
+)
+def graphlore_project(path: str = "", as_json: bool = False) -> str:
+    """Show which project this server reads, or switch it to another directory.
+
+    Every tool works on ONE project: the directory holding
+    ``graphify-out/graph.json``. It starts as GRAPHLORE_PROJECT_DIR (in Claude Code:
+    the session's project directory). Call this with a ``path`` to point the server
+    at another repository — for example a sibling repo just built with
+    ``graphlore_build("/abs/path/to/repo")`` — and every later call reads that one.
+    The switch lasts until the next switch or a server restart, and changes no file.
+
+    Not available while GRAPHLORE_RESTRICT_PATHS is on (always the case over HTTP,
+    where one process serves several clients). The opt-in watcher (GRAPHLORE_WATCH)
+    does not follow a switch: it re-syncs only the directory the server started in,
+    and only while that is the active project.
+
+    Args:
+        path: Directory to switch to (absolute, or relative to the current project).
+            Empty -> only report the active project.
+    """
+    previous = config.PROJECT_DIR
+    switched = False
+    if path.strip():
+        if RESTRICT_PATHS:
+            return _err(
+                "ERROR: switching projects is disabled while GRAPHLORE_RESTRICT_PATHS is "
+                "on (always the case over HTTP). Start a server with GRAPHLORE_PROJECT_DIR "
+                "set to the other project instead.",
+                as_json,
+            )
+        p = Path(path.strip()).expanduser()
+        target = (p if p.is_absolute() else config.PROJECT_DIR / p).resolve()
+        if target.name == config.OUT_DIR_NAME and (target / "graph.json").exists():
+            target = target.parent  # handed the output directory: use its project
+        if not target.is_dir():
+            return _err(f"ERROR: '{path}' is not a directory ({target}).", as_json)
+        if target != previous.resolve():
+            config.PROJECT_DIR = target
+            switched = True
+    graph = _load_graph()
+    counts = None
+    if isinstance(graph, dict):
+        nodes, edges = _nodes_edges(graph)
+        counts = {"nodes": len(nodes), "edges": len(edges)}
+    age = _graph_age()
+    git_note = _out_dir_git_note()
+    payload = {
+        "project_dir": str(config.PROJECT_DIR),
+        "switched": switched,
+        "previous_project_dir": str(previous) if switched else None,
+        "graph_exists": counts is not None,
+        "nodes": counts["nodes"] if counts else None,
+        "edges": counts["edges"] if counts else None,
+        "graph_age": age,
+        "note": git_note or None,
+    }
+    lines = [
+        f"Active project: {config.PROJECT_DIR}"
+        + (f"  (switched from {previous})" if switched else "")
+    ]
+    if counts:
+        lines.append(
+            f"graph.json: {counts['nodes']} nodes, {counts['edges']} edges"
+            + (f"  [{age}]" if age else "")
+        )
+    elif isinstance(graph, str) and _graph_path().exists():
+        lines.append(graph)  # present but unreadable: say why
+    else:
+        lines.append('No graph here yet — run graphlore_build(".").')
+    if git_note:
+        lines.append(git_note)
+    return _fmt(payload, as_json, "\n".join(lines))
+
+
+# ---------------------------------------------------------------------------
 # CLI wrapper tools
 # ---------------------------------------------------------------------------
+
+# What the graphify build log is condensed to by default: the lines carrying
+# counts, and the lines saying something was skipped, missing or failed.
+_BUILD_KEEP_LINE = re.compile(
+    r"\b\d[\d,]*\s+nodes\b|\bfound\s+\d|\bsummary\b"
+    r"|warning|error|fail|skipp|missing|not installed|could not|unable|truncat",
+    re.IGNORECASE,
+)
+# A progress tick: "AST extraction: 100/774 uncached files (12%) [8 workers]".
+_BUILD_PROGRESS_LINE = re.compile(r"\b\d+\s*/\s*\d+\b.*\(\d+%\)")
+
+
+def _condense_build_log(log: str) -> str:
+    """Counts and warnings from a graphify build log; the whole log if none are found.
+
+    The rest (progress ticks, per-stage banners, "next: run ..." hints) is counted
+    in a trailer rather than returned. A log this cannot read is returned whole —
+    a summary must never be emptier than what it summarizes.
+    """
+    lines = [ln for ln in log.splitlines() if ln.strip() and ln.strip() != "[stderr]"]
+    kept: list[str] = []
+    seen: set[str] = set()
+    for ln in lines:
+        if _BUILD_PROGRESS_LINE.search(ln) or not _BUILD_KEEP_LINE.search(ln):
+            continue
+        if ln.strip() not in seen:
+            seen.add(ln.strip())
+            kept.append(ln.rstrip())
+    if not kept:
+        return log
+    hidden = len(lines) - len(kept)
+    if hidden > 0:
+        kept.append(f"({hidden} more log line(s) hidden; verbose=True returns the full CLI log.)")
+    return "\n".join(kept)
+
+
+def _vendored_build_note() -> str:
+    """After a build: how much of the graph is vendored/minified, and what to do."""
+    graph = _load_graph()
+    if not isinstance(graph, dict):
+        return ""
+    view = _scoped(*_nodes_edges(graph))
+    if isinstance(view, str) or not view.vendored_nodes:
+        return ""
+    files = view.vendored_files
+    more = f", +{len(files) - 3} more" if len(files) > 3 else ""
+    return (
+        f"{view.vendored_nodes} node(s) come from {len(files)} vendored/minified file(s) "
+        f"({', '.join(files[:3])}{more}). The analysis tools leave them out by default; "
+        "list them in .graphifyignore to keep them out of the graph altogether."
+    )
 
 
 @mcp.tool(annotations=ToolAnnotations(title="Build/update graph", destructive_hint=False))
@@ -705,8 +953,19 @@ def graphlore_build(
     cluster_only: bool = False,
     no_viz: bool = True,
     code_only: bool = False,
+    verbose: bool = False,
 ) -> str:
     """Build or update a knowledge graph from a folder. (Writes to graphify-out/.)
+
+    graphify writes ``graphify-out/`` INSIDE the folder it reads. Building a folder
+    other than the active project (a subfolder, a sibling repository, an absolute
+    path) therefore leaves the graph where this server does not read it; the result
+    says so and names the ``graphlore_project`` call that switches to it.
+
+    The result is the build's counts and warnings (extractors missing for a file
+    type, files skipped as sensitive, files that yielded no symbols), plus notes on
+    vendored/minified files in the graph and on a graphify-out/ that git neither
+    ignores nor tracks.
 
     Args:
         path: Folder to extract the graph from (relative to the project dir or absolute).
@@ -716,6 +975,7 @@ def graphlore_build(
         no_viz: True -> skip the HTML visualization (faster for development).
         code_only: True -> index only code via local AST (no LLM key needed); skips
             doc/paper/image files that would otherwise require semantic extraction.
+        verbose: True -> return the full CLI log instead of its counts and warnings.
     """
     err = _path_escapes_project(path)
     if err:
@@ -736,9 +996,38 @@ def graphlore_build(
     # The CLI rewrote graph.json; evict eagerly so a same-second re-read (coarse
     # mtime granularity) can't serve the pre-build graph — same guard as prune.
     _GRAPH_CACHE.pop(str(gp), None)
-    if gp.exists():
-        result += f"\n\ngraph.json ready: {gp}"
-    return result
+    if result.startswith("ERROR"):
+        return result  # a failed build is returned whole, never condensed
+    if not verbose:
+        result = _condense_build_log(result)
+
+    p = Path(path)
+    target = (p if p.is_absolute() else config.PROJECT_DIR / p).resolve()
+    written = target / config.OUT_DIR_NAME / "graph.json"
+    notes: list[str] = []
+    if written.exists() and written != gp.resolve():
+        # Built somewhere this server does not read: say so instead of staying
+        # silent (or, worse, announcing the project's own older graph as ready).
+        how = (
+            f'Call graphlore_project("{target}") to switch this server to it'
+            if "graphlore_project" in _registered_tool_names() and not RESTRICT_PATHS
+            else f"Start a server with GRAPHLORE_PROJECT_DIR={target} to read it"
+        )
+        notes.append(
+            f"graph.json written to {written} — not the graph this server reads "
+            f"({gp}), so the read tools will NOT see it. {how}."
+        )
+        git_note = _out_dir_git_note(target)
+    else:
+        if gp.exists():
+            notes.append(f"graph.json ready: {gp}")
+            vendored = _vendored_build_note()
+            if vendored:
+                notes.append(vendored)
+        git_note = _out_dir_git_note()
+    if git_note:
+        notes.append(git_note)
+    return result + ("\n\n" + "\n".join(notes) if notes else "")
 
 
 @mcp.tool(annotations=ToolAnnotations(title="Query graph", read_only_hint=True))
@@ -808,8 +1097,12 @@ def graphlore_overview(top_n: int = 8, as_json: bool = False) -> str:
     if isinstance(graph, str):
         return _err(graph, as_json)
     nodes, edges = _nodes_edges(graph)
+    # God nodes are ranked inside the default scope: a vendored bundle or the
+    # `typing` module is never what "the most connected part of this codebase" means.
+    view = _scoped(nodes, edges)
+    assert not isinstance(view, str)  # the default scope always parses
     degree: Counter[str] = Counter()
-    for e in edges:
+    for e in view.edges:
         s, t = _edge_ends(e)
         degree[s] += 1
         degree[t] += 1
@@ -852,6 +1145,7 @@ def graphlore_overview(top_n: int = 8, as_json: bool = False) -> str:
         "id_collisions": id_collisions,
         "graph_age": age,
         "god_nodes": god,
+        "scope": view.payload(),
         "suggested_next": suggested,
     }
     lines = [
@@ -870,25 +1164,42 @@ def graphlore_overview(top_n: int = 8, as_json: bool = False) -> str:
             f"\nWarning: {id_collisions} node id collision(s) — distinct nodes share an "
             "id/label and were merged; degrees/neighbors may be understated."
         )
+    if view.note():
+        lines.append("\n" + view.note().replace("Left out of scope", "Left out of analysis"))
     if suggested:
         lines.append("\nSuggested next steps: " + "; ".join(suggested))
     return _fmt(payload, as_json, "\n".join(lines))
 
 
 @mcp.tool(annotations=ToolAnnotations(title="God nodes", read_only_hint=True))
-def graphlore_god_nodes(top_n: int = 10, as_json: bool = False) -> str:
-    """List the highest-degree (most connected) 'god nodes'."""
+def graphlore_god_nodes(top_n: int = 10, as_json: bool = False, scope: str = "") -> str:
+    """List the highest-degree (most connected) 'god nodes'.
+
+    Degree is counted inside the scope. By default that leaves out vendored and
+    minified files and nodes standing for external packages (``typing``, ``pytest``),
+    and the result says how many nodes that was.
+
+    Args:
+        top_n: How many nodes to list.
+        scope: Which part of the graph to rank — comma/space separated. A path
+            prefix or glob keeps only those files (``src/pkg``), ``!pattern`` leaves
+            files out, ``-tests`` leaves test code out, ``+external`` / ``+vendored``
+            bring those back, ``all`` ranks the whole graph.
+    """
     graph = _load_graph()
     if isinstance(graph, str):
         return _err(graph, as_json)
     nodes, edges = _nodes_edges(graph)
+    view = _scope_view(nodes, edges, scope, as_json)
+    if isinstance(view, str):
+        return view
     degree: Counter[str] = Counter()
-    for e in edges:
+    for e in view.edges:
         s, t = _edge_ends(e)
         degree[s] += 1
         degree[t] += 1
     labels = _display_labels(nodes)
-    types = {_node_id(n): n.get("type", "") for n in nodes}
+    types = {_node_id(n): n.get("type", "") for n in view.nodes}
     items = [
         {"node": labels.get(nid, nid), "type": types.get(nid, ""), "degree": d}
         for nid, d in degree.most_common(top_n)
@@ -897,11 +1208,12 @@ def graphlore_god_nodes(top_n: int = 10, as_json: bool = False) -> str:
     for it in items:
         t = f" [{it['type']}]" if it["type"] else ""
         text.append(f"  {it['node']}{t} — degree {it['degree']}")
-    return _fmt({"god_nodes": items}, as_json, "\n".join(text))
+    payload = {"god_nodes": items, "scope": view.payload()}
+    return _fmt(payload, as_json, _with_note("\n".join(text), view))
 
 
 @mcp.tool(annotations=ToolAnnotations(title="Surprise edges", read_only_hint=True))
-def graphlore_surprises(limit: int = 20, as_json: bool = False) -> str:
+def graphlore_surprises(limit: int = 20, as_json: bool = False, scope: str = "") -> str:
     """List unexpected cross-file/cross-domain connections (surprise edges).
 
     Three tiers, reported in ``basis`` so "nothing surprising" is never confused
@@ -909,16 +1221,30 @@ def graphlore_surprises(limit: int = 20, as_json: bool = False) -> str:
       - ``flagged``  — the graph carries explicit surprise flags; they are listed.
       - ``computed`` — no flags (every AST-built graph): cross-file edges are
         scored heuristically (confidence, file-type / directory / community
-        crossing, peripheral→hub), with resolver-noise and test↔source couplings
-        suppressed. These are leads, not graph annotations.
+        crossing, peripheral→hub). Expected couplings are scored down — test ↔
+        source, and a directory nothing depends on (bench/, demo/, examples/)
+        using the package several directories depend on — and an inferred edge
+        is dropped when its source file imports neither the target's module nor
+        its package (the resolver matched a name). These are leads, not graph
+        annotations.
       - ``none``     — nothing was scorable; the reason is named explicitly
         instead of printing an empty list under a promising header.
+
+    Args:
+        limit: Cap on listed edges.
+        scope: Which part of the graph to score (see graphlore_god_nodes): path
+            prefixes / globs, ``!pattern``, ``-tests``, ``+vendored``, ``all``.
+            Vendored and minified files are left out by default.
     """
     graph = _load_graph()
     if isinstance(graph, str):
         return _err(graph, as_json)
-    nodes, edges = _nodes_edges(graph)
-    labels = _display_labels(nodes)
+    all_nodes, all_edges = _nodes_edges(graph)
+    view = _scope_view(all_nodes, all_edges, scope, as_json)
+    if isinstance(view, str):
+        return view
+    nodes, edges = view.nodes, view.edges
+    labels = _display_labels(all_nodes)
 
     flagged = [e for e in edges if _is_surprise_edge(e)]
     if flagged:
@@ -930,8 +1256,11 @@ def graphlore_surprises(limit: int = 20, as_json: bool = False) -> str:
             )
         text = [f"First {limit} of {len(flagged)} flagged surprise edges:"]
         text += [f"  {i['from']} —{i['relation']}→ {i['to']}" for i in items]
-        payload = {"surprises": items, "basis": "flagged", "fallback": False}
-        return _fmt(payload, as_json, "\n".join(text))
+        payload = {
+            "surprises": items, "basis": "flagged", "fallback": False,
+            "scope": view.payload(),
+        }
+        return _fmt(payload, as_json, _with_note("\n".join(text), view))
 
     computed, diag = _computed_surprises(nodes, edges)
     items = computed[:limit]
@@ -955,8 +1284,11 @@ def graphlore_surprises(limit: int = 20, as_json: bool = False) -> str:
             "  Rebuild with clustering / an LLM backend (graphlore_build) to get "
             "community and inferred-confidence signals.",
         ]
-        payload = {"surprises": [], "basis": "none", "diagnostics": diag, "fallback": True}
-        return _fmt(payload, as_json, "\n".join(text))
+        payload = {
+            "surprises": [], "basis": "none", "diagnostics": diag, "fallback": True,
+            "scope": view.payload(),
+        }
+        return _fmt(payload, as_json, _with_note("\n".join(text), view))
 
     text = [
         f"No surprise flags in this graph; computed {len(computed)} candidate(s) from "
@@ -975,10 +1307,17 @@ def graphlore_surprises(limit: int = 20, as_json: bool = False) -> str:
             "  All candidates scored weak — this graph is single-language and "
             "AST-only, so the strongest available signals are weak. Treat as leads."
         )
+    unimported = diag["skipped"].get("inferred_unimported", 0)
+    if unimported:
+        text.append(
+            f"  ({unimported} inferred edge(s) dropped: the source file imports neither "
+            "the target's module nor its package.)"
+        )
     payload = {
         "surprises": items, "basis": "computed", "diagnostics": diag, "fallback": True,
+        "scope": view.payload(),
     }
-    return _fmt(payload, as_json, "\n".join(text))
+    return _fmt(payload, as_json, _with_note("\n".join(text), view))
 
 
 @mcp.tool(annotations=ToolAnnotations(title="Communities", read_only_hint=True))
@@ -1489,6 +1828,9 @@ IMPACT_RELATION_PRESETS: dict[str, frozenset[str] | None] = {
 # Structural containment: never a dependency, but walked one hop out from the
 # seed so a class's own members stay reachable when containment is filtered out.
 _IMPACT_MEMBER_RELATIONS = frozenset({"method", "contains"})
+# Never a dependency in either direction: a docstring / rationale node pointing
+# at the code it describes. Left out of the walk unless asked for by name.
+_IMPACT_SKIPPED_RELATIONS = frozenset({"rationale_for"})
 
 
 def _impact_relations(spec: str) -> frozenset[str] | None:
@@ -1534,6 +1876,10 @@ def graphlore_impact(
     Results are ordered by hop distance and capped at a token budget — a graph-native
     query pure vector/embedding retrieval can't answer. Note the blast radius includes
     any INFERRED / surprise edges in the graph, so it can be wider than call-graph-only.
+
+    Docstring / rationale nodes (relation ``rationale_for``) describe code, they do
+    not depend on it: they are left out of the blast radius and counted in
+    ``rationale_nodes_skipped``. Name the relation in ``relations`` to walk them.
 
     Each row also reports the traversed edge's own recorded position as `site`.
     `site_kind="reference"` means the graph recorded where the reference occurs;
@@ -1583,15 +1929,36 @@ def graphlore_impact(
             if _edge_rel(e).strip().lower() in _IMPACT_MEMBER_RELATIONS
         ]
 
+    # A docstring is not a dependent. Walked only when asked for by name.
+    skip = (
+        frozenset() if rel_filter is not None and "rationale_for" in rel_filter
+        else _IMPACT_SKIPPED_RELATIONS
+    )
     if direction == "dependents":
-        recs = _hop_records(reverse, sid, hops, rel_filter, seeds)
+        recs = _hop_records(reverse, sid, hops, rel_filter, seeds, skip)
     elif direction == "dependencies":
-        recs = _hop_records(forward, sid, hops, rel_filter, seeds)
+        recs = _hop_records(forward, sid, hops, rel_filter, seeds, skip)
     else:
-        recs = dict(_hop_records(reverse, sid, hops, rel_filter, seeds))
-        for nid, r in _hop_records(forward, sid, hops, rel_filter, seeds).items():
+        recs = dict(_hop_records(reverse, sid, hops, rel_filter, seeds, skip))
+        for nid, r in _hop_records(forward, sid, hops, rel_filter, seeds, skip).items():
             if nid not in recs or r[0] < recs[nid][0]:
                 recs[nid] = r  # nearest hop in either direction
+    # How many rationale nodes the walk passed by, so leaving them out is visible.
+    rationale_skipped = 0
+    if skip and rel_filter is None:
+        sides = {"dependents": (reverse,), "dependencies": (forward,)}.get(
+            direction, (reverse, forward)
+        )
+        passed: set[str] = set()
+        for adj_side in sides:
+            for nid, (d, _via, _edge) in recs.items():
+                if d >= hops:
+                    continue
+                passed.update(
+                    nb for nb, e in adj_side.get(nid, [])
+                    if _rel(e) in skip and nb not in recs
+                )
+        rationale_skipped = len(passed)
 
     hits: list[tuple[str, int, str, dict]] = []
     for nid, (d, via, edge) in recs.items():
@@ -1647,9 +2014,14 @@ def graphlore_impact(
         "relation_counts": dict(relation_counts.most_common()),
         "count": len(impacted),
         "impacted": impacted,
+        "rationale_nodes_skipped": rationale_skipped,
         "truncated": truncated,
         "approx_tokens": approx,
     }
+    rationale_note = (
+        f"\n({rationale_skipped} docstring/rationale node(s) left out — they describe "
+        "code, they do not depend on it.)" if rationale_skipped else ""
+    )
     verb = {
         "dependents": "depend on",
         "dependencies": "are used by",
@@ -1678,7 +2050,7 @@ def graphlore_impact(
                 row += f"  {prefix}{it['site']}"
             rows.append(row)
         text = "\n".join([head] + rows)
-    return _fmt(payload, as_json, text)
+    return _fmt(payload, as_json, text + rationale_note)
 
 
 @mcp.tool(annotations=ToolAnnotations(title="Locate + structural context", read_only_hint=True))
@@ -1698,6 +2070,14 @@ def graphlore_locate(
     are similar but NOT structurally connected to the seed (duplication /
     missing-abstraction / implicit-coupling candidates). Needs the optional
     `semble` extra: pip install 'graphlore[semble]'.
+
+    First call downloads a model: with the default semble backend it fetches
+    semble's embedding model from the Hugging Face Hub (minishlab/potion-code-16M-v2
+    as of semble 0.7) and caches it; later calls need no network. Prefetch with
+    ``python -c "from model2vec import StaticModel;
+    StaticModel.from_pretrained('minishlab/potion-code-16M-v2')"``; for a machine
+    without network access copy ``~/.cache/huggingface`` over, or point
+    ``SEMBLE_MODEL_NAME`` at a local copy of the model.
     """
     graph = _load_graph()
     if isinstance(graph, str):
@@ -1826,6 +2206,28 @@ def graphlore_locate(
     return _fmt(payload, as_json, "\n".join(text))
 
 
+# Definitions shorter than this are not seeded: two three-line getters always
+# look alike, and say nothing about duplicated logic.
+_DUP_MIN_LINES = 5
+# Two definitions whose line counts differ by more than this factor are not the
+# same shape, however similar an embedding finds their vocabulary.
+_DUP_MAX_SIZE_RATIO = 3.0
+
+
+def _span_len(n: dict) -> int:
+    """Line count of a node's definition (0 when the span engine can't read it)."""
+    try:
+        span = _span_for(_node_file(n), int(_node_line(n)))
+    except (TypeError, ValueError):
+        return 0
+    return span[1] - span[0] + 1 if span else 0
+
+
+def _site(n: dict) -> str:
+    f, ln = _node_file(n), _node_line(n)
+    return f"{f}:{ln}" if f and ln not in (None, "") else (f or "")
+
+
 @mcp.tool(annotations=ToolAnnotations(title="Duplication scan", read_only_hint=True))
 def graphlore_duplication_scan(
     node_budget: int = 50,
@@ -1833,105 +2235,214 @@ def graphlore_duplication_scan(
     min_distance: int = 3,
     max_pairs: int = 40,
     as_json: bool = False,
+    include_tests: bool = False,
+    min_score: float = 0.0,
+    scope: str = "",
 ) -> str:
     """Repo-wide hidden-link / duplication audit — the batch form of locate's hidden_links.
 
-    graphlore_locate surfaces "similar but structurally disconnected" cousins around ONE
-    seed; this sweeps the most-connected nodes and collects every such pair across the
-    repo — duplication, missing abstraction, or sync/async twins that retrieval-only
-    tools (which match "similar shape", not "similar yet structurally far") can't surface.
+    Compares definition with definition: each seed is a function, method or class
+    (largest bodies first), anchored to the semantic chunk that holds its own
+    source, and its semantic neighbours are kept only when they are
 
-    For each seed it asks semble for semantically-related code, then keeps only cousins
-    that are structurally far (beyond the search cap, or >= min_distance hops). Cost scales with
-    node_budget (one semble round-trip per seed), so it's intentionally outside the lean
-    surface — call it deliberately. Needs the optional `semble` extra.
+      - definitions of the same kind and a similar size (a function is compared
+        with functions, not with whatever mentions its name),
+      - structurally far in the graph (beyond the search cap, or >= min_distance
+        hops) — the part no search tool has: similar code that nothing connects,
+      - on the same side of the test/source line, unless include_tests is set.
 
-    Note: each seed is anchored by searching its label and taking the related set — an
-    approximate node→chunk bridge, since the graph stores nodes while semble stores
-    chunks. Seeds whose search doesn't resolve are skipped (counted in seeds_scanned).
+    Every pair carries the backend's similarity ``score`` and ``file:line`` for both
+    sides, best score first. For an exact, model-free first pass — classes and
+    functions that share a NAME across modules — use graphlore_same_names.
+
+    Cost scales with node_budget (one semantic round-trip per seed), so it is
+    intentionally outside the lean surface. Needs the optional `semble` extra.
+    First call downloads a model: semble fetches its embedding model from the
+    Hugging Face Hub (minishlab/potion-code-16M-v2 as of semble 0.7) and caches
+    it; later calls need no network. Prefetch with ``python -c "from model2vec
+    import StaticModel; StaticModel.from_pretrained('minishlab/potion-code-16M-v2')"``;
+    for a machine without network access copy ``~/.cache/huggingface`` over, or
+    point ``SEMBLE_MODEL_NAME`` at a local copy of the model.
 
     Args:
-        node_budget: Max seed nodes to scan (highest-degree first).
+        node_budget: Max seed definitions to scan (largest first).
         related_k: Semantic neighbours fetched per seed.
-        min_distance: Min structural hop distance for a cousin to count as "distant".
-        max_pairs: Cap on reported pairs (most distant first).
+        min_distance: Min structural hop distance for a pair to count as "distant".
+        max_pairs: Cap on reported pairs (best score first).
+        include_tests: True -> also report test ↔ source pairs.
+        min_score: Drop pairs the backend scores below this (when it reports scores).
+        scope: Which part of the graph to scan (see graphlore_god_nodes): path
+            prefixes / globs, ``!pattern``, ``-tests``, ``+vendored``, ``all``.
     """
     graph = _load_graph()
     if isinstance(graph, str):
         return _err(graph, as_json)
-    nodes, edges = _nodes_edges(graph)
+    all_nodes, all_edges = _nodes_edges(graph)
+    view = _scope_view(all_nodes, all_edges, scope, as_json)
+    if isinstance(view, str):
+        return view
     index = _semantic_index()
     if index is None:
-        return _err(_no_semantic_index_error("graphlore_duplication_scan"), as_json)
-    labels = _display_labels(nodes)
-    adj = _adjacency(edges)
-    degree: Counter[str] = Counter()
-    for e in edges:
-        s, t = _edge_ends(e)
-        degree[s] += 1
-        degree[t] += 1
-    seeds = sorted(
-        (n for n in nodes if _node_file(n)),
-        key=lambda n: -degree.get(_node_id(n), 0),
-    )[:max(0, node_budget)]
+        return _err(
+            _no_semantic_index_error("graphlore_duplication_scan")
+            + " graphlore_same_names lists same-named classes/functions without it.",
+            as_json,
+        )
+    labels = _display_labels(all_nodes)
+    adj = _adjacency(all_edges)
+    in_scope = {_node_id(n) for n in view.nodes}
+    defs = _Definitions(all_nodes, all_edges)
+
+    # Seeds: definitions, largest body first. A graph whose schema carries no
+    # recognizable definitions falls back to the most connected file-backed nodes.
+    sized = [
+        (n, _span_len(n)) for n in view.nodes if _node_id(n) in defs.kind
+    ]
+    by_shape = bool(sized)
+    if by_shape:
+        sized = [(n, ln) for n, ln in sized if ln == 0 or ln >= _DUP_MIN_LINES]
+        sized.sort(key=lambda x: (-x[1], _node_file(x[0]), str(_node_line(x[0]))))
+        seeds = [n for n, _ln in sized[:max(0, node_budget)]]
+    else:
+        degree: Counter[str] = Counter()
+        for e in view.edges:
+            s, t = _edge_ends(e)
+            degree[s] += 1
+            degree[t] += 1
+        seeds = sorted(
+            (n for n in view.nodes if _node_file(n)),
+            key=lambda n: -degree.get(_node_id(n), 0),
+        )[:max(0, node_budget)]
+
+    def _family(kind: str | None) -> str:
+        return "class" if kind == "class" else "callable"
 
     dist_cap = max(min_distance, 6)
     far_label = f">{dist_cap}"  # beyond the BFS cap or disconnected — not proven unreachable
     pairs: dict[frozenset[str], dict[str, Any]] = {}
-    scanned = 0
+    skipped: Counter[str] = Counter()
+    scanned = unanchored = 0
     for seed in seeds:
         sid = _node_id(seed)
-        hits = index.search(_node_label(seed), top_k=1)
-        if not hits:
+        sfile = _norm_relpath(_node_file(seed))
+        try:
+            sline = int(_node_line(seed))
+        except (TypeError, ValueError):
+            sline = 0
+        span = _span_for(sfile, sline)
+        # Anchor the seed to the chunk holding its OWN source: search with the
+        # head of its body and take the hit that overlaps its span. Searching by
+        # label alone matched whatever chunk mentions the name.
+        query = _node_label(seed)
+        if span is not None:
+            head = _read_source_lines(sfile, sline, min(span[1], sline + 14))
+            if head is not None:
+                query = "\n".join(head[0])[:800] or query
+        hits = index.search(query, top_k=3 if span is not None else 1)
+        anchor = None
+        for h in hits:
+            c = h.chunk
+            if span is None or (
+                _norm_relpath(c.file_path) == sfile
+                and int(c.start_line) <= span[1] and int(c.end_line) >= span[0]
+            ):
+                anchor = h
+                break
+        if anchor is None:
+            unanchored += 1
             continue
         scanned += 1
         distmap = _hop_distances(adj, sid, dist_cap)
-        for r in index.find_related(hits[0], top_k=related_k):
+        seed_len = span[1] - span[0] + 1 if span else 0
+        for r in index.find_related(anchor, top_k=related_k):
             c = r.chunk
             cn = _node_for_location(
-                nodes, str(c.file_path), int(c.start_line), int(c.end_line)
+                all_nodes, str(c.file_path), int(c.start_line), int(c.end_line)
             )
             if cn is None:
                 continue
             cid = _node_id(cn)
-            if cid == sid:
+            if cid == sid or cid not in in_scope:
+                continue
+            if by_shape:
+                ckind = defs.kind.get(cid)
+                if ckind is None or _family(ckind) != _family(defs.kind.get(sid)):
+                    skipped["different_kind"] += 1
+                    continue
+                other_len = _span_len(cn)
+                if seed_len and other_len and (
+                    max(seed_len, other_len) / min(seed_len, other_len) > _DUP_MAX_SIZE_RATIO
+                ):
+                    skipped["different_size"] += 1
+                    continue
+            cfile = _norm_relpath(_node_file(cn))
+            if not include_tests and _is_test_path(sfile) != _is_test_path(cfile):
+                skipped["test_source"] += 1
+                continue
+            raw_score = getattr(r, "score", None)
+            score = round(float(raw_score), 3) if isinstance(raw_score, int | float) else None
+            if score is not None and score < min_score:
+                skipped["below_min_score"] += 1
                 continue
             d = distmap.get(cid)
             if d is not None and d < min_distance:
                 continue  # structurally close -> a real link, not a hidden one
             key = frozenset((sid, cid))
-            if key not in pairs:  # symmetric pair recorded once
-                pairs[key] = {
-                    "a": labels.get(sid, sid),
-                    "b": labels.get(cid, cid),
-                    "distance": d if d is not None else far_label,
-                }
+            known = pairs.get(key)
+            if known is not None and (score is None or (known["score"] or 0) >= score):
+                continue  # symmetric pair recorded once, at its best score
+            pairs[key] = {
+                "a": labels.get(sid, sid),
+                "a_site": _site(seed),
+                "b": labels.get(cid, cid),
+                "b_site": _site(cn),
+                "score": score,
+                "distance": d if d is not None else far_label,
+            }
 
-    def _rank(p: dict) -> tuple[int, int]:
+    def _rank(p: dict) -> tuple[float, int, int]:
         d = p["distance"]
-        return (0, 0) if isinstance(d, str) else (1, -int(d))  # most distant first
+        far = (0, 0) if isinstance(d, str) else (1, -int(d))  # most distant first
+        return (-(p["score"] if p["score"] is not None else -1.0), *far)
 
     ranked = sorted(pairs.values(), key=_rank)
     shown = ranked[:max_pairs]
     payload = {
         "seeds_scanned": scanned,
+        "seeds_unanchored": unanchored,
+        "seeded_by": "definition size" if by_shape else "degree",
         "pair_count": len(ranked),
         "pairs": shown,
+        "skipped": dict(skipped),
         "truncated": len(ranked) > len(shown),
+        "scope": view.payload(),
     }
+    skip_note = ""
+    if skipped:
+        skip_note = "\nLeft out: " + ", ".join(
+            f"{n} {k.replace('_', ' ')}" for k, n in sorted(skipped.items())
+        ) + (
+            " (include_tests=True adds test ↔ source pairs)."
+            if skipped.get("test_source") else "."
+        )
     if not shown:
         return _fmt(
             payload, as_json,
-            f"No hidden-link / duplication candidates found across {scanned} seed(s).",
+            _with_note(
+                f"No hidden-link / duplication candidates found across {scanned} seed(s)."
+                + skip_note, view,
+            ),
         )
-    head = (
+    lines = [
         f"{len(ranked)} hidden-link candidate(s) from {scanned} seed(s)"
         + (f", showing {len(shown)}" if len(ranked) > len(shown) else "") + ":"
-    )
-    lines = [head] + [
-        f"  {p['a']}  ~  {p['b']}   (structural distance {p['distance']})" for p in shown
     ]
-    return _fmt(payload, as_json, "\n".join(lines))
+    for p in shown:
+        shown_score = f"{p['score']:.2f}  " if p["score"] is not None else ""
+        a = p["a"] + (f" ({p['a_site']})" if p["a_site"] else "")
+        b = p["b"] + (f" ({p['b_site']})" if p["b_site"] else "")
+        lines.append(f"  {shown_score}{a}  ~  {b}   (structural distance {p['distance']})")
+    return _fmt(payload, as_json, _with_note("\n".join(lines) + skip_note, view))
 
 
 @mcp.tool(annotations=ToolAnnotations(title="Node details", read_only_hint=True))
@@ -2636,22 +3147,38 @@ def graphlore_prune(dry_run: bool = True, as_json: bool = False) -> str:
 
 
 @mcp.tool(annotations=ToolAnnotations(title="Validate graph", read_only_hint=True))
-def graphlore_validate(limit: int = 15, as_json: bool = False) -> str:
+def graphlore_validate(limit: int = 15, as_json: bool = False, scope: str = "") -> str:
     """Lint graph.json for structural problems (read-only).
 
     Reports edges whose endpoints aren't in the node set (dangling), duplicate
     edges, self-loops, and orphan (degree-0) nodes — so you know how much to
     trust the graph or whether a rebuild is warranted. Does not modify anything.
+
+    A function that calls itself is recursion, not a defect of the graph: such
+    self-loops are counted apart as ``recursive_calls`` and are not issues. Vendored
+    and minified files are left out by default (their bundled code is full of
+    self-loops that say nothing about this graph); the result says how many nodes
+    that was.
+
+    Args:
+        limit: Cap on the examples listed per issue kind.
+        scope: Which part of the graph to lint (see graphlore_god_nodes): path
+            prefixes / globs, ``!pattern``, ``-tests``, ``+vendored``, ``all``.
     """
     graph = _load_graph()
     if isinstance(graph, str):
         return _err(graph, as_json)
-    nodes, edges = _nodes_edges(graph)
+    all_nodes, all_edges = _nodes_edges(graph)
+    view = _scope_view(all_nodes, all_edges, scope, as_json)
+    if isinstance(view, str):
+        return view
+    nodes, edges = view.nodes, view.edges
     node_ids = {_node_id(n) for n in nodes}
-    labels = _display_labels(nodes)
+    labels = _display_labels(all_nodes)
 
     dangling: list[dict] = []
     self_loops: list[dict] = []
+    recursive: list[str] = []
     duplicates: list[dict] = []
     seen: set[tuple[str, str, str]] = set()
     degree: Counter[str] = Counter()
@@ -2663,7 +3190,9 @@ def graphlore_validate(limit: int = 15, as_json: bool = False) -> str:
         missing = [x for x in (s, t) if x not in node_ids]
         if missing:
             dangling.append({"from": s, "to": t, "relation": rel, "missing": missing})
-        if s == t:
+        if s == t and _rel(e) in _CALL_RELATIONS:
+            recursive.append(labels.get(s, s))
+        elif s == t:
             self_loops.append({"node": labels.get(s, s), "relation": rel})
         key = (s, t, rel)
         if key in seen:
@@ -2689,13 +3218,20 @@ def graphlore_validate(limit: int = 15, as_json: bool = False) -> str:
         "total_issues": total,
         "healthy": total == 0,
         "issues": issues,
+        "recursive_calls": len(recursive),
         "examples": {
             "dangling": dangling[:limit],
             "self_loops": self_loops[:limit],
             "duplicate_edges": duplicates[:limit],
             "orphan_nodes": orphans[:limit],
+            "recursive_calls": recursive[:limit],
         },
+        "scope": view.payload(),
     }
+    recursion_note = (
+        f"\n{len(recursive)} function(s) call themselves (recursion — not an issue)."
+        if recursive else ""
+    )
     if total == 0:
         text = (
             f"Graph looks healthy: {len(nodes)} nodes, {len(edges)} edges, "
@@ -2719,59 +3255,438 @@ def graphlore_validate(limit: int = 15, as_json: bool = False) -> str:
                 f"  {len(orphans)} orphan node(s) (degree 0), e.g.: " + ", ".join(orphans[:8])
             )
         text = "\n".join(lines)
-    return _fmt(payload, as_json, text)
+    return _fmt(payload, as_json, _with_note(text + recursion_note, view))
+
+
+_CYCLE_KINDS = ("all", "imports", "calls", "other")
+# Relations that never close a dependency cycle on their own: containment points
+# from a file or class down to its members, and a docstring node at its subject.
+_CYCLE_IGNORED_RELATIONS = frozenset({"contains", "method", "rationale_for"})
 
 
 @mcp.tool(annotations=ToolAnnotations(title="Dependency cycles", read_only_hint=True))
-def graphlore_cycles(max_cycles: int = 20, as_json: bool = False) -> str:
-    """Detect circular dependencies (strongly-connected components) in the graph.
+def graphlore_cycles(
+    max_cycles: int = 20, as_json: bool = False, kind: str = "all", scope: str = ""
+) -> str:
+    """Detect circular dependencies, reported by the kind of edge that forms them.
 
-    A pure analysis on the directed edges: any group of nodes all mutually reachable
-    forms a dependency cycle — an architectural smell (no clean layering, hard to
-    test or extract in isolation). Members are reported as a set, not a path (the SCC
-    proves mutual reachability, not one specific route). Self-loops (a node depending
-    on itself) are listed separately. Complements graphlore_validate, which inspects
-    dangling/duplicate/self-loop edges rather than cycles.
+    Three kinds, in the order a reviewer needs them:
+      - ``imports`` — import cycles BETWEEN MODULES: import edges lifted to file
+        level (a file importing a symbol imports that symbol's file). The
+        architectural finding: no clean layering, import-order failures. A
+        repository without one says so in one line.
+      - ``calls``   — functions that call each other in a loop (mutual recursion,
+        redraw/rebuild loops). Often deliberate.
+      - ``other``   — remaining node-level cycles that only close through another
+        relation (references, inherits, uses ...), imports aside.
+    Each group is a strongly-connected set (``nodes``) plus one concrete loop
+    through it (``path``). A node pointing at itself — plain recursion — is not a
+    cycle and is listed apart in ``self_loops``. A module's import of its own
+    package ``__init__`` is ignored for import cycles (the parent package is
+    always imported first). Vendored and minified files are left out by default.
 
     Args:
-        max_cycles: Cap on the number of cycle groups returned (largest first).
+        max_cycles: Cap on the groups returned per kind (largest first).
+        kind: "all" (default), or one of "imports" / "calls" / "other".
+        scope: Which part of the graph to check (see graphlore_god_nodes): path
+            prefixes / globs, ``!pattern``, ``-tests``, ``+vendored``, ``all``.
+    """
+    kind = (kind or "all").strip().lower()
+    if kind not in _CYCLE_KINDS:
+        return _err(
+            "ERROR: kind must be 'all', 'imports' (import cycles between modules), "
+            "'calls' (functions calling each other) or 'other'.",
+            as_json,
+        )
+    graph = _load_graph()
+    if isinstance(graph, str):
+        return _err(graph, as_json)
+    all_nodes, all_edges = _nodes_edges(graph)
+    view = _scope_view(all_nodes, all_edges, scope, as_json)
+    if isinstance(view, str):
+        return view
+    nodes, edges = view.nodes, view.edges
+    labels = _display_labels(all_nodes)
+    wanted = _CYCLE_KINDS[1:] if kind == "all" else (kind,)
+
+    found: dict[str, list[dict[str, Any]]] = {}
+    counts: dict[str, int | None] = {"imports": None, "calls": None, "other": None}
+    truncated = False
+    implicit = 0
+
+    def _collect(name: str, forward: Any, show: Any, skip: set[frozenset[str]]) -> None:
+        nonlocal truncated
+        groups = [c for c in _find_cycles(forward)[0] if frozenset(c) not in skip]
+        counts[name] = len(groups)
+        truncated = truncated or len(groups) > max_cycles
+        found[name] = [
+            {
+                "kind": name, "size": len(c),
+                "nodes": [show(n) for n in c],
+                "path": [show(n) for n in _cycle_path(forward, c)],
+            }
+            for c in groups[:max(0, max_cycles)]
+        ]
+
+    def _label(nid: str) -> str:
+        return labels.get(nid, nid)
+
+    if "imports" in wanted:
+        module_forward, implicit = _module_import_adjacency(nodes, edges)
+        _collect("imports", module_forward, str, set())
+    call_forward = _relation_adjacency(edges, _CALL_RELATIONS)
+    if "calls" in wanted:
+        _collect("calls", call_forward, _label, set())
+    if "other" in wanted:
+        # Every node-level cycle a call cycle does not already account for: SCCs
+        # over the dependency edges (imports are judged between modules, above),
+        # minus the groups that ARE a call cycle.
+        any_forward: dict[str, list[tuple[str, str]]] = {}
+        for e in edges:
+            rel = _rel(e)
+            src, dst = _edge_ends(e)
+            if src != dst and rel not in _CYCLE_IGNORED_RELATIONS \
+                    and rel not in _IMPORT_RELATIONS:
+                any_forward.setdefault(src, []).append((dst, rel))
+        call_groups = {frozenset(c) for c in _find_cycles(call_forward)[0]}
+        _collect("other", any_forward, _label, call_groups)
+
+    # Node-level, so beside the point when only module import cycles were asked for.
+    self_loop_ids = [] if kind == "imports" else sorted(
+        {s for e in edges for s, t in [_edge_ends(e)] if s == t}
+    )
+    self_loop_labels = [_label(n) for n in self_loop_ids]
+    cycles = [c for name in wanted for c in found.get(name, [])]
+    total = sum(v for v in counts.values() if v)
+    payload = {
+        "kind": kind,
+        "cycle_count": total,
+        "import_cycle_count": counts["imports"],
+        "call_cycle_count": counts["calls"],
+        "other_cycle_count": counts["other"],
+        "cycles": cycles,
+        "self_loop_count": len(self_loop_ids),
+        "self_loops": self_loop_labels,
+        "implicit_package_imports_ignored": implicit,
+        "truncated": truncated,
+        "scope": view.payload(),
+    }
+
+    titles = {
+        "imports": ("Import cycles between modules", "module(s)"),
+        "calls": ("Call cycles (functions calling each other)", "node(s)"),
+        "other": ("Other dependency cycles (references / inherits / uses ...)", "node(s)"),
+    }
+    lines: list[str] = []
+    for name in wanted:
+        title, unit = titles[name]
+        n = counts[name] or 0
+        if not n:
+            lines.append(f"{title}: none.")
+            continue
+        shown = found[name]
+        suffix = f", showing the {len(shown)} largest" if n > len(shown) else ""
+        lines.append(f"{title}: {n}{suffix}")
+        for c in shown:
+            loop = " → ".join(c["path"])
+            if c["size"] + 1 == len(c["path"]):
+                lines.append(f"  [{c['size']} {unit}] {loop}")
+            else:
+                members = ", ".join(c["nodes"][:12]) + (" …" if c["size"] > 12 else "")
+                lines.append(f"  [{c['size']} {unit}] {members}")
+                lines.append(f"      one loop: {loop}")
+    if "imports" in wanted and implicit:
+        lines.append(
+            f"({implicit} import(s) of a module's own package __init__ ignored for "
+            "import cycles.)"
+        )
+    if self_loop_ids:
+        head = self_loop_labels[:20]
+        more = f" (+{len(self_loop_ids) - len(head)} more)" if len(self_loop_ids) > 20 else ""
+        lines.append(
+            f"\n{len(self_loop_ids)} self-loop(s) (a node referring to itself — recursion, "
+            "not a cycle): " + ", ".join(head) + more
+        )
+    if not total and not self_loop_ids and kind == "all":
+        lines = ["No dependency cycles found (the directed graph is acyclic): "
+                 "no import cycles between modules, no call cycles, no others."]
+    return _fmt(payload, as_json, _with_note("\n".join(lines), view))
+
+
+@mcp.tool(annotations=ToolAnnotations(title="Unreferenced code", read_only_hint=True))
+def graphlore_unreferenced(
+    scope: str = "",
+    include_mentioned: bool = False,
+    count_test_references: bool = True,
+    limit: int = 50,
+    as_json: bool = False,
+) -> str:
+    """Dead-code candidates: functions, methods and classes nothing refers to.
+
+    Three filters, each one reported so the count can be traced:
+      1. No incoming graph edge except containment — no call, reference, use,
+         import or inheritance from another definition. Recursion does not count.
+      2. Not registered by a decorator. A route handler, a click/typer command, a
+         pydantic validator or a pytest fixture is reached through a registry the
+         graph cannot see, so a definition carrying any decorator other than the
+         neutral ones (``staticmethod``, ``lru_cache``, ``dataclass`` ...) is
+         dropped and counted under ``registered_by_decorator``.
+      3. Not mentioned anywhere else in the repository's text — templates, configs
+         and docs included, since a function named in ``pyproject.toml`` or called
+         from an HTML attribute is not dead. ``mentions`` counts whole-identifier
+         occurrences outside the definition's own body.
+    What is left is listed with ``file:line``. Dunder methods and tests collected
+    by naming convention are never listed. Two kinds are listed but marked: a
+    public method of a class that other files use ("may be API"), and a method
+    written in a subclass ("may override a hook its base class calls").
+
+    A LOWER BOUND on what is alive, not proof of death: dynamic dispatch
+    (``getattr``, reflection, entry points built from strings) is invisible.
+
+    Args:
+        scope: Which definitions to examine (see graphlore_god_nodes): path
+            prefixes / globs, ``!pattern``, ``-tests``, ``+vendored``, ``all``.
+            References are counted over the whole graph whatever the scope.
+        include_mentioned: True -> also list definitions with no graph reference
+            whose name does appear elsewhere in the text, with the mention count.
+        count_test_references: False -> a reference from test code does not keep a
+            definition alive (finds code only its tests use).
+        limit: Cap on listed definitions.
+    """
+    graph = _load_graph()
+    if isinstance(graph, str):
+        return _err(graph, as_json)
+    all_nodes, all_edges = _nodes_edges(graph)
+    view = _scope_view(all_nodes, all_edges, scope, as_json)
+    if isinstance(view, str):
+        return view
+    found = _unreferenced(view.nodes, all_nodes, all_edges, count_test_references)
+    labels = _display_labels(all_nodes)
+    items = found["items"]
+    silent = [it for it in items if it["mentions"] == 0]
+    mentioned = [it for it in items if it["mentions"] > 0]
+    listed = (items if include_mentioned else silent)
+    shown = []
+    for it in listed[:max(0, limit)]:
+        row = {
+            "node": labels.get(it["id"], it["name"]), "kind": it["kind"],
+            "file": it["file"], "line": it["line"], "mentions": it["mentions"],
+        }
+        if it.get("note"):
+            row["note"] = it["note"]
+        shown.append(row)
+    payload = {
+        "examined": found["examined"],
+        "no_graph_reference": found["no_graph_reference"],
+        "registered_by_decorator": found["registered_by_decorator"],
+        "mentioned_elsewhere": len(mentioned),
+        "unreferenced_count": len(silent),
+        "unreferenced": shown,
+        "truncated": len(listed) > len(shown),
+        "files_scanned_for_mentions": found["files_scanned_for_mentions"],
+        "mention_scan_capped": found["mention_scan_capped"],
+        "scope": view.payload(),
+    }
+    registered = sum(found["registered_by_decorator"].values())
+    lines = [
+        f"{found['examined']} definition(s) examined, {found['no_graph_reference']} without "
+        f"an incoming graph reference: {registered} registered by a decorator, "
+        f"{len(mentioned)} mentioned elsewhere in the text, {len(silent)} unreferenced."
+    ]
+    if found["registered_by_decorator"]:
+        top = list(found["registered_by_decorator"].items())[:8]
+        lines.append("  decorators: " + ", ".join(f"@{d} ×{n}" for d, n in top))
+    if shown:
+        title = "No graph reference" if include_mentioned else "Unreferenced"
+        lines.append(f"\n{title} ({len(shown)} of {len(listed)}):")
+        for row in shown:
+            loc = f"{row['file']}:{row['line']}" if row["line"] else row["file"]
+            note = f"  — {row['note']}" if row.get("note") else ""
+            lines.append(
+                f"  {row['node']} [{row['kind']}]  {loc}  mentions: {row['mentions']}{note}"
+            )
+    elif mentioned and not include_mentioned:
+        lines.append("  include_mentioned=True lists the ones mentioned only in text.")
+    if found["mention_scan_capped"]:
+        lines.append(
+            f"(Text search stopped after {found['files_scanned_for_mentions']} files; "
+            "mention counts are a lower bound.)"
+        )
+    return _fmt(payload, as_json, _with_note("\n".join(lines), view))
+
+
+# Read when graphlore_layers is called with neither `rules` nor `rules_file`.
+_LAYERS_DEFAULT_FILE = ".graphlore-layers.json"
+
+
+@mcp.tool(annotations=ToolAnnotations(title="Layer rules", read_only_hint=True))
+def graphlore_layers(
+    rules: dict[str, list[str]] | None = None,
+    rules_file: str = "",
+    strict: bool = False,
+    limit: int = 50,
+    as_json: bool = False,
+) -> str:
+    """Check import edges against layer rules: which layer may import which.
+
+    ``rules`` maps a layer — a project-relative path prefix or glob — to the
+    prefixes it may import, e.g.
+    ``{"src/app/api": ["src/app/core"], "src/app/core": []}``. A file belongs to
+    the most specific layer whose prefix holds it. An import is allowed inside one
+    layer, into any prefix the layer lists (``"*"`` allows everything), and into
+    files that belong to no declared layer; external packages are never checked.
+    Everything else is a violation, returned grouped by the importing layer with
+    the ``file:line`` of the import.
+
+    Reads the graph's import edges (``imports`` / ``imports_from`` and their
+    kin) lifted to file level, so it is the same check as an AST-based
+    dependency test — without writing one. Imports the extractor did not record
+    (dynamic imports built from strings) are invisible.
+
+    Args:
+        rules: The mapping, inline.
+        rules_file: Or a JSON file in the repository holding the mapping (bare, or
+            under a "layers" key). With neither, ``.graphlore-layers.json`` at the
+            project root is read.
+        strict: True -> a layer may import ONLY itself and what it lists; imports
+            into files outside every declared layer become violations too.
+        limit: Cap on violations listed per layer.
     """
     graph = _load_graph()
     if isinstance(graph, str):
         return _err(graph, as_json)
     nodes, edges = _nodes_edges(graph)
-    labels = _display_labels(nodes)
-    forward, _reverse = _directed_adjacency(edges)
-    cycles, self_loops = _find_cycles(forward)
-    total = len(cycles)
-    shown_cycles = cycles[:max_cycles]  # list[list[node_id]]
-    self_loop_labels = [labels.get(n, n) for n in self_loops]
+    raw: object = rules
+    source = "inline"
+    if raw is None:
+        source = rules_file or _LAYERS_DEFAULT_FILE
+        full = _resolve_in_project(source)
+        if full is None or not full.is_file():
+            return _err(
+                f"ERROR: no layer rules. Pass rules={{\"<layer prefix>\": [\"<prefix it "
+                f"may import>\", ...]}} or a JSON rules_file in the repository "
+                f"('{source}' was not found).",
+                as_json,
+            )
+        try:
+            raw = json.loads(full.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as e:
+            return _err(f"ERROR: could not read layer rules from '{source}': {e}", as_json)
+    parsed = _normalize_rules(raw)
+    if isinstance(parsed, str):
+        return _err(parsed, as_json)
+    result = _layer_violations(nodes, edges, parsed, strict=strict)
+    total = result["violation_count"]
+    truncated = False
+    for entry in result["layers"]:
+        entry["violation_count"] = len(entry["violations"])
+        truncated = truncated or len(entry["violations"]) > limit
+        entry["violations"] = entry["violations"][:max(0, limit)]
     payload = {
-        "cycle_count": total,
-        "self_loop_count": len(self_loops),
-        "cycles": [
-            {"size": len(c), "nodes": [labels.get(n, n) for n in c]} for c in shown_cycles
-        ],
-        "self_loops": self_loop_labels,
-        "truncated": total > len(shown_cycles),
+        "rules_source": source,
+        "strict": strict,
+        "violation_count": total,
+        "imports_checked": result["imports_checked"],
+        "layers": result["layers"],
+        "unmatched_prefixes": result["unmatched_prefixes"],
+        "truncated": truncated,
     }
-    if not total and not self_loops:
-        return _fmt(
-            payload, as_json, "No dependency cycles found (the directed graph is acyclic)."
+    lines = [
+        f"{total} layer violation(s) in {result['imports_checked']} import(s) checked "
+        f"across {len(result['layers'])} layer(s)" + (" (strict)" if strict else "") + "."
+    ]
+    for entry in result["layers"]:
+        if not entry["violation_count"]:
+            continue
+        allowed = ", ".join(entry["may_import"]) or "nothing outside itself"
+        lines.append(
+            f"\n{entry['layer']} (may import: {allowed}) — "
+            f"{entry['violation_count']} violation(s):"
         )
-    lines: list[str] = []
-    if total:
-        suffix = f", showing the {len(shown_cycles)} largest" if total > len(shown_cycles) else ""
-        lines.append(f"{total} dependency cycle(s){suffix}:")
-        lines += [
-            f"  [{len(c)} nodes] " + ", ".join(labels.get(n, n) for n in c)
-            for c in shown_cycles
-        ]
-    if self_loops:
-        head = self_loop_labels[:20]
-        more = f" (+{len(self_loops) - len(head)} more)" if len(self_loops) > len(head) else ""
-        lines.append(f"\n{len(self_loops)} self-loop(s): " + ", ".join(head) + more)
+        for v in entry["violations"]:
+            what = f" ({v['imported']})" if v.get("imported") else ""
+            lines.append(f"  {v['site']}  imports {v['to_file']}{what}")
+        if entry["violation_count"] > len(entry["violations"]):
+            more = entry["violation_count"] - len(entry["violations"])
+            lines.append(f"  … +{more} more; raise `limit`.")
+    if result["unmatched_prefixes"]:
+        lines.append(
+            "\nNo graph file matches: " + ", ".join(result["unmatched_prefixes"])
+            + " — check the prefix (paths are relative to the project root)."
+        )
     return _fmt(payload, as_json, "\n".join(lines))
+
+
+@mcp.tool(annotations=ToolAnnotations(title="Same-named symbols", read_only_hint=True))
+def graphlore_same_names(
+    kinds: str = "class,function",
+    scope: str = "",
+    limit: int = 30,
+    as_json: bool = False,
+) -> str:
+    """Classes and top-level functions that share a name across modules.
+
+    The exact first tier of a duplication review: two ``Settings`` or two
+    ``TableSchema`` in different modules of one package are leftovers of a merge,
+    or two things that should be one. Needs no embedding model. Each definition
+    is listed with ``file:line`` and how many other modules import it
+    (``imported_by``) or refer to it at all (``referenced_by``) — the copy nobody
+    imports is the one to remove. Classes come first, then the most imported names.
+
+    Methods and nested functions are not compared, nor are the names every module
+    repeats (``main``, ``setup``). Test code is left out unless ``+tests`` is in
+    the scope: same-named tests and fixtures are routine.
+
+    Args:
+        kinds: "class", "function" or both, comma-separated.
+        scope: Which definitions to compare (see graphlore_god_nodes): path
+            prefixes / globs, ``!pattern``, ``+tests``, ``+vendored``, ``all``.
+        limit: Cap on listed names.
+    """
+    plural = {"classes": "class", "functions": "function"}
+    wanted = frozenset(
+        plural.get(k.strip().lower(), k.strip().lower())
+        for k in kinds.replace(" ", ",").split(",") if k.strip()
+    )
+    if not wanted or not wanted <= {"class", "function"}:
+        return _err("ERROR: kinds must be 'class', 'function' or 'class,function'.", as_json)
+    graph = _load_graph()
+    if isinstance(graph, str):
+        return _err(graph, as_json)
+    all_nodes, all_edges = _nodes_edges(graph)
+    view = _scope_view(all_nodes, all_edges, scope, as_json, default_tests=False)
+    if isinstance(view, str):
+        return view
+    groups = _same_named(view.nodes, all_nodes, all_edges, wanted)
+    shown = groups[:max(0, limit)]
+    for g in shown:
+        for d in g["definitions"]:
+            d.pop("id", None)
+    payload = {
+        "name_count": len(groups),
+        "names": shown,
+        "truncated": len(groups) > len(shown),
+        "scope": view.payload(),
+    }
+    if not groups:
+        return _fmt(
+            payload, as_json,
+            _with_note("No class or top-level function name is defined in more than one "
+                       "module.", view),
+        )
+    lines = [
+        f"{len(groups)} name(s) defined in more than one module"
+        + (f", showing {len(shown)}" if len(groups) > len(shown) else "") + ":"
+    ]
+    for g in shown:
+        lines.append(f"  {g['name']} [{'/'.join(g['kinds'])}] — {g['modules']} modules")
+        for d in g["definitions"]:
+            loc = f"{d['file']}:{d['line']}" if d["line"] else d["file"]
+            lines.append(
+                f"      {loc}  imported by {d['imported_by']} module(s), "
+                f"referenced by {d['referenced_by']}"
+            )
+    return _fmt(payload, as_json, _with_note("\n".join(lines), view))
 
 
 def _first_party_prefixes() -> list[str]:
@@ -3161,6 +4076,28 @@ def explain_flow(flow: str) -> str:
         "2. graphlore_subgraph around the entry point (hops=2) for the surrounding structure.\n"
         "3. graphlore_node_details on each key node for source locations.\n"
         "Produce a step-by-step walkthrough with file:line references."
+    )
+
+
+@mcp.prompt()
+def review() -> str:
+    """Review this codebase's structure: cycles, layering, dead and duplicated code."""
+    return (
+        "Review the structure of this codebase using the graphlore tools.\n"
+        "1. graphlore_validate — how far can the graph be trusted? Note what the scope "
+        "left out (vendored files, external packages).\n"
+        "2. graphlore_cycles(kind=\"imports\") — import cycles between modules come first; "
+        "then graphlore_cycles(kind=\"calls\") and judge which loops are deliberate.\n"
+        "3. graphlore_layers(rules={...}) — state the intended layering (from the README, "
+        "the directory layout or an existing architecture test) and list what breaks it.\n"
+        "4. graphlore_unreferenced — dead-code candidates; confirm each with "
+        "graphlore_fetch before calling it dead.\n"
+        "5. graphlore_same_names — classes and functions defined twice under one name.\n"
+        "6. graphlore_god_nodes — the most connected modules and symbols are the "
+        "maintainability hotspots; graphlore_skeleton shows how large they are.\n"
+        "7. graphlore_surprises last, as leads to check, not findings.\n"
+        "Report findings by severity, each with file:line and the tool output that "
+        "supports it. Separate what the graph shows from what you inferred."
     )
 
 
