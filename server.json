@@ -1,0 +1,59 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.yasinyaman/graphlore",
+  "title": "graphlore",
+  "description": "Navigate a codebase via its Graphify knowledge graph: semantic locate, impact, exact source spans.",
+  "repository": {
+    "url": "https://github.com/yasinyaman/graphlore",
+    "source": "github"
+  },
+  "websiteUrl": "https://github.com/yasinyaman/graphlore",
+  "version": "0.5.1",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "registryBaseUrl": "https://pypi.org",
+      "identifier": "graphlore",
+      "version": "0.5.1",
+      "runtimeHint": "uvx",
+      "runtimeArguments": [
+        {
+          "type": "named",
+          "name": "--with",
+          "value": "graphifyy",
+          "description": "Installs the Graphify CLI next to the server; graphlore_build needs it to build the graph."
+        }
+      ],
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "GRAPHLORE_PROJECT_DIR",
+          "description": "Absolute path of the project to explore. The server reads graphify-out/graph.json inside it.",
+          "format": "filepath",
+          "isRequired": true
+        },
+        {
+          "name": "GRAPHLORE_TOOLSET",
+          "description": "Tool surface: lean (12 core exploration tools), full (all 33) or locate (5, needs a semantic backend).",
+          "default": "lean",
+          "choices": [
+            "lean",
+            "full",
+            "locate"
+          ]
+        },
+        {
+          "name": "GRAPHLORE_OFFLINE",
+          "description": "Set to 1 to refuse every path graphlore knows reaches the network.",
+          "default": "0",
+          "choices": [
+            "0",
+            "1"
+          ]
+        }
+      ]
+    }
+  ]
+}

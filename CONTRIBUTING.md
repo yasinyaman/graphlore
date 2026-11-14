@@ -13,22 +13,47 @@ pip install -e ".[dev,treesitter]"   # treesitter so the multi-language tests ru
 
 ## Project layout
 
-`src/graphlore/` is split into layers (bottom → top):
+```
+graphlore/
+├── src/graphlore/          # package
+│   ├── server.py           #   MCP server: 33 tools, prompts, resources, transports
+│   ├── graph.py            #   graph.json loading, node/edge accessors, BFS, adjacency
+│   ├── spans.py            #   span engine: ast + tree-sitter, chunk→node join, structural diff
+│   ├── scope.py            #   analysis scope: vendored / external / test filtering
+│   ├── apis.py             #   symbol-level external-API extraction
+│   ├── routes.py           #   framework route → handler extraction
+│   ├── imports.py          #   import statements read from source: what they can mean, when they run
+│   ├── resolve.py          #   calls and imports through a module object, resolved from source
+│   ├── review.py           #   unreferenced code, same-named symbols, identical bodies, layer rules
+│   └── config.py           #   project dir / out dir
+├── tests/                  # pytest suite (in-process MCP client + unit tests)
+├── benchmarks/             # multilang benchmark + committed results JSON
+├── docs/                   # tool reference, concepts, configuration, benchmark reports
+├── .claude-plugin/         # Claude Code plugin + marketplace manifests (the repo root is the plugin)
+├── .claude/skills/         # graphlore-explore skill for Claude Code (shipped by the plugin)
+├── .github/workflows/      # CI: ruff + mypy + pytest on py 3.10–3.12; PyPI publish on release
+├── server.json             # MCP Registry manifest (see "Releasing")
+├── mcp.json                # Claude Code example config
+└── claude_desktop_config.json
+```
 
-- **`config.py`** — shared `PROJECT_DIR` / `OUT_DIR_NAME` (read by attribute so tests can repoint it).
-- **`graph.py`** — `graph.json` loading + schema-tolerant `_node_*` / `_edge_*` / traversal helpers.
-- **`spans.py`** — the analysis engine: tree-sitter / `ast` span extraction, the chunk→node join, and the structural diff behind cosmetic-vs-structural freshness.
-- **`server.py`** — the MCP surface: the MCPServer instance, the tools, resources, prompts, and `main()`. Re-exports the helpers above so `server._x` keeps resolving.
-
-Add a graph/analysis helper to `graph.py` or `spans.py`; add a new tool to `server.py`.
+`src/graphlore/` is layered bottom → top (`config.py` → `graph.py` → `spans.py` →
+`scope.py` → `apis.py` / `routes.py` → `imports.py` → `resolve.py` → `review.py` →
+`server.py`); each module imports only from earlier ones. `server.py` re-exports
+the helpers tests reach as `server._x`. [`AGENTS.md`](AGENTS.md) describes each
+layer and the conventions that span files.
 
 ## Before opening a PR
 
 ```bash
 ruff check .      # lint
-ruff format .     # format
+mypy              # types
 pytest -q         # tests
 ```
+
+Don't run `ruff format .` across the repository: most files are not
+ruff-formatted and CI does not check formatting, so it rewrites them wholesale.
+Match the surrounding style by hand.
 
 Please:
 - Keep tools read-only unless they genuinely mutate state, and set the matching MCP annotation (`read_only_hint` / `destructive_hint`).
@@ -38,11 +63,23 @@ Please:
 
 ## Releasing
 
-1. Bump the version in `pyproject.toml`, `src/graphlore/server.py` (`__version__`) and `.claude-plugin/plugin.json`, then run `uv lock`.
+1. Bump the version in `pyproject.toml`, `src/graphlore/server.py` (`__version__`), `.claude-plugin/plugin.json` and `server.json` (twice: the top-level `version` and the package's), then run `uv lock`.
 2. In `CHANGELOG.md`, move the `[Unreleased]` entries under a new version heading.
 3. Merge, then publish a GitHub release whose tag is the version (`v0.3.0` or `0.3.0`).
 
 Publishing the release runs `.github/workflows/publish.yml`, which builds the package and uploads it to PyPI. It refuses to upload when the tag and the `pyproject.toml` version differ.
+
+### MCP Registry
+
+`server.json` is the entry for the [official MCP Registry](https://registry.modelcontextprotocol.io). The registry holds metadata only and checks the package itself, so publish there **after** the PyPI release exists:
+
+```bash
+brew install mcp-publisher        # or a binary from the modelcontextprotocol/registry releases
+mcp-publisher login github        # device-code login; grants the io.github.yasinyaman/ namespace
+mcp-publisher publish             # run in the repository root, reads server.json
+```
+
+The registry verifies ownership by looking for `mcp-name: io.github.yasinyaman/graphlore` in the README that PyPI shows, which is why that line sits in an HTML comment at the top of `README.md`. Don't remove it, and keep it equal to `name` in `server.json` (a test checks both, and the two versions). The description is capped at 100 characters. `server.json` runs the server as `uvx --with graphifyy graphlore`, so the Graphify CLI is installed alongside it.
 
 One-time setup, before the first release: on PyPI, add a *pending trusted publisher* for the project name `graphlore` with owner `yasinyaman`, repository `graphlore`, workflow `publish.yml` and environment `pypi`. No API token is needed.
 
