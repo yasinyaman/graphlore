@@ -20,7 +20,8 @@ graph.json analysis tools (no CLI needed):
   - graphlore_overview   : one-shot orientation (call this first)
   - graphlore_locate     : semantic search (semble) -> enclosing node -> token-budgeted
                           subgraph + hidden_links  [needs the optional [semble] extra]
-  - graphlore_duplication_scan: repo-wide hidden-link / duplication audit  [needs [semble]]
+  - graphlore_duplication_scan: repo-wide duplication audit — identical bodies
+                          (exact), then hidden links  [the latter needs [semble]]
   - graphlore_god_nodes  : highest-degree nodes
   - graphlore_surprises  : unexpected cross-domain connections
   - graphlore_communities: Leiden community summaries
@@ -36,7 +37,7 @@ graph.json analysis tools (no CLI needed):
   - graphlore_prune      : drop phantom nodes for deleted/renamed source files
   - graphlore_validate   : lint graph.json (dangling / duplicate / self-loop / orphan)
   - graphlore_cycles     : circular dependencies by kind — import cycles between
-                          modules, call cycles, others
+                          modules (runtime / deferred / type-only), call cycles, others
   - graphlore_layers     : check import edges against layer rules (who may import whom)
   - graphlore_unreferenced: dead-code candidates (no graph reference, not registered
                           by a decorator, not mentioned in the repository's text)
@@ -67,10 +68,11 @@ Prompts:
 
 Internal layout: config.py (shared PROJECT_DIR), graph.py (graph.json load +
 node/edge/traversal helpers), spans.py (tree-sitter/ast span engine + structural
-diff), scope.py (the analysis scope: vendored / external / test filtering),
-apis.py and routes.py (per-file extractors), review.py (unreferenced code,
-same-named symbols, layer rules), and this module (the MCPServer surface: tools,
-resources, prompts, main).
+diff), imports.py (import statements read from source: what they can mean and
+when they run), scope.py (the analysis scope: vendored / external / test
+filtering), apis.py and routes.py (per-file extractors), review.py (unreferenced
+code, same-named symbols, identical bodies, layer rules), and this module (the
+MCPServer surface: tools, resources, prompts, main).
 
 Usage:
   GRAPHLORE_PROJECT_DIR=/path/to/repo python server.py
@@ -145,9 +147,18 @@ from .graph import (  # noqa: F401  (re-exported for the tools + tests)
     _rel,
     _relation_adjacency,
     _resolve_node,
+    _tiered_import_cycles,
+)
+from .imports import (  # noqa: F401  (re-exported for the tools + tests)
+    ImportChecker,
+    _imports_for_file,
+    _python_imports,
 )
 from .review import (  # noqa: F401  (re-exported for the tools + tests)
+    _body_fingerprints,
+    _class_bases,
     _Definitions,
+    _identical_bodies,
     _layer_violations,
     _normalize_rules,
     _same_named,
@@ -516,6 +527,7 @@ class _DisplayLabels:
             counts[lbl] += 1
         self._counts = counts
         self._resolved: dict[str, str] = {}
+        self._fqns: dict[str, str | None] = {}
 
     # dict.get-style overloads: with a str default the result is always str,
     # so call sites like `labels.get(n, n)` type-check as str.
@@ -547,20 +559,50 @@ class _DisplayLabels:
     def __len__(self) -> int:
         return len(self._label)
 
+    def name(self, nid: str, default: str | None = None) -> str | None:
+        """Label for a row that prints its own ``file:line``.
+
+        Like :meth:`get`, except that an ambiguous label with no FQN to qualify
+        it stays bare instead of gaining a ``(file:Lline)`` suffix the row would
+        then show twice.
+        """
+        base = self._label.get(nid)
+        if base is None:
+            return default
+        if self._counts.get(base, 0) <= 1:
+            return base
+        return self._fqn(nid, base) or base
+
+    def _fqn(self, nid: str, base: str) -> str | None:
+        """Span-recovered qualified name for an ambiguous label, if there is one."""
+        if nid in self._fqns:
+            return self._fqns[nid]
+        n = self._node[nid]
+        file, line = _node_file(n), _node_line(n)
+        qual = None
+        try:
+            if file and line not in (None, ""):
+                qual = _span_qualname(str(file), int(line))
+        except Exception:
+            qual = None
+        got = None
+        if qual:
+            # keep the call-marker convention of callable labels: `.foo()` ->
+            # `Bar.foo()`, `inner()` -> `outer.inner()`
+            named = f"{qual}()" if base.endswith("()") else qual
+            # a top-level function's qualified name IS its label: no help
+            got = named if named != base else None
+        self._fqns[nid] = got
+        return got
+
     def _qualified(self, nid: str, base: str) -> str:
         n = self._node[nid]
         file, line = _node_file(n), _node_line(n)
         if not file:
             return base  # nothing to qualify by
-        qual = None
-        try:
-            if line not in (None, ""):
-                qual = _span_qualname(str(file), int(line))
-        except Exception:
-            qual = None
-        if qual and qual != base:
-            # keep the call-marker convention of method labels: `.foo()` -> `Bar.foo()`
-            return f"{qual}()" if base.startswith(".") and base.endswith("()") else qual
+        fqn = self._fqn(nid, base)
+        if fqn:
+            return fqn
         loc = f"{file}:L{line}" if line not in (None, "") else str(file)
         return f"{base} ({loc})"
 
@@ -1262,7 +1304,7 @@ def graphlore_surprises(limit: int = 20, as_json: bool = False, scope: str = "")
         }
         return _fmt(payload, as_json, _with_note("\n".join(text), view))
 
-    computed, diag = _computed_surprises(nodes, edges)
+    computed, diag = _computed_surprises(nodes, edges, ImportChecker().kind)
     items = computed[:limit]
     if not items:
         skipped = ", ".join(
@@ -2212,6 +2254,11 @@ _DUP_MIN_LINES = 5
 # Two definitions whose line counts differ by more than this factor are not the
 # same shape, however similar an embedding finds their vocabulary.
 _DUP_MAX_SIZE_RATIO = 3.0
+# Default score floor on the semble backend. One observation, not a calibration:
+# on a 774-file repository every pair between 0.49 and 0.64 was two classes with
+# the same role and no shared code. A custom backend's scale is unknown, so the
+# floor applies to semble only.
+_SEMBLE_SCORE_FLOOR = 0.7
 
 
 def _span_len(n: dict) -> int:
@@ -2236,14 +2283,22 @@ def graphlore_duplication_scan(
     max_pairs: int = 40,
     as_json: bool = False,
     include_tests: bool = False,
-    min_score: float = 0.0,
+    min_score: float | None = None,
     scope: str = "",
 ) -> str:
-    """Repo-wide hidden-link / duplication audit — the batch form of locate's hidden_links.
+    """Repo-wide duplication audit in two tiers: identical bodies, then hidden links.
 
-    Compares definition with definition: each seed is a function, method or class
-    (largest bodies first), anchored to the semantic chunk that holds its own
-    source, and its semantic neighbours are kept only when they are
+    Tier 1 — ``identical_bodies`` (exact, no model, always runs): every function
+    and method body is hashed after normalizing whitespace, comments and the
+    docstring, and bodies that occur more than once are reported as one group
+    with ``file:line`` for each copy. The function's own name does not count, so a
+    renamed copy still matches; trivial bodies (``return self.x``) are left out.
+    This is the tier that finds the small helper copied into three modules.
+
+    Tier 2 — ``pairs`` (semantic, the batch form of locate's hidden_links): each
+    seed is a function, method or class (largest bodies first), anchored to the
+    semantic chunk that holds its own source, and its semantic neighbours are kept
+    only when they are
 
       - definitions of the same kind and a similar size (a function is compared
         with functions, not with whatever mentions its name),
@@ -2252,11 +2307,15 @@ def graphlore_duplication_scan(
       - on the same side of the test/source line, unless include_tests is set.
 
     Every pair carries the backend's similarity ``score`` and ``file:line`` for both
-    sides, best score first. For an exact, model-free first pass — classes and
-    functions that share a NAME across modules — use graphlore_same_names.
+    sides, best score first. The score is the similarity of the two chunks (1.0 =
+    the same text). On the default semble backend, pairs under 0.7 are left out
+    unless ``min_score`` says otherwise: down there they are usually code with the
+    same ROLE (two abstract bases, two SQL builders), not copied code. For names
+    shared across modules, see graphlore_same_names.
 
-    Cost scales with node_budget (one semantic round-trip per seed), so it is
-    intentionally outside the lean surface. Needs the optional `semble` extra.
+    Cost of tier 2 scales with node_budget (one semantic round-trip per seed), so
+    the tool is intentionally outside the lean surface. Tier 2 needs the optional
+    `semble` extra; without it the result is tier 1 alone, and says so.
     First call downloads a model: semble fetches its embedding model from the
     Hugging Face Hub (minishlab/potion-code-16M-v2 as of semble 0.7) and caches
     it; later calls need no network. Prefetch with ``python -c "from model2vec
@@ -2268,9 +2327,13 @@ def graphlore_duplication_scan(
         node_budget: Max seed definitions to scan (largest first).
         related_k: Semantic neighbours fetched per seed.
         min_distance: Min structural hop distance for a pair to count as "distant".
-        max_pairs: Cap on reported pairs (best score first).
-        include_tests: True -> also report test ↔ source pairs.
-        min_score: Drop pairs the backend scores below this (when it reports scores).
+        max_pairs: Cap on reported pairs (best score first), and on identical-body
+            groups.
+        include_tests: True -> also report test ↔ source pairs, and identical
+            bodies inside test code.
+        min_score: Drop pairs the backend scores below this (when it reports
+            scores). Default: 0.7 on semble, 0 on a custom backend; pass 0 to see
+            every pair.
         scope: Which part of the graph to scan (see graphlore_god_nodes): path
             prefixes / globs, ``!pattern``, ``-tests``, ``+vendored``, ``all``.
     """
@@ -2281,14 +2344,55 @@ def graphlore_duplication_scan(
     view = _scope_view(all_nodes, all_edges, scope, as_json)
     if isinstance(view, str):
         return view
+    labels = _display_labels(all_nodes)
+
+    # Tier 1: identical bodies. Exact, model-free, every size.
+    groups = _identical_bodies(view.nodes, all_nodes, all_edges, include_tests)
+    identical = [
+        {
+            "copies": g["copies"], "lines": g["lines"],
+            "definitions": [
+                {"node": labels.name(d["id"], d["id"]), "site": f"{d['file']}:{d['line']}"}
+                for d in g["definitions"]
+            ],
+        }
+        for g in groups[:max(0, max_pairs)]
+    ]
+    identical_lines: list[str] = []
+    if identical:
+        identical_lines.append(
+            f"Identical bodies (exact; whitespace, comments and docstrings aside) — "
+            f"{len(groups)} group(s)"
+            + (f", showing {len(identical)}" if len(groups) > len(identical) else "") + ":"
+        )
+        for g in identical:
+            copies = ", ".join(f"{d['node']} ({d['site']})" for d in g["definitions"])
+            identical_lines.append(f"  [{g['copies']} copies, {g['lines']} line(s)] {copies}")
+    else:
+        identical_lines.append("Identical bodies (exact): none.")
+
     index = _semantic_index()
     if index is None:
-        return _err(
-            _no_semantic_index_error("graphlore_duplication_scan")
-            + " graphlore_same_names lists same-named classes/functions without it.",
-            as_json,
+        # No semantic backend: the exact tier still stands on its own.
+        why = (
+            _no_semantic_index_error("graphlore_duplication_scan").removeprefix("ERROR: ")
+            + " graphlore_same_names lists same-named classes/functions without it."
         )
-    labels = _display_labels(all_nodes)
+        payload = {
+            "identical_group_count": len(groups),
+            "identical_bodies": identical,
+            "semantic_tier": "unavailable",
+            "semantic_note": why,
+            "seeds_scanned": 0,
+            "pair_count": 0,
+            "pairs": [],
+            "scope": view.payload(),
+        }
+        text = "\n".join(identical_lines) + "\n\nSemantic tier not run: " + why
+        return _fmt(payload, as_json, _with_note(text, view))
+    if min_score is None:
+        backend = config.env("SEMANTIC_BACKEND", "").strip().lower()
+        min_score = _SEMBLE_SCORE_FLOOR if backend in ("", "semble") else 0.0
     adj = _adjacency(all_edges)
     in_scope = {_node_id(n) for n in view.nodes}
     defs = _Definitions(all_nodes, all_edges)
@@ -2392,9 +2496,9 @@ def graphlore_duplication_scan(
             if known is not None and (score is None or (known["score"] or 0) >= score):
                 continue  # symmetric pair recorded once, at its best score
             pairs[key] = {
-                "a": labels.get(sid, sid),
+                "a": labels.name(sid, sid),
                 "a_site": _site(seed),
-                "b": labels.get(cid, cid),
+                "b": labels.name(cid, cid),
                 "b_site": _site(cn),
                 "score": score,
                 "distance": d if d is not None else far_label,
@@ -2408,35 +2512,43 @@ def graphlore_duplication_scan(
     ranked = sorted(pairs.values(), key=_rank)
     shown = ranked[:max_pairs]
     payload = {
+        "identical_group_count": len(groups),
+        "identical_bodies": identical,
+        "semantic_tier": "ran",
         "seeds_scanned": scanned,
         "seeds_unanchored": unanchored,
         "seeded_by": "definition size" if by_shape else "degree",
+        "score_floor": min_score,
         "pair_count": len(ranked),
         "pairs": shown,
         "skipped": dict(skipped),
-        "truncated": len(ranked) > len(shown),
+        "truncated": len(ranked) > len(shown) or len(groups) > len(identical),
         "scope": view.payload(),
     }
     skip_note = ""
     if skipped:
         skip_note = "\nLeft out: " + ", ".join(
             f"{n} {k.replace('_', ' ')}" for k, n in sorted(skipped.items())
-        ) + (
-            " (include_tests=True adds test ↔ source pairs)."
-            if skipped.get("test_source") else "."
-        )
+        ) + "."
+        if skipped.get("test_source"):
+            skip_note += " include_tests=True adds test ↔ source pairs."
+        if skipped.get("below_min_score"):
+            skip_note += (
+                f" Pairs scoring under {min_score:g} are usually code with the same role, "
+                "not copies; min_score=0 lists them."
+            )
+    lines = [*identical_lines, ""]
     if not shown:
-        return _fmt(
-            payload, as_json,
-            _with_note(
-                f"No hidden-link / duplication candidates found across {scanned} seed(s)."
-                + skip_note, view,
-            ),
+        lines.append(
+            f"No hidden-link / duplication candidates found across {scanned} seed(s)."
         )
-    lines = [
+        return _fmt(payload, as_json, _with_note("\n".join(lines) + skip_note, view))
+    lines.append(
         f"{len(ranked)} hidden-link candidate(s) from {scanned} seed(s)"
-        + (f", showing {len(shown)}" if len(ranked) > len(shown) else "") + ":"
-    ]
+        + (f", showing {len(shown)}" if len(ranked) > len(shown) else "")
+        + (" — score is the similarity of the two chunks, 1.0 = the same text:"
+           if any(p["score"] is not None for p in shown) else ":")
+    )
     for p in shown:
         shown_score = f"{p['score']:.2f}  " if p["score"] is not None else ""
         a = p["a"] + (f" ({p['a_site']})" if p["a_site"] else "")
@@ -3259,6 +3371,18 @@ def graphlore_validate(limit: int = 15, as_json: bool = False, scope: str = "") 
 
 
 _CYCLE_KINDS = ("all", "imports", "calls", "other")
+# Import cycles by when their imports run, most serious first.
+_IMPORT_TIER_TITLES = {
+    "runtime": "Runtime import cycles between modules (a loop of module-level imports: "
+               "can fail at start-up)",
+    "deferred": "Deferred import cycles (the loop needs an import inside a function)",
+    "type-only": "Type-only import cycles (the loop needs an import under "
+                 "`if TYPE_CHECKING:`)",
+}
+_IMPORT_HOP_ARROWS = {
+    "deferred": " →[in a function] ",
+    "type-checking": " →[TYPE_CHECKING] ",
+}
 # Relations that never close a dependency cycle on their own: containment points
 # from a file or class down to its members, and a docstring node at its subject.
 _CYCLE_IGNORED_RELATIONS = frozenset({"contains", "method", "rationale_for"})
@@ -3272,15 +3396,23 @@ def graphlore_cycles(
 
     Three kinds, in the order a reviewer needs them:
       - ``imports`` — import cycles BETWEEN MODULES: import edges lifted to file
-        level (a file importing a symbol imports that symbol's file). The
-        architectural finding: no clean layering, import-order failures. A
-        repository without one says so in one line.
+        level (a file importing a symbol imports that symbol's file), each read
+        back from the importing file's source and classified by when it runs.
+        ``runtime`` cycles (a loop of module-level imports: the ones that fail at
+        start-up) come first; ``deferred`` cycles only close through an import
+        inside a function, ``type-only`` ones through an import under
+        ``if TYPE_CHECKING:`` — the modules know each other, nothing breaks. A
+        repository without a runtime cycle says so in one line. An import edge
+        the source contradicts (``import yaml`` linked to a first-party
+        ``yaml.py``) is ignored and counted. Python is classified; imports in
+        other languages count as module-level.
       - ``calls``   — functions that call each other in a loop (mutual recursion,
         redraw/rebuild loops). Often deliberate.
       - ``other``   — remaining node-level cycles that only close through another
         relation (references, inherits, uses ...), imports aside.
     Each group is a strongly-connected set (``nodes``) plus one concrete loop
-    through it (``path``). A node pointing at itself — plain recursion — is not a
+    through it (``path``; for imports, ``hops`` says when each import on it
+    runs). A node pointing at itself — plain recursion — is not a
     cycle and is listed apart in ``self_loops``. A module's import of its own
     package ``__init__`` is ignored for import cycles (the parent package is
     always imported first). Vendored and minified files are left out by default.
@@ -3331,9 +3463,27 @@ def graphlore_cycles(
     def _label(nid: str) -> str:
         return labels.get(nid, nid)
 
+    checker = ImportChecker()
+    tier_counts: dict[str, int | None] = dict.fromkeys(_IMPORT_TIER_TITLES)
     if "imports" in wanted:
-        module_forward, implicit = _module_import_adjacency(nodes, edges)
-        _collect("imports", module_forward, str, set())
+        # Each import edge is read back from the importing file: one the source
+        # contradicts is dropped, the rest say when they run, and that decides
+        # whether a cycle can fail at start-up or only exists on paper.
+        module_forward, implicit = _module_import_adjacency(nodes, edges, checker.kind)
+        tiered = _tiered_import_cycles(module_forward)
+        counts["imports"] = len(tiered)
+        found["imports"] = []
+        for tier in _IMPORT_TIER_TITLES:
+            groups = [g for g in tiered if g["tier"] == tier]
+            tier_counts[tier] = len(groups)
+            truncated = truncated or len(groups) > max_cycles
+            found["imports"] += [
+                {
+                    "kind": "imports", "import_kind": tier, "size": len(g["nodes"]),
+                    "nodes": g["nodes"], "path": g["path"], "hops": g["hops"],
+                }
+                for g in groups[:max(0, max_cycles)]
+            ]
     call_forward = _relation_adjacency(edges, _CALL_RELATIONS)
     if "calls" in wanted:
         _collect("calls", call_forward, _label, set())
@@ -3362,23 +3512,64 @@ def graphlore_cycles(
         "kind": kind,
         "cycle_count": total,
         "import_cycle_count": counts["imports"],
+        "runtime_import_cycle_count": tier_counts["runtime"],
+        "deferred_import_cycle_count": tier_counts["deferred"],
+        "type_only_import_cycle_count": tier_counts["type-only"],
         "call_cycle_count": counts["calls"],
         "other_cycle_count": counts["other"],
         "cycles": cycles,
         "self_loop_count": len(self_loop_ids),
         "self_loops": self_loop_labels,
         "implicit_package_imports_ignored": implicit,
+        "import_edges_rejected": len(checker.rejected),
+        "rejected_imports": checker.rejected[:10],
         "truncated": truncated,
         "scope": view.payload(),
     }
 
     titles = {
-        "imports": ("Import cycles between modules", "module(s)"),
         "calls": ("Call cycles (functions calling each other)", "node(s)"),
         "other": ("Other dependency cycles (references / inherits / uses ...)", "node(s)"),
     }
     lines: list[str] = []
+    if "imports" in wanted and not counts["imports"]:
+        lines.append("Import cycles between modules: none.")
+    elif "imports" in wanted:
+        assumed = False
+        for tier, title in _IMPORT_TIER_TITLES.items():
+            n = tier_counts[tier] or 0
+            shown = [c for c in found["imports"] if c["import_kind"] == tier]
+            if not n:
+                if tier == "runtime":
+                    lines.append("Runtime import cycles between modules: none.")
+                continue
+            suffix = f", showing the {len(shown)} largest" if n > len(shown) else ""
+            lines.append(f"{title}: {n}{suffix}")
+            for c in shown:
+                loop = c["path"][0] if c["path"] else ""
+                for hop, nxt in zip(c["hops"], c["path"][1:], strict=False):
+                    loop += _IMPORT_HOP_ARROWS.get(hop, " → ") + nxt
+                assumed = assumed or (tier == "runtime" and "unclassified" in c["hops"])
+                if c["size"] + 1 == len(c["path"]):
+                    lines.append(f"  [{c['size']} module(s)] {loop}")
+                else:
+                    members = ", ".join(c["nodes"][:12]) + (" …" if c["size"] > 12 else "")
+                    lines.append(f"  [{c['size']} module(s)] {members}")
+                    lines.append(f"      one loop: {loop}")
+        if assumed:
+            lines.append(
+                "(Some imports above could not be read from the source — not Python, or "
+                "the file is missing — and are assumed to run at import time.)"
+            )
+    if "imports" in wanted and checker.rejected:
+        r = checker.rejected[0]
+        lines.append(
+            f"({len(checker.rejected)} import edge(s) ignored: the import statement cannot "
+            f"mean the file the graph links it to, e.g. {r['site']} → {r['to_file']}.)"
+        )
     for name in wanted:
+        if name == "imports":
+            continue
         title, unit = titles[name]
         n = counts[name] or 0
         if not n:
@@ -3434,11 +3625,18 @@ def graphlore_unreferenced(
       3. Not mentioned anywhere else in the repository's text — templates, configs
          and docs included, since a function named in ``pyproject.toml`` or called
          from an HTML attribute is not dead. ``mentions`` counts whole-identifier
-         occurrences outside the definition's own body.
+         occurrences outside the definition's own body. Another definition of
+         the same name is not a mention, and neither are its uses: a file that
+         defines its own symbol of that name and does not import this one is
+         left out of the count, and the row says where the namesake is
+         (``also_defined``).
     What is left is listed with ``file:line``. Dunder methods and tests collected
     by naming convention are never listed. Two kinds are listed but marked: a
     public method of a class that other files use ("may be API"), and a method
-    written in a subclass ("may override a hook its base class calls").
+    whose class has a base that may call it — a framework base, or a project
+    base that defines or mentions a method of that name ("may override a hook").
+    A class whose only bases are markers (``ABC``, ``Protocol``, ``BaseModel``,
+    exceptions) gets no such note.
 
     A LOWER BOUND on what is alive, not proof of death: dynamic dispatch
     (``getattr``, reflection, entry points built from strings) is invisible.
@@ -3469,9 +3667,11 @@ def graphlore_unreferenced(
     shown = []
     for it in listed[:max(0, limit)]:
         row = {
-            "node": labels.get(it["id"], it["name"]), "kind": it["kind"],
+            "node": labels.name(it["id"], it["name"]), "kind": it["kind"],
             "file": it["file"], "line": it["line"], "mentions": it["mentions"],
         }
+        if it.get("also_defined"):
+            row["also_defined"] = it["also_defined"]
         if it.get("note"):
             row["note"] = it["note"]
         shown.append(row)
@@ -3502,6 +3702,8 @@ def graphlore_unreferenced(
         for row in shown:
             loc = f"{row['file']}:{row['line']}" if row["line"] else row["file"]
             note = f"  — {row['note']}" if row.get("note") else ""
+            if row.get("also_defined"):
+                note += f"  — name shared with {', '.join(row['also_defined'])}"
             lines.append(
                 f"  {row['node']} [{row['kind']}]  {loc}  mentions: {row['mentions']}{note}"
             )
@@ -3515,6 +3717,10 @@ def graphlore_unreferenced(
     return _fmt(payload, as_json, _with_note("\n".join(lines), view))
 
 
+_LAYER_IMPORT_NOTES = {
+    "type-checking": "  [under TYPE_CHECKING]",
+    "deferred": "  [inside a function]",
+}
 # Read when graphlore_layers is called with neither `rules` nor `rules_file`.
 _LAYERS_DEFAULT_FILE = ".graphlore-layers.json"
 
@@ -3540,8 +3746,13 @@ def graphlore_layers(
 
     Reads the graph's import edges (``imports`` / ``imports_from`` and their
     kin) lifted to file level, so it is the same check as an AST-based
-    dependency test — without writing one. Imports the extractor did not record
-    (dynamic imports built from strings) are invisible.
+    dependency test — without writing one. Each edge is checked against the
+    importing file's own statements first: ``import yaml`` that the graph linked
+    to a first-party ``yaml.py`` is the PyYAML package, not a violation, and is
+    listed under ``rejected_imports`` instead. A violation says when its import
+    runs (``import``: module-level, type-checking, deferred), since many
+    architecture tests exempt ``TYPE_CHECKING`` imports. Imports the extractor
+    did not record (dynamic imports built from strings) are invisible.
 
     Args:
         rules: The mapping, inline.
@@ -3589,6 +3800,8 @@ def graphlore_layers(
         "imports_checked": result["imports_checked"],
         "layers": result["layers"],
         "unmatched_prefixes": result["unmatched_prefixes"],
+        "rejected_imports": result["rejected_imports"][:20],
+        "rejected_import_count": len(result["rejected_imports"]),
         "truncated": truncated,
     }
     lines = [
@@ -3605,10 +3818,18 @@ def graphlore_layers(
         )
         for v in entry["violations"]:
             what = f" ({v['imported']})" if v.get("imported") else ""
-            lines.append(f"  {v['site']}  imports {v['to_file']}{what}")
+            when = _LAYER_IMPORT_NOTES.get(v["import"], "")
+            lines.append(f"  {v['site']}  imports {v['to_file']}{what}{when}")
         if entry["violation_count"] > len(entry["violations"]):
             more = entry["violation_count"] - len(entry["violations"])
             lines.append(f"  … +{more} more; raise `limit`.")
+    if result["rejected_imports"]:
+        r = result["rejected_imports"][0]
+        lines.append(
+            f"\n{len(result['rejected_imports'])} import edge(s) not checked: the import "
+            f"statement cannot mean the file the graph links it to (e.g. {r['site']} → "
+            f"{r['to_file']}: a package of that name, not the project's module)."
+        )
     if result["unmatched_prefixes"]:
         lines.append(
             "\nNo graph file matches: " + ", ".join(result["unmatched_prefixes"])
@@ -3623,25 +3844,31 @@ def graphlore_same_names(
     scope: str = "",
     limit: int = 30,
     as_json: bool = False,
+    across_languages: bool = False,
 ) -> str:
     """Classes and top-level functions that share a name across modules.
 
     The exact first tier of a duplication review: two ``Settings`` or two
     ``TableSchema`` in different modules of one package are leftovers of a merge,
     or two things that should be one. Needs no embedding model. Each definition
-    is listed with ``file:line`` and how many other modules import it
-    (``imported_by``) or refer to it at all (``referenced_by``) — the copy nobody
-    imports is the one to remove. Classes come first, then the most imported names.
+    is listed with ``file:line``, how many other modules import it
+    (``imported_by``) or refer to it at all (``referenced_by``), and whether its
+    own file uses it (``used_in_own_file``) — a copy with 0 / 0 / no is dead as
+    well as duplicated. Classes come first, then the most imported names.
 
-    Methods and nested functions are not compared, nor are the names every module
-    repeats (``main``, ``setup``). Test code is left out unless ``+tests`` is in
-    the scope: same-named tests and fixtures are routine.
+    Methods and nested functions are not compared (nesting is read from the
+    source, not only from the graph), nor are the names every module repeats
+    (``main``, ``setup``). Names are compared within one language family: a
+    Python function and a JavaScript function of the same name are not copies.
+    Test code is left out unless ``+tests`` is in the scope: same-named tests and
+    fixtures are routine.
 
     Args:
         kinds: "class", "function" or both, comma-separated.
         scope: Which definitions to compare (see graphlore_god_nodes): path
             prefixes / globs, ``!pattern``, ``+tests``, ``+vendored``, ``all``.
         limit: Cap on listed names.
+        across_languages: True -> also group a name across languages.
     """
     plural = {"classes": "class", "functions": "function"}
     wanted = frozenset(
@@ -3657,7 +3884,7 @@ def graphlore_same_names(
     view = _scope_view(all_nodes, all_edges, scope, as_json, default_tests=False)
     if isinstance(view, str):
         return view
-    groups = _same_named(view.nodes, all_nodes, all_edges, wanted)
+    groups = _same_named(view.nodes, all_nodes, all_edges, wanted, across_languages)
     shown = groups[:max(0, limit)]
     for g in shown:
         for d in g["definitions"]:
@@ -3684,7 +3911,8 @@ def graphlore_same_names(
             loc = f"{d['file']}:{d['line']}" if d["line"] else d["file"]
             lines.append(
                 f"      {loc}  imported by {d['imported_by']} module(s), "
-                f"referenced by {d['referenced_by']}"
+                f"referenced by {d['referenced_by']}, used in its own file: "
+                + ("yes" if d["used_in_own_file"] else "no")
             )
     return _fmt(payload, as_json, _with_note("\n".join(lines), view))
 
