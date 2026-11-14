@@ -6,6 +6,32 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+- `server.json`, the manifest for the official MCP Registry
+  (`io.github.yasinyaman/graphlore`, PyPI package, stdio, run as
+  `uvx --with graphifyy graphlore`), and the `mcp-name:` line in the README
+  that the registry uses to verify PyPI ownership. Publishing there is a manual
+  step after the first PyPI release; `CONTRIBUTING.md` has the commands.
+
+### Changed
+- The README is a short landing page: what graphlore is, quick start, the 12
+  `lean` tools, the benchmark headline and an FAQ. The detail moved, unchanged,
+  to `docs/tools.md` (all 33 tools, resources, prompts), `docs/concepts.md`,
+  `docs/configuration.md` (toolsets, transports, the network table,
+  environment variables) and `docs/benchmark.md`. README links into the
+  repository are absolute, so they work on PyPI.
+- Package and plugin metadata describe what the server is for and carry more
+  search keywords (`mcp-server`, `model-context-protocol`, `code-navigation`,
+  `impact-analysis`, ...); `pyproject.toml` gains Documentation and Changelog
+  URLs.
+- The server instructions, the docs and the shipped skill no longer name a
+  `hidden_links` key (removed in 0.5.1), and the docs describe the fields
+  0.5.0 added (`not_fetched`, `did_you_mean`, `complete` / `beyond_hops`,
+  `vendored_dirs`).
+- `CONTRIBUTING.md` no longer recommends `ruff format .` (CI does not check
+  formatting and most files are not ruff-formatted), and its project layout
+  lists every module.
+
 ## [0.5.1] - 2026-11-14
 
 Fifth round of feedback: 0.5.0 re-run on the same three repositories.

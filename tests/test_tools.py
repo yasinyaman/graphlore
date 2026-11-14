@@ -260,6 +260,35 @@ def test_claude_plugin_manifests_stay_in_sync():
     assert srv["env"]["GRAPHLORE_PROJECT_DIR"] == "${CLAUDE_PROJECT_DIR}"
 
 
+def test_mcp_registry_manifest_stays_in_sync():
+    """server.json is the MCP Registry entry: two more copies of the version, a
+    name the README must repeat (the registry verifies PyPI ownership by finding
+    `mcp-name: <name>` in the package README), and limits the registry enforces."""
+    import re
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent
+    manifest = json.loads((root / "server.json").read_text(encoding="utf-8"))
+    readme = (root / "README.md").read_text(encoding="utf-8")
+
+    assert manifest["version"] == server.__version__
+    assert re.fullmatch(r"io\.github\.[A-Za-z0-9.-]+/[A-Za-z0-9._-]+", manifest["name"])
+    assert re.search(rf"mcp-name: {re.escape(manifest['name'])}(\s|-->)", readme)
+    assert 1 <= len(manifest["description"]) <= 100
+    assert manifest["repository"] == {
+        "url": "https://github.com/yasinyaman/graphlore", "source": "github"}
+    (package,) = manifest["packages"]
+    assert package["registryType"] == "pypi" and package["identifier"] == "graphlore"
+    assert package["version"] == server.__version__
+    assert package["transport"] == {"type": "stdio"}
+    # every variable it offers is one the server reads, and the toolset choices
+    # are the toolsets that exist
+    by_name = {v["name"]: v for v in package["environmentVariables"]}
+    assert all(name.startswith("GRAPHLORE_") for name in by_name)
+    assert set(by_name["GRAPHLORE_TOOLSET"]["choices"]) == set(server.TOOLSETS)
+    assert by_name["GRAPHLORE_TOOLSET"]["default"] == server._DEFAULT_TOOLSET
+
+
 def _write_graph(tmp_path, graph):
     out = tmp_path / "graphify-out"
     out.mkdir()
