@@ -6,6 +6,42 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+Fourth round of feedback: 0.4.0 re-run on the three repositories of the earlier
+rounds.
+
+### Added
+- `graphlore_project` and `graphlore_overview` print the server version. A
+  client keeps the tool schemas it loaded before a plugin update; a schema
+  without `scope` next to a current version number now reads as "start a new
+  session", not as "the parameter does not exist".
+- `graphlore_locate` returns `calls_into`: what the seed calls in other files,
+  most specific callee first. The tool that exposes a behavior is often a thin
+  wrapper over the module that implements it, and the graph knows that.
+
+### Changed
+- `graphlore_locate`'s `also_matched` no longer lists hits on a file's header
+  (its docstring and imports, before the first definition) — they are counted
+  in `header_hits_skipped` — and names the definition each hit falls in
+  (`qualname`).
+- `graphlore_surprises` scores an inferred edge into a module the source file
+  imports like an extracted one (the import resolves it; nobody guessed), and
+  withholds the structural bonuses from a pair of directories that ten or more
+  edges already join: an inbound adapter using the application layer is the
+  architecture, not a finding.
+
+### Fixed
+- **Regression in 0.4.0: `graphlore_unreferenced` listed methods that a
+  same-named caller calls.** A route handler `remove_example()` calling
+  `review.remove_example(...)` lives in a file that defines its own
+  `remove_example`, and 0.4.0 dropped every occurrence of a name in such a file.
+  Only what can refer to the file's own symbol is dropped now — its `def` line
+  and bare uses; an attribute access (`obj.name`, `mod.name`) still counts as a
+  mention.
+- An import edge graphlore resolved from the source carried no line, so
+  `graphlore_impact` reported it at the importing file's line 1 as a
+  definition. It now carries the line of the import statement and is reported
+  as a reference site.
+
 ## [0.4.0] - 2026-11-14
 
 Second and third rounds of feedback: the 0.3.0 review recipe run on the same

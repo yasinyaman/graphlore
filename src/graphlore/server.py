@@ -218,6 +218,12 @@ from .spans import (  # noqa: F401
 
 __version__ = "0.4.0"
 
+# Printed by graphlore_project and graphlore_overview. A client keeps the tool
+# schemas it loaded before a plugin update; an agent that reads "graphlore 0.4.1"
+# next to a schema without `scope` knows to ask for a new session instead of
+# concluding the parameter does not exist.
+_SERVER = f"graphlore {__version__}"
+
 GRAPHIFY_BIN = config.env("BIN", "graphify")
 CLI_TIMEOUT = int(config.env("TIMEOUT", "600"))
 
@@ -983,6 +989,10 @@ def graphlore_project(path: str = "", as_json: bool = False) -> str:
     ``graphlore_build("/abs/path/to/repo")`` — and every later call reads that one.
     The switch lasts until the next switch or a server restart, and changes no file.
 
+    The result also names the server version. A client keeps the tool schemas it
+    loaded before a plugin update, so a schema that lacks a parameter this
+    version documents means the session predates the update: start a new one.
+
     Not available while GRAPHLORE_RESTRICT_PATHS is on (always the case over HTTP,
     where one process serves several clients). The opt-in watcher (GRAPHLORE_WATCH)
     does not follow a switch: it re-syncs only the directory the server started in,
@@ -1019,6 +1029,7 @@ def graphlore_project(path: str = "", as_json: bool = False) -> str:
     age = _graph_age()
     git_note = _out_dir_git_note()
     payload = {
+        "server": _SERVER,
         "project_dir": str(config.PROJECT_DIR),
         "switched": switched,
         "previous_project_dir": str(previous) if switched else None,
@@ -1043,6 +1054,10 @@ def graphlore_project(path: str = "", as_json: bool = False) -> str:
         lines.append('No graph here yet — run graphlore_build(".").')
     if git_note:
         lines.append(git_note)
+    lines.append(
+        f"Server: {_SERVER}. If a tool's schema lacks a parameter its description or "
+        "the skill mentions, the client loaded it before an update: start a new session."
+    )
     return _fmt(payload, as_json, "\n".join(lines))
 
 
@@ -1301,6 +1316,7 @@ def graphlore_overview(top_n: int = 8, as_json: bool = False) -> str:
         },
         "id_collisions": id_collisions,
         "graph_age": age,
+        "server": _SERVER,
         "god_nodes": god,
         "scope": view.payload(),
         "suggested_next": suggested,
@@ -1325,6 +1341,7 @@ def graphlore_overview(top_n: int = 8, as_json: bool = False) -> str:
         lines.append("\n" + view.note().replace("Left out of scope", "Left out of analysis"))
     if suggested:
         lines.append("\nSuggested next steps: " + "; ".join(suggested))
+    lines.append(f"\nServer: {_SERVER}")
     return _fmt(payload, as_json, "\n".join(lines))
 
 
@@ -2542,11 +2559,14 @@ def graphlore_locate(
     graph node, returns the token-budgeted subgraph around it, AND lists
     semantically-similar code elsewhere — flagging `hidden_links`: cousins that
     are similar but NOT structurally connected to the seed (duplication /
-    missing-abstraction / implicit-coupling candidates). The seed is the top hit;
-    the other top hits are listed under it as ``also_matched`` (production code
-    before tests), because a question often has two homes — the tool that exposes
-    a behavior and the module that implements it. Needs the optional `semble`
-    extra: pip install 'graphlore[semble]'.
+    missing-abstraction / implicit-coupling candidates). The seed is the top hit,
+    and a question often has two homes — the tool that exposes a behavior and the
+    module that implements it — so two lists follow it: ``calls_into``, what the
+    seed calls in other files (most specific callee first, from the graph), and
+    ``also_matched``, the other top hits by the definition they fall in
+    (production code before tests; hits on a file's header — docstring and
+    imports — are counted, not listed). Needs the optional `semble` extra:
+    pip install 'graphlore[semble]'.
 
     First call downloads a model: with the default semble backend it fetches
     semble's embedding model from the Hugging Face Hub (minishlab/potion-code-16M-v2
@@ -2599,6 +2619,7 @@ def graphlore_locate(
     labels = _display_labels(nodes)
     adj = _adjacency(edges)
     seed_id = _node_id(seed)
+    byid_all = {_node_id(n): n for n in nodes}
     visited, sub_edges, truncated, tokens = _bfs_subgraph(
         adj, labels, seed_id, hops, budget_tokens, edge_set=_edge_set(edges)
     )
@@ -2649,15 +2670,58 @@ def graphlore_locate(
     # The other top hits. A question often has two homes (the tool in server.py,
     # the algorithm in graph.py) and the seed is only the first of them: list the
     # rest, production code before tests, so the second home is not missed.
+    # A hit on a file's header — its docstring and imports, before the first
+    # definition — says the file mentions the topic, not that it answers the
+    # question: those are counted, not listed.
     also_matched: list[dict[str, Any]] = []
+    header_hits = 0
     listed = {seed_id}
-    for hid, hit in zip(hit_ids[1:], semantic_hits[1:], strict=False):
+    for h, hid, hit in zip(hits[1:], hit_ids[1:], semantic_hits[1:], strict=False):
+        fp, sl, el = _loc(h)
+        rel_file = _norm_relpath(fp)
+        spans = _spans_for_file(rel_file)
+        node = byid_all.get(hid) if hid else None
+        if spans:
+            header = not _enclosing_spans(rel_file, sl, el)
+        else:  # no source to read: a hit that maps to the file as a whole
+            header = node is not None and _is_file_hub_node(node)
+        if header:
+            header_hits += 1
+            continue
         key = hid or f"{hit['file']}:{hit['lines']}"
         if key in listed:
             continue
         listed.add(key)
-        also_matched.append({**hit, "test": _is_test_path(_norm_relpath(hit["file"]))})
+        row = {**hit, "test": _is_test_path(rel_file)}
+        qual = _span_qualname(rel_file, sl, el)
+        if qual:
+            row["qualname"] = qual  # the definition the hit falls in
+        also_matched.append(row)
     also_matched.sort(key=lambda h: h["test"])  # stable: rank order within each group
+
+    # What the seed calls in OTHER files. The tool that exposes a behavior is
+    # often a thin wrapper over the module that implements it, and the graph
+    # knows that even when the search ranked a file header above it. Most
+    # specific callee first: a helper every tool calls says nothing here.
+    resolved_edges = _resolved(nodes, edges).edges
+    forward_e, reverse_e = _directed_edge_adjacency(resolved_edges)
+    seed_rel = _norm_relpath(str(seed.get("file") or seed.get("path")
+                                 or seed.get("source_file") or ""))
+    callees: dict[str, int] = {}
+    for target, e in forward_e.get(seed_id, []):
+        tn = byid_all.get(target)
+        if tn is None or _rel(e) not in _CALL_RELATIONS:
+            continue
+        tfile = _norm_relpath(_node_file(tn))
+        if tfile and tfile != seed_rel and not _is_test_path(tfile):
+            callees[target] = len({
+                src for src, ce in reverse_e.get(target, []) if _rel(ce) in _CALL_RELATIONS
+            })
+    calls_into = [
+        {"node": labels.get(t, t), "file": _node_file(byid_all[t]),
+         "line": _node_line(byid_all[t]) or None, "callers": n}
+        for t, n in sorted(callees.items(), key=lambda kv: (kv[1], kv[0]))[:5]
+    ]
     seed_obj: dict[str, Any] = {
         "node": _node_label(seed), "file": seed_file, "line": _node_line(seed),
     }
@@ -2674,6 +2738,8 @@ def graphlore_locate(
         },
         "semantic_hits": semantic_hits,
         "also_matched": also_matched,
+        "header_hits_skipped": header_hits,
+        "calls_into": calls_into,
         "semantic_cousins": cousins,
         "hidden_links": hidden,
     }
@@ -2685,11 +2751,18 @@ def graphlore_locate(
         f"Structure: {len(visited)} nodes, {len(sub_edges)} edges"
         + (" (TRUNCATED)" if truncated else ""),
     ]
+    if calls_into:
+        text.append("\nSeed calls into — the implementation may live here:")
+        text += [
+            f"  {c['node']}  ({c['file']}:{c['line']})" if c["line"]
+            else f"  {c['node']}  ({c['file']})"
+            for c in calls_into
+        ]
     if also_matched:
         text.append("\nAlso matched — the answer may live here too:")
         text += [
-            f"  {h['node'] or '(no graph node)'}  ({h['file']}:{h['lines']})"
-            + ("  [test]" if h["test"] else "")
+            f"  {h.get('qualname') or h['node'] or '(no graph node)'}"
+            f"  ({h['file']}:{h['lines']})" + ("  [test]" if h["test"] else "")
             for h in also_matched
         ]
     if hidden:
