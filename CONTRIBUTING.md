@@ -13,22 +13,46 @@ pip install -e ".[dev,treesitter]"   # treesitter so the multi-language tests ru
 
 ## Project layout
 
-`src/graphlore/` is split into layers (bottom → top):
+```
+graphlore/
+├── src/graphlore/          # package
+│   ├── server.py           #   MCP server: 33 tools, prompts, resources, transports
+│   ├── graph.py            #   graph.json loading, node/edge accessors, BFS, adjacency
+│   ├── spans.py            #   span engine: ast + tree-sitter, chunk→node join, structural diff
+│   ├── scope.py            #   analysis scope: vendored / external / test filtering
+│   ├── apis.py             #   symbol-level external-API extraction
+│   ├── routes.py           #   framework route → handler extraction
+│   ├── imports.py          #   import statements read from source: what they can mean, when they run
+│   ├── resolve.py          #   calls and imports through a module object, resolved from source
+│   ├── review.py           #   unreferenced code, same-named symbols, identical bodies, layer rules
+│   └── config.py           #   project dir / out dir
+├── tests/                  # pytest suite (in-process MCP client + unit tests)
+├── benchmarks/             # multilang benchmark + committed results JSON
+├── docs/                   # tool reference, concepts, configuration, benchmark reports
+├── .claude-plugin/         # Claude Code plugin + marketplace manifests (the repo root is the plugin)
+├── .claude/skills/         # graphlore-explore skill for Claude Code (shipped by the plugin)
+├── .github/workflows/      # CI: ruff + mypy + pytest on py 3.10–3.12; PyPI publish on release
+├── mcp.json                # Claude Code example config
+└── claude_desktop_config.json
+```
 
-- **`config.py`** — shared `PROJECT_DIR` / `OUT_DIR_NAME` (read by attribute so tests can repoint it).
-- **`graph.py`** — `graph.json` loading + schema-tolerant `_node_*` / `_edge_*` / traversal helpers.
-- **`spans.py`** — the analysis engine: tree-sitter / `ast` span extraction, the chunk→node join, and the structural diff behind cosmetic-vs-structural freshness.
-- **`server.py`** — the MCP surface: the MCPServer instance, the tools, resources, prompts, and `main()`. Re-exports the helpers above so `server._x` keeps resolving.
-
-Add a graph/analysis helper to `graph.py` or `spans.py`; add a new tool to `server.py`.
+`src/graphlore/` is layered bottom → top (`config.py` → `graph.py` → `spans.py` →
+`scope.py` → `apis.py` / `routes.py` → `imports.py` → `resolve.py` → `review.py` →
+`server.py`); each module imports only from earlier ones. `server.py` re-exports
+the helpers tests reach as `server._x`. [`AGENTS.md`](AGENTS.md) describes each
+layer and the conventions that span files.
 
 ## Before opening a PR
 
 ```bash
 ruff check .      # lint
-ruff format .     # format
+mypy              # types
 pytest -q         # tests
 ```
+
+Don't run `ruff format .` across the repository: most files are not
+ruff-formatted and CI does not check formatting, so it rewrites them wholesale.
+Match the surrounding style by hand.
 
 Please:
 - Keep tools read-only unless they genuinely mutate state, and set the matching MCP annotation (`read_only_hint` / `destructive_hint`).

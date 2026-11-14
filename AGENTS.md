@@ -25,7 +25,7 @@ GRAPHLORE_PROJECT_DIR=/path/to/repo python -m graphlore   # run the server (stdi
 
 CI (`.github/workflows/ci.yml`) runs `ruff check .`, `mypy` and pytest with coverage on Python 3.10–3.12, so code must stay 3.10-compatible. The default branch is `master`.
 
-**Don't run `ruff format .` across the repo.** `CONTRIBUTING.md` lists it, but CI doesn't check formatting and 8 of the 11 Python files (including `server.py` and `tests/test_tools.py`) are not ruff-formatted, so it rewrites them wholesale. Match the surrounding style by hand unless a reformat is the task.
+**Don't run `ruff format .` across the repo.** CI doesn't check formatting and 8 of the 11 Python files (including `server.py` and `tests/test_tools.py`) are not ruff-formatted, so it rewrites them wholesale. Match the surrounding style by hand unless a reformat is the task.
 
 The multi-language tests skip themselves when the `[treesitter]` extra is absent. When it is installed, `tree-sitter-language-pack` downloads grammars from GitHub releases on first use (cached under `~/.cache/tree-sitter-language-pack/`); if that download fails, those tests **fail** rather than skip (`assert None is True`, `KeyError`, empty route lists). Those symptoms look the same as a real regression in the tree-sitter extractors, so check before dismissing them:
 
@@ -57,7 +57,7 @@ Optional dependencies (`semble`, `tree-sitter`, `tiktoken`, `watchdog`, `uvicorn
 
 - **Read `config.PROJECT_DIR` by attribute**, never `from .config import PROJECT_DIR`: tests repoint it with `monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)`, and `graphlore_project` reassigns it at runtime. For the same reason nothing may cache a value derived from it without keying on it.
 - **Settings go through `config.env("NAME")`** so the legacy `GRAPHIFY_*` fallback applies. Several are captured once at import as `server.py` module constants (`TOOLSET`, `TRANSPORT`, `RESTRICT_PATHS`, `API_KEY`, `GRAPHIFY_BIN`, …) and tests patch the attribute; others (`SEMANTIC_BACKEND`, `WATCH`, `ALLOWED_HOSTS`, `TOKENIZER`, `OFFLINE` via `config.offline()`, `STRUCTURED`) are read at call time.
-- **Network egress:** every path that can reach the network checks `config.offline()` (refuse, or degrade to a local-only variant and say so); the README's "What reaches the network, and when" table lists them and must stay in step. `_run_cli` passes `_cli_env()`, which strips the `_BACKEND_ENV` keys offline. A new optional dependency that downloads on first use gets a row there and a gate.
+- **Network egress:** every path that can reach the network checks `config.offline()` (refuse, or degrade to a local-only variant and say so); the "What reaches the network, and when" table in `docs/configuration.md` lists them and must stay in step. `_run_cli` passes `_cli_env()`, which strips the `_BACKEND_ENV` keys offline. A new optional dependency that downloads on first use gets a row there and a gate.
 - **Repository text is framed:** a tool whose text reply quotes source, docstrings or CLI output derived from them wraps it in `_frame_repo_text(...)` and puts `content_trust: _CONTENT_TRUST` and `untrusted_fields` in the payload. graphlore's own notes go outside the frame; errors are never framed.
 - **Tool shape:** a plain sync function returning `str` (the SDK runs sync tools in a threadpool), registered with `@_tool(annotations=...)`, never `@mcp.tool`. `_load_graph()` returns either the graph dict or an error *string*; check `isinstance(graph, str)` and return `_err(msg, as_json)`. Success returns `_fmt(payload, as_json, text)`. With `as_json=True` every path, including errors and no-match, must return parseable JSON.
 - **MCP results:** `_tool` registers a wrapper (no outputSchema) and leaves the module attribute as the plain function, so direct calls and tests get the string. `_fmt` / `_err` record their payload in a per-call `ContextVar`; when the tool returns exactly that string, the payload becomes the result's `structuredContent`. `_err` sets `isError`, and so does `_fmt(..., is_error=True)` for a failure that still has a payload. An empty but valid answer (no search hits) is `_fmt`, not `_err`. `_err(msg, as_json, **extra)` keeps `error` a string and adds sibling keys (`code`, `did_you_mean`). A reply built without `_fmt`/`_err` has no structuredContent and is an error only when it starts with `ERROR`; CLI passthroughs go through `_cli_reply`. `GRAPHLORE_STRUCTURED=0` turns all of this off.
@@ -82,11 +82,22 @@ A tool is registered with `@_tool(annotations=ToolAnnotations(...))` in `server.
 - the tool list in the `server.py` module docstring, and `LEAN_TOOLS` / `LOCATE_TOOLS` if it belongs in a trimmed surface. `lean` is the default surface, so a tool outside it is invisible to most users unless they set `GRAPHLORE_TOOLSET=full` (the plugin does)
 - `_instructions(active)` and the prompts (`_render_prompt` steps) if the tool belongs in the recommended flow: they name a tool only when it is registered. A reply that points to another tool wraps the pointer in `_tool_hint(name, text)`
 - `test_tool_and_prompt_registration` in `tests/test_tools.py`, which asserts the exact tool count (33)
-- the README tool tables and its "33 tools" counts
+- the tool tables in `docs/tools.md`, the README's table of the 12 `lean` tools if the tool is in that set, and the "33" / "12" counts in both
 - `.claude/skills/graphlore-explore/SKILL.md` (shipped to users by the plugin)
 - `CHANGELOG.md` under `[Unreleased]` — every behavior change gets an entry there (Keep a Changelog format)
 
 The version is duplicated in `pyproject.toml`, `server.__version__` and `.claude-plugin/plugin.json` (a test compares the last two), and recorded in `uv.lock`; run `uv lock` after a bump. The release steps, including the PyPI publish workflow, are under "Releasing" in `CONTRIBUTING.md`.
+
+## Documentation layout
+
+`README.md` is the landing page, and PyPI's long description: what graphlore is, quick start, the 12 `lean` tools, the benchmark headline and an FAQ. Keep it short; detail goes to `docs/`:
+
+- `docs/tools.md` — all 33 tools, resources, prompts, what a result carries
+- `docs/concepts.md` — resolved edges, import checks, analysis scope, freshness, the semantic bridge, naming communities
+- `docs/configuration.md` — running, the plugin, toolsets, transports, the network table, environment variables
+- `docs/benchmark.md` — method and results (`docs/benchmark*.html` are the rendered reports)
+
+Links from the README into the repository are absolute (`https://github.com/yasinyaman/graphlore/blob/master/...`) because relative links break on PyPI; links between the `docs/` files are relative. The README's first paragraph and its FAQ headings are written to be quoted by search engines and AI assistants: keep them plain, literal and true to the code.
 
 ## Claude Code plugin
 
