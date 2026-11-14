@@ -21,7 +21,8 @@
         "graphlore"
       ],
       "env": {
-        "GRAPHLORE_PROJECT_DIR": "${CLAUDE_PROJECT_DIR}"
+        "GRAPHLORE_PROJECT_DIR": "${CLAUDE_PROJECT_DIR}",
+        "GRAPHLORE_TOOLSET": "full"
       }
     }
   }

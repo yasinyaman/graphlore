@@ -6039,3 +6039,98 @@ def test_skeleton_and_node_details_frame_repo_text(project, tmp_path, monkeypatc
     _write(project, "httpx/_client.py", "class Client:\n    def send(self):\n        pass\n")
     sk = server.graphlore_skeleton(file="httpx/_client.py")
     assert sk.splitlines()[1].startswith("=== repo text ")
+
+
+# --- The default tool surface is lean -------------------------------------------
+
+def test_default_toolset_is_lean():
+    import os
+    import subprocess
+    import sys
+
+    env = {k: v for k, v in os.environ.items()
+           if k not in ("GRAPHLORE_TOOLSET", "GRAPHIFY_TOOLSET")}
+    out = subprocess.run(
+        [sys.executable, "-c", "from graphlore import server; print(server.TOOLSET)"],
+        env=env, capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    assert out == "lean"
+    # the lean core covers the documented flow down to the source
+    assert {"graphlore_fetch", "graphlore_impact", "graphlore_project"} <= server.LEAN_TOOLS
+
+
+def test_unknown_toolset_warns_and_uses_the_default(monkeypatch, capsys):
+    monkeypatch.setattr(server, "TOOLSET", "fulll")
+    assert server._effective_toolset_tools() == server._effective_lean_tools()
+    err = capsys.readouterr().err
+    assert "unknown GRAPHLORE_TOOLSET='fulll'" in err and "using 'lean'" in err
+
+
+def _toolset_surfaces():
+    every = {t.name for t in server.mcp._tool_manager.list_tools()}
+    lean = set(server.LEAN_TOOLS)
+    return {
+        "full": every,
+        "lean": lean,
+        "lean, no semble": lean - {"graphlore_locate"},
+        "locate": set(server.LOCATE_TOOLS),
+    }
+
+
+def test_instructions_and_prompts_name_only_active_tools(monkeypatch):
+    import re
+
+    named = re.compile(r"graphlore_[a-z_]+")
+    for label, active in _toolset_surfaces().items():
+        text = server._instructions(None if label == "full" else active)
+        assert set(named.findall(text)) <= active, label
+        monkeypatch.setattr(server, "_registered_tool_names", lambda a=active: set(a))
+        for prompt in (server.onboard(), server.trace_bug("x"), server.explain_flow("y"),
+                       server.review()):
+            assert set(named.findall(prompt)) <= active, (label, prompt)
+        locate_text = server._tool_hint("graphlore_impact", "see graphlore_impact")
+        assert ("graphlore_impact" in locate_text) == ("graphlore_impact" in active)
+    # trimmed instructions say a missing tool is switched off, not broken
+    assert "GRAPHLORE_TOOLSET=full" in server._instructions(server.LEAN_TOOLS)
+    assert "trimmed toolset" not in server._instructions(None)
+
+
+def test_review_prompt_on_a_trimmed_surface_points_to_full(monkeypatch):
+    monkeypatch.setattr(server, "_registered_tool_names", lambda: set(server.LEAN_TOOLS))
+    assert "GRAPHLORE_TOOLSET=full" in server.review()
+    assert "graphlore_search" in server.trace_bug("x")
+
+
+def test_apply_toolset_lean_rewrites_the_instructions(monkeypatch):
+    import asyncio
+
+    from mcp import Client
+
+    monkeypatch.setattr(server, "TOOLSET", "lean")
+    removed: list[str] = []
+    monkeypatch.setattr(server.mcp, "remove_tool", removed.append)
+    left = {t.name for t in server.mcp._tool_manager.list_tools()}
+    monkeypatch.setattr(server, "_registered_tool_names",
+                        lambda: left - set(removed))
+    monkeypatch.setattr(server.mcp._lowlevel_server, "instructions",
+                        server.mcp._lowlevel_server.instructions)
+    server._apply_toolset()
+    # locate is dropped from lean when no semantic backend is installed
+    assert not set(removed) & (server.LEAN_TOOLS - {"graphlore_locate"})
+    assert "graphlore_cycles" in removed
+
+    async def _go():
+        async with Client(server.mcp) as client:
+            return client.instructions
+
+    sent = asyncio.run(_go())
+    assert "trimmed toolset" in sent and "graphlore_cycles" not in sent
+
+
+def test_plugin_pins_the_full_toolset():
+    from pathlib import Path
+
+    plugin = json.loads((Path(__file__).resolve().parent.parent
+                         / ".claude-plugin" / "plugin.json").read_text())
+    # the shipped skill uses review and naming tools that lean leaves out
+    assert plugin["mcpServers"]["graphlore"]["env"]["GRAPHLORE_TOOLSET"] == "full"

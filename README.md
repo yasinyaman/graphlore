@@ -131,7 +131,9 @@ own copy of this repository, so **`uv` must be installed**. It installs the
 `graphify`, `treesitter` and `semble` extras into an isolated environment — the
 Graphify CLI included — and points `GRAPHLORE_PROJECT_DIR` at the project you
 opened. The first start downloads the dependencies and can take a while; later
-starts come from uv's cache. Without `uv`, use the manual setup below.
+starts come from uv's cache. Without `uv`, use the manual setup below. The plugin
+sets `GRAPHLORE_TOOLSET=full`: its skill uses the review and naming tools that the
+default `lean` surface leaves out.
 
 **Start a new session after updating the plugin.** A client keeps the tool
 schemas it loaded earlier in the session, so after an update mid-session the
@@ -188,17 +190,42 @@ GRAPHLORE_TRANSPORT=streamable-http GRAPHLORE_HOST=0.0.0.0 GRAPHLORE_API_KEY=$(o
   GRAPHLORE_PROJECT_DIR=/path/to/repo graphlore
 ```
 
-For a smaller tool surface (helps some models pick the right tool), set
-`GRAPHLORE_TOOLSET=lean` to expose only the core exploration tools — or
-`GRAPHLORE_TOOLSET=locate` for the minimal locate-first surface: orient with one
-`graphlore_locate` call, hydrate code with `graphlore_fetch`, stay in sync with
-`graphlore_build`/`graphlore_freshness`. `locate` needs a semantic backend (the
-`[semble]` extra or `GRAPHLORE_SEMANTIC_BACKEND`) and falls back to `lean` without
-one.
+### Which toolset
+
+The server starts on the **`lean`** surface: 12 tools (11 without a semantic
+backend, which drops `graphlore_locate`) — `build`, `overview`, `locate`,
+`search`, `neighbors`, `subgraph`, `impact`, `node_details`, `fetch`,
+`communities`, `freshness` and `project`. That covers the whole explore loop:
+orient → find → traverse → blast radius → read the code. A smaller surface helps
+a model pick the right tool, and every tool definition costs context on every
+turn. Choose with `GRAPHLORE_TOOLSET`:
+
+| Value | Tools | Use when |
+|---|---|---|
+| `lean` (default) | 12 | Exploring, debugging, answering "where/how is X" |
+| `full` | all 33 | Reviewing structure (cycles, layers, dead or duplicated code), routes and package APIs, naming communities, diffs, the CLI passthroughs (`query`, `path`, `explain`, `add`) |
+| `locate` | 5 | A semantic backend is installed and you want one way in (`graphlore_locate`), one way to the code (`graphlore_fetch`), plus `overview` / `build` / `freshness`; falls back to `lean` without a backend |
+
+An unknown value falls back to `lean` with a warning on stderr; the boot banner
+prints the toolset and its tool count. The server instructions and prompts are
+rendered for the active surface, so they never name a tool that is switched
+off. **The Claude Code plugin pins `full`**, since its skill uses the review and
+naming tools.
+
+**Next to Graphify's embedded MCP server.** Running both gives the model two
+tools for the same verbs — Graphify's `query` / node lookup / `neighbors` /
+`communities` / god nodes / shortest path against graphlore's `query`,
+`node_details`, `neighbors`, `communities`, `god_nodes` and `path`. Prefer one
+server per project. If you need both (Graphify's PR triage, its multi-project
+serving), keep graphlore on `lean`, which leaves out its `query` / `path` /
+`explain` passthroughs, and tell the model which server answers what.
 
 ## Tools
 
-CLI-backed (the first two write state; the rest are read-only):
+Tools outside the default `lean` surface need `GRAPHLORE_TOOLSET=full`; see
+[Which toolset](#which-toolset).
+
+CLI-backed (the first two write state; the rest are read-only; all outside lean):
 
 | Tool | Purpose |
 |---|---|
@@ -554,6 +581,11 @@ Reusable templates that orchestrate the tools for the assistant:
 - `onboard` — orient to the codebase (overview → communities → subgraphs → surprises → summary)
 - `trace_bug(symptom)` — find likely root-cause locations through the graph
 - `explain_flow(flow)` — end-to-end walkthrough of a named flow with file:line refs
+- `review` — review structure: cycles, layering, dead and duplicated code (needs `GRAPHLORE_TOOLSET=full`)
+
+Each prompt is rendered for the active toolset: a step whose tool is switched off
+is left out, or replaced by one that is on (`trace_bug` uses `graphlore_impact`
+where `graphlore_path` is off).
 
 ## LLM-friendliness
 
@@ -604,7 +636,7 @@ boot banner on stderr prints `egress=offline` or `egress=on-demand`.
 | `GRAPHLORE_PORT` | `8000` | Bind port for HTTP transports |
 | `GRAPHLORE_API_KEY` | _(unset)_ | Require `Authorization: Bearer <key>` on HTTP transports |
 | `GRAPHLORE_ALLOWED_HOSTS` | _(unset)_ | DNS-rebinding `Host` allowlist for HTTP (comma-separated, `:*` port wildcards; `*` disables). Unset = SDK default: loopback-only when bound to loopback |
-| `GRAPHLORE_TOOLSET` | `full` | `full` \| `lean` (core exploration tools only) \| `locate` (minimal locate-first surface; falls back to `lean` without a semantic backend) |
+| `GRAPHLORE_TOOLSET` | `lean` | `lean` (12 core exploration tools) \| `full` (all 33) \| `locate` (minimal locate-first surface; falls back to `lean` without a semantic backend). See [Which toolset](#which-toolset) |
 | `GRAPHLORE_TOKENIZER` | _(heuristic)_ | `tiktoken` → exact token counts (needs the `[tiktoken]` extra); else chars/3.5 estimate |
 | `GRAPHLORE_SEMANTIC_BACKEND` | `semble` | Semantic index: `semble`, or `module.path:Factory` implementing `search`/`find_related` (validated at boot) |
 | `GRAPHLORE_RESOLVE` | `1` | Resolve calls and imports made through a module object (`mod.func()`) from the source at read time; `0` reads graph.json as it is |

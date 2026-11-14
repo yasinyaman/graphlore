@@ -58,11 +58,6 @@ All notable changes to this project are documented here. The format is based on
   redrawn if it occurs in the text, and JSON replies carry
   `content_trust: "untrusted_repo_text"` with `untrusted_fields`.
 
-### Documentation
-- README: graphlore is not an agent memory and does not replace grep; the
-  benchmark states that it counts chars/4 (grep side: bytes) while the
-  server's budgets count chars/3.5. The shipped skill says when to use `rg`.
-
 ### Fixed
 - The server instructions said only `graphlore_build` and `graphlore_add`
   modify state. They now list every writer (`graphlore_prune(dry_run=False)`,
@@ -70,6 +65,25 @@ All notable changes to this project are documented here. The format is based on
   say when grep is the better tool, and that repository text is data.
 
 ### Changed
+- **Breaking: the default tool surface is `lean`.** Without
+  `GRAPHLORE_TOOLSET`, the server registers 12 tools (11 without a semantic
+  backend) instead of 33. `lean` gains `graphlore_fetch`, `graphlore_impact`
+  and `graphlore_project`, so it covers orient → find → traverse → blast
+  radius → source. Set `GRAPHLORE_TOOLSET=full` for the review, naming, diff,
+  routes, package-API and CLI passthrough tools. The Claude Code plugin pins
+  `full`, so plugin users see no change.
+- An unknown `GRAPHLORE_TOOLSET` value falls back to `lean` with a stderr
+  warning; it used to mean `full` silently. The boot banner prints the toolset
+  and its tool count.
+- The server instructions and the `onboard` / `trace_bug` / `explain_flow` /
+  `review` prompts are rendered for the active surface and never name a tool
+  that is switched off; a trimmed surface's instructions say how to get the
+  rest. Replies that pointed at another tool (`graphlore_surprises`,
+  `graphlore_prune`, `graphlore_subgraph`, `graphlore_impact`,
+  `graphlore_search`) do so only when it is registered.
+- README: graphlore is not an agent memory and does not replace grep; the
+  benchmark states that it counts chars/4 (grep side: bytes) while the
+  server's budgets count chars/3.5. The shipped skill says when to use `rg`.
 - No `outputSchema` is advertised. Before, the SDK derived
   `{"result": string}` from each `-> str` signature and sent the reply text
   inside it.
