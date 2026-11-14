@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+- `server.json`, the manifest for the official MCP Registry
+  (`io.github.yasinyaman/graphlore`, PyPI package, stdio, run as
+  `uvx --with graphifyy graphlore`), and the `mcp-name:` line in the README
+  that the registry uses to verify PyPI ownership. Publishing there is a manual
+  step after the first PyPI release; `CONTRIBUTING.md` has the commands.
+
 ### Changed
 - The README is a short landing page: what graphlore is, quick start, the 12
   `lean` tools, the benchmark headline and an FAQ. The detail moved, unchanged,
