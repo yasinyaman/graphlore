@@ -1,6 +1,6 @@
 ---
 name: graphlore-explore
-description: Explore, understand, or debug a codebase through its Graphify knowledge graph using the graphlore MCP tools. Use when onboarding to an unfamiliar repository, tracing how a named flow or feature works end-to-end, finding likely root-cause locations for a bug, or answering "where/how is X implemented" — especially when a graphify-out/graph.json exists. Favors token-budgeted subgraph extraction over opening many files.
+description: Explore, understand, review or debug a codebase through its Graphify knowledge graph using the graphlore MCP tools. Use when onboarding to an unfamiliar repository, tracing how a named flow or feature works end-to-end, finding likely root-cause locations for a bug, reviewing a codebase's structure (import cycles, layering, dead or duplicated code), or answering "where/how is X implemented" — especially when a graphify-out/graph.json exists. Favors token-budgeted subgraph extraction over opening many files.
 ---
 
 # Exploring a codebase with Graphify
@@ -15,16 +15,22 @@ of whole files.
 If the graphlore_* tools are not available, the MCP server isn't connected — see
 the project README for the `.mcp.json` / Claude Desktop config.
 
-The server reads one project — the directory it was started with; there is no
-per-call project argument, so a question about another repo needs another server.
+The server reads one project at a time — at first the directory it was started
+with. `graphlore_project()` shows it; `graphlore_project("/path/to/other/repo")`
+switches to another repository (there is no per-call project argument).
 `graphlore_build` requires the `graphify` CLI on PATH: graphlore has no extractor
-of its own.
+of its own. graphify writes `graphify-out/` inside the folder it reads, so after
+`graphlore_build("/path/to/other/repo")` the build result tells you to switch
+before the read tools can see that graph.
 
 ## Preconditions: make sure the graph exists and is fresh
 
 1. `graphlore_freshness()` — is `graph.json` stale vs. the current git HEAD?
 2. If missing or stale: `graphlore_build(".", update=True)` (AST-only update needs
-   no API key; `mode="deep"` adds semantic edges but needs a backend key).
+   no API key; `mode="deep"` adds semantic edges but needs a backend key). Read
+   the result: it carries the build's warnings (a missing extractor for a file
+   type, files skipped as sensitive) and notes on vendored files and an
+   unignored `graphify-out/`.
 
 ## Find code by what it does — `graphlore_locate`
 
@@ -36,7 +42,9 @@ similar code that is structurally disconnected (duplication / missing-abstractio
 sync-async-twin candidates that neither search nor the graph surfaces alone). Works
 across Python, JS/TS, Go, Java, Rust, C++ and 165+ languages. Needs the optional
 `[semble]` extra; without it, fall back to `graphlore_search` (name-based) and the
-structural flow below.
+structural flow below. The first semantic call downloads semble's embedding model
+from the Hugging Face Hub (cached afterwards) — expect it to be slow once, and to
+fail on a machine without network access until the model is fetched ahead of time.
 
 ## Canonical flow (cheap → targeted)
 
@@ -56,10 +64,21 @@ Supporting tools: `graphlore_search` (find nodes by name), `graphlore_neighbors`
 (1-hop), `graphlore_god_nodes` (most connected), `graphlore_surprises`
 (unexpected cross-domain couplings), `graphlore_path(a, b)` (exact route between
 two nodes), `graphlore_explain(node)` (everything about one node),
-`graphlore_cycles()` (dependency cycles via SCCs), `graphlore_routes()` (framework
-route → handler table, joined to graph nodes), `graphlore_validate()` (lint
-graph.json for dangling/duplicate/self-loop/orphan issues — gauge how much to
-trust the graph).
+`graphlore_cycles()` (import cycles between modules, then call cycles),
+`graphlore_routes()` (framework route → handler table, joined to graph nodes),
+`graphlore_validate()` (lint graph.json for dangling/duplicate/self-loop/orphan
+issues — gauge how much to trust the graph).
+
+## Scope: whose code is being analysed
+
+`graphlore_god_nodes`, `graphlore_validate`, `graphlore_cycles`,
+`graphlore_surprises`, `graphlore_duplication_scan`, `graphlore_unreferenced` and
+`graphlore_same_names` take a `scope` string. By default they leave out vendored
+and minified files and nodes standing for external packages, and each result
+ends with what was left out. Narrow or widen it with comma/space separated
+tokens: a path prefix or glob to keep (`src/pkg`), `!pattern` to drop, `-tests`,
+`+external`, `+vendored`, or `all`. If a result looks dominated by code that is
+not the project's own, check that line before drawing conclusions.
 
 ## Token discipline
 
@@ -86,12 +105,29 @@ stripped) — the middle layer between the map and full code — and
 - **Explaining a flow** → `graphlore_query` the flow for entry points →
   `graphlore_subgraph(hops=2)` around them → `graphlore_node_details` for
   `file:line`. (The `explain_flow` MCP prompt scripts this.)
+- **Reviewing a codebase** (the `review` MCP prompt scripts this), in this order:
+  1. `graphlore_validate()` — how far to trust the graph, and what the scope left out.
+  2. `graphlore_cycles(kind="imports")` — import cycles between modules are the
+     finding a reviewer looks for first; then `kind="calls"` and judge which
+     loops are deliberate (redraw / rebuild loops usually are).
+  3. `graphlore_layers(rules={"<layer>": ["<what it may import>"]})` — write the
+     intended layering down (from the README, the directory layout, or the
+     project's own architecture test) and list the imports that break it.
+  4. `graphlore_unreferenced()` — dead-code candidates with `file:line`;
+     `graphlore_fetch` each one before calling it dead (dynamic dispatch is
+     invisible to the graph).
+  5. `graphlore_same_names()` — classes and functions defined twice under one
+     name, with how many modules import each copy.
+  6. `graphlore_god_nodes()` — the most connected modules and symbols are the
+     maintainability hotspots; `graphlore_skeleton` shows how large they are.
+  7. `graphlore_surprises()` last — leads to check, not findings.
 - **Before a refactor** → `graphlore_impact("<node>")` — the reverse-dependency
   **blast radius**, ordered by hop distance: what breaks if this changes.
 - **Reviewing a changeset** → `graphlore_diff(base, head)` — the file-level
   structural changes between two git refs, cosmetic-only edits separated.
-- **Hunting duplication** → `graphlore_duplication_scan()` — repo-wide
-  hidden-link audit: semantically similar but structurally distant pairs
+- **Hunting duplication** → `graphlore_same_names()` first (exact, no model),
+  then `graphlore_duplication_scan()` — definitions that are semantically similar
+  but structurally distant, each pair with its score and both `file:line`s
   (needs the `[semble]` extra).
 - **Auditing a dependency upgrade** → `graphlore_package_apis("<package>")` —
   which symbols of the external package are actually used, and from where.

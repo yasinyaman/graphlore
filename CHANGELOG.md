@@ -6,7 +6,99 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-14
+
+Feedback from a review session on a 774-file Python + JS repository (graphify
+0.9.108, 13,159 nodes): the analysis tools were dominated by code that was not
+the project's own, a graph built by path could not be read, and reviewing a
+codebase took hand-written scripts over `graph.json`.
+
+### Added
+- **`graphlore_project`** — shows the directory the server reads and switches it
+  to another one. A second repository (or one just built with
+  `graphlore_build("/abs/path")`) no longer needs a second server. Changes no
+  file; refused under `GRAPHLORE_RESTRICT_PATHS`, so never available over HTTP.
+- **Analysis scope.** `graphlore_god_nodes`, `graphlore_validate`,
+  `graphlore_cycles`, `graphlore_surprises` and `graphlore_duplication_scan` take
+  one `scope` string: path prefixes or globs to keep, `!pattern` to drop,
+  `-tests`, `+external`, `+vendored`, `all`. Every result carries a `scope`
+  object and a closing line saying what was left out.
+- **`graphlore_unreferenced`** — dead-code candidates: definitions with no
+  incoming graph reference, not registered by a decorator (routes, click/typer
+  commands, validators, fixtures — read from the graph's decorator edges and
+  from the source lines above the definition, in any language the span engine
+  reads), and not mentioned anywhere else in the repository's text. Each with
+  `file:line` and a mention count; public methods of classes other files use
+  are marked "may be API".
+- **`graphlore_layers`** — checks import edges against layer rules
+  (`{"layer prefix": ["prefixes it may import"]}`, inline or from a JSON file in
+  the repository, `.graphlore-layers.json` by default) and returns the
+  violations grouped by layer with `file:line`. `strict=True` also objects to
+  imports into files outside every declared layer.
+- **`graphlore_same_names`** — classes and top-level functions that share a name
+  across modules, with how many modules import and reference each copy. Exact,
+  no embedding model.
+- A **`review` prompt** and a "Reviewing a codebase" recipe in the
+  `graphlore-explore` skill: validate → import cycles → layer rules →
+  unreferenced code → same-named symbols → hotspots → surprises.
+- `graphlore_build(verbose=True)` returns the full CLI log.
+- `graphlore_duplication_scan` gains `include_tests` and `min_score`.
+
+### Changed
+- **Vendored, minified and external code is left out of the analysis tools by
+  default.** Files under `vendor/` / `node_modules/` / `third_party/`, files
+  named `*.min.js` or carrying a build hash (`decorate-BgofJUJ5.js`), JS/CSS whose
+  lines are too long to be hand-written, and nodes standing for external
+  packages or unresolved names (`typing`, `pytest`, `_`) no longer rank as god
+  nodes or show up as cycles and self-loops. `graphlore_overview` ranks its god
+  nodes the same way. `scope="all"` restores the old behaviour.
+- **`graphlore_cycles` reports by relation kind**: import cycles between modules
+  first (import edges lifted to file level; a module's import of its own package
+  `__init__` is ignored), call cycles after, then cycles that only close through
+  another relation. `kind="imports" | "calls" | "other"` asks for one. Each group
+  now carries one concrete loop (`path`) and its `kind`; the payload adds
+  `import_cycle_count` / `call_cycle_count` / `other_cycle_count`. A repository
+  with no import cycle says so in one line. Previously every relation was mixed
+  into one list of node groups.
+- **`graphlore_build` returns the build's counts and warnings** instead of the
+  raw CLI log (progress ticks and stage banners are counted, not printed). It
+  also reports when the graph was written somewhere this server does not read —
+  graphify writes `graphify-out/` inside the folder it is given, so a sibling
+  repository *or a subfolder* leaves the read tools on the old graph or on none
+  — and names the `graphlore_project` call that switches to it. Two more notes
+  appear when they apply: vendored/minified files found in the graph (with the
+  `.graphifyignore` hint), and a `graphify-out/` that git neither ignores nor
+  tracks. It writes no `.gitignore` itself: graphify supports a committed graph,
+  so whether to ignore the directory stays the repository's decision.
+- **`graphlore_duplication_scan` compares definition with definition.** Seeds
+  are functions, methods and classes (largest bodies first) instead of the most
+  connected nodes, each anchored to the chunk holding its own source rather
+  than to whatever chunk mentions its label. A neighbour is kept only if it is
+  a definition of the same kind and a similar size and structurally distant.
+  Pairs carry the similarity `score` and `a_site` / `b_site` (`file:line`), best
+  score first; test ↔ source pairs are left out unless `include_tests=True`.
+- **`graphlore_surprises`** scores a directory nothing depends on (`bench/`,
+  `demo/`, `examples/`) using a package that several directories depend on as
+  expected coupling, and drops an inferred edge whose source file imports neither
+  the target's module nor its package (the resolver matched a name).
+- **`graphlore_impact`** leaves docstring/rationale nodes (`rationale_for`) out
+  of the blast radius and counts them in `rationale_nodes_skipped`; name the
+  relation in `relations` to walk them.
+- **`graphlore_validate`** counts a function calling itself as `recursive_calls`,
+  not as a `self_loops` issue.
+- The descriptions of `graphlore_locate` and `graphlore_duplication_scan`, the
+  README and the semble-missing error now say that the first semantic call
+  downloads semble's embedding model from the Hugging Face Hub, and give the
+  command that fetches it ahead of time. The source no longer calls that path
+  "offline".
+
 ### Fixed
+- `graphlore_build` announced `graph.json ready` for the project's own, older
+  graph after building a different folder, and said nothing at all when the
+  project had no graph.
+- A package entry file labelled with part of its path (`pkg/__init__.py`, as
+  graphify >= 0.9 writes it) was not recognized as a whole-file node, so
+  `graphlore_surprises` scored edges it should have skipped.
 - README told users to `pip install graphlore`, but the package has never been
   released on PyPI, so the command failed. Installation now shows the GitHub
   form that works today
