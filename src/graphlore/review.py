@@ -18,6 +18,7 @@ from . import config
 from .graph import (
     _IMPORT_RELATIONS,
     _NON_DEPENDENCY_RELATIONS,
+    _bare_name,
     _edge_ends,
     _file_import_edges,
     _is_file_hub_node,
@@ -51,14 +52,6 @@ _CODE_EXTS = frozenset({
 })
 _IDENT = re.compile(r"[A-Za-z_$][A-Za-z0-9_$]*")
 _DECORATOR_LINE = re.compile(r"^\s*@\s*([A-Za-z_][\w.]*)")
-
-
-def _bare_name(label: str) -> str:
-    """``.dump()`` -> ``dump``, ``helper()`` -> ``helper``, ``TableSchema`` -> itself."""
-    name = label.strip()
-    if name.endswith("()"):
-        name = name[:-2]
-    return name.lstrip(".").rsplit(".", 1)[-1]
 
 
 def _int_line(n: dict) -> int:

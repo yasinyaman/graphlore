@@ -129,6 +129,14 @@ def _edge_rel(e: dict) -> str:
     return "->" if v is None else str(v)
 
 
+def _bare_name(label: str) -> str:
+    """``.dump()`` -> ``dump``, ``helper()`` -> ``helper``, ``TableSchema`` -> itself."""
+    name = label.strip()
+    if name.endswith("()"):
+        name = name[:-2]
+    return name.lstrip(".").rsplit(".", 1)[-1]
+
+
 def _is_surprise_edge(e: dict) -> bool:
     """A genuinely flagged surprise edge.
 
@@ -683,6 +691,7 @@ def _bfs_subgraph(
     hops: int,
     budget_tokens: int,
     edge_set: set[tuple[str, str, str]] | None = None,
+    order: Callable[[tuple[str, str]], Any] | None = None,
 ) -> tuple[set[str], list[dict], bool, int]:
     """BFS around start_id collecting edges until a token budget is hit.
 
@@ -691,6 +700,8 @@ def _bfs_subgraph(
     restores the true orientation of each collected edge: the undirected
     adjacency flattens direction, and an edge reached via its reverse entry must
     not be reported as ``B —calls→ A`` when the graph says ``A —calls→ B``.
+    ``order`` is a sort key over a node's ``(neighbor, relation)`` entries: what
+    comes first is what the budget keeps.
     """
     visited = {start_id}
     frontier = deque([(start_id, 0)])
@@ -703,7 +714,8 @@ def _bfs_subgraph(
         cur, depth = frontier.popleft()
         if depth >= hops:
             continue
-        for nb, rel in adj.get(cur, []):
+        neighbours = adj.get(cur, [])
+        for nb, rel in (sorted(neighbours, key=order) if order else neighbours):
             src, dst = cur, nb
             if (edge_set is not None and (src, dst, rel) not in edge_set
                     and (dst, src, rel) in edge_set):
@@ -1017,6 +1029,7 @@ def _hop_records(
     relations: frozenset[str] | None = None,
     seeds: Iterable[str] = (),
     exclude: frozenset[str] = frozenset(),
+    edge_ok: Callable[[dict], bool] | None = None,
 ) -> dict[str, tuple[int, str, dict | None]]:
     """Like :func:`_hop_distances`, but records HOW each node was reached.
 
@@ -1026,7 +1039,8 @@ def _hop_records(
     extra depth-0 entries (used to keep a class's own members reachable when
     containment edges are filtered out); they carry ``None`` as their edge so
     callers can tell them from real hits. ``exclude`` names relations never
-    walked, whatever ``relations`` says.
+    walked, whatever ``relations`` says; ``edge_ok`` rejects single edges (an
+    inferred one, under a strict walk).
     """
     out: dict[str, tuple[int, str, dict | None]] = {start_id: (0, "", None)}
     frontier = deque([(start_id, 0)])
@@ -1041,6 +1055,8 @@ def _hop_records(
         for nb, e in adj.get(cur, []):
             rel = _rel(e)
             if rel in exclude or (relations is not None and rel not in relations):
+                continue
+            if edge_ok is not None and not edge_ok(e):
                 continue
             if nb in out:
                 continue

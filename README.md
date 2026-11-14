@@ -7,7 +7,7 @@
 A Python MCP server that makes a [Graphify](https://graphify.net) codebase
 knowledge graph navigable — and joins it to the real source through a span
 engine. Graphify builds the graph (graphlore ships no extractor of its own);
-graphlore exposes it as 32 MCP tools, prompts and resources, and resolves every
+graphlore exposes it as 33 MCP tools, prompts and resources, and resolves every
 node to its true `start..end` symbol range — so an assistant orients structurally
 and cheaply (token-budgeted maps, then exact spans) instead of grepping and
 reading file after file.
@@ -212,9 +212,10 @@ graph.json analysis (read-only, no CLI needed, `as_json=True` for structured out
 | `graphlore_communities` | Leiden community summaries |
 | `graphlore_surprises` | Unexpected cross-file connections — listed from the graph's own flags when it has them, otherwise **computed** by scoring cross-file edges (confidence, file-type/directory/community crossing), with resolver noise, anything test code uses (the source under test, shared test fakes) and consumers — a directory or a script nothing depends on, using the package — scored down, and inferred edges into modules the source file never imports dropped; says plainly when nothing is computable rather than printing an empty list |
 | `graphlore_search` | Node search |
-| `graphlore_neighbors` | 1-hop neighbors of a node |
-| `graphlore_subgraph` | Token-budgeted BFS subgraph around a node — the cheap way to feed the model just the relevant slice (Graphify's embedded server does this too; pairing it with `fetch`/`locate` is what's specific here) |
-| `graphlore_impact` | Reverse-dependency / **blast radius** — what breaks if a node changes (`direction=dependents`/`dependencies`/`both`), filterable by relation (`relations="calls"`, `"code"`, `"imports"`, `"types"`), ordered by hop distance, each row carrying the recorded reference site. Docstring/rationale nodes are left out and counted |
+| `graphlore_neighbors` | 1-hop neighbors of a node, production code before tests; takes `scope` |
+| `graphlore_subgraph` | Token-budgeted BFS subgraph around a node — the cheap way to feed the model just the relevant slice (Graphify's embedded server does this too; pairing it with `fetch`/`locate` is what's specific here). Walks production code before tests, so a hub's budget goes to its real callers; takes `scope`, and a truncated result says how many direct neighbors were left out and how many were tests |
+| `graphlore_impact` | Reverse-dependency / **blast radius** — what breaks if a node changes (`direction=dependents`/`dependencies`/`both`), filterable by relation (`relations="calls"`, `"code"`, `"imports"`, `"types"`) and by `scope`. Ordered by hop distance, production code before tests; each row carries the recorded reference site and the edge's confidence, and `strict=True` walks only extracted edges. A truncated result says how many rows were dropped and how many were tests. Docstring/rationale nodes are left out and counted |
+| `graphlore_tests_for` | **Tests for a symbol** — tests that call it directly (with the call line), tests that reach it through one caller (a production function, or a helper/fixture in the test code), and weak matches kept apart (a test file that imports its module, a test named after it) |
 | `graphlore_node_details` | Node metadata: type, source file/line, docstring, community |
 | `graphlore_skeleton` | def/class **signatures** (decorators kept, bodies stripped) for a file/node/community — the middle layer between the map and full code |
 | `graphlore_fetch` | **Token-budgeted** source hydration — reads the real code for a node (its enclosing def/class span ± context), the map→code other half of `subgraph`/`locate` |
@@ -242,7 +243,28 @@ Semantic bridge (optional `[semble]` extra — semantic search joined to graph s
 
 | Tool | Purpose |
 |---|---|
-| `graphlore_locate` | NL query → enclosing graph node → token-budgeted subgraph, **plus `hidden_links`**: semantically-similar code that is structurally disconnected (duplication / missing-abstraction candidates) |
+| `graphlore_locate` | NL query → enclosing graph node → token-budgeted subgraph, **plus `hidden_links`**: semantically-similar code that is structurally disconnected (duplication / missing-abstraction candidates). The other top hits are listed under the seed (`also_matched`, production code first) — a question often has two homes |
+
+### What graphlore adds to the graph it reads
+
+graphify's local extractor links `from pkg import helper; helper()` to the
+function, but not `from pkg import mod; mod.helper()` — and often not the import
+of `mod` either. Test files are written almost entirely in the second form, so a
+function could come back with no callers and no tests while four tests call it.
+
+graphlore closes that gap at read time: for `mod.name(...)` where `mod` is bound
+by an import to a first-party module that defines `name` (or re-exports it), it
+adds the call edge, marked `resolved_by: "graphlore"`; the missing module import
+is added the same way. `graphlore_impact`, `graphlore_neighbors`,
+`graphlore_subgraph`, `graphlore_tests_for`, `graphlore_unreferenced`,
+`graphlore_cycles` and `graphlore_layers` read these edges; `graphlore_validate`
+says how many there are. graph.json is never modified.
+
+Python only. It costs one AST parse per Python file of the graph, once per
+process (about a second per hundred files); `GRAPHLORE_RESOLVE=0` turns it off.
+A call through an object, a callback or dynamic dispatch stays invisible, which
+is why an empty answer from these tools says "no edge was indexed", not "nothing
+calls this".
 
 ### Analysis scope
 
@@ -264,6 +286,10 @@ not the project's own code, and each result says how many nodes that was:
 | `-tests` / `+tests` | leave out / include test code |
 | `+external`, `+vendored` | bring those back |
 | `all` | the whole graph |
+
+`graphlore_impact`, `graphlore_subgraph` and `graphlore_neighbors` take the same
+`scope` string but leave nothing out by default: they walk out from a node you
+named, and `scope="-tests"` or `scope="src"` is how to narrow the walk.
 
 Tokens are separated by commas or spaces: `scope="src/pkg -tests"`. To keep
 vendored files out of the graph itself, list them in `.graphifyignore` —
@@ -499,6 +525,7 @@ Reusable templates that orchestrate the tools for the assistant:
 | `GRAPHLORE_TOOLSET` | `full` | `full` \| `lean` (core exploration tools only) \| `locate` (minimal locate-first surface; falls back to `lean` without a semantic backend) |
 | `GRAPHLORE_TOKENIZER` | _(heuristic)_ | `tiktoken` → exact token counts (needs the `[tiktoken]` extra); else chars/3.5 estimate |
 | `GRAPHLORE_SEMANTIC_BACKEND` | `semble` | Semantic index: `semble`, or `module.path:Factory` implementing `search`/`find_related` (validated at boot) |
+| `GRAPHLORE_RESOLVE` | `1` | Resolve calls and imports made through a module object (`mod.func()`) from the source at read time; `0` reads graph.json as it is |
 | `GRAPHLORE_WATCH` | `0` | Filesystem watcher: auto re-sync on structural changes (`[watch]` extra) |
 | `GRAPHLORE_WATCH_DEBOUNCE` | `2.0` | Watcher debounce window (seconds) |
 
@@ -512,13 +539,14 @@ Reusable templates that orchestrate the tools for the assistant:
 ```
 graphlore/
 ├── src/graphlore/          # package
-│   ├── server.py           #   MCP server: 32 tools, prompts, resources, transports
+│   ├── server.py           #   MCP server: 33 tools, prompts, resources, transports
 │   ├── graph.py            #   graph.json loading, node/edge accessors, BFS, adjacency
 │   ├── spans.py            #   span engine: ast + tree-sitter, chunk→node join, structural diff
 │   ├── imports.py          #   import statements read from source: what they can mean, when they run
 │   ├── scope.py            #   analysis scope: vendored / external / test filtering
 │   ├── apis.py             #   symbol-level external-API extraction
 │   ├── routes.py           #   framework route → handler extraction
+│   ├── resolve.py          #   calls and imports through a module object, resolved from source
 │   ├── review.py           #   unreferenced code, same-named symbols, identical bodies, layer rules
 │   └── config.py           #   project dir / out dir
 ├── tests/                  # pytest suite (in-process MCP client + unit tests)
