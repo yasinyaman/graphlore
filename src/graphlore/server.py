@@ -96,7 +96,7 @@ from collections import Counter
 from collections.abc import Callable
 from contextvars import ContextVar
 from pathlib import Path
-from typing import Annotated, Any, Protocol, TypeVar, overload
+from typing import Annotated, Any, NamedTuple, Protocol, TypeVar, overload
 
 import anyio.to_thread
 from mcp import MCPDeprecationWarning
@@ -128,18 +128,22 @@ from .graph import (  # noqa: F401  (re-exported for the tools + tests)
     _adjacency,
     _approx_tokens,
     _bare_name,
+    _beyond_hops,
     _bfs_subgraph,
+    _close_matches,
     _computed_surprises,
     _count_tokens,
     _cycle_path,
     _directed_adjacency,
     _directed_edge_adjacency,
     _edge_ends,
+    _edge_flags,
     _edge_rel,
     _edge_set,
     _exact_node_index,
     _file_import_edges,
     _find_cycles,
+    _flag_suffix,
     _graph_path,
     _hop_distances,
     _hop_records,
@@ -149,6 +153,7 @@ from .graph import (  # noqa: F401  (re-exported for the tools + tests)
     _is_test_path,
     _load_graph,
     _module_import_adjacency,
+    _name_index,
     _node_file,
     _node_id,
     _node_label,
@@ -158,6 +163,7 @@ from .graph import (  # noqa: F401  (re-exported for the tools + tests)
     _rel,
     _relation_adjacency,
     _resolve_node,
+    _substring_matches,
     _tiered_import_cycles,
 )
 from .imports import (  # noqa: F401  (re-exported for the tools + tests)
@@ -978,30 +984,47 @@ def _is_code_definition(n: dict) -> bool:
 _SYMBOL_KEY = re.compile(r"\.?[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*(?:\(\))?")
 
 
-def _pick_node(nodes: list[dict], key: str) -> tuple[dict | None, list[dict]]:
+class _Picked(NamedTuple):
+    """What a name resolved to: the node, the other nodes it could have meant, how
+    it matched (``id``, ``label``, ``name``, ``path``, ``substring``; ``None`` when
+    nothing did) and how many nodes matched in all."""
+
+    node: dict | None
+    others: list[dict]
+    how: str | None
+    total: int
+
+
+def _pick_node(nodes: list[dict], key: str) -> _Picked:
     """Resolve ``key`` to one node, and return the other nodes it could have meant.
 
     An id is unambiguous. A label (or a bare name: ``graphlore_locate`` for
     ``graphlore_locate()``) shared by several nodes resolves to a source
     definition before a doc heading of the same name, and the rest come back so
     the caller can say "matched 3, using this one" instead of picking silently.
+    A key that names no node falls back to a case-insensitive substring match,
+    which is always reported (``how == "substring"``): ``Response`` asked for and
+    ``ResponseHeaders`` used must not look like an exact hit.
     """
     exact = _exact_node_index(nodes).get(key)
     if exact is not None and _node_id(exact) == key:
-        return exact, []
+        return _Picked(exact, [], "id", 1)
+    index = _name_index(nodes)
+    how = "label"
     if _SYMBOL_KEY.fullmatch(key):
         # every node of that name, with or without the call marker: the function
         # `tool()` and the README heading `tool` are both what "tool" could mean
-        bare = _bare_name(key)
-        same = [n for n in nodes if _node_label(n) == key or (
-            not _is_file_hub_node(n) and _bare_name(_node_label(n)) == bare)]
+        same = index.by_name(key, _bare_name(key))
+        if any(_node_label(n) != key for n in same):
+            how = "name"
     else:
-        same = [n for n in nodes if _node_label(n) == key]
+        same = list(index.labels.get(key, ()))
     if not same and "/" in key:
         # a path names the node standing for that file
         rel = _norm_relpath(key)
         same = [n for n in nodes
                 if _is_file_hub_node(n) and _norm_relpath(_node_file(n)) == rel]
+        how = "path"
     if same:
         ranked = sorted(same, key=lambda n: not _is_code_definition(n))  # stable
         if "." in key.strip(".") and len(ranked) > 1:
@@ -1012,13 +1035,18 @@ def _pick_node(nodes: list[dict], key: str) -> tuple[dict | None, list[dict]]:
             ranked.sort(
                 key=lambda n: labels.get(_node_id(n), "").removesuffix("()") != want
             )
-        return ranked[0], ranked[1:]
-    return _resolve_node(nodes, key), []
+        return _Picked(ranked[0], ranked[1:], how, len(ranked))
+    hits, total = _substring_matches(nodes, key)
+    if not hits:
+        return _Picked(None, [], None, 0)
+    return _Picked(hits[0], hits[1:], "substring", total)
 
 
-def _matched(key: str, start: dict, others: list[dict]) -> tuple[dict[str, Any] | None, str]:
-    """(payload, text line) naming the other nodes ``key`` matched; (None, "") if none."""
-    if not others:
+def _matched(key: str, picked: _Picked) -> tuple[dict[str, Any] | None, str]:
+    """(payload, text line) saying how ``key`` resolved when that is worth knowing:
+    several nodes matched, or only a substring did. (None, "") otherwise."""
+    start, others = picked.node, picked.others
+    if start is None or (not others and picked.how != "substring"):
         return None, ""
 
     def site(n: dict) -> str:
@@ -1026,15 +1054,50 @@ def _matched(key: str, start: dict, others: list[dict]) -> tuple[dict[str, Any] 
 
     listed = [{"id": _node_id(n), "label": _node_label(n), "site": site(n)}
               for n in others[:5]]
-    payload = {"count": len(others) + 1, "using": _node_id(start), "others": listed}
-    more = f", +{len(others) - 5} more" if len(others) > 5 else ""
-    text = (
-        f"Matched {len(others) + 1} nodes for '{key}'; using {_node_label(start)} "
-        f"({site(start)}). Others: "
-        + ", ".join(f"{o['label']} ({o['site']}) id={o['id']}" for o in listed) + more
-        + " — pass an id to pick one."
+    payload = {
+        "count": picked.total, "using": _node_id(start), "others": listed,
+        "by": picked.how,
+    }
+    more = picked.total - 1 - len(listed)
+    rest = (
+        " Others: " + ", ".join(f"{o['label']} ({o['site']}) id={o['id']}" for o in listed)
+        + (f", +{more} more" if more > 0 else "") + " — pass an id to pick one."
+        if listed else " Pass an exact name or id if that is not the one."
     )
+    if picked.how == "substring":
+        text = (
+            f"'{key}' is not a node id or name; matched {picked.total} by substring, "
+            f"using {_node_label(start)} ({site(start)})." + rest
+        )
+    else:
+        text = (
+            f"Matched {picked.total} nodes for '{key}'; using {_node_label(start)} "
+            f"({site(start)})." + rest
+        )
     return payload, text
+
+
+def _suggestions(nodes: list[dict], key: str) -> list[dict[str, str]]:
+    return [
+        {"id": _node_id(n), "label": _node_label(n), "site": _site(n) or "no source location"}
+        for n in _close_matches(nodes, key)
+    ]
+
+
+def _not_found(nodes: list[dict], key: str, as_json: bool) -> str:
+    """The node-not-found error, with the closest names as ``did_you_mean``."""
+    close = _suggestions(nodes, key)
+    msg = f"No node matching '{key}'."
+    if close:
+        msg += " Did you mean: " + ", ".join(
+            f"{c['label']} ({c['site']})" for c in close) + "?"
+    if "graphlore_search" in _registered_tool_names():
+        msg += " Try graphlore_search."
+    return _err(msg, as_json, code="not_found", did_you_mean=close)
+
+
+# How many names a truncated reply lists of what it left out (the rest are counted).
+_LEFT_OUT_LISTED = 20
 
 
 # Said when a node-centric tool comes back empty: silence here is about the
@@ -1494,7 +1557,10 @@ def graphlore_god_nodes(top_n: int = 10, as_json: bool = False, scope: str = "")
     for it in items:
         t = f" [{it['type']}]" if it["type"] else ""
         text.append(f"  {it['node']}{t} — degree {it['degree']}")
-    payload = {"god_nodes": items, "scope": view.payload()}
+    payload = {
+        "god_nodes": items, "total": len(degree), "truncated": len(degree) > len(items),
+        "scope": view.payload(),
+    }
     return _fmt(payload, as_json, _with_note("\n".join(text), view))
 
 
@@ -1544,6 +1610,7 @@ def graphlore_surprises(limit: int = 20, as_json: bool = False, scope: str = "")
         text += [f"  {i['from']} —{i['relation']}→ {i['to']}" for i in items]
         payload = {
             "surprises": items, "basis": "flagged", "fallback": False,
+            "total": len(flagged), "truncated": len(flagged) > len(items),
             "scope": view.payload(),
         }
         return _fmt(payload, as_json, _with_note("\n".join(text), view))
@@ -1601,6 +1668,7 @@ def graphlore_surprises(limit: int = 20, as_json: bool = False, scope: str = "")
         )
     payload = {
         "surprises": items, "basis": "computed", "diagnostics": diag, "fallback": True,
+        "total": len(computed), "truncated": len(computed) > len(items),
         "scope": view.payload(),
     }
     return _fmt(payload, as_json, _with_note("\n".join(text), view))
@@ -2005,11 +2073,18 @@ def graphlore_search(pattern: str, limit: int = 25, as_json: bool = False) -> st
         {"node": _node_label(n), "type": n.get("type", ""), "degree": degree.get(_node_id(n), 0)}
         for n in hits[:limit]
     ]
-    text = [f"{len(hits)} matches (first {limit}):"]
+    truncated = len(hits) > len(items)
+    text = [
+        f"{len(hits)} matches (first {len(items)}; raise limit or narrow the pattern "
+        "for the rest):" if truncated else f"{len(hits)} matches:"
+    ]
     for it in items:
         t = f" [{it['type']}]" if it["type"] else ""
         text.append(f"  {it['node']}{t} — degree {it['degree']}")
-    return _fmt({"matches": items, "total": len(hits)}, as_json, "\n".join(text))
+    payload = {
+        "matches": items, "total": len(hits), "shown": len(items), "truncated": truncated,
+    }
+    return _fmt(payload, as_json, "\n".join(text))
 
 
 @_tool(annotations=ToolAnnotations(title="Node neighbors", read_only_hint=True))
@@ -2030,9 +2105,10 @@ def graphlore_neighbors(node: str, as_json: bool = False, scope: str = "") -> st
     if isinstance(graph, str):
         return _err(graph, as_json)
     nodes, edges = _nodes_edges(graph)
-    n, others = _pick_node(nodes, node)
+    picked = _pick_node(nodes, node)
+    n = picked.node
     if n is None:
-        return _err(f"No node matching '{node}'. Try graphlore_search.", as_json)
+        return _not_found(nodes, node, as_json)
     nav = _nav_view(nodes, edges, scope, as_json)
     if isinstance(nav, str):
         return nav
@@ -2048,15 +2124,14 @@ def graphlore_neighbors(node: str, as_json: bool = False, scope: str = "") -> st
         adj.get(nid, []),
         key=lambda x: (x[0] in tests, -len(adj.get(x[0], ())), labels.get(x[0], x[0])),
     )
-    neigh = [
-        {
-            "node": labels.get(t, t),
-            "relation": rel,
-            "direction": "out" if (nid, t, rel) in es else "in",
-        }
-        for t, rel in ranked
-    ]
-    matched, matched_text = _matched(node, n, others)
+    flags = _edge_flags(view.edges)
+    neigh = []
+    for t, rel in ranked:
+        out = (nid, t, rel) in es
+        row = {"node": labels.get(t, t), "relation": rel, "direction": "out" if out else "in"}
+        row.update(flags.get((nid, t, rel) if out else (t, nid, rel), {}))
+        neigh.append(row)
+    matched, matched_text = _matched(node, picked)
     payload: dict[str, Any] = {
         "node": _node_label(n), "neighbors": neigh,
         "scope": view.payload(), "resolved_edges": resolved.payload(),
@@ -2067,6 +2142,7 @@ def graphlore_neighbors(node: str, as_json: bool = False, scope: str = "") -> st
     text += [
         (f"  —{x['relation']}→ {x['node']}" if x["direction"] == "out"
          else f"  ←{x['relation']}— {x['node']}")
+        + (f"  [{_flag_suffix(x)[2:]}]" if _flag_suffix(x) else "")
         for x in neigh
     ]
     if not neigh:
@@ -2106,9 +2182,10 @@ def graphlore_subgraph(
     if isinstance(graph, str):
         return _err(graph, as_json)
     nodes, edges = _nodes_edges(graph)
-    start, others = _pick_node(nodes, node)
+    picked = _pick_node(nodes, node)
+    start = picked.node
     if start is None:
-        return _err(f"No node matching '{node}'. Try graphlore_search.", as_json)
+        return _not_found(nodes, node, as_json)
     nav = _nav_view(nodes, edges, scope, as_json)
     if isinstance(nav, str):
         return nav
@@ -2121,12 +2198,13 @@ def graphlore_subgraph(
     visited, collected_edges, truncated, approx_tokens = _bfs_subgraph(
         adj, labels, sid, hops, budget_tokens, edge_set=_edge_set(view.edges),
         order=lambda x: (x[0] in tests, -len(adj.get(x[0], ())), x[0]),
+        edge_flags=_edge_flags(view.edges),
     )
     left_out = {nb for nb, _rel_name in adj.get(sid, []) if nb not in visited}
     left_out_tests = len(left_out & tests)
 
     age = _graph_age()
-    matched, matched_text = _matched(node, start, others)
+    matched, matched_text = _matched(node, picked)
     payload: dict[str, Any] = {
         "center": _node_label(start),
         "hops": hops,
@@ -2156,7 +2234,11 @@ def graphlore_subgraph(
         + (f"  [graph age: {age}]" if age else ""),
         f"{len(visited)} nodes, {len(collected_edges)} edges\n",
     ]
-    text += [f"  {e['from']} —{e['relation']}→ {e['to']}" for e in collected_edges]
+    text += [
+        f"  {e['from']} —{e['relation']}→ {e['to']}"
+        + (f"  [{_flag_suffix(e)[2:]}]" if _flag_suffix(e) else "")
+        for e in collected_edges
+    ]
     if not collected_edges:
         payload["note"] = _EMPTY_NOTE
         text.append(_EMPTY_NOTE)
@@ -2278,9 +2360,10 @@ def graphlore_impact(
     if isinstance(graph, str):
         return _err(graph, as_json)
     nodes, graph_edges = _nodes_edges(graph)
-    start, others = _pick_node(nodes, node)
+    picked = _pick_node(nodes, node)
+    start = picked.node
     if start is None:
-        return _err(f"No node matching '{node}'. Try graphlore_search.", as_json)
+        return _not_found(nodes, node, as_json)
     nav = _nav_view(nodes, graph_edges, scope, as_json)
     if isinstance(nav, str):
         return nav
@@ -2317,11 +2400,15 @@ def graphlore_impact(
     edge_ok = _is_extracted_edge if strict else None
     if direction == "dependents":
         recs = _hop_records(reverse, sid, hops, rel_filter, seeds, skip, edge_ok)
+        beyond_hops = _beyond_hops(reverse, recs, hops, rel_filter, skip, edge_ok)
     elif direction == "dependencies":
         recs = _hop_records(forward, sid, hops, rel_filter, seeds, skip, edge_ok)
+        beyond_hops = _beyond_hops(forward, recs, hops, rel_filter, skip, edge_ok)
     else:
         recs = dict(_hop_records(reverse, sid, hops, rel_filter, seeds, skip, edge_ok))
+        beyond_hops = _beyond_hops(reverse, recs, hops, rel_filter, skip, edge_ok)
         both = _hop_records(forward, sid, hops, rel_filter, seeds, skip, edge_ok)
+        beyond_hops += _beyond_hops(forward, both, hops, rel_filter, skip, edge_ok)
         for nid, r in both.items():
             if nid not in recs or r[0] < recs[nid][0]:
                 recs[nid] = r  # nearest hop in either direction
@@ -2408,7 +2495,7 @@ def graphlore_impact(
         impacted.append(item)
 
     approx = _count_tokens(json.dumps(impacted, ensure_ascii=False))
-    matched, matched_text = _matched(node, start, others)
+    matched, matched_text = _matched(node, picked)
     payload: dict[str, Any] = {
         "node": _node_label(start),
         "direction": direction,
@@ -2422,12 +2509,23 @@ def graphlore_impact(
         "truncated": truncated,
         "dropped": dropped,
         "dropped_tests": dropped_tests,
+        # nodes one hop past `hops`; complete means neither the budget nor the hop
+        # limit cut the answer short
+        "beyond_hops": beyond_hops,
+        "complete": not truncated and beyond_hops == 0,
         "approx_tokens": approx,
         "scope": view.payload(),
         "resolved_edges": resolved.payload(),
     }
     if matched:
         payload["matched"] = matched
+    if not payload["complete"]:
+        payload["hint"] = (
+            ("Raise budget_tokens or narrow with relations=/scope= for the rows not "
+             "shown. " if truncated else "")
+            + (f"Raise hops past {hops} for the {beyond_hops} node(s) beyond it."
+               if beyond_hops else "")
+        ).strip()
     rationale_note = (
         f"\n({rationale_skipped} docstring/rationale node(s) left out — they describe "
         "code, they do not depend on it.)" if rationale_skipped else ""
@@ -2436,6 +2534,11 @@ def graphlore_impact(
         rationale_note += (
             f"\n({resolved_rows} row(s) rest on a call or import graphlore resolved from "
             "the source; graph.json does not carry it.)"
+        )
+    if beyond_hops:
+        rationale_note += (
+            f"\n(Incomplete: {beyond_hops} more node(s) lie one hop past hops={hops}; "
+            "raise hops to include them.)"
         )
     if matched_text:
         rationale_note += "\n" + matched_text
@@ -2516,9 +2619,10 @@ def graphlore_tests_for(
     if isinstance(graph, str):
         return _err(graph, as_json)
     nodes, graph_edges = _nodes_edges(graph)
-    start, others = _pick_node(nodes, node)
+    picked = _pick_node(nodes, node)
+    start = picked.node
     if start is None:
-        return _err(f"No node matching '{node}'. Try graphlore_search.", as_json)
+        return _not_found(nodes, node, as_json)
     resolved = _resolved(nodes, graph_edges)
     edges = resolved.edges
     forward, reverse = _directed_edge_adjacency(edges)
@@ -2611,7 +2715,7 @@ def graphlore_tests_for(
                 })
 
     cap = max(0, limit)
-    matched, matched_text = _matched(node, start, others)
+    matched, matched_text = _matched(node, picked)
     payload: dict[str, Any] = {
         "node": _node_label(start),
         "site": _site(start) or None,
@@ -2740,7 +2844,8 @@ def graphlore_locate(
     seed_id = _node_id(seed)
     byid_all = {_node_id(n): n for n in nodes}
     visited, sub_edges, truncated, tokens = _bfs_subgraph(
-        adj, labels, seed_id, hops, budget_tokens, edge_set=_edge_set(edges)
+        adj, labels, seed_id, hops, budget_tokens, edge_set=_edge_set(edges),
+        edge_flags=_edge_flags(edges),
     )
     dist_cap = max(hops, 4)
     distmap = _hop_distances(adj, seed_id, dist_cap)
@@ -2846,6 +2951,7 @@ def graphlore_locate(
     }
     if seed_qual and seed_qual != _node_label(seed):
         seed_obj["qualname"] = seed_qual  # span-recovered FQN, e.g. Client._send_single_request
+    left_out = {nb for nb, _rel_name in adj.get(seed_id, []) if nb not in visited}
     payload = {
         "query": query,
         "seed": seed_obj,
@@ -2853,12 +2959,14 @@ def graphlore_locate(
             "nodes": len(visited),
             "edges": sub_edges,
             "truncated": truncated,
+            "direct_neighbors_left_out": len(left_out),
             "approx_tokens": tokens,
         },
         "semantic_hits": semantic_hits,
         "also_matched": also_matched,
         "header_hits_skipped": header_hits,
         "calls_into": calls_into,
+        "calls_into_total": len(callees),
         "semantic_cousins": cousins,
         "hidden_links": hidden,
     }
@@ -2868,7 +2976,9 @@ def graphlore_locate(
         + (f" [{seed_qual}]" if seed_qual and seed_qual != _node_label(seed) else "")
         + f"  ({seed_file}:{_node_line(seed)})",
         f"Structure: {len(visited)} nodes, {len(sub_edges)} edges"
-        + (" (TRUNCATED)" if truncated else ""),
+        + (f" (TRUNCATED at budget: {len(left_out)} direct neighbor(s) of the seed "
+           "not shown; raise budget_tokens or call graphlore_subgraph on the seed)"
+           if truncated else ""),
     ]
     if calls_into:
         text.append("\nSeed calls into — the implementation may live here:")
@@ -2877,6 +2987,11 @@ def graphlore_locate(
             else f"  {c['node']}  ({c['file']})"
             for c in calls_into
         ]
+        if len(callees) > len(calls_into):
+            text.append(
+                f"  … {len(callees) - len(calls_into)} more (graphlore_impact on the "
+                "seed with direction='dependencies' lists them all)"
+            )
     if also_matched:
         text.append("\nAlso matched — the answer may live here too:")
         text += [
@@ -3213,9 +3328,10 @@ def graphlore_node_details(node: str, as_json: bool = False) -> str:
     if isinstance(graph, str):
         return _err(graph, as_json)
     nodes, _ = _nodes_edges(graph)
-    n = _resolve_node(nodes, node)
+    picked = _pick_node(nodes, node)
+    n = picked.node
     if n is None:
-        return _err(f"No node matching '{node}'. Try graphlore_search.", as_json)
+        return _not_found(nodes, node, as_json)
     # Common metadata keys across graphify schema variants.
     detail = {
         "id": _node_id(n),
@@ -3243,6 +3359,10 @@ def graphlore_node_details(node: str, as_json: bool = False) -> str:
     ]
     if extra:
         text.append(f"  other    : {', '.join(extra.keys())}")
+    matched, matched_text = _matched(node, picked)
+    if matched:
+        detail["matched"] = matched
+        text.append(matched_text)
     return _fmt(detail, as_json, "\n".join(text))
 
 
@@ -3280,13 +3400,15 @@ def graphlore_fetch(
 
     fetched: list[dict[str, Any]] = []
     not_found: list[str] = []
+    not_fetched: list[str] = []
     seen_ids: set[str] = set()
     running = 0
     code_blocks = 0
     truncated = False
 
     for q in nodes:
-        n = _resolve_node(all_nodes, q)
+        picked = _pick_node(all_nodes, q)
+        n = picked.node
         if n is None:
             not_found.append(q)
             continue
@@ -3294,6 +3416,11 @@ def graphlore_fetch(
         if nid in seen_ids:
             continue
         seen_ids.add(nid)
+        if truncated:
+            # past the budget: keep resolving so what was left out has a name
+            not_fetched.append(q)
+            continue
+        matched, _ = _matched(q, picked)
 
         f = _node_file(n)
         try:
@@ -3320,6 +3447,7 @@ def graphlore_fetch(
                 "file": f or None, "line": line or None, "lines": None,
                 "code": None, "tokens": 0, "spanned": spanned,
                 "note": "source unavailable (no file on disk or outside the project)",
+                **({"requested": q, "matched": matched} if matched else {}),
             })
             continue
 
@@ -3330,7 +3458,8 @@ def graphlore_fetch(
         # stop at the shared budget — same truncate-at-boundary contract as subgraph.
         if code_blocks and running + toks > budget_tokens:
             truncated = True
-            break
+            not_fetched.append(q)
+            continue
         running += toks
         code_blocks += 1
         fetched.append({
@@ -3338,14 +3467,23 @@ def graphlore_fetch(
             "qualname": qual if qual and qual != _node_label(n) else None,
             "file": f, "line": line or None, "lines": f"{clo}-{chi}",
             "code": code, "tokens": toks, "spanned": spanned,
+            **({"requested": q, "matched": matched} if matched else {}),
         })
 
-    payload = {
+    payload: dict[str, Any] = {
         "fetched": fetched,
         "not_found": not_found,
         "truncated": truncated,
         "approx_tokens": running,
     }
+    if truncated:
+        payload["not_fetched"] = not_fetched
+        payload["hint"] = (
+            "Call graphlore_fetch again with the names in not_fetched, or raise "
+            "budget_tokens."
+        )
+    if not_found:
+        payload["did_you_mean"] = {q: _suggestions(all_nodes, q) for q in not_found}
     parts: list[str] = []
     for it in fetched:
         head = it["qualname"] or it["node"]
@@ -3353,14 +3491,24 @@ def graphlore_fetch(
             f"{it['file']}:{it['lines']}" if it.get("lines")
             else (f"{it['file']}:{it['line']}" if it.get("file") else "(no source location)")
         )
+        if it.get("matched"):
+            m = it["matched"]
+            how = "by substring" if m["by"] == "substring" else f"{m['count']} nodes"
+            head += f"  [asked '{it['requested']}': matched {how}; pass an id to pick another]"
         if it["code"] is None:
             parts.append(f"# {head}  ({loc}) — {it.get('note', 'source unavailable')}")
         else:
             parts.append(f"# {head}  ({loc})\n{it['code']}")
+    close = payload.get("did_you_mean", {})
+    missing = ", ".join(
+        q + (f" (did you mean {', '.join(c['label'] for c in close[q])}?)" if close.get(q) else "")
+        for q in not_found
+    )
     summary = (
         f"Fetched {code_blocks} node(s), ~{running} est. tokens"
-        + (", TRUNCATED at budget" if truncated else "")
-        + (f"; {len(not_found)} not found: {', '.join(not_found)}" if not_found else "")
+        + (f", TRUNCATED at budget; not fetched: {', '.join(not_fetched)} "
+           "(call again with these names or raise budget_tokens)" if truncated else "")
+        + (f"; {len(not_found)} not found: {missing}" if not_found else "")
     )
     text = summary + ("\n\n" + "\n\n".join(parts) if parts else "")
     # Every requested name missing is a failure; a partial miss is not.
@@ -3397,12 +3545,16 @@ def graphlore_skeleton(
         return _err("ERROR: provide exactly one of file=, node=, or community=.", as_json)
 
     targets: list[tuple[str, str | None]] = []  # (file, qualname prefix or None)
+    matched: dict[str, Any] | None = None
+    matched_text = ""
     if file:
         targets = [(file, None)]
     elif node:
-        n = _resolve_node(nodes, node)
+        picked = _pick_node(nodes, node)
+        n = picked.node
         if n is None:
-            return _err(f"No node matching '{node}'. Try graphlore_search.", as_json)
+            return _not_found(nodes, node, as_json)
+        matched, matched_text = _matched(node, picked)
         nf = _node_file(n)
         if not nf:
             return _err(f"Node '{_node_label(n)}' has no source file to skeletonize.", as_json)
@@ -3431,26 +3583,40 @@ def graphlore_skeleton(
     sections: list[dict[str, Any]] = []
     running = 0
     truncated = False
+    left_out: list[str] = []
     for tf, prefix in targets:
+        if truncated:
+            # past the budget: name what was not shown instead of dropping it
+            left_out.append(_norm_relpath(tf))
+            continue
         entries = _skeleton_lines(tf, prefix)
         if not entries:
             continue
         toks = _count_tokens("\n".join("\n".join(h) for _q, h in entries))
         if sections and running + toks > budget_tokens:
             truncated = True
-            break
+            left_out.append(_norm_relpath(tf))
+            continue
         running += toks
         sections.append({
             "file": _norm_relpath(tf),
             "symbols": [{"qualname": q, "header": "\n".join(h)} for q, h in entries],
         })
 
-    payload = {
+    payload: dict[str, Any] = {
         "scope": file or node or f"community {community}",
         "sections": sections,
         "truncated": truncated,
         "approx_tokens": running,
     }
+    if truncated:
+        payload["files_left_out"] = left_out[:_LEFT_OUT_LISTED]
+        payload["files_left_out_count"] = len(left_out)
+        payload["hint"] = (
+            "Raise budget_tokens, or call again with file= for a file left out."
+        )
+    if node and matched:
+        payload["matched"] = matched
     if not sections:
         return _fmt(
             payload, as_json, "No signatures found (no parseable defs/classes in scope)."
@@ -3460,7 +3626,15 @@ def graphlore_skeleton(
         parts.append(f"# {section['file']}")
         parts += [sym["header"] for sym in section["symbols"]]
     if truncated:
-        parts.append("\n… TRUNCATED at budget.")
+        listed = ", ".join(left_out[:_LEFT_OUT_LISTED])
+        more = len(left_out) - _LEFT_OUT_LISTED
+        parts.append(
+            f"\n… TRUNCATED at budget: {len(left_out)} file(s) left out: {listed}"
+            + (f", +{more} more" if more > 0 else "")
+            + ". Raise budget_tokens, or call again with file= for one of them."
+        )
+    if node and matched:
+        parts.append(matched_text)
     return _fmt(payload, as_json, "\n".join(parts))
 
 
@@ -3505,6 +3679,11 @@ def _ast_equivalent_refs(path_a: str, ref_a: str, path_b: str, ref_b: str) -> bo
     if old_src is None or new_src is None:
         return None
     return _structurally_equal(path_b, old_src, new_src)
+
+
+# graphlore_freshness lists at most this many files per category; `counts` has the
+# real lengths.
+_FRESHNESS_LIST_CAP = 50
 
 
 @_tool(annotations=ToolAnnotations(title="Graph freshness", read_only_hint=True))
@@ -3694,12 +3873,23 @@ def graphlore_freshness(as_json: bool = False) -> str:
         "built_commit_reachable": (not built_unreachable) if built_at else None,
         "graph_mtime": graph_mtime,
         "stale": stale,
-        "uncommitted_or_untracked_files": changed_files[:50],
-        "structural_changes": structural[:50],
-        "cosmetic_changes": cosmetic[:50],
-        "non_source_changes": non_source[:50],
-        "deleted_or_renamed": removed[:50],
-        "phantom_files": phantom_removed[:50],
+        "uncommitted_or_untracked_files": changed_files[:_FRESHNESS_LIST_CAP],
+        "structural_changes": structural[:_FRESHNESS_LIST_CAP],
+        "cosmetic_changes": cosmetic[:_FRESHNESS_LIST_CAP],
+        "non_source_changes": non_source[:_FRESHNESS_LIST_CAP],
+        "deleted_or_renamed": removed[:_FRESHNESS_LIST_CAP],
+        "phantom_files": phantom_removed[:_FRESHNESS_LIST_CAP],
+        # every list above is capped; these are the real lengths
+        "counts": {
+            "uncommitted_or_untracked_files": len(changed_files),
+            "structural_changes": len(structural),
+            "cosmetic_changes": len(cosmetic),
+            "non_source_changes": len(non_source),
+            "deleted_or_renamed": len(removed),
+            "phantom_files": len(phantom_removed),
+        },
+        "truncated": any(len(x) > _FRESHNESS_LIST_CAP for x in (
+            changed_files, structural, cosmetic, non_source, removed, phantom_removed)),
         "recommended_action": action,
         "reason": reason,
         "recommendation": command,
@@ -4730,6 +4920,7 @@ def graphlore_package_apis(package: str = "", limit: int = 20, as_json: bool = F
             for p in shown
         ],
         "first_party_skipped": sorted(skipped),
+        "total": len(ranked),
         "truncated": len(ranked) > len(shown),
         "note": _API_SURFACE_NOTE,
     }
@@ -4938,6 +5129,8 @@ def community(community_id: str) -> str:
     for e in boundary[:50]:
         s, t = _edge_ends(e)
         lines.append(f"- {labels.get(s, s)} —{_edge_rel(e)}→ {labels.get(t, t)}")
+    if len(boundary) > 50:
+        lines.append(f"- … showing 50 of {len(boundary)} boundary edges")
     return "\n".join(lines)
 
 
