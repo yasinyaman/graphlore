@@ -39,7 +39,9 @@ followed?"), reach for `graphlore_locate("<natural-language question>")` first: 
 call runs semantic search, maps the top hit to its **enclosing graph node**, and
 returns the token-budgeted subgraph around it **plus `hidden_links`** — semantically
 similar code that is structurally disconnected (duplication / missing-abstraction /
-sync-async-twin candidates that neither search nor the graph surfaces alone). Works
+sync-async-twin candidates that neither search nor the graph surfaces alone). Read
+the "Also matched" lines under the seed: a question often has two homes (the tool
+that exposes a behavior and the module that implements it). Works
 across Python, JS/TS, Go, Java, Rust, C++ and 165+ languages. Needs the optional
 `[semble]` extra; without it, fall back to `graphlore_search` (name-based) and the
 structural flow below. The first semantic call downloads semble's embedding model
@@ -61,13 +63,32 @@ fail on a machine without network access until the model is fetched ahead of tim
    type, community, and docstring when you need to jump to source.
 
 Supporting tools: `graphlore_search` (find nodes by name), `graphlore_neighbors`
-(1-hop), `graphlore_god_nodes` (most connected), `graphlore_surprises`
+(1-hop), `graphlore_tests_for("<symbol>")` (which tests exercise it: direct,
+through one caller, weak hints), `graphlore_god_nodes` (most connected), `graphlore_surprises`
 (unexpected cross-domain couplings), `graphlore_path(a, b)` (exact route between
 two nodes), `graphlore_explain(node)` (everything about one node),
-`graphlore_cycles()` (import cycles between modules, then call cycles),
+`graphlore_cycles()` (import cycles between modules — runtime first — then call cycles),
 `graphlore_routes()` (framework route → handler table, joined to graph nodes),
 `graphlore_validate()` (lint graph.json for dangling/duplicate/self-loop/orphan
 issues — gauge how much to trust the graph).
+
+## Reading an answer: ambiguity, empty results, inferred edges
+
+- **A name can match several nodes** (a function and a README heading, two
+  `Settings` classes). The node-centric tools say "Matched N nodes ...; using
+  X" and list the others with their ids — check that X is the one you meant, and
+  pass the id if it is not.
+- **An empty answer is about the index, not the code.** "Nothing depends on X"
+  means no edge was indexed. graphlore adds the calls made through an imported
+  module (`mod.func()`, how tests usually call code) from the source — Python,
+  and JS/TS default and dynamic imports — but calls through an object, a
+  callback or dynamic dispatch stay invisible.
+- **Inferred edges are leads.** `graphlore_impact` marks them `inferred`;
+  `strict=True` walks only the edges the extractor resolved, for when you need
+  proof rather than candidates.
+- **Hub functions:** `graphlore_impact` and `graphlore_subgraph` list production
+  callers before tests and say how many rows a budget dropped; `scope="-tests"`
+  removes test code from the walk altogether.
 
 ## Scope: whose code is being analysed
 
@@ -108,27 +129,38 @@ stripped) — the middle layer between the map and full code — and
 - **Reviewing a codebase** (the `review` MCP prompt scripts this), in this order:
   1. `graphlore_validate()` — how far to trust the graph, and what the scope left out.
   2. `graphlore_cycles(kind="imports")` — import cycles between modules are the
-     finding a reviewer looks for first; then `kind="calls"` and judge which
-     loops are deliberate (redraw / rebuild loops usually are).
+     finding a reviewer looks for first. They come in three tiers: **runtime**
+     (a loop of module-level imports: can fail at start-up — report these as
+     defects), **deferred** (closes through an import inside a function) and
+     **type-only** (closes under `if TYPE_CHECKING:`) — report those two as
+     "these modules know each other", not as breakage. Then `kind="calls"` and
+     judge which loops are deliberate (redraw / rebuild loops usually are).
   3. `graphlore_layers(rules={"<layer>": ["<what it may import>"]})` — write the
      intended layering down (from the README, the directory layout, or the
      project's own architecture test) and list the imports that break it.
   4. `graphlore_unreferenced()` — dead-code candidates with `file:line`;
      `graphlore_fetch` each one before calling it dead (dynamic dispatch is
-     invisible to the graph).
+     invisible to the graph). A row "name shared with file:line" is the unused
+     one of two same-named definitions.
   5. `graphlore_same_names()` — classes and functions defined twice under one
-     name, with how many modules import each copy.
+     name, with how many modules import each copy and whether its own file
+     uses it; then `graphlore_duplication_scan()` for its `identical_bodies`
+     tier — function bodies that are the same code, whatever they are called
+     (exact, no model).
   6. `graphlore_god_nodes()` — the most connected modules and symbols are the
      maintainability hotspots; `graphlore_skeleton` shows how large they are.
   7. `graphlore_surprises()` last — leads to check, not findings.
 - **Before a refactor** → `graphlore_impact("<node>")` — the reverse-dependency
-  **blast radius**, ordered by hop distance: what breaks if this changes.
+  **blast radius**, ordered by hop distance: what breaks if this changes — then
+  `graphlore_tests_for("<node>")` for the tests to run afterwards.
 - **Reviewing a changeset** → `graphlore_diff(base, head)` — the file-level
   structural changes between two git refs, cosmetic-only edits separated.
-- **Hunting duplication** → `graphlore_same_names()` first (exact, no model),
-  then `graphlore_duplication_scan()` — definitions that are semantically similar
-  but structurally distant, each pair with its score and both `file:line`s
-  (needs the `[semble]` extra).
+- **Hunting duplication** → `graphlore_same_names()` and the `identical_bodies`
+  tier of `graphlore_duplication_scan()` first (both exact, no model), then the
+  scan's semantic `pairs` — definitions that are similar but structurally
+  distant, each with its score and both `file:line`s (needs the `[semble]`
+  extra). Read the score: near 1.0 is copied code; a low score is two things
+  with the same role, which is why pairs under 0.7 are left out by default.
 - **Auditing a dependency upgrade** → `graphlore_package_apis("<package>")` —
   which symbols of the external package are actually used, and from where.
 - **Finding an endpoint** → `graphlore_routes(pattern="/items")` — which URL
