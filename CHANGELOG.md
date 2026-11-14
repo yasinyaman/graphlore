@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-14
+
 Feedback from a review session on a 774-file Python + JS repository (graphify
 0.9.108, 13,159 nodes): the analysis tools were dominated by code that was not
 the project's own, a graph built by path could not be read, and reviewing a
