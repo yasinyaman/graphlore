@@ -2,21 +2,21 @@
 
 `benchmark.md` measures one tool, `graphlore_locate`, on six HTTP-client
 libraries. This is the other half: **all 33 tools, the resources and the
-prompts**, run on 20 real repositories in 14 languages, to find
+prompts**, run on 31 real repositories in 14 languages, to find
 what breaks, what answers wrongly and what stays silent — and what was fixed as
 a result.
 
 Back to the [README](../README.md) · [Benchmark](benchmark.md) ·
 [Tool reference](tools.md) · [Concepts](concepts.md)
 
-Measured 2026-11-14 with graphlore 0.5.1 (unreleased), graphify
-0.9.108, tree-sitter-language-pack 1.25.0, semble 0.7.3,
-Python 3.12.3. Results: [`benchmarks/results-polyglot.json`](../benchmarks/results-polyglot.json).
+Measured 2026-11-15 with graphlore 0.6.0, graphify
+0.9.109, tree-sitter-language-pack 1.25.0, semble 0.7.3,
+Python 3.13.18. Results: [`benchmarks/results-polyglot.json`](../benchmarks/results-polyglot.json).
 
 ## In short
 
-- Before the fixes the audit reported **448 findings** (a finding is
-  one problem in one repository, tool and language); after them **91**.
+- Before the fixes the audit reported **657 findings** (a finding is
+  one problem in one repository, tool and language); after them **60**.
   No crash is left; what is left is coverage gaps, oddities of the graph
   graphify builds, and the open items at the end.
 - The span engine, which `fetch`, `skeleton`, `locate`, labels and the dead-code
@@ -28,8 +28,12 @@ Python 3.12.3. Results: [`benchmarks/results-polyglot.json`](../benchmarks/resul
   import-cycle, layer and surprise tools worked on a thinner graph.
 - Fifteen tools cut their output without saying how to get the rest, against
   the project's own convention.
-- What remains is coverage, not correctness: route and package-API extraction
-  read five languages, and say so now when they meet another.
+- Route and package-API extraction read five languages and said nothing when
+  they met another. Package APIs are now read in all fourteen; routes in nine,
+  covering the common frameworks of each — on eleven sample applications, nine
+  of them implementations of the same RealWorld API, every route is found.
+- What remains is listed at the end: prefixes applied in another file, Scala and
+  Swift routes, and a handful of span and dead-code edge cases.
 
 ## What was run
 
@@ -88,11 +92,25 @@ included, no API key.
 | C++ | [libcpr/cpr](https://github.com/libcpr/cpr) | `34e18e3f70` | 2,932 | 5,058 | 1,063 |
 | Ruby | [lostisland/faraday](https://github.com/lostisland/faraday) | `565a149d40` | 1,188 | 1,471 | 528 |
 | PHP | [guzzle/guzzle](https://github.com/guzzle/guzzle) | `f8aca40edf` | 5,146 | 13,849 | 4,150 |
+| Kotlin | [gothinkster/kotlin-spring-realworld-example-app](https://github.com/gothinkster/kotlin-spring-realworld-example-app) | `848c29e3ab` | 341 | 647 | 121 |
+| Kotlin | [Rudge/kotlin-ktor-realworld-example-app](https://github.com/Rudge/kotlin-ktor-realworld-example-app) | `b9e9dec0ec` | 339 | 621 | 128 |
+| Java | [diegocamara/realworld-api-quarkus](https://github.com/diegocamara/realworld-api-quarkus) | `d4fe769be9` | 1,016 | 3,279 | 568 |
+| C# | [gothinkster/aspnetcore-realworld-example-app](https://github.com/gothinkster/aspnetcore-realworld-example-app) | `6fe67a5389` | 1,926 | 3,677 | 407 |
+| C# | [davidfowl/TodoApi](https://github.com/davidfowl/TodoApi) | `307a1eadbb` | 449 | 725 | 131 |
+| Rust | [launchbadge/realworld-axum-sqlx](https://github.com/launchbadge/realworld-axum-sqlx) | `f1b2565477` | 226 | 435 | 77 |
+| Rust | [fairingrey/actix-realworld-example-app](https://github.com/fairingrey/actix-realworld-example-app) | `8348aedd51` | 332 | 741 | 132 |
+| Ruby | [sklise/sinatra-warden-example](https://github.com/sklise/sinatra-warden-example) | `f38454974f` | 24 | 23 | 5 |
+| Ruby | [gothinkster/rails-realworld-example-app](https://github.com/gothinkster/rails-realworld-example-app) | `a2ae4fff78` | 289 | 256 | 83 |
+| PHP | [alexeymezenin/laravel-realworld-example-app](https://github.com/alexeymezenin/laravel-realworld-example-app) | `1f482bfe92` | 404 | 576 | 185 |
+| PHP | [symfony/demo](https://github.com/symfony/demo) | `f42980c690` | 956 | 1,413 | 278 |
 
-41,206 nodes in all. The repositories were picked to give every extractor
-a positive case (a FastAPI, an Express, a NestJS, a gin, a chi and a Spring
-application) and every language its usual test layout (`src/test/java`,
-`jvmTest`, `Foo.Tests/`, `spec/`, Rust's inline `#[cfg(test)]`).
+47,508 nodes in all. The first twenty repositories were picked to give
+every extractor a positive case (a FastAPI, an Express, a NestJS, a gin, a chi
+and a Spring application) and every language its usual test layout
+(`src/test/java`, `jvmTest`, `Foo.Tests/`, `spec/`, Rust's inline
+`#[cfg(test)]`); the last eleven are applications chosen for their routes, most
+of them implementations of the [RealWorld](https://github.com/gothinkster/realworld)
+API, which has 19 endpoints.
 
 ## What works in each language
 
@@ -104,21 +122,21 @@ fixes (commit `7e0ddb8`).
 | Language | Own span, before | Own span, after | Skeleton headers without the name, before → after | Freshness / diff |
 |---|--:|--:|--:|---|
 | Python | 120 / 120 (100%) | 120 / 120 (100%) | 0 → 0 of 406 | correct (2 files edited) |
-| JavaScript | 190 / 284 (67%) | 217 / 284 (76%) | 0 → 0 of 592 | correct (6 files edited) |
-| TypeScript | 174 / 183 (95%) | 174 / 183 (95%) | 0 → 0 of 774 | correct (3 files edited) |
+| JavaScript | 198 / 294 (67%) | 235 / 294 (80%) | 0 → 0 of 607 | correct (7 files edited) |
+| TypeScript | 174 / 183 (95%) | 175 / 183 (96%) | 0 → 0 of 774 | correct (3 files edited) |
 | TSX | 48 / 66 (73%) | 64 / 66 (97%) | 0 → 0 of 66 | correct (2 files edited) |
 | Go | 180 / 180 (100%) | 180 / 180 (100%) | 0 → 0 of 691 | correct (3 files edited) |
-| Java | 144 / 145 (99%) | 144 / 145 (99%) | 680 → 0 of 950 | correct (2 files edited) |
-| Kotlin | 0 / 121 (0%) | 117 / 121 (97%) | 0 → 0 of 718 | correct (3 files edited) |
+| Java | 204 / 205 (100%) | 205 / 205 (100%) | 727 → 0 of 1083 | correct (3 files edited) |
+| Kotlin | 0 / 241 (0%) | 238 / 241 (99%) | 0 → 0 of 812 | correct (5 files edited) |
 | Scala | 46 / 60 (77%) | 60 / 60 (100%) | 4 → 0 of 138 | correct (1 file edited) |
-| C# | 53 / 60 (88%) | 60 / 60 (100%) | 137 → 0 of 218 | correct (1 file edited) |
-| Rust | 55 / 60 (92%) | 58 / 60 (97%) | 0 → 0 of 310 | correct (1 file edited) |
+| C# | 168 / 180 (93%) | 180 / 180 (100%) | 153 → 0 of 300 | correct (3 files edited) |
+| Rust | 163 / 180 (91%) | 174 / 180 (97%) | 0 → 0 of 451 | correct (3 files edited) |
 | Swift | 54 / 60 (90%) | 60 / 60 (100%) | 87 → 0 of 394 | correct (1 file edited) |
 | C | 52 / 60 (87%) | 60 / 60 (100%) | 1 → 0 of 250 | correct (1 file edited) |
 | C++ | 45 / 123 (37%) | 123 / 123 (100%) | 0 → 0 of 355 | correct (2 files edited) |
-| C / C++ headers | 63 / 120 (52%) | 89 / 120 (74%) | 16 → 1 of 776 | correct (2 files edited) |
-| Ruby | 33 / 60 (55%) | 58 / 60 (97%) | 0 → 0 of 127 | correct (1 file edited) |
-| PHP | 49 / 60 (82%) | 60 / 60 (100%) | 0 → 0 of 1344 | correct (1 file edited) |
+| C / C++ headers | 63 / 120 (52%) | 89 / 120 (74%) | 16 → 0 of 776 | correct (2 files edited) |
+| Ruby | 97 / 125 (78%) | 125 / 125 (100%) | 0 → 0 of 160 | correct (3 files edited) |
+| PHP | 136 / 180 (76%) | 179 / 180 (99%) | 0 → 0 of 1454 | correct (3 files edited) |
 
 "Correct" means a trailing comment was reported as a cosmetic change and a
 renamed definition as a structural one, by both `graphlore_freshness` (working
@@ -129,38 +147,57 @@ extractors make of each language:
 
 | Language | Import edges | How they are classified | `package_apis` | `routes` |
 |---|--:|---|---|---|
-| Python | 430 | 409 module-level, 13 type-checking, 7 unclassified, 1 deferred, 8 rejected | read: 87 of 88 importing files | read |
-| JavaScript | 216 | 216 module-level | read: 149 of 162 importing files | read |
-| TypeScript | 1,328 | 973 module-level, 351 type-checking, 4 deferred | read: 134 of 146 importing files | read |
-| TSX | 612 | 596 module-level, 16 type-checking | read: 67 of 72 importing files | read |
-| Go | 950 | 950 module-level | read: 187 of 187 importing files | read |
-| Java | 866 | 866 module-level | read: 328 of 328 importing files | read |
-| Kotlin | 243 | 243 module-level | not read, and says so (`not_read`) | not read, and says so |
-| Scala | 0 | — | not read, and says so (`not_read`) | not read, and says so |
-| C# | 132 | 132 module-level | not read, and says so (`not_read`) | not read, and says so |
-| Rust | 407 | 407 module-level | not read, and says so (`not_read`) | not read, and says so |
-| Swift | 167 | 167 module-level | not read, and says so (`not_read`) | not read, and says so |
-| C | 77 | 77 module-level | not read, and says so (`not_read`) | not read, and says so |
-| C++ | 236 | 236 module-level | not read, and says so (`not_read`) | not read, and says so |
-| C / C++ headers | 174 | 174 module-level | not read, and says so (`not_read`) | not read, and says so |
-| Ruby | 0 | — | not read, and says so (`not_read`) | not read, and says so |
-| PHP | 396 | 396 unclassified | not read, and says so (`not_read`) | not read, and says so |
+| Python | 430 | 409 module-level, 13 type-checking, 7 unclassified, 1 deferred, 8 rejected | read: packages found in 87 of 103 files | read |
+| JavaScript | 221 | 221 module-level | read: packages found in 158 of 230 files | read |
+| TypeScript | 1,328 | 973 module-level, 351 type-checking, 4 deferred | read: packages found in 134 of 169 files | read |
+| TSX | 612 | 596 module-level, 16 type-checking | read: packages found in 67 of 72 files | read |
+| Go | 950 | 950 module-level | read: packages found in 187 of 189 files | read |
+| Java | 1,284 | 1284 module-level | read: packages found in 483 of 531 files | read |
+| Kotlin | 388 | 388 module-level | read: packages found in 190 of 223 files | read |
+| Scala | 0 | — | read: packages found in 12 of 14 files | not read, and says so |
+| C# | 281 | 281 module-level | read: packages found in 268 of 402 files | read |
+| Rust | 556 | 556 module-level | read: packages found in 80 of 88 files | read |
+| Swift | 167 | 167 module-level | read: packages found in 99 of 101 files | not read, and says so |
+| C | 77 | 77 module-level | read: packages found in 24 of 25 files | not read, and says so |
+| C++ | 236 | 236 module-level | read: packages found in 76 of 81 files | not read, and says so |
+| C / C++ headers | 174 | 174 module-level | read: packages found in 69 of 81 files | not read, and says so |
+| Ruby | 0 | — | read: packages found in 35 of 135 files | read |
+| PHP | 510 | 510 module-level | read: packages found in 236 of 284 files | read |
 
 Routes, on the applications picked for them. "Idiom hits" is the oracle's count
-of route registrations in non-test source; "rows" is what `graphlore_routes`
-returned for that language:
+of route registrations in non-test source — a regex, which counts a Rails
+`resources` line once although it declares several routes, and knows neither
+Ktor's slash-less patterns, JAX-RS nor actix builders (0 there); "rows" is what
+`graphlore_routes` returns now, and "before" what it returned on the code
+before the fixes:
 
-| Repository | Framework | Idiom hits | Rows | Found as |
-|---|---|--:|--:|---|
-| fastapi-template | FastAPI | 23 | 23 | fastapi 23 |
-| express | Express (its own examples) | 61 | 0 | nothing |
-| express-mongoose-demo | Express | 26 | 0 | nothing |
-| nestjs-realworld | NestJS | 21 | 21 | nestjs 21 |
-| chi | chi | 60 | 252 | net-http 132, chi 120 |
-| gin-examples | gin | 65 | 66 | gin 66 |
-| spring-petclinic | Spring | 19 | 17 | spring 17 |
+| Repository | Framework | Idiom hits | Rows before | Rows | Found as |
+|---|---|--:|--:|--:|---|
+| fastapi-template | FastAPI | 23 | 23 | 23 | fastapi 23 |
+| express | Express (its own examples) | 61 | 0 | 0 | nothing |
+| express-mongoose-demo | Express | 26 | 0 | 26 | express 26 |
+| nestjs-realworld | NestJS | 21 | 21 | 21 | nestjs 21 |
+| chi | chi | 60 | 252 | 59 | chi 59 |
+| gin-examples | gin | 65 | 66 | 66 | gin 66 |
+| spring-petclinic | Spring | 19 | 17 | 17 | spring 17 |
+| kotlin-spring-realworld | Spring (Kotlin) | 19 | 0 | 19 | spring 19 |
+| ktor-realworld | Ktor | 0 | 0 | 19 | ktor 19 |
+| quarkus-realworld | JAX-RS | 0 | 0 | 19 | jax-rs 19 |
+| aspnetcore-realworld | ASP.NET Core controllers | 19 | 0 | 19 | aspnet 19 |
+| todoapi | ASP.NET Core minimal APIs | 11 | 0 | 12 | aspnet 12 |
+| axum-realworld | axum | 12 | 0 | 19 | axum 19 |
+| actix-realworld | actix-web | 0 | 0 | 20 | actix-web 20 |
+| sinatra-warden | Sinatra | 6 | 0 | 6 | sinatra 6 |
+| rails-realworld | Rails | 8 | 0 | 19 | rails 19 |
+| laravel-realworld | Laravel | 20 | 0 | 20 | laravel 20 |
+| symfony-demo | Symfony | 18 | 0 | 19 | symfony 19 |
 
-Not in the table: 536 JS/TS edges graphify draws from `import x from 'pkg'`
+Fewer rows is not always a loss: chi's 252 rows before were mostly the routes
+its own tests register on throwaway muxes, which `graphlore_routes` now leaves
+out unless `scope="+tests"`; the 59 left match the 60 registrations the oracle
+counts in its examples.
+
+Not in the table: 537 JS/TS edges graphify draws from `import x from 'pkg'`
 to the `package.json` that declares `pkg`. The import check rejects those, which
 is the check doing its job.
 
@@ -174,15 +211,15 @@ see them. A file "holds tests" when it contains the language's test marker
 | JavaScript | 91 | 91 | 91 |
 | TypeScript | 50 | 50 | 50 |
 | Go | 60 | 60 | 60 |
-| Java | 121 | 115 | 121 |
-| Kotlin | 50 | 15 | 50 |
+| Java | 126 | 120 | 126 |
+| Kotlin | 56 | 21 | 56 |
 | Scala | 5 | 5 | 5 |
-| C# | 70 | 70 | 70 |
-| Rust | 30 | 2 | 4 |
+| C# | 89 | 87 | 89 |
+| Rust | 31 | 2 | 30 |
 | Swift | 35 | 35 | 35 |
 | C++ | 36 | 36 | 36 |
 | Ruby | 36 | 35 | 36 |
-| PHP | 60 | 60 | 60 |
+| PHP | 72 | 72 | 72 |
 
 Rust is the one that stays low: its tests live in the source file, inside
 `#[cfg(test)] mod tests`, and no path rule can see that (see the open items).
@@ -194,42 +231,41 @@ number of times the check fired.
 
 | Finding | Kind | Before | After |
 |---|---|--:|--:|
-| `CRASH` — ValueError: k should be >= 1, is now 0 | high / bug | 20 | 0 |
-| `FETCH-ONE-LINE-SPAN` — a multi-line definition was fetched as its first line only | high / bug | 25 | 0 |
-| `FETCH-SHADOW-SPAN` — a span that starts on the node's line belongs to another symbol | high / bug | 112 | 6 |
-| `ROUTES-EXPECTED-MISSING` — no express routes found in an application built on express | high / gap | 1 | 1 |
-| `APIS-SILENT-EMPTY` — files of this language import packages; the reply finds none and never says the language is not read | medium / bug | 13 | 0 |
+| `CRASH` — ValueError: k should be >= 1, is now 0 | high / bug | 31 | 0 |
+| `FETCH-ONE-LINE-SPAN` — a multi-line definition was fetched as its first line only | high / bug | 33 | 0 |
+| `FETCH-SHADOW-SPAN` — a span that starts on the node's line belongs to another symbol | high / bug | 154 | 6 |
+| `ROUTES-EXPECTED-MISSING` — no actix-web routes found in an application built on actix-web | high / gap | 12 | 0 |
+| `APIS-SILENT-EMPTY` — files of this language import packages; the reply finds none and never says the language is not read | medium / bug | 22 | 0 |
 | `EXT-TABLE-GAP` — an extension graphify indexes is missing from graphlore's tables | medium / bug | 2 | 0 |
-| `FETCH-NO-SPAN` — a definition has no span: fetch falls back to a line window | medium / gap | 274 | 99 |
+| `FETCH-NO-SPAN` — a definition has no span: fetch falls back to a line window | medium / gap | 404 | 94 |
 | `IMPORTS-REJECTED` — over 5% of this language's import edges are rejected as contradicted by the source | medium / bug | 3 | 0 |
-| `REPLY-TOO-LARGE` — a reply over 90 KB with default-sized arguments (some 25,000 tokens and up) | medium / bug | 34 | 0 |
-| `ROUTES-SILENT-EMPTY` — the source registers routes in an idiom the extractor does not read; the reply lists none | medium / gap | 2 | 2 |
-| `SET-LABELS-INVISIBLE` — a name written by set_labels shows up in neither graphlore_communities nor graphlore_overview | medium / bug | 20 | 0 |
-| `SKELETON-EMPTY` — a file with definition nodes yields no symbols | medium / gap | 13 | 4 |
-| `SKELETON-HEADER-NO-NAME` — a symbol's header does not show its name | medium / bug | 925 | 1 |
-| `TEST-PATH-MISSED` — files that contain tests are not recognised as test files | medium / gap | 5 | 1 |
-| `TRUNCATED-NO-HINT` — `truncated` without a `hint` on how to get the rest | medium / convention | 607 | 0 |
-| `UNREFERENCED-LISTS-A-TEST` — lists a test the runner collects as dead code | medium / bug | 190 | 1 |
-| `AMBIGUOUS-LABELS` — member list repeats a bare label; rows are not qualified | low / convention | 14 | 0 |
-| `CLI-AMBIGUOUS-NAME` — a bare name several nodes share is refused by the graphify CLI; graphlore passes the refusal through instead of resolving the name | low / gap | 6 | 7 |
-| `EMPTY-TYPE-FIELD` — every row carries `type: ""` (graphify >= 0.9 writes file_type) | low / bug | 20 | 0 |
+| `REPLY-TOO-LARGE` — a reply over 90 KB with default-sized arguments (some 25,000 tokens and up) | medium / bug | 36 | 0 |
+| `ROUTES-SILENT-EMPTY` — the source registers routes in an idiom the extractor does not read; the reply lists none | medium / gap | 10 | 1 |
+| `SET-LABELS-INVISIBLE` — a name written by set_labels shows up in neither graphlore_communities nor graphlore_overview | medium / bug | 31 | 0 |
+| `SKELETON-EMPTY` — a file with definition nodes yields no symbols | medium / gap | 23 | 6 |
+| `SKELETON-HEADER-NO-NAME` — a symbol's header does not show its name | medium / bug | 988 | 0 |
+| `TEST-PATH-MISSED` — files that contain tests are not recognised as test files | medium / gap | 7 | 1 |
+| `TRUNCATED-NO-HINT` — `truncated` without a `hint` on how to get the rest | medium / convention | 844 | 0 |
+| `UNREFERENCED-LISTS-A-TEST` — lists a test the runner collects as dead code | medium / bug | 245 | 1 |
+| `AMBIGUOUS-LABELS` — member list repeats a bare label; rows are not qualified | low / convention | 20 | 0 |
+| `CLI-AMBIGUOUS-NAME` — a bare name several nodes share is refused by the graphify CLI; graphlore passes the refusal through instead of resolving the name | low / gap | 10 | 0 |
+| `EMPTY-TYPE-FIELD` — every row carries `type: ""` (graphify >= 0.9 writes file_type) | low / bug | 31 | 0 |
 | `EXT-TABLES-DISAGREE` — an extension is known to some source-extension tables and not others | low / bug | 11 | 0 |
-| `FETCH-ENCLOSING-SPAN` — the node has no span of its own: fetch returns the definition around it | low / gap | 70 | 13 |
-| `IMPORTS-UNCLASSIFIED` — every import edge of this language is unclassified | low / gap | 6 | 2 |
-| `NEIGHBORS-COUNT` — row count differs from the edges touching the node | low / bug | 3 | 0 |
-| `RELATION-UNKNOWN` — graphify emits a relation no graphlore relation set names (relations="code" skips it) | low / gap | 24 | 0 |
-| `SLOW` — took over 5000 ms | low / perf | 3 | 4 |
-| `APIS-LANGUAGE-NOT-READ` — no package-API extractor for this language (the reply says so) | info / gap | 0 | 13 |
-| `BUILD-DEFAULT-NEEDS-KEY` — graphlore_build() with its defaults fails without an LLM key when the repository holds docs; code_only=True builds | info / upstream | 20 | 20 |
-| `GRAPH-ORPHAN-NODES` — the graph graphify built has orphan_nodes | info / upstream | 17 | 17 |
+| `FETCH-ENCLOSING-SPAN` — the node has no span of its own: fetch returns the definition around it | low / gap | 71 | 10 |
+| `IMPORTS-UNCLASSIFIED` — every import edge of this language is unclassified | low / gap | 8 | 1 |
+| `NEIGHBORS-COUNT` — row count differs from the edges touching the node | low / bug | 6 | 0 |
+| `RELATION-UNKNOWN` — graphify emits a relation no graphlore relation set names (relations="code" skips it) | low / gap | 35 | 0 |
+| `SLOW` — took over 5000 ms | low / perf | 4 | 6 |
+| `BUILD-DEFAULT-NEEDS-KEY` — graphlore_build() with its defaults fails without an LLM key when the repository holds docs; code_only=True builds | info / upstream | 31 | 0 |
+| `GRAPH-ORPHAN-NODES` — the graph graphify built has orphan_nodes | info / upstream | 26 | 26 |
 
-Tool status over the 20 repositories × 32 tools:
-before 578 ok, 42 empty, 20 crashed; after 600 ok,
-40 empty, 0 crashed. "Empty" is a valid answer with nothing in it
+Tool status over the 31 repositories × 32 tools:
+before 881 ok, 76 empty, 31 crashed; after 944 ok,
+48 empty, 0 crashed. "Empty" is a valid answer with nothing in it
 (`routes` on a library, `package_apis` on a language it does not read, `impact`
 on a node nothing depends on). `graphlore_add` is not counted: it fetches a URL,
 so it is only called with one it must refuse. The `SLOW` rows are
-3 `graphlore_build` calls (graphify's own extraction time) and 1 `graphlore_duplication_scan` call.
+6 `graphlore_build` calls (graphify's own extraction time).
 
 `benchmarks/multilang.py`, re-run before and after on the six repositories it
 covers: span-join precision is unchanged for Python, JS/TS, Go, Java and Rust,
@@ -345,67 +381,75 @@ Each entry names the repository that showed it. The regression tests in
   guzzle and 277 KB on retrofit, in the second step of the onboarding flow. It
   returns the `limit` largest with their `members` most connected nodes.
 
+### The second round: what the first report left open
+
+The first version of this report ended with ten open items. All ten are closed:
+
+- **Dependencies.** `uv.lock` moves from graphify 0.8.39 to 0.9.109 (what plugin
+  users already got through `uvx`), with mcp 2.3, semble 0.7 and
+  tree-sitter-language-pack 1.25. The floors were checked on Python 3.10 with
+  the oldest versions allowed: language-pack 1.9 and 1.10 hand tree-sitter a
+  `Language` it rejects, so every non-Python span was empty with them; the
+  floor is now 1.11 (with tree-sitter 0.23).
+- **Package APIs in all fourteen languages.** Kotlin, Scala, C#, Rust, Swift,
+  C / C++, Ruby and PHP are read from their imports; the project's own packages
+  are recognised per language (declared packages and namespaces, crates, gems,
+  Swift targets, header directories). Java's own packages were listed as
+  external until now: retrofit's `retrofit2.*` is first-party.
+- **Routes in nine languages.** Kotlin (Spring, Ktor), Java JAX-RS, C# (ASP.NET
+  Core controllers and minimal APIs), Rust (axum, actix-web), Ruby (Rails,
+  Sinatra) and PHP (Laravel, Symfony) join Python, JS/TS, Go and Java Spring.
+  See the route table above.
+- **Express routes in a file that imports no framework** (express-mongoose-demo:
+  0 → 26 of 26), `router.route('/x').get(h)` chains, and labels that follow the
+  framework imported (`fastify`, `koa`).
+- **`scope` on `routes`, `package_apis`, `layers` and `tests_for`.** Routes leave
+  test code out by default, which removes got's 1,354 test-server routes.
+- **Rust tests inside source files** are test code: `#[cfg(test)]` modules and
+  `#[test]` functions are test regions of the span engine, and every
+  node-level test decision uses them.
+- **PHP imports** are module-level.
+- **The CLI tools resolve a shared name** before graphify sees it.
+- **`graphlore_build()` without a key** falls back to `--code-only` and says so.
+- **Spans** for JS functions wrapped in one call (`exports.x = async(function* …)`),
+  anonymous Java and Kotlin classes, Ruby `X = Struct.new(…) do`; the skeleton of
+  a `typedef struct { … } name;` shows the name.
+- **Dead code**: doc-comment tags are not decorators, a class used only through
+  its members (C# extension classes) is used, anonymous classes and PHP magic
+  methods are not examined, googletest `TEST` and xUnit `setUp` are tests.
+- **A graph built by graphify 0.9** is in the test suite
+  (`tests/fixtures/polyglot/`): five languages, `file_type`, `community_name`,
+  `case_of`, closures, a Rust test module and a JS barrel.
+
 ## What is still missing
 
-In the order I would take them.
-
-1. **Express routes when the routes file does not import the framework.** The
-   extractor only reads `app.get('/x', h)` in a file that imports express.
-   express-mongoose-demo registers every route in `config/routes.js`, which
-   exports `function (app, passport) {…}` and imports no framework: 0 of 26
-   routes found. The gate exists to keep `axios.get('/users')` out; a project-level
-   gate (some file imports a server framework) plus a receiver that is a
-   parameter or is named like a router would keep that and find these. The
-   opposite case is in got: 1,354 rows, all of them routes its tests register
-   on a throwaway server.
-2. **`graphlore_routes`, `graphlore_package_apis`, `graphlore_layers` and
-   `graphlore_tests_for` take no `scope`.** The convention says a tool that
-   ranks or audits the graph does; these four read vendored and test files
-   alike (the 1,354 rows above).
-3. **Routes and package APIs for the other languages.** Nothing is read for
-   Kotlin (Spring, Ktor), C# (ASP.NET attributes and `MapGet`), Rust (axum,
-   actix), Ruby (Rails, Sinatra), PHP (Laravel, Symfony), Scala, Swift or
-   C / C++; Java reads Spring and not JAX-RS. The replies say so now; the
-   `apis.py` extractors are the model for adding one.
-4. **Rust tests are invisible to the path rule.** In ureq 26 of 48 source
-   files hold tests inside `#[cfg(test)] mod tests`. `tests_for` treats them as
-   production callers, and the production-before-tests order cannot separate
-   them. The span engine could mark a `mod` under `#[cfg(test)]`.
-5. **PHP and Ruby imports are unclassified** (396 edges in guzzle). A PHP `use`
-   cannot be deferred and could join the compile-time languages; Ruby
-   `require` inside a method can.
-6. **A bare name is refused by the CLI tools.** graphify 0.9 answers
-   `graphlore_explain("create")` with "Ambiguous: matches 3 nodes … retry with
-   the full node id" and graphlore passes that through. The other tools resolve
-   the same name with `_pick_node` and say which node they used.
-7. **`graphlore_build()` with its defaults fails on any repository that has a
-   README and no LLM key** (graphify 0.9: "no LLM API key found"). graphlore
-   now names `code_only=True` in that error; whether `code_only` should be the
-   default without a key is a product decision.
-8. **Spans still missing**: a JS function wrapped in a call
-   (`exports.create = async(function* () {…})` — 44 definitions in
-   express-mongoose-demo), a class made by assignment (Ruby `Struct.new`, a
-   TypeScript `const schema = z.object(…)`), C declarations behind unknown
-   macros (hiredis `ffc.h`: `ffc_internal ffc_inline` before the return type),
-   anonymous Java classes, and nodes graphify makes of a forward declaration
-   (`class ProxyAuthentication;`). For a typedef'd
-   anonymous struct the skeleton header is `typedef struct {`, the name being
-   on the closing line.
-9. **Dead-code heuristics that remain language-shaped**: C# extension classes
-   (never named at the call site), Scala case classes next to a companion of
-   the same name, and JSDoc tags written without a leading `*` (`@default`),
-   which read as decorators.
-10. **The lockfile pins graphify 0.8.39; `uvx` gives plugin users 0.9.x.**
-    Most of what this audit found in the relation and field vocabulary
-    (`file_type`, `defines`, `case_of`, `dispatches_to`, closure nodes,
-    `package.json` import targets) is 0.9 behaviour that the 5-node fixture
-    graph cannot show. A fixture graph built by 0.9 would.
+1. **Prefixes applied in another file.** Laravel adds `/api` to
+   `routes/api.php` in a service provider, NestJS has a global prefix in
+   `main.ts`, axum and actix routers are often built in one function and
+   mounted in another. The rows carry the pattern as written in their file.
+2. **Routes in Scala and Swift** (Play, http4s, Akka HTTP; Vapor) and in the
+   Kotlin `router { }` DSL: no reader, and the reply says so in `not_read`.
+3. **Package APIs outside Python, JS/TS, Go and Java are import-level.** They
+   say which packages and names a file imports, not which members it then uses
+   (`client.get(...)` on an imported `Client`).
+4. **Rust test helpers.** Everything inside a `#[cfg(test)]` module is test code,
+   so a helper there is listed among a function's direct tests, as in the other
+   languages without a naming rule.
+5. **Spans graphify sees and tree-sitter cannot**: C declarations behind unknown
+   macros (hiredis `ffc.h`: `ffc_internal ffc_inline` before the return type)
+   and nodes graphify makes of a forward declaration (`class ProxyAuthentication;`).
+6. **Dead-code edge cases**: a PHPUnit data provider named only in a
+   `#[DataProvider('…')]` string, and Scala case classes next to a companion
+   object of the same name (seen in requests-scala, not confirmed as a false
+   positive).
+7. **Ruby imports** are not classified, because graphify records no file-level
+   import edge for `require`: there is nothing to read.
 
 ### From the graph, not from graphlore
 
 Reported so they are not mistaken for the above.
 
-- Orphan nodes in 17 of 20 graphs; self-loop `contains` edges (a Go type
+- Orphan nodes in most graphs; self-loop `contains` edges (a Go type
   containing itself).
 - A node placed on another definition's line: express's `res` object sits on
   the line of `res.status = function status(code)`, so `graphlore_fetch("res")`
