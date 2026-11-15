@@ -6,7 +6,69 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-15
+
+Every tool was run on 31 real repositories in 14 languages
+(`benchmarks/polyglot.py`, `docs/benchmark-polyglot.md`). The changes below are
+what that turned up: package APIs read in all fourteen languages, routes in
+nine, a span engine checked on real code in each, and the conventions applied
+everywhere. What is still missing is listed at the end of the report.
+
 ### Added
+- **Package APIs for Kotlin, Scala, C#, Rust, Swift, C / C++, Ruby and PHP**,
+  read from each file's imports (`import a.b.C`, `using A.B;`, `use a::b::{c}`,
+  `#include <curl/curl.h>`, `require 'faraday/utils'`, `use A\B\C;`). The
+  project's own packages are left out per language: the packages and namespaces
+  its JVM, .NET and PHP files declare (an exact match, so guzzle's
+  `GuzzleHttp\Promise` dependency is not mistaken for guzzle), its crates
+  (`Cargo.toml`, plus `crate::` / `self::` / `super::` and modules declared in
+  the same file), gems, Swift targets and header directories. Java gained the
+  same rule: retrofit's own `retrofit2.*` packages were listed as external.
+- **Routes for Kotlin, C#, Rust, Ruby and PHP, and JAX-RS for Java**: Spring
+  and Ktor in Kotlin; ASP.NET Core controllers (`[Route("api/[controller]")]`,
+  `[HttpGet("{id}")]`) and minimal APIs (`app.MapGet`, prefixes through
+  `var g = app.MapGroup("/api")`); axum (`.route("/x", get(h).post(h2))`,
+  `.nest`) and actix-web (`#[get("/x")]`, `web::scope` / `resource`); Sinatra
+  and the Rails `routes.draw` DSL (`resources` with `only:` / `except:` /
+  `param:` and nesting, `namespace`, `scope`, `root`); Laravel `Route::` chains
+  (`prefix`, `group`, `resource`, `apiResource`) and Symfony `#[Route]`. Each
+  is gated on its framework, and Java's JAX-RS on a `javax.ws.rs` /
+  `jakarta.ws.rs` import so Retrofit's client `@GET` stays out. On eleven
+  RealWorld-style sample applications every route of the spec is found
+  (`docs/benchmark-polyglot.md`). `config/routes.rb` and `routes/*.php` are
+  read even when the graph holds no symbol of them.
+- `scope` on `graphlore_routes`, `graphlore_package_apis`, `graphlore_layers`
+  and `graphlore_tests_for`, the four tools that read the whole graph without
+  one. Their results carry the `scope` payload and say what was left out.
+- `tests/fixtures/polyglot/`: five languages and the graph graphify 0.9 built of
+  them, so the suite runs on `file_type`, `community_name`, `case_of`,
+  closures, a Rust test module and a JS barrel — what the 5-node fixture
+  cannot show.
+- `benchmarks/polyglot.py`: runs all 33 tools, the resources and the prompts on
+  pinned commits of real repositories in Python, JavaScript, TypeScript/TSX, Go,
+  Java, Kotlin, Scala, C#, Rust, Swift, C, C++, Ruby and PHP, and reports what
+  breaks an invariant (parseable JSON on every path, a cut that says what it
+  left out, a `file:line` that exists), what two tools disagree on, and where a
+  language gets an empty answer its source contradicts. `--baseline` marks
+  findings new or gone against an earlier run. Results:
+  `benchmarks/results-polyglot.json`; report: `docs/benchmark-polyglot.md`.
+- Every result that reports `truncated` now carries a `hint` naming the
+  argument to raise or the filter to add. Fifteen tools reported the cut and a
+  count but not how to get the rest: `god_nodes`, `surprises`, `search`,
+  `subgraph`, `tests_for`, `locate`, `duplication_scan`, `freshness`, `diff`,
+  `cycles`, `unreferenced`, `layers`, `same_names`, `package_apis`, `routes`.
+- `graphlore_package_apis` and `graphlore_routes` count the source files they
+  have no extractor for in `not_read` (`{".rs": 48}`) and say so in the text.
+  A Rust or Kotlin project used to get "no routes" in the same words as a
+  project that has none.
+- `graphlore_communities` shows each community's `name`: the one set with
+  `graphlore_set_labels` / `graphlore_label_communities`, else the one graphify
+  wrote on the nodes. A name written by `graphlore_set_labels` was visible in
+  no tool. Members that share a label are qualified.
+- `graphlore_communities(limit=30, members=15)`: the largest communities, each
+  with its most connected members first, `size` and `members_left_out`. It
+  used to list every member of every community — a 280 KB reply on guzzle, in
+  the second step of the onboarding flow.
 - `server.json`, the manifest for the official MCP Registry
   (`io.github.yasinyaman/graphlore`, PyPI package, stdio, run as
   `uvx --with graphifyy graphlore`), and the `mcp-name:` line in the README
@@ -14,6 +76,26 @@ All notable changes to this project are documented here. The format is based on
   step after the first PyPI release; `CONTRIBUTING.md` has the commands.
 
 ### Changed
+- `graphlore_routes` leaves test code out by default: got's tests register
+  1,354 routes on throwaway servers. `scope="+tests"` brings them back.
+- An Express-style row is labelled by the framework the file imports
+  (`fastify`, `koa`, `restify`, `polka`), not always `express`.
+- `graphlore_build()` with no LLM key on a folder that holds docs: graphify 0.9
+  refuses it, so it runs again with `--code-only` and says the docs were
+  skipped. A build with `mode=` asked for is not turned into another one.
+- `graphlore_explain` and `graphlore_path` resolve a name before graphify sees
+  it, and pass graphify the node id. graphify refuses a name several nodes
+  share ("Ambiguous: matches 3 nodes"); the reply now says which node was used.
+- Dependencies upgraded. `uv.lock` moves to graphifyy 0.9.109 (from 0.8.39:
+  what plugin users already got through `uvx`), mcp 2.3, semble 0.7,
+  tree-sitter-language-pack 1.25, ruff 0.17, mypy 2.4 and pytest 9.2. The
+  floors in `pyproject.toml` are now the oldest versions the suite passes with
+  on Python 3.10: `tree-sitter>=0.23` and `tree-sitter-language-pack>=1.11`
+  (1.9 and 1.10 return a `Language` that `tree_sitter.Parser` rejects, so the
+  span engine had no grammar with them), and `mypy>=1.12` for development (1.11
+  crashes on mcp's sources). CI uses `actions/checkout@v7`,
+  `actions/setup-python@v7`, `actions/upload-artifact@v7` and
+  `actions/download-artifact@v8` (node 24).
 - The README is a short landing page: what graphlore is, quick start, the 12
   `lean` tools, the benchmark headline and an FAQ. The detail moved, unchanged,
   to `docs/tools.md` (all 33 tools, resources, prompts), `docs/concepts.md`,
@@ -31,6 +113,118 @@ All notable changes to this project are documented here. The format is based on
 - `CONTRIBUTING.md` no longer recommends `ruff format .` (CI does not check
   formatting and most files are not ruff-formatted), and its project layout
   lists every module.
+
+### Fixed
+- **Express routes in a file that imports no framework.** An Express app's
+  `config/routes.js` (`module.exports = function (app) { app.get(...) }`)
+  imports nothing, so none of express-mongoose-demo's 26 routes were found;
+  all are now. Without a framework import in the file, a call counts when its
+  receiver is named like a router or is a parameter of the function around it,
+  it has a handler argument, and some file of the project imports a server
+  framework — `axios.get('/x', {…})` still does not. `router.route('/x')
+  .get(h).post(h2)` chains are read too.
+- **Rust tests inside a source file are tests.** `#[cfg(test)] mod tests` and
+  `#[test]` functions (26 of ureq's 48 source files hold them) were production
+  code to `tests_for`, the production-before-tests order, `-tests` scopes and
+  `unreferenced`'s `count_test_references`. A Rust `mod { … }` is a span, so a
+  test's qualname reads `tests.it_works`.
+- PHP imports are module-level instead of `unclassified` (a `use` cannot be
+  deferred).
+- Spans for a JS function wrapped in one call (`exports.create = async(function*
+  …)`, `const f = wrap(async () => …)`; 44 definitions in
+  express-mongoose-demo), for anonymous Java and Kotlin classes
+  (`new Callback<Void>() { … }`, `object : Callback<T> { … }`) and Ruby
+  `Request = Struct.new(…) do … end`. The skeleton of a C
+  `typedef struct { … } name;` shows the closing line with the name.
+- `graphlore_unreferenced` does not read a doc comment's `@default` / `@example`
+  as a decorator, and counts a class as used when one of its members is called
+  elsewhere: C# extension classes are never named at the call site
+  (`client.BuildUri(…)`), so RestSharp's were all listed. The row says
+  `used_through_members`.
+- **Kotlin had no spans at all.** Its grammar names a declaration through an
+  identifier child, not a `name` field, so none of kotlinpoet's 2,009
+  definitions had a span: `graphlore_fetch` returned one line,
+  `graphlore_skeleton` nothing, and annotations were never read. Now 1,997 do.
+- **A type written in a signature is no longer a definition.** The span engine
+  took any node with a hint word in its type and a `name` field: TypeScript
+  `React.ComponentProps`, Rust `io::Result` and struct literals, Swift type
+  annotations, Scala constructor parameters, a C `struct config cfg` parameter
+  — and every PHP `$parameter`, because `simple_parameter` contains "impl".
+  Such a one-line span sat on the definition's own line and won:
+  `graphlore_fetch` returned the first line of a function, and qualified names
+  read `FormMessage.ComponentProps`.
+- A `.h` file that reads as C++ is parsed as C++ (the C grammar turned cpr's
+  classes into errors: 146 of 558 definitions had a span, now 532). Function
+  prototypes, methods declared in their class, typedefs, operators and
+  functions behind a reference return type are spans.
+- C# and Java `record`s, Swift `protocol`s, `init` and `deinit`, and a JS
+  function assigned to a member (`res.send = function () {…}`,
+  `exports.x = …`) are spans.
+- `graphlore_fetch`, `graphlore_skeleton(node=)` and qualified labels take the
+  span that starts on the node's line under the node's name, not the innermost
+  one: `enum Color { RED, GREEN }` no longer answers a request for `Color` with
+  one of its cases.
+- `graphlore_skeleton` headers run on to the line that names the symbol. A
+  Java, C# or Swift declaration starts at its first annotation, and GNU-style C
+  puts the return type on a line of its own, so the header of 925 symbols was
+  `@Override`, `[Fact]` or `static int` and nothing else.
+- Names scoped with `::` (Ruby `Faraday::Utils::Headers`, C++ and PHP
+  `Session::SetOption()`) resolve by their last part and as a qualified key,
+  instead of falling through to the substring match.
+- **JS/TS imports through a barrel are no longer rejected.** graphify links
+  `import { X } from './dto'` to the file that defines `X`; the import check
+  compared the specifier with that file, found `dto/index.ts` instead and
+  dropped the edge as contradicted by the source — 113 of got's 797 import
+  edges, so `graphlore_cycles`, `graphlore_layers` and `graphlore_surprises`
+  worked on a thinner graph. Re-exports (`export … from`,
+  `module.exports = require(…)`) are followed through up to three files; a file
+  the entry merely imports is still not accepted. `require('../..')` names the
+  root `index.js`.
+- A C, C++ or Objective-C `#include` is module-level, like the imports of the
+  other compiled languages; those edges were `unclassified`.
+- Test files of more layouts are recognised: Gradle source sets (`jvmTest`,
+  `androidTest`), .NET test projects (`Foo.Tests/`), `FooTests.java` /
+  `FooTest.php` / `FooTestCase.swift`, Ruby `foo_spec.rb`, `*_tests.cpp`.
+  `graphlore_tests_for` and the production-before-tests order depend on it.
+- `graphlore_unreferenced` no longer lists collected tests as dead code: Go
+  `Benchmark…` / `Example…` / `Fuzz…` functions, googletest `TEST`, `…Tests` /
+  `…TestCase` classes and `setUp` / `tearDown` fixtures are tests by name, and annotations that start the declaration itself
+  (Java and Kotlin `@Test`, C# `[Fact]`) or use another syntax (Rust
+  `#[test]`) are read as decorators. Compiler and lint attributes
+  (`#[must_use]`, `#[derive]`, `[Obsolete]`, `@JvmStatic`) do not count as a
+  registration.
+- `graphlore_unreferenced` no longer examines what no caller names: anonymous
+  functions (`{closure#3}` — 866 of guzzle's roughly 900 rows), operators (C++
+  `operator[]`, Ruby `[]=`), constructors and destructors, and PHP magic
+  methods (`__invoke`). Ruby `success?` / `body=` are looked up in the text as
+  `success` / `body`, the way a caller writes them.
+- A node with no span of its own (a closure, a member declared without a body)
+  is qualified by where it lives: `sendDigest.{closure#3}()`. Three closures in
+  one method were all rendered `AuthMiddleware.sendDigest()`, the name of the
+  method around them.
+- Relations graphify 0.9 writes are known: `defines` (a class's field) and
+  `case_of` (an enum's case) are containment, so they form no cycle and are no
+  reference; `dispatches_to`, `references_constant` and `uses_static_prop` are
+  code relations, so `graphlore_impact(relations="code")` walks them.
+- `.mts` / `.cts` files count as source in every table; `.swift`, `.kts` and
+  `.hxx` have a language family, so `graphlore_same_names` no longer compares a
+  Swift class with every other language that had none.
+- `type` in `graphlore_god_nodes`, `graphlore_search` and
+  `graphlore_node_details` falls back to graphify 0.9's `file_type`; it was
+  `""` on every row.
+- `graphlore_neighbors` listed a self-loop twice.
+- A negative `limit` lists nothing. It was used as a slice end, so `limit=-1`
+  meant "all rows but the last": 471 KB from `graphlore_search` on guzzle
+  (`search`, `surprises`, `validate`, `package_apis`, `routes`,
+  `duplication_scan`).
+- `graphlore_locate(top_k=0)` raised `ValueError` from the semantic backend
+  instead of answering.
+- When semble is installed but cannot build its index (the embedding model
+  could not be downloaded), the error says so and quotes the reason, instead
+  of "needs the optional 'semble' extra".
+- `graphlore_build` adds `code_only=True` to the error graphify 0.9 gives for a
+  default build of a repository with docs and no LLM key, which names only the
+  CLI flag.
 
 ## [0.5.1] - 2026-11-14
 

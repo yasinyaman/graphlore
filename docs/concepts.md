@@ -46,13 +46,22 @@ when it runs:
 |---|---|---|
 | Python | stdlib `ast` | module-level · inside a function (deferred) · under `if TYPE_CHECKING:` |
 | JS / TS | `[treesitter]` | top-level `import` / `export … from` / `require` · `import()` or `require` inside a function (deferred) · `import type` |
-| Go, Java, Kotlin, Scala, C#, Rust, Swift | — | imports are resolved at compile time: always module-level |
+| Go, Java, Kotlin, Scala, C#, Rust, Swift, C, C++, Objective-C | — | imports are resolved at compile time (a `#include` by the preprocessor): always module-level |
+| PHP | — | a `use` only aliases a name (the file loads on first use, by autoload): always module-level |
+| Ruby | — | graphify records no file-level import edge for `require`: nothing to read |
 | anything else | — | kept as it is and counted as module-level; the result says so |
 
 An edge the source contradicts is dropped and listed: Python's `import yaml`
 linked to a first-party `yaml.py`, or a bare JS specifier (`'yaml'`) linked to
 `lib/yaml.js`. A tsconfig path alias cannot be told from a scoped package
 without the config, so those edges are kept.
+
+An import through a re-exporting entry file is kept too. graphify links
+`import { CreateDto } from './dto'` to the file that defines `CreateDto`, not to
+`dto/index.ts`; the statement still loads that file, so the edge holds. Only
+re-exports are followed (`export … from`, `module.exports = require(…)`),
+through at most three files: a file the entry merely imports is not what the
+importer asked for.
 
 ## Analysis scope
 
@@ -163,9 +172,12 @@ alongside graphlore.
 
 The chunk→node join and the freshness cosmetic-vs-structural check work
 **across languages**: Python uses the stdlib `ast` (no extra deps), and every
-other language (JS/TS, Go, Rust, Java, Ruby, C/C++, …) is handled by an optional
-**tree-sitter** backend — `pip install "graphlore[treesitter]"`, also pulled in
-by graphify. Without it, non-Python files fall back to nearest-line matching.
+other language (JS/TS, Go, Rust, Java, Kotlin, Scala, C#, Swift, Ruby, PHP,
+C/C++, …) is handled by an optional **tree-sitter** backend —
+`pip install "graphlore[treesitter]"`, also pulled in by graphify. Without it,
+non-Python files fall back to nearest-line matching. A `.h` file that reads as
+C++ (a `class`, a `namespace`, a `template<`) is parsed as C++.
+[What was measured per language](benchmark-polyglot.md), on real repositories.
 
 ## Naming communities without an API key (MCP sampling)
 

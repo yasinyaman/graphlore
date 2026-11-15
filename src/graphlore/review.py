@@ -34,9 +34,11 @@ from .imports import ImportChecker
 from .scope import _clean_pattern, _path_matches, _vendored_by_path
 from .spans import (
     _cached_file_analysis,
+    _is_test_node,
     _is_ts_symbol,
     _norm_relpath,
     _resolve_in_project,
+    _span_of_definition,
     _spans_for_file,
     _ts_bound_function,
     _ts_parser_for,
@@ -45,13 +47,18 @@ from .spans import (
 
 # Extensions whose nodes are source definitions (not config keys or doc headings).
 _CODE_EXTS = frozenset({
-    ".py", ".pyi", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs",
+    ".py", ".pyi", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".mts", ".cts",
     ".go", ".java", ".kt", ".kts", ".rs", ".c", ".h", ".cc", ".cpp", ".hpp",
     ".cxx", ".hxx", ".cs", ".rb", ".php", ".swift", ".scala", ".m", ".mm",
     ".lua", ".zig", ".ex", ".exs",
 })
 _IDENT = re.compile(r"[A-Za-z_$][A-Za-z0-9_$]*")
-_DECORATOR_LINE = re.compile(r"^\s*@\s*([A-Za-z_][\w.]*)")
+# A decorator / annotation / attribute at the start of a line: `@app.route`,
+# Java `@Test`, C# `[Fact]`, Rust `#[test]`.
+_DECORATOR_LINE = re.compile(r"^\s*(?:@\s*|#\s*\[\s*|\[\s*)([A-Za-z_][\w.:]*)")
+# How far below the first line of a definition its name may sit: Java, C#, Swift
+# and Kotlin count the annotations as part of the declaration.
+_DECORATOR_REACH = 12
 # An identifier, and whether it is reached as an attribute (`obj.name`).
 _MENTION = re.compile(r"(\.\s*)?([A-Za-z_$][A-Za-z0-9_$]*)")
 
@@ -164,6 +171,12 @@ _NEUTRAL_DECORATORS = frozenset({
     "overload", "final", "override", "abstractmethod", "deprecated",
     "no_type_check", "suppresswarnings", "safevarargs", "functionalinterface",
     "inline", "noinline", "nonnull", "nullable", "notnull",
+    # Rust / C# / Swift / Kotlin attributes that say how to compile or lint a
+    # definition, not that something will call it
+    "must_use", "derive", "doc", "allow", "warn", "deny", "cfg", "cfg_attr", "repr",
+    "non_exhaustive", "track_caller", "obsolete", "methodimpl", "attributeusage",
+    "serializable", "debuggerdisplay", "available", "discardableresult", "sendable",
+    "jvmstatic", "jvmoverloads", "jvmfield", "jvmname", "throws", "suppress", "optin",
 })
 _MENTION_SKIP_DIRS = frozenset({
     "node_modules", "venv", "env", "__pycache__", "dist", "build", "target",
@@ -341,15 +354,33 @@ def _decorators(
             found.append(_node_label(t) if t else target)
     file, line = _node_file(n), _int_line(n)
     span = _span_for(file, line)
-    if span is not None and span[0] < line:
-        for text in lines.get(file)[span[0] - 1:line - 1]:
+    if span is not None:
+        text_lines = lines.get(file)
+        # Above the definition (Python, JS, Rust: decorators are siblings) and from
+        # its first line down to the one that names it (Java `@Test` / C# `[Fact]`
+        # start the declaration itself).
+        name = _bare_name(_node_label(n))
+        below = text_lines[line - 1:line - 1 + _DECORATOR_REACH]
+        stop = next((i for i, text in enumerate(below) if name and name in text), 0)
+        in_comment = False
+        for text in text_lines[span[0] - 1:line - 1] + below[:stop + 1]:
+            # a doc comment's `@param` / `@default` tag is no decorator, with or
+            # without the leading `*`. Only a line that starts a comment opens
+            # one: `@Test("matches */*")` holds the characters in a string.
+            stripped = text.lstrip()
+            if in_comment:
+                in_comment = "*/" not in text
+                continue
+            if stripped.startswith("/*"):
+                in_comment = "*/" not in stripped[2:]
+                continue
             m = _DECORATOR_LINE.match(text)
             if m:
                 found.append(m.group(1))
     seen: set[str] = set()
     out: list[str] = []
     for d in found:
-        short = d.rsplit(".", 1)[-1].rstrip("()")
+        short = d.replace("::", ".").rsplit(".", 1)[-1].rstrip("()")
         if short and short.lower() not in seen:
             seen.add(short.lower())
             out.append(short)
@@ -412,8 +443,50 @@ def _count_mentions(
 
 
 def _is_test_definition(name: str, file: str) -> bool:
-    """A test the runner collects by naming convention, never by reference."""
-    return _is_test_path(file) and (name.startswith(("test", "Test")) or name.endswith("Test"))
+    """A test the runner collects by naming convention, never by reference:
+    ``test_x`` / ``TestX``, googletest's ``TEST`` / ``TEST_F``, Go's ``BenchmarkX`` /
+    ``ExampleX`` / ``FuzzX``, the ``XTest`` / ``XTests`` / ``XTestCase`` classes of
+    the JVM, .NET, PHP and Swift, and the ``setUp`` / ``tearDown`` fixtures."""
+    return _is_test_path(file) and (
+        name.startswith(("test", "Test", "TEST", "Benchmark", "Example", "Fuzz"))
+        or name.endswith(("Test", "Tests", "TestCase"))
+        # xUnit fixtures: `setUp`, `tearDown`, `setUpBeforeClass`
+        or name.lower().startswith(("setup", "teardown"))
+    )
+
+
+_TYPE_ARGUMENTS = re.compile(r"<[^<>]*>")
+
+
+def _never_called_by_name(name: str, label: str, parent_label: str) -> bool:
+    """A definition no caller writes the name of, so "nothing refers to it" says
+    nothing: an anonymous function (``{closure#3}``, ``<lambda>``), an operator
+    (C++ ``operator[]``, Ruby ``[]=``), a constructor or destructor — used
+    whenever its class is."""
+    if not name or name[0] in "{<(~" or not any(ch.isalnum() or ch == "_" for ch in name):
+        return True
+    if name.startswith("operator") and not (name[8:9].isalnum() or name[8:9] == "_"):
+        return True
+    plain = _TYPE_ARGUMENTS.sub("", name)
+    if parent_label and _TYPE_ARGUMENTS.sub("", _bare_name(parent_label)) == plain:
+        return True  # `.Foo()` under class Foo
+    scope = _TYPE_ARGUMENTS.sub("", label.strip().removesuffix("()")).replace("::", ".")
+    parts = scope.lstrip(".").split(".")
+    return len(parts) > 1 and parts[-2] == parts[-1]  # `Foo::Foo()`
+
+
+def _is_anonymous_class(n: dict, lines: _SourceLines) -> bool:
+    """A class graphify made of an anonymous class body, named after the type it
+    implements: Java ``new TypeToken<List<String>>() { … }``, Kotlin
+    ``object : Callback<T> { … }``. Nothing can refer to it by that name."""
+    text = lines.get(_node_file(n))
+    line = _int_line(n)
+    if not 0 < line <= len(text):
+        return False
+    src = text[line - 1]
+    label = _node_label(n).split("<", 1)[0]
+    return bool(label) and (f"new {label}" in src or bool(
+        re.search(rf"\bobject\s*:\s*{re.escape(label)}\b", src)))
 
 
 def _unreferenced(
@@ -435,17 +508,28 @@ def _unreferenced(
 
     examined = 0
     no_graph_ref: list[tuple[str, dict, str, str]] = []  # (id, node, kind, bare name)
+    lines = _SourceLines()
     for n in scoped_nodes:
         nid = _node_id(n)
         kind = defs.kind.get(nid)
         if not kind:
             continue
-        name = _bare_name(_node_label(n))
+        # Ruby `success?` / `save!` / `body=` are written `success?`, `body = x`:
+        # the identifier a caller types is the name without the suffix
+        name = _bare_name(_node_label(n)).rstrip("?!=")
         file = _node_file(n)
-        if not name or (name.startswith("__") and name.endswith("__")):
-            continue  # dunder methods are called by the language, not by name
+        if not name or (name.startswith("__") and (
+                name.endswith("__") or file.lower().endswith(".php"))):
+            # Python dunders and PHP magic methods (`__invoke`, `__get`) are
+            # called by the language, not by name
+            continue
         if _is_test_definition(name, file):
             continue
+        owner = defs.byid.get(defs.parent.get(nid, ""))
+        if _never_called_by_name(name, _node_label(n), _node_label(owner) if owner else ""):
+            continue
+        if kind == "class" and _is_anonymous_class(n, lines):
+            continue  # `new Callback<T>() { … }` / `object : Callback<T> { … }`
         examined += 1
         family = {nid, *defs.members.get(nid, ())}
         referenced = False
@@ -455,7 +539,7 @@ def _unreferenced(
                     continue
                 if not count_test_references:
                     sn = defs.byid.get(src)
-                    if sn is not None and _is_test_path(_node_file(sn)):
+                    if sn is not None and _is_test_node(sn):
                         continue
                 referenced = True
                 break
@@ -464,7 +548,6 @@ def _unreferenced(
         if not referenced:
             no_graph_ref.append((nid, n, kind, name))
 
-    lines = _SourceLines()
     registered: Counter[str] = Counter()
     remaining: list[tuple[str, dict, str, str]] = []
     for nid, n, kind, name in no_graph_ref:
@@ -478,7 +561,27 @@ def _unreferenced(
             remaining.append((nid, n, kind, name))
 
     names = {name for _nid, _n, _kind, name in remaining}
-    per_file, per_file_attrs, files_scanned, capped = _count_mentions(names)
+    # A class can be used only through its members: a C# extension class's
+    # methods are called on the extended type (`client.BuildUri(...)`) and the
+    # class is never named. Its members come from the span engine, since the
+    # graph may not see them (C# 14 `extension(...)` blocks).
+    graph_names = {_bare_name(_node_label(defs.byid[d])) for d in defs.kind}
+    members_of: dict[str, list[str]] = {}
+    for nid, n, kind, _name in remaining:
+        if kind != "class":
+            continue
+        cls_span = _span_of_definition(_node_file(n), _int_line(n), _name)
+        if cls_span is None:
+            continue
+        cls_qual = cls_span[3]
+        depth = cls_qual.count(".") + 1
+        members_of[nid] = sorted({
+            q.rsplit(".", 1)[-1] for _rs, _e, _dl, q in _spans_for_file(_node_file(n))
+            if q.startswith(cls_qual + ".") and q.count(".") == depth
+            and len(q.rsplit(".", 1)[-1]) >= 4 and q.rsplit(".", 1)[-1] not in names
+        })
+    member_names = {m for ms in members_of.values() for m in ms}
+    per_file, per_file_attrs, files_scanned, capped = _count_mentions(names | member_names)
     graph_bases: dict[str, list[str]] = {}  # class id -> base names the graph recorded
     for e in all_edges:
         if _rel(e) in _INHERITANCE_RELATIONS:
@@ -496,7 +599,7 @@ def _unreferenced(
     defined_in: dict[str, dict[str, list[int]]] = {}
     for other in defs.kind:
         on = defs.byid[other]
-        bare = _bare_name(_node_label(on))
+        bare = _bare_name(_node_label(on)).rstrip("?!=")
         if bare in names:
             defined_in.setdefault(bare, {}).setdefault(_node_file(on), []).append(
                 _int_line(on)
@@ -519,10 +622,19 @@ def _unreferenced(
                 attrs_here = per_file_attrs.get(name)
                 count = attrs_here[where] if attrs_here else 0
             mentions += max(0, count)
+        via = [
+            m for m in members_of.get(nid, ())
+            if m not in graph_names  # a name the graph knows can mean that other symbol
+            and any(f != file and c for f, c in (per_file_attrs.get(m) or {}).items())
+        ]
+        if via and not mentions:
+            mentions = sum(c for m in via for f, c in per_file_attrs[m].items() if f != file)
         item: dict[str, Any] = {
             "id": nid, "name": name, "kind": kind, "file": file, "line": line or None,
             "mentions": mentions,
         }
+        if via and mentions:
+            item["used_through_members"] = via[:5]
         namesakes = sorted(
             f"{f}:{ln}" for f, lns in homes.items() for ln in lns
             if (f, ln) != (file, line)
@@ -692,7 +804,7 @@ def _python_bodies(src: bytes) -> dict[int, tuple[str, int]]:
 
 
 def _treesitter_bodies(src: bytes, rel: str) -> dict[int, tuple[str, int]]:
-    parser, _lang = _ts_parser_for(rel)
+    parser, _lang = _ts_parser_for(rel, src)
     if parser is None:
         return {}
     try:

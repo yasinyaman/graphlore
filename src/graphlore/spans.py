@@ -9,12 +9,13 @@ freshness. Reads the project root from :mod:`graphlore.config`.
 from __future__ import annotations
 
 import ast
+import re
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 from . import config
-from .graph import _node_file, _node_line
+from .graph import _is_test_path, _node_file, _node_line
 
 # Per-file span index, keyed by absolute path -> (mtime, spans). A span is
 # ``(region_start, end_line, def_line, qualname)`` for each def/class:
@@ -93,37 +94,68 @@ def _norm_relpath(p: object) -> str:
 
 
 # tree-sitter symbol node-type hints (generic across languages). A node counts as
-# a definition only if its type matches one of these AND it exposes a "name" field —
-# which filters out look-alikes (function_type, class_body, type_annotation, ...).
+# a definition only if its type matches one of these AND it names itself — through
+# a "name" field, a declarator chain (C/C++) or, in grammars that have neither
+# (Kotlin), an identifier child — which filters out look-alikes (function_type,
+# class_body, ...).
 _TS_SYMBOL_HINTS = (
     "function", "method", "constructor", "class", "struct", "interface",
-    "enum", "trait", "impl", "module", "object", "type", "subroutine",
-    "procedure", "package", "namespace",
+    "enum", "trait", "module", "object", "type", "subroutine",
+    "procedure", "package", "namespace", "record", "protocol",
 )
+# Hints that must be a whole word of the node type: as a substring "impl" also
+# sits in PHP's `simple_parameter` and Kotlin's `simple_identifier`.
+_TS_SYMBOL_WORD_HINTS = frozenset({"impl", "mod"})
 # NB: no "_expression" (function_expression is a named def) and no "_specifier"
-# (C++ class_specifier / struct_specifier / enum_specifier ARE definitions). The
-# excluded nodes match a hint substring but are never name-bearing definitions.
-_TS_NON_SYMBOL_SUFFIXES = ("_type", "_body", "_parameters", "_clause")
+# (C++ class_specifier / struct_specifier / enum_specifier ARE definitions when
+# they have a body). The excluded nodes match a hint substring but name a use of a
+# symbol, never its definition: a type written in a signature (`React.FC`,
+# `io::Result`, Swift `x: Foo`) or a parameter (Scala `class_parameter`).
+_TS_NON_SYMBOL_SUFFIXES = (
+    "_type", "_body", "_parameters", "_clause",
+    "_identifier", "_annotation", "_parameter",
+)
 # Nodes that match a hint substring ("function"/"type") but are NOT definitions:
 # C/C++ calls/sub-declarators (`holds_alternative<T>(x)` -> template_function, a real
 # name under a nested function_declarator), and type-level constructs — generic
-# parameters (`<T>`) and associated-type bindings (`impl Iterator<Item = X>`) that
-# carry a `name` field yet name no symbol.
+# parameters (`<T>`, Go `[T any]`), associated-type bindings (`impl Iterator<Item = X>`),
+# a Swift tuple member, a TypeScript `x is T` predicate, a Rust struct literal
+# (`Foo { a: 1 }`) and a C macro mistaken for a type — that carry a `name` field
+# yet name no symbol.
 _TS_CALL_TYPES = frozenset({
     "template_function", "template_method", "call_expression", "function_declarator",
     "type_binding", "type_parameter", "constrained_type_parameter",
     "optional_type_parameter", "type_argument", "type_arguments",
+    "type_parameter_declaration", "type_predicate", "tuple_type_item",
+    "struct_expression", "macro_type_specifier",
 })
+# Definitions whose grammar gives them a keyword, not a name.
+_TS_KEYWORD_NAMES = {
+    "init_declaration": "init", "deinit_declaration": "deinit",   # Swift
+    "secondary_constructor": "constructor",                        # Kotlin
+}
+# The child that names a declaration in a grammar without a `name` field (Kotlin:
+# `function_declaration > simple_identifier`, `class_declaration > type_identifier`).
+_TS_NAME_CHILD_TYPES = frozenset({"simple_identifier", "type_identifier", "identifier"})
+# C/C++ declarations with no body of their own: a prototype in a header, a method
+# declared in its class. They are spans only when they declare a function.
+_TS_PROTOTYPE_TYPES = frozenset({"declaration", "field_declaration"})
+# A `.h` file is C to the language pack; with one of these at the start of a line
+# it is a C++ header, and the C grammar reads its classes as errors.
+_CPP_HEADER_MARK = re.compile(
+    rb"^[ \t]*(?:class\s+\w|namespace\b|template\s*<|using\s+namespace\b"
+    rb"|(?:public|private|protected)\s*:)", re.M)
 # Parser cache keyed by language name; value is a parser or None (unavailable).
 _TS_PARSERS: dict[str, Any] = {}
 
 
-def _ts_parser_for(rel: str) -> tuple[Any, str | None]:
+def _ts_parser_for(rel: str, src: bytes | None = None) -> tuple[Any, str | None]:
     """(parser, language) for a path via the optional tree-sitter backend.
 
     Returns (None, None) when tree-sitter / the language pack is not installed or
     the language is unknown. tree-sitter ships with graphify, so it's usually
     present; declared as the ``[treesitter]`` extra otherwise. Cached per language.
+    With ``src``, a ``.h`` file that reads as C++ gets the C++ grammar.
     """
     try:
         # Build a parser from the core API (Parser + Language) rather than the
@@ -140,6 +172,8 @@ def _ts_parser_for(rel: str) -> tuple[Any, str | None]:
         lang = None
     if not lang:
         return None, None
+    if lang == "c" and src is not None and _CPP_HEADER_MARK.search(src):
+        lang = "cpp"
     if lang not in _TS_PARSERS:
         if config.offline() and not _grammar_cached(lang):
             # get_language downloads an uncached grammar; offline, do without it
@@ -178,7 +212,9 @@ def _is_ts_symbol(node_type: str) -> bool:
     # enumerate every grammar's spelling (`call_expression` is also caught here).
     if "invocation" in t or "call" in t:
         return False
-    return any(h in t for h in _TS_SYMBOL_HINTS)
+    if any(h in t for h in _TS_SYMBOL_HINTS):
+        return True
+    return not _TS_SYMBOL_WORD_HINTS.isdisjoint(t.split("_"))
 
 
 def _spans_python(src: bytes) -> list[tuple[int, int, int, str]]:
@@ -247,15 +283,26 @@ def _ts_bound_function(node: Any) -> tuple[str, Any] | None:
     """An *anonymous* function bound to a name, so the binding name becomes the
     qualname (the arrow/closure carries no ``name`` field of its own). Covers
     ``const f = () => …`` / ``var h = func(){}`` (name+value), object properties
-    ``{ foo: () => … }`` (key+value), and class fields ``handler = (r) => …``
-    (property+value). ``None`` for non-function bindings or a function that already
-    has its own name (handled by the normal path)."""
+    ``{ foo: () => … }`` (key+value), class fields ``handler = (r) => …``
+    (property+value) and assignments ``exports.send = function () {…}`` /
+    ``res.send = …`` (left+right, named by the member assigned to). ``None`` for
+    non-function bindings or a function that already has its own name (handled by
+    the normal path)."""
     name = (node.child_by_field_name("name")
             or node.child_by_field_name("key")
             or node.child_by_field_name("property"))
     value = node.child_by_field_name("value")
+    if name is None and value is None:
+        left = node.child_by_field_name("left")
+        if left is not None and left.type == "member_expression":
+            left = left.child_by_field_name("property")
+        name, value = left, node.child_by_field_name("right")
     if name is None or value is None or not name.type.endswith("identifier"):
         return None
+    if value.type == "call_expression":
+        value = _ts_wrapped_function(value)
+        if value is None:
+            return None
     vt = value.type.lower()
     if not any(h in vt for h in ("function", "arrow", "lambda", "closure", "func")):
         return None
@@ -264,19 +311,103 @@ def _ts_bound_function(node: Any) -> tuple[str, Any] | None:
     return name.text.decode("utf-8", "replace"), value
 
 
+# Callees that take a function to run later, not to return a wrapped version of it.
+_TS_SCHEDULERS = frozenset({"setTimeout", "setInterval", "setImmediate", "queueMicrotask"})
+_TS_FUNCTION_VALUES = frozenset({
+    "arrow_function", "function_expression", "function", "generator_function",
+})
+
+
+def _ts_wrapped_function(call: Any) -> Any | None:
+    """The function in a one-call wrapper: ``async(function* () {…})``,
+    ``wrap(async (req, res) => {…})`` — a plain-named callee given exactly one
+    anonymous function. ``users.map(u => …)`` and ``setTimeout(() => …)`` are
+    not wrappers."""
+    fn = call.child_by_field_name("function")
+    args = call.child_by_field_name("arguments")
+    if fn is None or args is None or fn.type != "identifier":
+        return None
+    if fn.text.decode("utf-8", "replace") in _TS_SCHEDULERS:
+        return None
+    found = [a for a in args.named_children if a.type in _TS_FUNCTION_VALUES]
+    if len(found) != 1 or found[0].child_by_field_name("name") is not None:
+        return None
+    return found[0]
+
+
+def _ts_anonymous_class(node: Any) -> str | None:
+    """The name a class with no name of its own goes by: Java
+    ``new Callback<Void>() { … }`` and Kotlin ``object : Callback<T> { … }`` by
+    the type they implement, Ruby ``Request = Struct.new(:a) do … end`` by the
+    constant it is assigned to."""
+    t = node.type
+    if t == "object_creation_expression":
+        if not any(c.type == "class_body" for c in node.named_children):
+            return None
+        typ = node.child_by_field_name("type")
+        return typ.text.decode("utf-8", "replace") if typ is not None else None
+    if t == "object_literal":
+        spec = next((c for c in node.named_children if c.type == "delegation_specifier"), None)
+        user = None if spec is None else next(
+            (c for c in spec.named_children if c.type == "user_type"), None)
+        if user is None or not any(c.type == "class_body" for c in node.named_children):
+            return None
+        return user.text.decode("utf-8", "replace").split("<", 1)[0]
+    if t == "assignment":
+        left, right = node.child_by_field_name("left"), node.child_by_field_name("right")
+        if (left is not None and left.type == "constant" and right is not None
+                and right.type == "call" and right.child_by_field_name("block") is not None):
+            return left.text.decode("utf-8", "replace")
+    return None
+
+
 def _ts_declarator_name(node: Any) -> str | None:
     """C/C++ function name, which lives in a declarator chain rather than a ``name``
     field: ``function_definition > function_declarator > identifier /
-    qualified_identifier / field_identifier``. ``Session::Get`` -> ``Session.Get``."""
+    qualified_identifier / field_identifier``. ``Session::Get`` -> ``Session.Get``.
+    The chain is followed through the wrappers that carry no ``declarator`` field
+    (``const T& f()`` is a reference_declarator around the function_declarator)."""
     decl = node.child_by_field_name("declarator")
     for _ in range(8):  # bounded unwrap
         if decl is None:
             return None
-        if decl.type in ("identifier", "field_identifier", "destructor_name"):
+        if decl.type in ("identifier", "field_identifier", "destructor_name",
+                         "type_identifier", "operator_name"):
             return decl.text.decode("utf-8", "replace")
         if decl.type == "qualified_identifier":
             return decl.text.decode("utf-8", "replace").replace("::", ".")
-        decl = decl.child_by_field_name("declarator")
+        decl = decl.child_by_field_name("declarator") or next(
+            (c for c in decl.named_children
+             if c.type.endswith("declarator") or c.type == "qualified_identifier"), None)
+    return None
+
+
+def _ts_declares_function(node: Any) -> bool:
+    """Whether a C/C++ ``declaration`` / ``field_declaration`` declares a function
+    (``int f(void);``) rather than a variable or a field."""
+    decl = node.child_by_field_name("declarator")
+    for _ in range(8):
+        if decl is None:
+            return False
+        if decl.type == "function_declarator":
+            return True
+        decl = decl.child_by_field_name("declarator") or next(
+            (c for c in decl.named_children if c.type.endswith("declarator")), None)
+    return False
+
+
+def _ts_child_name(node: Any) -> str | None:
+    """The name of a declaration whose grammar has no ``name`` field: its keyword
+    (Swift ``init``), or its first identifier child (Kotlin)."""
+    fixed = _TS_KEYWORD_NAMES.get(node.type)
+    if fixed is not None:
+        return fixed
+    t = node.type.lower()
+    if not t.endswith(("_declaration", "_entry", "type_alias")) or "package" in t:
+        return None
+    for c in node.named_children:
+        if c.type in _TS_NAME_CHILD_TYPES:
+            return c.text.decode("utf-8", "replace")
     return None
 
 
@@ -289,7 +420,7 @@ def _spans_treesitter(src: bytes, rel: str) -> list[tuple[int, int, int, str]]:
     and the qualname chains enclosing named symbols. Empty when the tree-sitter
     backend or the language is unavailable (caller then uses the point heuristic).
     """
-    parser, _lang = _ts_parser_for(rel)
+    parser, _lang = _ts_parser_for(rel, src)
     if parser is None:
         return []
     try:
@@ -300,9 +431,17 @@ def _spans_treesitter(src: bytes, rel: str) -> list[tuple[int, int, int, str]]:
 
     def walk(node: Any, prefix: str) -> None:
         for child in node.named_children:
-            is_sym = _is_ts_symbol(child.type)
+            is_sym = _is_ts_symbol(child.type) or child.type in _TS_KEYWORD_NAMES
             name_node = child.child_by_field_name("name") if is_sym else None
-            if name_node is not None:
+            if name_node is not None and child.type.endswith("_specifier") \
+                    and child.child_by_field_name("body") is None:
+                # C/C++ `struct config cfg` in a signature, or a forward
+                # declaration: the type is named here, not defined
+                walk(child, prefix)
+            elif name_node is not None and child.type == "mod_item" \
+                    and child.child_by_field_name("body") is None:
+                pass  # Rust `mod foo;` names a file, it defines nothing here
+            elif name_node is not None:
                 base = name_node.text.decode("utf-8", "replace")
                 recv = child.child_by_field_name("receiver")  # Go method: prefix type
                 if recv is not None and (rt := _ts_receiver_type(recv)):
@@ -322,9 +461,26 @@ def _spans_treesitter(src: bytes, rel: str) -> list[tuple[int, int, int, str]]:
                 # full `ConfigBuilder<X>.`.
                 base = type_node.child_by_field_name("type") or type_node
                 walk(child, f"{prefix}{base.text.decode('utf-8', 'replace')}.")
-            elif is_sym and (dname := _ts_declarator_name(child)) is not None:
+            elif (is_sym or (child.type in _TS_PROTOTYPE_TYPES
+                             and _ts_declares_function(child))) \
+                    and (dname := _ts_declarator_name(child)) is not None:
                 # C/C++ function/method: the name lives in the declarator chain
                 qual = f"{prefix}{dname}"
+                def_line = child.start_point[0] + 1
+                end = child.end_point[0] + 1
+                spans.append((_ts_region_start(child, def_line), end, def_line, qual))
+                walk(child, qual + ".")
+            elif is_sym and (kname := _ts_child_name(child)) is not None:
+                # no `name` field in this grammar (Kotlin), or a keyword-named
+                # definition (Swift `init`)
+                qual = f"{prefix}{kname}"
+                def_line = child.start_point[0] + 1
+                end = child.end_point[0] + 1
+                spans.append((_ts_region_start(child, def_line), end, def_line, qual))
+                walk(child, qual + ".")
+            elif (anon := _ts_anonymous_class(child)) is not None:
+                # a class with no name of its own: named by what it implements
+                qual = f"{prefix}{anon}"
                 def_line = child.start_point[0] + 1
                 end = child.end_point[0] + 1
                 spans.append((_ts_region_start(child, def_line), end, def_line, qual))
@@ -345,6 +501,98 @@ def _spans_treesitter(src: bytes, rel: str) -> list[tuple[int, int, int, str]]:
     except RecursionError:
         pass
     return spans
+
+
+# --- test code that lives in a source file ------------------------------------
+# Rust keeps unit tests next to the code: `#[cfg(test)] mod tests { … }` and
+# `#[test] fn …`. No path rule can tell those from production code, so the span
+# engine marks their line ranges. Per file, (path, mtime)-cached like the spans.
+_TEST_REGION_CACHE: dict[str, tuple[float, list[tuple[int, int]]]] = {}
+
+
+def _rust_attributes(node: Any) -> list[str]:
+    """Texts of the `#[...]` attributes stacked right above ``node``."""
+    out: list[str] = []
+    prev = node.prev_named_sibling
+    while prev is not None and (prev.type == "attribute_item" or "comment" in prev.type):
+        if prev.type == "attribute_item":
+            out.append(prev.text.decode("utf-8", "replace"))
+        prev = prev.prev_named_sibling
+    return out
+
+
+_RUST_CFG_TEST = re.compile(r"\bcfg\s*\((?:[^()]|\([^()]*\))*\btest\b")
+_RUST_CFG_NOT_TEST = re.compile(r"\bnot\s*\(\s*test\s*\)")
+_RUST_TEST_ATTR = re.compile(r"^#\s*\[\s*(?:[\w:]+::)?test\s*(?:\(|\])")
+
+
+def _is_cfg_test(attr: str) -> bool:
+    return bool(_RUST_CFG_TEST.search(attr)) and not _RUST_CFG_NOT_TEST.search(attr)
+
+
+def _test_regions_rust(src: bytes, rel: str) -> list[tuple[int, int]]:
+    parser, _lang = _ts_parser_for(rel, src)
+    if parser is None:
+        return []
+    try:
+        root = parser.parse(src).root_node
+    except Exception:
+        return []
+    if any(c.type == "inner_attribute_item" and _is_cfg_test(c.text.decode("utf-8", "replace"))
+           for c in root.named_children):
+        return [(1, root.end_point[0] + 1)]  # `#![cfg(test)]`: the whole file
+    regions: list[tuple[int, int]] = []
+
+    def walk(node: Any) -> None:
+        for child in node.named_children:
+            span = (child.start_point[0] + 1, child.end_point[0] + 1)
+            if child.type == "mod_item":
+                body = child.child_by_field_name("body")
+                inner = body is not None and any(
+                    c.type == "inner_attribute_item"
+                    and _is_cfg_test(c.text.decode("utf-8", "replace"))
+                    for c in body.named_children)
+                if inner or any(_is_cfg_test(a) for a in _rust_attributes(child)):
+                    regions.append(span)
+                    continue
+            elif child.type == "function_item" and any(
+                    _RUST_TEST_ATTR.match(a) for a in _rust_attributes(child)):
+                regions.append(span)
+                continue
+            walk(child)
+
+    try:
+        walk(root)
+    except RecursionError:
+        pass
+    return regions
+
+
+def _test_regions(file_path: str) -> list[tuple[int, int]]:
+    """Line ranges of a source file that are test code although the file is not a
+    test file. Rust only: other languages keep tests in test files, which
+    `_is_test_path` recognises."""
+    if not str(file_path).lower().endswith(".rs"):
+        return []
+    return _cached_file_analysis(_TEST_REGION_CACHE, file_path, _test_regions_rust, list)
+
+
+def _is_test_node(n: dict) -> bool:
+    """A node that is test code: in a test file, or inside a test region of a
+    source file (a Rust `#[cfg(test)]` module or `#[test]` function)."""
+    file = _node_file(n)
+    if not file:
+        return False
+    if _is_test_path(file):
+        return True
+    regions = _test_regions(file)
+    if not regions:
+        return False
+    try:
+        line = int(_node_line(n))
+    except (TypeError, ValueError):
+        return False
+    return any(lo <= line <= hi for lo, hi in regions)
 
 
 def _spans_for_file(file_path: str) -> list[tuple[int, int, int, str]]:
@@ -389,6 +637,25 @@ def _enclosing_spans(
     in_chunk = [s for s in spans if line < s[2] <= end_line]
     in_chunk.sort(key=lambda s: s[2])  # earliest definition first
     return in_chunk
+
+
+def _span_of_definition(
+    file_path: str, line: int, name: str
+) -> tuple[int, int, int, str] | None:
+    """The span of the definition a graph node stands for.
+
+    Several spans can start on one line (``enum Color { RED, GREEN }``, a class and
+    its one-line member), and the innermost is then not the node's own: the span
+    that starts on the node's line under the node's name wins, else the innermost
+    enclosing one.
+    """
+    spans = _enclosing_spans(file_path, line, line)
+    if not spans:
+        return None
+    for s in spans:
+        if s[2] == line and s[3].rsplit(".", 1)[-1] == name:
+            return s
+    return spans[0]
 
 
 def _span_qualname(file_path: str, line: int, end_line: int | None = None) -> str | None:
@@ -532,12 +799,12 @@ def _structurally_equal(rel: str, old_src: Any, new_src: Any) -> bool | None:
             return ast.dump(ast.parse(old_src)) == ast.dump(ast.parse(new_src))
         except (SyntaxError, ValueError, RecursionError):
             return None
-    parser, _lang = _ts_parser_for(rel)
-    if parser is None:
-        return None
-
     def _b(s: Any) -> bytes:
         return bytes(s) if isinstance(s, bytes | bytearray) else str(s).encode("utf-8", "replace")
+
+    parser, _lang = _ts_parser_for(rel, _b(new_src))
+    if parser is None:
+        return None
 
     try:
         a = _ts_skeleton(parser.parse(_b(old_src)).root_node)
