@@ -239,7 +239,7 @@ from .spans import (  # noqa: F401
 # Configuration
 # ---------------------------------------------------------------------------
 
-__version__ = "0.5.1"
+__version__ = "0.6.0"
 
 # Printed by graphlore_project and graphlore_overview. A client keeps the tool
 # schemas it loaded before a plugin update; an agent that reads "graphlore 0.5.1"

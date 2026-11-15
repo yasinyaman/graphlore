@@ -7425,3 +7425,25 @@ def test_routes_php_laravel_and_symfony():
         "    public function postShow() {}\n}\n")) == [
         ("symfony", "GET", "/blog/posts/{slug}", "postShow"),
         ("symfony", "POST", "/blog/posts/{slug}", "postShow")]
+
+
+def test_a_string_with_comment_characters_does_not_hide_a_decorator(tmp_path, monkeypatch):
+    # Alamofire: `@Test("Full wildcard */* matches any MIME type")` read as a
+    # comment opener, so the Swift test was listed as dead code
+    _skip_without_treesitter()
+    (tmp_path / "Tests").mkdir()
+    (tmp_path / "Tests" / "MIMETypeTests.swift").write_text(
+        "struct MIMETypeTests {\n    @Test(\"Full wildcard */* matches any type\")\n"
+        "    func fullWildcardMatchesAny() throws {\n    }\n}\n", encoding="utf-8")
+    _write_graph(tmp_path, {"nodes": [
+        {"id": "s", "label": "MIMETypeTests", "source_file": "Tests/MIMETypeTests.swift",
+         "source_location": "L1", "file_type": "code", "_callable_class": True},
+        {"id": "f", "label": ".fullWildcardMatchesAny()", "source_file":
+         "Tests/MIMETypeTests.swift", "source_location": "L3", "file_type": "code"},
+    ], "edges": [{"source": "s", "target": "f", "relation": "method"}]})
+    server._GRAPH_CACHE.clear()
+    server._SPAN_CACHE.clear()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    data = json.loads(server.graphlore_unreferenced(as_json=True))
+    assert data["registered_by_decorator"].get("Test") == 1
+    assert ".fullWildcardMatchesAny()" not in {r["node"] for r in data["unreferenced"]}

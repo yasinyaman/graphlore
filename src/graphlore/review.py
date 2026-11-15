@@ -365,14 +365,14 @@ def _decorators(
         in_comment = False
         for text in text_lines[span[0] - 1:line - 1] + below[:stop + 1]:
             # a doc comment's `@param` / `@default` tag is no decorator, with or
-            # without the leading `*`
-            opened, closed = text.rfind("/*"), text.rfind("*/")
-            starts_in_comment = in_comment
-            if opened > closed:
-                in_comment = True
-            elif closed > opened:
-                in_comment = False
-            if starts_in_comment or opened >= 0:
+            # without the leading `*`. Only a line that starts a comment opens
+            # one: `@Test("matches */*")` holds the characters in a string.
+            stripped = text.lstrip()
+            if in_comment:
+                in_comment = "*/" not in text
+                continue
+            if stripped.startswith("/*"):
+                in_comment = "*/" not in stripped[2:]
                 continue
             m = _DECORATOR_LINE.match(text)
             if m:

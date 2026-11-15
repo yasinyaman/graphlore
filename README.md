@@ -197,7 +197,7 @@ and PHP frameworks
 ([tool reference](https://github.com/yasinyaman/graphlore/blob/master/docs/tools.md)),
 and both say which files they did not read.
 [What was measured in each language](https://github.com/yasinyaman/graphlore/blob/master/docs/benchmark-polyglot.md),
-on 20 real repositories.
+on 31 real repositories.
 
 ### Why do I see only 12 tools?
 
