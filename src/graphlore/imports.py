@@ -55,7 +55,14 @@ _TS_TYPE_IMPORT = re.compile(r"^\s*(?:import|export)\s+type\b")
 _JS_EXTS = (".d.ts", ".tsx", ".jsx", ".mjs", ".cjs", ".mts", ".cts", ".ts", ".js")
 # Languages whose imports are resolved at compile time: an import cannot be
 # deferred or conditional, so every one of them is module-level by definition.
-_COMPILED_EXTS = (".go", ".java", ".kt", ".kts", ".scala", ".cs", ".rs", ".swift")
+# A C-family `#include` / `#import` is resolved earlier still, by the preprocessor.
+_COMPILED_EXTS = (
+    ".go", ".java", ".kt", ".kts", ".scala", ".cs", ".rs", ".swift",
+    ".c", ".h", ".cc", ".cpp", ".cxx", ".hpp", ".hxx", ".m", ".mm",
+)
+# How many re-exporting entry files (`index.ts` barrels) a JS/TS import is
+# followed through before the edge counts as contradicted by the source.
+_BARREL_DEPTH = 3
 
 
 class _Import(NamedTuple):
@@ -130,6 +137,9 @@ class _JsImport(NamedTuple):
     line: int
     kind: str        # MODULE_LEVEL / DEFERRED / TYPE_CHECKING
     specifier: str   # './lib/api.js', 'yaml', '@/store'
+    # `export … from './x'` / `module.exports = require('./x')`: the file passes
+    # on what `./x` defines, so an import of this file reaches `./x` too
+    reexport: bool = False
 
 
 class JsFile(NamedTuple):
@@ -189,16 +199,20 @@ def _js_file(root: Any) -> JsFile:
                 if src is not None:
                     source = _strip_quotes(text(src))
                     kind = TYPE_CHECKING if _TS_TYPE_IMPORT.match(text(child)) else MODULE_LEVEL
-                    imports.append(_JsImport(line, kind, source))
+                    imports.append(_JsImport(line, kind, source, t == "export_statement"))
                     if t == "import_statement" and kind != TYPE_CHECKING:
                         bind_clause(child, source)
                     continue
             if t == "call_expression":
                 dynamic = dynamic_source(child)
                 if dynamic is not None:
-                    imports.append(
-                        _JsImport(line, DEFERRED if in_function else MODULE_LEVEL, dynamic)
-                    )
+                    left = (node.child_by_field_name("left")
+                            if node.type == "assignment_expression" else None)
+                    imports.append(_JsImport(
+                        line, DEFERRED if in_function else MODULE_LEVEL, dynamic,
+                        left is not None
+                        and text(left).startswith(("module.exports", "exports")),
+                    ))
                     continue
                 fn = child.child_by_field_name("function")
                 if fn is not None and fn.type == "member_expression":
@@ -251,14 +265,22 @@ def _js_module_forms(path: str) -> set[str]:
     forms = {base}
     if base.endswith("/index"):
         forms.add(base[: -len("/index")])
+    elif base == "index":
+        forms.add("")  # the project root's own index: `require('../..')`
     return forms
+
+
+def _js_relative_base(specifier: str, importer: str) -> str:
+    """The project-relative path a relative specifier points at ("" for the root)."""
+    base = posixpath.normpath(posixpath.join(posixpath.dirname(importer), specifier))
+    return "" if base == "." else base
 
 
 def _js_can_mean(specifier: str, importer: str, target: str) -> bool:
     """Can ``specifier``, written in ``importer``, name the file ``target``?"""
     forms = _js_module_forms(target)
     if specifier.startswith("."):
-        base = posixpath.normpath(posixpath.join(posixpath.dirname(importer), specifier))
+        base = _js_relative_base(specifier, importer)
         # `./x.js` in TypeScript source names `x.ts`: compare without extensions
         return base == target or bool(_js_module_forms(base) & forms)
     if _js_internal_source(specifier):  # '/abs', '@/alias', '~/alias', '#subpath'
@@ -303,13 +325,79 @@ class ImportChecker:
     def __init__(self) -> None:
         self._is_package: dict[str, bool] = {}
         self._is_root: dict[str, bool] = {}
+        self._is_file: dict[str, bool] = {}
+        self._reexports: dict[tuple[str, str], bool] = {}
         self._lines: dict[str, list[str]] = {}
         self.rejected: list[dict[str, str]] = []
         self.unclassified = 0
 
     def _exists(self, rel: str) -> bool:
-        full = _resolve_in_project(rel)
-        return full is not None and full.is_file()
+        got = self._is_file.get(rel)
+        if got is None:
+            full = _resolve_in_project(rel)
+            got = self._is_file[rel] = full is not None and full.is_file()
+        return got
+
+    def _js_entries(self, specifier: str, importer: str, target: str) -> list[str]:
+        """Files other than ``target`` that ``specifier`` names from ``importer``.
+
+        A relative specifier names one module or a directory's index. An alias or
+        a bare path (``@/client``, ``app/store``) cannot be resolved without the
+        build config, so the index files of the directories above ``target`` are
+        tried against it.
+        """
+        found: list[str] = []
+        if specifier.startswith("."):
+            for stem in _js_module_forms(_js_relative_base(specifier, importer)):
+                for ext in _JS_EXTS:
+                    found.append(stem + ext)
+                    found.append(f"{stem}/index{ext}" if stem else f"index{ext}")
+        else:
+            d = posixpath.dirname(target)
+            while True:
+                found += [f"{d}/index{ext}" if d else f"index{ext}" for ext in _JS_EXTS]
+                if not d:
+                    break
+                d = posixpath.dirname(d)
+        return [
+            f for f in dict.fromkeys(found)
+            if f != target and self._exists(f)
+            and (specifier.startswith(".") or _js_can_mean(specifier, importer, f))
+        ]
+
+    def _js_means(self, specifier: str, importer: str, target: str) -> bool:
+        """Can ``specifier`` reach ``target``: by naming it, or by naming a module
+        that re-exports from it.
+
+        graphify links ``import { CreateDto } from './dto'`` to the file that
+        defines ``CreateDto``, not to ``dto/index.ts`` which re-exports it. The
+        statement still loads that file, so the edge holds. Only re-exports are
+        followed (``export … from``, ``module.exports = require(…)``), through at
+        most ``_BARREL_DEPTH`` files: a file the entry merely imports is not what
+        the importer asked for.
+        """
+        if _js_can_mean(specifier, importer, target):
+            return True
+        return any(self._js_reexports(entry, target, _BARREL_DEPTH)
+                   for entry in self._js_entries(specifier, importer, target))
+
+    def _js_reexports(self, entry: str, target: str, depth: int) -> bool:
+        key = (entry, target)
+        got = self._reexports.get(key)
+        if got is None:
+            self._reexports[key] = False  # a re-export cycle ends here
+            js = _js_for_file(entry)
+            got = js is not None and any(
+                i.reexport and (
+                    _js_can_mean(i.specifier, entry, target)
+                    or (depth > 1 and any(
+                        self._js_reexports(nxt, target, depth - 1)
+                        for nxt in self._js_entries(i.specifier, entry, target)))
+                )
+                for i in js.imports
+            )
+            self._reexports[key] = got
+        return got
 
     def _package(self, d: str) -> bool:
         got = self._is_package.get(d)
@@ -415,7 +503,7 @@ class ImportChecker:
                 self.unclassified += 1
                 return UNCLASSIFIED
             kinds = [i.kind for i in js.imports
-                     if _js_can_mean(i.specifier, importer, imported)]
+                     if self._js_means(i.specifier, importer, imported)]
         else:
             stmts = _imports_for_file(importer)
             if stmts is None:
@@ -454,7 +542,7 @@ class ImportChecker:
             js = _js_for_file(importer)
             if js is None:
                 return None
-            return any(_js_can_mean(i.specifier, importer, imported) for i in js.imports)
+            return any(self._js_means(i.specifier, importer, imported) for i in js.imports)
         stmts = _imports_for_file(importer)
         target = _module_parts(imported)
         if stmts is None or target is None:

@@ -2333,7 +2333,7 @@ def test_span_backend_graceful_without_treesitter(tmp_path, monkeypatch):
     # comparison is undetermined (None), so the caller degrades safely
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     server._SPAN_CACHE.clear()
-    monkeypatch.setattr(spans, "_ts_parser_for", lambda rel: (None, None))
+    monkeypatch.setattr(spans, "_ts_parser_for", lambda rel, src=None: (None, None))
     (tmp_path / "app.js").write_bytes(b"function f(){ return 1; }\n")
     assert server._spans_for_file("app.js") == []
     assert server._structurally_equal("app.js", b"a", b"a // c") is None
@@ -3493,10 +3493,12 @@ def test_impact_relation_presets_parse():
     assert server._impact_relations("") is None
     assert server._impact_relations("all") is None
     assert server._impact_relations("calls,all") is None  # 'all' wins outright
-    assert server._impact_relations("calls") == frozenset({"calls", "indirect_call"})
+    # dispatches_to: graphify >= 0.9 links an interface method to its implementations
+    assert server._impact_relations("calls") == frozenset(
+        {"calls", "indirect_call", "dispatches_to"})
     assert "inherits" in (server._impact_relations("types") or set())
     assert server._impact_relations("calls,defines") == frozenset(
-        {"calls", "indirect_call", "defines"}
+        {"calls", "indirect_call", "dispatches_to", "defines"}
     )
 
 
@@ -6256,3 +6258,605 @@ def test_locate_lists_each_cousin_once(tmp_path, monkeypatch):
     # hidden links (linked: false) come first, then the connected cousins
     assert [c["linked"] for c in data["semantic_cousins"]] == [False, False, True]
     assert data["hidden_link_count"] == 2
+
+
+# --- polyglot audit regressions (benchmarks/polyglot.py, docs/benchmark-polyglot.md) ---
+# Each case is a real repository's failure cut down to a few lines.
+
+def _span_names(tmp_path, monkeypatch, name, source):
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    server._SPAN_CACHE.clear()
+    server._TS_PARSERS.clear()
+    (tmp_path / name).write_text(source, encoding="utf-8")
+    return {q for _rs, _e, _dl, q in server._spans_for_file(name)}
+
+
+def test_is_ts_symbol_rejects_a_type_that_is_only_named():
+    # `simple_parameter` contains "impl"; the rest carry a `name` field and a hint
+    # word, and name a use of a type rather than its definition
+    for node_type in ("simple_parameter", "simple_identifier", "nested_type_identifier",
+                      "scoped_type_identifier", "type_annotation", "class_parameter",
+                      "struct_expression", "tuple_type_item", "type_parameter_declaration",
+                      "macro_type_specifier"):
+        assert not server._is_ts_symbol(node_type), node_type
+    for node_type in ("impl_item", "record_declaration", "protocol_declaration",
+                      "function_expression", "struct_specifier", "enum_entry"):
+        assert server._is_ts_symbol(node_type), node_type
+
+
+def test_spans_skip_types_named_in_a_signature(tmp_path, monkeypatch):
+    _skip_without_treesitter()
+    # fastapi-template: React.ComponentProps became a one-line span on the def line
+    assert _span_names(tmp_path, monkeypatch, "form.tsx", (
+        'function FormMessage({ className }: React.ComponentProps<"p">) {\n'
+        "  return null\n}\n")) == {"FormMessage"}
+    # guzzle: every `$parameter` was a span (PHP simple_parameter contains "impl")
+    assert _span_names(tmp_path, monkeypatch, "Stack.php", (
+        "<?php\nclass Stack {\n  public function push(callable $middleware, string $name) {\n"
+        "    return 1;\n  }\n}\n")) == {"Stack", "Stack.push"}
+    # requests-scala: a constructor parameter shadowed its class
+    assert _span_names(tmp_path, monkeypatch, "Model.scala", (
+        "class ResponseBlob(val bytes: Array[Byte]) {\n  def size = bytes.length\n}\n"
+    )) == {"ResponseBlob", "ResponseBlob.size"}
+    # ureq: `io::Result` and the struct literal `Pool { .. }` were spans
+    assert _span_names(tmp_path, monkeypatch, "lib.rs", (
+        "use std::io;\nstruct Pool { size: i32 }\n"
+        "fn make() -> io::Result<Pool> {\n    Ok(Pool { size: 1 })\n}\n")) == {"Pool", "make"}
+    # hiredis: `struct config config` in a signature is a use, not a definition
+    assert _span_names(tmp_path, monkeypatch, "test.c", (
+        "struct config { int port; };\n"
+        "static int do_connect(struct config config) {\n  return config.port;\n}\n"
+    )) == {"config", "do_connect"}
+
+
+def test_spans_swift_types_inits_and_protocols(tmp_path, monkeypatch):
+    _skip_without_treesitter()
+    quals = _span_names(tmp_path, monkeypatch, "Retrier.swift", (
+        "protocol DataDecoder {\n  func decode(_ data: Data) -> Value\n}\n"
+        "class OfflineRetrier {\n  let monitor: Monitor = Monitor()\n"
+        "  init(monitor: Monitor) {\n    self.monitor = monitor\n  }\n"
+        "  func retry(request: Request) -> Outcome {\n    return Outcome()\n  }\n}\n"))
+    assert {"DataDecoder", "OfflineRetrier", "OfflineRetrier.init",
+            "OfflineRetrier.retry"} <= quals
+    # the types written in annotations are not symbols of this file
+    assert not {q.rsplit(".", 1)[-1] for q in quals} & {"Monitor", "Request", "Outcome", "Data"}
+
+
+def test_spans_kotlin_names_come_from_an_identifier_child(tmp_path, monkeypatch):
+    # kotlinpoet: 0 of 2009 definitions had a span — the grammar has no `name` field
+    _skip_without_treesitter()
+    quals = _span_names(tmp_path, monkeypatch, "Greeter.kt", (
+        "package demo\n\nclass Greeter(val name: String) {\n"
+        "  @JvmStatic\n  fun greet(): String {\n    return name\n  }\n}\n\n"
+        "fun String.shout(): String {\n  return uppercase()\n}\n\nobject Registry {\n}\n"))
+    assert {"Greeter", "Greeter.greet", "shout", "Registry"} <= quals
+    assert "demo" not in quals  # the package line names no definition
+
+
+def test_spans_csharp_record(tmp_path, monkeypatch):
+    _skip_without_treesitter()
+    quals = _span_names(tmp_path, monkeypatch, "Parameter.cs", (
+        "public record Parameter(string Name) {\n"
+        "  public int Size() {\n    return 1;\n  }\n}\n"))
+    assert {"Parameter", "Parameter.Size"} <= quals
+
+
+def test_spans_c_family_headers_and_declarations(tmp_path, monkeypatch):
+    _skip_without_treesitter()
+    # cpr: a `.h` with classes is C++ — the C grammar read it as errors — and a
+    # method declared in its class is a symbol even without a body
+    cpp = _span_names(tmp_path, monkeypatch, "session.h", (
+        "namespace cpr {\nclass Session {\n public:\n"
+        "  void SetUrl(const Url& url);\n"
+        "  const std::string& GetUrl() const {\n    return url_;\n  }\n"
+        " private:\n  std::string url_;\n};\n}\n"))
+    assert {"cpr", "cpr.Session", "cpr.Session.SetUrl", "cpr.Session.GetUrl"} <= cpp
+    # hiredis: prototypes and typedefs of a C header
+    c = _span_names(tmp_path, monkeypatch, "hiredis.h", (
+        "typedef struct {\n  int type;\n} redisOptions;\n"
+        "typedef int redisFD;\n"
+        "redisContext *redisConnect(const char *ip, int port);\n"))
+    assert {"redisOptions", "redisFD", "redisConnect"} <= c
+    # a function behind a reference return type, and an operator
+    src = _span_names(tmp_path, monkeypatch, "cookies.cpp", (
+        "const std::string& Cookie::GetDomain() const {\n  return domain_;\n}\n"
+        "Cookie& Cookie::operator=(const Cookie& other) {\n  return *this;\n}\n"))
+    assert {"Cookie.GetDomain", "Cookie.operator="} <= src
+
+
+def test_spans_js_function_assigned_to_a_member(tmp_path, monkeypatch):
+    # express: `res.send = function () {…}` is how the whole library is written
+    _skip_without_treesitter()
+    quals = _span_names(tmp_path, monkeypatch, "response.js", (
+        "exports.normalize = function (type) {\n  return type;\n};\n"
+        "res.accepts = function () {\n  return true;\n};\n"
+        "var x = 1;\nx = 2;\n"))
+    assert quals == {"normalize", "accepts"}
+
+
+def test_bare_name_drops_a_double_colon_scope():
+    assert server._bare_name("Faraday::Utils::Headers") == "Headers"
+    assert server._bare_name("Session::SetOption()") == "SetOption"
+    assert server._bare_name(".dump()") == "dump"
+    assert server._bare_name("pkg.mod.helper()") == "helper"
+    assert server._bare_name("Callback<a.B>") == "Callback<a.B>"   # type arguments kept
+    assert server._bare_name("Stream::operator<<()") == "operator<<"
+    assert server._bare_name("<anonymous>") == "<anonymous>"
+
+
+def test_a_scoped_label_is_found_by_its_last_name(tmp_path, monkeypatch):
+    _write_graph(tmp_path, {
+        "nodes": [{"id": "headers", "label": "Faraday::Utils::Headers",
+                   "source_file": "lib/headers.rb", "source_location": "L9"},
+                  {"id": "other", "label": "Faraday::Request",
+                   "source_file": "lib/request.rb", "source_location": "L3"}],
+        "edges": [],
+    })
+    server._GRAPH_CACHE.clear()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    got = json.loads(server.graphlore_node_details("Headers", as_json=True))
+    assert got["id"] == "headers" and "matched" not in got  # an exact name, not a substring
+
+
+def test_fetch_takes_the_span_that_carries_the_nodes_name(tmp_path, monkeypatch):
+    _skip_without_treesitter()
+    (tmp_path / "Color.java").write_text(
+        "enum Color { RED, GREEN }\n", encoding="utf-8")
+    _write_graph(tmp_path, {
+        "nodes": [{"id": "color", "label": "Color", "source_file": "Color.java",
+                   "source_location": "L1"},
+                  {"id": "red", "label": "RED", "source_file": "Color.java",
+                   "source_location": "L1"}],
+        "edges": [{"source": "color", "target": "red", "relation": "case_of"}],
+    })
+    server._GRAPH_CACHE.clear()
+    server._SPAN_CACHE.clear()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    by_node = {
+        key: json.loads(server.graphlore_fetch([key], as_json=True))["fetched"][0]["qualname"]
+        for key in ("color", "red")
+    }
+    # a qualname equal to the label is not repeated: None means Color's own span
+    assert by_node == {"color": None, "red": "Color.RED"}
+
+
+def test_skeleton_header_runs_on_to_the_line_with_the_name(tmp_path, monkeypatch):
+    _skip_without_treesitter()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    server._SPAN_CACHE.clear()
+    # spring-petclinic: the declaration starts at its first annotation
+    (tmp_path / "Owner.java").write_text(
+        "class Owner {\n  @Override\n  @SuppressWarnings(\"unchecked\")\n"
+        "  public String toString() {\n    return \"\";\n  }\n}\n", encoding="utf-8")
+    java = dict(server._skeleton_lines("Owner.java"))
+    assert java["Owner.toString"][-1].strip() == "public String toString() {"
+    assert java["Owner.toString"][0].strip() == "@Override"
+    # hiredis: GNU style puts the return type on a line of its own
+    (tmp_path / "async.c").write_text(
+        "static int\nredisAsyncSetConnectCallback(redisAsyncContext *ac,\n"
+        "                             redisConnectCallback *fn)\n{\n  return 0;\n}\n",
+        encoding="utf-8")
+    c = dict(server._skeleton_lines("async.c"))["redisAsyncSetConnectCallback"]
+    assert c[0] == "static int" and "redisConnectCallback *fn)" in c[-1]
+
+
+def test_test_paths_of_gradle_dotnet_and_ruby():
+    is_test = server._is_test_path
+    assert is_test("kotlinpoet/src/jvmTest/kotlin/com/squareup/TypeSpecTest.kt")
+    assert is_test("lib/src/androidTest/java/BasicCall.java")           # Gradle source set
+    assert is_test("test/RestSharp.Tests.Serializers.Xml/Sample.cs")    # .NET project
+    assert is_test("src/RestSharp.Tests/Client.cs")
+    assert is_test("src/owner/OwnerControllerTests.java")
+    assert is_test("examples/client_spec.rb")
+    assert is_test("test/structures_tests.cpp")
+    # production names that only look close
+    assert not is_test("kotlinpoet/src/jvmMain/kotlin/com/squareup/TypeSpec.kt")
+    assert not is_test("src/main/java/app/Latest.java")
+    assert not is_test("src/main/java/app/Contest.java")
+    assert not is_test("src/attestation/verify.go")
+
+
+def test_test_definitions_of_go_benchmarks_and_xunit_classes():
+    is_def = server._is_test_definition
+    assert is_def("BenchmarkWalkXFF", "middleware/client_ip_bench_test.go")
+    assert is_def("ExampleRouter", "mux_test.go") and is_def("FuzzParse", "parse_test.go")
+    assert is_def("MySqlIntegrationTests", "src/test/java/MySqlIntegrationTests.java")
+    assert is_def("AuthenticationInterceptorTestCase", "Tests/AuthenticationTests.swift")
+    assert is_def("TEST", "test/session_tests.cpp")                    # googletest macro
+    assert is_def("setUpBeforeClass", "tests/Handler/CurlFactoryTest.php")
+    assert not is_def("BenchmarkWalkXFF", "middleware/client_ip.go")  # only in a test file
+    assert not is_def("newServer", "mux_test.go")                     # a helper can be dead
+
+
+def test_extension_tables_agree_on_the_languages_they_name():
+    from graphlore import graph, imports, review
+
+    for ext in (".swift", ".kts", ".hxx", ".mts", ".cts"):
+        assert ext in graph._LANG_FAMILY, ext
+    for ext in (".mts", ".cts"):
+        assert ext in server._SOURCE_EXTS and ext in review._CODE_EXTS, ext
+    assert server._SOURCE_EXTS == review._CODE_EXTS
+    assert set(server._SOURCE_EXTS) <= set(graph._LANG_FAMILY)
+    assert graph._lang_family("a/b.swift") == "swift" != graph._lang_family("a/b.kt")
+    # a `#include` cannot be deferred: C, C++ and Objective-C are module-level
+    for ext in (".c", ".h", ".cpp", ".hpp", ".m"):
+        assert ext in imports._COMPILED_EXTS, ext
+    edge = {"relation": "imports", "source_location": "L1"}
+    assert server.ImportChecker().kind("src/a.c", "src/a.h", edge) == "module-level"
+
+
+def test_js_import_through_a_barrel_is_not_rejected(tmp_path, monkeypatch):
+    # got: 113 of 797 import edges were dropped as "contradicted by the source".
+    # graphify links `import {X} from './dto'` to the file that defines X.
+    _skip_without_treesitter()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    for rel, text in {
+        "src/app.ts": "import { CreateDto } from './dto';\nimport got from '../source/index.js';\n",
+        "src/dto/index.ts": "import { helper } from './helper';\nexport * from './create.dto';\n",
+        "src/dto/create.dto.ts": "export class CreateDto {}\n",
+        "src/dto/helper.ts": "export const helper = 1;\n",
+        "src/other/thing.ts": "export const thing = 1;\n",
+        "source/index.ts": "export * from './core/errors.js';\n",
+        "source/core/errors.ts": "export class HTTPError {}\n",
+        "examples/auth/index.js": "var express = require('../..');\n",
+        "index.js": "module.exports = require('./lib/express');\n",
+        "lib/express.js": "exports.x = 1;\n",
+    }.items():
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_text(text, encoding="utf-8")
+    checker = server.ImportChecker()
+    edge = {"relation": "imports", "source_location": "L1"}
+    assert checker.kind("src/app.ts", "src/dto/create.dto.ts", edge) == "module-level"
+    assert checker.kind("src/app.ts", "source/core/errors.ts", edge) == "module-level"
+    assert checker.kind("examples/auth/index.js", "index.js", edge) == "module-level"
+    assert checker.kind("examples/auth/index.js", "lib/express.js", edge) == "module-level"
+    assert checker.rejected == []
+    # a file the barrel does not re-export is still a false edge — and one it
+    # merely imports is not what the importer asked for
+    assert checker.kind("src/app.ts", "src/other/thing.ts", edge) is None
+    assert checker.kind("src/app.ts", "src/dto/helper.ts", edge) is None
+    assert [r["to_file"] for r in checker.rejected] == [
+        "src/other/thing.ts", "src/dto/helper.ts"]
+
+
+def test_unreferenced_reads_annotations_that_start_the_declaration(tmp_path, monkeypatch):
+    # spring-petclinic: Java / C# / Kotlin annotations are part of the declaration
+    # node, so nothing sat "above" the definition to be read as a decorator
+    _skip_without_treesitter()
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "Hooks.java").write_text(
+        "class Hooks {\n  @EventListener\n  public void onReady() {\n  }\n"
+        "  public void neverUsed() {\n  }\n}\n", encoding="utf-8")
+    (tmp_path / "src" / "Jobs.cs").write_text(
+        "class Jobs {\n  [Scheduled]\n  public void Nightly() {\n  }\n}\n", encoding="utf-8")
+    _write_graph(tmp_path, {
+        "nodes": [
+            {"id": "hooks", "label": "Hooks", "source_file": "src/Hooks.java",
+             "source_location": "L1", "file_type": "code"},
+            {"id": "ready", "label": ".onReady()", "source_file": "src/Hooks.java",
+             "source_location": "L2", "file_type": "code"},
+            {"id": "never", "label": ".neverUsed()", "source_file": "src/Hooks.java",
+             "source_location": "L5", "file_type": "code"},
+            {"id": "jobs", "label": "Jobs", "source_file": "src/Jobs.cs",
+             "source_location": "L1", "file_type": "code"},
+            {"id": "nightly", "label": ".Nightly()", "source_file": "src/Jobs.cs",
+             "source_location": "L2", "file_type": "code"},
+        ],
+        "edges": [
+            {"source": "hooks", "target": "ready", "relation": "method"},
+            {"source": "hooks", "target": "never", "relation": "method"},
+            {"source": "jobs", "target": "nightly", "relation": "method"},
+        ],
+    })
+    server._GRAPH_CACHE.clear()
+    server._SPAN_CACHE.clear()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    data = json.loads(server.graphlore_unreferenced(as_json=True))
+    assert data["registered_by_decorator"] == {"EventListener": 1, "Scheduled": 1}
+    assert ".neverUsed()" in [r["node"] for r in data["unreferenced"]]
+    assert not {".onReady()", ".Nightly()"} & {r["node"] for r in data["unreferenced"]}
+
+
+def test_graphify_09_relations_are_containment_or_code():
+    from graphlore import graph
+
+    # an enum's case and a class's field hang off their parent
+    assert {"defines", "case_of"} <= graph._CONTAINMENT_RELATIONS
+    assert {"defines", "case_of"} <= server._CYCLE_IGNORED_RELATIONS
+    assert {"dispatches_to", "references_constant", "uses_static_prop"} \
+        <= server._IMPACT_CODE_RELATIONS
+
+
+def test_enum_case_edges_form_no_cycle_and_no_reference(tmp_path, monkeypatch):
+    _write_graph(tmp_path, {
+        "nodes": [
+            {"id": "enum", "label": "Mode", "source_file": "a.swift", "source_location": "L1"},
+            {"id": "case", "label": "fast", "source_file": "a.swift", "source_location": "L2"},
+        ],
+        "edges": [
+            {"source": "enum", "target": "case", "relation": "case_of"},
+            {"source": "case", "target": "enum", "relation": "references"},
+        ],
+    })
+    server._GRAPH_CACHE.clear()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    assert json.loads(server.graphlore_cycles(as_json=True))["cycle_count"] == 0
+
+
+def test_every_truncated_reply_carries_a_hint(project):
+    cuts = [
+        (server.graphlore_god_nodes, {"top_n": 1}),
+        (server.graphlore_search, {"pattern": "e", "limit": 1}),
+        (server.graphlore_surprises, {"limit": 0}),
+        (server.graphlore_same_names, {"limit": 0}),
+        (server.graphlore_unreferenced, {"limit": 0}),
+        (server.graphlore_package_apis, {"limit": 0}),
+        (server.graphlore_routes, {"limit": 0}),
+        (server.graphlore_cycles, {"max_cycles": 0}),
+    ]
+    truncated = []
+    for tool, kwargs in cuts:
+        data = json.loads(tool(as_json=True, **kwargs))
+        if data.get("truncated"):
+            truncated.append(tool.__name__)
+            assert isinstance(data.get("hint"), str) and data["hint"], tool.__name__
+        else:
+            assert "hint" not in data, tool.__name__
+    assert {"graphlore_god_nodes", "graphlore_search"} <= set(truncated)
+
+
+def test_communities_show_the_names_they_were_given(tmp_path, monkeypatch):
+    _write_graph(tmp_path, {
+        "nodes": [
+            {"id": "a", "label": ".send()", "community": 0, "community_name": "Transport",
+             "source_file": "a.py", "source_location": "L1"},
+            {"id": "b", "label": ".send()", "community": 0, "community_name": "Transport",
+             "source_file": "b.py", "source_location": "L1"},
+            {"id": "c", "label": "Auth", "community": 1,
+             "source_file": "c.py", "source_location": "L1"},
+        ],
+        "edges": [],
+    })
+    server._GRAPH_CACHE.clear()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    comms = {c["id"]: c for c in json.loads(
+        server.graphlore_communities(as_json=True))["communities"]}
+    assert comms[0]["name"] == "Transport" and "name" not in comms[1]
+    # two members with one label are told apart
+    assert len(set(comms[0]["members"])) == 2
+    # a name set through graphlore wins over the one graphify built
+    server.graphlore_set_labels({"1": "Login"}, regenerate=False)
+    named = {c["id"]: c.get("name") for c in json.loads(
+        server.graphlore_communities(as_json=True))["communities"]}
+    assert named[1] == "Login"
+    assert "Community 1 — Login" in server.graphlore_communities()
+
+
+def test_communities_reply_is_bounded(tmp_path, monkeypatch):
+    # guzzle: 191 communities with every member listed was a 280 KB reply, in
+    # the second step of the onboarding flow
+    nodes = [{"id": f"n{c}_{i}", "label": f"sym{c}_{i}", "community": c,
+              "source_file": f"m{c}.py", "source_location": f"L{i + 1}"}
+             for c in range(4) for i in range(6 - c)]
+    # the last member of community 0 is its hub
+    edges = [{"source": "n0_5", "target": f"n0_{i}", "relation": "calls"} for i in range(5)]
+    _write_graph(tmp_path, {"nodes": nodes, "edges": edges})
+    server._GRAPH_CACHE.clear()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    data = json.loads(server.graphlore_communities(limit=2, members=3, as_json=True))
+    assert data["total"] == 4 and data["truncated"] and "limit" in data["hint"]
+    first, second = data["communities"]
+    assert (first["id"], first["size"], first["members_left_out"]) == (0, 6, 3)
+    assert first["members"][0] == "sym0_5"            # most connected first
+    assert (second["size"], len(second["members"])) == (5, 3)
+    # everything asked for: nothing is cut, and nothing says so
+    whole = json.loads(server.graphlore_communities(limit=10, members=10, as_json=True))
+    assert not whole["truncated"] and "hint" not in whole
+    assert all("members_left_out" not in c for c in whole["communities"])
+    assert "4 communities, the 2 largest" in server.graphlore_communities(limit=2)
+
+
+def test_node_type_falls_back_to_file_type(tmp_path, monkeypatch):
+    # graphify >= 0.9 writes file_type and no type: every row said `type: ""`
+    _write_graph(tmp_path, {
+        "nodes": [{"id": "a", "label": "Alpha", "file_type": "code",
+                   "source_file": "a.py", "source_location": "L1"},
+                  {"id": "b", "label": "Beta", "file_type": "document",
+                   "source_file": "b.md", "source_location": "L1"}],
+        "edges": [{"source": "a", "target": "b", "relation": "references"},
+                  {"source": "a", "target": "a", "relation": "contains"}],
+    })
+    server._GRAPH_CACHE.clear()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    gods = json.loads(server.graphlore_god_nodes(as_json=True, scope="all"))["god_nodes"]
+    assert {g["node"]: g["type"] for g in gods} == {"Alpha": "code", "Beta": "document"}
+    assert json.loads(server.graphlore_search("alp", as_json=True))["matches"][0]["type"] == "code"
+    assert json.loads(server.graphlore_node_details("a", as_json=True))["type"] == "code"
+    # a self-loop sits in the undirected adjacency twice: one row, not two
+    rows = json.loads(server.graphlore_neighbors("a", as_json=True))["neighbors"]
+    assert sorted(r["relation"] for r in rows) == ["contains", "references"]
+
+
+def test_locate_clamps_a_top_k_the_backend_would_refuse(tmp_path, monkeypatch):
+    _write_graph(tmp_path, {
+        "nodes": [{"id": "A", "label": "A", "source_file": "a.py", "source_location": "L1"}],
+        "edges": [],
+    })
+    server._GRAPH_CACHE.clear()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+
+    class _StrictIndex(_FakeIndex):  # semble raises ValueError for k < 1
+        def search(self, query, top_k=3):
+            if top_k < 1:
+                raise ValueError("k should be >= 1")
+            return super().search(query, top_k)
+
+        def find_related(self, hit, top_k=8):
+            if top_k < 1:
+                raise ValueError("k should be >= 1")
+            return super().find_related(hit, top_k)
+
+    fake = _StrictIndex(search_hits=[_FakeHit("a.py", 1)], related_hits=[])
+    monkeypatch.setattr(server, "_semble_index", lambda: fake)
+    data = json.loads(server.graphlore_locate("anything", top_k=0, related_k=0, as_json=True))
+    assert data["seed"]["node"] == "A"
+
+
+def test_semble_that_fails_to_load_is_not_reported_as_missing(project, monkeypatch):
+    # installed, but the embedding model could not be downloaded: the reply used
+    # to say "pip install graphlore[semble]"
+    import importlib.machinery
+    import sys
+    import types
+
+    class _Broken:
+        @staticmethod
+        def from_path(path):
+            raise OSError("403 Forbidden for huggingface.co")
+
+    fake = types.ModuleType("semble")
+    fake.SembleIndex = _Broken
+    fake.__spec__ = importlib.machinery.ModuleSpec("semble", None)
+    monkeypatch.setitem(sys.modules, "semble", fake)
+    monkeypatch.delenv("GRAPHLORE_OFFLINE", raising=False)
+    monkeypatch.delenv("GRAPHLORE_SEMANTIC_BACKEND", raising=False)
+    error = json.loads(server.graphlore_locate("anything", as_json=True))["error"]
+    assert "semble is installed but could not build its index" in error
+    assert "403 Forbidden" in error and "needs the optional" not in error
+
+
+def test_extractors_say_which_source_files_they_did_not_read(tmp_path, monkeypatch):
+    # ureq / kotlinpoet: "no routes" and "no packages" read the same as for a
+    # project that has none
+    (tmp_path / "app.py").write_text("import os\n", encoding="utf-8")
+    (tmp_path / "main.rs").write_text("use std::io;\n", encoding="utf-8")
+    _write_graph(tmp_path, {
+        "nodes": [
+            {"id": "app", "label": "app.py", "source_file": "app.py", "source_location": "L1"},
+            {"id": "main", "label": "main.rs", "source_file": "main.rs", "source_location": "L1"},
+            {"id": "lib", "label": "lib.rs", "source_file": "lib.rs", "source_location": "L1"},
+            {"id": "doc", "label": "README.md", "source_file": "README.md"},
+        ],
+        "edges": [],
+    })
+    server._GRAPH_CACHE.clear()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    for tool in (server.graphlore_routes, server.graphlore_package_apis):
+        assert json.loads(tool(as_json=True))["not_read"] == {".rs": 2}, tool.__name__
+        assert "Not read — no extractor for these source files: 2 .rs." in tool()
+
+
+def test_build_names_its_own_parameter_when_graphify_names_its_flag(project, monkeypatch):
+    # graphify >= 0.9 refuses a default build of a repository with docs when no
+    # LLM key is set, and points at `--code-only`
+    monkeypatch.setattr(server, "_run_cli", lambda args, cwd=None: (
+        "ERROR (exit 1):\nerror: no LLM API key found (8 doc/paper/image file(s) need "
+        "semantic extraction). Or pass --code-only to index just the code."))
+    out = server.graphlore_build(".")
+    assert out.startswith("ERROR") and "graphlore_build(code_only=True)" in out
+    # already asked for: nothing to add
+    assert "graphlore_build(code_only=True)" not in server.graphlore_build(".", code_only=True)
+
+
+def test_a_double_colon_key_resolves_like_a_dotted_one(tmp_path, monkeypatch):
+    # cpr: `Session::SetUrl` fell through to the substring match
+    _write_graph(tmp_path, {
+        "nodes": [
+            {"id": "a", "label": "Session::SetUrl()", "source_file": "session.cpp",
+             "source_location": "L3", "file_type": "code"},
+            {"id": "b", "label": "SetUrlHelper()", "source_file": "util.cpp",
+             "source_location": "L9", "file_type": "code"},
+        ],
+        "edges": [],
+    })
+    server._GRAPH_CACHE.clear()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    for key in ("Session::SetUrl", "Session::SetUrl()", "SetUrl"):
+        got = json.loads(server.graphlore_node_details(key, as_json=True))
+        assert got["id"] == "a" and "matched" not in got, key
+
+
+def test_compiler_attributes_do_not_count_as_registration():
+    from graphlore import review
+
+    assert {"must_use", "derive", "cfg", "allow", "obsolete", "jvmstatic"} \
+        <= review._NEUTRAL_DECORATORS
+    assert "test" not in review._NEUTRAL_DECORATORS       # `#[test]` does register
+    assert review._DECORATOR_LINE.match("    #[tokio::test]").group(1) == "tokio::test"
+    assert review._DECORATOR_LINE.match("  [Fact]").group(1) == "Fact"
+    assert review._DECORATOR_LINE.match("@app.route('/x')").group(1) == "app.route"
+
+
+def test_unreferenced_skips_what_no_caller_names(tmp_path, monkeypatch):
+    # guzzle: 775 of 907 "dead code" rows were closures; cpr listed operators and
+    # constructors; faraday's `success?` / `body=` were never found by the text scan
+    (tmp_path / "lib").mkdir()
+    (tmp_path / "lib" / "env.rb").write_text(
+        "class Env\n  def success?\n    true\n  end\n  def body=(value)\n  end\n"
+        "  def unused_helper\n  end\nend\n", encoding="utf-8")
+    (tmp_path / "lib" / "use.rb").write_text(
+        "puts env.success?\nenv.body = 1\n", encoding="utf-8")
+
+    def node(nid, label, file="lib/x.php", line=1):
+        return {"id": nid, "label": label, "source_file": file,
+                "source_location": f"L{line}", "file_type": "code", "_callable": True}
+
+    _write_graph(tmp_path, {
+        "nodes": [
+            node("closure", "{closure#3}()"), node("op", "Cookies::operator[]()", "c.cpp"),
+            node("magic", ".__invoke()"),          # PHP magic method (lib/x.php)
+            node("ctor", "CurlContainer<T>::CurlContainer()", "c.cpp"),
+            node("dtor", "~Session()", "c.cpp"), node("setter", "[]=()", "lib/env.rb"),
+            {"id": "cls", "label": "RestClient", "source_file": "a.cs",
+             "source_location": "L1", "file_type": "code"},
+            node("jctor", ".RestClient()", "a.cs", 2),
+            node("pred", ".success?()", "lib/env.rb", 2),
+            node("assign", ".body=()", "lib/env.rb", 5),
+            node("dead", ".unused_helper()", "lib/env.rb", 7),
+            {"id": "user", "label": "user()", "source_file": "b.cs", "source_location": "L1"},
+        ],
+        "edges": [{"source": "cls", "target": "jctor", "relation": "method"},
+                  {"source": "user", "target": "cls", "relation": "references"}],
+    })
+    server._GRAPH_CACHE.clear()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    data = json.loads(server.graphlore_unreferenced(as_json=True))
+    # `user()` is the fixture's own caller: nothing calls it either
+    assert [r["node"] for r in data["unreferenced"]] == ["user()", ".unused_helper()"]
+    # the two Ruby methods were examined, and found in the text under the name a
+    # caller types
+    assert data["mentioned_elsewhere"] == 2
+
+
+def test_a_node_without_its_own_span_is_qualified_by_where_it_lives(tmp_path, monkeypatch):
+    # guzzle: three closures in one method were all rendered `sendDigest()`
+    (tmp_path / "auth.py").write_text(
+        "def send_digest():\n    a = lambda: 1\n    b = lambda: 2\n    return a, b\n",
+        encoding="utf-8")
+    _write_graph(tmp_path, {
+        "nodes": [
+            {"id": "fn", "label": "send_digest()", "source_file": "auth.py",
+             "source_location": "L1"},
+            {"id": "c1", "label": "{closure}()", "source_file": "auth.py",
+             "source_location": "L2"},
+            {"id": "c2", "label": "{closure}()", "source_file": "auth.py",
+             "source_location": "L3"},
+        ],
+        "edges": [{"source": "fn", "target": "c1", "relation": "calls"},
+                  {"source": "fn", "target": "c2", "relation": "calls"}],
+    })
+    server._GRAPH_CACHE.clear()
+    server._SPAN_CACHE.clear()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    rows = json.loads(server.graphlore_neighbors("fn", as_json=True))["neighbors"]
+    assert {r["node"] for r in rows} == {"send_digest.{closure}()"}
+
+
+def test_a_negative_limit_lists_nothing_rather_than_all_but_one(project):
+    # `rows[:-1]` is every row but the last: `limit=-1` returned 471 KB on guzzle
+    assert json.loads(server.graphlore_search("e", limit=-1, as_json=True))["matches"] == []
+    assert json.loads(server.graphlore_surprises(limit=-1, as_json=True))["surprises"] == []
+    assert json.loads(server.graphlore_routes(limit=-1, as_json=True))["routes"] == []
+    assert json.loads(server.graphlore_package_apis(limit=-1, as_json=True))["packages"] == []
+    examples = json.loads(server.graphlore_validate(limit=-1, as_json=True))["examples"]
+    assert all(rows == [] for rows in examples.values())

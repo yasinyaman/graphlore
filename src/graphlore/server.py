@@ -127,8 +127,10 @@ from .apis import (  # noqa: F401  (re-exported for the tools + tests)
 from .graph import (  # noqa: F401  (re-exported for the tools + tests)
     _CALL_RELATIONS,
     _CHARS_PER_TOKEN,
+    _CONTAINMENT_RELATIONS,
     _GRAPH_CACHE,
     _IMPORT_RELATIONS,
+    _NON_DEPENDENCY_RELATIONS,
     _PAYLOAD_ENVELOPE_CHARS,
     _adjacency,
     _approx_tokens,
@@ -163,6 +165,7 @@ from .graph import (  # noqa: F401  (re-exported for the tools + tests)
     _node_id,
     _node_label,
     _node_line,
+    _node_type,
     _nodes_edges,
     _out_dir,
     _rel,
@@ -219,6 +222,7 @@ from .spans import (  # noqa: F401
     _node_for_location,
     _norm_relpath,
     _resolve_in_project,
+    _span_of_definition,
     _span_qualname,
     _spans_for_file,
     _spans_python,
@@ -470,6 +474,13 @@ def _fmt(payload: Any, as_json: bool, text: str, *, is_error: bool = False) -> s
     out = json.dumps(payload, ensure_ascii=False, indent=2) if as_json else text
     _record(payload, out, is_error)
     return out
+
+
+def _cut_hint(payload: dict[str, Any], hint: str) -> None:
+    """Say how to get the rows a limit or a budget dropped: ``hint`` goes into a
+    payload that reports ``truncated``, next to the count it already carries."""
+    if payload.get("truncated") and "hint" not in payload:
+        payload["hint"] = hint
 
 
 def _err(message: str, as_json: bool, **extra: Any) -> str:
@@ -798,17 +809,26 @@ class SemanticIndex(Protocol):
     def find_related(self, hit: Any, top_k: int = 8) -> list: ...
 
 
+# Why the last SembleIndex.from_path failed ("" when it loaded): quoted in the
+# error so a failed model download is not reported as a missing install.
+_SEMBLE_LOAD_ERROR = ""
+
+
 def _semble_index() -> Any:
     """Return a semble index for config.PROJECT_DIR, or None if the optional dep is absent."""
     _export_offline_env()  # before the import: huggingface_hub reads it at import time
+    global _SEMBLE_LOAD_ERROR
     try:
         from semble import SembleIndex
     except ImportError:
         return None
     try:
-        return SembleIndex.from_path(str(config.PROJECT_DIR))
-    except Exception:  # noqa: BLE001 - corrupt/incompatible on-disk index degrades to "no index"
+        index = SembleIndex.from_path(str(config.PROJECT_DIR))
+    except Exception as exc:  # noqa: BLE001 - corrupt/incompatible on-disk index degrades to "no index"
+        _SEMBLE_LOAD_ERROR = f"{type(exc).__name__}: {str(exc).strip()[:200]}"
         return None
+    _SEMBLE_LOAD_ERROR = ""
+    return index
 
 
 def _load_custom_semantic_index(spec: str) -> Any:
@@ -882,6 +902,12 @@ def _no_semantic_index_error(tool: str) -> str:
             f"ERROR: {tool}: semble is installed but could not load its index with "
             "GRAPHLORE_OFFLINE set — most likely its embedding model is not in the "
             "local Hugging Face cache. " + _MODEL_DOWNLOAD_NOTE
+        )
+    if _SEMBLE_LOAD_ERROR and importlib.util.find_spec("semble") is not None:
+        return (
+            f"ERROR: {tool}: semble is installed but could not build its index "
+            f"({_SEMBLE_LOAD_ERROR}) — most likely its embedding model could not be "
+            "downloaded. " + _MODEL_DOWNLOAD_NOTE
         )
     return (
         f"ERROR: {tool} needs the optional 'semble' extra. "
@@ -969,7 +995,14 @@ class _DisplayLabels:
         qual = None
         try:
             if file and line not in (None, ""):
-                qual = _span_qualname(str(file), int(line))
+                bare = _bare_name(base)
+                own = _span_of_definition(str(file), int(line), bare)
+                qual = own[3] if own else None
+                if qual and bare and qual.rsplit(".", 1)[-1] != bare:
+                    # No span of its own (a closure, a member declared without a
+                    # body): the span around it is where it lives, not what it
+                    # is. `sendDigest.{closure#3}`, never a second `sendDigest`.
+                    qual = f"{qual}.{bare}"
         except Exception:
             qual = None
         got = None
@@ -1097,7 +1130,7 @@ def _files_with_nodes(nodes: list[dict], files: list[str]) -> list[str]:
 # (.DS_Store, .env, lockfiles, images, editor swap files) cannot alter graph
 # structure, so it must never drive staleness or a watch-mode rebuild.
 _SOURCE_EXTS = frozenset({
-    ".py", ".pyi", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs",
+    ".py", ".pyi", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".mts", ".cts",
     ".go", ".java", ".kt", ".kts", ".rs", ".c", ".h", ".cc", ".cpp", ".hpp",
     ".cxx", ".hxx", ".cs", ".rb", ".php", ".swift", ".scala", ".m", ".mm",
     ".lua", ".zig", ".ex", ".exs",
@@ -1148,6 +1181,9 @@ def _read_source_lines(
 # How many lines past the def/class line a signature may continue (black-style
 # multi-line parameter lists) before _skeleton_lines gives up extending it.
 _SIG_CONT_MAX = 40
+# How many lines below the first line of a definition its name may sit (stacked
+# annotations / attributes above the declaration).
+_SIG_NAME_MAX = 12
 
 
 def _skeleton_lines(file_path: str, prefix: str | None = None) -> list[tuple[str, list[str]]]:
@@ -1170,6 +1206,16 @@ def _skeleton_lines(file_path: str, prefix: str | None = None) -> list[tuple[str
             continue
         lines, lo, _hi = block
         header = lines[:max(1, def_line - lo + 1)]
+        # A definition can start above the line that names it: Java / C# / Swift
+        # annotations are part of the declaration node, and GNU-style C puts the
+        # return type on a line of its own. Run on to the line with the name, or
+        # the header is `@Override` and nothing else.
+        name = re.split(r"[.:]", qual)[-1]
+        if name and not any(name in ln for ln in header):
+            for i, ln in enumerate(lines[len(header):len(header) + _SIG_NAME_MAX]):
+                if name in ln:
+                    header = lines[:len(header) + i + 1]
+                    break
         # Parentheses only (not braces): a Go/Java body opener `{` on the def line
         # must not drag the whole body in, while `def f(\n ...\n) -> X:` extends.
         depth = sum(ln.count("(") - ln.count(")") for ln in header)
@@ -1256,7 +1302,9 @@ def _pick_node(nodes: list[dict], key: str) -> _Picked:
         return _Picked(exact, [], "id", 1)
     index = _name_index(nodes)
     how = "label"
-    if _SYMBOL_KEY.fullmatch(key):
+    # `Session::SetUrl` (C++, Ruby, PHP, Rust) names a symbol like `Session.SetUrl`
+    dotted = key.replace("::", ".")
+    if _SYMBOL_KEY.fullmatch(dotted):
         # every node of that name, with or without the call marker: the function
         # `tool()` and the README heading `tool` are both what "tool" could mean
         same = index.by_name(key, _bare_name(key))
@@ -1272,14 +1320,17 @@ def _pick_node(nodes: list[dict], key: str) -> _Picked:
         how = "path"
     if same:
         ranked = sorted(same, key=lambda n: not _is_code_definition(n))  # stable
-        if "." in key.strip(".") and len(ranked) > 1:
+        if "." in dotted.strip(".") and len(ranked) > 1:
             # `Client.send`: of all the `.send()` methods, the one whose qualified
-            # name says Client comes first
-            want = key.removesuffix("()")
+            # name says Client comes first (`pkg.Client.send` says it too)
+            want = dotted.removesuffix("()")
             labels = _display_labels(nodes)
-            ranked.sort(
-                key=lambda n: labels.get(_node_id(n), "").removesuffix("()") != want
-            )
+
+            def other_scope(n: dict) -> bool:
+                shown = labels.get(_node_id(n), "").removesuffix("()").replace("::", ".")
+                return not (shown == want or shown.endswith("." + want))
+
+            ranked.sort(key=other_scope)
         return _Picked(ranked[0], ranked[1:], how, len(ranked))
     hits, total = _substring_matches(nodes, key)
     if not hits:
@@ -1610,6 +1661,9 @@ def graphlore_build(
     # mtime granularity) can't serve the pre-build graph — same guard as prune.
     _GRAPH_CACHE.pop(str(gp), None)
     if result.startswith("ERROR"):
+        if "--code-only" in result and not code_only:
+            # graphify names its own flag; say what that is on this tool
+            result += "\n\ngraphlore_build(code_only=True) passes --code-only."
         return result  # a failed build is returned whole, never condensed
     if not verbose:
         result = _condense_build_log(result)
@@ -1822,7 +1876,7 @@ def graphlore_god_nodes(top_n: int = 10, as_json: bool = False, scope: str = "")
         degree[s] += 1
         degree[t] += 1
     labels = _display_labels(nodes)
-    types = {_node_id(n): n.get("type", "") for n in view.nodes}
+    types = {_node_id(n): _node_type(n) for n in view.nodes}
     items = [
         {"node": labels.get(nid, nid), "type": types.get(nid, ""), "degree": d}
         for nid, d in degree.most_common(top_n)
@@ -1835,6 +1889,7 @@ def graphlore_god_nodes(top_n: int = 10, as_json: bool = False, scope: str = "")
         "god_nodes": items, "total": len(degree), "truncated": len(degree) > len(items),
         "scope": view.payload(),
     }
+    _cut_hint(payload, "Raise top_n for more of the `total` nodes, or narrow with scope=.")
     return _fmt(payload, as_json, _with_note("\n".join(text), view))
 
 
@@ -1875,7 +1930,7 @@ def graphlore_surprises(limit: int = 20, as_json: bool = False, scope: str = "")
     flagged = [e for e in edges if _is_surprise_edge(e)]
     if flagged:
         items = []
-        for e in flagged[:limit]:
+        for e in flagged[:max(0, limit)]:
             s, t = _edge_ends(e)
             items.append(
                 {"from": labels.get(s, s), "to": labels.get(t, t), "relation": _edge_rel(e)}
@@ -1887,11 +1942,12 @@ def graphlore_surprises(limit: int = 20, as_json: bool = False, scope: str = "")
             "total": len(flagged), "truncated": len(flagged) > len(items),
             "scope": view.payload(),
         }
+        _cut_hint(payload, "Raise limit for more of the `total` edges, or narrow with scope=.")
         return _fmt(payload, as_json, _with_note("\n".join(text), view))
 
     checker = ImportChecker()
     computed, diag = _computed_surprises(nodes, edges, checker.kind, checker.reaches)
-    items = computed[:limit]
+    items = computed[:max(0, limit)]
     if not items:
         skipped = ", ".join(
             f"{n} {k.replace('_', ' ')}" for k, n in sorted(diag["skipped"].items())
@@ -1946,31 +2002,72 @@ def graphlore_surprises(limit: int = 20, as_json: bool = False, scope: str = "")
         "total": len(computed), "truncated": len(computed) > len(items),
         "scope": view.payload(),
     }
+    _cut_hint(payload, "Raise limit for more of the `total` edges, or narrow with scope=.")
     return _fmt(payload, as_json, _with_note("\n".join(text), view))
 
 
 @_tool(annotations=ToolAnnotations(title="Communities", read_only_hint=True))
-def graphlore_communities(as_json: bool = False) -> str:
-    """Summarize Leiden communities with sizes and sample members."""
+def graphlore_communities(limit: int = 30, members: int = 15, as_json: bool = False) -> str:
+    """Summarize Leiden communities: size, name and their most connected members.
+
+    A community carries a ``name`` when it has one: set with
+    graphlore_set_labels / graphlore_label_communities
+    (``graphify-out/.graphify_labels.json``), else the one graphify wrote on the
+    nodes.
+
+    Args:
+        limit: Communities listed, largest first. ``total`` is how many there are.
+        members: Member labels shown per community, most connected first;
+            ``size`` is the full count and ``members_left_out`` the rest.
+    """
     graph = _load_graph()
     if isinstance(graph, str):
         return _err(graph, as_json)
-    nodes, _ = _nodes_edges(graph)
+    nodes, edges = _nodes_edges(graph)
     comms: dict[Any, list[str]] = {}
+    built_names: dict[Any, str] = {}
     for n in nodes:
         c = n.get("community", n.get("cluster"))
         if c is not None:
-            comms.setdefault(c, []).append(_node_label(n))
+            comms.setdefault(c, []).append(_node_id(n))
+            if n.get("community_name"):
+                built_names.setdefault(c, str(n["community_name"]))
     if not comms:
         msg = "Nodes carry no community info. Try graphlore_build(cluster_only=True)."
         return _fmt({"communities": [], "note": msg}, as_json, msg)
+    saved = _read_labels()
+    labels = _display_labels(nodes)
+    adj = _adjacency(edges)
+    limit, members = max(0, limit), max(0, members)
     ordered = sorted(comms.items(), key=lambda kv: -len(kv[1]))
-    items = [{"id": c, "size": len(m), "members": m} for c, m in ordered]
-    text = [f"{len(comms)} communities:\n"]
+    items: list[dict[str, Any]] = []
+    cut = len(ordered) > limit
+    for c, ids in ordered[:limit]:
+        ranked = sorted(ids, key=lambda i: -len(adj.get(i, ())))  # stable: graph order
+        item: dict[str, Any] = {
+            "id": c, "size": len(ids),
+            "members": [labels.get(i, i) for i in ranked[:members]],
+        }
+        if len(ids) > members:
+            item["members_left_out"] = len(ids) - members
+            cut = True
+        name = saved.get(str(c)) or built_names.get(c)
+        if name and name != f"Community {c}":
+            item["name"] = name
+        items.append(item)
+    payload: dict[str, Any] = {"communities": items, "total": len(comms), "truncated": cut}
+    _cut_hint(
+        payload,
+        "Raise limit for more of the `total` communities and members for more of each "
+        "one's `size`; graphlore_skeleton(community=id) lists a community's code.",
+    )
+    text = [f"{len(comms)} communities"
+            + (f", the {len(items)} largest" if len(comms) > len(items) else "") + ":\n"]
     for it in items:
         sample = ", ".join(it["members"][:5]) + ("…" if it["size"] > 5 else "")
-        text.append(f"  Community {it['id']} ({it['size']} nodes): {sample}")
-    return _fmt({"communities": items}, as_json, "\n".join(text))
+        named = f" — {it['name']}" if it.get("name") else ""
+        text.append(f"  Community {it['id']}{named} ({it['size']} nodes): {sample}")
+    return _fmt(payload, as_json, "\n".join(text))
 
 
 @_tool(annotations=ToolAnnotations(title="Sampling/LLM status", read_only_hint=True))
@@ -2037,7 +2134,7 @@ def _communities_for_naming(limit: int) -> tuple[list[tuple[Any, list[str]]], in
             comms.setdefault(c, []).append(_node_label(n))
     if not comms:
         return "Nodes carry no community info. Try graphlore_build(cluster_only=True)."
-    return sorted(comms.items(), key=lambda kv: -len(kv[1]))[:limit], len(comms)
+    return sorted(comms.items(), key=lambda kv: -len(kv[1]))[:max(0, limit)], len(comms)
 
 
 def _naming_request(
@@ -2353,8 +2450,8 @@ def graphlore_search(pattern: str, limit: int = 25, as_json: bool = False) -> st
         degree[s] += 1
         degree[t] += 1
     items = [
-        {"node": _node_label(n), "type": n.get("type", ""), "degree": degree.get(_node_id(n), 0)}
-        for n in hits[:limit]
+        {"node": _node_label(n), "type": _node_type(n), "degree": degree.get(_node_id(n), 0)}
+        for n in hits[:max(0, limit)]
     ]
     truncated = len(hits) > len(items)
     text = [
@@ -2367,6 +2464,7 @@ def graphlore_search(pattern: str, limit: int = 25, as_json: bool = False) -> st
     payload = {
         "matches": items, "total": len(hits), "shown": len(items), "truncated": truncated,
     }
+    _cut_hint(payload, "Raise limit or narrow the pattern for the rest of the `total` matches.")
     return _fmt(payload, as_json, "\n".join(text))
 
 
@@ -2409,8 +2507,12 @@ def graphlore_neighbors(node: str, as_json: bool = False, scope: str = "") -> st
     )
     flags = _edge_flags(view.edges)
     neigh = []
+    listed: set[tuple[str, str, bool]] = set()
     for t, rel in ranked:
         out = (nid, t, rel) in es
+        if (t, rel, out) in listed:
+            continue  # a self-loop sits in the undirected adjacency twice
+        listed.add((t, rel, out))
         row = {"node": labels.get(t, t), "relation": rel, "direction": "out" if out else "in"}
         row.update(flags.get((nid, t, rel) if out else (t, nid, rel), {}))
         neigh.append(row)
@@ -2503,6 +2605,11 @@ def graphlore_subgraph(
     }
     if matched:
         payload["matched"] = matched
+    _cut_hint(
+        payload,
+        "Raise budget_tokens or lower hops; scope= narrows what is walked. "
+        "direct_neighbors_left_out counts the 1-hop neighbors not shown.",
+    )
     cut = ""
     if truncated:
         cut = ", TRUNCATED at budget"
@@ -2539,11 +2646,14 @@ _IMPACT_CODE_RELATIONS = frozenset({
     "calls", "indirect_call", "references", "imports", "imports_from",
     "dynamic_import", "re_exports", "inherits", "extends", "implements",
     "uses", "mixes_in", "embeds", "requires",
+    # graphify >= 0.9: an interface method to its implementations, a class
+    # constant, a static property
+    "dispatches_to", "references_constant", "uses_static_prop",
 })
 IMPACT_RELATION_PRESETS: dict[str, frozenset[str] | None] = {
     "all": None,  # no filter — walk every edge type
     "code": _IMPACT_CODE_RELATIONS,
-    "calls": frozenset({"calls", "indirect_call"}),
+    "calls": frozenset({"calls", "indirect_call", "dispatches_to"}),
     "imports": frozenset({"imports", "imports_from", "dynamic_import",
                           "re_exports", "requires"}),
     "types": frozenset({"inherits", "extends", "implements", "mixes_in",
@@ -2551,7 +2661,7 @@ IMPACT_RELATION_PRESETS: dict[str, frozenset[str] | None] = {
 }
 # Structural containment: never a dependency, but walked one hop out from the
 # seed so a class's own members stay reachable when containment is filtered out.
-_IMPACT_MEMBER_RELATIONS = frozenset({"method", "contains"})
+_IMPACT_MEMBER_RELATIONS = _CONTAINMENT_RELATIONS
 # Never a dependency in either direction: a docstring / rationale node pointing
 # at the code it describes. Left out of the walk unless asked for by name.
 _IMPACT_SKIPPED_RELATIONS = frozenset({"rationale_for"})
@@ -3023,6 +3133,7 @@ def graphlore_tests_for(
         "truncated": max(len(direct_rows), len(through_rows), len(weak)) > cap,
         "resolved_edges": resolved.payload(),
     }
+    _cut_hint(payload, "Raise limit: each list is cut to it, and its *_count holds the total.")
     if matched:
         payload["matched"] = matched
 
@@ -3099,7 +3210,7 @@ def graphlore_locate(
     index = _semantic_index()
     if index is None:
         return _err(_no_semantic_index_error("graphlore_locate"), as_json)
-    hits = index.search(query, top_k=top_k)
+    hits = index.search(query, top_k=max(1, top_k))
     if not hits:
         msg = f"No semantic matches for '{query}'."
         return _fmt(
@@ -3151,7 +3262,7 @@ def graphlore_locate(
 
     cousins = []
     seen_nodes = {seed_id}
-    for r in index.find_related(hits[0], top_k=related_k):
+    for r in index.find_related(hits[0], top_k=max(1, related_k)):
         fp, sl, el = _loc(r)
         cn = _node_for_location(nodes, fp, sl, el)
         if cn is None:
@@ -3258,16 +3369,18 @@ def graphlore_locate(
     answer_files += [str(c["file"]) for c in calls_into if c.get("file")]
     drift_payload, drift_text = _drift_note(drift, answer_files)
     left_out = {nb for nb, _rel_name in adj.get(seed_id, []) if nb not in visited}
+    structure: dict[str, Any] = {
+        "nodes": len(visited),
+        "edges": sub_edges,
+        "truncated": truncated,
+        "direct_neighbors_left_out": len(left_out),
+        "approx_tokens": tokens,
+    }
+    _cut_hint(structure, "Raise budget_tokens, or call graphlore_subgraph on the seed.")
     payload = {
         "query": query,
         "seed": seed_obj,
-        "structure": {
-            "nodes": len(visited),
-            "edges": sub_edges,
-            "truncated": truncated,
-            "direct_neighbors_left_out": len(left_out),
-            "approx_tokens": tokens,
-        },
+        "structure": structure,
         "semantic_hits": semantic_hits,
         "also_matched": also_matched,
         "header_hits_skipped": header_hits,
@@ -3533,7 +3646,7 @@ def graphlore_duplication_scan(
         scanned += 1
         distmap = _hop_distances(adj, sid, dist_cap)
         seed_len = span[1] - span[0] + 1 if span else 0
-        for r in index.find_related(anchor, top_k=related_k):
+        for r in index.find_related(anchor, top_k=max(1, related_k)):
             c = r.chunk
             cn = _node_for_location(
                 all_nodes, str(c.file_path), int(c.start_line), int(c.end_line)
@@ -3585,7 +3698,7 @@ def graphlore_duplication_scan(
         return (-(p["score"] if p["score"] is not None else -1.0), *far)
 
     ranked = sorted(pairs.values(), key=_rank)
-    shown = ranked[:max_pairs]
+    shown = ranked[:max(0, max_pairs)]
     payload = {
         "identical_group_count": len(groups),
         "identical_bodies": identical,
@@ -3600,6 +3713,11 @@ def graphlore_duplication_scan(
         "truncated": len(ranked) > len(shown) or len(groups) > len(identical),
         "scope": view.payload(),
     }
+    _cut_hint(
+        payload,
+        "Raise max_pairs for the rest of the pair_count pairs and the "
+        "identical_group_count groups.",
+    )
     skip_note = ""
     if skipped:
         skip_note = "\nLeft out: " + ", ".join(
@@ -3647,7 +3765,7 @@ def graphlore_node_details(node: str, as_json: bool = False) -> str:
     detail = {
         "id": _node_id(n),
         "label": _node_label(n),
-        "type": n.get("type", ""),
+        "type": _node_type(n),
         "file": n.get("file") or n.get("path") or n.get("source_file", ""),
         "line": _node_line(n),
         "community": n.get("community", n.get("cluster", "")),
@@ -3752,9 +3870,9 @@ def graphlore_fetch(
         spanned = False
         lo = hi = line
         if f and line > 0:
-            encl = _enclosing_spans(f, line, line)
-            if encl:
-                region_start, end, _def_line, qual = encl[0]
+            own = _span_of_definition(f, line, _bare_name(_node_label(n)))
+            if own:
+                region_start, end, _def_line, qual = own
                 lo, hi, spanned = region_start, end, True
 
         block = _read_source_lines(f, lo - context_lines, hi + context_lines) if (
@@ -3902,9 +4020,10 @@ def graphlore_skeleton(
         if not nf:
             return _err(f"Node '{_node_label(n)}' has no source file to skeletonize.", as_json)
         try:
-            prefix = _span_qualname(nf, int(_node_line(n)))
+            own = _span_of_definition(nf, int(_node_line(n)), _bare_name(_node_label(n)))
         except (TypeError, ValueError):
-            prefix = None
+            own = None
+        prefix = own[3] if own else None
         targets = [(nf, prefix)]
     else:  # community
         members = [
@@ -4241,6 +4360,11 @@ def graphlore_freshness(as_json: bool = False) -> str:
         "reason": reason,
         "recommendation": command,
     })
+    _cut_hint(
+        payload,
+        f"Each list holds its first {_FRESHNESS_LIST_CAP} files; `counts` has the real "
+        "lengths and `git status` lists every file.",
+    )
     if not stale:
         suffix = f" ({len(cosmetic)} cosmetic-only change(s) ignored)" if cosmetic else ""
         text = f"Graph is fresh (HEAD {head[:10]}, no structural changes){suffix}."
@@ -4326,6 +4450,11 @@ def graphlore_diff(
         "cosmetic": kept_cosmetic,
         "truncated": len(structural) + len(cosmetic) > len(kept),
     }
+    _cut_hint(
+        payload,
+        "Raise budget_tokens for the rest: structural_change_count and "
+        "cosmetic_change_count hold the totals.",
+    )
     truncated = payload["truncated"]
 
     def _fmt_rec(r: dict) -> str:
@@ -4520,11 +4649,11 @@ def graphlore_validate(limit: int = 15, as_json: bool = False, scope: str = "") 
         "issues": issues,
         "recursive_calls": len(recursive),
         "examples": {
-            "dangling": dangling[:limit],
-            "self_loops": self_loops[:limit],
-            "duplicate_edges": duplicates[:limit],
-            "orphan_nodes": orphans[:limit],
-            "recursive_calls": recursive[:limit],
+            "dangling": dangling[:max(0, limit)],
+            "self_loops": self_loops[:max(0, limit)],
+            "duplicate_edges": duplicates[:max(0, limit)],
+            "orphan_nodes": orphans[:max(0, limit)],
+            "recursive_calls": recursive[:max(0, limit)],
         },
         "scope": view.payload(),
     }
@@ -4596,7 +4725,7 @@ _IMPORT_HOP_ARROWS = {
 }
 # Relations that never close a dependency cycle on their own: containment points
 # from a file or class down to its members, and a docstring node at its subject.
-_CYCLE_IGNORED_RELATIONS = frozenset({"contains", "method", "rationale_for"})
+_CYCLE_IGNORED_RELATIONS = _NON_DEPENDENCY_RELATIONS
 
 
 @_tool(annotations=ToolAnnotations(title="Dependency cycles", read_only_hint=True))
@@ -4743,6 +4872,11 @@ def graphlore_cycles(
         "truncated": truncated,
         "scope": view.payload(),
     }
+    _cut_hint(
+        payload,
+        "Raise max_cycles (it caps each kind), or ask for one kind with kind=; "
+        "the *_cycle_count fields hold the totals.",
+    )
 
     titles = {
         "calls": ("Call cycles (functions calling each other)", "node(s)"),
@@ -4909,6 +5043,8 @@ def graphlore_unreferenced(
         "mention_scan_capped": found["mention_scan_capped"],
         "scope": view.payload(),
     }
+    _cut_hint(payload, "Raise limit for the rest of the unreferenced_count rows, or narrow "
+                       "with scope=.")
     registered = sum(found["registered_by_decorator"].values())
     lines = [
         f"{found['examined']} definition(s) examined, {found['no_graph_reference']} without "
@@ -5027,6 +5163,8 @@ def graphlore_layers(
         "rejected_import_count": len(result["rejected_imports"]),
         "truncated": truncated,
     }
+    _cut_hint(payload, "Raise limit (it caps each layer's list): every layer's "
+                       "violation_count holds its total.")
     lines = [
         f"{total} layer violation(s) in {result['imports_checked']} import(s) checked "
         f"across {len(result['layers'])} layer(s)" + (" (strict)" if strict else "") + "."
@@ -5121,6 +5259,8 @@ def graphlore_same_names(
         "truncated": len(groups) > len(shown),
         "scope": view.payload(),
     }
+    _cut_hint(payload, "Raise limit for the rest of the name_count names, or narrow with "
+                       "scope= / kinds=.")
     if not groups:
         return _fmt(
             payload, as_json,
@@ -5172,6 +5312,41 @@ def _first_party_prefixes() -> list[str]:
     except OSError:
         pass
     return prefixes
+
+
+# What the per-file extractors (graphlore_package_apis, graphlore_routes) read:
+# Python through the stdlib ast, the rest through tree-sitter.
+_EXTRACTOR_EXTS = frozenset({
+    ".py", ".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts", ".go", ".java",
+})
+
+
+def _not_read(files: Iterable[str]) -> dict[str, int]:
+    """Source files the extractors could not read, counted by extension.
+
+    Either the language has no extractor (Rust, C#, Kotlin, ...) or its
+    tree-sitter grammar is unavailable. Without this, a Kotlin service answers
+    "no routes" in the same words as a project that has none.
+    """
+    counts: Counter[str] = Counter()
+    readable: dict[str, bool] = {}
+    for f in files:
+        dot = f.rfind(".")
+        ext = f[dot:].lower() if dot > 0 else ""
+        if ext not in _SOURCE_EXTS:
+            continue
+        ok = readable.get(ext)
+        if ok is None:
+            ok = readable[ext] = ext == ".py" or (
+                ext in _EXTRACTOR_EXTS and _ts_parser_for(f)[0] is not None)
+        if not ok:
+            counts[ext] += 1
+    return dict(sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])))
+
+
+def _not_read_text(not_read: dict[str, int]) -> str:
+    listed = ", ".join(f"{n} {ext}" for ext, n in not_read.items())
+    return f"Not read — no extractor for these source files: {listed}."
 
 
 _API_SURFACE_NOTE = (
@@ -5266,7 +5441,7 @@ def graphlore_package_apis(package: str = "", limit: int = 20, as_json: bool = F
         pkg_files,
         key=lambda p: (-len(pkg_files[p]), -len(pkg_syms.get(p, ())), p),
     )
-    shown = ranked[:limit]
+    shown = ranked[:max(0, limit)]
     payload = {
         "files_scanned": len(files),
         "packages": [
@@ -5283,11 +5458,17 @@ def graphlore_package_apis(package: str = "", limit: int = 20, as_json: bool = F
         "truncated": len(ranked) > len(shown),
         "note": _API_SURFACE_NOTE,
     }
+    not_read = _not_read(files)
+    if not_read:
+        payload["not_read"] = not_read
+    _cut_hint(payload, "Raise limit for the rest of the `total` packages, or pass package= "
+                       "for one.")
     if not ranked:
         return _fmt(
             payload, as_json,
             f"No external package use visible in {len(files)} graph file(s) "
-            f"({_API_SURFACE_NOTE}).",
+            f"({_API_SURFACE_NOTE})."
+            + (f"\n{_not_read_text(not_read)}" if not_read else ""),
         )
     lines = [
         f"External API surface across {len(files)} graph file(s) ({_API_SURFACE_NOTE}):"
@@ -5306,6 +5487,8 @@ def graphlore_package_apis(package: str = "", limit: int = 20, as_json: bool = F
         lines.append(f"  … +{len(ranked) - len(shown)} more package(s); raise `limit`.")
     if skipped:
         lines.append("first-party (skipped): " + ", ".join(sorted(skipped)))
+    if not_read:
+        lines.append(_not_read_text(not_read))
     return _fmt(payload, as_json, "\n".join(lines))
 
 
@@ -5405,7 +5588,7 @@ def graphlore_routes(
         rows = [r for r in rows if pattern.lower() in r["pattern"].lower()]
 
     rows.sort(key=lambda r: (r["file"], r["line"]))
-    shown = rows[:limit]
+    shown = rows[:max(0, limit)]
     payload: dict[str, Any] = {
         "files_scanned": len(files),
         "routes": shown,
@@ -5413,11 +5596,17 @@ def graphlore_routes(
         "truncated": len(rows) > len(shown),
         "note": _ROUTES_NOTE,
     }
+    _cut_hint(payload, "Raise limit for the rest of the `count` routes, or filter with "
+                       "framework= / method= / pattern=.")
+    not_read = _not_read(files)
+    if not_read:
+        payload["not_read"] = not_read
     if not rows:
         return _fmt(
             payload, as_json,
             f"No framework routes visible in {len(files)} scanned file(s) "
-            f"({_ROUTES_NOTE}).",
+            f"({_ROUTES_NOTE})."
+            + (f"\n{_not_read_text(not_read)}" if not_read else ""),
         )
     lines = [f"{len(rows)} route(s) across {len(files)} scanned file(s) ({_ROUTES_NOTE}):"]
     for r in shown:
@@ -5427,6 +5616,8 @@ def graphlore_routes(
         )
     if payload["truncated"]:
         lines.append(f"  … +{len(rows) - len(shown)} more route(s); raise `limit`.")
+    if not_read:
+        lines.append(_not_read_text(not_read))
     return _fmt(payload, as_json, "\n".join(lines))
 
 
@@ -5478,7 +5669,7 @@ def community(community_id: str) -> str:
             boundary.append(e)
     lines = [f"# Community {community_id} — {len(members)} nodes\n", "## Members"]
     for n in members:
-        ty = f" ({n.get('type')})" if n.get("type") else ""
+        ty = f" ({_node_type(n)})" if _node_type(n) else ""
         lines.append(f"- {_node_label(n)}{ty}")
     lines.append(f"\n## Internal edges ({len(internal)})")
     for e in internal:
