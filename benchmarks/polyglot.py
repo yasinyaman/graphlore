@@ -58,6 +58,7 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 from graphlore import graph as gl_graph  # noqa: E402
 from graphlore import review as gl_review  # noqa: E402
 from graphlore import server as s  # noqa: E402
+from graphlore import spans as gl_spans  # noqa: E402
 from graphlore.review import _Definitions  # noqa: E402
 
 s.TOOLSET = "full"  # main() is never called, so the shared registry stays whole
@@ -542,7 +543,9 @@ def check_navigation(a: Audit, sub: Subject) -> None:
         tf = a.call("tests_for", node=nid, limit=200)
         if tf and "error" not in tf:
             for row in tf.get("direct", []) + tf.get("through_one_caller", []):
-                if not s._is_test_path(row.get("file", "")):
+                rel, at = row.get("file", ""), int(row.get("line") or 0)
+                inline = any(lo <= at <= hi for lo, hi in gl_spans._test_regions(rel))
+                if not (s._is_test_path(rel) or inline):
                     a.finding("TESTS-FOR-NOT-A-TEST", "medium", "bug", "tests_for",
                               "a row lies outside every test path",
                               {"node": label, "row": row.get("file")}, _ext(row.get("file", "")))
@@ -829,7 +832,9 @@ def check_languages(a: Audit, sub: Subject, repo: dict[str, Any]) -> None:
         c: Counter[str] = Counter()
         missed: list[str] = []
         for rel in rels:
-            marked, path = bool(rx.search(_read(rel))), s._is_test_path(rel)
+            # a Rust file that holds its tests inline is recognised by its regions
+            marked = bool(rx.search(_read(rel)))
+            path = s._is_test_path(rel) or bool(gl_spans._test_regions(rel))
             c[f"marker={int(marked)},path={int(path)}"] += 1
             if marked and not path:
                 missed.append(rel)

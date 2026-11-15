@@ -199,6 +199,7 @@ from .review import (  # noqa: F401  (re-exported for the tools + tests)
     _unreferenced,
 )
 from .routes import (  # noqa: F401  (re-exported for the tools + tests)
+    _JS_SERVER_FRAMEWORKS,
     _ROUTES_CACHE,
     _ROUTES_CACHE_MAX,
     _routes_for_file,
@@ -218,6 +219,7 @@ from .spans import (  # noqa: F401
     _SPAN_CACHE_MAX,
     _TS_PARSERS,
     _enclosing_spans,
+    _is_test_node,
     _is_ts_symbol,
     _node_for_location,
     _norm_relpath,
@@ -1198,7 +1200,7 @@ def _skeleton_lines(file_path: str, prefix: str | None = None) -> list[tuple[str
     ``prefix + "."``) are returned.
     """
     out: list[tuple[str, list[str]]] = []
-    for region_start, _end, def_line, qual in _spans_for_file(file_path):
+    for region_start, end, def_line, qual in _spans_for_file(file_path):
         if prefix is not None and not (qual == prefix or qual.startswith(prefix + ".")):
             continue
         block = _read_source_lines(file_path, region_start, def_line + _SIG_CONT_MAX)
@@ -1211,11 +1213,22 @@ def _skeleton_lines(file_path: str, prefix: str | None = None) -> list[tuple[str
         # return type on a line of its own. Run on to the line with the name, or
         # the header is `@Override` and nothing else.
         name = re.split(r"[.:]", qual)[-1]
+        tail: list[str] = []
         if name and not any(name in ln for ln in header):
             for i, ln in enumerate(lines[len(header):len(header) + _SIG_NAME_MAX]):
-                if name in ln:
+                if name not in ln:
+                    continue
+                if lo + len(header) + i == end and end - def_line > 1:
+                    # C `typedef struct { … } redisOptions;`: the name closes the
+                    # body, which is not part of the signature
+                    tail = ["    …", ln]
+                else:
                     header = lines[:len(header) + i + 1]
-                    break
+                break
+            else:
+                last = _read_source_lines(file_path, end, end) if end > def_line else None
+                if last is not None and name in last[0][0]:
+                    tail = ["    …", last[0][0]]
         # Parentheses only (not braces): a Go/Java body opener `{` on the def line
         # must not drag the whole body in, while `def f(\n ...\n) -> X:` extends.
         depth = sum(ln.count("(") - ln.count(")") for ln in header)
@@ -1224,7 +1237,7 @@ def _skeleton_lines(file_path: str, prefix: str | None = None) -> list[tuple[str
                 break
             header.append(ln)
             depth += ln.count("(") - ln.count(")")
-        out.append((qual, [ln.rstrip() for ln in header]))
+        out.append((qual, [ln.rstrip() for ln in header + tail]))
     return out
 
 
@@ -1623,7 +1636,9 @@ def graphlore_build(
         no_viz: True -> skip the HTML visualization (faster for development).
         code_only: True -> index only code via local AST (no LLM key needed); skips
             doc/paper/image files that would otherwise require semantic extraction.
-            Forced on under GRAPHLORE_OFFLINE, where ``mode`` is refused.
+            Forced on under GRAPHLORE_OFFLINE, where ``mode`` is refused. Without
+            it, a build that graphify refuses for want of an LLM key (the folder
+            holds docs, and no key is set) is run again with it, and says so.
         verbose: True -> return the full CLI log instead of its counts and warnings.
     """
     err = _path_escapes_project(path)
@@ -1656,6 +1671,18 @@ def graphlore_build(
     if code_only:
         args.append("--code-only")
     result = _run_cli(args)
+    if (result.startswith("ERROR") and "no LLM API key" in result
+            and not (code_only or mode or cluster_only)):
+        # graphify >= 0.9 will not build a folder with docs and no key; the code
+        # can still be indexed, which is what a keyless caller wants
+        args.append("--code-only")
+        code_only = True
+        result = _run_cli(args)
+        offline_note = (
+            "No LLM API key is set, so graphify would not extract the doc/paper/image "
+            "files: built with --code-only (local AST extraction) instead. Set a "
+            "backend key (GEMINI_API_KEY, ANTHROPIC_API_KEY, ...) to include them."
+        )
     gp = _graph_path()
     # The CLI rewrote graph.json; evict eagerly so a same-second re-read (coarse
     # mtime granularity) can't serve the pre-build graph — same guard as prune.
@@ -1721,14 +1748,58 @@ def graphlore_query(question: str, dfs: bool = False, budget: int = 0) -> str:
 
 @_tool(annotations=ToolAnnotations(title="Path between nodes", read_only_hint=True))
 def graphlore_path(node_a: str, node_b: str) -> str:
-    """Find the exact path between two nodes (e.g. "DigestAuth" -> "Response")."""
-    return _cli_reply(_run_cli(["path", node_a, node_b]), repo_text=True)
+    """Find the exact path between two nodes (e.g. "DigestAuth" -> "Response").
+
+    Each end may be an id, a label or a bare name; a name several nodes share
+    resolves like everywhere else in graphlore, and the reply says which node
+    was used.
+    """
+    (a, note_a), (b, note_b) = _cli_node_key(node_a), _cli_node_key(node_b)
+    return _cli_node_reply(_run_cli(["path", a, b]), [note_a, note_b])
 
 
 @_tool(annotations=ToolAnnotations(title="Explain node", read_only_hint=True))
 def graphlore_explain(node: str) -> str:
-    """Return everything Graphify knows about a node."""
-    return _cli_reply(_run_cli(["explain", node]), repo_text=True)
+    """Return everything Graphify knows about a node.
+
+    ``node`` may be an id, a label or a bare name; a name several nodes share
+    resolves like everywhere else in graphlore, and the reply says which node
+    was used.
+    """
+    key, note = _cli_node_key(node)
+    return _cli_node_reply(_run_cli(["explain", key]), [note])
+
+
+def _cli_node_key(name: str) -> tuple[str, str]:
+    """(what to pass the graphify CLI for ``name``, a note saying how it resolved).
+
+    graphify refuses a name that several nodes share ("Ambiguous: matches 3
+    nodes … retry with the full node id"), so the name is resolved here with
+    `_pick_node` and the CLI gets the id. With no graph, or no match, the name
+    goes through as it was given and the CLI answers for itself.
+    """
+    graph = _load_graph()
+    if isinstance(graph, str):
+        return name, ""
+    nodes, _edges = _nodes_edges(graph)
+    picked = _pick_node(nodes, name)
+    if picked.node is None:
+        return name, ""
+    _payload, text = _matched(name, picked)
+    return _node_id(picked.node), text
+
+
+def _cli_node_reply(out: str, notes: list[str]) -> str:
+    """`_cli_reply` for a CLI call about named nodes, with graphlore's notes on how
+    the names resolved kept outside the frame (errors stay bare)."""
+    notes = [n for n in notes if n]
+    if out.startswith("ERROR") or not notes:
+        return _cli_reply(out, repo_text=True)
+    payload = {
+        "output": out, "resolved": notes,
+        "content_trust": _CONTENT_TRUST, "untrusted_fields": ["output"],
+    }
+    return _fmt(payload, False, _frame_repo_text(out) + "\n\n" + "\n".join(notes))
 
 
 @_tool(annotations=ToolAnnotations(title="Add external source", destructive_hint=False))
@@ -2498,7 +2569,7 @@ def graphlore_neighbors(node: str, as_json: bool = False, scope: str = "") -> st
     labels = _display_labels(nodes)
     adj = _adjacency(view.edges)
     es = _edge_set(view.edges)
-    tests = {_node_id(m) for m in view.nodes if _is_test_path(_node_file(m))}
+    tests = {_node_id(m) for m in view.nodes if _is_test_node(m)}
     # The adjacency is undirected; recover each edge's true orientation so an
     # incoming "calls" edge isn't drawn as if this node were the caller.
     ranked = sorted(
@@ -2578,7 +2649,7 @@ def graphlore_subgraph(
     labels = _display_labels(nodes)
     adj = _adjacency(view.edges)
     sid = _node_id(start)
-    tests = {_node_id(m) for m in view.nodes if _is_test_path(_node_file(m))}
+    tests = {_node_id(m) for m in view.nodes if _is_test_node(m)}
 
     visited, collected_edges, truncated, approx_tokens = _bfs_subgraph(
         adj, labels, sid, hops, budget_tokens, edge_set=_edge_set(view.edges),
@@ -2837,7 +2908,7 @@ def graphlore_impact(
         hits.append((nid, d, via, edge))
     def _in_test(nid: str) -> bool:
         n = byid.get(nid)
-        return n is not None and _is_test_path(_node_file(n))
+        return n is not None and _is_test_node(n)
 
     def _degree(nid: str) -> int:
         return len(forward.get(nid, ())) + len(reverse.get(nid, ()))
@@ -2995,7 +3066,8 @@ def graphlore_impact(
 
 @_tool(annotations=ToolAnnotations(title="Tests for a symbol", read_only_hint=True))
 def graphlore_tests_for(
-    node: str, limit: int = 30, as_json: bool = False, strict: bool = False
+    node: str, limit: int = 30, as_json: bool = False, strict: bool = False,
+    scope: str = "",
 ) -> str:
     """Which tests exercise a function, method or class.
 
@@ -3018,6 +3090,8 @@ def graphlore_tests_for(
             result says which one was used and lists the others with their ids.
         limit: Cap on the tests listed per group.
         strict: True -> count only edges the extractor resolved, never inferred ones.
+        scope: Which tests and callers to look at — path prefixes / globs,
+            ``!pattern``, ``-vendored``. Empty leaves nothing out.
     """
     graph = _load_graph()
     if isinstance(graph, str):
@@ -3027,8 +3101,11 @@ def graphlore_tests_for(
     start = picked.node
     if start is None:
         return _not_found(nodes, node, as_json)
-    resolved = _resolved(nodes, graph_edges)
-    edges = resolved.edges
+    nav = _nav_view(nodes, graph_edges, scope, as_json)
+    if isinstance(nav, str):
+        return nav
+    view, resolved = nav
+    edges = view.edges
     forward, reverse = _directed_edge_adjacency(edges)
     labels = _display_labels(nodes)
     byid = {_node_id(n): n for n in nodes}
@@ -3050,7 +3127,8 @@ def graphlore_tests_for(
         calls are recorded."""
         file = _node_file(n)
         if not _is_test_path(file):
-            return False
+            # a Rust `#[test]` fn, or anything in a `#[cfg(test)]` module
+            return _is_test_node(n) and not _is_file_hub_node(n)
         return (
             _is_file_hub_node(n) or not file.lower().endswith((".py", ".go"))
             or _is_test_definition(_bare_name(_node_label(n)), file)
@@ -3101,14 +3179,14 @@ def graphlore_tests_for(
     weak: list[dict[str, Any]] = []
     if target_file:
         for sf in sorted({
-            sf for sf, tf, _e, _dst, _kind in _file_import_edges(nodes, edges)
+            sf for sf, tf, _e, _dst, _kind in _file_import_edges(view.nodes, edges)
             if tf == target_file and _is_test_path(sf)
         } - covered_files):
             weak.append({"file": sf, "why": f"imports {target_file}"})
     name = _bare_name(_node_label(start)).strip("_").lower()
     if len(name) >= 4:
         seen = set(direct) | set(through)
-        for n in nodes:
+        for n in view.nodes:
             nid = _node_id(n)
             if nid in seen or not is_test(n):
                 continue
@@ -3131,6 +3209,7 @@ def graphlore_tests_for(
         "weak_count": len(weak),
         "weak": weak[:cap],
         "truncated": max(len(direct_rows), len(through_rows), len(weak)) > cap,
+        "scope": view.payload(),
         "resolved_edges": resolved.payload(),
     }
     _cut_hint(payload, "Raise limit: each list is cut to it, and its *_count holds the total.")
@@ -3165,7 +3244,7 @@ def graphlore_tests_for(
         lines.append("(" + resolved.note() + ")")
     if matched_text:
         lines.append(matched_text)
-    return _fmt(payload, as_json, "\n".join(lines))
+    return _fmt(payload, as_json, _with_note("\n".join(lines), view))
 
 
 @_tool(annotations=ToolAnnotations(title="Locate + structural context", read_only_hint=True))
@@ -5090,6 +5169,7 @@ def graphlore_layers(
     strict: bool = False,
     limit: int = 50,
     as_json: bool = False,
+    scope: str = "",
 ) -> str:
     """Check import edges against layer rules: which layer may import which.
 
@@ -5120,6 +5200,9 @@ def graphlore_layers(
         strict: True -> a layer may import ONLY itself and what it lists; imports
             into files outside every declared layer become violations too.
         limit: Cap on violations listed per layer.
+        scope: Which files to check — path prefixes / globs, ``!pattern``,
+            ``-tests``, ``+vendored``. The default leaves out vendored/minified
+            files and external nodes.
     """
     graph = _load_graph()
     if isinstance(graph, str):
@@ -5145,7 +5228,10 @@ def graphlore_layers(
     if isinstance(parsed, str):
         return _err(parsed, as_json)
     # Imports the graph lacks (`from pkg import mod`) are layer crossings too.
-    result = _layer_violations(nodes, _resolved(nodes, edges).edges, parsed, strict=strict)
+    view = _scope_view(nodes, _resolved(nodes, edges).edges, scope, as_json)
+    if isinstance(view, str):
+        return view
+    result = _layer_violations(view.nodes, view.edges, parsed, strict=strict)
     total = result["violation_count"]
     truncated = False
     for entry in result["layers"]:
@@ -5162,6 +5248,7 @@ def graphlore_layers(
         "rejected_imports": result["rejected_imports"][:20],
         "rejected_import_count": len(result["rejected_imports"]),
         "truncated": truncated,
+        "scope": view.payload(),
     }
     _cut_hint(payload, "Raise limit (it caps each layer's list): every layer's "
                        "violation_count holds its total.")
@@ -5196,7 +5283,7 @@ def graphlore_layers(
             "\nNo graph file matches: " + ", ".join(result["unmatched_prefixes"])
             + " — check the prefix (paths are relative to the project root)."
         )
-    return _fmt(payload, as_json, "\n".join(lines))
+    return _fmt(payload, as_json, _with_note("\n".join(lines), view))
 
 
 @_tool(annotations=ToolAnnotations(title="Same-named symbols", read_only_hint=True))
@@ -5356,7 +5443,9 @@ _API_SURFACE_NOTE = (
 
 
 @_tool(annotations=ToolAnnotations(title="External package API surface", read_only_hint=True))
-def graphlore_package_apis(package: str = "", limit: int = 20, as_json: bool = False) -> str:
+def graphlore_package_apis(
+    package: str = "", limit: int = 20, as_json: bool = False, scope: str = ""
+) -> str:
     """Symbol-level external API surface: which names each package is actually used for.
 
     The difference between "this module imports fastapi" (package level) and "this
@@ -5380,12 +5469,18 @@ def graphlore_package_apis(package: str = "", limit: int = 20, as_json: bool = F
     Args:
         package: Report one package in detail (per-symbol file lists). Empty = all.
         limit: Cap on packages listed in the summary view (most-used first).
+        scope: Which files to read — path prefixes / globs, ``!pattern``,
+            ``-tests`` (a package only the tests use), ``+vendored``. The default
+            leaves out vendored/minified files.
     """
     graph = _load_graph()
     if isinstance(graph, str):
         return _err(graph, as_json)
-    nodes, _edges = _nodes_edges(graph)
-    files = sorted({_norm_relpath(_node_file(n)) for n in nodes} - {""})
+    nodes, edges = _nodes_edges(graph)
+    view = _scope_view(nodes, edges, scope, as_json)
+    if isinstance(view, str):
+        return view
+    files = sorted({_norm_relpath(_node_file(n)) for n in view.nodes} - {""})
 
     first_party = _first_party_prefixes()
     skipped: set[str] = set()
@@ -5425,6 +5520,7 @@ def graphlore_package_apis(package: str = "", limit: int = 20, as_json: bool = F
             "qualified_paths": sorted(pkg_paths.get(match, ())),
             "symbol_files": per_symbol,
             "note": _API_SURFACE_NOTE,
+            "scope": view.payload(),
         }
         lines = [
             f"{match} — {len(payload['symbols'])} symbol(s) across "
@@ -5435,7 +5531,7 @@ def graphlore_package_apis(package: str = "", limit: int = 20, as_json: bool = F
             lines.append("  no symbols visible (package-level import only)")
         if payload["qualified_paths"]:
             lines.append("qualified paths: " + ", ".join(payload["qualified_paths"]))
-        return _fmt(payload, as_json, "\n".join(lines))
+        return _fmt(payload, as_json, _with_note("\n".join(lines), view))
 
     ranked = sorted(
         pkg_files,
@@ -5457,6 +5553,7 @@ def graphlore_package_apis(package: str = "", limit: int = 20, as_json: bool = F
         "total": len(ranked),
         "truncated": len(ranked) > len(shown),
         "note": _API_SURFACE_NOTE,
+        "scope": view.payload(),
     }
     not_read = _not_read(files)
     if not_read:
@@ -5466,9 +5563,10 @@ def graphlore_package_apis(package: str = "", limit: int = 20, as_json: bool = F
     if not ranked:
         return _fmt(
             payload, as_json,
-            f"No external package use visible in {len(files)} graph file(s) "
-            f"({_API_SURFACE_NOTE})."
-            + (f"\n{_not_read_text(not_read)}" if not_read else ""),
+            _with_note(
+                f"No external package use visible in {len(files)} graph file(s) "
+                f"({_API_SURFACE_NOTE})."
+                + (f"\n{_not_read_text(not_read)}" if not_read else ""), view),
         )
     lines = [
         f"External API surface across {len(files)} graph file(s) ({_API_SURFACE_NOTE}):"
@@ -5489,7 +5587,21 @@ def graphlore_package_apis(package: str = "", limit: int = 20, as_json: bool = F
         lines.append("first-party (skipped): " + ", ".join(sorted(skipped)))
     if not_read:
         lines.append(_not_read_text(not_read))
-    return _fmt(payload, as_json, "\n".join(lines))
+    return _fmt(payload, as_json, _with_note("\n".join(lines), view))
+
+
+def _project_imports_js_server(files: Iterable[str]) -> bool:
+    """Whether some JS/TS file of the graph imports a server framework (express,
+    fastify, koa-router, ...): the condition for keeping a route registered in a
+    file that imports none itself, such as an Express app's `config/routes.js`
+    (`module.exports = function (app) { app.get('/x', h) }`)."""
+    for f in files:
+        js = _js_for_file(f)
+        if js is not None and any(
+                i.specifier == fw or i.specifier.startswith(fw + "/")
+                for i in js.imports for fw in _JS_SERVER_FRAMEWORKS):
+            return True
+    return False
 
 
 _ROUTES_NOTE = (
@@ -5535,6 +5647,7 @@ def graphlore_routes(
     pattern: str = "",
     limit: int = 50,
     as_json: bool = False,
+    scope: str = "",
 ) -> str:
     """Framework route -> handler table: which URL patterns hit which code.
 
@@ -5561,17 +5674,33 @@ def graphlore_routes(
             rows the idiom doesn't pin to one method).
         pattern: Keep only URL patterns containing this substring (case-insensitive).
         limit: Cap on routes listed (sorted by file then line).
+        scope: Which files to read — path prefixes / globs, ``!pattern``,
+            ``+tests``, ``+vendored``. The default leaves out test code (a test's
+            throwaway server registers routes too) and vendored/minified files.
     """
     graph = _load_graph()
     if isinstance(graph, str):
         return _err(graph, as_json)
-    nodes, _edges = _nodes_edges(graph)
+    nodes, edges = _nodes_edges(graph)
+    view = _scope_view(nodes, edges, scope, as_json, default_tests=False)
+    if isinstance(view, str):
+        return view
     graph_files = {_norm_relpath(_node_file(n)) for n in nodes} - {""}
-    files = sorted(graph_files | _route_candidate_files(graph_files))
+    in_scope = {_norm_relpath(_node_file(n)) for n in view.nodes} - {""}
+    files = sorted(in_scope | {
+        f for f in _route_candidate_files(graph_files) if view.keeps_file(f)
+    })
 
     rows: list[dict[str, Any]] = []
+    server_import: bool | None = None  # does any JS/TS file import a server framework
     for f in files:
         for r in _routes_for_file(f):
+            if r.get("needs_server_import"):
+                if server_import is None:
+                    server_import = _project_imports_js_server(graph_files)
+                if not server_import:
+                    continue
+            r = {k: v for k, v in r.items() if k != "needs_server_import"}
             node = _node_for_location(nodes, f, r["line"])
             rows.append({
                 **r,
@@ -5595,6 +5724,7 @@ def graphlore_routes(
         "count": len(rows),
         "truncated": len(rows) > len(shown),
         "note": _ROUTES_NOTE,
+        "scope": view.payload(),
     }
     _cut_hint(payload, "Raise limit for the rest of the `count` routes, or filter with "
                        "framework= / method= / pattern=.")
@@ -5604,9 +5734,10 @@ def graphlore_routes(
     if not rows:
         return _fmt(
             payload, as_json,
-            f"No framework routes visible in {len(files)} scanned file(s) "
-            f"({_ROUTES_NOTE})."
-            + (f"\n{_not_read_text(not_read)}" if not_read else ""),
+            _with_note(
+                f"No framework routes visible in {len(files)} scanned file(s) "
+                f"({_ROUTES_NOTE})."
+                + (f"\n{_not_read_text(not_read)}" if not_read else ""), view),
         )
     lines = [f"{len(rows)} route(s) across {len(files)} scanned file(s) ({_ROUTES_NOTE}):"]
     for r in shown:
@@ -5618,7 +5749,7 @@ def graphlore_routes(
         lines.append(f"  … +{len(rows) - len(shown)} more route(s); raise `limit`.")
     if not_read:
         lines.append(_not_read_text(not_read))
-    return _fmt(payload, as_json, "\n".join(lines))
+    return _fmt(payload, as_json, _with_note("\n".join(lines), view))
 
 
 # ---------------------------------------------------------------------------

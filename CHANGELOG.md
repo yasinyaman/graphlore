@@ -11,6 +11,13 @@ Every tool was run on 20 real repositories in 14 languages
 what that turned up; what is still missing per language is in the report.
 
 ### Added
+- `scope` on `graphlore_routes`, `graphlore_package_apis`, `graphlore_layers`
+  and `graphlore_tests_for`, the four tools that read the whole graph without
+  one. Their results carry the `scope` payload and say what was left out.
+- `tests/fixtures/polyglot/`: five languages and the graph graphify 0.9 built of
+  them, so the suite runs on `file_type`, `community_name`, `case_of`,
+  closures, a Rust test module and a JS barrel — what the 5-node fixture
+  cannot show.
 - `benchmarks/polyglot.py`: runs all 33 tools, the resources and the prompts on
   pinned commits of real repositories in Python, JavaScript, TypeScript/TSX, Go,
   Java, Kotlin, Scala, C#, Rust, Swift, C, C++, Ruby and PHP, and reports what
@@ -43,6 +50,16 @@ what that turned up; what is still missing per language is in the report.
   step after the first PyPI release; `CONTRIBUTING.md` has the commands.
 
 ### Changed
+- `graphlore_routes` leaves test code out by default: got's tests register
+  1,354 routes on throwaway servers. `scope="+tests"` brings them back.
+- An Express-style row is labelled by the framework the file imports
+  (`fastify`, `koa`, `restify`, `polka`), not always `express`.
+- `graphlore_build()` with no LLM key on a folder that holds docs: graphify 0.9
+  refuses it, so it runs again with `--code-only` and says the docs were
+  skipped. A build with `mode=` asked for is not turned into another one.
+- `graphlore_explain` and `graphlore_path` resolve a name before graphify sees
+  it, and pass graphify the node id. graphify refuses a name several nodes
+  share ("Ambiguous: matches 3 nodes"); the reply now says which node was used.
 - Dependencies upgraded. `uv.lock` moves to graphifyy 0.9.109 (from 0.8.39:
   what plugin users already got through `uvx`), mcp 2.3, semble 0.7,
   tree-sitter-language-pack 1.25, ruff 0.17, mypy 2.4 and pytest 9.2. The
@@ -72,6 +89,32 @@ what that turned up; what is still missing per language is in the report.
   lists every module.
 
 ### Fixed
+- **Express routes in a file that imports no framework.** An Express app's
+  `config/routes.js` (`module.exports = function (app) { app.get(...) }`)
+  imports nothing, so none of express-mongoose-demo's 26 routes were found;
+  all are now. Without a framework import in the file, a call counts when its
+  receiver is named like a router or is a parameter of the function around it,
+  it has a handler argument, and some file of the project imports a server
+  framework — `axios.get('/x', {…})` still does not. `router.route('/x')
+  .get(h).post(h2)` chains are read too.
+- **Rust tests inside a source file are tests.** `#[cfg(test)] mod tests` and
+  `#[test]` functions (26 of ureq's 48 source files hold them) were production
+  code to `tests_for`, the production-before-tests order, `-tests` scopes and
+  `unreferenced`'s `count_test_references`. A Rust `mod { … }` is a span, so a
+  test's qualname reads `tests.it_works`.
+- PHP imports are module-level instead of `unclassified` (a `use` cannot be
+  deferred).
+- Spans for a JS function wrapped in one call (`exports.create = async(function*
+  …)`, `const f = wrap(async () => …)`; 44 definitions in
+  express-mongoose-demo), for anonymous Java and Kotlin classes
+  (`new Callback<Void>() { … }`, `object : Callback<T> { … }`) and Ruby
+  `Request = Struct.new(…) do … end`. The skeleton of a C
+  `typedef struct { … } name;` shows the closing line with the name.
+- `graphlore_unreferenced` does not read a doc comment's `@default` / `@example`
+  as a decorator, and counts a class as used when one of its members is called
+  elsewhere: C# extension classes are never named at the call site
+  (`client.BuildUri(…)`), so RestSharp's were all listed. The row says
+  `used_through_members`.
 - **Kotlin had no spans at all.** Its grammar names a declaration through an
   identifier child, not a `name` field, so none of kotlinpoet's 2,009
   definitions had a span: `graphlore_fetch` returned one line,

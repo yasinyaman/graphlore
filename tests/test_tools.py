@@ -2989,13 +2989,67 @@ def test_routes_js_express_and_negatives(tmp_path, monkeypatch):
         b"router.post('/users/:id', (req, res) => {});\n"
         b"app.all('/every', h);\n"
         b"headers.get('x-id');\n"          # no leading slash -> not a route
-        b"router.route('/x').get(h);\n"    # chained receiver -> v1 cut
+        b"router.route('/x').get(h).post(h2);\n"   # one row per verb of the chain
     )
     rows = server._routes_for_file("app.js")
     assert {(r["method"], r["pattern"]) for r in rows} == {
-        ("GET", "/users"), ("POST", "/users/:id"), ("ANY", "/every")}
-    handlers = {r["pattern"]: r["handler"] for r in rows}
-    assert handlers["/users"] == "listUsers" and handlers["/users/:id"] == "<inline>"
+        ("GET", "/users"), ("POST", "/users/:id"), ("ANY", "/every"),
+        ("GET", "/x"), ("POST", "/x")}
+    handlers = {(r["method"], r["pattern"]): r["handler"] for r in rows}
+    assert handlers[("GET", "/users")] == "listUsers"
+    assert handlers[("POST", "/users/:id")] == "<inline>"
+    assert handlers[("GET", "/x")] == "h" and handlers[("POST", "/x")] == "h2"
+    assert not any(r.get("needs_server_import") for r in rows)
+
+
+def test_express_routes_in_a_file_that_imports_no_framework(tmp_path, monkeypatch):
+    # express-mongoose-demo: every route is in config/routes.js, which receives
+    # `app` as a parameter and imports nothing — 0 of 26 routes were found
+    _skip_without_treesitter()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    server._ROUTES_CACHE.clear()
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / "routes.js").write_text(
+        "const users = require('../app/users');\n"
+        "module.exports = function (app, passport) {\n"
+        "  app.get('/login', users.login);\n"
+        "  passport.post('/users', users.create);\n"   # a parameter: kept
+        "};\n"
+        "axios.get('/api/x', { timeout: 1 });\n"        # a client call: not a route
+        "client.get('/api/y', done);\n"                 # neither a router name nor a parameter
+        "app.get('/health');\n",                        # no handler
+        encoding="utf-8")
+    (tmp_path / "server.js").write_text("const express = require('express');\n",
+                                        encoding="utf-8")
+    rows = server._routes_for_file("config/routes.js")
+    assert {(r["method"], r["pattern"]) for r in rows} == {("GET", "/login"), ("POST", "/users")}
+    assert all(r["needs_server_import"] for r in rows)
+    graph = {"nodes": [
+        {"id": "r", "label": "routes.js", "source_file": "config/routes.js",
+         "source_location": "L1"},
+        {"id": "s", "label": "server.js", "source_file": "server.js", "source_location": "L1"},
+    ], "edges": []}
+    _write_graph(tmp_path, graph)
+    server._GRAPH_CACHE.clear()
+    got = json.loads(server.graphlore_routes(as_json=True))
+    assert [r["pattern"] for r in got["routes"]] == ["/login", "/users"]
+    assert all("needs_server_import" not in r for r in got["routes"])
+    # a project that imports no server framework at all: the same calls are not routes
+    (tmp_path / "server.js").write_text("const axios = require('axios');\n", encoding="utf-8")
+    server._GRAPH_CACHE.clear()
+    assert json.loads(server.graphlore_routes(as_json=True))["routes"] == []
+
+
+def test_js_route_label_follows_the_imported_framework(tmp_path, monkeypatch):
+    _skip_without_treesitter()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    server._ROUTES_CACHE.clear()
+    (tmp_path / "a.js").write_text(
+        "const Router = require('@koa/router');\nrouter.get('/k', h);\n", encoding="utf-8")
+    (tmp_path / "b.js").write_text(
+        "import Fastify from 'fastify';\napp.post('/f', h);\n", encoding="utf-8")
+    assert [r["framework"] for r in server._routes_for_file("a.js")] == ["koa"]
+    assert [r["framework"] for r in server._routes_for_file("b.js")] == ["fastify"]
 
 
 def test_routes_ts_nestjs_controller_prefix(tmp_path, monkeypatch):
@@ -6746,16 +6800,38 @@ def test_extractors_say_which_source_files_they_did_not_read(tmp_path, monkeypat
         assert "Not read — no extractor for these source files: 2 .rs." in tool()
 
 
-def test_build_names_its_own_parameter_when_graphify_names_its_flag(project, monkeypatch):
+def test_build_without_a_key_falls_back_to_code_only(project, monkeypatch):
     # graphify >= 0.9 refuses a default build of a repository with docs when no
-    # LLM key is set, and points at `--code-only`
-    monkeypatch.setattr(server, "_run_cli", lambda args, cwd=None: (
-        "ERROR (exit 1):\nerror: no LLM API key found (8 doc/paper/image file(s) need "
-        "semantic extraction). Or pass --code-only to index just the code."))
+    # LLM key is set: every repository of the polyglot audit has a README
+    refusal = ("ERROR (exit 1):\nerror: no LLM API key found (8 doc/paper/image file(s) "
+               "need semantic extraction). Or pass --code-only to index just the code.")
+    calls = []
+
+    def fake(args, cwd=None):
+        calls.append(list(args))
+        return "Rebuilt: 5 nodes, 4 edges" if "--code-only" in args else refusal
+
+    monkeypatch.setattr(server, "_run_cli", fake)
     out = server.graphlore_build(".")
-    assert out.startswith("ERROR") and "graphlore_build(code_only=True)" in out
-    # already asked for: nothing to add
-    assert "graphlore_build(code_only=True)" not in server.graphlore_build(".", code_only=True)
+    assert calls == [[".", "--no-viz"], [".", "--no-viz", "--code-only"]]
+    assert not out.startswith("ERROR") and "built with --code-only" in out
+    # a semantic build asked for by name is not quietly turned into another one
+    calls.clear()
+    out = server.graphlore_build(".", mode="deep")
+    assert len(calls) == 1 and out.startswith("ERROR")
+    # a refusal with code_only already on is returned as it is
+    monkeypatch.setattr(server, "_run_cli", lambda args, cwd=None: refusal)
+    out = server.graphlore_build(".", code_only=True)
+    assert out.startswith("ERROR") and "graphlore_build(code_only=True)" not in out
+    # anything else that names the flag still gets the parameter's name
+    monkeypatch.setattr(server, "_run_cli", lambda args, cwd=None: (
+        "ERROR (exit 2):\nunknown corpus; pass --code-only to index just the code"))
+    assert "graphlore_build(code_only=True)" in server.graphlore_build(".")
+
+
+def test_php_imports_are_module_level():
+    edge = {"relation": "imports", "source_location": "L3"}
+    assert server.ImportChecker().kind("src/Client.php", "src/Pool.php", edge) == "module-level"
 
 
 def test_a_double_colon_key_resolves_like_a_dotted_one(tmp_path, monkeypatch):
@@ -6860,3 +6936,300 @@ def test_a_negative_limit_lists_nothing_rather_than_all_but_one(project):
     assert json.loads(server.graphlore_package_apis(limit=-1, as_json=True))["packages"] == []
     examples = json.loads(server.graphlore_validate(limit=-1, as_json=True))["examples"]
     assert all(rows == [] for rows in examples.values())
+
+
+def test_cli_tools_resolve_a_shared_name_before_the_cli_sees_it(tmp_path, monkeypatch):
+    # graphify 0.9 refuses `explain create` when three nodes are named create
+    _write_graph(tmp_path, {
+        "nodes": [
+            {"id": "articles_create", "label": "create()", "source_file": "app/articles.js",
+             "source_location": "L68", "file_type": "code"},
+            {"id": "users_create", "label": "create()", "source_file": "app/users.js",
+             "source_location": "L30", "file_type": "code"},
+            {"id": "only", "label": "Session", "source_file": "s.py", "source_location": "L1"},
+        ],
+        "edges": [],
+    })
+    server._GRAPH_CACHE.clear()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    seen = []
+
+    def fake(args, cwd=None):
+        seen.append(list(args))
+        return f"Node: {args[-1]}"
+
+    monkeypatch.setattr(server, "_run_cli", fake)
+    out = server.graphlore_explain("create")
+    assert seen[-1] == ["explain", "articles_create"]
+    framed, _, notes = out.partition("=== end repo text")
+    assert "Matched 2 nodes for 'create'" in notes and "users_create" in notes
+    assert "Matched" not in framed                  # graphlore's note is outside the frame
+    # a unique name needs no note, an id passes through, an unknown name too
+    assert "Matched" not in server.graphlore_explain("Session") and seen[-1][-1] == "only"
+    server.graphlore_explain("users_create")
+    assert seen[-1] == ["explain", "users_create"]
+    server.graphlore_explain("nothing_like_it")
+    assert seen[-1] == ["explain", "nothing_like_it"]
+    server.graphlore_path("Session", "create")
+    assert seen[-1] == ["path", "only", "articles_create"]
+    # a CLI error stays an error, unframed
+    monkeypatch.setattr(server, "_run_cli", lambda args, cwd=None: "ERROR (exit 4): no path")
+    assert server.graphlore_path("Session", "create").startswith("ERROR")
+
+
+def test_routes_package_apis_layers_and_tests_for_take_a_scope(tmp_path, monkeypatch):
+    # got: 1,354 rows, every one a route its tests register on a throwaway server
+    files = {
+        "app/web.py": "from flask import Flask\nimport requests\nfrom lib import core\n"
+                      "app = Flask(__name__)\n"
+                      "@app.route('/users')\ndef users():\n    return requests.get('x')\n",
+        "tests/test_web.py": "from flask import Flask\nimport pytest\nfrom app import web\n"
+                             "srv = Flask(__name__)\n@srv.route('/fake')\ndef test_fake():\n"
+                             "    return web.users()\n",
+        "lib/core.py": "def helper():\n    return 1\n",
+    }
+    for rel, text in files.items():
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_text(text, encoding="utf-8")
+
+    def node(nid, label, file, line):
+        return {"id": nid, "label": label, "source_file": file, "source_location": f"L{line}",
+                "file_type": "code"}
+
+    _write_graph(tmp_path, {
+        "nodes": [node("web", "web.py", "app/web.py", 1), node("users", "users()", "app/web.py", 6),
+                  node("tw", "test_web.py", "tests/test_web.py", 1),
+                  node("fake", "test_fake()", "tests/test_web.py", 6),
+                  node("core", "core.py", "lib/core.py", 1),
+                  node("helper", "helper()", "lib/core.py", 1)],
+        "edges": [{"source": "fake", "target": "users", "relation": "calls"},
+                  {"source": "web", "target": "core", "relation": "imports_from"},
+                  {"source": "tw", "target": "web", "relation": "imports_from"}],
+    })
+    server._GRAPH_CACHE.clear()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+
+    routes = json.loads(server.graphlore_routes(as_json=True))
+    assert [r["pattern"] for r in routes["routes"]] == ["/users"]   # tests left out by default
+    assert routes["scope"]["left_out"]["test_nodes"] == 2
+    assert "test" in server.graphlore_routes().rsplit("\n", 1)[-1].lower()
+    with_tests = json.loads(server.graphlore_routes(scope="+tests", as_json=True))
+    assert sorted(r["pattern"] for r in with_tests["routes"]) == ["/fake", "/users"]
+    assert json.loads(server.graphlore_routes(scope="+bogus", as_json=True))["error"]
+
+    apis = json.loads(server.graphlore_package_apis(as_json=True))
+    assert {"flask", "pytest", "requests"} <= {p["package"] for p in apis["packages"]}
+    prod = json.loads(server.graphlore_package_apis(scope="-tests", as_json=True))
+    assert "pytest" not in {p["package"] for p in prod["packages"]}
+    assert prod["scope"]["spec"] == "-tests"
+
+    rules = {"app": [], "lib": []}
+    assert json.loads(server.graphlore_layers(rules=rules, as_json=True))["violation_count"] == 1
+    only_lib = json.loads(server.graphlore_layers(rules=rules, scope="lib", as_json=True))
+    assert only_lib["violation_count"] == 0 and only_lib["scope"]["spec"] == "lib"
+
+    tf = json.loads(server.graphlore_tests_for("users", as_json=True))
+    assert [r["test"] for r in tf["direct"]] == ["test_fake()"] and "scope" in tf
+    narrowed = json.loads(server.graphlore_tests_for("users", scope="!tests", as_json=True))
+    assert narrowed["direct"] == []
+
+
+def test_rust_tests_inside_a_source_file_are_tests(tmp_path, monkeypatch):
+    # ureq: 26 of 48 source files hold `#[cfg(test)] mod tests`, which no path
+    # rule can see; tests_for listed those tests as production callers
+    _skip_without_treesitter()
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "pool.rs").write_text(
+        "pub fn acquire() -> i32 {\n"        # 1
+        "    1\n"                            # 2
+        "}\n"                                # 3
+        "mod helpers;\n"                     # 4  `mod x;` names a file: no span
+        "#[cfg(not(test))]\n"                # 5
+        "mod real {\n"                       # 6
+        "    pub fn used() { super::acquire(); }\n"   # 7
+        "}\n"                                # 8
+        "#[cfg(test)]\n"                     # 9
+        "mod tests {\n"                      # 10
+        "    use super::*;\n"                # 11
+        "    fn setup() -> i32 { acquire() }\n"   # 12
+        "    #[test]\n"                      # 13
+        "    fn it_acquires() {\n"           # 14
+        "        assert_eq!(setup(), 1);\n"  # 15
+        "    }\n"                            # 16
+        "}\n"                                # 17
+        "#[tokio::test]\n"                   # 18
+        "async fn top_level_test() { acquire(); }\n",   # 19
+        encoding="utf-8")
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    server._SPAN_CACHE.clear()
+    quals = {q for _rs, _e, _dl, q in server._spans_for_file("src/pool.rs")}
+    assert {"acquire", "real", "real.used", "tests", "tests.setup", "tests.it_acquires",
+            "top_level_test"} <= quals
+    assert "helpers" not in quals
+    from graphlore import spans
+    # the regions are the items themselves, not their attributes
+    assert spans._test_regions("src/pool.rs") == [(10, 17), (19, 19)]
+
+    def node(nid, label, line):
+        return {"id": nid, "label": label, "source_file": "src/pool.rs",
+                "source_location": f"L{line}", "file_type": "code"}
+
+    _write_graph(tmp_path, {
+        "nodes": [node("acquire", "acquire()", 1), node("used", "used()", 7),
+                  node("setup", "setup()", 12), node("it", "it_acquires()", 14),
+                  node("top", "top_level_test()", 19)],
+        "edges": [{"source": "used", "target": "acquire", "relation": "calls"},
+                  {"source": "setup", "target": "acquire", "relation": "calls"},
+                  {"source": "it", "target": "setup", "relation": "calls"},
+                  {"source": "top", "target": "acquire", "relation": "calls"}],
+    })
+    server._GRAPH_CACHE.clear()
+    tf = json.loads(server.graphlore_tests_for("acquire", as_json=True))
+    # as in any language without a naming rule, all code in a test region counts
+    assert {r["test"] for r in tf["direct"]} == {"setup()", "top_level_test()"}
+    # production callers come first, and -tests leaves the tests out
+    rows = json.loads(server.graphlore_neighbors("acquire", as_json=True))["neighbors"]
+    assert rows[0]["node"] == "used()"
+    prod = json.loads(server.graphlore_neighbors("acquire", scope="-tests", as_json=True))
+    assert [r["node"] for r in prod["neighbors"]] == ["used()"]
+
+
+def test_spans_for_wrapped_functions_and_classes_without_a_name(tmp_path, monkeypatch):
+    # express-mongoose-demo: 44 definitions written `exports.x = async(function* …)`;
+    # retrofit / kotlinpoet: anonymous classes; faraday: `Request = Struct.new(…) do`
+    _skip_without_treesitter()
+    js = _span_names(tmp_path, monkeypatch, "articles.js", (
+        "exports.create = async(function* (req, res) {\n  yield 1;\n});\n"
+        "const load = wrap(async (req) => {\n  return req;\n});\n"
+        "const all = users.map(u => u.id);\n"            # a method call: no span
+        "const later = setTimeout(() => {\n  tick();\n}, 10);\n"))   # scheduled, not wrapped
+    assert js == {"create", "load"}
+    java = _span_names(tmp_path, monkeypatch, "CallTest.java", (
+        "class CallTest {\n  void f() {\n    run(new Callback<Void>() {\n"
+        "      public void onResponse() {}\n    });\n  }\n}\n"))
+    assert {"CallTest.f.Callback<Void>", "CallTest.f.Callback<Void>.onResponse"} <= java
+    kt = _span_names(tmp_path, monkeypatch, "Suspend.kt", (
+        "class Suspend {\n  fun f() {\n    val cb = object : Callback<String> {\n"
+        "      override fun onResponse() {}\n    }\n  }\n}\n"))
+    assert "Suspend.f.Callback" in kt and "Suspend.f.Callback.onResponse" in kt
+    rb = _span_names(tmp_path, monkeypatch, "request.rb", (
+        "module Faraday\n  Request = Struct.new(:http_method, :path) do\n"
+        "    def url(path)\n      path\n    end\n  end\nend\n"))
+    assert {"Faraday", "Faraday.Request", "Faraday.Request.url"} <= rb
+    # a constant assigned a plain value is not a class
+    assert _span_names(tmp_path, monkeypatch, "c.rb", "MAX = compute(1)\n") == set()
+
+
+def test_skeleton_of_a_typedef_shows_the_name_that_closes_it(tmp_path, monkeypatch):
+    # hiredis: the header of `typedef struct { … } redisOptions;` was `typedef struct {`
+    _skip_without_treesitter()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    server._SPAN_CACHE.clear()
+    (tmp_path / "hiredis.h").write_text(
+        "typedef struct {\n  int type;\n  int options;\n} redisOptions;\n", encoding="utf-8")
+    header = dict(server._skeleton_lines("hiredis.h"))["redisOptions"]
+    assert header == ["typedef struct {", "    …", "} redisOptions;"]
+
+
+def test_unreferenced_class_used_through_its_members_and_jsdoc_tags(tmp_path, monkeypatch):
+    # RestSharp: extension classes are never named — their methods are called on
+    # the extended type. got: JSDoc `@default` / `@example` read as decorators.
+    _skip_without_treesitter()
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "BuildUriExtensions.cs").write_text(
+        "public static class BuildUriExtensions {\n"
+        "  public static Uri BuildUriWithoutQuery(this IRestClient client) { return null; }\n"
+        "}\n"
+        "public static class UnusedExtensions {\n"
+        "  public static int NobodyCallsThis(this int x) { return x; }\n"
+        "}\n", encoding="utf-8")
+    (tmp_path / "src" / "Auth.cs").write_text(
+        "class Auth { void Sign() { var u = client.BuildUriWithoutQuery(); } }\n",
+        encoding="utf-8")
+    (tmp_path / "src" / "options.ts").write_text(
+        "/**\n\tTimeout in ms.\n\n\t@default 1000\n*/\nexport function timeoutOf() {\n"
+        "  return 1;\n}\n", encoding="utf-8")
+
+    def node(nid, label, file, line):
+        return {"id": nid, "label": label, "source_file": file, "source_location": f"L{line}",
+                "file_type": "code", "_callable_class": not label.endswith("()")}
+
+    _write_graph(tmp_path, {
+        "nodes": [node("b", "BuildUriExtensions", "src/BuildUriExtensions.cs", 1),
+                  node("u", "UnusedExtensions", "src/BuildUriExtensions.cs", 4),
+                  node("a", "Auth", "src/Auth.cs", 1),
+                  node("t", "timeoutOf()", "src/options.ts", 6)],
+        "edges": [{"source": "a", "target": "a", "relation": "contains"}],
+    })
+    server._GRAPH_CACHE.clear()
+    server._SPAN_CACHE.clear()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    data = json.loads(server.graphlore_unreferenced(as_json=True))
+    listed = {r["node"] for r in data["unreferenced"]}
+    assert "UnusedExtensions" in listed and "BuildUriExtensions" not in listed
+    assert "timeoutOf()" in listed                     # `@default` registers nothing
+    assert "default" not in data["registered_by_decorator"]
+    from graphlore import review
+    found = review._unreferenced(*([server._nodes_edges(server._load_graph())[0]] * 2),
+                                 server._nodes_edges(server._load_graph())[1])
+    via = {i["name"]: i.get("used_through_members") for i in found["items"]}
+    assert via["BuildUriExtensions"] == ["BuildUriWithoutQuery"]
+
+
+# --- a graph graphify 0.9 built (tests/fixtures/polyglot) ----------------------
+
+def test_graphify_09_graph_through_the_main_tools(polyglot):
+    _skip_without_treesitter()
+    ov = json.loads(server.graphlore_overview(as_json=True))
+    assert ov["nodes"] == 43 and ov["communities"] == 7
+    gods = json.loads(server.graphlore_god_nodes(as_json=True))["god_nodes"]
+    assert all(g["type"] for g in gods)                            # file_type, not ""
+    names = {c.get("name") for c in json.loads(
+        server.graphlore_communities(as_json=True))["communities"]}
+    assert "Shop::Cart" in names                                   # community_name
+    # an enum's cases are containment: no cycle, and Mode is not "used" by them
+    assert json.loads(server.graphlore_cycles(as_json=True))["cycle_count"] == 0
+    # `import { CreateDto } from './dto'` through the index.ts barrel is kept
+    layers = json.loads(server.graphlore_layers(rules={"web/src": ["*"]}, as_json=True))
+    assert layers["rejected_import_count"] == 0
+    # the Rust test module is test code: run() is tested by runs()
+    tf = json.loads(server.graphlore_tests_for("run", as_json=True))
+    assert [r["test"] for r in tf["direct"]] == ["runs()"]
+    # every language has spans for what the graph defines
+    for key, qual in (("Shop::Line", "Shop.Line"), ("Shop::Cart", "Shop.Cart"),
+                      ("CreateDto", None), ("Stack", None), ("Fixed", None)):
+        row = json.loads(server.graphlore_fetch([key], as_json=True))["fetched"][0]
+        assert row["spanned"], key
+        assert row["qualname"] == qual, key
+    # graphify makes a node of the closure; it is not dead code
+    dead = {r["node"] for r in json.loads(
+        server.graphlore_unreferenced(as_json=True))["unreferenced"]}
+    assert "{closure#1}()" not in dead
+    # routes from two frameworks, both joined to their handler
+    routes = {(r["framework"], r["pattern"]): r["node"] for r in json.loads(
+        server.graphlore_routes(as_json=True))["routes"]}
+    assert routes[("fastapi", "/items/{item_id}")] == "read_item()"
+    assert ("express", "/items") in routes
+    # the import check reads PHP as module-level, Ruby has no import edges
+    assert json.loads(server.graphlore_validate(as_json=True))["issues"]["dangling_edges"] == 0
+
+
+def test_unreferenced_skips_anonymous_classes(tmp_path, monkeypatch):
+    # retrofit: graphify names `new TypeToken<List<String>>() {}` after its type
+    (tmp_path / "T.java").write_text(
+        "class T {\n  Type t = new TypeToken<List<String>>() {}.getType();\n}\n",
+        encoding="utf-8")
+    (tmp_path / "S.kt").write_text(
+        "val cb = object : Callback<String> {\n}\nclass Lonely\n", encoding="utf-8")
+    _write_graph(tmp_path, {"nodes": [
+        {"id": "a", "label": "TypeToken<List<String>>", "source_file": "T.java",
+         "source_location": "L2", "file_type": "code", "_callable_class": True},
+        {"id": "b", "label": "Callback", "source_file": "S.kt",
+         "source_location": "L1", "file_type": "code", "_callable_class": True},
+        {"id": "c", "label": "Lonely", "source_file": "S.kt",
+         "source_location": "L3", "file_type": "code", "_callable_class": True},
+    ], "edges": []})
+    server._GRAPH_CACHE.clear()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    rows = json.loads(server.graphlore_unreferenced(as_json=True))["unreferenced"]
+    assert [r["node"] for r in rows] == ["Lonely"]
