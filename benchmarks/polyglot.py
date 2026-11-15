@@ -913,7 +913,7 @@ def check_languages(a: Audit, sub: Subject, repo: dict[str, Any]) -> None:
     for want in repo.get("routes", []):
         if not frameworks.get(want):
             a.finding("ROUTES-EXPECTED-MISSING", "high", "gap", "routes",
-                      f"no {want} routes found in a {want} application", dict(frameworks))
+                      f"no {want} routes found in an application built on {want}", dict(frameworks))
     for row in rows:
         if not row.get("node"):
             a.finding("ROUTE-NO-NODE", "low", "gap", "routes",

@@ -1,0 +1,5033 @@
+{
+  "measured": "2026-11-14",
+  "versions": {
+    "graphlore": "0.5.1",
+    "graphify": "0.9.108",
+    "tree_sitter_language_pack": "1.25.0",
+    "semble": "0.7.3",
+    "python": "3.12.3"
+  },
+  "repos": [
+    {
+      "key": "httpx",
+      "langs": [
+        "python"
+      ],
+      "url": "https://github.com/encode/httpx",
+      "sha": "b5addb64f0161ff6bfe94c124ef76f6a1fba5254",
+      "nodes": 2339,
+      "edges": 4534,
+      "definitions": {
+        "class": 97,
+        "function": 737,
+        "method": 385
+      },
+      "definitions_by_ext": {
+        ".py": 1219
+      },
+      "span": {
+        ".py": {
+          "fetched": 60,
+          "spanned": 60,
+          "skeleton_files": 4,
+          "skeleton_symbols": 338
+        }
+      },
+      "unreferenced": {
+        "examined": 523,
+        "no_graph_reference": 183,
+        "mentioned_elsewhere": 151,
+        "unreferenced_count": 3,
+        "registered_by_decorator": {
+          "property": 22,
+          "fixture": 7
+        },
+        "rows_in_test_files": 2
+      },
+      "same_names": 0,
+      "identical_groups": 7,
+      "test_paths": {
+        ".py": {
+          "marker=0,path=0": 23,
+          "marker=0,path=1": 10,
+          "marker=1,path=1": 27
+        }
+      },
+      "imports": {
+        ".py": {
+          "module-level": 239,
+          "type-checking": 13,
+          "deferred": 1,
+          "rejected": 8
+        }
+      },
+      "package_apis": {
+        ".py": {
+          "files": 60,
+          "with_import_lines": 55,
+          "extracted": 55
+        }
+      },
+      "routes": {
+        ".py": {
+          "idiom_hits": 0,
+          "rows": 0
+        }
+      },
+      "route_frameworks": {},
+      "relations": {
+        "contains": 1326,
+        "references": 1105,
+        "calls": 600,
+        "method": 385,
+        "imports": 326,
+        "rationale_for": 301,
+        "uses": 163,
+        "indirect_call": 137,
+        "imports_from": 119,
+        "inherits": 62,
+        "defines": 8,
+        "re_exports": 2
+      },
+      "locate": {
+        "seeds": 6,
+        "qualnames": 5,
+        "in_span": 6
+      },
+      "edited_for_freshness": {
+        ".py": "httpx/_models.py"
+      }
+    },
+    {
+      "key": "fastapi-template",
+      "langs": [
+        "python",
+        "tsx"
+      ],
+      "url": "https://github.com/fastapi/full-stack-fastapi-template",
+      "sha": "aabb90126964a164e02aff39e7c385bb0598236d",
+      "nodes": 2059,
+      "edges": 4391,
+      "definitions": {
+        "class": 342,
+        "function": 370,
+        "method": 28
+      },
+      "definitions_by_ext": {
+        ".ts": 291,
+        ".py": 165,
+        ".tsx": 284
+      },
+      "span": {
+        ".py": {
+          "fetched": 60,
+          "spanned": 60,
+          "skeleton_files": 4,
+          "skeleton_symbols": 68
+        },
+        ".ts": {
+          "fetched": 60,
+          "spanned": 57,
+          "skeleton_files": 4,
+          "skeleton_symbols": 187
+        },
+        ".tsx": {
+          "fetched": 60,
+          "spanned": 59,
+          "skeleton_files": 4,
+          "skeleton_symbols": 61
+        }
+      },
+      "unreferenced": {
+        "examined": 680,
+        "no_graph_reference": 250,
+        "mentioned_elsewhere": 206,
+        "unreferenced_count": 12,
+        "registered_by_decorator": {
+          "post": 10,
+          "fixture": 4,
+          "get": 4,
+          "delete": 3,
+          "patch": 3,
+          "command": 3,
+          "model_validator": 2,
+          "computed_field": 1,
+          "put": 1,
+          "field_validator": 1
+        },
+        "rows_in_test_files": 2
+      },
+      "same_names": 20,
+      "identical_groups": 1,
+      "test_paths": {
+        ".py": {
+          "marker=0,path=0": 28,
+          "marker=0,path=1": 12,
+          "marker=1,path=1": 3
+        },
+        ".ts": {
+          "marker=0,path=0": 27,
+          "marker=1,path=1": 6,
+          "marker=0,path=1": 6
+        },
+        ".tsx": {
+          "marker=0,path=0": 69,
+          "marker=0,path=1": 1
+        }
+      },
+      "imports": {
+        ".ts": {
+          "module-level": 140,
+          "type-checking": 243,
+          "rejected_manifest": 25
+        },
+        ".py": {
+          "unclassified": 7,
+          "module-level": 170
+        },
+        ".tsx": {
+          "module-level": 596,
+          "type-checking": 16,
+          "rejected_manifest": 128
+        }
+      },
+      "package_apis": {
+        ".py": {
+          "files": 43,
+          "with_import_lines": 33,
+          "extracted": 32
+        },
+        ".ts": {
+          "files": 39,
+          "with_import_lines": 30,
+          "extracted": 21
+        },
+        ".tsx": {
+          "files": 70,
+          "with_import_lines": 70,
+          "extracted": 65
+        }
+      },
+      "routes": {
+        ".py": {
+          "idiom_hits": 23,
+          "rows": 23
+        },
+        ".ts": {
+          "idiom_hits": 0,
+          "rows": 0
+        }
+      },
+      "route_frameworks": {
+        "fastapi": 23
+      },
+      "relations": {
+        "contains": 1649,
+        "imports": 735,
+        "calls": 710,
+        "imports_from": 653,
+        "references": 292,
+        "re_exports": 158,
+        "uses": 57,
+        "declares": 54,
+        "method": 28,
+        "inherits": 26,
+        "indirect_call": 14,
+        "rationale_for": 13,
+        "extends": 2
+      },
+      "locate": {
+        "seeds": 6,
+        "qualnames": 5,
+        "in_span": 6
+      },
+      "edited_for_freshness": {
+        ".py": "backend/app/models.py",
+        ".ts": "frontend/src/hooks/useAuth.ts",
+        ".tsx": "frontend/src/components/ui/button.tsx"
+      }
+    },
+    {
+      "key": "express",
+      "langs": [
+        "javascript"
+      ],
+      "url": "https://github.com/expressjs/express",
+      "sha": "43fca52d28a422c8be48fd489cbd4f2d6152bab6",
+      "nodes": 707,
+      "edges": 1122,
+      "definitions": {
+        "function": 115,
+        "method": 49,
+        "class": 6
+      },
+      "definitions_by_ext": {
+        ".js": 170
+      },
+      "span": {
+        ".js": {
+          "fetched": 60,
+          "spanned": 59,
+          "shadow_span": 5,
+          "skeleton_files": 4,
+          "skeleton_symbols": 84
+        }
+      },
+      "unreferenced": {
+        "examined": 168,
+        "no_graph_reference": 66,
+        "mentioned_elsewhere": 66,
+        "unreferenced_count": 0,
+        "registered_by_decorator": {},
+        "rows_in_test_files": 0
+      },
+      "same_names": 8,
+      "identical_groups": 0,
+      "test_paths": {
+        ".js": {
+          "marker=0,path=0": 50,
+          "marker=1,path=1": 89,
+          "marker=0,path=1": 3
+        }
+      },
+      "imports": {
+        ".js": {
+          "module-level": 170,
+          "rejected_manifest": 146
+        }
+      },
+      "package_apis": {
+        ".js": {
+          "files": 142,
+          "with_import_lines": 132,
+          "extracted": 119
+        }
+      },
+      "routes": {
+        ".js": {
+          "idiom_hits": 61,
+          "rows": 0
+        }
+      },
+      "route_frameworks": {},
+      "relations": {
+        "contains": 403,
+        "imports_from": 383,
+        "calls": 69,
+        "imports": 64,
+        "method": 49,
+        "indirect_call": 46,
+        "declares": 44,
+        "references": 42,
+        "includes": 16,
+        "re_exports": 3,
+        "rationale_for": 2,
+        "cites": 1
+      },
+      "locate": {
+        "seeds": 6,
+        "qualnames": 6,
+        "in_span": 6
+      },
+      "edited_for_freshness": {
+        ".js": "lib/response.js"
+      }
+    },
+    {
+      "key": "express-mongoose-demo",
+      "langs": [
+        "javascript"
+      ],
+      "url": "https://github.com/madhums/node-express-mongoose-demo",
+      "sha": "8a134ab5deeef553d6de51d91d4ed8ee378acace",
+      "nodes": 372,
+      "edges": 482,
+      "definitions": {
+        "function": 68,
+        "method": 1,
+        "class": 69
+      },
+      "definitions_by_ext": {
+        ".js": 96
+      },
+      "span": {
+        ".js": {
+          "fetched": 60,
+          "spanned": 16,
+          "skeleton_files": 4,
+          "skeleton_symbols": 13
+        }
+      },
+      "unreferenced": {
+        "examined": 94,
+        "no_graph_reference": 85,
+        "mentioned_elsewhere": 85,
+        "unreferenced_count": 0,
+        "registered_by_decorator": {},
+        "rows_in_test_files": 0
+      },
+      "same_names": 9,
+      "identical_groups": 0,
+      "test_paths": {
+        ".js": {
+          "marker=0,path=0": 25,
+          "marker=0,path=1": 1,
+          "marker=1,path=1": 2
+        }
+      },
+      "imports": {
+        ".js": {
+          "module-level": 46,
+          "rejected_manifest": 35
+        }
+      },
+      "package_apis": {
+        ".js": {
+          "files": 28,
+          "with_import_lines": 21,
+          "extracted": 20
+        }
+      },
+      "routes": {
+        ".js": {
+          "idiom_hits": 26,
+          "rows": 0
+        }
+      },
+      "route_frameworks": {},
+      "relations": {
+        "contains": 279,
+        "imports_from": 80,
+        "imports": 46,
+        "declares": 42,
+        "calls": 22,
+        "indirect_call": 8,
+        "defines": 4,
+        "method": 1
+      },
+      "locate": {
+        "seeds": 4,
+        "qualnames": 2,
+        "in_span": 2
+      },
+      "edited_for_freshness": {
+        ".js": "app/controllers/articles.js"
+      }
+    },
+    {
+      "key": "got",
+      "langs": [
+        "typescript"
+      ],
+      "url": "https://github.com/sindresorhus/got",
+      "sha": "6b5aafc1cd538998728be6f45c65b0f80bae01b2",
+      "nodes": 1713,
+      "edges": 3833,
+      "definitions": {
+        "class": 364,
+        "method": 233,
+        "function": 419
+      },
+      "definitions_by_ext": {
+        ".ts": 984,
+        ".js": 32
+      },
+      "span": {
+        ".js": {
+          "fetched": 32,
+          "spanned": 16,
+          "skeleton_files": 4,
+          "skeleton_symbols": 16
+        },
+        ".ts": {
+          "fetched": 60,
+          "spanned": 58,
+          "skeleton_files": 4,
+          "skeleton_symbols": 542
+        }
+      },
+      "unreferenced": {
+        "examined": 1010,
+        "no_graph_reference": 494,
+        "mentioned_elsewhere": 467,
+        "unreferenced_count": 18,
+        "registered_by_decorator": {
+          "asyncIterator": 3,
+          "iterator": 2,
+          "default": 2,
+          "example": 1,
+          "for": 1
+        },
+        "rows_in_test_files": 11
+      },
+      "same_names": 8,
+      "identical_groups": 0,
+      "test_paths": {
+        ".ts": {
+          "marker=0,path=0": 27,
+          "marker=1,path=1": 43,
+          "marker=0,path=1": 22
+        },
+        ".js": {
+          "marker=0,path=0": 6
+        }
+      },
+      "imports": {
+        ".ts": {
+          "module-level": 685,
+          "type-checking": 108,
+          "deferred": 4,
+          "rejected_manifest": 134
+        },
+        ".js": {
+          "rejected_manifest": 1
+        }
+      },
+      "package_apis": {
+        ".ts": {
+          "files": 92,
+          "with_import_lines": 85,
+          "extracted": 83
+        },
+        ".js": {
+          "files": 6,
+          "with_import_lines": 6,
+          "extracted": 6
+        }
+      },
+      "routes": {
+        ".ts": {
+          "idiom_hits": 2,
+          "rows": 1354
+        },
+        ".js": {
+          "idiom_hits": 0,
+          "rows": 0
+        }
+      },
+      "route_frameworks": {
+        "express": 1354
+      },
+      "relations": {
+        "contains": 1198,
+        "imports_from": 718,
+        "calls": 620,
+        "imports": 530,
+        "references": 331,
+        "method": 232,
+        "indirect_call": 94,
+        "declares": 45,
+        "re_exports": 23,
+        "cites": 20,
+        "inherits": 14,
+        "rationale_for": 5,
+        "implements": 2,
+        "extends": 1
+      },
+      "locate": {
+        "seeds": 6,
+        "qualnames": 5,
+        "in_span": 6
+      },
+      "edited_for_freshness": {
+        ".js": "documentation/examples/uppercase-headers.js",
+        ".ts": "source/core/options.ts"
+      }
+    },
+    {
+      "key": "nestjs-realworld",
+      "langs": [
+        "typescript"
+      ],
+      "url": "https://github.com/lujakob/nestjs-realworld-example-app",
+      "sha": "c1c2cc4e448b279ff083272df1ac50d20c3304fa",
+      "nodes": 340,
+      "edges": 688,
+      "definitions": {
+        "class": 39,
+        "method": 70,
+        "function": 1
+      },
+      "definitions_by_ext": {
+        ".ts": 110
+      },
+      "span": {
+        ".ts": {
+          "fetched": 60,
+          "spanned": 59,
+          "skeleton_files": 4,
+          "skeleton_symbols": 45
+        }
+      },
+      "unreferenced": {
+        "examined": 110,
+        "no_graph_reference": 49,
+        "mentioned_elsewhere": 8,
+        "unreferenced_count": 14,
+        "registered_by_decorator": {
+          "ApiResponse": 8,
+          "Get": 6,
+          "InjectRepository": 4,
+          "UsePipes": 2,
+          "Delete": 2,
+          "Put": 1,
+          "BeforeInsert": 1,
+          "ApiOperation": 1,
+          "BeforeUpdate": 1,
+          "Post": 1
+        },
+        "rows_in_test_files": 0
+      },
+      "same_names": 1,
+      "identical_groups": 0,
+      "test_paths": {
+        ".js": {
+          "marker=0,path=0": 1
+        },
+        ".ts": {
+          "marker=0,path=0": 34,
+          "marker=1,path=1": 1
+        }
+      },
+      "imports": {
+        ".ts": {
+          "module-level": 148,
+          "rejected_manifest": 58
+        }
+      },
+      "package_apis": {
+        ".js": {
+          "files": 1,
+          "with_import_lines": 1,
+          "extracted": 1
+        },
+        ".ts": {
+          "files": 35,
+          "with_import_lines": 28,
+          "extracted": 27
+        }
+      },
+      "routes": {
+        ".js": {
+          "idiom_hits": 0,
+          "rows": 0
+        },
+        ".ts": {
+          "idiom_hits": 21,
+          "rows": 21
+        }
+      },
+      "route_frameworks": {
+        "nestjs": 21
+      },
+      "relations": {
+        "references": 187,
+        "imports_from": 129,
+        "contains": 120,
+        "imports": 107,
+        "method": 70,
+        "calls": 33,
+        "declares": 32,
+        "re_exports": 10
+      },
+      "locate": {
+        "seeds": 6,
+        "qualnames": 3,
+        "in_span": 6
+      },
+      "edited_for_freshness": {
+        ".ts": "src/user/user.entity.ts"
+      }
+    },
+    {
+      "key": "resty",
+      "langs": [
+        "go"
+      ],
+      "url": "https://github.com/go-resty/resty",
+      "sha": "716987e2b60ffe0e55e6ede191b5c7854b5fba5a",
+      "nodes": 1614,
+      "edges": 5699,
+      "definitions": {
+        "class": 123,
+        "function": 732,
+        "method": 507
+      },
+      "definitions_by_ext": {
+        ".go": 1362
+      },
+      "span": {
+        ".go": {
+          "fetched": 60,
+          "spanned": 60,
+          "skeleton_files": 4,
+          "skeleton_symbols": 485
+        }
+      },
+      "unreferenced": {
+        "examined": 809,
+        "no_graph_reference": 376,
+        "mentioned_elsewhere": 374,
+        "unreferenced_count": 2,
+        "registered_by_decorator": {},
+        "rows_in_test_files": 2
+      },
+      "same_names": 1,
+      "identical_groups": 1,
+      "test_paths": {
+        ".go": {
+          "marker=1,path=1": 21,
+          "marker=0,path=0": 21
+        }
+      },
+      "imports": {},
+      "package_apis": {
+        ".go": {
+          "files": 42,
+          "with_import_lines": 42,
+          "extracted": 42
+        }
+      },
+      "routes": {
+        ".go": {
+          "idiom_hits": 1,
+          "rows": 2
+        }
+      },
+      "route_frameworks": {
+        "net-http": 2
+      },
+      "relations": {
+        "calls": 2609,
+        "references": 1136,
+        "contains": 948,
+        "method": 507,
+        "imports_from": 450,
+        "dispatches_to": 40,
+        "embeds": 8,
+        "indirect_call": 1
+      },
+      "locate": {
+        "seeds": 6,
+        "qualnames": 5,
+        "in_span": 6
+      },
+      "edited_for_freshness": {
+        ".go": "client.go"
+      }
+    },
+    {
+      "key": "chi",
+      "langs": [
+        "go"
+      ],
+      "url": "https://github.com/go-chi/chi",
+      "sha": "c64ed7d6635f33a8b2feaff7dcfa55677023ac7d",
+      "nodes": 816,
+      "edges": 2973,
+      "definitions": {
+        "class": 60,
+        "function": 295,
+        "method": 169
+      },
+      "definitions_by_ext": {
+        ".go": 524
+      },
+      "span": {
+        ".go": {
+          "fetched": 60,
+          "spanned": 60,
+          "skeleton_files": 4,
+          "skeleton_symbols": 151
+        }
+      },
+      "unreferenced": {
+        "examined": 369,
+        "no_graph_reference": 148,
+        "mentioned_elsewhere": 143,
+        "unreferenced_count": 5,
+        "registered_by_decorator": {},
+        "rows_in_test_files": 0
+      },
+      "same_names": 3,
+      "identical_groups": 2,
+      "test_paths": {
+        ".go": {
+          "marker=0,path=0": 55,
+          "marker=1,path=1": 35
+        }
+      },
+      "imports": {
+        ".go": {
+          "module-level": 943
+        }
+      },
+      "package_apis": {
+        ".go": {
+          "files": 90,
+          "with_import_lines": 88,
+          "extracted": 88
+        }
+      },
+      "routes": {
+        ".go": {
+          "idiom_hits": 60,
+          "rows": 252
+        }
+      },
+      "route_frameworks": {
+        "chi": 120,
+        "net-http": 132
+      },
+      "relations": {
+        "imports_from": 1280,
+        "references": 531,
+        "calls": 485,
+        "contains": 460,
+        "method": 169,
+        "embeds": 20,
+        "dispatches_to": 13,
+        "indirect_call": 13,
+        "depends_on": 2
+      },
+      "locate": {
+        "seeds": 6,
+        "qualnames": 3,
+        "in_span": 4
+      },
+      "edited_for_freshness": {
+        ".go": "chi.go"
+      }
+    },
+    {
+      "key": "gin-examples",
+      "langs": [
+        "go"
+      ],
+      "url": "https://github.com/gin-gonic/examples",
+      "sha": "2661f002ee5de912f23b03ec293c8ab741170d5e",
+      "nodes": 720,
+      "edges": 1170,
+      "definitions": {
+        "class": 19,
+        "function": 126,
+        "method": 132
+      },
+      "definitions_by_ext": {
+        ".go": 162,
+        ".js": 11
+      },
+      "span": {
+        ".go": {
+          "fetched": 60,
+          "spanned": 60,
+          "skeleton_files": 4,
+          "skeleton_symbols": 55
+        },
+        ".js": {
+          "fetched": 11,
+          "spanned": 11,
+          "skeleton_files": 1,
+          "skeleton_symbols": 11
+        }
+      },
+      "unreferenced": {
+        "examined": 167,
+        "no_graph_reference": 92,
+        "mentioned_elsewhere": 83,
+        "unreferenced_count": 9,
+        "registered_by_decorator": {},
+        "rows_in_test_files": 0
+      },
+      "same_names": 5,
+      "identical_groups": 0,
+      "test_paths": {
+        ".go": {
+          "marker=0,path=0": 53,
+          "marker=1,path=1": 4
+        },
+        ".js": {
+          "marker=0,path=0": 2
+        }
+      },
+      "imports": {
+        ".go": {
+          "module-level": 7
+        }
+      },
+      "package_apis": {
+        ".go": {
+          "files": 57,
+          "with_import_lines": 57,
+          "extracted": 57
+        },
+        ".js": {
+          "files": 2,
+          "with_import_lines": 0,
+          "extracted": 0
+        }
+      },
+      "routes": {
+        ".go": {
+          "idiom_hits": 65,
+          "rows": 66
+        },
+        ".js": {
+          "idiom_hits": 0,
+          "rows": 0
+        }
+      },
+      "route_frameworks": {
+        "gin": 66
+      },
+      "relations": {
+        "contains": 396,
+        "imports_from": 261,
+        "calls": 255,
+        "method": 131,
+        "references": 112,
+        "indirect_call": 8,
+        "dispatches_to": 6,
+        "embeds": 1
+      },
+      "locate": {
+        "seeds": 6,
+        "qualnames": 6,
+        "in_span": 6
+      },
+      "edited_for_freshness": {
+        ".go": "grpc/example1/gen/helloworld/v1/helloworld.pb.go",
+        ".js": "realtime-advanced/resources/static/realtime.js"
+      }
+    },
+    {
+      "key": "retrofit",
+      "langs": [
+        "java"
+      ],
+      "url": "https://github.com/square/retrofit",
+      "sha": "7b6300dda7067085b51aa85dea7ffe951cc520d5",
+      "nodes": 5306,
+      "edges": 16635,
+      "definitions": {
+        "class": 1019,
+        "method": 2578,
+        "function": 417
+      },
+      "definitions_by_ext": {
+        ".java": 3452,
+        ".kt": 148,
+        ".js": 77,
+        ".mjs": 1,
+        ".ts": 1
+      },
+      "span": {
+        ".java": {
+          "fetched": 60,
+          "spanned": 60,
+          "enclosing_span": 1,
+          "skeleton_files": 4,
+          "skeleton_symbols": 859
+        },
+        ".js": {
+          "fetched": 60,
+          "spanned": 60,
+          "skeleton_files": 4,
+          "skeleton_symbols": 34
+        },
+        ".kt": {
+          "fetched": 60,
+          "spanned": 60,
+          "enclosing_span": 4,
+          "skeleton_files": 4,
+          "skeleton_symbols": 76
+        },
+        ".mjs": {
+          "fetched": 1,
+          "skeleton_files": 1,
+          "skeleton_empty": 1
+        },
+        ".ts": {
+          "fetched": 1,
+          "skeleton_files": 1,
+          "skeleton_empty": 1
+        }
+      },
+      "unreferenced": {
+        "examined": 3274,
+        "no_graph_reference": 2638,
+        "mentioned_elsewhere": 1143,
+        "unreferenced_count": 60,
+        "registered_by_decorator": {
+          "Test": 1184,
+          "GET": 178,
+          "POST": 43,
+          "Ignore": 12,
+          "IgnoreJRERequirement": 3,
+          "Before": 3,
+          "FromJson": 3,
+          "TargetApi": 2,
+          "HEAD": 2,
+          "interface": 1,
+          "Target": 1,
+          "Documented": 1,
+          "Retention": 1,
+          "ToJson": 1
+        },
+        "rows_in_test_files": 12
+      },
+      "same_names": 14,
+      "identical_groups": 36,
+      "test_paths": {
+        ".java": {
+          "marker=0,path=0": 171,
+          "marker=1,path=1": 102,
+          "marker=0,path=1": 34
+        },
+        ".kt": {
+          "marker=0,path=0": 8,
+          "marker=1,path=1": 8
+        },
+        ".js": {
+          "marker=0,path=0": 30
+        },
+        ".ts": {
+          "marker=0,path=0": 1
+        }
+      },
+      "imports": {
+        ".java": {
+          "module-level": 833
+        },
+        ".kt": {
+          "module-level": 48
+        },
+        ".ts": {
+          "rejected_manifest": 1
+        },
+        ".mjs": {
+          "rejected_manifest": 3
+        }
+      },
+      "package_apis": {
+        ".java": {
+          "files": 307,
+          "with_import_lines": 281,
+          "extracted": 281
+        },
+        ".kt": {
+          "files": 16,
+          "with_import_lines": 15,
+          "extracted": 0
+        },
+        ".mjs": {
+          "files": 1,
+          "with_import_lines": 0,
+          "extracted": 1
+        },
+        ".js": {
+          "files": 30,
+          "with_import_lines": 0,
+          "extracted": 0
+        },
+        ".ts": {
+          "files": 1,
+          "with_import_lines": 1,
+          "extracted": 1
+        }
+      },
+      "routes": {
+        ".java": {
+          "idiom_hits": 0,
+          "rows": 0
+        },
+        ".kt": {
+          "idiom_hits": 0,
+          "rows": 0
+        },
+        ".js": {
+          "idiom_hits": 0,
+          "rows": 0
+        },
+        ".ts": {
+          "idiom_hits": 0,
+          "rows": 0
+        }
+      },
+      "route_frameworks": {},
+      "relations": {
+        "references": 4711,
+        "calls": 3548,
+        "imports": 3408,
+        "method": 2578,
+        "contains": 1596,
+        "indirect_call": 539,
+        "implements": 134,
+        "inherits": 101,
+        "imports_from": 8,
+        "declares": 5,
+        "case_of": 4,
+        "defines": 2,
+        "extends": 1
+      },
+      "locate": {
+        "seeds": 6,
+        "qualnames": 5,
+        "in_span": 6
+      },
+      "edited_for_freshness": {
+        ".java": "retrofit/src/main/java/retrofit2/Call.java",
+        ".js": "website/public/2.x/converter-kotlinx-serialization/scripts/platform-content-handler.js",
+        ".kt": "retrofit-converters/kotlinx-serialization/src/main/java/retrofit2/converter/kotlinx/serialization/Serializer.kt"
+      }
+    },
+    {
+      "key": "spring-petclinic",
+      "langs": [
+        "java"
+      ],
+      "url": "https://github.com/spring-projects/spring-petclinic",
+      "sha": "500158f732419217507c7656904b8e6aa1bcc0d6",
+      "nodes": 697,
+      "edges": 1560,
+      "definitions": {
+        "class": 53,
+        "method": 192
+      },
+      "definitions_by_ext": {
+        ".java": 245
+      },
+      "span": {
+        ".java": {
+          "fetched": 60,
+          "spanned": 60,
+          "skeleton_files": 4,
+          "skeleton_symbols": 65
+        }
+      },
+      "unreferenced": {
+        "examined": 213,
+        "no_graph_reference": 130,
+        "mentioned_elsewhere": 6,
+        "unreferenced_count": 7,
+        "registered_by_decorator": {
+          "Test": 80,
+          "GetMapping": 11,
+          "ModelAttribute": 6,
+          "PostMapping": 5,
+          "InitBinder": 4,
+          "Nested": 3,
+          "Configuration": 3,
+          "Bean": 2,
+          "ServiceConnection": 1,
+          "BeforeEach": 1,
+          "BeforeAll": 1
+        },
+        "rows_in_test_files": 1
+      },
+      "same_names": 0,
+      "identical_groups": 1,
+      "test_paths": {
+        ".java": {
+          "marker=0,path=0": 30,
+          "marker=1,path=1": 18,
+          "marker=0,path=1": 2
+        }
+      },
+      "imports": {
+        ".java": {
+          "module-level": 33
+        }
+      },
+      "package_apis": {
+        ".java": {
+          "files": 50,
+          "with_import_lines": 45,
+          "extracted": 45
+        }
+      },
+      "routes": {
+        ".java": {
+          "idiom_hits": 19,
+          "rows": 17
+        }
+      },
+      "route_frameworks": {
+        "spring": 17
+      },
+      "relations": {
+        "imports": 484,
+        "references": 371,
+        "calls": 255,
+        "contains": 232,
+        "method": 192,
+        "inherits": 11,
+        "defines": 10,
+        "implements": 5
+      },
+      "locate": {
+        "seeds": 6,
+        "qualnames": 4,
+        "in_span": 6
+      },
+      "edited_for_freshness": {
+        ".java": "src/main/java/org/springframework/samples/petclinic/owner/Owner.java"
+      }
+    },
+    {
+      "key": "kotlinpoet",
+      "langs": [
+        "kotlin"
+      ],
+      "url": "https://github.com/square/kotlinpoet",
+      "sha": "5a120729f764333857b522523c12a8f4bd1dd3fc",
+      "nodes": 3236,
+      "edges": 8169,
+      "definitions": {
+        "class": 304,
+        "method": 1531,
+        "function": 200
+      },
+      "definitions_by_ext": {
+        ".kt": 2009,
+        ".java": 25,
+        ".kts": 1
+      },
+      "span": {
+        ".java": {
+          "fetched": 25,
+          "spanned": 25,
+          "skeleton_files": 3,
+          "skeleton_symbols": 26
+        },
+        ".kt": {
+          "fetched": 60,
+          "spanned": 60,
+          "skeleton_files": 4,
+          "skeleton_symbols": 641
+        },
+        ".kts": {
+          "fetched": 1,
+          "spanned": 1,
+          "skeleton_files": 1,
+          "skeleton_symbols": 1
+        }
+      },
+      "unreferenced": {
+        "examined": 1939,
+        "no_graph_reference": 1516,
+        "mentioned_elsewhere": 408,
+        "unreferenced_count": 44,
+        "registered_by_decorator": {
+          "Test": 998,
+          "IgnoreForHandlerType": 25,
+          "Ignore": 6,
+          "ExperimentalKotlinPoetApi": 6,
+          "Target": 3,
+          "Retention": 3,
+          "Synchronized": 3,
+          "Parameters": 3,
+          "JvmSynthetic": 3,
+          "DelicateKotlinPoetApi": 3,
+          "AnnotationWithArrayValue": 2,
+          "JvmDefaultWithCompatibility": 2,
+          "SourceCustomClassAnnotation": 1,
+          "HasSomeAnnotation": 1,
+          "JvmInline": 1,
+          "Inherited": 1,
+          "HasDefaultsAnnotation": 1,
+          "FunctionAnnotation": 1,
+          "FieldAnnotation": 1
+        },
+        "rows_in_test_files": 22
+      },
+      "same_names": 15,
+      "identical_groups": 0,
+      "test_paths": {
+        ".kt": {
+          "marker=0,path=0": 60,
+          "marker=0,path=1": 24,
+          "marker=1,path=1": 42
+        },
+        ".java": {
+          "marker=0,path=1": 2,
+          "marker=1,path=1": 1
+        }
+      },
+      "imports": {
+        ".kt": {
+          "module-level": 195
+        }
+      },
+      "package_apis": {
+        ".kts": {
+          "files": 6,
+          "with_import_lines": 2,
+          "extracted": 0
+        },
+        ".kt": {
+          "files": 126,
+          "with_import_lines": 107,
+          "extracted": 0
+        },
+        ".java": {
+          "files": 3,
+          "with_import_lines": 2,
+          "extracted": 2
+        }
+      },
+      "routes": {
+        ".kt": {
+          "idiom_hits": 0,
+          "rows": 0
+        },
+        ".java": {
+          "idiom_hits": 0,
+          "rows": 0
+        }
+      },
+      "route_frameworks": {},
+      "relations": {
+        "references": 2241,
+        "calls": 2241,
+        "method": 1531,
+        "imports": 1269,
+        "contains": 706,
+        "case_of": 103,
+        "implements": 54,
+        "inherits": 22,
+        "defines": 2
+      },
+      "locate": {
+        "seeds": 6,
+        "qualnames": 3,
+        "in_span": 6
+      },
+      "edited_for_freshness": {
+        ".kt": "kotlinpoet/src/jvmMain/kotlin/com/squareup/kotlinpoet/FunSpec.kt",
+        ".kts": "build.gradle.kts"
+      }
+    },
+    {
+      "key": "requests-scala",
+      "langs": [
+        "scala"
+      ],
+      "url": "https://github.com/com-lihaoyi/requests-scala",
+      "sha": "e3619c19ef551067d2979ced99b434d45bb60986",
+      "nodes": 338,
+      "edges": 505,
+      "definitions": {
+        "class": 43,
+        "method": 83,
+        "function": 18
+      },
+      "definitions_by_ext": {
+        ".scala": 144
+      },
+      "span": {
+        ".scala": {
+          "fetched": 60,
+          "spanned": 60,
+          "skeleton_files": 4,
+          "skeleton_symbols": 138
+        }
+      },
+      "unreferenced": {
+        "examined": 140,
+        "no_graph_reference": 108,
+        "mentioned_elsewhere": 89,
+        "unreferenced_count": 19,
+        "registered_by_decorator": {},
+        "rows_in_test_files": 1
+      },
+      "same_names": 0,
+      "identical_groups": 0,
+      "test_paths": {
+        ".scala": {
+          "marker=0,path=0": 7,
+          "marker=1,path=1": 5,
+          "marker=0,path=1": 2
+        }
+      },
+      "imports": {},
+      "package_apis": {
+        ".scala": {
+          "files": 14,
+          "with_import_lines": 12,
+          "extracted": 0
+        }
+      },
+      "routes": {
+        ".scala": {
+          "idiom_hits": 0,
+          "rows": 0
+        }
+      },
+      "route_frameworks": {},
+      "relations": {
+        "references": 190,
+        "contains": 155,
+        "method": 83,
+        "imports": 32,
+        "calls": 22,
+        "inherits": 19,
+        "defines": 3,
+        "mixes_in": 1
+      },
+      "locate": {
+        "seeds": 6,
+        "qualnames": 5,
+        "in_span": 6
+      },
+      "edited_for_freshness": {
+        ".scala": "requests/src/requests/Model.scala"
+      }
+    },
+    {
+      "key": "restsharp",
+      "langs": [
+        "csharp"
+      ],
+      "url": "https://github.com/restsharp/RestSharp",
+      "sha": "466e5f8782bd52f98df829f63a83b45fdb8472ae",
+      "nodes": 4025,
+      "edges": 9328,
+      "definitions": {
+        "class": 400,
+        "function": 1173,
+        "method": 3
+      },
+      "definitions_by_ext": {
+        ".cs": 1568,
+        ".tsx": 6,
+        ".ts": 2
+      },
+      "span": {
+        ".cs": {
+          "fetched": 60,
+          "spanned": 60,
+          "skeleton_files": 4,
+          "skeleton_symbols": 218
+        },
+        ".ts": {
+          "fetched": 2,
+          "skeleton_files": 2,
+          "skeleton_empty": 2
+        },
+        ".tsx": {
+          "fetched": 6,
+          "spanned": 5,
+          "skeleton_files": 2,
+          "skeleton_symbols": 5
+        }
+      },
+      "unreferenced": {
+        "examined": 1341,
+        "no_graph_reference": 794,
+        "mentioned_elsewhere": 236,
+        "unreferenced_count": 48,
+        "registered_by_decorator": {
+          "Fact": 447,
+          "Theory": 23,
+          "PublicAPI": 13,
+          "GeneratedRegex": 12,
+          "Benchmark": 3,
+          "XmlRoot": 2,
+          "MemoryDiagnoser": 2,
+          "Generator": 2,
+          "GlobalSetup": 2,
+          "SerializeAs": 1,
+          "EditorBrowsable": 1,
+          "UsedImplicitly": 1,
+          "CLSCompliant": 1
+        },
+        "rows_in_test_files": 26
+      },
+      "same_names": 2,
+      "identical_groups": 0,
+      "test_paths": {
+        ".cs": {
+          "marker=0,path=0": 135,
+          "marker=0,path=1": 52,
+          "marker=1,path=1": 70
+        },
+        ".js": {
+          "marker=0,path=0": 1
+        },
+        ".ts": {
+          "marker=0,path=0": 2
+        },
+        ".tsx": {
+          "marker=0,path=0": 2
+        }
+      },
+      "imports": {
+        ".cs": {
+          "module-level": 132
+        },
+        ".csproj": {
+          "unclassified": 24
+        },
+        ".ts": {
+          "rejected_manifest": 3
+        },
+        ".tsx": {
+          "rejected_manifest": 2
+        }
+      },
+      "package_apis": {
+        ".cs": {
+          "files": 257,
+          "with_import_lines": 120,
+          "extracted": 0
+        },
+        ".js": {
+          "files": 1,
+          "with_import_lines": 0,
+          "extracted": 0
+        },
+        ".ts": {
+          "files": 2,
+          "with_import_lines": 2,
+          "extracted": 2
+        },
+        ".tsx": {
+          "files": 2,
+          "with_import_lines": 2,
+          "extracted": 2
+        }
+      },
+      "routes": {
+        ".cs": {
+          "idiom_hits": 0,
+          "rows": 0
+        },
+        ".js": {
+          "idiom_hits": 0,
+          "rows": 0
+        },
+        ".ts": {
+          "idiom_hits": 0,
+          "rows": 0
+        }
+      },
+      "route_frameworks": {},
+      "relations": {
+        "references": 3009,
+        "calls": 2161,
+        "contains": 1631,
+        "method": 1171,
+        "defines": 712,
+        "imports": 367,
+        "implements": 94,
+        "case_of": 82,
+        "inherits": 55,
+        "dispatches_to": 19,
+        "imports_from": 14,
+        "declares": 12,
+        "extends": 1
+      },
+      "locate": {
+        "seeds": 6,
+        "qualnames": 4,
+        "in_span": 6
+      },
+      "edited_for_freshness": {
+        ".cs": "src/RestSharp/Request/RestRequest.cs",
+        ".tsx": "docs/src/components/HomepageFeatures/index.tsx"
+      }
+    },
+    {
+      "key": "ureq",
+      "langs": [
+        "rust"
+      ],
+      "url": "https://github.com/algesten/ureq",
+      "sha": "51bb001154f44cfab69653a74f7d45fbe1995b22",
+      "nodes": 1992,
+      "edges": 4375,
+      "definitions": {
+        "class": 203,
+        "method": 672,
+        "function": 340
+      },
+      "definitions_by_ext": {
+        ".rs": 1215
+      },
+      "span": {
+        ".rs": {
+          "fetched": 60,
+          "spanned": 58,
+          "skeleton_files": 4,
+          "skeleton_symbols": 310
+        }
+      },
+      "unreferenced": {
+        "examined": 1212,
+        "no_graph_reference": 735,
+        "mentioned_elsewhere": 497,
+        "unreferenced_count": 14,
+        "registered_by_decorator": {
+          "test": 224
+        },
+        "rows_in_test_files": 0
+      },
+      "same_names": 5,
+      "identical_groups": 3,
+      "test_paths": {
+        ".rs": {
+          "marker=0,path=0": 17,
+          "marker=1,path=0": 26,
+          "marker=1,path=1": 4,
+          "marker=0,path=1": 1
+        }
+      },
+      "imports": {
+        ".rs": {
+          "module-level": 407
+        }
+      },
+      "package_apis": {
+        ".rs": {
+          "files": 48,
+          "with_import_lines": 46,
+          "extracted": 0
+        }
+      },
+      "routes": {
+        ".rs": {
+          "idiom_hits": 0,
+          "rows": 0
+        }
+      },
+      "route_frameworks": {},
+      "relations": {
+        "references": 1140,
+        "calls": 794,
+        "contains": 767,
+        "imports_from": 754,
+        "method": 672,
+        "implements": 124,
+        "case_of": 122,
+        "inherits": 2
+      },
+      "locate": {
+        "seeds": 5,
+        "qualnames": 4,
+        "in_span": 5
+      },
+      "edited_for_freshness": {
+        ".rs": "src/config.rs"
+      }
+    },
+    {
+      "key": "alamofire",
+      "langs": [
+        "swift"
+      ],
+      "url": "https://github.com/Alamofire/Alamofire",
+      "sha": "dea4bab91767a971d6e112bc955c6a82295589b7",
+      "nodes": 4336,
+      "edges": 9959,
+      "definitions": {
+        "class": 461,
+        "method": 1581,
+        "function": 234
+      },
+      "definitions_by_ext": {
+        ".swift": 2058,
+        ".js": 112
+      },
+      "span": {
+        ".js": {
+          "fetched": 60,
+          "spanned": 60,
+          "skeleton_files": 4,
+          "skeleton_symbols": 434
+        },
+        ".swift": {
+          "fetched": 60,
+          "spanned": 60,
+          "skeleton_files": 4,
+          "skeleton_symbols": 394
+        }
+      },
+      "unreferenced": {
+        "examined": 1268,
+        "no_graph_reference": 634,
+        "mentioned_elsewhere": 511,
+        "unreferenced_count": 14,
+        "registered_by_decorator": {
+          "Test": 73,
+          "preconcurrency": 24,
+          "MainActor": 6,
+          "_disfavoredOverload": 4,
+          "main": 1,
+          "_spi": 1
+        },
+        "rows_in_test_files": 6
+      },
+      "same_names": 45,
+      "identical_groups": 67,
+      "test_paths": {
+        ".swift": {
+          "marker=0,path=0": 56,
+          "marker=0,path=1": 10,
+          "marker=1,path=1": 35
+        },
+        ".js": {
+          "marker=0,path=0": 6
+        }
+      },
+      "imports": {
+        ".swift": {
+          "module-level": 167
+        }
+      },
+      "package_apis": {
+        ".swift": {
+          "files": 101,
+          "with_import_lines": 98,
+          "extracted": 0
+        },
+        ".js": {
+          "files": 6,
+          "with_import_lines": 2,
+          "extracted": 2
+        }
+      },
+      "routes": {
+        ".swift": {
+          "idiom_hits": 0,
+          "rows": 0
+        },
+        ".js": {
+          "idiom_hits": 0,
+          "rows": 0
+        }
+      },
+      "route_frameworks": {},
+      "relations": {
+        "references": 2935,
+        "calls": 2665,
+        "method": 1916,
+        "contains": 1485,
+        "case_of": 240,
+        "implements": 223,
+        "imports": 188,
+        "inherits": 183,
+        "indirect_call": 64,
+        "dispatches_to": 60
+      },
+      "locate": {
+        "seeds": 6,
+        "qualnames": 4,
+        "in_span": 6
+      },
+      "edited_for_freshness": {
+        ".js": "docs/docsets/Alamofire.docset/Contents/Resources/Documents/js/typeahead.jquery.js",
+        ".swift": "Source/Features/OfflineRetrier.swift"
+      }
+    },
+    {
+      "key": "hiredis",
+      "langs": [
+        "c"
+      ],
+      "url": "https://github.com/redis/hiredis",
+      "sha": "5bb7f030f6631b243438cf0fdd3be84352b905bb",
+      "nodes": 1330,
+      "edges": 3154,
+      "definitions": {
+        "class": 60,
+        "method": 12,
+        "function": 617
+      },
+      "definitions_by_ext": {
+        ".h": 322,
+        ".c": 364,
+        ".cpp": 3
+      },
+      "span": {
+        ".c": {
+          "fetched": 60,
+          "spanned": 60,
+          "skeleton_files": 4,
+          "skeleton_symbols": 250
+        },
+        ".cpp": {
+          "fetched": 3,
+          "spanned": 3,
+          "skeleton_files": 1,
+          "skeleton_symbols": 6
+        },
+        ".h": {
+          "fetched": 60,
+          "spanned": 36,
+          "shadow_span": 1,
+          "skeleton_files": 4,
+          "skeleton_symbols": 323,
+          "header_without_name": 1
+        }
+      },
+      "unreferenced": {
+        "examined": 688,
+        "no_graph_reference": 277,
+        "mentioned_elsewhere": 265,
+        "unreferenced_count": 12,
+        "registered_by_decorator": {},
+        "rows_in_test_files": 0
+      },
+      "same_names": 6,
+      "identical_groups": 7,
+      "test_paths": {
+        ".cpp": {
+          "marker=0,path=0": 1
+        }
+      },
+      "imports": {
+        ".h": {
+          "module-level": 35
+        },
+        ".c": {
+          "module-level": 77
+        },
+        ".cpp": {
+          "module-level": 1
+        }
+      },
+      "package_apis": {
+        ".h": {
+          "files": 27,
+          "with_import_lines": 20,
+          "extracted": 0
+        },
+        ".c": {
+          "files": 25,
+          "with_import_lines": 24,
+          "extracted": 0
+        },
+        ".cpp": {
+          "files": 1,
+          "with_import_lines": 1,
+          "extracted": 0
+        }
+      },
+      "routes": {},
+      "route_frameworks": {},
+      "relations": {
+        "calls": 1041,
+        "contains": 1000,
+        "references": 643,
+        "imports": 297,
+        "defines": 124,
+        "case_of": 34,
+        "method": 13,
+        "inherits": 2
+      },
+      "locate": {
+        "seeds": 6,
+        "qualnames": 6,
+        "in_span": 6
+      },
+      "edited_for_freshness": {
+        ".c": "hiredis.c",
+        ".cpp": "examples/example-qt.cpp",
+        ".h": "hiredis.h"
+      }
+    },
+    {
+      "key": "cpr",
+      "langs": [
+        "cpp"
+      ],
+      "url": "https://github.com/libcpr/cpr",
+      "sha": "34e18e3f70152aec0767dd9b7089d86cc1b3d2bc",
+      "nodes": 2932,
+      "edges": 5058,
+      "definitions": {
+        "class": 181,
+        "method": 500,
+        "function": 382
+      },
+      "definitions_by_ext": {
+        ".h": 558,
+        ".cpp": 418,
+        ".hpp": 87
+      },
+      "span": {
+        ".cpp": {
+          "fetched": 60,
+          "spanned": 60,
+          "skeleton_files": 4,
+          "skeleton_symbols": 258
+        },
+        ".h": {
+          "fetched": 60,
+          "spanned": 60,
+          "enclosing_span": 6,
+          "skeleton_files": 4,
+          "skeleton_symbols": 453
+        },
+        ".hpp": {
+          "fetched": 60,
+          "spanned": 60,
+          "skeleton_files": 4,
+          "skeleton_symbols": 91
+        }
+      },
+      "unreferenced": {
+        "examined": 866,
+        "no_graph_reference": 532,
+        "mentioned_elsewhere": 496,
+        "unreferenced_count": 36,
+        "registered_by_decorator": {},
+        "rows_in_test_files": 5
+      },
+      "same_names": 2,
+      "identical_groups": 0,
+      "test_paths": {
+        ".cpp": {
+          "marker=0,path=1": 6,
+          "marker=0,path=0": 32,
+          "marker=1,path=1": 36
+        }
+      },
+      "imports": {
+        ".h": {
+          "module-level": 139
+        },
+        ".cpp": {
+          "module-level": 229
+        },
+        ".hpp": {
+          "module-level": 6
+        }
+      },
+      "package_apis": {
+        ".cpp": {
+          "files": 74,
+          "with_import_lines": 70,
+          "extracted": 0
+        },
+        ".h": {
+          "files": 54,
+          "with_import_lines": 49,
+          "extracted": 0
+        },
+        ".hpp": {
+          "files": 6,
+          "with_import_lines": 5,
+          "extracted": 0
+        }
+      },
+      "routes": {},
+      "route_frameworks": {},
+      "relations": {
+        "references": 1691,
+        "contains": 1015,
+        "imports": 878,
+        "method": 691,
+        "calls": 386,
+        "defines": 231,
+        "case_of": 117,
+        "inherits": 49
+      },
+      "locate": {
+        "seeds": 6,
+        "qualnames": 6,
+        "in_span": 6
+      },
+      "edited_for_freshness": {
+        ".cpp": "cpr/session.cpp",
+        ".h": "include/cpr/session.h"
+      }
+    },
+    {
+      "key": "faraday",
+      "langs": [
+        "ruby"
+      ],
+      "url": "https://github.com/lostisland/faraday",
+      "sha": "565a149d4038d7adeb47bdc265ceabe59e1b403a",
+      "nodes": 1188,
+      "edges": 1471,
+      "definitions": {
+        "class": 127,
+        "method": 345,
+        "function": 56
+      },
+      "definitions_by_ext": {
+        ".rb": 528
+      },
+      "span": {
+        ".rb": {
+          "fetched": 60,
+          "spanned": 60,
+          "enclosing_span": 2,
+          "skeleton_files": 4,
+          "skeleton_symbols": 127
+        }
+      },
+      "unreferenced": {
+        "examined": 512,
+        "no_graph_reference": 320,
+        "mentioned_elsewhere": 304,
+        "unreferenced_count": 15,
+        "registered_by_decorator": {
+          "host": 1
+        },
+        "rows_in_test_files": 5
+      },
+      "same_names": 1,
+      "identical_groups": 2,
+      "test_paths": {
+        ".rb": {
+          "marker=1,path=1": 36,
+          "marker=0,path=1": 12,
+          "marker=0,path=0": 35
+        }
+      },
+      "imports": {},
+      "package_apis": {
+        ".rb": {
+          "files": 83,
+          "with_import_lines": 26,
+          "extracted": 0
+        }
+      },
+      "routes": {
+        ".rb": {
+          "idiom_hits": 0,
+          "rows": 0
+        }
+      },
+      "route_frameworks": {},
+      "relations": {
+        "contains": 684,
+        "calls": 352,
+        "method": 345,
+        "references": 41,
+        "inherits": 38,
+        "mixes_in": 7,
+        "defines": 2,
+        "imports": 1,
+        "declares": 1
+      },
+      "locate": {
+        "seeds": 6,
+        "qualnames": 6,
+        "in_span": 6
+      },
+      "edited_for_freshness": {
+        ".rb": "lib/faraday/utils/headers.rb"
+      }
+    },
+    {
+      "key": "guzzle",
+      "langs": [
+        "php"
+      ],
+      "url": "https://github.com/guzzle/guzzle",
+      "sha": "f8aca40edffeae0ec508b92f4594766083c6e203",
+      "nodes": 5146,
+      "edges": 13849,
+      "definitions": {
+        "class": 176,
+        "method": 3070,
+        "function": 904
+      },
+      "definitions_by_ext": {
+        ".php": 4150
+      },
+      "span": {
+        ".php": {
+          "fetched": 60,
+          "spanned": 60,
+          "skeleton_files": 4,
+          "skeleton_symbols": 1344
+        }
+      },
+      "unreferenced": {
+        "examined": 1236,
+        "no_graph_reference": 343,
+        "mentioned_elsewhere": 329,
+        "unreferenced_count": 14,
+        "registered_by_decorator": {},
+        "rows_in_test_files": 14
+      },
+      "same_names": 12,
+      "identical_groups": 11,
+      "test_paths": {
+        ".php": {
+          "marker=0,path=0": 77,
+          "marker=1,path=1": 60,
+          "marker=0,path=1": 12
+        }
+      },
+      "imports": {
+        ".php": {
+          "unclassified": 396
+        }
+      },
+      "package_apis": {
+        ".php": {
+          "files": 149,
+          "with_import_lines": 123,
+          "extracted": 0
+        }
+      },
+      "routes": {
+        ".php": {
+          "idiom_hits": 0,
+          "rows": 0
+        }
+      },
+      "route_frameworks": {},
+      "relations": {
+        "calls": 6228,
+        "method": 3070,
+        "contains": 1809,
+        "references": 1468,
+        "imports": 873,
+        "references_constant": 237,
+        "inherits": 101,
+        "mixes_in": 30,
+        "implements": 29,
+        "uses_static_prop": 4
+      },
+      "locate": {
+        "seeds": 6,
+        "qualnames": 6,
+        "in_span": 6
+      },
+      "edited_for_freshness": {
+        ".php": "src/Handler/CurlFactory.php"
+      }
+    }
+  ],
+  "extension_tables": {
+    ".c": {
+      "_SOURCE_EXTS": true,
+      "_CODE_EXTS": true,
+      "_LANG_FAMILY": true,
+      "imports(read or compiled)": true
+    },
+    ".cc": {
+      "_SOURCE_EXTS": true,
+      "_CODE_EXTS": true,
+      "_LANG_FAMILY": true,
+      "imports(read or compiled)": true
+    },
+    ".cjs": {
+      "_SOURCE_EXTS": true,
+      "_CODE_EXTS": true,
+      "_LANG_FAMILY": true,
+      "imports(read or compiled)": true
+    },
+    ".cpp": {
+      "_SOURCE_EXTS": true,
+      "_CODE_EXTS": true,
+      "_LANG_FAMILY": true,
+      "imports(read or compiled)": true
+    },
+    ".cs": {
+      "_SOURCE_EXTS": true,
+      "_CODE_EXTS": true,
+      "_LANG_FAMILY": true,
+      "imports(read or compiled)": true
+    },
+    ".cts": {
+      "_SOURCE_EXTS": true,
+      "_CODE_EXTS": true,
+      "_LANG_FAMILY": true,
+      "imports(read or compiled)": true
+    },
+    ".cxx": {
+      "_SOURCE_EXTS": true,
+      "_CODE_EXTS": true,
+      "_LANG_FAMILY": true,
+      "imports(read or compiled)": true
+    },
+    ".d.ts": {
+      "_SOURCE_EXTS": false,
+      "_CODE_EXTS": false,
+      "_LANG_FAMILY": false,
+      "imports(read or compiled)": true
+    },
+    ".ex": {
+      "_SOURCE_EXTS": true,
+      "_CODE_EXTS": true,
+      "_LANG_FAMILY": true,
+      "imports(read or compiled)": false
+    },
+    ".exs": {
+      "_SOURCE_EXTS": true,
+      "_CODE_EXTS": true,
+      "_LANG_FAMILY": true,
+      "imports(read or compiled)": false
+    },
+    ".go": {
+      "_SOURCE_EXTS": true,
+      "_CODE_EXTS": true,
+      "_LANG_FAMILY": true,
+      "imports(read or compiled)": true
+    },
+    ".h": {
+      "_SOURCE_EXTS": true,
+      "_CODE_EXTS": true,
+      "_LANG_FAMILY": true,
+      "imports(read or compiled)": true
+    },
+    ".hpp": {
+      "_SOURCE_EXTS": true,
+      "_CODE_EXTS": true,
+      "_LANG_FAMILY": true,
+      "imports(read or compiled)": true
+    },
+    ".hxx": {
+      "_SOURCE_EXTS": true,
+      "_CODE_EXTS": true,
+      "_LANG_FAMILY": true,
+      "imports(read or compiled)": true
+    },
+    ".java": {
+      "_SOURCE_EXTS": true,
+      "_CODE_EXTS": true,
+      "_LANG_FAMILY": true,
+      "imports(read or compiled)": true
+    },
+    ".js": {
+      "_SOURCE_EXTS": true,
+      "_CODE_EXTS": true,
+      "_LANG_FAMILY": true,
+      "imports(read or compiled)": true
+    },
+    ".jsx": {
+      "_SOURCE_EXTS": true,
+      "_CODE_EXTS": true,
+      "_LANG_FAMILY": true,
+      "imports(read or compiled)": true
+    },
+    ".kt": {
+      "_SOURCE_EXTS": true,
+      "_CODE_EXTS": true,
+      "_LANG_FAMILY": true,
+      "imports(read or compiled)": true
+    },
+    ".kts": {
+      "_SOURCE_EXTS": true,
+      "_CODE_EXTS": true,
+      "_LANG_FAMILY": true,
+      "imports(read or compiled)": true
+    },
+    ".lua": {
+      "_SOURCE_EXTS": true,
+      "_CODE_EXTS": true,
+      "_LANG_FAMILY": true,
+      "imports(read or compiled)": false
+    },
+    ".m": {
+      "_SOURCE_EXTS": true,
+      "_CODE_EXTS": true,
+      "_LANG_FAMILY": true,
+      "imports(read or compiled)": true
+    },
+    ".mjs": {
+      "_SOURCE_EXTS": true,
+      "_CODE_EXTS": true,
+      "_LANG_FAMILY": true,
+      "imports(read or compiled)": true
+    },
+    ".mm": {
+      "_SOURCE_EXTS": true,
+      "_CODE_EXTS": true,
+      "_LANG_FAMILY": true,
+      "imports(read or compiled)": true
+    },
+    ".mts": {
+      "_SOURCE_EXTS": true,
+      "_CODE_EXTS": true,
+      "_LANG_FAMILY": true,
+      "imports(read or compiled)": true
+    },
+    ".php": {
+      "_SOURCE_EXTS": true,
+      "_CODE_EXTS": true,
+      "_LANG_FAMILY": true,
+      "imports(read or compiled)": false
+    },
+    ".py": {
+      "_SOURCE_EXTS": true,
+      "_CODE_EXTS": true,
+      "_LANG_FAMILY": true,
+      "imports(read or compiled)": true
+    },
+    ".pyi": {
+      "_SOURCE_EXTS": true,
+      "_CODE_EXTS": true,
+      "_LANG_FAMILY": true,
+      "imports(read or compiled)": true
+    },
+    ".rb": {
+      "_SOURCE_EXTS": true,
+      "_CODE_EXTS": true,
+      "_LANG_FAMILY": true,
+      "imports(read or compiled)": false
+    },
+    ".rs": {
+      "_SOURCE_EXTS": true,
+      "_CODE_EXTS": true,
+      "_LANG_FAMILY": true,
+      "imports(read or compiled)": true
+    },
+    ".scala": {
+      "_SOURCE_EXTS": true,
+      "_CODE_EXTS": true,
+      "_LANG_FAMILY": true,
+      "imports(read or compiled)": true
+    },
+    ".swift": {
+      "_SOURCE_EXTS": true,
+      "_CODE_EXTS": true,
+      "_LANG_FAMILY": true,
+      "imports(read or compiled)": true
+    },
+    ".ts": {
+      "_SOURCE_EXTS": true,
+      "_CODE_EXTS": true,
+      "_LANG_FAMILY": true,
+      "imports(read or compiled)": true
+    },
+    ".tsx": {
+      "_SOURCE_EXTS": true,
+      "_CODE_EXTS": true,
+      "_LANG_FAMILY": true,
+      "imports(read or compiled)": true
+    },
+    ".zig": {
+      "_SOURCE_EXTS": true,
+      "_CODE_EXTS": true,
+      "_LANG_FAMILY": true,
+      "imports(read or compiled)": false
+    }
+  },
+  "matrix": {
+    "httpx": {
+      "overview": "ok",
+      "god_nodes": "ok",
+      "surprises": "ok",
+      "communities": "ok",
+      "search": "ok",
+      "project": "ok",
+      "neighbors": "ok",
+      "subgraph": "ok",
+      "impact": "ok",
+      "tests_for": "ok",
+      "node_details": "ok",
+      "fetch": "ok",
+      "skeleton": "ok",
+      "validate": "ok",
+      "cycles": "ok",
+      "unreferenced": "ok",
+      "same_names": "ok",
+      "layers": "ok",
+      "duplication_scan": "ok",
+      "package_apis": "ok",
+      "routes": "empty",
+      "locate": "ok",
+      "query": "ok",
+      "explain": "ok",
+      "path": "ok",
+      "sampling_status": "ok",
+      "label_communities": "ok",
+      "freshness": "ok",
+      "diff": "ok",
+      "prune": "ok",
+      "set_labels": "ok",
+      "build": "ok"
+    },
+    "fastapi-template": {
+      "overview": "ok",
+      "god_nodes": "ok",
+      "surprises": "ok",
+      "communities": "ok",
+      "search": "ok",
+      "project": "ok",
+      "neighbors": "ok",
+      "subgraph": "ok",
+      "impact": "empty",
+      "tests_for": "ok",
+      "node_details": "ok",
+      "fetch": "ok",
+      "skeleton": "ok",
+      "validate": "ok",
+      "cycles": "ok",
+      "unreferenced": "ok",
+      "same_names": "ok",
+      "layers": "empty",
+      "duplication_scan": "ok",
+      "package_apis": "ok",
+      "routes": "ok",
+      "locate": "ok",
+      "query": "ok",
+      "explain": "ok",
+      "path": "ok",
+      "sampling_status": "ok",
+      "label_communities": "ok",
+      "freshness": "ok",
+      "diff": "ok",
+      "prune": "ok",
+      "set_labels": "ok",
+      "build": "ok"
+    },
+    "express": {
+      "overview": "ok",
+      "god_nodes": "ok",
+      "surprises": "ok",
+      "communities": "ok",
+      "search": "ok",
+      "project": "ok",
+      "neighbors": "ok",
+      "subgraph": "ok",
+      "impact": "ok",
+      "tests_for": "ok",
+      "node_details": "ok",
+      "fetch": "ok",
+      "skeleton": "ok",
+      "validate": "ok",
+      "cycles": "ok",
+      "unreferenced": "ok",
+      "same_names": "ok",
+      "layers": "ok",
+      "duplication_scan": "ok",
+      "package_apis": "ok",
+      "routes": "empty",
+      "locate": "ok",
+      "query": "ok",
+      "explain": "ok",
+      "path": "ok",
+      "sampling_status": "ok",
+      "label_communities": "ok",
+      "freshness": "ok",
+      "diff": "ok",
+      "prune": "ok",
+      "set_labels": "ok",
+      "build": "ok"
+    },
+    "express-mongoose-demo": {
+      "overview": "ok",
+      "god_nodes": "ok",
+      "surprises": "empty",
+      "communities": "ok",
+      "search": "ok",
+      "project": "ok",
+      "neighbors": "ok",
+      "subgraph": "ok",
+      "impact": "empty",
+      "tests_for": "ok",
+      "node_details": "ok",
+      "fetch": "ok",
+      "skeleton": "ok",
+      "validate": "ok",
+      "cycles": "ok",
+      "unreferenced": "ok",
+      "same_names": "ok",
+      "layers": "ok",
+      "duplication_scan": "ok",
+      "package_apis": "ok",
+      "routes": "empty",
+      "locate": "ok",
+      "query": "ok",
+      "explain": "ok",
+      "path": "ok",
+      "sampling_status": "ok",
+      "label_communities": "ok",
+      "freshness": "ok",
+      "diff": "ok",
+      "prune": "ok",
+      "set_labels": "ok",
+      "build": "ok"
+    },
+    "got": {
+      "overview": "ok",
+      "god_nodes": "ok",
+      "surprises": "ok",
+      "communities": "ok",
+      "search": "ok",
+      "project": "ok",
+      "neighbors": "ok",
+      "subgraph": "ok",
+      "impact": "empty",
+      "tests_for": "ok",
+      "node_details": "ok",
+      "fetch": "ok",
+      "skeleton": "ok",
+      "validate": "ok",
+      "cycles": "ok",
+      "unreferenced": "ok",
+      "same_names": "ok",
+      "layers": "ok",
+      "duplication_scan": "ok",
+      "package_apis": "ok",
+      "routes": "ok",
+      "locate": "ok",
+      "query": "ok",
+      "explain": "ok",
+      "path": "ok",
+      "sampling_status": "ok",
+      "label_communities": "ok",
+      "freshness": "ok",
+      "diff": "ok",
+      "prune": "ok",
+      "set_labels": "ok",
+      "build": "ok"
+    },
+    "nestjs-realworld": {
+      "overview": "ok",
+      "god_nodes": "ok",
+      "surprises": "ok",
+      "communities": "ok",
+      "search": "ok",
+      "project": "ok",
+      "neighbors": "ok",
+      "subgraph": "ok",
+      "impact": "empty",
+      "tests_for": "ok",
+      "node_details": "ok",
+      "fetch": "ok",
+      "skeleton": "ok",
+      "validate": "ok",
+      "cycles": "ok",
+      "unreferenced": "ok",
+      "same_names": "ok",
+      "layers": "empty",
+      "duplication_scan": "ok",
+      "package_apis": "ok",
+      "routes": "ok",
+      "locate": "ok",
+      "query": "ok",
+      "explain": "ok",
+      "path": "ok",
+      "sampling_status": "ok",
+      "label_communities": "ok",
+      "freshness": "ok",
+      "diff": "ok",
+      "prune": "ok",
+      "set_labels": "ok",
+      "build": "ok"
+    },
+    "resty": {
+      "overview": "ok",
+      "god_nodes": "ok",
+      "surprises": "ok",
+      "communities": "ok",
+      "search": "ok",
+      "project": "ok",
+      "neighbors": "ok",
+      "subgraph": "ok",
+      "impact": "ok",
+      "tests_for": "ok",
+      "node_details": "ok",
+      "fetch": "ok",
+      "skeleton": "ok",
+      "validate": "ok",
+      "cycles": "ok",
+      "unreferenced": "ok",
+      "same_names": "ok",
+      "layers": "empty",
+      "duplication_scan": "ok",
+      "package_apis": "ok",
+      "routes": "ok",
+      "locate": "ok",
+      "query": "ok",
+      "explain": "ok",
+      "path": "ok",
+      "sampling_status": "ok",
+      "label_communities": "ok",
+      "freshness": "ok",
+      "diff": "ok",
+      "prune": "ok",
+      "set_labels": "ok",
+      "build": "ok"
+    },
+    "chi": {
+      "overview": "ok",
+      "god_nodes": "ok",
+      "surprises": "ok",
+      "communities": "ok",
+      "search": "ok",
+      "project": "ok",
+      "neighbors": "ok",
+      "subgraph": "ok",
+      "impact": "ok",
+      "tests_for": "ok",
+      "node_details": "ok",
+      "fetch": "ok",
+      "skeleton": "ok",
+      "validate": "ok",
+      "cycles": "ok",
+      "unreferenced": "ok",
+      "same_names": "ok",
+      "layers": "ok",
+      "duplication_scan": "ok",
+      "package_apis": "ok",
+      "routes": "ok",
+      "locate": "ok",
+      "query": "ok",
+      "explain": "ok",
+      "path": "ok",
+      "sampling_status": "ok",
+      "label_communities": "ok",
+      "freshness": "ok",
+      "diff": "ok",
+      "prune": "ok",
+      "set_labels": "ok",
+      "build": "ok"
+    },
+    "gin-examples": {
+      "overview": "ok",
+      "god_nodes": "ok",
+      "surprises": "ok",
+      "communities": "ok",
+      "search": "ok",
+      "project": "ok",
+      "neighbors": "ok",
+      "subgraph": "ok",
+      "impact": "ok",
+      "tests_for": "ok",
+      "node_details": "ok",
+      "fetch": "ok",
+      "skeleton": "ok",
+      "validate": "ok",
+      "cycles": "ok",
+      "unreferenced": "ok",
+      "same_names": "ok",
+      "layers": "empty",
+      "duplication_scan": "ok",
+      "package_apis": "ok",
+      "routes": "ok",
+      "locate": "ok",
+      "query": "ok",
+      "explain": "ok",
+      "path": "ok",
+      "sampling_status": "ok",
+      "label_communities": "ok",
+      "freshness": "ok",
+      "diff": "ok",
+      "prune": "ok",
+      "set_labels": "ok",
+      "build": "ok"
+    },
+    "retrofit": {
+      "overview": "ok",
+      "god_nodes": "ok",
+      "surprises": "ok",
+      "communities": "ok",
+      "search": "ok",
+      "project": "ok",
+      "neighbors": "ok",
+      "subgraph": "ok",
+      "impact": "empty",
+      "tests_for": "ok",
+      "node_details": "ok",
+      "fetch": "ok",
+      "skeleton": "empty",
+      "validate": "ok",
+      "cycles": "ok",
+      "unreferenced": "ok",
+      "same_names": "ok",
+      "layers": "ok",
+      "duplication_scan": "ok",
+      "package_apis": "ok",
+      "routes": "empty",
+      "locate": "ok",
+      "query": "ok",
+      "explain": "ok",
+      "path": "ok",
+      "sampling_status": "ok",
+      "label_communities": "ok",
+      "freshness": "ok",
+      "diff": "ok",
+      "prune": "ok",
+      "set_labels": "ok",
+      "build": "ok"
+    },
+    "spring-petclinic": {
+      "overview": "ok",
+      "god_nodes": "ok",
+      "surprises": "ok",
+      "communities": "ok",
+      "search": "ok",
+      "project": "ok",
+      "neighbors": "ok",
+      "subgraph": "ok",
+      "impact": "ok",
+      "tests_for": "ok",
+      "node_details": "ok",
+      "fetch": "ok",
+      "skeleton": "ok",
+      "validate": "ok",
+      "cycles": "ok",
+      "unreferenced": "ok",
+      "same_names": "ok",
+      "layers": "empty",
+      "duplication_scan": "ok",
+      "package_apis": "ok",
+      "routes": "ok",
+      "locate": "ok",
+      "query": "ok",
+      "explain": "ok",
+      "path": "ok",
+      "sampling_status": "ok",
+      "label_communities": "ok",
+      "freshness": "ok",
+      "diff": "ok",
+      "prune": "ok",
+      "set_labels": "ok",
+      "build": "ok"
+    },
+    "kotlinpoet": {
+      "overview": "ok",
+      "god_nodes": "ok",
+      "surprises": "ok",
+      "communities": "ok",
+      "search": "ok",
+      "project": "ok",
+      "neighbors": "ok",
+      "subgraph": "ok",
+      "impact": "empty",
+      "tests_for": "ok",
+      "node_details": "ok",
+      "fetch": "ok",
+      "skeleton": "ok",
+      "validate": "ok",
+      "cycles": "ok",
+      "unreferenced": "ok",
+      "same_names": "ok",
+      "layers": "ok",
+      "duplication_scan": "ok",
+      "package_apis": "ok",
+      "routes": "empty",
+      "locate": "ok",
+      "query": "ok",
+      "explain": "ok",
+      "path": "ok",
+      "sampling_status": "ok",
+      "label_communities": "ok",
+      "freshness": "ok",
+      "diff": "ok",
+      "prune": "ok",
+      "set_labels": "ok",
+      "build": "ok"
+    },
+    "requests-scala": {
+      "overview": "ok",
+      "god_nodes": "ok",
+      "surprises": "ok",
+      "communities": "ok",
+      "search": "ok",
+      "project": "ok",
+      "neighbors": "ok",
+      "subgraph": "ok",
+      "impact": "ok",
+      "tests_for": "ok",
+      "node_details": "ok",
+      "fetch": "ok",
+      "skeleton": "ok",
+      "validate": "ok",
+      "cycles": "ok",
+      "unreferenced": "ok",
+      "same_names": "ok",
+      "layers": "empty",
+      "duplication_scan": "ok",
+      "package_apis": "empty",
+      "routes": "empty",
+      "locate": "ok",
+      "query": "ok",
+      "explain": "ok",
+      "path": "ok",
+      "sampling_status": "ok",
+      "label_communities": "ok",
+      "freshness": "ok",
+      "diff": "ok",
+      "prune": "ok",
+      "set_labels": "ok",
+      "build": "ok"
+    },
+    "restsharp": {
+      "overview": "ok",
+      "god_nodes": "ok",
+      "surprises": "ok",
+      "communities": "ok",
+      "search": "ok",
+      "project": "ok",
+      "neighbors": "ok",
+      "subgraph": "ok",
+      "impact": "empty",
+      "tests_for": "ok",
+      "node_details": "ok",
+      "fetch": "ok",
+      "skeleton": "empty",
+      "validate": "ok",
+      "cycles": "ok",
+      "unreferenced": "ok",
+      "same_names": "ok",
+      "layers": "ok",
+      "duplication_scan": "ok",
+      "package_apis": "ok",
+      "routes": "empty",
+      "locate": "ok",
+      "query": "ok",
+      "explain": "ok",
+      "path": "ok",
+      "sampling_status": "ok",
+      "label_communities": "ok",
+      "freshness": "ok",
+      "diff": "ok",
+      "prune": "ok",
+      "set_labels": "ok",
+      "build": "ok"
+    },
+    "ureq": {
+      "overview": "ok",
+      "god_nodes": "ok",
+      "surprises": "ok",
+      "communities": "ok",
+      "search": "ok",
+      "project": "ok",
+      "neighbors": "ok",
+      "subgraph": "ok",
+      "impact": "empty",
+      "tests_for": "ok",
+      "node_details": "ok",
+      "fetch": "ok",
+      "skeleton": "ok",
+      "validate": "ok",
+      "cycles": "ok",
+      "unreferenced": "ok",
+      "same_names": "ok",
+      "layers": "ok",
+      "duplication_scan": "ok",
+      "package_apis": "empty",
+      "routes": "empty",
+      "locate": "ok",
+      "query": "ok",
+      "explain": "ok",
+      "path": "ok",
+      "sampling_status": "ok",
+      "label_communities": "ok",
+      "freshness": "ok",
+      "diff": "ok",
+      "prune": "ok",
+      "set_labels": "ok",
+      "build": "ok"
+    },
+    "alamofire": {
+      "overview": "ok",
+      "god_nodes": "ok",
+      "surprises": "ok",
+      "communities": "ok",
+      "search": "ok",
+      "project": "ok",
+      "neighbors": "ok",
+      "subgraph": "ok",
+      "impact": "ok",
+      "tests_for": "ok",
+      "node_details": "ok",
+      "fetch": "ok",
+      "skeleton": "ok",
+      "validate": "ok",
+      "cycles": "ok",
+      "unreferenced": "ok",
+      "same_names": "ok",
+      "layers": "ok",
+      "duplication_scan": "ok",
+      "package_apis": "ok",
+      "routes": "empty",
+      "locate": "ok",
+      "query": "ok",
+      "explain": "ok",
+      "path": "ok",
+      "sampling_status": "ok",
+      "label_communities": "ok",
+      "freshness": "ok",
+      "diff": "ok",
+      "prune": "ok",
+      "set_labels": "ok",
+      "build": "ok"
+    },
+    "hiredis": {
+      "overview": "ok",
+      "god_nodes": "ok",
+      "surprises": "ok",
+      "communities": "ok",
+      "search": "ok",
+      "project": "ok",
+      "neighbors": "ok",
+      "subgraph": "ok",
+      "impact": "empty",
+      "tests_for": "ok",
+      "node_details": "ok",
+      "fetch": "ok",
+      "skeleton": "ok",
+      "validate": "ok",
+      "cycles": "ok",
+      "unreferenced": "ok",
+      "same_names": "ok",
+      "layers": "ok",
+      "duplication_scan": "ok",
+      "package_apis": "empty",
+      "routes": "empty",
+      "locate": "ok",
+      "query": "ok",
+      "explain": "ok",
+      "path": "ok",
+      "sampling_status": "ok",
+      "label_communities": "ok",
+      "freshness": "ok",
+      "diff": "ok",
+      "prune": "ok",
+      "set_labels": "ok",
+      "build": "ok"
+    },
+    "cpr": {
+      "overview": "ok",
+      "god_nodes": "ok",
+      "surprises": "ok",
+      "communities": "ok",
+      "search": "ok",
+      "project": "ok",
+      "neighbors": "ok",
+      "subgraph": "ok",
+      "impact": "empty",
+      "tests_for": "ok",
+      "node_details": "ok",
+      "fetch": "ok",
+      "skeleton": "ok",
+      "validate": "ok",
+      "cycles": "ok",
+      "unreferenced": "ok",
+      "same_names": "ok",
+      "layers": "ok",
+      "duplication_scan": "ok",
+      "package_apis": "empty",
+      "routes": "empty",
+      "locate": "ok",
+      "query": "ok",
+      "explain": "ok",
+      "path": "ok",
+      "sampling_status": "ok",
+      "label_communities": "ok",
+      "freshness": "ok",
+      "diff": "ok",
+      "prune": "ok",
+      "set_labels": "ok",
+      "build": "ok"
+    },
+    "faraday": {
+      "overview": "ok",
+      "god_nodes": "ok",
+      "surprises": "ok",
+      "communities": "ok",
+      "search": "ok",
+      "project": "ok",
+      "neighbors": "ok",
+      "subgraph": "ok",
+      "impact": "empty",
+      "tests_for": "ok",
+      "node_details": "ok",
+      "fetch": "ok",
+      "skeleton": "ok",
+      "validate": "ok",
+      "cycles": "ok",
+      "unreferenced": "ok",
+      "same_names": "ok",
+      "layers": "empty",
+      "duplication_scan": "ok",
+      "package_apis": "empty",
+      "routes": "empty",
+      "locate": "ok",
+      "query": "ok",
+      "explain": "ok",
+      "path": "ok",
+      "sampling_status": "ok",
+      "label_communities": "ok",
+      "freshness": "ok",
+      "diff": "ok",
+      "prune": "ok",
+      "set_labels": "ok",
+      "build": "ok"
+    },
+    "guzzle": {
+      "overview": "ok",
+      "god_nodes": "ok",
+      "surprises": "ok",
+      "communities": "ok",
+      "search": "ok",
+      "project": "ok",
+      "neighbors": "ok",
+      "subgraph": "ok",
+      "impact": "ok",
+      "tests_for": "ok",
+      "node_details": "ok",
+      "fetch": "ok",
+      "skeleton": "ok",
+      "validate": "ok",
+      "cycles": "ok",
+      "unreferenced": "ok",
+      "same_names": "ok",
+      "layers": "ok",
+      "duplication_scan": "ok",
+      "package_apis": "empty",
+      "routes": "empty",
+      "locate": "ok",
+      "query": "ok",
+      "explain": "ok",
+      "path": "ok",
+      "sampling_status": "ok",
+      "label_communities": "ok",
+      "freshness": "ok",
+      "diff": "ok",
+      "prune": "ok",
+      "set_labels": "ok",
+      "build": "ok"
+    }
+  },
+  "timings_ms": {
+    "httpx": {
+      "overview": 19.9,
+      "god_nodes": 4.7,
+      "surprises": 255.6,
+      "communities": 233.0,
+      "search": 8.7,
+      "project": 7.0,
+      "neighbors": 19.4,
+      "subgraph": 18.7,
+      "impact": 28.2,
+      "tests_for": 21.8,
+      "node_details": 18.4,
+      "skeleton": 70.2,
+      "fetch": 9.2,
+      "validate": 454.1,
+      "cycles": 61.1,
+      "unreferenced": 284.6,
+      "same_names": 157.5,
+      "layers": 39.6,
+      "duplication_scan": 1510.6,
+      "package_apis": 22.1,
+      "routes": 215.9,
+      "locate": 546.3,
+      "query": 414.1,
+      "explain": 431.5,
+      "path": 352.0,
+      "diff": 57.3,
+      "freshness": 68.3,
+      "prune": 242.4,
+      "set_labels": 9.0,
+      "build": 2798.2,
+      "add": 0.0
+    },
+    "fastapi-template": {
+      "overview": 24.6,
+      "god_nodes": 9.6,
+      "surprises": 1046.9,
+      "communities": 88.0,
+      "search": 4.3,
+      "project": 7.5,
+      "neighbors": 18.7,
+      "subgraph": 18.4,
+      "impact": 63.4,
+      "tests_for": 15.7,
+      "node_details": 5.3,
+      "skeleton": 50.6,
+      "fetch": 17.7,
+      "validate": 276.7,
+      "cycles": 731.5,
+      "unreferenced": 394.1,
+      "same_names": 220.5,
+      "layers": 727.2,
+      "duplication_scan": 1163.4,
+      "package_apis": 47.3,
+      "routes": 205.9,
+      "locate": 504.9,
+      "query": 413.8,
+      "explain": 451.1,
+      "path": 386.6,
+      "diff": 31.0,
+      "freshness": 30.0,
+      "prune": 218.4,
+      "set_labels": 8.0,
+      "build": 3732.7,
+      "add": 0.0
+    },
+    "express": {
+      "overview": 30.9,
+      "god_nodes": 10.3,
+      "surprises": 425.3,
+      "communities": 93.6,
+      "search": 3.1,
+      "project": 9.1,
+      "neighbors": 15.6,
+      "subgraph": 13.0,
+      "impact": 6.9,
+      "tests_for": 4.9,
+      "node_details": 2.9,
+      "skeleton": 6.8,
+      "fetch": 16.3,
+      "validate": 655.4,
+      "cycles": 226.9,
+      "unreferenced": 216.8,
+      "same_names": 72.0,
+      "layers": 140.4,
+      "duplication_scan": 620.8,
+      "package_apis": 34.2,
+      "routes": 303.6,
+      "locate": 687.7,
+      "query": 247.6,
+      "explain": 321.5,
+      "path": 322.9,
+      "diff": 29.6,
+      "freshness": 51.7,
+      "prune": 104.9,
+      "set_labels": 2.7,
+      "build": 2959.6,
+      "add": 0.0
+    },
+    "express-mongoose-demo": {
+      "overview": 13.5,
+      "god_nodes": 0.9,
+      "surprises": 132.0,
+      "communities": 304.6,
+      "search": 1.2,
+      "project": 6.8,
+      "neighbors": 1.6,
+      "subgraph": 13.7,
+      "impact": 6.8,
+      "tests_for": 4.0,
+      "node_details": 1.8,
+      "skeleton": 1.5,
+      "fetch": 7.3,
+      "validate": 236.1,
+      "cycles": 113.4,
+      "unreferenced": 123.9,
+      "same_names": 33.3,
+      "layers": 109.2,
+      "duplication_scan": 564.4,
+      "package_apis": 205.0,
+      "routes": 180.8,
+      "locate": 446.7,
+      "query": 271.9,
+      "explain": 288.0,
+      "path": 310.6,
+      "diff": 20.2,
+      "freshness": 20.0,
+      "prune": 47.7,
+      "set_labels": 1.4,
+      "build": 2702.7,
+      "add": 0.0
+    },
+    "got": {
+      "overview": 139.5,
+      "god_nodes": 8.8,
+      "surprises": 2466.5,
+      "communities": 1437.4,
+      "search": 6.9,
+      "project": 7.3,
+      "neighbors": 13.1,
+      "subgraph": 15.6,
+      "impact": 13.7,
+      "tests_for": 15.0,
+      "node_details": 7.9,
+      "skeleton": 180.5,
+      "fetch": 22.8,
+      "validate": 1541.2,
+      "cycles": 546.8,
+      "unreferenced": 1168.9,
+      "same_names": 362.6,
+      "layers": 709.0,
+      "duplication_scan": 3055.6,
+      "package_apis": 18.0,
+      "routes": 1959.6,
+      "locate": 1897.8,
+      "query": 375.8,
+      "explain": 301.5,
+      "path": 347.5,
+      "diff": 194.9,
+      "freshness": 91.0,
+      "prune": 190.9,
+      "set_labels": 7.0,
+      "build": 5840.3,
+      "add": 0.0
+    },
+    "nestjs-realworld": {
+      "overview": 9.0,
+      "god_nodes": 1.5,
+      "surprises": 284.0,
+      "communities": 32.8,
+      "search": 0.9,
+      "project": 5.9,
+      "neighbors": 5.0,
+      "subgraph": 9.7,
+      "impact": 10.5,
+      "tests_for": 2.7,
+      "node_details": 0.8,
+      "skeleton": 2.5,
+      "fetch": 11.8,
+      "validate": 27.0,
+      "cycles": 198.6,
+      "unreferenced": 71.8,
+      "same_names": 8.0,
+      "layers": 159.2,
+      "duplication_scan": 265.5,
+      "package_apis": 5.7,
+      "routes": 26.6,
+      "locate": 63.4,
+      "query": 272.1,
+      "explain": 239.9,
+      "path": 217.3,
+      "diff": 14.3,
+      "freshness": 16.0,
+      "prune": 34.5,
+      "set_labels": 1.6,
+      "build": 1020.9,
+      "add": 0.0
+    },
+    "resty": {
+      "overview": 35.6,
+      "god_nodes": 5.3,
+      "surprises": 61.8,
+      "communities": 261.3,
+      "search": 5.7,
+      "project": 5.9,
+      "neighbors": 10.9,
+      "subgraph": 12.4,
+      "impact": 10.5,
+      "tests_for": 9.8,
+      "node_details": 6.5,
+      "skeleton": 123.5,
+      "fetch": 142.3,
+      "validate": 27.2,
+      "cycles": 24.5,
+      "unreferenced": 642.5,
+      "same_names": 152.0,
+      "layers": 3.4,
+      "duplication_scan": 1443.5,
+      "package_apis": 9.3,
+      "routes": 388.6,
+      "locate": 907.2,
+      "query": 302.5,
+      "explain": 297.9,
+      "path": 355.5,
+      "diff": 79.0,
+      "freshness": 76.1,
+      "prune": 158.5,
+      "set_labels": 7.5,
+      "build": 1815.9,
+      "add": 0.0
+    },
+    "chi": {
+      "overview": 12.8,
+      "god_nodes": 3.1,
+      "surprises": 27.6,
+      "communities": 162.2,
+      "search": 2.7,
+      "project": 9.9,
+      "neighbors": 7.3,
+      "subgraph": 10.8,
+      "impact": 10.1,
+      "tests_for": 4.9,
+      "node_details": 2.1,
+      "skeleton": 11.8,
+      "fetch": 46.5,
+      "validate": 15.8,
+      "cycles": 9.1,
+      "unreferenced": 167.4,
+      "same_names": 230.9,
+      "layers": 7.2,
+      "duplication_scan": 749.8,
+      "package_apis": 13.8,
+      "routes": 260.5,
+      "locate": 426.9,
+      "query": 268.9,
+      "explain": 255.2,
+      "path": 258.0,
+      "diff": 14.5,
+      "freshness": 18.1,
+      "prune": 83.4,
+      "set_labels": 3.6,
+      "build": 1268.0,
+      "add": 0.0
+    },
+    "gin-examples": {
+      "overview": 10.5,
+      "god_nodes": 1.5,
+      "surprises": 5.3,
+      "communities": 84.7,
+      "search": 1.5,
+      "project": 8.5,
+      "neighbors": 4.2,
+      "subgraph": 12.1,
+      "impact": 9.9,
+      "tests_for": 4.4,
+      "node_details": 2.2,
+      "skeleton": 5.7,
+      "fetch": 11.5,
+      "validate": 168.0,
+      "cycles": 3.0,
+      "unreferenced": 133.3,
+      "same_names": 41.1,
+      "layers": 1.1,
+      "duplication_scan": 410.3,
+      "package_apis": 55.0,
+      "routes": 138.6,
+      "locate": 259.9,
+      "query": 304.4,
+      "explain": 261.9,
+      "path": 270.4,
+      "diff": 31.2,
+      "freshness": 27.3,
+      "prune": 66.7,
+      "set_labels": 3.0,
+      "build": 1349.4,
+      "add": 0.0
+    },
+    "retrofit": {
+      "overview": 93.4,
+      "god_nodes": 31.6,
+      "surprises": 124.0,
+      "communities": 1768.3,
+      "search": 18.6,
+      "project": 7.1,
+      "neighbors": 160.8,
+      "subgraph": 34.9,
+      "impact": 90.6,
+      "tests_for": 64.0,
+      "node_details": 13.1,
+      "skeleton": 251.1,
+      "fetch": 84.2,
+      "validate": 2753.1,
+      "cycles": 33.3,
+      "unreferenced": 1858.7,
+      "same_names": 156.6,
+      "layers": 17.7,
+      "duplication_scan": 4549.4,
+      "package_apis": 953.6,
+      "routes": 1156.6,
+      "locate": 2805.2,
+      "query": 732.6,
+      "explain": 749.3,
+      "path": 750.8,
+      "diff": 35.8,
+      "freshness": 72.4,
+      "prune": 740.6,
+      "set_labels": 3.1,
+      "build": 13963.9,
+      "add": 0.0
+    },
+    "spring-petclinic": {
+      "overview": 24.1,
+      "god_nodes": 1.8,
+      "surprises": 23.3,
+      "communities": 42.5,
+      "search": 6.5,
+      "project": 13.2,
+      "neighbors": 19.2,
+      "subgraph": 9.6,
+      "impact": 16.3,
+      "tests_for": 9.3,
+      "node_details": 2.7,
+      "skeleton": 8.4,
+      "fetch": 15.6,
+      "validate": 22.0,
+      "cycles": 2.8,
+      "unreferenced": 210.3,
+      "same_names": 20.1,
+      "layers": 2.5,
+      "duplication_scan": 975.7,
+      "package_apis": 24.7,
+      "routes": 55.1,
+      "locate": 454.7,
+      "query": 280.7,
+      "explain": 287.4,
+      "path": 257.6,
+      "diff": 22.7,
+      "freshness": 37.3,
+      "prune": 86.1,
+      "set_labels": 3.2,
+      "build": 1157.9,
+      "add": 0.0
+    },
+    "kotlinpoet": {
+      "overview": 358.1,
+      "god_nodes": 10.4,
+      "surprises": 64.4,
+      "communities": 569.1,
+      "search": 8.3,
+      "project": 9.0,
+      "neighbors": 54.0,
+      "subgraph": 21.2,
+      "impact": 192.4,
+      "tests_for": 20.2,
+      "node_details": 152.2,
+      "skeleton": 256.5,
+      "fetch": 34.1,
+      "validate": 455.6,
+      "cycles": 29.7,
+      "unreferenced": 699.8,
+      "same_names": 293.6,
+      "layers": 14.1,
+      "duplication_scan": 2665.7,
+      "package_apis": 29.6,
+      "routes": 30.9,
+      "locate": 1147.6,
+      "query": 544.7,
+      "explain": 504.4,
+      "path": 538.3,
+      "diff": 197.6,
+      "freshness": 50.5,
+      "prune": 444.8,
+      "set_labels": 24.2,
+      "build": 3210.6,
+      "add": 0.0
+    },
+    "requests-scala": {
+      "overview": 7.8,
+      "god_nodes": 1.4,
+      "surprises": 2.0,
+      "communities": 32.2,
+      "search": 1.1,
+      "project": 6.7,
+      "neighbors": 2.1,
+      "subgraph": 8.7,
+      "impact": 7.1,
+      "tests_for": 1.2,
+      "node_details": 1.0,
+      "skeleton": 23.6,
+      "fetch": 15.4,
+      "validate": 6.5,
+      "cycles": 1.6,
+      "unreferenced": 98.4,
+      "same_names": 20.0,
+      "layers": 0.5,
+      "duplication_scan": 247.8,
+      "package_apis": 3.7,
+      "routes": 4.3,
+      "locate": 86.0,
+      "query": 305.6,
+      "explain": 244.0,
+      "path": 264.3,
+      "diff": 21.8,
+      "freshness": 23.8,
+      "prune": 29.4,
+      "set_labels": 1.4,
+      "build": 594.9,
+      "add": 0.0
+    },
+    "restsharp": {
+      "overview": 33.9,
+      "god_nodes": 10.3,
+      "surprises": 81.0,
+      "communities": 186.3,
+      "search": 10.7,
+      "project": 6.0,
+      "neighbors": 23.6,
+      "subgraph": 21.2,
+      "impact": 131.6,
+      "tests_for": 21.1,
+      "node_details": 166.5,
+      "skeleton": 32.0,
+      "fetch": 52.1,
+      "validate": 126.6,
+      "cycles": 49.2,
+      "unreferenced": 647.1,
+      "same_names": 100.3,
+      "layers": 15.1,
+      "duplication_scan": 1935.5,
+      "package_apis": 56.2,
+      "routes": 61.8,
+      "locate": 862.1,
+      "query": 558.8,
+      "explain": 603.2,
+      "path": 581.0,
+      "diff": 23.0,
+      "freshness": 54.1,
+      "prune": 516.5,
+      "set_labels": 26.3,
+      "build": 4116.2,
+      "add": 0.0
+    },
+    "ureq": {
+      "overview": 21.8,
+      "god_nodes": 4.5,
+      "surprises": 40.7,
+      "communities": 488.0,
+      "search": 5.7,
+      "project": 13.0,
+      "neighbors": 16.3,
+      "subgraph": 13.0,
+      "impact": 45.2,
+      "tests_for": 11.5,
+      "node_details": 5.2,
+      "skeleton": 35.7,
+      "fetch": 42.6,
+      "validate": 33.5,
+      "cycles": 20.0,
+      "unreferenced": 562.1,
+      "same_names": 84.1,
+      "layers": 4.6,
+      "duplication_scan": 1359.2,
+      "package_apis": 16.1,
+      "routes": 15.0,
+      "locate": 463.3,
+      "query": 317.5,
+      "explain": 347.8,
+      "path": 347.5,
+      "diff": 41.3,
+      "freshness": 37.1,
+      "prune": 181.0,
+      "set_labels": 6.4,
+      "build": 1823.7,
+      "add": 0.0
+    },
+    "alamofire": {
+      "overview": 36.1,
+      "god_nodes": 40.1,
+      "surprises": 90.4,
+      "communities": 1255.9,
+      "search": 14.3,
+      "project": 6.7,
+      "neighbors": 153.5,
+      "subgraph": 23.4,
+      "impact": 81.5,
+      "tests_for": 35.8,
+      "node_details": 10.9,
+      "skeleton": 104.8,
+      "fetch": 306.7,
+      "validate": 1616.6,
+      "cycles": 25.8,
+      "unreferenced": 1791.3,
+      "same_names": 441.2,
+      "layers": 6.9,
+      "duplication_scan": 3721.8,
+      "package_apis": 408.1,
+      "routes": 457.2,
+      "locate": 1939.7,
+      "query": 525.3,
+      "explain": 539.5,
+      "path": 509.5,
+      "diff": 118.0,
+      "freshness": 83.5,
+      "prune": 424.3,
+      "set_labels": 19.5,
+      "build": 5745.0,
+      "add": 0.0
+    },
+    "hiredis": {
+      "overview": 17.9,
+      "god_nodes": 3.2,
+      "surprises": 30.1,
+      "communities": 135.8,
+      "search": 5.7,
+      "project": 6.5,
+      "neighbors": 15.7,
+      "subgraph": 12.9,
+      "impact": 46.4,
+      "tests_for": 7.6,
+      "node_details": 3.7,
+      "skeleton": 117.4,
+      "fetch": 112.5,
+      "validate": 23.4,
+      "cycles": 9.3,
+      "unreferenced": 210.5,
+      "same_names": 110.6,
+      "layers": 2.6,
+      "duplication_scan": 1889.9,
+      "package_apis": 12.8,
+      "routes": 12.3,
+      "locate": 556.5,
+      "query": 396.5,
+      "explain": 349.8,
+      "path": 291.4,
+      "diff": 72.8,
+      "freshness": 80.4,
+      "prune": 122.2,
+      "set_labels": 4.5,
+      "build": 1597.0,
+      "add": 0.0
+    },
+    "cpr": {
+      "overview": 25.5,
+      "god_nodes": 321.6,
+      "surprises": 22.1,
+      "communities": 566.1,
+      "search": 6.5,
+      "project": 7.1,
+      "neighbors": 32.7,
+      "subgraph": 23.0,
+      "impact": 37.4,
+      "tests_for": 16.2,
+      "node_details": 9.8,
+      "skeleton": 48.3,
+      "fetch": 43.1,
+      "validate": 47.0,
+      "cycles": 16.8,
+      "unreferenced": 572.6,
+      "same_names": 104.4,
+      "layers": 6.4,
+      "duplication_scan": 1398.4,
+      "package_apis": 26.5,
+      "routes": 22.3,
+      "locate": 1063.2,
+      "query": 345.5,
+      "explain": 435.0,
+      "path": 406.2,
+      "diff": 63.8,
+      "freshness": 73.9,
+      "prune": 222.8,
+      "set_labels": 9.0,
+      "build": 2466.8,
+      "add": 0.0
+    },
+    "faraday": {
+      "overview": 18.4,
+      "god_nodes": 8.3,
+      "surprises": 10.3,
+      "communities": 164.6,
+      "search": 3.5,
+      "project": 14.1,
+      "neighbors": 22.2,
+      "subgraph": 16.0,
+      "impact": 10.5,
+      "tests_for": 6.9,
+      "node_details": 5.6,
+      "skeleton": 6.1,
+      "fetch": 10.1,
+      "validate": 69.6,
+      "cycles": 5.2,
+      "unreferenced": 542.6,
+      "same_names": 36.7,
+      "layers": 1.3,
+      "duplication_scan": 625.3,
+      "package_apis": 19.0,
+      "routes": 20.7,
+      "locate": 433.7,
+      "query": 403.9,
+      "explain": 307.7,
+      "path": 289.1,
+      "diff": 37.3,
+      "freshness": 34.7,
+      "prune": 163.5,
+      "set_labels": 3.8,
+      "build": 1039.1,
+      "add": 0.0
+    },
+    "guzzle": {
+      "overview": 757.5,
+      "god_nodes": 15.7,
+      "surprises": 104.7,
+      "communities": 1433.8,
+      "search": 16.3,
+      "project": 6.9,
+      "neighbors": 33.6,
+      "subgraph": 32.4,
+      "impact": 35.5,
+      "tests_for": 412.7,
+      "node_details": 16.5,
+      "skeleton": 512.5,
+      "fetch": 55.4,
+      "validate": 925.4,
+      "cycles": 255.6,
+      "unreferenced": 632.0,
+      "same_names": 2049.8,
+      "layers": 12.8,
+      "duplication_scan": 5228.6,
+      "package_apis": 25.8,
+      "routes": 28.1,
+      "locate": 2039.2,
+      "query": 828.7,
+      "explain": 537.2,
+      "path": 585.5,
+      "diff": 120.8,
+      "freshness": 422.1,
+      "prune": 558.1,
+      "set_labels": 2.9,
+      "build": 4848.7,
+      "add": 0.0
+    }
+  },
+  "findings": [
+    {
+      "id": "FETCH-SHADOW-SPAN",
+      "severity": "high",
+      "kind": "bug",
+      "tool": "fetch",
+      "repo": "express",
+      "lang": ".js",
+      "summary": "a span that starts on the node's line belongs to another symbol",
+      "count": 5,
+      "samples": [
+        {
+          "node": "lib/response.js:65 res",
+          "qualname": "status",
+          "lines": "65-77"
+        },
+        {
+          "node": "lib/application.js:59 app",
+          "qualname": "init",
+          "lines": "59-83"
+        },
+        {
+          "node": "lib/request.js:127 req",
+          "qualname": "accepts",
+          "lines": "127-130"
+        },
+        {
+          "node": "examples/resource/index.js:13 app",
+          "qualname": "resource",
+          "lines": "13-26"
+        }
+      ]
+    },
+    {
+      "id": "FETCH-SHADOW-SPAN",
+      "severity": "high",
+      "kind": "bug",
+      "tool": "fetch",
+      "repo": "hiredis",
+      "lang": ".h",
+      "summary": "a span that starts on the node's line belongs to another symbol",
+      "count": 1,
+      "samples": [
+        {
+          "node": "ffc.h:2864 ffc_adjusted_mantissa ffc_digit_comp()",
+          "qualname": "ffc_digit_comp",
+          "lines": "2851-2883"
+        }
+      ]
+    },
+    {
+      "id": "ROUTES-EXPECTED-MISSING",
+      "severity": "high",
+      "kind": "gap",
+      "tool": "routes",
+      "repo": "express-mongoose-demo",
+      "lang": "",
+      "summary": "no express routes found in an application built on express",
+      "count": 1,
+      "samples": [
+        {}
+      ]
+    },
+    {
+      "id": "FETCH-NO-SPAN",
+      "severity": "medium",
+      "kind": "gap",
+      "tool": "fetch",
+      "repo": "express",
+      "lang": ".js",
+      "summary": "a definition has no span: fetch falls back to a line window",
+      "count": 1,
+      "samples": [
+        "lib/utils.js:29 methods()"
+      ]
+    },
+    {
+      "id": "FETCH-NO-SPAN",
+      "severity": "medium",
+      "kind": "gap",
+      "tool": "fetch",
+      "repo": "express-mongoose-demo",
+      "lang": ".js",
+      "summary": "a definition has no span: fetch falls back to a line window",
+      "count": 44,
+      "samples": [
+        "app/controllers/articles.js:10 Article",
+        "app/controllers/articles.js:68 create()",
+        "app/controllers/articles.js:9 only",
+        "app/controllers/users.js:9 User"
+      ]
+    },
+    {
+      "id": "FETCH-NO-SPAN",
+      "severity": "medium",
+      "kind": "gap",
+      "tool": "fetch",
+      "repo": "fastapi-template",
+      "lang": ".ts",
+      "summary": "a definition has no span: fetch falls back to a line window",
+      "count": 3,
+      "samples": [
+        "frontend/tests/config.ts:18 firstSuperuser",
+        "frontend/tests/config.ts:19 firstSuperuserPassword",
+        "frontend/src/client/client.gen.ts:16 client"
+      ]
+    },
+    {
+      "id": "FETCH-NO-SPAN",
+      "severity": "medium",
+      "kind": "gap",
+      "tool": "fetch",
+      "repo": "fastapi-template",
+      "lang": ".tsx",
+      "summary": "a definition has no span: fetch falls back to a line window",
+      "count": 1,
+      "samples": [
+        "frontend/src/components/ui/password-input.tsx:11 PasswordInput"
+      ]
+    },
+    {
+      "id": "FETCH-NO-SPAN",
+      "severity": "medium",
+      "kind": "gap",
+      "tool": "fetch",
+      "repo": "got",
+      "lang": ".js",
+      "summary": "a definition has no span: fetch falls back to a line window",
+      "count": 16,
+      "samples": [
+        "documentation/examples/advanced-creation.js:109 signRequest",
+        "documentation/examples/gh-got.js:15 instance",
+        "documentation/examples/h2c.js:32 instance",
+        "documentation/examples/advanced-creation.js:31 controlRedirects"
+      ]
+    },
+    {
+      "id": "FETCH-NO-SPAN",
+      "severity": "medium",
+      "kind": "gap",
+      "tool": "fetch",
+      "repo": "got",
+      "lang": ".ts",
+      "summary": "a definition has no span: fetch falls back to a line window",
+      "count": 2,
+      "samples": [
+        "test/helpers/test.ts:137 test",
+        "source/index.ts:11 got"
+      ]
+    },
+    {
+      "id": "FETCH-NO-SPAN",
+      "severity": "medium",
+      "kind": "gap",
+      "tool": "fetch",
+      "repo": "hiredis",
+      "lang": ".h",
+      "summary": "a definition has no span: fetch falls back to a line window",
+      "count": 24,
+      "samples": [
+        "hiredis.h:108 redisContext",
+        "async.h:41 dict",
+        "async.h:40 redisAsyncContext",
+        "ffc.h:1561 ffc_parse_int_string()"
+      ]
+    },
+    {
+      "id": "FETCH-NO-SPAN",
+      "severity": "medium",
+      "kind": "gap",
+      "tool": "fetch",
+      "repo": "nestjs-realworld",
+      "lang": ".ts",
+      "summary": "a definition has no span: fetch falls back to a line window",
+      "count": 1,
+      "samples": [
+        "src/user/user.decorator.ts:5 User"
+      ]
+    },
+    {
+      "id": "FETCH-NO-SPAN",
+      "severity": "medium",
+      "kind": "gap",
+      "tool": "fetch",
+      "repo": "restsharp",
+      "lang": ".ts",
+      "summary": "a definition has no span: fetch falls back to a line window",
+      "count": 2,
+      "samples": [
+        "docs/docusaurus.config.ts:5 config",
+        "docs/sidebars.ts:3 sidebars"
+      ]
+    },
+    {
+      "id": "FETCH-NO-SPAN",
+      "severity": "medium",
+      "kind": "gap",
+      "tool": "fetch",
+      "repo": "restsharp",
+      "lang": ".tsx",
+      "summary": "a definition has no span: fetch falls back to a line window",
+      "count": 1,
+      "samples": [
+        "docs/src/components/HomepageFeatures/index.tsx:11 FeatureList"
+      ]
+    },
+    {
+      "id": "FETCH-NO-SPAN",
+      "severity": "medium",
+      "kind": "gap",
+      "tool": "fetch",
+      "repo": "retrofit",
+      "lang": ".mjs",
+      "summary": "a definition has no span: fetch falls back to a line window",
+      "count": 1,
+      "samples": [
+        "website/astro.config.mjs:9 retrofitProperties"
+      ]
+    },
+    {
+      "id": "FETCH-NO-SPAN",
+      "severity": "medium",
+      "kind": "gap",
+      "tool": "fetch",
+      "repo": "retrofit",
+      "lang": ".ts",
+      "summary": "a definition has no span: fetch falls back to a line window",
+      "count": 1,
+      "samples": [
+        "website/src/content.config.ts:5 collections"
+      ]
+    },
+    {
+      "id": "FETCH-NO-SPAN",
+      "severity": "medium",
+      "kind": "gap",
+      "tool": "fetch",
+      "repo": "ureq",
+      "lang": ".rs",
+      "summary": "a definition has no span: fetch falls back to a line window",
+      "count": 2,
+      "samples": [
+        "src/send_body.rs:441 ()",
+        "src/util.rs:326 Uri"
+      ]
+    },
+    {
+      "id": "ROUTES-SILENT-EMPTY",
+      "severity": "medium",
+      "kind": "gap",
+      "tool": "routes",
+      "repo": "express",
+      "lang": ".js",
+      "summary": "the source registers routes in an idiom the extractor does not read; the reply lists none",
+      "count": 1,
+      "samples": [
+        {
+          "idiom_hits": 61,
+          "rows": 0
+        }
+      ]
+    },
+    {
+      "id": "ROUTES-SILENT-EMPTY",
+      "severity": "medium",
+      "kind": "gap",
+      "tool": "routes",
+      "repo": "express-mongoose-demo",
+      "lang": ".js",
+      "summary": "the source registers routes in an idiom the extractor does not read; the reply lists none",
+      "count": 1,
+      "samples": [
+        {
+          "idiom_hits": 26,
+          "rows": 0
+        }
+      ]
+    },
+    {
+      "id": "SKELETON-EMPTY",
+      "severity": "medium",
+      "kind": "gap",
+      "tool": "skeleton",
+      "repo": "restsharp",
+      "lang": ".ts",
+      "summary": "a file with definition nodes yields no symbols",
+      "count": 2,
+      "samples": [
+        "docs/docusaurus.config.ts",
+        "docs/sidebars.ts"
+      ]
+    },
+    {
+      "id": "SKELETON-EMPTY",
+      "severity": "medium",
+      "kind": "gap",
+      "tool": "skeleton",
+      "repo": "retrofit",
+      "lang": ".mjs",
+      "summary": "a file with definition nodes yields no symbols",
+      "count": 1,
+      "samples": [
+        "website/astro.config.mjs"
+      ]
+    },
+    {
+      "id": "SKELETON-EMPTY",
+      "severity": "medium",
+      "kind": "gap",
+      "tool": "skeleton",
+      "repo": "retrofit",
+      "lang": ".ts",
+      "summary": "a file with definition nodes yields no symbols",
+      "count": 1,
+      "samples": [
+        "website/src/content.config.ts"
+      ]
+    },
+    {
+      "id": "SKELETON-HEADER-NO-NAME",
+      "severity": "medium",
+      "kind": "bug",
+      "tool": "skeleton",
+      "repo": "hiredis",
+      "lang": ".h",
+      "summary": "a symbol's header does not show its name",
+      "count": 1,
+      "samples": [
+        {
+          "file": "hiredis.h",
+          "qualname": "redisOptions",
+          "header": "typedef struct {"
+        }
+      ]
+    },
+    {
+      "id": "TEST-PATH-MISSED",
+      "severity": "medium",
+      "kind": "gap",
+      "tool": "tests_for",
+      "repo": "ureq",
+      "lang": ".rs",
+      "summary": "files that contain tests are not recognised as test files",
+      "count": 1,
+      "samples": [
+        {
+          "files": 26,
+          "of": 48,
+          "examples": [
+            "src/agent.rs",
+            "src/body/charset.rs",
+            "src/body/gzip.rs",
+            "src/body/limit.rs"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "UNREFERENCED-LISTS-A-TEST",
+      "severity": "medium",
+      "kind": "bug",
+      "tool": "unreferenced",
+      "repo": "guzzle",
+      "lang": ".php",
+      "summary": "lists a test the runner collects as dead code",
+      "count": 1,
+      "samples": [
+        "tests/UtilsTest.php:26 .noBodyProvider()"
+      ]
+    },
+    {
+      "id": "CLI-AMBIGUOUS-NAME",
+      "severity": "low",
+      "kind": "gap",
+      "tool": "explain",
+      "repo": "alamofire",
+      "lang": "",
+      "summary": "a bare name several nodes share is refused by the graphify CLI; graphlore passes the refusal through instead of resolving the name",
+      "count": 1,
+      "samples": [
+        "ERROR (exit 3):\nAmbiguous: 'attach' matches 2 nodes in different files.\n  docs/docsets/Alamofire.docset/Contents/Resources/Documents/js/typeahead.jquery.js\n    "
+      ]
+    },
+    {
+      "id": "CLI-AMBIGUOUS-NAME",
+      "severity": "low",
+      "kind": "gap",
+      "tool": "explain",
+      "repo": "cpr",
+      "lang": "",
+      "summary": "a bare name several nodes share is refused by the graphify CLI; graphlore passes the refusal through instead of resolving the name",
+      "count": 1,
+      "samples": [
+        "ERROR (exit 3):\nAmbiguous: 'SetOption' matches 2 nodes in different files.\n  include/cpr/session.h\n    id: include_cpr_session_session_setoption\n  include/cpr/s"
+      ]
+    },
+    {
+      "id": "CLI-AMBIGUOUS-NAME",
+      "severity": "low",
+      "kind": "gap",
+      "tool": "explain",
+      "repo": "express-mongoose-demo",
+      "lang": "",
+      "summary": "a bare name several nodes share is refused by the graphify CLI; graphlore passes the refusal through instead of resolving the name",
+      "count": 1,
+      "samples": [
+        "ERROR (exit 3):\nAmbiguous: 'create' matches 3 nodes in different files.\n  app/controllers/articles.js\n    id: app_controllers_articles_create\n  app/controllers/"
+      ]
+    },
+    {
+      "id": "CLI-AMBIGUOUS-NAME",
+      "severity": "low",
+      "kind": "gap",
+      "tool": "explain",
+      "repo": "faraday",
+      "lang": "",
+      "summary": "a bare name several nodes share is refused by the graphify CLI; graphlore passes the refusal through instead of resolving the name",
+      "count": 1,
+      "samples": [
+        "ERROR (exit 3):\nAmbiguous: 'body' matches 3 nodes in different files.\n  lib/faraday/options/env.rb\n    id: lib_faraday_options_env_body\n  lib/faraday/response.r"
+      ]
+    },
+    {
+      "id": "CLI-AMBIGUOUS-NAME",
+      "severity": "low",
+      "kind": "gap",
+      "tool": "explain",
+      "repo": "gin-examples",
+      "lang": "",
+      "summary": "a bare name several nodes share is refused by the graphify CLI; graphlore passes the refusal through instead of resolving the name",
+      "count": 1,
+      "samples": [
+        "ERROR (exit 3):\nAmbiguous: 'setupRouter' matches 3 nodes in different files.\n  upload-file/limit-bytes/main.go\n    id: upload_file_limit_bytes_main_setuprouter\n"
+      ]
+    },
+    {
+      "id": "CLI-AMBIGUOUS-NAME",
+      "severity": "low",
+      "kind": "gap",
+      "tool": "explain",
+      "repo": "guzzle",
+      "lang": "",
+      "summary": "a bare name several nodes share is refused by the graphify CLI; graphlore passes the refusal through instead of resolving the name",
+      "count": 1,
+      "samples": [
+        "ERROR (exit 3):\nAmbiguous: '{closure#4}' matches 26 nodes in different files.\n  tests/Handler/CurlFactoryTest.php\n    id: tests_handler_curlfactorytest_closure_"
+      ]
+    },
+    {
+      "id": "CLI-AMBIGUOUS-NAME",
+      "severity": "low",
+      "kind": "gap",
+      "tool": "explain",
+      "repo": "httpx",
+      "lang": "",
+      "summary": "a bare name several nodes share is refused by the graphify CLI; graphlore passes the refusal through instead of resolving the name",
+      "count": 1,
+      "samples": [
+        "ERROR (exit 3):\nAmbiguous: 'request' matches 5 nodes in different files.\n  httpx/_models.py\n    id: httpx_models_request\n  httpx/_exceptions.py\n    id: httpx_ex"
+      ]
+    },
+    {
+      "id": "FETCH-ENCLOSING-SPAN",
+      "severity": "low",
+      "kind": "gap",
+      "tool": "fetch",
+      "repo": "cpr",
+      "lang": ".h",
+      "summary": "the node has no span of its own: fetch returns the definition around it",
+      "count": 6,
+      "samples": [
+        {
+          "node": "include/cpr/proxyauth.h:13 ProxyAuthentication",
+          "qualname": "cpr",
+          "lines": "12-54"
+        },
+        {
+          "node": "include/cpr/threadpool.h:17 io_context",
+          "qualname": "boost::asio",
+          "lines": "15-18"
+        },
+        {
+          "node": "include/cpr/secure_string.h:60 SecureString",
+          "qualname": "cpr::util",
+          "lines": "8-62"
+        },
+        {
+          "node": "include/cpr/async_wrapper.h:18 AsyncWrapper",
+          "qualname": "cpr",
+          "lines": "8-158"
+        }
+      ]
+    },
+    {
+      "id": "FETCH-ENCLOSING-SPAN",
+      "severity": "low",
+      "kind": "gap",
+      "tool": "fetch",
+      "repo": "faraday",
+      "lang": ".rb",
+      "summary": "the node has no span of its own: fetch returns the definition around it",
+      "count": 2,
+      "samples": [
+        {
+          "node": "lib/faraday/request.rb:27 Faraday::Request",
+          "qualname": "Faraday",
+          "lines": "3-134"
+        },
+        {
+          "node": "lib/faraday/adapter/test.rb:195 Faraday::Adapter::Test::Stub",
+          "qualname": "Faraday.Adapter.Test",
+          "lines": "62-315"
+        }
+      ]
+    },
+    {
+      "id": "FETCH-ENCLOSING-SPAN",
+      "severity": "low",
+      "kind": "gap",
+      "tool": "fetch",
+      "repo": "retrofit",
+      "lang": ".java",
+      "summary": "the node has no span of its own: fetch returns the definition around it",
+      "count": 1,
+      "samples": [
+        {
+          "node": "retrofit/java-test/src/test/java/retrofit2/CallTest.java:471 ToStringConverterFactory",
+          "qualname": "CallTest.http205SkipsConverter",
+          "lines": "461-486"
+        }
+      ]
+    },
+    {
+      "id": "FETCH-ENCLOSING-SPAN",
+      "severity": "low",
+      "kind": "gap",
+      "tool": "fetch",
+      "repo": "retrofit",
+      "lang": ".kt",
+      "summary": "the node has no span of its own: fetch returns the definition around it",
+      "count": 4,
+      "samples": [
+        {
+          "node": "retrofit/kotlin-test/src/test/java/retrofit2/KotlinSuspendTest.kt:309 Callback",
+          "qualname": "KotlinSuspendTest.usesCallAdapterForCall.get.adapt.enqueue",
+          "lines": "307-319"
+        },
+        {
+          "node": "retrofit/kotlin-test/src/test/java/retrofit2/KotlinSuspendTest.kt:290 Factory",
+          "qualname": "KotlinSuspendTest.usesCallAdapterForCall",
+          "lines": "287-338"
+        },
+        {
+          "node": "retrofit/kotlin-test/src/test/java/retrofit2/KotlinSuspendTest.kt:306 Call",
+          "qualname": "KotlinSuspendTest.usesCallAdapterForCall.get.adapt",
+          "lines": "305-321"
+        },
+        {
+          "node": "retrofit-mock/src/test/java/retrofit2/mock/BehaviorDelegateKotlinTest.kt:51 DoWorkService",
+          "qualname": "BehaviorDelegateKotlinTest.before",
+          "lines": "44-68"
+        }
+      ]
+    },
+    {
+      "id": "IMPORTS-UNCLASSIFIED",
+      "severity": "low",
+      "kind": "gap",
+      "tool": "cycles",
+      "repo": "guzzle",
+      "lang": ".php",
+      "summary": "every import edge of this language is unclassified",
+      "count": 1,
+      "samples": [
+        {
+          "edges": 396
+        }
+      ]
+    },
+    {
+      "id": "IMPORTS-UNCLASSIFIED",
+      "severity": "low",
+      "kind": "gap",
+      "tool": "cycles",
+      "repo": "restsharp",
+      "lang": ".csproj",
+      "summary": "every import edge of this language is unclassified",
+      "count": 1,
+      "samples": [
+        {
+          "edges": 24
+        }
+      ]
+    },
+    {
+      "id": "SLOW",
+      "severity": "low",
+      "kind": "perf",
+      "tool": "build",
+      "repo": "alamofire",
+      "lang": "",
+      "summary": "took over 5000 ms",
+      "count": 1,
+      "samples": [
+        {
+          "args": {
+            "path": ".",
+            "code_only": true
+          },
+          "ms": 5745
+        }
+      ]
+    },
+    {
+      "id": "SLOW",
+      "severity": "low",
+      "kind": "perf",
+      "tool": "build",
+      "repo": "got",
+      "lang": "",
+      "summary": "took over 5000 ms",
+      "count": 1,
+      "samples": [
+        {
+          "args": {
+            "path": ".",
+            "code_only": true
+          },
+          "ms": 5840
+        }
+      ]
+    },
+    {
+      "id": "SLOW",
+      "severity": "low",
+      "kind": "perf",
+      "tool": "duplication_scan",
+      "repo": "guzzle",
+      "lang": "",
+      "summary": "took over 5000 ms",
+      "count": 1,
+      "samples": [
+        {
+          "args": {
+            "node_budget": 8,
+            "max_pairs": 5
+          },
+          "ms": 5229
+        }
+      ]
+    },
+    {
+      "id": "SLOW",
+      "severity": "low",
+      "kind": "perf",
+      "tool": "build",
+      "repo": "retrofit",
+      "lang": "",
+      "summary": "took over 5000 ms",
+      "count": 1,
+      "samples": [
+        {
+          "args": {
+            "path": ".",
+            "code_only": true
+          },
+          "ms": 13964
+        }
+      ]
+    },
+    {
+      "id": "APIS-LANGUAGE-NOT-READ",
+      "severity": "info",
+      "kind": "gap",
+      "tool": "package_apis",
+      "repo": "alamofire",
+      "lang": ".swift",
+      "summary": "no package-API extractor for this language (the reply says so)",
+      "count": 1,
+      "samples": [
+        {
+          "files": 101,
+          "with_import_lines": 98,
+          "extracted": 0
+        }
+      ]
+    },
+    {
+      "id": "APIS-LANGUAGE-NOT-READ",
+      "severity": "info",
+      "kind": "gap",
+      "tool": "package_apis",
+      "repo": "cpr",
+      "lang": ".cpp",
+      "summary": "no package-API extractor for this language (the reply says so)",
+      "count": 1,
+      "samples": [
+        {
+          "files": 74,
+          "with_import_lines": 70,
+          "extracted": 0
+        }
+      ]
+    },
+    {
+      "id": "APIS-LANGUAGE-NOT-READ",
+      "severity": "info",
+      "kind": "gap",
+      "tool": "package_apis",
+      "repo": "cpr",
+      "lang": ".h",
+      "summary": "no package-API extractor for this language (the reply says so)",
+      "count": 1,
+      "samples": [
+        {
+          "files": 54,
+          "with_import_lines": 49,
+          "extracted": 0
+        }
+      ]
+    },
+    {
+      "id": "APIS-LANGUAGE-NOT-READ",
+      "severity": "info",
+      "kind": "gap",
+      "tool": "package_apis",
+      "repo": "cpr",
+      "lang": ".hpp",
+      "summary": "no package-API extractor for this language (the reply says so)",
+      "count": 1,
+      "samples": [
+        {
+          "files": 6,
+          "with_import_lines": 5,
+          "extracted": 0
+        }
+      ]
+    },
+    {
+      "id": "APIS-LANGUAGE-NOT-READ",
+      "severity": "info",
+      "kind": "gap",
+      "tool": "package_apis",
+      "repo": "faraday",
+      "lang": ".rb",
+      "summary": "no package-API extractor for this language (the reply says so)",
+      "count": 1,
+      "samples": [
+        {
+          "files": 83,
+          "with_import_lines": 26,
+          "extracted": 0
+        }
+      ]
+    },
+    {
+      "id": "APIS-LANGUAGE-NOT-READ",
+      "severity": "info",
+      "kind": "gap",
+      "tool": "package_apis",
+      "repo": "guzzle",
+      "lang": ".php",
+      "summary": "no package-API extractor for this language (the reply says so)",
+      "count": 1,
+      "samples": [
+        {
+          "files": 149,
+          "with_import_lines": 123,
+          "extracted": 0
+        }
+      ]
+    },
+    {
+      "id": "APIS-LANGUAGE-NOT-READ",
+      "severity": "info",
+      "kind": "gap",
+      "tool": "package_apis",
+      "repo": "hiredis",
+      "lang": ".h",
+      "summary": "no package-API extractor for this language (the reply says so)",
+      "count": 1,
+      "samples": [
+        {
+          "files": 27,
+          "with_import_lines": 20,
+          "extracted": 0
+        }
+      ]
+    },
+    {
+      "id": "APIS-LANGUAGE-NOT-READ",
+      "severity": "info",
+      "kind": "gap",
+      "tool": "package_apis",
+      "repo": "hiredis",
+      "lang": ".c",
+      "summary": "no package-API extractor for this language (the reply says so)",
+      "count": 1,
+      "samples": [
+        {
+          "files": 25,
+          "with_import_lines": 24,
+          "extracted": 0
+        }
+      ]
+    },
+    {
+      "id": "APIS-LANGUAGE-NOT-READ",
+      "severity": "info",
+      "kind": "gap",
+      "tool": "package_apis",
+      "repo": "kotlinpoet",
+      "lang": ".kt",
+      "summary": "no package-API extractor for this language (the reply says so)",
+      "count": 1,
+      "samples": [
+        {
+          "files": 126,
+          "with_import_lines": 107,
+          "extracted": 0
+        }
+      ]
+    },
+    {
+      "id": "APIS-LANGUAGE-NOT-READ",
+      "severity": "info",
+      "kind": "gap",
+      "tool": "package_apis",
+      "repo": "requests-scala",
+      "lang": ".scala",
+      "summary": "no package-API extractor for this language (the reply says so)",
+      "count": 1,
+      "samples": [
+        {
+          "files": 14,
+          "with_import_lines": 12,
+          "extracted": 0
+        }
+      ]
+    },
+    {
+      "id": "APIS-LANGUAGE-NOT-READ",
+      "severity": "info",
+      "kind": "gap",
+      "tool": "package_apis",
+      "repo": "restsharp",
+      "lang": ".cs",
+      "summary": "no package-API extractor for this language (the reply says so)",
+      "count": 1,
+      "samples": [
+        {
+          "files": 257,
+          "with_import_lines": 120,
+          "extracted": 0
+        }
+      ]
+    },
+    {
+      "id": "APIS-LANGUAGE-NOT-READ",
+      "severity": "info",
+      "kind": "gap",
+      "tool": "package_apis",
+      "repo": "retrofit",
+      "lang": ".kt",
+      "summary": "no package-API extractor for this language (the reply says so)",
+      "count": 1,
+      "samples": [
+        {
+          "files": 16,
+          "with_import_lines": 15,
+          "extracted": 0
+        }
+      ]
+    },
+    {
+      "id": "APIS-LANGUAGE-NOT-READ",
+      "severity": "info",
+      "kind": "gap",
+      "tool": "package_apis",
+      "repo": "ureq",
+      "lang": ".rs",
+      "summary": "no package-API extractor for this language (the reply says so)",
+      "count": 1,
+      "samples": [
+        {
+          "files": 48,
+          "with_import_lines": 46,
+          "extracted": 0
+        }
+      ]
+    },
+    {
+      "id": "BUILD-DEFAULT-NEEDS-KEY",
+      "severity": "info",
+      "kind": "upstream",
+      "tool": "build",
+      "repo": "alamofire",
+      "lang": "",
+      "summary": "graphlore_build() with its defaults fails without an LLM key when the repository holds docs; code_only=True builds",
+      "count": 1,
+      "samples": [
+        "named code_only=True"
+      ]
+    },
+    {
+      "id": "BUILD-DEFAULT-NEEDS-KEY",
+      "severity": "info",
+      "kind": "upstream",
+      "tool": "build",
+      "repo": "chi",
+      "lang": "",
+      "summary": "graphlore_build() with its defaults fails without an LLM key when the repository holds docs; code_only=True builds",
+      "count": 1,
+      "samples": [
+        "named code_only=True"
+      ]
+    },
+    {
+      "id": "BUILD-DEFAULT-NEEDS-KEY",
+      "severity": "info",
+      "kind": "upstream",
+      "tool": "build",
+      "repo": "cpr",
+      "lang": "",
+      "summary": "graphlore_build() with its defaults fails without an LLM key when the repository holds docs; code_only=True builds",
+      "count": 1,
+      "samples": [
+        "named code_only=True"
+      ]
+    },
+    {
+      "id": "BUILD-DEFAULT-NEEDS-KEY",
+      "severity": "info",
+      "kind": "upstream",
+      "tool": "build",
+      "repo": "express",
+      "lang": "",
+      "summary": "graphlore_build() with its defaults fails without an LLM key when the repository holds docs; code_only=True builds",
+      "count": 1,
+      "samples": [
+        "named code_only=True"
+      ]
+    },
+    {
+      "id": "BUILD-DEFAULT-NEEDS-KEY",
+      "severity": "info",
+      "kind": "upstream",
+      "tool": "build",
+      "repo": "express-mongoose-demo",
+      "lang": "",
+      "summary": "graphlore_build() with its defaults fails without an LLM key when the repository holds docs; code_only=True builds",
+      "count": 1,
+      "samples": [
+        "named code_only=True"
+      ]
+    },
+    {
+      "id": "BUILD-DEFAULT-NEEDS-KEY",
+      "severity": "info",
+      "kind": "upstream",
+      "tool": "build",
+      "repo": "faraday",
+      "lang": "",
+      "summary": "graphlore_build() with its defaults fails without an LLM key when the repository holds docs; code_only=True builds",
+      "count": 1,
+      "samples": [
+        "named code_only=True"
+      ]
+    },
+    {
+      "id": "BUILD-DEFAULT-NEEDS-KEY",
+      "severity": "info",
+      "kind": "upstream",
+      "tool": "build",
+      "repo": "fastapi-template",
+      "lang": "",
+      "summary": "graphlore_build() with its defaults fails without an LLM key when the repository holds docs; code_only=True builds",
+      "count": 1,
+      "samples": [
+        "named code_only=True"
+      ]
+    },
+    {
+      "id": "BUILD-DEFAULT-NEEDS-KEY",
+      "severity": "info",
+      "kind": "upstream",
+      "tool": "build",
+      "repo": "gin-examples",
+      "lang": "",
+      "summary": "graphlore_build() with its defaults fails without an LLM key when the repository holds docs; code_only=True builds",
+      "count": 1,
+      "samples": [
+        "named code_only=True"
+      ]
+    },
+    {
+      "id": "BUILD-DEFAULT-NEEDS-KEY",
+      "severity": "info",
+      "kind": "upstream",
+      "tool": "build",
+      "repo": "got",
+      "lang": "",
+      "summary": "graphlore_build() with its defaults fails without an LLM key when the repository holds docs; code_only=True builds",
+      "count": 1,
+      "samples": [
+        "named code_only=True"
+      ]
+    },
+    {
+      "id": "BUILD-DEFAULT-NEEDS-KEY",
+      "severity": "info",
+      "kind": "upstream",
+      "tool": "build",
+      "repo": "guzzle",
+      "lang": "",
+      "summary": "graphlore_build() with its defaults fails without an LLM key when the repository holds docs; code_only=True builds",
+      "count": 1,
+      "samples": [
+        "named code_only=True"
+      ]
+    },
+    {
+      "id": "BUILD-DEFAULT-NEEDS-KEY",
+      "severity": "info",
+      "kind": "upstream",
+      "tool": "build",
+      "repo": "hiredis",
+      "lang": "",
+      "summary": "graphlore_build() with its defaults fails without an LLM key when the repository holds docs; code_only=True builds",
+      "count": 1,
+      "samples": [
+        "named code_only=True"
+      ]
+    },
+    {
+      "id": "BUILD-DEFAULT-NEEDS-KEY",
+      "severity": "info",
+      "kind": "upstream",
+      "tool": "build",
+      "repo": "httpx",
+      "lang": "",
+      "summary": "graphlore_build() with its defaults fails without an LLM key when the repository holds docs; code_only=True builds",
+      "count": 1,
+      "samples": [
+        "named code_only=True"
+      ]
+    },
+    {
+      "id": "BUILD-DEFAULT-NEEDS-KEY",
+      "severity": "info",
+      "kind": "upstream",
+      "tool": "build",
+      "repo": "kotlinpoet",
+      "lang": "",
+      "summary": "graphlore_build() with its defaults fails without an LLM key when the repository holds docs; code_only=True builds",
+      "count": 1,
+      "samples": [
+        "named code_only=True"
+      ]
+    },
+    {
+      "id": "BUILD-DEFAULT-NEEDS-KEY",
+      "severity": "info",
+      "kind": "upstream",
+      "tool": "build",
+      "repo": "nestjs-realworld",
+      "lang": "",
+      "summary": "graphlore_build() with its defaults fails without an LLM key when the repository holds docs; code_only=True builds",
+      "count": 1,
+      "samples": [
+        "named code_only=True"
+      ]
+    },
+    {
+      "id": "BUILD-DEFAULT-NEEDS-KEY",
+      "severity": "info",
+      "kind": "upstream",
+      "tool": "build",
+      "repo": "requests-scala",
+      "lang": "",
+      "summary": "graphlore_build() with its defaults fails without an LLM key when the repository holds docs; code_only=True builds",
+      "count": 1,
+      "samples": [
+        "named code_only=True"
+      ]
+    },
+    {
+      "id": "BUILD-DEFAULT-NEEDS-KEY",
+      "severity": "info",
+      "kind": "upstream",
+      "tool": "build",
+      "repo": "restsharp",
+      "lang": "",
+      "summary": "graphlore_build() with its defaults fails without an LLM key when the repository holds docs; code_only=True builds",
+      "count": 1,
+      "samples": [
+        "named code_only=True"
+      ]
+    },
+    {
+      "id": "BUILD-DEFAULT-NEEDS-KEY",
+      "severity": "info",
+      "kind": "upstream",
+      "tool": "build",
+      "repo": "resty",
+      "lang": "",
+      "summary": "graphlore_build() with its defaults fails without an LLM key when the repository holds docs; code_only=True builds",
+      "count": 1,
+      "samples": [
+        "named code_only=True"
+      ]
+    },
+    {
+      "id": "BUILD-DEFAULT-NEEDS-KEY",
+      "severity": "info",
+      "kind": "upstream",
+      "tool": "build",
+      "repo": "retrofit",
+      "lang": "",
+      "summary": "graphlore_build() with its defaults fails without an LLM key when the repository holds docs; code_only=True builds",
+      "count": 1,
+      "samples": [
+        "named code_only=True"
+      ]
+    },
+    {
+      "id": "BUILD-DEFAULT-NEEDS-KEY",
+      "severity": "info",
+      "kind": "upstream",
+      "tool": "build",
+      "repo": "spring-petclinic",
+      "lang": "",
+      "summary": "graphlore_build() with its defaults fails without an LLM key when the repository holds docs; code_only=True builds",
+      "count": 1,
+      "samples": [
+        "named code_only=True"
+      ]
+    },
+    {
+      "id": "BUILD-DEFAULT-NEEDS-KEY",
+      "severity": "info",
+      "kind": "upstream",
+      "tool": "build",
+      "repo": "ureq",
+      "lang": "",
+      "summary": "graphlore_build() with its defaults fails without an LLM key when the repository holds docs; code_only=True builds",
+      "count": 1,
+      "samples": [
+        "named code_only=True"
+      ]
+    },
+    {
+      "id": "GRAPH-ORPHAN-NODES",
+      "severity": "info",
+      "kind": "upstream",
+      "tool": "validate",
+      "repo": "alamofire",
+      "lang": "",
+      "summary": "the graph graphify built has orphan_nodes",
+      "count": 1,
+      "samples": [
+        1
+      ]
+    },
+    {
+      "id": "GRAPH-ORPHAN-NODES",
+      "severity": "info",
+      "kind": "upstream",
+      "tool": "validate",
+      "repo": "express",
+      "lang": "",
+      "summary": "the graph graphify built has orphan_nodes",
+      "count": 1,
+      "samples": [
+        10
+      ]
+    },
+    {
+      "id": "GRAPH-ORPHAN-NODES",
+      "severity": "info",
+      "kind": "upstream",
+      "tool": "validate",
+      "repo": "express-mongoose-demo",
+      "lang": "",
+      "summary": "the graph graphify built has orphan_nodes",
+      "count": 1,
+      "samples": [
+        3
+      ]
+    },
+    {
+      "id": "GRAPH-ORPHAN-NODES",
+      "severity": "info",
+      "kind": "upstream",
+      "tool": "validate",
+      "repo": "faraday",
+      "lang": "",
+      "summary": "the graph graphify built has orphan_nodes",
+      "count": 1,
+      "samples": [
+        22
+      ]
+    },
+    {
+      "id": "GRAPH-ORPHAN-NODES",
+      "severity": "info",
+      "kind": "upstream",
+      "tool": "validate",
+      "repo": "fastapi-template",
+      "lang": "",
+      "summary": "the graph graphify built has orphan_nodes",
+      "count": 1,
+      "samples": [
+        9
+      ]
+    },
+    {
+      "id": "GRAPH-ORPHAN-NODES",
+      "severity": "info",
+      "kind": "upstream",
+      "tool": "validate",
+      "repo": "gin-examples",
+      "lang": "",
+      "summary": "the graph graphify built has orphan_nodes",
+      "count": 1,
+      "samples": [
+        10
+      ]
+    },
+    {
+      "id": "GRAPH-ORPHAN-NODES",
+      "severity": "info",
+      "kind": "upstream",
+      "tool": "validate",
+      "repo": "got",
+      "lang": "",
+      "summary": "the graph graphify built has orphan_nodes",
+      "count": 1,
+      "samples": [
+        2
+      ]
+    },
+    {
+      "id": "GRAPH-ORPHAN-NODES",
+      "severity": "info",
+      "kind": "upstream",
+      "tool": "validate",
+      "repo": "guzzle",
+      "lang": "",
+      "summary": "the graph graphify built has orphan_nodes",
+      "count": 1,
+      "samples": [
+        3
+      ]
+    },
+    {
+      "id": "GRAPH-ORPHAN-NODES",
+      "severity": "info",
+      "kind": "upstream",
+      "tool": "validate",
+      "repo": "httpx",
+      "lang": "",
+      "summary": "the graph graphify built has orphan_nodes",
+      "count": 1,
+      "samples": [
+        6
+      ]
+    },
+    {
+      "id": "GRAPH-ORPHAN-NODES",
+      "severity": "info",
+      "kind": "upstream",
+      "tool": "validate",
+      "repo": "kotlinpoet",
+      "lang": "",
+      "summary": "the graph graphify built has orphan_nodes",
+      "count": 1,
+      "samples": [
+        20
+      ]
+    },
+    {
+      "id": "GRAPH-ORPHAN-NODES",
+      "severity": "info",
+      "kind": "upstream",
+      "tool": "validate",
+      "repo": "nestjs-realworld",
+      "lang": "",
+      "summary": "the graph graphify built has orphan_nodes",
+      "count": 1,
+      "samples": [
+        1
+      ]
+    },
+    {
+      "id": "GRAPH-ORPHAN-NODES",
+      "severity": "info",
+      "kind": "upstream",
+      "tool": "validate",
+      "repo": "requests-scala",
+      "lang": "",
+      "summary": "the graph graphify built has orphan_nodes",
+      "count": 1,
+      "samples": [
+        1
+      ]
+    },
+    {
+      "id": "GRAPH-ORPHAN-NODES",
+      "severity": "info",
+      "kind": "upstream",
+      "tool": "validate",
+      "repo": "restsharp",
+      "lang": "",
+      "summary": "the graph graphify built has orphan_nodes",
+      "count": 1,
+      "samples": [
+        4
+      ]
+    },
+    {
+      "id": "GRAPH-ORPHAN-NODES",
+      "severity": "info",
+      "kind": "upstream",
+      "tool": "validate",
+      "repo": "resty",
+      "lang": "",
+      "summary": "the graph graphify built has orphan_nodes",
+      "count": 1,
+      "samples": [
+        1
+      ]
+    },
+    {
+      "id": "GRAPH-ORPHAN-NODES",
+      "severity": "info",
+      "kind": "upstream",
+      "tool": "validate",
+      "repo": "retrofit",
+      "lang": "",
+      "summary": "the graph graphify built has orphan_nodes",
+      "count": 1,
+      "samples": [
+        66
+      ]
+    },
+    {
+      "id": "GRAPH-ORPHAN-NODES",
+      "severity": "info",
+      "kind": "upstream",
+      "tool": "validate",
+      "repo": "spring-petclinic",
+      "lang": "",
+      "summary": "the graph graphify built has orphan_nodes",
+      "count": 1,
+      "samples": [
+        8
+      ]
+    },
+    {
+      "id": "GRAPH-ORPHAN-NODES",
+      "severity": "info",
+      "kind": "upstream",
+      "tool": "validate",
+      "repo": "ureq",
+      "lang": "",
+      "summary": "the graph graphify built has orphan_nodes",
+      "count": 1,
+      "samples": [
+        3
+      ]
+    }
+  ]
+}
