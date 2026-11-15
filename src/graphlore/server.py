@@ -50,7 +50,8 @@ graph.json analysis tools (no CLI needed):
   - graphlore_package_apis: symbol-level external API surface (which names each
                           package is actually used for — upgrade-audit input)
   - graphlore_routes     : framework route -> handler table (FastAPI/Flask/Django,
-                          Express/NestJS, gin/chi/net-http, Spring)
+                          Express/NestJS, gin/chi/net-http, Spring/JAX-RS, Ktor,
+                          ASP.NET Core, axum/actix-web, Rails/Sinatra, Laravel/Symfony)
 
 Project selection:
   - graphlore_project    : show / switch the project directory the server reads
@@ -5401,14 +5402,129 @@ def _first_party_prefixes() -> list[str]:
     return prefixes
 
 
-# What the per-file extractors (graphlore_package_apis, graphlore_routes) read:
-# Python through the stdlib ast, the rest through tree-sitter.
-_EXTRACTOR_EXTS = frozenset({
+# `package a.b;` / `namespace A.B;` / `namespace A\B;` at the start of a line.
+_DECLARED_PACKAGE = {
+    ".java": re.compile(r"^\s*package\s+([\w.]+)", re.M),
+    ".kt": re.compile(r"^\s*package\s+([\w.]+)", re.M),
+    ".kts": re.compile(r"^\s*package\s+([\w.]+)", re.M),
+    ".scala": re.compile(r"^\s*package\s+([\w.]+)", re.M),
+    ".cs": re.compile(r"^\s*namespace\s+([\w.]+)", re.M),
+    ".php": re.compile(r"^\s*namespace\s+([\w\\]+)\s*[;{]", re.M),
+}
+# Namespaces a repository may declare (a polyfill of `System.Index`) that still
+# name the platform: their imports stay external.
+_PLATFORM_ROOTS = frozenset({
+    "System", "Microsoft", "java", "javax", "jakarta", "kotlin", "kotlinx", "scala",
+    "android", "androidx",
+})
+_SWIFT_TARGET = re.compile(
+    r"\.(?:target|executableTarget|library|testTarget)\s*\(\s*name:\s*\"([^\"]+)\"")
+_GEMSPEC_NAME = re.compile(r"\.name\s*=\s*['\"]([\w.-]+)['\"]")
+
+
+class _FirstParty:
+    """What, among the packages a file imports, is the project itself.
+
+    Per language: Python's top-level packages and Go's module path (as before);
+    the packages and namespaces the repository's own JVM, .NET and PHP files
+    declare (an import is first-party when its package is one of them — a prefix
+    would make ``GuzzleHttp\\Promise`` part of guzzle); Rust crate names from
+    ``Cargo.toml``; Ruby gemspec names and ``lib/`` entries; Swift targets of
+    ``Package.swift`` and ``Sources/`` directories; C/C++ directories that hold
+    headers (``include/cpr``, ``cpr/``).
+    """
+
+    def __init__(self, files: list[str]) -> None:
+        self.prefixes = _first_party_prefixes()
+        self.declared: set[str] = set()
+        root = config.PROJECT_DIR
+        for f in files:
+            rx = _DECLARED_PACKAGE.get(f[f.rfind("."):].lower() if "." in f else "")
+            if rx is None:
+                continue
+            full = _resolve_in_project(f)
+            if full is None:
+                continue
+            try:
+                head = full.read_text(encoding="utf-8", errors="replace")[:20000]
+            except OSError:
+                continue
+            for m in rx.finditer(head):
+                name = m.group(1).strip("\\")
+                if re.split(r"[.\\]", name)[0] not in _PLATFORM_ROOTS:
+                    self.declared.add(name)
+        self.crates: set[str] = set()
+        self.c_dirs: set[str] = set()
+        self.c_headers: set[str] = set()  # `<hiredis.h>` when hiredis.h is the project's
+        self.ruby: set[str] = set()
+        self.swift: set[str] = set()
+        for f in files:
+            if f.rsplit("/", 1)[-1] in ("Cargo.toml", "Package.swift") or f.endswith(".gemspec"):
+                self._manifest(f)
+            elif f.endswith((".h", ".hpp", ".hxx", ".hh")):
+                self.c_headers.add(f.rsplit("/", 1)[-1])
+                if "/" not in f:
+                    continue
+                parts = f.split("/")
+                self.c_dirs.add(parts[1] if parts[0] in ("include", "src") and len(parts) > 2
+                                else parts[0])
+        for name in ("Cargo.toml", "Package.swift"):
+            self._manifest(name)
+        try:
+            for p in root.glob("*.gemspec"):
+                self._manifest(p.name)
+            lib = root / "lib"
+            if lib.is_dir():
+                self.ruby.update(p.stem for p in lib.iterdir())
+            sources = root / "Sources"
+            if sources.is_dir():
+                self.swift.update(p.name for p in sources.iterdir() if p.is_dir())
+        except OSError:
+            pass
+
+    def _manifest(self, rel: str) -> None:
+        full = _resolve_in_project(rel)
+        if full is None or not full.is_file():
+            return
+        try:
+            text = full.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return
+        if rel.endswith("Cargo.toml"):
+            for m in re.finditer(r"^\s*name\s*=\s*\"([^\"]+)\"", text, re.M):
+                self.crates.add(m.group(1).replace("-", "_"))
+        elif rel.endswith("Package.swift"):
+            self.swift.update(_SWIFT_TARGET.findall(text))
+        else:
+            self.ruby.update(_GEMSPEC_NAME.findall(text))
+
+    def internal(self, pkg: str, file: str) -> bool:
+        ext = file[file.rfind("."):].lower() if "." in file else ""
+        if ext in _DECLARED_PACKAGE:
+            return pkg in self.declared
+        if ext == ".rs":
+            return pkg in self.crates
+        if ext == ".rb":
+            return pkg in self.ruby
+        if ext == ".swift":
+            return pkg in self.swift
+        if ext in (".c", ".h", ".cc", ".cpp", ".cxx", ".hpp", ".hxx", ".m", ".mm"):
+            return pkg in self.c_dirs or pkg in self.c_headers
+        return any(pkg == fp or pkg.startswith(fp + "/") for fp in self.prefixes)
+
+
+# What the per-file extractors read: Python through the stdlib ast, the rest
+# through tree-sitter.
+_ROUTE_EXTS = frozenset({
     ".py", ".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts", ".go", ".java",
+    ".kt", ".kts", ".cs", ".rs", ".rb", ".php",
+})
+_API_EXTS = _ROUTE_EXTS | frozenset({
+    ".scala", ".swift", ".c", ".h", ".cc", ".cpp", ".cxx", ".hpp", ".hxx", ".m", ".mm",
 })
 
 
-def _not_read(files: Iterable[str]) -> dict[str, int]:
+def _not_read(files: Iterable[str], readable_exts: frozenset[str]) -> dict[str, int]:
     """Source files the extractors could not read, counted by extension.
 
     Either the language has no extractor (Rust, C#, Kotlin, ...) or its
@@ -5425,7 +5541,7 @@ def _not_read(files: Iterable[str]) -> dict[str, int]:
         ok = readable.get(ext)
         if ok is None:
             ok = readable[ext] = ext == ".py" or (
-                ext in _EXTRACTOR_EXTS and _ts_parser_for(f)[0] is not None)
+                ext in readable_exts and _ts_parser_for(f)[0] is not None)
         if not ok:
             counts[ext] += 1
     return dict(sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])))
@@ -5458,9 +5574,12 @@ def graphlore_package_apis(
     (``from fastapi import Depends``) plus attribute access through import aliases
     (``np.array(...)`` -> numpy: array). ``qualified_paths`` resolves full chains
     (``numpy.linalg.norm``) — the precise input for a version-diff check. Python is
-    parsed with the stdlib ast; JS/TS, Go and Java need the optional [treesitter]
-    extra. First-party packages (the project's own modules) are excluded and
-    reported in ``first_party_skipped``.
+    parsed with the stdlib ast; JS/TS, Go and Java (use sites too) and Kotlin,
+    Scala, C#, Rust, Swift, C/C++, Ruby and PHP (what each file imports) need the
+    optional [treesitter] extra. First-party packages are excluded and reported in
+    ``first_party_skipped``: Python and Go modules of the project, the packages
+    and namespaces its JVM / .NET / PHP files declare, its crates
+    (``Cargo.toml``), gems, Swift targets and header directories.
 
     The result is a LOWER BOUND ("at least these must be audited"): dynamic import,
     ``getattr(pkg, name)``, ``import *`` and use through a wrapper are invisible. A
@@ -5482,11 +5601,8 @@ def graphlore_package_apis(
         return view
     files = sorted({_norm_relpath(_node_file(n)) for n in view.nodes} - {""})
 
-    first_party = _first_party_prefixes()
+    first_party = _FirstParty(sorted({_norm_relpath(_node_file(n)) for n in nodes} - {""}))
     skipped: set[str] = set()
-
-    def _internal(pkg: str) -> bool:
-        return any(pkg == fp or pkg.startswith(fp + "/") for fp in first_party)
 
     pkg_files: dict[str, set[str]] = {}
     pkg_syms: dict[str, set[str]] = {}
@@ -5495,7 +5611,7 @@ def graphlore_package_apis(
     for f in files:
         packages, symbols, paths = _api_uses_for_file(f)
         for pkg in packages:
-            if _internal(pkg):
+            if first_party.internal(pkg, f):
                 skipped.add(pkg)
                 continue
             pkg_files.setdefault(pkg, set()).add(f)
@@ -5555,7 +5671,7 @@ def graphlore_package_apis(
         "note": _API_SURFACE_NOTE,
         "scope": view.payload(),
     }
-    not_read = _not_read(files)
+    not_read = _not_read(files, _API_EXTS)
     if not_read:
         payload["not_read"] = not_read
     _cut_hint(payload, "Raise limit for the rest of the `total` packages, or pass package= "
@@ -5605,20 +5721,20 @@ def _project_imports_js_server(files: Iterable[str]) -> bool:
 
 
 _ROUTES_NOTE = (
-    "lower bound: non-literal patterns, dynamic registration and chained builders "
-    "(router.route().get(), gorilla .Methods()) are invisible; zero routes means "
-    "no visibility, not no routes"
+    "lower bound: non-literal patterns, dynamic registration, prefixes applied in "
+    "another file and gorilla .Methods() are invisible; zero routes means no "
+    "visibility, not no routes"
 )
 
 
 def _route_candidate_files(graph_files: set[str]) -> set[str]:
     """Well-known route files the graph may not know about, beyond ``graph_files``.
 
-    Django's ``urls.py`` is the one file shape that systematically holds zero
-    extracted symbols (it's all module-level calls), so it can be absent from the
-    graph entirely. A pruned, capped walk picks those up; anything else outside
-    the graph (say a route-only ``routes.ts``) stays a documented limitation —
-    this must not grow into a filesystem scanner.
+    Some route files are all module-level calls and hold no symbol, so the
+    graph can leave them out: Django's ``urls.py``, Rails' ``config/routes.rb``,
+    Laravel's ``routes/*.php``. A pruned, capped walk picks those up; anything
+    else outside the graph (say a route-only ``routes.ts``) stays a documented
+    limitation — this must not grow into a filesystem scanner.
     """
     skip = {".git", "node_modules", ".venv", "venv", "dist", "build", "target",
             "__pycache__", config.OUT_DIR_NAME}
@@ -5627,14 +5743,18 @@ def _route_candidate_files(graph_files: set[str]) -> set[str]:
     try:
         for dirpath, dirnames, filenames in os.walk(root):
             dirnames[:] = [d for d in dirnames if d not in skip and not d.startswith(".")]
-            if "urls.py" in filenames:
+            here = Path(dirpath)
+            wanted = [f for f in filenames if f == "urls.py"
+                      or (f == "routes.rb" and here.name == "config")
+                      or (f.endswith(".php") and here.name == "routes")]
+            for name in wanted:
                 try:
-                    rel = (Path(dirpath) / "urls.py").resolve().relative_to(root.resolve())
+                    rel = (here / name).resolve().relative_to(root.resolve())
                 except (ValueError, OSError):
                     continue
                 found.add(rel.as_posix())
-                if len(found) >= 200:
-                    break
+            if len(found) >= 200:
+                break
     except OSError:
         pass
     return found - graph_files
@@ -5651,25 +5771,35 @@ def graphlore_routes(
 ) -> str:
     """Framework route -> handler table: which URL patterns hit which code.
 
-    Scans the files the graph knows (plus any ``urls.py`` the graph missed) for
-    the common registration idioms — Python: Flask ``@app.route`` / FastAPI-style
-    verb decorators / Django ``path()``; JS/TS: Express-style ``app.get('/x', h)``
-    and NestJS ``@Controller``+``@Get``; Go: gin/echo/chi verb methods,
-    ``HandleFunc`` (Go 1.22 ``"GET /x"`` patterns split), chi ``Route`` nesting;
-    Java: Spring ``@GetMapping``-family and ``@RequestMapping``. Each row is
-    joined back to its graph node and qualified name, so a route answers "where
-    is this endpoint" in one hop. Python is parsed with the stdlib ast; JS/TS,
-    Go and Java need the optional [treesitter] extra.
+    Scans the files the graph knows (plus the ``urls.py``, ``config/routes.rb``
+    and ``routes/*.php`` it missed) for the common registration idioms —
+    Python: Flask ``@app.route`` / FastAPI-style verb decorators / Django
+    ``path()``; JS/TS: Express-style ``app.get('/x', h)`` and
+    ``router.route('/x').get(h)``, NestJS ``@Controller``+``@Get``; Go:
+    gin/echo/chi verb methods, ``HandleFunc`` (Go 1.22 ``"GET /x"`` patterns
+    split), chi ``Route`` nesting; Java: Spring ``@GetMapping``-family and
+    ``@RequestMapping``, JAX-RS ``@Path``+``@GET``; Kotlin: Spring and Ktor
+    ``routing {}``; C#: ASP.NET Core ``[HttpGet]`` controllers and minimal APIs
+    (``app.MapGet``, ``MapGroup``); Rust: axum ``Router::route`` / ``nest``,
+    actix-web ``#[get]`` and ``web::scope`` / ``resource``; Ruby: Sinatra and the
+    Rails ``routes.draw`` DSL (``resources``, ``namespace``, ``scope``); PHP:
+    Laravel ``Route::`` chains and Symfony ``#[Route]``. Each row is joined back
+    to its graph node and qualified name, so a route answers "where is this
+    endpoint" in one hop. Python is parsed with the stdlib ast; the rest need the
+    optional [treesitter] extra. Source files in a language with no route
+    reader are counted in ``not_read``.
 
-    The result is a LOWER BOUND: non-literal patterns, dynamic registration and
-    chained builders (``router.route().get()``, gorilla ``.Methods()``) are
-    invisible; gorilla chains surface as method ``ANY``. Zero routes reads "no
+    The result is a LOWER BOUND: non-literal patterns, dynamic registration,
+    prefixes applied in another file and gorilla ``.Methods()`` are invisible;
+    gorilla chains surface as method ``ANY``. Zero routes reads "no
     visibility", not "no routes".
 
     Args:
         framework: Keep only this framework label (exact, case-insensitive) —
-            e.g. "fastapi", "flask", "django", "express", "nestjs", "gin",
-            "chi", "net-http", "spring".
+            e.g. "fastapi", "flask", "django", "express", "fastify", "koa",
+            "nestjs", "gin", "echo", "chi", "gorilla", "net-http", "spring",
+            "jax-rs", "ktor", "aspnet", "axum", "actix-web", "sinatra", "rails",
+            "laravel", "symfony".
         method: Keep only this HTTP method (exact, case-insensitive; "ANY" for
             rows the idiom doesn't pin to one method).
         pattern: Keep only URL patterns containing this substring (case-insensitive).
@@ -5728,7 +5858,7 @@ def graphlore_routes(
     }
     _cut_hint(payload, "Raise limit for the rest of the `count` routes, or filter with "
                        "framework= / method= / pattern=.")
-    not_read = _not_read(files)
+    not_read = _not_read(files, _ROUTE_EXTS)
     if not_read:
         payload["not_read"] = not_read
     if not rows:
