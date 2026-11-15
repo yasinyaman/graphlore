@@ -9,7 +9,7 @@ a result.
 Back to the [README](../README.md) · [Benchmark](benchmark.md) ·
 [Tool reference](tools.md) · [Concepts](concepts.md)
 
-Measured 2026-11-15 with graphlore 0.6.0, graphify
+Measured 2026-11-15 with graphlore 0.6.1, graphify
 0.9.109, tree-sitter-language-pack 1.25.0, semble 0.7.3,
 Python 3.13.18. Results: [`benchmarks/results-polyglot.json`](../benchmarks/results-polyglot.json).
 

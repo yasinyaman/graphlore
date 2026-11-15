@@ -1,7 +1,7 @@
 {
   "measured": "2026-11-15",
   "versions": {
-    "graphlore": "0.6.0",
+    "graphlore": "0.6.1",
     "graphify": "0.9.109",
     "tree_sitter_language_pack": "1.25.0",
     "semble": "0.7.3",

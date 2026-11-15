@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-11-15
+
 A sixth field report, on a FastAPI repository whose graph was older than its
 working tree: the route table joined rows to the wrong node without saying so.
 
