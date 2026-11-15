@@ -11,6 +11,28 @@ Every tool was run on 20 real repositories in 14 languages
 what that turned up; what is still missing per language is in the report.
 
 ### Added
+- **Package APIs for Kotlin, Scala, C#, Rust, Swift, C / C++, Ruby and PHP**,
+  read from each file's imports (`import a.b.C`, `using A.B;`, `use a::b::{c}`,
+  `#include <curl/curl.h>`, `require 'faraday/utils'`, `use A\B\C;`). The
+  project's own packages are left out per language: the packages and namespaces
+  its JVM, .NET and PHP files declare (an exact match, so guzzle's
+  `GuzzleHttp\Promise` dependency is not mistaken for guzzle), its crates
+  (`Cargo.toml`, plus `crate::` / `self::` / `super::` and modules declared in
+  the same file), gems, Swift targets and header directories. Java gained the
+  same rule: retrofit's own `retrofit2.*` packages were listed as external.
+- **Routes for Kotlin, C#, Rust, Ruby and PHP, and JAX-RS for Java**: Spring
+  and Ktor in Kotlin; ASP.NET Core controllers (`[Route("api/[controller]")]`,
+  `[HttpGet("{id}")]`) and minimal APIs (`app.MapGet`, prefixes through
+  `var g = app.MapGroup("/api")`); axum (`.route("/x", get(h).post(h2))`,
+  `.nest`) and actix-web (`#[get("/x")]`, `web::scope` / `resource`); Sinatra
+  and the Rails `routes.draw` DSL (`resources` with `only:` / `except:` /
+  `param:` and nesting, `namespace`, `scope`, `root`); Laravel `Route::` chains
+  (`prefix`, `group`, `resource`, `apiResource`) and Symfony `#[Route]`. Each
+  is gated on its framework, and Java's JAX-RS on a `javax.ws.rs` /
+  `jakarta.ws.rs` import so Retrofit's client `@GET` stays out. On eleven
+  RealWorld-style sample applications every route of the spec is found
+  (`docs/benchmark-polyglot.md`). `config/routes.rb` and `routes/*.php` are
+  read even when the graph holds no symbol of them.
 - `scope` on `graphlore_routes`, `graphlore_package_apis`, `graphlore_layers`
   and `graphlore_tests_for`, the four tools that read the whole graph without
   one. Their results carry the `scope` payload and say what was left out.

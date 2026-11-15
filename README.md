@@ -191,10 +191,11 @@ table linked below also lists what it cannot constrain.
 Python works out of the box through the standard library. JS/TS, Go, Java,
 Kotlin, Scala, C#, Rust, Swift, C/C++, Ruby, PHP and the other languages
 tree-sitter covers need the `[treesitter]` extra; without it, non-Python files
-fall back to nearest-line matching. Route and package-API extraction cover
-fewer languages
-([tool reference](https://github.com/yasinyaman/graphlore/blob/master/docs/tools.md))
-and say which files they did not read.
+fall back to nearest-line matching. Package-API extraction reads all of
+these; route extraction reads Python, JS/TS, Go, Java, Kotlin, C#, Rust, Ruby
+and PHP frameworks
+([tool reference](https://github.com/yasinyaman/graphlore/blob/master/docs/tools.md)),
+and both say which files they did not read.
 [What was measured in each language](https://github.com/yasinyaman/graphlore/blob/master/docs/benchmark-polyglot.md),
 on 20 real repositories.
 

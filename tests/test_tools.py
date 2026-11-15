@@ -6782,22 +6782,27 @@ def test_semble_that_fails_to_load_is_not_reported_as_missing(project, monkeypat
 def test_extractors_say_which_source_files_they_did_not_read(tmp_path, monkeypatch):
     # ureq / kotlinpoet: "no routes" and "no packages" read the same as for a
     # project that has none
+    _skip_without_treesitter()
     (tmp_path / "app.py").write_text("import os\n", encoding="utf-8")
-    (tmp_path / "main.rs").write_text("use std::io;\n", encoding="utf-8")
+    (tmp_path / "main.lua").write_text("local x = require('x')\n", encoding="utf-8")
+    (tmp_path / "App.swift").write_text("import Foundation\n", encoding="utf-8")
+
+    def hub(name):
+        return {"id": name, "label": name, "source_file": name, "source_location": "L1"}
+
     _write_graph(tmp_path, {
-        "nodes": [
-            {"id": "app", "label": "app.py", "source_file": "app.py", "source_location": "L1"},
-            {"id": "main", "label": "main.rs", "source_file": "main.rs", "source_location": "L1"},
-            {"id": "lib", "label": "lib.rs", "source_file": "lib.rs", "source_location": "L1"},
-            {"id": "doc", "label": "README.md", "source_file": "README.md"},
-        ],
+        "nodes": [hub("app.py"), hub("main.lua"), hub("util.lua"), hub("App.swift"),
+                  {"id": "doc", "label": "README.md", "source_file": "README.md"}],
         "edges": [],
     })
     server._GRAPH_CACHE.clear()
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
-    for tool in (server.graphlore_routes, server.graphlore_package_apis):
-        assert json.loads(tool(as_json=True))["not_read"] == {".rs": 2}, tool.__name__
-        assert "Not read — no extractor for these source files: 2 .rs." in tool()
+    # Lua has no extractor of either kind; Swift has a package-API reader only
+    assert json.loads(server.graphlore_package_apis(as_json=True))["not_read"] == {".lua": 2}
+    assert json.loads(server.graphlore_routes(as_json=True))["not_read"] == {
+        ".lua": 2, ".swift": 1}
+    assert "Not read — no extractor for these source files: 2 .lua." \
+        in server.graphlore_package_apis()
 
 
 def test_build_without_a_key_falls_back_to_code_only(project, monkeypatch):
@@ -7233,3 +7238,190 @@ def test_unreferenced_skips_anonymous_classes(tmp_path, monkeypatch):
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     rows = json.loads(server.graphlore_unreferenced(as_json=True))["unreferenced"]
     assert [r["node"] for r in rows] == ["Lonely"]
+
+
+def test_package_api_readers_of_eight_more_languages():
+    _skip_without_treesitter()
+    from graphlore.apis import api_uses_for_source as uses
+
+    def read(rel, src):
+        pk, sy, _pa = uses(src, rel)
+        return sorted(pk), {k: sorted(v) for k, v in sy.items()}
+
+    assert read("a.kt", "import okhttp3.Request\nimport kotlinx.coroutines.*\n"
+                        "import java.util.List as JList\n") == (
+        ["java.util", "kotlinx.coroutines", "okhttp3"],
+        {"okhttp3": ["Request"], "java.util": ["List"]})
+    assert read("a.scala", "import requests.{Session, Request => R}\nimport geny._\n"
+                           "import x.Y, p.q.{Z}\n") == (
+        ["geny", "p.q", "requests", "x"],
+        {"requests": ["Request", "Session"], "x": ["Y"], "p.q": ["Z"]})
+    assert read("a.cs", "using System.Net.Http;\nusing static System.Math;\n"
+                        "using Json = Newtonsoft.Json;\n") == (
+        ["Newtonsoft.Json", "System", "System.Net.Http"], {"System": ["Math"]})
+    # crate:: / self:: / super:: and `mod x;` of the same file are the crate itself
+    assert read("a.rs", "mod request;\nuse std::io::{self, Read};\nuse crate::agent::Agent;\n"
+                        "use request::WithBody;\nuse http::header::{HOST as H};\n"
+                        "extern crate log;\n") == (
+        ["http", "log", "std"], {"std": ["io", "io::Read"], "http": ["header::HOST"]})
+    assert read("a.swift", "import Foundation\nimport struct Alamofire.Session\n") == (
+        ["Alamofire", "Foundation"], {"Alamofire": ["Session"]})
+    assert read("a.c", "#include <curl/curl.h>\n#include <stdio.h>\n#include \"local.h\"\n") == (
+        ["curl", "stdio.h"], {"curl": ["curl.h"]})
+    assert read("a.rb", "require 'faraday/utils'\nrequire 'json'\nrequire_relative 'x'\n"
+                        "require \"#{dir}/y\"\n") == (["faraday", "json"], {"faraday": ["utils"]})
+    assert read("a.php", "<?php\nuse Psr\\Http\\Message\\RequestInterface;\n"
+                         "use GuzzleHttp\\Promise\\{Create, PromiseInterface as P};\n"
+                         "class A { use SomeTrait; }\n") == (
+        ["GuzzleHttp\\Promise", "Psr\\Http\\Message"],
+        {"Psr\\Http\\Message": ["RequestInterface"],
+         "GuzzleHttp\\Promise": ["Create", "PromiseInterface"]})
+
+
+def test_package_apis_leaves_out_what_the_project_declares(tmp_path, monkeypatch):
+    # retrofit's own `retrofit2.*` packages, guzzle's namespaces, ureq's crate
+    # and hiredis's own headers used to be listed as external packages
+    _skip_without_treesitter()
+    files = {
+        "src/main/java/app/Svc.java": "package app.svc;\nimport app.model.User;\n"
+                                      "import okhttp3.Call;\nclass Svc {}\n",
+        "src/main/java/app/User.java": "package app.model;\nclass User {}\n",
+        "src/Client.php": "<?php\nnamespace GuzzleHttp;\nuse GuzzleHttp\\Handler\\Proxy;\n"
+                          "use GuzzleHttp\\Promise\\Create;\nclass Client {}\n",
+        "src/Handler/Proxy.php": "<?php\nnamespace GuzzleHttp\\Handler;\nclass Proxy {}\n",
+        "Cargo.toml": "[package]\nname = \"my-crate\"\n",
+        "src/lib.rs": "use my_crate::Agent;\nuse serde::Serialize;\n",
+        "hiredis.h": "int x;\n", "test.c": "#include <hiredis.h>\n#include <stdlib.h>\n",
+        "System/Index.cs": "namespace System;\nstruct Index {}\n",   # a polyfill
+        "App.cs": "using System.Text;\nnamespace App;\n",
+    }
+    nodes = []
+    for rel, text in files.items():
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_text(text, encoding="utf-8")
+        nodes.append({"id": rel, "label": rel.rsplit("/", 1)[-1], "source_file": rel,
+                      "source_location": "L1"})
+    _write_graph(tmp_path, {"nodes": nodes, "edges": []})
+    server._GRAPH_CACHE.clear()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    data = json.loads(server.graphlore_package_apis(as_json=True))
+    external = {p["package"] for p in data["packages"]}
+    assert external == {"okhttp3", "GuzzleHttp\\Promise", "serde", "stdlib.h", "System.Text"}
+    assert {"app.model", "GuzzleHttp\\Handler", "my_crate", "hiredis.h"} \
+        <= set(data["first_party_skipped"])
+
+
+def _routes_of(rel, source):
+    from graphlore.routes import routes_for_source
+    return [(r["framework"], r["method"], r["pattern"], r["handler"])
+            for r in routes_for_source(source, rel)]
+
+
+def test_routes_kotlin_spring_and_ktor():
+    _skip_without_treesitter()
+    assert _routes_of("A.kt", (
+        "import org.springframework.web.bind.annotation.*\n"
+        "@RestController\n@RequestMapping(\"/api\")\nclass C {\n"
+        "  @GetMapping(\"/a/{id}\")\n  fun get(@PathVariable id: String) = 1\n"
+        "  @RequestMapping(value = [\"/b\"], method = [RequestMethod.POST, RequestMethod.PUT])\n"
+        "  fun b() = 2\n}\n")) == [
+        ("spring", "GET", "/api/a/{id}", "get"), ("spring", "POST", "/api/b", "b"),
+        ("spring", "PUT", "/api/b", "b")]
+    assert _routes_of("Router.kt", (
+        "import io.ktor.routing.*\nfun Routing.api() {\n  route(\"users\") {\n"
+        "    post(\"login\") { c.login() }\n    get { x() }\n  }\n"
+        "  get(\"/health\", ::health)\n  get<Typed> { }\n}\n")) == [
+        ("ktor", "POST", "/users/login", "<inline>"), ("ktor", "GET", "/users", "<inline>"),
+        ("ktor", "GET", "/health", "health")]
+    # neither import: a `get("/x") { }` call is not a route
+    assert _routes_of("B.kt", "fun f() { get(\"/x\") { } }\n") == []
+
+
+def test_routes_jax_rs_but_not_retrofit():
+    _skip_without_treesitter()
+    assert _routes_of("Res.java", (
+        "import jakarta.ws.rs.*;\n@Path(\"/articles\")\npublic class Res {\n"
+        "  @GET\n  @Path(\"/feed\")\n  public Response feed() { return null; }\n"
+        "  @POST\n  public Response create() { return null; }\n}\n")) == [
+        ("jax-rs", "GET", "/articles/feed", "feed"), ("jax-rs", "POST", "/articles", "create")]
+    assert _routes_of("Api.java", (
+        "import retrofit2.http.GET;\ninterface Api { @GET(\"/users\") Call<User> users(); }\n"
+    )) == []
+
+
+def test_routes_aspnet_attributes_and_minimal_apis():
+    _skip_without_treesitter()
+    assert _routes_of("C.cs", (
+        "[ApiController]\n[Route(\"api/[controller]\")]\n"
+        "public class ArticlesController : Controller {\n"
+        "  [HttpGet(\"{slug}\")]\n  public Task<X> Get(string slug) => null;\n"
+        "  [HttpPost, Authorize]\n  public Task<X> Create() => null;\n}\n"
+        "var todos = app.MapGroup(\"/todos\").WithTags(\"x\");\n"
+        "todos.MapGet(\"/\", GetAll);\n"
+        "todos.MapPost(\"/{id}\", async (int id) => Results.Ok()).RequireAuthorization();\n"
+        "cache.MapGet(\"x\");\n")) == [
+        ("aspnet", "GET", "/api/Articles/{slug}", "Get"),
+        ("aspnet", "POST", "/api/Articles", "Create"),
+        ("aspnet", "GET", "/todos", "GetAll"), ("aspnet", "POST", "/todos/{id}", "<inline>")]
+
+
+def test_routes_rust_axum_and_actix():
+    _skip_without_treesitter()
+    assert _routes_of("a.rs", (
+        "use axum::{routing::{get, post}, Router};\n"
+        "pub fn router() -> Router {\n    Router::new()\n"
+        "        .route(\"/api/users\", post(create_user))\n"
+        "        .route(\"/api/user\", get(current).put(update))\n"
+        "        .nest(\"/v2\", Router::new().route(\"/x\", get(h)))\n}\n")) == [
+        ("axum", "POST", "/api/users", "create_user"), ("axum", "GET", "/api/user", "current"),
+        ("axum", "PUT", "/api/user", "update"), ("axum", "GET", "/v2/x", "h")]
+    assert sorted(_routes_of("b.rs", (
+        "use actix_web::{web, App};\n#[get(\"/hello/{name}\")]\nasync fn greet() {}\n"
+        "pub fn routes(app: &mut web::ServiceConfig) {\n    app.service(\n"
+        "        web::scope(\"/api\")\n"
+        "            .service(web::resource(\"users\").route(web::post().to_async(register)))\n"
+        "    );\n}\n"))) == [
+        ("actix-web", "GET", "/hello/{name}", "greet"),
+        ("actix-web", "POST", "/api/users", "register")]
+    assert _routes_of("c.rs", "fn f() { router.route(\"/x\", get(h)); }\n") == []   # no crate
+
+
+def test_routes_ruby_rails_and_sinatra():
+    _skip_without_treesitter()
+    rails = _routes_of("config/routes.rb", (
+        "Rails.application.routes.draw do\n  scope :api do\n"
+        "    resources :articles, param: :slug, except: [:edit, :new] do\n"
+        "      resource :favorite, only: [:create]\n      get :feed, on: :collection\n"
+        "    end\n    post 'users/login', to: 'sessions#create'\n  end\n"
+        "  root to: 'home#index'\nend\n"))
+    assert ("rails", "GET", "/api/articles/:slug", "articles#show") in rails
+    assert ("rails", "POST", "/api/articles/:article_slug/favorite", "favorite#create") in rails
+    assert ("rails", "GET", "/api/articles/feed", "articles#feed") in rails
+    assert ("rails", "POST", "/api/users/login", "sessions#create") in rails
+    assert ("rails", "GET", "/", "home#index") in rails
+    assert not any(r[2].endswith("/edit") or r[2].endswith("/new") for r in rails)
+    assert _routes_of("app.rb", (
+        "class App < Sinatra::Base\n  get '/' do\n    'hi'\n  end\n"
+        "  post '/login' do\n  end\nend\n")) == [
+        ("sinatra", "GET", "/", "<inline>"), ("sinatra", "POST", "/login", "<inline>")]
+    assert _routes_of("client.rb", "get '/x' do\nend\n") == []    # no sinatra in sight
+
+
+def test_routes_php_laravel_and_symfony():
+    _skip_without_treesitter()
+    assert _routes_of("routes/api.php", (
+        "<?php\nRoute::prefix('v1')->group(function () {\n"
+        "    Route::get('/users', [UserController::class, 'index'])->name('users');\n"
+        "    Route::apiResource('articles', ArticleController::class)->only(['index']);\n"
+        "});\nRoute::group(['prefix' => 'api'], function () {\n"
+        "    Route::post('login', 'AuthController@login');\n});\n")) == [
+        ("laravel", "GET", "/v1/users", "UserController::index"),
+        ("laravel", "GET", "/v1/articles", "ArticleController@index"),
+        ("laravel", "POST", "/api/login", "AuthController@login")]
+    assert _routes_of("BlogController.php", (
+        "<?php\nuse Symfony\\Component\\Routing\\Attribute\\Route;\n#[Route('/blog')]\n"
+        "final class BlogController {\n"
+        "    #[Route('/posts/{slug}', name: 'post', methods: ['GET', 'POST'])]\n"
+        "    public function postShow() {}\n}\n")) == [
+        ("symfony", "GET", "/blog/posts/{slug}", "postShow"),
+        ("symfony", "POST", "/blog/posts/{slug}", "postShow")]
