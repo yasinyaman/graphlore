@@ -27,8 +27,10 @@ strings are all invisible. The symbol list is therefore a LOWER BOUND — it say
 "at least these must be audited", never "only these"; zero visible symbols
 reads as "no visibility", not "no usage".
 
-Python via the stdlib ``ast``; JS/TS, Go and Java via the optional tree-sitter
-backend. Results are cached per (path, mtime) like the span index.
+Python via the stdlib ``ast``; JS/TS, Go and Java (imports plus use sites), and
+Kotlin, Scala, C#, Rust, Swift, C / C++, Ruby and PHP (imports only: what each
+file imports by name) via the optional tree-sitter backend. Results are cached
+per (path, mtime) like the span index.
 """
 from __future__ import annotations
 
@@ -51,14 +53,34 @@ def _empty() -> ApiUses:
     return set(), {}, {}
 
 
-def _record(uses: ApiUses, pkg: str, module: str, chain: list[str]) -> None:
-    """Record one use site: ``chain`` is the attribute/symbol chain after ``module``."""
+def _record(
+    uses: ApiUses, pkg: str, module: str, chain: list[str], sep: str = "."
+) -> None:
+    """Record one use site: ``chain`` is the attribute/symbol chain after ``module``,
+    joined with the language's separator (``::`` in Rust, ``\\`` in PHP)."""
     packages, symbols, paths = uses
     packages.add(pkg)
     if not chain:
         return
     symbols.setdefault(pkg, set()).add(chain[0])
-    paths.setdefault(pkg, set()).add(".".join([module, *chain]))
+    paths.setdefault(pkg, set()).add(sep.join([module, *chain]))
+
+
+def _txt(node: Any) -> str:
+    return node.text.decode("utf-8", "replace")
+
+
+def _dotted_import(uses: ApiUses, full: str, wildcard: bool, sep: str = ".") -> None:
+    """``a.b.C`` -> a.b: {C}; a wildcard or a one-part name records the package only.
+    The import-level reading the JVM / .NET / PHP extractors share."""
+    full = full.strip().strip(sep)
+    if not full:
+        return
+    if wildcard or sep not in full:
+        uses[0].add(full)
+        return
+    module, _, symbol = full.rpartition(sep)
+    _record(uses, module, module, [symbol], sep)
 
 
 # ---------------------------------------------------------------------------
@@ -311,6 +333,210 @@ def _api_uses_java(root: Any) -> ApiUses:
     return uses
 
 
+def _api_uses_kotlin(root: Any) -> ApiUses:
+    """``import a.b.C`` / ``import a.b.C as D`` -> a.b: {C}; ``import a.b.*`` -> a.b."""
+    uses = _empty()
+    for header in _descendants(root, "import_header"):
+        ident = next((c for c in header.named_children if c.type == "identifier"), None)
+        if ident is not None:
+            wildcard = any(c.type == "wildcard_import" for c in header.named_children)
+            _dotted_import(uses, _txt(ident), wildcard)
+    return uses
+
+
+def _api_uses_scala(root: Any) -> ApiUses:
+    """``import a.b.C``, ``import a.b.{C, D => E}``, ``import a.b._`` and the
+    comma form ``import x.Y, p.q.{R}`` (one node, split on the commas)."""
+    uses = _empty()
+    for decl in _descendants(root, "import_declaration"):
+        groups: list[list[Any]] = [[]]
+        for c in decl.children:
+            if c.type == ",":
+                groups.append([])
+            elif c.is_named:
+                groups[-1].append(c)
+        for group in groups:
+            path = [_txt(c) for c in group if c.type == "identifier"]
+            selectors = next((c for c in group if c.type == "namespace_selectors"), None)
+            wildcard = any(c.type == "namespace_wildcard" for c in group)
+            if len(path) < 2 and selectors is None and not wildcard:
+                continue  # `import Y` alone is relative to an earlier import
+            if selectors is not None and path:
+                module = ".".join(path)
+                for sel in selectors.named_children:
+                    name = sel.child_by_field_name("name") or sel
+                    if name.type == "identifier":
+                        _record(uses, module, module, [_txt(name)])
+                    else:
+                        uses[0].add(module)
+            elif path:
+                _dotted_import(uses, ".".join(path), wildcard)
+    return uses
+
+
+def _api_uses_csharp(root: Any) -> ApiUses:
+    """``using A.B;`` -> A.B; ``using static A.B.C;`` -> A.B: {C}; an alias
+    ``using X = A.B;`` -> A.B (it may name a type, so no symbol is claimed)."""
+    uses = _empty()
+    for decl in _descendants(root, "using_directive"):
+        target = next((c for c in decl.named_children
+                       if c.type in ("qualified_name", "identifier")
+                       and c != decl.child_by_field_name("name")), None)
+        if target is None:
+            continue
+        full = _txt(target)
+        if any(c.type == "static" for c in decl.children):
+            _dotted_import(uses, full, False)
+        else:
+            uses[0].add(full)
+    return uses
+
+
+_RUST_LOCAL_ROOTS = frozenset({"crate", "self", "super", "Self"})
+
+
+def _api_uses_rust(root: Any) -> ApiUses:
+    """``use a::b::{c, d as e};`` -> a: {b::c, b::d}; ``use a::*`` -> a;
+    ``extern crate x`` -> x. ``crate::`` / ``self::`` / ``super::`` and modules
+    declared in the same file (``mod request;``) are the crate itself."""
+    uses = _empty()
+    local = {_txt(n) for m in _descendants(root, "mod_item")
+             if (n := m.child_by_field_name("name")) is not None}
+
+    def paths(node: Any, prefix: list[str]) -> list[list[str]]:
+        t = node.type
+        if t in ("identifier", "crate", "self", "super", "scoped_identifier"):
+            return [prefix + [p for p in _txt(node).split("::") if p]]
+        if t == "use_as_clause":
+            inner = node.child_by_field_name("path")
+            return paths(inner, prefix) if inner is not None else []
+        if t == "use_wildcard":
+            base = next(iter(node.named_children), None)
+            return [prefix + ([p for p in _txt(base).split("::") if p] if base else [])]
+        if t == "scoped_use_list":
+            base = node.child_by_field_name("path")
+            lst = node.child_by_field_name("list")
+            head = prefix + ([p for p in _txt(base).split("::") if p] if base else [])
+            return [p for item in (lst.named_children if lst else ()) for p in paths(item, head)]
+        if t == "use_list":
+            return [p for item in node.named_children for p in paths(item, prefix)]
+        return []
+
+    for decl in _descendants(root, "use_declaration"):
+        arg = decl.child_by_field_name("argument")
+        for parts in paths(arg, []) if arg is not None else []:
+            parts = [p for p in parts if p != "self"] if len(parts) > 1 else parts
+            if not parts or parts[0] in _RUST_LOCAL_ROOTS or parts[0] in local:
+                continue
+            crate = parts[0]
+            if len(parts) == 1:
+                uses[0].add(crate)
+            else:
+                _record(uses, crate, crate, ["::".join(parts[1:])], "::")
+    for decl in _descendants(root, "extern_crate_declaration"):
+        name = decl.child_by_field_name("name")
+        if name is not None and _txt(name) not in _RUST_LOCAL_ROOTS:
+            uses[0].add(_txt(name))
+    return uses
+
+
+def _api_uses_swift(root: Any) -> ApiUses:
+    """``import Foundation`` -> Foundation; ``import struct A.B`` -> A: {B}."""
+    uses = _empty()
+    for decl in _descendants(root, "import_declaration"):
+        ident = next((c for c in decl.named_children if c.type == "identifier"), None)
+        if ident is None:
+            continue
+        parts = [_txt(c) for c in ident.named_children if c.type == "simple_identifier"]
+        if not parts:
+            continue
+        if len(parts) > 1:
+            _record(uses, parts[0], parts[0], [".".join(parts[1:])])
+        else:
+            uses[0].add(parts[0])
+    return uses
+
+
+def _api_uses_c(root: Any) -> ApiUses:
+    """``#include <curl/curl.h>`` -> curl: {curl.h}; ``#include <stdio.h>`` ->
+    stdio.h. A quoted ``#include "x.h"`` is the project's own header."""
+    uses = _empty()
+    for inc in _descendants(root, "preproc_include"):
+        path = inc.child_by_field_name("path")
+        if path is None or path.type != "system_lib_string":
+            continue
+        header = _txt(path).strip("<>").strip()
+        if not header:
+            continue
+        pkg, sep, rest = header.partition("/")
+        if sep:
+            _record(uses, pkg, pkg, [rest], "/")
+        else:
+            uses[0].add(header)
+    return uses
+
+
+def _api_uses_ruby(root: Any) -> ApiUses:
+    """``require 'faraday/utils'`` -> faraday: {faraday/utils}; ``gem 'x'`` -> x.
+    ``require_relative`` and a path (``./x``) are the project's own files."""
+    uses = _empty()
+    for call in _descendants(root, "call"):
+        if call.child_by_field_name("receiver") is not None:
+            continue
+        method = call.child_by_field_name("method")
+        args = call.child_by_field_name("arguments")
+        if method is None or args is None or _txt(method) not in ("require", "gem"):
+            continue
+        first = next(iter(args.named_children), None)
+        if first is None or first.type != "string" or any(
+                c.type == "interpolation" for c in first.named_children):
+            continue
+        feature = "".join(_txt(c) for c in first.named_children if c.type == "string_content")
+        if not feature or feature.startswith((".", "/")):
+            continue
+        pkg = feature.split("/", 1)[0]
+        if "/" in feature:
+            _record(uses, pkg, pkg, [feature.split("/", 1)[1]], "/")
+        else:
+            uses[0].add(pkg)
+    return uses
+
+
+def _api_uses_php(root: Any) -> ApiUses:
+    """``use A\\B\\C;`` -> A\\B: {C}; ``use A\\B\\{C, D as E};`` -> A\\B: {C, D};
+    ``use function A\\b;`` likewise. A trait ``use`` inside a class is no import."""
+    uses = _empty()
+    for decl in _descendants(root, "namespace_use_declaration"):
+        group = decl.child_by_field_name("body")
+        base = next((c for c in decl.named_children if c.type == "namespace_name"), None)
+        clauses = (group.named_children if group is not None
+                   else [c for c in decl.named_children if c.type == "namespace_use_clause"])
+        for clause in clauses:
+            if clause.type != "namespace_use_clause":
+                continue
+            name = next((c for c in clause.named_children
+                         if c.type in ("qualified_name", "name")), None)
+            if name is None:
+                continue
+            full = _txt(name).lstrip("\\")
+            if base is not None:
+                full = _txt(base).strip("\\") + "\\" + full
+            _dotted_import(uses, full, False, "\\")
+    return uses
+
+
+def _descendants(root: Any, node_type: str) -> list[Any]:
+    """Every node of ``node_type`` under ``root``, iteratively (deep files)."""
+    out: list[Any] = []
+    stack = [root]
+    while stack:
+        n = stack.pop()
+        if n.type == node_type:
+            out.append(n)
+        stack.extend(reversed(n.named_children))
+    return out
+
+
 _TS_EXTRACTORS = {
     "javascript": _api_uses_js,
     "typescript": _api_uses_js,
@@ -318,6 +544,16 @@ _TS_EXTRACTORS = {
     "jsx": _api_uses_js,
     "go": _api_uses_go,
     "java": _api_uses_java,
+    "kotlin": _api_uses_kotlin,
+    "scala": _api_uses_scala,
+    "csharp": _api_uses_csharp,
+    "rust": _api_uses_rust,
+    "swift": _api_uses_swift,
+    "c": _api_uses_c,
+    "cpp": _api_uses_c,
+    "objc": _api_uses_c,
+    "ruby": _api_uses_ruby,
+    "php": _api_uses_php,
 }
 
 
@@ -370,8 +606,9 @@ def api_uses_for_source(src: bytes | str, rel: str) -> ApiUses:
 def _api_uses_for_file(file_path: str) -> ApiUses:
     """(packages, symbols, paths) for one source file under PROJECT_DIR.
 
-    Python via stdlib ``ast``; JS/TS, Go and Java via the optional tree-sitter
-    backend when present; empty for other / missing / unparseable files (cached
+    Python via stdlib ``ast``; the other languages of ``_TS_EXTRACTORS`` via the
+    optional tree-sitter backend when present; empty for other / missing /
+    unparseable files (cached
     either way). Confined to PROJECT_DIR like the span index. Cached by
     (path, mtime).
     """

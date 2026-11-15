@@ -204,7 +204,10 @@ stripped) — the middle layer between the map and full code — and
   which symbols of the external package are actually used, and from where.
 - **Finding an endpoint** → `graphlore_routes(pattern="/items")` — which URL
   patterns hit which handlers (FastAPI/Flask/Django, Express/NestJS,
-  gin/chi/net-http, Spring), each row joined to its graph node and `file:line`.
+  gin/chi/net-http, Spring/JAX-RS, Ktor, ASP.NET Core, axum/actix-web,
+  Rails/Sinatra, Laravel/Symfony), each row joined to its graph node and
+  `file:line`. Test code is left out unless `scope="+tests"`; `not_read` counts
+  the files of a language it has no reader for.
 
 ## Naming communities (optional, for readable subsystems)
 

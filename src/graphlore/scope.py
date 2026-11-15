@@ -19,7 +19,7 @@ from typing import Any
 
 from . import config
 from .graph import _edge_ends, _is_external_node, _is_test_path, _node_file, _node_id
-from .spans import _cached_file_analysis, _norm_relpath
+from .spans import _cached_file_analysis, _is_test_node, _norm_relpath
 
 # Directory names that hold third-party code checked into the repository.
 _VENDOR_DIR_PARTS = frozenset({
@@ -192,6 +192,20 @@ class ScopeView:
     external_nodes: int = 0
     test_nodes: int = 0
     filtered_nodes: int = 0
+    keep_tests: bool = True
+    keep_vendored: bool = True
+
+    def keeps_file(self, rel: str) -> bool:
+        """Whether this scope keeps a file the graph has no node for (a routes file
+        with no symbols): the same path, test and vendored rules as for nodes."""
+        rel = _norm_relpath(rel)
+        if not self.keep_vendored and _is_vendored_file(rel):
+            return False
+        if not self.keep_tests and _is_test_path(rel):
+            return False
+        if self.scope.include and not any(_path_matches(p, rel) for p in self.scope.include):
+            return False
+        return not any(_path_matches(p, rel) for p in self.scope.exclude)
 
     @property
     def left_out(self) -> int:
@@ -260,7 +274,8 @@ def _build_view(
     nodes: list[dict], edges: list[dict], scope: Scope, tests: bool, external: bool,
     vendored: bool,
 ) -> ScopeView:
-    view = ScopeView(nodes=nodes, edges=edges, scope=scope)
+    view = ScopeView(nodes=nodes, edges=edges, scope=scope,
+                     keep_tests=tests, keep_vendored=vendored)
     vendored_cache: dict[str, bool] = {}
     vendored_files: set[str] = set()
     dropped: set[str] = set()
@@ -277,7 +292,7 @@ def _build_view(
                 vendored_files.add(rel)
         if not reason and not external and _is_external_node(n):
             reason = "external"
-        if not reason and not tests and rel and _is_test_path(rel):
+        if not reason and not tests and rel and _is_test_node(n):
             reason = "tests"
         if not reason and (scope.include or scope.exclude):
             if scope.include and not (rel and any(_path_matches(p, rel) for p in scope.include)):

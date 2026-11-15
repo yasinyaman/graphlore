@@ -32,6 +32,21 @@ def empty_project(tmp_path, monkeypatch):
     return tmp_path
 
 
+@pytest.fixture()
+def polyglot(tmp_path, monkeypatch):
+    """A copy of fixtures/polyglot: five languages, and the graph graphify 0.9
+    built of them (``graph.json``, copied to ``graphify-out/``)."""
+    src = FIXTURES / "polyglot"
+    root = tmp_path / "polyglot"
+    shutil.copytree(src, root, ignore=shutil.ignore_patterns("graph.json"))
+    (root / "graphify-out").mkdir()
+    shutil.copy(src / "graph.json", root / "graphify-out" / "graph.json")
+    server._GRAPH_CACHE.clear()
+    server._SPAN_CACHE.clear()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", root)
+    return root
+
+
 @pytest.fixture(autouse=True)
 def _full_toolset(monkeypatch):
     """Pin the full tool surface for every test.

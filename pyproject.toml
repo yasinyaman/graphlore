@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "graphlore"
-version = "0.5.1"
+version = "0.6.0"
 description = "MCP server that lets AI coding assistants navigate a codebase knowledge graph (Graphify): semantic code search, impact analysis, token-budgeted subgraphs and exact source spans."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -45,11 +45,12 @@ graphify = ["graphifyy"]
 semble = ["semble>=0.3"]
 # Multi-language span/structure backend for graphify_locate and graphify_freshness
 # (Python works without it via stdlib ast). tree-sitter also ships with graphify.
-# Bounds: the stable `Parser(Language)` core API we use exists since tree-sitter
-# 0.22 (cap below the next major). The language pack bundles grammars that churn,
-# so it's pinned to the tested 1.x line (`>=1.6,<2.0`) to keep golden span tests
-# from silently regressing on a grammar update.
-treesitter = ["tree-sitter>=0.22,<1.0", "tree-sitter-language-pack>=1.6,<2.0"]
+# Bounds: the floors are the oldest pair the suite passes with (Python 3.10,
+# mcp 2.1). Language-pack 1.9 and 1.10 hand back a Language that
+# `tree_sitter.Parser` rejects, and 1.11 needs tree-sitter >= 0.23. Both stay below
+# the next major: the pack bundles grammars that churn, and the golden span tests
+# should not regress silently on a grammar update.
+treesitter = ["tree-sitter>=0.23,<1.0", "tree-sitter-language-pack>=1.11,<2.0"]
 # Exact token counting for the budgeted subgraph tools (opt-in via
 # GRAPHIFY_TOKENIZER=tiktoken); without it the conservative chars/3.5 estimate is used.
 tiktoken = ["tiktoken>=0.7"]
@@ -58,10 +59,11 @@ tiktoken = ["tiktoken>=0.7"]
 watch = ["watchdog>=4.0"]
 all = [
     "graphifyy", "semble>=0.3",
-    "tree-sitter>=0.22,<1.0", "tree-sitter-language-pack>=1.6,<2.0",
+    "tree-sitter>=0.23,<1.0", "tree-sitter-language-pack>=1.11,<2.0",
     "tiktoken>=0.7", "watchdog>=4.0",
 ]
-dev = ["pytest>=8.0", "ruff>=0.6", "pytest-cov>=5.0", "mypy>=1.11"]
+# mypy 1.11 crashes reading mcp's own sources; 1.12 is the oldest that checks the package.
+dev = ["pytest>=8.0", "ruff>=0.6", "pytest-cov>=5.0", "mypy>=1.12"]
 
 [project.urls]
 Homepage = "https://github.com/yasinyaman/graphlore"

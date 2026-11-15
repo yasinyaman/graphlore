@@ -31,7 +31,9 @@ graphlore is a Python MCP server (MCP Python SDK v2: `mcp.server.mcpserver.MCPSe
 - A new source reader (`imports.py`, `resolve.py`) covers every language the project already parses — Python via `ast`, the rest via tree-sitter, as in `apis.py` — or says per language why there is nothing to read. Don't add a Python-only analysis.
 - A row that prints its own `file:line` uses `labels.name(id)`, not `labels.get(id)`, so the location is shown once.
 - Every tool taking a node name resolves it with `_pick_node`, reports `_matched(key, picked)` and answers a miss with `_not_found` (adds `did_you_mean`); never `_resolve_node` directly.
-- A budget or limit that drops rows says so: `truncated` plus a count or the names left out, and a `hint`.
+- A budget or limit that drops rows says so: `truncated` plus a count or the names left out, and a `hint` (`_cut_hint`). `graphlore_package_apis` / `graphlore_routes` count source files with no extractor in `not_read`.
+- Relation names are compared against the sets in `graph.py`, not literals; node type is read with `_node_type`. A node's own span is `_span_of_definition(file, line, name)`; whether a node is test code is `_is_test_node(n)` (covers Rust inline tests), not `_is_test_path`.
+- After changing the span rules, the import checker or the test-path rules, run `benchmarks/polyglot.py` (every tool on 31 real repositories in 14 languages; `docs/benchmark-polyglot.md`).
 - Node-centric tools (impact, subgraph, neighbors, tests_for) use `_pick_node` + `_matched` for the node, `_nav_view` for edges and scope (it includes the calls `resolve.py` adds from the source), order production code before tests, and attach `_EMPTY_NOTE` to an empty result.
 - `config.PROJECT_DIR` can change at runtime (`graphlore_project`); never cache a value derived from it without keying on it.
 

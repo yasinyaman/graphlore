@@ -1,7 +1,7 @@
 {
   "name": "graphlore",
   "displayName": "graphlore",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "description": "Let Claude navigate a codebase through its knowledge graph instead of grepping: an MCP server (semantic locate, impact analysis, token-budgeted subgraphs, exact source spans) plus an exploration skill. Built on Graphify.",
   "author": {
     "name": "yasinyaman",
