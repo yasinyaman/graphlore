@@ -951,6 +951,14 @@ def check_languages(a: Audit, sub: Subject, repo: dict[str, Any]) -> None:
     m["routes"] = routes
     frameworks = Counter(r.get("framework") for r in rows)
     m["route_frameworks"] = dict(frameworks)
+    # a prefix the router declares in its own file, applied to the pattern
+    m["route_prefixed"] = sum(1 for r in rows if "local_pattern" in r)
+    # on an unedited clone the graph matches the source: every join must hold
+    unconfirmed = [r for r in rows if r.get("node_confirmed") is False and r.get("node")]
+    if unconfirmed:
+        a.finding("ROUTE-NODE-UNCONFIRMED", "medium", "bug", "routes",
+                  "a route row's node is unconfirmed although the clone is unedited",
+                  [f"{r.get('file')}:{r.get('line')}" for r in unconfirmed[:5]])
     for want in repo.get("routes", []):
         if not frameworks.get(want):
             a.finding("ROUTES-EXPECTED-MISSING", "high", "gap", "routes",
