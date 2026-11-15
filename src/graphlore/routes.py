@@ -82,6 +82,18 @@ _PY_VERB_FRAMEWORKS = (
 # detection; without the gate, HTTP-client request sites (axios.get('/api/x'),
 # apiClient.post('/login', body)) are indistinguishable from registrations.
 _JS_SERVER_FRAMEWORKS = ("express", "fastify", "koa-router", "@koa/router", "restify", "polka")
+# The label a row gets for the framework the file imports.
+_JS_FRAMEWORK_LABELS = {"koa-router": "koa", "@koa/router": "koa"}
+# Without a framework import in the file, `x.get('/p', handler)` is taken for a
+# registration only when `x` reads like a server object or is a parameter of the
+# function around it (`module.exports = function (app) { app.get(...) }`), and
+# only in a project where some file imports a server framework: the row carries
+# `needs_server_import` and graphlore_routes drops it otherwise.
+_JS_ROUTER_NAMES = frozenset({"app", "router", "server", "api", "routes", "route", "r"})
+_JS_HANDLER_TYPES = frozenset({
+    "identifier", "member_expression", "arrow_function", "function_expression",
+    "function", "call_expression",
+})
 
 
 def _row(framework: str, method: str, pattern: str, handler: str, line: int) -> RouteRow:
@@ -208,10 +220,10 @@ def _routes_js(root: Any) -> list[RouteRow]:
     # Same gate idea as the Python verb decorators: without a server-framework
     # import in the file, identifier.verb('/x', …) is far likelier an HTTP-client
     # request site than a route registration.
-    server_framework = any(
-        imp == fw or imp.startswith(fw + "/")
-        for imp in imports for fw in _JS_SERVER_FRAMEWORKS
-    )
+    framework = next(
+        (fw for fw in _JS_SERVER_FRAMEWORKS for imp in sorted(imports)
+         if imp == fw or imp.startswith(fw + "/")), None)
+    label = _JS_FRAMEWORK_LABELS.get(framework or "", framework or "express")
 
     def string_arg(args: Any, index: int = 0) -> str | None:
         strings = [a for a in args.named_children if "string" in a.type]
@@ -264,7 +276,87 @@ def _routes_js(root: Any) -> list[RouteRow]:
                     child.start_point[0] + 1,
                 ))
 
-    def walk(node: Any, pending: list[Any]) -> None:
+    def parameters(fn: Any) -> set[str]:
+        """Names a function binds as parameters (plain identifiers only)."""
+        out: set[str] = set()
+        one = fn.child_by_field_name("parameter")      # `app => …`
+        if one is not None and one.type == "identifier":
+            out.add(_text(one))
+        params = fn.child_by_field_name("parameters")
+        for p in params.named_children if params is not None else ():
+            if p.type == "identifier":
+                out.add(_text(p))
+            elif p.type in ("required_parameter", "optional_parameter"):  # TypeScript
+                pat = p.child_by_field_name("pattern")
+                if pat is not None and pat.type == "identifier":
+                    out.add(_text(pat))
+        return out
+
+    def chain_root(call: Any) -> tuple[Any, str] | None:
+        """For `x.route('/p').get(h).post(h2)`: (`x`, '/p') from any verb call of it."""
+        fn = call.child_by_field_name("function")
+        while fn is not None and fn.type == "member_expression":
+            obj = fn.child_by_field_name("object")
+            if obj is None or obj.type != "call_expression":
+                return None
+            inner = obj.child_by_field_name("function")
+            args = obj.child_by_field_name("arguments")
+            if inner is None or inner.type != "member_expression" or args is None:
+                return None
+            prop = inner.child_by_field_name("property")
+            recv = inner.child_by_field_name("object")
+            if prop is not None and _text(prop) == "route":
+                pattern = string_arg(args)
+                if recv is not None and recv.type == "identifier" and pattern is not None:
+                    return recv, pattern
+                return None
+            if prop is None or _text(prop) not in verbs:
+                return None
+            fn = inner
+        return None
+
+    def registration(call: Any, params: set[str]) -> None:
+        fn = call.child_by_field_name("function")
+        args = call.child_by_field_name("arguments")
+        if fn is None or args is None or fn.type != "member_expression":
+            return
+        obj = fn.child_by_field_name("object")
+        prop = fn.child_by_field_name("property")
+        if obj is None or prop is None or _text(prop) not in verbs:
+            return
+        chained = chain_root(call) if obj.type == "call_expression" else None
+        if chained is not None:
+            recv, pattern = chained
+        elif obj.type == "identifier":
+            # a plain receiver only: `this.x.get(...)` and `a.b.get(...)` are not
+            recv, found = obj, string_arg(args)
+            if found is None:
+                return
+            pattern = found
+        else:
+            return
+        if not pattern.startswith("/"):
+            return
+        last = args.named_children[-1] if args.named_children else None
+        if framework is None:
+            # no framework import here: ask more of the call (see _JS_ROUTER_NAMES)
+            name = _text(recv)
+            handlers = args.named_children[0 if chained else 1:]
+            if not handlers or last is None or last.type not in _JS_HANDLER_TYPES:
+                return
+            if name not in _JS_ROUTER_NAMES and name not in params:
+                return
+        handler = "<inline>"
+        if last is not None and last.type in ("identifier", "member_expression"):
+            handler = _text(last)
+        method = _text(prop)
+        row = _row(label, "ANY" if method == "all" else method, pattern, handler,
+                   prop.start_point[0] + 1)
+        if framework is None:
+            row["needs_server_import"] = True
+        rows.append(row)
+
+    def walk(node: Any, pending: list[Any], params: set[str]) -> None:
         for child in node.named_children:
             t = child.type
             if t == "decorator":
@@ -275,32 +367,15 @@ def _routes_js(root: Any) -> list[RouteRow]:
                 pending = []
                 continue
             if t == "call_expression":
-                fn = child.child_by_field_name("function")
-                args = child.child_by_field_name("arguments")
-                if (fn is not None and args is not None and fn.type == "member_expression"):
-                    obj = fn.child_by_field_name("object")
-                    prop = fn.child_by_field_name("property")
-                    # Plain-identifier receiver only: excludes router.route('/x')
-                    # .get(h) chains (documented v1 cut) and this.x receivers.
-                    # Gated on a server-framework import (see above).
-                    if (server_framework and obj is not None and prop is not None
-                            and obj.type == "identifier" and _text(prop) in verbs):
-                        pattern = string_arg(args)
-                        if pattern is not None and pattern.startswith("/"):
-                            handler = "<inline>"
-                            last = args.named_children[-1] if args.named_children else None
-                            if last is not None and last.type in (
-                                    "identifier", "member_expression"):
-                                handler = _text(last)
-                            method = _text(prop)
-                            rows.append(_row(
-                                "express", "ANY" if method == "all" else method,
-                                pattern, handler, child.start_point[0] + 1,
-                            ))
-            walk(child, pending)
+                registration(child, params)
+            inner = params
+            if t in ("function_declaration", "function_expression", "function",
+                     "arrow_function", "method_definition", "generator_function"):
+                inner = params | parameters(child)
+            walk(child, pending, inner)
             pending = []
 
-    walk(root, [])
+    walk(root, [], set())
     return rows
 
 

@@ -47,6 +47,8 @@ when it runs:
 | Python | stdlib `ast` | module-level · inside a function (deferred) · under `if TYPE_CHECKING:` |
 | JS / TS | `[treesitter]` | top-level `import` / `export … from` / `require` · `import()` or `require` inside a function (deferred) · `import type` |
 | Go, Java, Kotlin, Scala, C#, Rust, Swift, C, C++, Objective-C | — | imports are resolved at compile time (a `#include` by the preprocessor): always module-level |
+| PHP | — | a `use` only aliases a name (the file loads on first use, by autoload): always module-level |
+| Ruby | — | graphify records no file-level import edge for `require`: nothing to read |
 | anything else | — | kept as it is and counted as module-level; the result says so |
 
 An edge the source contradicts is dropped and listed: Python's `import yaml`

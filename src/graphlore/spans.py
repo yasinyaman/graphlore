@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from . import config
-from .graph import _node_file, _node_line
+from .graph import _is_test_path, _node_file, _node_line
 
 # Per-file span index, keyed by absolute path -> (mtime, spans). A span is
 # ``(region_start, end_line, def_line, qualname)`` for each def/class:
@@ -105,7 +105,7 @@ _TS_SYMBOL_HINTS = (
 )
 # Hints that must be a whole word of the node type: as a substring "impl" also
 # sits in PHP's `simple_parameter` and Kotlin's `simple_identifier`.
-_TS_SYMBOL_WORD_HINTS = frozenset({"impl"})
+_TS_SYMBOL_WORD_HINTS = frozenset({"impl", "mod"})
 # NB: no "_expression" (function_expression is a named def) and no "_specifier"
 # (C++ class_specifier / struct_specifier / enum_specifier ARE definitions when
 # they have a body). The excluded nodes match a hint substring but name a use of a
@@ -299,12 +299,66 @@ def _ts_bound_function(node: Any) -> tuple[str, Any] | None:
         name, value = left, node.child_by_field_name("right")
     if name is None or value is None or not name.type.endswith("identifier"):
         return None
+    if value.type == "call_expression":
+        value = _ts_wrapped_function(value)
+        if value is None:
+            return None
     vt = value.type.lower()
     if not any(h in vt for h in ("function", "arrow", "lambda", "closure", "func")):
         return None
     if value.child_by_field_name("name") is not None:
         return None
     return name.text.decode("utf-8", "replace"), value
+
+
+# Callees that take a function to run later, not to return a wrapped version of it.
+_TS_SCHEDULERS = frozenset({"setTimeout", "setInterval", "setImmediate", "queueMicrotask"})
+_TS_FUNCTION_VALUES = frozenset({
+    "arrow_function", "function_expression", "function", "generator_function",
+})
+
+
+def _ts_wrapped_function(call: Any) -> Any | None:
+    """The function in a one-call wrapper: ``async(function* () {…})``,
+    ``wrap(async (req, res) => {…})`` — a plain-named callee given exactly one
+    anonymous function. ``users.map(u => …)`` and ``setTimeout(() => …)`` are
+    not wrappers."""
+    fn = call.child_by_field_name("function")
+    args = call.child_by_field_name("arguments")
+    if fn is None or args is None or fn.type != "identifier":
+        return None
+    if fn.text.decode("utf-8", "replace") in _TS_SCHEDULERS:
+        return None
+    found = [a for a in args.named_children if a.type in _TS_FUNCTION_VALUES]
+    if len(found) != 1 or found[0].child_by_field_name("name") is not None:
+        return None
+    return found[0]
+
+
+def _ts_anonymous_class(node: Any) -> str | None:
+    """The name a class with no name of its own goes by: Java
+    ``new Callback<Void>() { … }`` and Kotlin ``object : Callback<T> { … }`` by
+    the type they implement, Ruby ``Request = Struct.new(:a) do … end`` by the
+    constant it is assigned to."""
+    t = node.type
+    if t == "object_creation_expression":
+        if not any(c.type == "class_body" for c in node.named_children):
+            return None
+        typ = node.child_by_field_name("type")
+        return typ.text.decode("utf-8", "replace") if typ is not None else None
+    if t == "object_literal":
+        spec = next((c for c in node.named_children if c.type == "delegation_specifier"), None)
+        user = None if spec is None else next(
+            (c for c in spec.named_children if c.type == "user_type"), None)
+        if user is None or not any(c.type == "class_body" for c in node.named_children):
+            return None
+        return user.text.decode("utf-8", "replace").split("<", 1)[0]
+    if t == "assignment":
+        left, right = node.child_by_field_name("left"), node.child_by_field_name("right")
+        if (left is not None and left.type == "constant" and right is not None
+                and right.type == "call" and right.child_by_field_name("block") is not None):
+            return left.text.decode("utf-8", "replace")
+    return None
 
 
 def _ts_declarator_name(node: Any) -> str | None:
@@ -384,6 +438,9 @@ def _spans_treesitter(src: bytes, rel: str) -> list[tuple[int, int, int, str]]:
                 # C/C++ `struct config cfg` in a signature, or a forward
                 # declaration: the type is named here, not defined
                 walk(child, prefix)
+            elif name_node is not None and child.type == "mod_item" \
+                    and child.child_by_field_name("body") is None:
+                pass  # Rust `mod foo;` names a file, it defines nothing here
             elif name_node is not None:
                 base = name_node.text.decode("utf-8", "replace")
                 recv = child.child_by_field_name("receiver")  # Go method: prefix type
@@ -421,6 +478,13 @@ def _spans_treesitter(src: bytes, rel: str) -> list[tuple[int, int, int, str]]:
                 end = child.end_point[0] + 1
                 spans.append((_ts_region_start(child, def_line), end, def_line, qual))
                 walk(child, qual + ".")
+            elif (anon := _ts_anonymous_class(child)) is not None:
+                # a class with no name of its own: named by what it implements
+                qual = f"{prefix}{anon}"
+                def_line = child.start_point[0] + 1
+                end = child.end_point[0] + 1
+                spans.append((_ts_region_start(child, def_line), end, def_line, qual))
+                walk(child, qual + ".")
             elif (bound := _ts_bound_function(child)) is not None:
                 # anonymous function bound to a name: `const f = () => …`
                 bname, fn = bound
@@ -437,6 +501,98 @@ def _spans_treesitter(src: bytes, rel: str) -> list[tuple[int, int, int, str]]:
     except RecursionError:
         pass
     return spans
+
+
+# --- test code that lives in a source file ------------------------------------
+# Rust keeps unit tests next to the code: `#[cfg(test)] mod tests { … }` and
+# `#[test] fn …`. No path rule can tell those from production code, so the span
+# engine marks their line ranges. Per file, (path, mtime)-cached like the spans.
+_TEST_REGION_CACHE: dict[str, tuple[float, list[tuple[int, int]]]] = {}
+
+
+def _rust_attributes(node: Any) -> list[str]:
+    """Texts of the `#[...]` attributes stacked right above ``node``."""
+    out: list[str] = []
+    prev = node.prev_named_sibling
+    while prev is not None and (prev.type == "attribute_item" or "comment" in prev.type):
+        if prev.type == "attribute_item":
+            out.append(prev.text.decode("utf-8", "replace"))
+        prev = prev.prev_named_sibling
+    return out
+
+
+_RUST_CFG_TEST = re.compile(r"\bcfg\s*\((?:[^()]|\([^()]*\))*\btest\b")
+_RUST_CFG_NOT_TEST = re.compile(r"\bnot\s*\(\s*test\s*\)")
+_RUST_TEST_ATTR = re.compile(r"^#\s*\[\s*(?:[\w:]+::)?test\s*(?:\(|\])")
+
+
+def _is_cfg_test(attr: str) -> bool:
+    return bool(_RUST_CFG_TEST.search(attr)) and not _RUST_CFG_NOT_TEST.search(attr)
+
+
+def _test_regions_rust(src: bytes, rel: str) -> list[tuple[int, int]]:
+    parser, _lang = _ts_parser_for(rel, src)
+    if parser is None:
+        return []
+    try:
+        root = parser.parse(src).root_node
+    except Exception:
+        return []
+    if any(c.type == "inner_attribute_item" and _is_cfg_test(c.text.decode("utf-8", "replace"))
+           for c in root.named_children):
+        return [(1, root.end_point[0] + 1)]  # `#![cfg(test)]`: the whole file
+    regions: list[tuple[int, int]] = []
+
+    def walk(node: Any) -> None:
+        for child in node.named_children:
+            span = (child.start_point[0] + 1, child.end_point[0] + 1)
+            if child.type == "mod_item":
+                body = child.child_by_field_name("body")
+                inner = body is not None and any(
+                    c.type == "inner_attribute_item"
+                    and _is_cfg_test(c.text.decode("utf-8", "replace"))
+                    for c in body.named_children)
+                if inner or any(_is_cfg_test(a) for a in _rust_attributes(child)):
+                    regions.append(span)
+                    continue
+            elif child.type == "function_item" and any(
+                    _RUST_TEST_ATTR.match(a) for a in _rust_attributes(child)):
+                regions.append(span)
+                continue
+            walk(child)
+
+    try:
+        walk(root)
+    except RecursionError:
+        pass
+    return regions
+
+
+def _test_regions(file_path: str) -> list[tuple[int, int]]:
+    """Line ranges of a source file that are test code although the file is not a
+    test file. Rust only: other languages keep tests in test files, which
+    `_is_test_path` recognises."""
+    if not str(file_path).lower().endswith(".rs"):
+        return []
+    return _cached_file_analysis(_TEST_REGION_CACHE, file_path, _test_regions_rust, list)
+
+
+def _is_test_node(n: dict) -> bool:
+    """A node that is test code: in a test file, or inside a test region of a
+    source file (a Rust `#[cfg(test)]` module or `#[test]` function)."""
+    file = _node_file(n)
+    if not file:
+        return False
+    if _is_test_path(file):
+        return True
+    regions = _test_regions(file)
+    if not regions:
+        return False
+    try:
+        line = int(_node_line(n))
+    except (TypeError, ValueError):
+        return False
+    return any(lo <= line <= hi for lo, hi in regions)
 
 
 def _spans_for_file(file_path: str) -> list[tuple[int, int, int, str]]:

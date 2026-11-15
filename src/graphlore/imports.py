@@ -55,10 +55,12 @@ _TS_TYPE_IMPORT = re.compile(r"^\s*(?:import|export)\s+type\b")
 _JS_EXTS = (".d.ts", ".tsx", ".jsx", ".mjs", ".cjs", ".mts", ".cts", ".ts", ".js")
 # Languages whose imports are resolved at compile time: an import cannot be
 # deferred or conditional, so every one of them is module-level by definition.
-# A C-family `#include` / `#import` is resolved earlier still, by the preprocessor.
+# A C-family `#include` / `#import` is resolved earlier still, by the preprocessor,
+# and a PHP `use` only aliases a name (the file loads on first use, by autoload).
+# Ruby needs nothing: graphify records no file-level import edge for `require`.
 _COMPILED_EXTS = (
     ".go", ".java", ".kt", ".kts", ".scala", ".cs", ".rs", ".swift",
-    ".c", ".h", ".cc", ".cpp", ".cxx", ".hpp", ".hxx", ".m", ".mm",
+    ".c", ".h", ".cc", ".cpp", ".cxx", ".hpp", ".hxx", ".m", ".mm", ".php",
 )
 # How many re-exporting entry files (`index.ts` barrels) a JS/TS import is
 # followed through before the edge counts as contradicted by the source.

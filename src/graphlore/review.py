@@ -34,9 +34,11 @@ from .imports import ImportChecker
 from .scope import _clean_pattern, _path_matches, _vendored_by_path
 from .spans import (
     _cached_file_analysis,
+    _is_test_node,
     _is_ts_symbol,
     _norm_relpath,
     _resolve_in_project,
+    _span_of_definition,
     _spans_for_file,
     _ts_bound_function,
     _ts_parser_for,
@@ -360,7 +362,18 @@ def _decorators(
         name = _bare_name(_node_label(n))
         below = text_lines[line - 1:line - 1 + _DECORATOR_REACH]
         stop = next((i for i, text in enumerate(below) if name and name in text), 0)
+        in_comment = False
         for text in text_lines[span[0] - 1:line - 1] + below[:stop + 1]:
+            # a doc comment's `@param` / `@default` tag is no decorator, with or
+            # without the leading `*`
+            opened, closed = text.rfind("/*"), text.rfind("*/")
+            starts_in_comment = in_comment
+            if opened > closed:
+                in_comment = True
+            elif closed > opened:
+                in_comment = False
+            if starts_in_comment or opened >= 0:
+                continue
             m = _DECORATOR_LINE.match(text)
             if m:
                 found.append(m.group(1))
@@ -462,6 +475,20 @@ def _never_called_by_name(name: str, label: str, parent_label: str) -> bool:
     return len(parts) > 1 and parts[-2] == parts[-1]  # `Foo::Foo()`
 
 
+def _is_anonymous_class(n: dict, lines: _SourceLines) -> bool:
+    """A class graphify made of an anonymous class body, named after the type it
+    implements: Java ``new TypeToken<List<String>>() { … }``, Kotlin
+    ``object : Callback<T> { … }``. Nothing can refer to it by that name."""
+    text = lines.get(_node_file(n))
+    line = _int_line(n)
+    if not 0 < line <= len(text):
+        return False
+    src = text[line - 1]
+    label = _node_label(n).split("<", 1)[0]
+    return bool(label) and (f"new {label}" in src or bool(
+        re.search(rf"\bobject\s*:\s*{re.escape(label)}\b", src)))
+
+
 def _unreferenced(
     scoped_nodes: list[dict],
     all_nodes: list[dict],
@@ -481,6 +508,7 @@ def _unreferenced(
 
     examined = 0
     no_graph_ref: list[tuple[str, dict, str, str]] = []  # (id, node, kind, bare name)
+    lines = _SourceLines()
     for n in scoped_nodes:
         nid = _node_id(n)
         kind = defs.kind.get(nid)
@@ -500,6 +528,8 @@ def _unreferenced(
         owner = defs.byid.get(defs.parent.get(nid, ""))
         if _never_called_by_name(name, _node_label(n), _node_label(owner) if owner else ""):
             continue
+        if kind == "class" and _is_anonymous_class(n, lines):
+            continue  # `new Callback<T>() { … }` / `object : Callback<T> { … }`
         examined += 1
         family = {nid, *defs.members.get(nid, ())}
         referenced = False
@@ -509,7 +539,7 @@ def _unreferenced(
                     continue
                 if not count_test_references:
                     sn = defs.byid.get(src)
-                    if sn is not None and _is_test_path(_node_file(sn)):
+                    if sn is not None and _is_test_node(sn):
                         continue
                 referenced = True
                 break
@@ -518,7 +548,6 @@ def _unreferenced(
         if not referenced:
             no_graph_ref.append((nid, n, kind, name))
 
-    lines = _SourceLines()
     registered: Counter[str] = Counter()
     remaining: list[tuple[str, dict, str, str]] = []
     for nid, n, kind, name in no_graph_ref:
@@ -532,7 +561,27 @@ def _unreferenced(
             remaining.append((nid, n, kind, name))
 
     names = {name for _nid, _n, _kind, name in remaining}
-    per_file, per_file_attrs, files_scanned, capped = _count_mentions(names)
+    # A class can be used only through its members: a C# extension class's
+    # methods are called on the extended type (`client.BuildUri(...)`) and the
+    # class is never named. Its members come from the span engine, since the
+    # graph may not see them (C# 14 `extension(...)` blocks).
+    graph_names = {_bare_name(_node_label(defs.byid[d])) for d in defs.kind}
+    members_of: dict[str, list[str]] = {}
+    for nid, n, kind, _name in remaining:
+        if kind != "class":
+            continue
+        cls_span = _span_of_definition(_node_file(n), _int_line(n), _name)
+        if cls_span is None:
+            continue
+        cls_qual = cls_span[3]
+        depth = cls_qual.count(".") + 1
+        members_of[nid] = sorted({
+            q.rsplit(".", 1)[-1] for _rs, _e, _dl, q in _spans_for_file(_node_file(n))
+            if q.startswith(cls_qual + ".") and q.count(".") == depth
+            and len(q.rsplit(".", 1)[-1]) >= 4 and q.rsplit(".", 1)[-1] not in names
+        })
+    member_names = {m for ms in members_of.values() for m in ms}
+    per_file, per_file_attrs, files_scanned, capped = _count_mentions(names | member_names)
     graph_bases: dict[str, list[str]] = {}  # class id -> base names the graph recorded
     for e in all_edges:
         if _rel(e) in _INHERITANCE_RELATIONS:
@@ -573,10 +622,19 @@ def _unreferenced(
                 attrs_here = per_file_attrs.get(name)
                 count = attrs_here[where] if attrs_here else 0
             mentions += max(0, count)
+        via = [
+            m for m in members_of.get(nid, ())
+            if m not in graph_names  # a name the graph knows can mean that other symbol
+            and any(f != file and c for f, c in (per_file_attrs.get(m) or {}).items())
+        ]
+        if via and not mentions:
+            mentions = sum(c for m in via for f, c in per_file_attrs[m].items() if f != file)
         item: dict[str, Any] = {
             "id": nid, "name": name, "kind": kind, "file": file, "line": line or None,
             "mentions": mentions,
         }
+        if via and mentions:
+            item["used_through_members"] = via[:5]
         namesakes = sorted(
             f"{f}:{ln}" for f, lns in homes.items() for ln in lns
             if (f, ln) != (file, line)
