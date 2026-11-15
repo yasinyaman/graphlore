@@ -136,7 +136,7 @@ def _routes_python(src: bytes) -> list[RouteRow]:
         return None  # non-literal pattern: invisible, per the lower-bound contract
 
     for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
             for dec in node.decorator_list:
                 if not (isinstance(dec, ast.Call) and isinstance(dec.func, ast.Attribute)):
                     continue
@@ -147,7 +147,7 @@ def _routes_python(src: bytes) -> list[RouteRow]:
                 if attr == "route":  # Flask style, one row per declared method
                     methods = ["GET"]
                     for kw in dec.keywords:
-                        if kw.arg == "methods" and isinstance(kw.value, (ast.List, ast.Tuple)):
+                        if kw.arg == "methods" and isinstance(kw.value, ast.List | ast.Tuple):
                             declared = [
                                 e.value for e in kw.value.elts
                                 if isinstance(e, ast.Constant) and isinstance(e.value, str)

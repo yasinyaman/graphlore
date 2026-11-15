@@ -43,6 +43,16 @@ what that turned up; what is still missing per language is in the report.
   step after the first PyPI release; `CONTRIBUTING.md` has the commands.
 
 ### Changed
+- Dependencies upgraded. `uv.lock` moves to graphifyy 0.9.109 (from 0.8.39:
+  what plugin users already got through `uvx`), mcp 2.3, semble 0.7,
+  tree-sitter-language-pack 1.25, ruff 0.17, mypy 2.4 and pytest 9.2. The
+  floors in `pyproject.toml` are now the oldest versions the suite passes with
+  on Python 3.10: `tree-sitter>=0.23` and `tree-sitter-language-pack>=1.11`
+  (1.9 and 1.10 return a `Language` that `tree_sitter.Parser` rejects, so the
+  span engine had no grammar with them), and `mypy>=1.12` for development (1.11
+  crashes on mcp's sources). CI uses `actions/checkout@v7`,
+  `actions/setup-python@v7`, `actions/upload-artifact@v7` and
+  `actions/download-artifact@v8` (node 24).
 - The README is a short landing page: what graphlore is, quick start, the 12
   `lean` tools, the benchmark headline and an FAQ. The detail moved, unchanged,
   to `docs/tools.md` (all 33 tools, resources, prompts), `docs/concepts.md`,
