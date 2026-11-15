@@ -59,6 +59,10 @@ from graphlore import graph as gl_graph  # noqa: E402
 from graphlore import review as gl_review  # noqa: E402
 from graphlore import server as s  # noqa: E402
 from graphlore import spans as gl_spans  # noqa: E402
+
+# Test regions inside source files (Rust `#[cfg(test)]`); absent from graphlore
+# releases before 0.6, which this script also audits for comparison.
+_test_regions = getattr(gl_spans, "_test_regions", lambda rel: [])
 from graphlore.review import _Definitions  # noqa: E402
 
 s.TOOLSET = "full"  # main() is never called, so the shared registry stays whole
@@ -576,7 +580,7 @@ def check_navigation(a: Audit, sub: Subject) -> None:
         if tf and "error" not in tf:
             for row in tf.get("direct", []) + tf.get("through_one_caller", []):
                 rel, at = row.get("file", ""), int(row.get("line") or 0)
-                inline = any(lo <= at <= hi for lo, hi in gl_spans._test_regions(rel))
+                inline = any(lo <= at <= hi for lo, hi in _test_regions(rel))
                 if not (s._is_test_path(rel) or inline):
                     a.finding("TESTS-FOR-NOT-A-TEST", "medium", "bug", "tests_for",
                               "a row lies outside every test path",
@@ -866,7 +870,7 @@ def check_languages(a: Audit, sub: Subject, repo: dict[str, Any]) -> None:
         for rel in rels:
             # a Rust file that holds its tests inline is recognised by its regions
             marked = bool(rx.search(_read(rel)))
-            path = s._is_test_path(rel) or bool(gl_spans._test_regions(rel))
+            path = s._is_test_path(rel) or bool(_test_regions(rel))
             c[f"marker={int(marked)},path={int(path)}"] += 1
             if marked and not path:
                 missed.append(rel)
@@ -1178,8 +1182,12 @@ def check_sandbox(a: Audit, sub: Subject, repo_dir: Path, keep: bool) -> None:
                               "a name written by set_labels shows up in neither "
                               "graphlore_communities nor graphlore_overview")
             a.call("set_labels", names={"999999": "x"}, expect_error=True)
-        # build through graphlore's own argv, from nothing
-        before = len(sub.nodes)
+        # build through graphlore's own argv, from nothing; code_only=True skips
+        # the docs, so the code nodes are what the two builds must agree on
+        def code_nodes(nodes: list[dict]) -> int:
+            return sum(1 for n in nodes if str(n.get("file_type") or "code") == "code")
+
+        before = code_nodes(sub.nodes)
         plain = a.text("build", path=".", expect_error=True)
         if plain.startswith("ERROR") and "no LLM API key" in plain:
             a.finding("BUILD-DEFAULT-NEEDS-KEY", "info", "upstream", "build",
@@ -1200,11 +1208,11 @@ def check_sandbox(a: Audit, sub: Subject, repo_dir: Path, keep: bool) -> None:
             if isinstance(graph, str):
                 a.finding("BUILD-NO-GRAPH", "high", "bug", "build",
                           "after graphlore_build the graph cannot be loaded", graph[:160])
-            elif len(s._nodes_edges(graph)[0]) < before * 0.5:
+            elif code_nodes(s._nodes_edges(graph)[0]) < before * 0.5:
                 a.finding("BUILD-SMALL-GRAPH", "medium", "bug", "build",
-                          "the graph graphlore_build wrote is under half the size of "
-                          "the one `graphify update` built",
-                          {"update": before, "build": len(s._nodes_edges(graph)[0])})
+                          "the graph graphlore_build wrote has under half the code "
+                          "nodes of the one `graphify update` built",
+                          {"update": before, "build": code_nodes(s._nodes_edges(graph)[0])})
         a.call("project", path=str(box / "graphify-out"))
         a.call("project", path=str(tmp / "does-not-exist"), expect_error=True)
     finally:

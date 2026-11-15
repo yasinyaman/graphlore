@@ -6,9 +6,13 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
-Every tool was run on 20 real repositories in 14 languages
-(`benchmarks/polyglot.py`, `docs/benchmark-polyglot.md`). The fixes below are
-what that turned up; what is still missing per language is in the report.
+## [0.6.0] - 2026-11-15
+
+Every tool was run on 31 real repositories in 14 languages
+(`benchmarks/polyglot.py`, `docs/benchmark-polyglot.md`). The changes below are
+what that turned up: package APIs read in all fourteen languages, routes in
+nine, a span engine checked on real code in each, and the conventions applied
+everywhere. What is still missing is listed at the end of the report.
 
 ### Added
 - **Package APIs for Kotlin, Scala, C#, Rust, Swift, C / C++, Ruby and PHP**,

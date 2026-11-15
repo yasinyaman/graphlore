@@ -20,7 +20,7 @@ pytest -q tests/test_tools.py::test_overview_json   # one test
 pytest -q -k freshness                              # by keyword
 pytest -q --cov --cov-report=term-missing           # what CI runs; coverage floor is 80%
 
-python benchmarks/polyglot.py --setup --root /tmp/polyglot   # clone 20 repos in 14 languages, build their graphs
+python benchmarks/polyglot.py --setup --root /tmp/polyglot   # clone 31 repos in 14 languages, build their graphs
 python benchmarks/polyglot.py --root /tmp/polyglot --baseline benchmarks/results-polyglot.json   # every tool on each; new / gone findings
 
 GRAPHLORE_PROJECT_DIR=/path/to/repo python -m graphlore   # run the server (stdio)
@@ -100,7 +100,7 @@ The version is duplicated in `pyproject.toml`, `server.__version__`, `.claude-pl
 - `docs/concepts.md` — resolved edges, import checks, analysis scope, freshness, the semantic bridge, naming communities
 - `docs/configuration.md` — running, the plugin, toolsets, transports, the network table, environment variables
 - `docs/benchmark.md` — method and results (`docs/benchmark*.html` are the rendered reports)
-- `docs/benchmark-polyglot.md` — every tool run on 20 real repositories in 14 languages: what works per language, what does not, and the findings (`benchmarks/polyglot.py` reruns it)
+- `docs/benchmark-polyglot.md` — every tool run on 31 real repositories in 14 languages: what works per language, what does not, and the findings (`benchmarks/polyglot.py` reruns it)
 
 Links from the README into the repository are absolute (`https://github.com/yasinyaman/graphlore/blob/master/...`) because relative links break on PyPI; links between the `docs/` files are relative. The README's first paragraph and its FAQ headings are written to be quoted by search engines and AI assistants: keep them plain, literal and true to the code.
 
