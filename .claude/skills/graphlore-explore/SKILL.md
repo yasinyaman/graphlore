@@ -206,7 +206,8 @@ stripped) — the middle layer between the map and full code — and
   patterns hit which handlers (FastAPI/Flask/Django, Express/NestJS,
   gin/chi/net-http, Spring/JAX-RS, Ktor, ASP.NET Core, axum/actix-web,
   Rails/Sinatra, Laravel/Symfony), each row joined to its graph node and
-  `file:line`. Test code is left out unless `scope="+tests"`; `not_read` counts
+  `file:line`. On a graph older than the code, trust a row's `node` only when
+  `node_confirmed` is true; `node: null` means the file is not in the graph yet. Test code is left out unless `scope="+tests"`; `not_read` counts
   the files of a language it has no reader for.
 
 ## Naming communities (optional, for readable subsystems)

@@ -223,6 +223,7 @@ from .spans import (  # noqa: F401
     _is_test_node,
     _is_ts_symbol,
     _node_for_location,
+    _nodes_by_file,
     _norm_relpath,
     _resolve_in_project,
     _span_of_definition,
@@ -687,6 +688,76 @@ def _git(args: list[str], cwd: Path | None = None) -> str | None:
         return None
 
 
+def _worktree_status() -> list[tuple[str, str, str | None]] | None:
+    """Uncommitted changes as ``(code, path, old_path)``, project-relative.
+
+    Modified, staged, deleted and untracked files — ``git diff --name-only HEAD``
+    misses new files — with graphify's own output dir skipped, so an
+    un-gitignored graphify-out/ doesn't mark the graph perpetually stale. None
+    when ``git status`` fails: that must never read as a clean tree.
+
+    ``-uall`` lists the files inside an untracked directory; without it git
+    reports the directory itself (``api/``), which has no extension and read as
+    a non-source change. ``-z`` prints paths verbatim: default porcelain C-quotes
+    paths with spaces or non-ASCII bytes (``"my file.py"``), which would leave the
+    quotes in the path and break a later ``git show ref:path``.
+    """
+    status = _git(["status", "--porcelain", "-z", "-uall"])
+    if status is None:
+        return None
+    # Porcelain paths are REPO-ROOT-relative; PROJECT_DIR may be a subdirectory of
+    # the repo, so re-anchor them (dropping changes outside the project) before
+    # any working-tree read or node-path comparison.
+    prefix = ""
+    top = _git(["rev-parse", "--show-toplevel"])
+    if top:
+        try:
+            rel_root = config.PROJECT_DIR.resolve().relative_to(Path(top).resolve())
+            prefix = "" if str(rel_root) == "." else rel_root.as_posix() + "/"
+        except (ValueError, OSError):
+            prefix = ""
+
+    def _reanchor(p: str) -> str | None:
+        if not prefix:
+            return p
+        return p[len(prefix):] if p.startswith(prefix) else None
+
+    out: list[tuple[str, str, str | None]] = []
+    fields = iter(status.split("\0"))
+    for entry in fields:
+        if not entry:
+            continue  # trailing empty field after the final NUL separator
+        code = entry[:2]
+        raw_path = entry[3:]  # "XY <path>"; verbatim, no unquoting needed
+        raw_old = raw_path
+        # `-z` emits a rename/copy as two fields — new path, then original path —
+        # not the `old -> new` of default porcelain. Consume the paired field.
+        if "R" in code or "C" in code:
+            raw_old = next(fields, raw_path)
+        path = _reanchor(raw_path)
+        if path is None:
+            continue  # changed outside PROJECT_DIR
+        if path == config.OUT_DIR_NAME or path.startswith(config.OUT_DIR_NAME + "/"):
+            continue
+        out.append((code, path, _reanchor(raw_old)))
+    return out
+
+
+def _uncommitted_source_note() -> str:
+    """", N source file(s) changed since (uncommitted)" for a dirty tree, else "".
+
+    graphify builds from the working tree, so a file already dirty at build time
+    counts too: the note says "check", not "certainly stale".
+    """
+    status = _worktree_status()
+    if not status:
+        return ""
+    n = sum(1 for _, path, _ in status if _graph_relevant_file(path, set()))
+    if not n:
+        return ""
+    return f", {n} source file{'' if n == 1 else 's'} changed since (uncommitted)"
+
+
 def _graph_age() -> str | None:
     """Lightweight 'how stale is the graph' note for embedding in frequent tool
     outputs, so staleness is visible even without a separate graphlore_freshness
@@ -702,14 +773,14 @@ def _graph_age() -> str | None:
     if head is None:
         return None
     if head.startswith(built_at) or built_at.startswith(head):
-        return "built at HEAD"
+        return "built at HEAD" + _uncommitted_source_note()
     if _git(["cat-file", "-e", f"{built_at}^{{commit}}"]) is None:
         return "built at an unreachable commit (rebuild recommended)"
     ahead = _git(["rev-list", "--count", f"{built_at}..HEAD"])
     if ahead and ahead.isdigit() and int(ahead) > 0:
         n = int(ahead)
-        return f"built {n} commit{'' if n == 1 else 's'} ago"
-    return "built at a divergent commit"
+        return f"built {n} commit{'' if n == 1 else 's'} ago" + _uncommitted_source_note()
+    return "built at a divergent commit" + _uncommitted_source_note()
 
 
 class _Drift(NamedTuple):
@@ -1590,6 +1661,62 @@ def _condense_build_log(log: str) -> str:
     return "\n".join(kept)
 
 
+_AST_INCOMPLETE = re.compile(r"AST extraction incomplete for (\d+) source", re.IGNORECASE)
+
+
+def _failed_sources_note(log: str, target: Path) -> str:
+    """Which sources an "AST extraction incomplete for N source(s)" build left out.
+
+    graphify prints the count, not the names (it names only the zero-node ones,
+    in a warning the summary keeps). It does leave every failed source unstamped
+    in ``manifest.json``, so the source files git lists under ``target`` that the
+    manifest has no entry for are the candidates: the failed ones, plus any file
+    ``.graphifyignore`` leaves out. Empty when the log reports no failure.
+    """
+    m = _AST_INCOMPLETE.search(log)
+    if not m:
+        return ""
+    count = int(m.group(1))
+    head = (f"AST extraction failed for {count} source(s); graphify names only the "
+            "ones that produced zero nodes, in a warning.")
+    manifest_path = target / config.OUT_DIR_NAME / "manifest.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        manifest = None
+    listed = _git(["ls-files", "--cached", "--others", "--exclude-standard", "-z", "--", "."],
+                  cwd=target)
+    if not isinstance(manifest, dict) or listed is None:
+        return head + (" With no manifest.json or no git to compare it with, the "
+                       "others cannot be named here.")
+    stamped: set[str] = set()
+    for key in manifest:
+        k = Path(str(key))
+        if k.is_absolute():
+            try:
+                k = k.resolve().relative_to(target)
+            except (ValueError, OSError):
+                continue
+        stamped.add(_norm_relpath(k.as_posix()))
+    out_dir = config.OUT_DIR_NAME.rstrip("/") + "/"
+    missing = sorted(
+        rel for rel in (_norm_relpath(x) for x in listed.split("\0"))
+        if rel and rel not in stamped and not rel.startswith(out_dir)
+        and _graph_relevant_file(rel, set())
+    )
+    if not missing:
+        return head + (" Every source file git lists has a manifest.json entry, so the "
+                       "others are file kinds graphify reads besides source code "
+                       "(project files such as pom.xml or *.csproj).")
+    shown = ", ".join(missing[:5])
+    more = f", +{len(missing) - 5} more" if len(missing) > 5 else ""
+    return (
+        f"{head} Source files with no manifest.json entry (graphify leaves failed "
+        f"sources unstamped; a file .graphifyignore leaves out shows here too): "
+        f"{shown}{more}."
+    )
+
+
 def _vendored_build_note() -> str:
     """After a build: how much of the graph is vendored/minified, and what to do."""
     graph = _load_graph()
@@ -1693,13 +1820,15 @@ def graphlore_build(
             # graphify names its own flag; say what that is on this tool
             result += "\n\ngraphlore_build(code_only=True) passes --code-only."
         return result  # a failed build is returned whole, never condensed
-    if not verbose:
-        result = _condense_build_log(result)
-
     p = Path(path)
     target = (p if p.is_absolute() else config.PROJECT_DIR / p).resolve()
     written = target / config.OUT_DIR_NAME / "graph.json"
     notes: list[str] = []
+    failed = _failed_sources_note(result, target)
+    if not verbose:
+        result = _condense_build_log(result)
+    if failed:
+        notes.append(failed)
     if written.exists() and written != gp.resolve():
         # Built somewhere this server does not read: say so instead of staying
         # silent (or, worse, announcing the project's own older graph as ready).
@@ -4256,14 +4385,7 @@ def graphlore_freshness(as_json: bool = False) -> str:
         return _fmt(payload, as_json,
                     "graph.json exists, but this is not a git repo (or git unavailable).")
 
-    # Modified AND untracked files — `git diff --name-only HEAD` misses new files.
-    # Skip graphify's own output dir so an un-gitignored graphify-out/ doesn't
-    # mark the graph perpetually stale.
-    # `-z`: NUL-separated with paths printed verbatim. Default porcelain C-quotes
-    # paths containing spaces or non-ASCII bytes (e.g. `"my file.py"`), which would
-    # leave the literal quotes in the path and break the `git show ref:path` AST
-    # diff below (every such file would look structurally changed).
-    status = _git(["status", "--porcelain", "-z"])
+    status = _worktree_status()
     if status is None:
         # A failed/timed-out `git status` must NOT read as a clean tree — that
         # would report "fresh" over real pending changes.
@@ -4274,46 +4396,10 @@ def graphlore_freshness(as_json: bool = False) -> str:
             "determined (not assuming the tree is clean).",
             is_error=True,
         )
-
-    # Porcelain paths are REPO-ROOT-relative; PROJECT_DIR may be a subdirectory of
-    # the repo, so re-anchor them (dropping changes outside the project) before
-    # any working-tree read or node-path comparison.
-    prefix = ""
-    top = _git(["rev-parse", "--show-toplevel"])
-    if top:
-        try:
-            rel_root = config.PROJECT_DIR.resolve().relative_to(Path(top).resolve())
-            prefix = "" if str(rel_root) == "." else rel_root.as_posix() + "/"
-        except (ValueError, OSError):
-            prefix = ""
-
-    def _reanchor(p: str) -> str | None:
-        if not prefix:
-            return p
-        return p[len(prefix):] if p.startswith(prefix) else None
-
-    changed_files: list[str] = []
-    removed: list[str] = []  # deleted/renamed -> old nodes linger under incremental update
-    fields = iter(status.split("\0"))
-    for entry in fields:
-        if not entry:
-            continue  # trailing empty field after the final NUL separator
-        code = entry[:2]
-        raw_path = entry[3:]  # "XY <path>"; verbatim, no unquoting needed
-        raw_old = raw_path
-        # `-z` emits a rename/copy as two fields — new path, then original path —
-        # not the `old -> new` of default porcelain. Consume the paired field.
-        if "R" in code or "C" in code:
-            raw_old = next(fields, raw_path)
-        path = _reanchor(raw_path)
-        if path is None:
-            continue  # changed outside PROJECT_DIR
-        old = _reanchor(raw_old)
-        if path == config.OUT_DIR_NAME or path.startswith(config.OUT_DIR_NAME + "/"):
-            continue
-        changed_files.append(path)
-        if ("D" in code or "R" in code) and old is not None:
-            removed.append(old)
+    changed_files = [path for _, path, _ in status]
+    # deleted/renamed -> old nodes linger under incremental update
+    removed = [old for code, _, old in status
+               if ("D" in code or "R" in code) and old is not None]
 
     # Prefer the commit graphify built the graph from; fall back to mtime vs commit.
     nodes: list[dict] = []
@@ -5727,37 +5813,85 @@ _ROUTES_NOTE = (
 )
 
 
-def _route_candidate_files(graph_files: set[str]) -> set[str]:
-    """Well-known route files the graph may not know about, beyond ``graph_files``.
+# Cap on source files outside the graph that graphlore_routes reads itself.
+_ROUTE_EXTRA_FILES_MAX = 500
+# Directories graphify does not extract (build output, environments, caches):
+# a committed dist/ is a compiled copy of the routes, not more of them.
+_NOT_EXTRACTED_DIRS = frozenset({
+    "venv", "node_modules", "__pycache__", "dist", "build", "target",
+    "site-packages", "lib64", "lcov-report", "__snapshots__", "storybook-static",
+    "dist-protected",
+})
 
-    Some route files are all module-level calls and hold no symbol, so the
-    graph can leave them out: Django's ``urls.py``, Rails' ``config/routes.rb``,
-    Laravel's ``routes/*.php``. A pruned, capped walk picks those up; anything
-    else outside the graph (say a route-only ``routes.ts``) stays a documented
-    limitation — this must not grow into a filesystem scanner.
+
+def _project_files_outside_graph(graph_files: set[str]) -> list[str]:
+    """Project files with a route reader the graph has no node for, sorted.
+
+    A new router file the graph predates, or a route file that is all
+    module-level calls and holds no symbol (Django's ``urls.py``, Rails'
+    ``config/routes.rb``, Laravel's ``routes/*.php``). In a git repository this
+    is the tracked plus untracked-but-not-ignored files (``.gitignore`` holds),
+    otherwise a pruned walk of the project directory.
     """
-    skip = {".git", "node_modules", ".venv", "venv", "dist", "build", "target",
-            "__pycache__", config.OUT_DIR_NAME}
+    out_dir = config.OUT_DIR_NAME.rstrip("/") + "/"
+
+    def wanted(rel: str) -> bool:
+        dot = rel.rfind(".")
+        if not (dot >= 0 and rel[dot:].lower() in _ROUTE_EXTS
+                and rel not in graph_files and not rel.startswith(out_dir)):
+            return False
+        return not any(d in _NOT_EXTRACTED_DIRS or d.startswith(".") or d.endswith(".egg-info")
+                       for d in rel.split("/")[:-1])
+
+    listed = _git(["ls-files", "--cached", "--others", "--exclude-standard", "-z", "--", "."])
+    if listed is not None:
+        rels = (_norm_relpath(x) for x in listed.split("\0"))
+        return sorted({p for p in rels if p and wanted(p)})
+    skip = _NOT_EXTRACTED_DIRS | {config.OUT_DIR_NAME}
     found: set[str] = set()
     root = config.PROJECT_DIR
     try:
+        root_resolved = root.resolve()
         for dirpath, dirnames, filenames in os.walk(root):
             dirnames[:] = [d for d in dirnames if d not in skip and not d.startswith(".")]
             here = Path(dirpath)
-            wanted = [f for f in filenames if f == "urls.py"
-                      or (f == "routes.rb" and here.name == "config")
-                      or (f.endswith(".php") and here.name == "routes")]
-            for name in wanted:
+            for name in filenames:
                 try:
-                    rel = (here / name).resolve().relative_to(root.resolve())
+                    rel = (here / name).resolve().relative_to(root_resolved).as_posix()
                 except (ValueError, OSError):
-                    continue
-                found.add(rel.as_posix())
-            if len(found) >= 200:
+                    continue  # a link out of the project
+                if wanted(rel):
+                    found.add(rel)
+            if len(found) >= 10 * _ROUTE_EXTRA_FILES_MAX:
                 break
     except OSError:
         pass
-    return found - graph_files
+    return sorted(found)
+
+
+def _route_node(
+    nodes: list[dict], file: str, handler: str, line: int,
+) -> tuple[dict | None, bool]:
+    """The graph node a route row belongs to, and whether it was found by name.
+
+    The handler's name among the file's nodes comes first (the nearest to the
+    route's line when it repeats): a graph built before lines were inserted above
+    the handler still names it. Only when no node of the file carries that name
+    does the location join (``_node_for_location``) decide, and that join is only
+    as good as the graph's line numbers.
+    """
+    bare = _bare_name(handler) if handler else ""
+    if bare and not bare.startswith("<"):
+        same = [n for n in _nodes_by_file(nodes).get(file, [])
+                if _bare_name(_node_label(n)) == bare]
+        if same:
+            def distance(n: dict) -> int:
+                try:
+                    return abs(int(_node_line(n) or 0) - line)
+                except (TypeError, ValueError):
+                    return 1 << 30
+            return min(same, key=distance), True
+    return _node_for_location(nodes, file, line), False
 
 
 @_tool(annotations=ToolAnnotations(title="Framework routes", read_only_hint=True))
@@ -5771,8 +5905,9 @@ def graphlore_routes(
 ) -> str:
     """Framework route -> handler table: which URL patterns hit which code.
 
-    Scans the files the graph knows (plus the ``urls.py``, ``config/routes.rb``
-    and ``routes/*.php`` it missed) for the common registration idioms —
+    Scans the files the graph knows, and the source files it lacks (a router
+    added since the build, a ``urls.py`` with no symbol), for the common
+    registration idioms —
     Python: Flask ``@app.route`` / FastAPI-style verb decorators / Django
     ``path()``; JS/TS: Express-style ``app.get('/x', h)`` and
     ``router.route('/x').get(h)``, NestJS ``@Controller``+``@Get``; Go:
@@ -5788,6 +5923,13 @@ def graphlore_routes(
     endpoint" in one hop. Python is parsed with the stdlib ast; the rest need the
     optional [treesitter] extra. Source files in a language with no route
     reader are counted in ``not_read``.
+
+    A prefix the router declares in its own file is applied
+    (``APIRouter(prefix=...)``, ``Blueprint(url_prefix=...)``; the bare pattern
+    stays in ``local_pattern``). A row's ``node`` is found by the handler's name
+    among the file's nodes, then by line; ``node_confirmed`` is false when that
+    cannot be trusted (the file changed since the build), and ``node`` is null
+    for a file the graph does not have. ``build_drift`` lists the changed files.
 
     The result is a LOWER BOUND: non-literal patterns, dynamic registration,
     prefixes applied in another file and gorilla ``.Methods()`` are invisible;
@@ -5817,13 +5959,16 @@ def graphlore_routes(
         return view
     graph_files = {_norm_relpath(_node_file(n)) for n in nodes} - {""}
     in_scope = {_norm_relpath(_node_file(n)) for n in view.nodes} - {""}
-    files = sorted(in_scope | {
-        f for f in _route_candidate_files(graph_files) if view.keeps_file(f)
-    })
+    outside = [f for f in _project_files_outside_graph(graph_files) if view.keeps_file(f)]
+    outside_read = outside[:_ROUTE_EXTRA_FILES_MAX]
+    not_in_graph = set(outside_read)
+    files = sorted(in_scope | not_in_graph)
+    drift = _build_drift()
 
     rows: list[dict[str, Any]] = []
     server_import: bool | None = None  # does any JS/TS file import a server framework
     for f in files:
+        changed = _file_changed(drift, f)
         for r in _routes_for_file(f):
             if r.get("needs_server_import"):
                 if server_import is None:
@@ -5831,13 +5976,37 @@ def graphlore_routes(
                 if not server_import:
                     continue
             r = {k: v for k, v in r.items() if k != "needs_server_import"}
-            node = _node_for_location(nodes, f, r["line"])
-            rows.append({
-                **r,
-                "file": f,
-                "node": _node_label(node) if node is not None else "",
-                "qualname": _span_qualname(f, r["line"]) or "",
-            })
+            row: dict[str, Any] = {**r, "file": f}
+            if f in not_in_graph:
+                row["node"] = None
+                row["node_confirmed"] = False
+                row["node_note"] = (
+                    "not in the graph: the file is new or changed since the build — rebuild"
+                    if changed else
+                    "not in the graph: graphify recorded no node in this file"
+                )
+            else:
+                node, by_name = _route_node(nodes, f, r.get("handler", ""), r["line"])
+                row["node"] = _node_label(node) if node is not None else ""
+                # A name match survives lines moving; a location join holds only
+                # while the file is as the graph saw it.
+                confirmed = True if by_name else (None if changed is None else not changed)
+                row["node_confirmed"] = confirmed
+                if confirmed is not True and node is not None:
+                    row["node_note"] = (
+                        f"no node named {_bare_name(r.get('handler', '')) or 'like the handler'} "
+                        "in this file; joined by line"
+                        + (", and the file changed since the build — rebuild to confirm"
+                           if changed else
+                           ", and whether the file changed since the build is unknown")
+                    )
+                elif node is None:
+                    row["node_confirmed"] = False
+                    row["node_note"] = "no graph node at this line"
+            if changed:
+                row["file_changed_since_build"] = True
+            row["qualname"] = _span_qualname(f, r["line"]) or ""
+            rows.append(row)
 
     if framework:
         rows = [r for r in rows if r["framework"].lower() == framework.lower()]
@@ -5856,29 +6025,61 @@ def graphlore_routes(
         "note": _ROUTES_NOTE,
         "scope": view.payload(),
     }
-    _cut_hint(payload, "Raise limit for the rest of the `count` routes, or filter with "
-                       "framework= / method= / pattern=.")
+    drift_payload, drift_text = _drift_note(drift, files)
+    payload["build_drift"] = drift_payload
+    if outside:
+        payload["files_not_in_graph"] = {
+            "count": len(outside),
+            "read": len(outside_read),
+            "files": outside[:_LEFT_OUT_LISTED],
+        }
+    hints = []
+    if len(rows) > len(shown):
+        hints.append("Raise limit for the rest of the `count` routes, or filter with "
+                     "framework= / method= / pattern=.")
+    if len(outside) > len(outside_read):
+        payload["truncated"] = True
+        hints.append(f"Only the first {_ROUTE_EXTRA_FILES_MAX} of the "
+                     f"{len(outside)} files outside the graph were read; rebuild the "
+                     "graph or narrow scope= to read the rest.")
+    if hints:
+        _cut_hint(payload, " ".join(hints))
     not_read = _not_read(files, _ROUTE_EXTS)
     if not_read:
         payload["not_read"] = not_read
+    extra_text = []
+    if outside:
+        extra_text.append(
+            f"{len(outside)} source file(s) are not in the graph"
+            + (f" ({len(outside_read)} read)" if len(outside_read) < len(outside) else "")
+            + "; their rows have no node (rebuild to join them).")
+    if drift_text:
+        extra_text.append(drift_text)
     if not rows:
         return _fmt(
             payload, as_json,
             _with_note(
                 f"No framework routes visible in {len(files)} scanned file(s) "
                 f"({_ROUTES_NOTE})."
-                + (f"\n{_not_read_text(not_read)}" if not_read else ""), view),
+                + (f"\n{_not_read_text(not_read)}" if not_read else "")
+                + "".join(f"\n{t}" for t in extra_text), view),
         )
     lines = [f"{len(rows)} route(s) across {len(files)} scanned file(s) ({_ROUTES_NOTE}):"]
     for r in shown:
+        flag = ""
+        if r["node"] is None:
+            flag = "  [not in the graph]"
+        elif r.get("node_confirmed") is False:
+            flag = f"  [node unconfirmed: {r['node'] or 'none'}]"
         lines.append(
             f"  {r['method']} {r['pattern']} -> {r['handler']}  "
-            f"({r['file']}:{r['line']})  [{r['framework']}]"
+            f"({r['file']}:{r['line']})  [{r['framework']}]{flag}"
         )
-    if payload["truncated"]:
+    if len(rows) > len(shown):
         lines.append(f"  … +{len(rows) - len(shown)} more route(s); raise `limit`.")
     if not_read:
         lines.append(_not_read_text(not_read))
+    lines.extend(extra_text)
     return _fmt(payload, as_json, _with_note("\n".join(lines), view))
 
 

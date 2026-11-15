@@ -6,6 +6,47 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+A sixth field report, on a FastAPI repository whose graph was older than its
+working tree: the route table joined rows to the wrong node without saying so.
+
+### Added
+- **`graphlore_routes` applies a prefix the router declares in its own file**:
+  `router = APIRouter(prefix="/keys")` and Flask
+  `Blueprint(..., url_prefix="/keys")` are prepended to the routes registered on
+  them, and the pattern as written stays in `local_pattern`. A prefix added where
+  the router is mounted (`include_router(..., prefix=)`,
+  `register_blueprint(..., url_prefix=)`) is still invisible.
+- **`graphlore_routes` reads source files the graph lacks**: a router added
+  since the build was missing from the table. Every file git lists (or, without
+  git, a pruned walk finds) with a route reader, kept by the scope and not under
+  a directory graphify skips (`dist/`, `build/`, `node_modules/`, ...), is read;
+  its rows have `node: null` and a `node_note` saying why, and
+  `files_not_in_graph` counts them (at most 500 are read, and a cut says so).
+  This replaces the narrower walk for `urls.py`, `config/routes.rb` and
+  `routes/*.php`.
+- `graphlore_routes` carries `build_drift` like `locate`, `impact` and
+  `subgraph`, and marks the rows of a changed file `file_changed_since_build`.
+
+### Fixed
+- **Route rows on a stale graph named the wrong node.** The row was joined to
+  the node at its line, and a graph built before lines were inserted above the
+  handler has other lines. The handler's name among the file's nodes now comes
+  first (the nearest one when it repeats); the line join is the fallback, and a
+  row it cannot vouch for (no node of that name, file changed since the build)
+  says so with `node_confirmed: false` and a `node_note`.
+- **"built at HEAD" over a dirty working tree.** `graph_age` in
+  `graphlore_project`, `graphlore_overview` and `graphlore_subgraph` adds the
+  uncommitted source files: "built at HEAD, 37 source files changed since
+  (uncommitted)".
+- **`graphlore_freshness` counted a new untracked directory as one non-source
+  change**: git reports `api/` for it, which has no extension. It runs
+  `git status -uall` now, so the files inside are listed and classified.
+- **`graphlore_build` lost which sources failed AST extraction.** graphify
+  prints only "AST extraction incomplete for N source(s)" (it names the
+  zero-node ones in a warning the summary keeps). The result now lists the
+  source files git lists that `manifest.json` has no entry for, which is where
+  graphify leaves a failed source, or says why it cannot.
+
 ## [0.6.0] - 2026-11-15
 
 Every tool was run on 31 real repositories in 14 languages

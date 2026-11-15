@@ -132,6 +132,65 @@ def _join_path(prefix: str, sub: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+# Router objects that carry their own prefix: name of the constructor -> the
+# keyword holding the prefix, and how the framework joins it to a route
+# ("concat": FastAPI's prefix + path; "slash": Flask's one-slash join).
+_PY_PREFIXED_ROUTERS = {
+    "APIRouter": ("prefix", "concat"),
+    "Blueprint": ("url_prefix", "slash"),
+}
+
+
+def _py_router_prefixes(tree: ast.AST) -> dict[str, tuple[str, str]]:
+    """``name -> (prefix, join style)`` for routers built in this file with a
+    literal prefix: ``router = APIRouter(prefix="/keys")``,
+    ``bp = Blueprint("keys", __name__, url_prefix="/keys")``.
+
+    Only the router's own declaration is read. A prefix added where it is
+    mounted (``app.include_router(router, prefix=...)``,
+    ``register_blueprint(bp, url_prefix=...)``) usually sits in another file and
+    stays invisible. A name assigned twice with different prefixes is dropped
+    rather than guessed.
+    """
+    found: dict[str, tuple[str, str]] = {}
+    ambiguous: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and len(node.targets) == 1:
+            target, value = node.targets[0], node.value
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            target, value = node.target, node.value
+        else:
+            continue
+        if not (isinstance(target, ast.Name) and isinstance(value, ast.Call)):
+            continue
+        fn = value.func
+        ctor = fn.attr if isinstance(fn, ast.Attribute) else getattr(fn, "id", "")
+        if ctor not in _PY_PREFIXED_ROUTERS:
+            continue
+        kw_name, style = _PY_PREFIXED_ROUTERS[ctor]
+        prefix = next(
+            (kw.value.value for kw in value.keywords
+             if kw.arg == kw_name and isinstance(kw.value, ast.Constant)
+             and isinstance(kw.value.value, str)), None)
+        if not prefix:
+            continue
+        name = target.id
+        if name in found and found[name] != (prefix, style):
+            ambiguous.add(name)
+        found[name] = (prefix, style)
+    for name in ambiguous:
+        found.pop(name, None)
+    return found
+
+
+def _py_prefix_join(prefix: str, pattern: str, style: str) -> str:
+    if style == "concat":  # FastAPI: prefix + path, as written
+        return prefix + pattern
+    if not pattern:  # Flask: one slash between the two
+        return prefix
+    return prefix.rstrip("/") + "/" + pattern.lstrip("/")
+
+
 def _routes_python(src: bytes) -> list[RouteRow]:
     rows: list[RouteRow] = []
     try:
@@ -163,6 +222,20 @@ def _routes_python(src: bytes) -> list[RouteRow]:
                 return kw.value.value
         return None  # non-literal pattern: invisible, per the lower-bound contract
 
+    prefixes = _py_router_prefixes(tree) if verb_framework is not None else {}
+
+    def _prefixed(rows_for: list[RouteRow], dec: ast.Call) -> list[RouteRow]:
+        """Apply a prefix the decorated router declared in this file."""
+        target = dec.func.value if isinstance(dec.func, ast.Attribute) else None
+        known = prefixes.get(target.id) if isinstance(target, ast.Name) else None
+        if known is None:
+            return rows_for
+        prefix, style = known
+        for r in rows_for:
+            r["local_pattern"] = r["pattern"]
+            r["pattern"] = _py_prefix_join(prefix, r["pattern"], style)
+        return rows_for
+
     for node in ast.walk(tree):
         if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
             for dec in node.decorator_list:
@@ -182,10 +255,11 @@ def _routes_python(src: bytes) -> list[RouteRow]:
                             ]
                             methods = declared or methods
                     label = "flask" if "flask" in imported else verb_framework
-                    rows += [_row(label, m, pattern, node.name, node.lineno)
-                             for m in methods]
+                    rows += _prefixed([_row(label, m, pattern, node.name, node.lineno)
+                                       for m in methods], dec)
                 elif attr in _HTTP_METHODS:
-                    rows.append(_row(verb_framework, attr, pattern, node.name, node.lineno))
+                    rows += _prefixed(
+                        [_row(verb_framework, attr, pattern, node.name, node.lineno)], dec)
         elif (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
                 and node.func.id in ("path", "re_path", "url") and "django" in imported
                 and node.args and isinstance(node.args[0], ast.Constant)

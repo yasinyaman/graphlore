@@ -7447,3 +7447,209 @@ def test_a_string_with_comment_characters_does_not_hide_a_decorator(tmp_path, mo
     data = json.loads(server.graphlore_unreferenced(as_json=True))
     assert data["registered_by_decorator"].get("Test") == 1
     assert ".fullWildcardMatchesAny()" not in {r["node"] for r in data["unreferenced"]}
+
+
+# ---------------------------------------------------------------------------
+# A graph older than the working tree: routes, build age, freshness, build log
+# ---------------------------------------------------------------------------
+
+_KEYS_PY = (
+    "from fastapi import APIRouter\n"
+    "\n"
+    "router = APIRouter(prefix=\"/keys\", tags=[\"keys\"])\n"
+    "\n"
+    "\n"
+    "@router.get(\"/\")\n"
+    "def list_keys():\n"
+    "    return []\n"
+    "\n"
+    "\n"
+    "@router.post(\"/{key_id}\")\n"
+    "def make_key(key_id):\n"
+    "    return key_id\n"
+)
+
+
+def _stale_routes_project(tmp_path, monkeypatch):
+    """app/keys.py committed with a graph built from it (lines 7 and 12)."""
+    import shutil as _sh
+    import subprocess
+
+    import pytest
+    if _sh.which("git") is None:
+        pytest.skip("git not available")
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "keys.py").write_text(_KEYS_PY, encoding="utf-8")
+    (tmp_path / ".gitignore").write_text("graphify-out/\n", encoding="utf-8")
+    git = _git_init(tmp_path)
+    git("add", ".")
+    git("commit", "-m", "init")
+    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=tmp_path, capture_output=True,
+                          text=True, check=True).stdout.strip()
+    _write_graph(tmp_path, {"built_at_commit": head, "nodes": [
+        {"id": "keys", "label": "keys.py", "source_file": "app/keys.py",
+         "source_location": "L1"},
+        {"id": "list_keys", "label": "list_keys()", "source_file": "app/keys.py",
+         "source_location": "L7"},
+        {"id": "make_key", "label": "make_key()", "source_file": "app/keys.py",
+         "source_location": "L12"},
+    ], "links": []})
+    server._SPAN_CACHE.clear()
+    server._ROUTES_CACHE.clear()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    return git
+
+
+def test_routes_apply_a_prefix_the_router_declares_in_its_file():
+    from graphlore.routes import _routes_python
+    rows = _routes_python(_KEYS_PY.encode())
+    assert [(r["pattern"], r["local_pattern"]) for r in rows] == [
+        ("/keys/", "/"), ("/keys/{key_id}", "/{key_id}")]
+    flask = _routes_python(
+        b"from flask import Blueprint\n"
+        b"bp = Blueprint('keys', __name__, url_prefix='/keys/')\n"
+        b"@bp.route('/<id>', methods=['GET'])\n"
+        b"def k(id): ...\n"
+        b"@other.route('/x')\n"
+        b"def x(): ...\n")
+    assert [(r["pattern"], r.get("local_pattern")) for r in flask] == [
+        ("/keys/<id>", "/<id>"), ("/x", None)]
+    # the same name bound to two prefixes is not guessed
+    twice = _routes_python(
+        b"from fastapi import APIRouter\n"
+        b"r = APIRouter(prefix='/a')\n"
+        b"r = APIRouter(prefix='/b')\n"
+        b"@r.get('/x')\n"
+        b"def x(): ...\n")
+    assert twice[0]["pattern"] == "/x" and "local_pattern" not in twice[0]
+
+
+def test_routes_join_by_handler_name_when_lines_moved(tmp_path, monkeypatch):
+    _stale_routes_project(tmp_path, monkeypatch)
+    data = json.loads(server.graphlore_routes(as_json=True))
+    assert data["build_drift"] == {"known": True, "since": data["build_drift"]["since"],
+                                   "changed_files": []}
+    assert [(r["node"], r["node_confirmed"]) for r in data["routes"]] == [
+        ("list_keys()", True), ("make_key()", True)]
+    assert not any("file_changed_since_build" in r for r in data["routes"])
+
+    # five lines inserted above the handlers, no rebuild: the graph's lines are
+    # off by five, and a join by line would name the wrong function
+    src = _KEYS_PY.replace("router = APIRouter", "def helper():\n    return 1\n\n\n\nrouter = "
+                           "APIRouter")
+    (tmp_path / "app" / "keys.py").write_text(src, encoding="utf-8")
+    data = json.loads(server.graphlore_routes(as_json=True))
+    rows = data["routes"]
+    assert [(r["handler"], r["node"], r["node_confirmed"]) for r in rows] == [
+        ("list_keys", "list_keys()", True), ("make_key", "make_key()", True)]
+    assert all(r["file_changed_since_build"] for r in rows)
+    assert data["build_drift"]["changed_files"] == ["app/keys.py"]
+    assert "Changed since the graph was built" in server.graphlore_routes()
+
+
+def test_routes_say_when_the_node_cannot_be_confirmed(tmp_path, monkeypatch):
+    _stale_routes_project(tmp_path, monkeypatch)
+    # the handler renamed in source: no node carries its name any more
+    (tmp_path / "app" / "keys.py").write_text(
+        _KEYS_PY.replace("def make_key(", "def create_key("), encoding="utf-8")
+    rows = json.loads(server.graphlore_routes(as_json=True))["routes"]
+    row = next(r for r in rows if r["handler"] == "create_key")
+    assert row["node_confirmed"] is False
+    assert "no node named create_key" in row["node_note"] and "rebuild" in row["node_note"]
+    assert "[node unconfirmed:" in server.graphlore_routes()
+
+
+def test_routes_read_source_files_the_graph_lacks(tmp_path, monkeypatch):
+    _stale_routes_project(tmp_path, monkeypatch)
+    (tmp_path / "app" / "extra").mkdir()
+    (tmp_path / "app" / "extra" / "users.py").write_text(
+        "from fastapi import APIRouter\n"
+        "users = APIRouter(prefix='/users')\n"
+        "@users.get('/me')\n"
+        "def me(): ...\n", encoding="utf-8")
+    (tmp_path / "dist").mkdir()  # build output graphify does not extract either
+    (tmp_path / "dist" / "users.py").write_text(
+        "from fastapi import FastAPI\napp = FastAPI()\n@app.get('/d')\ndef d(): ...\n",
+        encoding="utf-8")
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_app.py").write_text(
+        "from fastapi import FastAPI\napp = FastAPI()\n@app.get('/t')\ndef t(): ...\n",
+        encoding="utf-8")
+    data = json.loads(server.graphlore_routes(as_json=True))
+    row = next(r for r in data["routes"] if r["file"] == "app/extra/users.py")
+    assert row["pattern"] == "/users/me" and row["node"] is None
+    assert row["node_confirmed"] is False and "not in the graph" in row["node_note"]
+    assert "rebuild" in row["node_note"]
+    # test code stays out by default, like test nodes
+    assert data["files_not_in_graph"] == {"count": 1, "read": 1,
+                                          "files": ["app/extra/users.py"]}
+    assert "not in the graph" in server.graphlore_routes()
+    plus = json.loads(server.graphlore_routes(scope="+tests", as_json=True))
+    assert plus["files_not_in_graph"]["count"] == 2
+
+
+def test_routes_cap_on_files_outside_the_graph_is_reported(tmp_path, monkeypatch):
+    _stale_routes_project(tmp_path, monkeypatch)
+    monkeypatch.setattr(server, "_ROUTE_EXTRA_FILES_MAX", 1)
+    for name in ("a.py", "b.py"):
+        (tmp_path / "app" / name).write_text("x = 1\n", encoding="utf-8")
+    data = json.loads(server.graphlore_routes(as_json=True))
+    assert data["files_not_in_graph"]["count"] == 2
+    assert data["files_not_in_graph"]["read"] == 1
+    assert data["truncated"] is True and "outside the graph" in data["hint"]
+
+
+def test_graph_age_counts_uncommitted_source_files(tmp_path, monkeypatch):
+    _stale_routes_project(tmp_path, monkeypatch)
+    assert server._graph_age() == "built at HEAD"
+    (tmp_path / "app" / "keys.py").write_text(_KEYS_PY + "\n# more\n", encoding="utf-8")
+    (tmp_path / "app" / "new").mkdir()
+    (tmp_path / "app" / "new" / "a.py").write_text("x = 1\n", encoding="utf-8")
+    (tmp_path / "notes.txt").write_text("not source\n", encoding="utf-8")
+    age = server._graph_age()
+    assert age == "built at HEAD, 2 source files changed since (uncommitted)"
+    assert "2 source files changed since (uncommitted)" in server.graphlore_project()
+
+
+def test_freshness_lists_files_inside_an_untracked_directory(tmp_path, monkeypatch):
+    _stale_routes_project(tmp_path, monkeypatch)
+    (tmp_path / "app" / "extra").mkdir()
+    (tmp_path / "app" / "extra" / "users.py").write_text("def me(): ...\n", encoding="utf-8")
+    data = json.loads(server.graphlore_freshness(as_json=True))
+    # git reports the directory itself ("app/extra/") without -uall
+    assert "app/extra/users.py" in data["uncommitted_or_untracked_files"]
+    assert data["stale"] is True
+
+
+def test_build_names_failed_sources_from_the_manifest(tmp_path, monkeypatch):
+    import shutil as _sh
+
+    import pytest
+    if _sh.which("git") is None:
+        pytest.skip("git not available")
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    for name in ("ok.py", "bad.py", "worse.go"):
+        (tmp_path / name).write_text("x = 1\n", encoding="utf-8")
+    (tmp_path / "README.md").write_text("doc\n", encoding="utf-8")
+    git = _git_init(tmp_path)
+    git("add", ".")
+    git("commit", "-m", "init")
+    log = _BUILD_LOG + (
+        "\n[graphify extract] AST extraction incomplete for 2 source(s); failed sources "
+        "will not replace saved AST records and remain pending for retry.")
+    _fake_build(monkeypatch, log, writes=tmp_path / "graphify-out")
+    # no manifest: the count, and why the names cannot be given
+    out = server.graphlore_build(".")
+    assert "AST extraction incomplete for 2 source(s)" in out
+    assert "cannot be named here" in out
+    (tmp_path / "graphify-out" / "manifest.json").write_text(
+        json.dumps({"ok.py": {"ast_hash": "1"}, "README.md": {"ast_hash": "2"}}),
+        encoding="utf-8")
+    out = server.graphlore_build(".")
+    assert "no manifest.json entry" in out and "bad.py, worse.go." in out
+    (tmp_path / "graphify-out" / "manifest.json").write_text(
+        json.dumps({k: {} for k in ("ok.py", "bad.py", "worse.go")}), encoding="utf-8")
+    assert "pom.xml" in server.graphlore_build(".")
+    # a build with no failure gets no note
+    _fake_build(monkeypatch, _BUILD_LOG, writes=tmp_path / "graphify-out")
+    assert "AST extraction failed" not in server.graphlore_build(".")
