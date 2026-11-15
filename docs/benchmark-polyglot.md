@@ -16,7 +16,7 @@ Python 3.13.18. Results: [`benchmarks/results-polyglot.json`](../benchmarks/resu
 ## In short
 
 - Before the fixes the audit reported **657 findings** (a finding is
-  one problem in one repository, tool and language); after them **60**.
+  one problem in one repository, tool and language); after them **61**.
   No crash is left; what is left is coverage gaps, oddities of the graph
   graphify builds, and the open items at the end.
 - The span engine, which `fetch`, `skeleton`, `locate`, labels and the dead-code
@@ -169,28 +169,30 @@ of route registrations in non-test source — a regex, which counts a Rails
 `resources` line once although it declares several routes, and knows neither
 Ktor's slash-less patterns, JAX-RS nor actix builders (0 there); "rows" is what
 `graphlore_routes` returns now, and "before" what it returned on the code
-before the fixes:
+before the fixes; "prefixed" counts the rows whose router declares its prefix in
+the same file (`APIRouter(prefix="/items")`), which is applied to the pattern
+while the pattern as written stays in `local_pattern`:
 
-| Repository | Framework | Idiom hits | Rows before | Rows | Found as |
-|---|---|--:|--:|--:|---|
-| fastapi-template | FastAPI | 23 | 23 | 23 | fastapi 23 |
-| express | Express (its own examples) | 61 | 0 | 0 | nothing |
-| express-mongoose-demo | Express | 26 | 0 | 26 | express 26 |
-| nestjs-realworld | NestJS | 21 | 21 | 21 | nestjs 21 |
-| chi | chi | 60 | 252 | 59 | chi 59 |
-| gin-examples | gin | 65 | 66 | 66 | gin 66 |
-| spring-petclinic | Spring | 19 | 17 | 17 | spring 17 |
-| kotlin-spring-realworld | Spring (Kotlin) | 19 | 0 | 19 | spring 19 |
-| ktor-realworld | Ktor | 0 | 0 | 19 | ktor 19 |
-| quarkus-realworld | JAX-RS | 0 | 0 | 19 | jax-rs 19 |
-| aspnetcore-realworld | ASP.NET Core controllers | 19 | 0 | 19 | aspnet 19 |
-| todoapi | ASP.NET Core minimal APIs | 11 | 0 | 12 | aspnet 12 |
-| axum-realworld | axum | 12 | 0 | 19 | axum 19 |
-| actix-realworld | actix-web | 0 | 0 | 20 | actix-web 20 |
-| sinatra-warden | Sinatra | 6 | 0 | 6 | sinatra 6 |
-| rails-realworld | Rails | 8 | 0 | 19 | rails 19 |
-| laravel-realworld | Laravel | 20 | 0 | 20 | laravel 20 |
-| symfony-demo | Symfony | 18 | 0 | 19 | symfony 19 |
+| Repository | Framework | Idiom hits | Rows before | Rows | Prefixed | Found as |
+|---|---|--:|--:|--:|--:|---|
+| fastapi-template | FastAPI | 23 | 23 | 23 | 18 | fastapi 23 |
+| express | Express (its own examples) | 61 | 0 | 0 | 0 | nothing |
+| express-mongoose-demo | Express | 26 | 0 | 26 | 0 | express 26 |
+| nestjs-realworld | NestJS | 21 | 21 | 21 | 0 | nestjs 21 |
+| chi | chi | 60 | 252 | 59 | 0 | chi 59 |
+| gin-examples | gin | 65 | 66 | 66 | 0 | gin 66 |
+| spring-petclinic | Spring | 19 | 17 | 17 | 0 | spring 17 |
+| kotlin-spring-realworld | Spring (Kotlin) | 19 | 0 | 19 | 0 | spring 19 |
+| ktor-realworld | Ktor | 0 | 0 | 19 | 0 | ktor 19 |
+| quarkus-realworld | JAX-RS | 0 | 0 | 19 | 0 | jax-rs 19 |
+| aspnetcore-realworld | ASP.NET Core controllers | 19 | 0 | 19 | 0 | aspnet 19 |
+| todoapi | ASP.NET Core minimal APIs | 11 | 0 | 12 | 0 | aspnet 12 |
+| axum-realworld | axum | 12 | 0 | 19 | 0 | axum 19 |
+| actix-realworld | actix-web | 0 | 0 | 20 | 0 | actix-web 20 |
+| sinatra-warden | Sinatra | 6 | 0 | 6 | 0 | sinatra 6 |
+| rails-realworld | Rails | 8 | 0 | 19 | 0 | rails 19 |
+| laravel-realworld | Laravel | 20 | 0 | 20 | 0 | laravel 20 |
+| symfony-demo | Symfony | 18 | 0 | 19 | 0 | symfony 19 |
 
 Fewer rows is not always a loss: chi's 252 rows before were mostly the routes
 its own tests register on throwaway muxes, which `graphlore_routes` now leaves
@@ -255,7 +257,7 @@ number of times the check fired.
 | `IMPORTS-UNCLASSIFIED` — every import edge of this language is unclassified | low / gap | 8 | 1 |
 | `NEIGHBORS-COUNT` — row count differs from the edges touching the node | low / bug | 6 | 0 |
 | `RELATION-UNKNOWN` — graphify emits a relation no graphlore relation set names (relations="code" skips it) | low / gap | 35 | 0 |
-| `SLOW` — took over 5000 ms | low / perf | 4 | 6 |
+| `SLOW` — took over 5000 ms | low / perf | 4 | 8 |
 | `BUILD-DEFAULT-NEEDS-KEY` — graphlore_build() with its defaults fails without an LLM key when the repository holds docs; code_only=True builds | info / upstream | 31 | 0 |
 | `GRAPH-ORPHAN-NODES` — the graph graphify built has orphan_nodes | info / upstream | 26 | 26 |
 
@@ -265,7 +267,7 @@ before 881 ok, 76 empty, 31 crashed; after 944 ok,
 (`routes` on a library, `package_apis` on a language it does not read, `impact`
 on a node nothing depends on). `graphlore_add` is not counted: it fetches a URL,
 so it is only called with one it must refuse. The `SLOW` rows are
-6 `graphlore_build` calls (graphify's own extraction time).
+8 `graphlore_build` calls (graphify's own extraction time).
 
 `benchmarks/multilang.py`, re-run before and after on the six repositories it
 covers: span-join precision is unchanged for Python, JS/TS, Go, Java and Rust,
@@ -421,12 +423,37 @@ The first version of this report ended with ten open items. All ten are closed:
   (`tests/fixtures/polyglot/`): five languages, `file_type`, `community_name`,
   `case_of`, closures, a Rust test module and a JS barrel.
 
+### A field report on a graph older than its code
+
+A FastAPI application whose graph was built before its latest edits showed what
+the clean clones above cannot: the route table assumed the graph and the source
+agree.
+
+- **Rows joined to the wrong node.** A row was joined to the node at its line;
+  with lines inserted above the handler and no rebuild, that is another
+  function. The handler's name among the file's nodes now comes first, the line
+  is the fallback, and a row neither can vouch for says `node_confirmed: false`.
+  `build_drift` lists the files changed since the build.
+- **Routes in a file the graph lacks** (a router added since the build) were
+  missing. Such files are read now, under the scope and outside the directories
+  graphify skips; their rows have `node: null` and are counted in
+  `files_not_in_graph`.
+- **A prefix the router declares in its own file** was not applied: 18 of
+  fastapi-template's 23 routes carry one (see the route table).
+- `graph_age` said "built at HEAD" over a dirty tree, `graphlore_freshness`
+  counted a new untracked directory as one non-source change, and a build's
+  "AST extraction incomplete for N source(s)" named none of them. The first two
+  are fixed; for the third, the sources git lists that graphify's
+  `manifest.json` leaves unstamped are named.
+
 ## What is still missing
 
 1. **Prefixes applied in another file.** Laravel adds `/api` to
    `routes/api.php` in a service provider, NestJS has a global prefix in
-   `main.ts`, axum and actix routers are often built in one function and
-   mounted in another. The rows carry the pattern as written in their file.
+   `main.ts`, FastAPI and Flask add one where the router is mounted
+   (`include_router(router, prefix=...)`, `register_blueprint(bp, url_prefix=...)`),
+   axum and actix routers are often built in one function and mounted in
+   another. The rows carry the pattern as their own file gives it.
 2. **Routes in Scala and Swift** (Play, http4s, Akka HTTP; Vapor) and in the
    Kotlin `router { }` DSL: no reader, and the reply says so in `not_read`.
 3. **Package APIs outside Python, JS/TS, Go and Java are import-level.** They
