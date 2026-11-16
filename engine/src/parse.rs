@@ -80,6 +80,7 @@ pub fn file_facts(
             facts.defs = generic::walk_defs(module, root, src);
             facts.test_regions = module.test_regions(root, src);
             crate::refs::read(module, root, src, &mut facts);
+            crate::http::read(lang, root, src, &mut facts);
             for d in facts.defs.iter_mut() {
                 d.is_test = facts
                     .test_regions

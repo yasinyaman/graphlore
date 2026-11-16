@@ -302,6 +302,10 @@ _NON_DEPENDENCY_RELATIONS = _CONTAINMENT_RELATIONS | {"rationale_for"}
 # (the native engine). Two definitions touching one such node affect each other
 # without either calling the other: shared state.
 _STATE_RELATIONS = frozenset({"reads", "writes"})
+# A web route and the code on either side of it (the native engine): `handles`
+# from a route node to its handler, `http_calls` from a client's definition to
+# the route its request reaches. Each is a real dependency across the wire.
+_HTTP_RELATIONS = frozenset({"handles", "http_calls"})
 # Node kinds that hold state (the native engine's `kind`).
 _STATE_KINDS = frozenset({"variable", "property", "constant"})
 
@@ -315,6 +319,12 @@ def _is_resource_node(n: dict) -> bool:
     """Something outside the program's memory that code reads or writes: an
     environment variable, a file, a table, an event (`type: resource`)."""
     return str(n.get("type", "")).lower() == "resource"
+
+
+def _is_route_node(n: dict) -> bool:
+    """A web route the native engine found (`type: route`): its method, full
+    pattern and framework, at the line that registers it."""
+    return str(n.get("type", "")).lower() == "route"
 
 
 _SHARED_STATE_CACHE: dict[int, tuple[list[dict], list[dict]]] = {}

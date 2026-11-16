@@ -132,6 +132,7 @@ from .graph import (  # noqa: F401  (re-exported for the tools + tests)
     _CHARS_PER_TOKEN,
     _CONTAINMENT_RELATIONS,
     _GRAPH_CACHE,
+    _HTTP_RELATIONS,
     _IMPORT_RELATIONS,
     _NON_DEPENDENCY_RELATIONS,
     _PAYLOAD_ENVELOPE_CHARS,
@@ -163,6 +164,7 @@ from .graph import (  # noqa: F401  (re-exported for the tools + tests)
     _is_external_node,
     _is_file_hub_node,
     _is_resource_node,
+    _is_route_node,
     _is_state_node,
     _is_surprise_edge,
     _is_test_path,
@@ -2898,7 +2900,7 @@ _IMPACT_CODE_RELATIONS = frozenset({
     # graphify >= 0.9: an interface method to its implementations, a class
     # constant, a static property
     "dispatches_to", "references_constant", "uses_static_prop",
-})
+}) | _HTTP_RELATIONS
 IMPACT_RELATION_PRESETS: dict[str, frozenset[str] | None] = {
     "all": None,  # no filter — walk every edge type
     "code": _IMPACT_CODE_RELATIONS,
@@ -2909,6 +2911,8 @@ IMPACT_RELATION_PRESETS: dict[str, frozenset[str] | None] = {
                         "embeds", "uses"}),
     # a definition reading or writing a variable, field, constant or resource
     "state": _STATE_RELATIONS | {"written_by"},
+    # a handler, the routes it serves and the clients that request them
+    "http": _HTTP_RELATIONS,
 }
 # Structural containment: never a dependency, but walked one hop out from the
 # seed so a class's own members stay reachable when containment is filtered out.
