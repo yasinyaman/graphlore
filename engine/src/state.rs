@@ -288,7 +288,7 @@ impl State {
     }
 
     /// Record what `n` reads, writes and declares. Called for every node.
-    pub fn visit(&mut self, n: Node, src: &[u8]) {
+    pub fn visit<'t>(&mut self, n: Node<'t>, src: &[u8], anc: &[Node<'t>]) {
         let k = n.kind();
         if matches!(k, "global_statement" | "nonlocal_statement") {
             for c in kids(n) {
@@ -362,9 +362,9 @@ impl State {
             }
         }
         if BARE_KINDS.contains(&k) {
-            self.bare(n, src);
+            self.bare(n, src, anc);
         } else if MEMBER_KINDS.contains(&k) {
-            self.member(n, src);
+            self.member(n, src, anc);
         }
     }
 
@@ -413,8 +413,8 @@ impl State {
     }
 
     /// A bare name in an expression.
-    fn bare(&mut self, n: Node, src: &[u8]) {
-        let Some(p) = n.parent() else { return };
+    fn bare<'t>(&mut self, n: Node<'t>, src: &[u8], anc: &[Node<'t>]) {
+        let Some(p) = up(anc, 0) else { return };
         let pk = p.kind();
         if pk.contains("parameter") {
             self.declared.push((n.start_byte(), text(n, src)));
@@ -423,7 +423,7 @@ impl State {
         // the key of a Go composite literal (`S{n: 1}`) names a field of the
         // new value, it reads nothing
         if pk == "literal_element"
-            && p.parent()
+            && up(anc, 1)
                 .is_some_and(|k| k.kind() == "keyed_element" && first_named(k) == Some(p.id()))
         {
             return;
@@ -462,11 +462,11 @@ impl State {
         if MEMBER_KINDS.contains(&pk) && first_named(p) != Some(n.id()) {
             return; // the member part of a shape with no fields
         }
-        if is_write_target(n) {
+        if is_write_target(n, anc) {
             return;
         }
         let path = vec![bare_name(n, src)];
-        if calls_mutator(n, src) {
+        if calls_mutator(n, src, anc) {
             self.push(n, RefKind::Write, path.clone(), "mutate");
         }
         self.push(n, RefKind::Read, path, "read");
@@ -474,20 +474,20 @@ impl State {
 
     /// `a.b` in an expression: read on its own (`Attr`, as a method taken as a
     /// value is), read on the way to something else, or changed in place.
-    fn member(&mut self, n: Node, src: &[u8]) {
+    fn member<'t>(&mut self, n: Node<'t>, src: &[u8], anc: &[Node<'t>]) {
         let Some(path) = member_path(n, src) else { return };
         if path.len() < 2 || path.iter().any(|s| s == UNKNOWN) {
             return;
         }
-        let Some(p) = n.parent() else { return };
-        if is_callee(p, n) || is_write_target(n) {
+        let Some(p) = up(anc, 0) else { return };
+        if is_callee(p, n) || is_write_target(n, anc) {
             return;
         }
         if p.kind().contains("import") || p.kind().contains("type") {
             return;
         }
         if is_object(p, n) {
-            if calls_mutator(n, src) {
+            if calls_mutator(n, src, anc) {
                 self.push(n, RefKind::Write, path.clone(), "mutate");
             }
             self.push(n, RefKind::Read, path, "read");
@@ -689,17 +689,23 @@ fn is_item(k: &str) -> bool {
         || k == "indexing_expression"
 }
 
+/// The `i`-th ancestor (0: the parent) from the walk's stack of ancestors:
+/// tree-sitter finds a parent by walking down from the root again.
+fn up<'t>(anc: &[Node<'t>], i: usize) -> Option<Node<'t>> {
+    anc.len().checked_sub(i + 1).map(|j| anc[j])
+}
+
 /// Whether `n` is written: assigned to, updated or deleted.
-pub fn writes_to(n: Node) -> bool {
-    is_write_target(n)
+pub fn writes_to<'t>(n: Node<'t>, anc: &[Node<'t>]) -> bool {
+    is_write_target(n, anc)
 }
 
 /// Whether `n` is what an assignment, an update or a `del` writes (through any
 /// `[…]` around it).
-fn is_write_target(n: Node) -> bool {
+fn is_write_target<'t>(n: Node<'t>, anc: &[Node<'t>]) -> bool {
     let mut cur = n;
-    for _ in 0..MAX_CLIMB {
-        let Some(p) = cur.parent() else { return false };
+    for i in 0..MAX_CLIMB {
+        let Some(p) = up(anc, i) else { return false };
         let pk = p.kind();
         if ASSIGNMENTS.contains(&pk) {
             let target = p
@@ -769,10 +775,11 @@ fn is_callee(p: Node, n: Node) -> bool {
 
 /// Whether a method that changes its receiver is called on `n`, directly or
 /// further along the chain (`CACHE.lock().unwrap().insert(k, v)`).
-fn calls_mutator(n: Node, src: &[u8]) -> bool {
+fn calls_mutator<'t>(n: Node<'t>, src: &[u8], anc: &[Node<'t>]) -> bool {
     let mut cur = n;
+    let mut i = 0;
     for _ in 0..MAX_CLIMB {
-        let Some(p) = cur.parent() else { return false };
+        let Some(p) = up(anc, i) else { return false };
         if !is_object(p, cur) {
             return false;
         }
@@ -786,9 +793,10 @@ fn calls_mutator(n: Node, src: &[u8]) -> bool {
                 return false;
             }
             cur = p;
+            i += 1;
             continue;
         }
-        let Some(call) = p.parent().filter(|pp| is_callee(*pp, p)) else { return false };
+        let Some(call) = up(anc, i + 1).filter(|pp| is_callee(*pp, p)) else { return false };
         if MUTATORS.contains(&name.as_str()) {
             return true;
         }
@@ -797,6 +805,7 @@ fn calls_mutator(n: Node, src: &[u8]) -> bool {
             return false;
         }
         cur = call;
+        i += 2;
     }
     false
 }

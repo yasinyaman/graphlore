@@ -16,7 +16,17 @@ All notable changes to this project are documented here. The format is based on
   assigned without `global` are left out; a constructor setting its own
   object's fields builds it and couples nothing. Two definitions touching one
   such node affect each other without either calling the other. Member reads
-  of a property or constant that were `references` are `reads` now. Schema 4.
+  of a property or constant that were `references` are `reads` now. Fields of
+  instances count too (`self.x`, `this.x`, `@x`, declared fields), and so do
+  **resources**, by a literal key: environment variables (`os.getenv`,
+  `process.env.X`, `ENV[...]`, …), files (`open(p, "w")`, `fs.writeFileSync`,
+  …), tables named in SQL strings or reached through an ORM model
+  (`User.objects.filter`, `Post.create`, `db.Items.Add`; the model's table
+  from `__tablename__`, `Meta.db_table`, `@Table`, `$table`, `DbSet<T>`, …),
+  events a project both emits and listens for, and cache keys
+  (`localStorage`, Redis-like stores). A resource is a `type: resource` node
+  only when two definitions touch it. On the 31 audit repositories this adds
+  16% edges; builds take 15% longer (median). Schema 4, engine 0.4.0.
 - **`graphlore_impact(shared_state=True)`** walks shared state: the
   dependents of a writer include the code that reads what it writes, the
   dependencies of a reader the code that writes what it reads (a `written_by`

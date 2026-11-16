@@ -5,9 +5,10 @@ It walks a project, parses every source file with a tree-sitter grammar compiled
 into the wheel, and writes a graphify-compatible `graph.json`: a node per file,
 per definition (with its real `start..end` span), property, constant and
 document heading, the containment edges between them, the imports, calls,
-bases and type references it resolves from the source, and communities
-(Leiden on edges weighted by kind, confidence and directory, stable across
-rebuilds).
+bases and type references it resolves from the source, shared state (the
+variables, fields, constants, environment variables, files, tables and events
+definitions read and write), and communities (Leiden on edges weighted by
+kind, confidence and directory, stable across rebuilds).
 
 Languages: Python, JavaScript, TypeScript, TSX, Go, Java, Kotlin, Scala, C#,
 Rust, Swift, C, C++, Ruby and PHP; plus Markdown and reStructuredText headings.

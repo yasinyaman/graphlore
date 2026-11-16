@@ -163,6 +163,8 @@ def test_surprises_and_node_details_name_shared_state(tmp_path, monkeypatch):
     # the two files both import cache.py, not each other
     assert "files that neither import the other share it" in row["why"]
     assert sp["shared_state_total"] == 1
+    cut = json.loads(server.graphlore_surprises(limit=0, as_json=True))
+    assert cut["truncated"] and cut["shared_state_left_out"] == 1 and cut["hint"]
     text = server.graphlore_surprises()
     assert "Shared state:" in text and "CACHE" in text
     put = json.loads(server.graphlore_node_details("put", as_json=True))
