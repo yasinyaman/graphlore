@@ -59,6 +59,21 @@ def test_neighbors(project):
     assert ("returns", "Response") in rels
 
 
+def test_neighbors_lists_both_directions_of_a_mutual_edge(tmp_path, monkeypatch):
+    # A references B and B references A: two rows, one per direction
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    _write_graph(tmp_path, {"nodes": [{"id": "a", "label": "A"}, {"id": "b", "label": "B"},
+                                      {"id": "c", "label": "C"}],
+                            "links": [{"source": "a", "target": "b", "relation": "references"},
+                                      {"source": "b", "target": "a", "relation": "references"},
+                                      {"source": "a", "target": "a", "relation": "calls"},
+                                      {"source": "c", "target": "a", "relation": "calls"}]})
+    data = json.loads(server.graphlore_neighbors("a", as_json=True))
+    rows = sorted((r["node"], r["relation"], r["direction"]) for r in data["neighbors"])
+    assert rows == [("A", "calls", "out"), ("B", "references", "in"),
+                    ("B", "references", "out"), ("C", "calls", "in")]
+
+
 def test_neighbors_fuzzy(project):
     # case-insensitive substring match still resolves
     data = json.loads(server.graphlore_neighbors("async", as_json=True))
@@ -2381,9 +2396,12 @@ def test_spans_treesitter_go_receiver_qualname(tmp_path, monkeypatch):
     (tmp_path / "c.go").write_bytes(
         b"package m\ntype Client struct{}\n"
         b"func (c *Client) Get(u string) error { return nil }\n"
-        b"func Helper() int { return 1 }\n")
+        b"func Helper() int { return 1 }\n"
+        b"var hashes = map[string]func() int{\n\t\"a\": Helper,\n}\n")
     quals = {q for _rs, _e, _dl, q in server._spans_for_file("c.go")}
     assert "Client.Get" in quals and "Helper" in quals
+    # the function type in a map type is a type, not a function named `string`
+    assert "string" not in quals
     assert server._span_qualname("c.go", 3) == "Client.Get"
 
 
@@ -2693,6 +2711,19 @@ def test_fetch_returns_enclosing_span(tmp_path, monkeypatch):
     assert item["spanned"] is True
     assert "def alpha" in item["code"] and "return y" in item["code"]
     assert "def beta" not in item["code"]  # the next symbol is not pulled in
+
+
+def test_fetch_takes_the_lines_a_native_constant_carries(tmp_path, monkeypatch):
+    # the span engine makes no span for a constant; the native node carries its lines
+    src = "LIMITS = {\n    'a': 1,\n}\n\ndef beta():\n    return LIMITS\n"
+    _fetch_project(tmp_path, monkeypatch, src, [
+        {"id": "limits", "label": "LIMITS", "source_file": "m.py", "source_location": "L1",
+         "kind": "constant", "region_start": 1, "end_line": 3},
+        {"id": "beta", "label": "beta", "source_file": "m.py", "line": 5},
+    ])
+    item = json.loads(server.graphlore_fetch(["limits"], as_json=True))["fetched"][0]
+    assert item["lines"] == "1-3" and item["spanned"] is True
+    assert "'a': 1" in item["code"] and "def beta" not in item["code"]
 
 
 def test_fetch_shared_budget_truncates_keeping_first(tmp_path, monkeypatch):
@@ -5322,6 +5353,51 @@ def test_resolved_edges_add_calls_through_an_imported_module(tmp_path, monkeypat
     assert server._resolved(nodes, edges).edges is edges
 
 
+def test_resolved_edges_leave_a_native_graph_alone(tmp_path, monkeypatch):
+    # the native engine resolved these calls itself: nothing is added at read time
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    _module_call_project(tmp_path)
+    gp = tmp_path / "graphify-out" / "graph.json"
+    graph = json.loads(gp.read_text(encoding="utf-8"))
+    graph["graph"] = {"engine": "graphlore", "schema_version": 2}
+    gp.write_text(json.dumps(graph), encoding="utf-8")
+    server._GRAPH_CACHE.clear()
+    nodes, edges = server._nodes_edges(server._load_graph())
+    assert server._engine_resolved(nodes)
+    assert server._resolved(nodes, edges).edges is edges
+    # schema 1 (definitions only) still gets graphlore's resolution
+    graph["graph"]["schema_version"] = 1
+    gp.write_text(json.dumps(graph), encoding="utf-8")
+    server._GRAPH_CACHE.clear()
+    nodes, edges = server._nodes_edges(server._load_graph())
+    assert not server._engine_resolved(nodes)
+    assert len(server._resolved(nodes, edges).edges) > len(edges)
+    assert not server._engine_resolved([])          # a list no graph came with
+
+
+def test_import_checker_takes_when_an_import_runs_from_the_edge(tmp_path, monkeypatch):
+    from graphlore.imports import ImportChecker
+
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    # the source names another module: without `runs` the edge is rejected
+    _write(tmp_path, "app.py", "import yaml\n")
+    _write(tmp_path, "pkg/__init__.py", "")
+    _write(tmp_path, "pkg/yaml.py", "")
+    checker = ImportChecker()
+    plain = {"relation": "imports", "source_location": "L1"}
+    assert checker.kind("app.py", "pkg/yaml.py", plain) is None
+    edge = {"relation": "imports", "source_location": "L1", "runs": "deferred"}
+    assert ImportChecker().kind("app.py", "pkg/yaml.py", edge) == "deferred"
+    assert ImportChecker().kind("app.py", "pkg/yaml.py", dict(edge, runs="bogus")) is None
+    # with no checker, the carried kind is used as it is
+    nodes = [{"id": "a", "label": "app.py", "source_file": "app.py"},
+             {"id": "b", "label": "yaml.py", "source_file": "pkg/yaml.py"}]
+    lifted = server._file_import_edges(nodes, [{"source": "a", "target": "b", **edge}])
+    assert [k for *_, k in lifted] == ["deferred"]
+    lifted = server._file_import_edges(nodes, [{"source": "a", "target": "b", **plain}])
+    assert [k for *_, k in lifted] == ["unclassified"]
+
+
 def test_resolved_edges_leave_other_graphs_alone(project):
     nodes, edges = server._nodes_edges(server._load_graph())
     resolved = server._resolved(nodes, edges)  # no source on disk: nothing to add
@@ -7190,9 +7266,13 @@ def test_cli_tools_resolve_a_shared_name_before_the_cli_sees_it(tmp_path, monkey
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     seen = []
 
+    graph_arg = ["--graph", str(tmp_path / "graphify-out" / "graph.json")]
+
     def fake(args, cwd=None):
-        seen.append(list(args))
-        return f"Node: {args[-1]}"
+        # the CLI reads the graph graphlore reads, whatever GRAPHLORE_OUT_DIR is
+        assert args[-2:] == graph_arg
+        seen.append(list(args[:-2]))
+        return f"Node: {args[-3]}"
 
     monkeypatch.setattr(server, "_run_cli", fake)
     out = server.graphlore_explain("create")
