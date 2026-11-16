@@ -108,6 +108,17 @@ pub fn path_of(n: Node, src: &[u8]) -> Option<Vec<String>> {
             _ => Some(vec![t.trim_start_matches('$').to_string()]),
         };
     }
+    // `f().m`: the result of a call, marked `()` after the callee (before the
+    // member shapes: Java / Ruby / PHP calls carry `object` and `name` fields)
+    if is_call_kind(k) || matches!(k, "new_expression" | "object_creation_expression") {
+        return match callee(n, src) {
+            Some((_, mut p)) if p.last().is_some_and(|s| s != UNKNOWN) => {
+                p.push(UNKNOWN.into());
+                Some(p)
+            }
+            _ => Some(vec![UNKNOWN.into()]),
+        };
+    }
     for (obj, member) in MEMBER_FIELDS {
         if let (Some(o), Some(m)) = (n.child_by_field_name(obj), n.child_by_field_name(member)) {
             let mut p = path_of(o, src).unwrap_or_else(|| vec![UNKNOWN.into()]);
@@ -129,8 +140,13 @@ pub fn path_of(n: Node, src: &[u8]) -> Option<Vec<String>> {
         "navigation_suffix" => kids(n).into_iter().last().and_then(|c| path_of(c, src)),
         // `a.b.C` written as one node: Kotlin `identifier`, Java/C# qualified
         // names, PHP `qualified_name` / `namespace_name`, Scala `stable_identifier`
-        "user_type" | "namespace_name" | "stable_identifier" | "dotted_name"
-        | "nested_identifier" => {
+        "user_type"
+        | "namespace_name"
+        | "stable_identifier"
+        | "dotted_name"
+        | "nested_identifier"
+        | "named_type"
+        | "class_constant_access_expression" => {
             let mut p = Vec::new();
             for c in kids(n) {
                 if matches!(c.kind(), "type_arguments" | "type_projection") {
@@ -166,15 +182,16 @@ pub fn path_of(n: Node, src: &[u8]) -> Option<Vec<String>> {
         | "non_null_expression"
         | "await_expression"
         | "unary_expression" => kids(n).into_iter().find_map(|c| path_of(c, src)),
-        // `f().m`: the result of a call, marked `()` after the callee
-        _ if is_call_kind(k) || matches!(k, "new_expression" | "object_creation_expression") => {
-            match callee(n, src) {
-                Some((_, mut p)) if p.last().is_some_and(|s| s != UNKNOWN) => {
-                    p.push(UNKNOWN.into());
-                    Some(p)
+        // Java `a.b.C` written as names with no fields
+        "scoped_type_identifier" | "scoped_identifier" | "qualified_identifier" => {
+            let mut p = Vec::new();
+            for c in kids(n) {
+                if matches!(c.kind(), "type_arguments" | "annotation" | "marker_annotation") {
+                    continue;
                 }
-                _ => Some(vec![UNKNOWN.into()]),
+                p.extend(path_of(c, src)?);
             }
+            (!p.is_empty()).then_some(p)
         }
         _ => None,
     }
@@ -448,14 +465,56 @@ fn bound_name(n: Node, src: &[u8]) -> Option<String> {
     None
 }
 
-/// The first type a type position names.
+/// Generic types that hold the value they are about: the field's type is
+/// what they wrap (`Box<dyn Transport>`, `Optional<Foo>`, `Arc<Mutex<Pool>>`).
+const WRAPPERS: &[&str] = &[
+    "Box",
+    "Arc",
+    "Rc",
+    "Weak",
+    "Option",
+    "Cell",
+    "RefCell",
+    "Mutex",
+    "RwLock",
+    "Pin",
+    "Cow",
+    "Optional",
+    "Lazy",
+    "Provider",
+    "Supplier",
+    "AtomicReference",
+    "Ref",
+    "Mono",
+    "Future",
+    "Promise",
+    "Readonly",
+    "Partial",
+    "Required",
+    "unique_ptr",
+    "shared_ptr",
+    "weak_ptr",
+    "optional",
+];
+
+/// The first type a type position names, through wrappers.
 fn first_type(n: Node, src: &[u8]) -> Option<Vec<String>> {
     if matches!(n.kind(), "implicit_type" | "placeholder_type_specifier") {
         return None; // `var`, `auto`
     }
     let mut v = Vec::new();
     types_in(n, src, "", &mut v);
-    v.into_iter().next().map(|(p, _)| p)
+    // types_in yields the outer type, then its arguments (in reverse order)
+    let mut it = v.into_iter().map(|(p, _)| p);
+    let first = it.next()?;
+    let wrapper = first.last().is_some_and(|l| WRAPPERS.contains(&l.as_str()));
+    if wrapper {
+        let rest: Vec<Vec<String>> = it.collect();
+        if let Some(inner) = rest.into_iter().last() {
+            return Some(inner);
+        }
+    }
+    Some(first)
 }
 
 /// What a value constructs: `Foo()`, `new Foo()`, `Foo::new()`, `Foo{}`,
@@ -543,7 +602,16 @@ fn locals_of(n: Node, src: &[u8], in_params: bool) -> Vec<(String, Vec<String>, 
             else {
                 return out;
             };
-            let Some(ty) = value_type(r, src) else { return out };
+            let Some(ty) = value_type(r, src) else {
+                // assigned something the walk cannot type: still a local that
+                // shadows outer names
+                if matches!(l.kind(), "identifier" | "variable_name") {
+                    if let Some(name) = bound_name(l, src) {
+                        out.push((name, Vec::new(), false, false));
+                    }
+                }
+                return out;
+            };
             if let Some(f) = is_self_member(l, src) {
                 out.push((f, ty, false, true));
             } else if l.kind() == "instance_variable" {
@@ -845,8 +913,21 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
                     }
                 }
             }
-            // a class's constructor parameters (Kotlin, Scala `class A(val x: B)`)
+            // a class's constructor parameters (C# primary constructors, Kotlin,
+            // Scala `class A(val x: B)`): their types are the class's
             if def.kind.is_class_like() {
+                let mut types = Vec::new();
+                for c in kids(n) {
+                    if matches!(
+                        c.kind(),
+                        "parameter_list" | "primary_constructor" | "class_parameters"
+                    ) {
+                        param_types(c, src, &mut types);
+                    }
+                }
+                for (p, ctx) in types {
+                    push(&mut refs, n, RefKind::Type, p, ctx, Some(di));
+                }
                 for c in kids(n) {
                     if matches!(c.kind(), "primary_constructor" | "class_parameters") {
                         let mut st = vec![c];
@@ -912,6 +993,17 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
                     from_def: None,
                     byte: n.start_byte(),
                 });
+            }
+        }
+        // type arguments anywhere: `Deserialize<Person>()`, `IRequest<Envelope>`,
+        // `List<Foo>` in a body (signatures repeat them; edges are unique)
+        if matches!(n.kind(), "type_arguments" | "type_argument_list") {
+            let mut types = Vec::new();
+            for c in kids(n) {
+                types_in(c, src, "generic_arg", &mut types);
+            }
+            for (p, ctx) in types {
+                push(&mut refs, n, RefKind::Type, p, ctx, None);
             }
         }
         // JSX: `<FormMessage />`, `<Table.Cell>` render a component

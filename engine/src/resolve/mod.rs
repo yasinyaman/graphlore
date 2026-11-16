@@ -430,6 +430,16 @@ impl<'a> Project<'a> {
         p.index_locals();
         p.modsys = modules::ModuleSystems::build(&p);
         p.scopes = (0..files.len()).map(|f| p.scope_of(f)).collect();
+        // the files a file's imported names live in (`use A\B\C`, `import a.b.C`)
+        for f in 0..files.len() {
+            let mut more = Vec::new();
+            for (b, _) in p.scopes[f].bindings.values() {
+                if let Some(Target::Def((g, _))) = p.eval(b, 2) {
+                    more.push(g);
+                }
+            }
+            p.scopes[f].imported.extend(more);
+        }
         p
     }
 
@@ -546,6 +556,10 @@ impl<'a> Project<'a> {
             x.from_def == Some(r.1) && x.kind == RefKind::Type && x.context == "return_type"
         })?;
         let path = rt.path.clone();
+        if path == ["self"] {
+            // `-> Self`, `: this`: the method's own type (builders)
+            return self.class_of(r.0, Some(r.1));
+        }
         let t = self.type_of_path(r.0, self.def(r).parent, &path)?;
         self.def(t).kind.is_class_like().then_some(t)
     }
@@ -863,6 +877,9 @@ impl<'a> Project<'a> {
                         return Some(t);
                     }
                     for (star, _) in self.scopes.get(f).map(|s| s.stars.as_slice()).unwrap_or(&[]) {
+                        if matches!(star, Target::Ext(..)) {
+                            continue;
+                        }
                         if let Some(t) = self.member(star, name, depth - 1) {
                             return Some(t);
                         }
@@ -988,6 +1005,10 @@ impl<'a> Project<'a> {
             return Some(t);
         }
         for (star, imp) in &scope.stars {
+            // an external module's contents are unknown: it names nothing
+            if matches!(star, Target::Ext(..)) {
+                continue;
+            }
             if let Some(t) = self.member(star, name, 2) {
                 self.note_use(f, *imp, &t);
                 return Some(t);
@@ -1030,6 +1051,11 @@ impl<'a> Project<'a> {
                         return self.walk(Target::Def(m), &rest[1..], conf);
                     }
                 }
+            }
+            // Rust `super::x`: the parent module
+            "super" if fam == Family::Rust => {
+                let t = modules::rust_parent(self, f)?;
+                return self.walk(t, rest, conf);
             }
             "super" => {
                 let c = self.class_of(f, d)?;
@@ -1116,6 +1142,13 @@ impl<'a> Project<'a> {
                 if let Target::Def(c) = t {
                     if self.def(c).kind.is_class_like() {
                         continue;
+                    }
+                    // a method that declares its result: `builder().a().b()`
+                    if self.def(c).kind.is_callable() {
+                        if let Some(r) = self.return_type(c) {
+                            t = Target::Def(r);
+                            continue;
+                        }
                     }
                 }
                 if rest.len() == i + 2 && !bases {
@@ -1294,7 +1327,18 @@ impl<'a> Project<'a> {
                     && !d.decl_only
             })
             .collect();
-        (cands.len() == 1).then(|| cands[0])
+        if cands.len() != 1 {
+            return None;
+        }
+        let c = cands[0];
+        // evidence: the caller imports the method's file, or shares its
+        // directory (Ruby and Swift see every type of their module)
+        let open_world = matches!(fam, Some(Family::Ruby) | Some(Family::Swift));
+        let evident = open_world
+            || c.0 == f
+            || self.scopes[f].imported.contains(&c.0)
+            || dir_of(&self.files[c.0].path) == dir_of(&self.files[f].path);
+        evident.then_some(c)
     }
 
     /// The node a use is made from: the innermost enclosing definition that
@@ -1397,8 +1441,10 @@ pub fn resolve(
                 } else {
                     r.from_def
                 };
-                // attribute reads and values never fall back to a name guess
-                let strict = heritage || matches!(r.kind, RefKind::Attr);
+                // attribute reads, values and bare Ruby names never fall back
+                // to a name guess
+                let strict =
+                    heritage || matches!(r.kind, RefKind::Attr) || r.context == "implicit_call";
                 let found = if r.from_owner.is_some() && heritage {
                     p.resolve_path(f, None, &r.path, true)
                 } else {
