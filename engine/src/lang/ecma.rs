@@ -144,6 +144,28 @@ impl LanguageModule for Ecma {
 
     /// Module-level `let` / `var` (a `const` is `extra_def`'s constant).
     fn state_defs<'t>(&self, n: Node<'t>, src: &[u8]) -> Vec<(Node<'t>, Node<'t>, DefKind)> {
+        // `this.x = …` in a method of a class: a field of the class
+        if n.kind() == "assignment_expression" {
+            let field = n
+                .child_by_field_name("left")
+                .filter(|l| l.kind() == "member_expression")
+                .filter(|l| l.child_by_field_name("object").is_some_and(|o| o.kind() == "this"))
+                .and_then(|l| l.child_by_field_name("property"))
+                .filter(|p| p.kind() == "property_identifier");
+            let mut p = n.parent();
+            let mut in_class = false;
+            while let Some(x) = p {
+                if x.kind() == "method_definition" {
+                    in_class = x.parent().is_some_and(|b| b.kind() == "class_body");
+                    break;
+                }
+                p = x.parent();
+            }
+            return match field {
+                Some(name) if in_class => vec![(n, name, DefKind::Property)],
+                _ => Vec::new(),
+            };
+        }
         if n.kind() != "variable_declarator" {
             return Vec::new();
         }

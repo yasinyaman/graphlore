@@ -47,7 +47,7 @@ impl LanguageModule for CFamily {
             return Vec::new();
         }
         let w = words(n);
-        if w.iter().any(|x| x == "extern") || (in_class && !w.iter().any(|x| x == "static")) {
+        if w.iter().any(|x| x == "extern") {
             return Vec::new();
         }
         let constant = w.iter().any(|x| x == "const" || x == "constexpr");

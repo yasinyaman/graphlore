@@ -26,8 +26,15 @@ impl LanguageModule for Scala {
                 || (p.kind() == "template_body"
                     && p.parent().is_some_and(|o| o.kind() == "object_definition"))
         });
+        // a `var` / `val` of a class or trait: a field of each instance
+        let member = n.parent().is_some_and(|p| {
+            p.kind() == "template_body"
+                && p.parent()
+                    .is_some_and(|o| matches!(o.kind(), "class_definition" | "trait_definition"))
+        });
+        let kind = if member && kind == DefKind::Variable { DefKind::Property } else { kind };
         match n.child_by_field_name("pattern").filter(|p| p.kind() == "identifier") {
-            Some(name) if shared => vec![(n, name, kind)],
+            Some(name) if shared || member => vec![(n, name, kind)],
             _ => Vec::new(),
         }
     }

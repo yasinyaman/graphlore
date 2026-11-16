@@ -37,15 +37,13 @@ impl LanguageModule for Php {
     /// `public static $total` (shared by every instance) and `const MAX`.
     fn state_defs<'t>(&self, n: Node<'t>, _src: &[u8]) -> Vec<(Node<'t>, Node<'t>, DefKind)> {
         match n.kind() {
-            "property_declaration" if kids(n).iter().any(|c| c.kind() == "static_modifier") => {
-                kids(n)
-                    .into_iter()
-                    .filter(|c| c.kind() == "property_element")
-                    .filter_map(|e| e.child_by_field_name("name"))
-                    .filter_map(|v| kids(v).into_iter().find(|c| c.kind() == "name"))
-                    .map(|name| (n, name, DefKind::Property))
-                    .collect()
-            }
+            "property_declaration" => kids(n)
+                .into_iter()
+                .filter(|c| c.kind() == "property_element")
+                .filter_map(|e| e.child_by_field_name("name"))
+                .filter_map(|v| kids(v).into_iter().find(|c| c.kind() == "name"))
+                .map(|name| (n, name, DefKind::Property))
+                .collect(),
             "const_declaration" => kids(n)
                 .into_iter()
                 .filter(|c| c.kind() == "const_element")

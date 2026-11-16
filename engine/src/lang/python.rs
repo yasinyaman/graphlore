@@ -143,6 +143,33 @@ impl LanguageModule for Python {
         let Some(stmt) = node.parent().filter(|p| p.kind() == "expression_statement") else {
             return Vec::new();
         };
+        // `self.x = …` in a method: a field of the class
+        if let Some(attr) =
+            node.child_by_field_name("left").filter(|l| l.kind() == "attribute").filter(|l| {
+                l.child_by_field_name("object")
+                    .is_some_and(|o| o.kind() == "identifier" && &_src[o.byte_range()] == b"self")
+            })
+        {
+            let in_method = {
+                let mut p = stmt.parent();
+                let mut found = false;
+                while let Some(x) = p {
+                    if x.kind() == "function_definition" {
+                        found = x.parent().and_then(|b| b.parent()).is_some_and(|c| {
+                            c.kind() == "class_definition"
+                                || c.parent().is_some_and(|d| d.kind() == "class_definition")
+                        });
+                        break;
+                    }
+                    p = x.parent();
+                }
+                found
+            };
+            return match attr.child_by_field_name("attribute") {
+                Some(name) if in_method => vec![(node, name, DefKind::Property)],
+                _ => Vec::new(),
+            };
+        }
         let Some(scope) = stmt.parent() else { return Vec::new() };
         let in_class = scope.kind() == "block"
             && scope.parent().is_some_and(|c| c.kind() == "class_definition");

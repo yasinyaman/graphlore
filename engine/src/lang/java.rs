@@ -37,10 +37,13 @@ impl LanguageModule for Java {
             .map(|m| text(m, src))
             .unwrap_or_default();
         let words: Vec<&str> = mods.split_whitespace().collect();
-        if !words.contains(&"static") {
-            return Vec::new();
-        }
-        let kind = if words.contains(&"final") { DefKind::Constant } else { DefKind::Property };
+        // a `static final` is a constant; any other field is state (one value
+        // per program for a `static`, per object otherwise)
+        let kind = if words.contains(&"static") && words.contains(&"final") {
+            DefKind::Constant
+        } else {
+            DefKind::Property
+        };
         let mut cursor = n.walk();
         n.children_by_field_name("declarator", &mut cursor)
             .filter_map(|d| d.child_by_field_name("name"))
