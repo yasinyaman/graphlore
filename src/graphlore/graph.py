@@ -200,6 +200,86 @@ def _is_surprise_edge(e: dict) -> bool:
     )
 
 
+# --- shared state ------------------------------------------------------------
+
+
+def _shared_state(
+    nodes: list[dict], edges: list[dict], labels: Any = None,
+) -> list[dict]:
+    """Variables, fields and resources that code in one file writes and code in
+    another file reads or writes, without the files calling or importing each
+    other necessarily: implicit coupling, strongest first.
+
+    A score per state node: +2 when a writer's file and a toucher's file import
+    neither one the other, +2 when they sit in different top-level directories,
+    +1 when they are in different communities. Test code is left out (a test
+    setting a global is how tests work) unless the state itself is test code.
+    """
+    byid = {_node_id(n): n for n in nodes}
+    name = (lambda i: labels.get(i, i)) if labels is not None else (
+        lambda i: _node_label(byid[i]) if i in byid else i)
+    readers: dict[str, set[str]] = {}
+    writers: dict[str, set[str]] = {}
+    for e in edges:
+        rel = _rel(e)
+        if rel not in _STATE_RELATIONS:
+            continue
+        s, t = _edge_ends(e)
+        (writers if rel == "writes" else readers).setdefault(t, set()).add(s)
+    imports: set[tuple[str, str]] = set()
+    for sf, tf, _e, _t, _k in _file_import_edges(nodes, edges):
+        imports.add((sf, tf))
+        imports.add((tf, sf))
+    out: list[dict] = []
+    for sid, ws in writers.items():
+        state = byid.get(sid)
+        if state is None:
+            continue
+        test_state = bool(_node_file(state)) and _is_test_path(_node_file(state))
+
+        def keep(i: str, test_state: bool = test_state) -> bool:
+            n = byid.get(i)
+            f = _node_file(n) if n else ""
+            return bool(f) and (test_state or not _is_test_path(f))
+
+        ws_kept = sorted(i for i in ws if keep(i))
+        rs_kept = sorted(i for i in readers.get(sid, set()) - ws if keep(i))
+        touch = ws_kept + rs_kept
+        if not ws_kept or len(touch) < 2:
+            continue
+        file_of = {i: _node_file(byid[i]) for i in touch}
+        files = sorted(set(file_of.values()))
+        if len(files) < 2:
+            continue
+        why: list[str] = []
+        score = 1
+        pairs = [(file_of[w], file_of[o]) for w in ws_kept for o in touch
+                 if file_of[o] != file_of[w]]
+        if any(p not in imports for p in pairs):
+            score += 2
+            why.append("files that neither import the other share it")
+        if any(_top_dir(a) != _top_dir(b) for a, b in pairs):
+            score += 2
+            why.append("crosses top-level directories")
+        comm = {i: byid[i].get("community", byid[i].get("cluster")) for i in touch}
+        if len({c for c in comm.values() if c is not None}) > 1:
+            score += 1
+            why.append("touched from more than one community")
+        out.append({
+            "state": name(sid),
+            "kind": str(state.get("kind") or state.get("resource") or _node_type(state) or ""),
+            "file": _node_file(state) or None,
+            "writers": [name(i) for i in ws_kept],
+            "readers": [name(i) for i in rs_kept],
+            "files": len(files),
+            "score": score,
+            "strength": "strong" if score >= 5 else "medium" if score >= 3 else "weak",
+            "why": why,
+        })
+    out.sort(key=lambda r: (-r["score"], -r["files"], -len(r["writers"]), r["state"]))
+    return out
+
+
 # --- computed surprises -----------------------------------------------------
 # A graph built by local AST extraction carries no surprise flag and often no
 # community info, so the flag check above returns nothing on it. Rather than
@@ -218,6 +298,46 @@ _CONTAINMENT_RELATIONS = frozenset({"contains", "method", "defines", "case_of"})
 # Edges that say nothing about one piece of code depending on another: structural
 # containment, and a docstring/comment node pointing at the code it describes.
 _NON_DEPENDENCY_RELATIONS = _CONTAINMENT_RELATIONS | {"rationale_for"}
+# A definition reading or writing a variable, a field, a constant or a resource
+# (the native engine). Two definitions touching one such node affect each other
+# without either calling the other: shared state.
+_STATE_RELATIONS = frozenset({"reads", "writes"})
+# Node kinds that hold state (the native engine's `kind`).
+_STATE_KINDS = frozenset({"variable", "property", "constant"})
+
+
+def _is_state_node(n: dict) -> bool:
+    """A variable, field or constant, or a resource node (env, file, table, …)."""
+    return str(n.get("kind", "")).lower() in _STATE_KINDS or _is_resource_node(n)
+
+
+def _is_resource_node(n: dict) -> bool:
+    """Something outside the program's memory that code reads or writes: an
+    environment variable, a file, a table, an event (`type: resource`)."""
+    return str(n.get("type", "")).lower() == "resource"
+
+
+_SHARED_STATE_CACHE: dict[int, tuple[list[dict], list[dict]]] = {}
+
+
+def _with_written_by(edges: list[dict]) -> list[dict]:
+    """``edges`` plus, for each ``writes`` edge W → R, a ``written_by`` edge
+    R → W, so a walk can go from a writer through what it writes to its
+    readers. Cached on the identity of ``edges``, like the adjacency."""
+    cached = _SHARED_STATE_CACHE.get(id(edges))
+    if cached is not None and cached[0] is edges:
+        return cached[1]
+    out = list(edges)
+    for e in edges:
+        if _rel(e) == "writes":
+            s, t = _edge_ends(e)
+            v = {k: e[k] for k in ("confidence", "source_file", "source_location") if k in e}
+            out.append({"source": t, "target": s, "relation": "written_by",
+                        "context": "shared_state", **v})
+    if len(_SHARED_STATE_CACHE) >= 4:
+        _SHARED_STATE_CACHE.pop(next(iter(_SHARED_STATE_CACHE)), None)
+    _SHARED_STATE_CACHE[id(edges)] = (edges, out)
+    return out
 _FILE_KEYS = ("file", "path", "source_file")
 
 
