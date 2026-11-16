@@ -60,6 +60,43 @@ impl LanguageModule for Ruby {
         out
     }
 
+    /// A bare identifier that is no local: a method of `self` called without
+    /// parentheses or arguments (`current_user`, `raise_if_locked`).
+    fn refs_of(&self, n: Node, src: &[u8]) -> Option<Vec<(RefKind, Vec<String>, &'static str)>> {
+        if n.kind() != "identifier" {
+            return None;
+        }
+        let p = n.parent()?;
+        let is_target = p.child_by_field_name("left").is_some_and(|l| l.id() == n.id())
+            || matches!(
+                p.kind(),
+                "method_parameters"
+                    | "block_parameters"
+                    | "lambda_parameters"
+                    | "optional_parameter"
+                    | "keyword_parameter"
+                    | "splat_parameter"
+                    | "hash_splat_parameter"
+                    | "block_parameter"
+                    | "method"
+                    | "singleton_method"
+                    | "call"
+                    | "argument_list"
+                    | "pair"
+                    | "exception_variable"
+                    | "for"
+                    | "alias"
+                    | "undef"
+            )
+            || p.kind().ends_with("_parameters");
+        if is_target {
+            // `call` children are its receiver / method name (read by the
+            // generic rule); arguments are values, not calls
+            return Some(Vec::new());
+        }
+        Some(vec![(RefKind::Call, vec![text(n, src)], "implicit_call")])
+    }
+
     fn builtins(&self) -> &'static [&'static str] {
         &[
             "puts",

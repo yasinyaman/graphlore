@@ -101,6 +101,18 @@ fn jsonc(src: &str) -> Option<serde_json::Value> {
     serde_json::from_str(&cleaned).ok()
 }
 
+/// The first `"…"` after `key` in `src` (Package.swift arguments).
+fn quoted_after(src: &str, key: &str) -> Option<String> {
+    let at = src.find(key)? + key.len();
+    let rest = &src[at..];
+    let open = rest.find('"')?;
+    if rest[..open].trim() != "" {
+        return None;
+    }
+    let close = rest[open + 1..].find('"')?;
+    Some(rest[open + 1..open + 1 + close].to_string())
+}
+
 /// `key = "value"` of a TOML section, crudely (Cargo.toml `[package] name`).
 fn toml_value(src: &str, section: &str, key: &str) -> Option<String> {
     let mut current = String::new();
@@ -198,6 +210,22 @@ impl ModuleSystems {
             .filter(|(r, _)| r.ends_with("Package.swift"))
             .map(|(r, _)| dir_of(r).to_string())
             .collect();
+        // targets with their own `path:` (`.target(name: "X", path: "Source")`)
+        let mut swift_targets: Vec<(String, String)> = Vec::new();
+        for (rel, _) in p.manifests.iter().filter(|(r, _)| r.ends_with("Package.swift")) {
+            let Some(src) = read_manifest(p, rel) else { continue };
+            let dir = dir_of(rel);
+            for chunk in src.split(".target(").chain(src.split(".testTarget(")).skip(1) {
+                let name = quoted_after(chunk, "name:");
+                let path = quoted_after(chunk.split(".target(").next().unwrap_or(chunk), "path:");
+                if let Some(name) = name {
+                    let path = path.unwrap_or_else(|| format!("Sources/{name}"));
+                    swift_targets.push((join(dir, &path), name));
+                }
+            }
+        }
+        swift_targets.sort_by_key(|(d, _)| std::cmp::Reverse(d.len()));
+        swift_targets.dedup();
         for (fi, f) in p.files.iter().enumerate() {
             let Some(lang) = f.lang else { continue };
             let path = f.path.as_str();
@@ -226,17 +254,22 @@ impl ModuleSystems {
                     m.rs_mod.insert(fi, (key, modpath));
                 }
                 Lang::Swift => {
-                    let module = swift_pkgs
+                    let by_target = swift_targets
                         .iter()
-                        .find_map(|pkg| {
-                            let pre =
-                                if pkg.is_empty() { String::new() } else { format!("{pkg}/") };
-                            let rest = path.strip_prefix(&pre)?;
-                            let mut it = rest.split('/');
-                            match (it.next(), it.next()) {
-                                (Some("Sources" | "Tests"), Some(m)) => Some(m.to_string()),
-                                _ => None,
-                            }
+                        .find(|(d, _)| path.starts_with(&format!("{d}/")))
+                        .map(|(_, n)| n.clone());
+                    let module = by_target
+                        .or_else(|| {
+                            swift_pkgs.iter().find_map(|pkg| {
+                                let pre =
+                                    if pkg.is_empty() { String::new() } else { format!("{pkg}/") };
+                                let rest = path.strip_prefix(&pre)?;
+                                let mut it = rest.split('/');
+                                match (it.next(), it.next()) {
+                                    (Some("Sources" | "Tests"), Some(m)) => Some(m.to_string()),
+                                    _ => None,
+                                }
+                            })
                         })
                         .unwrap_or_default();
                     m.swift_files.entry(module.clone()).or_default().push(fi);
@@ -577,6 +610,14 @@ fn ns_target(p: &Project, fam: Family, name: &str) -> Option<Target> {
 }
 
 // ---- Rust -----------------------------------------------------------------
+
+/// The module above a Rust file's module.
+pub fn rust_parent(p: &Project, f: usize) -> Option<Target> {
+    let (key, path) = p.modsys.rs_mod.get(&f)?;
+    let mut up = path.clone();
+    up.pop()?;
+    p.modsys.rs_files.get(&(key.clone(), up)).map(|fs| Target::Module(fs.clone()))
+}
 
 pub fn crate_root(p: &Project, f: usize) -> Option<Target> {
     let (key, _) = p.modsys.rs_mod.get(&f)?;
