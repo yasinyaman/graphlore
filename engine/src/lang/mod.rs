@@ -10,7 +10,7 @@
 use serde::Serialize;
 use tree_sitter::{Language, Node};
 
-use crate::facts::DefKind;
+use crate::facts::{DefKind, ImportFact, RefKind};
 use crate::generic;
 
 mod c_family;
@@ -285,4 +285,65 @@ pub trait LanguageModule: Send + Sync {
     fn test_regions(&self, _root: Node, _src: &[u8]) -> Vec<(u32, u32)> {
         Vec::new()
     }
+
+    /// The import facts of an import statement, or `None` when `node` is not
+    /// one (the walk then goes on into it).
+    fn imports_of(&self, _node: Node, _src: &[u8]) -> Option<Vec<ImportFact>> {
+        None
+    }
+
+    /// The bases a definition names: `(Inherits | Implements | Base | MixesIn
+    /// | Embeds, path)`. Called for every definition node.
+    fn heritage_of(&self, _node: Node, _src: &[u8]) -> Vec<(RefKind, Vec<String>)> {
+        Vec::new()
+    }
+
+    /// The type that the bases a non-definition node names belong to (Rust
+    /// `impl Trait for Type`).
+    fn heritage_owner(&self, _node: Node, _src: &[u8]) -> Option<String> {
+        None
+    }
+
+    /// `(local, exported)` names a node exports under another name.
+    fn exports_of(&self, _node: Node, _src: &[u8]) -> Vec<(String, String)> {
+        Vec::new()
+    }
+
+    /// The package or file-scoped namespace a node declares.
+    fn package_of(&self, _node: Node, _src: &[u8]) -> Option<String> {
+        None
+    }
+
+    /// Whether a node is a field or property declaration whose `type` field is
+    /// a type reference of the enclosing type.
+    fn is_field(&self, node: Node) -> bool {
+        matches!(
+            node.kind(),
+            "field_declaration"
+                | "property_declaration"
+                | "public_field_definition"
+                | "field_definition"
+        )
+    }
+
+    /// References a node makes, in place of the generic call rule: `None`
+    /// keeps the generic one.
+    fn refs_of(
+        &self,
+        _node: Node,
+        _src: &[u8],
+    ) -> Option<Vec<(RefKind, Vec<String>, &'static str)>> {
+        None
+    }
+
+    /// Names the language provides, never resolved to a project definition
+    /// by name alone (`len`, `print`, `make`).
+    fn builtins(&self) -> &'static [&'static str] {
+        &[]
+    }
+}
+
+/// Paths of the children of a list node (a base list, a type list).
+pub fn paths_in(list: Node, src: &[u8]) -> Vec<Vec<String>> {
+    generic::kids(list).into_iter().filter_map(|c| crate::refs::path_of(c, src)).collect()
 }

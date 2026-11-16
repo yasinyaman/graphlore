@@ -486,6 +486,10 @@ pub fn walk_defs(m: &dyn LanguageModule, root: Node, src: &[u8]) -> Vec<Def> {
                     parent: item.parent,
                     owner,
                     is_test: false,
+                    decl_only: PROTOTYPE_TYPES.contains(&node.kind()),
+                    node_id: node.id(),
+                    start_byte: node.start_byte(),
+                    end_byte: node.end_byte(),
                 });
                 let idx = defs.len() - 1;
                 push_children(

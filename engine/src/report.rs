@@ -38,6 +38,8 @@ pub struct BuildReport {
     pub timed_out_count: usize,
     pub non_utf8_paths: usize,
     pub id_collisions: usize,
+    /// Edges by relation, inferred and unresolved counts, per language family.
+    pub resolution: BTreeMap<String, crate::resolve::ResolveStats>,
     pub max_file_bytes: u64,
     pub elapsed_ms: u128,
 }

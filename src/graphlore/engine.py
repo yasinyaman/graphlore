@@ -29,18 +29,19 @@ from . import config
 ENGINES = ("graphify", "native", "auto")
 DEFAULT_ENGINE = "graphify"
 # graph.json schema versions of the native engine this graphlore reads.
-SUPPORTED_SCHEMAS = frozenset({1})
+SUPPORTED_SCHEMAS = frozenset({1, 2})
 INSTALL_HINT = (
     "Install it with: pip install graphlore-engine (from a checkout of graphlore: "
     "pip install maturin && maturin develop -m engine/Cargo.toml --release)."
 )
 # What a native graph does not have yet; said after every native build so an
-# empty impact or cycles answer is not mistaken for a clean codebase.
+# empty communities answer is not mistaken for a codebase without structure.
 NATIVE_GAPS = (
     "The native engine is experimental: this graph has files, definitions with "
-    "their spans, containment and document headings, but no import or call edges "
-    "and no communities yet, so impact, cycles, layers and the community tools "
-    "have little to work with. GRAPHLORE_ENGINE=graphify builds the full graph."
+    "their spans, containment, document headings and the imports, calls, bases and "
+    "type references it could resolve from the source, but no communities yet, and "
+    "update=True rebuilds the whole graph. GRAPHLORE_ENGINE=graphify builds a graph "
+    "with communities."
 )
 
 
@@ -215,6 +216,22 @@ def render_report(report: dict[str, Any], verbose: bool = False) -> str:
         ]
         lines.append("  " + " · ".join(rows if verbose else rows[:8])
                      + ("" if verbose or len(rows) <= 8 else f" · +{len(rows) - 8} more"))
+    resolution: dict[str, dict[str, Any]] = report.get("resolution") or {}
+    if resolution:
+        rows = []
+        for fam, r in sorted(resolution.items()):
+            edges = sum((r.get("edges") or {}).values())
+            if not edges and not r.get("unresolved"):
+                continue
+            bit = f"{fam} {_plural(edges, 'edge')}"
+            if r.get("inferred"):
+                bit += f" ({r['inferred']} inferred)"
+            if r.get("unresolved"):
+                bit += f", {r['unresolved']} unresolved"
+            rows.append(bit)
+        if rows:
+            lines.append("  resolved: " + " · ".join(rows if verbose else rows[:8])
+                         + ("" if verbose or len(rows) <= 8 else f" · +{len(rows) - 8} more"))
     errors = {k: v["parse_errors"] for k, v in langs.items() if v.get("parse_errors")}
     if errors:
         lines.append(
