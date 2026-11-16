@@ -37,8 +37,14 @@ const MEMBER_KINDS: &[&str] = &[
     "scope_resolution",
 ];
 /// Bare names that can be a variable, a constant or a field.
-const BARE_KINDS: &[&str] =
-    &["identifier", "simple_identifier", "constant", "class_variable", "global_variable"];
+const BARE_KINDS: &[&str] = &[
+    "identifier",
+    "simple_identifier",
+    "constant",
+    "class_variable",
+    "global_variable",
+    "instance_variable",
+];
 const ASSIGNMENTS: &[&str] = &[
     "assignment",
     "augmented_assignment",
@@ -414,6 +420,14 @@ impl State {
             self.declared.push((n.start_byte(), text(n, src)));
             return;
         }
+        // the key of a Go composite literal (`S{n: 1}`) names a field of the
+        // new value, it reads nothing
+        if pk == "literal_element"
+            && p.parent()
+                .is_some_and(|k| k.kind() == "keyed_element" && first_named(k) == Some(p.id()))
+        {
+            return;
+        }
         if pk.contains("import")
             || pk.contains("type")
             || pk.contains("label")
@@ -551,7 +565,9 @@ impl State {
                     continue;
                 }
             }
-            if head != "self" && head != "super" && shadowed(home, head) {
+            // a local of the same name hides a variable; `local.field` is the
+            // field of the object the local holds, which resolution types
+            if u.path.len() == 1 && shadowed(home, head) {
                 continue;
             }
             if needs_import && !matches!(head, "self" | "super" | "crate") && !known.contains(head)

@@ -95,6 +95,18 @@ impl LanguageModule for Rust {
         true
     }
 
+    /// A struct's named fields: `self.n` in its `impl` reads or writes them.
+    fn state_defs<'t>(&self, n: Node<'t>, _src: &[u8]) -> Vec<(Node<'t>, Node<'t>, DefKind)> {
+        if n.kind() != "field_declaration"
+            || !n.parent().and_then(|l| l.parent()).is_some_and(|s| s.kind() == "struct_item")
+        {
+            return Vec::new();
+        }
+        n.child_by_field_name("name")
+            .map(|name| vec![(n, name, DefKind::Property)])
+            .unwrap_or_default()
+    }
+
     fn extra_def<'t>(&self, n: Node<'t>, _src: &[u8]) -> Option<(Node<'t>, DefKind)> {
         // `const X: T = …;` / `static X: T = …;` outside a function body
         if !matches!(n.kind(), "const_item" | "static_item") {

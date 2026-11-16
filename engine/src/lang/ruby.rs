@@ -34,7 +34,20 @@ impl LanguageModule for Ruby {
         let scope = n.parent().map(|p| (p.kind(), p.parent().map(|q| q.kind())));
         let top = matches!(scope, Some(("program", _)));
         let in_type = matches!(scope, Some(("body_statement", Some("class" | "module"))));
+        let in_method = {
+            let mut p = n.parent();
+            let mut found = false;
+            while let Some(x) = p {
+                if x.kind() == "method" {
+                    found = true;
+                    break;
+                }
+                p = x.parent();
+            }
+            found
+        };
         let kind = match left.kind() {
+            "instance_variable" if in_method => DefKind::Property,
             "global_variable" if top => DefKind::Variable,
             "constant" if top || in_type => DefKind::Constant,
             "class_variable" if in_type => DefKind::Property,

@@ -25,10 +25,8 @@ impl LanguageModule for CSharp {
         let has = |w: &str| mods.iter().any(|m| m == w);
         let kind = if has("const") || (has("static") && has("readonly")) {
             DefKind::Constant
-        } else if has("static") {
-            DefKind::Property
         } else {
-            return Vec::new();
+            DefKind::Property
         };
         let Some(decl) = kids(n).into_iter().find(|c| c.kind() == "variable_declaration") else {
             return Vec::new();

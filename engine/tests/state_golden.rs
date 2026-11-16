@@ -401,3 +401,83 @@ fn what_is_not_a_write() {
     assert!(got.is_empty(), "{got:?}");
     let _ = g;
 }
+
+#[test]
+fn instance_fields() {
+    // set in the constructor (which builds, and couples nothing), changed and
+    // read in the other methods
+    let (got, g) = state(
+        "pyfield",
+        &[(
+            "a.py",
+            "class Conn:\n    def __init__(self):\n        self.open = False\n        self.sent = 0\n\n    def connect(self):\n        self.open = True\n\n    def send(self):\n        if self.open:\n            self.sent += 1\n",
+        )],
+    );
+    assert_eq!(kind(&g, "open"), "property");
+    has(
+        &got,
+        &[
+            (".connect()", "writes", "open"),
+            (".send()", "reads", "open"),
+            (".send()", "writes", "sent"),
+        ],
+    );
+    lacks(&got, &[(".__init__()", "writes", "open")]);
+    let (got, _) = state(
+        "jsfield",
+        &[(
+            "k.js",
+            "class K {\n  constructor() { this.n = 0; }\n  inc() { this.n += 1; }\n  get() { return this.n; }\n}\n",
+        )],
+    );
+    has(&got, &[(".inc()", "writes", "n"), (".get()", "reads", "n")]);
+    let (got, _) = state(
+        "rbfield",
+        &[(
+            "k.rb",
+            "class K\n  def initialize\n    @n = 0\n  end\n\n  def inc\n    @n += 1\n  end\n\n  def get\n    @n\n  end\nend\n",
+        )],
+    );
+    has(&got, &[(".inc()", "writes", "@n"), (".get()", "reads", "@n")]);
+    let (got, _) = state(
+        "gofield",
+        &[
+            ("go.mod", "module example.com/m\n"),
+            (
+                "s.go",
+                "package m\n\ntype S struct {\n\tn int\n}\n\nfunc (s *S) Inc() { s.n++ }\n\nfunc (s *S) Get() int { return s.n }\n",
+            ),
+        ],
+    );
+    has(&got, &[(".Inc()", "writes", "n"), (".Get()", "reads", "n")]);
+    let (got, _) = state(
+        "golit",
+        &[
+            ("go.mod", "module example.com/m\n"),
+            (
+                "s.go",
+                "package m\n\ntype S struct {\n\tn int\n}\n\nfunc New() S { return S{n: 1} }\n",
+            ),
+        ],
+    );
+    lacks(&got, &[("New()", "reads", "n")]);
+    let (got, _) = state(
+        "rsfield",
+        &[
+            ("Cargo.toml", "[package]\nname = \"m\"\nversion = \"0.1.0\"\n"),
+            (
+                "src/lib.rs",
+                "pub struct S {\n    n: u32,\n}\n\nimpl S {\n    pub fn inc(&mut self) {\n        self.n += 1;\n    }\n\n    pub fn get(&self) -> u32 {\n        self.n\n    }\n}\n",
+            ),
+        ],
+    );
+    has(&got, &[(".inc()", "writes", "n"), (".get()", "reads", "n")]);
+    let (got, _) = state(
+        "javafield",
+        &[(
+            "K.java",
+            "class K {\n  private int n;\n  K() { n = 0; }\n  void inc() { n++; this.n += 1; }\n  int get() { return n; }\n}\n",
+        )],
+    );
+    has(&got, &[(".inc()", "writes", "n"), (".get()", "reads", "n")]);
+}

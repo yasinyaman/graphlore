@@ -1187,6 +1187,14 @@ fn add_extras(
             .filter(|(_, d)| d.start_byte <= b && b < d.end_byte)
             .max_by_key(|(_, d)| d.start_byte)
             .map(|(i, _)| i);
+        // a field first assigned in a method (`self.x = …` in `__init__`) is the
+        // type's, not the method's
+        let mut parent = parent;
+        if *kind == crate::facts::DefKind::Property {
+            while let Some(p) = parent.filter(|&p| defs[p].kind.is_callable()) {
+                parent = defs[p].parent;
+            }
+        }
         let name = text(*name_node, src).trim_start_matches('$').to_string();
         if name == "_" {
             continue; // Go `var _ I = (*T)(nil)`: a compile-time check, no variable
