@@ -357,6 +357,9 @@ pub struct Project<'a> {
     /// type -> field name -> the field's local (its declared or assigned type).
     fields: HashMap<DefRef, HashMap<String, (usize, usize)>>,
     depth: RefCell<usize>,
+    /// Set while a type reference is resolved: names then mean types only
+    /// (`Item Item { get; set; }`: the property's type, not the property).
+    types_only: RefCell<bool>,
     /// Import -> files a resolved use went through it to.
     used: RefCell<HashMap<(usize, usize), HashSet<usize>>>,
 }
@@ -424,6 +427,7 @@ impl<'a> Project<'a> {
             locals: HashMap::new(),
             fields: HashMap::new(),
             depth: RefCell::new(0),
+            types_only: RefCell::new(false),
             used: RefCell::new(HashMap::new()),
         };
         p.index();
@@ -512,7 +516,13 @@ impl<'a> Project<'a> {
 
     /// The type a local path names: a type, or the type a constructor or
     /// factory method belongs to (`Foo::new()`, `Foo.create()`).
-    fn type_of_path(&self, f: usize, d: Option<usize>, path: &[String]) -> Option<DefRef> {
+    fn type_of_path(
+        &self,
+        f: usize,
+        d: Option<usize>,
+        path: &[String],
+        declared: bool,
+    ) -> Option<DefRef> {
         {
             let mut depth = self.depth.borrow_mut();
             if *depth > 3 {
@@ -520,7 +530,9 @@ impl<'a> Project<'a> {
             }
             *depth += 1;
         }
+        let before = self.types_only.replace(declared);
         let out = self.type_of_path_inner(f, d, path);
+        *self.types_only.borrow_mut() = before;
         *self.depth.borrow_mut() -= 1;
         out
     }
@@ -560,7 +572,7 @@ impl<'a> Project<'a> {
             // `-> Self`, `: this`: the method's own type (builders)
             return self.class_of(r.0, Some(r.1));
         }
-        let t = self.type_of_path(r.0, self.def(r).parent, &path)?;
+        let t = self.type_of_path(r.0, self.def(r).parent, &path, true)?;
         self.def(t).kind.is_class_like().then_some(t)
     }
 
@@ -574,7 +586,7 @@ impl<'a> Project<'a> {
                 if l.path.is_empty() {
                     return None;
                 }
-                let t = self.type_of_path(f, Some(x), &l.path)?;
+                let t = self.type_of_path(f, Some(x), &l.path, l.declared)?;
                 let conf = if l.declared { Confidence::Extracted } else { Confidence::Inferred };
                 return Some((t, conf));
             }
@@ -654,7 +666,7 @@ impl<'a> Project<'a> {
     fn field_type(&self, c: DefRef, name: &str, depth: usize) -> Option<(DefRef, Confidence)> {
         if let Some(&(fi, li)) = self.fields.get(&c).and_then(|m| m.get(name)) {
             let l = &self.files[fi].locals[li];
-            let t = self.type_of_path(fi, l.from_def, &l.path)?;
+            let t = self.type_of_path(fi, l.from_def, &l.path, l.declared)?;
             let conf = if l.declared { Confidence::Extracted } else { Confidence::Inferred };
             return Some((t, conf));
         }
@@ -960,8 +972,34 @@ impl<'a> Project<'a> {
         self.narrow(f, cands).map(|(r, _)| r)
     }
 
-    /// A bare name as the language sees it from `d` in file `f`.
+    /// A bare name as the language sees it from `d` in file `f`; in a type
+    /// position, only a type (or a module / namespace on the way to one).
     fn resolve_name(&self, f: usize, d: Option<usize>, name: &str) -> Option<Target> {
+        let t = self.resolve_name_any(f, d, name)?;
+        if !self.acceptable(&t) {
+            // nothing but a member had the name: in a type position, the type
+            let ty = self.type_named(f, name)?;
+            return Some(Target::Def(ty));
+        }
+        Some(t)
+    }
+
+    /// In a type position (`types_only`), only a type or a module / namespace
+    /// can be what a name means; a member of the same name shadows nothing.
+    fn acceptable(&self, t: &Target) -> bool {
+        if !*self.types_only.borrow() {
+            return true;
+        }
+        match t {
+            Target::Def(r) => {
+                let k = self.def(*r).kind;
+                k.is_class_like() || matches!(k, DefKind::TypeAlias | DefKind::Namespace)
+            }
+            _ => true,
+        }
+    }
+
+    fn resolve_name_any(&self, f: usize, d: Option<usize>, name: &str) -> Option<Target> {
         let fam = self.family[f]?;
         let defs = &self.files[f].defs;
         // enclosing definitions: nested functions; class members where
@@ -973,13 +1011,17 @@ impl<'a> Project<'a> {
                 let member_scope = fam.implicit_this() && defs[x].kind.is_class_like();
                 if callable_scope || member_scope || defs[x].kind == DefKind::Namespace {
                     if let Some(r) = self.best(k.iter().map(|&i| (f, i))) {
-                        return Some(Target::Def(r));
+                        if self.acceptable(&Target::Def(r)) {
+                            return Some(Target::Def(r));
+                        }
                     }
                 }
             }
             if fam.implicit_this() && defs[x].kind.is_class_like() {
                 if let Some(m) = self.class_member((f, x), name, 4) {
-                    return Some(Target::Def(m));
+                    if self.acceptable(&Target::Def(m)) {
+                        return Some(Target::Def(m));
+                    }
                 }
             }
             cur = defs[x].parent;
@@ -987,22 +1029,30 @@ impl<'a> Project<'a> {
         if fam.implicit_this() {
             if let Some(c) = self.class_of(f, d) {
                 if let Some(m) = self.class_member(c, name, 4) {
-                    return Some(Target::Def(m));
+                    if self.acceptable(&Target::Def(m)) {
+                        return Some(Target::Def(m));
+                    }
                 }
             }
         }
         if let Some(r) = self.top_in(&[f], name) {
-            return Some(Target::Def(r));
+            if self.acceptable(&Target::Def(r)) {
+                return Some(Target::Def(r));
+            }
         }
         let scope = &self.scopes[f];
         if let Some((b, imp)) = scope.bindings.get(name) {
             if let Some(t) = self.eval(b, 3) {
-                self.note_use(f, *imp, &t);
-                return Some(t);
+                if self.acceptable(&t) {
+                    self.note_use(f, *imp, &t);
+                    return Some(t);
+                }
             }
         }
         if let Some(t) = modules::scope_lookup(self, fam, f, d, name) {
-            return Some(t);
+            if self.acceptable(&t) {
+                return Some(t);
+            }
         }
         for (star, imp) in &scope.stars {
             // an external module's contents are unknown: it names nothing
@@ -1010,8 +1060,10 @@ impl<'a> Project<'a> {
                 continue;
             }
             if let Some(t) = self.member(star, name, 2) {
-                self.note_use(f, *imp, &t);
-                return Some(t);
+                if self.acceptable(&t) {
+                    self.note_use(f, *imp, &t);
+                    return Some(t);
+                }
             }
         }
         None
@@ -1135,6 +1187,16 @@ impl<'a> Project<'a> {
                 }
             },
         };
+        // a property named bare (implicit `this`) with more after it
+        if let Target::Def(p) = t {
+            let pk = self.def(p).kind;
+            if matches!(pk, DefKind::Property | DefKind::Constant) && !rest.is_empty() {
+                let owner = self.class_of(p.0, self.def(p).parent)?;
+                let (ft, cf) = self.field_type(owner, &self.def(p).name.clone(), 3)?;
+                conf = conf.max(cf);
+                t = Target::Def(ft);
+            }
+        }
         for (i, seg) in rest.iter().enumerate() {
             if seg == "()" {
                 // the result of a call: constructing a type gives one of it;
@@ -1158,7 +1220,22 @@ impl<'a> Project<'a> {
                 }
                 return None;
             }
-            match self.member(&t, seg, 3) {
+            let found = self.member(&t, seg, 3);
+            // a property with more after it: go on through its type
+            let through_property = matches!(&found, Some(Target::Def(p))
+                if matches!(self.def(*p).kind, DefKind::Property | DefKind::Constant))
+                && i + 1 < rest.len();
+            if through_property {
+                if let Target::Def(c) = t {
+                    if let Some((ft, cf)) = self.field_type(c, seg, 3) {
+                        conf = conf.max(cf);
+                        t = Target::Def(ft);
+                        continue;
+                    }
+                }
+                return None;
+            }
+            match found {
                 Some(next) => t = next,
                 None => {
                     // `self.repo.find()`: through the field's type
@@ -1354,7 +1431,15 @@ impl<'a> Project<'a> {
         }
         let defs = &self.files[f].defs;
         let mut cur = r.from_def;
+        // a field's type, or what its initializer calls, is its type's use
+        // (a Swift computed property's body is its own)
+        let swift = self.family[f] == Some(Family::Swift);
         while let Some(x) = cur {
+            let skip = defs[x].extra && !(swift && r.kind != RefKind::Type);
+            if skip {
+                cur = defs[x].parent;
+                continue;
+            }
             if let Some(id) = self.node_id((f, x)) {
                 return id.to_string();
             }
@@ -1445,11 +1530,13 @@ pub fn resolve(
                 // to a name guess
                 let strict =
                     heritage || matches!(r.kind, RefKind::Attr) || r.context == "implicit_call";
+                *p.types_only.borrow_mut() = heritage || r.kind == RefKind::Type;
                 let found = if r.from_owner.is_some() && heritage {
                     p.resolve_path(f, None, &r.path, true)
                 } else {
                     p.resolve_path(f, scope_def, &r.path, strict)
                 };
+                *p.types_only.borrow_mut() = false;
                 let (target, relation, conf) = match found {
                     Some((Target::Def(t), conf)) => {
                         let Some(id) = p.node_id(t) else { continue };
@@ -1485,7 +1572,9 @@ pub fn resolve(
                             }
                             RefKind::Decorator => "references",
                             RefKind::Attr => {
-                                if !tk.is_callable() {
+                                if !(tk.is_callable()
+                                    || matches!(tk, DefKind::Property | DefKind::Constant))
+                                {
                                     continue;
                                 }
                                 "references"

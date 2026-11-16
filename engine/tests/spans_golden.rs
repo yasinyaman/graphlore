@@ -262,3 +262,22 @@ fn ruby_modules_classes_and_struct_blocks() {
         &["Shop", "Shop.Line", "Shop.Line.total", "Shop.Cart", "Shop.Cart.empty?"],
     );
 }
+
+#[test]
+fn properties_and_constants_are_extra_definitions() {
+    let cs = "class A { public Svc Svc { get; set; } public int M() { return 1; } }\n";
+    let facts = file_facts(cs.as_bytes(), "A.cs");
+    let prop = facts.defs.iter().find(|d| d.name == "Svc").expect("property");
+    assert!(prop.extra && prop.kind == DefKind::Property);
+    // spans.py does not report them, so file_spans leaves them out
+    assert_eq!(quals("A.cs", cs), set(&["A", "A.M"]));
+    let ts = "export const ICON_MAP = { a: 1 };\nconst helper = () => 1;\nclass K { x = 1; f = () => 2; }\n";
+    let facts = file_facts(ts.as_bytes(), "k.ts");
+    let extra: BTreeSet<(&str, DefKind)> =
+        facts.defs.iter().filter(|d| d.extra).map(|d| (d.name.as_str(), d.kind)).collect();
+    assert_eq!(extra, [("ICON_MAP", DefKind::Constant), ("x", DefKind::Property)].into());
+    let rs = "const MAX: usize = 3;\nfn f() { const LOCAL: u8 = 1; }\n";
+    let facts = file_facts(rs.as_bytes(), "a.rs");
+    let extra: Vec<&str> = facts.defs.iter().filter(|d| d.extra).map(|d| d.name.as_str()).collect();
+    assert_eq!(extra, ["MAX"]);
+}

@@ -204,6 +204,8 @@ pub fn assemble(files: &[FileFacts]) -> Assembled {
                         "case_of"
                     } else if kind.is_callable() && class_parent {
                         "method"
+                    } else if kind == DefKind::Property && class_parent {
+                        "defines"
                     } else {
                         "contains"
                     };

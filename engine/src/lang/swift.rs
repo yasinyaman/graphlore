@@ -31,6 +31,28 @@ impl LanguageModule for Swift {
         generic::kind_of(node.kind())
     }
 
+    fn extra_def<'t>(&self, n: Node<'t>, _src: &[u8]) -> Option<(Node<'t>, DefKind)> {
+        // a stored or computed property of a type (not a local `let`)
+        if n.kind() != "property_declaration" && n.kind() != "protocol_property_declaration" {
+            return None;
+        }
+        let in_type = n.parent().is_some_and(|p| {
+            matches!(p.kind(), "class_body" | "protocol_body" | "enum_class_body")
+        });
+        if !in_type {
+            return None;
+        }
+        let pattern = n.child_by_field_name("name")?;
+        let name = if pattern.kind() == "pattern" {
+            pattern
+                .child_by_field_name("bound_identifier")
+                .or_else(|| kids(pattern).into_iter().next())?
+        } else {
+            pattern
+        };
+        Some((name, DefKind::Property))
+    }
+
     fn imports_of(&self, n: Node, src: &[u8]) -> Option<Vec<ImportFact>> {
         if n.kind() != "import_declaration" {
             return None;

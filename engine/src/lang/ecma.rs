@@ -234,6 +234,43 @@ impl LanguageModule for Ecma {
         decl.child_by_field_name("name").filter(|x| x.kind() == "identifier").map(|x| text(x, src))
     }
 
+    fn extra_def<'t>(&self, n: Node<'t>, _src: &[u8]) -> Option<(Node<'t>, DefKind)> {
+        let is_function = |v: Option<Node>| {
+            v.is_some_and(|v| {
+                matches!(
+                    v.kind(),
+                    "arrow_function"
+                        | "function_expression"
+                        | "function"
+                        | "generator_function"
+                        | "class"
+                )
+            })
+        };
+        match n.kind() {
+            // a class field that holds a value, not a function
+            "public_field_definition" | "field_definition" => {
+                let name =
+                    n.child_by_field_name("name").or_else(|| n.child_by_field_name("property"))?;
+                (!is_function(n.child_by_field_name("value"))).then_some((name, DefKind::Property))
+            }
+            // a module-level `const X = …` that is not a function
+            "variable_declarator" => {
+                let decl = n.parent().filter(|p| p.kind() == "lexical_declaration")?;
+                let top = decl.parent().is_some_and(|p| {
+                    p.kind() == "program"
+                        || (p.kind() == "export_statement"
+                            && p.parent().is_some_and(|q| q.kind() == "program"))
+                });
+                let is_const = all_kids(decl).iter().any(|c| c.kind() == "const");
+                let name = n.child_by_field_name("name").filter(|x| x.kind() == "identifier")?;
+                let value = n.child_by_field_name("value");
+                (top && is_const && !is_function(value)).then_some((name, DefKind::Constant))
+            }
+            _ => None,
+        }
+    }
+
     fn exports_of(&self, n: Node, src: &[u8]) -> Vec<(String, String)> {
         let mut out = Vec::new();
         match n.kind() {

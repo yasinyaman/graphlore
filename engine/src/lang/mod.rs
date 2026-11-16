@@ -304,6 +304,12 @@ pub trait LanguageModule: Send + Sync {
         None
     }
 
+    /// A node that defines a property or a constant (`Def::extra`): its name
+    /// node and kind. Only asked of nodes that are not definitions already.
+    fn extra_def<'t>(&self, _node: Node<'t>, _src: &[u8]) -> Option<(Node<'t>, DefKind)> {
+        None
+    }
+
     /// The object a definition is assigned to as a property (see `Def::object`).
     fn object_of(&self, _node: Node, _src: &[u8]) -> Option<String> {
         None

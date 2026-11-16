@@ -646,10 +646,20 @@ fn locals_of(n: Node, src: &[u8], in_params: bool) -> Vec<(String, Vec<String>, 
         | "declaration"
         | "property_declaration"
         | "public_field_definition" => {
-            let field = matches!(
-                k,
-                "field_declaration" | "property_declaration" | "public_field_definition"
-            );
+            // a field only when declared in a type's body (Swift / Kotlin use
+            // property_declaration for locals too)
+            let field = matches!(k, "field_declaration" | "public_field_definition")
+                || (k == "property_declaration"
+                    && n.parent().is_some_and(|p| {
+                        matches!(
+                            p.kind(),
+                            "class_body"
+                                | "declaration_list"
+                                | "protocol_body"
+                                | "enum_class_body"
+                                | "field_declaration_list"
+                        )
+                    }));
             let declared =
                 n.child_by_field_name("type").and_then(|t| first_type(t, src)).or_else(|| {
                     kids(n)
@@ -779,6 +789,7 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
             byte: n.start_byte(),
         });
     };
+    let mut extras: Vec<(Node, Node, crate::facts::DefKind)> = Vec::new();
     let mut stack = vec![root];
     let mut steps = 0usize;
     while let Some(n) = stack.pop() {
@@ -797,6 +808,9 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
             continue;
         }
         if !by_node.contains_key(&n.id()) {
+            if let Some((name, kind)) = m.extra_def(n, src) {
+                extras.push((n, name, kind));
+            }
             let found = m.heritage_of(n, src);
             if !found.is_empty() {
                 let owner = m.heritage_owner(n, src);
@@ -1094,6 +1108,7 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
         let children: Vec<Node> = n.children(&mut cursor).filter(|c| c.is_named()).collect();
         stack.extend(children.into_iter().rev());
     }
+    add_extras(&mut facts.defs, &extras, m, src);
     // the innermost definition around each use (a sweep: defs are in source
     // pre-order, so a stack of open ranges is the chain of ancestors)
     assign_defs(&facts.defs, &mut refs);
@@ -1123,47 +1138,90 @@ fn inside_callable(defs: &[Def], byte: usize) -> bool {
     defs.iter().any(|d| d.kind.is_callable() && d.start_byte <= byte && byte < d.end_byte)
 }
 
-fn assign_defs(defs: &[Def], refs: &mut [RefFact]) {
-    let mut order: Vec<usize> = (0..refs.len())
-        .filter(|&i| refs[i].from_def.is_none() && refs[i].from_owner.is_none())
-        .collect();
-    order.sort_by_key(|&i| refs[i].byte);
+/// For each byte offset, the innermost definition whose range holds it.
+fn innermost(defs: &[Def], bytes: &[usize]) -> Vec<Option<usize>> {
+    let mut by_start: Vec<usize> = (0..defs.len()).collect();
+    by_start.sort_by_key(|&i| (defs[i].start_byte, std::cmp::Reverse(defs[i].end_byte)));
+    let mut order: Vec<usize> = (0..bytes.len()).collect();
+    order.sort_by_key(|&i| bytes[i]);
+    let mut out = vec![None; bytes.len()];
     let mut open: Vec<usize> = Vec::new();
     let mut next = 0;
     for i in order {
-        let b = refs[i].byte;
-        while next < defs.len() && defs[next].start_byte <= b {
-            while open.last().is_some_and(|&o| defs[o].end_byte <= defs[next].start_byte) {
+        let b = bytes[i];
+        while next < by_start.len() && defs[by_start[next]].start_byte <= b {
+            let d = by_start[next];
+            while open.last().is_some_and(|&o| defs[o].end_byte <= defs[d].start_byte) {
                 open.pop();
             }
-            open.push(next);
+            open.push(d);
             next += 1;
         }
         while open.last().is_some_and(|&o| defs[o].end_byte <= b) {
             open.pop();
         }
-        refs[i].from_def = open.last().copied();
+        out[i] = open.last().copied();
+    }
+    out
+}
+
+fn assign_defs(defs: &[Def], refs: &mut [RefFact]) {
+    let idx: Vec<usize> = (0..refs.len())
+        .filter(|&i| refs[i].from_def.is_none() && refs[i].from_owner.is_none())
+        .collect();
+    let bytes: Vec<usize> = idx.iter().map(|&i| refs[i].byte).collect();
+    for (k, d) in innermost(defs, &bytes).into_iter().enumerate() {
+        refs[idx[k]].from_def = d;
     }
 }
 
 fn assign_local_defs(defs: &[Def], locals: &mut [Local]) {
-    let mut order: Vec<usize> =
-        (0..locals.len()).filter(|&i| locals[i].from_def.is_none()).collect();
-    order.sort_by_key(|&i| locals[i].byte);
-    let mut open: Vec<usize> = Vec::new();
-    let mut next = 0;
-    for i in order {
-        let b = locals[i].byte;
-        while next < defs.len() && defs[next].start_byte <= b {
-            while open.last().is_some_and(|&o| defs[o].end_byte <= defs[next].start_byte) {
-                open.pop();
-            }
-            open.push(next);
-            next += 1;
-        }
-        while open.last().is_some_and(|&o| defs[o].end_byte <= b) {
-            open.pop();
-        }
-        locals[i].from_def = open.last().copied();
+    let idx: Vec<usize> = (0..locals.len()).filter(|&i| locals[i].from_def.is_none()).collect();
+    let bytes: Vec<usize> = idx.iter().map(|&i| locals[i].byte).collect();
+    for (k, d) in innermost(defs, &bytes).into_iter().enumerate() {
+        locals[idx[k]].from_def = d;
+    }
+}
+
+/// Properties and constants as definitions, after the `spans.py` ones (so
+/// every index into `defs` stays valid), each under the definition around it.
+fn add_extras(
+    defs: &mut Vec<Def>,
+    extras: &[(Node, Node, crate::facts::DefKind)],
+    m: &dyn LanguageModule,
+    src: &[u8],
+) {
+    let base = defs.len();
+    for (node, name_node, kind) in extras {
+        let b = node.start_byte();
+        let parent = defs[..base]
+            .iter()
+            .enumerate()
+            .filter(|(_, d)| d.start_byte <= b && b < d.end_byte)
+            .max_by_key(|(_, d)| d.start_byte)
+            .map(|(i, _)| i);
+        let name = text(*name_node, src).trim_start_matches('$').to_string();
+        let qualname = match parent {
+            Some(p) => format!("{}.{name}", defs[p].qualname),
+            None => name.clone(),
+        };
+        let def_line = line(*node);
+        defs.push(Def {
+            name,
+            qualname,
+            kind: *kind,
+            region_start: m.region_start(*node, def_line),
+            def_line,
+            end_line: m.end_line(*node),
+            parent,
+            owner: None,
+            is_test: false,
+            object: None,
+            extra: true,
+            decl_only: false,
+            node_id: node.id(),
+            start_byte: node.start_byte(),
+            end_byte: node.end_byte(),
+        });
     }
 }

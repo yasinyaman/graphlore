@@ -31,6 +31,17 @@ impl LanguageModule for Kotlin {
         generic::kind_of(node.kind())
     }
 
+    fn extra_def<'t>(&self, n: Node<'t>, _src: &[u8]) -> Option<(Node<'t>, DefKind)> {
+        if n.kind() != "property_declaration"
+            || !n.parent().is_some_and(|p| p.kind() == "class_body")
+        {
+            return None;
+        }
+        let decl = kids(n).into_iter().find(|c| c.kind() == "variable_declaration")?;
+        let name = kids(decl).into_iter().find(|c| c.kind() == "simple_identifier")?;
+        Some((name, DefKind::Property))
+    }
+
     fn imports_of(&self, n: Node, src: &[u8]) -> Option<Vec<ImportFact>> {
         match n.kind() {
             "import_list" => None,

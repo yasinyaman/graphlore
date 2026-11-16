@@ -12,7 +12,7 @@ use regex::Regex;
 use tree_sitter::Node;
 
 use super::LanguageModule;
-use crate::facts::{ImportFact, ImportForm, RefKind};
+use crate::facts::{DefKind, ImportFact, ImportForm, RefKind};
 use crate::generic::{end_line, kids, line, text};
 use crate::refs::{import, path_of};
 
@@ -91,6 +91,26 @@ fn use_leaves(
 }
 
 impl LanguageModule for Rust {
+    fn extra_def<'t>(&self, n: Node<'t>, _src: &[u8]) -> Option<(Node<'t>, DefKind)> {
+        // `const X: T = …;` / `static X: T = …;` outside a function body
+        if !matches!(n.kind(), "const_item" | "static_item") {
+            return None;
+        }
+        let in_fn = {
+            let mut p = n.parent();
+            let mut inside = false;
+            while let Some(x) = p {
+                if x.kind() == "function_item" {
+                    inside = true;
+                    break;
+                }
+                p = x.parent();
+            }
+            inside
+        };
+        (!in_fn).then(|| n.child_by_field_name("name").map(|x| (x, DefKind::Constant))).flatten()
+    }
+
     fn imports_of(&self, n: Node, src: &[u8]) -> Option<Vec<ImportFact>> {
         match n.kind() {
             "use_declaration" => {
