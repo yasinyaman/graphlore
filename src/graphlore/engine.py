@@ -41,7 +41,7 @@ NATIVE_GAPS = (
     "their spans, containment, document headings, the imports, calls, bases and "
     "type references it could resolve from the source, and communities by its own "
     "weighting (edge kind, confidence and directory), not graphify's. "
-    "update=True rebuilds the whole graph."
+    "update=True parses only the files that changed."
 )
 # The same for a graph written before the engine detected communities.
 NATIVE_GAPS_NO_COMMUNITIES = (
@@ -137,12 +137,8 @@ def choose(
 
 
 def _update_note(update: bool) -> str:
-    if not update:
-        return ""
-    return (
-        "The native engine has no incremental update yet: update=True rebuilt the "
-        "whole graph (which also drops the nodes of deleted files)."
-    )
+    del update  # the build reply says what an update reused
+    return ""
 
 
 def build(
@@ -151,6 +147,7 @@ def build(
     documents: bool = True,
     commit: str | None = None,
     timeout: int = 600,
+    incremental: bool = False,
 ) -> dict[str, Any] | str:
     """Build ``target``'s graph with the native engine, in a child process.
 
@@ -167,6 +164,8 @@ def build(
         argv += ["--commit", commit]
     if not documents:
         argv.append("--no-docs")
+    if incremental:
+        argv.append("--incremental")
     try:
         proc = subprocess.run(
             argv, capture_output=True, text=True, encoding="utf-8", errors="replace",
@@ -243,7 +242,7 @@ def _plural(n: int, word: str) -> str:
     return f"{n} {word}" + ("" if n == 1 else "s")
 
 
-def render_report(report: dict[str, Any], verbose: bool = False) -> str:
+def render_report(report: dict[str, Any], verbose: bool = False, update: bool = False) -> str:
     """The build reply: counts first, then everything that was left out."""
     langs: dict[str, dict[str, int]] = report.get("languages") or {}
     secs = (report.get("elapsed_ms") or 0) / 1000
@@ -279,6 +278,16 @@ def render_report(report: dict[str, Any], verbose: bool = False) -> str:
         if rows:
             lines.append("  resolved: " + " · ".join(rows if verbose else rows[:8])
                          + ("" if verbose or len(rows) <= 8 else f" · +{len(rows) - 8} more"))
+    inc = report.get("incremental")
+    if isinstance(inc, dict) and inc.get("cache"):
+        line = (f"  update: {_plural(inc.get('parsed', 0), 'file')} parsed, "
+                f"{inc.get('reused', 0)} unchanged reused from the cache")
+        if inc.get("removed"):
+            line += f", {inc['removed']} gone since the last build"
+        lines.append(line)
+    elif isinstance(inc, dict) and update:
+        lines.append("  update: no cache from this engine version and options, "
+                     "so every file was parsed")
     communities = report.get("communities")
     if isinstance(communities, dict) and communities.get("count"):
         lines.append("  " + render_communities(communities))

@@ -524,8 +524,7 @@ def test_engine_choose_routes_each_request():
     both = {"native_found": True, "graphify_found": True}
     assert choose(requested="graphify", **both) == ("graphify", "")
     assert choose(requested="native", **both) == ("native", "")
-    engine, note = choose(requested="native", **both, update=True)
-    assert engine == "native" and "rebuilt the whole graph" in note
+    assert choose(requested="native", **both, update=True) == ("native", "")
     engine, msg = choose(requested="native", native_found=False, graphify_found=True)
     assert engine == "error" and msg.startswith("ERROR") and "pip install graphlore-engine" in msg
     engine, msg = choose(requested="native", **both, mode="deep")
@@ -609,10 +608,10 @@ def test_build_with_the_native_engine(tmp_path, monkeypatch):
     assert "parse errors (definitions found are partial): c 1 file" in out
     assert "skipped as larger than 2048 KB: 1 file (vendor/big.c)" in out
     assert server.engine.NATIVE_GAPS_NO_COMMUNITIES in out   # the gaps are always said
-    assert "rebuilt the whole graph" in out          # update=True under native
     assert "graph.json ready" in out
     (target, kw), = calls
     assert target == tmp_path.resolve() and kw["documents"] is True
+    assert kw["incremental"] is True                 # update=True reuses the facts cache
     assert kw["commit"] is None                       # not a git repository
     server.graphlore_build(".", code_only=True, verbose=True)
     assert calls[-1][1]["documents"] is False
@@ -664,6 +663,9 @@ def test_engine_build_runs_the_engine_in_a_child_process(tmp_path, monkeypatch):
     argv = seen[-1]
     assert argv[:4] == [server.engine.sys.executable, "-m", "graphlore_engine", "build"]
     assert ["--commit", "abc"] == argv[argv.index("--commit"):argv.index("--commit") + 2]
+    assert "--incremental" not in argv
+    server.engine.build(tmp_path, incremental=True, timeout=5)
+    assert "--incremental" in seen[-1]
     assert "--no-docs" in argv
     assert argv[argv.index("--out") + 1] == str(tmp_path / "graphify-out" / "graph.json")
 
@@ -707,6 +709,14 @@ def test_engine_render_report_lists_what_was_left_out():
         f"l{i}": {"files": i, "definitions": 1, "parse_errors": 0} for i in range(1, 11)})
     assert "+2 more" in server.engine.render_report(many)
     assert "+2 more" not in server.engine.render_report(many, verbose=True)
+    # what an update reused, and an update that found no cache
+    inc = dict(_NATIVE_REPORT, incremental={"cache": True, "parsed": 2, "reused": 30,
+                                            "removed": 1})
+    assert ("update: 2 files parsed, 30 unchanged reused from the cache, 1 gone"
+            in server.engine.render_report(inc))
+    cold = dict(_NATIVE_REPORT, incremental={"cache": False, "parsed": 33})
+    assert "no cache" in server.engine.render_report(cold, update=True)
+    assert "no cache" not in server.engine.render_report(cold)
 
 
 def test_no_communities_note_names_the_engine(tmp_path, monkeypatch):

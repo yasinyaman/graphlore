@@ -7,7 +7,7 @@
 //! of [`Lang`], a row in [`SPECS`], and a module here when the defaults are not
 //! enough.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tree_sitter::{Language, Node};
 
 use crate::facts::{DefKind, ImportFact, RefKind};
@@ -26,7 +26,7 @@ mod rust;
 mod scala;
 mod swift;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Lang {
     Python,
