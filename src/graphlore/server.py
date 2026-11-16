@@ -1639,7 +1639,8 @@ def graphlore_build(
     communities, in 14 languages, all local); ``auto`` uses native when installed
     and graphify for what native cannot do. With native, ``mode`` is refused,
     ``cluster_only`` detects the communities of the graph on disk again,
-    ``update`` rebuilds the whole graph, ``code_only`` skips the document headings
+    ``update`` parses only the files changed since the last native build,
+    ``code_only`` skips the document headings
     and ``no_viz`` has no effect.
 
     Args:
@@ -1673,7 +1674,8 @@ def graphlore_build(
         if choice == "native" and cluster_only:
             return _cluster_native(path, note=engine_note)
         if choice == "native":
-            return _build_native(path, code_only=code_only, verbose=verbose, note=engine_note)
+            return _build_native(path, code_only=code_only, verbose=verbose, note=engine_note,
+                                 update=update)
     offline_note = ""
     if config.offline():
         if mode:
@@ -1779,19 +1781,22 @@ def _existing_engine(path: str) -> str | None:
     return engine.graph_engine(graph) if isinstance(graph, dict) else None
 
 
-def _build_native(path: str, *, code_only: bool, verbose: bool, note: str) -> str:
-    """graphlore_build with the native engine (GRAPHLORE_ENGINE=native / auto)."""
+def _build_native(
+    path: str, *, code_only: bool, verbose: bool, note: str, update: bool = False,
+) -> str:
+    """graphlore_build with the native engine (GRAPHLORE_ENGINE=native / auto).
+    ``update`` reuses the facts of the files unchanged since the last build."""
     target = _build_target(path)
     if not target.is_dir():
         return _err(f"ERROR: not a directory: {target}", False)
     report = engine.build(
         target, documents=not code_only, commit=_git(["rev-parse", "HEAD"], target),
-        timeout=CLI_TIMEOUT,
+        timeout=CLI_TIMEOUT, incremental=update,
     )
     _GRAPH_CACHE.pop(str(_graph_path()), None)
     if isinstance(report, str):
         return _err(report, False)
-    text = engine.render_report(report, verbose)
+    text = engine.render_report(report, verbose, update=update)
     notes = _build_notes(path)
     if code_only:
         notes.append("code_only=True: Markdown / reStructuredText headings were not read.")

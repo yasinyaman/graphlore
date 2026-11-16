@@ -1,6 +1,6 @@
 """``python -m graphlore_engine``: the engine's command line.
 
-    build ROOT [--out PATH] [--commit SHA] [--no-docs] [--out-dir-name NAME]
+    build ROOT [--out PATH] [--commit SHA] [--no-docs] [--out-dir-name NAME] [--incremental]
     cluster GRAPH
     spans FILE [--as PATH]
     languages
@@ -32,6 +32,8 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--out-dir-name", default="graphify-out")
     b.add_argument("--max-file-bytes", type=int, default=2 * 1024 * 1024)
     b.add_argument("--threads", type=int)
+    b.add_argument("--incremental", action="store_true",
+                   help="reuse the facts of files unchanged since the last build")
     c = sub.add_parser("cluster", help="detect a graph.json's communities again")
     c.add_argument("graph")
     s = sub.add_parser("spans", help="print the definition spans of one file")
@@ -61,7 +63,7 @@ def main(argv: list[str] | None = None) -> int:
         report = build(
             args.root, out=out, commit=args.commit, documents=not args.no_docs,
             out_dir_name=args.out_dir_name, max_file_bytes=args.max_file_bytes,
-            threads=args.threads,
+            threads=args.threads, incremental=args.incremental,
         )
     except RuntimeError as e:
         print(f"ERROR: {e}", file=sys.stderr)

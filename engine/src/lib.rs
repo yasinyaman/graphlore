@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 use rayon::prelude::*;
 use serde_json::{json, Map, Value};
 
+pub mod cache;
 pub mod community;
 pub mod docs;
 pub mod facts;
@@ -52,6 +53,9 @@ pub struct BuildOptions {
     pub parse_timeout: Option<Duration>,
     /// Worker threads; `None` uses every core.
     pub threads: Option<usize>,
+    /// Reuse the facts of files unchanged since the last build (`update=True`).
+    /// The cache is written either way.
+    pub incremental: bool,
 }
 
 impl BuildOptions {
@@ -65,21 +69,41 @@ impl BuildOptions {
             max_file_bytes: DEFAULT_MAX_FILE_BYTES,
             parse_timeout: Some(DEFAULT_PARSE_TIMEOUT),
             threads: None,
+            incremental: false,
         }
     }
 }
 
+#[allow(clippy::large_enum_variant)] // one per file, moved once
 enum Read {
-    Facts(FileFacts),
+    Facts(FileFacts, cache::Stamp, bool),
     Unreadable(String),
 }
 
-fn read_all(files: &[walk::Candidate], timeout: Option<Duration>) -> Vec<Read> {
+fn read_all(
+    files: &[walk::Candidate],
+    timeout: Option<Duration>,
+    cached: Option<&cache::Cache>,
+) -> Vec<Read> {
     files
         .par_iter()
-        .map(|c| match std::fs::read(&c.abs) {
-            Err(_) => Read::Unreadable(c.rel.clone()),
-            Ok(src) => Read::Facts(match c.kind {
+        .map(|c| {
+            let meta = std::fs::metadata(&c.abs).ok();
+            let (size, mtime) = meta.as_ref().map_or((0, 0), |m| (m.len(), cache::mtime_ns(m)));
+            if let Some((facts, stamp)) = cached.and_then(|k| k.unchanged(&c.rel, size, mtime)) {
+                return Read::Facts(facts, stamp, true);
+            }
+            let src = match std::fs::read(&c.abs) {
+                Err(_) => return Read::Unreadable(c.rel.clone()),
+                Ok(src) => src,
+            };
+            let stamp =
+                cache::Stamp { size: src.len() as u64, mtime_ns: mtime, hash: cache::hash(&src) };
+            if let Some(facts) = cached.and_then(|k| k.same_content(&c.rel, stamp.size, stamp.hash))
+            {
+                return Read::Facts(facts, stamp, true);
+            }
+            let facts = match c.kind {
                 walk::FileKind::Code(lang) => {
                     let lang = lang::detect(&c.rel, Some(&src)).unwrap_or(lang);
                     parse::file_facts(&c.rel, &src, Some(lang), None, timeout)
@@ -87,7 +111,8 @@ fn read_all(files: &[walk::Candidate], timeout: Option<Duration>) -> Vec<Read> {
                 walk::FileKind::Doc(kind) => {
                     parse::file_facts(&c.rel, &src, None, Some(kind), timeout)
                 }
-            }),
+            };
+            Read::Facts(facts, stamp, false)
         })
         .collect()
 }
@@ -103,13 +128,25 @@ pub fn build_graph(opts: &BuildOptions) -> Result<(Value, BuildReport), String> 
         return Err(format!("not a directory: {}", root.display()));
     }
     let found = walk::discover(&root, &opts.out_dir_name, opts.documents, opts.max_file_bytes);
+    let cache_key = cache::Key {
+        engine_version: VERSION.to_string(),
+        schema_version: SCHEMA_VERSION,
+        documents: opts.documents,
+        max_file_bytes: opts.max_file_bytes,
+    };
+    let cache_path = opts.out.as_deref().and_then(cache::path_for);
+    let cached = if opts.incremental {
+        cache_path.as_deref().and_then(|p| cache::Cache::load(p, &cache_key))
+    } else {
+        None
+    };
     let reads = match opts.threads {
         Some(n) => rayon::ThreadPoolBuilder::new()
             .num_threads(n.max(1))
             .build()
             .map_err(|e| e.to_string())?
-            .install(|| read_all(&found.files, opts.parse_timeout)),
-        None => read_all(&found.files, opts.parse_timeout),
+            .install(|| read_all(&found.files, opts.parse_timeout, cached.as_ref())),
+        None => read_all(&found.files, opts.parse_timeout, cached.as_ref()),
     };
 
     let mut report = BuildReport {
@@ -128,12 +165,20 @@ pub fn build_graph(opts: &BuildOptions) -> Result<(Value, BuildReport), String> 
     report.too_large_count = n;
 
     let mut facts = Vec::new();
+    let mut stamps = Vec::new();
     let mut unreadable = Vec::new();
     let mut timed_out = Vec::new();
+    report.incremental.cache = cached.is_some();
     for r in reads {
         match r {
             Read::Unreadable(rel) => unreadable.push(rel),
-            Read::Facts(f) => {
+            Read::Facts(f, stamp, reused) => {
+                if reused {
+                    report.incremental.reused += 1;
+                } else {
+                    report.incremental.parsed += 1;
+                }
+                stamps.push(stamp);
                 if f.is_document {
                     report.documents += 1;
                     report.headings += f.headings.len();
@@ -152,6 +197,12 @@ pub fn build_graph(opts: &BuildOptions) -> Result<(Value, BuildReport), String> 
             }
         }
     }
+    if let Some(c) = &cached {
+        let found: std::collections::HashSet<&str> =
+            facts.iter().map(|f: &FileFacts| f.path.as_str()).collect();
+        report.incremental.removed = c.removed(&found);
+    }
+    drop(cached);
     (report.unreadable, report.unreadable_count) = report::sample(unreadable);
     (report.timed_out, report.timed_out_count) = report::sample(timed_out);
 
@@ -203,6 +254,11 @@ pub fn build_graph(opts: &BuildOptions) -> Result<(Value, BuildReport), String> 
         graph::write::write_atomic(out, &graph)?;
         if let (Some(path), Some(labels)) = (&labels_path, &communities.labels) {
             write_labels(path, labels)?;
+        }
+        if let Some(path) = &cache_path {
+            // a cache that cannot be written costs the next update its speed, nothing else
+            report.incremental.cache_written =
+                cache::store(path, cache_key, facts.into_iter().zip(stamps).collect()).is_ok();
         }
     }
     report.elapsed_ms = started.elapsed().as_millis();

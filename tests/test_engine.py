@@ -267,3 +267,21 @@ def test_native_communities_are_read_kept_and_reclustered(native):
     assert labels[str(top)] == "The core"
     skeleton = json.loads(server.graphlore_skeleton(community=str(top), as_json=True))
     assert skeleton["sections"]
+
+
+def test_native_update_parses_only_what_changed(py_project):
+    cache = py_project / "graphify-out" / "cache" / "graphlore-native.bin"
+    assert cache.is_file()
+    before = _graph(py_project)
+    out = server.graphlore_build(".", update=True)
+    assert "0 files parsed" in out, out
+    (py_project / "pkg" / "util.py").write_text(
+        "def double(x):\n    return x + x\n\ndef halve(x):\n    return x / 2\n", encoding="utf-8")
+    out = server.graphlore_build(".", update=True)
+    assert "update: 1 file parsed" in out, out
+    ids = {n["id"] for n in _graph(py_project)["nodes"]}
+    assert "pkg_util_halve" in ids and "pkg_util_unused_helper" not in ids
+    # the communities keep their ids through the update
+    after = {n["id"]: n["community"] for n in _graph(py_project)["nodes"]}
+    kept = sum(after.get(n["id"]) == n["community"] for n in before["nodes"])
+    assert kept >= 0.9 * len(before["nodes"]) - 2

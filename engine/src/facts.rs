@@ -1,13 +1,13 @@
 //! What one file yields: definitions with their spans, document headings, and
 //! (from phase 2 on) imports and references. The graph is assembled from these.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::lang::Lang;
 
 /// What a definition is. Decides its label (`name()`, `.name()`, bare), the
 /// relation that links it to its parent, and whether it becomes a graph node.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DefKind {
     Class,
@@ -70,7 +70,7 @@ impl DefKind {
 }
 
 /// One definition. Lines are 1-based and inclusive.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Def {
     /// The bare name (`acquire`, `Get`), never qualified.
     pub name: String,
@@ -112,7 +112,7 @@ pub struct Def {
 }
 
 /// A document heading (Markdown, reStructuredText).
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Heading {
     pub level: u32,
     pub text: String,
@@ -121,7 +121,7 @@ pub struct Heading {
 }
 
 /// When an import runs: what graphlore's `ImportChecker` calls its kind.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Runs {
     #[serde(rename = "module-level")]
     ModuleLevel,
@@ -142,7 +142,7 @@ impl Runs {
 }
 
 /// The shape of an import statement.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ImportForm {
     /// The whole module, bound to `alias` (or to its own first name when
@@ -163,7 +163,7 @@ pub enum ImportForm {
 
 /// An import statement, as written. One statement can yield several facts
 /// (Python `import a, b`; Rust `use a::{b, c}`).
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ImportFact {
     pub line: u32,
     pub form: ImportForm,
@@ -184,7 +184,7 @@ pub struct ImportFact {
 }
 
 /// What a reference is.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RefKind {
     /// A call; a call of a class is a construction.
@@ -209,7 +209,7 @@ pub enum RefKind {
 
 /// A name with a known type: a typed parameter, a typed field, a variable
 /// assigned a construction (`x = Foo()`, `let x = Foo::new()`).
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Local {
     pub name: String,
     /// The type's path, or the constructor call's (`["Foo", "new"]`).
@@ -224,8 +224,12 @@ pub struct Local {
     pub byte: usize,
 }
 
+/// A reference's context. An alias, not `&'static str` written out, so that
+/// serde does not take the field as borrowed from what it deserializes.
+pub type Context = &'static str;
+
 /// A use of a name.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RefFact {
     pub line: u32,
     pub kind: RefKind,
@@ -236,7 +240,8 @@ pub struct RefFact {
     pub path: Vec<String>,
     /// `call`, `parameter_type`, `return_type`, `field`, `generic_arg`,
     /// `decorator`, `constructor`, `type`.
-    pub context: &'static str,
+    #[serde(deserialize_with = "crate::cache::static_str")]
+    pub context: Context,
     /// The innermost definition the use sits in.
     pub from_def: Option<usize>,
     /// The type a use belongs to when no definition encloses it: a Rust
@@ -246,7 +251,7 @@ pub struct RefFact {
     pub byte: usize,
 }
 
-#[derive(Clone, Debug, Default, Serialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct ParseStatus {
     /// The tree has ERROR or MISSING nodes; the definitions found are partial.
     pub has_error: bool,
@@ -254,7 +259,7 @@ pub struct ParseStatus {
     pub timed_out: bool,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FileFacts {
     /// Root-relative, `/`-separated.
     pub path: String,

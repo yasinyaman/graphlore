@@ -41,8 +41,23 @@ pub struct BuildReport {
     /// Edges by relation, inferred and unresolved counts, per language family.
     pub resolution: BTreeMap<String, crate::resolve::ResolveStats>,
     pub communities: crate::community::CommunityReport,
+    pub incremental: Incremental,
     pub max_file_bytes: u64,
     pub elapsed_ms: u128,
+}
+
+/// What an update reused from the facts cache.
+#[derive(Default, Serialize)]
+pub struct Incremental {
+    /// A cache for this engine version and these options was found.
+    pub cache: bool,
+    /// Files whose facts came from the cache.
+    pub reused: usize,
+    /// Files parsed.
+    pub parsed: usize,
+    /// Cached files this build did not find.
+    pub removed: usize,
+    pub cache_written: bool,
 }
 
 pub fn sample(mut v: Vec<String>) -> (Vec<String>, usize) {
