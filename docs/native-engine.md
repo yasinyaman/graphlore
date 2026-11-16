@@ -46,6 +46,11 @@ what is left before it can be the default.
   (`py`, `npm`, `go`, `jvm`, `dotnet`, `crate`, `php`, `gem`, `swift`, `c`).
 - **Documents.** A page node per Markdown / reStructuredText file and a node per
   heading, nested by level (`code_only` skips them).
+- **Shared state.** Variables, fields and constants are nodes
+  (`kind: variable | property | constant`), and so are the environment
+  variables, files, tables, events and cache keys code uses by a literal key
+  (`type: resource`); `reads` / `writes` link the definitions that touch them
+  ([below](#shared-state-and-resources)).
 - **Communities.** Every node has a `community` and a `community_name`, from
   Leiden on edges weighted by kind, confidence and directory ([below](#communities));
   the graph header carries their count, modularity and a signature per
@@ -57,7 +62,7 @@ what is left before it can be the default.
   `.name()` / bare, and the node-link layout is graphify's, so every graphlore
   tool — and graphify's own `query` / `path` / `explain` — reads the graph
   unchanged. `built_at_commit` is recorded for freshness. The graph says
-  `graph.engine: graphlore` and `schema_version: 3`, and graphlore then trusts
+  `graph.engine: graphlore` and `schema_version: 4`, and graphlore then trusts
   its edges: `ImportChecker` reads `runs` instead of re-checking an import
   against the source, and the edges `resolve.py` adds to graphify's graphs are
   already there.
@@ -153,16 +158,17 @@ On the 31 audit repositories, against graphify's communities on its own graphs
 
 | | graphify | native |
 |---|--:|--:|
-| communities | 90.6 | 90.5 |
-| largest, % of the nodes | 10.0 | 12.4 |
+| communities | 90.6 | 94.6 |
+| largest, % of the nodes | 10.0 | 11.1 |
 | singletons, % of the nodes | 1.1 | 0.1 |
-| median size | 8.3 | 10.8 |
+| median size | 8.3 | 11.6 |
 | modularity on the plain graph | 0.67 | 0.60 |
-| members in the community's main directory | 82.8% | 87.1% |
-| test nodes in a mostly-production community | 20.9% | 8.0% |
+| members in the community's main directory | 82.8% | 88.8% |
+| test nodes in a mostly-production community | 20.9% | 9.4% |
 
-The two partitions agree with a normalised mutual information of 0.78 (0.62 to
-1.0). The lower plain modularity is the price of the weights: the native
+(Engine 0.4.0, with the shared-state edges; 0.3.0 had 90.5 communities, 87.1%
+in the main directory and 8.0% of test nodes mixed in.) The two partitions
+agree with a normalised mutual information of 0.78 (0.62 to 1.0). The lower plain modularity is the price of the weights: the native
 communities follow directories more closely (in 20 of the 31 repositories) and
 keep tests apart from the code they test. The largest communities that the
 size rule leaves whole are single files: express's `History.md` (298 headings
@@ -200,6 +206,69 @@ What an update still spends is the whole-project part. On the crates that is
 assembling and resolving (1.8 s and 1.6 s), communities (3.0 s; 5.0 s on a
 first build, which settles from scratch) and writing a 250 MB graph.json
 (1.3 s), while parsing drops from 8.5 s to 0.2 s.
+
+### Shared state and resources
+
+Two definitions that never call each other still affect each other when one
+writes what the other reads. The fact walk records, for every name and member
+access, whether it is read or written (`engine/src/state.rs`); each language
+says what its state is (`LanguageModule::state_defs`), and resolution keeps the
+uses that name it:
+
+| | state nodes |
+|---|---|
+| module / package level | Python assignments (capitals and literals: constants), JS/TS `let` / `var` / `const` (not `require` bindings), Go `var` / `const`, Rust `static` / `const`, C/C++ globals (not `extern`), Kotlin / Swift / Scala top level, Ruby `$x` and constants, PHP class constants |
+| class level | Python class attributes, Java / C# / C++ / PHP static fields, Ruby `@@x`, Scala `object` members, C# / Swift / Kotlin / TS properties |
+| instance | Python `self.x` and JS `this.x` first assigned in a method, Ruby `@x`, Java / C# / C++ / PHP / Scala / Rust / Go fields |
+
+A write is an assignment, `+=` and the like, `x[k] = v`, `del x`, `x++`
+(`EXTRACTED`), or a call of a mutating method (`append`, `set`, `clear`,
+`push_back`, …, through `lock()` / `unwrap()` chains) on a variable that holds
+a collection or a builder (`INFERRED`: only the name says so). A local hides a
+variable of its name — a parameter, a declared local, and in Python and Ruby any
+name assigned without `global` — but `local.field` is the field of the object
+the local holds. A constructor setting its own object's fields builds it and is
+left out.
+
+Resources (`engine/src/resources.rs`) are what lies outside the program, by a
+key written as a string literal: environment variables (`os.getenv`,
+`os.environ[…]`, `process.env.X`, `System.getenv`, `env::var`, `ENV[…]`,
+`$_ENV`, `getenv`), files (`open(p, mode)`, `fs.writeFileSync`, `os.ReadFile`,
+`File.WriteAllText`, `fs::write`, `fopen`, …), tables in SQL strings (`FROM` /
+`JOIN` read; `INSERT INTO`, `UPDATE … SET`, `DELETE FROM` write; names a
+`WITH` defines left out), event names (`emit` / `publish` write, `on` /
+`subscribe` read; only when the project does both, and not for names every
+stream or page emits) and cache keys (`localStorage`, Redis-like stores).
+A data model names its table (`__tablename__`, Django `Meta.db_table`, `@Table`
+/ `@Entity`, `[Table]`, Laravel `$table`, Rails `table_name`, an ORM base class,
+EF `DbSet<T>`, `mongoose.model`), and a call through it (`User.objects.filter`,
+`Post.create`, `user.save()`, `db.Items.Add`) reads or writes that table
+(`INFERRED`). A resource is a node (`res_<kind>_<key>`) only when two
+definitions or more touch it; the rest are counted in the build reply.
+
+On the 31 audit repositories:
+
+| | |
+|---|--:|
+| variables / constants / fields | 492 / 1,798 / 6,478 |
+| `reads` (inferred) | 16,555 (691) |
+| `writes` (inferred) | 2,333 (459) |
+| resources shared by two definitions or more | env 21, table 8, event 10, key 2 |
+| state written in one place and read or written in another | 1,095 |
+| edges added | +16% |
+
+Read by hand, 30 sampled reads were all right, 24 of 25 writes (the 25th a
+C# object initializer setting a property of the class it names), and 29 of 30
+edges to instance fields (the miss, a Go struct literal's key, is now left
+out). The first samples found the rules above: a method named `delete` on an
+HTTP client (`got.delete(url)`) is no write, a chain does not carry a write
+past an unrelated call (`req.getHeader(…).replace(…)`), a constructor's own
+fields are construction, `_` in Go is no variable, a `"Update own password"`
+message is no SQL, and `data` / `close` / `click` are no shared events.
+
+Builds take 15% longer (median of eight repositories against 0.3.0, −1% to
++27%): the walk keeps a stack of ancestors for these rules, as tree-sitter's
+`parent()` walks down from the root again and cost twice that.
 
 ## Compared with graphify on 31 repositories
 
@@ -309,6 +378,11 @@ graphify's graphs. What the native graphs still raise:
 - **`TEST-PATH-MISSED`**: ureq's `src/run.rs` and aspnetcore-realworld's
   `build/Program.cs` hold tests that no path rule recognises.
 
+Rerun with engine 0.4.0 and its shared state, the audit raises nothing new
+but one convention finding, fixed since: `graphlore_surprises(limit=0)` cut its
+`shared_state` list without saying how much (`shared_state_left_out` does now).
+`SKELETON-EMPTY` went from 5 to 0, and the tool time stayed at 131 s.
+
 The first native run also found three bugs that had nothing to do with the
 engine, and they are now fixed for both engines. A Go function type in a map
 type (`map[string]func() hash.Hash`) was taken for a function named `string`,
@@ -321,10 +395,13 @@ two nodes reference each other. `path` and `explain` read the CLI's default
 1. **Phase 1: definitions, spans, containment, headings.** Done.
 2. **Phase 2: imports and references in all 14 languages.** Done (this page).
 3. **Communities and incremental updates.** Done (this page).
-4. **No CLI behind the CLI tools.** `query`, `path` and `explain` answered over
+4. **Shared state and resources.** Done (this page): what two definitions
+   couple through without a call. Next: HTTP calls to the project's own routes
+   (`fetch('/api/users')` to its handler), and git co-change.
+5. **No CLI behind the CLI tools.** `query`, `path` and `explain` answered over
    graph.json in Python; community naming by MCP sampling only; the route and
    package-API extractors moved into the language modules.
-5. **Native by default.** The polyglot audit passes on native graphs (above),
+6. **Native by default.** The polyglot audit passes on native graphs (above),
    so what is left is publishing the wheels (below) and making `auto` the
    default; then
    graphify, `graphlore_add` and `mode="deep"` go, and the output directory gets

@@ -794,9 +794,12 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
     let mut extras: Vec<(Node, Node, crate::facts::DefKind, bool)> = Vec::new();
     let mut state = crate::state::State::new(m.assignment_declares());
     let mut resources: Vec<crate::resources::ResourceUse> = Vec::new();
-    let mut stack = vec![root];
+    // `(node, depth)`; `anc` holds the ancestors of the node being visited
+    let mut stack = vec![(root, 0usize)];
+    let mut anc: Vec<Node> = Vec::new();
     let mut steps = 0usize;
-    while let Some(n) = stack.pop() {
+    while let Some((n, depth)) = stack.pop() {
+        anc.truncate(depth);
         steps += 1;
         if steps > 2_000_000 {
             break;
@@ -1047,8 +1050,8 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
         }
         // reads and writes of variables, fields and constants, and of what
         // lies outside the program (environment, files, tables, events)
-        state.visit(n, src);
-        crate::resources::visit(n, src, facts.lang, &mut resources);
+        state.visit(n, src, &anc);
+        crate::resources::visit(n, src, facts.lang, &anc, &mut resources);
         if let Some(extra) = m.refs_of(n, src) {
             for (kind, path, context) in extra {
                 push(&mut refs, n, kind, path, context, None);
@@ -1094,7 +1097,8 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
         }
         let mut cursor = n.walk();
         let children: Vec<Node> = n.children(&mut cursor).filter(|c| c.is_named()).collect();
-        stack.extend(children.into_iter().rev());
+        anc.push(n);
+        stack.extend(children.into_iter().rev().map(|c| (c, depth + 1)));
     }
     add_extras(&mut facts.defs, &extras, m, src);
     let defs = &facts.defs;

@@ -300,14 +300,20 @@ const KEY_WRITES: &[&str] = &[
 ];
 
 /// Record the resources `n` uses. Called for every node of a file.
-pub fn visit(n: Node, src: &[u8], lang: Option<Lang>, out: &mut Vec<ResourceUse>) {
+pub fn visit<'t>(
+    n: Node<'t>,
+    src: &[u8],
+    lang: Option<Lang>,
+    anc: &[Node<'t>],
+    out: &mut Vec<ResourceUse>,
+) {
     let Some(lang) = lang else { return };
     let k = n.kind();
     if is_call_kind(k) || matches!(k, "new_expression" | "object_creation_expression") {
         call(n, src, lang, out);
     }
-    env_access(n, src, lang, out);
-    if is_string(k) && !n.parent().is_some_and(|p| is_string(p.kind())) {
+    env_access(n, src, lang, anc, out);
+    if is_string(k) && !anc.last().is_some_and(|p| is_string(p.kind())) {
         sql(n, src, out);
     }
 }
@@ -473,7 +479,13 @@ fn call(n: Node, src: &[u8], lang: Lang, out: &mut Vec<ResourceUse>) {
 
 /// `os.environ["A"]`, `process.env.A`, `process.env["A"]`, `ENV["A"]`,
 /// `$_ENV["A"]`: read, or written when assigned to.
-fn env_access(n: Node, src: &[u8], lang: Lang, out: &mut Vec<ResourceUse>) {
+fn env_access<'t>(
+    n: Node<'t>,
+    src: &[u8],
+    lang: Lang,
+    anc: &[Node<'t>],
+    out: &mut Vec<ResourceUse>,
+) {
     let k = n.kind();
     let (object, key) = match (lang, k) {
         (Lang::Python, "subscript") => {
@@ -489,7 +501,7 @@ fn env_access(n: Node, src: &[u8], lang: Lang, out: &mut Vec<ResourceUse>) {
                 .is_some_and(|p| p == ["process", "env"] || p == ["import", "meta", "env"]);
             if is_env {
                 if let Some(prop) = n.child_by_field_name("property") {
-                    let write = crate::state::writes_to(n);
+                    let write = crate::state::writes_to(n, anc);
                     push(out, n, ResourceKind::Env, write, text(prop, src), "env", true);
                 }
             }
@@ -513,7 +525,7 @@ fn env_access(n: Node, src: &[u8], lang: Lang, out: &mut Vec<ResourceUse>) {
         return;
     }
     if let Some(key) = literal(key, src) {
-        let write = crate::state::writes_to(n);
+        let write = crate::state::writes_to(n, anc);
         push(out, n, ResourceKind::Env, write, key, "env", true);
     }
 }

@@ -185,6 +185,35 @@ non-Python files fall back to nearest-line matching. A `.h` file that reads as
 C++ (a `class`, a `namespace`, a `template<`) is parsed as C++.
 [What was measured per language](benchmark-polyglot.md), on real repositories.
 
+## Shared state and resources
+
+Two functions can affect each other without either calling the other: one
+writes a module variable, a field, an environment variable, a file or a table
+row, and the other reads it. A call graph does not show that. On a native
+graph each such piece of state is a node — a variable, field or constant
+(`kind: variable | property | constant`), or a resource outside the program
+(`type: resource`, `resource: env | file | table | event | key`) — and the
+definitions that touch it are linked to it by `reads` / `writes`. Writing is
+read from the syntax (an assignment, `+=`, `x[k] = v`, `del`, `++`) and is
+`EXTRACTED`; a mutating method on a collection (`cache.clear()`) or a call
+through an ORM (`User.objects.create()`) is `INFERRED`, since only a name says
+so. A resource becomes a node only when two definitions touch it.
+
+The tools use it in four places:
+- `graphlore_neighbors` and `graphlore_subgraph` show the edges as they are:
+  a variable's neighbours are its readers and writers.
+- `graphlore_impact` leaves them out by default, so a blast radius stays a
+  call and import graph, and counts what it passed by in
+  `state_nodes_skipped`; `shared_state=True` follows them from a writer through
+  what it writes to its readers.
+- `graphlore_surprises` lists, beside the edges, the state written in one file
+  and read or written in another (`shared_state`), strongest first.
+- `graphlore_node_details` says what a definition reads and writes and which
+  other definitions share that state with it.
+
+`graphlore_cycles` ignores reads and writes: two functions sharing a counter
+do not depend on each other in a cycle.
+
 ## Communities
 
 A community is a group of nodes that belong together: `graphlore_communities`

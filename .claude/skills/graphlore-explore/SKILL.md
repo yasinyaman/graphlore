@@ -193,7 +193,15 @@ stripped) — the middle layer between the map and full code — and
   7. `graphlore_surprises()` last — leads to check, not findings.
 - **Before a refactor** → `graphlore_impact("<node>")` — the reverse-dependency
   **blast radius**, ordered by hop distance: what breaks if this changes — then
-  `graphlore_tests_for("<node>")` for the tests to run afterwards.
+  `graphlore_tests_for("<node>")` for the tests to run afterwards. On a native
+  graph, `graphlore_impact("<node>", shared_state=True)` adds the code it
+  affects without a call: what reads the variables, fields, environment
+  variables, files or tables it writes (`state_nodes_skipped` says when that
+  matters), and `graphlore_node_details("<node>")` lists them under
+  `shared_with`.
+- **"What else touches this?"** → `graphlore_surprises()`'s `shared_state` list:
+  state written in one file and read in another, the implicit coupling no call
+  graph shows.
 - **Reviewing a changeset** → `graphlore_diff(base, head)` — the file-level
   structural changes between two git refs, cosmetic-only edits separated.
 - **Hunting duplication** → `graphlore_same_names()` and the `identical_bodies`

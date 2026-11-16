@@ -2138,6 +2138,7 @@ def graphlore_surprises(limit: int = 20, as_json: bool = False, scope: str = "")
         payload["shared_state_total"] = len(shared)
         if len(shared) > len(shared_rows):
             payload["truncated"] = True
+            payload["shared_state_left_out"] = len(shared) - len(shared_rows)
         if not shared_rows:
             return
         text.append(f"\nShared state: {len(shared)} variable(s)/field(s) written in one "

@@ -141,7 +141,10 @@ has a node per file, per definition (with its `start..end` span, `kind` and
 heading; containment; and the imports (with when each runs), calls, bases and
 type references it resolves from the source, each `EXTRACTED` or, when found
 by name alone, `INFERRED`. It is written in graphify's id and label conventions,
-so every tool reads it. Its communities are its own (Leiden on edges weighted
+so every tool reads it. It also has shared state: variables, fields and
+constants, and environment variables, files, tables, events and cache keys,
+linked by `reads` / `writes` to the definitions that touch them
+([native-engine.md](native-engine.md#shared-state-and-resources)). Its communities are its own (Leiden on edges weighted
 by kind, confidence and directory, see
 [native-engine.md](native-engine.md#communities)), not graphify's, and stay put
 across rebuilds, so names saved for them stay attached; every native build says
