@@ -7,6 +7,27 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **Shared state in the native engine**: variables, constants and class-level
+  fields are nodes in all 14 languages (`kind: variable | constant |
+  property`), and the definitions that read or write them are linked by
+  `reads` / `writes` edges: assignments, `+=`, `x[k] = v`, `del`, `++`, and a
+  mutating method (`append`, `set`, `clear`, …) on a collection or a builder,
+  `INFERRED` since only its name says so. Locals, parameters and Python names
+  assigned without `global` are left out; a constructor setting its own
+  object's fields builds it and couples nothing. Two definitions touching one
+  such node affect each other without either calling the other. Member reads
+  of a property or constant that were `references` are `reads` now. Schema 4.
+- **`graphlore_impact(shared_state=True)`** walks shared state: the
+  dependents of a writer include the code that reads what it writes, the
+  dependencies of a reader the code that writes what it reads (a `written_by`
+  step). By default reads and writes are not walked and are counted in
+  `state_nodes_skipped`; `relations="state"` names them.
+- **`graphlore_surprises` lists shared state** (`shared_state`): variables,
+  fields and resources written in one file and read or written in another,
+  scored by whether the files import each other, their top-level directories
+  and their communities.
+- **`graphlore_node_details` says what a definition reads and writes**, and
+  which other definitions share that state with it, and how.
 - **A native extraction engine, `engine/`** (experimental, opt-in): graphlore's
   own extractor, written in Rust and built with maturin + PyO3 into a separate
   package, `graphlore-engine`, with tree-sitter grammars for Python,
@@ -115,6 +136,9 @@ All notable changes to this project are documented here. The format is based on
   and the file is unchanged since the build, instead of a line window.
 
 ### Fixed
+- `graphlore_unreferenced` and `graphlore_same_names` no longer take a native
+  module-level constant for a class (it hangs off its file by `contains`, as a
+  class does); the native `kind` decides.
 - `graphlore_neighbors` lists both directions when two nodes link each other
   by the same relation (A references B and B references A); it dropped one.
 - `graphlore_path` and `graphlore_explain` pass `--graph` to the CLI, as
