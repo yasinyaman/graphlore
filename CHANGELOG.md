@@ -6,6 +6,44 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+- **A native extraction engine, `engine/`** (experimental, opt-in): graphlore's
+  own extractor, written in Rust and built with maturin + PyO3 into a separate
+  package, `graphlore-engine`, with tree-sitter grammars for Python,
+  JavaScript, TypeScript, TSX, Go, Java, Kotlin, Scala, C#, Rust, Swift, C, C++,
+  Ruby and PHP compiled in — nothing is downloaded and nothing reaches the
+  network. It writes a graphify-compatible `graph.json` with a node per file,
+  per definition and per Markdown / reStructuredText heading, and the
+  `contains` / `method` / `case_of` edges between them. Each definition node
+  carries its real span (`region_start`, `end_line`, `source_location` as
+  `L13-L15`), `kind`, `qualname` and `language`; Rust `#[cfg(test)]` and
+  `#[test]` items are marked `test`. Ids and labels follow graphify's scheme
+  (25 of the 26 code definitions in the polyglot fixture get the same id and
+  parent from both engines). The definition rule is a port of `spans.py`'s: on
+  ~95,000 definitions in real Go, JS, TS, Rust, Ruby, Java, C#, PHP, Kotlin,
+  Swift, Scala and C/C++ files it returns the same spans as `spans.py`, apart
+  from 2.5% of C/C++ headers where the grammar versions differ, and on 30,000
+  Python definitions the same spans as the stdlib `ast`. Per language, a module
+  overrides only what its grammar does differently. No import or call edges
+  and no communities yet; every native build says so.
+- **`GRAPHLORE_ENGINE`** picks the extractor `graphlore_build` uses: `graphify`
+  (the default, unchanged), `native` (an error naming the install command when
+  the engine is missing; `mode` and `cluster_only` refused; `update` rebuilds
+  the whole graph) or `auto` (native when installed, graphify for what native
+  cannot do and for updates of a graph graphify built). The native build runs
+  in a child process bounded by `GRAPHLORE_TIMEOUT`, and records
+  `built_at_commit` for freshness. With the native engine chosen, a file whose
+  Python tree-sitter grammar is missing (no `[treesitter]` extra, or offline)
+  gets its spans from the engine's compiled-in grammars.
+- **`benchmarks/compare_engines.py`**: the native graph of a repository against
+  graphify's, per language — exact, near and same-file matches, what only one
+  engine has, and whether matched definitions share a parent and relation.
+
+### Changed
+- On a native graph, `graphlore_communities` and the community naming tools say
+  that the native engine has no communities yet, instead of suggesting
+  `graphlore_build(cluster_only=True)`.
+
 ## [0.6.0] - 2026-11-15
 
 Every tool was run on 31 real repositories in 14 languages

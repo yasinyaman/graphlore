@@ -14,7 +14,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from . import config
+from . import config, engine
 from .graph import _is_test_path, _node_file, _node_line
 
 # Per-file span index, keyed by absolute path -> (mtime, spans). A span is
@@ -422,6 +422,10 @@ def _spans_treesitter(src: bytes, rel: str) -> list[tuple[int, int, int, str]]:
     """
     parser, _lang = _ts_parser_for(rel, src)
     if parser is None:
+        # No Python tree-sitter (or no grammar, offline): with the native engine
+        # chosen, its compiled-in grammars answer with the same rule.
+        if engine.requested() != "graphify":
+            return engine.file_spans(src, rel) or []
         return []
     try:
         root = parser.parse(src).root_node

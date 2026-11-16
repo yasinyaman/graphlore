@@ -4,7 +4,9 @@ Guidance for AI coding agents working in this repository. This file is the singl
 
 ## What this is
 
-graphlore is a Python MCP server that makes a Graphify-built knowledge graph (`graphify-out/graph.json`) navigable and joins it to real source spans. It ships **no extractor**: building the graph is delegated to the external `graphify` CLI (PyPI package `graphifyy`). What lives here is graph analysis plus the span engine (stdlib `ast` for Python, tree-sitter for everything else).
+graphlore is a Python MCP server that makes a Graphify-built knowledge graph (`graphify-out/graph.json`) navigable and joins it to real source spans. By default building the graph is delegated to the external `graphify` CLI (PyPI package `graphifyy`). What lives in `src/graphlore/` is graph analysis plus the span engine (stdlib `ast` for Python, tree-sitter for everything else).
+
+`engine/` is graphlore's own extractor, written in Rust: a separate distribution, `graphlore-engine` (import name `graphlore_engine`), built with maturin + PyO3, with its tree-sitter grammars compiled in. It is experimental and opt-in (`GRAPHLORE_ENGINE=native` or `auto`): phase 1 writes files, definitions with their `start..end` spans, containment (`contains` / `method` / `case_of`) and Markdown/RST headings for 14 languages, but no import or call edges and no communities yet. The plan is to make it the default once `benchmarks/compare_engines.py` and the polyglot audit say it matches graphify, then drop graphify. graphlore itself stays pure Python: the Claude Code plugin builds it from source on the user's machine, so Rust must never enter its own build (`pyproject.toml` excludes `engine/` from the sdist).
 
 It is built on the **MCP Python SDK v2** (`mcp>=2.1,<3.0`): `mcp.server.mcpserver.MCPServer`, not v1's `FastMCP`, and `ToolAnnotations` with snake_case fields (`read_only_hint`, `destructive_hint`).
 
@@ -24,9 +26,16 @@ python benchmarks/polyglot.py --setup --root /tmp/polyglot   # clone 31 repos in
 python benchmarks/polyglot.py --root /tmp/polyglot --baseline benchmarks/results-polyglot.json   # every tool on each; new / gone findings
 
 GRAPHLORE_PROJECT_DIR=/path/to/repo python -m graphlore   # run the server (stdio)
+
+# the native engine (engine/), with a Rust toolchain
+cargo fmt --manifest-path engine/Cargo.toml --check
+cargo clippy --manifest-path engine/Cargo.toml --all-targets -- -D warnings
+cargo test --manifest-path engine/Cargo.toml
+maturin build -m engine/Cargo.toml --release --out dist-engine && pip install dist-engine/*.whl   # or `maturin develop` in a venv
+python benchmarks/compare_engines.py REPO            # native graph vs graphify's, per language
 ```
 
-CI (`.github/workflows/ci.yml`) runs `ruff check .`, `mypy` and pytest with coverage on Python 3.10–3.12, so code must stay 3.10-compatible. The default branch is `master`.
+CI (`.github/workflows/ci.yml`) runs `ruff check .`, `mypy` and pytest with coverage on Python 3.10–3.12, so code must stay 3.10-compatible; its `engine` job runs the cargo checks, builds the wheel and runs the suite with the engine installed. The default branch is `master`. Unlike the Python sources, `engine/` is `cargo fmt`-formatted (`engine/rustfmt.toml`) and CI checks it.
 
 **Don't run `ruff format .` across the repo.** CI doesn't check formatting and 8 of the 11 Python files (including `server.py` and `tests/test_tools.py`) are not ruff-formatted, so it rewrites them wholesale. Match the surrounding style by hand unless a reformat is the task.
 
@@ -43,6 +52,7 @@ A `LanguageNotFoundError: Download error` means the grammars are unavailable and
 `src/graphlore/` is layered bottom → top; each module imports only from earlier entries in this list (plus one sideways import: `routes.py` uses `_strip_quotes` from `apis.py`):
 
 - `config.py` — `env(name)` reads `GRAPHLORE_<name>`, falling back to the legacy `GRAPHIFY_<name>`; holds `PROJECT_DIR` and `OUT_DIR_NAME`.
+- `engine.py` — the extractor choice (`GRAPHLORE_ENGINE`, read per call): `choose()` routes a build to graphify or the native engine, `build()` runs `python -m graphlore_engine build` in a child process (a grammar crash cannot take the server down), `render_report()` is the build reply, `file_spans()` is the span fallback `spans.py` uses when Python tree-sitter is missing. It never imports `graphlore_engine` at module import.
 - `graph.py` — loads `graph.json` (cached by path + mtime), schema-tolerant node/edge accessors, adjacency, BFS, SCC cycles, hop distances, surprise scoring, token estimation. No MCP dependency.
 - `spans.py` — the span engine: per-file `(region_start, end_line, def_line, qualname)` spans, `_node_for_location` (semantic chunk → enclosing graph node), `_structurally_equal` (the cosmetic-vs-structural diff behind freshness/diff/watch), and the shared per-file pipeline `_cached_file_analysis`.
 - `scope.py` — the analysis scope shared by the analysis tools: parses the `scope` string, detects vendored/minified files, and hands back a cached `ScopeView` of the nodes and edges it keeps.
@@ -52,15 +62,15 @@ A `LanguageNotFoundError: Download error` means the grammars are unavailable and
 - `review.py` — the review analyses with no MCP dependency: unreferenced code, same-named symbols, identical bodies, layer rules.
 - `server.py` — the whole MCP surface in one ~5,000-line module: the `mcp` instance, 33 tools, resources, prompts, toolset trimming, the opt-in watcher, HTTP bearer auth and `main()`.
 
-Tools come in two kinds. **CLI-backed** tools (`build`, `add`, `query`, `path`, `explain`) shell out through `_run_cli`, always as an argv list with no shell; `graphlore_label_communities(method="cli")` is a sixth `_run_cli` caller (`graphify label`). Callers detect failure by the `ERROR` prefix of the returned string. **graph.json analysis** tools read the graph directly and must keep working with no `graphify` binary and no optional extras installed.
+Tools come in two kinds. **CLI-backed** tools (`build`, `add`, `query`, `path`, `explain`) shell out through `_run_cli` (`build` goes to `_build_native` instead when `engine.choose` picks the native engine), always as an argv list with no shell; `graphlore_label_communities(method="cli")` is a sixth `_run_cli` caller (`graphify label`). Callers detect failure by the `ERROR` prefix of the returned string. **graph.json analysis** tools read the graph directly and must keep working with no `graphify` binary and no optional extras installed.
 
-Optional dependencies (`semble`, `tree-sitter`, `tiktoken`, `watchdog`, `uvicorn`) are imported lazily inside functions and degrade to a fallback or an install hint; nothing may raise `ImportError` at module import.
+Optional dependencies (`semble`, `tree-sitter`, `tiktoken`, `watchdog`, `uvicorn`, `graphlore_engine`) are imported lazily inside functions and degrade to a fallback or an install hint; nothing may raise `ImportError` at module import.
 
 ## Conventions that span files
 
 - **Read `config.PROJECT_DIR` by attribute**, never `from .config import PROJECT_DIR`: tests repoint it with `monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)`, and `graphlore_project` reassigns it at runtime. For the same reason nothing may cache a value derived from it without keying on it.
-- **Settings go through `config.env("NAME")`** so the legacy `GRAPHIFY_*` fallback applies. Several are captured once at import as `server.py` module constants (`TOOLSET`, `TRANSPORT`, `RESTRICT_PATHS`, `API_KEY`, `GRAPHIFY_BIN`, …) and tests patch the attribute; others (`SEMANTIC_BACKEND`, `WATCH`, `ALLOWED_HOSTS`, `TOKENIZER`, `OFFLINE` via `config.offline()`, `STRUCTURED`) are read at call time.
-- **Network egress:** every path that can reach the network checks `config.offline()` (refuse, or degrade to a local-only variant and say so); the "What reaches the network, and when" table in `docs/configuration.md` lists them and must stay in step. `_run_cli` passes `_cli_env()`, which strips the `_BACKEND_ENV` keys offline. A new optional dependency that downloads on first use gets a row there and a gate.
+- **Settings go through `config.env("NAME")`** so the legacy `GRAPHIFY_*` fallback applies. Several are captured once at import as `server.py` module constants (`TOOLSET`, `TRANSPORT`, `RESTRICT_PATHS`, `API_KEY`, `GRAPHIFY_BIN`, …) and tests patch the attribute; others (`SEMANTIC_BACKEND`, `WATCH`, `ALLOWED_HOSTS`, `TOKENIZER`, `OFFLINE` via `config.offline()`, `STRUCTURED`, `ENGINE` via `engine.requested()`) are read at call time.
+- **Network egress:** every path that can reach the network checks `config.offline()` (refuse, or degrade to a local-only variant and say so); the "What reaches the network, and when" table in `docs/configuration.md` lists them and must stay in step. `_run_cli` passes `_cli_env()`, which strips the `_BACKEND_ENV` keys offline. A new optional dependency that downloads on first use gets a row there and a gate. The native engine never reaches the network (its grammars are compiled in); keep it that way.
 - **Repository text is framed:** a tool whose text reply quotes source, docstrings or CLI output derived from them wraps it in `_frame_repo_text(...)` and puts `content_trust: _CONTENT_TRUST` and `untrusted_fields` in the payload. graphlore's own notes go outside the frame; errors are never framed.
 - **Tool shape:** a plain sync function returning `str` (the SDK runs sync tools in a threadpool), registered with `@_tool(annotations=...)`, never `@mcp.tool`. `_load_graph()` returns either the graph dict or an error *string*; check `isinstance(graph, str)` and return `_err(msg, as_json)`. Success returns `_fmt(payload, as_json, text)`. With `as_json=True` every path, including errors and no-match, must return parseable JSON.
 - **MCP results:** `_tool` registers a wrapper (no outputSchema) and leaves the module attribute as the plain function, so direct calls and tests get the string. `_fmt` / `_err` record their payload in a per-call `ContextVar`; when the tool returns exactly that string, the payload becomes the result's `structuredContent`. `_err` sets `isError`, and so does `_fmt(..., is_error=True)` for a failure that still has a payload. An empty but valid answer (no search hits) is `_fmt`, not `_err`. `_err(msg, as_json, **extra)` keeps `error` a string and adds sibling keys (`code`, `did_you_mean`). A reply built without `_fmt`/`_err` has no structuredContent and is an error only when it starts with `ERROR`; CLI passthroughs go through `_cli_reply`. `GRAPHLORE_STRUCTURED=0` turns all of this off.
@@ -101,6 +111,7 @@ The version is duplicated in `pyproject.toml`, `server.__version__`, `.claude-pl
 - `docs/configuration.md` — running, the plugin, toolsets, transports, the network table, environment variables
 - `docs/benchmark.md` — method and results (`docs/benchmark*.html` are the rendered reports)
 - `docs/benchmark-polyglot.md` — every tool run on 31 real repositories in 14 languages: what works per language, what does not, and the findings (`benchmarks/polyglot.py` reruns it)
+- `docs/native-engine.md` — the native engine: what phase 1 extracts, its comparison with graphify on the same 31 repositories (`benchmarks/compare_engines.py`), and the roadmap to replacing graphify
 
 Links from the README into the repository are absolute (`https://github.com/yasinyaman/graphlore/blob/master/...`) because relative links break on PyPI; links between the `docs/` files are relative. The README's first paragraph and its FAQ headings are written to be quoted by search engines and AI assistants: keep them plain, literal and true to the code.
 
@@ -118,6 +129,15 @@ The repository root is itself a Claude Code plugin and its own marketplace (`.cl
 - Check manifest changes with `claude plugin validate --strict .`; it passes clean.
 - Claude Code's project instructions live in `.claude/CLAUDE.md`, not at the root. A `CLAUDE.md` at a plugin root is not loaded as plugin context and makes the validator warn, so don't add one there.
 
+## The native engine (`engine/`)
+
+- `src/generic.rs` is the port of `spans.py`'s definition rule (`_spans_treesitter` and its helpers), in the same order. Keep the two in step: `tests/test_engine.py` asserts that `graphlore_engine.file_spans` equals `spans._spans_treesitter` (and, for Python, `spans._spans_python`) on a snippet per language. A rule change in `spans.py` gets the same change in `generic.rs`.
+- A language is a `Lang` variant, a row in `SPECS` (`src/lang/mod.rs`: name, extensions, grammar crate) and a module in `src/lang/` implementing `LanguageModule`, whose methods all default to the generic rule; a module overrides only what its grammar does differently (`kind_of`, `region_start`, `end_line`, `test_regions`, `refine`, `bound_functions`, `emits_node`). Phase 2 adds `import_of` / `reference_of` there. Each new language gets a sample in `tests/grammars_load.rs` and goldens in `tests/spans_golden.rs`.
+- Grammar crates must depend only on `tree-sitter-language` (not on the core crate), or they pin a second core. Kotlin is `tree-sitter-kotlin-sg` (the fwcd grammar `spans.py`'s rules assume) because `tree-sitter-kotlin` pins an old core.
+- graph.json keeps graphify's shape and conventions so every reader works unchanged: node-link top level, path-slug ids (`core/src/lib.rs` + `Fixed.acquire` → `core_src_lib_fixed_acquire`), labels `name()` / `.name()` / bare, a file hub per file, `source_location` whose leading number is the definition line. Additions are extra keys (`kind`, `qualname`, `language`, `region_start`, `end_line`, `test`, top-level `graph.engine`); never write `type` or `line` on code nodes, which the accessors prefer.
+- The engine's version lives only in `engine/Cargo.toml` and is independent of graphlore's. `SCHEMA_VERSION` (`src/lib.rs`) changes when graph.json changes in a way readers must know about; `engine.SUPPORTED_SCHEMAS` lists the ones this graphlore reads, and `test_engine_version_pins_stay_in_sync` checks the two.
+- No `engine` extra in `pyproject.toml` until `graphlore-engine` is on PyPI: `uv lock` resolves every extra and would fail.
+
 ## Tests
 
-Everything is in `tests/test_tools.py`. `tests/conftest.py` pins `server.TOOLSET = "full"` for every test: `server.main()` trims the shared `server.mcp` for real, and the default is `lean`. Tests call tool functions directly (`server.graphlore_overview(as_json=True)`) and parse the result. The `project` fixture gives a temp project with the 5-node fixture graph; `empty_project` has no graph. Tests needing a specific shape write their own `graphify-out/graph.json` into `tmp_path` and repoint `PROJECT_DIR`. Protocol-level behavior (schemas, sampling) uses the SDK's in-memory `Client(server.mcp)` driven by `asyncio.run`; there is no pytest-asyncio. Freshness/diff tests build a real git repo in `tmp_path`.
+Everything is in `tests/test_tools.py`, except the native engine's end-to-end tests, which are in `tests/test_engine.py` and skip themselves when `graphlore_engine` is not installed; its Rust tests are in `engine/tests/`. An autouse fixture clears `GRAPHLORE_ENGINE` for every test. `tests/conftest.py` pins `server.TOOLSET = "full"` for every test: `server.main()` trims the shared `server.mcp` for real, and the default is `lean`. Tests call tool functions directly (`server.graphlore_overview(as_json=True)`) and parse the result. The `project` fixture gives a temp project with the 5-node fixture graph; `empty_project` has no graph. Tests needing a specific shape write their own `graphify-out/graph.json` into `tmp_path` and repoint `PROJECT_DIR`. Protocol-level behavior (schemas, sampling) uses the SDK's in-memory `Client(server.mcp)` driven by `asyncio.run`; there is no pytest-asyncio. Freshness/diff tests build a real git repo in `tmp_path`.

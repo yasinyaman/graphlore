@@ -11,6 +11,16 @@ python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev,treesitter]"   # treesitter so the multi-language tests run, not skip
 ```
 
+The native engine (`engine/`) needs a Rust toolchain (stable, 1.90 or newer)
+and maturin. Without it, `tests/test_engine.py` skips itself and everything else
+runs.
+
+```bash
+pip install maturin
+maturin develop -m engine/Cargo.toml --release   # inside the venv; installs graphlore_engine
+cargo test --manifest-path engine/Cargo.toml
+```
+
 ## Project layout
 
 ```
@@ -25,19 +35,26 @@ graphlore/
 │   ├── imports.py          #   import statements read from source: what they can mean, when they run
 │   ├── resolve.py          #   calls and imports through a module object, resolved from source
 │   ├── review.py           #   unreferenced code, same-named symbols, identical bodies, layer rules
+│   ├── engine.py           #   which extractor builds the graph (graphify CLI / native engine)
 │   └── config.py           #   project dir / out dir
+├── engine/                 # the native extractor in Rust (separate package graphlore-engine)
+│   ├── src/generic.rs      #   the definition rule, ported from spans.py
+│   ├── src/lang/           #   one module per language: only what differs from the generic rule
+│   ├── src/docs/           #   Markdown / reStructuredText headings
+│   ├── src/graph/          #   ids, labels, containment edges, atomic graph.json write
+│   └── tests/              #   grammar ABI check, span goldens, a build of the polyglot fixture
 ├── tests/                  # pytest suite (in-process MCP client + unit tests)
 ├── benchmarks/             # multilang benchmark, polyglot audit + committed results JSON
 ├── docs/                   # tool reference, concepts, configuration, benchmark reports
 ├── .claude-plugin/         # Claude Code plugin + marketplace manifests (the repo root is the plugin)
 ├── .claude/skills/         # graphlore-explore skill for Claude Code (shipped by the plugin)
-├── .github/workflows/      # CI: ruff + mypy + pytest on py 3.10–3.12; PyPI publish on release
+├── .github/workflows/      # CI: ruff + mypy + pytest on py 3.10–3.12, the engine job; PyPI publish on release
 ├── server.json             # MCP Registry manifest (see "Releasing")
 ├── mcp.json                # Claude Code example config
 └── claude_desktop_config.json
 ```
 
-`src/graphlore/` is layered bottom → top (`config.py` → `graph.py` → `spans.py` →
+`src/graphlore/` is layered bottom → top (`config.py` → `engine.py` → `graph.py` → `spans.py` →
 `scope.py` → `apis.py` / `routes.py` → `imports.py` → `resolve.py` → `review.py` →
 `server.py`); each module imports only from earlier ones. `server.py` re-exports
 the helpers tests reach as `server._x`. [`AGENTS.md`](AGENTS.md) describes each
@@ -49,7 +66,14 @@ layer and the conventions that span files.
 ruff check .      # lint
 mypy              # types
 pytest -q         # tests
+# when engine/ changed:
+cargo fmt --manifest-path engine/Cargo.toml --check
+cargo clippy --manifest-path engine/Cargo.toml --all-targets -- -D warnings
+cargo test --manifest-path engine/Cargo.toml
 ```
+
+A change to the definition rule in `spans.py` needs the same change in
+`engine/src/generic.rs`; `tests/test_engine.py` compares the two.
 
 Don't run `ruff format .` across the repository: most files are not
 ruff-formatted and CI does not check formatting, so it rewrites them wholesale.

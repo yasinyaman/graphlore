@@ -107,7 +107,7 @@ helps a model pick the right tool.
 | `graphlore_fetch` | A node's source code: the exact span, under a token budget |
 | `graphlore_communities` | The subsystems (Leiden communities) of the codebase |
 | `graphlore_freshness` | Is the graph stale against git: fresh, update or rebuild |
-| `graphlore_build` | Build or update the graph with the Graphify CLI |
+| `graphlore_build` | Build or update the graph with the Graphify CLI (or the experimental native engine) |
 | `graphlore_project` | Show or switch the project directory the server reads |
 
 `GRAPHLORE_TOOLSET=full` exposes all 33: structure review (import and call
@@ -219,8 +219,11 @@ own. The old `GRAPHIFY_*` environment variables still work.
 ## Known limits
 
 - One active project at a time; `graphlore_project` switches it (stdio only).
-- No extractor of its own: the `graphify` CLI builds the graph, and
+- By default the `graphify` CLI builds the graph, and
   `build` / `query` / `path` / `explain` / `add` are thin wrappers over it.
+  graphlore's own extractor (`engine/`, Rust, opt-in with
+  `GRAPHLORE_ENGINE=native`) is experimental: definitions, spans and
+  containment in 14 languages, no import or call edges yet.
 - No PR or review-thread tooling.
 - Calls through an object, a callback or dynamic dispatch are not in the graph,
   so an empty answer means "no edge was indexed", not "nothing calls this".
@@ -231,6 +234,7 @@ own. The old `GRAPHIFY_*` environment variables still work.
 - [How graphlore works](https://github.com/yasinyaman/graphlore/blob/master/docs/concepts.md): resolved edges, import checks, analysis scope, freshness, semantic bridge, naming communities
 - [Configuration](https://github.com/yasinyaman/graphlore/blob/master/docs/configuration.md): toolsets, HTTP transport and security, offline mode, environment variables
 - [Benchmark](https://github.com/yasinyaman/graphlore/blob/master/docs/benchmark.md): method, cross-language results, caveats
+- [Native engine](https://github.com/yasinyaman/graphlore/blob/master/docs/native-engine.md): graphlore's own extractor in Rust (experimental), compared with graphify on 31 repositories, and the roadmap
 - [Changelog](https://github.com/yasinyaman/graphlore/blob/master/CHANGELOG.md) · [Contributing](https://github.com/yasinyaman/graphlore/blob/master/CONTRIBUTING.md) · [Guidance for coding agents](https://github.com/yasinyaman/graphlore/blob/master/AGENTS.md)
 
 ## Development
