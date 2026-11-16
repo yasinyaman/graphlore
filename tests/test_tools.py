@@ -74,6 +74,123 @@ def test_neighbors_lists_both_directions_of_a_mutual_edge(tmp_path, monkeypatch)
                     ("B", "references", "out"), ("C", "calls", "in")]
 
 
+_SHARED_STATE_GRAPH = {
+    "nodes": [
+        {"id": "cache_py", "label": "cache.py", "source_file": "pkg/cache.py", "kind": "file",
+         "source_location": "L1"},
+        {"id": "cache", "label": "CACHE", "source_file": "pkg/cache.py", "kind": "variable",
+         "source_location": "L1"},
+        {"id": "a_py", "label": "a.py", "source_file": "pkg/a.py", "kind": "file",
+         "source_location": "L1"},
+        {"id": "put", "label": "put()", "source_file": "pkg/a.py", "kind": "function",
+         "source_location": "L3", "_callable": True},
+        {"id": "b_py", "label": "b.py", "source_file": "web/b.py", "kind": "file",
+         "source_location": "L1"},
+        {"id": "get", "label": "get()", "source_file": "web/b.py", "kind": "function",
+         "source_location": "L3", "_callable": True},
+        {"id": "view", "label": "view()", "source_file": "web/b.py", "kind": "function",
+         "source_location": "L9", "_callable": True},
+        {"id": "t_py", "label": "test_a.py", "source_file": "tests/test_a.py", "kind": "file",
+         "source_location": "L1"},
+        {"id": "test_put", "label": "test_put()", "source_file": "tests/test_a.py",
+         "kind": "function", "source_location": "L2", "_callable": True},
+    ],
+    "links": [
+        {"source": "cache_py", "target": "cache", "relation": "contains"},
+        {"source": "a_py", "target": "put", "relation": "contains"},
+        {"source": "b_py", "target": "get", "relation": "contains"},
+        {"source": "b_py", "target": "view", "relation": "contains"},
+        {"source": "t_py", "target": "test_put", "relation": "contains"},
+        {"source": "a_py", "target": "cache_py", "relation": "imports_from"},
+        {"source": "b_py", "target": "cache_py", "relation": "imports_from"},
+        {"source": "put", "target": "cache", "relation": "writes", "context": "item",
+         "confidence": "EXTRACTED", "source_file": "pkg/a.py", "source_location": "L4"},
+        {"source": "get", "target": "cache", "relation": "reads", "context": "read",
+         "confidence": "EXTRACTED", "source_file": "web/b.py", "source_location": "L4"},
+        {"source": "view", "target": "get", "relation": "calls", "confidence": "EXTRACTED",
+         "source_file": "web/b.py", "source_location": "L10"},
+        {"source": "test_put", "target": "cache", "relation": "writes", "confidence": "EXTRACTED",
+         "source_file": "tests/test_a.py", "source_location": "L3"},
+        {"source": "test_put", "target": "put", "relation": "calls", "confidence": "EXTRACTED",
+         "source_file": "tests/test_a.py", "source_location": "L4"},
+    ],
+}
+
+
+def _shared_state_project(tmp_path, monkeypatch):
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    server._GRAPH_CACHE.clear()
+    _write_graph(tmp_path, json.loads(json.dumps(_SHARED_STATE_GRAPH)))
+
+
+def test_impact_follows_shared_state_only_when_asked(tmp_path, monkeypatch):
+    # put() writes CACHE, get() reads it, view() calls get(): no call joins put
+    # and get, the variable does
+    _shared_state_project(tmp_path, monkeypatch)
+    plain = json.loads(server.graphlore_impact("put", as_json=True))
+    code = {r["node"] for r in plain["impacted"] if not r["node"].endswith(".py")}
+    assert code == {"test_put()"}  # files that contain it aside
+    assert plain["state_nodes_skipped"] == 0  # put's dependents do not pass CACHE
+    out = json.loads(server.graphlore_impact("put", direction="dependencies", as_json=True))
+    assert "CACHE" not in {r["node"] for r in out["impacted"]}
+    assert out["state_nodes_skipped"] == 1
+    assert "shared_state=True" in out["hint"]
+    shared = json.loads(server.graphlore_impact("put", shared_state=True, as_json=True))
+    rows = {r["node"]: r for r in shared["impacted"]}
+    assert rows["CACHE"]["relation"] == "written_by" and rows["CACHE"]["distance"] == 1
+    assert rows["get()"]["distance"] == 2 and rows["get()"]["relation"] == "reads"
+    assert rows["view()"]["distance"] == 3 and rows["view()"]["via"] == "get()"
+    # and back: what get() depends on through what it reads
+    back = json.loads(server.graphlore_impact(
+        "get", direction="dependencies", shared_state=True, as_json=True))
+    assert {"CACHE", "put()"} <= {r["node"] for r in back["impacted"]}
+    # on the variable itself, its readers and writers are its dependents
+    own = json.loads(server.graphlore_impact("CACHE", as_json=True))
+    assert {"put()", "get()", "test_put()"} <= {r["node"] for r in own["impacted"]}
+    assert "state" in server.IMPACT_RELATION_PRESETS
+    named = json.loads(server.graphlore_impact(
+        "get", direction="dependencies", relations="state", as_json=True))
+    assert {r["node"] for r in named["impacted"]} >= {"CACHE"}
+
+
+def test_surprises_and_node_details_name_shared_state(tmp_path, monkeypatch):
+    _shared_state_project(tmp_path, monkeypatch)
+    sp = json.loads(server.graphlore_surprises(as_json=True))
+    (row,) = sp["shared_state"]
+    assert row["state"] == "CACHE" and row["writers"] == ["put()"] and row["readers"] == ["get()"]
+    assert row["kind"] == "variable" and row["files"] == 2
+    assert "crosses top-level directories" in row["why"]
+    # the two files both import cache.py, not each other
+    assert "files that neither import the other share it" in row["why"]
+    assert sp["shared_state_total"] == 1
+    text = server.graphlore_surprises()
+    assert "Shared state:" in text and "CACHE" in text
+    put = json.loads(server.graphlore_node_details("put", as_json=True))
+    assert put["state"]["writes"] == ["CACHE"]
+    assert {(r["node"], r["effect"]) for r in put["state"]["shared_with"]} == {
+        ("get()", "affected by this"), ("test_put()", "both write it")}
+    get = json.loads(server.graphlore_node_details("get", as_json=True))
+    assert get["state"]["shared_with"][0] == {
+        "node": "put()", "state": "CACHE", "relation": "writes", "effect": "affects this"}
+    cache = json.loads(server.graphlore_node_details("CACHE", as_json=True))
+    assert cache["state"] == {"written_by": ["put()", "test_put()"], "read_by": ["get()"]}
+    assert "state" not in json.loads(server.graphlore_node_details("view", as_json=True))
+
+
+def test_shared_state_makes_no_cycle_and_no_class(tmp_path, monkeypatch):
+    # get() reads CACHE and something writes CACHE back from get's file: still
+    # no dependency cycle; a module variable is not an unreferenced class
+    _shared_state_project(tmp_path, monkeypatch)
+    graph = json.loads(json.dumps(_SHARED_STATE_GRAPH))
+    graph["links"].append({"source": "cache", "target": "get", "relation": "reads"})
+    (tmp_path / "graphify-out" / "graph.json").write_text(json.dumps(graph), encoding="utf-8")
+    server._GRAPH_CACHE.clear()
+    cycles = json.loads(server.graphlore_cycles(kind="other", as_json=True))
+    assert cycles["cycles"] == [] or all("CACHE" not in str(c) for c in cycles["cycles"])
+    dead = json.loads(server.graphlore_unreferenced(scope="all", as_json=True))
+    assert "CACHE" not in {d["node"] for d in dead["unreferenced"]}
+
+
 def test_neighbors_fuzzy(project):
     # case-insensitive substring match still resolves
     data = json.loads(server.graphlore_neighbors("async", as_json=True))

@@ -135,6 +135,8 @@ from .graph import (  # noqa: F401  (re-exported for the tools + tests)
     _IMPORT_RELATIONS,
     _NON_DEPENDENCY_RELATIONS,
     _PAYLOAD_ENVELOPE_CHARS,
+    _STATE_KINDS,
+    _STATE_RELATIONS,
     _adjacency,
     _approx_tokens,
     _bare_name,
@@ -160,6 +162,8 @@ from .graph import (  # noqa: F401  (re-exported for the tools + tests)
     _hop_records,
     _is_external_node,
     _is_file_hub_node,
+    _is_resource_node,
+    _is_state_node,
     _is_surprise_edge,
     _is_test_path,
     _load_graph,
@@ -175,8 +179,10 @@ from .graph import (  # noqa: F401  (re-exported for the tools + tests)
     _rel,
     _relation_adjacency,
     _resolve_node,
+    _shared_state,
     _substring_matches,
     _tiered_import_cycles,
+    _with_written_by,
 )
 from .imports import (  # noqa: F401  (re-exported for the tools + tests)
     ImportChecker,
@@ -2098,8 +2104,15 @@ def graphlore_surprises(limit: int = 20, as_json: bool = False, scope: str = "")
       - ``none``     — nothing was scorable; the reason is named explicitly
         instead of printing an empty list under a promising header.
 
+    ``shared_state`` lists, apart from the edges, the variables, fields and
+    resources that code in one file writes and code in another reads or writes
+    (the native engine's ``reads`` / ``writes``): coupling with no call between
+    the two. Scored like the edges: files that do not import each other,
+    different top-level directories, different communities; test code is left
+    out unless the state is test code.
+
     Args:
-        limit: Cap on listed edges.
+        limit: Cap on listed edges, and on listed shared state.
         scope: Which part of the graph to score (see graphlore_god_nodes): path
             prefixes / globs, ``!pattern``, ``-tests``, ``+vendored``, ``all``.
             Vendored and minified files are left out by default.
@@ -2113,6 +2126,28 @@ def graphlore_surprises(limit: int = 20, as_json: bool = False, scope: str = "")
         return view
     nodes, edges = view.nodes, view.edges
     labels = _display_labels(all_nodes)
+    shared = _shared_state(nodes, edges, labels)
+    shared_rows = shared[:max(0, limit)]
+
+    def with_shared(payload: dict[str, Any], text: list[str]) -> None:
+        payload["shared_state"] = shared_rows
+        payload["shared_state_total"] = len(shared)
+        if len(shared) > len(shared_rows):
+            payload["truncated"] = True
+        if not shared_rows:
+            return
+        text.append(f"\nShared state: {len(shared)} variable(s)/field(s) written in one "
+                    "file and read or written in another (no call between them needed):")
+        for r in shared_rows:
+            text.append(
+                f"  [{r['strength']} {r['score']}] {r['state']} ({r['kind']}, "
+                f"{r['file'] or 'outside the code'}): written by "
+                f"{', '.join(r['writers'][:3])}{'…' if len(r['writers']) > 3 else ''}"
+                + (f"; read by {', '.join(r['readers'][:3])}"
+                   f"{'…' if len(r['readers']) > 3 else ''}" if r["readers"] else "")
+            )
+            if r["why"]:
+                text.append(f"      {'; '.join(r['why'])}")
 
     flagged = [e for e in edges if _is_surprise_edge(e)]
     if flagged:
@@ -2129,7 +2164,9 @@ def graphlore_surprises(limit: int = 20, as_json: bool = False, scope: str = "")
             "total": len(flagged), "truncated": len(flagged) > len(items),
             "scope": view.payload(),
         }
-        _cut_hint(payload, "Raise limit for more of the `total` edges, or narrow with scope=.")
+        with_shared(payload, text)
+        _cut_hint(payload, "Raise limit for more of the `total` edges and "
+                  "`shared_state_total` state, or narrow with scope=.")
         return _fmt(payload, as_json, _with_note("\n".join(text), view))
 
     checker = ImportChecker()
@@ -2159,6 +2196,8 @@ def graphlore_surprises(limit: int = 20, as_json: bool = False, scope: str = "")
             "surprises": [], "basis": "none", "diagnostics": diag, "fallback": True,
             "scope": view.payload(),
         }
+        with_shared(payload, text)
+        _cut_hint(payload, "Raise limit for more of the `shared_state_total` state.")
         return _fmt(payload, as_json, _with_note("\n".join(text), view))
 
     text = [
@@ -2189,7 +2228,9 @@ def graphlore_surprises(limit: int = 20, as_json: bool = False, scope: str = "")
         "total": len(computed), "truncated": len(computed) > len(items),
         "scope": view.payload(),
     }
-    _cut_hint(payload, "Raise limit for more of the `total` edges, or narrow with scope=.")
+    with_shared(payload, text)
+    _cut_hint(payload, "Raise limit for more of the `total` edges and "
+              "`shared_state_total` state, or narrow with scope=.")
     return _fmt(payload, as_json, _with_note("\n".join(text), view))
 
 
@@ -2861,6 +2902,8 @@ IMPACT_RELATION_PRESETS: dict[str, frozenset[str] | None] = {
                           "re_exports", "requires"}),
     "types": frozenset({"inherits", "extends", "implements", "mixes_in",
                         "embeds", "uses"}),
+    # a definition reading or writing a variable, field, constant or resource
+    "state": _STATE_RELATIONS | {"written_by"},
 }
 # Structural containment: never a dependency, but walked one hop out from the
 # seed so a class's own members stay reachable when containment is filtered out.
@@ -2908,6 +2951,7 @@ def graphlore_impact(
     relations: str = "",
     scope: str = "",
     strict: bool = False,
+    shared_state: bool = False,
 ) -> str:
     """Reverse-dependency / blast-radius analysis: what's affected if `node` changes.
 
@@ -2935,6 +2979,15 @@ def graphlore_impact(
     not depend on it: they are left out of the blast radius and counted in
     ``rationale_nodes_skipped``. Name the relation in ``relations`` to walk them.
 
+    Shared state (``reads`` / ``writes`` of a variable, field, constant or
+    resource, from the native engine) is not walked by default, so a call graph
+    stays a call graph: the variables passed by are counted in
+    ``state_nodes_skipped``. On a variable itself its readers and writers are
+    its dependents. ``shared_state=True`` follows it: what ``node`` writes leads
+    to what reads it (a ``written_by`` step), so the dependents of a writer
+    include the code that reads what it writes, and the dependencies of a reader
+    the code that writes what it reads.
+
     Each row also reports the traversed edge's own recorded position as `site`.
     `site_kind="reference"` means the graph recorded where the reference occurs;
     `site_kind="definition"` means it did not, and the row falls back to where the
@@ -2957,6 +3010,9 @@ def graphlore_impact(
             nothing out.
         strict: True -> walk only edges the extractor resolved (confidence
             EXTRACTED), never an inferred one.
+        shared_state: True -> also walk from a writer through what it writes to
+            its readers (and back): code that affects other code through a
+            variable, a field or a resource without calling it.
     """
     graph = _load_graph()
     if isinstance(graph, str):
@@ -2970,7 +3026,7 @@ def graphlore_impact(
     if isinstance(nav, str):
         return nav
     view, resolved = nav
-    edges = view.edges
+    edges = _with_written_by(view.edges) if shared_state else view.edges
     direction = direction.strip().lower()
     if direction not in ("dependents", "dependencies", "both"):
         return _err(
@@ -2999,6 +3055,14 @@ def graphlore_impact(
         frozenset() if rel_filter is not None and "rationale_for" in rel_filter
         else _IMPACT_SKIPPED_RELATIONS
     )
+    # Shared state is walked when asked for, by name or with shared_state=True,
+    # and from a variable itself (its readers and writers are its dependents).
+    walk_state = (
+        shared_state or _is_state_node(start)
+        or (rel_filter is not None and bool(rel_filter & _STATE_RELATIONS))
+    )
+    state_skip = frozenset() if walk_state else _STATE_RELATIONS
+    skip = skip | state_skip
     edge_ok = _is_extracted_edge if strict else None
     if direction == "dependents":
         recs = _hop_records(reverse, sid, hops, rel_filter, seeds, skip, edge_ok)
@@ -3029,7 +3093,25 @@ def graphlore_impact(
                     nb for nb, e in adj_side.get(nid, [])
                     if _rel(e) in skip and nb not in recs
                 )
-        rationale_skipped = len(passed)
+        rationale_skipped = len({
+            nid for nid in passed
+            if not (byid.get(nid) and _is_state_node(byid[nid]))
+        }) if state_skip else len(passed)
+    # The variables and fields the walk passed by without following them.
+    state_skipped = 0
+    if state_skip:
+        sides = {"dependents": (reverse,), "dependencies": (forward,)}.get(
+            direction, (reverse, forward)
+        )
+        touched: set[str] = set()
+        for adj_side in sides:
+            for nid, (d, _via, _edge) in recs.items():
+                if d < hops:
+                    touched.update(
+                        nb for nb, e in adj_side.get(nid, [])
+                        if _rel(e) in state_skip and nb not in recs
+                    )
+        state_skipped = len(touched)
 
     hits: list[tuple[str, int, str, dict]] = []
     for nid, (d, via, edge) in recs.items():
@@ -3108,6 +3190,8 @@ def graphlore_impact(
         "count": len(impacted),
         "impacted": impacted,
         "rationale_nodes_skipped": rationale_skipped,
+        "state_nodes_skipped": state_skipped,
+        "shared_state": shared_state,
         "truncated": truncated,
         "dropped": dropped,
         "dropped_tests": dropped_tests,
@@ -3125,7 +3209,9 @@ def graphlore_impact(
     hint = (
         ("Raise budget_tokens or narrow with relations=/scope= for the rows not "
          "shown. " if truncated else "")
-        + (f"hops={hops + 1} would add {beyond_hops} node(s)." if beyond_hops else "")
+        + (f"hops={hops + 1} would add {beyond_hops} node(s). " if beyond_hops else "")
+        + (f"shared_state=True follows the {state_skipped} variable(s)/field(s) "
+           "passed by to the code that reads or writes them." if state_skipped else "")
     ).strip()
     if hint:
         payload["hint"] = hint
@@ -3133,6 +3219,11 @@ def graphlore_impact(
         f"\n({rationale_skipped} docstring/rationale node(s) left out — they describe "
         "code, they do not depend on it.)" if rationale_skipped else ""
     )
+    if state_skipped:
+        rationale_note += (
+            f"\n({state_skipped} variable(s)/field(s) read or written along the way not "
+            "followed; shared_state=True follows them to the code they couple.)"
+        )
     if resolved_rows:
         rationale_note += (
             f"\n({resolved_rows} row(s) rest on a call or import graphlore resolved from "
@@ -3963,11 +4054,18 @@ def graphlore_duplication_scan(
 
 @_tool(annotations=ToolAnnotations(title="Node details", read_only_hint=True))
 def graphlore_node_details(node: str, as_json: bool = False) -> str:
-    """Show a node's full metadata: type, source file/line, docstring, community."""
+    """Show a node's full metadata: type, source file/line, docstring, community.
+
+    On a native graph, ``state`` says what the node reads and writes (variables,
+    fields, constants, resources) and ``shared_with`` the other definitions that
+    touch the same state, each with how: the code this one affects, or is
+    affected by, without a call between them. For a variable or field it lists
+    its readers and writers instead.
+    """
     graph = _load_graph()
     if isinstance(graph, str):
         return _err(graph, as_json)
-    nodes, _ = _nodes_edges(graph)
+    nodes, edges = _nodes_edges(graph)
     picked = _pick_node(nodes, node)
     n = picked.node
     if n is None:
@@ -3990,6 +4088,9 @@ def graphlore_node_details(node: str, as_json: bool = False) -> str:
     }}
     if extra:
         detail["extra"] = extra
+    state, state_text = _state_of(nodes, edges, _node_id(n))
+    if state:
+        detail["state"] = state
     detail["content_trust"] = _CONTENT_TRUST
     detail["untrusted_fields"] = ["doc", "extra"]
     loc = f"{detail['file']}:{detail['line']}" if detail["file"] else "(no source location)"
@@ -4002,11 +4103,74 @@ def graphlore_node_details(node: str, as_json: bool = False) -> str:
     ]
     if extra:
         text.append(f"  other    : {', '.join(extra.keys())}")
+    text += state_text
     matched, matched_text = _matched(node, picked)
     if matched:
         detail["matched"] = matched
         text.append(matched_text)
     return _fmt(detail, as_json, "\n".join(text))
+
+
+_STATE_SHARED_LIMIT = 15
+
+
+def _state_of(nodes: list[dict], edges: list[dict], nid: str) -> tuple[dict[str, Any], list[str]]:
+    """What a definition reads and writes, and who else touches the same state;
+    for a state node, its readers and writers. Empty on a graph with no
+    ``reads`` / ``writes`` edges."""
+    labels = _display_labels(nodes)
+    byid = {_node_id(n): n for n in nodes}
+    touches: dict[str, dict[str, set[str]]] = {}   # state -> relation -> definitions
+    for e in edges:
+        rel = _rel(e)
+        if rel in _STATE_RELATIONS:
+            s, t = _edge_ends(e)
+            touches.setdefault(t, {}).setdefault(rel, set()).add(s)
+    if nid in touches:
+        got = touches[nid]
+        rows = {rel: sorted(labels.get(i, i) for i in got.get(rel, ()))
+                for rel in ("writes", "reads")}
+        out: dict[str, Any] = {"written_by": rows["writes"], "read_by": rows["reads"]}
+        text = [f"  written by: {', '.join(rows['writes']) or '(nothing)'}",
+                f"  read by   : {', '.join(rows['reads']) or '(nothing)'}"]
+        return out, text
+    mine = {rel: sorted(t for t, by in touches.items() if nid in by.get(rel, ()))
+            for rel in ("reads", "writes")}
+    if not (mine["reads"] or mine["writes"]):
+        return {}, []
+    shared: list[dict[str, Any]] = []
+    for t in sorted(set(mine["reads"]) | set(mine["writes"])):
+        i_write = t in mine["writes"]
+        for rel in ("writes", "reads"):
+            for other in sorted(touches[t].get(rel, ())):
+                if other == nid or (rel == "reads" and other in touches[t].get("writes", ())):
+                    continue
+                if not i_write and rel == "reads":
+                    continue  # two readers of one variable do not affect each other
+                shared.append({
+                    "node": labels.get(other, other), "state": labels.get(t, t),
+                    "relation": rel,
+                    "effect": "affected by this" if i_write and rel == "reads"
+                              else "affects this" if not i_write else "both write it",
+                })
+    out = {"reads": [labels.get(t, t) for t in mine["reads"]],
+           "writes": [labels.get(t, t) for t in mine["writes"]],
+           "shared_with": shared[:_STATE_SHARED_LIMIT], "shared_total": len(shared)}
+    if len(shared) > _STATE_SHARED_LIMIT:
+        out["truncated"] = True
+        out["hint"] = ("graphlore_impact(node, shared_state=True) walks every one of them, "
+                       "with distances.")
+    text = [f"  reads    : {', '.join(out['reads']) or '(nothing)'}",
+            f"  writes   : {', '.join(out['writes']) or '(nothing)'}"]
+    if shared:
+        text.append(f"  shared with ({len(shared)}):")
+        text += [f"    {r['node']} — {r['relation']} {r['state']} ({r['effect']})"
+                 for r in shared[:_STATE_SHARED_LIMIT]]
+        if len(shared) > _STATE_SHARED_LIMIT:
+            text.append(f"    … {len(shared) - _STATE_SHARED_LIMIT} more: "
+                        "graphlore_impact(node, shared_state=True)")
+    _ = byid
+    return out, text
 
 
 @_tool(annotations=ToolAnnotations(title="Fetch node source", read_only_hint=True))
@@ -4938,7 +5102,9 @@ _IMPORT_HOP_ARROWS = {
 }
 # Relations that never close a dependency cycle on their own: containment points
 # from a file or class down to its members, and a docstring node at its subject.
-_CYCLE_IGNORED_RELATIONS = _NON_DEPENDENCY_RELATIONS
+# Reading or writing a variable is no dependency cycle: two functions sharing a
+# counter do not import or call each other.
+_CYCLE_IGNORED_RELATIONS = _NON_DEPENDENCY_RELATIONS | _STATE_RELATIONS
 
 
 @_tool(annotations=ToolAnnotations(title="Dependency cycles", read_only_hint=True))

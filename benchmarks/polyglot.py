@@ -973,7 +973,7 @@ def check_languages(a: Audit, sub: Subject, repo: dict[str, Any]) -> None:
     # manifest, template and citation edges: real, and not code dependencies
     not_code = {"rationale_for", "declares", "depends_on", "includes", "cites"}
     known = (s._IMPORT_RELATIONS | s._CALL_RELATIONS | gl_graph._CONTAINMENT_RELATIONS
-             | s._IMPACT_CODE_RELATIONS | not_code)
+             | s._IMPACT_CODE_RELATIONS | s._STATE_RELATIONS | not_code)
     rels = Counter(s._rel(e) for e in sub.edges)
     m["relations"] = dict(rels.most_common())
     for rel, count in rels.items():

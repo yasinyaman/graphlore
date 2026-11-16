@@ -285,3 +285,32 @@ def test_native_update_parses_only_what_changed(py_project):
     after = {n["id"]: n["community"] for n in _graph(py_project)["nodes"]}
     kept = sum(after.get(n["id"]) == n["community"] for n in before["nodes"])
     assert kept >= 0.9 * len(before["nodes"]) - 2
+
+
+def test_native_shared_state_end_to_end(tmp_path, monkeypatch):
+    # put() writes CACHE, get() in another package reads it; no call between them
+    files = {
+        "pkg/__init__.py": "",
+        "pkg/cache.py": "CACHE = {}\n",
+        "pkg/a.py": "from pkg.cache import CACHE\n\n\ndef put(k, v):\n    CACHE[k] = v\n",
+        "web/__init__.py": "",
+        "web/b.py": "from pkg.cache import CACHE\n\n\ndef get(k):\n    return CACHE.get(k)\n",
+    }
+    for rel, text in files.items():
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_text(text, encoding="utf-8")
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    monkeypatch.setenv("GRAPHLORE_ENGINE", "native")
+    server._GRAPH_CACHE.clear()
+    assert server.graphlore_build(".").startswith("native engine")
+    nb = json.loads(server.graphlore_neighbors("CACHE", as_json=True))
+    assert {(r["node"], r["relation"], r["direction"]) for r in nb["neighbors"]} >= {
+        ("put()", "writes", "in"), ("get()", "reads", "in")}
+    plain = json.loads(server.graphlore_impact("put", as_json=True))
+    assert "get()" not in {r["node"] for r in plain["impacted"]}
+    shared = json.loads(server.graphlore_impact("put", shared_state=True, as_json=True))
+    assert "get()" in {r["node"] for r in shared["impacted"]}
+    sp = json.loads(server.graphlore_surprises(as_json=True))
+    assert [r["state"] for r in sp["shared_state"]] == ["CACHE"]
+    details = json.loads(server.graphlore_node_details("put", as_json=True))
+    assert details["state"]["shared_with"][0]["node"] == "get()"
