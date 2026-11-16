@@ -3,8 +3,10 @@
 The native engine is the ``graphlore-engine`` distribution (import name
 ``graphlore_engine``), written in Rust with its tree-sitter grammars compiled in.
 It is optional and experimental: it extracts definitions with their real spans,
-containment and document headings, but no import or call edges and no
-communities yet. ``GRAPHLORE_ENGINE`` picks the engine at call time:
+containment, document headings, the imports, calls, bases and type references it
+resolves from the source, and communities by its own weighting; ``update=True``
+parses only the files that changed. ``GRAPHLORE_ENGINE`` picks the engine at
+call time:
 
   graphify (default)  the graphify CLI, as before
   native              the native engine; an error when it is not installed

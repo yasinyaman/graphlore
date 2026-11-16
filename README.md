@@ -224,7 +224,7 @@ own. The old `GRAPHIFY_*` environment variables still work.
   graphlore's own extractor (`engine/`, Rust, opt-in with
   `GRAPHLORE_ENGINE=native`) is experimental: definitions, spans,
   imports, calls, bases and type references in 14 languages, resolved from the
-  source; no communities yet.
+  source, with its own communities and incremental updates.
 - No PR or review-thread tooling.
 - Calls through an object, a callback or dynamic dispatch are not in the graph,
   so an empty answer means "no edge was indexed", not "nothing calls this".

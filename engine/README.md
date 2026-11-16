@@ -4,19 +4,22 @@ The native code-graph extractor behind [graphlore](https://github.com/yasinyaman
 It walks a project, parses every source file with a tree-sitter grammar compiled
 into the wheel, and writes a graphify-compatible `graph.json`: a node per file,
 per definition (with its real `start..end` span), property, constant and
-document heading, the containment edges between them, and the imports, calls,
-bases and type references it resolves from the source.
+document heading, the containment edges between them, the imports, calls,
+bases and type references it resolves from the source, and communities
+(Leiden on edges weighted by kind, confidence and directory, stable across
+rebuilds).
 
 Languages: Python, JavaScript, TypeScript, TSX, Go, Java, Kotlin, Scala, C#,
 Rust, Swift, C, C++, Ruby and PHP; plus Markdown and reStructuredText headings.
 Nothing is downloaded at run time and nothing reaches the network.
 
-It is experimental. Communities and incremental updates come in later
-releases; until then graphlore uses it only when `GRAPHLORE_ENGINE=native` (or
+It is experimental: graphlore uses it only when `GRAPHLORE_ENGINE=native` (or
 `auto`) is set.
 
 ```bash
 python -m graphlore_engine build /path/to/repo      # writes graphify-out/graph.json
+python -m graphlore_engine build /path/to/repo --incremental   # parse only what changed
+python -m graphlore_engine cluster graphify-out/graph.json     # detect its communities again
 python -m graphlore_engine spans src/app.ts         # one file's definitions
 python -m graphlore_engine languages
 ```
