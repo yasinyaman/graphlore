@@ -29,19 +29,26 @@ from . import config
 ENGINES = ("graphify", "native", "auto")
 DEFAULT_ENGINE = "graphify"
 # graph.json schema versions of the native engine this graphlore reads.
-SUPPORTED_SCHEMAS = frozenset({1, 2})
+SUPPORTED_SCHEMAS = frozenset({1, 2, 3})
 INSTALL_HINT = (
     "Install it with: pip install graphlore-engine (from a checkout of graphlore: "
     "pip install maturin && maturin develop -m engine/Cargo.toml --release)."
 )
 # What a native graph does not have yet; said after every native build so an
-# empty communities answer is not mistaken for a codebase without structure.
+# empty answer is not mistaken for a codebase without structure.
 NATIVE_GAPS = (
     "The native engine is experimental: this graph has files, definitions with "
+    "their spans, containment, document headings, the imports, calls, bases and "
+    "type references it could resolve from the source, and communities by its own "
+    "weighting (edge kind, confidence and directory), not graphify's. "
+    "update=True rebuilds the whole graph."
+)
+# The same for a graph written before the engine detected communities.
+NATIVE_GAPS_NO_COMMUNITIES = (
+    "The native engine is experimental: this graph has files, definitions with "
     "their spans, containment, document headings and the imports, calls, bases and "
-    "type references it could resolve from the source, but no communities yet, and "
-    "update=True rebuilds the whole graph. GRAPHLORE_ENGINE=graphify builds a graph "
-    "with communities."
+    "type references it could resolve from the source, but no communities, and "
+    "update=True rebuilds the whole graph. A current graphlore-engine detects them."
 )
 
 
@@ -90,11 +97,7 @@ def choose(
         )
     if requested == "graphify":
         return "graphify", ""
-    unsupported = (
-        f"mode={mode!r} (graphify's LLM extraction)" if mode
-        else "cluster_only=True (community detection)" if cluster_only
-        else ""
-    )
+    unsupported = f"mode={mode!r} (graphify's LLM extraction)" if mode else ""
     if requested == "native":
         if not native_found:
             return "error", (
@@ -123,9 +126,10 @@ def choose(
             f"ERROR: the native engine has no {unsupported} yet, and the graphify CLI "
             "is not installed either (pip install graphifyy && graphify install)."
         )
-    if update and existing == "graphify" and graphify_found:
+    if (update or cluster_only) and existing == "graphify" and graphify_found:
+        what = "update=True" if update else "cluster_only=True"
         return "graphify", (
-            "GRAPHLORE_ENGINE=auto: the graph on disk is graphify's, so update=True "
+            f"GRAPHLORE_ENGINE=auto: the graph on disk is graphify's, so {what} "
             "went to graphify to keep its edges and communities. "
             "graphlore_build(update=False) rebuilds it with the native engine."
         )
@@ -192,6 +196,49 @@ def build(
     return report
 
 
+def cluster(graph: Path, *, timeout: int = 600) -> dict[str, Any] | str:
+    """Detect the communities of the native graph at ``graph`` again, in a child
+    process; returns the engine's community report or an ``ERROR`` string."""
+    argv = [sys.executable, "-m", "graphlore_engine", "cluster", str(graph)]
+    try:
+        proc = subprocess.run(
+            argv, capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        return f"ERROR: the native engine did not finish within {timeout}s (GRAPHLORE_TIMEOUT)."
+    except OSError as e:
+        return f"ERROR: failed to run the native engine: {e}"
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or "").strip()
+        if detail.startswith("ERROR"):
+            return detail
+        return f"ERROR (native engine, exit {proc.returncode}):\n{detail}"
+    try:
+        report = json.loads(proc.stdout)
+    except ValueError:
+        return f"ERROR: the native engine's report is not JSON:\n{proc.stdout[:500]}"
+    if not isinstance(report, dict):
+        return "ERROR: the native engine's report is not a JSON object."
+    return report
+
+
+def render_communities(c: dict[str, Any]) -> str:
+    """One line on the communities a native build or re-cluster found."""
+    line = (
+        f"communities: {c.get('count', 0)} (largest {c.get('largest', 0)} nodes, "
+        f"modularity {c.get('modularity', 0)})"
+    )
+    if c.get("kept_ids"):
+        line += f", {c['kept_ids']} kept their id from the previous graph"
+    if c.get("renamed_labels"):
+        line += (
+            f"; {_plural(c['renamed_labels'], 'saved name')} dropped from "
+            ".graphify_labels.json because its community changed beyond recognition"
+        )
+    return line
+
+
 def _plural(n: int, word: str) -> str:
     return f"{n} {word}" + ("" if n == 1 else "s")
 
@@ -232,6 +279,9 @@ def render_report(report: dict[str, Any], verbose: bool = False) -> str:
         if rows:
             lines.append("  resolved: " + " · ".join(rows if verbose else rows[:8])
                          + ("" if verbose or len(rows) <= 8 else f" · +{len(rows) - 8} more"))
+    communities = report.get("communities")
+    if isinstance(communities, dict) and communities.get("count"):
+        lines.append("  " + render_communities(communities))
     errors = {k: v["parse_errors"] for k, v in langs.items() if v.get("parse_errors")}
     if errors:
         lines.append(
@@ -260,7 +310,8 @@ def render_report(report: dict[str, Any], verbose: bool = False) -> str:
         lines.append(f"  skipped {skipped} whose name is not UTF-8")
     if verbose and report.get("id_collisions"):
         lines.append(f"  {report['id_collisions']} node id(s) suffixed _2, _3… to stay unique")
-    lines.append(NATIVE_GAPS)
+    has = isinstance(communities, dict) and bool(communities.get("count"))
+    lines.append(NATIVE_GAPS if has or not report.get("nodes") else NATIVE_GAPS_NO_COMMUNITIES)
     return "\n".join(lines)
 
 
