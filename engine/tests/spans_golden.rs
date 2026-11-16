@@ -1,0 +1,264 @@
+//! Span goldens: the cases graphlore's `tests/test_tools.py` holds for
+//! `spans.py`, so both engines answer them the same. Each is a real repository's
+//! failure cut down to a few lines (see docs/benchmark-polyglot.md).
+
+use std::collections::BTreeSet;
+
+use graphlore_engine::{file_facts, file_spans, DefKind};
+
+fn quals(rel: &str, src: &str) -> BTreeSet<String> {
+    file_spans(src.as_bytes(), rel).into_iter().map(|s| s.3).collect()
+}
+
+fn span(rel: &str, src: &str, qual: &str) -> (u32, u32, u32) {
+    file_spans(src.as_bytes(), rel)
+        .into_iter()
+        .find(|s| s.3 == qual)
+        .map(|s| (s.0, s.1, s.2))
+        .unwrap_or_else(|| panic!("no span {qual} in {rel}"))
+}
+
+fn set(items: &[&str]) -> BTreeSet<String> {
+    items.iter().map(|s| s.to_string()).collect()
+}
+
+#[track_caller]
+fn has_all(got: &BTreeSet<String>, want: &[&str]) {
+    let missing: Vec<_> = want.iter().filter(|w| !got.contains(**w)).collect();
+    assert!(missing.is_empty(), "missing {missing:?} in {got:?}");
+}
+
+#[test]
+fn python_is_decorator_aware_and_ends_on_code() {
+    let src =
+        "import functools\n@functools.cache\ndef decorated():\n    return 1\n    # trailing\n";
+    assert_eq!(span("u.py", src, "decorated"), (2, 4, 3));
+    // a comment above an undecorated def is not part of it (stdlib ast agrees)
+    assert_eq!(span("v.py", "# doc\ndef f():\n    pass\n", "f"), (2, 3, 2));
+    // a lambda bound to a name is no definition
+    assert_eq!(
+        quals("w.py", "f = lambda: 1\nclass A:\n    def m(self): pass\n"),
+        set(&["A", "A.m"])
+    );
+}
+
+#[test]
+fn rust_excludes_type_params_and_prefixes_impl_methods() {
+    let got = quals(
+        "x.rs",
+        "type Alias = u32;\n\
+        fn parse<T: Clone>(x: T) -> impl Iterator<Item = T> { std::iter::once(x) }\n\
+        struct S;\nimpl S { fn run(&self) {} }\n",
+    );
+    has_all(&got, &["Alias", "parse", "S", "S.run"]);
+    assert!(!got.iter().any(|q| ["T", "Item"].contains(&q.rsplit('.').next().unwrap())));
+    let got = quals(
+        "lib.rs",
+        "use std::io;\nstruct Pool { size: i32 }\n\
+        fn make() -> io::Result<Pool> {\n    Ok(Pool { size: 1 })\n}\n",
+    );
+    assert_eq!(got, set(&["Pool", "make"]));
+}
+
+#[test]
+fn rust_test_regions_and_modules() {
+    let src = "pub fn acquire() -> i32 {\n    1\n}\nmod helpers;\n#[cfg(not(test))]\nmod real {\n    \
+        pub fn used() { super::acquire(); }\n}\n#[cfg(test)]\nmod tests {\n    use super::*;\n    \
+        fn setup() -> i32 { acquire() }\n    #[test]\n    fn it_acquires() {\n        \
+        assert_eq!(setup(), 1);\n    }\n}\n#[tokio::test]\nasync fn top_level_test() { acquire(); }\n";
+    let got = quals("src/pool.rs", src);
+    has_all(
+        &got,
+        &[
+            "acquire",
+            "real",
+            "real.used",
+            "tests",
+            "tests.setup",
+            "tests.it_acquires",
+            "top_level_test",
+        ],
+    );
+    assert!(!got.contains("helpers"));
+    let facts = file_facts(src.as_bytes(), "src/pool.rs");
+    assert_eq!(facts.test_regions, vec![(10, 17), (19, 19)]);
+    let tests: BTreeSet<_> =
+        facts.defs.iter().filter(|d| d.is_test).map(|d| d.qualname.as_str()).collect();
+    assert_eq!(tests, ["tests", "tests.it_acquires", "tests.setup", "top_level_test"].into());
+    assert!(facts.defs.iter().all(|d| d.name != "tests" || d.kind == DefKind::Namespace));
+}
+
+#[test]
+fn go_doc_comments_receivers_and_types() {
+    assert_eq!(
+        span(
+            "x.go",
+            "package m\n\n// Handler does the thing.\nfunc Handler() int {\n\treturn 1\n}\n",
+            "Handler"
+        ),
+        (3, 6, 4)
+    );
+    let src =
+        "package m\ntype Client struct{}\nfunc (c *Client) Get(u string) error { return nil }\n\
+               func Helper() int { return 1 }\ntype Doer interface { Do() }\n";
+    has_all(&quals("c.go", src), &["Client", "Client.Get", "Helper", "Doer", "Doer.Do"]);
+    let facts = file_facts(src.as_bytes(), "c.go");
+    let kind = |n: &str| facts.defs.iter().find(|d| d.name == n).unwrap().kind;
+    assert_eq!(kind("Client"), DefKind::Struct);
+    assert_eq!(kind("Doer"), DefKind::Interface);
+    assert_eq!(kind("Get"), DefKind::Method);
+    assert_eq!(
+        facts.defs.iter().find(|d| d.name == "Get").unwrap().owner.as_deref(),
+        Some("Client")
+    );
+}
+
+#[test]
+fn js_bound_and_member_assigned_functions() {
+    has_all(
+        &quals(
+            "a.js",
+            "const fetchUser = (id) => {\n  return get(id);\n};\n\
+                        const retry = async function () {\n  return 1;\n};\n",
+        ),
+        &["fetchUser", "retry"],
+    );
+    has_all(
+        &quals(
+            "z.js",
+            "const obj = { arrowProp: (x) => x + 1, shorthand() { return 1; } };\n\
+                        class Service { handler = (req) => { return req; }; }\n",
+        ),
+        &["arrowProp", "shorthand", "Service", "Service.handler"],
+    );
+    has_all(&quals("z.js", "const x = function bar() {\n  return 1;\n};\n"), &["bar"]);
+    assert_eq!(
+        quals(
+            "response.js",
+            "exports.normalize = function (type) {\n  return type;\n};\n\
+               res.accepts = function () {\n  return true;\n};\nvar x = 1;\nx = 2;\n"
+        ),
+        set(&["normalize", "accepts"])
+    );
+    let src = "class Service {\n  fetch(u) {\n    return get(u);\n  }\n}\nfunction helper() {\n  return 1;\n}\n";
+    assert_eq!(span("app.js", src, "Service.fetch").2, 2);
+    assert_eq!(span("app.js", src, "helper").2, 6);
+}
+
+#[test]
+fn typescript_interfaces_and_signature_types() {
+    has_all(
+        &quals(
+            "client.ts",
+            "interface Fetcher {\n  fetch(url: string): number;\n}\nclass Api {\n  \
+               async send(url: string): Promise<number> {\n    return get(url);\n  }\n}\n",
+        ),
+        &["Fetcher", "Api", "Api.send"],
+    );
+    assert_eq!(
+        quals(
+            "form.tsx",
+            "function FormMessage({ className }: React.ComponentProps<\"p\">) {\n  \
+               return null\n}\n"
+        ),
+        set(&["FormMessage"])
+    );
+}
+
+#[test]
+fn java_kotlin_scala_csharp() {
+    let src = "class Api {\n    int fetch(String u) {\n        return get(u);\n    }\n}\n";
+    assert_eq!(span("Api.java", src, "Api.fetch").2, 2);
+    let kt = quals(
+        "Greeter.kt",
+        "package demo\n\nclass Greeter(val name: String) {\n  @JvmStatic\n  \
+        fun greet(): String {\n    return name\n  }\n}\n\nfun String.shout(): String {\n  \
+        return uppercase()\n}\n\nobject Registry {\n}\n",
+    );
+    has_all(&kt, &["Greeter", "Greeter.greet", "shout", "Registry"]);
+    assert!(!kt.contains("demo"));
+    assert_eq!(
+        quals(
+            "Model.scala",
+            "class ResponseBlob(val bytes: Array[Byte]) {\n  def size = bytes.length\n}\n"
+        ),
+        set(&["ResponseBlob", "ResponseBlob.size"])
+    );
+    has_all(
+        &quals("Parameter.cs", "public record Parameter(string Name) {\n  public int Size() {\n    return 1;\n  }\n}\n"),
+        &["Parameter", "Parameter.Size"],
+    );
+}
+
+#[test]
+fn swift_types_inits_protocols_and_extensions() {
+    let src = "protocol DataDecoder {\n  func decode(_ data: Data) -> Value\n}\n\
+        class OfflineRetrier {\n  let monitor: Monitor = Monitor()\n  init(monitor: Monitor) {\n    \
+        self.monitor = monitor\n  }\n  func retry(request: Request) -> Outcome {\n    return Outcome()\n  }\n}\n\
+        extension OfflineRetrier {\n  func reset() {}\n}\n";
+    let got = quals("Retrier.swift", src);
+    has_all(
+        &got,
+        &["DataDecoder", "OfflineRetrier", "OfflineRetrier.init", "OfflineRetrier.retry"],
+    );
+    assert!(got.iter().all(
+        |q| !["Monitor", "Request", "Outcome", "Data"].contains(&q.rsplit('.').next().unwrap())
+    ));
+    let facts = file_facts(src.as_bytes(), "Retrier.swift");
+    let ext = facts.defs.iter().find(|d| d.kind == DefKind::Extension).expect("extension");
+    assert_eq!(ext.name, "OfflineRetrier");
+    let reset = facts.defs.iter().find(|d| d.name == "reset").unwrap();
+    assert_eq!((reset.kind, reset.owner.as_deref()), (DefKind::Method, Some("OfflineRetrier")));
+}
+
+#[test]
+fn php_signature_types_are_no_spans() {
+    assert_eq!(
+        quals("Stack.php", "<?php\nclass Stack {\n  public function push(callable $middleware, string $name) {\n    \
+               return 1;\n  }\n}\n"),
+        set(&["Stack", "Stack.push"])
+    );
+}
+
+#[test]
+fn c_family_declarators_headers_and_prototypes() {
+    let got = quals(
+        "t.cpp",
+        "namespace cpr {\nResponse Session::Get() {\n  return holds_alternative<int>(r);\n}\n\
+                              int helper(int x){ return x; }\n}\n",
+    );
+    has_all(&got, &["cpr.Session.Get", "cpr.helper"]);
+    assert!(!got.iter().any(|q| q.contains("holds_alternative") || q.ends_with("Get.Session.Get")));
+    let cpp = quals("session.h", "namespace cpr {\nclass Session {\n public:\n  void SetUrl(const Url& url);\n  \
+        const std::string& GetUrl() const {\n    return url_;\n  }\n private:\n  std::string url_;\n};\n}\n");
+    has_all(&cpp, &["cpr", "cpr.Session", "cpr.Session.SetUrl", "cpr.Session.GetUrl"]);
+    let c = quals(
+        "hiredis.h",
+        "typedef struct {\n  int type;\n} redisOptions;\ntypedef int redisFD;\n\
+                               redisContext *redisConnect(const char *ip, int port);\n",
+    );
+    has_all(&c, &["redisOptions", "redisFD", "redisConnect"]);
+    has_all(
+        &quals("cookies.cpp", "const std::string& Cookie::GetDomain() const {\n  return domain_;\n}\n\
+                               Cookie& Cookie::operator=(const Cookie& other) {\n  return *this;\n}\n"),
+        &["Cookie.GetDomain", "Cookie.operator="],
+    );
+    assert_eq!(
+        quals(
+            "test.c",
+            "struct config { int port; };\nstatic int do_connect(struct config config) {\n  \
+               return config.port;\n}\n"
+        ),
+        set(&["config", "do_connect"])
+    );
+}
+
+#[test]
+fn ruby_modules_classes_and_struct_blocks() {
+    let src = "module Shop\n  Line = Struct.new(:sku, :qty) do\n    def total(price)\n      qty * price\n    end\n  end\n\n  \
+               class Cart\n    def empty?\n      @lines.empty?\n    end\n  end\nend\n";
+    has_all(
+        &quals("cart.rb", src),
+        &["Shop", "Shop.Line", "Shop.Line.total", "Shop.Cart", "Shop.Cart.empty?"],
+    );
+}

@@ -57,3 +57,11 @@ def _full_toolset(monkeypatch):
     ``server.TOOLSET`` themselves.
     """
     monkeypatch.setattr(server, "TOOLSET", "full")
+
+
+@pytest.fixture(autouse=True)
+def _default_engine(monkeypatch):
+    """Every test starts on the default engine (graphify), whatever the shell
+    running pytest exports; tests of the native engine set it themselves."""
+    for name in ("GRAPHLORE_ENGINE", "GRAPHIFY_ENGINE"):
+        monkeypatch.delenv(name, raising=False)

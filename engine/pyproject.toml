@@ -1,0 +1,33 @@
+[build-system]
+requires = ["maturin>=1.16,<2"]
+build-backend = "maturin"
+
+[project]
+name = "graphlore-engine"
+description = "graphlore's native code-graph extractor: definitions, spans and containment in 14 languages, with tree-sitter grammars compiled in."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "yasinyaman" }]
+keywords = ["graphlore", "tree-sitter", "code-graph", "knowledge-graph", "static-analysis"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Rust",
+    "Topic :: Software Development :: Libraries",
+]
+dynamic = ["version"]
+
+[project.urls]
+Homepage = "https://github.com/yasinyaman/graphlore"
+
+[project.scripts]
+graphlore-engine = "graphlore_engine.__main__:main"
+
+[tool.maturin]
+module-name = "graphlore_engine._native"
+python-source = "python"
+features = ["python"]
+strip = true

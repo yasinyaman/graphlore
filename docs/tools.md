@@ -16,7 +16,7 @@ CLI-backed (the first two write state; the rest are read-only; all outside lean)
 
 | Tool | Purpose |
 |---|---|
-| `graphlore_build` | Build/update the graph (`update`, `cluster_only`, `code_only`, `mode="deep"`). Returns the build's counts and warnings (`verbose=True` for the full CLI log), says so when the graph landed outside the active project (graphify writes `graphify-out/` inside the folder it reads), and notes vendored/minified files and a `graphify-out/` that git neither ignores nor tracks. When graphify refuses a default build for want of an LLM key (the folder holds docs), it runs again with `code_only` and says so |
+| `graphlore_build` | Build/update the graph (`update`, `cluster_only`, `code_only`, `mode="deep"`). Returns the build's counts and warnings (`verbose=True` for the full CLI log), says so when the graph landed outside the active project (graphify writes `graphify-out/` inside the folder it reads), and notes vendored/minified files and a `graphify-out/` that git neither ignores nor tracks. When graphify refuses a default build for want of an LLM key (the folder holds docs), it runs again with `code_only` and says so. `GRAPHLORE_ENGINE=native` builds with graphlore's experimental native engine instead (definitions with spans, containment and document headings; no import or call edges or communities yet; see [configuration](configuration.md#the-native-engine)) |
 | `graphlore_add` | Add a source by URL (arXiv, tweet) |
 | `graphlore_query` | Natural-language query (`dfs`, `budget`) |
 | `graphlore_path` | Exact path between two nodes; each end may be a bare name, resolved like everywhere else (the reply says which node was used) |

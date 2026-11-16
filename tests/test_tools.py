@@ -501,6 +501,237 @@ def test_build_wires_flags_to_cli_args(tmp_path, monkeypatch):
     assert captured[-1] == ["."]
 
 
+
+# --- extraction engine: GRAPHLORE_ENGINE (graphify | native | auto) -------------
+
+def test_engine_choose_routes_each_request():
+    choose = server.engine.choose
+    both = {"native_found": True, "graphify_found": True}
+    assert choose(requested="graphify", **both) == ("graphify", "")
+    assert choose(requested="native", **both) == ("native", "")
+    engine, note = choose(requested="native", **both, update=True)
+    assert engine == "native" and "rebuilt the whole graph" in note
+    engine, msg = choose(requested="native", native_found=False, graphify_found=True)
+    assert engine == "error" and msg.startswith("ERROR") and "pip install graphlore-engine" in msg
+    for kw in ({"mode": "deep"}, {"cluster_only": True}):
+        engine, msg = choose(requested="native", **both, **kw)
+        assert engine == "error" and "GRAPHLORE_ENGINE=graphify" in msg
+        engine, note = choose(requested="auto", **both, **kw)
+        assert engine == "graphify" and "graphify ran it" in note
+        engine, msg = choose(requested="auto", native_found=True, graphify_found=False, **kw)
+        assert engine == "error" and "pip install graphifyy" in msg
+    assert choose(requested="auto", **both) == ("native", "")
+    engine, note = choose(requested="auto", **both, update=True, existing="graphify")
+    assert engine == "graphify" and "update=False" in note
+    assert choose(requested="auto", **both, update=True, existing="native")[0] == "native"
+    engine, note = choose(requested="auto", native_found=False, graphify_found=True)
+    assert engine == "graphify" and "not installed" in note
+    engine, note = choose(requested="nativ", **both)
+    assert engine == "graphify" and "'nativ' is not an engine" in note
+
+
+def test_engine_requested_reads_the_environment_per_call(monkeypatch):
+    assert server.engine.requested() == "graphify"
+    monkeypatch.setenv("GRAPHLORE_ENGINE", " Native ")
+    assert server.engine.requested() == "native"
+    monkeypatch.delenv("GRAPHLORE_ENGINE")
+    monkeypatch.setenv("GRAPHIFY_ENGINE", "auto")      # the legacy spelling
+    assert server.engine.requested() == "auto"
+
+
+def test_engine_graph_engine_reads_the_graph_header():
+    assert server.engine.graph_engine({"graph": {"engine": "graphlore"}}) == "native"
+    assert server.engine.graph_engine({"graph": {"graphify_version": "0.9"}}) == "graphify"
+    assert server.engine.graph_engine({"nodes": []}) == "graphify"
+    assert server.engine.graph_engine("ERROR: no graph") == "graphify"
+
+
+_NATIVE_REPORT = {
+    "engine": "graphlore", "engine_version": "0.1.0", "schema_version": 1,
+    "nodes": 36, "edges": 30, "files": 8, "documents": 1, "definitions": 27,
+    "headings": 1, "elapsed_ms": 120,
+    "languages": {"python": {"files": 3, "definitions": 3, "parse_errors": 0},
+                  "c": {"files": 2, "definitions": 9, "parse_errors": 1}},
+    "not_read": {".lua": 2}, "too_large": ["vendor/big.c"], "too_large_count": 1,
+    "timed_out": [], "timed_out_count": 0, "unreadable": [], "unreadable_count": 0,
+    "non_utf8_paths": 1, "id_collisions": 2, "max_file_bytes": 2 * 1024 * 1024,
+}
+
+
+def _fake_native(monkeypatch, tmp_path, calls, report=None):
+    """GRAPHLORE_ENGINE=native with the engine 'installed': engine.build writes a
+    native graph and returns `report`; _run_cli must not run."""
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    monkeypatch.setenv("GRAPHLORE_ENGINE", "native")
+    monkeypatch.setattr(server.engine, "available", lambda: True)
+
+    def build(target, **kw):
+        calls.append((target, kw))
+        out = target / "graphify-out"
+        out.mkdir(exist_ok=True)
+        (out / "graph.json").write_text(json.dumps({
+            "graph": {"engine": "graphlore"},
+            "nodes": [{"id": "a", "label": "a.py", "source_file": "a.py"}], "links": [],
+        }), encoding="utf-8")
+        return dict(report or _NATIVE_REPORT)
+
+    import pytest
+
+    monkeypatch.setattr(server.engine, "build", build)
+    monkeypatch.setattr(server, "_run_cli", lambda *a, **k: pytest.fail("graphify ran"))
+
+
+def test_build_with_the_native_engine(tmp_path, monkeypatch):
+    calls = []
+    _fake_native(monkeypatch, tmp_path, calls)
+    out = server.graphlore_build(".", update=True)
+    assert out.startswith("native engine 0.1.0: 36 nodes, 30 edges from 8 source files")
+    assert "not read (no module for these source files): .lua 2" in out
+    assert "parse errors (definitions found are partial): c 1 file" in out
+    assert "skipped as larger than 2048 KB: 1 file (vendor/big.c)" in out
+    assert server.engine.NATIVE_GAPS in out          # the gaps are always said
+    assert "rebuilt the whole graph" in out          # update=True under native
+    assert "graph.json ready" in out
+    (target, kw), = calls
+    assert target == tmp_path.resolve() and kw["documents"] is True
+    assert kw["commit"] is None                       # not a git repository
+    server.graphlore_build(".", code_only=True, verbose=True)
+    assert calls[-1][1]["documents"] is False
+
+
+def test_build_with_the_native_engine_refuses_what_it_cannot_do(tmp_path, monkeypatch):
+    calls = []
+    _fake_native(monkeypatch, tmp_path, calls)
+    for kw in ({"mode": "deep"}, {"cluster_only": True}):
+        out = server.graphlore_build(".", **kw)
+        assert out.startswith("ERROR") and "GRAPHLORE_ENGINE=graphify" in out
+    assert calls == []
+    monkeypatch.setattr(server.engine, "available", lambda: False)
+    assert "is not installed" in server.graphlore_build(".")
+    (tmp_path / "f.txt").write_text("x", encoding="utf-8")
+    monkeypatch.setattr(server.engine, "available", lambda: True)
+    assert "not a directory" in server.graphlore_build("f.txt")
+
+
+def test_build_native_error_and_auto_fallbacks(tmp_path, monkeypatch):
+    calls = []
+    _fake_native(monkeypatch, tmp_path, calls)
+    monkeypatch.setattr(server.engine, "build", lambda target, **kw: "ERROR: boom")
+    assert server.graphlore_build(".").startswith("ERROR: boom")
+    # auto over a graph graphify built: update=True stays with graphify
+    _write_graph(tmp_path, {"graph": {"graphify_version": "0.9"}, "nodes": [], "links": []})
+    server._GRAPH_CACHE.clear()
+    monkeypatch.setenv("GRAPHLORE_ENGINE", "auto")
+    monkeypatch.setattr(server.shutil, "which", lambda _b: "/fake/graphify")
+    captured = []
+    monkeypatch.setattr(server, "_run_cli", lambda args: captured.append(args) or "built")
+    out = server.graphlore_build(".", update=True)
+    assert captured == [[".", "--update", "--no-viz"]]
+    assert "graph on disk is graphify's" in out
+
+
+def test_engine_build_runs_the_engine_in_a_child_process(tmp_path, monkeypatch):
+    seen = []
+
+    def run(argv, **kw):
+        seen.append(argv)
+        return _FakeProc(stdout=json.dumps(_NATIVE_REPORT))
+
+    monkeypatch.setattr(server.engine.subprocess, "run", run)
+    report = server.engine.build(tmp_path, documents=False, commit="abc", timeout=5)
+    assert report["nodes"] == 36
+    argv = seen[-1]
+    assert argv[:4] == [server.engine.sys.executable, "-m", "graphlore_engine", "build"]
+    assert ["--commit", "abc"] == argv[argv.index("--commit"):argv.index("--commit") + 2]
+    assert "--no-docs" in argv
+    assert argv[argv.index("--out") + 1] == str(tmp_path / "graphify-out" / "graph.json")
+
+    cases = [
+        (lambda *a, **k: _FakeProc(stderr="ERROR: not a directory: /x", returncode=1),
+         "ERROR: not a directory"),
+        (lambda *a, **k: _FakeProc(stderr="Segmentation fault", returncode=-11),
+         "ERROR (native engine, exit -11)"),
+        (lambda *a, **k: _FakeProc(stdout="not json"), "report is not JSON"),
+        (lambda *a, **k: _FakeProc(stdout="[1]"), "not a JSON object"),
+        (lambda *a, **k: _FakeProc(stdout=json.dumps({"schema_version": 99})),
+         "graph schema 99"),
+    ]
+    for fake, expected in cases:
+        monkeypatch.setattr(server.engine.subprocess, "run", fake)
+        out = server.engine.build(tmp_path)
+        assert isinstance(out, str) and expected in out, out
+
+    def timeout(argv, **kw):
+        raise server.engine.subprocess.TimeoutExpired(argv, 5)
+
+    def oserror(argv, **kw):
+        raise OSError("no python")
+
+    monkeypatch.setattr(server.engine.subprocess, "run", timeout)
+    assert "did not finish within 600s" in server.engine.build(tmp_path)
+    monkeypatch.setattr(server.engine.subprocess, "run", oserror)
+    assert "no python" in server.engine.build(tmp_path)
+
+
+def test_engine_render_report_lists_what_was_left_out():
+    rep = dict(_NATIVE_REPORT, timed_out=["gen.c"], timed_out_count=1,
+               unreadable=["a", "b", "c", "d"], unreadable_count=4)
+    text = server.engine.render_report(rep)
+    assert "parse timed out: 1 file (gen.c)" in text
+    assert "could not be read: 4 files (a, b, c, +1 more)" in text
+    assert "whose name is not UTF-8" in text
+    assert "suffixed" not in text
+    assert "suffixed _2" in server.engine.render_report(rep, verbose=True)
+    many = dict(_NATIVE_REPORT, languages={
+        f"l{i}": {"files": i, "definitions": 1, "parse_errors": 0} for i in range(1, 11)})
+    assert "+2 more" in server.engine.render_report(many)
+    assert "+2 more" not in server.engine.render_report(many, verbose=True)
+
+
+def test_no_communities_note_names_the_engine(tmp_path, monkeypatch):
+    _write_graph(tmp_path, {"graph": {"engine": "graphlore"},
+                            "nodes": [{"id": "a", "label": "a"}], "links": []})
+    server._GRAPH_CACHE.clear()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    out = server.graphlore_communities()
+    assert "native engine does not detect communities" in out
+    (tmp_path / "graphify-out" / "graph.json").write_text(
+        json.dumps({"nodes": [{"id": "a", "label": "a"}], "links": []}), encoding="utf-8")
+    server._GRAPH_CACHE.clear()
+    assert "cluster_only=True" in server.graphlore_communities()
+
+
+def test_spans_fall_back_to_the_native_engine(monkeypatch):
+    from graphlore import spans
+    monkeypatch.setattr(spans, "_ts_parser_for", lambda rel, src=None: (None, None))
+    monkeypatch.setattr(server.engine, "file_spans", lambda src, rel: [(1, 2, 1, "f")])
+    assert spans._spans_treesitter(b"func f() {}\n", "a.go") == []    # graphify: unchanged
+    monkeypatch.setenv("GRAPHLORE_ENGINE", "native")
+    assert spans._spans_treesitter(b"func f() {}\n", "a.go") == [(1, 2, 1, "f")]
+    monkeypatch.setattr(server.engine, "file_spans", lambda src, rel: None)
+    assert spans._spans_treesitter(b"func f() {}\n", "a.go") == []
+
+
+def test_engine_file_spans_without_the_engine(monkeypatch):
+    import sys as _sys
+    monkeypatch.setitem(_sys.modules, "graphlore_engine", None)   # import fails
+    assert server.engine.file_spans(b"x", "a.go") is None
+
+
+def test_engine_version_pins_stay_in_sync():
+    """engine/Cargo.toml's version is the engine's only copy; the schema graphlore
+    reads must be the one the engine writes."""
+    import re
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent
+    cargo = (root / "engine" / "Cargo.toml").read_text(encoding="utf-8")
+    assert re.search(r'^version = "\d+\.\d+\.\d+"$', cargo, re.M)
+    lib = (root / "engine" / "src" / "lib.rs").read_text(encoding="utf-8")
+    schema = int(re.search(r"pub const SCHEMA_VERSION: u32 = (\d+);", lib).group(1))
+    assert schema in server.engine.SUPPORTED_SCHEMAS
+
+
 # --- node-id collision diagnostic --------------------------------------------
 
 def test_overview_flags_id_collisions(tmp_path, monkeypatch):

@@ -13,7 +13,8 @@ Tool surface: GRAPHLORE_TOOLSET=lean (the default) registers LEAN_TOOLS only,
 =full all of the tools below, =locate LOCATE_TOOLS.
 
 CLI-backed tools:
-  - graphlore_build      : build / update the graph from a folder
+  - graphlore_build      : build / update the graph from a folder (graphify, or
+                          the native engine with GRAPHLORE_ENGINE=native|auto)
   - graphlore_query      : natural-language graph query
   - graphlore_path       : path between two nodes
   - graphlore_explain    : full explanation of a single node
@@ -72,7 +73,8 @@ Prompts:
   - explain_flow : explain how a named flow/feature works
   - review       : review structure — cycles, layering, dead and duplicated code
 
-Internal layout: config.py (shared PROJECT_DIR), graph.py (graph.json load +
+Internal layout: config.py (shared PROJECT_DIR), engine.py (graphify CLI or the
+native graphlore_engine extractor), graph.py (graph.json load +
 node/edge/traversal helpers), spans.py (tree-sitter/ast span engine + structural
 diff), scope.py (the analysis scope: vendored / external / test filtering),
 apis.py and routes.py (per-file extractors), imports.py (import statements read
@@ -118,7 +120,7 @@ from mcp.types import (
     ToolAnnotations,
 )
 
-from . import config
+from . import config, engine
 from .apis import (  # noqa: F401  (re-exported for the tools + tests)
     _API_CACHE,
     _API_CACHE_MAX,
@@ -1629,6 +1631,15 @@ def graphlore_build(
     vendored/minified files in the graph and on a graphify-out/ that git neither
     ignores nor tracks.
 
+    GRAPHLORE_ENGINE picks the extractor: ``graphify`` (default) runs the graphify
+    CLI; ``native`` runs graphlore's experimental native engine (the
+    graphlore-engine package: definitions with real spans, containment and
+    Markdown/RST headings in 14 languages, all local, but no import/call edges or
+    communities yet); ``auto`` uses native when installed and graphify for what
+    native cannot do. With native, ``mode`` and ``cluster_only`` are refused,
+    ``update`` rebuilds the whole graph, ``code_only`` skips the document headings
+    and ``no_viz`` has no effect.
+
     Args:
         path: Folder to extract the graph from (relative to the project dir or absolute).
         mode: "deep" -> more aggressive INFERRED edges; empty -> default.
@@ -1645,6 +1656,20 @@ def graphlore_build(
     err = _path_escapes_project(path)
     if err:
         return err
+    requested = engine.requested()
+    engine_note = ""
+    if requested != "graphify":
+        choice, engine_note = engine.choose(
+            requested=requested,
+            native_found=engine.available(),
+            graphify_found=shutil.which(GRAPHIFY_BIN) is not None,
+            mode=mode, update=update, cluster_only=cluster_only,
+            existing=_existing_engine(path) if update else None,
+        )
+        if choice == "error":
+            return _err(engine_note, False, code="engine")
+        if choice == "native":
+            return _build_native(path, code_only=code_only, verbose=verbose, note=engine_note)
     offline_note = ""
     if config.offline():
         if mode:
@@ -1695,9 +1720,25 @@ def graphlore_build(
         return result  # a failed build is returned whole, never condensed
     if not verbose:
         result = _condense_build_log(result)
+    notes = _build_notes(path)
+    if offline_note:
+        notes.append(offline_note)
+    if engine_note:
+        notes.append(engine_note)
+    return _cli_reply(result + ("\n\n" + "\n".join(notes) if notes else ""))
 
+
+def _build_target(path: str) -> Path:
     p = Path(path)
-    target = (p if p.is_absolute() else config.PROJECT_DIR / p).resolve()
+    return (p if p.is_absolute() else config.PROJECT_DIR / p).resolve()
+
+
+def _build_notes(path: str) -> list[str]:
+    """After a build of ``path``, by either engine: where graph.json went (and
+    whether this server reads it), vendored files in it, and git's view of the
+    output directory."""
+    target = _build_target(path)
+    gp = _graph_path()
     written = target / config.OUT_DIR_NAME / "graph.json"
     notes: list[str] = []
     if written.exists() and written != gp.resolve():
@@ -1722,9 +1763,49 @@ def graphlore_build(
         git_note = _out_dir_git_note()
     if git_note:
         notes.append(git_note)
-    if offline_note:
-        notes.append(offline_note)
-    return _cli_reply(result + ("\n\n" + "\n".join(notes) if notes else ""))
+    return notes
+
+
+def _existing_engine(path: str) -> str | None:
+    """The engine that built the graph a build of ``path`` would replace, when
+    that is the graph this server reads."""
+    if _build_target(path) / config.OUT_DIR_NAME / "graph.json" != _graph_path().resolve():
+        return None
+    graph = _load_graph()
+    return engine.graph_engine(graph) if isinstance(graph, dict) else None
+
+
+def _build_native(path: str, *, code_only: bool, verbose: bool, note: str) -> str:
+    """graphlore_build with the native engine (GRAPHLORE_ENGINE=native / auto)."""
+    target = _build_target(path)
+    if not target.is_dir():
+        return _err(f"ERROR: not a directory: {target}", False)
+    report = engine.build(
+        target, documents=not code_only, commit=_git(["rev-parse", "HEAD"], target),
+        timeout=CLI_TIMEOUT,
+    )
+    _GRAPH_CACHE.pop(str(_graph_path()), None)
+    if isinstance(report, str):
+        return _err(report, False)
+    text = engine.render_report(report, verbose)
+    notes = _build_notes(path)
+    if code_only:
+        notes.append("code_only=True: Markdown / reStructuredText headings were not read.")
+    if note:
+        notes.append(note)
+    if notes:
+        text += "\n\n" + "\n".join(notes)
+    return _fmt({"output": text, "engine": "native", "report": report}, False, text)
+
+
+def _no_communities_msg(graph: object) -> str:
+    if engine.graph_engine(graph) == "native":
+        return (
+            "Nodes carry no community info: the native engine does not detect "
+            "communities yet. GRAPHLORE_ENGINE=graphify graphlore_build() builds a "
+            "graph that has them."
+        )
+    return "Nodes carry no community info. Try graphlore_build(cluster_only=True)."
 
 
 @_tool(annotations=ToolAnnotations(title="Query graph", read_only_hint=True))
@@ -2105,7 +2186,7 @@ def graphlore_communities(limit: int = 30, members: int = 15, as_json: bool = Fa
             if n.get("community_name"):
                 built_names.setdefault(c, str(n["community_name"]))
     if not comms:
-        msg = "Nodes carry no community info. Try graphlore_build(cluster_only=True)."
+        msg = _no_communities_msg(graph)
         return _fmt({"communities": [], "note": msg}, as_json, msg)
     saved = _read_labels()
     labels = _display_labels(nodes)
@@ -2205,7 +2286,7 @@ def _communities_for_naming(limit: int) -> tuple[list[tuple[Any, list[str]]], in
         if c is not None:
             comms.setdefault(c, []).append(_node_label(n))
     if not comms:
-        return "Nodes carry no community info. Try graphlore_build(cluster_only=True)."
+        return _no_communities_msg(graph)
     return sorted(comms.items(), key=lambda kv: -len(kv[1]))[:max(0, limit)], len(comms)
 
 

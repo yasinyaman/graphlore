@@ -2,7 +2,7 @@
 
 This is a condensed copy of `AGENTS.md` at the repository root, which is the full and authoritative guidance. Read it when you can; if the two disagree, `AGENTS.md` wins.
 
-graphlore is a Python MCP server (MCP Python SDK v2: `mcp.server.mcpserver.MCPServer`, not v1 `FastMCP`) that makes a Graphify-built `graphify-out/graph.json` navigable and joins it to real source spans. It has no extractor; the external `graphify` CLI builds the graph.
+graphlore is a Python MCP server (MCP Python SDK v2: `mcp.server.mcpserver.MCPServer`, not v1 `FastMCP`) that makes a Graphify-built `graphify-out/graph.json` navigable and joins it to real source spans. By default the external `graphify` CLI builds the graph; `engine/` holds graphlore's experimental native extractor in Rust (a separate `graphlore-engine` wheel, opt-in with `GRAPHLORE_ENGINE=native|auto`).
 
 ## Checks
 
@@ -11,7 +11,7 @@ graphlore is a Python MCP server (MCP Python SDK v2: `mcp.server.mcpserver.MCPSe
 
 ## Layout
 
-`src/graphlore/` is layered `config.py` → `graph.py` → `spans.py` → `scope.py` → `apis.py` / `routes.py` → `imports.py` → `resolve.py` → `review.py` → `server.py`. `server.py` holds the whole MCP surface (33 tools, resources, prompts, `main()`). All tests are in `tests/test_tools.py` and call tool functions directly.
+`src/graphlore/` is layered `config.py` → `engine.py` → `graph.py` → `spans.py` → `scope.py` → `apis.py` / `routes.py` → `imports.py` → `resolve.py` → `review.py` → `server.py`. `server.py` holds the whole MCP surface (33 tools, resources, prompts, `main()`). Tests are in `tests/test_tools.py` (plus `tests/test_engine.py`, which needs the engine installed) and call tool functions directly.
 
 ## Rules
 
@@ -23,7 +23,8 @@ graphlore is a Python MCP server (MCP Python SDK v2: `mcp.server.mcpserver.MCPSe
 - `_run_cli` passes an argv list with no shell. Never build a shell string.
 - A path that can reach the network checks `config.offline()` and is listed in the network table in `docs/configuration.md`; `_run_cli` uses `_cli_env()`.
 - Text replies that quote repository content wrap it in `_frame_repo_text(...)` and set `content_trust` / `untrusted_fields` in the payload.
-- Optional dependencies (`semble`, `tree-sitter`, `tiktoken`, `watchdog`, `uvicorn`) are imported inside functions and degrade to a fallback or install hint.
+- `engine/src/generic.rs` ports `spans.py`'s definition rule; change both together (`tests/test_engine.py` compares them). `engine/` is `cargo fmt`-formatted; CI runs fmt, clippy and `cargo test`.
+- Optional dependencies (`semble`, `tree-sitter`, `tiktoken`, `watchdog`, `uvicorn`, `graphlore_engine`) are imported inside functions and degrade to a fallback or install hint.
 - graph.json analysis tools must work with no `graphify` binary and no optional extras.
 - Set `read_only_hint` / `destructive_hint` on every tool to match what it does.
 - A tool that ranks or audits the graph takes `scope: str = ""` and goes through `_scope_view`; it reports `view.payload()` and wraps its text in `_with_note`, so what the scope left out (vendored/minified files, external nodes) is always stated.
