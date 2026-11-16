@@ -56,7 +56,9 @@ All notable changes to this project are documented here. The format is based on
 - **`benchmarks/compare_engines.py` compares edges** (imports as file pairs;
   calls, bases and type references over the definitions both engines have),
   and **`benchmarks/polyglot.py --engine native`** runs the whole audit on
-  native graphs (built into `graphlore-native/`).
+  native graphs (built into `graphlore-native/`). On the 31 repositories it
+  raises no high finding (7 on graphify's graphs) and no `FETCH-NO-SPAN` (94),
+  and every tool but the community ones answers as on graphify's graphs.
 - **`GRAPHLORE_ENGINE`** picks the extractor `graphlore_build` uses: `graphify`
   (the default, unchanged), `native` (an error naming the install command when
   the engine is missing; `mode` and `cluster_only` refused; `update` rebuilds

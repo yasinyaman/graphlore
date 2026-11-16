@@ -178,6 +178,49 @@ retrofit 2.5 s against 13.9 s, guzzle 1.4 s / 5.8 s, alamofire 1.8 s / 5.7 s,
 got 1.4 s / 5.3 s, kotlinpoet 0.8 s / 3.7 s. The Rust crates in
 `~/.cargo/registry` (2,300 files, 88,000 nodes, 203,000 edges) take 11.5 s.
 
+### The polyglot audit on native graphs
+
+`benchmarks/polyglot.py --engine native` runs every tool on the native graphs
+of the same 31 repositories (built into `graphlore-native/`, semantic tools
+skipped), and the same run on graphify's graphs is the baseline. Findings, per
+id, summed over the repositories (measured 2026-11-16):
+
+| Finding | graphify graphs | native graphs |
+|---|--:|--:|
+| `FETCH-SHADOW-SPAN` (high: fetch returns another definition's span) | 7 | 0 |
+| `FETCH-NO-SPAN` (fetch falls back to a line window) | 94 | 0 |
+| `FETCH-ENCLOSING-SPAN` (fetch returns the definition around the node) | 9 | 1 |
+| `SLOW` (a call over the time limit) | 11 | 0 |
+| `SKELETON-EMPTY` (a file with definitions yields no symbols) | 6 | 5 |
+| `TEST-PATH-MISSED` (a file holding tests is not seen as a test file) | 1 | 2 |
+| `REPLY-TOO-LARGE` (a reply over 90 KB with default arguments) | 0 | 5 |
+| `ROUTES-SILENT-EMPTY`, `IMPORTS-UNCLASSIFIED`, `UNREFERENCED-LISTS-A-TEST` | 3 | 1 |
+| `GRAPH-ORPHAN-NODES` (info) | 26 | 20 |
+
+Every tool answers on every native graph as it does on graphify's, except
+`communities` and `label_communities`, which have no communities to show yet.
+The run takes 122 s of tool time against 216 s on graphify's graphs. What
+the native graphs still raise:
+
+- **`REPLY-TOO-LARGE`** comes from their denser edges, not from wrong ones:
+  more edges make other nodes the hubs the audit picks, and those are big.
+  guzzle's `CurlFactory` is one class of 3,100 lines that `fetch` returns
+  whole (it always returns the first node it is asked for), retrofit's `Call`
+  has a 98 KB neighbor list, and cpr's cross-language `same_names` is long.
+- **`SKELETON-EMPTY`** is a file that holds only constants
+  (`docs/docusaurus.config.ts`): they are nodes, but not spans, so `skeleton`
+  lists nothing. `fetch` reads such a node's own lines (`region_start` to
+  `end_line`).
+- **`TEST-PATH-MISSED`**: ureq's `src/run.rs` and aspnetcore-realworld's
+  `build/Program.cs` hold tests that no path rule recognises.
+
+The first native run also found three bugs that had nothing to do with the
+engine, and they are now fixed for both engines. A Go function type in a map
+type (`map[string]func() hash.Hash`) was taken for a function named `string`,
+in `spans.py` as well as in `generic.rs`. `neighbors` listed one row where
+two nodes reference each other. `path` and `explain` read the CLI's default
+`graphify-out/` when `GRAPHLORE_OUT_DIR` named another directory.
+
 ## Roadmap
 
 1. **Phase 1: definitions, spans, containment, headings.** Done.
@@ -189,8 +232,8 @@ got 1.4 s / 5.3 s, kotlinpoet 0.8 s / 3.7 s. The Rust crates in
 4. **No CLI behind the CLI tools.** `query`, `path` and `explain` answered over
    graph.json in Python; community naming by MCP sampling only; the route and
    package-API extractors moved into the language modules.
-5. **Native by default.** `auto` becomes the default once the polyglot audit
-   passes on native graphs (`benchmarks/polyglot.py --engine native`); then
+5. **Native by default.** `auto` becomes the default once communities are in
+   (the polyglot audit already passes on native graphs otherwise, above); then
    graphify, `graphlore_add` and `mode="deep"` go, and the output directory gets
    graphlore's own name (still reading `graphify-out/`).
 

@@ -68,7 +68,10 @@ python benchmarks/polyglot.py --root /tmp/polyglot --json out.json --baseline be
 ```
 
 Graphs are built with `graphify update .`: local AST extraction, clustering
-included, no API key.
+included, no API key. With `--engine native` (and `--rebuild`) the audit runs
+on the graphs graphlore's [native engine](native-engine.md) builds into
+`graphlore-native/` instead; its results are in
+[the native engine page](native-engine.md#the-polyglot-audit-on-native-graphs).
 
 | Language | Repository | Commit | Nodes | Edges | Definitions |
 |---|---|---|--:|--:|--:|
