@@ -43,6 +43,7 @@ pub struct BuildReport {
     pub communities: crate::community::CommunityReport,
     pub incremental: Incremental,
     pub state: StateReport,
+    pub http: HttpReport,
     /// Milliseconds per phase: walk, parse, assemble, resolve, communities, write, cache.
     pub phases_ms: BTreeMap<&'static str, u128>,
     pub max_file_bytes: u64,
@@ -60,6 +61,30 @@ pub struct StateReport {
     pub resources: BTreeMap<String, usize>,
     /// Resources only one definition touches: no coupling, so no node.
     pub single_touch: usize,
+}
+
+/// Web routes and the HTTP calls that reach them.
+#[derive(Default, Serialize)]
+pub struct HttpReport {
+    /// Route nodes, one per method and full path.
+    pub routes: usize,
+    pub by_framework: BTreeMap<String, usize>,
+    /// Routes with part of a prefix named something whose value is unknown.
+    pub prefix_unresolved: usize,
+    /// Requests production code makes (`fetch`, `axios`, a generated SDK,
+    /// `requests`, `httpx`, …).
+    pub client_calls: usize,
+    /// Of those, linked to a route of the project by `http_calls`.
+    pub linked: usize,
+    /// To a path no route has.
+    pub unlinked: usize,
+    /// To another host.
+    pub external: usize,
+    /// To a URL the source does not spell out.
+    pub dynamic: usize,
+    /// Requests in test code: counted, never linked.
+    pub test_calls: usize,
+    pub http_calls_edges: usize,
 }
 
 /// What an update reused from the facts cache.

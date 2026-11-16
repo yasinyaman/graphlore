@@ -1133,12 +1133,42 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
     facts.locals = locals;
 }
 
+/// The value node of a declaration: `= …` of an assignment, a declarator, a
+/// field or a property.
+fn value_node<'t>(node: Node<'t>) -> Option<Node<'t>> {
+    ["value", "right", "default_value", "initializer"]
+        .iter()
+        .find_map(|f| node.child_by_field_name(f))
+        .or_else(|| {
+            // C/C++, Go and Kotlin keep it one level down
+            kids(node).into_iter().find_map(|c| {
+                c.child_by_field_name("value")
+                    .or_else(|| (c.kind() == "expression_list").then(|| c.named_child(0)).flatten())
+            })
+        })
+}
+
+/// A short string literal a declaration holds.
+fn state_value(node: Node, src: &[u8]) -> Option<String> {
+    let v = value_node(node)?;
+    if !(v.kind().contains("string") || v.kind() == "encapsed_string") {
+        return None;
+    }
+    let s = string_value(v, src);
+    (s.len() <= 200 && !s.contains('\n')).then_some(s)
+}
+
+/// What constructs the value a declaration holds (`Settings()`).
+fn state_value_path(node: Node, src: &[u8]) -> Option<Vec<String>> {
+    value_node(node).and_then(|v| value_type(v, src))
+}
+
 fn inside_callable(defs: &[Def], byte: usize) -> bool {
     defs.iter().any(|d| d.kind.is_callable() && d.start_byte <= byte && byte < d.end_byte)
 }
 
 /// For each byte offset, the innermost definition whose range holds it.
-fn innermost(defs: &[Def], bytes: &[usize]) -> Vec<Option<usize>> {
+pub(crate) fn innermost(defs: &[Def], bytes: &[usize]) -> Vec<Option<usize>> {
     let mut by_start: Vec<usize> = (0..defs.len()).collect();
     by_start.sort_by_key(|&i| (defs[i].start_byte, std::cmp::Reverse(defs[i].end_byte)));
     let mut order: Vec<usize> = (0..bytes.len()).collect();
@@ -1242,6 +1272,8 @@ fn add_extras(
             decl_only: false,
             container: crate::state::holds_container(*node, src),
             table: crate::resources::declared_table(*node, src, None, ""),
+            value: state_value(*node, src),
+            value_path: state_value_path(*node, src),
             node_id: node.id(),
             start_byte: node.start_byte(),
             end_byte: node.end_byte(),

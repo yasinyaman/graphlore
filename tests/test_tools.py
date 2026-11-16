@@ -153,6 +153,53 @@ def test_impact_follows_shared_state_only_when_asked(tmp_path, monkeypatch):
     assert {r["node"] for r in named["impacted"]} >= {"CACHE"}
 
 
+_HTTP_GRAPH = {
+    "nodes": [
+        {"id": "users_py", "label": "users.py", "source_file": "api/users.py", "kind": "file",
+         "source_location": "L1"},
+        {"id": "read_user", "label": "read_user()", "source_file": "api/users.py",
+         "kind": "function", "source_location": "L6", "_callable": True},
+        {"id": "route_get_users", "label": "GET /api/users/{id}", "type": "route",
+         "file_type": "route", "method": "GET", "pattern": "/api/users/{id}",
+         "key": "GET /api/users/{}", "framework": "fastapi", "source_file": "api/users.py",
+         "source_location": "L6"},
+        {"id": "sdk_ts", "label": "sdk.ts", "source_file": "web/sdk.ts", "kind": "file",
+         "source_location": "L1"},
+        {"id": "read_user_by_id", "label": "readUserById()", "source_file": "web/sdk.ts",
+         "kind": "function", "source_location": "L3", "_callable": True},
+        {"id": "page", "label": "UserPage()", "source_file": "web/page.ts",
+         "kind": "function", "source_location": "L2", "_callable": True},
+    ],
+    "links": [
+        {"source": "users_py", "target": "read_user", "relation": "contains"},
+        {"source": "sdk_ts", "target": "read_user_by_id", "relation": "contains"},
+        {"source": "route_get_users", "target": "read_user", "relation": "handles",
+         "confidence": "EXTRACTED", "source_file": "api/users.py", "source_location": "L6"},
+        {"source": "read_user_by_id", "target": "route_get_users", "relation": "http_calls",
+         "confidence": "EXTRACTED", "source_file": "web/sdk.ts", "source_location": "L4"},
+        {"source": "page", "target": "read_user_by_id", "relation": "calls",
+         "confidence": "EXTRACTED", "source_file": "web/page.ts", "source_location": "L3"},
+    ],
+}
+
+
+def test_impact_crosses_http_from_handler_to_clients(tmp_path, monkeypatch):
+    # read_user() serves GET /api/users/{id}; readUserById() requests it and
+    # UserPage() calls readUserById(): no call joins the two sides, the route does
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    server._GRAPH_CACHE.clear()
+    _write_graph(tmp_path, json.loads(json.dumps(_HTTP_GRAPH)))
+    assert server._is_route_node(_HTTP_GRAPH["nodes"][2])
+    out = json.loads(server.graphlore_impact("read_user", as_json=True))
+    rows = {r["node"]: r for r in out["impacted"]}
+    assert rows["GET /api/users/{id}"]["distance"] == 1
+    assert rows["readUserById()"]["distance"] == 2
+    assert rows["UserPage()"]["distance"] == 3
+    assert "http" in server.IMPACT_RELATION_PRESETS
+    http = json.loads(server.graphlore_impact("read_user", relations="http", as_json=True))
+    assert {r["node"] for r in http["impacted"]} == {"GET /api/users/{id}", "readUserById()"}
+
+
 def test_surprises_and_node_details_name_shared_state(tmp_path, monkeypatch):
     _shared_state_project(tmp_path, monkeypatch)
     sp = json.loads(server.graphlore_surprises(as_json=True))

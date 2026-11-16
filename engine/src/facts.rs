@@ -123,6 +123,14 @@ pub struct Def {
     /// `mongoose.model('User')`.
     #[serde(default)]
     pub table: Option<String>,
+    /// A variable's or constant's value when it is a short string literal
+    /// (`API_V1_STR = "/api/v1"`), for a route prefix that names it.
+    #[serde(default)]
+    pub value: Option<String>,
+    /// What constructs a variable's value (`settings = Settings()`: `Settings`),
+    /// so `settings.API_V1_STR` resolves through it.
+    #[serde(default)]
+    pub value_path: Option<Vec<String>>,
     /// The tree-sitter node the definition came from, and its byte range:
     /// for attaching references, never serialised.
     #[serde(skip)]
@@ -311,6 +319,9 @@ pub struct FileFacts {
     /// Environment variables, files, tables, events and keys the file uses.
     #[serde(default)]
     pub resources: Vec<crate::resources::ResourceUse>,
+    /// Web routes, routers, mounts and global prefixes the file declares.
+    #[serde(default)]
+    pub http: crate::http::HttpFacts,
     pub parse: ParseStatus,
 }
 
@@ -330,6 +341,7 @@ impl FileFacts {
             refs: Vec::new(),
             locals: Vec::new(),
             resources: Vec::new(),
+            http: Default::default(),
             parse: ParseStatus::default(),
         }
     }

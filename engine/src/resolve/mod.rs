@@ -26,6 +26,7 @@ use crate::graph::ids::slug;
 use crate::lang::Lang;
 use crate::resources::ResourceKind;
 
+mod http;
 mod modules;
 
 pub type DefRef = (usize, usize);
@@ -1188,14 +1189,31 @@ impl<'a> Project<'a> {
                 }
             },
         };
-        // a property named bare (implicit `this`) with more after it
+        // a property named bare (implicit `this`), or a module variable, with
+        // more after it: on through its type
         if let Target::Def(p) = t {
-            let pk = self.def(p).kind;
-            if matches!(pk, DefKind::Property | DefKind::Constant) && !rest.is_empty() {
-                let owner = self.class_of(p.0, self.def(p).parent)?;
-                let (ft, cf) = self.field_type(owner, &self.def(p).name.clone(), 3)?;
-                conf = conf.max(cf);
-                t = Target::Def(ft);
+            if self.def(p).kind.is_state() && !rest.is_empty() {
+                let typed = self
+                    .class_of(p.0, self.def(p).parent)
+                    .and_then(|owner| self.field_type(owner, &self.def(p).name.clone(), 3))
+                    .or_else(|| self.state_type(p));
+                match typed {
+                    Some((ft, cf)) => {
+                        conf = conf.max(cf);
+                        t = Target::Def(ft);
+                    }
+                    // a constant bound to an import (`const users =
+                    // require('./users')`): on through the module
+                    None => {
+                        let top =
+                            p.0 == f && self.def(p).parent.is_none() && self.def(p).name == *head;
+                        let (b, imp) =
+                            self.scopes[f].bindings.get(head.as_str()).filter(|_| top)?;
+                        let m = self.eval(b, 3)?;
+                        self.note_use(f, *imp, &m);
+                        t = m;
+                    }
+                }
             }
         }
         for (i, seg) in rest.iter().enumerate() {
@@ -1469,6 +1487,15 @@ impl<'a> Project<'a> {
         self.def(t).table.clone().map(|table| (table, write))
     }
 
+    /// The type of a variable from what constructs its value
+    /// (`settings = Settings()`).
+    fn state_type(&self, p: DefRef) -> Option<(DefRef, Confidence)> {
+        let d = self.def(p);
+        let path = d.value_path.as_ref()?;
+        let t = self.type_of_path(p.0, d.parent, path, false)?;
+        self.def(t).kind.is_class_like().then_some((t, Confidence::Inferred))
+    }
+
     fn source_of(&self, f: usize, r: &RefFact) -> String {
         if let Some(owner) = &r.from_owner {
             if let Some(t) = self.type_named(f, owner) {
@@ -1548,6 +1575,7 @@ pub fn resolve(
     let mut stats: BTreeMap<String, ResolveStats> = BTreeMap::new();
     let mut ext_nodes: Vec<(String, String, &'static str)> = Vec::new();
     let mut resource_nodes: Vec<(String, String, ResourceKind)> = Vec::new();
+    let route_nodes: Vec<http::RouteNode>;
     {
         let p = Project::new(root, files, asm, manifests);
         let mut ext_seen: HashSet<String> = HashSet::new();
@@ -1822,6 +1850,45 @@ pub fn resolve(
                 });
             }
         }
+        // routes, joined across files, and their handlers
+        route_nodes = http::compose(&p, files);
+        for (r, h) in route_nodes.iter().flat_map(|r| r.handlers.iter().map(move |h| (r, h))) {
+            edges.push(EdgeOut {
+                source: r.id.clone(),
+                target: h.clone(),
+                relation: "handles",
+                confidence: Confidence::Extracted,
+                file: r.file,
+                line: r.line,
+                context: "route",
+                runs: None,
+            });
+        }
+        // requests, to the routes they reach
+        let (links, http) = http::link_calls(&p, files, &route_nodes);
+        for l in links {
+            edges.push(EdgeOut {
+                source: l.source,
+                target: l.target,
+                relation: "http_calls",
+                confidence: l.confidence,
+                file: l.file,
+                line: l.line,
+                context: "http",
+                runs: None,
+            });
+        }
+        let st = stats.entry("http".into()).or_default();
+        for (k, v) in [
+            ("client_calls", http.calls),
+            ("linked", http.linked),
+            ("unlinked", http.unlinked),
+            ("test_calls", http.test_calls),
+            ("external", http.external),
+            ("dynamic", http.dynamic),
+        ] {
+            st.edges.insert(k.into(), v);
+        }
         // imports, once the uses have said which files of a package each one
         // reaches
         for (f, facts) in files.iter().enumerate() {
@@ -1962,10 +2029,35 @@ pub fn resolve(
         })
         .collect();
     nodes.extend(ext);
+    for r in route_nodes {
+        let claimed = asm.ids.claim(r.id.clone());
+        if claimed != r.id {
+            renamed.insert(r.id.clone(), claimed.clone());
+        }
+        let mut v = json!({
+            "id": claimed,
+            "label": r.label,
+            "norm_label": r.label.to_lowercase(),
+            "file_type": "route",
+            "type": "route",
+            "method": r.method,
+            "pattern": r.pattern,
+            "key": r.key,
+            "framework": r.framework,
+            "source_file": files[r.file].path,
+            "source_location": format!("L{}", r.line),
+        });
+        if r.unresolved {
+            v["prefix_unresolved"] = json!(true);
+        }
+        nodes.push(v);
+    }
     if !renamed.is_empty() {
         for l in links.iter_mut() {
-            if let Some(new) = l["target"].as_str().and_then(|t| renamed.get(t)) {
-                l["target"] = json!(new);
+            for end in ["source", "target"] {
+                if let Some(new) = l[end].as_str().and_then(|t| renamed.get(t)) {
+                    l[end] = json!(new);
+                }
             }
         }
     }

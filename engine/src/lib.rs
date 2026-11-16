@@ -19,6 +19,7 @@ pub mod docs;
 pub mod facts;
 pub mod generic;
 pub mod graph;
+pub mod http;
 pub mod lang;
 pub mod parse;
 pub mod refs;
@@ -37,7 +38,7 @@ pub use report::BuildReport;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Bumped when graph.json changes in a way graphlore's readers must know about.
-pub const SCHEMA_VERSION: u32 = 4;
+pub const SCHEMA_VERSION: u32 = 5;
 pub const DEFAULT_MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
 pub const DEFAULT_PARSE_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -241,6 +242,14 @@ pub fn build_graph(opts: &BuildOptions) -> Result<(Value, BuildReport), String> 
         if matches!(n["kind"].as_str(), Some("variable" | "property" | "constant")) {
             report.state.state_nodes += 1;
         }
+        if n["type"] == "route" {
+            report.http.routes += 1;
+            let fw = n["framework"].as_str().unwrap_or("?").to_string();
+            *report.http.by_framework.entry(fw).or_default() += 1;
+            if n["prefix_unresolved"] == true {
+                report.http.prefix_unresolved += 1;
+            }
+        }
         if n["type"] == "resource" {
             let kind = n["resource"].as_str().unwrap_or("?").to_string();
             *report.state.resources.entry(kind).or_default() += 1;
@@ -250,6 +259,7 @@ pub fn build_graph(opts: &BuildOptions) -> Result<(Value, BuildReport), String> 
         match e["relation"].as_str() {
             Some("reads") => report.state.reads += 1,
             Some("writes") => report.state.writes += 1,
+            Some("http_calls") => report.http.http_calls_edges += 1,
             _ => {}
         }
     }
@@ -257,6 +267,15 @@ pub fn build_graph(opts: &BuildOptions) -> Result<(Value, BuildReport), String> 
     report.resolution = resolution;
     if let Some(r) = report.resolution.remove("resources") {
         report.state.single_touch = r.unresolved;
+    }
+    if let Some(r) = report.resolution.remove("http") {
+        let get = |k: &str| r.edges.get(k).copied().unwrap_or(0);
+        report.http.client_calls = get("client_calls");
+        report.http.linked = get("linked");
+        report.http.unlinked = get("unlinked");
+        report.http.external = get("external");
+        report.http.dynamic = get("dynamic");
+        report.http.test_calls = get("test_calls");
     }
 
     let languages: Map<String, Value> =
