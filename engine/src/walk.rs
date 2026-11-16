@@ -30,9 +30,25 @@ pub struct Candidate {
     pub kind: FileKind,
 }
 
+/// Build and package manifests the resolver reads (module paths, crate names,
+/// path aliases, workspace packages, source roots).
+pub const MANIFESTS: &[&str] = &[
+    "go.mod",
+    "Cargo.toml",
+    "package.json",
+    "tsconfig.json",
+    "jsconfig.json",
+    "Package.swift",
+    "pyproject.toml",
+    "setup.py",
+    "setup.cfg",
+];
+
 #[derive(Default)]
 pub struct WalkResult {
     pub files: Vec<Candidate>,
+    /// `(root-relative path, absolute path)` of every manifest found.
+    pub manifests: Vec<(String, PathBuf)>,
     pub too_large: Vec<String>,
     pub not_read: BTreeMap<String, usize>,
     pub non_utf8_paths: usize,
@@ -86,6 +102,10 @@ pub fn discover(root: &Path, out_dir_name: &str, documents: bool, max_bytes: u64
             result.non_utf8_paths += 1;
             continue;
         };
+        let base = rel.rsplit('/').next().unwrap_or(&rel);
+        if MANIFESTS.contains(&base) {
+            result.manifests.push((rel.clone(), path.to_path_buf()));
+        }
         let kind = if let Some(lang) = lang::detect(&rel, None) {
             FileKind::Code(lang)
         } else if let Some(doc) = docs::detect(&rel) {
@@ -111,6 +131,7 @@ pub fn discover(root: &Path, out_dir_name: &str, documents: bool, max_bytes: u64
         result.files.push(Candidate { rel, abs: path.to_path_buf(), kind });
     }
     result.files.sort_by(|a, b| a.rel.cmp(&b.rel));
+    result.manifests.sort();
     result.too_large.sort();
     result
 }

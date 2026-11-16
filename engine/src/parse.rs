@@ -79,6 +79,7 @@ pub fn file_facts(
             facts.parse.has_error = root.has_error();
             facts.defs = generic::walk_defs(module, root, src);
             facts.test_regions = module.test_regions(root, src);
+            crate::refs::read(module, root, src, &mut facts);
             for d in facts.defs.iter_mut() {
                 d.is_test = facts
                     .test_regions

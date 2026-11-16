@@ -19,7 +19,9 @@ pub mod generic;
 pub mod graph;
 pub mod lang;
 pub mod parse;
+pub mod refs;
 pub mod report;
+pub mod resolve;
 pub mod walk;
 
 #[cfg(feature = "python")]
@@ -31,7 +33,7 @@ pub use report::BuildReport;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Bumped when graph.json changes in a way graphlore's readers must know about.
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
 pub const DEFAULT_MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
 pub const DEFAULT_PARSE_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -152,10 +154,15 @@ pub fn build_graph(opts: &BuildOptions) -> Result<(Value, BuildReport), String> 
     (report.unreadable, report.unreadable_count) = report::sample(unreadable);
     (report.timed_out, report.timed_out_count) = report::sample(timed_out);
 
-    let assembled = graph::assemble::assemble(&facts);
+    let mut assembled = graph::assemble::assemble(&facts);
+    let (ext_nodes, edges, resolution) =
+        resolve::resolve(&root, &facts, &mut assembled, found.manifests);
+    assembled.nodes.extend(ext_nodes);
+    assembled.links.extend(edges);
     report.nodes = assembled.nodes.len();
     report.edges = assembled.links.len();
     report.id_collisions = assembled.id_collisions;
+    report.resolution = resolution;
 
     let languages: Map<String, Value> =
         report.languages.iter().map(|(k, v)| (k.clone(), json!(v.files))).collect();
@@ -170,6 +177,7 @@ pub fn build_graph(opts: &BuildOptions) -> Result<(Value, BuildReport), String> 
             "schema_version": SCHEMA_VERSION,
             "languages": languages,
             "documents": report.documents,
+            "resolution": report.resolution,
         }),
     );
     top.insert("nodes".into(), Value::Array(assembled.nodes));

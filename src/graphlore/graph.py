@@ -28,6 +28,11 @@ def _graph_path() -> Path:
 # multi-MB graph on every tool call; keyed on path (not just mtime) so distinct
 # graphs in tests can't collide on a coarse-resolution mtime.
 _GRAPH_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+# id(nodes list) -> (nodes, the graph's `graph` header): lets helpers that get
+# only the node list (resolve.py) ask which engine wrote it. Identity-guarded
+# like the other id-keyed caches.
+_GRAPH_META: dict[int, tuple[list, dict[str, Any]]] = {}
+_GRAPH_META_MAX = 8
 
 
 def _load_graph() -> dict[str, Any] | str:
@@ -51,6 +56,7 @@ def _load_graph() -> dict[str, Any] | str:
             # string here — not leak through and AttributeError inside every tool.
             return f"ERROR: graph.json must be a JSON object, not {type(data).__name__}"
         _GRAPH_CACHE[key] = (mtime, data)
+        _remember_meta(data)
         return data
     except json.JSONDecodeError as e:
         return f"ERROR: failed to parse graph.json: {e}"
@@ -58,6 +64,32 @@ def _load_graph() -> dict[str, Any] | str:
         # stat/read can fail mid-rebuild (file swapped between exists() and stat)
         # or on undecodable bytes; both are "graph unavailable", not a crash.
         return f"ERROR: failed to read graph.json: {e}"
+
+
+def _remember_meta(data: dict[str, Any]) -> None:
+    nodes = data.get("nodes") or data.get("vertices")
+    meta = data.get("graph")
+    if not isinstance(nodes, list) or not isinstance(meta, dict):
+        return
+    if id(nodes) not in _GRAPH_META and len(_GRAPH_META) >= _GRAPH_META_MAX:
+        _GRAPH_META.pop(next(iter(_GRAPH_META)), None)  # FIFO
+    _GRAPH_META[id(nodes)] = (nodes, meta)
+
+
+def _graph_meta(nodes: list) -> dict[str, Any]:
+    """The `graph` header of the loaded graph these nodes came from ({} if none)."""
+    entry = _GRAPH_META.get(id(nodes))
+    return entry[1] if entry is not None and entry[0] is nodes else {}
+
+
+def _engine_resolved(nodes: list) -> bool:
+    """Whether graphlore's native engine wrote this graph with its own import and
+    call resolution (schema 2 on): its edges need no correcting at read time."""
+    meta = _graph_meta(nodes)
+    try:
+        return meta.get("engine") == "graphlore" and int(meta.get("schema_version", 0)) >= 2
+    except (TypeError, ValueError):
+        return False
 
 
 def _nodes_edges(graph: dict[str, Any]) -> tuple[list[dict], list[dict]]:
@@ -322,6 +354,9 @@ IMPORT_MODULE_LEVEL = "module-level"
 IMPORT_DEFERRED = "deferred"            # inside a function body
 IMPORT_TYPE_CHECKING = "type-checking"  # under `if TYPE_CHECKING:`
 IMPORT_UNCLASSIFIED = "unclassified"
+# The values an edge's `runs` field may carry (native engine): every kind but
+# unclassified.
+_IMPORT_RUNS = frozenset({IMPORT_MODULE_LEVEL, IMPORT_DEFERRED, IMPORT_TYPE_CHECKING})
 _IMPORT_RUNS_AT_IMPORT = frozenset({IMPORT_MODULE_LEVEL, IMPORT_UNCLASSIFIED})
 # (importing file, imported file, edge) -> one of the kinds above, or None when
 # the import statement cannot mean that file at all (the resolver matched a name).
@@ -354,7 +389,12 @@ def _file_import_edges(
         sf, tf = _node_file(src), _node_file(dst)
         if not (sf and tf) or sf == tf:
             continue
-        kind = IMPORT_UNCLASSIFIED if kind_of is None else kind_of(sf, tf, e)
+        if kind_of is not None:
+            kind = kind_of(sf, tf, e)
+        else:
+            # an extractor that read the statement says when it runs
+            carried = e.get("runs")
+            kind = carried if carried in _IMPORT_RUNS else IMPORT_UNCLASSIFIED
         if kind is None:
             continue
         if kind == IMPORT_UNCLASSIFIED and kind_of is not None and not _is_file_hub_node(src) \

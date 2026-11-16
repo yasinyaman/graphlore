@@ -12,6 +12,14 @@ pub struct Assembled {
     pub nodes: Vec<Value>,
     pub links: Vec<Value>,
     pub id_collisions: usize,
+    /// The hub node id of each file, in `files` order.
+    pub hubs: Vec<String>,
+    /// The node id of each definition (`None` when it is no node), per file.
+    pub def_ids: Vec<Vec<Option<String>>>,
+    /// The definition each definition hangs off (see `resolve_parents`), per file.
+    pub parents: Vec<Vec<Option<usize>>>,
+    /// The ids handed out, so that the nodes added later stay unique.
+    pub ids: IdAllocator,
 }
 
 fn basename(rel: &str) -> &str {
@@ -26,7 +34,7 @@ fn location(line: u32, end: u32) -> String {
     }
 }
 
-fn link(source: &str, target: &str, relation: &str, file: &str, line: u32) -> Value {
+pub fn link(source: &str, target: &str, relation: &str, file: &str, line: u32) -> Value {
     json!({
         "source": source,
         "target": target,
@@ -43,7 +51,7 @@ fn link(source: &str, target: &str, relation: &str, file: &str, line: u32) -> Va
 /// emitted lexical ancestor when that is class-like; otherwise the type it is
 /// declared for (Go receiver, Rust `impl`, `Session::Get`, Swift extension)
 /// when the file defines it; otherwise the nearest emitted ancestor, if any.
-fn resolve_parents(defs: &[Def], emitted: &[bool]) -> Vec<Option<usize>> {
+pub fn resolve_parents(defs: &[Def], emitted: &[bool]) -> Vec<Option<usize>> {
     let mut out: Vec<Option<usize>> = Vec::with_capacity(defs.len());
     for (i, d) in defs.iter().enumerate() {
         let mut lexical = d.parent;
@@ -86,9 +94,13 @@ pub fn assemble(files: &[FileFacts]) -> Assembled {
     let mut nodes = Vec::new();
     let mut links = Vec::new();
 
+    let mut hubs = Vec::with_capacity(files.len());
+    let mut all_def_ids = Vec::with_capacity(files.len());
+    let mut all_parents = Vec::with_capacity(files.len());
     for (facts, file_slug) in files.iter().zip(&slugs) {
         let rel = facts.path.as_str();
         let hub = ids.claim(file_slug.clone());
+        hubs.push(hub.clone());
         let label = basename(rel);
         let mut hub_node = Map::new();
         hub_node.insert("id".into(), json!(hub));
@@ -130,10 +142,16 @@ pub fn assemble(files: &[FileFacts]) -> Assembled {
                 links.push(link(&parent, &id, "contains", rel, h.line));
                 heading_ids.push((h.level, id));
             }
+            all_def_ids.push(Vec::new());
+            all_parents.push(Vec::new());
             continue;
         }
 
-        let Some(lang) = facts.lang else { continue };
+        let Some(lang) = facts.lang else {
+            all_def_ids.push(vec![None; facts.defs.len()]);
+            all_parents.push(vec![None; facts.defs.len()]);
+            continue;
+        };
         let module = lang.module();
         let defs = &facts.defs;
         let emitted: Vec<bool> = defs.iter().map(|d| module.emits_node(d.kind)).collect();
@@ -199,6 +217,16 @@ pub fn assemble(files: &[FileFacts]) -> Assembled {
             node_ids[i] = Some(id);
             chains[i] = chain;
         }
+        all_def_ids.push(node_ids);
+        all_parents.push(parents);
     }
-    Assembled { nodes, links, id_collisions: ids.collisions }
+    Assembled {
+        nodes,
+        links,
+        id_collisions: ids.collisions,
+        hubs,
+        def_ids: all_def_ids,
+        parents: all_parents,
+        ids,
+    }
 }

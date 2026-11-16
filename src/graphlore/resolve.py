@@ -34,6 +34,7 @@ from .graph import (
     _IMPORT_RELATIONS,
     _bare_name,
     _edge_ends,
+    _engine_resolved,
     _is_file_hub_node,
     _node_file,
     _node_id,
@@ -315,7 +316,8 @@ def _resolved(nodes: list[dict], edges: list[dict]) -> Resolved:
     Off with ``GRAPHLORE_RESOLVE=0``. Costs one parse per Python and JS/TS file
     of the graph (cached per file by mtime), once per loaded graph.
     """
-    if not _enabled():
+    if not _enabled() or _engine_resolved(nodes):
+        # graphlore's native engine resolved these calls and imports itself
         return Resolved(edges)
     ident = (id(nodes), id(edges))
     project = str(config.PROJECT_DIR)

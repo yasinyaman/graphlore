@@ -205,6 +205,7 @@ def compare(theirs_graph: dict, ours_graph: dict) -> dict[str, Any]:
         for name, g in (("graphify", theirs_graph), ("native", ours_graph))
     }
     return {
+        "edges": compare_edges(theirs_graph, ours_graph, paired),
         "languages": dict(sorted(langs.items())),
         "graphify_definitions": total,
         "native_definitions": len(ours),
@@ -213,6 +214,89 @@ def compare(theirs_graph: dict, ours_graph: dict) -> dict[str, Any]:
         "near_offsets": dict(sorted(offsets.items())),
         "document_nodes": docs,
     }
+
+
+EDGE_GROUPS = {
+    "imports": {"imports", "imports_from", "re_exports", "dynamic_import", "requires"},
+    "calls": {"calls", "indirect_call"},
+    "bases": {"inherits", "extends", "implements", "mixes_in", "embeds"},
+    "references": {"references", "uses"},
+}
+
+
+def _group(rel: str) -> str | None:
+    return next((g for g, rels in EDGE_GROUPS.items() if rel in rels), None)
+
+
+def compare_edges(theirs_graph: dict, ours_graph: dict, paired: dict[str, str]) -> dict[str, Any]:
+    """Edges per group and language: imports as (file, file) pairs, the rest as
+    (definition, definition) pairs over the definitions both engines have."""
+    out: dict[str, dict[str, Any]] = {}
+    sides = {}
+    for name, graph in (("graphify", theirs_graph), ("native", ours_graph)):
+        nodes, edges = _nodes_edges(graph)
+        byid = {_node_id(n): n for n in nodes}
+        sides[name] = (byid, edges)
+    common = set(paired.values())
+    rev = {o: t for t, o in paired.items()}
+    sets: dict[tuple[str, str, str], set] = {}
+    inferred = {}
+    for name, (byid, edges) in sides.items():
+        for e in edges:
+            g = _group(_edge_rel(e).strip().lower())
+            if g is None:
+                continue
+            s, t = _edge_ends(e)
+            sn, tn = byid.get(s), byid.get(t)
+            if sn is None or tn is None:
+                continue
+            sf, tf = _node_file(sn), _node_file(tn)
+            lang = language(sf) if sf else None
+            if not lang:
+                continue
+            if g == "imports":
+                if not tf or sf == tf or _is_external_node(tn):
+                    continue
+                key = (sf, tf)
+            else:
+                if name == "graphify":
+                    s2, t2 = paired.get(s), paired.get(t)
+                    if s2 is None or t2 is None:
+                        continue
+                    key = (s2, t2)
+                else:
+                    if s not in common or t not in common:
+                        continue
+                    key = (s, t)
+            sets.setdefault((g, lang, name), set()).add(key)
+            if name == "native" and str(e.get("confidence", "")).upper() == "INFERRED":
+                inferred[(g, lang)] = inferred.get((g, lang), 0) + 1
+    labels = {
+        name: {i: _node_label(n) for i, n in byid.items()} for name, (byid, _) in sides.items()
+    }
+    for g, lang in sorted({k[:2] for k in sets}):
+        theirs = sets.get((g, lang, "graphify"), set())
+        ours = sets.get((g, lang, "native"), set())
+
+        def show(pairs: set, side: str, g: str = g) -> list[str]:
+            rows = []
+            for a, b in sorted(pairs)[:SAMPLES]:
+                if g == "imports":
+                    rows.append(f"{a} -> {b}")
+                else:
+                    la = labels["native"].get(a) or labels["graphify"].get(rev.get(a, a), a)
+                    lb = labels["native"].get(b) or labels["graphify"].get(rev.get(b, b), b)
+                    rows.append(f"{la} -> {lb}")
+            return rows
+
+        out.setdefault(g, {})[lang] = {
+            "graphify": len(theirs), "native": len(ours), "both": len(theirs & ours),
+            "only_graphify": len(theirs - ours), "only_native": len(ours - theirs),
+            "native_inferred": inferred.get((g, lang), 0),
+            "samples_only_graphify": show(theirs - ours, "graphify"),
+            "samples_only_native": show(ours - theirs, "native"),
+        }
+    return out
 
 
 def render(result: dict[str, Any]) -> str:
@@ -235,6 +319,13 @@ def render(result: dict[str, Any]) -> str:
     if result["near_offsets"]:
         lines.append(f"near matches by line offset (native - graphify): {result['near_offsets']}")
     lines.append(f"document nodes: {result['document_nodes']}")
+    for g, per_lang in result.get("edges", {}).items():
+        lines.append(f"\n{g} edges ({'file pairs' if g == 'imports' else 'definition pairs'}):")
+        lines.append(f"  {'language':14} {'graphify':>8} {'native':>7} {'both':>6} {'only-g':>7} "
+                     f"{'only-n':>7} {'inferred':>8}")
+        for lang, r in per_lang.items():
+            lines.append(f"  {lang:14} {r['graphify']:8} {r['native']:7} {r['both']:6} "
+                         f"{r['only_graphify']:7} {r['only_native']:7} {r['native_inferred']:8}")
     for name, r in result["languages"].items():
         for key, what in (("only_graphify", "only in graphify"), ("only_native", "only native"),
                           ("parent_differs", "different parent"),

@@ -64,10 +64,9 @@ def test_native_build_is_read_by_the_tools(native):
         ("Shop", "contains"), (".add()", "method"), (".empty?()", "method")}
 
     lint = json.loads(server.graphlore_validate(as_json=True))
-    assert lint["issues"]["dangling_edges"] == 0 and lint["issues"]["self_loops"] == 0
-    # the two files that define nothing (an empty __init__.py, a re-exporting
-    # index.ts) are orphans until import edges arrive
-    assert sorted(lint["examples"]["orphan_nodes"]) == ["__init__.py", "index.ts"]
+    assert lint["healthy"], lint["issues"]
+    # the engine resolved the imports and calls itself: nothing left to add
+    assert lint["resolved_edges"] == {"calls": 0, "imports": 0}
 
 
 def test_native_build_records_the_commit_freshness_reads(native):
@@ -173,3 +172,73 @@ def test_native_cli_reports_and_fails_cleanly(native, tmp_path):
     run = subprocess.run([sys.executable, "-m", "graphlore_engine", "build",
                           str(tmp_path / "missing")], capture_output=True, text=True)
     assert run.returncode == 1 and run.stderr.startswith("ERROR: cannot read")
+
+
+_PY_PROJECT = {
+    "pkg/__init__.py": "from .core import Engine\n",
+    "pkg/core.py": (
+        "from typing import TYPE_CHECKING\nfrom pkg import util\nif TYPE_CHECKING:\n"
+        "    from pkg.cli import Cli\n\n\nclass Engine:\n    def run(self, n: int) -> int:\n"
+        "        return util.double(n) + self.step()\n\n    def step(self) -> int:\n"
+        "        return 1\n"),
+    "pkg/util.py": (
+        "def double(n):\n    from pkg.core import Engine\n    return n * 2\n\n\n"
+        "def unused_helper():\n    return 3\n"),
+    "pkg/cli.py": (
+        "from pkg import Engine\n\n\nclass Cli:\n    pass\n\n\ndef main():\n"
+        "    e = Engine()\n    return e.run(2)\n"),
+    "tests/test_core.py": (
+        "from pkg.core import Engine\n\n\ndef test_run():\n    assert Engine().run(1) == 3\n"),
+}
+
+
+@pytest.fixture()
+def py_project(tmp_path, monkeypatch):
+    for rel, text in _PY_PROJECT.items():
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_text(text, encoding="utf-8")
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    monkeypatch.setenv("GRAPHLORE_ENGINE", "native")
+    server._GRAPH_CACHE.clear()
+    server._SPAN_CACHE.clear()
+    assert server.graphlore_build(".").startswith("native engine")
+    return tmp_path
+
+
+def _edges(root):
+    g = _graph(root)
+    return {(e["source"], e["relation"], e["target"]): e for e in g["links"]}
+
+
+def test_native_imports_say_when_they_run(py_project):
+    edges = _edges(py_project)
+    runs = {(s, t): e.get("runs") for (s, rel, t), e in edges.items() if rel.startswith("imports")}
+    assert runs[("pkg_core", "pkg_cli")] == "type-checking"
+    assert runs[("pkg_util", "pkg_core")] == "deferred"
+    assert runs[("pkg_core", "pkg_util")] == "module-level"
+    # a name imported through a package's re-export lands on its definition
+    assert ("pkg_cli", "imports", "pkg_core_engine") in edges
+    assert edges[("pkg_core", "imports_from", "pkg_util")]["context"] == "submodule_import"
+    ext = [n for n in _graph(py_project)["nodes"] if n.get("external")]
+    assert {n["label"] for n in ext} == {"typing"}
+
+
+def test_native_calls_and_the_tools_that_walk_them(py_project):
+    edges = _edges(py_project)
+    assert edges[("pkg_core_engine_run", "calls", "pkg_util_double")]["confidence"] == "EXTRACTED"
+    assert ("pkg_core_engine_run", "calls", "pkg_core_engine_step") in edges
+    # `e = Engine(); e.run(2)`: the receiver's type comes from what it was assigned
+    assert edges[("pkg_cli_main", "calls", "pkg_core_engine_run")]["confidence"] == "INFERRED"
+
+    cycles = json.loads(server.graphlore_cycles(as_json=True))
+    assert cycles["import_edges_rejected"] == 0
+    assert cycles["runtime_import_cycle_count"] == 0
+    assert cycles["deferred_import_cycle_count"] == 1
+    assert cycles["type_only_import_cycle_count"] == 1
+
+    tests = json.loads(server.graphlore_tests_for("Engine.run", as_json=True))
+    assert [t["test"] for t in tests["direct"]] == ["test_run()"]
+    impact = json.loads(server.graphlore_impact("double", as_json=True))
+    assert ".run()" in {r["node"] for r in impact["impacted"]}
+    dead = json.loads(server.graphlore_unreferenced(as_json=True))
+    assert {d["node"] for d in dead["unreferenced"]} == {"unused_helper()", "main()"}

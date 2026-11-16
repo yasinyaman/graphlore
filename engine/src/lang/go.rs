@@ -1,14 +1,36 @@
 //! Go. Methods are named `Receiver.Method` (the generic walk reads the
 //! `receiver` field), and a `type_spec` is a struct, an interface or an alias
-//! depending on the type it declares.
+//! depending on the type it declares. Imports are packages (`import x "path"`;
+//! `.` imports every name, `_` none); an anonymous struct field or interface
+//! element embeds its type.
 
 use tree_sitter::Node;
 
 use super::LanguageModule;
-use crate::facts::DefKind;
-use crate::generic;
+use crate::facts::{DefKind, ImportFact, ImportForm, RefKind};
+use crate::generic::{self, kids, text};
+use crate::refs::{import, path_of, string_value};
 
 pub struct Go;
+
+const BUILTINS: &[&str] = &[
+    "append", "cap", "clear", "close", "complex", "copy", "delete", "imag", "len", "make", "max",
+    "min", "new", "panic", "print", "println", "real", "recover",
+];
+
+fn spec(n: Node, src: &[u8]) -> Option<ImportFact> {
+    let path = string_value(n.child_by_field_name("path")?, src);
+    let mut f = import(n, ImportForm::Module, path);
+    if let Some(name) = n.child_by_field_name("name") {
+        let alias = text(name, src);
+        if alias == "." {
+            f.form = ImportForm::Wildcard;
+        } else {
+            f.alias = Some(alias);
+        }
+    }
+    Some(f)
+}
 
 impl LanguageModule for Go {
     fn kind_of(&self, node: Node, _src: &[u8]) -> DefKind {
@@ -21,5 +43,78 @@ impl LanguageModule for Go {
             "type_alias" => DefKind::TypeAlias,
             k => generic::kind_of(k),
         }
+    }
+
+    fn imports_of(&self, n: Node, src: &[u8]) -> Option<Vec<ImportFact>> {
+        if n.kind() != "import_declaration" {
+            return None;
+        }
+        let mut out = Vec::new();
+        for c in kids(n) {
+            match c.kind() {
+                "import_spec" => out.extend(spec(c, src)),
+                "import_spec_list" => out.extend(
+                    kids(c)
+                        .into_iter()
+                        .filter(|s| s.kind() == "import_spec")
+                        .filter_map(|s| spec(s, src)),
+                ),
+                _ => {}
+            }
+        }
+        Some(out)
+    }
+
+    fn package_of(&self, n: Node, src: &[u8]) -> Option<String> {
+        (n.kind() == "package_clause")
+            .then(|| kids(n).into_iter().next().map(|c| text(c, src)))
+            .flatten()
+    }
+
+    fn heritage_of(&self, n: Node, src: &[u8]) -> Vec<(RefKind, Vec<String>)> {
+        if n.kind() != "type_spec" {
+            return Vec::new();
+        }
+        let Some(t) = n.child_by_field_name("type") else { return Vec::new() };
+        let mut out = Vec::new();
+        match t.kind() {
+            "struct_type" => {
+                for list in kids(t) {
+                    for field in kids(list) {
+                        if field.kind() == "field_declaration"
+                            && field.child_by_field_name("name").is_none()
+                        {
+                            if let Some(p) =
+                                field.child_by_field_name("type").and_then(|x| path_of(x, src))
+                            {
+                                out.push((RefKind::Embeds, p));
+                            }
+                        }
+                    }
+                }
+            }
+            "interface_type" => {
+                for e in kids(t) {
+                    if matches!(e.kind(), "type_elem" | "constraint_elem") {
+                        for x in kids(e) {
+                            if let Some(p) = path_of(x, src) {
+                                out.push((RefKind::Embeds, p));
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+        out
+    }
+
+    fn is_field(&self, node: Node) -> bool {
+        // an anonymous field is an embedding, read by `heritage_of`
+        node.kind() == "field_declaration" && node.child_by_field_name("name").is_some()
+    }
+
+    fn builtins(&self) -> &'static [&'static str] {
+        BUILTINS
     }
 }
