@@ -138,6 +138,53 @@ fn call_import(n: Node, src: &[u8]) -> Option<Vec<ImportFact>> {
 }
 
 impl LanguageModule for Ecma {
+    fn needs_import(&self) -> bool {
+        true
+    }
+
+    /// Module-level `let` / `var` (a `const` is `extra_def`'s constant).
+    fn state_defs<'t>(&self, n: Node<'t>, src: &[u8]) -> Vec<(Node<'t>, Node<'t>, DefKind)> {
+        if n.kind() != "variable_declarator" {
+            return Vec::new();
+        }
+        let Some(decl) = n
+            .parent()
+            .filter(|p| matches!(p.kind(), "lexical_declaration" | "variable_declaration"))
+        else {
+            return Vec::new();
+        };
+        let top = decl.parent().is_some_and(|p| {
+            p.kind() == "program"
+                || (p.kind() == "export_statement"
+                    && p.parent().is_some_and(|q| q.kind() == "program"))
+        });
+        let is_const = all_kids(decl).iter().any(|c| c.kind() == "const");
+        let value = n.child_by_field_name("value");
+        let function = value.is_some_and(|v| {
+            matches!(
+                v.kind(),
+                "arrow_function"
+                    | "function_expression"
+                    | "function"
+                    | "generator_function"
+                    | "class"
+            )
+        });
+        // `var express = require('express')` binds a module: an import, not state
+        let module = value.is_some_and(|v| {
+            let v = if v.kind() == "await_expression" { v.named_child(0).unwrap_or(v) } else { v };
+            v.kind() == "call_expression"
+                && v.child_by_field_name("function")
+                    .is_some_and(|f| f.kind() == "import" || text(f, src) == "require")
+        });
+        match n.child_by_field_name("name").filter(|x| x.kind() == "identifier") {
+            Some(name) if top && !is_const && !function && !module => {
+                vec![(n, name, DefKind::Variable)]
+            }
+            _ => Vec::new(),
+        }
+    }
+
     fn kind_of(&self, node: Node, src: &[u8]) -> DefKind {
         match node.kind() {
             "internal_module" | "module" => DefKind::Namespace,

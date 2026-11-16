@@ -310,6 +310,15 @@ pub trait LanguageModule: Send + Sync {
         None
     }
 
+    /// Variables, constants and class-level fields a node declares (`Def::extra`):
+    /// `(span node, name node, kind)` for each name, with `DefKind::Variable` for
+    /// module or package state, `Constant` for what cannot change, `Property`
+    /// for a class-level field. Asked of every node that is not a definition;
+    /// `extra_def` covers the properties and constants found before.
+    fn state_defs<'t>(&self, _node: Node<'t>, _src: &[u8]) -> Vec<(Node<'t>, Node<'t>, DefKind)> {
+        Vec::new()
+    }
+
     /// The object a definition is assigned to as a property (see `Def::object`).
     fn object_of(&self, _node: Node, _src: &[u8]) -> Option<String> {
         None
@@ -337,6 +346,21 @@ pub trait LanguageModule: Send + Sync {
         )
     }
 
+    /// Whether assigning a bare name inside a function declares a local of it
+    /// (Python, Ruby: `x = 1` is a new local unless `global x`), rather than
+    /// writing a name from an outer scope.
+    fn assignment_declares(&self) -> bool {
+        false
+    }
+
+    /// Whether a name from another file has to be imported to be used here, so
+    /// a bare name is state only when it is the file's own or imported (false
+    /// for languages whose packages, namespaces or classes share names
+    /// without imports: Go, the JVM, C#, Swift, C/C++, Ruby, PHP).
+    fn needs_import(&self) -> bool {
+        false
+    }
+
     /// References a node makes, in place of the generic call rule: `None`
     /// keeps the generic one.
     fn refs_of(
@@ -357,4 +381,10 @@ pub trait LanguageModule: Send + Sync {
 /// Paths of the children of a list node (a base list, a type list).
 pub fn paths_in(list: Node, src: &[u8]) -> Vec<Vec<String>> {
     generic::kids(list).into_iter().filter_map(|c| crate::refs::path_of(c, src)).collect()
+}
+
+/// A module-level name is a constant when written in capitals (`MAX_SIZE`).
+pub fn capitals(name: &str) -> bool {
+    name.chars().any(|c| c.is_ascii_uppercase())
+        && name.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
 }

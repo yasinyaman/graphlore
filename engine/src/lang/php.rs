@@ -7,7 +7,7 @@
 use tree_sitter::Node;
 
 use super::LanguageModule;
-use crate::facts::{ImportFact, ImportForm, RefKind};
+use crate::facts::{DefKind, ImportFact, ImportForm, RefKind};
 use crate::generic::{kids, text};
 use crate::refs::{import, path_of, string_value};
 
@@ -34,6 +34,28 @@ fn use_clause(n: Node, clause: Node, prefix: &str, src: &[u8]) -> Option<ImportF
 }
 
 impl LanguageModule for Php {
+    /// `public static $total` (shared by every instance) and `const MAX`.
+    fn state_defs<'t>(&self, n: Node<'t>, _src: &[u8]) -> Vec<(Node<'t>, Node<'t>, DefKind)> {
+        match n.kind() {
+            "property_declaration" if kids(n).iter().any(|c| c.kind() == "static_modifier") => {
+                kids(n)
+                    .into_iter()
+                    .filter(|c| c.kind() == "property_element")
+                    .filter_map(|e| e.child_by_field_name("name"))
+                    .filter_map(|v| kids(v).into_iter().find(|c| c.kind() == "name"))
+                    .map(|name| (n, name, DefKind::Property))
+                    .collect()
+            }
+            "const_declaration" => kids(n)
+                .into_iter()
+                .filter(|c| c.kind() == "const_element")
+                .filter_map(|e| kids(e).into_iter().find(|c| c.kind() == "name"))
+                .map(|name| (n, name, DefKind::Constant))
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+
     fn imports_of(&self, n: Node, src: &[u8]) -> Option<Vec<ImportFact>> {
         match n.kind() {
             "namespace_use_declaration" => {

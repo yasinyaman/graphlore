@@ -7,13 +7,31 @@ use tree_sitter::Node;
 
 use super::java::dotted_import;
 use super::LanguageModule;
-use crate::facts::{ImportFact, ImportForm, RefKind};
+use crate::facts::{DefKind, ImportFact, ImportForm, RefKind};
 use crate::generic::{kids, text};
 use crate::refs::{import, path_of};
 
 pub struct Scala;
 
 impl LanguageModule for Scala {
+    /// `var` / `val` at the top level or in an `object` (one shared instance).
+    fn state_defs<'t>(&self, n: Node<'t>, _src: &[u8]) -> Vec<(Node<'t>, Node<'t>, DefKind)> {
+        let kind = match n.kind() {
+            "var_definition" => DefKind::Variable,
+            "val_definition" => DefKind::Constant,
+            _ => return Vec::new(),
+        };
+        let shared = n.parent().is_some_and(|p| {
+            p.kind() == "compilation_unit"
+                || (p.kind() == "template_body"
+                    && p.parent().is_some_and(|o| o.kind() == "object_definition"))
+        });
+        match n.child_by_field_name("pattern").filter(|p| p.kind() == "identifier") {
+            Some(name) if shared => vec![(n, name, kind)],
+            _ => Vec::new(),
+        }
+    }
+
     fn imports_of(&self, n: Node, src: &[u8]) -> Option<Vec<ImportFact>> {
         if n.kind() != "import_declaration" {
             return None;

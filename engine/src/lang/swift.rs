@@ -13,6 +13,22 @@ use crate::refs::{import, path_of};
 pub struct Swift;
 
 impl LanguageModule for Swift {
+    /// Top-level `var` / `let` (properties of a type are `extra_def`'s).
+    fn state_defs<'t>(&self, n: Node<'t>, src: &[u8]) -> Vec<(Node<'t>, Node<'t>, DefKind)> {
+        if n.kind() != "property_declaration"
+            || !n.parent().is_some_and(|p| p.kind() == "source_file")
+        {
+            return Vec::new();
+        }
+        let is_let =
+            kids(n).iter().any(|c| c.kind() == "value_binding_pattern" && text(*c, src) == "let");
+        let kind = if is_let { DefKind::Constant } else { DefKind::Variable };
+        let name = n.child_by_field_name("name").and_then(|p| {
+            p.child_by_field_name("bound_identifier").or_else(|| kids(p).into_iter().next())
+        });
+        name.map(|x| vec![(n, x, kind)]).unwrap_or_default()
+    }
+
     fn kind_of(&self, node: Node, src: &[u8]) -> DefKind {
         if node.kind() == "class_declaration" {
             let keyword =

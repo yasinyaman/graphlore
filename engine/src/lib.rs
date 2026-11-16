@@ -24,6 +24,7 @@ pub mod parse;
 pub mod refs;
 pub mod report;
 pub mod resolve;
+pub mod state;
 pub mod walk;
 
 #[cfg(feature = "python")]
@@ -35,7 +36,7 @@ pub use report::BuildReport;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Bumped when graph.json changes in a way graphlore's readers must know about.
-pub const SCHEMA_VERSION: u32 = 3;
+pub const SCHEMA_VERSION: u32 = 4;
 pub const DEFAULT_MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
 pub const DEFAULT_PARSE_TIMEOUT: Duration = Duration::from_secs(10);
 

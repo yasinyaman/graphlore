@@ -25,6 +25,29 @@ pub fn dotted_import(n: Node, path: &str, wildcard: bool, alias: Option<String>)
 }
 
 impl LanguageModule for Java {
+    /// `static` fields: one value the whole program shares (`final` ones are
+    /// constants).
+    fn state_defs<'t>(&self, n: Node<'t>, src: &[u8]) -> Vec<(Node<'t>, Node<'t>, DefKind)> {
+        if n.kind() != "field_declaration" {
+            return Vec::new();
+        }
+        let mods = kids(n)
+            .into_iter()
+            .find(|c| c.kind() == "modifiers")
+            .map(|m| text(m, src))
+            .unwrap_or_default();
+        let words: Vec<&str> = mods.split_whitespace().collect();
+        if !words.contains(&"static") {
+            return Vec::new();
+        }
+        let kind = if words.contains(&"final") { DefKind::Constant } else { DefKind::Property };
+        let mut cursor = n.walk();
+        n.children_by_field_name("declarator", &mut cursor)
+            .filter_map(|d| d.child_by_field_name("name"))
+            .map(|name| (n, name, kind))
+            .collect()
+    }
+
     fn kind_of(&self, node: Node, _src: &[u8]) -> DefKind {
         match node.kind() {
             "annotation_type_declaration" => DefKind::Interface,

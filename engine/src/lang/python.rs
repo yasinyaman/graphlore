@@ -10,7 +10,7 @@
 use tree_sitter::Node;
 
 use super::LanguageModule;
-use crate::facts::{ImportFact, ImportForm, RefKind, Runs};
+use crate::facts::{DefKind, ImportFact, ImportForm, RefKind, Runs};
 use crate::generic::{all_kids, end_line, kids, line, text};
 use crate::refs::{import, path_of};
 
@@ -124,6 +124,65 @@ const BUILTINS: &[&str] = &[
 impl LanguageModule for Python {
     fn bound_functions(&self) -> bool {
         false
+    }
+
+    fn assignment_declares(&self) -> bool {
+        true
+    }
+
+    fn needs_import(&self) -> bool {
+        true
+    }
+
+    /// `CACHE = {}` at module level (a variable; `MAX = 3` a constant) and
+    /// `count = 0` / `name: str` in a class body (a class attribute).
+    fn state_defs<'t>(&self, node: Node<'t>, _src: &[u8]) -> Vec<(Node<'t>, Node<'t>, DefKind)> {
+        if node.kind() != "assignment" {
+            return Vec::new();
+        }
+        let Some(stmt) = node.parent().filter(|p| p.kind() == "expression_statement") else {
+            return Vec::new();
+        };
+        let Some(scope) = stmt.parent() else { return Vec::new() };
+        let in_class = scope.kind() == "block"
+            && scope.parent().is_some_and(|c| c.kind() == "class_definition");
+        if scope.kind() != "module" && !in_class {
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        let Some(left) = node.child_by_field_name("left") else { return out };
+        let names: Vec<Node> = if left.kind() == "identifier" {
+            vec![left]
+        } else if matches!(left.kind(), "pattern_list" | "tuple_pattern") {
+            kids(left).into_iter().filter(|c| c.kind() == "identifier").collect()
+        } else {
+            Vec::new()
+        };
+        for name in names {
+            let kind = if in_class {
+                DefKind::Property
+            } else if super::capitals(&String::from_utf8_lossy(&_src[name.byte_range()]))
+                && node.child_by_field_name("right").is_some_and(|v| {
+                    // `CACHE = {}` is written in capitals and changed all the same
+                    !matches!(
+                        v.kind(),
+                        "dictionary"
+                            | "list"
+                            | "set"
+                            | "call"
+                            | "dictionary_comprehension"
+                            | "list_comprehension"
+                            | "set_comprehension"
+                    )
+                })
+            {
+                DefKind::Constant
+            } else {
+                DefKind::Variable
+            };
+            out.push((node, name, kind));
+        }
+        out
     }
 
     fn end_line(&self, node: Node) -> u32 {

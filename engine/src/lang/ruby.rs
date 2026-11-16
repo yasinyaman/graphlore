@@ -7,7 +7,7 @@
 use tree_sitter::Node;
 
 use super::LanguageModule;
-use crate::facts::{ImportFact, ImportForm, RefKind};
+use crate::facts::{DefKind, ImportFact, ImportForm, RefKind};
 use crate::generic::{kids, text};
 use crate::refs::{import, path_of, string_value};
 
@@ -20,6 +20,29 @@ fn method_name(n: Node, src: &[u8]) -> Option<String> {
 }
 
 impl LanguageModule for Ruby {
+    fn assignment_declares(&self) -> bool {
+        true
+    }
+
+    /// `$hits = 0` and `MAX = 3` at the top level, and `@@total = 0` / `LIMIT
+    /// = 2` in a class or module body.
+    fn state_defs<'t>(&self, n: Node<'t>, _src: &[u8]) -> Vec<(Node<'t>, Node<'t>, DefKind)> {
+        if n.kind() != "assignment" {
+            return Vec::new();
+        }
+        let Some(left) = n.child_by_field_name("left") else { return Vec::new() };
+        let scope = n.parent().map(|p| (p.kind(), p.parent().map(|q| q.kind())));
+        let top = matches!(scope, Some(("program", _)));
+        let in_type = matches!(scope, Some(("body_statement", Some("class" | "module"))));
+        let kind = match left.kind() {
+            "global_variable" if top => DefKind::Variable,
+            "constant" if top || in_type => DefKind::Constant,
+            "class_variable" if in_type => DefKind::Property,
+            _ => return Vec::new(),
+        };
+        vec![(n, left, kind)]
+    }
+
     fn imports_of(&self, n: Node, src: &[u8]) -> Option<Vec<ImportFact>> {
         let m = method_name(n, src)?;
         if !matches!(m.as_str(), "require" | "require_relative" | "load" | "autoload") {

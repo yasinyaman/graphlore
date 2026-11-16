@@ -33,6 +33,24 @@ fn spec(n: Node, src: &[u8]) -> Option<ImportFact> {
 }
 
 impl LanguageModule for Go {
+    /// Package-level `var` and `const`: every function of the package sees them.
+    fn state_defs<'t>(&self, node: Node<'t>, _src: &[u8]) -> Vec<(Node<'t>, Node<'t>, DefKind)> {
+        let kind = match node.kind() {
+            "var_spec" => DefKind::Variable,
+            "const_spec" => DefKind::Constant,
+            _ => return Vec::new(),
+        };
+        let mut decl = node.parent();
+        if decl.is_some_and(|d| d.kind() == "var_spec_list") {
+            decl = decl.and_then(|d| d.parent());
+        }
+        if !decl.and_then(|d| d.parent()).is_some_and(|f| f.kind() == "source_file") {
+            return Vec::new();
+        }
+        let mut cursor = node.walk();
+        node.children_by_field_name("name", &mut cursor).map(|n| (node, n, kind)).collect()
+    }
+
     fn kind_of(&self, node: Node, _src: &[u8]) -> DefKind {
         match node.kind() {
             "type_spec" => match node.child_by_field_name("type").map(|t| t.kind()) {

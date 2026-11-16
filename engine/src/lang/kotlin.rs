@@ -15,6 +15,25 @@ use crate::refs::path_of;
 pub struct Kotlin;
 
 impl LanguageModule for Kotlin {
+    /// Top-level `var` / `val` (class and companion properties are
+    /// `extra_def`'s).
+    fn state_defs<'t>(&self, n: Node<'t>, src: &[u8]) -> Vec<(Node<'t>, Node<'t>, DefKind)> {
+        if n.kind() != "property_declaration"
+            || !n.parent().is_some_and(|p| p.kind() == "source_file")
+        {
+            return Vec::new();
+        }
+        let val =
+            kids(n).iter().any(|c| c.kind() == "binding_pattern_kind" && text(*c, src) == "val");
+        let kind = if val { DefKind::Constant } else { DefKind::Variable };
+        kids(n)
+            .into_iter()
+            .filter(|c| c.kind() == "variable_declaration")
+            .filter_map(|v| kids(v).into_iter().find(|c| c.kind() == "simple_identifier"))
+            .map(|name| (n, name, kind))
+            .collect()
+    }
+
     fn kind_of(&self, node: Node, src: &[u8]) -> DefKind {
         if node.kind() == "class_declaration" {
             for c in all_kids(node) {
