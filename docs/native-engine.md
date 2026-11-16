@@ -46,12 +46,18 @@ what is left before it can be the default.
   (`py`, `npm`, `go`, `jvm`, `dotnet`, `crate`, `php`, `gem`, `swift`, `c`).
 - **Documents.** A page node per Markdown / reStructuredText file and a node per
   heading, nested by level (`code_only` skips them).
+- **Communities.** Every node has a `community` and a `community_name`, from
+  Leiden on edges weighted by kind, confidence and directory ([below](#communities));
+  the graph header carries their count, modularity and a signature per
+  community, which the next build uses to keep ids and saved names.
+- **Incremental updates.** `update=True` parses only the files that changed
+  since the last build ([below](#incremental-updates)).
 - **graphify's conventions.** Node ids are path slugs (`core/src/lib.rs` +
   `Fixed.acquire` → `core_src_lib_fixed_acquire`), labels are `name()` /
   `.name()` / bare, and the node-link layout is graphify's, so every graphlore
   tool — and graphify's own `query` / `path` / `explain` — reads the graph
   unchanged. `built_at_commit` is recorded for freshness. The graph says
-  `graph.engine: graphlore` and `schema_version: 2`, and graphlore then trusts
+  `graph.engine: graphlore` and `schema_version: 3`, and graphlore then trusts
   its edges: `ImportChecker` reads `runs` instead of re-checking an import
   against the source, and the edges `resolve.py` adds to graphify's graphs are
   already there.
@@ -107,6 +113,93 @@ function's declared result). Then, for the whole project
 
 An external module's contents are unknown, so a wildcard import of one
 (`#include <stdio.h>`, `using System;`) names nothing.
+
+### Communities
+
+`engine/src/community/` runs Leiden (local moving, refinement, aggregation, so
+every community is connected) to maximise modularity, on a graph of the
+internal nodes whose edges are weighted:
+
+| | weight |
+|---|--:|
+| `contains`, `method`, `defines`, `case_of`, `calls` | 1.0 |
+| `inherits`, `implements`, `mixes_in`, `embeds` | 1.5 |
+| an import of a file / of a definition | 0.7 / 0.4 |
+| `references`, `uses`, `indirect_call` and the rest | 0.5 |
+| × an `INFERRED` edge | 0.5 |
+| × ends in the same directory / in different top-level directories | 1.25 / 0.6 |
+| × test code to production code | 0.1 |
+
+plus a tie of total weight 0.1 between each file and the other files of its
+directory. External nodes take no part, and join the community most of their
+neighbours are in. Then graphify's rules: an isolated node is its own
+community, one over a quarter of the graph (at least 10 nodes) or one of 50 and
+more with a cohesion under 0.05 is split by a second pass, ids are by size, and
+a community is named after its most connected member, prefixed with the
+directory when most members share one (`httpx: Response`).
+
+Nodes are visited in the order of a hash of their id, so adding a node does
+not reorder the rest, and the same graph gives the same communities on any
+machine. A build starts from the previous graph's communities and repeats the
+partition until a pass returns its own start (when graphify's splits make two
+states alternate, it keeps the one closest to where it began, which a rebuild
+from it keeps too); a first build settles the same way. The previous ids are
+kept by overlap, and a saved name stays while its community's members are the
+same or a strict majority of both its old and new members; others are dropped
+from `.graphify_labels.json`, and the build says how many.
+
+On the 31 audit repositories, against graphify's communities on its own graphs
+(`benchmarks/compare_engines.py REPO --communities`, averages per repository):
+
+| | graphify | native |
+|---|--:|--:|
+| communities | 90.6 | 90.5 |
+| largest, % of the nodes | 10.0 | 12.4 |
+| singletons, % of the nodes | 1.1 | 0.1 |
+| median size | 8.3 | 10.8 |
+| modularity on the plain graph | 0.67 | 0.60 |
+| members in the community's main directory | 82.8% | 87.1% |
+| test nodes in a mostly-production community | 20.9% | 8.0% |
+
+The two partitions agree with a normalised mutual information of 0.78 (0.62 to
+1.0). The lower plain modularity is the price of the weights: the native
+communities follow directories more closely (in 20 of the 31 repositories) and
+keep tests apart from the code they test. The largest communities that the
+size rule leaves whole are single files: express's `History.md` (298 headings
+under one title) and express-mongoose-demo's minified jQuery (225 functions).
+
+After a one-file change (two functions added) and `update=True`, 99.8–100% of
+the nodes keep their community id on eight of the repositories (httpx,
+retrofit, alamofire, guzzle, kotlinpoet, got, restsharp, cpr), and 99% to all
+of the names saved for every community stay; before the settling above, 86–92%
+of the ids stayed. The community step takes at most 173 ms on the audit
+repositories, and 3–5 s on the 270,000 nodes of the Rust crates in
+`~/.cargo/registry`.
+
+### Incremental updates
+
+Every build writes `<out dir>/cache/graphlore-native.bin`: each file's facts
+with its size, modification time and content hash, for this engine version and
+these build options. `update=True` reuses the facts of a file whose size and
+modification time are unchanged (and older than the cache by two seconds), or
+whose content hashes the same, and parses the rest; resolution and communities
+run over the whole project, so an update writes the graph a full build would
+(a test checks), and the nodes of deleted files go. A cache from another
+version or other options, or one that cannot be read, means a full parse.
+`verbose=True` shows the time per phase.
+
+| | full build | update, nothing changed | update, one file changed |
+|---|--:|--:|--:|
+| httpx (86 files) | 0.26 s | 0.11 s | 0.10 s |
+| kotlinpoet (163) | 0.58 s | 0.34 s | 0.30 s |
+| guzzle (168) | 0.86 s | 0.21 s | 0.26 s |
+| retrofit (392) | 2.18 s | 0.68 s | 0.69 s |
+| `~/.cargo/registry` (2,466 files, 270,000 nodes) | 19.2 s | 8.7 s | – |
+
+What an update still spends is the whole-project part. On the crates that is
+assembling and resolving (1.8 s and 1.6 s), communities (3.0 s; 5.0 s on a
+first build, which settles from scratch) and writing a 250 MB graph.json
+(1.3 s), while parsing drops from 8.5 s to 0.2 s.
 
 ## Compared with graphify on 31 repositories
 
@@ -172,11 +265,11 @@ definitions: nested functions, anonymous functions bound to an object key or a
 class field, overloads graphify folds into one node, C++ methods declared in
 their class.
 
-**Speed.** With resolution, the native builds are 3–6 times faster than
-graphify's (`--code-only --no-viz`, four cores, starting Python included):
-retrofit 2.5 s against 13.9 s, guzzle 1.4 s / 5.8 s, alamofire 1.8 s / 5.7 s,
-got 1.4 s / 5.3 s, kotlinpoet 0.8 s / 3.7 s. The Rust crates in
-`~/.cargo/registry` (2,300 files, 88,000 nodes, 203,000 edges) take 11.5 s.
+**Speed.** With resolution and communities, the native builds are 5–8 times
+faster than graphify's (`--code-only --no-viz`, four cores, starting Python
+included): retrofit 2.2 s against 13.9 s, guzzle 0.9 s / 5.8 s, alamofire
+1.2 s / 5.7 s, got 0.7 s / 5.3 s, kotlinpoet 0.6 s / 3.7 s; an update after a
+one-file change takes a third of that ([above](#incremental-updates)).
 
 ### The polyglot audit on native graphs
 
@@ -197,10 +290,12 @@ id, summed over the repositories (measured 2026-11-16):
 | `ROUTES-SILENT-EMPTY`, `IMPORTS-UNCLASSIFIED`, `UNREFERENCED-LISTS-A-TEST` | 3 | 1 |
 | `GRAPH-ORPHAN-NODES` (info) | 26 | 20 |
 
-Every tool answers on every native graph as it does on graphify's, except
-`communities` and `label_communities`, which have no communities to show yet.
-The run takes 122 s of tool time against 216 s on graphify's graphs. What
-the native graphs still raise:
+Every tool answers on every native graph as it does on graphify's,
+`communities` and `label_communities` included since the engine detects
+communities (engine 0.3.0; an `AMBIGUOUS-LABELS` that run found, six
+`.filter()` object-key functions in one file listed alike, was a display bug
+of graphlore's, now fixed). The run takes 134 s of tool time against 216 s on
+graphify's graphs. What the native graphs still raise:
 
 - **`REPLY-TOO-LARGE`** comes from their denser edges, not from wrong ones:
   more edges make other nodes the hubs the audit picks, and those are big.
@@ -225,15 +320,13 @@ two nodes reference each other. `path` and `explain` read the CLI's default
 
 1. **Phase 1: definitions, spans, containment, headings.** Done.
 2. **Phase 2: imports and references in all 14 languages.** Done (this page).
-3. **Communities and incremental updates.** A deterministic community detection
-   in the engine (stable ids, since saved names are keyed by them), and a
-   per-file facts cache keyed by content hash, so `update=True` re-parses only
-   what changed and node-carried spans can be trusted without re-parsing.
+3. **Communities and incremental updates.** Done (this page).
 4. **No CLI behind the CLI tools.** `query`, `path` and `explain` answered over
    graph.json in Python; community naming by MCP sampling only; the route and
    package-API extractors moved into the language modules.
-5. **Native by default.** `auto` becomes the default once communities are in
-   (the polyglot audit already passes on native graphs otherwise, above); then
+5. **Native by default.** The polyglot audit passes on native graphs (above),
+   so what is left is publishing the wheels (below) and making `auto` the
+   default; then
    graphify, `graphlore_add` and `mode="deep"` go, and the output directory gets
    graphlore's own name (still reading `graphify-out/`).
 

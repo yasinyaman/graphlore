@@ -49,6 +49,37 @@ All notable changes to this project are documented here. The format is based on
   47% of graphify's; most of the rest is graphify's name guesses and artefacts
   (`docs/native-engine.md` has the per-language table and samples). Builds stay
   3–6 times faster than graphify's.
+- **Communities in the native engine** (`engine/src/community/`): Leiden on the
+  internal nodes, with edges weighted by what they say (containment and calls
+  1.0, bases 1.5, imports 0.7 / 0.4, type references 0.5), by confidence
+  (`INFERRED` × 0.5) and by where their ends live (same directory × 1.25, other
+  top-level directory × 0.6, test to production × 0.1), plus a weak tie between
+  the files of a directory; external nodes join their neighbours' community.
+  Then graphify's rules (isolated nodes alone, oversized and sparse
+  communities split, ids by size) and names after the most connected member,
+  prefixed with the directory most members share. Nodes are visited in the
+  order of a hash of their id and a build starts from the previous graph's
+  communities and settles, so after a one-file change 99.8–100% of nodes keep
+  their community; ids are kept by overlap, and a name saved for a community
+  stays while its members mostly do (stale ones are dropped from
+  `.graphify_labels.json`, and the build says how many). On the 31 audit
+  repositories there are as many communities as graphify finds (90.5 against
+  90.6 per repository), with 87% of a community's members in one directory
+  (graphify: 83%) and 8% of test nodes in a production community (21%).
+  graph.json schema 3: `community` / `community_name` on every node and
+  `graph.communities` in the header. `python -m graphlore_engine cluster GRAPH`
+  detects them again.
+- **Incremental native updates**: every native build writes a facts cache
+  (`graphify-out/cache/graphlore-native.bin`), and `graphlore_build(update=True)`
+  reuses the facts of the files whose size and modification time, or content,
+  are unchanged, and parses the rest; resolution and communities run over the
+  whole project, so an update writes the graph a full build writes. retrofit:
+  2.6 s for a full build, 1.0 s for an update after one file changed. The build
+  reply says how many files were parsed and reused; `verbose=True` adds the
+  time per phase.
+- **`benchmarks/compare_engines.py --communities`** compares the two engines'
+  communities: count, sizes, modularity, directory purity, test mixing and
+  their agreement (NMI).
 - **`graphlore_build` on a native graph trusts its edges**: `ImportChecker`
   takes an edge's `runs` as when the import runs and rejects nothing, and the
   calls and imports `resolve.py` adds to graphify's graphs are not added to a
@@ -73,9 +104,12 @@ All notable changes to this project are documented here. The format is based on
   engine has, and whether matched definitions share a parent and relation.
 
 ### Changed
-- On a native graph, `graphlore_communities` and the community naming tools say
-  that the native engine has no communities yet, instead of suggesting
-  `graphlore_build(cluster_only=True)`.
+- With the native engine, `graphlore_build(cluster_only=True)` detects the
+  communities of the graph on disk again (it was refused), and `update=True`
+  is incremental (it rebuilt everything); under `GRAPHLORE_ENGINE=auto` both
+  still go to graphify when the graph on disk is graphify's.
+- On a native graph built before the engine detected communities,
+  `graphlore_communities` says so and names `graphlore_build(cluster_only=True)`.
 - `graphlore_fetch` returns the lines a native property or constant node
   carries (`region_start`..`end_line`) when the span engine has no span for it
   and the file is unchanged since the build, instead of a line window.
@@ -86,6 +120,10 @@ All notable changes to this project are documented here. The format is based on
 - `graphlore_path` and `graphlore_explain` pass `--graph` to the CLI, as
   `graphlore_query` did, so with `GRAPHLORE_OUT_DIR` set they read the graph
   the other tools read instead of the CLI's default `graphify-out/`.
+- Ambiguous `.name()` labels of functions bound to an object key
+  (`{ filter: () => … }` in six test callbacks) are qualified by `file:line`
+  in member and neighbor lists; the bare `filter()` they got from their span
+  told them apart no better than the label did.
 - A Go function type written inside a map type (`map[string]func() hash.Hash`)
   is no longer taken for a function named `string`, in `spans.py` and in the
   native engine.

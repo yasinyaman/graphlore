@@ -141,8 +141,11 @@ has a node per file, per definition (with its `start..end` span, `kind` and
 heading; containment; and the imports (with when each runs), calls, bases and
 type references it resolves from the source, each `EXTRACTED` or, when found
 by name alone, `INFERRED`. It is written in graphify's id and label conventions,
-so every tool reads it. It has no communities yet, and `update=True` rebuilds
-the whole graph; every native build says so.
+so every tool reads it. Its communities are its own (Leiden on edges weighted
+by kind, confidence and directory, see
+[native-engine.md](native-engine.md#communities)), not graphify's, and stay put
+across rebuilds, so names saved for them stay attached; every native build says
+so.
 
 It is not on PyPI yet. From a checkout:
 
@@ -153,10 +156,14 @@ pip install dist-engine/*.whl
 GRAPHLORE_ENGINE=native GRAPHLORE_PROJECT_DIR=/path/to/repo python -m graphlore
 ```
 
-With the native engine, `graphlore_build`'s `update` rebuilds the whole graph
-(and so drops the nodes of deleted files), `code_only` skips the document
-headings, `no_viz` has no effect, and `mode` / `cluster_only` are refused (`auto`
-sends them to graphify). The build runs in a child process bounded by
+With the native engine, `graphlore_build`'s `update` parses only the files that
+changed since the last native build (a facts cache in
+`graphify-out/cache/graphlore-native.bin`; resolution and communities still run
+over the whole project, so the graph is the one a full build writes, and the
+nodes of deleted files go), `cluster_only` detects the communities of the graph
+on disk again, `code_only` skips the document headings, `no_viz` has no effect,
+and `mode` is refused (`auto` sends it to graphify, and so it does `update` /
+`cluster_only` on a graph graphify built). The build runs in a child process bounded by
 `GRAPHLORE_TIMEOUT`. `benchmarks/compare_engines.py REPO` compares its graph of
 a repository with graphify's, per language; [native-engine.md](native-engine.md)
 has the results on 31 repositories and the roadmap.

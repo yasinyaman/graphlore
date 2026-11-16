@@ -5260,6 +5260,22 @@ def test_display_labels_name_carries_no_location(tmp_path, monkeypatch):
     assert labels.name("missing", "fallback") == "fallback"
 
 
+def test_display_labels_qualify_object_key_functions_by_location(tmp_path, monkeypatch):
+    # `{ filter: () => … }` inside a test callback: the span names it `filter`,
+    # which tells two of them apart no better than `.filter()`
+    _skip_without_treesitter()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    server._SPAN_CACHE.clear()
+    _write(tmp_path, "t.js", "test('a', () => {\n  paginate({ filter: () => true });\n});\n"
+                             "test('b', () => {\n  paginate({ filter: () => false });\n});\n")
+    nodes = [
+        {"id": "f1", "label": ".filter()", "source_file": "t.js", "source_location": "L2"},
+        {"id": "f2", "label": ".filter()", "source_file": "t.js", "source_location": "L5"},
+    ]
+    labels = server._DisplayLabels(nodes)
+    assert labels.get("f1") == ".filter() (t.js:L2)" and labels.get("f2") == ".filter() (t.js:L5)"
+
+
 # --- surprises: leaf scripts and test support --------------------------------
 
 

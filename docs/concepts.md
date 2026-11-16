@@ -185,6 +185,24 @@ non-Python files fall back to nearest-line matching. A `.h` file that reads as
 C++ (a `class`, a `namespace`, a `template<`) is parsed as C++.
 [What was measured per language](benchmark-polyglot.md), on real repositories.
 
+## Communities
+
+A community is a group of nodes that belong together: `graphlore_communities`
+lists them, `graphlore_skeleton(community=…)` shows one's code, and
+`graphlore_surprises` counts an edge between two of them as a reason to look.
+graphify finds them with Leiden on the graph as it is. The native engine runs
+Leiden too, but on edges weighted by what they say (a containment or a call binds
+tighter than a type named in passing, a base class tighter still), by how sure
+they are (a guess by name counts half) and by where their ends live (the same
+directory binds tighter, other top-level directories and test-to-production
+edges looser), plus a weak tie between the files of a directory. Its
+communities sit more in one directory and keep tests apart from the code they
+test; [native-engine.md](native-engine.md#communities) has the rules and the
+measurements. A native rebuild starts from the previous graph's communities:
+a one-file change leaves almost every node where it was, the ids stay, and so
+do the names saved for them, which are dropped only when their community
+changed beyond recognition (the build says how many).
+
 ## Naming communities without an API key (MCP sampling)
 
 The Leiden clustering is keyless, but turning `Community 7` into `Authentication`

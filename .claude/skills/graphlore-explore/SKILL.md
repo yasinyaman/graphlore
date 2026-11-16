@@ -30,7 +30,7 @@ switches to another repository (there is no per-call project argument).
 `graphlore_build` requires the `graphify` CLI on PATH, unless
 `GRAPHLORE_ENGINE=native` selects graphlore's experimental native engine (then
 the graph has definitions, spans, imports, calls and type references resolved
-from the source, but no communities, and the build result says so). graphify writes `graphify-out/` inside the folder it reads, so after
+from the source, and communities of its own, as the build result says). graphify writes `graphify-out/` inside the folder it reads, so after
 `graphlore_build("/path/to/other/repo")` the build result tells you to switch
 before the read tools can see that graph.
 

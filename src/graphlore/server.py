@@ -1016,8 +1016,11 @@ class _DisplayLabels:
             # keep the call-marker convention of callable labels: `.foo()` ->
             # `Bar.foo()`, `inner()` -> `outer.inner()`
             named = f"{qual}()" if base.endswith("()") else qual
-            # a top-level function's qualified name IS its label: no help
-            got = named if named != base else None
+            # a top-level function's qualified name IS its label: no help, and
+            # nor is an undotted one for a `.name()` label (a function bound to
+            # an object key inside a callback): `filter()` tells six apart no
+            # better than `.filter()` did, the file:line suffix does
+            got = named if named != base and "." in qual else None
         self._fqns[nid] = got
         return got
 
