@@ -40,6 +40,7 @@ pub struct BuildReport {
     pub id_collisions: usize,
     /// Edges by relation, inferred and unresolved counts, per language family.
     pub resolution: BTreeMap<String, crate::resolve::ResolveStats>,
+    pub communities: crate::community::CommunityReport,
     pub max_file_bytes: u64,
     pub elapsed_ms: u128,
 }

@@ -39,6 +39,14 @@ fn build(
     serde_json::to_string(&report).map_err(|e| PyRuntimeError::new_err(e.to_string()))
 }
 
+/// Detect the communities of a graph.json again and rewrite it. Returns the
+/// community report as a JSON string.
+#[pyfunction]
+fn cluster(py: Python<'_>, graph: PathBuf) -> PyResult<String> {
+    let report = py.detach(|| crate::cluster(&graph)).map_err(PyRuntimeError::new_err)?;
+    serde_json::to_string(&report).map_err(|e| PyRuntimeError::new_err(e.to_string()))
+}
+
 /// `(region_start, end_line, def_line, qualname)` per definition of one file.
 #[pyfunction]
 fn file_spans(py: Python<'_>, src: &[u8], rel: &str) -> Vec<(u32, u32, u32, String)> {
@@ -65,6 +73,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", crate::VERSION)?;
     m.add("SCHEMA_VERSION", crate::SCHEMA_VERSION)?;
     m.add_function(wrap_pyfunction!(build, m)?)?;
+    m.add_function(wrap_pyfunction!(cluster, m)?)?;
     m.add_function(wrap_pyfunction!(file_spans, m)?)?;
     m.add_function(wrap_pyfunction!(file_facts, m)?)?;
     m.add_function(wrap_pyfunction!(languages, m)?)?;

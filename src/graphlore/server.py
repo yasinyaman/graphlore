@@ -1634,10 +1634,11 @@ def graphlore_build(
 
     GRAPHLORE_ENGINE picks the extractor: ``graphify`` (default) runs the graphify
     CLI; ``native`` runs graphlore's experimental native engine (the
-    graphlore-engine package: definitions with real spans, containment and
-    Markdown/RST headings in 14 languages, all local, but no import/call edges or
-    communities yet); ``auto`` uses native when installed and graphify for what
-    native cannot do. With native, ``mode`` and ``cluster_only`` are refused,
+    graphlore-engine package: definitions with real spans, containment,
+    Markdown/RST headings, resolved imports, calls, bases and type references, and
+    communities, in 14 languages, all local); ``auto`` uses native when installed
+    and graphify for what native cannot do. With native, ``mode`` is refused,
+    ``cluster_only`` detects the communities of the graph on disk again,
     ``update`` rebuilds the whole graph, ``code_only`` skips the document headings
     and ``no_viz`` has no effect.
 
@@ -1665,10 +1666,12 @@ def graphlore_build(
             native_found=engine.available(),
             graphify_found=shutil.which(GRAPHIFY_BIN) is not None,
             mode=mode, update=update, cluster_only=cluster_only,
-            existing=_existing_engine(path) if update else None,
+            existing=_existing_engine(path) if update or cluster_only else None,
         )
         if choice == "error":
             return _err(engine_note, False, code="engine")
+        if choice == "native" and cluster_only:
+            return _cluster_native(path, note=engine_note)
         if choice == "native":
             return _build_native(path, code_only=code_only, verbose=verbose, note=engine_note)
     offline_note = ""
@@ -1799,12 +1802,29 @@ def _build_native(path: str, *, code_only: bool, verbose: bool, note: str) -> st
     return _fmt({"output": text, "engine": "native", "report": report}, False, text)
 
 
+def _cluster_native(path: str, *, note: str) -> str:
+    """graphlore_build(cluster_only=True) on a native graph: the engine detects
+    the communities of the graph on disk again."""
+    target = _build_target(path)
+    gp = target / config.OUT_DIR_NAME / "graph.json"
+    if not gp.is_file():
+        return _err(f"ERROR: no graph to cluster at {gp}; run graphlore_build() first.", False)
+    report = engine.cluster(gp, timeout=CLI_TIMEOUT)
+    _GRAPH_CACHE.pop(str(_graph_path()), None)
+    if isinstance(report, str):
+        return _err(report, False)
+    text = "native engine: " + engine.render_communities(report)
+    if note:
+        text += "\n\n" + note
+    return _fmt({"output": text, "engine": "native", "communities": report}, False, text)
+
+
 def _no_communities_msg(graph: object) -> str:
     if engine.graph_engine(graph) == "native":
         return (
-            "Nodes carry no community info: the native engine does not detect "
-            "communities yet. GRAPHLORE_ENGINE=graphify graphlore_build() builds a "
-            "graph that has them."
+            "Nodes carry no community info: this native graph was built by an engine "
+            "that did not detect communities. graphlore_build(cluster_only=True) "
+            "detects them with a current graphlore-engine."
         )
     return "Nodes carry no community info. Try graphlore_build(cluster_only=True)."
 

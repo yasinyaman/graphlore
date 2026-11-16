@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 use rayon::prelude::*;
 use serde_json::{json, Map, Value};
 
+pub mod community;
 pub mod docs;
 pub mod facts;
 pub mod generic;
@@ -33,7 +34,7 @@ pub use report::BuildReport;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Bumped when graph.json changes in a way graphlore's readers must know about.
-pub const SCHEMA_VERSION: u32 = 2;
+pub const SCHEMA_VERSION: u32 = 3;
 pub const DEFAULT_MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
 pub const DEFAULT_PARSE_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -159,6 +160,16 @@ pub fn build_graph(opts: &BuildOptions) -> Result<(Value, BuildReport), String> 
         resolve::resolve(&root, &facts, &mut assembled, found.manifests);
     assembled.nodes.extend(ext_nodes);
     assembled.links.extend(edges);
+    let previous = opts.out.as_deref().and_then(read_json);
+    let labels_path = opts.out.as_deref().and_then(|o| o.parent()).map(|d| d.join(LABELS_FILE));
+    let saved = labels_path.as_deref().and_then(read_labels);
+    let communities = community::detect(
+        &mut assembled.nodes,
+        &assembled.links,
+        &previous.as_ref().map(community::Previous::from_graph).unwrap_or_default(),
+        saved.as_ref(),
+    );
+    report.communities = communities.report.clone();
     report.nodes = assembled.nodes.len();
     report.edges = assembled.links.len();
     report.id_collisions = assembled.id_collisions;
@@ -178,6 +189,7 @@ pub fn build_graph(opts: &BuildOptions) -> Result<(Value, BuildReport), String> 
             "languages": languages,
             "documents": report.documents,
             "resolution": report.resolution,
+            "communities": communities.header,
         }),
     );
     top.insert("nodes".into(), Value::Array(assembled.nodes));
@@ -189,14 +201,73 @@ pub fn build_graph(opts: &BuildOptions) -> Result<(Value, BuildReport), String> 
     let graph = Value::Object(top);
     if let Some(out) = &opts.out {
         graph::write::write_atomic(out, &graph)?;
+        if let (Some(path), Some(labels)) = (&labels_path, &communities.labels) {
+            write_labels(path, labels)?;
+        }
     }
     report.elapsed_ms = started.elapsed().as_millis();
     Ok((graph, report))
 }
 
+/// Where graphlore and graphify keep the names given to communities.
+pub const LABELS_FILE: &str = ".graphify_labels.json";
+
+fn read_json(path: &std::path::Path) -> Option<Value> {
+    let text = std::fs::read(path).ok()?;
+    serde_json::from_slice(&text).ok()
+}
+
+/// `{community id: name}`; anything else in the file is left out.
+fn read_labels(path: &std::path::Path) -> Option<std::collections::BTreeMap<String, String>> {
+    let v = read_json(path)?;
+    Some(
+        v.as_object()?
+            .iter()
+            .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+            .collect(),
+    )
+}
+
+fn write_labels(
+    path: &std::path::Path,
+    labels: &std::collections::BTreeMap<String, String>,
+) -> Result<(), String> {
+    graph::write::write_atomic(path, &json!(labels))
+}
+
 /// Build and write the graph; the report says what was read and left out.
 pub fn build(opts: &BuildOptions) -> Result<BuildReport, String> {
     build_graph(opts).map(|(_, r)| r)
+}
+
+/// Detect the communities of the graph.json at `path` again and rewrite it, as
+/// `build` would (ids kept from the graph's own, stale saved names dropped).
+pub fn cluster(path: &std::path::Path) -> Result<community::CommunityReport, String> {
+    let mut graph = read_json(path).ok_or_else(|| format!("cannot read {}", path.display()))?;
+    let prev = community::Previous::from_graph(&graph);
+    let labels_path = path.parent().map(|d| d.join(LABELS_FILE));
+    let saved = labels_path.as_deref().and_then(read_labels);
+    let obj = graph.as_object_mut().ok_or("graph.json is not an object")?;
+    let links = obj.get("links").or_else(|| obj.get("edges")).cloned().unwrap_or(json!([]));
+    let links = links.as_array().map(Vec::as_slice).unwrap_or_default();
+    let mut nodes = match obj.remove("nodes") {
+        Some(Value::Array(nodes)) => nodes,
+        _ => return Err("graph.json has no node list".into()),
+    };
+    let out = community::detect(&mut nodes, links, &prev, saved.as_ref());
+    obj.insert("nodes".into(), Value::Array(nodes));
+    let meta = obj.entry("graph").or_insert_with(|| json!({}));
+    if let Some(meta) = meta.as_object_mut() {
+        meta.insert("communities".into(), out.header);
+        if meta.get("engine").and_then(Value::as_str) == Some("graphlore") {
+            meta.insert("schema_version".into(), json!(SCHEMA_VERSION));
+        }
+    }
+    graph::write::write_atomic(path, &graph)?;
+    if let (Some(lp), Some(labels)) = (&labels_path, &out.labels) {
+        write_labels(lp, labels)?;
+    }
+    Ok(out.report)
 }
 
 /// The facts of one file, its language detected from `rel`.

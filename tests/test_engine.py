@@ -243,3 +243,27 @@ def test_native_calls_and_the_tools_that_walk_them(py_project):
     assert ".run()" in {r["node"] for r in impact["impacted"]}
     dead = json.loads(server.graphlore_unreferenced(as_json=True))
     assert {d["node"] for d in dead["unreferenced"]} == {"unused_helper()", "main()"}
+
+
+def test_native_communities_are_read_kept_and_reclustered(native):
+    server.graphlore_build(".")
+    first = {n["id"]: n["community"] for n in _graph(native)["nodes"]}
+    assert all(isinstance(c, int) for c in first.values())
+    assert _graph(native)["graph"]["communities"]["count"] == len(set(first.values()))
+    comms = json.loads(server.graphlore_communities(as_json=True))
+    assert comms["total"] == len(set(first.values())) and comms["communities"][0]["name"]
+    # a saved name survives a rebuild, and so do the ids
+    top = comms["communities"][0]["id"]
+    server.graphlore_set_labels({str(top): "The core"}, regenerate=False)
+    server.graphlore_build(".")
+    assert {n["id"]: n["community"] for n in _graph(native)["nodes"]} == first
+    comms = json.loads(server.graphlore_communities(as_json=True))
+    assert comms["communities"][0]["name"] == "The core"
+    # cluster_only detects them again from the graph on disk, the same way
+    out = server.graphlore_build(".", cluster_only=True)
+    assert out.startswith("native engine: communities: "), out
+    assert {n["id"]: n["community"] for n in _graph(native)["nodes"]} == first
+    labels = json.loads((native / "graphify-out" / ".graphify_labels.json").read_text())
+    assert labels[str(top)] == "The core"
+    skeleton = json.loads(server.graphlore_skeleton(community=str(top), as_json=True))
+    assert skeleton["sections"]

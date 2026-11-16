@@ -528,13 +528,17 @@ def test_engine_choose_routes_each_request():
     assert engine == "native" and "rebuilt the whole graph" in note
     engine, msg = choose(requested="native", native_found=False, graphify_found=True)
     assert engine == "error" and msg.startswith("ERROR") and "pip install graphlore-engine" in msg
-    for kw in ({"mode": "deep"}, {"cluster_only": True}):
-        engine, msg = choose(requested="native", **both, **kw)
-        assert engine == "error" and "GRAPHLORE_ENGINE=graphify" in msg
-        engine, note = choose(requested="auto", **both, **kw)
-        assert engine == "graphify" and "graphify ran it" in note
-        engine, msg = choose(requested="auto", native_found=True, graphify_found=False, **kw)
-        assert engine == "error" and "pip install graphifyy" in msg
+    engine, msg = choose(requested="native", **both, mode="deep")
+    assert engine == "error" and "GRAPHLORE_ENGINE=graphify" in msg
+    engine, note = choose(requested="auto", **both, mode="deep")
+    assert engine == "graphify" and "graphify ran it" in note
+    engine, msg = choose(requested="auto", native_found=True, graphify_found=False, mode="deep")
+    assert engine == "error" and "pip install graphifyy" in msg
+    # the native engine detects communities: cluster_only is its own
+    assert choose(requested="native", **both, cluster_only=True) == ("native", "")
+    assert choose(requested="auto", **both, cluster_only=True, existing="native")[0] == "native"
+    engine, note = choose(requested="auto", **both, cluster_only=True, existing="graphify")
+    assert engine == "graphify" and "cluster_only=True went to graphify" in note
     assert choose(requested="auto", **both) == ("native", "")
     engine, note = choose(requested="auto", **both, update=True, existing="graphify")
     assert engine == "graphify" and "update=False" in note
@@ -604,7 +608,7 @@ def test_build_with_the_native_engine(tmp_path, monkeypatch):
     assert "not read (no module for these source files): .lua 2" in out
     assert "parse errors (definitions found are partial): c 1 file" in out
     assert "skipped as larger than 2048 KB: 1 file (vendor/big.c)" in out
-    assert server.engine.NATIVE_GAPS in out          # the gaps are always said
+    assert server.engine.NATIVE_GAPS_NO_COMMUNITIES in out   # the gaps are always said
     assert "rebuilt the whole graph" in out          # update=True under native
     assert "graph.json ready" in out
     (target, kw), = calls
@@ -617,9 +621,11 @@ def test_build_with_the_native_engine(tmp_path, monkeypatch):
 def test_build_with_the_native_engine_refuses_what_it_cannot_do(tmp_path, monkeypatch):
     calls = []
     _fake_native(monkeypatch, tmp_path, calls)
-    for kw in ({"mode": "deep"}, {"cluster_only": True}):
-        out = server.graphlore_build(".", **kw)
-        assert out.startswith("ERROR") and "GRAPHLORE_ENGINE=graphify" in out
+    out = server.graphlore_build(".", mode="deep")
+    assert out.startswith("ERROR") and "GRAPHLORE_ENGINE=graphify" in out
+    # cluster_only with no graph on disk says what to run first
+    out = server.graphlore_build(".", cluster_only=True)
+    assert out.startswith("ERROR") and "graphlore_build() first" in out
     assert calls == []
     monkeypatch.setattr(server.engine, "available", lambda: False)
     assert "is not installed" in server.graphlore_build(".")
@@ -709,11 +715,53 @@ def test_no_communities_note_names_the_engine(tmp_path, monkeypatch):
     server._GRAPH_CACHE.clear()
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     out = server.graphlore_communities()
-    assert "native engine does not detect communities" in out
+    assert "did not detect communities" in out and "cluster_only=True" in out
     (tmp_path / "graphify-out" / "graph.json").write_text(
         json.dumps({"nodes": [{"id": "a", "label": "a"}], "links": []}), encoding="utf-8")
     server._GRAPH_CACHE.clear()
     assert "cluster_only=True" in server.graphlore_communities()
+
+
+def test_build_cluster_only_reclusters_a_native_graph(tmp_path, monkeypatch):
+    calls = []
+    _fake_native(monkeypatch, tmp_path, calls)
+    server.graphlore_build(".")
+    seen = []
+
+    def cluster(graph, **kw):
+        seen.append(graph)
+        return {"count": 4, "largest": 9, "modularity": 0.61, "kept_ids": 3,
+                "renamed_labels": 1}
+
+    monkeypatch.setattr(server.engine, "cluster", cluster)
+    out = server.graphlore_build(".", cluster_only=True)
+    assert seen == [tmp_path.resolve() / "graphify-out" / "graph.json"]
+    assert "communities: 4 (largest 9 nodes, modularity 0.61)" in out
+    assert "3 kept their id" in out and "1 saved name dropped" in out
+    monkeypatch.setattr(server.engine, "cluster", lambda graph, **kw: "ERROR: bad graph")
+    assert server.graphlore_build(".", cluster_only=True).startswith("ERROR: bad graph")
+    # the build reply names the communities, and the gap note follows them
+    with_comm = dict(_NATIVE_REPORT, communities={"count": 2, "largest": 5, "modularity": 0.5})
+    assert "communities: 2" in server.engine.render_report(with_comm)
+    assert "own weighting" in server.engine.render_report(with_comm)
+    assert "but no communities" in server.engine.render_report(_NATIVE_REPORT)
+
+
+def test_engine_cluster_runs_in_a_child_process(tmp_path, monkeypatch):
+    seen = []
+
+    def run(argv, **kw):
+        seen.append(argv)
+        return _FakeProc(stdout=json.dumps({"count": 2}))
+
+    monkeypatch.setattr(server.engine.subprocess, "run", run)
+    assert server.engine.cluster(tmp_path / "g.json", timeout=5) == {"count": 2}
+    assert seen[-1][2:] == ["graphlore_engine", "cluster", str(tmp_path / "g.json")]
+    monkeypatch.setattr(server.engine.subprocess, "run",
+                        lambda argv, **kw: _FakeProc(stdout="", stderr="ERROR: nope", returncode=1))
+    assert server.engine.cluster(tmp_path / "g.json") == "ERROR: nope"
+    monkeypatch.setattr(server.engine.subprocess, "run", lambda argv, **kw: _FakeProc(stdout="[]"))
+    assert "not a JSON object" in server.engine.cluster(tmp_path / "g.json")
 
 
 def test_spans_fall_back_to_the_native_engine(monkeypatch):
