@@ -117,6 +117,12 @@ pub struct Def {
     /// says nothing (`client.delete(url)` sends a request).
     #[serde(default)]
     pub container: bool,
+    /// The database table a data model maps to: a class with `__tablename__`,
+    /// `@Table`, `[Table]`, `$table`, or one an ORM base makes a model (the
+    /// class name, lower-cased), an EF `DbSet<T> Users` property, a Mongoose
+    /// `mongoose.model('User')`.
+    #[serde(default)]
+    pub table: Option<String>,
     /// The tree-sitter node the definition came from, and its byte range:
     /// for attaching references, never serialised.
     #[serde(skip)]
@@ -302,6 +308,9 @@ pub struct FileFacts {
     pub exports: Vec<(String, String)>,
     pub refs: Vec<RefFact>,
     pub locals: Vec<Local>,
+    /// Environment variables, files, tables, events and keys the file uses.
+    #[serde(default)]
+    pub resources: Vec<crate::resources::ResourceUse>,
     pub parse: ParseStatus,
 }
 
@@ -320,6 +329,7 @@ impl FileFacts {
             exports: Vec::new(),
             refs: Vec::new(),
             locals: Vec::new(),
+            resources: Vec::new(),
             parse: ParseStatus::default(),
         }
     }

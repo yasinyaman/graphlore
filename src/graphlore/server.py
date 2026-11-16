@@ -2126,7 +2126,11 @@ def graphlore_surprises(limit: int = 20, as_json: bool = False, scope: str = "")
         return view
     nodes, edges = view.nodes, view.edges
     labels = _display_labels(all_nodes)
-    shared = _shared_state(nodes, edges, labels)
+    # resources (an environment variable, a table) have no file and count as
+    # external to the code: the shared state is read with them in
+    with_resources = _scope_view(all_nodes, all_edges, f"{scope} +external".strip(), as_json)
+    shared_view = view if isinstance(with_resources, str) else with_resources
+    shared = _shared_state(shared_view.nodes, shared_view.edges, labels)
     shared_rows = shared[:max(0, limit)]
 
     def with_shared(payload: dict[str, Any], text: list[str]) -> None:

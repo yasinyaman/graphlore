@@ -835,6 +835,10 @@ def test_engine_render_report_lists_what_was_left_out():
     assert "time per phase: parse 40 ms, resolve 9 ms" in server.engine.render_report(
         timed, verbose=True)
     assert "time per phase" not in server.engine.render_report(timed)
+    shared = dict(_NATIVE_REPORT, state={"state_nodes": 4, "reads": 9, "writes": 3,
+                                        "resources": {"env": 2, "table": 1}, "single_touch": 5})
+    assert ("shared state: 4 variable/fields, 9 reads, 3 writes; resources: env 2, table 1 "
+            "(5 more touched in one place only, not shown)") in server.engine.render_report(shared)
     cold = dict(_NATIVE_REPORT, incremental={"cache": False, "parsed": 33})
     assert "no cache" in server.engine.render_report(cold, update=True)
     assert "no cache" not in server.engine.render_report(cold)

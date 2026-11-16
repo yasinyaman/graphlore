@@ -24,6 +24,7 @@ use crate::facts::{Def, DefKind, FileFacts, ImportForm, RefFact, RefKind, Runs};
 use crate::graph::assemble::Assembled;
 use crate::graph::ids::slug;
 use crate::lang::Lang;
+use crate::resources::ResourceKind;
 
 mod modules;
 
@@ -1438,6 +1439,36 @@ impl<'a> Project<'a> {
         false
     }
 
+    /// The table a call reads or writes through an ORM: `User.objects.filter()`,
+    /// `Article::where()`, `user.save()`, `db.Items.Add(x)`, when what the
+    /// method is called on is a data model (`Def::table`).
+    fn orm_use(&self, f: usize, r: &RefFact) -> Option<(String, bool)> {
+        if r.kind != RefKind::Call || r.path.len() < 2 {
+            return None;
+        }
+        let method = r.path.last()?.as_str();
+        let write = if ORM_WRITES.contains(&method) {
+            true
+        } else if ORM_READS.contains(&method) {
+            false
+        } else {
+            return None;
+        };
+        let mut prefix = r.path[..r.path.len() - 1].to_vec();
+        // Django `User.objects`, Flask-SQLAlchemy `User.query`
+        while prefix.len() > 1
+            && matches!(prefix.last().map(String::as_str), Some("objects" | "query" | "()"))
+        {
+            prefix.pop();
+        }
+        if prefix.iter().any(|s| s == "()") {
+            return None;
+        }
+        let (target, _) = self.resolve_path(f, r.from_def, &prefix, true)?;
+        let Target::Def(t) = target else { return None };
+        self.def(t).table.clone().map(|table| (table, write))
+    }
+
     fn source_of(&self, f: usize, r: &RefFact) -> String {
         if let Some(owner) = &r.from_owner {
             if let Some(t) = self.type_named(f, owner) {
@@ -1516,6 +1547,7 @@ pub fn resolve(
     let mut edges: Vec<EdgeOut> = Vec::new();
     let mut stats: BTreeMap<String, ResolveStats> = BTreeMap::new();
     let mut ext_nodes: Vec<(String, String, &'static str)> = Vec::new();
+    let mut resource_nodes: Vec<(String, String, ResourceKind)> = Vec::new();
     {
         let p = Project::new(root, files, asm, manifests);
         let mut ext_seen: HashSet<String> = HashSet::new();
@@ -1526,11 +1558,16 @@ pub fn resolve(
             }
             id
         };
+        let mut orm_uses: Vec<(String, String, usize, u32, bool)> = Vec::new();
         for (f, facts) in files.iter().enumerate() {
             let Some(fam) = p.family[f] else { continue };
             let st = stats.entry(fam.name().to_string()).or_default();
             for r in &facts.refs {
                 let src = p.source_of(f, r);
+                // a data model's table, read or written through the ORM
+                if let Some((table, write)) = p.orm_use(f, r) {
+                    orm_uses.push((table, src.clone(), f, r.line, write));
+                }
                 let heritage = matches!(
                     r.kind,
                     RefKind::Inherits
@@ -1723,6 +1760,68 @@ pub fn resolve(
                 });
             }
         }
+        // resources: one node per (kind, key) that two definitions or more
+        // touch; a file the project holds is its own node
+        // (source, file, line, writes, context, certain)
+        type Use = (String, usize, u32, bool, &'static str, bool);
+        let mut groups: BTreeMap<(ResourceKind, String), Vec<Use>> = BTreeMap::new();
+        for (f, facts) in files.iter().enumerate() {
+            for u in &facts.resources {
+                let probe = RefFact {
+                    line: u.line,
+                    kind: RefKind::Read,
+                    path: Vec::new(),
+                    context: "",
+                    from_def: u.from_def,
+                    from_owner: None,
+                    byte: u.byte,
+                };
+                let src = p.source_of(f, &probe);
+                let entry = (src, f, u.line, u.write, u.context, u.certain);
+                groups.entry((u.kind, u.key.clone())).or_default().push(entry);
+            }
+        }
+        for (table, src, f, line, write) in orm_uses {
+            let entry = (src, f, line, write, "orm", false);
+            groups.entry((ResourceKind::Table, table)).or_default().push(entry);
+        }
+        let by_path: HashMap<&str, usize> =
+            files.iter().enumerate().map(|(i, x)| (x.path.as_str(), i)).collect();
+        for ((kind, key), uses) in groups {
+            let touchers: HashSet<&str> = uses.iter().map(|u| u.0.as_str()).collect();
+            let st = stats.entry("resources".into()).or_default();
+            // an event couples code only when the project both emits and
+            // listens for it
+            let one_sided = kind == ResourceKind::Event
+                && (uses.iter().all(|u| u.3) || uses.iter().all(|u| !u.3));
+            if touchers.len() < 2 || one_sided {
+                st.unresolved += 1; // touched once, or from one side: no coupling to show
+                continue;
+            }
+            let target = if kind == ResourceKind::File {
+                let k = key.trim_start_matches("./");
+                by_path.get(k).map(|&i| p.hubs[i].clone())
+            } else {
+                None
+            };
+            let target = target.unwrap_or_else(|| {
+                let id = format!("res_{}_{}", kind.as_str(), slug(&key));
+                resource_nodes.push((id.clone(), key.clone(), kind));
+                id
+            });
+            for (src, f, line, write, context, certain) in uses {
+                edges.push(EdgeOut {
+                    source: src,
+                    target: target.clone(),
+                    relation: if write { "writes" } else { "reads" },
+                    confidence: if certain { Confidence::Extracted } else { Confidence::Inferred },
+                    file: f,
+                    line,
+                    context,
+                    runs: None,
+                });
+            }
+        }
         // imports, once the uses have said which files of a package each one
         // reaches
         for (f, facts) in files.iter().enumerate() {
@@ -1821,7 +1920,28 @@ pub fn resolve(
     // external ids are claimed last; one that a project node already holds
     // gets a suffix, and its edges follow
     let mut renamed: HashMap<String, String> = HashMap::new();
-    let nodes: Vec<Value> = ext_nodes
+    resource_nodes.sort();
+    resource_nodes.dedup();
+    let mut nodes: Vec<Value> = resource_nodes
+        .into_iter()
+        .map(|(id, key, kind)| {
+            let claimed = asm.ids.claim(id.clone());
+            if claimed != id {
+                renamed.insert(id, claimed.clone());
+            }
+            json!({
+                "id": claimed,
+                "label": key,
+                "norm_label": key.to_lowercase(),
+                "file_type": "concept",
+                "type": "resource",
+                "resource": kind.as_str(),
+                "key": key,
+                "source_file": "",
+            })
+        })
+        .collect();
+    let ext: Vec<Value> = ext_nodes
         .into_iter()
         .map(|(id, label, eco)| {
             let claimed = asm.ids.claim(id.clone());
@@ -1841,6 +1961,7 @@ pub fn resolve(
             })
         })
         .collect();
+    nodes.extend(ext);
     if !renamed.is_empty() {
         for l in links.iter_mut() {
             if let Some(new) = l["target"].as_str().and_then(|t| renamed.get(t)) {
@@ -1850,6 +1971,93 @@ pub fn resolve(
     }
     (nodes, links, stats)
 }
+
+/// ORM methods that read rows of a model's table, and that write them.
+const ORM_READS: &[&str] = &[
+    "get",
+    "filter",
+    "filter_by",
+    "all",
+    "first",
+    "last",
+    "find",
+    "find_by",
+    "findOne",
+    "findById",
+    "findAll",
+    "findBy",
+    "findMany",
+    "findUnique",
+    "findFirst",
+    "where",
+    "select",
+    "count",
+    "exists",
+    "aggregate",
+    "exclude",
+    "order_by",
+    "values",
+    "pluck",
+    "paginate",
+    "Find",
+    "FindAsync",
+    "Where",
+    "FirstOrDefault",
+    "FirstOrDefaultAsync",
+    "SingleOrDefault",
+    "SingleOrDefaultAsync",
+    "Any",
+    "AnyAsync",
+    "ToList",
+    "ToListAsync",
+    "CountAsync",
+    "findAndCountAll",
+    "fetch",
+];
+const ORM_WRITES: &[&str] = &[
+    "create",
+    "save",
+    "update",
+    "delete",
+    "destroy",
+    "insert",
+    "update_or_create",
+    "get_or_create",
+    "bulk_create",
+    "bulk_update",
+    "persist",
+    "remove",
+    "upsert",
+    "increment",
+    "decrement",
+    "updateOne",
+    "updateMany",
+    "deleteOne",
+    "deleteMany",
+    "insertMany",
+    "findOneAndUpdate",
+    "findByIdAndUpdate",
+    "findOneAndDelete",
+    "findByIdAndDelete",
+    "Add",
+    "AddAsync",
+    "AddRange",
+    "Remove",
+    "RemoveRange",
+    "Update",
+    "UpdateRange",
+    "Attach",
+    "save!",
+    "create!",
+    "update!",
+    "destroy!",
+    "delete_all",
+    "update_all",
+    "insert_all",
+    "upsert_all",
+    "forceDelete",
+    "truncate",
+];
 
 /// Names a type's constructor-like functions go by.
 fn is_factory(name: &str) -> bool {

@@ -42,10 +42,24 @@ pub struct BuildReport {
     pub resolution: BTreeMap<String, crate::resolve::ResolveStats>,
     pub communities: crate::community::CommunityReport,
     pub incremental: Incremental,
+    pub state: StateReport,
     /// Milliseconds per phase: walk, parse, assemble, resolve, communities, write, cache.
     pub phases_ms: BTreeMap<&'static str, u128>,
     pub max_file_bytes: u64,
     pub elapsed_ms: u128,
+}
+
+/// Shared state: what definitions read and write besides calling each other.
+#[derive(Default, Serialize)]
+pub struct StateReport {
+    /// Variables, fields and constants (nodes).
+    pub state_nodes: usize,
+    pub reads: usize,
+    pub writes: usize,
+    /// Resource nodes by kind: env, file, table, event, key.
+    pub resources: BTreeMap<String, usize>,
+    /// Resources only one definition touches: no coupling, so no node.
+    pub single_touch: usize,
 }
 
 /// What an update reused from the facts cache.

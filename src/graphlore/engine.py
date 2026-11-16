@@ -290,6 +290,16 @@ def render_report(report: dict[str, Any], verbose: bool = False, update: bool = 
     elif isinstance(inc, dict) and update:
         lines.append("  update: no cache from this engine version and options, "
                      "so every file was parsed")
+    state = report.get("state")
+    if isinstance(state, dict) and (state.get("reads") or state.get("writes")):
+        line = (f"  shared state: {_plural(state.get('state_nodes', 0), 'variable/field')}, "
+                f"{state.get('reads', 0)} reads, {state.get('writes', 0)} writes")
+        res = state.get("resources") or {}
+        if res:
+            line += "; resources: " + ", ".join(f"{k} {v}" for k, v in sorted(res.items()))
+        if state.get("single_touch"):
+            line += f" ({state['single_touch']} more touched in one place only, not shown)"
+        lines.append(line)
     communities = report.get("communities")
     if isinstance(communities, dict) and communities.get("count"):
         lines.append("  " + render_communities(communities))
