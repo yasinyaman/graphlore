@@ -24,6 +24,7 @@ pub mod parse;
 pub mod refs;
 pub mod report;
 pub mod resolve;
+pub mod resources;
 pub mod state;
 pub mod walk;
 
@@ -236,8 +237,27 @@ pub fn build_graph(opts: &BuildOptions) -> Result<(Value, BuildReport), String> 
     lap("communities", &mut phases);
     report.nodes = assembled.nodes.len();
     report.edges = assembled.links.len();
+    for n in &assembled.nodes {
+        if matches!(n["kind"].as_str(), Some("variable" | "property" | "constant")) {
+            report.state.state_nodes += 1;
+        }
+        if n["type"] == "resource" {
+            let kind = n["resource"].as_str().unwrap_or("?").to_string();
+            *report.state.resources.entry(kind).or_default() += 1;
+        }
+    }
+    for e in &assembled.links {
+        match e["relation"].as_str() {
+            Some("reads") => report.state.reads += 1,
+            Some("writes") => report.state.writes += 1,
+            _ => {}
+        }
+    }
     report.id_collisions = assembled.id_collisions;
     report.resolution = resolution;
+    if let Some(r) = report.resolution.remove("resources") {
+        report.state.single_touch = r.unresolved;
+    }
 
     let languages: Map<String, Value> =
         report.languages.iter().map(|(k, v)| (k.clone(), json!(v.files))).collect();

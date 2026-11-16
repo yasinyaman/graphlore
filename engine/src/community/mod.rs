@@ -209,7 +209,9 @@ pub struct Outcome {
 fn info(n: &Value, test_file: &mut HashMap<String, bool>) -> NodeInfo {
     let s = |k: &str| n.get(k).and_then(Value::as_str).unwrap_or("").to_string();
     let file = s("source_file");
-    let external = n.get("type").and_then(Value::as_str) == Some("external");
+    // an external name, or a resource (an environment variable, a table): no
+    // code of the project, so it joins the community of those that use it
+    let external = matches!(n.get("type").and_then(Value::as_str), Some("external" | "resource"));
     let in_test_file =
         !file.is_empty() && *test_file.entry(file.clone()).or_insert_with_key(|f| is_test_path(f));
     NodeInfo {

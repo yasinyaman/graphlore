@@ -689,6 +689,11 @@ fn is_item(k: &str) -> bool {
         || k == "indexing_expression"
 }
 
+/// Whether `n` is written: assigned to, updated or deleted.
+pub fn writes_to(n: Node) -> bool {
+    is_write_target(n)
+}
+
 /// Whether `n` is what an assignment, an update or a `del` writes (through any
 /// `[…]` around it).
 fn is_write_target(n: Node) -> bool {

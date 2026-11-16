@@ -208,7 +208,7 @@ pub fn is_call_kind(k: &str) -> bool {
 }
 
 /// The callee of a call node, and whether it constructs (`new`).
-fn callee(n: Node, src: &[u8]) -> Option<(RefKind, Vec<String>)> {
+pub fn callee(n: Node, src: &[u8]) -> Option<(RefKind, Vec<String>)> {
     let k = n.kind();
     if matches!(
         k,
@@ -793,6 +793,7 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
     // `(span node, name node, kind, from state_defs)`
     let mut extras: Vec<(Node, Node, crate::facts::DefKind, bool)> = Vec::new();
     let mut state = crate::state::State::new(m.assignment_declares());
+    let mut resources: Vec<crate::resources::ResourceUse> = Vec::new();
     let mut stack = vec![root];
     let mut steps = 0usize;
     while let Some(n) = stack.pop() {
@@ -830,6 +831,10 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
         if let Some(&di) = by_node.get(&n.id()) {
             if let Some(o) = m.object_of(n, src) {
                 facts.defs[di].object = Some(o);
+            }
+            if facts.defs[di].kind.is_class_like() {
+                let name = facts.defs[di].name.clone();
+                facts.defs[di].table = crate::resources::declared_table(n, src, facts.lang, &name);
             }
             let def: &Def = &facts.defs[di];
             for (kind, path) in m.heritage_of(n, src) {
@@ -1040,8 +1045,10 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
                 }
             }
         }
-        // reads and writes of variables, fields and constants
+        // reads and writes of variables, fields and constants, and of what
+        // lies outside the program (environment, files, tables, events)
         state.visit(n, src);
+        crate::resources::visit(n, src, facts.lang, &mut resources);
         if let Some(extra) = m.refs_of(n, src) {
             for (kind, path, context) in extra {
                 push(&mut refs, n, kind, path, context, None);
@@ -1096,6 +1103,11 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
     // pre-order, so a stack of open ranges is the chain of ancestors)
     assign_defs(&facts.defs, &mut refs);
     assign_local_defs(&facts.defs, &mut locals);
+    let bytes: Vec<usize> = resources.iter().map(|r| r.byte).collect();
+    for (r, d) in resources.iter_mut().zip(innermost(&facts.defs, &bytes)) {
+        r.from_def = d;
+    }
+    facts.resources = resources;
     // one per (definition, name, field): a declared type over a guessed one
     locals.retain(|l| !matches!(l.path.as_slice(), [t] if t == "var" || t == "auto" || t == "let"));
     locals.sort_by(|a, b| {
@@ -1225,6 +1237,7 @@ fn add_extras(
             extra: true,
             decl_only: false,
             container: crate::state::holds_container(*node, src),
+            table: crate::resources::declared_table(*node, src, None, ""),
             node_id: node.id(),
             start_byte: node.start_byte(),
             end_byte: node.end_byte(),
