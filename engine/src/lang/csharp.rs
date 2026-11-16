@@ -14,6 +14,33 @@ use crate::refs::{import, path_of};
 pub struct CSharp;
 
 impl LanguageModule for CSharp {
+    /// `static` fields (shared by the whole program) and `const` / `static
+    /// readonly` ones (constants).
+    fn state_defs<'t>(&self, n: Node<'t>, src: &[u8]) -> Vec<(Node<'t>, Node<'t>, DefKind)> {
+        if n.kind() != "field_declaration" {
+            return Vec::new();
+        }
+        let mods: Vec<String> =
+            kids(n).into_iter().filter(|c| c.kind() == "modifier").map(|c| text(c, src)).collect();
+        let has = |w: &str| mods.iter().any(|m| m == w);
+        let kind = if has("const") || (has("static") && has("readonly")) {
+            DefKind::Constant
+        } else if has("static") {
+            DefKind::Property
+        } else {
+            return Vec::new();
+        };
+        let Some(decl) = kids(n).into_iter().find(|c| c.kind() == "variable_declaration") else {
+            return Vec::new();
+        };
+        kids(decl)
+            .into_iter()
+            .filter(|c| c.kind() == "variable_declarator")
+            .filter_map(|d| d.child_by_field_name("name"))
+            .map(|name| (n, name, kind))
+            .collect()
+    }
+
     fn imports_of(&self, n: Node, src: &[u8]) -> Option<Vec<ImportFact>> {
         if n.kind() != "using_directive" {
             return None;

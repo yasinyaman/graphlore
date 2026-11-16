@@ -25,6 +25,64 @@ static CPP_HEADER_MARK: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 impl LanguageModule for CFamily {
+    /// Variables at file or namespace scope (not `extern` ones, which name a
+    /// variable defined elsewhere), and `static` data members of a class.
+    fn state_defs<'t>(&self, n: Node<'t>, src: &[u8]) -> Vec<(Node<'t>, Node<'t>, DefKind)> {
+        let words = |n: Node| -> Vec<String> {
+            kids(n)
+                .into_iter()
+                .filter(|c| matches!(c.kind(), "storage_class_specifier" | "type_qualifier"))
+                .map(|c| generic::text(c, src))
+                .collect()
+        };
+        let in_class = n.kind() == "field_declaration"
+            && n.parent().is_some_and(|p| p.kind() == "field_declaration_list");
+        let at_file = n.kind() == "declaration"
+            && n.parent().is_some_and(|p| {
+                p.kind() == "translation_unit"
+                    || (p.kind() == "declaration_list"
+                        && p.parent().is_some_and(|q| q.kind() == "namespace_definition"))
+            });
+        if !(in_class || at_file) {
+            return Vec::new();
+        }
+        let w = words(n);
+        if w.iter().any(|x| x == "extern") || (in_class && !w.iter().any(|x| x == "static")) {
+            return Vec::new();
+        }
+        let constant = w.iter().any(|x| x == "const" || x == "constexpr");
+        let kind = match (in_class, constant) {
+            (_, true) => DefKind::Constant,
+            (true, false) => DefKind::Property,
+            (false, false) => DefKind::Variable,
+        };
+        let mut out = Vec::new();
+        let mut cursor = n.walk();
+        for d in n.children_by_field_name("declarator", &mut cursor) {
+            // `int x`, `int x = 1`, `int *p`, `int a[3]`; never a function
+            let mut cur = d;
+            for _ in 0..4 {
+                match cur.kind() {
+                    "identifier" | "field_identifier" => {
+                        out.push((n, cur, kind));
+                        break;
+                    }
+                    "init_declarator"
+                    | "pointer_declarator"
+                    | "array_declarator"
+                    | "reference_declarator" => {
+                        match cur.child_by_field_name("declarator").or_else(|| cur.named_child(0)) {
+                            Some(next) => cur = next,
+                            None => break,
+                        }
+                    }
+                    _ => break,
+                }
+            }
+        }
+        out
+    }
+
     fn refine(&self, lang: Lang, rel: &str, src: &[u8]) -> Option<Lang> {
         if lang == Lang::C
             && rel.to_ascii_lowercase().ends_with(".h")

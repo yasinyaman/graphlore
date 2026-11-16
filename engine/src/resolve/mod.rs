@@ -1420,6 +1420,24 @@ impl<'a> Project<'a> {
 
     /// The node a use is made from: the innermost enclosing definition that
     /// is a node (an extension's type, an impl's type), else the file.
+    /// Whether the callable around `d` is a constructor (`__init__`, `init`,
+    /// `constructor`, a Java / C# / C++ constructor, Ruby `initialize`).
+    fn constructs(&self, f: usize, d: Option<usize>) -> bool {
+        let defs = &self.files[f].defs;
+        let mut cur = d;
+        while let Some(x) = cur {
+            if defs[x].kind.is_callable() {
+                return defs[x].kind == DefKind::Constructor
+                    || matches!(
+                        defs[x].name.as_str(),
+                        "__init__" | "init" | "constructor" | "initialize"
+                    );
+            }
+            cur = defs[x].parent;
+        }
+        false
+    }
+
     fn source_of(&self, f: usize, r: &RefFact) -> String {
         if let Some(owner) = &r.from_owner {
             if let Some(t) = self.type_named(f, owner) {
@@ -1528,8 +1546,11 @@ pub fn resolve(
                 };
                 // attribute reads, values and bare Ruby names never fall back
                 // to a name guess
-                let strict =
-                    heritage || matches!(r.kind, RefKind::Attr) || r.context == "implicit_call";
+                let state = matches!(r.kind, RefKind::Read | RefKind::Write);
+                let strict = heritage
+                    || state
+                    || matches!(r.kind, RefKind::Attr)
+                    || r.context == "implicit_call";
                 *p.types_only.borrow_mut() = heritage || r.kind == RefKind::Type;
                 let found = if r.from_owner.is_some() && heritage {
                     p.resolve_path(f, None, &r.path, true)
@@ -1571,13 +1592,37 @@ pub fn resolve(
                                 "references"
                             }
                             RefKind::Decorator => "references",
+                            // a member read on its own: state is read, a method
+                            // taken as a value is referred to
+                            RefKind::Attr if tk.is_state() => "reads",
                             RefKind::Attr => {
-                                if !(tk.is_callable()
-                                    || matches!(tk, DefKind::Property | DefKind::Constant))
-                                {
+                                if !tk.is_callable() {
                                     continue;
                                 }
                                 "references"
+                            }
+                            RefKind::Read | RefKind::Write => {
+                                if !tk.is_state() {
+                                    continue;
+                                }
+                                // a mutating method's name means a change only
+                                // on a collection or a builder
+                                if r.context == "mutate" && !p.def(t).container {
+                                    continue;
+                                }
+                                // a constructor setting its own object's fields
+                                // builds it; it couples nothing
+                                if r.kind == RefKind::Write
+                                    && tk == DefKind::Property
+                                    && p.constructs(f, r.from_def)
+                                {
+                                    continue;
+                                }
+                                if r.kind == RefKind::Read {
+                                    "reads"
+                                } else {
+                                    "writes"
+                                }
                             }
                             RefKind::Indirect => {
                                 if conf != Confidence::Extracted {
@@ -1592,6 +1637,12 @@ pub fn resolve(
                                 }
                             }
                         };
+                        // a write known only from the method's name is a guess
+                        let conf = if r.context == "mutate" {
+                            conf.max(Confidence::Inferred)
+                        } else {
+                            conf
+                        };
                         (id.to_string(), rel, conf)
                     }
                     Some((Target::Ext(e, rest), conf)) => match r.kind {
@@ -1599,7 +1650,11 @@ pub fn resolve(
                             (ext_target(e, &rest, false), "calls", conf)
                         }
                         RefKind::Decorator => (ext_target(e, &rest, true), "references", conf),
-                        RefKind::Type | RefKind::Indirect | RefKind::Attr => continue,
+                        RefKind::Type
+                        | RefKind::Indirect
+                        | RefKind::Attr
+                        | RefKind::Read
+                        | RefKind::Write => continue,
                         k => (ext_target(e, &rest, true), external_base(k, fam, &rest), conf),
                     },
                     Some(_) => continue,
@@ -1644,7 +1699,9 @@ pub fn resolve(
                                     }
                                 }
                             }
-                            if r.kind != RefKind::Indirect {
+                            // a name that is no state is most of what is read
+                            if !matches!(r.kind, RefKind::Indirect | RefKind::Read | RefKind::Write)
+                            {
                                 st.unresolved += 1;
                             }
                             continue;

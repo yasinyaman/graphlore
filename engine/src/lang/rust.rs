@@ -91,6 +91,10 @@ fn use_leaves(
 }
 
 impl LanguageModule for Rust {
+    fn needs_import(&self) -> bool {
+        true
+    }
+
     fn extra_def<'t>(&self, n: Node<'t>, _src: &[u8]) -> Option<(Node<'t>, DefKind)> {
         // `const X: T = …;` / `static X: T = …;` outside a function body
         if !matches!(n.kind(), "const_item" | "static_item") {
@@ -108,7 +112,10 @@ impl LanguageModule for Rust {
             }
             inside
         };
-        (!in_fn).then(|| n.child_by_field_name("name").map(|x| (x, DefKind::Constant))).flatten()
+        // a `static` is one place in memory every function shares; a `const`
+        // is copied where it is used
+        let kind = if n.kind() == "static_item" { DefKind::Variable } else { DefKind::Constant };
+        (!in_fn).then(|| n.child_by_field_name("name").map(|x| (x, kind))).flatten()
     }
 
     fn imports_of(&self, n: Node, src: &[u8]) -> Option<Vec<ImportFact>> {

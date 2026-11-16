@@ -37,7 +37,17 @@ fn ids_labels_and_containment_match_graphify() {
     let (native, report) = build_graph(&BuildOptions::new(fixture())).unwrap();
     let theirs = graphify();
     let containment = ["contains", "method", "case_of"];
-    let ours = edges(&native, &containment);
+    // variables, constants and class-level fields are the native engine's own
+    // nodes (graphify has none): left out of the comparison
+    let state: BTreeSet<String> = native["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|n| matches!(n["kind"].as_str(), Some("variable" | "constant" | "property")))
+        .map(|n| n["id"].as_str().unwrap().to_string())
+        .collect();
+    let ours: BTreeSet<_> =
+        edges(&native, &containment).into_iter().filter(|(_, _, t)| !state.contains(t)).collect();
     // Two known differences. graphify's PHP closure node (`{closure#1}()`) is a
     // definition the native engine does not name. And graphify hangs Ruby's
     // `Line = Struct.new … do` off the file although it sits inside

@@ -31,7 +31,7 @@ from . import config
 ENGINES = ("graphify", "native", "auto")
 DEFAULT_ENGINE = "graphify"
 # graph.json schema versions of the native engine this graphlore reads.
-SUPPORTED_SCHEMAS = frozenset({1, 2, 3})
+SUPPORTED_SCHEMAS = frozenset({1, 2, 3, 4})
 INSTALL_HINT = (
     "Install it with: pip install graphlore-engine (from a checkout of graphlore: "
     "pip install maturin && maturin develop -m engine/Cargo.toml --release)."

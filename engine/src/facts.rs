@@ -30,8 +30,12 @@ pub enum DefKind {
     /// A property or field of a type (C# / Swift / Kotlin properties, TS class
     /// fields). Not a span `spans.py` reports.
     Property,
-    /// A module-level constant (`const X = …` in TS/JS, Rust `const` / `static`).
+    /// A module-level constant (`const X = …` in TS/JS, Rust `const`).
     Constant,
+    /// A module-level or package-level variable: state that every function of
+    /// the module can read and write (Python module assignments, Go `var`,
+    /// JS `let`, C globals, Rust `static`).
+    Variable,
     Other,
 }
 
@@ -46,6 +50,11 @@ impl DefKind {
             self,
             DefKind::Class | DefKind::Struct | DefKind::Interface | DefKind::Enum | DefKind::Module
         )
+    }
+
+    /// State a definition can read or write: a variable, a property, a constant.
+    pub fn is_state(self) -> bool {
+        matches!(self, DefKind::Property | DefKind::Constant | DefKind::Variable)
     }
 
     pub fn as_str(self) -> &'static str {
@@ -64,6 +73,7 @@ impl DefKind {
             DefKind::TypeAlias => "type_alias",
             DefKind::Property => "property",
             DefKind::Constant => "constant",
+            DefKind::Variable => "variable",
             DefKind::Other => "other",
         }
     }
@@ -101,6 +111,12 @@ pub struct Def {
     /// A C/C++ prototype or a method declared in its class: a declaration
     /// whose body is elsewhere.
     pub decl_only: bool,
+    /// A variable or field that holds a collection or a builder (`{}`, `[]`,
+    /// `new Map()`, `mutableListOf()`, `List<T>`): a call of a mutating method
+    /// on it (`add`, `set`, `clear`) changes it. On anything else such a name
+    /// says nothing (`client.delete(url)` sends a request).
+    #[serde(default)]
+    pub container: bool,
     /// The tree-sitter node the definition came from, and its byte range:
     /// for attaching references, never serialised.
     #[serde(skip)]
@@ -205,6 +221,12 @@ pub enum RefKind {
     Indirect,
     /// `obj.name` read without a call: a property, or a method taken as a value.
     Attr,
+    /// A bare name read as a value: a module variable, a constant, a field
+    /// seen without `this`.
+    Read,
+    /// A name or member assigned to, or changed in place (`x += 1`,
+    /// `x[k] = v`, `x.append(v)`).
+    Write,
 }
 
 /// A name with a known type: a typed parameter, a typed field, a variable

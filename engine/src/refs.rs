@@ -39,10 +39,11 @@ const SELF_KINDS: &[&str] =
     &["this", "self", "self_expression", "this_expression", "crate", "base"];
 const SUPER_KINDS: &[&str] = &["super", "super_expression", "base_expression"];
 /// `(object, member)` field pairs of member-access shapes.
-const MEMBER_FIELDS: &[(&str, &str)] = &[
+pub const MEMBER_FIELDS: &[(&str, &str)] = &[
     ("object", "property"),
     ("object", "attribute"),
     ("object", "name"),
+    ("object", "field"),
     ("operand", "field"),
     ("value", "field"),
     ("argument", "field"),
@@ -75,7 +76,7 @@ const VALUE_FIELDS: &[&str] = &["value", "default_value", "default", "body", "in
 const DECORATOR_KINDS: &[&str] =
     &["decorator", "marker_annotation", "annotation", "attribute", "attribute_item"];
 
-const UNKNOWN: &str = "()";
+pub const UNKNOWN: &str = "()";
 
 /// The dotted path a node names, as far as the walk can tell.
 pub fn path_of(n: Node, src: &[u8]) -> Option<Vec<String>> {
@@ -197,7 +198,7 @@ pub fn path_of(n: Node, src: &[u8]) -> Option<Vec<String>> {
     }
 }
 
-fn is_call_kind(k: &str) -> bool {
+pub fn is_call_kind(k: &str) -> bool {
     (k.contains("call") || k.contains("invocation"))
         && !k.contains("signature")
         && !k.contains("suffix")
@@ -426,7 +427,7 @@ fn is_callable(kind: crate::facts::DefKind) -> bool {
 }
 
 /// The name a declarator or pattern binds: `x`, `*x`, `&x`, `$x`, `mut x`.
-fn bound_name(n: Node, src: &[u8]) -> Option<String> {
+pub fn bound_name(n: Node, src: &[u8]) -> Option<String> {
     let mut cur = n;
     for _ in 0..6 {
         match cur.kind() {
@@ -789,7 +790,9 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
             byte: n.start_byte(),
         });
     };
-    let mut extras: Vec<(Node, Node, crate::facts::DefKind)> = Vec::new();
+    // `(span node, name node, kind, from state_defs)`
+    let mut extras: Vec<(Node, Node, crate::facts::DefKind, bool)> = Vec::new();
+    let mut state = crate::state::State::new(m.assignment_declares());
     let mut stack = vec![root];
     let mut steps = 0usize;
     while let Some(n) = stack.pop() {
@@ -809,8 +812,9 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
         }
         if !by_node.contains_key(&n.id()) {
             if let Some((name, kind)) = m.extra_def(n, src) {
-                extras.push((n, name, kind));
+                extras.push((n, name, kind, false));
             }
+            extras.extend(m.state_defs(n, src).into_iter().map(|(a, b, k)| (a, b, k, true)));
             let found = m.heritage_of(n, src);
             if !found.is_empty() {
                 let owner = m.heritage_owner(n, src);
@@ -998,7 +1002,14 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
             }
         }
         if !by_node.contains_key(&n.id()) {
+            // an untyped `x = …` declares a local only where assigning declares
+            // (Python, Ruby); elsewhere it writes a variable declared before
+            let plain_assignment = matches!(n.kind(), "assignment" | "assignment_expression")
+                && !m.assignment_declares();
             for (name, path, declared, field) in locals_of(n, src, false) {
+                if plain_assignment && path.is_empty() {
+                    continue;
+                }
                 locals.push(Local {
                     name,
                     path,
@@ -1029,38 +1040,8 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
                 }
             }
         }
-        // `self.prop`, `obj.method` read, not called and not assigned to
-        if matches!(
-            n.kind(),
-            "attribute"
-                | "member_expression"
-                | "field_expression"
-                | "member_access_expression"
-                | "navigation_expression"
-                | "selector_expression"
-        ) {
-            let called = n.parent().is_some_and(|p| {
-                callee(p, src).is_some()
-                    && p.child_by_field_name("function").is_some_and(|f| f.id() == n.id())
-                    || p.kind().contains("call")
-                        && kids(p).first().is_some_and(|f| f.id() == n.id())
-            });
-            let assigned = n
-                .parent()
-                .is_some_and(|p| p.child_by_field_name("left").is_some_and(|l| l.id() == n.id()));
-            let chained = n.parent().is_some_and(|p| {
-                MEMBER_FIELDS
-                    .iter()
-                    .any(|(o, _)| p.child_by_field_name(o).is_some_and(|x| x.id() == n.id()))
-            });
-            if !called && !assigned && !chained {
-                if let Some(path) = path_of(n, src) {
-                    if path.len() >= 2 && !path.iter().any(|s| s == UNKNOWN) {
-                        push(&mut refs, n, RefKind::Attr, path, "property_read", None);
-                    }
-                }
-            }
-        }
+        // reads and writes of variables, fields and constants
+        state.visit(n, src);
         if let Some(extra) = m.refs_of(n, src) {
             for (kind, path, context) in extra {
                 push(&mut refs, n, kind, path, context, None);
@@ -1109,6 +1090,8 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
         stack.extend(children.into_iter().rev());
     }
     add_extras(&mut facts.defs, &extras, m, src);
+    let defs = &facts.defs;
+    refs.extend(state.finish(defs, &imports, m.needs_import(), |bytes| innermost(defs, bytes)));
     // the innermost definition around each use (a sweep: defs are in source
     // pre-order, so a stack of open ranges is the chain of ancestors)
     assign_defs(&facts.defs, &mut refs);
@@ -1187,12 +1170,16 @@ fn assign_local_defs(defs: &[Def], locals: &mut [Local]) {
 /// every index into `defs` stays valid), each under the definition around it.
 fn add_extras(
     defs: &mut Vec<Def>,
-    extras: &[(Node, Node, crate::facts::DefKind)],
+    extras: &[(Node, Node, crate::facts::DefKind, bool)],
     m: &dyn LanguageModule,
     src: &[u8],
 ) {
     let base = defs.len();
-    for (node, name_node, kind) in extras {
+    // a name declared twice in one scope (`X = 1` … `X = 2`) is one variable:
+    // the first declaration
+    let mut seen: std::collections::HashSet<(Option<usize>, String)> =
+        std::collections::HashSet::new();
+    for (node, name_node, kind, state) in extras {
         let b = node.start_byte();
         let parent = defs[..base]
             .iter()
@@ -1201,6 +1188,16 @@ fn add_extras(
             .max_by_key(|(_, d)| d.start_byte)
             .map(|(i, _)| i);
         let name = text(*name_node, src).trim_start_matches('$').to_string();
+        if name == "_" {
+            continue; // Go `var _ I = (*T)(nil)`: a compile-time check, no variable
+        }
+        // (properties and constants found before keep their own rule)
+        if *state {
+            let taken = defs[..base].iter().any(|d| d.parent == parent && d.name == name);
+            if taken || !seen.insert((parent, name.clone())) {
+                continue;
+            }
+        }
         let qualname = match parent {
             Some(p) => format!("{}.{name}", defs[p].qualname),
             None => name.clone(),
@@ -1219,6 +1216,7 @@ fn add_extras(
             object: None,
             extra: true,
             decl_only: false,
+            container: crate::state::holds_container(*node, src),
             node_id: node.id(),
             start_byte: node.start_byte(),
             end_byte: node.end_byte(),
