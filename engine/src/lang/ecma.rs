@@ -210,6 +210,30 @@ impl LanguageModule for Ecma {
         }
     }
 
+    fn object_of(&self, n: Node, src: &[u8]) -> Option<String> {
+        let p = n.parent()?;
+        // `obj.name = function`, `Klass.prototype.name = function`
+        if p.kind() == "assignment_expression" {
+            let left = p.child_by_field_name("left")?;
+            if left.kind() != "member_expression" {
+                return None;
+            }
+            let obj = path_of(left.child_by_field_name("object")?, src)?;
+            return obj.into_iter().rfind(|s| s != "prototype" && s != "()");
+        }
+        // `const obj = { name() {}, other: function () {} }`
+        let pair_or_method = if p.kind() == "object" {
+            n
+        } else if p.kind() == "pair" {
+            p
+        } else {
+            return None;
+        };
+        let object = pair_or_method.parent().filter(|o| o.kind() == "object")?;
+        let decl = object.parent().filter(|d| d.kind() == "variable_declarator")?;
+        decl.child_by_field_name("name").filter(|x| x.kind() == "identifier").map(|x| text(x, src))
+    }
+
     fn exports_of(&self, n: Node, src: &[u8]) -> Vec<(String, String)> {
         let mut out = Vec::new();
         match n.kind() {
