@@ -77,6 +77,8 @@ fn an_update_parses_what_changed_and_writes_the_same_graph() {
     assert_eq!((again.incremental.reused, again.incremental.parsed), (5, 0));
 
     // one file changed, one deleted, one added
+    let graph_path = root.join("graphify-out/graph.json");
+    let before = fs::read(&graph_path).unwrap();
     fs::write(root.join("pkg/util.py"), "def double(x):\n    return x + x\n").unwrap();
     fs::remove_file(root.join("README.md")).unwrap();
     fs::write(root.join("pkg/extra.py"), "from .util import double\n\nX = double(2)\n").unwrap();
@@ -88,7 +90,9 @@ fn an_update_parses_what_changed_and_writes_the_same_graph() {
         updated["nodes"].as_array().unwrap().iter().map(|n| n["id"].as_str().unwrap()).collect();
     assert!(!ids.contains(&"pkg_util_triple") && !ids.iter().any(|i| i.starts_with("readme")));
 
-    // the same graph as a full build of the same tree
+    // the same graph as a full build of the same tree from the same previous graph
+    // (whose communities both start from)
+    fs::write(&graph_path, before).unwrap();
     let (full, _) = build_graph(&opts(&root, false)).unwrap();
     assert_eq!(content(updated), content(full));
     fs::remove_dir_all(&root).unwrap();

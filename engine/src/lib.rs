@@ -128,6 +128,13 @@ pub fn build_graph(opts: &BuildOptions) -> Result<(Value, BuildReport), String> 
         return Err(format!("not a directory: {}", root.display()));
     }
     let found = walk::discover(&root, &opts.out_dir_name, opts.documents, opts.max_file_bytes);
+    let mut phase = Instant::now();
+    let mut lap = |name: &'static str, phases: &mut Vec<(&'static str, u128)>| {
+        phases.push((name, phase.elapsed().as_millis()));
+        phase = Instant::now();
+    };
+    let mut phases: Vec<(&'static str, u128)> = Vec::new();
+    phases.push(("walk", started.elapsed().as_millis()));
     let cache_key = cache::Key {
         engine_version: VERSION.to_string(),
         schema_version: SCHEMA_VERSION,
@@ -149,6 +156,7 @@ pub fn build_graph(opts: &BuildOptions) -> Result<(Value, BuildReport), String> 
         None => read_all(&found.files, opts.parse_timeout, cached.as_ref()),
     };
 
+    lap("parse", &mut phases);
     let mut report = BuildReport {
         engine: "graphlore",
         engine_version: VERSION,
@@ -207,20 +215,24 @@ pub fn build_graph(opts: &BuildOptions) -> Result<(Value, BuildReport), String> 
     (report.timed_out, report.timed_out_count) = report::sample(timed_out);
 
     let mut assembled = graph::assemble::assemble(&facts);
+    lap("assemble", &mut phases);
     let (ext_nodes, edges, resolution) =
         resolve::resolve(&root, &facts, &mut assembled, found.manifests);
+    lap("resolve", &mut phases);
     assembled.nodes.extend(ext_nodes);
     assembled.links.extend(edges);
-    let previous = opts.out.as_deref().and_then(read_json);
+    let previous = opts.out.as_deref().and_then(community::Previous::read);
+    lap("previous", &mut phases);
     let labels_path = opts.out.as_deref().and_then(|o| o.parent()).map(|d| d.join(LABELS_FILE));
     let saved = labels_path.as_deref().and_then(read_labels);
     let communities = community::detect(
         &mut assembled.nodes,
         &assembled.links,
-        &previous.as_ref().map(community::Previous::from_graph).unwrap_or_default(),
+        &previous.unwrap_or_default(),
         saved.as_ref(),
     );
     report.communities = communities.report.clone();
+    lap("communities", &mut phases);
     report.nodes = assembled.nodes.len();
     report.edges = assembled.links.len();
     report.id_collisions = assembled.id_collisions;
@@ -252,6 +264,7 @@ pub fn build_graph(opts: &BuildOptions) -> Result<(Value, BuildReport), String> 
     let graph = Value::Object(top);
     if let Some(out) = &opts.out {
         graph::write::write_atomic(out, &graph)?;
+        lap("write", &mut phases);
         if let (Some(path), Some(labels)) = (&labels_path, &communities.labels) {
             write_labels(path, labels)?;
         }
@@ -259,8 +272,10 @@ pub fn build_graph(opts: &BuildOptions) -> Result<(Value, BuildReport), String> 
             // a cache that cannot be written costs the next update its speed, nothing else
             report.incremental.cache_written =
                 cache::store(path, cache_key, facts.into_iter().zip(stamps).collect()).is_ok();
+            lap("cache", &mut phases);
         }
     }
+    report.phases_ms = phases.into_iter().collect();
     report.elapsed_ms = started.elapsed().as_millis();
     Ok((graph, report))
 }

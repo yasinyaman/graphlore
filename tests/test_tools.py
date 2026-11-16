@@ -714,6 +714,10 @@ def test_engine_render_report_lists_what_was_left_out():
                                             "removed": 1})
     assert ("update: 2 files parsed, 30 unchanged reused from the cache, 1 gone"
             in server.engine.render_report(inc))
+    timed = dict(_NATIVE_REPORT, phases_ms={"parse": 40, "resolve": 9})
+    assert "time per phase: parse 40 ms, resolve 9 ms" in server.engine.render_report(
+        timed, verbose=True)
+    assert "time per phase" not in server.engine.render_report(timed)
     cold = dict(_NATIVE_REPORT, incremental={"cache": False, "parsed": 33})
     assert "no cache" in server.engine.render_report(cold, update=True)
     assert "no cache" not in server.engine.render_report(cold)

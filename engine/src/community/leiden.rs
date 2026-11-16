@@ -5,9 +5,9 @@
 //! refinement inside every community (only well-connected nodes merge, so every
 //! community stays connected), and aggregation of the refined communities, whose
 //! starting partition is the unrefined one. The refinement merges greedily
-//! (largest gain, ties to the lower index) rather than at random, and node order
-//! comes from a fixed-seed generator: the same graph always gives the same
-//! partition, on every machine.
+//! (largest gain, ties to the lower index) rather than at random, and nodes are
+//! visited in the order of keys the caller derives from them: the same graph
+//! always gives the same partition, on every machine.
 
 use std::collections::VecDeque;
 
@@ -84,30 +84,21 @@ impl Graph {
     }
 }
 
-/// splitmix64: a tiny, well-mixed generator, enough to order nodes.
-struct Rng(u64);
-
-impl Rng {
-    fn next(&mut self) -> u64 {
-        self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
-        let mut z = self.0;
-        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-        z ^ (z >> 31)
-    }
-
-    fn shuffle<T>(&mut self, xs: &mut [T]) {
-        for i in (1..xs.len()).rev() {
-            let j = (self.next() % (i as u64 + 1)) as usize;
-            xs.swap(i, j);
-        }
-    }
+/// Nodes in the order of their keys (ties by index).
+fn by_key(nodes: &mut [usize], keys: &[u64]) {
+    nodes.sort_by_key(|&v| (keys[v], v));
 }
 
 const EPS: f64 = 1e-12;
 
 /// The community of every node, numbered from 0 in order of first appearance.
-pub fn leiden(g: &Graph, resolution: f64, seed: u64) -> Vec<usize> {
+///
+/// `keys` orders the nodes wherever the algorithm visits them in turn: a key
+/// that comes from the node itself (a hash of its id) keeps the order of the
+/// other nodes when one is added, so a small change to a graph makes a small
+/// change to its partition. `initial` starts from a known partition (the
+/// previous build's) instead of singletons.
+pub fn leiden(g: &Graph, resolution: f64, keys: &[u64], initial: Option<&[usize]>) -> Vec<usize> {
     let n = g.len();
     if n == 0 {
         return Vec::new();
@@ -116,29 +107,36 @@ pub fn leiden(g: &Graph, resolution: f64, seed: u64) -> Vec<usize> {
     if m2 <= 0.0 {
         return (0..n).collect();
     }
-    let mut rng = Rng(seed);
     // which aggregate node each original node is part of, and the current level
     let mut member: Vec<usize> = (0..n).collect();
     let mut level = g.clone();
-    let mut part: Vec<usize> = (0..n).collect();
+    let mut level_keys = keys.to_vec();
+    let mut part: Vec<usize> = match initial {
+        Some(p) if p.len() == n => p.to_vec(),
+        _ => (0..n).collect(),
+    };
     for _ in 0..64 {
-        let moved = local_moving(&level, &mut part, resolution, m2, &mut rng);
+        let moved = local_moving(&level, &mut part, resolution, m2, &level_keys);
         let communities = renumber(&mut part);
         if !moved && communities == level.len() {
             break;
         }
-        let mut refined = refine(&level, &part, resolution, m2, &mut rng);
+        let mut refined = refine(&level, &part, resolution, m2, &level_keys);
         let groups = renumber(&mut refined);
         if groups == level.len() {
             // nothing merges inside the communities: one more level changes nothing
             break;
         }
-        // the aggregate's starting partition is the unrefined one
+        // the aggregate's starting partition is the unrefined one, its keys the
+        // smallest of its members'
         let mut start = vec![0usize; groups];
+        let mut agg_keys = vec![u64::MAX; groups];
         for v in 0..level.len() {
             start[refined[v]] = part[v];
+            agg_keys[refined[v]] = agg_keys[refined[v]].min(level_keys[v]);
         }
         level = aggregate(&level, &refined, groups);
+        level_keys = agg_keys;
         for m in member.iter_mut() {
             *m = refined[*m];
         }
@@ -191,7 +189,7 @@ fn renumber(part: &mut [usize]) -> usize {
 /// Leiden's fast local moving: visit nodes from a queue, move each to the
 /// neighbouring community with the largest modularity gain, and requeue the
 /// neighbours a move may now pull along. Returns whether anything moved.
-fn local_moving(g: &Graph, part: &mut [usize], gamma: f64, m2: f64, rng: &mut Rng) -> bool {
+fn local_moving(g: &Graph, part: &mut [usize], gamma: f64, m2: f64, keys: &[u64]) -> bool {
     let n = g.len();
     let k = g.strengths();
     let mut tot = vec![0.0; n];
@@ -199,7 +197,7 @@ fn local_moving(g: &Graph, part: &mut [usize], gamma: f64, m2: f64, rng: &mut Rn
         tot[part[v]] += k[v];
     }
     let mut order: Vec<usize> = (0..n).collect();
-    rng.shuffle(&mut order);
+    by_key(&mut order, keys);
     let mut queue: VecDeque<usize> = order.into_iter().collect();
     let mut queued = vec![true; n];
     let mut w_to = vec![0.0; n];
@@ -262,7 +260,7 @@ fn local_moving(g: &Graph, part: &mut [usize], gamma: f64, m2: f64, rng: &mut Rn
 /// Leiden's refinement: inside each community, start from singletons and merge
 /// a node that is still a singleton into the refined group it gains most by
 /// joining, when both are well connected to the rest of the community.
-fn refine(g: &Graph, part: &[usize], gamma: f64, m2: f64, rng: &mut Rng) -> Vec<usize> {
+fn refine(g: &Graph, part: &[usize], gamma: f64, m2: f64, keys: &[u64]) -> Vec<usize> {
     let n = g.len();
     let k = g.strengths();
     let c_count = part.iter().copied().max().map_or(0, |x| x + 1);
@@ -281,7 +279,7 @@ fn refine(g: &Graph, part: &[usize], gamma: f64, m2: f64, rng: &mut Rng) -> Vec<
     let mut touched: Vec<usize> = Vec::new();
     for group in members.iter_mut() {
         let total: f64 = group.iter().map(|&v| k[v]).sum();
-        rng.shuffle(group);
+        by_key(group, keys);
         for &v in group.iter() {
             if !single[v] {
                 continue;
@@ -362,6 +360,14 @@ fn aggregate(g: &Graph, refined: &[usize], groups: usize) -> Graph {
 mod tests {
     use super::*;
 
+    fn keys(n: usize) -> Vec<u64> {
+        (0..n as u64).map(|i| i.wrapping_mul(0x9E37_79B9_7F4A_7C15).rotate_left(17)).collect()
+    }
+
+    fn run(g: &Graph) -> Vec<usize> {
+        leiden(g, 1.0, &keys(g.len()), None)
+    }
+
     fn clique(edges: &mut Vec<(usize, usize, f64)>, nodes: &[usize]) {
         for (i, &a) in nodes.iter().enumerate() {
             for &b in &nodes[i + 1..] {
@@ -377,7 +383,7 @@ mod tests {
         clique(&mut e, &[5, 6, 7, 8, 9]);
         e.push((4, 5, 1.0));
         let g = Graph::from_edges(10, &e);
-        let p = leiden(&g, 1.0, 42);
+        let p = run(&g);
         assert!(p[..5].iter().all(|&c| c == p[0]));
         assert!(p[5..].iter().all(|&c| c == p[5]));
         assert_ne!(p[0], p[5]);
@@ -393,7 +399,7 @@ mod tests {
             e.push((base + 5, (base + 6) % 48, 1.0));
         }
         let g = Graph::from_edges(48, &e);
-        let p = leiden(&g, 1.0, 7);
+        let p = run(&g);
         for c in 0..8 {
             let base = c * 6;
             assert!(p[base..base + 6].iter().all(|&x| x == p[base]), "clique {c}: {p:?}");
@@ -409,7 +415,18 @@ mod tests {
             e.push((i, (i + 1) % 200, 0.5));
         }
         let g = Graph::from_edges(200, &e);
-        assert_eq!(leiden(&g, 1.0, 42), leiden(&g, 1.0, 42));
+        assert_eq!(run(&g), run(&g));
+    }
+
+    #[test]
+    fn a_start_from_the_answer_keeps_it() {
+        let mut e = Vec::new();
+        clique(&mut e, &[0, 1, 2, 3, 4]);
+        clique(&mut e, &[5, 6, 7, 8, 9]);
+        e.push((4, 5, 1.0));
+        let g = Graph::from_edges(10, &e);
+        let p = run(&g);
+        assert_eq!(leiden(&g, 1.0, &keys(10), Some(&p)), p);
     }
 
     #[test]
@@ -423,7 +440,7 @@ mod tests {
         }
         e.retain(|&(a, b, _)| a < 300 && b < 300);
         let g = Graph::from_edges(300, &e);
-        let p = leiden(&g, 1.0, 42);
+        let p = run(&g);
         let singletons: Vec<usize> = (0..300).collect();
         assert!(modularity(&g, &p, 1.0) > modularity(&g, &singletons, 1.0));
         // every community is connected within itself
@@ -447,7 +464,7 @@ mod tests {
 
     #[test]
     fn edgeless_and_empty_graphs() {
-        assert!(leiden(&Graph::new(0), 1.0, 1).is_empty());
-        assert_eq!(leiden(&Graph::new(3), 1.0, 1), vec![0, 1, 2]);
+        assert!(run(&Graph::new(0)).is_empty());
+        assert_eq!(run(&Graph::new(3)), vec![0, 1, 2]);
     }
 }
