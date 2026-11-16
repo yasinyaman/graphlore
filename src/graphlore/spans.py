@@ -306,6 +306,8 @@ def _ts_bound_function(node: Any) -> tuple[str, Any] | None:
     vt = value.type.lower()
     if not any(h in vt for h in ("function", "arrow", "lambda", "closure", "func")):
         return None
+    if vt.endswith("_type"):
+        return None  # a type written out (Go `map[string]func() int`), not a function
     if value.child_by_field_name("name") is not None:
         return None
     return name.text.decode("utf-8", "replace"), value

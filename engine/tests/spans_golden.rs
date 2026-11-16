@@ -102,6 +102,9 @@ fn go_doc_comments_receivers_and_types() {
         "package m\ntype Client struct{}\nfunc (c *Client) Get(u string) error { return nil }\n\
                func Helper() int { return 1 }\ntype Doer interface { Do() }\n";
     has_all(&quals("c.go", src), &["Client", "Client.Get", "Helper", "Doer", "Doer.Do"]);
+    // a function type written in a map type names nothing
+    let map = "package m\nvar hashes = map[string]func() int{\n\t\"a\": f,\n}\n";
+    assert!(quals("m.go", map).is_empty());
     let facts = file_facts(src.as_bytes(), "c.go");
     let kind = |n: &str| facts.defs.iter().find(|d| d.name == n).unwrap().kind;
     assert_eq!(kind("Client"), DefKind::Struct);

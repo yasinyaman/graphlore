@@ -192,6 +192,10 @@ pub fn bound_function<'t>(node: Node<'t>, src: &[u8]) -> Option<(String, Node<'t
     if !["function", "arrow", "lambda", "closure", "func"].iter().any(|h| vt.contains(h)) {
         return None;
     }
+    if vt.ends_with("_type") {
+        // a type written out (Go `map[string]func() int`), not a function
+        return None;
+    }
     if value.child_by_field_name("name").is_some() {
         return None;
     }

@@ -56,6 +56,12 @@ linked to a first-party `yaml.py`, or a bare JS specifier (`'yaml'`) linked to
 `lib/yaml.js`. A tsconfig path alias cannot be told from a scoped package
 without the config, so those edges are kept.
 
+A graph the native engine built (`GRAPHLORE_ENGINE=native`) needs none of this:
+it resolves each import by path when it reads the statement, and records when it
+runs on the edge (`runs`), so the check takes that and rejects nothing. The calls
+and imports through a module object that graphlore adds to graphify's graphs
+(above) are in such a graph already, and nothing is added to it.
+
 An import through a re-exporting entry file is kept too. graphify links
 `import { CreateDto } from './dto'` to the file that defines `CreateDto`, not to
 `dto/index.ts`; the statement still loads that file, so the edge holds. Only

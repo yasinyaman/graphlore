@@ -28,7 +28,7 @@ graph.json and the working tree untouched. Everything that writes (edits for
 freshness/diff, prune, build, set_labels, label_communities) runs on a throwaway
 copy. Findings are grouped by id; `kind` says whose they are: bug / convention
 (graphlore), gap (a language or framework graphlore does not cover), upstream
-(the graph graphify built), perf.
+(the graph the extractor built: graphify, or the native engine), perf.
 """
 from __future__ import annotations
 
@@ -765,7 +765,7 @@ def check_review(a: Audit, sub: Subject) -> None:
         for kind in ("dangling_edges", "duplicate_edges", "orphan_nodes"):
             if issues.get(kind):
                 a.finding("GRAPH-" + kind.upper().replace("_", "-"), "info", "upstream",
-                          "validate", f"the graph graphify built has {kind}", issues[kind])
+                          "validate", f"the graph the extractor built has {kind}", issues[kind])
     a.call("validate", scope="all", limit=1)
     for kind in ("all", "imports", "calls", "other"):
         cyc = a.call("cycles", kind=kind, max_cycles=5)
@@ -1195,7 +1195,7 @@ def check_sandbox(a: Audit, sub: Subject, repo_dir: Path, keep: bool) -> None:
                       "the repository holds docs; code_only=True builds",
                       "named code_only=True" if "code_only=True" in plain
                       else "the reply names only the CLI flag")
-        (box / "graphify-out" / "graph.json").unlink(missing_ok=True)
+        (box / s.config.OUT_DIR_NAME / "graph.json").unlink(missing_ok=True)
         out = a.text("build", path=".", code_only=True)
         if out.startswith("ERROR"):
             a.status("build", "error")
@@ -1213,7 +1213,7 @@ def check_sandbox(a: Audit, sub: Subject, repo_dir: Path, keep: bool) -> None:
                           "the graph graphlore_build wrote has under half the code "
                           "nodes of the one `graphify update` built",
                           {"update": before, "build": code_nodes(s._nodes_edges(graph)[0])})
-        a.call("project", path=str(box / "graphify-out"))
+        a.call("project", path=str(box / s.config.OUT_DIR_NAME))
         a.call("project", path=str(tmp / "does-not-exist"), expect_error=True)
     finally:
         _reset(repo_dir)
@@ -1312,6 +1312,37 @@ def check_extension_tables(a: Audit) -> dict[str, dict[str, bool]]:
     return matrix
 
 
+NATIVE_OUT = "graphlore-native"
+
+
+def build_native(root: Path, repos: list[dict[str, Any]], rebuild: bool) -> None:
+    """Build each repo's graph with the native engine into graphlore-native/ and
+    point the audit (and the build check inside it) at the native engine."""
+    try:
+        import graphlore_engine
+    except ImportError:
+        raise SystemExit("the native engine is not installed: "
+                         "maturin develop -m engine/Cargo.toml --release") from None
+    os.environ["GRAPHLORE_ENGINE"] = "native"
+    s.config.OUT_DIR_NAME = NATIVE_OUT
+    for repo in repos:
+        d = root / repo["key"]
+        if not d.exists():
+            continue
+        exclude = d / ".git" / "info" / "exclude"
+        if exclude.exists() and NATIVE_OUT not in exclude.read_text(encoding="utf-8"):
+            with exclude.open("a", encoding="utf-8") as fh:
+                fh.write(f"{NATIVE_OUT}/\n")
+        out = d / NATIVE_OUT / "graph.json"
+        if out.exists() and not rebuild:
+            continue
+        commit = _git(d, "rev-parse", "HEAD").strip() or None
+        rep = json.loads(graphlore_engine.build(str(d), out=str(out), commit=commit,
+                                                out_dir_name=NATIVE_OUT))
+        print(f"native {repo['key']}: {rep['nodes']} nodes, {rep['edges']} edges, "
+              f"{rep['elapsed_ms']} ms")
+
+
 def audit_repo(a: Audit, repo: dict[str, Any], root: Path, opts: argparse.Namespace) -> None:
     repo_dir = (root / repo["key"]).resolve()
     a.repo = repo["key"]
@@ -1327,7 +1358,7 @@ def audit_repo(a: Audit, repo: dict[str, Any], root: Path, opts: argparse.Namesp
         "definitions": dict(Counter(sub.defs.kind.values())),
         "definitions_by_ext": {ext: len(ids) for ext, ids in sub.by_ext.items()},
     })
-    graph_file = repo_dir / "graphify-out" / "graph.json"
+    graph_file = repo_dir / s.config.OUT_DIR_NAME / "graph.json"
     before = (hashlib.sha256(graph_file.read_bytes()).hexdigest(),
               _git(repo_dir, "status", "--porcelain"))
     want = set(opts.tools.split(",")) if opts.tools else None
@@ -1414,6 +1445,12 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--json", metavar="PATH", default=None)
     parser.add_argument("--baseline", metavar="PATH", default=None,
                         help="an earlier --json result: mark findings new or gone")
+    parser.add_argument("--engine", choices=("graphify", "native"), default="graphify",
+                        help="audit the graphs graphify built (graphify-out/) or the ones "
+                             "graphlore's native engine builds (graphlore-native/, built "
+                             "when missing or with --rebuild)")
+    parser.add_argument("--rebuild", action="store_true",
+                        help="with --engine native: rebuild every native graph first")
     opts = parser.parse_args(argv)
 
     only = {x for x in opts.only.split(",") if x}
@@ -1424,6 +1461,8 @@ def main(argv: list[str] | None = None) -> None:
         return
     for key in s._BACKEND_ENV:  # no tool may reach an LLM backend from here
         os.environ.pop(key, None)
+    if opts.engine == "native":
+        build_native(root, repos, opts.rebuild)
 
     audit = Audit()
     ext_matrix = check_extension_tables(audit)
@@ -1450,7 +1489,9 @@ def main(argv: list[str] | None = None) -> None:
 
         payload = {
             "measured": date.today().isoformat(),
+            "engine": opts.engine,
             "versions": {"graphlore": s.__version__, "graphify": ver("graphifyy"),
+                         "graphlore_engine": ver("graphlore-engine"),
                          "tree_sitter_language_pack": ver("tree-sitter-language-pack"),
                          "semble": ver("semble"),
                          "python": ".".join(map(str, sys.version_info[:3]))},

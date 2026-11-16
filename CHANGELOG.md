@@ -24,8 +24,39 @@ All notable changes to this project are documented here. The format is based on
   Swift, Scala and C/C++ files it returns the same spans as `spans.py`, apart
   from 2.5% of C/C++ headers where the grammar versions differ, and on 30,000
   Python definitions the same spans as the stdlib `ast`. Per language, a module
-  overrides only what its grammar does differently. No import or call edges
-  and no communities yet; every native build says so.
+  overrides only what its grammar does differently. No communities yet; every
+  native build says so.
+- **Imports, calls, bases and type references in the native engine**, in all
+  14 languages. The engine reads import statements, calls and constructions,
+  base lists, types in signatures, fields, variables and type arguments,
+  decorators and attribute reads, and resolves them the way each language
+  does: module paths per language (Python's root rules, JS/TS relative paths
+  with `tsconfig.json` paths and workspace packages, `go.mod`, JVM / C# / PHP
+  packages and namespaces, Cargo crates and the module tree, Ruby
+  `require_relative`, SwiftPM targets, C/C++ includes), names through the
+  enclosing scopes, the file, its imports and re-exports, its package or
+  namespace, and receivers through typed parameters, fields, assigned
+  constructions and declared return types (builder chains included). What that
+  finds is `EXTRACTED`; a unique name across the project, with import
+  evidence for a method, is `INFERRED`; anything else gets no edge and is
+  counted in the build reply. Import edges carry `runs` (module-level,
+  deferred, type-checking); external modules and bases are `type: external`
+  nodes with an `ecosystem`. Properties (C#, Swift, Kotlin, TS/JS class
+  fields) and module-level constants are nodes. graph.json schema 2. Compared
+  with graphify on the 31 audit repositories, the native graph has 77% of
+  graphify's call edges, 75% of its file-level imports, 96% of its bases and
+  85% of its type references, while 15% of its calls are inferred against
+  47% of graphify's; most of the rest is graphify's name guesses and artefacts
+  (`docs/native-engine.md` has the per-language table and samples). Builds stay
+  3–6 times faster than graphify's.
+- **`graphlore_build` on a native graph trusts its edges**: `ImportChecker`
+  takes an edge's `runs` as when the import runs and rejects nothing, and the
+  calls and imports `resolve.py` adds to graphify's graphs are not added to a
+  native schema-2 graph (`graph._engine_resolved`).
+- **`benchmarks/compare_engines.py` compares edges** (imports as file pairs;
+  calls, bases and type references over the definitions both engines have),
+  and **`benchmarks/polyglot.py --engine native`** runs the whole audit on
+  native graphs (built into `graphlore-native/`).
 - **`GRAPHLORE_ENGINE`** picks the extractor `graphlore_build` uses: `graphify`
   (the default, unchanged), `native` (an error naming the install command when
   the engine is missing; `mode` and `cluster_only` refused; `update` rebuilds
@@ -43,6 +74,19 @@ All notable changes to this project are documented here. The format is based on
 - On a native graph, `graphlore_communities` and the community naming tools say
   that the native engine has no communities yet, instead of suggesting
   `graphlore_build(cluster_only=True)`.
+- `graphlore_fetch` returns the lines a native property or constant node
+  carries (`region_start`..`end_line`) when the span engine has no span for it
+  and the file is unchanged since the build, instead of a line window.
+
+### Fixed
+- `graphlore_neighbors` lists both directions when two nodes link each other
+  by the same relation (A references B and B references A); it dropped one.
+- `graphlore_path` and `graphlore_explain` pass `--graph` to the CLI, as
+  `graphlore_query` did, so with `GRAPHLORE_OUT_DIR` set they read the graph
+  the other tools read instead of the CLI's default `graphify-out/`.
+- A Go function type written inside a map type (`map[string]func() hash.Hash`)
+  is no longer taken for a function named `string`, in `spans.py` and in the
+  native engine.
 
 ## [0.6.0] - 2026-11-15
 

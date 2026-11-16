@@ -127,7 +127,8 @@ _SNIPPETS = {
     "form.tsx": "function FormMessage({ className }: React.ComponentProps<\"p\">) {\n"
                 "  return null\n}\n",
     "c.go": "package m\n\n// Client talks.\ntype Client struct{}\n"
-            "func (c *Client) Get(u string) error { return nil }\n",
+            "func (c *Client) Get(u string) error { return nil }\n"
+            "var hashes = map[string]func() int{\n\t\"a\": f,\n}\n",
     "Api.java": "class Api {\n    int fetch(String u) {\n        return get(u);\n    }\n}\n",
     "Greeter.kt": "package demo\n\nclass Greeter(val name: String) {\n  @JvmStatic\n"
                   "  fun greet(): String {\n    return name\n  }\n}\n\nobject Registry {\n}\n",

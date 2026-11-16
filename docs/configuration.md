@@ -137,11 +137,12 @@ shipped as a separate package, `graphlore-engine`, whose wheels carry the
 tree-sitter grammars for Python, JavaScript, TypeScript/TSX, Go, Java, Kotlin,
 Scala, C#, Rust, Swift, C, C++, Ruby and PHP. It is experimental. A native graph
 has a node per file, per definition (with its `start..end` span, `kind` and
-`qualname`) and per Markdown / reStructuredText heading, and the containment
-edges between them, in graphify's id and label conventions so every tool reads
-it. It has no import or call edges and no communities yet, so impact, cycles,
-layers and the community tools have little to work with; every native build
-says so.
+`qualname`), property, module-level constant and Markdown / reStructuredText
+heading; containment; and the imports (with when each runs), calls, bases and
+type references it resolves from the source, each `EXTRACTED` or, when found
+by name alone, `INFERRED`. It is written in graphify's id and label conventions,
+so every tool reads it. It has no communities yet, and `update=True` rebuilds
+the whole graph; every native build says so.
 
 It is not on PyPI yet. From a checkout:
 

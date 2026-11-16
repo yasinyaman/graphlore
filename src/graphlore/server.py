@@ -150,6 +150,7 @@ from .graph import (  # noqa: F401  (re-exported for the tools + tests)
     _edge_flags,
     _edge_rel,
     _edge_set,
+    _engine_resolved,
     _exact_node_index,
     _file_import_edges,
     _find_cycles,
@@ -1822,10 +1823,15 @@ def graphlore_query(question: str, dfs: bool = False, budget: int = 0) -> str:
         args.append("--dfs")
     if budget > 0:
         args += ["--budget", str(budget)]
-    gp = _graph_path()
-    if gp.exists():
-        args += ["--graph", str(gp)]
+    args += _graph_arg()
     return _cli_reply(_run_cli(args), repo_text=True)
+
+
+def _graph_arg() -> list[str]:
+    """``--graph <path>`` for the CLI's read commands, so they read the graph the
+    analysis tools read (``GRAPHLORE_OUT_DIR``), not the CLI's own default."""
+    gp = _graph_path()
+    return ["--graph", str(gp)] if gp.exists() else []
 
 
 @_tool(annotations=ToolAnnotations(title="Path between nodes", read_only_hint=True))
@@ -1837,7 +1843,7 @@ def graphlore_path(node_a: str, node_b: str) -> str:
     was used.
     """
     (a, note_a), (b, note_b) = _cli_node_key(node_a), _cli_node_key(node_b)
-    return _cli_node_reply(_run_cli(["path", a, b]), [note_a, note_b])
+    return _cli_node_reply(_run_cli(["path", a, b, *_graph_arg()]), [note_a, note_b])
 
 
 @_tool(annotations=ToolAnnotations(title="Explain node", read_only_hint=True))
@@ -1849,7 +1855,7 @@ def graphlore_explain(node: str) -> str:
     was used.
     """
     key, note = _cli_node_key(node)
-    return _cli_node_reply(_run_cli(["explain", key]), [note])
+    return _cli_node_reply(_run_cli(["explain", key, *_graph_arg()]), [note])
 
 
 def _cli_node_key(name: str) -> tuple[str, str]:
@@ -2662,9 +2668,16 @@ def graphlore_neighbors(node: str, as_json: bool = False, scope: str = "") -> st
     neigh = []
     listed: set[tuple[str, str, bool]] = set()
     for t, rel in ranked:
-        out = (nid, t, rel) in es
-        if (t, rel, out) in listed:
-            continue  # a self-loop sits in the undirected adjacency twice
+        # A pair linked both ways by one relation (A references B, B references A)
+        # sits in the undirected adjacency twice, once per edge: list each
+        # direction once. A self-loop also sits there twice, and is one row.
+        ways = [True] if t == nid else [
+            d for d, present in ((True, (nid, t, rel) in es), (False, (t, nid, rel) in es))
+            if present
+        ]
+        out = next((d for d in ways if (t, rel, d) not in listed), None)
+        if out is None:
+            continue
         listed.add((t, rel, out))
         row = {"node": labels.get(t, t), "relation": rel, "direction": "out" if out else "in"}
         row.update(flags.get((nid, t, rel) if out else (t, nid, rel), {}))
@@ -2689,6 +2702,15 @@ def graphlore_neighbors(node: str, as_json: bool = False, scope: str = "") -> st
     if matched_text:
         text.append("\n" + matched_text)
     return _fmt(payload, as_json, _with_note("\n".join(text), view))
+
+
+def _carried_span(n: dict, line: int) -> tuple[int, int] | None:
+    """The lines a native-engine node carries (``region_start``..``end_line``),
+    for a definition the span engine does not make: a property or a constant."""
+    lo, hi = n.get("region_start"), n.get("end_line")
+    if isinstance(lo, int) and isinstance(hi, int) and lo <= line <= hi:
+        return lo, hi
+    return None
 
 
 @_tool(annotations=ToolAnnotations(title="Token-budgeted subgraph", read_only_hint=True))
@@ -4035,6 +4057,8 @@ def graphlore_fetch(
             if own:
                 region_start, end, _def_line, qual = own
                 lo, hi, spanned = region_start, end, True
+            elif (carried := _carried_span(n, line)) and not _file_changed(drift, f):
+                lo, hi, spanned = carried[0], carried[1], True
 
         block = _read_source_lines(f, lo - context_lines, hi + context_lines) if (
             f and lo > 0
