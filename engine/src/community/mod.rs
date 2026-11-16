@@ -19,13 +19,12 @@ use std::sync::OnceLock;
 use std::time::Instant;
 
 use regex::Regex;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
 use leiden::Graph;
 
 pub const RESOLUTION: f64 = 1.0;
-const SEED: u64 = 42;
 /// graphify's thresholds (`cluster.py`).
 const MAX_COMMUNITY_FRACTION: f64 = 0.25;
 const MIN_SPLIT_SIZE: usize = 10;
@@ -33,6 +32,16 @@ const COHESION_SPLIT_MIN_SIZE: usize = 50;
 const COHESION_SPLIT_THRESHOLD: f64 = 0.05;
 /// Share of members in one directory from which a name carries the directory.
 const DIR_NAME_SHARE: f64 = 0.6;
+/// Where an edge's ends live: the same directory, different top-level
+/// directories, test code and production code. Measured on 14 of the polyglot
+/// audit's repositories: a test edge at 0.1 keeps test code together (4% of
+/// test nodes end up in a production community, 11% at 0.5) and lifts the share
+/// of a community in one directory from 90% to 93%.
+const SAME_DIR: f64 = 1.25;
+const OTHER_TOP: f64 = 0.6;
+const TEST_TO_PRODUCTION: f64 = 0.1;
+/// An `INFERRED` edge (a guess by name) counts this much of an extracted one.
+const INFERRED: f64 = 0.5;
 /// Total weight of the tie each file gets to the other files of its directory.
 const DIR_PRIOR: f64 = 0.1;
 /// Directories with more files than this are tied in a ring, not a clique.
@@ -55,13 +64,13 @@ fn structure_factor(a: &NodeInfo, b: &NodeInfo) -> f64 {
     let mut f = 1.0;
     if !a.file.is_empty() && !b.file.is_empty() && a.file != b.file {
         if parent(&a.file) == parent(&b.file) {
-            f *= 1.25;
+            f *= SAME_DIR;
         } else if top(&a.file) != top(&b.file) {
-            f *= 0.6;
+            f *= OTHER_TOP;
         }
     }
     if a.test != b.test {
-        f *= 0.5;
+        f *= TEST_TO_PRODUCTION;
     }
     f
 }
@@ -108,7 +117,55 @@ pub struct Previous {
     pub signatures: HashMap<i64, String>,
 }
 
+#[derive(Deserialize)]
+struct PrevFile {
+    #[serde(default)]
+    nodes: Vec<PrevNode>,
+    #[serde(default)]
+    graph: Option<PrevMeta>,
+}
+
+#[derive(Deserialize)]
+struct PrevNode {
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    community: Option<Value>,
+}
+
+#[derive(Deserialize)]
+struct PrevMeta {
+    #[serde(default)]
+    communities: Option<PrevCommunities>,
+}
+
+#[derive(Deserialize)]
+struct PrevCommunities {
+    #[serde(default)]
+    signatures: HashMap<String, Value>,
+}
+
 impl Previous {
+    /// The communities of the graph.json at `path`, reading only the fields
+    /// they need (a graph of 250 MB takes a fraction of a full parse).
+    pub fn read(path: &std::path::Path) -> Option<Self> {
+        let bytes = std::fs::read(path).ok()?;
+        let file: PrevFile = serde_json::from_slice(&bytes).ok()?;
+        let mut prev = Previous::default();
+        for n in file.nodes {
+            if let (Some(id), Some(c)) = (n.id, n.community.as_ref().and_then(Value::as_i64)) {
+                prev.community.insert(id, c);
+            }
+        }
+        let sigs = file.graph.and_then(|g| g.communities).map(|c| c.signatures);
+        for (k, v) in sigs.into_iter().flatten() {
+            if let (Ok(c), Some(s)) = (k.parse::<i64>(), v.as_str()) {
+                prev.signatures.insert(c, s.to_string());
+            }
+        }
+        Some(prev)
+    }
+
     pub fn from_graph(graph: &Value) -> Self {
         let mut prev = Previous::default();
         for n in graph.get("nodes").and_then(Value::as_array).into_iter().flatten() {
@@ -149,15 +206,16 @@ pub struct Outcome {
     pub labels: Option<BTreeMap<String, String>>,
 }
 
-fn info(n: &Value) -> NodeInfo {
+fn info(n: &Value, test_file: &mut HashMap<String, bool>) -> NodeInfo {
     let s = |k: &str| n.get(k).and_then(Value::as_str).unwrap_or("").to_string();
     let file = s("source_file");
     let external = n.get("type").and_then(Value::as_str) == Some("external");
+    let in_test_file =
+        !file.is_empty() && *test_file.entry(file.clone()).or_insert_with_key(|f| is_test_path(f));
     NodeInfo {
         id: s("id"),
         label: s("label"),
-        test: n.get("test").and_then(Value::as_bool).unwrap_or(false)
-            || (!file.is_empty() && is_test_path(&file)),
+        test: n.get("test").and_then(Value::as_bool).unwrap_or(false) || in_test_file,
         is_file: n.get("kind").and_then(Value::as_str) == Some("file"),
         file,
         external,
@@ -173,8 +231,9 @@ pub fn detect(
 ) -> Outcome {
     let started = Instant::now();
     let mut order: Vec<usize> = (0..nodes.len()).collect();
-    let infos: Vec<NodeInfo> = nodes.iter().map(info).collect();
-    order.sort_by(|&a, &b| infos[a].id.cmp(&infos[b].id));
+    let mut test_file = HashMap::new();
+    let infos: Vec<NodeInfo> = nodes.iter().map(|n| info(n, &mut test_file)).collect();
+    order.sort_unstable_by(|&a, &b| infos[a].id.cmp(&infos[b].id));
     let infos: Vec<NodeInfo> = {
         let mut by: Vec<Option<NodeInfo>> = infos.into_iter().map(Some).collect();
         order.iter().map(|&i| by[i].take().unwrap()).collect()
@@ -199,7 +258,7 @@ pub fn detect(
         let rel = e.get("relation").and_then(Value::as_str).unwrap_or("");
         let mut w = relation_weight(rel, infos[b].is_file);
         if e.get("confidence").and_then(Value::as_str) == Some("INFERRED") {
-            w *= 0.5;
+            w *= INFERRED;
         }
         w *= structure_factor(&infos[a], &infos[b]);
         weighted.push((a, b, w));
@@ -215,40 +274,15 @@ pub fn detect(
     }
     let graph = Graph::from_edges(n, &weighted);
 
-    // partition the internal nodes that have edges
-    let connected: Vec<usize> =
-        (0..n).filter(|&v| !infos[v].external && !graph.adj[v].is_empty()).collect();
-    let mut groups: Vec<Vec<usize>> = Vec::new();
-    if !connected.is_empty() {
-        let part = leiden::leiden(&graph.subgraph(&connected), RESOLUTION, SEED);
-        let count = part.iter().copied().max().map_or(0, |x| x + 1);
-        groups = vec![Vec::new(); count];
-        for (k, &v) in connected.iter().enumerate() {
-            groups[part[k]].push(v);
-        }
-    }
-    groups
-        .extend((0..n).filter(|&v| !infos[v].external && graph.adj[v].is_empty()).map(|v| vec![v]));
-    // split what is too big, then what is too sparse
-    let max_size = MIN_SPLIT_SIZE.max((n as f64 * MAX_COMMUNITY_FRACTION) as usize);
-    let mut split: Vec<Vec<usize>> = Vec::new();
-    for g in groups {
-        if g.len() > max_size {
-            split.extend(split_group(&graph, g));
-        } else {
-            split.push(g);
-        }
-    }
-    let inside = inside_pairs(&raw, &split, n);
-    let mut groups: Vec<Vec<usize>> = Vec::new();
-    for (g, pairs) in split.into_iter().zip(inside) {
-        if g.len() >= COHESION_SPLIT_MIN_SIZE && cohesion(pairs, g.len()) < COHESION_SPLIT_THRESHOLD
-        {
-            groups.extend(split_group(&graph, g));
-        } else {
-            groups.push(g);
-        }
-    }
+    // partition the internal nodes that have edges, visiting nodes in an order
+    // of their own (a hash of the id) and starting from the previous graph's
+    // communities: a small change to the code moves few nodes
+    let mut walk = Walk {
+        keys: infos.iter().map(|x| fnv(x.id.as_bytes())).collect(),
+        before: infos.iter().map(|x| prev.community.get(&x.id).copied()).collect(),
+    };
+    let warm = walk.before.iter().any(Option::is_some);
+    let mut groups = settle(&graph, &mut walk, &infos, &raw, warm);
     // externals join their neighbours' community
     let mut of: Vec<usize> = vec![usize::MAX; n];
     for (c, g) in groups.iter().enumerate() {
@@ -388,12 +422,181 @@ fn directory_ties(infos: &[NodeInfo]) -> Vec<(usize, usize, f64)> {
 }
 
 /// A second Leiden pass on one community; unchanged when it finds one part.
-fn split_group(graph: &Graph, g: Vec<usize>) -> Vec<Vec<usize>> {
+/// Leiden over the internal nodes with edges, isolated nodes alone, then
+/// graphify's splits of what is too big and what is too sparse.
+fn partition(
+    graph: &Graph,
+    walk: &Walk,
+    infos: &[NodeInfo],
+    raw: &[(usize, usize)],
+) -> Vec<Vec<usize>> {
+    let n = infos.len();
+    let connected: Vec<usize> =
+        (0..n).filter(|&v| !infos[v].external && !graph.adj[v].is_empty()).collect();
+    let mut groups: Vec<Vec<usize>> = Vec::new();
+    if !connected.is_empty() {
+        let part = walk.leiden(graph, &connected);
+        let count = part.iter().copied().max().map_or(0, |x| x + 1);
+        groups = vec![Vec::new(); count];
+        for (k, &v) in connected.iter().enumerate() {
+            groups[part[k]].push(v);
+        }
+    }
+    groups
+        .extend((0..n).filter(|&v| !infos[v].external && graph.adj[v].is_empty()).map(|v| vec![v]));
+    let max_size = MIN_SPLIT_SIZE.max((n as f64 * MAX_COMMUNITY_FRACTION) as usize);
+    let mut split: Vec<Vec<usize>> = Vec::new();
+    for g in groups {
+        if g.len() > max_size {
+            split.extend(split_group(graph, walk, g));
+        } else {
+            split.push(g);
+        }
+    }
+    let inside = inside_pairs(raw, &split, n);
+    let mut groups: Vec<Vec<usize>> = Vec::new();
+    for (g, pairs) in split.into_iter().zip(inside) {
+        if g.len() >= COHESION_SPLIT_MIN_SIZE && cohesion(pairs, g.len()) < COHESION_SPLIT_THRESHOLD
+        {
+            groups.extend(split_group(graph, walk, g));
+        } else {
+            groups.push(g);
+        }
+    }
+    groups
+}
+
+/// Partition until a pass starting from the last result returns it again.
+///
+/// Each pass starts from the previous one's communities. Graphify's splits can
+/// make two states alternate (Leiden merges what the cohesion rule split, which
+/// splits it again): then the state of the cycle closest to where the build
+/// started is kept, which a rebuild starting from it keeps too. A first build
+/// settles the same way, so the first update after it moves nothing for nothing.
+fn settle(
+    graph: &Graph,
+    walk: &mut Walk,
+    infos: &[NodeInfo],
+    raw: &[(usize, usize)],
+    warm: bool,
+) -> Vec<Vec<usize>> {
+    let n = infos.len();
+    let first = partition(graph, walk, infos, raw);
+    if warm && reproduces(&first, &walk.before) {
+        return first; // the previous communities, unchanged: already settled
+    }
+    let reference: Vec<Option<i64>> = if warm { walk.before.clone() } else { labels(&first, n) };
+    let mut states = vec![first];
+    for _ in 0..SETTLE_PASSES {
+        walk.before = labels(states.last().expect("one state"), n);
+        let next = partition(graph, walk, infos, raw);
+        match states.iter().position(|s| same_partition(s, &next, n)) {
+            Some(at) if at + 1 == states.len() => break, // a fixed point
+            Some(at) => {
+                // a cycle: keep its state closest to the start
+                let cycle = states.split_off(at);
+                return cycle
+                    .into_iter()
+                    .enumerate()
+                    .max_by_key(|(i, s)| (agreement(s, &reference), std::cmp::Reverse(*i)))
+                    .map(|(_, s)| s)
+                    .expect("a cycle has states");
+            }
+            None => states.push(next),
+        }
+    }
+    states.pop().expect("one state")
+}
+
+const SETTLE_PASSES: usize = 6;
+
+/// Whether `groups` are exactly the communities `before` names: every node had
+/// one, each group is one of them, and no two groups share one.
+fn reproduces(groups: &[Vec<usize>], before: &[Option<i64>]) -> bool {
+    let mut seen: HashSet<i64> = HashSet::new();
+    groups.iter().all(|g| {
+        let Some(c) = before[g[0]] else { return false };
+        seen.insert(c) && g.iter().all(|&v| before[v] == Some(c))
+    })
+}
+
+fn labels(groups: &[Vec<usize>], n: usize) -> Vec<Option<i64>> {
+    let mut out = vec![None; n];
+    for (c, g) in groups.iter().enumerate() {
+        for &v in g {
+            out[v] = Some(c as i64);
+        }
+    }
+    out
+}
+
+/// Nodes that sit with the majority of their group's reference community.
+fn agreement(groups: &[Vec<usize>], reference: &[Option<i64>]) -> usize {
+    groups
+        .iter()
+        .map(|g| {
+            let mut count: HashMap<i64, usize> = HashMap::new();
+            for &v in g {
+                if let Some(c) = reference[v] {
+                    *count.entry(c).or_default() += 1;
+                }
+            }
+            count.values().copied().max().unwrap_or(0)
+        })
+        .sum()
+}
+
+/// Whether two lists of groups put the same nodes together.
+fn same_partition(a: &[Vec<usize>], b: &[Vec<usize>], n: usize) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut of = vec![usize::MAX; n];
+    for (c, g) in a.iter().enumerate() {
+        for &v in g {
+            of[v] = c;
+        }
+    }
+    b.iter().all(|g| g.iter().all(|&v| of[v] == of[g[0]]))
+}
+
+/// How Leiden visits the nodes, and where it starts.
+struct Walk {
+    keys: Vec<u64>,
+    before: Vec<Option<i64>>,
+}
+
+impl Walk {
+    /// Leiden on the subgraph of `nodes`.
+    fn leiden(&self, graph: &Graph, nodes: &[usize]) -> Vec<usize> {
+        let keys: Vec<u64> = nodes.iter().map(|&v| self.keys[v]).collect();
+        let mut label: HashMap<i64, usize> = HashMap::new();
+        let mut next = 0;
+        let mut initial = Vec::with_capacity(nodes.len());
+        for &v in nodes {
+            let l = match self.before[v] {
+                Some(c) => *label.entry(c).or_insert_with(|| {
+                    next += 1;
+                    next - 1
+                }),
+                None => {
+                    next += 1;
+                    next - 1
+                }
+            };
+            initial.push(l);
+        }
+        let start = (!label.is_empty()).then_some(initial.as_slice());
+        leiden::leiden(&graph.subgraph(nodes), RESOLUTION, &keys, start)
+    }
+}
+
+fn split_group(graph: &Graph, walk: &Walk, g: Vec<usize>) -> Vec<Vec<usize>> {
     let sub = graph.subgraph(&g);
     if sub.adj.iter().all(Vec::is_empty) {
         return g.into_iter().map(|v| vec![v]).collect();
     }
-    let part = leiden::leiden(&sub, RESOLUTION, SEED);
+    let part = walk.leiden(graph, &g);
     let count = part.iter().copied().max().map_or(0, |x| x + 1);
     if count <= 1 {
         return vec![g];
@@ -490,18 +693,16 @@ fn still_applies(cid: i64, members: &HashSet<&str>, prev: &Previous, sig: Option
     shared * 2 > before.len() && shared * 2 > members.len()
 }
 
-/// 64-bit FNV-1a over the sorted member ids: the same members, the same value.
+/// 64-bit FNV-1a.
+fn fnv(bytes: &[u8]) -> u64 {
+    crate::cache::hash(bytes)
+}
+
+/// A hash of the sorted member ids: the same members, the same value.
 fn signature<'a>(ids: impl Iterator<Item = &'a str>) -> String {
     let mut ids: Vec<&str> = ids.collect();
     ids.sort_unstable();
-    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-    for id in ids {
-        for b in id.bytes().chain(std::iter::once(0)) {
-            h ^= u64::from(b);
-            h = h.wrapping_mul(0x0000_0100_0000_01b3);
-        }
-    }
-    format!("{h:016x}")
+    format!("{:016x}", fnv(ids.join("\0").as_bytes()))
 }
 
 /// The member with the most edges names the community; with most of the members
@@ -649,6 +850,32 @@ mod tests {
         assert_eq!(labels.get(&a.to_string()).map(String::as_str), Some("Package A"));
         assert!(!labels.contains_key("7"));
         assert_eq!(out.report.renamed_labels, 1);
+    }
+
+    #[test]
+    fn a_rebuild_from_a_result_returns_it() {
+        // a graph big and sparse enough for the size and cohesion splits to act
+        let mut nodes = Vec::new();
+        let mut links = Vec::new();
+        for f in 0..40 {
+            let hub = format!("f{f}");
+            nodes.push(node(&hub, &format!("d{}/f{f}.py", f % 4), "file"));
+            for d in 0..6 {
+                let def = format!("{hub}_d{d}");
+                nodes.push(node(&def, &format!("d{}/f{f}.py", f % 4), "function"));
+                links.push(edge(&hub, &def, "contains"));
+                links.push(edge(&def, &format!("f{}_d{}", (f * 7 + d) % 40, (d + 1) % 6), "calls"));
+            }
+        }
+        let first = detect(&mut nodes, &links, &Previous::default(), None);
+        let prev = Previous::from_graph(&json!({"nodes": nodes.clone(),
+                                                "graph": {"communities": first.header}}));
+        let mut again = nodes.clone();
+        let out = detect(&mut again, &links, &prev, None);
+        for (a, b) in nodes.iter().zip(&again) {
+            assert_eq!(a["community"], b["community"], "{}", a["id"]);
+        }
+        assert_eq!(out.report.kept_ids, out.report.count);
     }
 
     #[test]

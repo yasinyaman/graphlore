@@ -1,6 +1,6 @@
 [package]
 name = "graphlore-engine"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 rust-version = "1.90"
 description = "graphlore's native code-graph extractor: tree-sitter definitions, spans and containment in 14 languages"

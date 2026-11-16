@@ -12,6 +12,12 @@ It is the check that decides when the native engine can become the default
   python benchmarks/compare_engines.py REPO --graphify-graph path/to/graph.json
   python benchmarks/compare_engines.py tests/fixtures/polyglot \\
       --graphify-graph tests/fixtures/polyglot/graph.json --fail-under 90
+  python benchmarks/compare_engines.py REPO --communities
+
+--communities compares the two engines' communities instead: how many, how
+big, modularity on the plain graph, how much of each community sits in one
+directory, how many test nodes share a community with production code, and
+how far the two partitions agree (normalised mutual information).
 
 The native graph is built into a temporary directory (the repository is not
 written to) unless --native-graph names one. graphify's side is
@@ -43,6 +49,7 @@ from graphlore.graph import (  # noqa: E402
     _edge_rel,
     _is_external_node,
     _is_file_hub_node,
+    _is_test_path,
     _node_file,
     _node_id,
     _node_label,
@@ -299,6 +306,116 @@ def compare_edges(theirs_graph: dict, ours_graph: dict, paired: dict[str, str]) 
     return out
 
 
+def _parent_dir(path: str) -> str:
+    return path.rsplit("/", 1)[0] if "/" in path else ""
+
+
+def community_stats(graph: dict[str, Any]) -> dict[str, Any]:
+    """Size, modularity, directory purity and test mixing of a graph's communities,
+    over its internal nodes (externals left out, as both engines attach them
+    differently)."""
+    nodes, edges = _nodes_edges(graph)
+    comm: dict[str, Any] = {}
+    files: dict[str, str] = {}
+    for n in nodes:
+        c = n.get("community", n.get("cluster"))
+        if c is None or _is_external_node(n):
+            continue
+        comm[_node_id(n)] = c
+        files[_node_id(n)] = _node_file(n) or ""
+    if not comm:
+        return {"count": 0}
+    members: dict[Any, list[str]] = collections.defaultdict(list)
+    for nid, c in comm.items():
+        members[c].append(nid)
+    sizes = sorted((len(m) for m in members.values()), reverse=True)
+    # modularity of the partition on the plain, undirected graph
+    deg: collections.Counter = collections.Counter()
+    inside: collections.Counter = collections.Counter()
+    m = 0
+    seen: set[tuple[str, str]] = set()
+    for e in edges:
+        a, b = _edge_ends(e)
+        if a == b or a not in comm or b not in comm or (min(a, b), max(a, b)) in seen:
+            continue
+        seen.add((min(a, b), max(a, b)))
+        m += 1
+        deg[a] += 1
+        deg[b] += 1
+        if comm[a] == comm[b]:
+            inside[comm[a]] += 1
+    tot: collections.Counter = collections.Counter()
+    for nid, d in deg.items():
+        tot[comm[nid]] += d
+    q = sum(inside[c] / m - (tot[c] / (2 * m)) ** 2 for c in members) if m else 0.0
+    # how much of each community sits in its main directory
+    placed = dominant = 0
+    for ids in members.values():
+        dirs = collections.Counter(_parent_dir(files[i]) for i in ids if files[i])
+        if len(ids) > 1 and dirs:
+            placed += sum(dirs.values())
+            dominant += dirs.most_common(1)[0][1]
+    # test nodes in a community that is mostly production code
+    is_test = {i: bool(files[i]) and _is_test_path(files[i]) for i in comm}
+    tests = mixed = 0
+    for ids in members.values():
+        t = sum(is_test[i] for i in ids)
+        tests += t
+        if t and t * 2 < len(ids):
+            mixed += t
+    n = len(comm)
+    return {
+        "count": len(members), "nodes": n,
+        "largest_pct": round(100 * sizes[0] / n, 1),
+        "singletons_pct": round(100 * sum(1 for x in sizes if x == 1) / n, 1),
+        "median_size": sizes[len(sizes) // 2],
+        "modularity": round(q, 3),
+        "dir_purity_pct": round(100 * dominant / placed, 1) if placed else None,
+        "tests_in_production_pct": round(100 * mixed / tests, 1) if tests else None,
+    }
+
+
+def nmi(a: dict[str, Any], b: dict[str, Any]) -> float | None:
+    """Normalised mutual information of two partitions over the nodes both have."""
+    import math
+
+    shared = [k for k in a if k in b]
+    n = len(shared)
+    if not n:
+        return None
+    ca = collections.Counter(a[k] for k in shared)
+    cb = collections.Counter(b[k] for k in shared)
+    joint = collections.Counter((a[k], b[k]) for k in shared)
+    mi = sum(c / n * math.log(c * n / (ca[x] * cb[y])) for (x, y), c in joint.items())
+    ha = -sum(c / n * math.log(c / n) for c in ca.values())
+    hb = -sum(c / n * math.log(c / n) for c in cb.values())
+    return round(2 * mi / (ha + hb), 3) if ha + hb else 1.0
+
+
+def compare_communities(theirs: dict[str, Any], ours: dict[str, Any]) -> dict[str, Any]:
+    def partition(g: dict[str, Any]) -> dict[str, Any]:
+        nodes, _ = _nodes_edges(g)
+        return {_node_id(n): n.get("community", n.get("cluster")) for n in nodes
+                if n.get("community", n.get("cluster")) is not None and not _is_external_node(n)}
+
+    return {"graphify": community_stats(theirs), "native": community_stats(ours),
+            "nmi": nmi(partition(theirs), partition(ours))}
+
+
+def render_communities(result: dict[str, Any]) -> str:
+    rows = [("communities", "count"), ("nodes in them", "nodes"),
+            ("largest, % of nodes", "largest_pct"), ("singletons, % of nodes", "singletons_pct"),
+            ("median size", "median_size"), ("modularity (plain graph)", "modularity"),
+            ("in the main directory, %", "dir_purity_pct"),
+            ("test nodes with production, %", "tests_in_production_pct")]
+    lines = [f"{'':32} {'graphify':>9} {'native':>9}"]
+    for label, key in rows:
+        lines.append(f"{label:32} {str(result['graphify'].get(key, '-')):>9} "
+                     f"{str(result['native'].get(key, '-')):>9}")
+    lines.append(f"agreement (NMI over shared nodes): {result['nmi']}")
+    return "\n".join(lines)
+
+
 def render(result: dict[str, Any]) -> str:
     lines = [
         f"{'language':14} {'graphify':>8} {'native':>7} {'exact':>6} {'near':>5} "
@@ -375,12 +492,20 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--native-graph")
     ap.add_argument("--json", help="write the full comparison here")
     ap.add_argument("--fail-under", type=float)
+    ap.add_argument("--communities", action="store_true",
+                    help="compare the two engines' communities instead")
     args = ap.parse_args(argv)
     repo = Path(args.repo).resolve()
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
         theirs = load(graphify_graph(repo, args.graphify_graph, tmp))
         ours = load(native_graph(repo, args.native_graph, tmp))
+    if args.communities:
+        cres = compare_communities(theirs, ours)
+        print(render_communities(cres))
+        if args.json:
+            Path(args.json).write_text(json.dumps(cres, indent=2), encoding="utf-8")
+        return 0
     result = compare(theirs, ours)
     print(render(result))
     if args.json:

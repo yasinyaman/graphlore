@@ -317,6 +317,9 @@ def render_report(report: dict[str, Any], verbose: bool = False, update: bool = 
     if report.get("non_utf8_paths"):
         skipped = _plural(report["non_utf8_paths"], "file")
         lines.append(f"  skipped {skipped} whose name is not UTF-8")
+    phases = report.get("phases_ms")
+    if verbose and isinstance(phases, dict) and phases:
+        lines.append("  time per phase: " + ", ".join(f"{k} {v} ms" for k, v in phases.items()))
     if verbose and report.get("id_collisions"):
         lines.append(f"  {report['id_collisions']} node id(s) suffixed _2, _3… to stay unique")
     has = isinstance(communities, dict) and bool(communities.get("count"))

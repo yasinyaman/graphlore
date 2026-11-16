@@ -42,6 +42,8 @@ pub struct BuildReport {
     pub resolution: BTreeMap<String, crate::resolve::ResolveStats>,
     pub communities: crate::community::CommunityReport,
     pub incremental: Incremental,
+    /// Milliseconds per phase: walk, parse, assemble, resolve, communities, write, cache.
+    pub phases_ms: BTreeMap<&'static str, u128>,
     pub max_file_bytes: u64,
     pub elapsed_ms: u128,
 }
