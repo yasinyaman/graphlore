@@ -487,6 +487,7 @@ pub fn walk_defs(m: &dyn LanguageModule, root: Node, src: &[u8]) -> Vec<Def> {
                     owner,
                     is_test: false,
                     object: None,
+                    extra: false,
                     decl_only: PROTOTYPE_TYPES.contains(&node.kind()),
                     node_id: node.id(),
                     start_byte: node.start_byte(),

@@ -7,7 +7,7 @@
 use tree_sitter::Node;
 
 use super::LanguageModule;
-use crate::facts::{ImportFact, ImportForm, RefKind};
+use crate::facts::{DefKind, ImportFact, ImportForm, RefKind};
 use crate::generic::{all_kids, kids, text};
 use crate::refs::{import, path_of};
 
@@ -40,6 +40,12 @@ impl LanguageModule for CSharp {
     fn package_of(&self, n: Node, src: &[u8]) -> Option<String> {
         (n.kind() == "file_scoped_namespace_declaration")
             .then(|| n.child_by_field_name("name").map(|c| text(c, src)))
+            .flatten()
+    }
+
+    fn extra_def<'t>(&self, n: Node<'t>, _src: &[u8]) -> Option<(Node<'t>, DefKind)> {
+        (n.kind() == "property_declaration")
+            .then(|| n.child_by_field_name("name").map(|x| (x, DefKind::Property)))
             .flatten()
     }
 

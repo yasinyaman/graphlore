@@ -210,6 +210,7 @@ pub fn file_spans(src: &[u8], rel: &str) -> Vec<(u32, u32, u32, String)> {
     file_facts(src, rel)
         .defs
         .into_iter()
+        .filter(|d| !d.extra)
         .map(|d| (d.region_start, d.end_line, d.def_line, d.qualname))
         .collect()
 }

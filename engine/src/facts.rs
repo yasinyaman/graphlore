@@ -7,7 +7,7 @@ use crate::lang::Lang;
 
 /// What a definition is. Decides its label (`name()`, `.name()`, bare), the
 /// relation that links it to its parent, and whether it becomes a graph node.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DefKind {
     Class,
@@ -27,6 +27,11 @@ pub enum DefKind {
     /// node; its members belong to the type it extends.
     Extension,
     TypeAlias,
+    /// A property or field of a type (C# / Swift / Kotlin properties, TS class
+    /// fields). Not a span `spans.py` reports.
+    Property,
+    /// A module-level constant (`const X = …` in TS/JS, Rust `const` / `static`).
+    Constant,
     Other,
 }
 
@@ -57,6 +62,8 @@ impl DefKind {
             DefKind::Namespace => "namespace",
             DefKind::Extension => "extension",
             DefKind::TypeAlias => "type_alias",
+            DefKind::Property => "property",
+            DefKind::Constant => "constant",
             DefKind::Other => "other",
         }
     }
@@ -88,6 +95,9 @@ pub struct Def {
     /// function`, `View.prototype.render = …`, `{ get() {} }` in `const app =
     /// {…}`): what `this` means inside it when no class encloses it.
     pub object: Option<String>,
+    /// Found by the reference walk (a property, a constant), not by the
+    /// `spans.py` rule: left out of `file_spans`.
+    pub extra: bool,
     /// A C/C++ prototype or a method declared in its class: a declaration
     /// whose body is elsewhere.
     pub decl_only: bool,
