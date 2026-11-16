@@ -304,6 +304,11 @@ pub trait LanguageModule: Send + Sync {
         None
     }
 
+    /// The object a definition is assigned to as a property (see `Def::object`).
+    fn object_of(&self, _node: Node, _src: &[u8]) -> Option<String> {
+        None
+    }
+
     /// `(local, exported)` names a node exports under another name.
     fn exports_of(&self, _node: Node, _src: &[u8]) -> Vec<(String, String)> {
         Vec::new()

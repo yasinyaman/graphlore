@@ -439,7 +439,9 @@ impl<'a> Project<'a> {
             let mut children: HashMap<usize, HashMap<String, Vec<usize>>> = HashMap::new();
             let fam = self.family[fi];
             for (di, d) in f.defs.iter().enumerate() {
-                if is_top(&f.defs, di) {
+                // a method declared for a type (Go receiver, Rust impl, C++
+                // `A::m`) is no module-level name
+                if is_top(&f.defs, di) && !(d.owner.is_some() && d.kind.is_callable()) {
                     top.entry(d.name.clone()).or_default().push(di);
                 }
                 if let Some(par) = d.parent {
@@ -508,14 +510,22 @@ impl<'a> Project<'a> {
             }
             *depth += 1;
         }
-        let found = self.resolve_path(f, d, path, true);
+        let out = self.type_of_path_inner(f, d, path);
         *self.depth.borrow_mut() -= 1;
+        out
+    }
+
+    fn type_of_path_inner(&self, f: usize, d: Option<usize>, path: &[String]) -> Option<DefRef> {
+        let found = self.resolve_path(f, d, path, true);
         match found? {
             (Target::Def(r), _) => {
                 let def = self.def(r);
                 let k = def.kind;
                 if k.is_class_like() || k == DefKind::TypeAlias {
                     Some(r)
+                } else if let Some(t) = k.is_callable().then(|| self.return_type(r)).flatten() {
+                    // a call of a function whose declared result is a project type
+                    Some(t)
                 } else if k.is_callable() && path.len() == 2 && is_factory(&def.name) {
                     // `Foo::new()`, `Foo.create()`: a type's own constructor
                     let owner = self.class_of(r.0, Some(r.1))?;
@@ -528,6 +538,16 @@ impl<'a> Project<'a> {
             }
             _ => None,
         }
+    }
+
+    /// The project type a callable declares it returns.
+    fn return_type(&self, r: DefRef) -> Option<DefRef> {
+        let rt = self.files[r.0].refs.iter().find(|x| {
+            x.from_def == Some(r.1) && x.kind == RefKind::Type && x.context == "return_type"
+        })?;
+        let path = rt.path.clone();
+        let t = self.type_of_path(r.0, self.def(r).parent, &path)?;
+        self.def(t).kind.is_class_like().then_some(t)
     }
 
     /// The type of a local name or parameter seen from `d`.
@@ -557,6 +577,46 @@ impl<'a> Project<'a> {
         while let Some(x) = cur {
             if let Some(&li) = self.locals.get(&(f, x, name.to_string())) {
                 return self.files[f].locals[li].path.is_empty();
+            }
+            cur = defs[x].parent;
+        }
+        false
+    }
+
+    /// `this.name` inside a function assigned to an object: another function
+    /// of the same file assigned to that object.
+    fn object_member(&self, f: usize, d: Option<usize>, name: &str) -> Option<DefRef> {
+        let defs = &self.files[f].defs;
+        let mut cur = d;
+        let obj = loop {
+            let x = cur?;
+            if let Some(o) = &defs[x].object {
+                break o.clone();
+            }
+            cur = defs[x].parent;
+        };
+        let cands: Vec<DefRef> = defs
+            .iter()
+            .enumerate()
+            .filter(|(_, x)| x.name == name && x.object.as_deref() == Some(obj.as_str()))
+            .map(|(i, _)| (f, i))
+            .collect();
+        self.best(cands)
+    }
+
+    /// A local assigned something external (`ts := httptest.NewServer()`):
+    /// its methods are the external type's, never a project namesake's.
+    fn is_external_local(&self, f: usize, d: Option<usize>, name: &str) -> bool {
+        let defs = &self.files[f].defs;
+        let mut cur = d;
+        while let Some(x) = cur {
+            if let Some(&li) = self.locals.get(&(f, x, name.to_string())) {
+                let l = &self.files[f].locals[li];
+                let head = l.path.first().map(String::as_str).unwrap_or("");
+                if head.is_empty() || matches!(head, "self" | "super" | "()") {
+                    return false;
+                }
+                return matches!(self.resolve_name(f, Some(x), head), Some(Target::Ext(_, _)));
             }
             cur = defs[x].parent;
         }
@@ -959,11 +1019,17 @@ impl<'a> Project<'a> {
         let mut conf = Confidence::Extracted;
         let mut t = match head.as_str() {
             "self" => {
-                let c = self.class_of(f, d)?;
                 if rest.is_empty() {
                     return None;
                 }
-                Target::Def(c)
+                match self.class_of(f, d) {
+                    Some(c) => Target::Def(c),
+                    // JS `this` inside a function assigned to an object
+                    None => {
+                        let m = self.object_member(f, d, &rest[0])?;
+                        return self.walk(Target::Def(m), &rest[1..], conf);
+                    }
+                }
             }
             "super" => {
                 let c = self.class_of(f, d)?;
@@ -983,7 +1049,9 @@ impl<'a> Project<'a> {
                     .fallback_method(f, &rest[0])
                     .map(|r| (Target::Def(r), Confidence::Inferred));
             }
-            _ if self.is_untyped_local(f, d, head) => return None,
+            _ if self.is_untyped_local(f, d, head) || self.is_external_local(f, d, head) => {
+                return None
+            }
             _ => match self
                 .local_type(f, d, head)
                 .map(|(t, c)| {
@@ -1002,6 +1070,21 @@ impl<'a> Project<'a> {
                 None => {
                     if let Some(found) = self.qualified(f, d, path) {
                         return Some(found);
+                    }
+                    // `res.get()` where the file assigns functions to `res`
+                    if rest.len() == 1 {
+                        let defs = &self.files[f].defs;
+                        let cands: Vec<DefRef> = defs
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, x)| {
+                                x.name == rest[0] && x.object.as_deref() == Some(head.as_str())
+                            })
+                            .map(|(i, _)| (f, i))
+                            .collect();
+                        if let Some(m) = self.best(cands) {
+                            return Some((Target::Def(m), Confidence::Extracted));
+                        }
                     }
                     if rest.is_empty() {
                         if bases {
@@ -1190,7 +1273,11 @@ impl<'a> Project<'a> {
     /// `x.name()` on a receiver of unknown type: a method that only one type
     /// of the project has, and not a name every type has.
     fn fallback_method(&self, f: usize, name: &str) -> Option<DefRef> {
-        if COMMON_METHODS.contains(&name) || self.builtin(f, name) || name.len() < 4 {
+        let lower = name.to_lowercase();
+        if COMMON_METHODS.iter().any(|c| c.to_lowercase() == lower)
+            || self.builtin(f, name)
+            || name.len() < 4
+        {
             return None;
         }
         let fam = self.family[f];
@@ -1323,7 +1410,12 @@ pub fn resolve(
                         let tk = p.def(t).kind;
                         let rel = match r.kind {
                             RefKind::Call | RefKind::New => {
-                                if !(tk.is_callable() || tk.is_class_like()) {
+                                // a type alias called: a conversion (Go
+                                // `HandlerFunc(f)`)
+                                if !(tk.is_callable()
+                                    || tk.is_class_like()
+                                    || tk == DefKind::TypeAlias)
+                                {
                                     continue;
                                 }
                                 "calls"

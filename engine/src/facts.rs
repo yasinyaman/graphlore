@@ -84,6 +84,10 @@ pub struct Def {
     pub owner: Option<String>,
     /// Inside a test region of a source file (Rust `#[cfg(test)]`, `#[test]`).
     pub is_test: bool,
+    /// The object a function is assigned to as a property (JS `res.send =
+    /// function`, `View.prototype.render = …`, `{ get() {} }` in `const app =
+    /// {…}`): what `this` means inside it when no class encloses it.
+    pub object: Option<String>,
     /// A C/C++ prototype or a method declared in its class: a declaration
     /// whose body is elsewhere.
     pub decl_only: bool,

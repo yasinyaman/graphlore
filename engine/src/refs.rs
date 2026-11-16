@@ -742,6 +742,9 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
             }
         }
         if let Some(&di) = by_node.get(&n.id()) {
+            if let Some(o) = m.object_of(n, src) {
+                facts.defs[di].object = Some(o);
+            }
             let def: &Def = &facts.defs[di];
             for (kind, path) in m.heritage_of(n, src) {
                 push(&mut refs, n, kind, path, "", Some(di));
@@ -909,6 +912,15 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
                     from_def: None,
                     byte: n.start_byte(),
                 });
+            }
+        }
+        // JSX: `<FormMessage />`, `<Table.Cell>` render a component
+        if matches!(n.kind(), "jsx_opening_element" | "jsx_self_closing_element") {
+            if let Some(path) = n.child_by_field_name("name").and_then(|x| path_of(x, src)) {
+                if path.first().is_some_and(|h| h.chars().next().is_some_and(|c| c.is_uppercase()))
+                {
+                    push(&mut refs, n, RefKind::Call, path, "jsx", None);
+                }
             }
         }
         // `self.prop`, `obj.method` read, not called and not assigned to
