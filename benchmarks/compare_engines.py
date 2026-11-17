@@ -246,6 +246,36 @@ def compare_edges(theirs_graph: dict, ours_graph: dict, paired: dict[str, str]) 
         sides[name] = (byid, edges)
     common = set(paired.values())
     rev = {o: t for t, o in paired.items()}
+    # The native graph has definitions graphify folds into the one around them:
+    # a function nested in a method (`const abort = () => …`), the setter beside a
+    # getter of the same name. An edge from one of those is compared as an edge
+    # from the paired definition it belongs to, as graphify records it.
+    ours_by, ours_edges = sides["native"]
+    parent: dict[str, str] = {}
+    for e in ours_edges:
+        if _edge_rel(e).strip().lower() in CONTAINMENT:
+            a, b = _edge_ends(e)
+            parent.setdefault(b, a)
+
+    def name_key(n: dict) -> tuple[str, str]:
+        return (_node_file(n), str(n.get("qualname") or _node_label(n)))
+
+    twins = {name_key(ours_by[i]): i for i in common if i in ours_by}
+
+    def lifted(i: str, climb: bool) -> str | None:
+        for _ in range(8):
+            if i in common:
+                return i
+            n = ours_by.get(i)
+            if n is None:
+                return None
+            twin = twins.get(name_key(n))
+            if twin is not None:
+                return twin
+            if not climb or i not in parent:
+                return None
+            i = parent[i]
+        return None
     sets: dict[tuple[str, str, str], set] = {}
     inferred = {}
     for name, (byid, edges) in sides.items():
@@ -272,9 +302,10 @@ def compare_edges(theirs_graph: dict, ours_graph: dict, paired: dict[str, str]) 
                         continue
                     key = (s2, t2)
                 else:
-                    if s not in common or t not in common:
+                    s2, t2 = lifted(s, True), lifted(t, False)
+                    if s2 is None or t2 is None:
                         continue
-                    key = (s, t)
+                    key = (s2, t2)
             sets.setdefault((g, lang, name), set()).add(key)
             if name == "native" and str(e.get("confidence", "")).upper() == "INFERRED":
                 inferred[(g, lang)] = inferred.get((g, lang), 0) + 1

@@ -303,3 +303,112 @@ fn imports_carry_when_they_run_and_externals_are_nodes() {
         assert!(seen.insert(key), "duplicate edge {e}");
     }
 }
+
+#[test]
+fn a_call_in_a_field_assignment_is_the_methods() {
+    // `self.x = make()` in `__init__`: the field is a node of the class, the
+    // call is `__init__`'s (not the class's, where the field hangs)
+    let got = edges("fieldcall", &[
+        ("parse.py", "def urlparse(url):\n    return url\n"),
+        ("urls.py", "from parse import urlparse\n\n\nclass URL:\n    def __init__(self, url):\n        self._uri = urlparse(url)\n        self.raw = self._clean(url)\n\n    def _clean(self, url):\n        return url\n"),
+        ("box.js", "function make() { return 1; }\n\nclass Box {\n  constructor() {\n    this.value = make();\n  }\n}\n"),
+    ]);
+    has(
+        &got,
+        &[
+            (".__init__()", "calls", "urlparse()"),
+            (".__init__()", "calls", "._clean()"),
+            (".constructor()", "calls", "make()"),
+        ],
+    );
+    assert!(!got.iter().any(|(s, r, _)| (s == "URL" || s == "Box") && r == "calls"), "{got:#?}");
+}
+
+#[test]
+fn a_name_bound_to_a_required_member_is_what_it_names() {
+    // `var parse = require('./utils').parse` is an import, not a variable
+    let got = edges("requiremember", &[
+        ("lib/utils.js", "exports.parse = function parse(v) { return v; };\n"),
+        ("lib/app.js", "var parse = require('./utils').parse;\nconst utils = require('./utils');\n\nfunction run(v) {\n  return parse(v) + utils.parse(v);\n}\n"),
+    ]);
+    has(&got, &[("run()", "calls", "parse()"), ("app.js", "imports", "parse()")]);
+    assert!(
+        !got.iter().any(|(_, r, t)| r == "reads" && (t == "parse" || t == "utils")),
+        "{got:#?}"
+    );
+}
+
+#[test]
+fn php_variables_are_typed_by_what_they_are_assigned() {
+    let got = edges("phpvars", &[
+        ("src/Factory.php", "<?php\nnamespace App;\n\nclass Factory\n{\n    public function create($r) { return 1; }\n    public function release($e): void {}\n}\n"),
+        ("src/Runner.php", "<?php\nnamespace App;\n\nclass Runner\n{\n    public function run(Factory $given)\n    {\n        $factory = new Factory();\n        $easy = $factory->create(1);\n        $given->release($easy);\n    }\n}\n\nfunction factory() {}\n"),
+    ]);
+    has(&got, &[(".run()", "calls", ".create()"), (".run()", "calls", ".release()")]);
+    // `$factory` is a variable: never the function of that name
+    assert!(!got.contains(&(".run()".into(), "calls".into(), "factory()".into())), "{got:#?}");
+}
+
+#[test]
+fn an_untyped_local_hides_outer_names_and_super_in_a_test_module_is_the_file() {
+    // `pool.get(…)` on a local the walk cannot type is not the crate's `get`,
+    // which `use super::*` in `mod tests` used to bring into the file's scope
+    let got = edges("rustlocal", &[
+        ("Cargo.toml", "[package]\nname = \"x\"\nversion = \"0.1.0\"\n"),
+        ("src/lib.rs", "mod pool;\npub fn get(uri: &str) -> u32 { 1 }\n"),
+        ("src/pool.rs", "use std::sync::{Arc, Mutex};\n\nstruct Pool { closed: bool }\n\nimpl Pool {\n    fn get(&mut self, key: &str) -> Option<u32> { None }\n    fn purge_idle(&mut self) {}\n}\n\npub struct ConnectionPool { pool: Arc<Mutex<Pool>> }\n\nimpl ConnectionPool {\n    pub fn connect(&self) -> u32 {\n        let mut pool = self.pool.lock().unwrap();\n        pool.purge_idle();\n        if let Some(conn) = pool.get(\"k\") { return conn; }\n        0\n    }\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n\n    #[test]\n    fn connects() { let _ = Pool { closed: false }; }\n}\n"),
+    ]);
+    has(&got, &[(".connect()", "calls", ".purge_idle()")]);
+    assert!(!got.contains(&(".connect()".into(), "calls".into(), "get()".into())), "{got:#?}");
+    assert!(
+        !got.iter().any(|(s, r, t)| s == "pool.rs" && r.starts_with("imports") && t == "lib.rs"),
+        "{got:#?}"
+    );
+}
+
+#[test]
+fn an_extension_in_another_module_does_not_hide_the_type() {
+    // Tests only extend `Session`: `Session()` there is still the class the
+    // module imports, and a local it types reaches the class's methods
+    let got = edges("swiftext", &[
+        ("Package.swift", "// swift-tools-version:5.9\nimport PackageDescription\n\nlet package = Package(name: \"Net\",\n                      targets: [.target(name: \"Net\", path: \"Source\"),\n                                .testTarget(name: \"NetTests\", dependencies: [\"Net\"], path: \"Tests\")])\n"),
+        ("Source/Session.swift", "open class Session {\n    public init() {}\n    open func request(_ url: String) -> Int { 1 }\n}\n"),
+        ("Tests/Helpers.swift", "import Net\n\nextension Session {\n    func stub() {}\n}\n"),
+        ("Tests/SessionTests.swift", "import Net\nimport XCTest\n\nfinal class SessionTests: XCTestCase {\n    func testRequest() {\n        let session = Session()\n        _ = session.request(\"x\")\n    }\n}\n"),
+    ]);
+    has(&got, &[(".testRequest()", "calls", "Session"), (".testRequest()", "calls", ".request()")]);
+}
+
+#[test]
+fn what_a_local_hides_and_what_it_does_not() {
+    let got = edges("shadow", &[
+        // a typed local beside a method of its name: the call is the method's
+        ("B.java", "class B {\n  B baseUrl(String baseUrl) {\n    return baseUrl(parse(baseUrl));\n  }\n  B baseUrl(Object url) { return this; }\n  Object parse(String s) { return s; }\n}\n"),
+        // a field assigned in a method is still the field
+        ("T.java", "class Service { void go() {} }\nclass T {\n  private Service service;\n  void setUp(Object retrofit) {\n    service = make(retrofit);\n  }\n  Service make(Object o) { return null; }\n  void run() { service.go(); }\n}\n"),
+        // `let agent = agent();`: the right-hand side is the function
+        ("src/lib.rs", "pub struct Agent;\nimpl Agent {\n    pub fn shutdown(&self) {}\n}\nfn agent() -> Agent { Agent }\nfn stops() {\n    let agent = agent();\n    agent.shutdown();\n}\n"),
+        // a parameter named like a function elsewhere is the parameter
+        ("conftest.py", "def token_headers():\n    return {}\n"),
+        ("test_api.py", "from conftest import token_headers as th\n\n\ndef send(headers):\n    return headers\n\n\ndef test_login(token_headers: dict):\n    send(token_headers)\n"),
+    ]);
+    has(
+        &got,
+        &[
+            (".baseUrl()", "calls", ".parse()"),
+            (".setUp()", "writes", "service"),
+            (".run()", "calls", ".go()"),
+            ("stops()", "calls", "agent()"),
+            ("stops()", "calls", ".shutdown()"),
+            ("test_login()", "calls", "send()"),
+        ],
+    );
+    assert!(
+        got.iter().any(|(s, r, t)| s == ".baseUrl()" && r == "calls" && t == ".baseUrl()"),
+        "{got:#?}"
+    );
+    assert!(
+        !got.contains(&("test_login()".into(), "indirect_call".into(), "token_headers()".into())),
+        "{got:#?}"
+    );
+}

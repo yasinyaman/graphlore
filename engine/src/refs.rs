@@ -88,13 +88,10 @@ pub fn path_of(n: Node, src: &[u8]) -> Option<Vec<String>> {
         return Some(vec!["super".into()]);
     }
     if k == "variable_name" {
-        // PHP `$this`, `$x`
+        // PHP `$this`, and `$x` kept with its `$`: a variable, which only a
+        // local of that name can type (never a function or class named `x`)
         let t = text(n, src);
-        return Some(vec![if t == "$this" || t == "this" {
-            "self".into()
-        } else {
-            UNKNOWN.into()
-        }]);
+        return Some(vec![if t == "$this" || t == "this" { "self".into() } else { t }]);
     }
     if k == "relative_scope" {
         // PHP `self::`, `static::`, `parent::`
@@ -890,6 +887,7 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
                                         path: Vec::new(),
                                         declared: false,
                                         field: false,
+                                        assigned: false,
                                         from_def: Some(di),
                                         byte: c.start_byte(),
                                     });
@@ -918,6 +916,7 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
                                         path: Vec::new(),
                                         declared: false,
                                         field: false,
+                                        assigned: false,
                                         from_def: Some(di),
                                         byte: c.start_byte(),
                                     });
@@ -933,6 +932,7 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
                             path,
                             declared,
                             field,
+                            assigned: false,
                             from_def: Some(di),
                             byte: ps.start_byte(),
                         });
@@ -968,6 +968,7 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
                                     path,
                                     declared,
                                     field: true,
+                                    assigned: false,
                                     from_def: Some(di),
                                     byte: x.start_byte(),
                                 });
@@ -1023,6 +1024,7 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
                     path,
                     declared,
                     field,
+                    assigned: plain_assignment,
                     from_def: None,
                     byte: n.start_byte(),
                 });
@@ -1108,7 +1110,7 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
     assign_defs(&facts.defs, &mut refs);
     assign_local_defs(&facts.defs, &mut locals);
     let bytes: Vec<usize> = resources.iter().map(|r| r.byte).collect();
-    for (r, d) in resources.iter_mut().zip(innermost(&facts.defs, &bytes)) {
+    for (r, d) in resources.iter_mut().zip(homes(&facts.defs, &bytes)) {
         r.from_def = d;
     }
     facts.resources = resources;
@@ -1169,7 +1171,34 @@ fn inside_callable(defs: &[Def], byte: usize) -> bool {
 
 /// For each byte offset, the innermost definition whose range holds it.
 pub(crate) fn innermost(defs: &[Def], bytes: &[usize]) -> Vec<Option<usize>> {
-    let mut by_start: Vec<usize> = (0..defs.len()).collect();
+    innermost_where(defs, bytes, |_| true)
+}
+
+/// The definition a use at each byte belongs to: the innermost one, but a
+/// field first assigned in a method (`self.x = make()`, an extra definition
+/// whose parent is the class) gives way to that method, which is what calls
+/// `make()`. A field or constant declared outside any callable keeps its uses.
+pub(crate) fn homes(defs: &[Def], bytes: &[usize]) -> Vec<Option<usize>> {
+    if !defs.iter().any(|d| d.extra) {
+        return innermost(defs, bytes);
+    }
+    let all = innermost(defs, bytes);
+    let plain = innermost_where(defs, bytes, |d| !d.extra);
+    all.into_iter()
+        .zip(plain)
+        .map(|(a, p)| match (a, p) {
+            (Some(a), Some(p)) if defs[a].extra && defs[p].kind.is_callable() => Some(p),
+            (a, _) => a,
+        })
+        .collect()
+}
+
+fn innermost_where(
+    defs: &[Def],
+    bytes: &[usize],
+    keep: impl Fn(&Def) -> bool,
+) -> Vec<Option<usize>> {
+    let mut by_start: Vec<usize> = (0..defs.len()).filter(|&i| keep(&defs[i])).collect();
     by_start.sort_by_key(|&i| (defs[i].start_byte, std::cmp::Reverse(defs[i].end_byte)));
     let mut order: Vec<usize> = (0..bytes.len()).collect();
     order.sort_by_key(|&i| bytes[i]);
@@ -1199,7 +1228,7 @@ fn assign_defs(defs: &[Def], refs: &mut [RefFact]) {
         .filter(|&i| refs[i].from_def.is_none() && refs[i].from_owner.is_none())
         .collect();
     let bytes: Vec<usize> = idx.iter().map(|&i| refs[i].byte).collect();
-    for (k, d) in innermost(defs, &bytes).into_iter().enumerate() {
+    for (k, d) in homes(defs, &bytes).into_iter().enumerate() {
         refs[idx[k]].from_def = d;
     }
 }
@@ -1207,7 +1236,7 @@ fn assign_defs(defs: &[Def], refs: &mut [RefFact]) {
 fn assign_local_defs(defs: &[Def], locals: &mut [Local]) {
     let idx: Vec<usize> = (0..locals.len()).filter(|&i| locals[i].from_def.is_none()).collect();
     let bytes: Vec<usize> = idx.iter().map(|&i| locals[i].byte).collect();
-    for (k, d) in innermost(defs, &bytes).into_iter().enumerate() {
+    for (k, d) in homes(defs, &bytes).into_iter().enumerate() {
         locals[idx[k]].from_def = d;
     }
 }

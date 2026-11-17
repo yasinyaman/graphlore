@@ -226,6 +226,39 @@ All notable changes to this project are documented here. The format is based on
   and the file is unchanged since the build, instead of a line window.
 
 ### Fixed
+- Native engine 0.5.1, from comparing its graphs with graphify's edge by
+  edge on the 31 audit repositories:
+  - A call in a field assignment inside a method (`self._uri = urlparse(url)`
+    in `__init__`, `this.x = make()` in a constructor) was recorded as the
+    class's call, not the method's, so `graphlore_impact` on the method missed
+    it. Python's `calls` recall against graphify goes from 92% to 94%.
+  - PHP variables were never typed: `$factory = new CurlFactory();
+    $factory->create()` and a typed parameter's `$given->release()` now reach
+    the class's method (PHP 81% to 90%; `$x` stays a variable and is never
+    resolved as a function or class named `x`).
+  - A name bound to a required module or one of its members (`var parse =
+    require('./utils').parse`, `const mongoose = require('mongoose')`) is an
+    import, not a variable or constant node: `parse(v)` is a call of the
+    function again, and the binding is no longer listed as state.
+  - A local whose value the walk cannot type hid nothing: `let mut pool =
+    self.pool.lock().unwrap(); pool.get(…)` was an `EXTRACTED` call of an
+    unrelated top-level `get`, and a parameter named like a function elsewhere
+    (`token_headers: dict`, a minified bundle's `t`) was that function passed
+    as a value. Such a local now hides the outer name (1,079 `indirect_call`
+    edges gone, nearly all in minified bundles); a bare call beside a typed
+    local (`baseUrl(…)` beside `String baseUrl`), a local assigned from the
+    function of its own name (`let agent = agent();`) and a field assigned in
+    a method keep the outer meaning.
+  - In Rust, `use super::*` inside `mod tests { … }` was read as an import of
+    the parent module's file, which put that file's names in scope and added
+    an import edge to it.
+  - In Swift, an `extension Session { … }` in a module that only extends the
+    type hid the type it imports: `Session()` and everything typed through it
+    was unresolved in such a module (666 calls gained in alamofire's tests).
+- `benchmarks/compare_engines.py` compares an edge from a definition only the
+  native graph has (a function nested in a method, the setter beside a
+  getter) as an edge from the paired definition it belongs to; TypeScript's
+  `calls` recall read 78% where 96% of graphify's calls were in the graph.
 - `graphlore_unreferenced` and `graphlore_same_names` no longer take a native
   module-level constant for a class (it hangs off its file by `contains`, as a
   class does); the native `kind` decides.

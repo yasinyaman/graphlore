@@ -79,6 +79,32 @@ fn specifiers(list: Node, src: &[u8]) -> Vec<(String, Option<String>)> {
         .collect()
 }
 
+/// `require('express')`, `require('./utils').parse`, `await import('m')`: the
+/// value of a declaration that binds a module or one of its members. Such a
+/// name is an import, not state: a call through it is a call of what it names.
+fn binds_import(v: Node, src: &[u8]) -> bool {
+    let mut v = v;
+    for _ in 0..4 {
+        match v.kind() {
+            "await_expression" | "parenthesized_expression" => match v.named_child(0) {
+                Some(inner) => v = inner,
+                None => return false,
+            },
+            "member_expression" => match v.child_by_field_name("object") {
+                Some(o) => v = o,
+                None => return false,
+            },
+            "call_expression" => {
+                return v
+                    .child_by_field_name("function")
+                    .is_some_and(|f| f.kind() == "import" || text(f, src) == "require");
+            }
+            _ => return false,
+        }
+    }
+    false
+}
+
 /// `require('m')` and `import('m')`, bound by the declaration they sit in.
 fn call_import(n: Node, src: &[u8]) -> Option<Vec<ImportFact>> {
     let f = n.child_by_field_name("function")?;
@@ -192,13 +218,7 @@ impl LanguageModule for Ecma {
                     | "class"
             )
         });
-        // `var express = require('express')` binds a module: an import, not state
-        let module = value.is_some_and(|v| {
-            let v = if v.kind() == "await_expression" { v.named_child(0).unwrap_or(v) } else { v };
-            v.kind() == "call_expression"
-                && v.child_by_field_name("function")
-                    .is_some_and(|f| f.kind() == "import" || text(f, src) == "require")
-        });
+        let module = value.is_some_and(|v| binds_import(v, src));
         match n.child_by_field_name("name").filter(|x| x.kind() == "identifier") {
             Some(name) if top && !is_const && !function && !module => {
                 vec![(n, name, DefKind::Variable)]
@@ -303,7 +323,7 @@ impl LanguageModule for Ecma {
         decl.child_by_field_name("name").filter(|x| x.kind() == "identifier").map(|x| text(x, src))
     }
 
-    fn extra_def<'t>(&self, n: Node<'t>, _src: &[u8]) -> Option<(Node<'t>, DefKind)> {
+    fn extra_def<'t>(&self, n: Node<'t>, src: &[u8]) -> Option<(Node<'t>, DefKind)> {
         let is_function = |v: Option<Node>| {
             v.is_some_and(|v| {
                 matches!(
@@ -334,7 +354,9 @@ impl LanguageModule for Ecma {
                 let is_const = all_kids(decl).iter().any(|c| c.kind() == "const");
                 let name = n.child_by_field_name("name").filter(|x| x.kind() == "identifier")?;
                 let value = n.child_by_field_name("value");
-                (top && is_const && !is_function(value)).then_some((name, DefKind::Constant))
+                let import = value.is_some_and(|v| binds_import(v, src));
+                (top && is_const && !is_function(value) && !import)
+                    .then_some((name, DefKind::Constant))
             }
             _ => None,
         }

@@ -255,6 +255,11 @@ pub struct Local {
     pub declared: bool,
     /// A field of a type (`this.x` / `self.x`), not a local variable.
     pub field: bool,
+    /// From a plain assignment where assigning declares nothing (`service =
+    /// retrofit.create(…)` in Java): a hint of what the assigned variable
+    /// holds, not a local of its own, so it hides no outer name.
+    #[serde(default)]
+    pub assigned: bool,
     pub from_def: Option<usize>,
     #[serde(skip)]
     pub byte: usize,

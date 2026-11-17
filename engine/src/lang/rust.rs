@@ -90,6 +90,50 @@ fn use_leaves(
     }
 }
 
+/// The names of the inline modules (`mod m { … }`) around a node, outermost
+/// first. Climbs with `parent()`: called for `use` declarations only.
+fn inline_mods(n: Node, src: &[u8]) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut cur = n.parent();
+    while let Some(p) = cur {
+        if p.kind() == "mod_item" && p.child_by_field_name("body").is_some() {
+            out.push(p.child_by_field_name("name").map(|x| text(x, src)).unwrap_or_default());
+        }
+        cur = p.parent();
+    }
+    out.reverse();
+    out
+}
+
+/// A `use` path written inside inline modules, as the file's module sees it:
+/// `super::x` in `mod tests` is `self::x`, `self::x` is `self::tests::x`.
+/// `None` when it only names the file's own module or one of its items, which
+/// the file's scope holds already.
+fn out_of_inline(path: Vec<String>, inline: &[String], wildcard: bool) -> Option<Vec<String>> {
+    if inline.is_empty() {
+        return Some(path);
+    }
+    let supers = path.iter().take_while(|s| *s == "super").count();
+    let out: Vec<String> = if supers > inline.len() {
+        path[inline.len()..].to_vec()
+    } else if supers > 0 {
+        let mut v = vec!["self".to_string()];
+        v.extend(inline[..inline.len() - supers].iter().cloned());
+        v.extend(path[supers..].iter().cloned());
+        v
+    } else if path.first().is_some_and(|s| s == "self") {
+        let mut v = vec!["self".to_string()];
+        v.extend(inline.iter().cloned());
+        v.extend(path[1..].iter().cloned());
+        v
+    } else {
+        return Some(path);
+    };
+    // `use super::*` / `use super::Thing` in `mod tests`: already in scope
+    let own = if wildcard { out.len() == 1 } else { out.len() == 2 };
+    (!(own && out[0] == "self")).then_some(out)
+}
+
 impl LanguageModule for Rust {
     fn needs_import(&self) -> bool {
         true
@@ -137,8 +181,12 @@ impl LanguageModule for Rust {
                 if let Some(arg) = n.child_by_field_name("argument") {
                     use_leaves(arg, src, &[], &mut leaves);
                 }
+                // inside an inline `mod tests { … }`, `super` is this file's own
+                // module, not its parent's file
+                let inline = inline_mods(n, src);
                 let mut out = Vec::new();
                 for (path, alias, wildcard) in leaves {
+                    let Some(path) = out_of_inline(path, &inline, wildcard) else { continue };
                     if wildcard {
                         out.push(import(n, ImportForm::Wildcard, path.join("::")));
                         continue;
