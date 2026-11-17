@@ -527,3 +527,24 @@ fn laravel_route_files_and_symfony_attributes() {
         ],
     );
 }
+
+#[test]
+fn paths_that_slug_alike_keep_their_own_nodes() {
+    // `/` and `/*` give one slug: each route still has its node and handler
+    let (got, g) = routes(
+        "slugs",
+        &[(
+            "app.js",
+            "const express = require('express');\nconst app = express();\n\nfunction home(req, res) {}\nfunction rest(req, res) {}\n\napp.get('/', home);\napp.get('/*', rest);\n",
+        )],
+    );
+    has(&got, &[("GET /", "home()"), ("GET /*", "rest()")]);
+    let ids: BTreeSet<&str> = g["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|n| n["type"] == "route")
+        .map(|n| n["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids.len(), 2, "{ids:?}");
+}

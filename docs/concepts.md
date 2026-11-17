@@ -214,6 +214,34 @@ The tools use it in four places:
 `graphlore_cycles` ignores reads and writes: two functions sharing a counter
 do not depend on each other in a cycle.
 
+## HTTP routes and requests
+
+A browser's `fetch('/api/v1/users/42')` and the handler that serves it are in
+one repository but joined by nothing a parser sees. On a native graph every
+route is a node (`type: route`, with its `method`, its full `pattern` and a
+normalized `key` such as `GET /api/v1/users/{}`), a `handles` edge leads from
+it to its handler, and an `http_calls` edge leads to it from each definition
+whose request reaches it. The full pattern is joined across files: a FastAPI
+router's prefix and the `include_router` prefix above it, an Express
+`app.use('/api', …)`, a gin group passed to a function, Laravel's
+`routes/api.php` prefix. Requests are matched segment by segment, parameters of
+every syntax (`{id}`, `:id`, `<int:id>`, `${id}`) as one wildcard; an exact
+match with a known method is `EXTRACTED`, a value against a parameter or a
+guess between candidates `INFERRED`. Requests in test code are counted in the
+build report, never linked: a test's client calls the routes it sets up
+itself. [What is read, per language](native-engine.md#http-routes-and-requests).
+
+The tools use it in three places:
+- `graphlore_routes` lists the route nodes, with each route's handler and the
+  code that requests it (`called_by`, `callers`); on a graphify graph it reads
+  the source instead, file by file.
+- `graphlore_impact` walks both relations like calls, so a handler's
+  dependents reach the client code that requests it, across languages;
+  `relations="http"` keeps only them.
+- `graphlore_node_details` says which routes a handler serves and who requests
+  them, which routes a client definition requests, and a route's handlers and
+  callers.
+
 ## Communities
 
 A community is a group of nodes that belong together: `graphlore_communities`
