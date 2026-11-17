@@ -8,18 +8,27 @@ All notable changes to this project are documented here. The format is based on
 
 ### Added
 - **Routes and HTTP requests in the native engine** (graph schema 5, engine
-  0.5.0), Python and JS/TS first: every route is a `type: route` node with its
+  0.5.0), in Python, JS/TS, Java, Kotlin and C#: every route is a `type: route` node with its
   `method`, its full `pattern` and a normalized `key` (`GET /api/v1/users/{}`),
   joined to its handler by a `handles` edge. The full path is composed across
   files, which `graphlore_routes` cannot do: FastAPI `APIRouter(prefix=…)` and
   `include_router(…, prefix=settings.API_V1_STR)` (a constant's value is
   read), Flask blueprints, Express `app.use('/api', router)` and
   `app.use('/x', require('./x'))`, Fastify `register(…, { prefix })`, NestJS
-  `setGlobalPrefix`. A prefix whose value is unknown is written as a parameter
+  `setGlobalPrefix`; within a file, Spring and JAX-RS class prefixes, Ktor's
+  nested `route("p") { … }` and ASP.NET `[Route]` controllers and `MapGroup`
+  groups (kept per method, so two `var group = …` do not mix). A handler
+  written as a lambda that makes one call (`post { users.register(ctx) }`,
+  `(req, res) => ctrl.show(req, res)`) is the method it calls. A prefix whose value is unknown is written as a parameter
   (`/{API_PREFIX}/users`) and the node says `prefix_unresolved`. Requests the
   code makes (`fetch`, `axios` and clients made by `axios.create({ baseURL })`,
   generated SDKs such as `client.get({ url: '/api/v1/items/' })`, jQuery,
-  Angular `HttpClient`, `EventSource`, `requests`, `httpx`, `aiohttp`) are
+  Angular `HttpClient`, `EventSource`, `requests`, `httpx`, `aiohttp`, Feign
+  `@RequestLine`, the mappings of a `@FeignClient` / `@HttpExchange` /
+  `@RegisterRestClient` interface and Retrofit's `@GET` (requests, not
+  routes, unlike `graphlore_routes`), `RestTemplate`, `WebClient` /
+  `RestClient`, MockMvc, RestAssured, the Ktor client, and C# `HttpClient`
+  with a relative URL such as `$"todos/{id}"`) are
   linked to the route they reach by `http_calls`: `EXTRACTED` when the method
   is known and every segment matches (a parameter or a template hole against
   a parameter), `INFERRED` for a value against a parameter, an unknown method
@@ -29,7 +38,9 @@ All notable changes to this project are documented here. The format is based on
   the source does not spell out. `graphlore_impact` follows both relations, so
   a handler's dependents reach the client code that requests it, and
   `relations="http"` names them. In fastapi-template all 23 requests of the
-  generated SDK reach their 23 handlers.
+  generated SDK reach their 23 handlers, in kotlin-spring-realworld the 6
+  Feign requests theirs, and in todoapi 7 of the 9 `HttpClient` requests (the
+  other two go to routes `MapIdentityApi` adds at run time).
 - **Shared state in the native engine**: variables, constants and class-level
   fields are nodes in all 14 languages (`kind: variable | constant |
   property`), and the definitions that read or write them are linked by

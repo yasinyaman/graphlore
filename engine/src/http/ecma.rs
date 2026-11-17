@@ -11,8 +11,8 @@ use std::collections::HashSet;
 use tree_sitter::Node;
 
 use super::{
-    join_path, path_expr, CallFact, ClientBase, GlobalPrefix, Handler, HttpFacts, MountFact,
-    Mounted, Part, PathExpr, RouteFact, RouterFact,
+    join_path, path_expr, single_call, CallFact, ClientBase, GlobalPrefix, Handler, HttpFacts,
+    MountFact, Mounted, Part, PathExpr, RouteFact, RouterFact,
 };
 use crate::facts::FileFacts;
 use crate::generic::{kids, line, text};
@@ -234,6 +234,12 @@ impl Ctx<'_> {
         let handler = match last {
             Some(l) if matches!(l.kind(), "identifier" | "member_expression") => {
                 path_of(l, src).map(Handler::Path).unwrap_or(Handler::Inline)
+            }
+            // `(req, res) => ctrl.show(req, res)`: the call it makes
+            Some(l)
+                if matches!(l.kind(), "arrow_function" | "function_expression" | "function") =>
+            {
+                single_call(l, src).map_or(Handler::Inline, Handler::Path)
             }
             _ => Handler::Inline,
         };

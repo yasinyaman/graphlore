@@ -10,7 +10,9 @@
 //! `/api/v1/users/{user_id}` rather than the `/{user_id}` its decorator says,
 //! and links each route to its handler.
 
+pub mod csharp;
 pub mod ecma;
+pub mod jvm;
 pub mod python;
 
 use serde::{Deserialize, Serialize};
@@ -150,6 +152,9 @@ pub fn read(lang: Lang, root: Node, src: &[u8], facts: &mut FileFacts) {
     let http = match lang {
         Lang::Python => python::read(root, src, facts),
         Lang::JavaScript | Lang::TypeScript | Lang::Tsx => ecma::read(root, src, facts),
+        Lang::Java => jvm::read_java(root, src, facts),
+        Lang::Kotlin => jvm::read_kotlin(root, src, facts),
+        Lang::CSharp => csharp::read(root, src, facts),
         _ => return,
     };
     facts.http = http;
@@ -188,10 +193,7 @@ fn collect(n: Node, src: &[u8], out: &mut Vec<Part>, depth: usize) -> Option<()>
     }
     if k.contains("string") || k == "template_string" {
         let pieces = kids(n);
-        let interpolated = pieces.iter().any(|c| {
-            let ck = c.kind();
-            ck.contains("interpolation") || ck == "template_substitution"
-        });
+        let interpolated = pieces.iter().any(|c| hole_kind(c.kind()) || delimiter_kind(c.kind()));
         if !interpolated {
             out.push(Part::Lit(string_value(n, src)));
             return Some(());
@@ -205,7 +207,8 @@ fn collect(n: Node, src: &[u8], out: &mut Vec<Part>, depth: usize) -> Option<()>
         last += open;
         for c in pieces {
             let ck = c.kind();
-            if !(ck.contains("interpolation") || ck == "template_substitution") {
+            let hole = hole_kind(ck);
+            if !hole && !delimiter_kind(ck) {
                 continue;
             }
             if c.start_byte() > last {
@@ -213,12 +216,24 @@ fn collect(n: Node, src: &[u8], out: &mut Vec<Part>, depth: usize) -> Option<()>
                     String::from_utf8_lossy(&src[last..c.start_byte()]).to_string(),
                 ));
             }
-            let inner = c.named_child(0);
-            match inner.and_then(|e| path_of(e, src)) {
-                Some(p) if !p.iter().any(|s| s == "()") => out.push(Part::Name(p)),
-                _ => out.push(Part::Hole),
+            if hole {
+                // Kotlin `$name` is the name itself; elsewhere the expression inside
+                let path = if ck == "interpolated_identifier" {
+                    Some(vec![text(c, src)])
+                } else {
+                    // past the braces C# names (`interpolation_brace`)
+                    kids(c)
+                        .into_iter()
+                        .find(|e| !e.kind().contains("brace") && !delimiter_kind(e.kind()))
+                        .and_then(|e| path_of(e, src))
+                };
+                match path {
+                    Some(p) if !p.iter().any(|s| s == "()") => out.push(Part::Name(p)),
+                    _ => out.push(Part::Hole),
+                }
             }
-            last = c.end_byte();
+            // a mark before the opening quote (C# `$`) leaves the start where it is
+            last = last.max(c.end_byte());
         }
         let end = n.end_byte().saturating_sub(1).max(last);
         if end > last {
@@ -237,6 +252,60 @@ fn collect(n: Node, src: &[u8], out: &mut Vec<Part>, depth: usize) -> Option<()>
         }
         _ => None,
     }
+}
+
+/// A piece of an interpolated string that holds a value: `${x}`, `{x}`, `$x`.
+fn hole_kind(k: &str) -> bool {
+    matches!(
+        k,
+        "interpolation"
+            | "template_substitution"
+            | "interpolated_expression"
+            | "interpolated_identifier"
+    )
+}
+
+/// The marks around a hole that some grammars name (Kotlin `${`, `}`, `$`).
+fn delimiter_kind(k: &str) -> bool {
+    k.starts_with("interpolation_") && (k.ends_with("_start") || k.ends_with("_end"))
+}
+
+/// The callee of a function written in a registration whose body is one call:
+/// `post { controller.register(ctx) }`, `() => svc.List()`, `(req, res) =>
+/// ctrl.show(req, res)`. That call's target handles the route.
+pub fn single_call(f: Node, src: &[u8]) -> Option<Vec<String>> {
+    let mut n = f.child_by_field_name("body").unwrap_or(f);
+    for _ in 0..6 {
+        let k = n.kind();
+        if crate::refs::is_call_kind(k) {
+            let (_, path) = crate::refs::callee(n, src)?;
+            let ok = !path.is_empty() && path.len() <= 3 && !path.iter().any(|s| s == "()");
+            return ok.then_some(path);
+        }
+        let inner: Vec<Node> =
+            kids(n).into_iter().filter(|c| !c.kind().contains("comment")).collect();
+        n = match k {
+            "annotated_lambda"
+            | "lambda_literal"
+            | "statements"
+            | "statement_block"
+            | "block"
+            | "function_body"
+            | "expression_statement"
+            | "return_statement"
+            | "await_expression"
+            | "arrow_expression_clause"
+            | "parenthesized_expression"
+                if inner.len() == 1 =>
+            {
+                inner[0]
+            }
+            // a lambda's parameters before its body
+            "lambda_literal" | "arrow_function" | "lambda_expression" => *inner.last()?,
+            _ => return None,
+        };
+    }
+    None
 }
 
 /// A route pattern or a URL with every parameter written `{}`: `{id}`,
@@ -274,6 +343,33 @@ mod tests {
         assert_eq!(join_path(&["/api/v1", "/users", "/{id}"]), "/api/v1/users/{id}");
         assert_eq!(join_path(&["", "/"]), "/");
         assert_eq!(join_path(&["api", "users/"]), "/api/users");
+    }
+
+    /// The first string node of a parsed snippet, as a path expression.
+    fn first_string(lang: Lang, code: &str) -> PathExpr {
+        let tree = crate::parse::parse(lang, code.as_bytes(), None).unwrap();
+        let mut stack = vec![tree.root_node()];
+        while let Some(n) = stack.pop() {
+            if n.kind().contains("string") {
+                return path_expr(n, code.as_bytes()).unwrap();
+            }
+            stack.extend(kids(n).into_iter().rev());
+        }
+        panic!("no string in {code}");
+    }
+
+    #[test]
+    fn interpolated_strings_keep_their_names() {
+        let name = |s: &str| Part::Name(vec![s.to_string()]);
+        let lit = |s: &str| Part::Lit(s.to_string());
+        assert_eq!(
+            first_string(Lang::Kotlin, "val u = \"$base/users/${id}\"\n").0,
+            vec![name("base"), lit("/users/"), name("id")]
+        );
+        assert_eq!(
+            first_string(Lang::CSharp, "class A { string U = $\"todos/{id}\"; }\n").0,
+            vec![lit("todos/"), name("id")]
+        );
     }
 
     #[test]
