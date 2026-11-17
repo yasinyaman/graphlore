@@ -248,3 +248,140 @@ fn fetch_axios_and_python_clients() {
     }
     assert!(!got.iter().any(|(s, _, _)| s == "elsewhere()" || s == "test_users()"), "{got:#?}");
 }
+
+#[track_caller]
+fn has_call(got: &BTreeSet<(String, String, String)>, want: &[(&str, &str, &str)]) {
+    for (s, r, c) in want {
+        assert!(
+            got.contains(&(s.to_string(), r.to_string(), c.to_string())),
+            "missing {s} -> {r} ({c}) in {got:#?}"
+        );
+    }
+}
+
+#[test]
+fn spring_controllers_and_feign_clients() {
+    let (got, g) = routes(
+        "spring",
+        &[
+            (
+                "src/main/java/app/OwnerController.java",
+                "package app;\n\nimport org.springframework.web.bind.annotation.*;\n\n@RestController\n@RequestMapping(\"/api/owners\")\nclass OwnerController {\n    @GetMapping(\"/{id}\")\n    public Owner show(@PathVariable int id) { return null; }\n\n    @RequestMapping(value = \"/{id}\", method = {RequestMethod.PUT, RequestMethod.PATCH}, produces = \"application/json\")\n    public Owner update(@PathVariable int id) { return null; }\n}\n",
+            ),
+            (
+                "src/main/kotlin/app/client/OwnerClient.kt",
+                "package app.client\n\nimport feign.Param\nimport feign.RequestLine\n\ninterface OwnerClient {\n    @RequestLine(\"GET /api/owners/{id}\")\n    fun owner(@Param(\"id\") id: Int): Owner\n}\n",
+            ),
+            (
+                "src/main/java/app/PetsApi.java",
+                "package app;\n\nimport org.springframework.cloud.openfeign.FeignClient;\nimport org.springframework.web.bind.annotation.*;\n\n@FeignClient(\"pets\")\ninterface PetsApi {\n    @PutMapping(\"/api/owners/{id}\")\n    void save(@PathVariable int id);\n}\n",
+            ),
+        ],
+    );
+    has(
+        &got,
+        &[
+            ("GET /api/owners/{id}", ".show()"),
+            ("PUT /api/owners/{id}", ".update()"),
+            ("PATCH /api/owners/{id}", ".update()"),
+        ],
+    );
+    // a @FeignClient interface's mapping is a request, not a route
+    assert_eq!(got.len(), 3, "{got:#?}");
+    has_call(
+        &calls(&g),
+        &[
+            (".owner()", "GET /api/owners/{id}", "EXTRACTED"),
+            (".save()", "PUT /api/owners/{id}", "EXTRACTED"),
+        ],
+    );
+}
+
+#[test]
+fn jaxrs_resources_and_retrofit_interfaces() {
+    let (got, g) = routes(
+        "jaxrs",
+        &[
+            (
+                "src/main/java/app/TagsResource.java",
+                "package app;\n\nimport jakarta.ws.rs.GET;\nimport jakarta.ws.rs.Path;\n\n@Path(\"/tags\")\npublic class TagsResource {\n    @GET\n    public String all() { return \"\"; }\n\n    @GET\n    @Path(\"/{name}\")\n    public String one(String name) { return name; }\n}\n",
+            ),
+            (
+                "android/src/main/java/app/TagsService.java",
+                "package app;\n\nimport retrofit2.Call;\nimport retrofit2.http.GET;\nimport retrofit2.http.Path;\n\npublic interface TagsService {\n    @GET(\"tags/{name}\")\n    Call<String> tag(@Path(\"name\") String name);\n}\n",
+            ),
+        ],
+    );
+    has(&got, &[("GET /tags", ".all()"), ("GET /tags/{name}", ".one()")]);
+    assert_eq!(got.len(), 2, "a Retrofit interface declares no route: {got:#?}");
+    has_call(&calls(&g), &[(".tag()", "GET /tags/{name}", "EXTRACTED")]);
+}
+
+#[test]
+fn ktor_nested_routes_and_their_controllers() {
+    let (got, _) = routes(
+        "ktor",
+        &[
+            (
+                "src/main/kotlin/app/Router.kt",
+                "package app\n\nimport io.ktor.routing.Routing\nimport io.ktor.routing.get\nimport io.ktor.routing.post\nimport io.ktor.routing.route\n\nfun Routing.users(userController: UserController) {\n    route(\"users\") {\n        post { userController.register(this.context) }\n        post(\"login\") { userController.login(this.context) }\n        route(\"{id}\") {\n            get { userController.show(this.context) }\n        }\n    }\n}\n",
+            ),
+            (
+                "src/main/kotlin/app/UserController.kt",
+                "package app\n\nclass UserController {\n    fun register(ctx: Any) {}\n    fun login(ctx: Any) {}\n    fun show(ctx: Any) {}\n}\n",
+            ),
+        ],
+    );
+    has(
+        &got,
+        &[
+            ("POST /users", ".register()"),
+            ("POST /users/login", ".login()"),
+            ("GET /users/{id}", ".show()"),
+        ],
+    );
+}
+
+#[test]
+fn aspnet_controllers_minimal_apis_and_http_client() {
+    let (got, g) = routes(
+        "aspnet",
+        &[
+            (
+                "Api/Controllers/TodosController.cs",
+                "using Microsoft.AspNetCore.Mvc;\n\n[ApiController]\n[Route(\"api/[controller]\")]\npublic class TodosController : ControllerBase\n{\n    [HttpGet(\"{id}\")]\n    public IActionResult Get(int id) => Ok();\n\n    [HttpPost(\"~/archive\")]\n    public IActionResult Archive() => Ok();\n}\n",
+            ),
+            (
+                "Api/UsersApi.cs",
+                "public static class UsersApi\n{\n    public static void MapUsers(this IEndpointRouteBuilder routes)\n    {\n        var group = routes.MapGroup(\"/users\");\n        group.MapGet(\"/{id}\", (int id) => UserService.Find(id));\n        routes.MapGroup(\"/admin\").MapDelete(\"/{id}\", RemoveUser);\n    }\n\n    public static void MapOther(this IEndpointRouteBuilder routes)\n    {\n        var group = routes.MapGroup(\"/other\");\n        group.MapPost(\"/\", () => 1);\n    }\n\n    static void RemoveUser(int id) {}\n}\n\npublic class UserService\n{\n    public static object Find(int id) => null;\n}\n",
+            ),
+            (
+                "Web/UsersClient.cs",
+                "public class UsersClient(HttpClient client)\n{\n    public async Task<User?> GetUserAsync(int id)\n    {\n        return await client.GetFromJsonAsync<User>($\"users/{id}\");\n    }\n\n    public async Task ArchiveAsync()\n    {\n        await client.SendAsync(new HttpRequestMessage(HttpMethod.Post, \"/archive\"));\n    }\n}\n",
+            ),
+            (
+                "Web/Cache.cs",
+                "public class Cache(IDistributedCache cache)\n{\n    public Task<byte[]?> Load() => cache.GetAsync(\"users\");\n}\n",
+            ),
+        ],
+    );
+    has(
+        &got,
+        &[
+            ("GET /api/Todos/{id}", ".Get()"),
+            ("POST /archive", ".Archive()"),
+            ("GET /users/{id}", ".Find()"),
+            ("DELETE /admin/{id}", ".RemoveUser()"),
+            ("POST /other", ".MapOther()"),
+        ],
+    );
+    let c = calls(&g);
+    has_call(
+        &c,
+        &[
+            (".GetUserAsync()", "GET /users/{id}", "EXTRACTED"),
+            (".ArchiveAsync()", "POST /archive", "EXTRACTED"),
+        ],
+    );
+    assert!(!c.iter().any(|(s, _, _)| s == ".Load()"), "a cache is not an HTTP client: {c:#?}");
+}

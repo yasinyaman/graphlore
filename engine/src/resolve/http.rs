@@ -283,8 +283,9 @@ fn handler_id(p: &Project, f: usize, from_def: Option<usize>, h: &Handler) -> St
             Some(id) => id.to_string(),
             None => probe(Some(*i)),
         },
+        // only what the scopes resolve: a name-only guess names no handler
         Handler::Path(path) => match p.resolve_path(f, from_def, path, false) {
-            Some((Target::Def(t), _)) if p.node_id(t).is_some() => {
+            Some((Target::Def(t), Confidence::Extracted)) if p.node_id(t).is_some() => {
                 p.node_id(t).unwrap_or_default().to_string()
             }
             _ => probe(from_def),
