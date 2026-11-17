@@ -7,7 +7,9 @@ per definition (with its real `start..end` span), property, constant and
 document heading, the containment edges between them, the imports, calls,
 bases and type references it resolves from the source, shared state (the
 variables, fields, constants, environment variables, files, tables and events
-definitions read and write), and communities (Leiden on edges weighted by
+definitions read and write), web routes with their full paths and the
+requests the code makes to them (`handles` / `http_calls`), and communities
+(Leiden on edges weighted by
 kind, confidence and directory, stable across rebuilds).
 
 Languages: Python, JavaScript, TypeScript, TSX, Go, Java, Kotlin, Scala, C#,

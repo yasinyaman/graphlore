@@ -314,3 +314,43 @@ def test_native_shared_state_end_to_end(tmp_path, monkeypatch):
     assert [r["state"] for r in sp["shared_state"]] == ["CACHE"]
     details = json.loads(server.graphlore_node_details("put", as_json=True))
     assert details["state"]["shared_with"][0]["node"] == "get()"
+
+
+def test_native_routes_and_requests_end_to_end(tmp_path, monkeypatch):
+    # a FastAPI route under two prefixes from two other files, and a generated
+    # TypeScript client that requests it: the tools cross the wire
+    files = {
+        "backend/app/core/config.py": (
+            "class Settings:\n    API_V1_STR: str = \"/api/v1\"\n\n\nsettings = Settings()\n"),
+        "backend/app/api/users.py": (
+            "from fastapi import APIRouter\n\nrouter = APIRouter(prefix=\"/users\")\n\n\n"
+            "@router.get(\"/{user_id}\")\ndef read_user(user_id: int):\n    return user_id\n"),
+        "backend/app/main.py": (
+            "from fastapi import FastAPI\n\nfrom app.api import users\n"
+            "from app.core.config import settings\n\napp = FastAPI()\n"
+            "app.include_router(users.router, prefix=settings.API_V1_STR)\n"),
+        "frontend/src/sdk.gen.ts": (
+            "import { client } from './client';\n\nexport function readUserById(options: any) {\n"
+            "  return client.get({ url: '/api/v1/users/{user_id}', ...options });\n}\n"),
+        "frontend/src/page.ts": (
+            "import { readUserById } from './sdk.gen';\n\n"
+            "export function UserPage() {\n  return readUserById({});\n}\n"),
+    }
+    for rel, text in files.items():
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_text(text, encoding="utf-8")
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    monkeypatch.setenv("GRAPHLORE_ENGINE", "native")
+    server._GRAPH_CACHE.clear()
+    assert server.graphlore_build(".").startswith("native engine")
+    routes = json.loads(server.graphlore_routes(as_json=True))
+    assert routes["source"] == "graph"
+    (row,) = routes["routes"]
+    assert (row["method"], row["pattern"], row["handler"]) == (
+        "GET", "/api/v1/users/{user_id}", "read_user()")
+    assert row["callers"] == ["readUserById()"]
+    impact = json.loads(server.graphlore_impact("read_user", as_json=True))
+    assert {"GET /api/v1/users/{user_id}", "readUserById()", "UserPage()"} <= {
+        r["node"] for r in impact["impacted"]}
+    details = json.loads(server.graphlore_node_details("read_user", as_json=True))
+    assert details["http"]["called_by"] == ["readUserById()"]

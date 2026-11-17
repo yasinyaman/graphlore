@@ -296,6 +296,18 @@ pub(super) fn compose(p: &Project, files: &[FileFacts]) -> Vec<RouteNode> {
             r.id = format!("{}_{}", r.id, slug(&files[r.file].path));
         }
     }
+    // paths that slug alike (`/` and `/*`) still need ids of their own: an
+    // edge is rewritten by id, and two nodes on one id would leave one bare
+    let mut taken: HashSet<String> = HashSet::new();
+    for r in &mut out {
+        let mut id = r.id.clone();
+        let mut n = 2;
+        while !taken.insert(id.clone()) {
+            id = format!("{}_{n}", r.id);
+            n += 1;
+        }
+        r.id = id;
+    }
     out
 }
 

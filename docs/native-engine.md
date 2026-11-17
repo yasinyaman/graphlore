@@ -51,6 +51,11 @@ what is left before it can be the default.
   variables, files, tables, events and cache keys code uses by a literal key
   (`type: resource`); `reads` / `writes` link the definitions that touch them
   ([below](#shared-state-and-resources)).
+- **Routes and HTTP requests.** A route is a node (`type: route`, its
+  method, full path and framework) with a `handles` edge to its handler, the
+  path joined across files; a request the code makes to one of the project's
+  own routes is an `http_calls` edge from the requesting definition to it
+  ([below](#http-routes-and-requests)).
 - **Communities.** Every node has a `community` and a `community_name`, from
   Leiden on edges weighted by kind, confidence and directory ([below](#communities));
   the graph header carries their count, modularity and a signature per
@@ -62,7 +67,7 @@ what is left before it can be the default.
   `.name()` / bare, and the node-link layout is graphify's, so every graphlore
   tool — and graphify's own `query` / `path` / `explain` — reads the graph
   unchanged. `built_at_commit` is recorded for freshness. The graph says
-  `graph.engine: graphlore` and `schema_version: 4`, and graphlore then trusts
+  `graph.engine: graphlore` and `schema_version: 5`, and graphlore then trusts
   its edges: `ImportChecker` reads `runs` instead of re-checking an import
   against the source, and the edges `resolve.py` adds to graphify's graphs are
   already there.
@@ -270,6 +275,84 @@ Builds take 15% longer (median of eight repositories against 0.3.0, −1% to
 +27%): the walk keeps a stack of ancestors for these rules, as tree-sitter's
 `parent()` walks down from the root again and cost twice that.
 
+### HTTP routes and requests
+
+A frontend's `fetch('/api/v1/users/42')` and the FastAPI handler it reaches
+are joined by nothing in the code: no call, no import. The engine reads both
+ends and links them. Each language module reads its frameworks' routes
+(`engine/src/http/`), after the rules of graphlore's `routes.py`:
+
+| | routes | requests |
+|---|---|---|
+| Python | FastAPI, Flask, Sanic, Quart, Litestar, Django | `requests`, `httpx`, `aiohttp` (and clients with a `base_url`) |
+| JS / TS | Express, Fastify, Koa, Restify, Polka, NestJS | `fetch`, axios (and `axios.create({ baseURL })`), generated SDKs (`client.get({ url })`), jQuery, Angular `HttpClient`, `EventSource`, supertest |
+| Java / Kotlin | Spring, JAX-RS, Ktor | Feign, `@FeignClient` / `@HttpExchange` / `@RegisterRestClient` interfaces, Retrofit, `RestTemplate`, `WebClient` / `RestClient`, MockMvc, RestAssured, the Ktor client |
+| C# | ASP.NET Core controllers, minimal APIs | `HttpClient` |
+| Go | gin, echo, chi, gorilla, net/http | `http.Get`, `http.NewRequest`, resty |
+| Rust | axum, actix-web | reqwest, ureq |
+| Ruby | Rails `routes.draw`, Sinatra | HTTParty, Faraday, rack-test |
+| PHP | Laravel, Symfony | Guzzle, Laravel `Http::`, Laravel test requests |
+
+Unlike `routes.py`, the engine joins a route's path across files. A router has
+a prefix of its own (`APIRouter(prefix="/users")`, `Blueprint(url_prefix=…)`,
+`express.Router()`), is mounted under another with one (`include_router(r,
+prefix=settings.API_V1_STR)`, `app.use('/api', require('./users'))`,
+`register_blueprint`, Fastify `register`), or under a global prefix
+(`app.setGlobalPrefix('api')`). A prefix written as a name is read through
+resolution: `settings.API_V1_STR` is the value of the class attribute of the
+`Settings()` that `settings` holds. Routers can also be groups bound in a
+function (`v1 := router.Group("/v1")`), a function's parameter that each call
+mounts (`addUserRoutes(v1)` with `func addUserRoutes(rg *gin.RouterGroup)`), the
+router a function builds (axum `.nest("/api", users::router())`, actix
+`.configure(routes)`), or a route file (Laravel's
+`Route::prefix('api')->group(base_path('routes/api.php'))`). A prefix whose
+value is unknown is written as a parameter (`/{API_PREFIX}/users`) and the
+route says `prefix_unresolved`.
+
+Handlers: a decorated function or an annotated method is its own handler; a
+name (`users.login`, `[UserController::class, 'store']`, Rails
+`"articles#index"`) is resolved, from the scopes only; a lambda that makes one
+call (`post { users.register(ctx) }`, `(req, res) => ctrl.show(req, res)`) is the
+method it calls; any other inline function is the definition around it.
+
+A request is linked when its URL is the project's own: a path (`/api/users`),
+a relative one (`"todos"` through an `HttpClient` whose base address the code
+does not say), or `localhost`; an unknown leading part (`${API_URL}/users`) is
+taken for the base. Paths are compared segment by segment, every parameter
+form (`{id}`, `:id`, `<int:id>`, `[id]`, `*`) one wildcard. The best candidate
+has the most segments that match as text, then parameter against parameter
+(a template hole `${id}` counts as a parameter); a tie goes to the route
+nearest the request in the tree. An exact match with a known method is
+`EXTRACTED`; a value against a parameter (`/users/7`), an unknown method or
+base, and several candidates are `INFERRED`. Requests in test code are not
+linked, only counted (`report.http.test_calls`), as are those to another host
+(`external`) and those whose URL the source does not spell out (`dynamic`).
+
+On the 31 audit repositories:
+
+| | |
+|---|--:|
+| route nodes | 830 |
+| `graphlore_routes` rows found as routes | 2,375 of 2,376 |
+| … with a longer path (a prefix from another file or a group) | 69 |
+| … with a closure in a variable for a handler (named by the function around it) | 60 |
+| production requests / linked | 67 / 37 |
+| requests in tests (counted) | 2,797 |
+
+The links, read one by one: fastapi-template's generated SDK, 23 requests to
+the 23 handlers; kotlin-spring-realworld's six Feign methods to their Spring
+handlers; todoapi's Blazor and BFF `HttpClient`s, 7 of 9 (the other two reach
+routes `MapIdentityApi` adds at run time); gin-examples' browser
+`EventSource('/stream/' + id)` to the Go handler in the same example. Builds
+take 7% longer than with engine 0.4.0 (median of ten repositories, best of
+three each; −6% to +30%, the +30% of express not seen again in its per-phase
+times). Outside
+the engine's sight: prefixes set in configuration (ASP.NET
+`ApiRoutePrefixConvention`, Spring `server.servlet.context-path`), routes a
+framework adds (`MapIdentityApi`, `devise_for`), named-route helpers (Rails
+`*_path`, Symfony `path('name')`), template links (`href`, `action`), and
+GraphQL / gRPC.
+
 ## Compared with graphify on 31 repositories
 
 `benchmarks/compare_engines.py` builds both graphs of a repository, pairs
@@ -396,12 +479,14 @@ two nodes reference each other. `path` and `explain` read the CLI's default
 2. **Phase 2: imports and references in all 14 languages.** Done (this page).
 3. **Communities and incremental updates.** Done (this page).
 4. **Shared state and resources.** Done (this page): what two definitions
-   couple through without a call. Next: HTTP calls to the project's own routes
-   (`fetch('/api/users')` to its handler), and git co-change.
-5. **No CLI behind the CLI tools.** `query`, `path` and `explain` answered over
-   graph.json in Python; community naming by MCP sampling only; the route and
+   couple through without a call.
+5. **HTTP routes and requests.** Done (this page): route nodes with full
+   paths in 10 languages, and the requests that reach them. Next: git
+   co-change.
+6. **No CLI behind the CLI tools.** `query`, `path` and `explain` answered over
+   graph.json in Python; community naming by MCP sampling only; the
    package-API extractors moved into the language modules.
-6. **Native by default.** The polyglot audit passes on native graphs (above),
+7. **Native by default.** The polyglot audit passes on native graphs (above),
    so what is left is publishing the wheels (below) and making `auto` the
    default; then
    graphify, `graphlore_add` and `mode="deep"` go, and the output directory gets

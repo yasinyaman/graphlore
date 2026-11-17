@@ -200,6 +200,34 @@ def test_impact_crosses_http_from_handler_to_clients(tmp_path, monkeypatch):
     assert {r["node"] for r in http["impacted"]} == {"GET /api/users/{id}", "readUserById()"}
 
 
+def test_routes_and_node_details_read_native_route_nodes(tmp_path, monkeypatch):
+    # on a native graph (schema 5) the rows are the route nodes: the full path
+    # and who requests the route, not a re-read of the source
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    server._GRAPH_CACHE.clear()
+    graph = json.loads(json.dumps(_HTTP_GRAPH))
+    graph["graph"] = {"engine": "graphlore", "schema_version": 5}
+    _write_graph(tmp_path, graph)
+    out = json.loads(server.graphlore_routes(as_json=True))
+    assert out["source"] == "graph"
+    (row,) = out["routes"]
+    assert row["pattern"] == "/api/users/{id}" and row["method"] == "GET"
+    assert row["handler"] == "read_user()" and row["framework"] == "fastapi"
+    assert row["called_by"] == 1 and row["callers"] == ["readUserById()"]
+    assert "requested by 1" in server.graphlore_routes()
+    handler = json.loads(server.graphlore_node_details("read_user", as_json=True))
+    assert handler["http"] == {"routes": ["GET /api/users/{id}"], "called_by": ["readUserById()"]}
+    client = json.loads(server.graphlore_node_details("readUserById", as_json=True))
+    assert client["http"] == {"requests": ["GET /api/users/{id}"]}
+    route = json.loads(server.graphlore_node_details("GET /api/users/{id}", as_json=True))
+    assert route["http"] == {"handlers": ["read_user()"], "called_by": ["readUserById()"]}
+    # without the header (a graphify graph) the source is read
+    graph.pop("graph")
+    (tmp_path / "graphify-out" / "graph.json").write_text(json.dumps(graph))
+    server._GRAPH_CACHE.clear()
+    assert json.loads(server.graphlore_routes(as_json=True))["source"] == "source"
+
+
 def test_surprises_and_node_details_name_shared_state(tmp_path, monkeypatch):
     _shared_state_project(tmp_path, monkeypatch)
     sp = json.loads(server.graphlore_surprises(as_json=True))

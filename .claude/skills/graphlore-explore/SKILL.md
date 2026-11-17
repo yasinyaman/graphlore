@@ -199,6 +199,11 @@ stripped) — the middle layer between the map and full code — and
   variables, files or tables it writes (`state_nodes_skipped` says when that
   matters), and `graphlore_node_details("<node>")` lists them under
   `shared_with`.
+- **"Who calls this endpoint?"** → on a native graph, `graphlore_routes(pattern="/users")`
+  gives each route's full path, handler and `callers` (the frontend or client
+  code whose requests reach it), and `graphlore_impact("<handler>")` walks from
+  the handler through its route to that code; `relations="http"` keeps only
+  those steps.
 - **"What else touches this?"** → `graphlore_surprises()`'s `shared_state` list:
   state written in one file and read in another, the implicit coupling no call
   graph shows.

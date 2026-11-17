@@ -171,6 +171,7 @@ from .graph import (  # noqa: F401  (re-exported for the tools + tests)
     _load_graph,
     _module_import_adjacency,
     _name_index,
+    _native_routes,
     _node_file,
     _node_id,
     _node_label,
@@ -4100,6 +4101,9 @@ def graphlore_node_details(node: str, as_json: bool = False) -> str:
     state, state_text = _state_of(nodes, edges, _node_id(n))
     if state:
         detail["state"] = state
+    http, http_text = _http_of(nodes, edges, _node_id(n))
+    if http:
+        detail["http"] = http
     detail["content_trust"] = _CONTENT_TRUST
     detail["untrusted_fields"] = ["doc", "extra"]
     loc = f"{detail['file']}:{detail['line']}" if detail["file"] else "(no source location)"
@@ -4112,12 +4116,54 @@ def graphlore_node_details(node: str, as_json: bool = False) -> str:
     ]
     if extra:
         text.append(f"  other    : {', '.join(extra.keys())}")
-    text += state_text
+    text += state_text + http_text
     matched, matched_text = _matched(node, picked)
     if matched:
         detail["matched"] = matched
         text.append(matched_text)
     return _fmt(detail, as_json, "\n".join(text))
+
+
+def _http_of(nodes: list[dict], edges: list[dict], nid: str) -> tuple[dict[str, Any], list[str]]:
+    """The routes a handler serves and who requests them; for a route, its
+    handlers and callers; for client code, the routes it requests. Empty on a
+    graph with no `handles` / `http_calls` edges."""
+    labels = _display_labels(nodes)
+    handlers: dict[str, list[str]] = {}   # route -> handlers
+    callers: dict[str, list[str]] = {}    # route -> requesting definitions
+    for e in edges:
+        rel = _rel(e)
+        if rel not in _HTTP_RELATIONS:
+            continue
+        s, t = _edge_ends(e)
+        if rel == "handles":
+            handlers.setdefault(s, []).append(t)
+        else:
+            callers.setdefault(t, []).append(s)
+    if not handlers and not callers:
+        return {}, []
+    name = lambda i: labels.get(i, i)  # noqa: E731
+    if nid in handlers or nid in callers:
+        route = {"handlers": sorted({name(h) for h in handlers.get(nid, [])}),
+                 "called_by": sorted({name(c) for c in callers.get(nid, [])})}
+        return route, [
+            f"  handled by: {', '.join(route['handlers']) or '(nothing)'}",
+            f"  requested by: {', '.join(route['called_by']) or '(nothing in the graph)'}"]
+    serves = sorted(r for r, hs in handlers.items() if nid in hs)
+    requests = sorted(r for r, cs in callers.items() if nid in cs)
+    if not serves and not requests:
+        return {}, []
+    out: dict[str, Any] = {}
+    text: list[str] = []
+    if serves:
+        out["routes"] = [name(r) for r in serves]
+        out["called_by"] = sorted({name(c) for r in serves for c in callers.get(r, [])})
+        text.append(f"  serves    : {', '.join(out['routes'])}")
+        text.append(f"  requested by: {', '.join(out['called_by']) or '(nothing in the graph)'}")
+    if requests:
+        out["requests"] = [name(r) for r in requests]
+        text.append(f"  requests  : {', '.join(out['requests'])}")
+    return out, text
 
 
 _STATE_SHARED_LIMIT = 15
@@ -6035,6 +6081,58 @@ _ROUTES_NOTE = (
 )
 
 
+_ROUTES_NATIVE_NOTE = (
+    "from the native graph: full paths, prefixes joined across files; non-literal "
+    "patterns, dynamic registration and prefixes set in configuration are invisible"
+)
+
+
+def _graph_routes(nodes: list[dict], edges: list[dict], view: ScopeView) -> list[dict[str, Any]]:
+    """Route rows from a native graph's route nodes: the full pattern, the handler
+    (`handles`) and who requests it (`http_calls`)."""
+    labels = _display_labels(nodes)
+    byid = {_node_id(n): n for n in nodes}
+    handlers: dict[str, list[str]] = {}
+    callers: dict[str, list[str]] = {}
+    for e in edges:
+        rel = _rel(e)
+        s, t = _edge_ends(e)
+        if rel == "handles":
+            handlers.setdefault(s, []).append(t)
+        elif rel == "http_calls":
+            callers.setdefault(t, []).append(s)
+    rows: list[dict[str, Any]] = []
+    for n in nodes:
+        if not _is_route_node(n):
+            continue
+        f = _norm_relpath(_node_file(n))
+        if not view.keeps_file(f):
+            continue
+        rid = _node_id(n)
+        hs = handlers.get(rid, [])
+        first = byid.get(hs[0]) if hs else None
+        cs = sorted({labels.get(c, c) for c in callers.get(rid, [])})
+        row: dict[str, Any] = {
+            "framework": str(n.get("framework", "")),
+            "method": str(n.get("method", "")),
+            "pattern": str(n.get("pattern", "")),
+            "handler": labels.get(hs[0], hs[0]) if hs else "",
+            "line": _node_line(n),
+            "file": f,
+            "node": _node_label(first) if first is not None else "",
+            "qualname": str(first.get("qualname", "")) if first is not None else "",
+            "called_by": len(cs),
+        }
+        if len(hs) > 1:
+            row["handlers"] = [labels.get(h, h) for h in hs]
+        if cs:
+            row["callers"] = cs[:3]
+        if n.get("prefix_unresolved"):
+            row["prefix_unresolved"] = True
+        rows.append(row)
+    return rows
+
+
 def _route_candidate_files(graph_files: set[str]) -> set[str]:
     """Well-known route files the graph may not know about, beyond ``graph_files``.
 
@@ -6097,10 +6195,18 @@ def graphlore_routes(
     optional [treesitter] extra. Source files in a language with no route
     reader are counted in ``not_read``.
 
+    On a graph the native engine built (schema 5 on) the rows are its route
+    nodes instead (``source: "graph"``): the full path, prefixes joined across
+    files (FastAPI ``include_router``, Express ``app.use``, gin groups passed to
+    a function, Laravel's ``routes/api.php`` prefix, …), the handler, and
+    ``called_by`` / ``callers``: the code in the repository whose requests
+    reach the route (``http_calls``).
+
     The result is a LOWER BOUND: non-literal patterns, dynamic registration,
-    prefixes applied in another file and gorilla ``.Methods()`` are invisible;
-    gorilla chains surface as method ``ANY``. Zero routes reads "no
-    visibility", not "no routes".
+    prefixes set in configuration and gorilla ``.Methods()`` are invisible
+    (on a graphify graph, prefixes applied in another file too); gorilla chains
+    surface as method ``ANY``. Zero routes reads "no visibility", not "no
+    routes".
 
     Args:
         framework: Keep only this framework label (exact, case-insensitive) —
@@ -6129,9 +6235,11 @@ def graphlore_routes(
         f for f in _route_candidate_files(graph_files) if view.keeps_file(f)
     })
 
-    rows: list[dict[str, Any]] = []
+    native = _native_routes(nodes)
+    rows: list[dict[str, Any]] = (
+        _graph_routes(nodes, edges, view) if native else [])
     server_import: bool | None = None  # does any JS/TS file import a server framework
-    for f in files:
+    for f in files if not native else []:
         for r in _routes_for_file(f):
             if r.get("needs_server_import"):
                 if server_import is None:
@@ -6156,12 +6264,14 @@ def graphlore_routes(
 
     rows.sort(key=lambda r: (r["file"], r["line"]))
     shown = rows[:max(0, limit)]
+    note = _ROUTES_NATIVE_NOTE if native else _ROUTES_NOTE
     payload: dict[str, Any] = {
         "files_scanned": len(files),
         "routes": shown,
         "count": len(rows),
         "truncated": len(rows) > len(shown),
-        "note": _ROUTES_NOTE,
+        "source": "graph" if native else "source",
+        "note": note,
         "scope": view.payload(),
     }
     _cut_hint(payload, "Raise limit for the rest of the `count` routes, or filter with "
@@ -6174,14 +6284,15 @@ def graphlore_routes(
             payload, as_json,
             _with_note(
                 f"No framework routes visible in {len(files)} scanned file(s) "
-                f"({_ROUTES_NOTE})."
+                f"({note})."
                 + (f"\n{_not_read_text(not_read)}" if not_read else ""), view),
         )
-    lines = [f"{len(rows)} route(s) across {len(files)} scanned file(s) ({_ROUTES_NOTE}):"]
+    lines = [f"{len(rows)} route(s) across {len(files)} scanned file(s) ({note}):"]
     for r in shown:
+        called = f"  requested by {r['called_by']}" if r.get("called_by") else ""
         lines.append(
             f"  {r['method']} {r['pattern']} -> {r['handler']}  "
-            f"({r['file']}:{r['line']})  [{r['framework']}]"
+            f"({r['file']}:{r['line']})  [{r['framework']}]{called}"
         )
     if payload["truncated"]:
         lines.append(f"  … +{len(rows) - len(shown)} more route(s); raise `limit`.")

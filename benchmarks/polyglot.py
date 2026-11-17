@@ -1167,6 +1167,8 @@ def check_sandbox(a: Audit, sub: Subject, repo_dir: Path, keep: bool) -> None:
             if again and again.get("removable_nodes"):
                 a.finding("PRUNE-NOT-IDEMPOTENT", "medium", "bug", "prune",
                           "a second prune still finds nodes to remove")
+            # back, so the build below reads the tree the graph was built from
+            _git(box, "checkout", "--", gone)
         # labels
         com = a.call("communities")
         if com and com.get("communities"):

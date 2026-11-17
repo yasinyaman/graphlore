@@ -92,6 +92,16 @@ def _engine_resolved(nodes: list) -> bool:
         return False
 
 
+def _native_routes(nodes: list) -> bool:
+    """Whether the native engine wrote this graph's routes (schema 5 on): route
+    nodes with their full paths, `handles` and `http_calls` edges."""
+    meta = _graph_meta(nodes)
+    try:
+        return meta.get("engine") == "graphlore" and int(meta.get("schema_version", 0)) >= 5
+    except (TypeError, ValueError):
+        return False
+
+
 def _nodes_edges(graph: dict[str, Any]) -> tuple[list[dict], list[dict]]:
     """Schema-tolerant node/edge extraction."""
     nodes = graph.get("nodes") or graph.get("vertices") or []

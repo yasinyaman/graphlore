@@ -57,7 +57,14 @@ All notable changes to this project are documented here. The format is based on
   `GET /stream/:roomid`. Across the 31 audit repositories, 2375 of
   `graphlore_routes`' 2376 rows are routes of the native graph (69 with a
   longer path; 60 with a closure kept in a variable for a handler, which the
-  native graph names by the function around it).
+  native graph names by the function around it). Builds take 7% longer
+  (median of ten repositories against engine 0.4.0).
+- On a native graph (schema 5), `graphlore_routes` lists the graph's route
+  nodes (`source: "graph"`): the full path, the handler, and `called_by` /
+  `callers`, the code whose requests reach the route; on a graphify graph it
+  reads the source as before (`source: "source"`). `graphlore_node_details`
+  has an `http` section: the routes a handler serves and who requests them,
+  the routes a client definition requests, or a route's handlers and callers.
 - **Shared state in the native engine**: variables, constants and class-level
   fields are nodes in all 14 languages (`kind: variable | constant |
   property`), and the definitions that read or write them are linked by
