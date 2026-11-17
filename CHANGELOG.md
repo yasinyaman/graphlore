@@ -8,7 +8,8 @@ All notable changes to this project are documented here. The format is based on
 
 ### Added
 - **Routes and HTTP requests in the native engine** (graph schema 5, engine
-  0.5.0), in Python, JS/TS, Java, Kotlin and C#: every route is a `type: route` node with its
+  0.5.0), in Python, JS/TS, Java, Kotlin, C#, Go, Rust, Ruby and PHP: every
+  route is a `type: route` node with its
   `method`, its full `pattern` and a normalized `key` (`GET /api/v1/users/{}`),
   joined to its handler by a `handles` edge. The full path is composed across
   files, which `graphlore_routes` cannot do: FastAPI `APIRouter(prefix=…)` and
@@ -17,7 +18,16 @@ All notable changes to this project are documented here. The format is based on
   `app.use('/x', require('./x'))`, Fastify `register(…, { prefix })`, NestJS
   `setGlobalPrefix`; within a file, Spring and JAX-RS class prefixes, Ktor's
   nested `route("p") { … }` and ASP.NET `[Route]` controllers and `MapGroup`
-  groups (kept per method, so two `var group = …` do not mix). A handler
+  groups (kept per method, so two `var group = …` do not mix), chi `Route`
+  lambdas, actix scopes, the Rails `routes.draw` DSL (`resources`,
+  `namespace`, `scope`) and Laravel `prefix()->group()`; across files, gin /
+  echo groups (`v1 := router.Group("/v1")`) and the router passed to a
+  function (`addUserRoutes(v1)`), axum `.nest("/api", users::router())` /
+  `.merge(…)` and actix `.configure(routes)`, and Laravel's route-file prefix
+  (`Route::prefix('api')->group(base_path('routes/api.php'))`, Laravel 11's
+  `withRouting(api: …)`). A Rails `"articles#index"` or Laravel
+  `[UserController::class, 'store']` handler is the controller's method (a
+  singular `resource :user` is `UsersController`'s). A handler
   written as a lambda that makes one call (`post { users.register(ctx) }`,
   `(req, res) => ctrl.show(req, res)`) is the method it calls. A prefix whose value is unknown is written as a parameter
   (`/{API_PREFIX}/users`) and the node says `prefix_unresolved`. Requests the
@@ -27,8 +37,10 @@ All notable changes to this project are documented here. The format is based on
   `@RequestLine`, the mappings of a `@FeignClient` / `@HttpExchange` /
   `@RegisterRestClient` interface and Retrofit's `@GET` (requests, not
   routes, unlike `graphlore_routes`), `RestTemplate`, `WebClient` /
-  `RestClient`, MockMvc, RestAssured, the Ktor client, and C# `HttpClient`
-  with a relative URL such as `$"todos/{id}"`) are
+  `RestClient`, MockMvc, RestAssured, the Ktor client, C# `HttpClient` with
+  a relative URL such as `$"todos/{id}"`, Go `http.Get` / `http.NewRequest`,
+  reqwest / ureq, HTTParty / Faraday, Guzzle and Laravel `Http::`, and in
+  tests rack-test and Laravel's `$this->getJson(…)`) are
   linked to the route they reach by `http_calls`: `EXTRACTED` when the method
   is known and every segment matches (a parameter or a template hole against
   a parameter), `INFERRED` for a value against a parameter, an unknown method
@@ -40,7 +52,12 @@ All notable changes to this project are documented here. The format is based on
   `relations="http"` names them. In fastapi-template all 23 requests of the
   generated SDK reach their 23 handlers, in kotlin-spring-realworld the 6
   Feign requests theirs, and in todoapi 7 of the 9 `HttpClient` requests (the
-  other two go to routes `MapIdentityApi` adds at run time).
+  other two go to routes `MapIdentityApi` adds at run time), and in
+  gin-examples a browser `EventSource('/stream/' + id)` the Go handler of
+  `GET /stream/:roomid`. Across the 31 audit repositories, 2375 of
+  `graphlore_routes`' 2376 rows are routes of the native graph (69 with a
+  longer path; 60 with a closure kept in a variable for a handler, which the
+  native graph names by the function around it).
 - **Shared state in the native engine**: variables, constants and class-level
   fields are nodes in all 14 languages (`kind: variable | constant |
   property`), and the definitions that read or write them are linked by

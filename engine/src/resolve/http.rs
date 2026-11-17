@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 use super::{modules, Confidence, DefRef, Family, ModRes, Project, Target};
 use crate::facts::{FileFacts, ImportForm};
 use crate::graph::ids::slug;
-use crate::http::{join_path, Handler, Mounted, Part, PathExpr};
+use crate::http::{join_path, Handler, Mounted, Part, PathExpr, PARAM_ROUTER, SELF_ROUTER};
 
 /// A router: a definition the resolver found (`router = APIRouter(…)`), or an
 /// object only a file names (an `app` parameter).
@@ -15,6 +15,10 @@ use crate::http::{join_path, Handler, Mounted, Part, PathExpr};
 enum Key {
     Def(DefRef),
     Obj(usize, String),
+    /// A router bound in a definition: `v1 := router.Group("/v1")`.
+    Local(usize, usize, String),
+    /// A function's parameter that routes are registered on.
+    Param(DefRef, usize),
 }
 
 /// A route node to write.
@@ -76,16 +80,51 @@ fn key_of(p: &Project, f: usize, d: Option<usize>, path: &[String]) -> Key {
     }
 }
 
+/// The router a registration's receiver names in file `f`, inside `d`: the
+/// definition itself, a parameter of it, a router bound in it or around it,
+/// or what resolution makes of the name.
+fn router_key(
+    p: &Project,
+    files: &[FileFacts],
+    f: usize,
+    d: Option<usize>,
+    path: &[String],
+) -> Key {
+    match path {
+        [s] if s == SELF_ROUTER => {
+            return d.map_or_else(|| Key::Obj(f, s.clone()), |d| Key::Def((f, d)));
+        }
+        [s, n] if s == PARAM_ROUTER => {
+            if let (Some(d), Ok(i)) = (d, n.parse::<usize>()) {
+                return Key::Param((f, d), i);
+            }
+        }
+        [name] => {
+            let mut cur = d;
+            while let Some(x) = cur {
+                if files[f].http.routers.iter().any(|r| r.scope == Some(x) && r.name == *name) {
+                    return Key::Local(f, x, name.clone());
+                }
+                cur = files[f].defs[x].parent;
+            }
+        }
+        _ => {}
+    }
+    key_of(p, f, d, path)
+}
+
 /// The routers a mounted module holds: those it declares and those its
 /// routes are registered on.
 fn module_keys(p: &Project, files: &[FileFacts], g: usize) -> Vec<Key> {
     let mut out: Vec<Key> = Vec::new();
     for r in &files[g].http.routers {
-        out.push(top_key(p, files, g, &r.name));
+        if r.scope.is_none() {
+            out.push(top_key(p, files, g, &r.name));
+        }
     }
     for r in &files[g].http.routes {
         if let Some(path) = &r.router {
-            out.push(key_of(p, g, r.from_def, path));
+            out.push(router_key(p, files, g, r.from_def, path));
         }
     }
     out.sort_by_key(|k| format!("{k:?}"));
@@ -110,11 +149,27 @@ pub(super) fn compose(p: &Project, files: &[FileFacts]) -> Vec<RouteNode> {
     let mut mounts: HashMap<Key, Vec<Mount>> = HashMap::new();
     for (f, facts) in files.iter().enumerate() {
         for r in &facts.http.routers {
-            own.insert(top_key(p, files, f, &r.name), (f, r.prefix.clone()));
+            let k = match r.scope {
+                Some(d) => Key::Local(f, d, r.name.clone()),
+                None => top_key(p, files, f, &r.name),
+            };
+            own.insert(k, (f, r.prefix.clone()));
         }
         for m in &facts.http.mounts {
-            let parent = key_of(p, f, m.from_def, &m.parent);
+            let parent = router_key(p, files, f, m.from_def, &m.parent);
             let children: Vec<Key> = match &m.child {
+                Mounted::Path(path)
+                    if !matches!(
+                        router_key(p, files, f, m.from_def, path),
+                        Key::Def(_) | Key::Obj(..)
+                    ) =>
+                {
+                    vec![router_key(p, files, f, m.from_def, path)]
+                }
+                Mounted::Param(callee, i) => match p.resolve_path(f, m.from_def, callee, true) {
+                    Some((Target::Def(t), _)) => vec![Key::Param(t, *i)],
+                    _ => Vec::new(),
+                },
                 Mounted::Path(path) => match p.resolve_path(f, m.from_def, path, true) {
                     Some((Target::Def(t), _)) => vec![Key::Def(t)],
                     Some((Target::Module(gs), _)) => {
@@ -153,13 +208,21 @@ pub(super) fn compose(p: &Project, files: &[FileFacts]) -> Vec<RouteNode> {
             }
         }
     }
-    // global prefixes, by the directory of the file that sets them
+    // global prefixes, by the directory of the file that sets them; a file
+    // prefix, by the end of the route file's path
     let mut globals: Vec<(String, String, String, bool)> = Vec::new();
+    let mut file_prefixes: Vec<(String, String, String, bool)> = Vec::new();
     for (f, facts) in files.iter().enumerate() {
         for g in &facts.http.prefixes {
             let (v, u) = value(p, f, None, &g.prefix);
-            let dir = facts.path.rsplit_once('/').map_or(String::new(), |(d, _)| format!("{d}/"));
-            globals.push((g.framework.clone(), dir, v, u));
+            match &g.file {
+                Some(tail) => file_prefixes.push((g.framework.clone(), tail.clone(), v, u)),
+                None => {
+                    let dir =
+                        facts.path.rsplit_once('/').map_or(String::new(), |(d, _)| format!("{d}/"));
+                    globals.push((g.framework.clone(), dir, v, u));
+                }
+            }
         }
     }
 
@@ -175,7 +238,7 @@ pub(super) fn compose(p: &Project, files: &[FileFacts]) -> Vec<RouteNode> {
             }
             let bases = match &r.router {
                 Some(path) => {
-                    let k = key_of(p, f, r.from_def, path);
+                    let k = router_key(p, files, f, r.from_def, path);
                     prefixes(p, &k, &own, &mounts, &mut memo, 0, &mut HashSet::new())
                 }
                 None => vec![(String::new(), false)],
@@ -183,8 +246,14 @@ pub(super) fn compose(p: &Project, files: &[FileFacts]) -> Vec<RouteNode> {
             let (sub, sub_unresolved) = value(p, f, r.from_def, &r.path);
             let global = globals
                 .iter()
-                .find(|(fw, dir, _, _)| *fw == r.framework && facts.path.starts_with(dir.as_str()));
-            let handler = handler_id(p, f, r.from_def, &r.handler);
+                .find(|(fw, dir, _, _)| *fw == r.framework && facts.path.starts_with(dir.as_str()))
+                .or_else(|| {
+                    file_prefixes.iter().find(|(fw, tail, _, _)| {
+                        *fw == r.framework
+                            && (facts.path == *tail || facts.path.ends_with(&format!("/{tail}")))
+                    })
+                });
+            let handler = handler_id(p, files, f, r.from_def, &r.handler);
             for (base, unresolved) in bases {
                 let pattern = match global {
                     Some((_, _, g, _)) => join_path(&[g, &base, &sub]),
@@ -265,7 +334,13 @@ fn prefixes(
 }
 
 /// The node a route's handler is.
-fn handler_id(p: &Project, f: usize, from_def: Option<usize>, h: &Handler) -> String {
+fn handler_id(
+    p: &Project,
+    files: &[FileFacts],
+    f: usize,
+    from_def: Option<usize>,
+    h: &Handler,
+) -> String {
     let probe = |d: Option<usize>| {
         let r = crate::facts::RefFact {
             line: 0,
@@ -291,6 +366,10 @@ fn handler_id(p: &Project, f: usize, from_def: Option<usize>, h: &Handler) -> St
             _ => probe(from_def),
         },
         Handler::Inline => probe(from_def),
+        Handler::Class(ns, class, method) => match class_method(p, files, ns, class, method) {
+            Some(id) => id,
+            None => probe(from_def),
+        },
     }
 }
 
@@ -505,4 +584,38 @@ pub(super) fn link_calls(
         }
     }
     (out, stats)
+}
+
+/// The node of `method` of the one class named `class` whose enclosing names
+/// or path hold the namespace's segments (`Api::ArticlesController#index`,
+/// `App\Http\Controllers\UserController@store`); `None` when no single class
+/// fits.
+fn class_method(
+    p: &Project,
+    files: &[FileFacts],
+    ns: &[String],
+    class: &str,
+    method: &str,
+) -> Option<String> {
+    let fits = |f: usize, i: usize| {
+        let d = &files[f].defs[i];
+        let mut names: Vec<String> = d.qualname.split('.').map(str::to_lowercase).collect();
+        names.extend(files[f].path.split('/').map(|s| s.to_lowercase()));
+        ns.iter().all(|s| {
+            names.iter().any(|n| n == &s.to_lowercase() || n.starts_with(&s.to_lowercase()))
+        })
+    };
+    let mut found = None;
+    for (f, facts) in files.iter().enumerate() {
+        for (i, d) in facts.defs.iter().enumerate() {
+            if d.name == class && d.kind.is_class_like() && fits(f, i) {
+                if found.is_some() {
+                    return None;
+                }
+                found = Some((f, i));
+            }
+        }
+    }
+    let m = p.class_member(found?, method, 4)?;
+    p.node_id(m).map(str::to_string)
 }

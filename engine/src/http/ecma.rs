@@ -423,7 +423,11 @@ impl Ctx<'_> {
         match verb {
             "setGlobalPrefix" => {
                 if let Some(p) = named.first().and_then(|a| path_expr(*a, src)) {
-                    self.out.prefixes.push(GlobalPrefix { framework: "nestjs".into(), prefix: p });
+                    self.out.prefixes.push(GlobalPrefix {
+                        framework: "nestjs".into(),
+                        prefix: p,
+                        file: None,
+                    });
                 }
             }
             "use" if self.framework.is_some() || ROUTER_NAMES.contains(&parent[0].as_str()) => {
@@ -494,7 +498,7 @@ impl Ctx<'_> {
             .and_then(|o| object_value(o, src, "prefix"))
             .and_then(|v| path_expr(v, src))
             .unwrap_or_default();
-        self.out.routers.push(RouterFact { name: text(name, src), prefix });
+        self.out.routers.push(RouterFact { name: text(name, src), prefix, scope: None });
     }
 
     fn class_body(&mut self, cls: Node, params: &HashSet<String>) {

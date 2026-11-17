@@ -12,8 +12,12 @@
 
 pub mod csharp;
 pub mod ecma;
+pub mod go;
 pub mod jvm;
+pub mod php;
 pub mod python;
+pub mod ruby;
+pub mod rust;
 
 use serde::{Deserialize, Serialize};
 use tree_sitter::Node;
@@ -57,7 +61,19 @@ pub enum Handler {
     Path(Vec<String>),
     /// A function written in the registration: the definition around it.
     Inline,
+    /// A method of a class named as text (Rails `"articles#index"` →
+    /// `ArticlesController#index`, Laravel `"UserController@store"`): the
+    /// namespace segments, the class, the method.
+    Class(Vec<String>, String, String),
 }
+
+/// A router path naming the definition the registration is in: routes chained
+/// on `Router::new()` in a function that returns it (axum), which a `nest`
+/// elsewhere mounts.
+pub const SELF_ROUTER: &str = "<self>";
+/// A router path `[PARAM_ROUTER, "N"]`: the function's `N`th parameter (Go
+/// `func addUserRoutes(rg *gin.RouterGroup)`), which each call mounts.
+pub const PARAM_ROUTER: &str = "<param>";
 
 /// One route as a file declares it.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -81,9 +97,13 @@ pub struct RouteFact {
 /// A router made with a prefix of its own.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RouterFact {
-    /// The top-level name it is bound to.
+    /// The name it is bound to.
     pub name: String,
     pub prefix: PathExpr,
+    /// The definition a local router is bound in (`v1 := router.Group("/v1")`);
+    /// `None` for a top-level one.
+    #[serde(default)]
+    pub scope: Option<usize>,
 }
 
 /// What is mounted.
@@ -93,6 +113,8 @@ pub enum Mounted {
     Path(Vec<String>),
     /// A module required in place (`require('./routes/users')`).
     Module(String),
+    /// The `N`th parameter of the function called (`addUserRoutes(v1)`).
+    Param(Vec<String>, usize),
 }
 
 /// One router mounted under another, with a prefix.
@@ -111,6 +133,10 @@ pub struct MountFact {
 pub struct GlobalPrefix {
     pub framework: String,
     pub prefix: PathExpr,
+    /// Only the routes of this file, by its path's end (Laravel
+    /// `Route::prefix('api')->group(base_path('routes/api.php'))`).
+    #[serde(default)]
+    pub file: Option<String>,
 }
 
 /// An HTTP request the code makes: `fetch('/api/users')`,
@@ -155,6 +181,10 @@ pub fn read(lang: Lang, root: Node, src: &[u8], facts: &mut FileFacts) {
         Lang::Java => jvm::read_java(root, src, facts),
         Lang::Kotlin => jvm::read_kotlin(root, src, facts),
         Lang::CSharp => csharp::read(root, src, facts),
+        Lang::Go => go::read(root, src, facts),
+        Lang::Rust => rust::read(root, src, facts),
+        Lang::Ruby => ruby::read(root, src, facts),
+        Lang::Php => php::read(root, src, facts),
         _ => return,
     };
     facts.http = http;
@@ -288,6 +318,7 @@ pub fn single_call(f: Node, src: &[u8]) -> Option<Vec<String>> {
             "annotated_lambda"
             | "lambda_literal"
             | "statements"
+            | "statement_list"
             | "statement_block"
             | "block"
             | "function_body"
