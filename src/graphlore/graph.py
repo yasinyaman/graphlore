@@ -213,17 +213,30 @@ def _is_surprise_edge(e: dict) -> bool:
 # --- shared state ------------------------------------------------------------
 
 
+# How far a call path between two definitions sharing state is looked for.
+_CALL_PATH_HOPS = 6
+# Pairs listed per shared state row.
+_SHARED_PAIRS_LIMIT = 10
+
+
 def _shared_state(
     nodes: list[dict], edges: list[dict], labels: Any = None,
+    call_edges: list[dict] | None = None,
+    coupled: Callable[[str, str], tuple[int, float] | None] | None = None,
 ) -> list[dict]:
     """Variables, fields and resources that code in one file writes and code in
-    another file reads or writes, without the files calling or importing each
-    other necessarily: implicit coupling, strongest first.
+    another file reads or writes: implicit coupling, strongest first.
 
-    A score per state node: +2 when a writer's file and a toucher's file import
-    neither one the other, +2 when they sit in different top-level directories,
-    +1 when they are in different communities. Test code is left out (a test
-    setting a global is how tests work) unless the state itself is test code.
+    Each pair of a writer and another definition touching the state says
+    whether a call path joins them (`call_path`, either way, over calls,
+    dispatch and HTTP, within 6 hops, on `call_edges` — the graph's edges by
+    default) and whether their files change together (`co_change`, from
+    `coupled(file_a, file_b)`, the git history). A score per state node: +2 when
+    some pair has no call path between them (a hidden pair), +2 when the
+    touching files sit in different top-level directories, +1 when they are in
+    different communities, +2 when the files of a hidden pair change together.
+    Test code is left out (a test setting a global is how tests work) unless
+    the state itself is test code.
     """
     byid = {_node_id(n): n for n in nodes}
     name = (lambda i: labels.get(i, i)) if labels is not None else (
@@ -236,10 +249,15 @@ def _shared_state(
             continue
         s, t = _edge_ends(e)
         (writers if rel == "writes" else readers).setdefault(t, set()).add(s)
-    imports: set[tuple[str, str]] = set()
-    for sf, tf, _e, _t, _k in _file_import_edges(nodes, edges):
-        imports.add((sf, tf))
-        imports.add((tf, sf))
+    call_rels = _CALL_RELATIONS | {"dispatches_to"} | _HTTP_RELATIONS
+    adj = _relation_adjacency(call_edges if call_edges is not None else edges, call_rels)
+    reach: dict[str, dict[str, int]] = {}
+
+    def hops(a: str, b: str) -> int | None:
+        if a not in reach:
+            reach[a] = _hop_distances(adj, a, _CALL_PATH_HOPS)
+        return reach[a].get(b)
+
     out: list[dict] = []
     for sid, ws in writers.items():
         state = byid.get(sid)
@@ -263,18 +281,49 @@ def _shared_state(
             continue
         why: list[str] = []
         score = 1
-        pairs = [(file_of[w], file_of[o]) for w in ws_kept for o in touch
-                 if file_of[o] != file_of[w]]
-        if any(p not in imports for p in pairs):
+        file_pairs = [(file_of[w], file_of[o]) for w in ws_kept for o in touch
+                      if file_of[o] != file_of[w]]
+        pairs: list[dict] = []
+        seen: set[frozenset[str]] = set()
+        for w in ws_kept:
+            for o in touch:
+                if o == w or frozenset((w, o)) in seen:
+                    continue
+                seen.add(frozenset((w, o)))
+                ab, ba = hops(w, o), hops(o, w)
+                path = ({"direction": "a→b", "hops": ab} if ab is not None
+                        else {"direction": "b→a", "hops": ba} if ba is not None else None)
+                cc = (coupled(file_of[w], file_of[o])
+                      if coupled is not None and file_of[w] != file_of[o] else None)
+                pairs.append({
+                    "writer": name(w), "other": name(o),
+                    "effect": "both write it" if o in ws else "the other reads what it writes",
+                    "call_path": path,
+                    "co_change": {"commits": cc[0], "degree": round(cc[1], 2)} if cc else None,
+                })
+        hidden = [p for p in pairs if p["call_path"] is None]
+        co_hidden = [p for p in hidden if p["co_change"]]
+        if hidden:
             score += 2
-            why.append("files that neither import the other share it")
-        if any(_top_dir(a) != _top_dir(b) for a, b in pairs):
+            why.append(f"{len(hidden)} of {len(pairs)} pair(s) share it with no call "
+                       "path between them")
+        elif pairs:
+            why.append("every pair is joined by a call path as well")
+        if any(_top_dir(a) != _top_dir(b) for a, b in file_pairs):
             score += 2
             why.append("crosses top-level directories")
         comm = {i: byid[i].get("community", byid[i].get("cluster")) for i in touch}
         if len({c for c in comm.values() if c is not None}) > 1:
             score += 1
             why.append("touched from more than one community")
+        if co_hidden:
+            score += 2
+            why.append(f"{len(co_hidden)} hidden pair(s) whose files change together")
+        pairs.sort(key=lambda p: (p["call_path"] is not None, p["co_change"] is None))
+        row_pairs = pairs[:_SHARED_PAIRS_LIMIT]
+        extra: dict[str, Any] = {}
+        if len(pairs) > len(row_pairs):
+            extra["pairs_left_out"] = len(pairs) - len(row_pairs)
         out.append({
             "state": name(sid),
             "kind": str(state.get("kind") or state.get("resource") or _node_type(state) or ""),
@@ -285,6 +334,10 @@ def _shared_state(
             "score": score,
             "strength": "strong" if score >= 5 else "medium" if score >= 3 else "weak",
             "why": why,
+            "pairs": row_pairs,
+            "hidden_pairs": len(hidden),
+            "co_changing_pairs": len(co_hidden),
+            **extra,
         })
     out.sort(key=lambda r: (-r["score"], -r["files"], -len(r["writers"]), r["state"]))
     return out

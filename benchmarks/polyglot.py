@@ -515,6 +515,15 @@ def check_orientation(a: Audit, sub: Subject) -> None:
     if sp and "error" not in sp and sp.get("basis") not in ("flagged", "computed", "none"):
         a.finding("SURPRISES-BASIS", "low", "bug", "surprises", "unexpected basis",
                   sp.get("basis"))
+    if sp and "error" not in sp:
+        hist = sp.get("history") or {}
+        # a history too short to tell what changes together must say so
+        if hist.get("commits", 0) < 10 and not hist.get("note"):
+            a.finding("HISTORY-SILENT", "medium", "convention", "surprises",
+                      "a short or missing git history is not named", hist)
+        if sp.get("co_change") and hist.get("commits", 0) < 10:
+            a.finding("CO-CHANGE-WITHOUT-HISTORY", "medium", "bug", "surprises",
+                      "files changing together listed from a history too short", hist)
     a.call("surprises", limit=1, expect_error=True)
     com = a.call("communities")
     if com and com.get("communities"):
