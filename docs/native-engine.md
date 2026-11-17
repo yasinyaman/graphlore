@@ -481,8 +481,9 @@ two nodes reference each other. `path` and `explain` read the CLI's default
 4. **Shared state and resources.** Done (this page): what two definitions
    couple through without a call.
 5. **HTTP routes and requests.** Done (this page): route nodes with full
-   paths in 10 languages, and the requests that reach them. Next: git
-   co-change.
+   paths in 10 languages, and the requests that reach them. Git co-change and
+   the call-path check of shared-state pairs are done on graphlore's side
+   ([concepts](concepts.md#files-that-change-together)), for both engines.
 6. **No CLI behind the CLI tools.** `query`, `path` and `explain` answered over
    graph.json in Python; community naming by MCP sampling only; the
    package-API extractors moved into the language modules.

@@ -27,7 +27,7 @@ graph.json analysis tools (no CLI needed):
   - graphlore_duplication_scan: repo-wide duplication audit — identical bodies
                           (exact), then hidden links  [the latter needs [semble]]
   - graphlore_god_nodes  : highest-degree nodes
-  - graphlore_surprises  : unexpected cross-domain connections
+  - graphlore_surprises  : unexpected cross-domain connections, shared state, co-change
   - graphlore_communities: Leiden community summaries
   - graphlore_search     : node name/label search
   - graphlore_neighbors  : 1-hop neighbors of a node
@@ -121,6 +121,7 @@ from mcp.types import (
 )
 
 from . import config, engine
+from . import history as history_mod  # noqa: F401  (tests reach _parse)
 from .apis import (  # noqa: F401  (re-exported for the tools + tests)
     _API_CACHE,
     _API_CACHE_MAX,
@@ -185,8 +186,10 @@ from .graph import (  # noqa: F401  (re-exported for the tools + tests)
     _shared_state,
     _substring_matches,
     _tiered_import_cycles,
+    _top_dir,
     _with_written_by,
 )
+from .history import _HISTORY_CACHE, History, history  # noqa: F401
 from .imports import (  # noqa: F401  (re-exported for the tools + tests)
     ImportChecker,
     _imports_for_file,
@@ -2089,6 +2092,46 @@ def graphlore_god_nodes(top_n: int = 10, as_json: bool = False, scope: str = "")
     return _fmt(payload, as_json, _with_note("\n".join(text), view))
 
 
+def _linked_files(nodes: list[dict], edges: list[dict]) -> set[tuple[str, str]]:
+    """Pairs of files (sorted) that some edge of the graph joins, either way."""
+    byid = {_node_id(n): n for n in nodes}
+    out: set[tuple[str, str]] = set()
+    for e in edges:
+        if _rel(e) in _NON_DEPENDENCY_RELATIONS:
+            continue
+        s, t = _edge_ends(e)
+        a = _norm_relpath(_node_file(byid[s])) if s in byid else ""
+        b = _norm_relpath(_node_file(byid[t])) if t in byid else ""
+        if a and b and a != b:
+            out.add((a, b) if a < b else (b, a))
+    return out
+
+
+def _hidden_co_change(
+    nodes: list[dict], edges: list[dict], view: ScopeView, hist: History,
+) -> list[dict[str, Any]]:
+    """Source files that change together in the git history with no edge of the
+    graph between them, strongest first. Tests are left out: a test changes
+    with the code it tests by design."""
+    files = {_norm_relpath(_node_file(n)) for n in nodes} - {""}
+
+    def counts(f: str) -> bool:
+        dot = f.rfind(".")
+        return (f in files and dot >= 0 and f[dot:].lower() in _SOURCE_EXTS
+                and not _is_test_path(f) and view.keeps_file(f))
+
+    linked = _linked_files(nodes, edges)
+    out: list[dict[str, Any]] = []
+    for a, b, n, d in hist.coupled_pairs():
+        if not (counts(a) and counts(b)) or (a, b) in linked:
+            continue
+        why = ["no edge of the graph joins them"]
+        if _top_dir(a) != _top_dir(b):
+            why.append("different top-level directories")
+        out.append({"files": [a, b], "commits": n, "degree": round(d, 2), "why": why})
+    return out
+
+
 @_tool(annotations=ToolAnnotations(title="Surprise edges", read_only_hint=True))
 def graphlore_surprises(limit: int = 20, as_json: bool = False, scope: str = "") -> str:
     """List unexpected cross-file/cross-domain connections (surprise edges).
@@ -2112,10 +2155,20 @@ def graphlore_surprises(limit: int = 20, as_json: bool = False, scope: str = "")
     (the native engine's ``reads`` / ``writes``): coupling with no call between
     the two. Scored like the edges: files that do not import each other,
     different top-level directories, different communities; test code is left
-    out unless the state is test code.
+    out unless the state is test code. Each row's ``pairs`` say, per writer and
+    other definition touching the state, whether a call path joins them
+    (``call_path``) and whether their files change together in the git history
+    (``co_change``); a hidden pair (no call path) and a hidden pair whose files
+    change together each raise the score.
+
+    ``co_change`` lists source files that keep changing in the same commits
+    (code-maat's degree, from the last 1000 commits; a commit of more than 30
+    files is skipped) with no edge of the graph between them: coupling the code
+    does not show. ``history`` says how much history was read; a shallow clone
+    or a short history is named, not taken for "nothing changes together".
 
     Args:
-        limit: Cap on listed edges, and on listed shared state.
+        limit: Cap on listed edges, on listed shared state and on co-change pairs.
         scope: Which part of the graph to score (see graphlore_god_nodes): path
             prefixes / globs, ``!pattern``, ``-tests``, ``+vendored``, ``all``.
             Vendored and minified files are left out by default.
@@ -2133,8 +2186,17 @@ def graphlore_surprises(limit: int = 20, as_json: bool = False, scope: str = "")
     # external to the code: the shared state is read with them in
     with_resources = _scope_view(all_nodes, all_edges, f"{scope} +external".strip(), as_json)
     shared_view = view if isinstance(with_resources, str) else with_resources
-    shared = _shared_state(shared_view.nodes, shared_view.edges, labels)
+    hist = history()
+    coupled = hist.coupled if hist.usable else None
+    # call paths are looked for on the resolved edges, and only where there is
+    # state to share (resolving a graphify graph parses its sources)
+    has_state = any(_rel(e) in _STATE_RELATIONS for e in all_edges)
+    call_edges = _resolved(all_nodes, all_edges).edges if has_state else all_edges
+    shared = _shared_state(shared_view.nodes, shared_view.edges, labels,
+                           call_edges=call_edges, coupled=coupled)
     shared_rows = shared[:max(0, limit)]
+    co_change = _hidden_co_change(all_nodes, all_edges, view, hist) if hist.usable else []
+    co_rows = co_change[:max(0, limit)]
 
     def with_shared(payload: dict[str, Any], text: list[str]) -> None:
         payload["shared_state"] = shared_rows
@@ -2142,6 +2204,21 @@ def graphlore_surprises(limit: int = 20, as_json: bool = False, scope: str = "")
         if len(shared) > len(shared_rows):
             payload["truncated"] = True
             payload["shared_state_left_out"] = len(shared) - len(shared_rows)
+        payload["co_change"] = co_rows
+        payload["co_change_total"] = len(co_change)
+        if len(co_change) > len(co_rows):
+            payload["truncated"] = True
+            payload["co_change_left_out"] = len(co_change) - len(co_rows)
+        payload["history"] = hist.payload()
+        if co_rows:
+            text.append(f"\nChanging together: {len(co_change)} pair(s) of files that "
+                        f"change in the same commits ({hist.commits} read) with nothing "
+                        "in the graph joining them:")
+            for r in co_rows:
+                text.append(f"  [{r['commits']} commits, degree {r['degree']}] "
+                            f"{r['files'][0]} <-> {r['files'][1]}")
+        elif hist.note():
+            text.append(f"\n({hist.note()}.)")
         if not shared_rows:
             return
         text.append(f"\nShared state: {len(shared)} variable(s)/field(s) written in one "
@@ -2153,6 +2230,10 @@ def graphlore_surprises(limit: int = 20, as_json: bool = False, scope: str = "")
                 f"{', '.join(r['writers'][:3])}{'…' if len(r['writers']) > 3 else ''}"
                 + (f"; read by {', '.join(r['readers'][:3])}"
                    f"{'…' if len(r['readers']) > 3 else ''}" if r["readers"] else "")
+                + (f" — {r['hidden_pairs']} pair(s) with no call path"
+                   + (f", {r['co_changing_pairs']} of them changing together"
+                      if r["co_changing_pairs"] else "")
+                   if r["hidden_pairs"] else "")
             )
             if r["why"]:
                 text.append(f"      {'; '.join(r['why'])}")
@@ -2173,8 +2254,9 @@ def graphlore_surprises(limit: int = 20, as_json: bool = False, scope: str = "")
             "scope": view.payload(),
         }
         with_shared(payload, text)
-        _cut_hint(payload, "Raise limit for more of the `total` edges and "
-                  "`shared_state_total` state, or narrow with scope=.")
+        _cut_hint(payload, "Raise limit for more of the `total` edges, "
+                  "`shared_state_total` state and `co_change_total` pairs, or narrow "
+                  "with scope=.")
         return _fmt(payload, as_json, _with_note("\n".join(text), view))
 
     checker = ImportChecker()
@@ -2205,7 +2287,8 @@ def graphlore_surprises(limit: int = 20, as_json: bool = False, scope: str = "")
             "scope": view.payload(),
         }
         with_shared(payload, text)
-        _cut_hint(payload, "Raise limit for more of the `shared_state_total` state.")
+        _cut_hint(payload, "Raise limit for more of the `shared_state_total` state and "
+                  "`co_change_total` pairs.")
         return _fmt(payload, as_json, _with_note("\n".join(text), view))
 
     text = [
@@ -2237,8 +2320,9 @@ def graphlore_surprises(limit: int = 20, as_json: bool = False, scope: str = "")
         "scope": view.payload(),
     }
     with_shared(payload, text)
-    _cut_hint(payload, "Raise limit for more of the `total` edges and "
-              "`shared_state_total` state, or narrow with scope=.")
+    _cut_hint(payload, "Raise limit for more of the `total` edges, "
+              "`shared_state_total` state and `co_change_total` pairs, or narrow "
+              "with scope=.")
     return _fmt(payload, as_json, _with_note("\n".join(text), view))
 
 
@@ -4104,6 +4188,9 @@ def graphlore_node_details(node: str, as_json: bool = False) -> str:
     http, http_text = _http_of(nodes, edges, _node_id(n))
     if http:
         detail["http"] = http
+    co, co_text = _co_change_of(nodes, edges, _norm_relpath(_node_file(n)))
+    if co:
+        detail["co_change"] = co
     detail["content_trust"] = _CONTENT_TRUST
     detail["untrusted_fields"] = ["doc", "extra"]
     loc = f"{detail['file']}:{detail['line']}" if detail["file"] else "(no source location)"
@@ -4116,12 +4203,37 @@ def graphlore_node_details(node: str, as_json: bool = False) -> str:
     ]
     if extra:
         text.append(f"  other    : {', '.join(extra.keys())}")
-    text += state_text + http_text
+    text += state_text + http_text + co_text
     matched, matched_text = _matched(node, picked)
     if matched:
         detail["matched"] = matched
         text.append(matched_text)
     return _fmt(detail, as_json, "\n".join(text))
+
+
+_CO_CHANGE_PARTNERS = 5
+
+
+def _co_change_of(
+    nodes: list[dict], edges: list[dict], f: str,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """The files `f` changes together with most in the git history, and whether
+    the graph joins them; empty without a usable history."""
+    if not f:
+        return [], []
+    hist = history()
+    if not hist.usable:
+        return [], []
+    partners = hist.partners(f)
+    if not partners:
+        return [], []
+    linked = _linked_files(nodes, edges)
+    rows = [{"file": o, "commits": c, "degree": round(d, 2),
+             "linked": ((f, o) if f < o else (o, f)) in linked}
+            for o, c, d in partners[:_CO_CHANGE_PARTNERS]]
+    shown = ", ".join(f"{r['file']} ({r['commits']}{'' if r['linked'] else ', not in the graph'})"
+                      for r in rows)
+    return rows, [f"  changes with: {shown}"]
 
 
 def _http_of(nodes: list[dict], edges: list[dict], nid: str) -> tuple[dict[str, Any], list[str]]:
@@ -6402,7 +6514,8 @@ def onboard() -> str:
             (("graphlore_subgraph", "For the top 2-3 god nodes, call graphlore_subgraph to "
               "see how they connect."),),
             (("graphlore_surprises", "Call graphlore_surprises and flag anything that looks "
-              "like a hidden coupling."),),
+              "like a hidden coupling: state shared with no call path, files that change "
+              "together with nothing in the graph joining them."),),
         ],
         "Then write me a concise architecture summary: subsystems, key types, and risks.",
     )

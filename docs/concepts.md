@@ -207,12 +207,42 @@ The tools use it in four places:
   `state_nodes_skipped`; `shared_state=True` follows them from a writer through
   what it writes to its readers.
 - `graphlore_surprises` lists, beside the edges, the state written in one file
-  and read or written in another (`shared_state`), strongest first.
+  and read or written in another (`shared_state`), strongest first. Each row's
+  `pairs` say, per writer and other definition touching the state, whether a
+  call path joins them (`call_path`: either way, over calls, dispatch and HTTP,
+  within 6 hops) and whether their files change together (`co_change`, below).
+  A hidden pair, one with no call path, is what a call graph cannot show; it
+  raises the score, and more when the two files also change together.
 - `graphlore_node_details` says what a definition reads and writes and which
   other definitions share that state with it.
 
 `graphlore_cycles` ignores reads and writes: two functions sharing a counter
 do not depend on each other in a cycle.
+
+## Files that change together
+
+Two files that keep changing in the same commits are coupled whether or not the
+code says so: a websocket client and its server, a model and the schema it
+maps to, two implementations of one interface kept in step. graphlore reads
+this from the project's git history when a tool asks, with one local
+`git log` (no network): the last 1000 commits that are not merges, renames
+followed to the file's current name, and no commit of more than 30 files (a
+reformat or a mass rename says nothing about which files belong together).
+The measure is code-maat's: a pair's `degree` is the commits it shares over the
+mean of the two files' commits, and a pair counts from 3 shared commits and a
+degree of 0.3. The result is cached on `HEAD`; it works on graphify and native
+graphs alike, and nothing is written to `graph.json`.
+
+- `graphlore_surprises` lists in `co_change` the source files that change
+  together with no edge of the graph between them (tests left out: a test
+  changes with the code it tests by design), and raises the score of a
+  shared-state pair whose files change together.
+- `graphlore_node_details` names the files a node's file changes with most,
+  and whether the graph joins them (`linked`).
+
+`history` in the reply says how much was read. A shallow clone (CI checkouts
+often are: `git fetch --deepen=1000` fetches more) or fewer than 10 commits is
+named as such, so an empty list is never taken for "nothing changes together".
 
 ## HTTP routes and requests
 

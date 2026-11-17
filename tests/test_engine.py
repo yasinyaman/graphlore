@@ -312,6 +312,9 @@ def test_native_shared_state_end_to_end(tmp_path, monkeypatch):
     assert "get()" in {r["node"] for r in shared["impacted"]}
     sp = json.loads(server.graphlore_surprises(as_json=True))
     assert [r["state"] for r in sp["shared_state"]] == ["CACHE"]
+    # no call joins put() and get(): the pair is hidden
+    (pair,) = sp["shared_state"][0]["pairs"]
+    assert (pair["writer"], pair["other"], pair["call_path"]) == ("put()", "get()", None)
     details = json.loads(server.graphlore_node_details("put", as_json=True))
     assert details["state"]["shared_with"][0]["node"] == "get()"
 

@@ -204,6 +204,11 @@ stripped) — the middle layer between the map and full code — and
   code whose requests reach it), and `graphlore_impact("<handler>")` walks from
   the handler through its route to that code; `relations="http"` keeps only
   those steps.
+- **"What changes with this?"** → `graphlore_node_details("<node>")`'s `co_change`
+  names the files its file changes with in the git history (`linked: false` when
+  nothing in the graph joins them); `graphlore_surprises()`'s `co_change` lists
+  such pairs across the project. A shallow clone has no history to read: the
+  reply says so (`history.note`).
 - **"What else touches this?"** → `graphlore_surprises()`'s `shared_state` list:
   state written in one file and read in another, the implicit coupling no call
   graph shows.

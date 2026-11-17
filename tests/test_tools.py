@@ -228,6 +228,102 @@ def test_routes_and_node_details_read_native_route_nodes(tmp_path, monkeypatch):
     assert json.loads(server.graphlore_routes(as_json=True))["source"] == "source"
 
 
+def test_shared_state_pairs_joined_by_a_call_are_not_hidden(tmp_path, monkeypatch):
+    graph = json.loads(json.dumps(_SHARED_STATE_GRAPH))
+    graph["links"].append({"source": "get", "target": "put", "relation": "calls",
+                           "confidence": "EXTRACTED", "source_file": "web/b.py",
+                           "source_location": "L5"})
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    server._GRAPH_CACHE.clear()
+    _write_graph(tmp_path, graph)
+    (row,) = json.loads(server.graphlore_surprises(as_json=True))["shared_state"]
+    assert row["hidden_pairs"] == 0
+    assert row["pairs"][0]["call_path"] == {"direction": "b→a", "hops": 1}
+    assert "every pair is joined by a call path as well" in row["why"]
+    hidden = server._shared_state(*server._nodes_edges(_SHARED_STATE_GRAPH))[0]
+    assert row["score"] == hidden["score"] - 2
+
+
+def _co_change_repo(tmp_path, monkeypatch, links=()):
+    """pkg/a.py and web/b.py change together five times (the first commit
+    too), c.py alone six more; one commit of 31 files is bulk."""
+    import shutil as _sh
+    import subprocess
+
+    import pytest
+    if _sh.which("git") is None:
+        pytest.skip("git not available")
+    files = {"pkg/a.py": "def a():\n    return 1\n", "web/b.py": "def b():\n    return 2\n",
+             "c.py": "def c():\n    return 3\n"}
+    for rel, text in files.items():
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_text(text, encoding="utf-8")
+    nodes = [{"id": rel.replace("/", "_"), "label": rel.rsplit("/", 1)[-1], "source_file": rel,
+              "kind": "file", "source_location": "L1"} for rel in files]
+    nodes += [{"id": n, "label": f"{n}()", "source_file": rel, "kind": "function",
+               "source_location": "L1", "_callable": True}
+              for n, rel in (("a", "pkg/a.py"), ("b", "web/b.py"), ("c", "c.py"))]
+    _write_graph(tmp_path, {"nodes": nodes, "links": list(links)})
+
+    def git(*args):
+        subprocess.run(["git", *args], cwd=tmp_path, capture_output=True, check=True)
+
+    git("init")
+    git("config", "user.email", "t@example.com")
+    git("config", "user.name", "Test")
+    git("add", ".")
+    git("commit", "-m", "init")
+    for i in range(4):
+        for rel in ("pkg/a.py", "web/b.py"):
+            with open(tmp_path / rel, "a", encoding="utf-8") as fh:
+                fh.write(f"# {i}\n")
+        git("commit", "-qam", f"together {i}")
+    for i in range(6):
+        with open(tmp_path / "c.py", "a", encoding="utf-8") as fh:
+            fh.write(f"# {i}\n")
+        git("commit", "-qam", f"alone {i}")
+    for i in range(31):
+        (tmp_path / f"bulk_{i}.py").write_text("x = 1\n", encoding="utf-8")
+    git("add", ".")
+    git("commit", "-qm", "bulk")
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    server._GRAPH_CACHE.clear()
+    server._HISTORY_CACHE.clear()
+
+
+def test_files_that_change_together_with_nothing_joining_them(tmp_path, monkeypatch):
+    _co_change_repo(tmp_path, monkeypatch)
+    sp = json.loads(server.graphlore_surprises(as_json=True))
+    assert sp["history"] == {"commits": 12, "shallow": False, "skipped_bulk": 1}
+    (row,) = sp["co_change"]
+    assert row["files"] == ["pkg/a.py", "web/b.py"] and row["commits"] == 5
+    assert row["degree"] == 1.0 and "different top-level directories" in row["why"]
+    assert "Changing together: 1 pair(s)" in server.graphlore_surprises()
+    cut = json.loads(server.graphlore_surprises(limit=0, as_json=True))
+    assert cut["co_change_left_out"] == 1 and cut["truncated"]
+    a = json.loads(server.graphlore_node_details("a", as_json=True))
+    assert a["co_change"] == [{"file": "web/b.py", "commits": 5, "degree": 1.0, "linked": False}]
+    assert json.loads(server.graphlore_node_details("c", as_json=True)).get("co_change") is None
+
+
+def test_files_the_graph_joins_are_not_hidden_co_change(tmp_path, monkeypatch):
+    _co_change_repo(tmp_path, monkeypatch, links=[
+        {"source": "a", "target": "b", "relation": "calls", "confidence": "EXTRACTED"}])
+    assert json.loads(server.graphlore_surprises(as_json=True))["co_change"] == []
+    a = json.loads(server.graphlore_node_details("a", as_json=True))
+    assert a["co_change"][0]["linked"] is True
+
+
+def test_history_follows_renames_and_drops_untracked_files():
+    log = ("\x1enew\n\nM\tsrc/b.py\nM\tsrc/a2.py\n"
+           "\x1eren\n\nR100\tsrc/a.py\tsrc/a2.py\n"
+           "\x1eold\n\nM\tsrc/a.py\nM\tsrc/b.py\nM\tgone.py\n")
+    commits, bulk, revs, shared = server.history_mod._parse(log, {"src/a2.py", "src/b.py"})
+    assert (commits, bulk) == (3, 0)
+    assert revs == {"src/a2.py": 3, "src/b.py": 2}
+    assert shared == {("src/a2.py", "src/b.py"): 2}
+
+
 def test_surprises_and_node_details_name_shared_state(tmp_path, monkeypatch):
     _shared_state_project(tmp_path, monkeypatch)
     sp = json.loads(server.graphlore_surprises(as_json=True))
@@ -235,9 +331,14 @@ def test_surprises_and_node_details_name_shared_state(tmp_path, monkeypatch):
     assert row["state"] == "CACHE" and row["writers"] == ["put()"] and row["readers"] == ["get()"]
     assert row["kind"] == "variable" and row["files"] == 2
     assert "crosses top-level directories" in row["why"]
-    # the two files both import cache.py, not each other
-    assert "files that neither import the other share it" in row["why"]
+    # no call joins put() and get(): a hidden pair
+    assert row["hidden_pairs"] == 1 and row["co_changing_pairs"] == 0
+    (pair,) = row["pairs"]
+    assert (pair["writer"], pair["other"], pair["call_path"]) == ("put()", "get()", None)
+    assert "1 of 1 pair(s) share it with no call path between them" in row["why"]
     assert sp["shared_state_total"] == 1
+    assert sp["history"]["commits"] == 0 and "no history read" in sp["history"]["note"]
+    assert sp["co_change"] == [] and sp["co_change_total"] == 0
     cut = json.loads(server.graphlore_surprises(limit=0, as_json=True))
     assert cut["truncated"] and cut["shared_state_left_out"] == 1 and cut["hint"]
     text = server.graphlore_surprises()

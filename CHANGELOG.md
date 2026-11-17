@@ -7,6 +7,28 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **Files that change together.** graphlore reads the project's git history
+  (one local `git log`: the last 1000 commits that are not merges, renames
+  followed, commits of more than 30 files skipped) and measures, per pair of
+  files, code-maat's degree of change coupling; cached on `HEAD`, for graphify
+  and native graphs alike, nothing written to `graph.json`.
+  `graphlore_surprises` lists in `co_change` the source files that change
+  together with no edge of the graph between them (tests left out), and
+  `graphlore_node_details` the files a node's file changes with most and
+  whether the graph joins them (`linked`). Both say how much history was read
+  (`history`), and a shallow clone or a history under 10 commits is named
+  rather than shown as an empty list. On nine audit repositories deepened to
+  their last 1000 commits, 239 such pairs, read by hand all real: a websocket
+  client and its server, Rails routes and models with `schema.rb`, parallel
+  implementations kept in step; `git log` took at most 230 ms.
+- **Shared state, pair by pair.** Each `shared_state` row of
+  `graphlore_surprises` lists its `pairs` (a writer and another definition
+  touching the state), whether a call path joins them (`call_path`, either
+  way, over calls, dispatch and HTTP, within 6 hops) and whether their files
+  change together (`co_change`). The score counts hidden pairs (no call path)
+  instead of files that import neither the other, and a hidden pair whose
+  files change together raises it again; a row whose pairs are all joined by
+  calls says so (`every pair is joined by a call path as well`).
 - **Routes and HTTP requests in the native engine** (graph schema 5, engine
   0.5.0), in Python, JS/TS, Java, Kotlin, C#, Go, Rust, Ruby and PHP: every
   route is a `type: route` node with its
