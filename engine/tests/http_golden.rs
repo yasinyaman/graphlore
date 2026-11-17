@@ -385,3 +385,145 @@ fn aspnet_controllers_minimal_apis_and_http_client() {
     );
     assert!(!c.iter().any(|(s, _, _)| s == ".Load()"), "a cache is not an HTTP client: {c:#?}");
 }
+
+#[test]
+fn gin_groups_across_files_and_chi_lambdas() {
+    let (got, g) = routes(
+        "gin",
+        &[
+            ("go.mod", "module example.com/app\n\ngo 1.22\n"),
+            (
+                "routes/main.go",
+                "package routes\n\nimport \"github.com/gin-gonic/gin\"\n\nvar router = gin.Default()\n\nfunc getRoutes() {\n\tv1 := router.Group(\"/v1\")\n\taddUserRoutes(v1)\n\tv2 := router.Group(\"/v2\")\n\taddUserRoutes(v2)\n\trouter.GET(\"/health\", health)\n}\n\nfunc health(c *gin.Context) {}\n",
+            ),
+            (
+                "routes/users.go",
+                "package routes\n\nimport \"github.com/gin-gonic/gin\"\n\nfunc addUserRoutes(rg *gin.RouterGroup) {\n\tusers := rg.Group(\"/users\")\n\tusers.GET(\"comments\", listComments)\n\tusers.POST(\"/\", func(c *gin.Context) { createUser(c) })\n}\n\nfunc listComments(c *gin.Context) {}\n\nfunc createUser(c *gin.Context) {}\n",
+            ),
+            (
+                "api/router.go",
+                "package api\n\nimport (\n\t\"net/http\"\n\n\t\"github.com/go-chi/chi/v5\"\n)\n\nfunc Router() http.Handler {\n\tr := chi.NewRouter()\n\tr.Route(\"/api\", func(r chi.Router) {\n\t\tr.Get(\"/items/{id}\", getItem)\n\t})\n\treturn r\n}\n\nfunc getItem(w http.ResponseWriter, r *http.Request) {}\n",
+            ),
+            (
+                "cmd/check/main.go",
+                "package main\n\nimport \"net/http\"\n\nfunc main() {\n\thttp.Get(\"http://localhost:8080/v1/users/comments\")\n}\n",
+            ),
+        ],
+    );
+    has(
+        &got,
+        &[
+            ("GET /v1/users/comments", "listComments()"),
+            ("GET /v2/users/comments", "listComments()"),
+            ("POST /v1/users", "createUser()"),
+            ("GET /health", "health()"),
+            ("GET /api/items/{id}", "getItem()"),
+        ],
+    );
+    has_call(&calls(&g), &[("main()", "GET /v1/users/comments", "EXTRACTED")]);
+}
+
+#[test]
+fn axum_nest_across_files_and_actix_configure() {
+    let (got, _) = routes(
+        "axum",
+        &[
+            ("Cargo.toml", "[package]\nname = \"app\"\nversion = \"0.1.0\"\n"),
+            (
+                "src/main.rs",
+                "mod users;\n\nuse axum::{routing::get, Router};\n\nfn app() -> Router {\n    Router::new()\n        .route(\"/health\", get(health))\n        .nest(\"/api\", users::router())\n}\n\nasync fn health() {}\n",
+            ),
+            (
+                "src/users.rs",
+                "use axum::{routing::{get, post}, Router};\n\npub fn router() -> Router {\n    Router::new().route(\"/users/:id\", get(show_user).post(update_user))\n}\n\nasync fn show_user() {}\n\nasync fn update_user() {}\n",
+            ),
+            (
+                "web/src/lib.rs",
+                "use actix_web::{web, App};\n\n#[actix_web::get(\"/ping\")]\nasync fn ping() {}\n\npub fn app() {\n    App::new().service(web::scope(\"/v1\").configure(routes));\n}\n\nfn routes(cfg: &mut web::ServiceConfig) {\n    cfg.service(web::resource(\"items\").route(web::post().to(add_item)));\n}\n\nasync fn add_item() {}\n",
+            ),
+        ],
+    );
+    has(
+        &got,
+        &[
+            ("GET /health", "health()"),
+            ("GET /api/users/:id", "show_user()"),
+            ("POST /api/users/:id", "update_user()"),
+            ("GET /ping", "ping()"),
+            ("POST /v1/items", "add_item()"),
+        ],
+    );
+}
+
+#[test]
+fn rails_routes_reach_controller_actions() {
+    let (got, g) = routes(
+        "rails",
+        &[
+            (
+                "config/routes.rb",
+                "Rails.application.routes.draw do\n  namespace :api do\n    resource :user, only: [:show]\n    resources :articles, param: :slug, only: [:index, :show] do\n      get :feed, on: :collection\n    end\n  end\n  get 'about', to: 'pages#about'\nend\n",
+            ),
+            (
+                "app/controllers/api/users_controller.rb",
+                "module Api\n  class UsersController < ApplicationController\n    def show; end\n  end\nend\n",
+            ),
+            (
+                "app/controllers/api/articles_controller.rb",
+                "module Api\n  class ArticlesController < ApplicationController\n    def index; end\n    def show; end\n    def feed; end\n  end\nend\n",
+            ),
+            ("app/controllers/pages_controller.rb", "class PagesController < ApplicationController\n  def about; end\nend\n"),
+            ("spec/requests/articles_spec.rb", "describe 'articles' do\n  it 'lists' do\n    get '/api/articles'\n  end\nend\n"),
+        ],
+    );
+    has(
+        &got,
+        &[
+            ("GET /api/user", ".show()"),
+            ("GET /api/articles", ".index()"),
+            ("GET /api/articles/:slug", ".show()"),
+            ("GET /api/articles/feed", ".feed()"),
+            ("GET /about", ".about()"),
+        ],
+    );
+    assert_eq!(g["graph"]["engine"], "graphlore");
+    assert!(calls(&g).is_empty(), "a request spec is counted, not linked");
+}
+
+#[test]
+fn laravel_route_files_and_symfony_attributes() {
+    let (got, _) = routes(
+        "laravel",
+        &[
+            (
+                "app/Providers/RouteServiceProvider.php",
+                "<?php\nnamespace App\\Providers;\n\nuse Illuminate\\Support\\Facades\\Route;\n\nclass RouteServiceProvider\n{\n    public function boot()\n    {\n        Route::prefix('api')->middleware('api')->group(base_path('routes/api.php'));\n    }\n}\n",
+            ),
+            (
+                "routes/api.php",
+                "<?php\nuse Illuminate\\Support\\Facades\\Route;\nuse App\\Http\\Controllers\\UserController;\nuse App\\Http\\Controllers\\ArticleController;\n\nRoute::prefix('users')->group(function () {\n    Route::post('login', [UserController::class, 'login']);\n});\nRoute::apiResource('articles', ArticleController::class)->only(['index', 'show']);\n",
+            ),
+            (
+                "app/Http/Controllers/UserController.php",
+                "<?php\nnamespace App\\Http\\Controllers;\n\nclass UserController\n{\n    public function login() {}\n}\n",
+            ),
+            (
+                "app/Http/Controllers/ArticleController.php",
+                "<?php\nnamespace App\\Http\\Controllers;\n\nclass ArticleController\n{\n    public function index() {}\n    public function show() {}\n}\n",
+            ),
+            (
+                "src/Controller/BlogController.php",
+                "<?php\nnamespace App\\Controller;\n\nuse Symfony\\Component\\Routing\\Attribute\\Route;\n\n#[Route('/blog')]\nclass BlogController\n{\n    #[Route('/{slug}', name: 'post', methods: ['GET'])]\n    public function post() {}\n}\n",
+            ),
+        ],
+    );
+    has(
+        &got,
+        &[
+            ("POST /api/users/login", ".login()"),
+            ("GET /api/articles", ".index()"),
+            ("GET /api/articles/{id}", ".show()"),
+            ("GET /blog/{slug}", ".post()"),
+        ],
+    );
+}

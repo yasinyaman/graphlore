@@ -183,7 +183,7 @@ pub fn read(root: Node, src: &[u8], facts: &FileFacts) -> HttpFacts {
             if let Some(name) = bound {
                 let prefix =
                     keyword(call, src, key).and_then(|v| path_expr(v, src)).unwrap_or_default();
-                out.routers.push(RouterFact { name: text(name, src), prefix });
+                out.routers.push(RouterFact { name: text(name, src), prefix, scope: None });
             }
             continue;
         }
