@@ -358,31 +358,35 @@ GraphQL / gRPC.
 `benchmarks/compare_engines.py` builds both graphs of a repository, pairs
 graphify's code definitions with the native ones (same file, definition line
 and bare name), and compares the edges between paired definitions (imports as
-file pairs). On the 31 repositories of the [polyglot audit](benchmark-polyglot.md)
-(graphify 0.9.111, engine 0.2.0, measured 2026-11-16), as native / graphify
-edges and the share of graphify's that the native graph has too:
+file pairs). The native graph has definitions graphify folds into the one
+around them (a function nested in a method, the setter beside a getter of the
+same name); an edge from one of those is compared as an edge from the paired
+definition it belongs to, as graphify records it. On the 31 repositories of the
+[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.1,
+measured 2026-11-17), as native / graphify edges and the share of graphify's
+that the native graph has too:
 
 | Language | same definition | imports (file pairs) | calls | bases | type references |
 |---|--:|--:|--:|--:|--:|
-| Python | 100% | 212 / 219 (96%) | 2,113 / 834 (93%) | 67 / 62 (100%) | 709 / 494 (68%) |
-| JavaScript | 97.3% | 190 / 305 (59%) | 890 / 2,061 (34%)¹ | 1 / 1 | 3 / 0 |
-| TypeScript | 99.6% | 527 / 634 (83%) | 627 / 688 (79%) | 25 / 20 (100%) | 693 / 156 (88%) |
-| TSX | 99.7% | 253 / 316 (80%) | 422 / 456 (93%) | – | 38 / 4 |
-| Go | 100% | 538 / 950 (47%)² | 5,893 / 3,167 (98%) | 19 / 14 (100%) | 672 / 355 (100%) |
-| Java | 100% | 1,100 / 1,010 (100%) | 5,082 / 5,123 (80%) | 207 / 168 (94%) | 3,908 / 1,930 (96%) |
-| Kotlin | 99.4% | 359 / 333 (95%) | 3,376 / 2,108 (61%) | 87 / 56 (88%) | 1,003 / 673 (75%) |
-| Scala | 100% | 2 / 0 | 33 / 20 (35%) | 21 / 22 (95%) | 62 / 32 (91%) |
-| C# | 92.7% | 334 / 280 (28%)³ | 2,172 / 2,450 (76%) | 87 / 86 (98%) | 1,388 / 806 (97%) |
-| Rust | 93.3% | 323 / 370 (75%) | 1,714 / 853 (76%) | 50 / 41 (93%) | 1,164 / 895 (81%) |
-| Swift | 95.9% | 145 / 166 (–)³ | 3,247 / 2,141 (77%) | 170 / 164 (100%) | 934 / 580 (51%) |
+| Python | 100% | 212 / 219 (96%) | 2,080 / 834 (94%) | 73 / 62 (100%) | 439 / 494 (68%) |
+| JavaScript | 93.5%⁵ | 190 / 305 (59%) | 1,378 / 2,058 (44%)¹ | 1 / 1 | 3 / 0 |
+| TypeScript | 99.4% | 527 / 634 (83%) | 778 / 687 (98%) | 25 / 20 (100%) | 736 / 156 (88%) |
+| TSX | 99.7% | 253 / 316 (80%) | 435 / 456 (95%) | – | 42 / 4 |
+| Go | 100% | 538 / 950 (47%)² | 5,864 / 3,167 (98%) | 19 / 14 (100%) | 673 / 355 (100%) |
+| Java | 100% | 1,105 / 1,010 (100%) | 5,179 / 5,123 (81%) | 215 / 168 (94%) | 4,021 / 1,930 (98%) |
+| Kotlin | 99.4% | 368 / 333 (95%) | 3,527 / 2,108 (64%) | 87 / 56 (88%) | 1,093 / 673 (81%) |
+| Scala | 100% | 2 / 0 | 46 / 20 (45%) | 21 / 22 (95%) | 75 / 32 (100%) |
+| C# | 92.7% | 347 / 280 (30%)³ | 2,259 / 2,450 (80%) | 87 / 86 (98%) | 1,249 / 806 (99%) |
+| Rust | 93.3% | 314 / 370 (75%) | 1,754 / 853 (79%) | 53 / 41 (93%) | 1,241 / 895 (81%) |
+| Swift | 95.9% | 165 / 166 (–)³ | 4,020 / 2,141 (82%) | 190 / 164 (100%) | 1,080 / 580 (62%) |
 | C | 100% | 89 / 77 (99%) | 864 / 791 (100%) | – | 253 / 130 (97%) |
-| C++ | 92.1% | 215 / 228 (93%) | 285 / 280 (25%)⁴ | 30 / 5 (100%) | 206 / 214 (71%) |
-| C/C++ headers | 68.2% | 164 / 172 (95%) | 337 / 342 (83%) | 11 / 12 (92%) | 380 / 285 (72%) |
-| Ruby | 99.5% | 42 / 0 | 298 / 374 (60%) | 36 / 15 (93%) | 48 / 0 |
-| PHP | 80.6% | 429 / 505 (84%) | 5,715 / 6,140 (81%) | 65 / 60 (98%) | 263 / 213 (95%) |
-| **All** | **93.3%** | **4,922 / 5,565 (75%)** | **33,068 / 27,828 (77%)** | **876 / 726 (96%)** | **11,724 / 6,767 (85%)** |
+| C++ | 97.8% | 215 / 228 (93%) | 488 / 281 (33%)⁴ | 30 / 5 (100%) | 326 / 218 (88%) |
+| C/C++ headers | 90.6% | 164 / 172 (95%) | 360 / 348 (85%) | 11 / 12 (92%) | 515 / 289 (84%) |
+| Ruby | 99.7% | 42 / 0 | 308 / 375 (60%) | 36 / 15 (93%) | 50 / 0 |
+| PHP | 80.6% | 429 / 505 (84%) | 7,040 / 6,140 (90%) | 65 / 60 (98%) | 648 / 213 (95%) |
+| **All** | **94.4%** | **4,960 / 5,565 (75%)** | **36,380 / 27,832 (82%)** | **913 / 726 (96%)** | **12,444 / 6,775 (87%)** |
 
-Of the native calls, 5,067 (15%) are `INFERRED`, against 47% of graphify's.
+Of the native calls, 7,249 (20%) are `INFERRED`, against 47% of graphify's.
 Reading a sample of each side's edges the other lacks, per language:
 
 - **What only graphify has** is mostly its own guesses and artefacts.
@@ -401,6 +405,23 @@ Reading a sample of each side's edges the other lacks, per language:
   helper, Ruby's `@article.destroy` linked to the controller's own `destroy`.
   ⁴ C++ calls: graphify links a call to the declaration in the header; the
   native graph to the definition, whose body is what `fetch` and `impact` read.
+  A call by name alone to a method of the same file is most of the rest:
+  `funSpec.toString()` linked to a test's own `toString()` (262 of Kotlin's 716
+  in kotlinpoet), `Truth.assertThat()` to a project `assertThat` (653 in
+  retrofit), `@handlers.insert(i, h)` to the builder's `insert`, `server.enqueue`,
+  `Unirest.delete`. A construction (`new RestRequest()`) goes to the
+  constructor in graphify's C# graphs and to the class in the native one (most
+  of C#'s gap), and `Article.find_by(…)` is a `calls` edge to the model there, a
+  `references` edge here.
+- **What the native graph still lacks**, read from the same samples: calls of
+  **extension functions and methods** on a receiver the project does not
+  define (`property.toPropertySpec()` in Kotlin, `realm.IsEmpty()` in C#,
+  `self.userinfo()` in a Rust `impl Trait for` an external type); Ruby methods
+  called **without a receiver or parentheses** (`Article.new(article_params)`);
+  Java **anonymous classes** (`new Callback<String>() { … }` is a node of its
+  own that calls `Callback`, where the method around it should, and it does not
+  inherit it); and a receiver whose type comes out of a generic call
+  (`retrofit.create(Service.class)`).
 - **What only the native graph has** is mostly what a name lookup by itself
   cannot see: calls through a module object (`httpx.Response(...)`), through a
   typed local or field (`client = httpx.Client(); client.get()`,
@@ -411,17 +432,21 @@ Reading a sample of each side's edges the other lacks, per language:
 
 **Definitions.** What only graphify has is PHP closures (`{closure#N}()`, 894
 of PHP's 895), a node for a Rust `impl` or Swift `extension` target defined in
-another file, and C/C++ forward declarations and macro-wrapped declarations in
-headers. What only the native engine has is what `spans.py` treats as
+another file, C/C++ forward declarations and macro-wrapped declarations in
+headers, and ⁵ a node for each name bound to an import (`const mongoose =
+require('mongoose')`), which the native graph treats as the import it is. What only the native engine has is what `spans.py` treats as
 definitions: nested functions, anonymous functions bound to an object key or a
 class field, overloads graphify folds into one node, C++ methods declared in
 their class.
 
-**Speed.** With resolution and communities, the native builds are 5–8 times
-faster than graphify's (`--code-only --no-viz`, four cores, starting Python
-included): retrofit 2.2 s against 13.9 s, guzzle 0.9 s / 5.8 s, alamofire
-1.2 s / 5.7 s, got 0.7 s / 5.3 s, kotlinpoet 0.6 s / 3.7 s; an update after a
-one-file change takes a third of that ([above](#incremental-updates)).
+**Speed.** With resolution, shared state, routes and communities, the native
+builds take 13.3 s for the 31 repositories against graphify's 81.3 s
+(graphify 0.9.112 `update .`, four cores, starting Python included, the
+faster of two clean builds each): 8.7 times faster at the median, from 2.1
+(todoapi, whose bundled JavaScript the native engine reads in full) to 17.2
+times; retrofit 2.9 s against 13.1 s, guzzle 0.9 s / 6.1 s, alamofire 1.2 s /
+5.4 s, got 0.9 s / 4.7 s. An update after a one-file change takes a third of
+a build ([above](#incremental-updates)).
 
 ### The polyglot audit on native graphs
 

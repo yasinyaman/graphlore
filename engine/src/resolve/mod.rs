@@ -362,6 +362,8 @@ pub struct Project<'a> {
     /// Set while a type reference is resolved: names then mean types only
     /// (`Item Item { get; set; }`: the property's type, not the property).
     types_only: RefCell<bool>,
+    /// The path being resolved is the callee of a call.
+    calling: RefCell<bool>,
     /// Import -> files a resolved use went through it to.
     used: RefCell<HashMap<(usize, usize), HashSet<usize>>>,
 }
@@ -430,6 +432,7 @@ impl<'a> Project<'a> {
             fields: HashMap::new(),
             depth: RefCell::new(0),
             types_only: RefCell::new(false),
+            calling: RefCell::new(false),
             used: RefCell::new(HashMap::new()),
         };
         p.index();
@@ -651,6 +654,40 @@ impl<'a> Project<'a> {
         false
     }
 
+    /// A local that does not hide the outer name: one assigned from the outer
+    /// thing of its own name (`let agent = agent();`: on that line the name
+    /// still means the outer one, and the facts do not say which side of it a
+    /// use is on), a plain assignment where assigning declares nothing, or,
+    /// for a bare call (`called`), a local with a written type: `baseUrl(…)`
+    /// beside `String baseUrl` calls the method, not the string.
+    fn local_keeps_outer(&self, f: usize, d: Option<usize>, name: &str, called: bool) -> bool {
+        let defs = &self.files[f].defs;
+        let mut cur = d;
+        while let Some(x) = cur {
+            if let Some(&li) = self.locals.get(&(f, x, name.to_string())) {
+                let l = &self.files[f].locals[li];
+                return l.assigned
+                    || (called && l.declared)
+                    || l.path.first().is_some_and(|h| h == name);
+            }
+            cur = defs[x].parent;
+        }
+        false
+    }
+
+    /// A "local" recorded from a plain assignment that declares nothing.
+    fn local_is_hint(&self, f: usize, d: Option<usize>, name: &str) -> bool {
+        let defs = &self.files[f].defs;
+        let mut cur = d;
+        while let Some(x) = cur {
+            if let Some(&li) = self.locals.get(&(f, x, name.to_string())) {
+                return self.files[f].locals[li].assigned;
+            }
+            cur = defs[x].parent;
+        }
+        false
+    }
+
     /// Whether a name is a parameter or local of the enclosing definitions.
     fn is_local_name(&self, f: usize, d: Option<usize>, name: &str) -> bool {
         let defs = &self.files[f].defs;
@@ -773,10 +810,13 @@ impl<'a> Project<'a> {
 
     /// Top-level `name` in files.
     fn top_in(&self, files: &[usize], name: &str) -> Option<DefRef> {
+        // an `extension Session { … }` adds to a type, it does not declare the
+        // name: in a module that only extends it, the name is still the type's
         self.best(
             files
                 .iter()
-                .flat_map(|&f| self.top[f].get(name).into_iter().flatten().map(move |&d| (f, d))),
+                .flat_map(|&f| self.top[f].get(name).into_iter().flatten().map(move |&d| (f, d)))
+                .filter(|r| self.def(*r).kind != DefKind::Extension),
         )
     }
 
@@ -1129,23 +1169,72 @@ impl<'a> Project<'a> {
                     .fallback_method(f, &rest[0])
                     .map(|r| (Target::Def(r), Confidence::Inferred));
             }
+            // PHP `$x`: a variable. Its declared or assigned type, else only
+            // a distinctive method name
+            v if v.starts_with('$') => match self.local_type(f, d, &v[1..]) {
+                Some((t, c)) => {
+                    conf = c;
+                    Target::Def(t)
+                }
+                None => {
+                    let known = self.is_local_name(f, d, &v[1..]);
+                    let external = known && self.is_external_local(f, d, &v[1..]);
+                    if !external
+                        && !bases
+                        && (rest.len() == 1 || (rest.len() == 2 && rest[0] == "()"))
+                    {
+                        return self
+                            .fallback_method(f, rest.last()?)
+                            .map(|r| (Target::Def(r), Confidence::Inferred));
+                    }
+                    return None;
+                }
+            },
             _ if self.is_untyped_local(f, d, head) || self.is_external_local(f, d, head) => {
                 return None
             }
-            _ => match self
-                .local_type(f, d, head)
-                .map(|(t, c)| {
-                    conf = c;
-                    Target::Def(t)
-                })
-                .or_else(|| self.resolve_name(f, d, head))
-                .or_else(|| {
-                    // a field seen without `this` (Java, C#, C++, Swift, Ruby)
-                    let c = if fam.implicit_this() { self.class_of(f, d)? } else { return None };
-                    let (t, cf) = self.field_type(c, head, 3)?;
-                    conf = cf;
-                    Some(Target::Def(t))
-                }) {
+            // a local assigned something the walk cannot type (`let pool =
+            // self.pool.lock().unwrap()`) still hides every outer name of its
+            // own: only a distinctive method name says what is called on it
+            _ if self.is_local_name(f, d, head)
+                && !*self.types_only.borrow()
+                && !self.local_keeps_outer(
+                    f,
+                    d,
+                    head,
+                    rest.is_empty() && *self.calling.borrow(),
+                )
+                && self.local_type(f, d, head).is_none() =>
+            {
+                if !bases && (rest.len() == 1 || (rest.len() == 2 && rest[0] == "()")) {
+                    return self
+                        .fallback_method(f, rest.last()?)
+                        .map(|r| (Target::Def(r), Confidence::Inferred));
+                }
+                return None;
+            }
+            _ => match (!(rest.is_empty()
+                // the name by itself, where an assignment only hinted at what
+                // it holds (`service = make()`), is the variable, not its
+                // type; and a bare call beside a local that cannot be what is
+                // called (`let agent = agent();`, `baseUrl(…)` beside `String
+                // baseUrl`) is a call of the outer name
+                && (self.local_is_hint(f, d, head)
+                    || (*self.calling.borrow() && self.local_keeps_outer(f, d, head, true)))))
+            .then(|| self.local_type(f, d, head))
+            .flatten()
+            .map(|(t, c)| {
+                conf = c;
+                Target::Def(t)
+            })
+            .or_else(|| self.resolve_name(f, d, head))
+            .or_else(|| {
+                // a field seen without `this` (Java, C#, C++, Swift, Ruby)
+                let c = if fam.implicit_this() { self.class_of(f, d)? } else { return None };
+                let (t, cf) = self.field_type(c, head, 3)?;
+                conf = cf;
+                Some(Target::Def(t))
+            }) {
                 Some(t) => t,
                 None => {
                     if let Some(found) = self.qualified(f, d, path) {
@@ -1617,12 +1706,14 @@ pub fn resolve(
                     || matches!(r.kind, RefKind::Attr)
                     || r.context == "implicit_call";
                 *p.types_only.borrow_mut() = heritage || r.kind == RefKind::Type;
+                *p.calling.borrow_mut() = matches!(r.kind, RefKind::Call | RefKind::New);
                 let found = if r.from_owner.is_some() && heritage {
                     p.resolve_path(f, None, &r.path, true)
                 } else {
                     p.resolve_path(f, scope_def, &r.path, strict)
                 };
                 *p.types_only.borrow_mut() = false;
+                *p.calling.borrow_mut() = false;
                 let (target, relation, conf) = match found {
                     Some((Target::Def(t), conf)) => {
                         let Some(id) = p.node_id(t) else { continue };
