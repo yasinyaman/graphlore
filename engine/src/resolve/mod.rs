@@ -500,7 +500,12 @@ const SWIFT_CORE_METHODS: &[&str] = &[
 /// Whether a path segment is something of collections: an element, a method
 /// that keeps the collection or one that gives an element.
 fn is_collection_step(seg: &str) -> bool {
-    is_element_marker(seg)
+    NESTING_METHODS.contains(&seg)
+        || GROUPING_METHODS.contains(&seg)
+        || ASSOCIATING_METHODS.contains(&seg)
+        || FLATTENING_METHODS.contains(&seg)
+        || REDUCING_METHODS.contains(&seg)
+        || is_element_marker(seg)
         || KEEPING_METHODS.contains(&seg)
         || ELEMENT_ACCESSORS.contains(&seg)
         || KEY_LOOKUPS.contains(&seg)
@@ -531,6 +536,32 @@ const KEY_LOOKUPS: &[&str] = &[
 /// Methods that give each element with its index (a pair).
 const PAIRING_METHODS: &[&str] =
     &["enumerate", "withIndex", "enumerated", "each_with_index", "with_index", "Index"];
+
+/// Methods that give lists of consecutive elements.
+const NESTING_METHODS: &[&str] = &[
+    "chunked",
+    "windowed",
+    "chunks",
+    "windows",
+    "chunks_exact",
+    "each_slice",
+    "each_cons",
+    "Chunk",
+];
+
+/// Methods that group the elements under a key: a map of lists of them.
+const GROUPING_METHODS: &[&str] = &["groupBy", "GroupBy", "group_by", "ToLookup"];
+
+/// Methods that key each element: a map whose values are the elements.
+const ASSOCIATING_METHODS: &[&str] =
+    &["associateBy", "ToDictionary", "keyBy", "index_by", "indexBy", "uniqueIndex"];
+
+/// Methods that give the elements of a collection of collections.
+const FLATTENING_METHODS: &[&str] = &["flatten", "Flatten", "flat", "SelectMany"];
+
+/// Methods that fold the elements into one of them.
+const REDUCING_METHODS: &[&str] =
+    &["reduce", "reduceOrNull", "Aggregate", "inject", "maxWith", "minWith", "maxWithOrNull"];
 
 /// A map's views: its values (a collection of them), its entries (a map
 /// still), its keys (nothing known).
@@ -1909,7 +1940,7 @@ impl<'a> Project<'a> {
                     let alias = !l.declared
                         && !l.path.is_empty()
                         && l.path[0] != *name
-                        && l.path.last().is_some_and(|s| !is_element_marker(s));
+                        && !l.path.is_empty();
                     return if alias {
                         self.elem_of_as(f, Some(x), &l.path, how)
                             .map(|(t, _)| (t, Confidence::Inferred))
@@ -2794,6 +2825,9 @@ impl<'a> Project<'a> {
         // elements each with an index (`withIndex()`)
         let mut keyed = false;
         let mut indexed = false;
+        // how many collections deep the elements are, beyond the one `many`
+        // says (`xs.chunked(2)`: 1)
+        let mut nest: u8 = 0;
         // what comes after position `i` is something of collections, or the
         // path ends there and a collection is what is asked for
         let collection_next = |i: usize| match rest.get(i) {
@@ -3144,6 +3178,13 @@ impl<'a> Project<'a> {
                     if !fits {
                         return None;
                     }
+                    // one of a collection of collections is a collection
+                    if nest > 0 {
+                        nest -= 1;
+                        keyed = false;
+                        indexed = false;
+                        continue;
+                    }
                 } else if seg == crate::refs::VALUE {
                     return None;
                 }
@@ -3191,6 +3232,7 @@ impl<'a> Project<'a> {
                 many = true;
                 keyed = false;
                 indexed = false;
+                nest = 0;
                 continue;
             }
             if many {
@@ -3215,13 +3257,37 @@ impl<'a> Project<'a> {
                     }
                 } else if PAIRING_METHODS.contains(&s) && !keyed {
                     indexed = true;
+                } else if NESTING_METHODS.contains(&s) && !keyed && !indexed {
+                    // `chunked(2)`, `windows(3)`: lists of the elements
+                    nest += 1;
+                } else if GROUPING_METHODS.contains(&s) && !keyed && !indexed {
+                    // `groupBy { … }`: a map whose values are lists of them
+                    keyed = true;
+                    nest += 1;
+                } else if ASSOCIATING_METHODS.contains(&s) && !keyed && !indexed {
+                    // `associateBy { it.id }`: a map whose values are them
+                    keyed = true;
+                } else if FLATTENING_METHODS.contains(&s) && !keyed && !indexed {
+                    // `flatten()`: the elements of the lists
+                    if nest == 0 {
+                        return None;
+                    }
+                    nest -= 1;
+                } else if REDUCING_METHODS.contains(&s) && !keyed && !indexed && nest == 0 {
+                    // `reduce { a, b -> … }`: one of them
+                    many = false;
+                    one = true;
                 } else if ELEMENT_ACCESSORS.contains(&s) {
                     // (a map's `first()` is an entry, and so is a pair's)
                     if keyed || indexed {
                         return None;
                     }
-                    many = false;
-                    one = true;
+                    if nest > 0 {
+                        nest -= 1;
+                    } else {
+                        many = false;
+                        one = true;
+                    }
                 } else if !KEEPING_METHODS.contains(&s) {
                     return None;
                 }

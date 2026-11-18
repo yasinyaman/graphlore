@@ -1072,3 +1072,40 @@ fn what_the_type_arguments_of_a_declaration_bind() {
         );
     }
 }
+
+#[test]
+fn lambda_bodies_references_groups_and_lists_of_lists() {
+    let got = call_ids("mapping", &[
+        ("a.kt", "package app\nclass Decoy { fun a() {}; fun b() {}; fun c() {}; fun d() {}; fun e() {}; fun g() {}; fun h() {}; fun k() {} }\nclass Owner { fun a() {}; fun b() {}; fun c() {}; fun d() {}; fun e() {}; fun g() {}; fun h() {}; fun k() {} }\nclass Foo(val owner: Owner, val id: String) { fun a() {}; fun d() {}; fun e() {}; fun g() {}; fun h() {}; fun k() {} }\nfun mapping(xs: List<Foo>) {\n    xs.map { x ->\n        val o = x.owner\n        o\n    }.forEach { it.a() }\n    xs.map(Foo::owner).forEach { it.b() }\n    xs.map { x ->\n        println(x)\n        x.owner\n    }.first().c()\n    xs.chunked(2).forEach { chunk -> chunk.forEach { it.d() } }\n    xs.groupBy { it.id }.values.forEach { group -> group.first().e() }\n    xs.associateBy { it.id }.getValue(\"x\").g()\n    xs.reduce { a, b -> a }.h()\n    xs.chunked(2).flatten().forEach { it.k() }\n}\n"),
+        ("B.java", "import java.util.List;\nclass Bait { void run() {} void go() {} }\nclass Boss { void run() {} void go() {} }\nclass Item { Boss getBoss() { return null; } }\nclass Use {\n  void chain(List<Item> items) {\n    items.stream().map(Item::getBoss).forEach(b -> b.run());\n    items.stream().map(i -> { var b = i.getBoss(); return b; }).forEach(b -> b.go());\n  }\n}\n"),
+        ("c.swift", "class Ghost { func fly() {} }\nclass Pilot { func fly() {} }\nclass Plane { var pilot = Pilot() }\nfunc planes(ps: [Plane]) {\n    ps.map(\\.pilot).forEach { $0.fly() }\n}\n"),
+        ("d.rs", "pub struct Fake;\nimpl Fake { pub fn go(&self) {} pub fn run(&self) {} }\npub struct Head;\nimpl Head { pub fn go(&self) {} pub fn run(&self) {} }\npub struct Part { head: Head }\nimpl Part {\n    pub fn head(&self) -> &Head { &self.head }\n}\npub fn parts(xs: Vec<Part>) {\n    xs.iter().map(Part::head).for_each(|h| h.go());\n    xs.iter().map(|p| { let h = p.head(); h }).for_each(|h| h.run());\n}\n"),
+    ]);
+    let mut missing = Vec::new();
+    for (from, to) in [
+        ("mapping()", "a_owner_a"),
+        ("mapping()", "a_owner_b"),
+        ("mapping()", "a_owner_c"),
+        ("mapping()", "a_foo_d"),
+        ("mapping()", "a_foo_e"),
+        ("mapping()", "a_foo_g"),
+        ("mapping()", "a_foo_h"),
+        ("mapping()", "a_foo_k"),
+        (".chain()", "b_boss_run"),
+        (".chain()", "b_boss_go"),
+        ("planes()", "c_pilot_fly"),
+        ("parts()", "d_head_go"),
+        ("parts()", "d_head_run"),
+    ] {
+        if !got.contains(&(from.to_string(), to.to_string())) {
+            missing.push((from, to));
+        }
+    }
+    assert!(missing.is_empty(), "missing {missing:?}\n{got:?}");
+    for (from, to) in &got {
+        assert!(
+            !["decoy", "bait", "ghost", "fake"].iter().any(|d| to.contains(d)),
+            "{from} -> {to}: {got:?}"
+        );
+    }
+}

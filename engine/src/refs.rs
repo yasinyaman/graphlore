@@ -1361,6 +1361,7 @@ fn bind_closure_params(closures: &[ClosureScope], refs: &mut [RefFact], locals: 
             used[i] = true;
         }
     }
+    rename_closure_heads(closures, &order, locals, &mut used);
     for (i, (start, _, params)) in closures.iter().enumerate() {
         if !used[i] {
             continue;
@@ -1381,6 +1382,34 @@ fn bind_closure_params(closures: &[ClosureScope], refs: &mut [RefFact], locals: 
                 from_def: None,
                 byte: *start,
             });
+        }
+    }
+    // and the parameters of a closure inside another, typed from its
+    // parameters (`chunk -> chunk.forEach { it.d() }`)
+    rename_closure_heads(closures, &order, locals, &mut used);
+}
+
+/// Renames the head of a local's path to the closure parameter it names
+/// (`name@byte`, as `bind_closure_params` does for uses): a local assigned
+/// inside a closure from one of its parameters, or a parameter of a closure
+/// inside it typed from one.
+fn rename_closure_heads(
+    closures: &[ClosureScope],
+    order: &[usize],
+    locals: &mut [Local],
+    used: &mut [bool],
+) {
+    for l in locals.iter_mut() {
+        let Some(head) = l.path.first() else { continue };
+        let bare = head.trim_start_matches('$').to_string();
+        let found = order.iter().copied().find(|&i| {
+            let (start, end, params) = &closures[i];
+            *start <= l.byte && l.byte < *end && params.iter().any(|(n, _, _)| *n == bare)
+        });
+        if let Some(i) = found {
+            let sigil = if head.starts_with('$') { "$" } else { "" };
+            l.path[0] = format!("{sigil}{bare}@{}", closures[i].0);
+            used[i] = true;
         }
     }
 }
@@ -2407,6 +2436,145 @@ fn mapped(of: &[String], var: &str, each: Vec<String>) -> Option<Vec<String>> {
     Some(out)
 }
 
+/// A function given by reference: `Item::owner` (Kotlin, Java, Rust) and
+/// `this::convert` name what it is; `::Item`, `Item::new` a construction;
+/// Swift's `\.owner` a member of each element (an empty head, as Ruby's
+/// `&:owner`).
+fn referenced(f: Node, src: &[u8]) -> Option<Vec<String>> {
+    match f.kind() {
+        "callable_reference" | "method_reference" => {
+            let ks: Vec<Node> = kids(f).into_iter().filter(|c| !is_comment(c)).collect();
+            let (last, of) = ks.split_last()?;
+            let name = text(*last, src);
+            let mut p = Vec::new();
+            for c in of {
+                p.extend(path_of(*c, src)?);
+            }
+            if name != "new" {
+                p.push(name);
+            }
+            (!p.is_empty()).then_some(p)
+        }
+        "key_path_expression" => {
+            let names: Vec<String> = kids(f)
+                .into_iter()
+                .filter(|c| c.kind() == "navigation_suffix" || c.kind() == "simple_identifier")
+                .filter_map(|c| path_of(c, src))
+                .flatten()
+                .collect();
+            match names.as_slice() {
+                [one] => Some(vec![String::new(), one.clone()]),
+                _ => None,
+            }
+        }
+        // Rust `map(Part::head)`
+        "scoped_identifier" => path_of(f, src).filter(|p| p.len() >= 2),
+        // Swift `\.owner`: the key path is the target of a navigation
+        "navigation_expression"
+            if f.child_by_field_name("target").is_some_and(|t| {
+                t.kind() == "key_path_expression" && t.named_child_count() == 0
+            }) =>
+        {
+            let suffix = f.child_by_field_name("suffix")?;
+            let name = path_of(suffix, src)?;
+            match name.as_slice() {
+                [one] => Some(vec![String::new(), one.clone()]),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+/// What a lambda's body gives: its one expression, its last one where the
+/// language makes that the value (Kotlin, Ruby, Rust, Scala), or what its
+/// `return`s give when they agree.
+fn lambda_result(body: Node, src: &[u8]) -> Option<Vec<String>> {
+    if let Some(e) = single_expression(body) {
+        return path_of(e, src);
+    }
+    let statements: Vec<Node> = kids(body).into_iter().filter(|c| !is_comment(c)).collect();
+    let tail = statements.last().copied().filter(|t| {
+        !t.kind().ends_with("declaration")
+            && !t.kind().contains("return")
+            && !matches!(
+                t.kind(),
+                "let_declaration" | "expression_statement" | "local_variable_declaration"
+            )
+            || (t.kind() == "expression_statement"
+                && matches!(body.kind(), "statements" | "block_body" | "body_statement"))
+    });
+    // the `return`s of the body, not of a lambda inside it
+    let mut returned: Vec<Vec<String>> = Vec::new();
+    let mut stack: Vec<(Node, usize)> = statements.iter().map(|c| (*c, 0)).collect();
+    while let Some((n, depth)) = stack.pop() {
+        if is_closure(n.kind()) || depth > 6 {
+            continue;
+        }
+        if let Some(v) = returned_value(n, src) {
+            returned.push(path_of(v, src)?);
+            continue;
+        }
+        stack.extend(kids(n).into_iter().map(|c| (c, depth + 1)));
+    }
+    match (returned.first(), tail) {
+        (Some(first), _) => returned.iter().all(|r| r == first).then(|| first.clone()),
+        (None, Some(t)) => {
+            let t =
+                if t.kind() == "expression_statement" { kids(t).into_iter().last()? } else { t };
+            path_of(t, src)
+        }
+        _ => None,
+    }
+}
+
+/// Whether `name` is a local a lambda's body declares, and what it is
+/// assigned: `Some(Some(path))`, `Some(None)` for a local of no path, `None`
+/// for a name the body does not declare.
+fn lambda_local(body: Node, name: &str, src: &[u8]) -> Option<Option<Vec<String>>> {
+    let mut stack: Vec<(Node, usize)> = kids(body).into_iter().map(|c| (c, 0)).collect();
+    while let Some((n, depth)) = stack.pop() {
+        if is_closure(n.kind()) || depth > 3 {
+            continue;
+        }
+        let declares = matches!(
+            n.kind(),
+            "property_declaration"
+                | "let_declaration"
+                | "local_variable_declaration"
+                | "variable_declaration"
+                | "lexical_declaration"
+                | "variable_declarator"
+                | "short_var_declaration"
+                | "assignment"
+                | "init_declarator"
+        );
+        if declares {
+            let named = ["name", "pattern", "left", "declarator"]
+                .iter()
+                .find_map(|f| n.child_by_field_name(f))
+                .or_else(|| {
+                    kids(n).into_iter().find(|c| {
+                        matches!(c.kind(), "variable_declaration" | "variable_declarator")
+                    })
+                })
+                .and_then(|x| bound_name(x, src));
+            if named.as_deref() == Some(name) {
+                let value = value_node(n).or_else(|| {
+                    // Kotlin `val o = x.owner`: the value beside the declaration
+                    kids(n).into_iter().rev().find(|c| {
+                        !matches!(c.kind(), "variable_declaration" | "binding_pattern_kind")
+                            && !c.kind().contains("modifier")
+                    })
+                });
+                return Some(value.and_then(|v| path_of(v, src)));
+            }
+        }
+        stack.extend(kids(n).into_iter().map(|c| (c, depth + 1)));
+    }
+    None
+}
+
 /// The one expression a lambda's body is, through the block that holds it.
 fn single_expression(body: Node) -> Option<Node> {
     let mut cur = body;
@@ -2491,6 +2659,17 @@ fn mapped_path(n: Node, src: &[u8], of: &[String]) -> Result<Option<Vec<String>>
         let name = text(sym, src).trim_start_matches(':').to_string();
         return Ok(mapped(of, "", vec![String::new(), name]));
     }
+    // `map(Item::owner)`, `map(::Item)`, `map(Item::new)`, Swift `map(\.owner)`
+    if let Some(each) = referenced(*f, src) {
+        return Ok(match each.first().map(String::as_str) {
+            Some("") => mapped(of, "", each),
+            _ => {
+                let mut each = each;
+                each.push(MANY.into());
+                Some(each)
+            }
+        });
+    }
     if !(is_closure(f.kind()) || f.kind() == "block") {
         return Err(());
     }
@@ -2519,8 +2698,17 @@ fn mapped_path(n: Node, src: &[u8], of: &[String]) -> Result<Option<Vec<String>>
         kids(*f).into_iter().rfind(|c| !c.kind().contains("parameter") && !is_comment(c))
     });
     let each = body
-        .and_then(single_expression)
-        .and_then(|e| path_of(e, src))
+        .and_then(|b| lambda_result(b, src))
+        // a local of the lambda: what it is assigned (`val o = it.owner; o`)
+        .and_then(|each| match body.and_then(|b| lambda_local(b, &each[0], src)) {
+            Some(Some(value)) => {
+                let mut p = value;
+                p.extend(each.into_iter().skip(1));
+                Some(p)
+            }
+            Some(None) => None,
+            None => Some(each),
+        })
         // what another parameter gives has no name outside the lambda
         .filter(|each| !names.iter().skip(1).any(|(other, ..)| *other == each[0]));
     Ok(each.and_then(|each| mapped(of, &var, each)))
