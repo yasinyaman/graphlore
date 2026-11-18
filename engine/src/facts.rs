@@ -182,6 +182,11 @@ pub struct Def {
     /// parameter of the class around is written as its name.
     #[serde(default)]
     pub targs: Vec<Vec<String>>,
+    /// The parts of the tuple a callable declares it returns (`-> (A, B)`,
+    /// `Pair<A, B>`, Go `(A, B, error)`), in order; an empty path for a part
+    /// with no type to name.
+    #[serde(default)]
+    pub rets: Vec<Vec<String>>,
     /// The type a variable, field or constant is declared with, as written.
     #[serde(default)]
     pub declared_type: Option<Vec<String>>,

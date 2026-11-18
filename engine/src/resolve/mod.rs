@@ -1735,6 +1735,11 @@ impl<'a> Project<'a> {
     /// construct (`fun builder(n) = Builder(n)`, `return self`), when they
     /// agree: read from the body, so a guess.
     fn return_type(&self, r: DefRef) -> Option<(DefRef, bool)> {
+        // a tuple is no one type (Go's first result is what its callers
+        // take, `v, err := f()`)
+        if !self.def(r).rets.is_empty() && self.family[r.0] != Some(Family::Go) {
+            return None;
+        }
         // `-> Option<Foo>`, `Promise<Foo>`: what the wrapper holds (whether
         // it has to be opened first is the walk's `sealed`)
         if let Some(inner) = self.def(r).wraps.as_ref().filter(|_| self.def(r).kind.is_callable()) {
@@ -3157,6 +3162,25 @@ impl<'a> Project<'a> {
                 if skip == 0 && opened_after(i + 1) {
                     sealed = false;
                 }
+                continue;
+            }
+            // `let (a, b) = f()`: `a` is `f`'s result's first part
+            if let Some(part) = crate::refs::tuple_index(seg) {
+                let Target::Def(c) = t else { return None };
+                let def = self.def(c);
+                if !def.kind.is_callable() {
+                    return None;
+                }
+                let typed = match def.rets.get(part) {
+                    Some(p) if !p.is_empty() => self
+                        .type_of_path(c.0, def.parent, p, true)
+                        .filter(|t| self.def(*t).kind.is_class_like()),
+                    // a function that declares no tuple: its result is the first
+                    _ if part == 0 && def.rets.is_empty() => self.return_type(c).map(|(r, _)| r),
+                    _ => None,
+                };
+                t = Target::Def(typed?);
+                binds = None;
                 continue;
             }
             // `[]`: one of the collection
