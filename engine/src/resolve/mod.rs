@@ -2815,6 +2815,53 @@ impl<'a> Project<'a> {
         }
     }
 
+    /// The slot of a struct a `SlotFact` fills: the field of the holder's
+    /// type it names, or the one at its position among the struct's fields
+    /// (data fields count) when the initializer gives none. A slot is a
+    /// function pointer, so a callable definition of its struct.
+    fn slot_of(&self, f: usize, s: &crate::facts::SlotFact) -> Option<DefRef> {
+        // the holder's struct, or a field of an anonymous struct type (`ac->ev`
+        // of `struct { … } ev;`), which answers for its members
+        let t = match self.type_of_path(f, s.from_def, &s.holder, false) {
+            Some(t) if self.def(t).kind.is_class_like() => t,
+            _ => match self.resolve_path(f, s.from_def, &s.holder, true) {
+                Some((Target::Def(x), _)) if self.def(x).inline_body.is_some() => x,
+                _ => return None,
+            },
+        };
+        let inline = self.def(t).inline_body;
+        // (an anonymous struct's members are the outer struct's, in its body)
+        let (owner, range) = match inline {
+            Some(r) => (self.def(t).parent.map(|p| (t.0, p))?, Some(r)),
+            None => (t, None),
+        };
+        let slot = match (&s.field, s.position) {
+            (Some(name), _) if inline.is_some() => self.best(self.members(t, name))?,
+            (Some(name), _) => self.class_member(t, name, 2)?,
+            (None, Some(i)) => {
+                let mut fields: Vec<DefRef> = self.children[owner.0]
+                    .get(&owner.1)
+                    .into_iter()
+                    .flat_map(|m| m.values().flatten())
+                    .map(|&d| (owner.0, d))
+                    .filter(|c| {
+                        let x = self.def(*c);
+                        let inside =
+                            range.is_none_or(|(lo, hi)| lo <= x.start_byte && x.end_byte <= hi);
+                        inside
+                            && (x.kind.is_state()
+                                || (x.kind.is_callable() && x.kind != DefKind::Constructor))
+                    })
+                    .collect();
+                fields.sort_by_key(|c| self.def(*c).start_byte);
+                fields.dedup();
+                *fields.get(usize::try_from(i).ok()?)?
+            }
+            _ => return None,
+        };
+        self.def(slot).kind.is_callable().then_some(slot)
+    }
+
     /// The path a local's declaration gives it (its type as written).
     fn local_path(&self, f: usize, d: Option<usize>, name: &str) -> Option<&Vec<String>> {
         let defs = &self.files[f].defs;
@@ -3082,6 +3129,22 @@ impl<'a> Project<'a> {
     /// The members of a type: its lexical children, and the methods attached
     /// to it by owner.
     fn members(&self, c: DefRef, name: &str) -> Vec<DefRef> {
+        // a field of an anonymous struct type: the members its body declares,
+        // which the struct around holds
+        if let Some((lo, hi)) = self.def(c).inline_body {
+            let Some(outer) = self.def(c).parent else { return Vec::new() };
+            return self.children[c.0]
+                .get(&outer)
+                .and_then(|m| m.get(name))
+                .into_iter()
+                .flatten()
+                .filter(|&&d| {
+                    let x = self.def((c.0, d));
+                    lo <= x.start_byte && x.end_byte <= hi
+                })
+                .map(|&d| (c.0, d))
+                .collect();
+        }
         let mut out: Vec<DefRef> = self.children[c.0]
             .get(&c.1)
             .and_then(|m| m.get(name))
@@ -4646,6 +4709,12 @@ impl<'a> Project<'a> {
                             binds = None;
                             many = nested;
                             t = Target::Def(ft);
+                            continue;
+                        }
+                        // C `ac->ev.addRead`: `ev` is of an anonymous struct
+                        // type, whose members the field answers for
+                        if self.def(*p).inline_body.is_some() {
+                            t = Target::Def(*p);
                             continue;
                         }
                         // a property of a type the project does not define
@@ -6566,6 +6635,33 @@ pub fn resolve(
                     context: if r.kind == RefKind::Decorator { "decorator" } else { r.context },
                     runs: None,
                 });
+            }
+        }
+        // C, C++: a function put in a slot of a struct is what a call through
+        // the slot reaches (`dispatches_to`, an interface method to its
+        // implementations)
+        for (f, facts) in files.iter().enumerate() {
+            for s in &facts.slots {
+                let Some(slot) = p.slot_of(f, s) else { continue };
+                let Some(Target::Def(v)) = p.resolve_name(f, s.from_def, &s.value) else {
+                    continue;
+                };
+                if !p.def(v).kind.is_callable() {
+                    continue;
+                }
+                let (Some(from), Some(to)) = (p.node_id(slot), p.node_id(v)) else { continue };
+                if from != to {
+                    edges.push(EdgeOut {
+                        source: from.to_string(),
+                        target: to.to_string(),
+                        relation: "dispatches_to",
+                        confidence: Confidence::Extracted,
+                        file: f,
+                        line: s.line,
+                        context: "slot",
+                        runs: None,
+                    });
+                }
             }
         }
         // resources: one node per (kind, key) that two definitions or more

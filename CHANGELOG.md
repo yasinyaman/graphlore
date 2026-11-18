@@ -259,6 +259,14 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- **Native engine 0.5.35: C function-pointer slots dispatch to the functions
+  put in them.** An initializer (`.close = redisNetClose`, or by position)
+  or an assignment (`ac->ev.addRead = redisLibuvAddRead;`) gives a
+  `dispatches_to` edge from the slot to the function, so `impact` and call
+  paths go from `r->fn->createString(…)` on to `createStringObject`. A field
+  of an anonymous struct type answers for its body's members. hiredis: 88
+  `dispatches_to` edges, 81 reads and writes. The facts cache is rebuilt
+  once (`FileFacts::slots`, `Def::inline_body`).
 - **Native engine 0.5.34: a C `typedef struct X { … } X;` is its struct.**
   A local typed by such an alias reaches the struct's members (the target
   0.5.32 wrote for it was the first type in the body, now the struct's own

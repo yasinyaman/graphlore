@@ -114,6 +114,11 @@ pub struct Def {
     /// for the spans, no node and no name.
     #[serde(default)]
     pub misread: bool,
+    /// C, C++: a field declared with an anonymous struct type (`struct {
+    /// void *data; void (*addRead)(void *); } ev;`): the bytes of that body,
+    /// whose members the grammar gives to the struct around.
+    #[serde(default)]
+    pub inline_body: Option<(usize, usize)>,
     /// How many parameters a callable declares.
     #[serde(default)]
     pub params: Option<u8>,
@@ -585,6 +590,10 @@ pub struct FileFacts {
     /// methods of.
     #[serde(default)]
     pub spec_includes: Vec<Vec<String>>,
+    /// C, C++: a function put in a slot of a struct (`.close = netClose` in
+    /// an initializer, `c->funcs->read = netRead`).
+    #[serde(default)]
+    pub slots: Vec<SlotFact>,
     /// Lambdas with a receiver (Kotlin `x.apply { … }`, `withIndent { … }`).
     #[serde(default)]
     pub receivers: Vec<ReceiverScope>,
@@ -614,6 +623,7 @@ impl FileFacts {
             locals: Vec::new(),
             attrs: Vec::new(),
             spec_includes: Vec::new(),
+            slots: Vec::new(),
             receivers: Vec::new(),
             resources: Vec::new(),
             http: Default::default(),
@@ -634,4 +644,20 @@ pub fn count_lines(src: &[u8]) -> u32 {
     } else {
         n + 1
     }
+}
+
+/// A function put in a slot of a struct: what holds the struct (`byName` of
+/// `static funcs byName = { .close = netClose }`, `c->f` of `c->f.read =
+/// netRead`), the slot by name or by position in the initializer, and the
+/// function's name.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SlotFact {
+    pub holder: Vec<String>,
+    pub field: Option<String>,
+    pub position: Option<u32>,
+    pub value: String,
+    pub line: u32,
+    pub from_def: Option<usize>,
+    #[serde(skip)]
+    pub byte: usize,
 }
