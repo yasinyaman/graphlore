@@ -1032,3 +1032,43 @@ fn the_values_of_a_map_and_the_element_beside_an_index() {
         );
     }
 }
+
+#[test]
+fn what_the_type_arguments_of_a_declaration_bind() {
+    // every method has a namesake on a decoy, so a name alone says nothing
+    let got = call_ids("generics", &[
+        ("G.java", "import java.util.List;\nclass Decoy { String getName() { return \"\"; } void ping() {} void stop() {} }\nclass Contact { String getName() { return \"\"; } void ping() {} void stop() {} }\nfinal class Response<T> { T body() { return null; } List<T> all() { return null; } T value; }\ninterface Call<T> { Response<T> execute(); }\nclass Use {\n  void body(Response<Contact> r) { r.body().getName(); }\n  void field(Response<Contact> r) { r.value.ping(); }\n  void list(Response<Contact> r) { for (var c : r.all()) { c.stop(); } }\n  void chain(Call<Contact> call) { call.execute().body().getName(); }\n  void declared(Call<Contact> call) {\n    Response<Contact> response = call.execute();\n    response.body().ping();\n  }\n}\n"),
+        ("b.kt", "package app\nclass Ghost { fun run() {}; fun stop() {} }\nclass Owner { fun run() {}; fun stop() {} }\nclass Crate<T>(val item: T) { fun get(): T = item }\nfun boxes(b: Crate<Owner>) {\n    b.get().run()\n    b.item.stop()\n}\n"),
+        ("c.ts", "export class Lure { greet() {} wave() {} }\nexport class User { greet() {} wave() {} }\nexport class Page<T> { items: T[] = []; first(): T { return this.items[0]; } }\nexport function pages(p: Page<User>) {\n  p.first().greet();\n  p.items.forEach(u => u.wave());\n}\n"),
+        ("D.cs", "class Fake { public void Send() {} public void Open() {} }\nclass Mail { public void Send() {} public void Open() {} }\nclass Envelope<T> { public T Value; public T Get() { return Value; } }\nclass Post {\n  void Go(Envelope<Mail> e) {\n    e.Get().Send();\n    e.Value.Open();\n  }\n}\n"),
+        ("e.swift", "class Ghost { func fly() {} }\nclass Bird { func fly() {} }\nstruct Wrapper<T> { let item: T\n    func get() -> T { item }\n}\nfunc birds(w: Wrapper<Bird>) {\n    w.get().fly()\n}\n"),
+        ("f.rs", "pub struct Fake;\nimpl Fake { pub fn go(&self) {} }\npub struct Part;\nimpl Part { pub fn go(&self) {} }\npub struct Holder<T> { item: T }\nimpl<T> Holder<T> {\n    pub fn get(&self) -> &T { &self.item }\n}\npub fn parts(h: Holder<Part>) {\n    h.get().go();\n}\n"),
+    ]);
+    let mut missing = Vec::new();
+    for (from, to) in [
+        (".body()", "g_contact_getname"),
+        (".field()", "g_contact_ping"),
+        (".list()", "g_contact_stop"),
+        (".chain()", "g_contact_getname"),
+        (".declared()", "g_contact_ping"),
+        ("boxes()", "b_owner_run"),
+        ("boxes()", "b_owner_stop"),
+        ("pages()", "c_user_greet"),
+        ("pages()", "c_user_wave"),
+        (".Go()", "d_mail_send"),
+        (".Go()", "d_mail_open"),
+        ("birds()", "e_bird_fly"),
+        ("parts()", "f_part_go"),
+    ] {
+        if !got.contains(&(from.to_string(), to.to_string())) {
+            missing.push((from, to));
+        }
+    }
+    assert!(missing.is_empty(), "missing {missing:?}\n{got:?}");
+    for (from, to) in &got {
+        assert!(
+            !["decoy", "ghost", "lure", "fake"].iter().any(|d| to.contains(d)),
+            "{from} -> {to}: {got:?}"
+        );
+    }
+}

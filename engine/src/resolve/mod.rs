@@ -140,6 +140,16 @@ enum Bind {
     Member(Target, String),
 }
 
+/// What the type parameters of a generic type stand for where a path names
+/// one of it: `Response<Contact> r` makes `Response`'s `T` `Contact` for
+/// `r.body()`. Each argument is a path with the file and scope it is
+/// written in.
+#[derive(Clone, Debug)]
+struct Binds {
+    owner: DefRef,
+    args: Vec<(Vec<String>, usize, Option<usize>)>,
+}
+
 #[derive(Default)]
 struct Scope {
     /// Local name -> what it is bound to, and the import that bound it.
@@ -2558,7 +2568,9 @@ impl<'a> Project<'a> {
                 return self.type_named(f, &def.name);
             }
             if let Some(owner) = &def.owner {
-                let bare = owner.rsplit(['.', ':']).next().unwrap_or(owner);
+                // (`impl<T> Holder<T>`: the type is `Holder`)
+                let plain = owner.split('<').next().unwrap_or(owner).trim();
+                let bare = plain.rsplit(['.', ':']).next().unwrap_or(plain);
                 if let Some(t) = self.type_named(f, bare) {
                     return Some(t);
                 }
@@ -3072,6 +3084,20 @@ impl<'a> Project<'a> {
                 }
             }
         }
+        // `Response<Contact> r`: what the type's parameters stand for
+        let mut binds: Option<Binds> = None;
+        if let (Target::Def(c), false) = (&t, own_init || many || rest.is_empty()) {
+            let c = *c;
+            binds = match head_def {
+                Some(p) => {
+                    let def = self.def(p);
+                    self.binds_for(c, &def.targs, p.0, def.parent, None)
+                }
+                None => self
+                    .local_targs(f, d, head)
+                    .and_then(|(args, x)| self.binds_for(c, args, f, Some(x), None)),
+            };
+        }
         // a local, parameter or field (named bare) declared as, or assigned,
         // a sealed wrapper
         if !many && !own_init && !rest.is_empty() {
@@ -3235,7 +3261,13 @@ impl<'a> Project<'a> {
                     // and the whole is one of their elements)
                     let flat = rest.get(i + 1).is_some_and(|s| s == crate::refs::MANY);
                     if self.def(c).kind.is_callable() && (flat || collection_next(i + 1)) {
-                        if let Some(elem) = self.elem_type_of(c) {
+                        // (`fun all(): List<T>` on a `Response<Contact>`)
+                        let elem = self.elem_type_of(c).or_else(|| {
+                            let e = self.def(c).elem.as_ref()?;
+                            self.bound_type(binds.as_ref(), e, c)
+                        });
+                        if let Some(elem) = elem {
+                            binds = None;
                             keyed = self.def(c).keyed && !flat;
                             t = Target::Def(elem);
                             many = true;
@@ -3249,8 +3281,20 @@ impl<'a> Project<'a> {
                             if !declared {
                                 conf = conf.max(Confidence::Inferred);
                             }
+                            // `fun execute(): Response<T>`: the result's own
+                            // bindings, through the ones the call was made under
+                            let def = self.def(c);
+                            binds = self.binds_for(r, &def.targs, c.0, def.parent, binds.as_ref());
                             t = Target::Def(r);
                             sealed = self.def(c).sealed && !opened_after(i + 1);
+                            continue;
+                        }
+                        // `fun body(): T` on a `Response<Contact>`
+                        if let Some(r) =
+                            self.return_path(c).and_then(|p| self.bound_type(binds.as_ref(), p, c))
+                        {
+                            binds = None;
+                            t = Target::Def(r);
                             continue;
                         }
                         // a result bound to the type itself: the type the
@@ -3301,7 +3345,13 @@ impl<'a> Project<'a> {
             if let Some(Target::Def(p)) = &found {
                 let flat = rest.get(i + 1).is_some_and(|s| s == crate::refs::MANY);
                 if self.def(*p).kind.is_state() && (flat || collection_next(i + 1)) {
-                    if let Some(elem) = self.elem_type_of(*p) {
+                    // (`items: T[]` on a `Page<User>`)
+                    let elem = self.elem_type_of(*p).or_else(|| {
+                        let e = self.def(*p).elem.as_ref()?;
+                        self.bound_type(binds.as_ref(), e, *p)
+                    });
+                    if let Some(elem) = elem {
+                        binds = None;
                         keyed = self.def(*p).keyed && !flat;
                         t = Target::Def(elem);
                         many = true;
@@ -3323,8 +3373,27 @@ impl<'a> Project<'a> {
                     if let Some((ft, cf)) = self.field_type(c, seg, 3).or_else(declared) {
                         conf = conf.max(cf);
                         sealed = self.member_sealed(c, seg, found.as_ref()) && !opened_after(i + 1);
+                        binds = match &found {
+                            Some(Target::Def(p)) => {
+                                let def = self.def(*p);
+                                self.binds_for(ft, &def.targs, p.0, def.parent, binds.as_ref())
+                            }
+                            _ => None,
+                        };
                         t = Target::Def(ft);
                         continue;
+                    }
+                    // `val body: T` on a `Response<Contact>`
+                    if let Some(Target::Def(p)) = &found {
+                        let written = self.def(*p).declared_type.as_ref();
+                        if let Some(ft) = written
+                            .and_then(|w| self.bound_type(binds.as_ref(), w, *p))
+                            .or_else(|| self.bound_field(binds.as_ref(), c, seg))
+                        {
+                            binds = None;
+                            t = Target::Def(ft);
+                            continue;
+                        }
                     }
                 }
                 return None;
@@ -3343,9 +3412,15 @@ impl<'a> Project<'a> {
                     if !self.def(c).kind.is_class_like() || i + 1 == rest.len() {
                         return None;
                     }
+                    if let Some(ft) = self.bound_field(binds.as_ref(), c, seg) {
+                        binds = None;
+                        t = Target::Def(ft);
+                        continue;
+                    }
                     let (ft, cf) = self.field_type(c, seg, 3)?;
                     conf = conf.max(cf);
                     sealed = self.member_sealed(c, seg, None) && !opened_after(i + 1);
+                    binds = None;
                     t = Target::Def(ft);
                 }
             }
@@ -3359,6 +3434,102 @@ impl<'a> Project<'a> {
             return None;
         }
         Some((t, conf))
+    }
+
+    /// The bindings `args` (written in file `f`, scope `scope`) give `owner`'s
+    /// type parameters; an argument that is itself a type parameter `outer`
+    /// binds (`fun execute(): Response<T>` in `Call<T>`) takes its binding.
+    fn binds_for(
+        &self,
+        owner: DefRef,
+        args: &[Vec<String>],
+        f: usize,
+        scope: Option<usize>,
+        outer: Option<&Binds>,
+    ) -> Option<Binds> {
+        let def = self.def(owner);
+        if args.is_empty() || !def.kind.is_class_like() || def.type_params.len() != args.len() {
+            return None;
+        }
+        let args = args
+            .iter()
+            .map(|a| {
+                let passed = match (a.as_slice(), outer) {
+                    ([x], Some(o)) => self.def(o.owner).type_params.iter().position(|p| p == x),
+                    _ => None,
+                };
+                match (passed, outer) {
+                    (Some(i), Some(o)) => o.args[i].clone(),
+                    _ => (a.clone(), f, scope),
+                }
+            })
+            .collect();
+        Some(Binds { owner, args })
+    }
+
+    /// The type a type parameter `name` of the class around `member` stands
+    /// for under `b`: only for a member of the class the bindings are for, and
+    /// never for a type parameter of the member itself.
+    fn bound_type(&self, b: Option<&Binds>, name: &[String], member: DefRef) -> Option<DefRef> {
+        let b = b?;
+        let [name] = name else { return None };
+        let def = self.def(member);
+        if def.type_params.contains(name)
+            || self.class_of(member.0, Some(member.1)) != Some(b.owner)
+        {
+            return None;
+        }
+        self.bound_param(b, name)
+    }
+
+    /// The type type parameter `name` of `b.owner` stands for.
+    fn bound_param(&self, b: &Binds, name: &str) -> Option<DefRef> {
+        let i = self.def(b.owner).type_params.iter().position(|p| p == name)?;
+        let (path, file, scope) = &b.args[i];
+        self.type_of_path(*file, *scope, path, true).filter(|t| self.def(*t).kind.is_class_like())
+    }
+
+    /// A field of `c` (assigned in a method, or a constructor's `val x: T`)
+    /// whose written type is a type parameter `b` binds.
+    fn bound_field(&self, b: Option<&Binds>, c: DefRef, name: &str) -> Option<DefRef> {
+        let b = b.filter(|b| b.owner == c)?;
+        let &(fi, li) = self.fields.get(&c)?.get(name)?;
+        let l = &self.files[fi].locals[li];
+        match l.path.as_slice() {
+            [x] if l.declared => self.bound_param(b, x),
+            _ => None,
+        }
+    }
+
+    /// The type a callable declares it returns, as written.
+    fn return_path(&self, c: DefRef) -> Option<&Vec<String>> {
+        self.files[c.0]
+            .refs
+            .iter()
+            .find(|x| {
+                x.from_def == Some(c.1) && x.kind == RefKind::Type && x.context == "return_type"
+            })
+            .map(|x| &x.path)
+    }
+
+    /// The type arguments a local or parameter is declared with, and the
+    /// definition it is a local of.
+    fn local_targs(
+        &self,
+        f: usize,
+        d: Option<usize>,
+        name: &str,
+    ) -> Option<(&[Vec<String>], usize)> {
+        let defs = &self.files[f].defs;
+        let mut cur = d;
+        while let Some(x) = cur {
+            if let Some(&li) = self.locals.get(&(f, x, name.to_string())) {
+                let l = &self.files[f].locals[li];
+                return (!l.targs.is_empty()).then_some((&l.targs[..], x));
+            }
+            cur = defs[x].parent;
+        }
+        None
     }
 
     /// Whether the path being walked is a call to link (not a local's value
