@@ -259,6 +259,25 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- Native engine 0.5.22, declared types and three lookups. On the 31 audit
+  repositories: 249 calls and 150 reads and writes gained, 513 calls
+  `INFERRED` → `EXTRACTED`, 9 calls gone; the share of `INFERRED` calls
+  goes from 30% to 28%.
+  - **The type a declaration writes comes before what is assigned**: Go
+    `var rooms *Manager`, Kotlin `val kind: Kind = builder.kind` (no type at
+    all before), and C++ `static HttpServer* server = new HttpServer();`,
+    whose 509 calls in cpr's tests were a guess by its value.
+  - **Of several callables of one name in the middle of a chain, the one
+    whose result has what is asked next**: `result.response().isSuccessful()`
+    beside a static `response(Response)` (46 calls in retrofit).
+  - **A field before a function of its name when a member is asked of it**
+    (Kotlin constructor parameters beside `fun builder(…)`, Swift
+    `eventMonitor?.request(…)`).
+  - **C# names are looked up in every namespace around the file's**; four
+    bases written `: Interceptors.Interceptor` are the project's class,
+    where they were an external name.
+  - With more arguments typed, 9 calls that tied between overloads are one
+    (`producerOf(ANY.copy(…))`).
 - Native engine 0.5.21, **names bound with a type the source states are
   locals**: a loop variable written with its type (Java `for (Pet pet :
   pets)`, C# `foreach (Pet pet in pets)`), a type pattern (`o instanceof

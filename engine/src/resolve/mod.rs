@@ -3478,7 +3478,24 @@ impl<'a> Project<'a> {
                 }
                 Some(Target::Def(m))
             })
-            .or_else(|| self.resolve_name(f, d, head))
+            .or_else(|| {
+                let found = self.resolve_name(f, d, head)?;
+                // a function of the name with a member asked of it, not
+                // called: the field of that name is what is meant (Kotlin
+                // `constructor(builder: Builder, tags: TagMap =
+                // builder.buildTagMap())` beside `fun builder(…)`)
+                if let Target::Def(x) = &found {
+                    let asked = rest.first().is_some_and(|s| s != "()" && !s.starts_with('['));
+                    if asked && self.def(*x).kind.is_callable() && fam.implicit_this() {
+                        let held = self.class_of(f, d).and_then(|c| self.field_type(c, head, 3));
+                        if let Some((t, cf)) = held {
+                            conf = cf;
+                            return Some(Target::Def(t));
+                        }
+                    }
+                }
+                Some(found)
+            })
             .or_else(|| {
                 // a field seen without `this` (Java, C#, C++, Swift, Ruby)
                 let c = if fam.implicit_this() { self.class_of(f, d)? } else { return None };
@@ -3547,6 +3564,9 @@ impl<'a> Project<'a> {
                 let typed = self
                     .class_of(p.0, self.def(p).parent)
                     .and_then(|owner| self.field_type(owner, &self.def(p).name.clone(), 3))
+                    // the type its declaration writes (Go `var rooms
+                    // *Manager`, Kotlin `val kind: Kind = builder.kind`)
+                    .or_else(|| self.declared_state_type(p))
                     .or_else(|| self.state_type(p));
                 match typed {
                     Some((ft, cf)) => {
@@ -3907,6 +3927,17 @@ impl<'a> Project<'a> {
                             continue;
                         }
                     }
+                    // several callables of the name (`Result.response()`
+                    // beside `response(Response)`): a call in the middle of
+                    // a chain writes no arguments the walk keeps, so the one
+                    // whose result has what is asked next
+                    let c = match self.overload_giving(c, rest.get(i + 1)) {
+                        Some(other) => {
+                            conf = conf.max(Confidence::Inferred);
+                            other
+                        }
+                        None => c,
+                    };
                     // a method that declares its result: `builder().a().b()`
                     if self.def(c).kind.is_callable() {
                         if let Some((r, declared)) = self.return_type(c) {
@@ -4740,7 +4771,18 @@ impl<'a> Project<'a> {
         let joined = |p: &[String]| p.join(".");
         let mut prefixes: Vec<String> = Vec::new();
         if let Some(pkg) = &self.files[f].package {
-            prefixes.push(format!("{}.", pkg.replace('\\', ".")));
+            let pkg = pkg.replace('\\', ".");
+            prefixes.push(format!("{pkg}."));
+            // C#: a name is looked up in every namespace around the file's
+            // (`Users.UserHelpers` from `App.Features.Articles` is
+            // `App.Features.Users.UserHelpers`)
+            if fam == Family::CSharp {
+                let mut parts: Vec<&str> = pkg.split('.').collect();
+                while parts.len() > 1 {
+                    parts.pop();
+                    prefixes.push(format!("{}.", parts.join(".")));
+                }
+            }
         }
         // the namespaces / modules lexically around the use (C#, C++, Ruby)
         let defs = &self.files[f].defs;
@@ -5209,6 +5251,38 @@ impl<'a> Project<'a> {
         let (target, _) = self.resolve_path(f, r.from_def, &prefix, true)?;
         let Target::Def(t) = target else { return None };
         self.def(t).table.clone().map(|table| (table, write))
+    }
+
+    /// Of the overloads of `c`, the one other than `c` whose result has a
+    /// member `next`, when `c`'s own has none and exactly one does.
+    fn overload_giving(&self, c: DefRef, next: Option<&String>) -> Option<DefRef> {
+        let next = next.filter(|s| !s.starts_with('[') && *s != "()")?;
+        if !self.def(c).kind.is_callable() {
+            return None;
+        }
+        let all = self.overloads(c);
+        if all.len() < 2 {
+            return None;
+        }
+        let gives = |o: DefRef| {
+            self.return_type(o).is_some_and(|(r, _)| self.class_member(r, next, 4).is_some())
+        };
+        if gives(c) {
+            return None;
+        }
+        let mut fit = all.into_iter().filter(|o| *o != c && gives(*o));
+        match (fit.next(), fit.next()) {
+            (Some(o), None) => Some(o),
+            _ => None,
+        }
+    }
+
+    /// The project type a variable, field or constant is declared with.
+    fn declared_state_type(&self, p: DefRef) -> Option<(DefRef, Confidence)> {
+        let def = self.def(p);
+        let ty = def.declared_type.as_ref()?;
+        let t = self.type_of_path(p.0, def.parent, ty, true)?;
+        self.def(t).kind.is_class_like().then_some((t, Confidence::Extracted))
     }
 
     /// The type of a variable from what constructs its value
