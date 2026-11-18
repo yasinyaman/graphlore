@@ -170,9 +170,13 @@ pub struct Def {
     #[serde(default)]
     pub value_path: Option<Vec<String>>,
     /// The element type of the collection a field is declared as, or a
-    /// callable declares it returns.
+    /// callable declares it returns (of a map: its values').
     #[serde(default)]
     pub elem: Option<Vec<String>>,
+    /// That collection is a map: `elem` is its values' type, and iterating it
+    /// gives entries (or keys), not values.
+    #[serde(default)]
+    pub keyed: bool,
     /// The type a variable, field or constant is declared with, as written.
     #[serde(default)]
     pub declared_type: Option<Vec<String>>,
@@ -319,6 +323,9 @@ pub struct Local {
     /// given to its `forEach`, `xs.first()` and `xs[0]` have.
     #[serde(default)]
     pub elem: Option<Vec<String>>,
+    /// Declared as a map (`elem` is its values' type; see `Def::keyed`).
+    #[serde(default)]
+    pub keyed: bool,
     /// The arguments of the call the value is, as far as the site shows
     /// (at most 4): what binds a type parameter the function returns.
     #[serde(default)]
@@ -388,6 +395,9 @@ pub struct ParamFact {
     /// The element type, when that type is a collection's.
     #[serde(default)]
     pub elem: Option<Vec<String>>,
+    /// That type is a map's (see `Def::keyed`).
+    #[serde(default)]
+    pub keyed: bool,
     /// It has a default value.
     pub optional: bool,
     /// It takes any number of arguments (`vararg`, `...`, `params`).

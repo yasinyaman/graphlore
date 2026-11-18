@@ -279,6 +279,20 @@ What the lookup takes from each language's own rules:
   it was not before. A local assigned a call of such a function is closed
   unless the value was opened where it is assigned (`let c = open();` is,
   `let c = open()?;` is not).
+- **Maps and pairs.** A map declared as one (`Map<K, V>`, `HashMap`,
+  `Dictionary`, `dict[K, V]`, `Record`, Go `map[K]V`, Swift `[K: V]`) has its
+  values' type as its element, and records that it is a map: `m[k]`,
+  `m.get(k)`, `getValue`, `getOrDefault`, `getOrPut` give a value,
+  `m.values` / `.Values` is the collection of them, and `entries`,
+  `entrySet`, `items` keep the map. Iterating a map gives its entries (in
+  Python its keys), so a single loop variable over one, a lambda's one
+  parameter, and `m.first()` are nothing known; a pair taken apart is its
+  key and value (`for ((k, v) in m)`, `for k, v in d.items()`, `for (k, v)
+  in &m`, `for (const [k, v] of m)`, `foreach (var (k, v) in m)`, `m.forEach
+  { (k, v) -> … }`, Java's `m.forEach((k, v) -> …)`), and Go's `range` gives
+  the value second. The same pair beside an index gives the element
+  (`xs.withIndex()`, `xs.iter().enumerate()`, `xs.enumerated()`). The key's
+  type is not recorded: keys are mostly strings and numbers.
 - **Results that are type parameters.** A function that returns its own type
   parameter gives the type of the argument that binds it: `fun <T> pick(x:
   T): T` the argument's, `fun <T> head(xs: List<T>): T` its element's. A method that returns a type
@@ -535,7 +549,7 @@ file pairs). The native graph has definitions graphify folds into the one
 around them (a function nested in a method, the setter beside a getter of the
 same name); an edge from one of those is compared as an edge from the paired
 definition it belongs to, as graphify records it. On the 31 repositories of the
-[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.7,
+[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.8,
 measured 2026-11-18), as native / graphify edges and the share of graphify's
 that the native graph has too:
 
@@ -550,16 +564,16 @@ that the native graph has too:
 | Kotlin | 99.4% | 368 / 333 (95%) | 4,682 / 2,108 (71%) | 96 / 56 (93%) | 1,087 / 673 (91%) |
 | Scala | 100% | 2 / 0 | 46 / 20 (45%) | 21 / 22 (95%) | 75 / 32 (100%) |
 | C# | 92.7% | 347 / 280 (30%)³ | 2,787 / 2,450 (93%) | 87 / 86 (98%) | 1,259 / 806 (99%) |
-| Rust | 93.3% | 314 / 370 (75%) | 1,835 / 853 (82%) | 53 / 41 (93%) | 1,242 / 895 (81%) |
+| Rust | 93.3% | 314 / 370 (75%) | 1,837 / 853 (82%) | 53 / 41 (93%) | 1,242 / 895 (81%) |
 | Swift | 95.9% | 166 / 166 (–)³ | 5,164 / 2,141 (82%) | 190 / 164 (100%) | 1,091 / 580 (62%) |
 | C | 100% | 89 / 77 (99%) | 864 / 791 (100%) | – | 253 / 130 (97%) |
 | C++ | 97.8% | 215 / 228 (93%) | 631 / 281 (33%)⁴ | 30 / 5 (100%) | 326 / 218 (88%) |
 | C/C++ headers | 90.6% | 164 / 172 (95%) | 361 / 348 (85%) | 11 / 12 (92%) | 515 / 289 (87%) |
 | Ruby | 99.7% | 42 / 0 | 445 / 375 (70%) | 46 / 15 (93%) | 28 / 0 |
 | PHP | 80.6% | 429 / 505 (84%) | 8,870 / 6,140 (90%) | 65 / 60 (98%) | 648 / 213 (95%) |
-| **All** | **94.4%** | **4,961 / 5,565 (75%)** | **43,572 / 27,832 (84%)** | **1,132 / 726 (97%)** | **12,412 / 6,775 (89%)** |
+| **All** | **94.4%** | **4,961 / 5,565 (75%)** | **43,574 / 27,832 (84%)** | **1,132 / 726 (97%)** | **12,412 / 6,775 (89%)** |
 
-Of the native calls, 12,725 (29%) are `INFERRED`, against 47% of graphify's.
+Of the native calls, 12,727 (29%) are `INFERRED`, against 47% of graphify's.
 That share was 20% before engine 0.5.5: a call of an overloaded name that the
 arguments do not decide used to be an `EXTRACTED` edge to the first overload,
 and is now an `INFERRED` edge to each overload that fits (999 calls, with
@@ -594,6 +608,14 @@ unwrap chains of these repositories are mostly on library types
 14 calls in all. Of the two edges gone, one was a guess on a name
 (`ret.extensions_mut()` on an `http::Response`, linked to ureq's own
 `Request`) and one moved to the definition the call is of.
+Engine 0.5.8 (maps and pairs) changes 10 edges: kotlinpoet's
+`constructorProperties[param.name].emit(…)` calls `PropertySpec.emit`
+where a guess by name linked `ParameterSpec`'s, ureq's `proxy.map(|p|
+p.username())` moves from a function of `util.rs` to `Proxy.username`, and
+two edges of got are gone that named a function defined in another loop
+for a destructured loop variable of the same name. The maps of these
+repositories that hold project types are mostly looked up by key once, or
+not walked at all.
 Reading a sample of each side's edges the other lacks, per language:
 
 - **What only graphify has** is mostly its own guesses and artefacts.
@@ -632,7 +654,7 @@ Reading a sample of each side's edges the other lacks, per language:
   whose names say what they give (`xs.filter { … }.map { it.owner
   }.first()`); not through one whose result depends on more than the
   elements (`fold`, `reduce`, `groupBy`, `zip`, `associate`), a mapping whose
-  function is several statements, or the keys and values of a map.
+  function is several statements, or a map's keys.
 - **What only the native graph has** is mostly what a name lookup by itself
   cannot see: calls through a module object (`httpx.Response(...)`), through a
   typed local or field (`client = httpx.Client(); client.get()`,
@@ -656,7 +678,7 @@ builds take 13.3 s for the 31 repositories against graphify's 81.3 s
 faster of two clean builds each): 8.7 times faster at the median, from 2.1
 (todoapi, whose bundled JavaScript the native engine reads in full) to 17.2
 times; retrofit 2.9 s against 13.1 s, guzzle 0.9 s / 6.1 s, alamofire 1.2 s /
-5.4 s, got 0.9 s / 4.7 s (engine 0.5.1; with all that 0.5.7 resolves the same
+5.4 s, got 0.9 s / 4.7 s (engine 0.5.1; with all that 0.5.8 resolves the same
 31 builds take 16.8 to 17.8 s, retrofit 3.7 to 4.1 s). An update after a one-file change takes a third of
 a build ([above](#incremental-updates)).
 
@@ -703,7 +725,7 @@ but one convention finding, fixed since: `graphlore_surprises(limit=0)` cut its
 `shared_state` list without saying how much (`shared_state_left_out` does now).
 `SKELETON-EMPTY` went from 5 to 0, and the tool time stayed at 131 s.
 
-Rerun on graphs built by engine 0.5.3, and again by 0.5.4, 0.5.5, 0.5.6 and 0.5.7
+Rerun on graphs built by engine 0.5.3, and again by 0.5.4 through 0.5.8
 (2026-11-18), the audit raises nothing on the native graphs but its
 `GRAPH-ORPHAN-NODES` note on 19 of them; 115 to 154 s of tool time (on the 0.5.7 run, retrofit's build through `graphlore_build` took 5.1 s and was reported `SLOW` for crossing 5 s). What the table above still listed is
 gone:

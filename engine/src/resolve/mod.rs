@@ -490,10 +490,42 @@ const SWIFT_CORE_METHODS: &[&str] = &[
 /// Whether a path segment is something of collections: an element, a method
 /// that keeps the collection or one that gives an element.
 fn is_collection_step(seg: &str) -> bool {
-    seg == crate::refs::ELEMENT
+    is_element_marker(seg)
         || KEEPING_METHODS.contains(&seg)
         || ELEMENT_ACCESSORS.contains(&seg)
+        || KEY_LOOKUPS.contains(&seg)
+        || PAIRING_METHODS.contains(&seg)
+        || MAP_VIEWS.contains(&seg)
 }
+
+/// `[]`, `[*]`, `[v]`: one of what precedes (see `refs::ELEMENT`).
+fn is_element_marker(seg: &str) -> bool {
+    seg == crate::refs::ELEMENT || seg == crate::refs::ITERATED || seg == crate::refs::VALUE
+}
+
+/// Methods of a map that take a key and give its value.
+const KEY_LOOKUPS: &[&str] = &[
+    "get",
+    "getValue",
+    "getOrDefault",
+    "getOrPut",
+    "getOrElse",
+    "getOrNull",
+    "computeIfAbsent",
+    "remove",
+    "GetValueOrDefault",
+    "fetch",
+    "get_mut",
+];
+
+/// Methods that give each element with its index (a pair).
+const PAIRING_METHODS: &[&str] =
+    &["enumerate", "withIndex", "enumerated", "each_with_index", "with_index", "Index"];
+
+/// A map's views: its values (a collection of them), its entries (a map
+/// still), its keys (nothing known).
+const MAP_VIEWS: &[&str] =
+    &["values", "Values", "entries", "entrySet", "items", "keys", "Keys", "keySet", "keys_mut"];
 
 /// Methods of a collection that give a collection of the same elements.
 const KEEPING_METHODS: &[&str] = &[
@@ -982,6 +1014,10 @@ pub struct Project<'a> {
     /// Whether a local assigned a value holds it in a sealed wrapper
     /// (`let r = load();` with `fn load() -> Result<Foo, E>`), per local.
     sealed_locals: RefCell<HashMap<(usize, usize), bool>>,
+    /// A local's value is being typed: the method its path ends with is what
+    /// gives the type (`let p = self.pool.lock().unwrap()`), not a call to
+    /// link, so a library's method at the end still types it.
+    typing_value: RefCell<bool>,
     /// The locals whose type is being worked out: `(file, index of the local)`.
     typing: RefCell<HashSet<(usize, usize)>>,
     /// The use being resolved, when it is a call: `(file, index of the use)`.
@@ -1079,6 +1115,7 @@ impl<'a> Project<'a> {
             structural: RefCell::new(HashMap::new()),
             local_types: RefCell::new(HashMap::new()),
             sealed_locals: RefCell::new(HashMap::new()),
+            typing_value: RefCell::new(false),
             typing: RefCell::new(HashSet::new()),
             cur: RefCell::new(None),
             args: RefCell::new(None),
@@ -1220,8 +1257,8 @@ impl<'a> Project<'a> {
     ) -> Option<(DefRef, Confidence)> {
         // an element of a collection: `xs[]`
         if let Some((last, of)) = path.split_last() {
-            if last == crate::refs::ELEMENT {
-                return self.elem_of(f, d, of);
+            if is_element_marker(last) {
+                return self.elem_of_as(f, d, of, last);
             }
         }
         let found = self.resolve_path(f, d, path, true);
@@ -1714,9 +1751,11 @@ impl<'a> Project<'a> {
                 // a written type is not
                 let value = !self.files[f].locals[li].declared;
                 let calling = self.calling.replace(value);
+                let typing_value = self.typing_value.replace(value);
                 let recv = self.recv.replace(None);
                 let out = self.local_type_of(f, x, li, name);
                 *self.recv.borrow_mut() = recv;
+                *self.typing_value.borrow_mut() = typing_value;
                 *self.calling.borrow_mut() = calling;
                 self.typing.borrow_mut().remove(&(f, li));
                 if whole {
@@ -1816,6 +1855,18 @@ impl<'a> Project<'a> {
     /// field declared as a collection (`xs: List<Foo>`, `Foo[] xs`), or the
     /// result of a call that declares it returns one.
     fn elem_of(&self, f: usize, d: Option<usize>, path: &[String]) -> Option<(DefRef, Confidence)> {
+        self.elem_of_as(f, d, path, crate::refs::ELEMENT)
+    }
+
+    /// `elem_of` for one marker (`refs::ELEMENT`, `ITERATED`, `VALUE`): what an
+    /// index, an iteration or the second of a pair gives.
+    fn elem_of_as(
+        &self,
+        f: usize,
+        d: Option<usize>,
+        path: &[String],
+        how: &str,
+    ) -> Option<(DefRef, Confidence)> {
         let typed = |file: usize, scope: Option<usize>, elem: &[String]| {
             self.type_of_path(file, scope, elem, true)
                 .filter(|t| self.def(*t).kind.is_class_like())
@@ -1828,24 +1879,30 @@ impl<'a> Project<'a> {
                 if let Some(&li) = self.locals.get(&(f, x, name.clone())) {
                     let l = &self.files[f].locals[li];
                     // a parameter's is on the definition's parameter list
-                    let elem = l.elem.clone().or_else(|| {
-                        defs[x].plist.iter().find(|p| p.name == *name).and_then(|p| p.elem.clone())
-                    });
+                    let param = defs[x].plist.iter().find(|p| p.name == *name);
+                    let elem = l.elem.clone().or_else(|| param.and_then(|p| p.elem.clone()));
+                    let keyed = l.keyed || param.is_some_and(|p| p.keyed);
                     if let Some(e) = elem {
-                        return typed(f, Some(x), &e);
+                        let fits = match how {
+                            crate::refs::ITERATED => !keyed,
+                            crate::refs::VALUE => keyed,
+                            _ => true,
+                        };
+                        return if fits { typed(f, Some(x), &e) } else { None };
                     }
                     // an optional is a collection of at most one
                     // (`opt.ifPresent { it.run() }`)
-                    if l.sealed {
+                    if l.sealed && how != crate::refs::VALUE {
                         return typed(f, Some(x), &l.path);
                     }
                     // another name for a collection: `val ys = xs`
                     let alias = !l.declared
                         && !l.path.is_empty()
                         && l.path[0] != *name
-                        && l.path.last().is_some_and(|s| s != crate::refs::ELEMENT);
+                        && l.path.last().is_some_and(|s| !is_element_marker(s));
                     return if alias {
-                        self.elem_of(f, Some(x), &l.path).map(|(t, _)| (t, Confidence::Inferred))
+                        self.elem_of_as(f, Some(x), &l.path, how)
+                            .map(|(t, _)| (t, Confidence::Inferred))
                     } else {
                         None
                     };
@@ -1862,7 +1919,9 @@ impl<'a> Project<'a> {
         let recv = self.recv.replace(None);
         let calling = self.calling.replace(false);
         let types = self.types_only.replace(false);
-        let found = self.resolve_path_inner(f, d, path, true, true);
+        let mut marked = path.to_vec();
+        marked.push(how.to_string());
+        let found = self.resolve_path_inner(f, d, &marked, true, false);
         *self.types_only.borrow_mut() = types;
         *self.calling.borrow_mut() = calling;
         *self.recv.borrow_mut() = recv;
@@ -1883,10 +1942,13 @@ impl<'a> Project<'a> {
     /// `val x = xs.first()`: an element of the collection `xs`.
     fn accessed(&self, f: usize, d: usize, l: &crate::facts::Local) -> Option<DefRef> {
         let (method, of) = l.path.split_last()?;
-        if of.is_empty() || !ELEMENT_ACCESSORS.contains(&method.as_str()) {
+        let lookup = KEY_LOOKUPS.contains(&method.as_str());
+        if of.is_empty() || !(lookup || ELEMENT_ACCESSORS.contains(&method.as_str())) {
             return None;
         }
-        self.elem_of(f, Some(d), of).map(|(t, _)| t)
+        // (a map's `first()` is an entry; `get(k)` its value)
+        let how = if lookup { crate::refs::ELEMENT } else { crate::refs::ITERATED };
+        self.elem_of_as(f, Some(d), of, how).map(|(t, _)| t)
     }
 
     /// The type of a local assigned a call of a function that returns its
@@ -2716,6 +2778,10 @@ impl<'a> Project<'a> {
         // method that keeps one (`filter`, `sorted`) or `[+]`; until an
         // element is taken (`first()`, `[]`).
         let mut many = false;
+        // `t` is a map's values (iterating it gives entries or keys), or
+        // elements each with an index (`withIndex()`)
+        let mut keyed = false;
+        let mut indexed = false;
         // what comes after position `i` is something of collections, or the
         // path ends there and a collection is what is asked for
         let collection_next = |i: usize| match rest.get(i) {
@@ -2733,6 +2799,7 @@ impl<'a> Project<'a> {
                 let (elem, c) = head_many?;
                 conf = c;
                 many = true;
+                keyed = self.local_keyed(f, d, head);
                 Target::Def(elem)
             }
             "self" => {
@@ -2970,6 +3037,7 @@ impl<'a> Project<'a> {
         if let Target::Def(p) = t {
             if !many && self.def(p).kind.is_state() && collection_next(0) {
                 if let Some(elem) = self.elem_type_of(p) {
+                    keyed = self.def(p).keyed;
                     t = Target::Def(elem);
                     many = true;
                 }
@@ -3020,6 +3088,9 @@ impl<'a> Project<'a> {
         let mut skip = 0;
         // an element was just taken and may still be in an optional
         let mut one = false;
+        // a wrapper was just opened, and what it gave may be another
+        // (`lock().unwrap()`): only unwrappers are skipped, it is no optional
+        let mut unwrapping = false;
         for (i, seg) in rest.iter().enumerate() {
             if skip > 0 {
                 skip -= 1;
@@ -3030,11 +3101,29 @@ impl<'a> Project<'a> {
             }
             // `[]`: one of the collection
             // (of an optional, `xs.find { … }?.let { … }`: what it holds)
-            if seg == crate::refs::ELEMENT {
+            if is_element_marker(seg) {
                 if !many && !one && !sealed {
                     return None;
                 }
+                if many {
+                    let fits = match seg.as_str() {
+                        // an index or a key: the element, a map's value
+                        crate::refs::ELEMENT => !indexed,
+                        // what iterating gives: an element; a map's entries
+                        // or keys, and pairs with an index, are none
+                        crate::refs::ITERATED => !keyed && !indexed,
+                        // the second of the pair: a value or an element
+                        _ => keyed || indexed,
+                    };
+                    if !fits {
+                        return None;
+                    }
+                } else if seg == crate::refs::VALUE {
+                    return None;
+                }
                 many = false;
+                keyed = false;
+                indexed = false;
                 sealed = false;
                 continue;
             }
@@ -3043,13 +3132,13 @@ impl<'a> Project<'a> {
                 // say; as the thing called it is the library's
                 let called = rest.get(i + 1).is_some_and(|s| s == "()");
                 let last = i + 1 + usize::from(called) == rest.len();
-                if last && *self.calling.borrow() {
+                if last && self.linking_call() {
                     return None;
                 }
                 if UNWRAPPERS.contains(&seg.as_str()) {
                     sealed = false;
                     // (and what it gives may be another: `lock().unwrap()`)
-                    one = true;
+                    unwrapping = true;
                 } else if !SEALED_KEEPING.contains(&seg.as_str()) {
                     return None;
                 }
@@ -3074,19 +3163,40 @@ impl<'a> Project<'a> {
                 };
                 t = Target::Def(of.filter(|_| !many)?);
                 many = true;
+                keyed = false;
+                indexed = false;
                 continue;
             }
             if many {
                 // a method of collections: its name says what it gives
                 // (called, or read like a property: Swift `xs.first`); as
                 // the thing called it is the library's method, nothing here
-                if i + 1 == rest.len() && *self.calling.borrow() {
+                if i + 1 == rest.len() && self.linking_call() {
                     return None;
                 }
-                if ELEMENT_ACCESSORS.contains(&seg.as_str()) {
+                let s = seg.as_str();
+                if keyed && KEY_LOOKUPS.contains(&s) {
+                    // `m.get(k)`, `m.getValue(k)`: the value
+                    many = false;
+                    keyed = false;
+                    one = true;
+                } else if keyed && MAP_VIEWS.contains(&s) {
+                    match s {
+                        "values" | "Values" => keyed = false,
+                        "entries" | "entrySet" | "items" => {}
+                        // the keys: of a type nothing records
+                        _ => return None,
+                    }
+                } else if PAIRING_METHODS.contains(&s) && !keyed {
+                    indexed = true;
+                } else if ELEMENT_ACCESSORS.contains(&s) {
+                    // (a map's `first()` is an entry, and so is a pair's)
+                    if keyed || indexed {
+                        return None;
+                    }
                     many = false;
                     one = true;
-                } else if !KEEPING_METHODS.contains(&seg.as_str()) {
+                } else if !KEEPING_METHODS.contains(&s) {
                     return None;
                 }
                 skip = usize::from(rest.get(i + 1).is_some_and(|s| s == "()"));
@@ -3095,14 +3205,18 @@ impl<'a> Project<'a> {
             // `xs.first().unwrap()`, `xs.stream().findFirst().get()`: the
             // element out of the optional it came in, unless its type has
             // a member of that name
-            if std::mem::take(&mut one) && UNWRAPPERS.contains(&seg.as_str()) {
+            let after_element = std::mem::take(&mut one);
+            if (after_element || std::mem::take(&mut unwrapping))
+                && UNWRAPPERS.contains(&seg.as_str())
+            {
                 if let Target::Def(c) = t {
                     if self.class_member(c, seg, 4).is_none() {
                         // (as the thing called, it is the library's)
-                        if i + 1 == rest.len() && *self.calling.borrow() {
+                        if i + 1 == rest.len() && self.linking_call() {
                             return None;
                         }
-                        one = true;
+                        one = after_element;
+                        unwrapping = !after_element;
                         skip = usize::from(rest.get(i + 1).is_some_and(|s| s == "()"));
                         continue;
                     }
@@ -3122,6 +3236,7 @@ impl<'a> Project<'a> {
                     let flat = rest.get(i + 1).is_some_and(|s| s == crate::refs::MANY);
                     if self.def(c).kind.is_callable() && (flat || collection_next(i + 1)) {
                         if let Some(elem) = self.elem_type_of(c) {
+                            keyed = self.def(c).keyed && !flat;
                             t = Target::Def(elem);
                             many = true;
                             skip = usize::from(flat);
@@ -3187,6 +3302,7 @@ impl<'a> Project<'a> {
                 let flat = rest.get(i + 1).is_some_and(|s| s == crate::refs::MANY);
                 if self.def(*p).kind.is_state() && (flat || collection_next(i + 1)) {
                     if let Some(elem) = self.elem_type_of(*p) {
+                        keyed = self.def(*p).keyed && !flat;
                         t = Target::Def(elem);
                         many = true;
                         skip = usize::from(flat);
@@ -3245,6 +3361,12 @@ impl<'a> Project<'a> {
         Some((t, conf))
     }
 
+    /// Whether the path being walked is a call to link (not a local's value
+    /// being typed).
+    fn linking_call(&self) -> bool {
+        *self.calling.borrow() && !*self.typing_value.borrow()
+    }
+
     /// Whether member `name` of type `c` (found as `found`, or a field
     /// assigned in a method) holds its value in a sealed wrapper.
     fn member_sealed(&self, c: DefRef, name: &str, found: Option<&Target>) -> bool {
@@ -3300,6 +3422,20 @@ impl<'a> Project<'a> {
                     self.sealed_locals.borrow_mut().insert((f, li), sealed);
                 }
                 return sealed;
+            }
+            cur = defs[x].parent;
+        }
+        false
+    }
+
+    /// Whether a local or parameter is declared as a map.
+    fn local_keyed(&self, f: usize, d: Option<usize>, name: &str) -> bool {
+        let defs = &self.files[f].defs;
+        let mut cur = d;
+        while let Some(x) = cur {
+            if let Some(&li) = self.locals.get(&(f, x, name.to_string())) {
+                return self.files[f].locals[li].keyed
+                    || defs[x].plist.iter().any(|p| p.name == *name && p.keyed);
             }
             cur = defs[x].parent;
         }
