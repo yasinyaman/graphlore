@@ -96,6 +96,9 @@ _FUSION_DEPTH = 50
 # (lexical, dense) weight by query kind: a name is found by its spelling, a
 # question by its meaning.
 _FUSION_WEIGHTS = {"symbol": (1.0, 0.3), "natural": (0.6, 1.0), "code": (0.5, 1.0)}
+# Rank fusion forgets how far ahead an exact name match was in BM25: on a symbol
+# query a chunk named exactly like the query gains this many first places.
+_EXACT_FUSED_BONUS = 0.0
 
 # find_related on the lexical tier: candidates come from the postings of the
 # chunk's heaviest terms, then exact cosine on the best of them.
@@ -733,16 +736,25 @@ class CodeIndex:
                 for cid in self.by_def.get(key, ()):
                     scores[cid] = scores.get(cid, 0.0) + overlay_weight * s
         if kind == "symbol":
-            want = _symbol_key(query)
-            whole = re.sub(r"[^0-9a-z.]", "", query.strip().rstrip("()").replace("::", ".").lower())
-            if want:
-                for cid in scores:
-                    chunk = self.chunks[cid]
-                    if chunk.qualname and chunk.qualname.lower() == whole:
-                        scores[cid] *= _EXACT_QUALNAME_BOOST
-                    elif re.sub(r"[^0-9a-z]", "", chunk.name.lower()) == want:
-                        scores[cid] *= _EXACT_NAME_BOOST
+            for cid, boost in self._exact(query, scores).items():
+                scores[cid] *= boost
         return scores
+
+    def _exact(self, query: str, cids: Iterable[int]) -> dict[int, float]:
+        """Chunks named like a symbol query: the boost each gets (whole qualified
+        name, or its last component)."""
+        want = _symbol_key(query)
+        if not want:
+            return {}
+        whole = re.sub(r"[^0-9a-z.]", "", query.strip().rstrip("()").replace("::", ".").lower())
+        out = {}
+        for cid in cids:
+            chunk = self.chunks[cid]
+            if chunk.qualname and chunk.qualname.lower() == whole:
+                out[cid] = _EXACT_QUALNAME_BOOST
+            elif chunk.name and re.sub(r"[^0-9a-z]", "", chunk.name.lower()) == want:
+                out[cid] = _EXACT_NAME_BOOST
+        return out
 
     def _rerank(self, scored: list[tuple[int, float]], query: str) -> list[tuple[int, float]]:
         """The path prior, then the per-file decay, over the best candidates."""
@@ -819,6 +831,9 @@ class CodeIndex:
             for r, (row, _cos) in enumerate(rows):
                 cid = cids[row]
                 fused[cid] = fused.get(cid, 0.0) + wd / (_RRF_K + r + 1)
+            if kind == "symbol" and _EXACT_FUSED_BONUS:
+                for cid, boost in self._exact(query, list(fused)).items():
+                    fused[cid] += _EXACT_FUSED_BONUS * boost / _EXACT_NAME_BOOST / (_RRF_K + 1)
             out = sorted(fused.items(), key=lambda kv: (-kv[1], self._order(kv[0])))
             out = self._rerank(out, query)
             return [Hit(self.chunks[c], round(s, 6)) for c, s in out[:top_k]]
