@@ -166,6 +166,19 @@ What the lookup takes from each language's own rules:
   to what it wraps: that the project has one `evaluate` says the caller is
   it, not the callee. A typed receiver, `self` and a tie between overloads
   are not guesses and keep their edge.
+- **What the source writes at a declaration's value.** A cast is the type
+  it writes, as surely as a declaration (`var a = (Box)o`, `o as Box`,
+  TypeScript `<Cup>o`, Kotlin `o as? Jar`). A C# primary constructor's
+  parameters are typed names of the class (`class Handler(ConduitContext
+  context)`). A name taken out of the object a function returns is the
+  function it names: `const { show, hide: close } = useToast()` beside
+  `return { show, hide: close }` (`INFERRED`, like a part of a returned
+  tuple). A Python `@property` read with more after it is what it returns
+  (`self.cookies.extract_cookies(…)`). And in a C# top-level program a
+  variable that names nothing in sight, called by the name of an extension
+  the file can see, is that extension's receiver (`builder.Services.AddJwt()`,
+  `INFERRED`); a capital head is a library's type making a static call
+  (`HttpUtility.UrlEncode(s)`), never.
 - **The type arguments a call writes** (C#, Java). `client.Get<User>(id)`
   is of a callable that declares as many type parameters; one that
   declares none, or another number, cannot be meant. A call that writes
@@ -737,31 +750,31 @@ file pairs). The native graph has definitions graphify folds into the one
 around them (a function nested in a method, the setter beside a getter of the
 same name); an edge from one of those is compared as an edge from the paired
 definition it belongs to, as graphify records it. On the 31 repositories of the
-[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.23,
+[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.25,
 measured 2026-11-18), as native / graphify edges and the share of graphify's
 that the native graph has too:
 
 | Language | same definition | imports (file pairs) | calls | bases | type references |
 |---|--:|--:|--:|--:|--:|
-| Python | 100% | 212 / 219 (96%) | 2,962 / 834 (94%) | 73 / 62 (100%) | 439 / 494 (68%) |
+| Python | 100% | 212 / 219 (96%) | 2,970 / 834 (94%) | 73 / 62 (100%) | 440 / 494 (68%) |
 | JavaScript | 93.5%⁵ | 190 / 305 (59%) | 1,341 / 2,058 (43%)¹ | 1 / 1 | 3 / 0 |
-| TypeScript | 99.4% | 527 / 634 (83%) | 805 / 687 (98%) | 25 / 20 (100%) | 737 / 156 (88%) |
+| TypeScript | 99.4% | 527 / 634 (83%) | 805 / 687 (98%) | 25 / 20 (100%) | 740 / 156 (88%) |
 | TSX | 99.7% | 253 / 316 (80%) | 435 / 456 (95%) | – | 42 / 4 |
 | Go | 100% | 538 / 950 (47%)² | 6,723 / 3,167 (99%) | 19 / 14 (100%) | 679 / 355 (99%) |
 | Java | 100% | 1,105 / 1,010 (100%) | 5,718 / 5,123 (85%) | 415 / 168 (94%) | 3,989 / 1,930 (98%) |
-| Kotlin | 99.4% | 368 / 333 (95%) | 4,783 / 2,108 (71%) | 96 / 56 (93%) | 1,079 / 673 (91%) |
+| Kotlin | 99.4% | 368 / 333 (95%) | 4,786 / 2,108 (71%) | 96 / 56 (93%) | 1,079 / 673 (91%) |
 | Scala | 100% | 2 / 0 | 46 / 20 (45%) | 21 / 22 (95%) | 75 / 32 (100%) |
-| C# | 92.7% | 347 / 280 (30%)³ | 2,808 / 2,450 (94%) | 87 / 86 (98%) | 1,223 / 806 (99%) |
+| C# | 92.7% | 347 / 280 (30%)³ | 2,860 / 2,450 (96%) | 87 / 86 (98%) | 1,248 / 806 (99%) |
 | Rust | 93.3% | 314 / 370 (75%) | 2,011 / 853 (86%) | 53 / 41 (93%) | 1,245 / 895 (81%) |
-| Swift | 95.9% | 166 / 166 (–)³ | 5,467 / 2,141 (83%) | 190 / 164 (100%) | 1,091 / 580 (62%) |
+| Swift | 95.9% | 166 / 166 (–)³ | 5,466 / 2,141 (83%) | 190 / 164 (100%) | 1,091 / 580 (62%) |
 | C | 100% | 89 / 77 (99%) | 864 / 791 (100%) | – | 253 / 130 (97%) |
 | C++ | 97.8% | 215 / 228 (93%) | 653 / 281 (33%)⁴ | 30 / 5 (100%) | 326 / 218 (88%) |
 | C/C++ headers | 90.6% | 164 / 172 (95%) | 359 / 348 (85%) | 11 / 12 (92%) | 515 / 289 (87%) |
 | Ruby | 99.7% | 42 / 0 | 442 / 375 (69%) | 46 / 15 (93%) | 28 / 0 |
 | PHP | 80.6% | 429 / 505 (84%) | 8,870 / 6,140 (90%) | 65 / 60 (98%) | 648 / 213 (95%) |
-| **All** | **94.4%** | **4,961 / 5,565 (75%)** | **44,287 / 27,832 (85%)** | **1,132 / 726 (97%)** | **12,372 / 6,775 (89%)** |
+| **All** | **94.4%** | **4,961 / 5,565 (75%)** | **44,349 / 27,832 (85%)** | **1,132 / 726 (97%)** | **12,401 / 6,775 (89%)** |
 
-Of the native calls, 12,596 (28%) are `INFERRED`, against 47% of graphify's.
+Of the native calls, 12,595 (28%) are `INFERRED`, against 47% of graphify's.
 That share was 20% before engine 0.5.5: a call of an overloaded name that the
 arguments do not decide used to be an `EXTRACTED` edge to the first overload,
 and is now an `INFERRED` edge to each overload that fits (999 calls, with
@@ -804,6 +817,28 @@ two edges of got are gone that named a function defined in another loop
 for a destructured loop variable of the same name. The maps of these
 repositories that hold project types are mostly looked up by key once, or
 not walked at all.
+Engine 0.5.25 (from what the 0.5.24 diagnostics left: C# primary
+constructors, a cast, an object a function returns, a Python `@property`,
+C#'s top-level programs) adds 83 calls (60 `EXTRACTED`) and 157 reads,
+writes, uses and references, turns 11 edges `EXTRACTED` and takes 8 away.
+aspnetcore-realworld gets most of it: its handlers take what they use in a
+primary constructor (`class QueryHandler(ConduitContext context, …)`), and
+`context.SaveChangesAsync()` or `mapper.PersonToUser(person)` had no edge;
+its `Program.cs` reaches `builder.Services.AddConduit()` (`INFERRED`: the
+receiver is a top-level variable of a library's value). fastapi-template's
+components get 13 calls of the functions a hook returns (`const {
+showSuccessToast } = useCustomToast()`), httpx 8 through its properties
+(`self.cookies.extract_cookies(…)`), and casts type a local in C#, Java,
+TypeScript and Kotlin (`var attribute = (DeserializeAsAttribute)…`, `o as
+Jar`). Of the 8 gone, 4 were wrong: two `indirect_call`s of alamofire
+from `self.didCancelTask(task)` to the method `task()`, where `task` is the
+local `guard let task = … as? URLSessionDownloadTask` binds, a call of got's
+tests to an unrelated `close()` that a destructured local now holds, and
+one inside a minified bundle. kotlinpoet's `memberName.emit(this)` goes to
+`MemberName.emit` (`EXTRACTED`) instead of a guess. The other three are
+reads of alamofire's example app that a later binding now hides (`guard
+let request` beside `if let request = request as? DataRequest` in the same
+function): locals are the function's, not the block's.
 Engine 0.5.23 (the type arguments a call writes) changes restsharp only,
 and only which of several overloads a call is linked to: 81 targets are
 gone and 27 calls that are left with one are `EXTRACTED`.
@@ -1042,8 +1077,8 @@ builds take 13.3 s for the 31 repositories against graphify's 81.3 s
 faster of two clean builds each): 8.7 times faster at the median, from 2.1
 (todoapi, whose bundled JavaScript the native engine reads in full) to 17.2
 times; retrofit 2.9 s against 13.1 s, guzzle 0.9 s / 6.1 s, alamofire 1.2 s /
-5.4 s, got 0.9 s / 4.7 s (engine 0.5.1; with all that 0.5.23 resolves the same
-31 builds take 16.3 to 18.9 s through Python, 16.1 to 18.1 s in the engine alone, retrofit 3.7 to 4.1 s). An update after a one-file change takes a third of
+5.4 s, got 0.9 s / 4.7 s (engine 0.5.1; with all that 0.5.25 resolves the same
+31 builds take 16.3 to 18.9 s through Python, 15.8 to 18.1 s in the engine alone, retrofit 3.7 to 4.1 s). An update after a one-file change takes a third of
 a build ([above](#incremental-updates)).
 
 ### What is left without an edge
@@ -1090,7 +1125,7 @@ implicit members since 0.5.17: 39 whose place gives no type are rows now
 closure parameters and variables of express's tests. What is left at file
 level there is `app.use` and `app.set` (842 rows of express), names too
 short and too common to guess by. Engine 0.5.19 takes 123 more off (6,362;
-C# 349 from 470; 6,360 with 0.5.20, 6,348 with 0.5.21, 6,285 with 0.5.22). Most of what C# has left is not the project's: `Assert.
+C# 349 from 470; 6,360 with 0.5.20, 6,348 with 0.5.21, 6,285 with 0.5.22, 6,237 with 0.5.25). Most of what C# has left is not the project's: `Assert.
 NotNull` beside its own `Ensure.NotNull` (77), `WireMockServer.Start` (23).
 
 By then most rows were of that kind: a library's name the project happens
@@ -1106,7 +1141,8 @@ the rest). Of the 6,285 rows (engine 0.5.24, 2026-11-18):
 | the one definition is test code and the call is not (PSR-7's `getHeaderLine` beside a test double) | 214 |
 | **none of these: what an edge is still plausible for** | **2,114** |
 
-The 2,114 by language: PHP 445, TypeScript 405, Ruby 304, C# 196, Rust 192,
+(0.5.25 takes 48 of those 2,114 off: C# 196 → 166, TSX 19 → 6, Python 20
+→ 17, Kotlin 79 → 77; 2,066 are left.) The 2,114 by language: PHP 445, TypeScript 405, Ruby 304, C# 196, Rust 192,
 C++ 169, Swift 94, Kotlin 79, JavaScript 71, Java 49, Go 34, C 33, Python
 20, TSX 19, Scala 4. They are still an upper bound: the marks are
 conservative, and PHP's and TypeScript's rows are mostly PSR-7 and Node

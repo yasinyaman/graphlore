@@ -502,6 +502,7 @@ pub fn walk_defs(m: &dyn LanguageModule, root: Node, src: &[u8]) -> Vec<Def> {
                     keyed: false,
                     key: None,
                     returned_parts: Vec::new(),
+                    returned_members: Vec::new(),
                     targs: Vec::new(),
                     targ_elems: Vec::new(),
                     base_targs: Vec::new(),
