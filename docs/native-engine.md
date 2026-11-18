@@ -291,8 +291,20 @@ What the lookup takes from each language's own rules:
   in &m`, `for (const [k, v] of m)`, `foreach (var (k, v) in m)`, `m.forEach
   { (k, v) -> … }`, Java's `m.forEach((k, v) -> …)`), and Go's `range` gives
   the value second. The same pair beside an index gives the element
-  (`xs.withIndex()`, `xs.iter().enumerate()`, `xs.enumerated()`). The key's
-  type is not recorded: keys are mostly strings and numbers.
+  (`xs.withIndex()`, `xs.iter().enumerate()`, `xs.enumerated()`). The keys'
+  type is recorded too: `m.keys` / `keySet()` is a collection of it, and the
+  first of a pair taken apart (`for ((k, v) in m)`, `m.forEach((k, v) ->
+  …)`) is a key; the first of a list's pair is the element (`forEach((x,
+  i) => …)`), beside an index nothing. `xs.partition { … }` taken apart
+  (`val (ok, bad) = …`) gives two collections of the elements, `xs.zip(ys)`
+  (and Python's `zip(xs, ys)`) taken apart gives one of each, `xs.fold(init)
+  { acc, x -> … }` (`Aggregate(seed, …)`, `inject(init)`, JS `reduce(f,
+  init)`) is what `init` is and so is the accumulator, and
+  `xs.associateWith { it.owner }` is a map whose values are what the lambda
+  gives. A part of a tuple a callable returns as a literal of names (`return
+  [copiedText, copy]`) is the definition of that name inside it when its
+  type names no class, and a local holding it calls it (`copy(id)`,
+  `INFERRED`).
 - **What a declaration's type arguments bind.** A local, parameter, field
   or result written with type arguments (`Response<Contact> r`, `b:
   Crate<Owner>`, `fun execute(): Response<T>`) binds the type parameters of
@@ -605,7 +617,7 @@ file pairs). The native graph has definitions graphify folds into the one
 around them (a function nested in a method, the setter beside a getter of the
 same name); an edge from one of those is compared as an edge from the paired
 definition it belongs to, as graphify records it. On the 31 repositories of the
-[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.13,
+[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.14,
 measured 2026-11-18), as native / graphify edges and the share of graphify's
 that the native graph has too:
 
@@ -672,6 +684,10 @@ two edges of got are gone that named a function defined in another loop
 for a destructured loop variable of the same name. The maps of these
 repositories that hold project types are mostly looked up by key once, or
 not walked at all.
+Engine 0.5.14 (keys, partition, zip, fold, associateWith, returned
+functions) adds one edge: `copy(id)` in fastapi-template's columns, the
+right guess 0.5.11 had lost, now from what `useCopyToClipboard` returns.
+The rest does not occur in these repositories with project types.
 Engine 0.5.13 (generics through values, nested arguments, generic bases)
 changes three edges: a loop variable over a call's collection is typed in
 kotlinpoet, and `addAnnotation(fileAnnotation)` goes to the one overload
@@ -743,12 +759,12 @@ Reading a sample of each side's edges the other lacks, per language:
   parameter bound to the type itself, handed explicitly, or bound by an
   argument or its elements, and through a chain of collection methods
   whose names say what they give (`xs.filter { … }.map { it.owner
-  }.first()`, `groupBy`, `chunked`, `associateBy`, `reduce`); not through
-  one whose result is another value than the elements' (`fold` with an
-  initial value, `zip`, `associateWith`, `partition` taken apart), a map's
-  keys, type arguments nested more than one level (`Map<K, List<V>>`'s
-  values are lists of an unknown type), or a Rust trait's type arguments
-  (`impl Repo<User> for UserRepo`).
+  }.first()`, `groupBy`, `chunked`, `associateBy`, `reduce`, `fold`,
+  `partition`, `zip`, `associateWith`); not through type arguments nested
+  more than one level (`Map<K, List<V>>`'s values are lists of an unknown
+  type), a Rust trait's type arguments (`impl Repo<User> for UserRepo`),
+  a Python dictionary iterated for its keys (`for k in d`), or a lambda
+  given to `zip` that takes the pair apart.
 - **What only the native graph has** is mostly what a name lookup by itself
   cannot see: calls through a module object (`httpx.Response(...)`), through a
   typed local or field (`client = httpx.Client(); client.get()`,
@@ -772,7 +788,7 @@ builds take 13.3 s for the 31 repositories against graphify's 81.3 s
 faster of two clean builds each): 8.7 times faster at the median, from 2.1
 (todoapi, whose bundled JavaScript the native engine reads in full) to 17.2
 times; retrofit 2.9 s against 13.1 s, guzzle 0.9 s / 6.1 s, alamofire 1.2 s /
-5.4 s, got 0.9 s / 4.7 s (engine 0.5.1; with all that 0.5.13 resolves the same
+5.4 s, got 0.9 s / 4.7 s (engine 0.5.1; with all that 0.5.14 resolves the same
 31 builds take 16.3 to 18.9 s through Python, 15.3 to 16.2 s in the engine alone, retrofit 3.7 to 4.1 s). An update after a one-file change takes a third of
 a build ([above](#incremental-updates)).
 
@@ -819,7 +835,7 @@ but one convention finding, fixed since: `graphlore_surprises(limit=0)` cut its
 `shared_state` list without saying how much (`shared_state_left_out` does now).
 `SKELETON-EMPTY` went from 5 to 0, and the tool time stayed at 131 s.
 
-Rerun on graphs built by engine 0.5.3, and again by 0.5.4 through 0.5.13
+Rerun on graphs built by engine 0.5.3, and again by 0.5.4 through 0.5.14
 (2026-11-18), the audit raises nothing on the native graphs but its
 `GRAPH-ORPHAN-NODES` note on 19 of them; 115 to 154 s of tool time (on the 0.5.7 run, retrofit's build through `graphlore_build` took 5.1 s and was reported `SLOW` for crossing 5 s). What the table above still listed is
 gone:

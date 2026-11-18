@@ -177,6 +177,14 @@ pub struct Def {
     /// gives entries (or keys), not values.
     #[serde(default)]
     pub keyed: bool,
+    /// The type of that map's keys.
+    #[serde(default)]
+    pub key: Option<Vec<String>>,
+    /// The names a callable returns as a tuple or array literal (`return
+    /// [copiedText, copy]`), in order: what a part names when its type does
+    /// not.
+    #[serde(default)]
+    pub returned_parts: Vec<String>,
     /// The type arguments written on a field's declared type, or on the type a
     /// callable declares it returns (`Response<User>`: `[["User"]]`); a type
     /// parameter of the class around is written as its name.
@@ -348,6 +356,9 @@ pub struct Local {
     /// Declared as a map (`elem` is its values' type; see `Def::keyed`).
     #[serde(default)]
     pub keyed: bool,
+    /// The type of that map's keys.
+    #[serde(default)]
+    pub key: Option<Vec<String>>,
     /// The type arguments its declared type is written with (see
     /// `Def::targs`): what the class's type parameters stand for here.
     #[serde(default)]
@@ -427,6 +438,9 @@ pub struct ParamFact {
     /// That type is a map's (see `Def::keyed`).
     #[serde(default)]
     pub keyed: bool,
+    /// The type of that map's keys.
+    #[serde(default)]
+    pub key: Option<Vec<String>>,
     /// It has a default value.
     pub optional: bool,
     /// It takes any number of arguments (`vararg`, `...`, `params`).

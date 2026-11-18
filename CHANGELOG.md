@@ -247,6 +247,20 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- Native engine 0.5.14, the rest of collections and tuples. On the 31 audit
+  repositories one edge comes back (`copy(id)` in fastapi-template, lost in
+  0.5.11); the rest does not occur there with project types:
+  - **A map's keys**: `m.keys` / `keySet()` is a collection of the key type,
+    and the first of a pair taken apart is a key (`for ((k, v) in m)`,
+    `m.forEach((k, v) -> …)`); of a list's pair, the element.
+  - **`partition`** taken apart gives two collections of the elements,
+    **`zip`** taken apart one of each (`for ((x, y) in xs.zip(ys))`, Python
+    `zip(xs, ys)`), **`fold(init)`** / `Aggregate(seed, …)` / `inject(init)`
+    / JS `reduce(f, init)` is what `init` is (the accumulator too), and
+    **`associateWith`** is a map whose values are what its lambda gives.
+  - **A part a callable returns as a literal of names** (`return
+    [copiedText, copy]`) is the definition of that name inside it when its
+    type names no class; a local holding it calls it (`INFERRED`).
 - Native engine 0.5.13, generics through values, nested arguments and
   generic bases. On the 31 audit repositories three undecided overload edges
   become the one overload that fits; the other patterns do not occur there

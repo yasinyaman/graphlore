@@ -874,6 +874,34 @@ fn returned_path(v: Node, src: &[u8]) -> Option<Vec<String>> {
     value_type(v, src)
 }
 
+/// `return [copiedText, copy]`: the names a callable returns as a tuple or
+/// an array literal, the first time it does.
+fn note_parts(def: &mut Def, v: Node, src: &[u8]) {
+    if !def.returned_parts.is_empty()
+        || !matches!(v.kind(), "array" | "tuple_expression" | "tuple" | "list" | "array_literal")
+    {
+        return;
+    }
+    // (an item that is no name keeps its place, empty)
+    let names: Vec<String> = kids(v)
+        .into_iter()
+        .filter(|c| !is_comment(c))
+        .map(|c| {
+            // (C#'s and Swift's items sit in an argument / a `value`)
+            let c =
+                if c.kind() == "argument" { kids(c).into_iter().last().unwrap_or(c) } else { c };
+            if matches!(c.kind(), "identifier" | "simple_identifier") {
+                text(c, src)
+            } else {
+                String::new()
+            }
+        })
+        .collect();
+    if names.len() >= 2 && names.iter().any(|n| !n.is_empty()) {
+        def.returned_parts = names;
+    }
+}
+
 fn note_return(def: &mut Def, path: Vec<String>) {
     if def.returns.len() < 4 && !def.returns.contains(&path) {
         def.returns.push(path);
@@ -1305,6 +1333,7 @@ fn params_in(holder: Node, only_parameters: bool, src: &[u8]) -> Vec<crate::fact
             ty,
             elem: written_elem(c, src),
             keyed: written_keyed(c, src),
+            key: written_key(c, src),
             optional: eq
                 || k.contains("default")
                 || k == "optional_parameter"
@@ -1380,6 +1409,7 @@ fn bind_closure_params(closures: &[ClosureScope], refs: &mut [RefFact], locals: 
                 keyed: false,
                 targs: Vec::new(),
                 targ_elems: Vec::new(),
+                key: None,
                 from_def: None,
                 byte: *start,
             });
@@ -1874,6 +1904,7 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
                 facts.defs[di].type_params = type_params(n, src);
                 facts.defs[di].elem = return_elem(n, src);
                 facts.defs[di].keyed = return_keyed(n, src);
+                facts.defs[di].key = return_key(n, src);
                 facts.defs[di].targs = return_targs(n, src);
                 facts.defs[di].targ_elems = return_targ_elems(n, src);
                 facts.defs[di].rets = return_tuple(n, src);
@@ -1883,8 +1914,11 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
                 }
                 facts.defs[di].plist = param_list(n, src);
                 facts.defs[di].params = u8::try_from(facts.defs[di].plist.len()).ok();
-                if let Some(path) = body_value(n).and_then(|v| returned_path(v, src)) {
-                    note_return(&mut facts.defs[di], path);
+                if let Some(v) = body_value(n) {
+                    if let Some(path) = returned_path(v, src) {
+                        note_return(&mut facts.defs[di], path);
+                    }
+                    note_parts(&mut facts.defs[di], v, src);
                 }
             }
             if facts.defs[di].kind.is_class_like() {
@@ -1950,6 +1984,7 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
                                         keyed: false,
                                         targs: Vec::new(),
                                         targ_elems: Vec::new(),
+                                        key: None,
                                         from_def: Some(di),
                                         byte: c.start_byte(),
                                     });
@@ -1986,6 +2021,7 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
                                         keyed: false,
                                         targs: Vec::new(),
                                         targ_elems: Vec::new(),
+                                        key: None,
                                         from_def: Some(di),
                                         byte: c.start_byte(),
                                     });
@@ -2012,6 +2048,7 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
                             elem: None,
                             value_args: Vec::new(),
                             targ_elems: own.map(|c| written_targ_elems(c, src)).unwrap_or_default(),
+                            key: own.and_then(|c| written_key(c, src)),
                             from_def: Some(di),
                             byte: ps.start_byte(),
                         });
@@ -2058,6 +2095,7 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
                                     targ_elems: own
                                         .map(|c| written_targ_elems(c, src))
                                         .unwrap_or_default(),
+                                    key: own.and_then(|c| written_key(c, src)),
                                     from_def: Some(di),
                                     byte: x.start_byte(),
                                 });
@@ -2114,6 +2152,8 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
                     if each {
                         one.push(ITERATED.into());
                     }
+                    let mut first = of.clone();
+                    first.push(KEY.into());
                     let mut second = of;
                     second.push(VALUE.into());
                     // `{ (k, v) -> … }`, `([k, v]) => …`, `|(k, v)|`: an entry
@@ -2123,15 +2163,25 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
                     if let (Some(it), 0) = (lambda, at) {
                         params = vec![(it.to_string(), one, false)];
                     } else if destructured && two {
+                        if params[0].1.is_empty() {
+                            params[0].1 = first;
+                        }
                         if params[1].1.is_empty() {
                             params[1].1 = second;
                         }
                     } else if lambda.is_none() && params.get(at).is_some_and(|p| p.1.is_empty()) {
                         params[at].1 = one;
-                        // `m.forEach((k, v) -> …)`: the value of a map's
-                        // entry beside its key (nothing for a list's)
+                        // `m.forEach((k, v) -> …)`: a map's key and value (a
+                        // list's element and index)
                         if each && at == 0 && two && params[1].1.is_empty() {
+                            params[0].1 = first;
                             params[1].1 = second;
+                        }
+                        // `xs.fold(Acc()) { acc, x -> … }`: the accumulator
+                        if at == 1 && params[0].1.is_empty() {
+                            if let Some(init) = fold_init(&anc, n, src) {
+                                params[0].1 = init;
+                            }
                         }
                     }
                 }
@@ -2162,6 +2212,7 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
                     keyed: false,
                     targs: Vec::new(),
                     targ_elems: Vec::new(),
+                    key: None,
                     from_def: None,
                     byte: n.start_byte(),
                 });
@@ -2192,6 +2243,7 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
                             keyed: false,
                             targs: Vec::new(),
                             targ_elems: Vec::new(),
+                            key: None,
                             from_def: None,
                             byte: n.start_byte(),
                         });
@@ -2239,6 +2291,7 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
                     keyed: declared && written_keyed(n, src),
                     targs: if declared { written_targs(n, src) } else { Vec::new() },
                     targ_elems: if declared { written_targ_elems(n, src) } else { Vec::new() },
+                    key: if declared { written_key(n, src) } else { None },
                     from_def: None,
                     byte: n.start_byte(),
                 });
@@ -2287,14 +2340,17 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
             }
         }
         // `return Foo()` in a definition (not in a closure inside it)
-        if let Some(path) = returned_value(n, src).and_then(|v| returned_path(v, src)) {
+        if let Some(v) = returned_value(n, src) {
             let home = anc.iter().rev().find_map(|a| match by_node.get(&a.id()) {
                 Some(&di) if facts.defs[di].kind.is_callable() => Some(Some(di)),
                 _ if is_closure(a.kind()) => Some(None),
                 _ => None,
             });
             if let Some(Some(di)) = home {
-                note_return(&mut facts.defs[di], path);
+                if let Some(path) = returned_path(v, src) {
+                    note_return(&mut facts.defs[di], path);
+                }
+                note_parts(&mut facts.defs[di], v, src);
             }
         }
         // reads and writes of variables, fields and constants, and of what
@@ -2456,6 +2512,15 @@ pub const ITERATED: &str = "[*]";
 /// gives: the value of a map's entry, the element beside an index
 /// (`withIndex()`, `enumerate()`).
 pub const VALUE: &str = "[v]";
+
+/// The marker that ends a path naming the first of the pair an iteration
+/// gives: a map's key, an element (`forEach((x, i) => …)`), nothing beside an
+/// index.
+pub const KEY: &str = "[k]";
+
+/// The marker after a path that names a map from the elements of what
+/// precedes it to what each gives (`xs.associateWith { it.owner }`).
+pub const MANY_KEYED: &str = "[+=]";
 
 /// A path segment: the wrapper the path named so far is opened (`await x`,
 /// Rust `x?`). Nothing to a value that is no wrapper.
@@ -2661,6 +2726,24 @@ fn single_expression(body: Node) -> Option<Node> {
 /// `xs.stream().map(x -> x.owner())`: the path of the collection it gives.
 fn mapped_call(n: Node, src: &[u8], path: &[String]) -> Option<Vec<String>> {
     let (method, of) = path.split_last()?;
+    if !of.is_empty() && matches!(method.as_str(), "fold" | "Aggregate" | "inject" | "reduce") {
+        if let Some(init) = fold_value(n, src) {
+            return Some(init);
+        }
+    }
+    // `xs.associateWith { it.owner }`: a map from the elements to them
+    if method == "associateWith" && !of.is_empty() {
+        let mut p = match mapped_by(n, src, of) {
+            Mapped::To(p) => p,
+            _ => return None,
+        };
+        if p.last().is_some_and(|s| s == MANY) {
+            p.pop();
+            p.push(MANY_KEYED.into());
+            return Some(p);
+        }
+        return None;
+    }
     if of.is_empty() || !MAPPING_METHODS.contains(&method.as_str()) {
         return None;
     }
@@ -3351,6 +3434,79 @@ fn written_elem(node: Node, src: &[u8]) -> Option<Vec<String>> {
     })
 }
 
+/// The type of the keys of the map a type position names (see `map_value`).
+fn map_key(t: Node, src: &[u8]) -> Option<Vec<String>> {
+    let mut stack = vec![(t, 0)];
+    while let Some((n, depth)) = stack.pop() {
+        match n.kind() {
+            "map_type" => return n.child_by_field_name("key").and_then(|k| first_type(k, src)),
+            "dictionary_type" => {
+                let k = n.child_by_field_name("key").or_else(|| kids(n).first().copied())?;
+                return first_type(k, src);
+            }
+            _ => {}
+        }
+        if let Some((name, given)) = generic_args(n, src) {
+            if !MAPS.contains(&name.as_str()) {
+                return None;
+            }
+            return match given.as_slice() {
+                [k, _] => first_type(*k, src),
+                _ => None,
+            };
+        }
+        if depth < 3
+            && matches!(n.kind(), "type_annotation" | "nullable_type" | "optional_type" | "type")
+        {
+            stack.extend(kids(n).into_iter().map(|c| (c, depth + 1)));
+        }
+    }
+    None
+}
+
+/// The key type of the map a declaration writes for what it declares.
+fn written_key(node: Node, src: &[u8]) -> Option<Vec<String>> {
+    let mut places = vec![node];
+    places.extend(
+        kids(node)
+            .into_iter()
+            .filter(|c| c.kind().ends_with("declaration") || c.kind().ends_with("declarator")),
+    );
+    places.into_iter().find_map(|n| match n.child_by_field_name("type") {
+        Some(t) => map_key(t, src),
+        None => kids(n)
+            .into_iter()
+            .find(|c| {
+                matches!(
+                    c.kind(),
+                    "user_type" | "type_annotation" | "nullable_type" | "dictionary_type"
+                )
+            })
+            .and_then(|t| map_key(t, src)),
+    })
+}
+
+/// The key type of the map a callable declares it returns.
+fn return_key(def: Node, src: &[u8]) -> Option<Vec<String>> {
+    let mut cursor = def.walk();
+    for (i, child) in def.children(&mut cursor).enumerate() {
+        let result = match def.field_name_for_child(i as u32) {
+            Some("return_type") | Some("returns") => true,
+            Some("result") => child.kind() != "parameter_list",
+            Some("type") => !def.kind().contains("field") && !def.kind().contains("property"),
+            Some(_) => false,
+            None => {
+                matches!(child.kind(), "user_type" | "nullable_type")
+                    && def.kind() == "function_declaration"
+            }
+        };
+        if result {
+            return map_key(child, src);
+        }
+    }
+    None
+}
+
 /// Whether a declaration writes a map's type for what it declares.
 fn written_keyed(node: Node, src: &[u8]) -> bool {
     let mut places = vec![node];
@@ -3650,6 +3806,41 @@ const ITERATION_METHODS: &[&str] = &[
 const INDEXED_METHODS: &[&str] =
     &["forEachIndexed", "mapIndexed", "mapIndexedNotNull", "filterIndexed", "onEachIndexed"];
 
+/// Methods whose lambda takes an accumulator, then an element.
+const FOLDING_METHODS: &[&str] = &["fold", "Aggregate", "inject", "reduce", "reduceRight"];
+
+/// `xs.fold(Acc()) { … }`, C# `Aggregate(seed, …)`, Ruby `inject(init)`, JS
+/// `reduce(f, init)`: the path of the initial value, which the result and
+/// the accumulator are.
+fn fold_init(anc: &[Node], _lambda: Node, src: &[u8]) -> Option<Vec<String>> {
+    let call = anc.iter().rev().take(5).find(|a| is_call_kind(a.kind()))?;
+    fold_value(*call, src)
+}
+
+fn fold_value(call: Node, src: &[u8]) -> Option<Vec<String>> {
+    let (_, path) = callee(call, src)?;
+    let method = path.last()?;
+    let (list, _) = argument_list(call)?;
+    let args: Vec<Node> = kids(list?)
+        .into_iter()
+        .filter(|c| !is_comment(c))
+        .map(|a| {
+            if a.kind().contains("argument") {
+                kids(a).into_iter().last().unwrap_or(a)
+            } else {
+                a
+            }
+        })
+        .collect();
+    let init = match (method.as_str(), args.as_slice()) {
+        ("fold" | "Aggregate" | "inject", [init, ..]) if !is_closure(init.kind()) => *init,
+        // JS `xs.reduce((acc, x) => …, init)`
+        ("reduce", [f, init]) if is_closure(f.kind()) => *init,
+        _ => return None,
+    };
+    value_type(init, src).or_else(|| path_of(init, src)).filter(|p| p[0] != UNKNOWN)
+}
+
 /// Methods whose lambda takes the receiver itself.
 const SELF_METHODS: &[&str] = &["let", "also", "takeIf", "takeUnless", "tap", "then"];
 
@@ -3688,12 +3879,45 @@ fn iterated_on(anc: &[Node], n: Node, src: &[u8]) -> Option<(usize, Vec<String>,
     let of = std::mem::take(&mut of);
     if ITERATION_METHODS.contains(&method.as_str()) {
         Some((0, of, true))
-    } else if INDEXED_METHODS.contains(&method.as_str()) {
+    } else if INDEXED_METHODS.contains(&method.as_str())
+        || FOLDING_METHODS.contains(&method.as_str())
+    {
         Some((1, of, true))
     } else if SELF_METHODS.contains(&method.as_str()) {
         Some((0, of, false))
     } else {
         None
+    }
+}
+
+/// `xs.zip(ys)` (Kotlin, Rust, Swift) or Python `zip(xs, ys)`: the paths of
+/// the two collections zipped.
+fn zipped(n: Node, src: &[u8]) -> Option<(Vec<String>, Vec<String>)> {
+    if !is_call_kind(n.kind()) {
+        return None;
+    }
+    let (_, path) = callee(n, src)?;
+    let (method, of) = path.split_last()?;
+    if method != "zip" {
+        return None;
+    }
+    let (list, _) = argument_list(n)?;
+    let args: Vec<Node> = kids(list?)
+        .into_iter()
+        .filter(|c| !is_comment(c))
+        .map(|a| {
+            if a.kind().contains("argument") {
+                kids(a).into_iter().last().unwrap_or(a)
+            } else {
+                a
+            }
+        })
+        .collect();
+    let named = |a: &Node| path_of(*a, src).filter(|p| p[0] != UNKNOWN);
+    match (of.is_empty(), args.as_slice()) {
+        (false, [other]) => Some((of.to_vec(), named(other)?)),
+        (true, [a, b]) => Some((named(a)?, named(b)?)),
+        _ => None,
     }
 }
 
@@ -3814,15 +4038,23 @@ fn loop_vars(n: Node, src: &[u8]) -> Option<Vec<(String, Vec<String>)>> {
         return Some(vec![(name, path)]);
     }
     if let Some((key, value)) = pair_names(var, src) {
+        // `for ((a, b) in xs.zip(ys))`, Python `zip(xs, ys)`: one of each
+        if let Some((left, right)) = zipped(iterable, src) {
+            let mut out = Vec::new();
+            for (name, mut of) in [(key, left), (value, right)] {
+                of.push(ITERATED.into());
+                out.push((name, of));
+            }
+            out.retain(|(n, _)| n != "_");
+            return Some(out);
+        }
         let of = path_of(iterable, src).filter(|p| p[0] != UNKNOWN)?;
+        let mut first = of.clone();
+        first.push(KEY.into());
         let mut path = of;
         path.push(VALUE.into());
-        let mut out = vec![(key, Vec::new())];
-        if value != "_" {
-            out.push((value, path));
-        }
-        out.retain(|(n, _)| n != "_");
-        return Some(out);
+        let out = vec![(key, first), (value, path)];
+        return Some(out.into_iter().filter(|(n, _)| n != "_").collect());
     }
     // one name, not a pattern of several
     let name = match var.kind() {
@@ -4017,6 +4249,8 @@ fn add_extras(
             sealed: written_sealed(*node, src),
             elem: written_elem(*node, src),
             keyed: written_keyed(*node, src),
+            key: written_key(*node, src),
+            returned_parts: Vec::new(),
             targs: written_targs(*node, src),
             targ_elems: written_targ_elems(*node, src),
             base_targs: Vec::new(),
