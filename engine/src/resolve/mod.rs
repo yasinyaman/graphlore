@@ -1055,6 +1055,9 @@ pub struct Project<'a> {
     /// Whether a local assigned a value holds it in a sealed wrapper
     /// (`let r = load();` with `fn load() -> Result<Foo, E>`), per local.
     sealed_locals: RefCell<HashMap<(usize, usize), bool>>,
+    /// How many parts the tuple a local's value is has (0: no tuple), per
+    /// local.
+    tuple_locals: RefCell<HashMap<(usize, usize), usize>>,
     /// A local's value is being typed: the method its path ends with is what
     /// gives the type (`let p = self.pool.lock().unwrap()`), not a call to
     /// link, so a library's method at the end still types it.
@@ -1156,6 +1159,7 @@ impl<'a> Project<'a> {
             structural: RefCell::new(HashMap::new()),
             local_types: RefCell::new(HashMap::new()),
             sealed_locals: RefCell::new(HashMap::new()),
+            tuple_locals: RefCell::new(HashMap::new()),
             typing_value: RefCell::new(false),
             typing: RefCell::new(HashSet::new()),
             cur: RefCell::new(None),
@@ -2791,6 +2795,11 @@ impl<'a> Project<'a> {
         want_many: bool,
     ) -> Option<(Target, Confidence)> {
         let fam = self.family[f]?;
+        // `let p = setup(); p.0.go()`: a part of the tuple a local holds is
+        // that part of its value
+        if let Some(whole) = self.tuple_local_path(f, d, path) {
+            return self.resolve_path_inner(f, d, &whole, bases, want_many);
+        }
         // `await x`, `x?` (`refs::OPENED`): taken out of the path, and kept as
         // where a wrapper is opened (`opened[i]`: before the `i`th name)
         let stripped: Vec<String>;
@@ -3168,6 +3177,18 @@ impl<'a> Project<'a> {
             if let Some(part) = crate::refs::tuple_index(seg) {
                 let Target::Def(c) = t else { return None };
                 let def = self.def(c);
+                // Rust `self.0` on `struct Script(Arc<Mutex<State>>)`
+                if def.kind.is_class_like() {
+                    let p = def.rets.get(part).filter(|p| !p.is_empty())?;
+                    let ft = self
+                        .type_of_path(c.0, def.parent, p, true)
+                        .filter(|t| self.def(*t).kind.is_class_like())?;
+                    sealed =
+                        def.part_sealed.get(part).copied().unwrap_or(false) && !opened_after(i + 1);
+                    binds = None;
+                    t = Target::Def(ft);
+                    continue;
+                }
                 if !def.kind.is_callable() {
                     return None;
                 }
@@ -3620,6 +3641,65 @@ impl<'a> Project<'a> {
             cur = defs[x].parent;
         }
         None
+    }
+
+    /// `p.0`, `p.Item2`, `p.second` where local `p` holds the tuple a call
+    /// returns: the value's path with the part and the rest after it.
+    fn tuple_local_path(&self, f: usize, d: Option<usize>, path: &[String]) -> Option<Vec<String>> {
+        let (head, rest) = path.split_first()?;
+        let part = match rest.first()?.as_str() {
+            s if crate::refs::tuple_index(s).is_some() => crate::refs::tuple_index(s)?,
+            "first" | "Item1" => 0,
+            "second" | "Item2" => 1,
+            "third" | "Item3" => 2,
+            "Item4" => 3,
+            _ => return None,
+        };
+        let defs = &self.files[f].defs;
+        let mut cur = d;
+        let (x, li) = loop {
+            let x = cur?;
+            if let Some(&li) = self.locals.get(&(f, x, head.clone())) {
+                break (x, li);
+            }
+            cur = defs[x].parent;
+        };
+        let l = &self.files[f].locals[li];
+        if l.declared || l.path.is_empty() || l.path.iter().any(|s| s.starts_with("[#")) {
+            return None;
+        }
+        // the value is a call of a function that returns a tuple
+        let known = self.tuple_locals.borrow().get(&(f, li)).copied();
+        let parts = match known {
+            Some(n) => n,
+            None => {
+                let whole = self.typing.borrow().is_empty() && *self.depth.borrow() == 0;
+                if !self.typing.borrow_mut().insert((f, li)) {
+                    return None;
+                }
+                let recv = self.recv.replace(None);
+                let value = self.resolve_path(f, Some(x), &l.path, true);
+                *self.recv.borrow_mut() = recv;
+                self.typing.borrow_mut().remove(&(f, li));
+                let n = match value {
+                    Some((Target::Def(c), _)) if self.def(c).kind.is_callable() => {
+                        self.def(c).rets.len()
+                    }
+                    _ => 0,
+                };
+                if whole {
+                    self.tuple_locals.borrow_mut().insert((f, li), n);
+                }
+                n
+            }
+        };
+        if parts <= part {
+            return None;
+        }
+        let mut whole = l.path.clone();
+        whole.push(crate::refs::tuple_part(part));
+        whole.extend(rest.iter().skip(1).cloned());
+        Some(whole)
     }
 
     /// Whether the path being walked is a call to link (not a local's value

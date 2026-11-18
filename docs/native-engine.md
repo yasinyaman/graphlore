@@ -333,7 +333,11 @@ What the lookup takes from each language's own rules:
   that took it apart was the whole), except in Go, where `v, err := f()`
   takes `f`'s first result as before. A part written as a type alias
   (`type CopyFn = (text: string) => …`) is no class, so its name is a local
-  of no type.
+  of no type. A numbered field is a part too: a Rust tuple struct's
+  (`struct Script(Arc<Mutex<State>>)`: `self.0.lock().unwrap().bump()`,
+  `struct Tunnel(Box<dyn Transport>)`: `self.0.buffers()`), and one of the
+  tuple a local holds (`let pair = setup(); pair.0.go()`, Swift `both.1`,
+  C# `pair.Item2`, Kotlin `p.second` on a `Pair`).
 - **Results that are type parameters.** A function that returns its own type
   parameter gives the type of the argument that binds it: `fun <T> pick(x:
   T): T` the argument's, `fun <T> head(xs: List<T>): T` its element's. A method that returns a type
@@ -590,7 +594,7 @@ file pairs). The native graph has definitions graphify folds into the one
 around them (a function nested in a method, the setter beside a getter of the
 same name); an edge from one of those is compared as an edge from the paired
 definition it belongs to, as graphify records it. On the 31 repositories of the
-[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.11,
+[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.12,
 measured 2026-11-18), as native / graphify edges and the share of graphify's
 that the native graph has too:
 
@@ -605,7 +609,7 @@ that the native graph has too:
 | Kotlin | 99.4% | 368 / 333 (95%) | 4,682 / 2,108 (71%) | 96 / 56 (93%) | 1,087 / 673 (91%) |
 | Scala | 100% | 2 / 0 | 46 / 20 (45%) | 21 / 22 (95%) | 75 / 32 (100%) |
 | C# | 92.7% | 347 / 280 (30%)³ | 2,787 / 2,450 (93%) | 87 / 86 (98%) | 1,259 / 806 (99%) |
-| Rust | 93.3% | 314 / 370 (75%) | 1,850 / 853 (82%) | 53 / 41 (93%) | 1,244 / 895 (81%) |
+| Rust | 93.3% | 314 / 370 (75%) | 1,850 / 853 (81%) | 53 / 41 (93%) | 1,244 / 895 (81%) |
 | Swift | 95.9% | 166 / 166 (–)³ | 5,165 / 2,141 (82%) | 190 / 164 (100%) | 1,091 / 580 (62%) |
 | C | 100% | 89 / 77 (99%) | 864 / 791 (100%) | – | 253 / 130 (97%) |
 | C++ | 97.8% | 215 / 228 (93%) | 631 / 281 (33%)⁴ | 30 / 5 (100%) | 326 / 218 (88%) |
@@ -614,7 +618,7 @@ that the native graph has too:
 | PHP | 80.6% | 429 / 505 (84%) | 8,870 / 6,140 (90%) | 65 / 60 (98%) | 648 / 213 (95%) |
 | **All** | **94.4%** | **4,961 / 5,565 (75%)** | **43,603 / 27,832 (84%)** | **1,132 / 726 (97%)** | **12,414 / 6,775 (89%)** |
 
-Of the native calls, 12,729 (29%) are `INFERRED`, against 47% of graphify's.
+Of the native calls, 12,715 (29%) are `INFERRED`, against 47% of graphify's.
 That share was 20% before engine 0.5.5: a call of an overloaded name that the
 arguments do not decide used to be an `EXTRACTED` edge to the first overload,
 and is now an `INFERRED` edge to each overload that fits (999 calls, with
@@ -657,6 +661,13 @@ two edges of got are gone that named a function defined in another loop
 for a destructured loop variable of the same name. The maps of these
 repositories that hold project types are mostly looked up by key once, or
 not walked at all.
+Engine 0.5.12 (numbered fields) changes 28 of ureq's calls: 14 that were
+guesses by name are `EXTRACTED`, and 13 move from a method of that name in
+another file (`self.0.lock()` linked to `cookies.rs`) to the trait or type
+the field holds (`TunnelTransport(Box<dyn Transport>)`'s `self.0.is_open()`
+is `Transport::is_open`). Most of ureq's numbered fields hold library types
+(`Receiver`, `Uri`, `HeaderMap`) or a type parameter
+(`ChainedConnector<In, First, Second>(First, Second, …)`), which name nothing.
 Engine 0.5.11 (tuples taken apart) adds 38 edges and drops 18: restsharp's
 interceptor tests (`var (client, interceptor) = SetupClient()`, 25 reads)
 and ureq's (`let (agent, state) = setup(config)`, 13 calls). Of the 18
@@ -718,8 +729,7 @@ Reading a sample of each side's edges the other lacks, per language:
   }.first()`, `groupBy`, `chunked`, `associateBy`, `reduce`); not through
   one whose result is another value than the elements' (`fold` with an
   initial value, `zip`, `associateWith`, `partition` taken apart), a map's
-  keys, a tuple's part read as `.0` / `.first` / `.Item1` (only a tuple
-  taken apart), a local typed by its value when the type is generic, or a member a
+  keys, a local typed by its value when the type is generic, or a member a
   generic base declares (`class UserRepo : Repo<User>`).
 - **What only the native graph has** is mostly what a name lookup by itself
   cannot see: calls through a module object (`httpx.Response(...)`), through a
@@ -744,8 +754,8 @@ builds take 13.3 s for the 31 repositories against graphify's 81.3 s
 faster of two clean builds each): 8.7 times faster at the median, from 2.1
 (todoapi, whose bundled JavaScript the native engine reads in full) to 17.2
 times; retrofit 2.9 s against 13.1 s, guzzle 0.9 s / 6.1 s, alamofire 1.2 s /
-5.4 s, got 0.9 s / 4.7 s (engine 0.5.1; with all that 0.5.11 resolves the same
-31 builds take 16.3 to 18.4 s, retrofit 3.7 to 4.1 s). An update after a one-file change takes a third of
+5.4 s, got 0.9 s / 4.7 s (engine 0.5.1; with all that 0.5.12 resolves the same
+31 builds take 16.3 to 18.9 s through Python, 15.3 to 16.2 s in the engine alone, retrofit 3.7 to 4.1 s). An update after a one-file change takes a third of
 a build ([above](#incremental-updates)).
 
 ### The polyglot audit on native graphs
@@ -791,7 +801,7 @@ but one convention finding, fixed since: `graphlore_surprises(limit=0)` cut its
 `shared_state` list without saying how much (`shared_state_left_out` does now).
 `SKELETON-EMPTY` went from 5 to 0, and the tool time stayed at 131 s.
 
-Rerun on graphs built by engine 0.5.3, and again by 0.5.4 through 0.5.11
+Rerun on graphs built by engine 0.5.3, and again by 0.5.4 through 0.5.12
 (2026-11-18), the audit raises nothing on the native graphs but its
 `GRAPH-ORPHAN-NODES` note on 19 of them; 115 to 154 s of tool time (on the 0.5.7 run, retrofit's build through `graphlore_build` took 5.1 s and was reported `SLOW` for crossing 5 s). What the table above still listed is
 gone:

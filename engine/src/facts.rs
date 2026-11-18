@@ -183,10 +183,14 @@ pub struct Def {
     #[serde(default)]
     pub targs: Vec<Vec<String>>,
     /// The parts of the tuple a callable declares it returns (`-> (A, B)`,
-    /// `Pair<A, B>`, Go `(A, B, error)`), in order; an empty path for a part
-    /// with no type to name.
+    /// `Pair<A, B>`, Go `(A, B, error)`), or a Rust tuple struct's numbered
+    /// fields, in order; an empty path for a part with no type to name.
     #[serde(default)]
     pub rets: Vec<Vec<String>>,
+    /// Which of those parts is a closed wrapper (a Rust tuple struct's
+    /// `Arc<Mutex<State>>` field); empty when none is recorded.
+    #[serde(default)]
+    pub part_sealed: Vec<bool>,
     /// The type a variable, field or constant is declared with, as written.
     #[serde(default)]
     pub declared_type: Option<Vec<String>>,

@@ -247,6 +247,16 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- Native engine 0.5.12, numbered fields. On the 31 audit repositories 28 of
+  ureq's calls change, none is lost: 14 guesses by name are `EXTRACTED`, 13
+  move to the trait or type the field holds.
+  - **A Rust tuple struct's fields** (`struct Script(Arc<Mutex<State>>)`,
+    `struct Tunnel(Box<dyn Transport>)`) are its numbered parts:
+    `self.0.lock().unwrap().bump()` calls `State.bump`, `self.0.buffers()`
+    calls `Transport::buffers`. `self.0.lock()` named a `lock` of another
+    file by its name.
+  - **A part of the tuple a local holds**: `let pair = setup(); pair.0.go()`,
+    Swift `both.1`, C# `pair.Item2`, Kotlin `p.second` on a `Pair`.
 - Native engine 0.5.11, tuples taken apart. On the 31 audit repositories 38
   more edges and 18 gone (14 of them in minified bootstrap bundles):
   - **A declaration that takes a tuple apart types each name by its part**:

@@ -1165,3 +1165,34 @@ fn a_tuple_taken_apart() {
         );
     }
 }
+
+#[test]
+fn numbered_fields_and_the_parts_of_a_tuple_a_local_holds() {
+    let got = call_ids("tuple-fields", &[
+        ("a.rs", "use std::sync::{Arc, Mutex};\npub struct Fake;\nimpl Fake { pub fn buffers(&self) {} pub fn bump(&self) {} pub fn go(&self) {} pub fn stop(&self) {} }\npub trait Transport { fn buffers(&self); }\npub struct State;\nimpl State { pub fn bump(&self) {} }\npub struct Tunnel(Box<dyn Transport>);\nimpl Tunnel {\n    pub fn bufs(&self) { self.0.buffers(); }\n}\npub struct Script(Arc<Mutex<State>>);\nimpl Script {\n    pub fn step(&self) { self.0.lock().unwrap().bump(); }\n}\npub struct Agent;\nimpl Agent { pub fn go(&self) {} pub fn stop(&self) {} }\npub struct Clock;\nimpl Clock { pub fn go(&self) {} pub fn stop(&self) {} }\nfn setup() -> (Agent, Clock) { (Agent, Clock) }\npub fn run() {\n    let pair = setup();\n    pair.0.go();\n    pair.1.stop();\n}\n"),
+        ("b.swift", "class Ghost { func up() {}; func down() {} }\nclass Top { func up() {}; func down() {} }\nclass Bottom { func up() {}; func down() {} }\nfunc split() -> (Top, Bottom) { (Top(), Bottom()) }\nfunc halves() {\n    let both = split()\n    both.1.down()\n}\n"),
+        ("C.cs", "class Mock { public void Send() {} public void Check() {} }\nclass Client { public void Send() {} public void Check() {} }\nclass Probe { public void Send() {} public void Check() {} }\nclass T {\n  (Client, Probe) Setup() { return (null, null); }\n  void Run() {\n    var pair = Setup();\n    pair.Item2.Check();\n  }\n}\n"),
+        ("d.kt", "package app\nclass Ghost { fun a() {}; fun b() {} }\nclass Left { fun a() {}; fun b() {} }\nclass Right { fun a() {}; fun b() {} }\nfun two(): Pair<Left, Right> = Pair(Left(), Right())\nfun pairs() {\n    val p = two()\n    p.second.b()\n}\n"),
+    ]);
+    let mut missing = Vec::new();
+    for (from, to) in [
+        (".bufs()", "a_transport_buffers"),
+        (".step()", "a_state_bump"),
+        ("run()", "a_agent_go"),
+        ("run()", "a_clock_stop"),
+        ("halves()", "b_bottom_down"),
+        (".Run()", "c_probe_check"),
+        ("pairs()", "d_right_b"),
+    ] {
+        if !got.contains(&(from.to_string(), to.to_string())) {
+            missing.push((from, to));
+        }
+    }
+    assert!(missing.is_empty(), "missing {missing:?}\n{got:?}");
+    for bad in ["a_agent_stop", "a_clock_go", "b_top_down", "c_client_check", "d_left_b"] {
+        assert!(!got.iter().any(|(_, to)| to == bad), "{bad}: {got:?}");
+    }
+    for (from, to) in &got {
+        assert!(!["fake", "mock", "ghost"].iter().any(|d| to.contains(d)), "{from} -> {to}");
+    }
+}
