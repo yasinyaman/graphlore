@@ -259,6 +259,17 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- **Native engine 0.5.32: C++ type aliases and template specializations.**
+  `using X = T<…>;` is a definition (graphify has these nodes too) and an
+  alias or `typedef` is followed to the type it names; its arguments pick a
+  template's specialization (`<Response, true>` fits `<T, true>`). A bare
+  template name with several specializations is `INFERRED`, and a member
+  several of them declare gets no edge. Deduction guides declare no
+  function. `std::vector`, `std::map` and the other standard containers
+  are collections. cpr: 50 calls, 23 reads, 98 references, 34 alias nodes;
+  C++ definitions shared with graphify 97.8% → 98.7%; C++'s unmarked
+  unresolved rows 12 → 6. The facts cache is rebuilt once
+  (`Def::alias_args`).
 - **Native engine 0.5.31: a C++ namespace is every block that opens it.**
   `cpr::File(…)` is looked up in each `namespace cpr { }` of the project,
   not only in the block the caller's file opens; a method defined for a

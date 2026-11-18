@@ -743,6 +743,48 @@ fn value_type(v: Node, src: &[u8]) -> Option<Vec<String>> {
     }
 }
 
+/// The name a C++ deduction guide is for (`Wrapper(T&&, bool) ->
+/// Wrapper<T, true>;`): a declaration with no type before its declarator, a
+/// trailing result, and the result's template the declarator's own name.
+fn deduction_guide(n: Node, src: &[u8]) -> Option<String> {
+    if n.kind() != "declaration" || n.child_by_field_name("type").is_some() {
+        return None;
+    }
+    let decl = n.child_by_field_name("declarator").filter(|d| d.kind() == "function_declarator")?;
+    let name =
+        text(decl.child_by_field_name("declarator").filter(|d| d.kind() == "identifier")?, src);
+    let trailing = kids(decl).into_iter().find(|c| c.kind() == "trailing_return_type")?;
+    let mut t = kids(trailing).into_iter().find(|c| c.kind() == "type_descriptor")?;
+    t = t.child_by_field_name("type")?;
+    let of = if t.kind() == "template_type" { t.child_by_field_name("name")? } else { t };
+    (text(of, src) == name).then_some(name)
+}
+
+/// The arguments a type writes for its template, as written: `Response`,
+/// `true` of `AsyncWrapper<Response, true>` (through a `type_descriptor`).
+fn template_args(t: Node, src: &[u8]) -> Vec<String> {
+    let mut t = t;
+    for _ in 0..3 {
+        match t.kind() {
+            "type_descriptor" => match t.child_by_field_name("type") {
+                Some(x) => t = x,
+                None => return Vec::new(),
+            },
+            "qualified_identifier" => match t.child_by_field_name("name") {
+                Some(x) => t = x,
+                None => return Vec::new(),
+            },
+            _ => break,
+        }
+    }
+    if t.kind() != "template_type" {
+        return Vec::new();
+    }
+    t.child_by_field_name("arguments")
+        .map(|a| kids(a).into_iter().filter(|c| !is_comment(c)).map(|c| text(c, src)).collect())
+        .unwrap_or_default()
+}
+
 /// C++ `Pool pool(context);` where every "parameter type" is a name the
 /// function has as a local or parameter: a variable constructed from them,
 /// which the grammar reads as the declaration of a function. The name, its
@@ -2881,6 +2923,38 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                 r.args = args;
             }
         }
+        // C++ `Wrapper(T&&, bool) -> Wrapper<T, true>;`: a deduction guide,
+        // which declares no function (the template's own name, a trailing
+        // result naming it, no type before it)
+        if facts.lang == Some(crate::lang::Lang::Cpp) {
+            if let Some(name) = deduction_guide(n, src) {
+                let (lo, hi) = (n.start_byte(), n.end_byte());
+                for d in facts.defs.iter_mut() {
+                    if d.name == name && lo <= d.start_byte && d.end_byte <= hi {
+                        d.misread = true;
+                    }
+                }
+                misread.push((lo, hi));
+            }
+        }
+        // C, C++ `typedef struct conn conn_t;`: what the alias names
+        if matches!(facts.lang, Some(crate::lang::Lang::C | crate::lang::Lang::Cpp))
+            && n.kind() == "type_definition"
+        {
+            if let Some(t) = n.child_by_field_name("type") {
+                let (lo, hi) = (n.start_byte(), n.end_byte());
+                for d in facts.defs.iter_mut() {
+                    if d.kind == crate::facts::DefKind::TypeAlias
+                        && lo <= d.start_byte
+                        && d.end_byte <= hi
+                        && d.declared_type.is_none()
+                    {
+                        d.declared_type = first_type(t, src);
+                        d.alias_args = template_args(t, src);
+                    }
+                }
+            }
+        }
         // C++ `Pool pool(context);` beside a local `context`: the grammar
         // reads a declaration of a function `pool`, the language a variable
         // (a local hides a type of its name)
@@ -3557,6 +3631,15 @@ const COLLECTIONS: &[&str] = &[
     "ArraySlice",
     "NonEmptyList",
     "PersistentList",
+    // C++'s standard sequences (`std::vector<Foo>`)
+    "vector",
+    "deque",
+    "forward_list",
+    "unordered_set",
+    "multiset",
+    "span",
+    "queue",
+    "priority_queue",
 ];
 
 /// The element type a type position names, when it names a collection:
@@ -3632,6 +3715,10 @@ const MAPS: &[&str] = &[
     "defaultdict",
     "Record",
     "ReadonlyMap",
+    // C++'s (`std::map<K, V>`)
+    "map",
+    "unordered_map",
+    "multimap",
 ];
 
 /// The generic type a type position names, through annotations and
@@ -4950,6 +5037,11 @@ fn add_extras(
             value_path: state_value_path(*node, src),
             declared_type: written_type(*node, src),
             written_head: written_head(*node, src),
+            alias_args: if *kind == crate::facts::DefKind::TypeAlias {
+                node.child_by_field_name("type").map(|t| template_args(t, src)).unwrap_or_default()
+            } else {
+                Vec::new()
+            },
             wraps: written_sealed(*node, src).then(|| written_type(*node, src)).flatten(),
             sealed: written_sealed(*node, src),
             elem: written_elem(*node, src),

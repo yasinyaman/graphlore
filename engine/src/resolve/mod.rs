@@ -1592,13 +1592,28 @@ impl<'a> Project<'a> {
                 }
                 // a method declared for a type (Go receiver, Rust impl, C++
                 // `A::m`) is no module-level name
+                // C++ `class AsyncWrapper<T, true>`: a specialization answers
+                // to the template's name too
+                let bare = (fam == Some(Family::C) && d.kind.is_class_like())
+                    .then(|| specialized(&d.name))
+                    .flatten();
                 if is_top(&f.defs, di) && !(d.owner.is_some() && d.kind.is_callable()) {
                     top.entry(d.name.clone()).or_default().push(di);
+                    if let Some(b) = bare {
+                        top.entry(b.to_string()).or_default().push(di);
+                    }
                 }
                 if let Some(par) = d.parent {
                     children.entry(par).or_default().entry(d.name.clone()).or_default().push(di);
+                    if let Some(b) = bare {
+                        children.entry(par).or_default().entry(b.to_string()).or_default().push(di);
+                    }
                 }
                 let Some(fam) = fam else { continue };
+                if let Some(b) = bare {
+                    let q = specialized(&d.qualname).unwrap_or(b);
+                    self.by_qual.entry(qual_key(fam, q)).or_default().push((fi, di));
+                }
                 if self.def_ids[fi].get(di).is_some_and(|x| x.is_some()) {
                     self.by_name.entry(d.name.clone()).or_default().push((fi, di));
                 }
@@ -1702,7 +1717,17 @@ impl<'a> Project<'a> {
             (Target::Def(r), conf) => {
                 let def = self.def(r);
                 let k = def.kind;
-                if k.is_class_like() || k == DefKind::TypeAlias {
+                // C, C++ `using AsyncResponseC = AsyncWrapper<Response, true>;`,
+                // `typedef struct conn conn_t;`: the type the alias names, and of
+                // a template's specializations the one its arguments fit
+                let aliased = (k == DefKind::TypeAlias && self.family[r.0] == Some(Family::C))
+                    .then_some(def.declared_type.as_ref())
+                    .flatten()
+                    .and_then(|ty| self.type_of_path(r.0, def.parent, ty, true))
+                    .filter(|t| *t != r && self.def(*t).kind.is_class_like());
+                if let Some(t) = aliased {
+                    Some((self.specialization_for(t, &def.alias_args), conf))
+                } else if k.is_class_like() || k == DefKind::TypeAlias {
                     Some((r, conf))
                 } else if let Some((t, declared)) =
                     k.is_callable().then(|| self.return_type(r)).flatten()
@@ -2726,6 +2751,67 @@ impl<'a> Project<'a> {
         out
     }
 
+    /// The other specializations of the C++ template `c` is one of (and the
+    /// template itself): `AsyncWrapper<T, false>` beside `AsyncWrapper<T, true>`.
+    fn specializations(&self, c: DefRef) -> Vec<DefRef> {
+        let d = self.def(c);
+        if self.family[c.0] != Some(Family::C) || !d.kind.is_class_like() {
+            return Vec::new();
+        }
+        let q = specialized(&d.qualname).unwrap_or(&d.qualname);
+        let mut out: Vec<DefRef> = self
+            .by_qual
+            .get(&qual_key(Family::C, q))
+            .into_iter()
+            .flatten()
+            .copied()
+            .filter(|o| *o != c && self.def(*o).kind.is_class_like())
+            .collect();
+        out.sort();
+        out.dedup();
+        out
+    }
+
+    /// Of `t` and the other specializations of its template, the one the
+    /// written arguments fit (`<Response, true>` fits `<T, true>`, not `<T,
+    /// false>`): a value argument must be the same, a type one fits any. `t`
+    /// when none or several fit.
+    fn specialization_for(&self, t: DefRef, args: &[String]) -> DefRef {
+        if args.is_empty() {
+            return t;
+        }
+        let mut all = vec![t];
+        all.extend(self.specializations(t));
+        let fits: Vec<DefRef> = all
+            .into_iter()
+            .filter(|c| {
+                let spec = specialization_args(&self.def(*c).name);
+                !spec.is_empty()
+                    && spec
+                        .iter()
+                        .enumerate()
+                        .all(|(i, s)| !literal_arg(s) || args.get(i).is_some_and(|a| a == s))
+            })
+            .collect();
+        match fits.as_slice() {
+            [one] => *one,
+            _ => t,
+        }
+    }
+
+    /// The path a local's declaration gives it (its type as written).
+    fn local_path(&self, f: usize, d: Option<usize>, name: &str) -> Option<&Vec<String>> {
+        let defs = &self.files[f].defs;
+        let mut cur = d;
+        while let Some(x) = cur {
+            if let Some(&li) = self.locals.get(&(f, x, name.to_string())) {
+                return Some(&self.files[f].locals[li].path);
+            }
+            cur = defs[x].parent;
+        }
+        None
+    }
+
     /// The first name of the type a local's declaration writes (C, C++:
     /// `std` of `std::promise<void> release;`).
     fn local_written_head(&self, f: usize, d: Option<usize>, name: &str) -> Option<&str> {
@@ -3136,7 +3222,9 @@ impl<'a> Project<'a> {
 
     /// The constructors a type declares, in source order.
     fn constructors(&self, c: DefRef) -> Vec<DefRef> {
-        let cname = &self.def(c).name;
+        let full = &self.def(c).name;
+        // (a C++ specialization's constructors carry the template's name)
+        let cname = &specialized(full).unwrap_or(full).to_string();
         let mut out: Vec<DefRef> = self.children[c.0]
             .get(&c.1)
             .into_iter()
@@ -3903,6 +3991,27 @@ impl<'a> Project<'a> {
                 }
             },
         };
+        // C++: a template's bare name where several specializations declare
+        // it (`AsyncWrapper{…}`, a local `AsyncWrapper w{…}`): which one the
+        // arguments make is not read, so `t` is one of them, not picked
+        let mut unpicked = false;
+        if let Target::Def(c) = t {
+            if fam == Family::C && !self.specializations(c).is_empty() {
+                let bare = specialized(&self.def(c).name);
+                let written = if bare.is_some_and(|b| b == head.as_str()) {
+                    true
+                } else {
+                    // (`Wrapper w{…}`: the local's declared type is the bare name)
+                    self.local_path(f, d, head)
+                        .and_then(|p| p.last())
+                        .is_some_and(|last| bare.is_some_and(|b| b == last))
+                };
+                if written {
+                    unpicked = true;
+                    conf = conf.max(Confidence::Inferred);
+                }
+            }
+        }
         // a property named bare (implicit `this`), or a module variable, with
         // more after it: on through its type
         if let Target::Def(p) = t {
@@ -4411,6 +4520,32 @@ impl<'a> Project<'a> {
                     }
                 }
             }
+            // C++: the member of a specialization the arguments did not pick
+            // (`test_wrapper.Cancel()` on an `AsyncWrapper w{…}`) is the one
+            // specialization that answers to it, `INFERRED`; a name several
+            // answer to names none of them. On one they did pick, a member it
+            // lacks is still the one other specialization's that has it.
+            if fam == Family::C && (unpicked || found.is_none()) {
+                if let Target::Def(c) = t {
+                    let mut all = self.specializations(c);
+                    if unpicked {
+                        all.push(c);
+                    }
+                    let mut hits: Vec<DefRef> =
+                        all.into_iter().filter_map(|s| self.class_member(s, seg, 3)).collect();
+                    hits.sort();
+                    hits.dedup();
+                    found = match hits.as_slice() {
+                        [one] => {
+                            conf = conf.max(Confidence::Inferred);
+                            Some(Target::Def(*one))
+                        }
+                        [] if !unpicked => found,
+                        _ => None,
+                    };
+                }
+            }
+            unpicked = false;
             // Python `@property def cookies(self) -> Cookies`: read without
             // a call, with more after it, it is what it returns
             if let Some(Target::Def(m)) = &found {
@@ -6883,3 +7018,42 @@ const MARKER_BASES: &[&str] = &[
     "IAsyncDisposable",
     "Disposable",
 ];
+
+/// The template a C++ specialization's name specializes: `AsyncWrapper` of
+/// `AsyncWrapper<T, true>`, `cpr.AsyncWrapper` of `cpr.AsyncWrapper<T, true>`.
+fn specialized(name: &str) -> Option<&str> {
+    let i = name.find('<')?;
+    (i > 0 && name.ends_with('>')).then(|| &name[..i])
+}
+
+/// The arguments a C++ specialization's name writes: `T`, `true` of
+/// `AsyncWrapper<T, true>` (top-level commas only).
+fn specialization_args(name: &str) -> Vec<String> {
+    let Some(i) = name.find('<') else { return Vec::new() };
+    let inner = name[i + 1..].strip_suffix('>').unwrap_or(&name[i + 1..]);
+    let (mut out, mut cur, mut depth) = (Vec::new(), String::new(), 0i32);
+    for ch in inner.chars() {
+        match ch {
+            '<' | '(' | '[' => depth += 1,
+            '>' | ')' | ']' => depth -= 1,
+            ',' if depth == 0 => {
+                out.push(cur.trim().to_string());
+                cur.clear();
+                continue;
+            }
+            _ => {}
+        }
+        cur.push(ch);
+    }
+    if !cur.trim().is_empty() {
+        out.push(cur.trim().to_string());
+    }
+    out
+}
+
+/// Whether a template argument is a value written out (`true`, `3`,
+/// `'c'`): a specialization for it fits only that value.
+fn literal_arg(a: &str) -> bool {
+    matches!(a, "true" | "false" | "nullptr")
+        || a.chars().next().is_some_and(|c| c.is_ascii_digit() || c == '\'' || c == '-')
+}

@@ -25,6 +25,15 @@ static CPP_HEADER_MARK: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 impl LanguageModule for CFamily {
+    /// C++ `using AsyncResponse = AsyncWrapper<Response>;`: a type alias (no
+    /// hint word in `alias_declaration`, so no span of `spans.py`'s rule).
+    fn extra_def<'t>(&self, n: Node<'t>, _src: &[u8]) -> Option<(Node<'t>, DefKind)> {
+        (n.kind() == "alias_declaration")
+            .then(|| n.child_by_field_name("name"))
+            .flatten()
+            .map(|name| (name, DefKind::TypeAlias))
+    }
+
     /// Variables at file or namespace scope (not `extern` ones, which name a
     /// variable defined elsewhere), and `static` data members of a class.
     fn state_defs<'t>(&self, n: Node<'t>, src: &[u8]) -> Vec<(Node<'t>, Node<'t>, DefKind)> {

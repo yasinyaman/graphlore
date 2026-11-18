@@ -230,6 +230,11 @@ pub struct Def {
     /// read it.
     #[serde(default)]
     pub written_head: Option<String>,
+    /// The arguments a C++ alias or typedef writes for the template it names,
+    /// as written (`Response`, `true` of `AsyncWrapper<Response, true>`):
+    /// what picks one of the template's specializations.
+    #[serde(default)]
+    pub alias_args: Vec<String>,
     /// What the wrapper a field is declared as, or a callable declares it
     /// returns, holds: `Option<Foo>`, `Promise<Foo>`, `Box<dyn Foo>` → `Foo`.
     #[serde(default)]
