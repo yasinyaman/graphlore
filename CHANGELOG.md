@@ -247,6 +247,21 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- Native engine 0.5.10, what a mapping's function gives, and lists of lists.
+  On the 31 audit repositories 5 more edges, none gone:
+  - **A lambda of several statements** gives its last expression (Kotlin,
+    Ruby, Rust, Swift) or what its `return`s give when they agree, and a local
+    it declares is what it is assigned (`xs.map { x -> val o = x.owner; o }`).
+  - **A function given by reference maps**: `map(Item::owner)`,
+    `map(Item::getBoss)`, `map(::Item)`, `map(Item::new)`, Rust
+    `map(Part::head)`, Swift `map(\.pilot)`.
+  - **Lists of lists and groups**: `chunked`, `windowed`, `chunks`,
+    `each_slice` give lists of the elements, `groupBy` a map of them,
+    `flatten` / `SelectMany` takes one level off; `associateBy` /
+    `ToDictionary` key the elements, `reduce` / `Aggregate` give one.
+  - **A closure inside another** names the outer closure's parameter as the
+    outer closure's: the inner parameter's type, and a local assigned inside
+    a closure from its parameter, were looked up under the bare name.
 - Native engine 0.5.9, what a declaration's type arguments bind. On the 31
   audit repositories 19 more edges, none gone, and 12 of retrofit's calls
   that were guesses by name are `EXTRACTED`:

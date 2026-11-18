@@ -305,6 +305,22 @@ What the lookup takes from each language's own rules:
   class the bindings are for takes them (a member a base class declares
   does not, nor a method's own type parameter); a wrapper's argument is the
   type itself, as before. A local typed by its value carries no bindings.
+- **What a mapping's function gives, and lists of lists.** A lambda of
+  several statements gives its last expression where the language makes
+  that the value (Kotlin, Ruby, Rust, Swift) or what its `return`s give
+  when they agree; a local the lambda declares is what it is assigned
+  (`xs.map { x -> val o = x.owner; o }`). A function given by reference maps
+  too: `map(Item::owner)`, `map(Item::getBoss)`, `map(::Item)`,
+  `map(Item::new)`, Rust `map(Part::head)`, Swift `map(\.pilot)`. The walk
+  counts lists of lists: `chunked`, `windowed`, `chunks`, `each_slice` give
+  lists of the elements, `groupBy` / `GroupBy` / `group_by` a map of them,
+  `flatten` / `SelectMany` takes one level off, so `xs.chunked(2).forEach {
+  c -> c.forEach { it.run() } }` and `xs.groupBy { it.id }.values.forEach {
+  g -> g.first().run() }` reach the element's `run`. `associateBy` /
+  `ToDictionary` / `keyBy` key the elements (a map of them), `reduce` /
+  `Aggregate` / `inject` give one. A closure inside another names the outer
+  closure's parameter as the outer closure's (the inner parameter's type
+  was looked up under the bare name).
 - **Results that are type parameters.** A function that returns its own type
   parameter gives the type of the argument that binds it: `fun <T> pick(x:
   T): T` the argument's, `fun <T> head(xs: List<T>): T` its element's. A method that returns a type
@@ -561,7 +577,7 @@ file pairs). The native graph has definitions graphify folds into the one
 around them (a function nested in a method, the setter beside a getter of the
 same name); an edge from one of those is compared as an edge from the paired
 definition it belongs to, as graphify records it. On the 31 repositories of the
-[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.9,
+[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.10,
 measured 2026-11-18), as native / graphify edges and the share of graphify's
 that the native graph has too:
 
@@ -576,16 +592,16 @@ that the native graph has too:
 | Kotlin | 99.4% | 368 / 333 (95%) | 4,682 / 2,108 (71%) | 96 / 56 (93%) | 1,087 / 673 (91%) |
 | Scala | 100% | 2 / 0 | 46 / 20 (45%) | 21 / 22 (95%) | 75 / 32 (100%) |
 | C# | 92.7% | 347 / 280 (30%)³ | 2,787 / 2,450 (93%) | 87 / 86 (98%) | 1,259 / 806 (99%) |
-| Rust | 93.3% | 314 / 370 (75%) | 1,837 / 853 (82%) | 53 / 41 (93%) | 1,242 / 895 (81%) |
-| Swift | 95.9% | 166 / 166 (–)³ | 5,164 / 2,141 (82%) | 190 / 164 (100%) | 1,091 / 580 (62%) |
+| Rust | 93.3% | 314 / 370 (75%) | 1,837 / 853 (82%) | 53 / 41 (93%) | 1,244 / 895 (81%) |
+| Swift | 95.9% | 166 / 166 (–)³ | 5,165 / 2,141 (82%) | 190 / 164 (100%) | 1,091 / 580 (62%) |
 | C | 100% | 89 / 77 (99%) | 864 / 791 (100%) | – | 253 / 130 (97%) |
 | C++ | 97.8% | 215 / 228 (93%) | 631 / 281 (33%)⁴ | 30 / 5 (100%) | 326 / 218 (88%) |
 | C/C++ headers | 90.6% | 164 / 172 (95%) | 361 / 348 (85%) | 11 / 12 (92%) | 515 / 289 (87%) |
 | Ruby | 99.7% | 42 / 0 | 445 / 375 (70%) | 46 / 15 (93%) | 28 / 0 |
 | PHP | 80.6% | 429 / 505 (84%) | 8,870 / 6,140 (90%) | 65 / 60 (98%) | 648 / 213 (95%) |
-| **All** | **94.4%** | **4,961 / 5,565 (75%)** | **43,589 / 27,832 (84%)** | **1,132 / 726 (97%)** | **12,412 / 6,775 (89%)** |
+| **All** | **94.4%** | **4,961 / 5,565 (75%)** | **43,590 / 27,832 (84%)** | **1,132 / 726 (97%)** | **12,414 / 6,775 (89%)** |
 
-Of the native calls, 12,715 (29%) are `INFERRED`, against 47% of graphify's.
+Of the native calls, 12,716 (29%) are `INFERRED`, against 47% of graphify's.
 That share was 20% before engine 0.5.5: a call of an overloaded name that the
 arguments do not decide used to be an `EXTRACTED` edge to the first overload,
 and is now an `INFERRED` edge to each overload that fits (999 calls, with
@@ -628,6 +644,11 @@ two edges of got are gone that named a function defined in another loop
 for a destructured loop variable of the same name. The maps of these
 repositories that hold project types are mostly looked up by key once, or
 not walked at all.
+Engine 0.5.10 (mapping functions, references, groups, lists of lists) adds 5
+edges and drops none: a function passed by reference (`filter_map(
+NoProxyEntry::try_parse)` in ureq, `compactMap(\.self)` in alamofire) and a
+field read through a lambda local. These repositories map almost always
+with a one-expression lambda, which 0.5.6 already read.
 Engine 0.5.9 (type arguments) adds 19 edges and drops none, and 12 of
 retrofit's calls that were guesses by name are now `EXTRACTED`: retrofit's
 tests take a `Response<T>` or `Result<T>` out of a recording observer
@@ -672,9 +693,11 @@ Reading a sample of each side's edges the other lacks, per language:
   parameter bound to the type itself, handed explicitly, or bound by an
   argument or its elements, and through a chain of collection methods
   whose names say what they give (`xs.filter { … }.map { it.owner
-  }.first()`); not through one whose result depends on more than the
-  elements (`fold`, `reduce`, `groupBy`, `zip`, `associate`), a mapping whose
-  function is several statements, or a map's keys.
+  }.first()`, `groupBy`, `chunked`, `associateBy`, `reduce`); not through
+  one whose result is another value than the elements' (`fold` with an
+  initial value, `zip`, `associateWith`, `partition` taken apart), a map's
+  keys, a local typed by its value when the type is generic, or a member a
+  generic base declares (`class UserRepo : Repo<User>`).
 - **What only the native graph has** is mostly what a name lookup by itself
   cannot see: calls through a module object (`httpx.Response(...)`), through a
   typed local or field (`client = httpx.Client(); client.get()`,
@@ -698,7 +721,7 @@ builds take 13.3 s for the 31 repositories against graphify's 81.3 s
 faster of two clean builds each): 8.7 times faster at the median, from 2.1
 (todoapi, whose bundled JavaScript the native engine reads in full) to 17.2
 times; retrofit 2.9 s against 13.1 s, guzzle 0.9 s / 6.1 s, alamofire 1.2 s /
-5.4 s, got 0.9 s / 4.7 s (engine 0.5.1; with all that 0.5.9 resolves the same
+5.4 s, got 0.9 s / 4.7 s (engine 0.5.1; with all that 0.5.10 resolves the same
 31 builds take 16.3 to 18.4 s, retrofit 3.7 to 4.1 s). An update after a one-file change takes a third of
 a build ([above](#incremental-updates)).
 
@@ -745,7 +768,7 @@ but one convention finding, fixed since: `graphlore_surprises(limit=0)` cut its
 `shared_state` list without saying how much (`shared_state_left_out` does now).
 `SKELETON-EMPTY` went from 5 to 0, and the tool time stayed at 131 s.
 
-Rerun on graphs built by engine 0.5.3, and again by 0.5.4 through 0.5.9
+Rerun on graphs built by engine 0.5.3, and again by 0.5.4 through 0.5.10
 (2026-11-18), the audit raises nothing on the native graphs but its
 `GRAPH-ORPHAN-NODES` note on 19 of them; 115 to 154 s of tool time (on the 0.5.7 run, retrofit's build through `graphlore_build` took 5.1 s and was reported `SLOW` for crossing 5 s). What the table above still listed is
 gone:
