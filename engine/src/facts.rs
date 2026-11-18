@@ -176,6 +176,15 @@ pub struct Def {
     /// The type a variable, field or constant is declared with, as written.
     #[serde(default)]
     pub declared_type: Option<Vec<String>>,
+    /// What the wrapper a field is declared as, or a callable declares it
+    /// returns, holds: `Option<Foo>`, `Promise<Foo>`, `Box<dyn Foo>` → `Foo`.
+    #[serde(default)]
+    pub wraps: Option<Vec<String>>,
+    /// That wrapper holds its value closed (`Option`, `Optional`, `Mutex`,
+    /// `Promise`, `Task`): what is called on it is the wrapper's own method
+    /// until it is opened (`unwrap()`, `get()`, `await`, `?`, `.Result`).
+    #[serde(default)]
+    pub sealed: bool,
     /// The tree-sitter node the definition came from, and its byte range:
     /// for attaching references, never serialised.
     #[serde(skip)]
@@ -319,6 +328,10 @@ pub struct Local {
     /// arguments (`create(Service::class.java)`, `typeof(Bar)`).
     #[serde(default)]
     pub given: Option<Vec<String>>,
+    /// Declared as a wrapper that holds its value closed (`opt: Optional<Foo>`,
+    /// `Arc<Mutex<Pool>>`): the path is what it holds (see `Def::sealed`).
+    #[serde(default)]
+    pub sealed: bool,
     pub from_def: Option<usize>,
     #[serde(skip)]
     pub byte: usize,

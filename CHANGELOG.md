@@ -247,6 +247,29 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- Native engine 0.5.7, what a wrapper holds. On the 31 audit repositories:
+  191 more edges, 2 gone (one a guess by name, one moved to the definition
+  the call is of):
+  - **A closed wrapper is opened before it is used.** `Option`, `Optional`,
+    `Mutex`, `RwLock`, `RefCell`, `Promise`, `Future`, `CompletableFuture`,
+    `Deferred`, Rust `Result` and C# `Task` / `ValueTask` are the wrapper
+    until `await`, `?`, an unwrapper (`unwrap()`, `get()`, `orElseThrow()`,
+    `lock()`, `borrow()`, `.Result`, `.Value`) or a lambda given to them
+    (`opt.ifPresent { it.run() }`) opens them: `self.pool.lock().unwrap()
+    .get()` on an `Arc<Mutex<Pool>>` calls `Pool.get`, `open()?.stop()`
+    calls `Conn.stop`, `(await fetchDoc()).load()` calls `Doc.load`. What
+    is called on a closed wrapper (`is_some()`, `isPresent()`, `then()`,
+    `Wait()`) is the wrapper's own method: no edge to the type it holds.
+  - **A declared result is read through a wrapper**: `-> Option<Foo>`,
+    `Promise<Foo>`, `Task<Foo>`, `Box<dyn Foo>` return a `Foo` (they returned
+    nothing the walk could use).
+  - **C# `var x = await f()` is typed** (a C# declarator names its value with
+    no field, and only a plain call was looked for): 141 more `reads` in
+    restsharp's tests.
+  - **A generic class whose base is the plain class of its name**
+    (`RestResponse<T> : RestResponse`) has that class as its base; the base
+    resolved to the class itself and was dropped, so no member of the
+    hierarchy was found from it.
 - Native engine 0.5.6, chains of calls on a collection. On the 31 audit
   repositories: 144 more calls, 479 more `reads` and 46 more `writes`, and 12
   edges gone (ten of them a closure's parameter taken for a method or

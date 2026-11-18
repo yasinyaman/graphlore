@@ -259,6 +259,26 @@ What the lookup takes from each language's own rules:
   lambda, the second for Kotlin's `forEachIndexed` / `mapIndexed`; a Swift
   closure's parameters (`{ p in … }`, `$0`) and a C# `d => …` are names of
   the closure like every other language's.
+- **What a wrapper holds.** A wrapper that answers for what it holds (`Box`,
+  `Arc`, `Rc`, `Readonly`) is read as that type, as before. One that holds
+  its value closed — `Option`, `Optional`, `Mutex`, `RwLock`, `RefCell`,
+  `Promise`, `Future`, `CompletableFuture`, `Deferred`, and Rust's `Result`
+  and C#'s `Task` / `ValueTask` (in those languages only: retrofit has a
+  `Result<T>` of its own) — is the wrapper until it is opened: by `await`,
+  Rust's `?`, an unwrapper (`unwrap()`, `expect()`, `get()`,
+  `orElseThrow()`, `lock()`, `borrow()`, `.Result`, `.Value`), or the
+  parameter of a lambda given to it (`opt.ifPresent { it.run() }`, `opt.map
+  { it.owner }`). A method that keeps the wrapper (`map_err`, `ok_or`,
+  `filter`, `ConfigureAwait`) leaves it closed; anything else called on a
+  closed wrapper is the wrapper's own method (`is_some()`, `isPresent()`,
+  `then()`, `Wait()`) and no edge. So `self.pool.lock().unwrap().get()` on
+  an `Arc<Mutex<Pool>>` calls `Pool.get`, `open()?.stop()` on `fn open() ->
+  Result<Conn, E>` calls `Conn.stop`, and `(await fetchDoc()).load()` on a
+  `Promise<Doc>` calls `Doc.load`. A function's declared result is read
+  through a wrapper too (`-> Option<Foo>` returns a `Foo`, closed), which
+  it was not before. A local assigned a call of such a function is closed
+  unless the value was opened where it is assigned (`let c = open();` is,
+  `let c = open()?;` is not).
 - **Results that are type parameters.** A function that returns its own type
   parameter gives the type of the argument that binds it: `fun <T> pick(x:
   T): T` the argument's, `fun <T> head(xs: List<T>): T` its element's. A method that returns a type
@@ -515,7 +535,7 @@ file pairs). The native graph has definitions graphify folds into the one
 around them (a function nested in a method, the setter beside a getter of the
 same name); an edge from one of those is compared as an edge from the paired
 definition it belongs to, as graphify records it. On the 31 repositories of the
-[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.6,
+[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.7,
 measured 2026-11-18), as native / graphify edges and the share of graphify's
 that the native graph has too:
 
@@ -529,17 +549,17 @@ that the native graph has too:
 | Java | 100% | 1,105 / 1,010 (100%) | 5,665 / 5,123 (85%) | 415 / 168 (94%) | 3,989 / 1,930 (98%) |
 | Kotlin | 99.4% | 368 / 333 (95%) | 4,682 / 2,108 (71%) | 96 / 56 (93%) | 1,087 / 673 (91%) |
 | Scala | 100% | 2 / 0 | 46 / 20 (45%) | 21 / 22 (95%) | 75 / 32 (100%) |
-| C# | 92.7% | 347 / 280 (30%)³ | 2,782 / 2,450 (93%) | 87 / 86 (98%) | 1,258 / 806 (99%) |
-| Rust | 93.3% | 314 / 370 (75%) | 1,826 / 853 (82%) | 53 / 41 (93%) | 1,242 / 895 (81%) |
+| C# | 92.7% | 347 / 280 (30%)³ | 2,787 / 2,450 (93%) | 87 / 86 (98%) | 1,259 / 806 (99%) |
+| Rust | 93.3% | 314 / 370 (75%) | 1,835 / 853 (82%) | 53 / 41 (93%) | 1,242 / 895 (81%) |
 | Swift | 95.9% | 166 / 166 (–)³ | 5,164 / 2,141 (82%) | 190 / 164 (100%) | 1,091 / 580 (62%) |
 | C | 100% | 89 / 77 (99%) | 864 / 791 (100%) | – | 253 / 130 (97%) |
 | C++ | 97.8% | 215 / 228 (93%) | 631 / 281 (33%)⁴ | 30 / 5 (100%) | 326 / 218 (88%) |
 | C/C++ headers | 90.6% | 164 / 172 (95%) | 361 / 348 (85%) | 11 / 12 (92%) | 515 / 289 (87%) |
 | Ruby | 99.7% | 42 / 0 | 445 / 375 (70%) | 46 / 15 (93%) | 28 / 0 |
 | PHP | 80.6% | 429 / 505 (84%) | 8,870 / 6,140 (90%) | 65 / 60 (98%) | 648 / 213 (95%) |
-| **All** | **94.4%** | **4,961 / 5,565 (75%)** | **43,558 / 27,832 (84%)** | **1,132 / 726 (97%)** | **12,411 / 6,775 (89%)** |
+| **All** | **94.4%** | **4,961 / 5,565 (75%)** | **43,572 / 27,832 (84%)** | **1,132 / 726 (97%)** | **12,412 / 6,775 (89%)** |
 
-Of the native calls, 12,714 (29%) are `INFERRED`, against 47% of graphify's.
+Of the native calls, 12,725 (29%) are `INFERRED`, against 47% of graphify's.
 That share was 20% before engine 0.5.5: a call of an overloaded name that the
 arguments do not decide used to be an `EXTRACTED` edge to the first overload,
 and is now an `INFERRED` edge to each overload that fits (999 calls, with
@@ -563,6 +583,17 @@ handler(response) }`), two moved to the extension function the call is of.
 The chains themselves are a small part of it: these repositories mostly
 loop over a collection or call one method on an element, which 0.5.5
 already followed.
+Engine 0.5.7 (what a wrapper holds) adds 191 edges and drops 2: most are
+C#, where `var x = await client.ExecuteAsync(r)` was never typed (a C#
+declarator names its value with no field, and only a call was looked for)
+and a generic class whose base is the plain one of its name
+(`RestResponse<T> : RestResponse`) reached no base at all: 141 more `reads`
+in restsharp, 31 more `reads` / `writes` in aspnetcore-realworld. The Rust
+unwrap chains of these repositories are mostly on library types
+(`uri.authority().unwrap()`, `res.headers().get(…).unwrap()`), so they add
+14 calls in all. Of the two edges gone, one was a guess on a name
+(`ret.extensions_mut()` on an `http::Response`, linked to ureq's own
+`Request`) and one moved to the definition the call is of.
 Reading a sample of each side's edges the other lacks, per language:
 
 - **What only graphify has** is mostly its own guesses and artefacts.
@@ -625,8 +656,8 @@ builds take 13.3 s for the 31 repositories against graphify's 81.3 s
 faster of two clean builds each): 8.7 times faster at the median, from 2.1
 (todoapi, whose bundled JavaScript the native engine reads in full) to 17.2
 times; retrofit 2.9 s against 13.1 s, guzzle 0.9 s / 6.1 s, alamofire 1.2 s /
-5.4 s, got 0.9 s / 4.7 s (engine 0.5.1; with all that 0.5.6 resolves the same
-31 builds take 16.8 to 17.8 s). An update after a one-file change takes a third of
+5.4 s, got 0.9 s / 4.7 s (engine 0.5.1; with all that 0.5.7 resolves the same
+31 builds take 16.8 to 17.8 s, retrofit 3.7 to 4.1 s). An update after a one-file change takes a third of
 a build ([above](#incremental-updates)).
 
 ### The polyglot audit on native graphs
@@ -672,9 +703,9 @@ but one convention finding, fixed since: `graphlore_surprises(limit=0)` cut its
 `shared_state` list without saying how much (`shared_state_left_out` does now).
 `SKELETON-EMPTY` went from 5 to 0, and the tool time stayed at 131 s.
 
-Rerun on graphs built by engine 0.5.3, and again by 0.5.4, 0.5.5 and 0.5.6
+Rerun on graphs built by engine 0.5.3, and again by 0.5.4, 0.5.5, 0.5.6 and 0.5.7
 (2026-11-18), the audit raises nothing on the native graphs but its
-`GRAPH-ORPHAN-NODES` note on 19 of them; 115 to 138 s of tool time. What the table above still listed is
+`GRAPH-ORPHAN-NODES` note on 19 of them; 115 to 154 s of tool time (on the 0.5.7 run, retrofit's build through `graphlore_build` took 5.1 s and was reported `SLOW` for crossing 5 s). What the table above still listed is
 gone:
 
 - **`REPLY-TOO-LARGE`**: `graphlore_neighbors` cuts a hub at `limit` and says
