@@ -1601,7 +1601,11 @@ impl<'a> Project<'a> {
                 if self.def_ids[fi].get(di).is_some_and(|x| x.is_some()) {
                     self.by_name.entry(d.name.clone()).or_default().push((fi, di));
                 }
-                self.by_qual.entry(qual_key(fam, &d.qualname)).or_default().push((fi, di));
+                // (an RSpec `let` is a name of its block only: the scoped
+                // lookup in `resolve_name_any` is its one way in)
+                if d.scope_lines.is_none() {
+                    self.by_qual.entry(qual_key(fam, &d.qualname)).or_default().push((fi, di));
+                }
                 if d.receiver.is_some() && !d.decl_only {
                     self.extensions.entry(d.name.clone()).or_default().push((fi, di));
                 }
@@ -2924,7 +2928,10 @@ impl<'a> Project<'a> {
             files
                 .iter()
                 .flat_map(|&f| self.top[f].get(name).into_iter().flatten().map(move |&d| (f, d)))
-                .filter(|r| self.def(*r).kind != DefKind::Extension),
+                // (an RSpec `let` is a name of its block only)
+                .filter(|r| {
+                    self.def(*r).kind != DefKind::Extension && self.def(*r).scope_lines.is_none()
+                }),
         )
     }
 
@@ -3309,6 +3316,31 @@ impl<'a> Project<'a> {
                 }
             }
         }
+        // RSpec `let(:conn)`: a name of the block it is written in; of
+        // several, the innermost around the use, and none outside them
+        let scoped: Vec<usize> = self.top[f]
+            .get(name)
+            .into_iter()
+            .flatten()
+            .copied()
+            .filter(|&i| defs[i].scope_lines.is_some())
+            .collect();
+        if !scoped.is_empty() {
+            let at = (*self.cur.borrow())
+                .filter(|(cf, _)| *cf == f)
+                .map(|(cf, ri)| self.files[cf].refs[ri].line)
+                .or_else(|| d.map(|x| defs[x].def_line));
+            let inner = at.and_then(|line| {
+                scoped
+                    .iter()
+                    .copied()
+                    .filter(|&i| defs[i].scope_lines.is_some_and(|(a, b)| a <= line && line <= b))
+                    .min_by_key(|&i| defs[i].scope_lines.map(|(a, b)| b - a))
+            });
+            if let Some(i) = inner {
+                return Some(Target::Def((f, i)));
+            }
+        }
         if let Some(r) = self.top_in(&[f], name) {
             if self.acceptable(&Target::Def(r)) {
                 return Some(Target::Def(r));
@@ -3340,7 +3372,41 @@ impl<'a> Project<'a> {
                 }
             }
         }
+        // a spec: the methods of the modules `RSpec.configure` includes in
+        // every example (`config.include Faraday::IntegrationHelpers`). A
+        // name it calls that nothing else answers to can only be theirs
+        if fam == Family::Ruby && crate::community::is_test_path(&self.files[f].path) {
+            if let Some(m) = self.spec_helper_member(name) {
+                return Some(Target::Def(m));
+            }
+        }
         None
+    }
+
+    /// A method named `name` of a module some file's `RSpec.configure`
+    /// includes (`config.include M`): the one there is.
+    fn spec_helper_member(&self, name: &str) -> Option<DefRef> {
+        let mut found: Option<DefRef> = None;
+        for facts in self.files {
+            for path in &facts.spec_includes {
+                let key = qual_key(Family::Ruby, &path.join("::"));
+                let modules = self.by_qual.get(&key).into_iter().flatten().copied();
+                for module in modules.filter(|m| self.def(*m).kind.is_class_like()) {
+                    let hit = self
+                        .members(module, name)
+                        .into_iter()
+                        .chain(self.reopened_member(module, name))
+                        .find(|x| self.def(*x).kind.is_callable());
+                    if let Some(x) = hit {
+                        if found.is_some_and(|y| y != x) {
+                            return None;
+                        }
+                        found = Some(x);
+                    }
+                }
+            }
+        }
+        found
     }
 
     fn note_use(&self, f: usize, imp: usize, t: &Target) {
@@ -5262,6 +5328,7 @@ impl<'a> Project<'a> {
                 let d = self.def(*r);
                 (d.kind.is_callable() || d.kind.is_class_like())
                     && !(free && d.kind == DefKind::Method)
+                    && d.scope_lines.is_none()
             })
             .collect();
         self.narrow(f, cands).map(|(r, _)| r)
@@ -5659,6 +5726,7 @@ impl<'a> Project<'a> {
                         || d.owner.is_some()
                         || d.object.as_deref().is_some_and(|o| o != "exports"))
                     && !d.decl_only
+                    && d.scope_lines.is_none()
             })
             .collect();
         if cands.len() != 1 {
@@ -5796,7 +5864,10 @@ impl<'a> Project<'a> {
         // (a Swift computed property's body is its own)
         let swift = self.family[f] == Some(Family::Swift);
         while let Some(x) = cur {
-            let skip = defs[x].extra && !(swift && r.kind != RefKind::Type);
+            // (an extra definition that is a callable, RSpec's `let`, is
+            // the source of its own block's uses)
+            let skip =
+                defs[x].extra && !defs[x].kind.is_callable() && !(swift && r.kind != RefKind::Type);
             if skip {
                 cur = defs[x].parent;
                 continue;

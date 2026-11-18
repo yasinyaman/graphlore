@@ -310,6 +310,12 @@ pub trait LanguageModule: Send + Sync {
         None
     }
 
+    /// The modules a test configuration mixes into every test (RSpec
+    /// `config.include M`).
+    fn spec_includes(&self, _node: Node, _src: &[u8]) -> Vec<Vec<String>> {
+        Vec::new()
+    }
+
     /// Variables, constants and class-level fields a node declares (`Def::extra`):
     /// `(span node, name node, kind)` for each name, with `DefKind::Variable` for
     /// module or package state, `Constant` for what cannot change, `Property`

@@ -24,6 +24,43 @@ impl LanguageModule for Ruby {
         true
     }
 
+    /// RSpec `let(:conn) { … }`, `let!`, `subject(:request) { … }` and a bare
+    /// `subject { … }`: a method the spec defines, named by the symbol.
+    fn extra_def<'t>(&self, n: Node<'t>, src: &[u8]) -> Option<(Node<'t>, DefKind)> {
+        let m = method_name(n, src)?;
+        if !matches!(m.as_str(), "let" | "let!" | "subject" | "subject!") {
+            return None;
+        }
+        n.child_by_field_name("block")?;
+        let named = n
+            .child_by_field_name("arguments")
+            .and_then(|a| kids(a).into_iter().next())
+            .filter(|a| a.kind() == "simple_symbol");
+        match named {
+            Some(sym) => Some((sym, DefKind::Function)),
+            None if m.starts_with("subject") => {
+                n.child_by_field_name("method").map(|x| (x, DefKind::Function))
+            }
+            None => None,
+        }
+    }
+
+    /// `config.include Faraday::IntegrationHelpers` in `RSpec.configure`.
+    fn spec_includes(&self, n: Node, src: &[u8]) -> Vec<Vec<String>> {
+        if n.kind() != "call"
+            || n.child_by_field_name("method").map(|x| text(x, src)).as_deref() != Some("include")
+            || n.child_by_field_name("receiver").map(|x| text(x, src)).as_deref() != Some("config")
+        {
+            return Vec::new();
+        }
+        let Some(args) = n.child_by_field_name("arguments") else { return Vec::new() };
+        kids(args)
+            .into_iter()
+            .filter(|a| matches!(a.kind(), "constant" | "scope_resolution"))
+            .filter_map(|a| path_of(a, src))
+            .collect()
+    }
+
     /// `$hits = 0` and `MAX = 3` at the top level, and `@@total = 0` / `LIMIT
     /// = 2` in a class or module body.
     fn state_defs<'t>(&self, n: Node<'t>, _src: &[u8]) -> Vec<(Node<'t>, Node<'t>, DefKind)> {

@@ -2158,6 +2158,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
             imports.extend(found);
             continue;
         }
+        facts.spec_includes.extend(m.spec_includes(n, src));
         if !by_node.contains_key(&n.id()) {
             if let Some((name, kind)) = m.extra_def(n, src) {
                 extras.push((n, name, kind, false));
@@ -2791,6 +2792,16 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
     }
     add_extras(&mut facts.defs, &extras, m, src);
     let defs = &facts.defs;
+    // `subject { conn }`, `let(:conn) { … }`: the call that declares a
+    // callable is no use of a name
+    let declaring: std::collections::HashSet<usize> = defs
+        .iter()
+        .filter(|d| d.extra && d.kind.is_callable() && d.params == Some(0))
+        .map(|d| d.start_byte)
+        .collect();
+    if !declaring.is_empty() {
+        refs.retain(|r| !(r.path.len() == 1 && declaring.contains(&r.byte)));
+    }
     refs.extend(state.finish(defs, &imports, m.needs_import(), |bytes| innermost(defs, bytes)));
     // `assert_eq!(handle_count(&pool), 2)`: the grammar gives a macro's
     // arguments as tokens; read as expressions they are calls like any other
@@ -4724,7 +4735,8 @@ fn add_extras(
                 parent = defs[p].parent;
             }
         }
-        let name = text(*name_node, src).trim_start_matches('$').to_string();
+        // (`$x`, PHP; `:conn`, the symbol that names an RSpec `let`)
+        let name = text(*name_node, src).trim_start_matches(['$', ':']).to_string();
         if name == "_" {
             continue; // Go `var _ I = (*T)(nil)`: a compile-time check, no variable
         }
@@ -4740,6 +4752,21 @@ fn add_extras(
             None => name.clone(),
         };
         let def_line = line(*node);
+        // a callable written as a call with a block (RSpec `let(:conn) {
+        // Client.new }`): what the block's last expression gives is its
+        // result, and it is a name of the block it is written in
+        let block = kind.is_callable().then(|| node.child_by_field_name("block")).flatten();
+        let returns: Vec<Vec<String>> = block
+            .and_then(|b| b.child_by_field_name("body"))
+            .and_then(|body| kids(body).into_iter().rfind(|c| !is_comment(c)))
+            .and_then(|v| returned_path(v, src))
+            .into_iter()
+            .collect();
+        let scope_lines = block.and_then(|_| {
+            let around = node.parent()?.parent()?;
+            matches!(around.kind(), "do_block" | "block")
+                .then(|| (line(around), m.end_line(around)))
+        });
         defs.push(Def {
             name,
             qualname,
@@ -4765,6 +4792,7 @@ fn add_extras(
             key: written_key(*node, src),
             returned_parts: Vec::new(),
             returned_members: Vec::new(),
+            scope_lines,
             targs: written_targs(*node, src),
             targ_elems: written_targ_elems(*node, src),
             base_targs: Vec::new(),
@@ -4772,9 +4800,9 @@ fn add_extras(
             part_sealed: Vec::new(),
             receiver: None,
             anonymous: false,
-            params: None,
+            params: block.map(|_| 0),
             plist: Vec::new(),
-            returns: Vec::new(),
+            returns,
             lambda_receiver: None,
             self_params: Vec::new(),
             attrs: Vec::new(),
