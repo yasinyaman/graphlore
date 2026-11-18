@@ -93,12 +93,14 @@ _QUERY_MAX_TERMS = 64
 # Fusion of the lexical and dense rankings: weighted reciprocal rank.
 _RRF_K = 60
 _FUSION_DEPTH = 50
-# (lexical, dense) weight by query kind: a name is found by its spelling, a
-# question by its meaning.
-_FUSION_WEIGHTS = {"symbol": (1.0, 0.3), "natural": (0.6, 1.0), "code": (0.5, 1.0)}
+# (lexical, dense) weight by query kind: a name is found by its spelling; for a
+# question both rankings count the same. The defaults of this block were chosen on
+# 19 of the 63 repositories of benchmarks/search.py (one per language) and checked
+# on the other 44 (docs/benchmark.md).
+_FUSION_WEIGHTS = {"symbol": (1.0, 0.3), "natural": (1.0, 1.0), "code": (1.0, 1.0)}
 # Rank fusion forgets how far ahead an exact name match was in BM25: on a symbol
 # query a chunk named exactly like the query gains this many first places.
-_EXACT_FUSED_BONUS = 0.0
+_EXACT_FUSED_BONUS = 1.0
 
 # find_related on the lexical tier: candidates come from the postings of the
 # chunk's heaviest terms, then exact cosine on the best of them.
@@ -116,13 +118,11 @@ _TEST_WORDS = frozenset({"test", "tests", "testing", "spec", "specs", "fixture",
                          "mock", "mocks"})
 # The n-th chunk of one file in a ranking is worth this much less than the one
 # before it: a question with two homes should show both.
-_FILE_DECAY = 0.6
-# A file several of whose chunks match is more likely the answer: its best chunk
-# gains this share of the others' scores.
-_FILE_COHERENCE = 0.0
-# The same on the BM25-only index, for questions (not names: a symbol query wants
-# the one definition, and a file that mentions the name often loses it).
-_LEX_COHERENCE = 0.0
+_FILE_DECAY = 0.4
+# A file several of whose chunks match is more likely the answer: on the BM25-only
+# index its best chunk gains this share of the others' scores, for questions (not
+# names: a symbol query wants the one definition). After fusion it did not help.
+_LEX_COHERENCE = 0.2
 _RERANK_DEPTH = 100
 
 _INDEX_CACHE_MAX = 2
@@ -784,8 +784,6 @@ class CodeIndex:
             for cid, s in scored[:_RERANK_DEPTH]
         ]
         pool.sort(key=lambda kv: (-kv[1], self._order(kv[0])))
-        if _FILE_COHERENCE:
-            pool = self._cohere(pool, _FILE_COHERENCE)
         seen: Counter[str] = Counter()
         out = []
         for cid, s in pool:
