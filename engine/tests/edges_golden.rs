@@ -1805,3 +1805,30 @@ fn cpp_plain_declarations_and_misread_constructions_are_locals() {
     // no node for the misread declaration; a real one keeps its node
     assert!(!got.iter().any(|(f, _, _)| f == "pool()"), "{got:#?}");
 }
+
+#[test]
+fn cpp_a_namespace_is_every_block_that_opens_it() {
+    // `shop::File` is looked up in every `namespace shop { }`, not only the
+    // block the caller's file opens; a name called is the function of that
+    // name, a name with `::` after it the class
+    let got = calls_conf("cppns", &[
+        ("include/file.h", "namespace shop {\nstruct File {\n    explicit File(int p) {}\n};\n}\n"),
+        ("include/async.h", "namespace shop {\ntemplate <class Fn> auto task(Fn fn) { return fn(); }\nclass task {\n  public:\n    static void stop() {}\n};\nvoid run() {}\n}\n"),
+        ("include/other.h", "namespace other {\nstruct File {\n    explicit File(int p) {}\n};\nvoid run() {}\n}\n"),
+        // a method defined for a type inside a block of the namespace is the
+        // type's: `shop::run()` is not `Session::run`
+        ("base/session.cpp", "#include \"../include/async.h\"\nnamespace shop {\nclass Session {\n  public:\n    void run();\n};\nvoid Session::run() {}\n}\n"),
+        ("test/use.cpp", "#include \"../include/file.h\"\n#include \"../include/async.h\"\n#include \"../include/other.h\"\nnamespace shop {\nvoid here();\n}\nvoid go() {\n    auto f = shop::File(1);\n    shop::run();\n    shop::task([] { return 1; });\n    shop::task::stop();\n}\n"),
+    ]);
+    let has = |to: &str| got.iter().any(|(f, t, _)| f == "go()" && t == to);
+    assert!(has("include_file_file"), "{got:#?}");
+    assert!(has("include_file_file_file"), "{got:#?}");
+    assert!(!has("include_other_file"), "{got:#?}");
+    assert!(has("include_async_run"), "{got:#?}");
+    assert!(!has("include_other_run"), "{got:#?}");
+    assert!(!has("base_session_session_run"), "{got:#?}");
+    // the function, not the class of its name
+    assert!(has("include_async_task"), "{got:#?}");
+    assert!(!has("include_async_task_2"), "{got:#?}");
+    assert!(has("include_async_task_stop"), "{got:#?}");
+}

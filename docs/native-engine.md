@@ -767,7 +767,7 @@ file pairs). The native graph has definitions graphify folds into the one
 around them (a function nested in a method, the setter beside a getter of the
 same name); an edge from one of those is compared as an edge from the paired
 definition it belongs to, as graphify records it. On the 31 repositories of the
-[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.30,
+[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.31,
 measured 2026-11-18), as native / graphify edges and the share of graphify's
 that the native graph has too:
 
@@ -785,11 +785,11 @@ that the native graph has too:
 | Rust | 93.3% | 314 / 370 (75%) | 2,016 / 853 (86%) | 53 / 41 (93%) | 1,245 / 895 (81%) |
 | Swift | 95.9% | 166 / 166 (–)³ | 5,494 / 2,141 (83%) | 190 / 164 (100%) | 1,091 / 580 (62%) |
 | C | 100% | 89 / 77 (99%) | 864 / 791 (100%) | – | 253 / 130 (97%) |
-| C++ | 97.8% | 215 / 228 (93%) | 745 / 281 (34%)⁴ | 30 / 5 (100%) | 326 / 218 (88%) |
-| C/C++ headers | 90.6% | 164 / 172 (95%) | 358 / 348 (85%) | 11 / 12 (92%) | 515 / 289 (87%) |
+| C++ | 97.8% | 215 / 228 (93%) | 780 / 281 (34%)⁴ | 30 / 5 (100%) | 326 / 218 (88%) |
+| C/C++ headers | 90.6% | 164 / 172 (95%) | 382 / 348 (87%) | 11 / 12 (92%) | 515 / 289 (87%) |
 | Ruby | 99.7% | 42 / 0 | 443 / 375 (69%) | 46 / 15 (93%) | 28 / 0 |
 | PHP | 80.6% | 429 / 505 (84%) | 8,873 / 6,140 (90%) | 65 / 60 (98%) | 648 / 213 (95%) |
-| **All** | **94.4%** | **4,962 / 5,565 (75%)** | **44,491 / 27,832 (85%)** | **1,136 / 726 (97%)** | **12,401 / 6,775 (89%)** |
+| **All** | **94.4%** | **4,962 / 5,565 (75%)** | **44,535 / 27,832 (85%)** | **1,136 / 726 (97%)** | **12,401 / 6,775 (89%)** |
 
 Of the native calls, 12,743 (29%) are `INFERRED`, against 47% of graphify's.
 That share was 20% before engine 0.5.5: a call of an overloaded name that the
@@ -834,6 +834,18 @@ two edges of got are gone that named a function defined in another loop
 for a destructured loop variable of the same name. The maps of these
 repositories that hold project types are mostly looked up by key once, or
 not walked at all.
+Engine 0.5.31 (C++ namespaces) looks a namespace's member up in every block
+that opens the namespace, not only the one the caller's file opens: a
+header's `namespace cpr { struct File … }` and a test's `namespace cpr {
+… }` are one namespace, so `cpr::File(…)`, `cpr::Url{…}` and `cpr::Get(…)`
+reach their definitions wherever the caller's file opens a block of its
+own. A method defined for a type inside such a block (`Response
+Session::Get() { … }` in `namespace cpr { }`) is the type's, not a name of
+the namespace. A name called is the function of that name and a name with
+`::` after it the type (`cpr::async(…)` beside `class async`,
+`cpr::async::cleanup()`). cpr gets 273 `EXTRACTED` calls (`cpr::Get` 116,
+`cpr::Post` 47, `cpr::ThreadPool` and its constructor 40, `cpr::Url` 21);
+nothing is gone.
 Engine 0.5.30 (C++ locals) reads `Session session;` as a local of its type
 (a declaration without a value had none: only `T x = …`, `T x(1)` and `T
 x{…}` were read), and `cpr::ThreadPool pool(context);` as a variable
@@ -1204,7 +1216,7 @@ implicit members since 0.5.17: 39 whose place gives no type are rows now
 closure parameters and variables of express's tests. What is left at file
 level there is `app.use` and `app.set` (842 rows of express), names too
 short and too common to guess by. Engine 0.5.19 takes 123 more off (6,362;
-C# 349 from 470; 6,360 with 0.5.20, 6,348 with 0.5.21, 6,285 with 0.5.22, 6,237 with 0.5.25, 6,206 with 0.5.27, 6,166 with 0.5.28, 6,156 with 0.5.30). Most of what C# has left is not the project's: `Assert.
+C# 349 from 470; 6,360 with 0.5.20, 6,348 with 0.5.21, 6,285 with 0.5.22, 6,237 with 0.5.25, 6,206 with 0.5.27, 6,166 with 0.5.28, 6,156 with 0.5.30, 6,140 with 0.5.31). Most of what C# has left is not the project's: `Assert.
 NotNull` beside its own `Ensure.NotNull` (77), `WireMockServer.Start` (23).
 
 By then most rows were of that kind: a library's name the project happens
@@ -1249,7 +1261,7 @@ type declares: symfony-demo's `$user->getFullName()` is marked beside the
 on `std` (`std::async(…)`, and a member of a field or local declared with a
 `std::` type, as written, `Def::written_head` / `Local::written_head`: the
 readers of types drop a C++ namespace), and reads C++ locals; C++ is left
-with 28 unmarked rows, from 50.) The 2,114 by language: PHP 445, TypeScript 405, Ruby 304, C# 196, Rust 192,
+with 28 unmarked rows, from 50, and with 12 after 0.5.31's namespaces.) The 2,114 by language: PHP 445, TypeScript 405, Ruby 304, C# 196, Rust 192,
 C++ 169, Swift 94, Kotlin 79, JavaScript 71, Java 49, Go 34, C 33, Python
 20, TSX 19, Scala 4. They are still an upper bound: the marks are
 conservative, and PHP's and TypeScript's rows are mostly PSR-7 and Node

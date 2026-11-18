@@ -259,6 +259,13 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- **Native engine 0.5.31: a C++ namespace is every block that opens it.**
+  `cpr::File(…)` is looked up in each `namespace cpr { }` of the project,
+  not only in the block the caller's file opens; a method defined for a
+  type inside such a block is the type's, not the namespace's; a name called
+  is the function of that name and a name with `::` after it the class
+  (`cpr::async(…)` beside `class async`). cpr: 273 `EXTRACTED` calls, none
+  gone; C++'s unmarked unresolved rows 28 → 12.
 - **Native engine 0.5.30: C++ locals declared without a value, and the
   constructions the grammar reads as declarations.** `Session session;` is a
   local of its type, and `cpr::ThreadPool pool(context);` beside a local
