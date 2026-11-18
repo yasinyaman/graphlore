@@ -119,6 +119,13 @@ pub struct Def {
     /// whose members the grammar gives to the struct around.
     #[serde(default)]
     pub inline_body: Option<(usize, usize)>,
+    /// JS `var req = Object.create(http.IncomingMessage.prototype)`: what the
+    /// object is created from (`http.IncomingMessage.prototype`).
+    #[serde(default)]
+    pub created_from: Option<Vec<String>>,
+    /// JS `const Article = mongoose.model('Article')`: the model it names.
+    #[serde(default)]
+    pub model_name: Option<String>,
     /// How many parameters a callable declares.
     #[serde(default)]
     pub params: Option<u8>,
@@ -465,6 +472,12 @@ pub struct RefFact {
     /// (`client.Get<User>(id)`: 1); 0 when it writes none.
     #[serde(default)]
     pub targs: u8,
+    /// JS `this.x` in a function expression no definition holds: what the
+    /// function is attached to, `app` of `app[method] = function () {…}`, or
+    /// the call it is passed to, `UserSchema.path.().validate` of
+    /// `UserSchema.path('name').validate(function () {…})`.
+    #[serde(default)]
+    pub this_of: Option<Vec<String>>,
     #[serde(skip)]
     pub byte: usize,
 }
@@ -594,6 +607,10 @@ pub struct FileFacts {
     /// an initializer, `c->funcs->read = netRead`).
     #[serde(default)]
     pub slots: Vec<SlotFact>,
+    /// JS `mongoose.model('Article', ArticleSchema)`: the models this file
+    /// registers, with the schema each is made of.
+    #[serde(default)]
+    pub models: Vec<(String, String)>,
     /// Lambdas with a receiver (Kotlin `x.apply { … }`, `withIndent { … }`).
     #[serde(default)]
     pub receivers: Vec<ReceiverScope>,
@@ -624,6 +641,7 @@ impl FileFacts {
             attrs: Vec::new(),
             spec_includes: Vec::new(),
             slots: Vec::new(),
+            models: Vec::new(),
             receivers: Vec::new(),
             resources: Vec::new(),
             http: Default::default(),
