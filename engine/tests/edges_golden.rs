@@ -950,7 +950,7 @@ fn what_a_wrapper_holds_once_it_is_opened() {
     // every method has a namesake on a decoy type and on the wrapper's own
     // API, so a name alone says nothing
     let got = call_ids("wrappers", &[
-        ("a.rs", "use std::sync::{Arc, Mutex};\npub struct Decoy;\nimpl Decoy {\n    pub fn get(&self) {}\n    pub fn run(&self) {}\n    pub fn stop(&self) {}\n    pub fn ping(&self) {}\n}\npub struct Pool;\nimpl Pool {\n    pub fn get(&self) {}\n    pub fn is_some(&self) {}\n}\npub struct Conn;\nimpl Conn {\n    pub fn run(&self) {}\n    pub fn stop(&self) {}\n    pub fn ping(&self) {}\n}\npub fn open() -> Result<Conn, String> { Ok(Conn) }\npub struct Client { pool: Arc<Mutex<Pool>>, conn: Option<Conn> }\nimpl Client {\n    pub fn go(&self) -> Result<(), String> {\n        self.pool.lock().unwrap().get();\n        self.conn.as_ref().unwrap().run();\n        open()?.stop();\n        let c = open();\n        c.unwrap().ping();\n        self.conn.is_some();\n        Ok(())\n    }\n}\n"),
+        ("a.rs", "use std::sync::{Arc, Mutex};\npub struct Decoy;\nimpl Decoy {\n    pub fn get(&self) {}\n    pub fn run(&self) {}\n    pub fn stop(&self) {}\n    pub fn ping(&self) {}\n}\npub struct Pool;\nimpl Pool {\n    pub fn get(&self) {}\n    pub fn is_some(&self) {}\n}\npub struct Conn;\nimpl Conn {\n    pub fn run(&self) {}\n    pub fn stop(&self) {}\n    pub fn ping(&self) {}\n}\npub fn open() -> Result<Conn, String> { Ok(Conn) }\npub struct Client { pool: Arc<Mutex<Pool>>, conn: Option<Conn> }\nimpl Client {\n    pub fn go(&self) -> Result<(), String> {\n        self.pool.lock().unwrap().get();\n        self.conn.as_ref().unwrap().run();\n        open()?.stop();\n        let c = open();\n        c.unwrap().ping();\n        self.conn.is_some();\n        Ok(())\n    }\n    pub fn take_one(&self) {\n        let pool = self.pool.lock().unwrap();\n        pool.get();\n    }\n}\n"),
         ("B.java", "import java.util.Optional;\nclass Lure { void run() {} void get() {} }\nclass User { void run() {} void stop() {} void get() {} }\nclass Repo {\n  Optional<User> find() { return Optional.empty(); }\n  void use(Optional<User> u) {\n    find().get().run();\n    find().orElseThrow().stop();\n    u.ifPresent(x -> x.run());\n    find().isPresent();\n  }\n}\n"),
         ("c.ts", "export class Bait { load() {} save() {} }\nexport class Doc { load() {} save() {} then() {} }\nexport async function fetchDoc(): Promise<Doc> { return new Doc(); }\nexport async function go() {\n  (await fetchDoc()).load();\n  const d = await fetchDoc();\n  d.save();\n  fetchDoc().then();\n}\n"),
         // `var x = await f()` (no field names a C# declarator's value), and a
@@ -961,6 +961,8 @@ fn what_a_wrapper_holds_once_it_is_opened() {
     let mut missing = Vec::new();
     for (from, to) in [
         (".go()", "a_pool_get"),
+        // a local assigned the opened wrapper (and `get` is no map's here)
+        (".take_one()", "a_pool_get"),
         (".go()", "a_conn_run"),
         (".go()", "a_conn_stop"),
         (".go()", "a_conn_ping"),
@@ -984,6 +986,48 @@ fn what_a_wrapper_holds_once_it_is_opened() {
     for (from, to) in &got {
         assert!(
             !["decoy", "lure", "bait", "fake"].iter().any(|d| to.contains(d)),
+            "{from} -> {to}"
+        );
+    }
+}
+
+#[test]
+fn the_values_of_a_map_and_the_element_beside_an_index() {
+    let got = call_ids("maps", &[
+        ("a.kt", "package app\nclass Decoy { fun a() {}; fun b() {}; fun c() {}; fun d() {}; fun e() {}; fun g() {}; fun h() {} }\nclass Foo { fun a() {}; fun b() {}; fun c() {}; fun d() {}; fun e() {}; fun g() {}; fun h() {}; fun key() {} }\nfun maps(m: Map<String, Foo>, xs: List<Foo>) {\n    m[\"x\"]!!.a()\n    m.getValue(\"x\").b()\n    for ((k, v) in m) { v.c() }\n    m.values.forEach { it.d() }\n    m.forEach { (k, v) -> v.e() }\n    for ((i, x) in xs.withIndex()) { x.g() }\n    for (v in m.values) { v.h() }\n}\nfun entries(m: Map<String, Foo>) {\n    for (e in m) { e.key() }\n    m.forEach { it.key() }\n    m.first().key()\n}\n"),
+        ("b.py", "class Dummy:\n    def run(self): ...\n    def lower(self): ...\n\n\nclass Job:\n    def run(self): ...\n    def lower(self): ...\n\n\ndef jobs(d: dict[str, Job]):\n    for k, v in d.items():\n        v.run()\n\n\ndef keys(d: dict[str, Job]):\n    for k in d:\n        k.lower()\n"),
+        ("c.rs", "use std::collections::HashMap;\npub struct Fake;\nimpl Fake { pub fn go(&self) {} pub fn run(&self) {} }\npub struct Part;\nimpl Part { pub fn go(&self) {} pub fn run(&self) {} }\npub fn parts(m: HashMap<String, Part>, xs: Vec<Part>) {\n    for (k, v) in &m { v.go(); }\n    for (i, x) in xs.iter().enumerate() { x.run(); }\n}\n"),
+        ("d.go", "package x\n\ntype Ghost struct{}\n\nfunc (g *Ghost) Visit() {}\n\ntype Node struct{}\n\nfunc (n *Node) Visit() {}\nfunc Walk(m map[string]*Node) {\n\tfor _, n := range m {\n\t\tn.Visit()\n\t}\n}\n"),
+        ("E.cs", "using System.Collections.Generic;\nclass Mock { public void Send() {} }\nclass Mail { public void Send() {} }\nclass Box {\n  void Go(Dictionary<string, Mail> m) {\n    foreach (var (k, v) in m) { v.Send(); }\n  }\n}\n"),
+        ("f.swift", "class Ghost { func fly() {} }\nclass Bird { func fly() {} }\nfunc birds(m: [String: Bird]) {\n    for (k, v) in m { v.fly() }\n}\n"),
+    ]);
+    let mut missing = Vec::new();
+    for (from, to) in [
+        ("maps()", "a_foo_a"),
+        ("maps()", "a_foo_b"),
+        ("maps()", "a_foo_c"),
+        ("maps()", "a_foo_d"),
+        ("maps()", "a_foo_e"),
+        ("maps()", "a_foo_g"),
+        ("maps()", "a_foo_h"),
+        ("jobs()", "b_job_run"),
+        ("parts()", "c_part_go"),
+        ("parts()", "c_part_run"),
+        ("Walk()", "d_node_visit"),
+        (".Go()", "e_mail_send"),
+        ("birds()", "f_bird_fly"),
+    ] {
+        if !got.contains(&(from.to_string(), to.to_string())) {
+            missing.push((from, to));
+        }
+    }
+    assert!(missing.is_empty(), "missing {missing:?}\n{got:?}");
+    // iterating a map gives its entries (Python: its keys), and its
+    // `first()` is an entry: none is a value
+    for (from, to) in &got {
+        assert!(from != "entries()" && from != "keys()", "{from} -> {to}");
+        assert!(
+            !["decoy", "dummy", "fake", "ghost", "mock"].iter().any(|d| to.contains(d)),
             "{from} -> {to}"
         );
     }

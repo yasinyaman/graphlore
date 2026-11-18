@@ -221,6 +221,7 @@ pub fn path_of(n: Node, src: &[u8]) -> Option<Vec<String>> {
         | "type_annotation"
         | "parenthesized_expression"
         | "non_null_expression"
+        | "reference_expression"
         | "unary_expression" => kids(n).into_iter().find_map(|c| path_of(c, src)),
         // `await x`, Rust `x?`: what the wrapper holds
         "await_expression" | "try_expression" => {
@@ -1303,6 +1304,7 @@ fn params_in(holder: Node, only_parameters: bool, src: &[u8]) -> Vec<crate::fact
             name,
             ty,
             elem: written_elem(c, src),
+            keyed: written_keyed(c, src),
             optional: eq
                 || k.contains("default")
                 || k == "optional_parameter"
@@ -1374,6 +1376,7 @@ fn bind_closure_params(closures: &[ClosureScope], refs: &mut [RefFact], locals: 
                 elem: None,
                 value_args: Vec::new(),
                 sealed: false,
+                keyed: false,
                 from_def: None,
                 byte: *start,
             });
@@ -1798,6 +1801,7 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
                 facts.defs[di].lambda_receiver = lambda_receiver(n, src);
                 facts.defs[di].type_params = type_params(n, src);
                 facts.defs[di].elem = return_elem(n, src);
+                facts.defs[di].keyed = return_keyed(n, src);
                 if let Some((inner, sealed)) = return_wraps(n, src) {
                     facts.defs[di].wraps = Some(inner);
                     facts.defs[di].sealed = sealed;
@@ -1868,6 +1872,7 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
                                         elem: None,
                                         value_args: Vec::new(),
                                         sealed: false,
+                                        keyed: false,
                                         from_def: Some(di),
                                         byte: c.start_byte(),
                                     });
@@ -1901,6 +1906,7 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
                                         elem: None,
                                         value_args: Vec::new(),
                                         sealed: false,
+                                        keyed: false,
                                         from_def: Some(di),
                                         byte: c.start_byte(),
                                     });
@@ -1921,6 +1927,7 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
                             elem: None,
                             value_args: Vec::new(),
                             sealed: false,
+                            keyed: false,
                             from_def: Some(di),
                             byte: ps.start_byte(),
                         });
@@ -1961,6 +1968,7 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
                                     elem: None,
                                     value_args: Vec::new(),
                                     sealed: false,
+                                    keyed: false,
                                     from_def: Some(di),
                                     byte: x.start_byte(),
                                 });
@@ -2012,11 +2020,30 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
             // (Swift's has `$0`)
             let lambda = implicit_parameter(n);
             if lambda.is_some() || params.first().is_some_and(|(_, path, _)| path.is_empty()) {
-                if let Some((at, of)) = iterated(&anc, n, src) {
-                    match (lambda, params.get_mut(at)) {
-                        (Some(it), _) if at == 0 => params = vec![(it.to_string(), of, false)],
-                        (None, Some(p)) if p.1.is_empty() => p.1 = of,
-                        _ => {}
+                if let Some((at, of, each)) = iterated_on(&anc, n, src) {
+                    let mut one = of.clone();
+                    if each {
+                        one.push(ITERATED.into());
+                    }
+                    let mut second = of;
+                    second.push(VALUE.into());
+                    // `{ (k, v) -> … }`, `([k, v]) => …`, `|(k, v)|`: an entry
+                    // taken apart, its value second
+                    let destructured = each && at == 0 && destructures_pair(n);
+                    let two = params.len() == 2;
+                    if let (Some(it), 0) = (lambda, at) {
+                        params = vec![(it.to_string(), one, false)];
+                    } else if destructured && two {
+                        if params[1].1.is_empty() {
+                            params[1].1 = second;
+                        }
+                    } else if lambda.is_none() && params.get(at).is_some_and(|p| p.1.is_empty()) {
+                        params[at].1 = one;
+                        // `m.forEach((k, v) -> …)`: the value of a map's
+                        // entry beside its key (nothing for a list's)
+                        if each && at == 0 && two && params[1].1.is_empty() {
+                            params[1].1 = second;
+                        }
                     }
                 }
             }
@@ -2032,7 +2059,7 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
                 closures.push((body.start_byte(), body.end_byte(), params));
             }
             // `for (x in xs)`, `for x in xs`, `for _, x := range xs`
-            if let Some((name, of)) = loop_variable(n, src) {
+            for (name, of) in loop_variable(n, src) {
                 locals.push(Local {
                     name,
                     path: of,
@@ -2043,6 +2070,7 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
                     elem: None,
                     value_args: Vec::new(),
                     sealed: false,
+                    keyed: false,
                     from_def: None,
                     byte: n.start_byte(),
                 });
@@ -2088,6 +2116,7 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
                     elem: if declared { written_elem(n, src) } else { None },
                     value_args,
                     sealed: declared && written_sealed(n, src),
+                    keyed: declared && written_keyed(n, src),
                     from_def: None,
                     byte: n.start_byte(),
                 });
@@ -2296,6 +2325,16 @@ pub const ELEMENT: &str = "[]";
 /// (`xs.map { it.owner }` is `xs`, `[]`, `owner`, `[+]`).
 pub const MANY: &str = "[+]";
 
+/// The marker that ends a path naming what an iteration over what comes
+/// before it gives: an element of a list, nothing known of a map (its
+/// entries, or in Python its keys).
+pub const ITERATED: &str = "[*]";
+
+/// The marker that ends a path naming the second of the pair an iteration
+/// gives: the value of a map's entry, the element beside an index
+/// (`withIndex()`, `enumerate()`).
+pub const VALUE: &str = "[v]";
+
 /// A path segment: the wrapper the path named so far is opened (`await x`,
 /// Rust `x?`). Nothing to a value that is no wrapper.
 pub const OPENED: &str = "[?]";
@@ -2324,7 +2363,7 @@ fn mapped(of: &[String], var: &str, each: Vec<String>) -> Option<Vec<String>> {
     let mut out = if each[0] == var {
         // a member of the element
         let mut p = of.to_vec();
-        p.push(ELEMENT.into());
+        p.push(ITERATED.into());
         p.extend(each.into_iter().skip(1));
         p
     } else {
@@ -2534,7 +2573,98 @@ fn elem_type(t: Node, src: &[u8]) -> Option<Vec<String>> {
     }
     let (outer, _) = v.remove(at);
     let args: Vec<Vec<String>> = v.into_iter().map(|(p, _)| p).collect();
-    (COLLECTIONS.contains(&outer.last()?.as_str()) && args.len() == 1).then(|| args[0].clone())
+    if COLLECTIONS.contains(&outer.last()?.as_str()) && args.len() == 1 {
+        return Some(args[0].clone());
+    }
+    map_value(t, src)
+}
+
+/// Names of map types whose second type argument is their values' type.
+const MAPS: &[&str] = &[
+    "Map",
+    "MutableMap",
+    "HashMap",
+    "LinkedHashMap",
+    "TreeMap",
+    "SortedMap",
+    "NavigableMap",
+    "ConcurrentHashMap",
+    "ConcurrentMap",
+    "WeakHashMap",
+    "EnumMap",
+    "ImmutableMap",
+    "PersistentMap",
+    "Dictionary",
+    "IDictionary",
+    "IReadOnlyDictionary",
+    "ConcurrentDictionary",
+    "SortedDictionary",
+    "ImmutableDictionary",
+    "BTreeMap",
+    "IndexMap",
+    "dict",
+    "Dict",
+    "Mapping",
+    "MutableMapping",
+    "OrderedDict",
+    "DefaultDict",
+    "defaultdict",
+    "Record",
+    "ReadonlyMap",
+];
+
+/// The type of the values of the map a type position names: `Map<K, V>`,
+/// `dict[K, V]`, Go `map[K]V`, Swift `[K: V]`.
+fn map_value(t: Node, src: &[u8]) -> Option<Vec<String>> {
+    let mut stack = vec![(t, 0)];
+    while let Some((n, depth)) = stack.pop() {
+        match n.kind() {
+            "map_type" => return n.child_by_field_name("value").and_then(|v| first_type(v, src)),
+            "dictionary_type" => {
+                let v = n.child_by_field_name("value").or_else(|| kids(n).get(1).copied())?;
+                return first_type(v, src);
+            }
+            _ => {}
+        }
+        let args = kids(n).into_iter().find(|c| {
+            matches!(
+                c.kind(),
+                "type_arguments"
+                    | "type_argument_list"
+                    | "template_argument_list"
+                    | "type_parameter"
+            )
+        });
+        if let Some(args) = args {
+            let named = path_of(n, src).and_then(|p| p.last().cloned());
+            if !named.is_some_and(|x| MAPS.contains(&x.as_str())) {
+                return None;
+            }
+            let given: Vec<Node> = kids(args).into_iter().filter(|c| !is_comment(c)).collect();
+            return match given.as_slice() {
+                [_, v] => first_type(*v, src),
+                _ => None,
+            };
+        }
+        if depth < 3
+            && matches!(
+                n.kind(),
+                "type_annotation"
+                    | "nullable_type"
+                    | "optional_type"
+                    | "type"
+                    | "pointer_type"
+                    | "reference_type"
+                    | "parenthesized_type"
+                    | "generic_type"
+                    | "user_type"
+                    | "generic_name"
+            )
+        {
+            stack.extend(kids(n).into_iter().map(|c| (c, depth + 1)));
+        }
+    }
+    None
 }
 
 /// The element type of the collection a declaration or a parameter is
@@ -2559,6 +2689,55 @@ fn written_elem(node: Node, src: &[u8]) -> Option<Vec<String>> {
                 .and_then(|t| elem_type(t, src))
         })
     })
+}
+
+/// Whether a declaration writes a map's type for what it declares.
+fn written_keyed(node: Node, src: &[u8]) -> bool {
+    let mut places = vec![node];
+    places.extend(
+        kids(node)
+            .into_iter()
+            .filter(|c| c.kind().ends_with("declaration") || c.kind().ends_with("declarator")),
+    );
+    places.into_iter().any(|n| match n.child_by_field_name("type") {
+        Some(t) => map_value(t, src).is_some(),
+        None => kids(n)
+            .into_iter()
+            .find(|c| {
+                matches!(
+                    c.kind(),
+                    "user_type" | "type_annotation" | "nullable_type" | "dictionary_type"
+                )
+            })
+            .is_some_and(|t| map_value(t, src).is_some()),
+    })
+}
+
+/// Whether a callable declares it returns a map.
+fn return_keyed(def: Node, src: &[u8]) -> bool {
+    let mut cursor = def.walk();
+    for (i, child) in def.children(&mut cursor).enumerate() {
+        let result = match def.field_name_for_child(i as u32) {
+            Some("return_type") | Some("returns") => true,
+            Some("result") => {
+                // Go `(map[string]*Foo, error)`: the first result
+                if child.kind() == "parameter_list" {
+                    return kids(child).into_iter().next().is_some_and(|f| written_keyed(f, src));
+                }
+                true
+            }
+            Some("type") => !def.kind().contains("field") && !def.kind().contains("property"),
+            Some(_) => false,
+            None => {
+                matches!(child.kind(), "user_type" | "nullable_type")
+                    && def.kind() == "function_declaration"
+            }
+        };
+        if result {
+            return map_value(child, src).is_some();
+        }
+    }
+    false
 }
 
 /// Whether a declaration writes a sealed wrapper for what it declares
@@ -2828,9 +3007,10 @@ fn implicit_parameter(n: Node) -> Option<&'static str> {
     Some(if swift { "0" } else { "it" })
 }
 
-/// What the first parameter of the lambda `n` is, from the call it is given
-/// to: an element of the receiver of an iteration method, or the receiver.
-fn iterated(anc: &[Node], n: Node, src: &[u8]) -> Option<(usize, Vec<String>)> {
+/// The call a lambda is given to: which of its parameters is the element,
+/// the path of the receiver, and whether that parameter is an element of
+/// it (else the receiver itself, `x.let { … }`).
+fn iterated_on(anc: &[Node], n: Node, src: &[u8]) -> Option<(usize, Vec<String>, bool)> {
     let lambda_start = n.start_byte();
     let call = anc.iter().rev().take(5).find(|a| is_call_kind(a.kind()))?;
     let (_, path) = callee(*call, src)?;
@@ -2845,21 +3025,82 @@ fn iterated(anc: &[Node], n: Node, src: &[u8]) -> Option<(usize, Vec<String>)> {
     }
     let (method, receiver) = path.split_last()?;
     let mut of = receiver.to_vec();
+    let of = std::mem::take(&mut of);
     if ITERATION_METHODS.contains(&method.as_str()) {
-        of.push(ELEMENT.into());
-        Some((0, of))
+        Some((0, of, true))
     } else if INDEXED_METHODS.contains(&method.as_str()) {
-        of.push(ELEMENT.into());
-        Some((1, of))
+        Some((1, of, true))
     } else if SELF_METHODS.contains(&method.as_str()) {
-        Some((0, of))
+        Some((0, of, false))
     } else {
         None
     }
 }
 
-/// The variable of a loop over a collection, and the path of its elements.
-fn loop_variable(n: Node, src: &[u8]) -> Option<(String, Vec<String>)> {
+/// Whether a lambda's one parameter is a pair taken apart: Kotlin `{ (k, v)
+/// -> … }`, JS `([k, v]) => …`, Rust `|(k, v)|`.
+fn destructures_pair(n: Node) -> bool {
+    let first = match n.kind() {
+        "lambda_literal" => kids(n)
+            .into_iter()
+            .find(|c| c.kind() == "lambda_parameters")
+            .and_then(|ps| kids(ps).into_iter().next()),
+        _ => ["parameters", "parameter"].iter().find_map(|f| n.child_by_field_name(f)).and_then(
+            |ps| {
+                if matches!(ps.kind(), "array_pattern" | "tuple_pattern") {
+                    Some(ps)
+                } else {
+                    kids(ps).into_iter().next()
+                }
+            },
+        ),
+    };
+    first.is_some_and(|p| {
+        matches!(p.kind(), "multi_variable_declaration" | "array_pattern" | "tuple_pattern")
+            && kids(p).len() == 2
+    })
+}
+
+/// The two names of a pair taken apart (`(k, v)`, `[k, v]`, `k, v`), when
+/// each is one name.
+fn pair_names(var: Node, src: &[u8]) -> Option<(String, String)> {
+    if !matches!(
+        var.kind(),
+        "multi_variable_declaration"
+            | "tuple_pattern"
+            | "pattern_list"
+            | "array_pattern"
+            | "pattern"
+            | "parenthesized_variable_designation"
+    ) {
+        return None;
+    }
+    let one = |c: Node| -> Option<String> {
+        match c.kind() {
+            "identifier" | "simple_identifier" => bound_name(c, src),
+            "variable_declaration" | "pattern" => match kids(c).as_slice() {
+                [x] if matches!(x.kind(), "identifier" | "simple_identifier") => {
+                    bound_name(*x, src)
+                }
+                _ => None,
+            },
+            _ => None,
+        }
+    };
+    match kids(var).into_iter().filter(|c| !is_comment(c)).collect::<Vec<_>>().as_slice() {
+        [a, b] => Some((one(*a)?, one(*b)?)),
+        _ => None,
+    }
+}
+
+/// The variables of a loop over a collection, and the paths of what they
+/// are: one name is what the iteration gives (`[*]`), two taken apart are a
+/// key or index and the value beside it (`[v]`), Go's `range` its own pair.
+fn loop_variable(n: Node, src: &[u8]) -> Vec<(String, Vec<String>)> {
+    loop_vars(n, src).unwrap_or_default()
+}
+
+fn loop_vars(n: Node, src: &[u8]) -> Option<Vec<(String, Vec<String>)>> {
     let k = n.kind();
     let (var, iterable) = match k {
         // Go `for _, x := range xs`: the second name is the element
@@ -2881,7 +3122,11 @@ fn loop_variable(n: Node, src: &[u8]) -> Option<(String, Vec<String>)> {
             let var = ["left", "name", "pattern", "item"]
                 .iter()
                 .find_map(|f| n.child_by_field_name(f))
-                .or_else(|| kids(n).into_iter().find(|c| c.kind() == "variable_declaration"))?;
+                .or_else(|| {
+                    kids(n).into_iter().find(|c| {
+                        matches!(c.kind(), "variable_declaration" | "multi_variable_declaration")
+                    })
+                })?;
             let iterable = ["right", "value", "collection"]
                 .iter()
                 .find_map(|f| n.child_by_field_name(f))
@@ -2900,6 +3145,25 @@ fn loop_variable(n: Node, src: &[u8]) -> Option<(String, Vec<String>)> {
         }
         _ => return None,
     };
+    // Go's `range` gives the pair itself: the second name is the element (of
+    // a slice) or the value (of a map)
+    if k == "range_clause" {
+        let name = bound_name(var, src).filter(|n| n != "_")?;
+        let mut path = path_of(iterable, src).filter(|p| p[0] != UNKNOWN)?;
+        path.push(ELEMENT.into());
+        return Some(vec![(name, path)]);
+    }
+    if let Some((key, value)) = pair_names(var, src) {
+        let of = path_of(iterable, src).filter(|p| p[0] != UNKNOWN)?;
+        let mut path = of;
+        path.push(VALUE.into());
+        let mut out = vec![(key, Vec::new())];
+        if value != "_" {
+            out.push((value, path));
+        }
+        out.retain(|(n, _)| n != "_");
+        return Some(out);
+    }
     // one name, not a pattern of several
     let name = match var.kind() {
         "identifier" | "simple_identifier" | "variable_name" => bound_name(var, src)?,
@@ -2922,8 +3186,8 @@ fn loop_variable(n: Node, src: &[u8]) -> Option<(String, Vec<String>)> {
         return None;
     }
     let mut path = path_of(iterable, src).filter(|p| p[0] != UNKNOWN)?;
-    path.push(ELEMENT.into());
-    Some((name, path))
+    path.push(ITERATED.into());
+    Some(vec![(name, path)])
 }
 
 /// The type a declaration writes for what it declares (`val x: Foo`, `Foo x`,
@@ -3092,6 +3356,7 @@ fn add_extras(
             wraps: written_sealed(*node, src).then(|| written_type(*node, src)).flatten(),
             sealed: written_sealed(*node, src),
             elem: written_elem(*node, src),
+            keyed: written_keyed(*node, src),
             receiver: None,
             anonymous: false,
             params: None,

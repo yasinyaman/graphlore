@@ -247,6 +247,27 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- Native engine 0.5.8, maps and pairs. On the 31 audit repositories 10 edges
+  change, most to the definition the call is of:
+  - **A map's values.** `Map<K, V>`, `HashMap`, `Dictionary`, `dict[K, V]`,
+    `Record`, Go `map[K]V` and Swift `[K: V]` have their values' type as
+    their element: `m[k]`, `m.get(k)`, `getValue`, `getOrDefault`,
+    `getOrPut` give a value, `m.values` is a collection of them. Kotlinpoet's
+    `constructorProperties[param.name].emit(…)` calls `PropertySpec.emit`
+    (a guess by name had linked `ParameterSpec`'s).
+  - **Iterating a map gives entries, not values** (Python: keys): one loop
+    variable over a map, a lambda's one parameter and `m.first()` name
+    nothing; a pair taken apart is its key and value (`for ((k, v) in m)`,
+    `for k, v in d.items()`, `for (k, v) in &m`, `for (const [k, v] of m)`,
+    `foreach (var (k, v) in m)`, `m.forEach { (k, v) -> … }`), and beside an
+    index it is the element (`withIndex()`, `enumerate()`, `enumerated()`).
+  - **A loop variable taken apart is a local** (it was not recorded, and the
+    name fell through to an outer one: two edges of got named a function of
+    another loop).
+  - Rust `for x in &xs` reads `xs` (a reference was no path).
+  - A local assigned an opened wrapper (`let pool =
+    self.pool.lock().unwrap();`) is typed by what it holds; the library's
+    method at the end of the value stopped it.
 - Native engine 0.5.7, what a wrapper holds. On the 31 audit repositories:
   191 more edges, 2 gone (one a guess by name, one moved to the definition
   the call is of):
