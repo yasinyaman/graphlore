@@ -153,7 +153,9 @@ you also want the JSON in the text.
 When structure isn't enough, escalate in steps instead of Reading whole files:
 `graphlore_skeleton("<file-or-node>")` gives def/class **signatures** (bodies
 stripped) — the middle layer between the map and full code — and
-`graphlore_fetch("<node>")` hydrates just that node's source, token-capped.
+`graphlore_fetch("<node>")` hydrates just that node's source, token-capped. A
+definition over 8,000 tokens comes back cut (`cut` says which lines of how
+many): list its members with `graphlore_skeleton` and fetch the one you need.
 
 ## Task recipes
 

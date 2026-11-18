@@ -555,7 +555,17 @@ def check_navigation(a: Audit, sub: Subject) -> None:
     touching = {nid: len(rows) for nid, rows in rows_of.items()}
     for nid in sub.hubs():
         label = s._node_label(sub.byid[nid])
-        nb = a.call("neighbors", node=nid)
+        # the default call (a hub is cut at `limit`, and must say so), then
+        # every row for the checks that count them
+        cut = a.call("neighbors", node=nid)
+        if cut and "error" not in cut and cut.get("truncated") and (
+                cut.get("total") != touching.get(nid, 0) or not cut.get("counts")):
+            a.finding("NEIGHBORS-CUT-COUNT", "medium", "bug", "neighbors",
+                      "a cut neighbor list does not say how many there are",
+                      {"node": label, "total": cut.get("total"),
+                       "edges": touching.get(nid, 0)})
+        nb = a.call("neighbors", node=nid, limit=10 ** 9) if (
+            cut and cut.get("truncated")) else cut
         if nb and "error" not in nb:
             rows = nb.get("neighbors", [])
             if len(rows) != touching.get(nid, 0):

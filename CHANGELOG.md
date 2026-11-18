@@ -215,6 +215,17 @@ All notable changes to this project are documented here. The format is based on
   engine has, and whether matched definitions share a parent and relation.
 
 ### Changed
+- **Three replies that could run past 90 KB are cut, and say what they left
+  out** (the polyglot audit's `REPLY-TOO-LARGE` on native graphs, five to
+  none). `graphlore_neighbors` takes `limit` (200): past it the result carries
+  `total`, `truncated` and `counts` by relation and direction (retrofit's
+  `Call`, 752 neighbors: 98 KB to 10 KB). `graphlore_fetch` returns one
+  definition whole up to 8,000 tokens or `budget_tokens`, whichever is larger;
+  a longer one is cut at a line with `cut` (`lines_shown`, `lines_total`,
+  `tokens_total`), `lines_left_out` and a hint naming `graphlore_skeleton` and the budget that
+  returns all of it (guzzle's 3,100-line `CurlFactory`: 124 KB to 27 KB).
+  `graphlore_same_names` lists the first 25 definitions of a name and counts
+  them all in `definitions_total` (cpr's 647 definitions named `TEST`: 133 KB to 2 KB).
 - With the native engine, `graphlore_build(cluster_only=True)` detects the
   communities of the graph on disk again (it was refused), and `update=True`
   is incremental (it rebuilt everything); under `GRAPHLORE_ENGINE=auto` both
