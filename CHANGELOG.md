@@ -259,6 +259,11 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- Native engine 0.5.26, two more kinds of library names in the
+  diagnostics (graph.json is unchanged): a capital head that names nothing
+  of the project and no local (`Date.now()`, `Assert.NotNull(…)`), and the
+  methods of Rust's and C++'s standard types (`lock`, `clone`, `c_str`).
+  Of 6,237 unresolved rows, 1,610 are left unmarked (2,066 before).
 - Native engine 0.5.25, five readings the 0.5.24 diagnostics pointed to.
   On the 31 audit repositories: 83 calls (60 `EXTRACTED`) and 157 reads,
   writes, uses and references gained, 8 edges gone.
