@@ -1927,3 +1927,39 @@ fn c_an_extern_variable_declares_the_definition_elsewhere() {
     });
     assert!(reads);
 }
+
+#[test]
+fn c_a_function_put_in_a_slot_is_what_the_slot_dispatches_to() {
+    // a struct of function pointers is an interface; what an initializer
+    // (by name or by position, data fields counted) or an assignment puts
+    // in a slot is an implementation of it. NULL, a library's function and
+    // a data field give nothing
+    let got = edges("cslots", &[
+        ("net.h", "typedef struct funcs {\n    int (*close)(int);\n    int size;\n    int (*read)(int);\n} funcs;\ntypedef struct ctx {\n    funcs f;\n    funcs *fp;\n} ctx;\n"),
+        // a field of an anonymous struct type: its members are the body's
+            ("ev.h", "typedef struct actx {\n    void *data;\n    struct {\n        void *data;\n        void (*addRead)(void *);\n    } ev;\n} actx;\nvoid addReadImpl(void *p) {}\nvoid attach(actx *ac) {\n    ac->ev.addRead = addReadImpl;\n}\nvoid go(actx *ac) {\n    ac->ev.addRead(ac->ev.data);\n}\n"),
+            ("net.c", "#include \"net.h\"\nint netClose(int x) { return x; }\nint netRead(int x) { return x; }\nint posClose(int x) { return x; }\nint posRead(int x) { return x; }\nint setRead(int x) { return x; }\nint setClose(int x) { return x; }\nint three = 3;\nstatic funcs byName = { .close = netClose, .read = netRead };\nstatic funcs byPos = { posClose, three, posRead };\nstatic funcs none = { .close = NULL, .read = abort };\nvoid set(ctx *c) {\n    c->f.read = setRead;\n    c->fp->close = setClose;\n    c->f.size = three;\n}\nint use(ctx *c) {\n    return c->fp->read(1);\n}\n"),
+    ]);
+    has(
+        &got,
+        &[
+            (".close()", "dispatches_to", "netClose()"),
+            (".read()", "dispatches_to", "netRead()"),
+            (".close()", "dispatches_to", "posClose()"),
+            (".read()", "dispatches_to", "posRead()"),
+            (".read()", "dispatches_to", "setRead()"),
+            (".close()", "dispatches_to", "setClose()"),
+            ("use()", "calls", ".read()"),
+            (".addRead()", "dispatches_to", "addReadImpl()"),
+            ("go()", "calls", ".addRead()"),
+        ],
+    );
+    let wrong = |to: &str| got.iter().any(|(_, r, t)| r == "dispatches_to" && t == to);
+    assert!(!wrong("three") && !wrong("abort"), "{got:#?}");
+    assert!(!got.iter().any(|(f, r, _)| f == "size" && r == "dispatches_to"), "{got:#?}");
+    // positional: `three` is the data field's, so `posRead` is `read`'s
+    assert!(
+        !got.contains(&(".close()".into(), "dispatches_to".into(), "posRead()".into())),
+        "{got:#?}"
+    );
+}

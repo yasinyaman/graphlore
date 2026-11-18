@@ -767,7 +767,7 @@ file pairs). The native graph has definitions graphify folds into the one
 around them (a function nested in a method, the setter beside a getter of the
 same name); an edge from one of those is compared as an edge from the paired
 definition it belongs to, as graphify records it. On the 31 repositories of the
-[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.34,
+[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.35,
 measured 2026-11-18), as native / graphify edges and the share of graphify's
 that the native graph has too:
 
@@ -834,6 +834,27 @@ two edges of got are gone that named a function defined in another loop
 for a destructured loop variable of the same name. The maps of these
 repositories that hold project types are mostly looked up by key once, or
 not walked at all.
+Engine 0.5.35 (C function-pointer slots) reads a struct of function pointers
+as an interface and what is put in its slots as the implementations: an
+initializer of a variable, by name (`.async_read = redisAsyncRead`) or by
+position among the struct's fields, data fields counted (`static dictType
+callbackDict = { callbackHash, NULL, callbackValDup, … }`), and an
+assignment of a function's bare name to a member (`ac->ev.addRead =
+redisLibuvAddRead;`, `c->dataCleanup = asCleanup;`). Each is a
+`dispatches_to` edge from the slot to the function (`EXTRACTED`), the
+relation graphlore's `impact`, `calls` preset and call paths already follow
+from an interface method to its implementations, so `r->fn->createString(…)`
+now leads to `createStringObject`. `NULL`, a library's function and a data
+field give none. A field of an anonymous struct type (`struct { void *data;
+void (*addRead)(void *); } ev;`) answers for the members its body declares,
+which the grammar gives to the struct around (`Def::inline_body`): the
+adapters' `ac->ev.addRead = …` and reads through `c->tcp.host`. hiredis gets
+88 `dispatches_to` edges (62 of them the 11 event-loop adapters filling
+`ac->ev`, 10 `redisContextFuncs` for TCP and TLS, 7 reply-object functions,
+5 `dictType` callbacks, 4 allocators in the tests) and 81 reads and writes
+through anonymous structs. A member of an anonymous struct named like one
+of the struct around (`ev.data` beside `data`) is not a definition of its
+own, so a use of it names nothing rather than the outer one.
 Engine 0.5.34 (C `typedef struct`) reads `typedef struct redisReader { … }
 redisReader;` as the struct written inside it: the alias is a definition
 whose child is the struct, and its members are the struct's (a local

@@ -743,6 +743,72 @@ fn value_type(v: Node, src: &[u8]) -> Option<Vec<String>> {
     }
 }
 
+/// C, C++: the functions a node puts in slots of a struct. An initializer
+/// of a variable (`static funcs byName = { .close = netClose, netRead }`:
+/// by name, or by position among its elements) or an assignment to a member
+/// (`c->f.read = netRead`). Only a bare name is a function put there; the
+/// resolver keeps it when it names one.
+fn slot_facts(n: Node, src: &[u8]) -> Vec<crate::facts::SlotFact> {
+    let mut out = Vec::new();
+    let mut fact = |holder: Vec<String>, field: Option<String>, position: Option<u32>, v: Node| {
+        out.push(crate::facts::SlotFact {
+            holder,
+            field,
+            position,
+            value: text(v, src),
+            line: line(v),
+            from_def: None,
+            byte: v.start_byte(),
+        });
+    };
+    match n.kind() {
+        "init_declarator" => {
+            let Some(list) =
+                n.child_by_field_name("value").filter(|v| v.kind() == "initializer_list")
+            else {
+                return out;
+            };
+            let Some(name) = n.child_by_field_name("declarator").and_then(|d| bound_name(d, src))
+            else {
+                return out;
+            };
+            for (i, item) in kids(list).into_iter().filter(|c| !is_comment(c)).enumerate() {
+                match item.kind() {
+                    "identifier" => fact(vec![name.clone()], None, u32::try_from(i).ok(), item),
+                    "initializer_pair" => {
+                        let designators: Vec<Node> = kids(item)
+                            .into_iter()
+                            .filter(|c| c.kind() == "field_designator")
+                            .collect();
+                        let value =
+                            item.child_by_field_name("value").filter(|v| v.kind() == "identifier");
+                        if let ([one], Some(v)) = (designators.as_slice(), value) {
+                            let field = kids(*one).into_iter().next().map(|f| text(f, src));
+                            fact(vec![name.clone()], field, None, v);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        "assignment_expression" => {
+            let left = n.child_by_field_name("left").filter(|l| l.kind() == "field_expression");
+            let right = n.child_by_field_name("right").filter(|r| r.kind() == "identifier");
+            let op = n.child_by_field_name("operator").map(|o| text(o, src));
+            if let (Some(l), Some(r), Some("=")) = (left, right, op.as_deref()) {
+                if let Some(mut path) = path_of(l, src) {
+                    if path.len() >= 2 {
+                        let field = path.pop();
+                        fact(path, field, None, r);
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+    out
+}
+
 /// The name a C++ deduction guide is for (`Wrapper(T&&, bool) ->
 /// Wrapper<T, true>;`): a declaration with no type before its declarator, a
 /// trailing result, and the result's template the declarator's own name.
@@ -2932,6 +2998,10 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                 r.args = args;
             }
         }
+        // C, C++: a function put in a slot of a struct
+        if matches!(facts.lang, Some(crate::lang::Lang::C | crate::lang::Lang::Cpp)) {
+            facts.slots.extend(slot_facts(n, src));
+        }
         // C++ `Wrapper(T&&, bool) -> Wrapper<T, true>;`: a deduction guide,
         // which declares no function (the template's own name, a trailing
         // result naming it, no type before it)
@@ -3062,6 +3132,10 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
         r.from_def = d;
     }
     facts.resources = resources;
+    let bytes: Vec<usize> = facts.slots.iter().map(|s| s.byte).collect();
+    for (s, d) in facts.slots.iter_mut().zip(homes(&facts.defs, &bytes)) {
+        s.from_def = d;
+    }
     // one per (definition, name, field): a declared type over a guessed one
     locals.retain(|l| !matches!(l.path.as_slice(), [t] if t == "var" || t == "auto" || t == "let"));
     locals.sort_by(|a, b| {
@@ -5031,6 +5105,14 @@ fn add_extras(
             Some(p) => format!("{}.{name}", defs[p].qualname),
             None => name.clone(),
         };
+        // C, C++ `struct { … } ev;`: a field of an anonymous struct type
+        let inline = node
+            .child_by_field_name("type")
+            .filter(|t| matches!(t.kind(), "struct_specifier" | "union_specifier"))
+            .filter(|t| t.child_by_field_name("name").is_none())
+            .and_then(|t| t.child_by_field_name("body"))
+            .map(|b| (b.start_byte(), b.end_byte()))
+            .filter(|_| *state);
         let def_line = line(*node);
         // a callable written as a call with a block (RSpec `let(:conn) {
         // Client.new }`): what the block's last expression gives is its
@@ -5064,7 +5146,7 @@ fn add_extras(
             table: crate::resources::declared_table(*node, src, None, ""),
             value: state_value(*node, src),
             value_path: state_value_path(*node, src),
-            declared_type: written_type(*node, src),
+            declared_type: if inline.is_some() { None } else { written_type(*node, src) },
             written_head: written_head(*node, src),
             alias_args: Vec::new(),
             wraps: written_sealed(*node, src).then(|| written_type(*node, src)).flatten(),
@@ -5083,6 +5165,7 @@ fn add_extras(
             receiver: None,
             anonymous: false,
             misread: false,
+            inline_body: inline,
             params: block.map(|_| 0),
             plist: Vec::new(),
             returns,
