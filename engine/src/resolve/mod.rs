@@ -451,6 +451,144 @@ const RUBY_CORE_METHODS: &[&str] = &[
     "tap",
 ];
 
+/// Names JavaScript's own arrays, strings, promises and maps answer to, and
+/// Node's and the DOM's event emitters and streams: on a receiver the walk
+/// cannot type they say nothing about a project method of the same name
+/// (`socket.once('close', …)` beside a project `once`).
+const ECMA_CORE_METHODS: &[&str] = &[
+    "concat",
+    "indexOf",
+    "lastIndexOf",
+    "includes",
+    "slice",
+    "splice",
+    "forEach",
+    "filter",
+    "map",
+    "reduce",
+    "reduceRight",
+    "some",
+    "every",
+    "find",
+    "findIndex",
+    "findLast",
+    "findLastIndex",
+    "flat",
+    "flatMap",
+    "join",
+    "reverse",
+    "sort",
+    "shift",
+    "unshift",
+    "push",
+    "pop",
+    "fill",
+    "keys",
+    "values",
+    "entries",
+    "copyWithin",
+    "toSorted",
+    "toReversed",
+    "toSpliced",
+    "charAt",
+    "charCodeAt",
+    "codePointAt",
+    "endsWith",
+    "startsWith",
+    "localeCompare",
+    "match",
+    "matchAll",
+    "normalize",
+    "padEnd",
+    "padStart",
+    "repeat",
+    "replace",
+    "replaceAll",
+    "search",
+    "split",
+    "substring",
+    "substr",
+    "toLowerCase",
+    "toUpperCase",
+    "trim",
+    "trimStart",
+    "trimEnd",
+    "toString",
+    "valueOf",
+    "toJSON",
+    "toLocaleString",
+    "toFixed",
+    "hasOwnProperty",
+    "isPrototypeOf",
+    "apply",
+    "call",
+    "bind",
+    "then",
+    "catch",
+    "finally",
+    "get",
+    "set",
+    "has",
+    "delete",
+    "clear",
+    "add",
+    "next",
+    "exec",
+    "test",
+    "on",
+    "once",
+    "off",
+    "emit",
+    "addListener",
+    "removeListener",
+    "removeAllListeners",
+    "listeners",
+    "listenerCount",
+    "prependListener",
+    "prependOnceListener",
+    "setMaxListeners",
+    "eventNames",
+    "pipe",
+    "unpipe",
+    "write",
+    "end",
+    "read",
+    "destroy",
+    "pause",
+    "resume",
+    "cork",
+    "uncork",
+    "setEncoding",
+    "abort",
+    "addEventListener",
+    "removeEventListener",
+    "dispatchEvent",
+    "appendChild",
+    "removeChild",
+    "querySelector",
+    "querySelectorAll",
+    "getElementById",
+    "getElementsByClassName",
+    "getElementsByTagName",
+    "setAttribute",
+    "getAttribute",
+    "removeAttribute",
+    "preventDefault",
+    "stopPropagation",
+    "getContext",
+    "getComputedStyle",
+    "getBoundingClientRect",
+    "focus",
+    "blur",
+    "click",
+    "json",
+    "text",
+    "arrayBuffer",
+    "blob",
+    "getTime",
+    "toISOString",
+];
+
 /// The same for Swift's collections and strings.
 const SWIFT_CORE_METHODS: &[&str] = &[
     "sorted",
@@ -1216,7 +1354,59 @@ impl<'a> Project<'a> {
             }
             p.scopes[f].imported.extend(more);
         }
+        // … and the files a module it imports passes on (`module.exports =
+        // require('./lib/app')`, `exports.response = res`, `export * from`):
+        // a package's entry stands for the files it is made of
+        let passes: Vec<Vec<usize>> = (0..files.len()).map(|g| p.passes_on(g)).collect();
+        if passes.iter().any(|x| !x.is_empty()) {
+            for f in 0..files.len() {
+                let mut seen: HashSet<usize> = HashSet::new();
+                let mut frontier: Vec<usize> = p.scopes[f].imported.iter().copied().collect();
+                for _ in 0..3 {
+                    let mut next = Vec::new();
+                    for g in frontier {
+                        for &h in &passes[g] {
+                            if h != f && seen.insert(h) {
+                                next.push(h);
+                            }
+                        }
+                    }
+                    frontier = next;
+                    if frontier.is_empty() {
+                        break;
+                    }
+                }
+                p.scopes[f].imported.extend(seen);
+            }
+        }
         p
+    }
+
+    /// The files module `g` passes on to whoever imports it: the ones it
+    /// re-exports whole, and the ones a name it exports was imported from.
+    fn passes_on(&self, g: usize) -> Vec<usize> {
+        let mut out = Vec::new();
+        let s = &self.scopes[g];
+        for (i, imp) in self.files[g].imports.iter().enumerate() {
+            if imp.form == ImportForm::ReExport {
+                if let Some(ModRes::Target(Target::Module(fs))) = s.modules.get(i) {
+                    out.extend(fs.iter().copied());
+                }
+            }
+        }
+        for (local, _) in &self.files[g].exports {
+            if let Some((b, _)) = s.bindings.get(local) {
+                match self.eval(b, 2) {
+                    Some(Target::Module(fs)) => out.extend(fs),
+                    Some(Target::Def((h, _))) => out.push(h),
+                    _ => {}
+                }
+            }
+        }
+        out.retain(|&h| h != g);
+        out.sort_unstable();
+        out.dedup();
+        out
     }
 
     fn index(&mut self) {
@@ -2600,6 +2790,21 @@ impl<'a> Project<'a> {
         )
     }
 
+    /// What a JS/TS module is when it is used as a value (`const Foo =
+    /// require('./foo'); new Foo()`): the definition it assigns to
+    /// `module.exports` or exports as its default, through modules that pass
+    /// another one on (`module.exports = require('./lib/app')`).
+    fn module_default(&self, files: &[usize], depth: usize) -> Option<Target> {
+        let f = *files.first()?;
+        if self.family[f] != Some(Family::Ecma) || depth == 0 {
+            return None;
+        }
+        files
+            .iter()
+            .find_map(|&g| modules::reexport(self, g, "default", depth - 1))
+            .filter(|t| matches!(t, Target::Def(_)))
+    }
+
     /// `name` looked up inside a target.
     fn member(&self, t: &Target, name: &str, depth: usize) -> Option<Target> {
         match t {
@@ -2643,6 +2848,14 @@ impl<'a> Project<'a> {
                         if let Some(t) = self.member(star, name, depth - 1) {
                             return Some(t);
                         }
+                    }
+                }
+                // CommonJS: what `require` gives is what the module assigns
+                // to `module.exports`; a name not the module's own is that
+                // thing's (`const Foo = require('./foo'); Foo.create()`)
+                if name != "default" {
+                    if let Some(d @ Target::Def(_)) = self.module_default(files, depth - 1) {
+                        return self.member(&d, name, depth - 1);
                     }
                 }
                 None
@@ -2837,7 +3050,17 @@ impl<'a> Project<'a> {
         path: &[String],
         bases: bool,
     ) -> Option<(Target, Confidence)> {
-        self.resolve_path_inner(f, d, path, bases, false).or_else(|| {
+        let found = self.resolve_path_inner(f, d, path, bases, false);
+        // a module called, constructed or named as a type is what it exports
+        // as itself (`const express = require('../'); express()`)
+        if let Some((Target::Module(fs), conf)) = &found {
+            if *self.calling.borrow() || *self.types_only.borrow() || bases {
+                if let Some(t) = self.module_default(fs, 3) {
+                    return Some((t, *conf));
+                }
+            }
+        }
+        found.or_else(|| {
             // an element (`xs[0].run()`) or a mapping (`xs.map { … }`) the
             // walk could not type is a receiver it cannot name: what is
             // called on it is found by a distinctive name alone
@@ -3214,8 +3437,23 @@ impl<'a> Project<'a> {
                     None => {
                         let top =
                             p.0 == f && self.def(p).parent.is_none() && self.def(p).name == *head;
-                        let (b, imp) =
-                            self.scopes[f].bindings.get(head.as_str()).filter(|_| top)?;
+                        let bound = self.scopes[f].bindings.get(head.as_str()).filter(|_| top);
+                        // a module variable holding what the walk cannot type
+                        // (`var app = express()`) is a receiver it cannot
+                        // name, as a local would be: a distinctive method
+                        // name may say what is called. Never one holding a
+                        // library's value (`http.createServer()`)
+                        if bound.is_none()
+                            && self.def(p).parent.is_none()
+                            && rest.len() == 1
+                            && !bases
+                            && *self.calling.borrow()
+                            && !*self.types_only.borrow()
+                            && self.holds_project_value(p)
+                        {
+                            return self.unknown_receiver(f, &rest[0], None);
+                        }
+                        let (b, imp) = bound?;
                         let m = self.eval(b, 3)?;
                         self.note_use(f, *imp, &m);
                         t = m;
@@ -4654,6 +4892,9 @@ impl<'a> Project<'a> {
             return None;
         }
         let fam = self.family[f];
+        if fam == Some(Family::Ecma) && ECMA_CORE_METHODS.contains(&name) {
+            return None;
+        }
         let cands: Vec<DefRef> = self
             .by_name
             .get(name)?
@@ -4662,8 +4903,13 @@ impl<'a> Project<'a> {
             .filter(|r| self.family[r.0] == fam)
             .filter(|r| {
                 let d = self.def(*r);
+                // (a function assigned to an object is that object's
+                // method: `res.sendFile = function sendFile() {}`; one
+                // assigned to `exports` is the module's function)
                 d.kind.is_callable()
-                    && (d.kind == DefKind::Method || d.owner.is_some())
+                    && (d.kind == DefKind::Method
+                        || d.owner.is_some()
+                        || d.object.as_deref().is_some_and(|o| o != "exports"))
                     && !d.decl_only
             })
             .collect();
@@ -4738,6 +4984,18 @@ impl<'a> Project<'a> {
         let path = d.value_path.as_ref()?;
         let t = self.type_of_path(p.0, d.parent, path, false)?;
         self.def(t).kind.is_class_like().then_some((t, Confidence::Inferred))
+    }
+
+    /// Whether a variable is assigned something of the project's that the
+    /// walk could name the start of (`express()`, `makeStore().open()`): not
+    /// a literal, not a library's value.
+    fn holds_project_value(&self, p: DefRef) -> bool {
+        let d = self.def(p);
+        let Some(head) = d.value_path.as_ref().and_then(|v| v.first()) else { return false };
+        if matches!(head.as_str(), "self" | "super" | "()") || head.starts_with('[') {
+            return false;
+        }
+        matches!(self.resolve_name(p.0, d.parent, head), Some(Target::Def(_) | Target::Module(_)))
     }
 
     fn source_of(&self, f: usize, r: &RefFact) -> String {

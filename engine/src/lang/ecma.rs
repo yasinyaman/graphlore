@@ -134,6 +134,14 @@ fn call_import(n: Node, src: &[u8]) -> Option<Vec<ImportFact>> {
         .filter(|h| h.kind() == "variable_declarator" || h.kind() == "assignment_expression")
         .and_then(|h| h.child_by_field_name("name").or_else(|| h.child_by_field_name("left")));
     let mut fact = import(n, ImportForm::Module, module);
+    // `module.exports = require('./lib/app')`: the module is that module
+    if member.is_none()
+        && target
+            .is_some_and(|t| t.kind() == "member_expression" && text(t, src) == "module.exports")
+    {
+        fact.form = ImportForm::ReExport;
+        return Some(vec![fact]);
+    }
     match (target, member) {
         (Some(t), Some(m)) if t.kind() == "identifier" => {
             fact.form = ImportForm::From;
@@ -387,10 +395,21 @@ impl LanguageModule for Ecma {
             // CommonJS: `module.exports = X`, `module.exports = { a, b: c }`
             "assignment_expression" => {
                 let left = n.child_by_field_name("left").map(|l| text(l, src));
+                let Some(right) = n.child_by_field_name("right") else { return out };
+                // `exports.name = bound`, `module.exports.name = bound`: a
+                // name the module passes on
+                let named = left.as_deref().and_then(|l| {
+                    l.strip_prefix("module.exports.").or_else(|| l.strip_prefix("exports."))
+                });
+                if let Some(name) = named {
+                    if right.kind() == "identifier" && !name.contains('.') {
+                        out.push((text(right, src), name.to_string()));
+                    }
+                    return out;
+                }
                 if left.as_deref() != Some("module.exports") {
                     return out;
                 }
-                let Some(right) = n.child_by_field_name("right") else { return out };
                 match right.kind() {
                     "identifier" => out.push((text(right, src), "default".into())),
                     "object" => {

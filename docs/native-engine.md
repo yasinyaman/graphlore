@@ -117,8 +117,8 @@ function's declared result). Then, for the whole project
    result. All of that is `EXTRACTED`.
 3. **Only then** is a name looked up across the project: a unique function or
    type of the same language, or a method only one type has (not a name every
-   type has, and in a file the caller imports or its directory). That is
-   `INFERRED`. A name with several candidates gets no edge; the build reply
+   type has, and in a file the caller imports, one a module it imports passes
+   on, or its directory). That is `INFERRED`. A name with several candidates gets no edge; the build reply
    counts the unresolved uses per language.
 
 An external module's contents are unknown, so a wildcard import of one
@@ -367,6 +367,31 @@ What the lookup takes from each language's own rules:
   inside a macro too. Arguments that are no expressions (a `{ … }` body,
   `a => b` arms, a pattern) parse with an error and are left out, and so is
   the pattern of `matches!(value, Pattern)`.
+- **A CommonJS module is what it assigns to its exports.** `require` gives
+  `module.exports`, so `const Foo = require('./foo'); new Foo()` constructs
+  the class `foo.js` assigns there, `make()` calls the function, and
+  `Foo.create()` is that class's member; `exports = module.exports =
+  createApplication` and a named function expression count the same. A
+  module that assigns another one (`module.exports = require('./lib/app')`,
+  a package's `index.js`) is that module: the import is a `re_exports`
+  edge, and its names and what it is are looked up there. `exports.name =
+  bound` passes a name on (`exports.authCallback = login`, `exports.response
+  = res`). A module that only names its exports is called by none of this.
+- **A test file's receivers.** `it('…', function () { app.use(function (req,
+  res) { res.sendFile(…) }) })` runs at file level: `res` is a closure's
+  parameter and `app` a module variable holding what `express()` returns,
+  which no walk can type. Both are receivers the walk cannot name, as an
+  untyped local is, and only a distinctive method name says what is called
+  (`INFERRED`): the one callable of that name that is a method, or a
+  function assigned to an object (`res.sendFile = function sendFile() {}`;
+  one assigned to `exports` is the module's function, not a method), in a
+  file in sight. In sight now includes what an imported module passes on:
+  a test requires the package's entry, the entry re-exports `lib/express.js`,
+  and that exports `response.js` under a name. Never on a variable holding a
+  library's value (`http.createServer()` then `server.listen()`), and never
+  by a name JavaScript's own arrays, strings and promises or Node's and the
+  DOM's emitters and streams answer to (`once`, `pipe`, `concat`, `abort`):
+  beside a project method of that name they say nothing.
 - **Tuples taken apart.** A callable's result that is a tuple — `-> (A, B)`
   (Rust, Swift), `(A, B) Method()` (C#), `[A, B]` (TypeScript), `Pair<A, B>`
   / `Triple` (Kotlin), `tuple[A, B]` (Python), a Go function's results — is
@@ -640,15 +665,15 @@ file pairs). The native graph has definitions graphify folds into the one
 around them (a function nested in a method, the setter beside a getter of the
 same name); an edge from one of those is compared as an edge from the paired
 definition it belongs to, as graphify records it. On the 31 repositories of the
-[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.17,
+[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.18,
 measured 2026-11-18), as native / graphify edges and the share of graphify's
 that the native graph has too:
 
 | Language | same definition | imports (file pairs) | calls | bases | type references |
 |---|--:|--:|--:|--:|--:|
 | Python | 100% | 212 / 219 (96%) | 2,963 / 834 (94%) | 73 / 62 (100%) | 439 / 494 (68%) |
-| JavaScript | 93.5%⁵ | 190 / 305 (59%) | 1,315 / 2,058 (43%)¹ | 1 / 1 | 3 / 0 |
-| TypeScript | 99.4% | 527 / 634 (83%) | 807 / 687 (98%) | 25 / 20 (100%) | 737 / 156 (88%) |
+| JavaScript | 93.5%⁵ | 190 / 305 (59%) | 1,341 / 2,058 (43%)¹ | 1 / 1 | 3 / 0 |
+| TypeScript | 99.4% | 527 / 634 (83%) | 805 / 687 (98%) | 25 / 20 (100%) | 737 / 156 (88%) |
 | TSX | 99.7% | 253 / 316 (80%) | 435 / 456 (95%) | – | 42 / 4 |
 | Go | 100% | 538 / 950 (47%)² | 6,702 / 3,167 (99%) | 19 / 14 (100%) | 678 / 355 (99%) |
 | Java | 100% | 1,105 / 1,010 (100%) | 5,680 / 5,123 (85%) | 415 / 168 (94%) | 3,989 / 1,930 (98%) |
@@ -662,9 +687,9 @@ that the native graph has too:
 | C/C++ headers | 90.6% | 164 / 172 (95%) | 361 / 348 (85%) | 11 / 12 (92%) | 515 / 289 (87%) |
 | Ruby | 99.7% | 42 / 0 | 445 / 375 (70%) | 46 / 15 (93%) | 28 / 0 |
 | PHP | 80.6% | 429 / 505 (84%) | 8,870 / 6,140 (90%) | 65 / 60 (98%) | 648 / 213 (95%) |
-| **All** | **94.4%** | **4,961 / 5,565 (75%)** | **44,037 / 27,832 (85%)** | **1,132 / 726 (97%)** | **12,415 / 6,775 (89%)** |
+| **All** | **94.4%** | **4,961 / 5,565 (75%)** | **44,060 / 27,832 (85%)** | **1,132 / 726 (97%)** | **12,415 / 6,775 (89%)** |
 
-Of the native calls, 13,027 (30%) are `INFERRED`, against 47% of graphify's.
+Of the native calls, 13,041 (30%) are `INFERRED`, against 47% of graphify's.
 That share was 20% before engine 0.5.5: a call of an overloaded name that the
 arguments do not decide used to be an `EXTRACTED` edge to the first overload,
 and is now an `INFERRED` edge to each overload that fits (999 calls, with
@@ -707,6 +732,23 @@ two edges of got are gone that named a function defined in another loop
 for a destructured loop variable of the same name. The maps of these
 repositories that hold project types are mostly looked up by key once, or
 not walked at all.
+Engine 0.5.18 (CommonJS modules as what they export, and the receivers of
+a test file) adds 329 calls and takes 12 away. express gets 234: 110
+`EXTRACTED` calls of `createApplication` from the tests and examples that
+start with `express()` (through `index.js`, which is `lib/express.js`), and
+124 `INFERRED` ones from a test or example to the method it exercises
+(`app.listen`, `res.status`, `app.enable`, `res.sendFile`, `req.accepts`, …;
+the 44 read are right) — before, only `test/utils.js` had an edge into
+`lib/`, in either graph. Its `app.use`, `app.set` and `res.set` stay without
+one: a name of three letters is no evidence. express-mongoose-demo's five
+OAuth routes are handled by `users.login`, the function `exports.authCallback
+= login` names, not by the function of the routes file. Of the other 95 new
+calls, 94 are inside minified bundles (jQuery, Bootstrap, epoch, a
+documentation script), from a function to one assigned to an object in the
+same file; the analysis scope leaves those files out by default. got loses 12 `INFERRED` calls of
+its own `pipe`, `unpipe` and `abort` on receivers the walk cannot type:
+those names are Node's streams' (`body.pipe(request)`). The table above
+counts edges between definitions both graphs have, so it shows 26 of these.
 Engine 0.5.17 (Swift's implicit members, and the overloads an extension
 adds) changes alamofire only: 158 calls of an implicit member it had no
 edge for (`.status(401)`, `.endpoints(…)`, `.payloads(2)`, `.retrier { … }`,
@@ -827,8 +869,8 @@ builds take 13.3 s for the 31 repositories against graphify's 81.3 s
 faster of two clean builds each): 8.7 times faster at the median, from 2.1
 (todoapi, whose bundled JavaScript the native engine reads in full) to 17.2
 times; retrofit 2.9 s against 13.1 s, guzzle 0.9 s / 6.1 s, alamofire 1.2 s /
-5.4 s, got 0.9 s / 4.7 s (engine 0.5.1; with all that 0.5.17 resolves the same
-31 builds take 16.3 to 18.9 s through Python, 16.1 to 16.9 s in the engine alone, retrofit 3.7 to 4.1 s). An update after a one-file change takes a third of
+5.4 s, got 0.9 s / 4.7 s (engine 0.5.1; with all that 0.5.18 resolves the same
+31 builds take 16.3 to 18.9 s through Python, 16.1 to 17.4 s in the engine alone, retrofit 3.7 to 4.1 s). An update after a one-file change takes a third of
 a build ([above](#incremental-updates)).
 
 ### What is left without an edge
@@ -871,7 +913,10 @@ calls inside a Rust macro were not in this table at all (no call was read
 there); since 0.5.16 they are read, 171 of them got an edge, and the 52
 that did not are counted (6,848 rows, Rust 424). The same goes for Swift's
 implicit members since 0.5.17: 39 whose place gives no type are rows now
-(6,887).
+(6,887). Engine 0.5.18 takes 402 rows off (6,485; JavaScript 1,473): the
+closure parameters and variables of express's tests. What is left at file
+level there is `app.use` and `app.set` (842 rows of express), names too
+short and too common to guess by.
 
 ### The polyglot audit on native graphs
 
@@ -916,9 +961,9 @@ but one convention finding, fixed since: `graphlore_surprises(limit=0)` cut its
 `shared_state` list without saying how much (`shared_state_left_out` does now).
 `SKELETON-EMPTY` went from 5 to 0, and the tool time stayed at 131 s.
 
-Rerun on graphs built by engine 0.5.3, and again by 0.5.4 through 0.5.17
+Rerun on graphs built by engine 0.5.3, and again by 0.5.4 through 0.5.18
 (2026-11-18), the audit raises nothing on the native graphs but its
-`GRAPH-ORPHAN-NODES` note on 19 of them; 115 to 154 s of tool time (on the 0.5.7 run, retrofit's build through `graphlore_build` took 5.1 s and was reported `SLOW` for crossing 5 s). What the table above still listed is
+`GRAPH-ORPHAN-NODES` note on 19 of them; 115 to 159 s of tool time (on the 0.5.7 run, retrofit's build through `graphlore_build` took 5.1 s and was reported `SLOW` for crossing 5 s). What the table above still listed is
 gone:
 
 - **`REPLY-TOO-LARGE`**: `graphlore_neighbors` cuts a hub at `limit` and says
