@@ -514,7 +514,8 @@ const SWIFT_CORE_METHODS: &[&str] = &[
 /// Whether a path segment is something of collections: an element, a method
 /// that keeps the collection or one that gives an element.
 fn is_collection_step(seg: &str) -> bool {
-    NESTING_METHODS.contains(&seg)
+    seg == "partition"
+        || NESTING_METHODS.contains(&seg)
         || GROUPING_METHODS.contains(&seg)
         || ASSOCIATING_METHODS.contains(&seg)
         || FLATTENING_METHODS.contains(&seg)
@@ -529,7 +530,10 @@ fn is_collection_step(seg: &str) -> bool {
 
 /// `[]`, `[*]`, `[v]`: one of what precedes (see `refs::ELEMENT`).
 fn is_element_marker(seg: &str) -> bool {
-    seg == crate::refs::ELEMENT || seg == crate::refs::ITERATED || seg == crate::refs::VALUE
+    seg == crate::refs::ELEMENT
+        || seg == crate::refs::ITERATED
+        || seg == crate::refs::VALUE
+        || seg == crate::refs::KEY
 }
 
 /// Methods of a map that take a key and give its value.
@@ -1953,8 +1957,13 @@ impl<'a> Project<'a> {
                     let elem = l.elem.clone().or_else(|| param.and_then(|p| p.elem.clone()));
                     let keyed = l.keyed || param.is_some_and(|p| p.keyed);
                     if let Some(e) = elem {
+                        // (the first of a map's pair is its key)
+                        if how == crate::refs::KEY && keyed {
+                            let key = l.key.clone().or_else(|| param.and_then(|p| p.key.clone()));
+                            return key.and_then(|k| typed(f, Some(x), &k));
+                        }
                         let fits = match how {
-                            crate::refs::ITERATED => !keyed,
+                            crate::refs::ITERATED | crate::refs::KEY => !keyed,
                             crate::refs::VALUE => keyed,
                             _ => true,
                         };
@@ -2859,6 +2868,10 @@ impl<'a> Project<'a> {
         // elements each with an index (`withIndex()`)
         let mut keyed = false;
         let mut indexed = false;
+        // the type of the map's keys, when it is known
+        let mut keys: Option<DefRef> = None;
+        // after `partition`: a pair of collections of the same elements
+        let mut partitioned = false;
         // how many collections deep the elements are, beyond the one `many`
         // says (`xs.chunked(2)`: 1)
         let mut nest: u8 = 0;
@@ -2880,6 +2893,7 @@ impl<'a> Project<'a> {
                 conf = c;
                 many = true;
                 keyed = self.local_keyed(f, d, head);
+                keys = keyed.then(|| self.local_key(f, d, head)).flatten();
                 Target::Def(elem)
             }
             "self" => {
@@ -2989,6 +3003,13 @@ impl<'a> Project<'a> {
                 )
                 && self.local_type(f, d, head).is_none() =>
             {
+                // `const [text, copy] = useCopy(); copy(id)`: the function the
+                // part is
+                if rest.is_empty() && !bases && *self.calling.borrow() {
+                    if let Some(fun) = self.local_function(f, d, head) {
+                        return Some((Target::Def(fun), Confidence::Inferred));
+                    }
+                }
                 if !bases && (rest.len() == 1 || (rest.len() == 2 && rest[0] == "()")) {
                     let on = self.local_written_type(f, d, head).filter(|_| rest.len() == 1);
                     return self.unknown_receiver(f, rest.last()?, on.as_deref());
@@ -3118,6 +3139,7 @@ impl<'a> Project<'a> {
             if !many && self.def(p).kind.is_state() && collection_next(0) {
                 if let Some(elem) = self.elem_type_of(p) {
                     keyed = self.def(p).keyed;
+                    keys = self.def_key(p);
                     t = Target::Def(elem);
                     many = true;
                 }
@@ -3197,6 +3219,10 @@ impl<'a> Project<'a> {
             }
             // `let (a, b) = f()`: `a` is `f`'s result's first part
             if let Some(part) = crate::refs::tuple_index(seg) {
+                // either half of `partition`: a collection of the same
+                if many && std::mem::take(&mut partitioned) && part < 2 {
+                    continue;
+                }
                 let Target::Def(c) = t else { return None };
                 let def = self.def(c);
                 // Rust `self.0` on `struct Script(Arc<Mutex<State>>)`
@@ -3222,7 +3248,14 @@ impl<'a> Project<'a> {
                     _ if part == 0 && def.rets.is_empty() => self.return_type(c).map(|(r, _)| r),
                     _ => None,
                 };
-                t = Target::Def(typed?);
+                // `return [copiedText, copy]`: a part whose type names no class
+                // is the definition of that name inside the callable
+                let named = || {
+                    let name = def.returned_parts.get(part).filter(|n| !n.is_empty())?;
+                    let inner = self.children[c.0].get(&c.1)?.get(name)?;
+                    inner.first().map(|&i| (c.0, i))
+                };
+                t = Target::Def(typed.or_else(named)?);
                 binds = None;
                 continue;
             }
@@ -3248,8 +3281,23 @@ impl<'a> Project<'a> {
                     };
                     let elem = declared.or_else(bound)?;
                     keyed = self.def(c).keyed;
+                    keys = self.def_key(c);
                     t = Target::Def(elem);
                     many = true;
+                }
+                // `for ((k, v) in m)`: a map's key; beside an index nothing;
+                // the first of what a list gives, its element
+                if seg == crate::refs::KEY {
+                    if !many || indexed {
+                        return None;
+                    }
+                    if keyed {
+                        t = Target::Def(keys?);
+                        many = false;
+                        keyed = false;
+                        nest = 0;
+                        continue;
+                    }
                 }
                 if many {
                     let fits = match seg.as_str() {
@@ -3257,7 +3305,7 @@ impl<'a> Project<'a> {
                         crate::refs::ELEMENT => !indexed,
                         // what iterating gives: an element; a map's entries
                         // or keys, and pairs with an index, are none
-                        crate::refs::ITERATED => !keyed && !indexed,
+                        crate::refs::ITERATED | crate::refs::KEY => !keyed && !indexed,
                         // the second of the pair: a value or an element
                         _ => keyed || indexed,
                     };
@@ -3302,7 +3350,8 @@ impl<'a> Project<'a> {
                 continue;
             }
             // `[+]`: a collection of what the path named so far gives
-            if seg == crate::refs::MANY {
+            // (`[+=]`: a map whose values those are)
+            if seg == crate::refs::MANY || seg == crate::refs::MANY_KEYED {
                 let Target::Def(x) = t else { return None };
                 let def = self.def(x);
                 let of = if def.kind.is_class_like() {
@@ -3316,7 +3365,8 @@ impl<'a> Project<'a> {
                 };
                 t = Target::Def(of.filter(|_| !many)?);
                 many = true;
-                keyed = false;
+                keyed = seg == crate::refs::MANY_KEYED;
+                keys = None;
                 indexed = false;
                 nest = 0;
                 continue;
@@ -3338,8 +3388,12 @@ impl<'a> Project<'a> {
                     match s {
                         "values" | "Values" => keyed = false,
                         "entries" | "entrySet" | "items" => {}
-                        // the keys: of a type nothing records
-                        _ => return None,
+                        // the keys: a collection of the key type, when known
+                        _ => {
+                            t = Target::Def(keys?);
+                            keyed = false;
+                            nest = 0;
+                        }
                     }
                 } else if PAIRING_METHODS.contains(&s) && !keyed {
                     indexed = true;
@@ -3359,6 +3413,9 @@ impl<'a> Project<'a> {
                         return None;
                     }
                     nest -= 1;
+                } else if s == "partition" && !keyed && !indexed {
+                    // `val (ok, bad) = xs.partition { … }`: two of them
+                    partitioned = true;
                 } else if REDUCING_METHODS.contains(&s) && !keyed && !indexed && nest == 0 {
                     // `reduce { a, b -> … }`: one of them
                     many = false;
@@ -3422,6 +3479,7 @@ impl<'a> Project<'a> {
                         if let Some(elem) = elem {
                             binds = None;
                             keyed = self.def(c).keyed && !flat;
+                            keys = self.def_key(c);
                             t = Target::Def(elem);
                             many = true;
                             skip = usize::from(flat);
@@ -3517,6 +3575,7 @@ impl<'a> Project<'a> {
                     if let Some(elem) = elem {
                         binds = None;
                         keyed = self.def(*p).keyed && !flat;
+                        keys = self.def_key(*p);
                         t = Target::Def(elem);
                         many = true;
                         skip = usize::from(flat);
@@ -3944,6 +4003,64 @@ impl<'a> Project<'a> {
             cur = defs[x].parent;
         }
         false
+    }
+
+    /// The type of the keys of the map definition `p` is declared as or
+    /// returns.
+    fn def_key(&self, p: DefRef) -> Option<DefRef> {
+        let def = self.def(p);
+        self.type_of_path(p.0, def.parent, def.key.as_ref()?, true)
+            .filter(|t| self.def(*t).kind.is_class_like())
+    }
+
+    /// The type of the keys of the map a local or parameter is declared as.
+    fn local_key(&self, f: usize, d: Option<usize>, name: &str) -> Option<DefRef> {
+        let defs = &self.files[f].defs;
+        let mut cur = d;
+        while let Some(x) = cur {
+            if let Some(&li) = self.locals.get(&(f, x, name.to_string())) {
+                let l = &self.files[f].locals[li];
+                let key = l.key.clone().or_else(|| {
+                    defs[x].plist.iter().find(|p| p.name == *name).and_then(|p| p.key.clone())
+                })?;
+                return self
+                    .type_of_path(f, Some(x), &key, true)
+                    .filter(|t| self.def(*t).kind.is_class_like());
+            }
+            cur = defs[x].parent;
+        }
+        None
+    }
+
+    /// The function a local holds when it is a part of a callable's tuple
+    /// that names one (`const [text, copy] = useCopy()`).
+    fn local_function(&self, f: usize, d: Option<usize>, name: &str) -> Option<DefRef> {
+        let defs = &self.files[f].defs;
+        let mut cur = d;
+        let (x, li) = loop {
+            let x = cur?;
+            if let Some(&li) = self.locals.get(&(f, x, name.to_string())) {
+                break (x, li);
+            }
+            cur = defs[x].parent;
+        };
+        let l = &self.files[f].locals[li];
+        if l.declared || !l.path.last().is_some_and(|s| crate::refs::tuple_index(s).is_some()) {
+            return None;
+        }
+        if !self.typing.borrow_mut().insert((f, li)) {
+            return None;
+        }
+        let recv = self.recv.replace(None);
+        let calling = self.calling.replace(false);
+        let found = self.resolve_path(f, Some(x), &l.path, true);
+        *self.calling.borrow_mut() = calling;
+        *self.recv.borrow_mut() = recv;
+        self.typing.borrow_mut().remove(&(f, li));
+        match found {
+            Some((Target::Def(fun), _)) if self.def(fun).kind.is_callable() => Some(fun),
+            _ => None,
+        }
     }
 
     /// Whether a local or parameter is declared as a map.

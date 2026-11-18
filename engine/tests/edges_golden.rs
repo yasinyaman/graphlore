@@ -1228,3 +1228,42 @@ fn generics_through_values_nested_arguments_and_bases() {
         );
     }
 }
+
+#[test]
+fn keys_partitions_zips_folds_and_a_returned_function() {
+    let got = call_ids("rest", &[
+        ("a.kt", "package app\nclass Decoy { fun a() {}; fun b() {}; fun c() {}; fun d() {}; fun e() {}; fun g() {}; fun h() {}; fun k() {}; fun m() {} }\nclass Key { fun a() {}; fun b() {}; fun c() {} }\nclass Foo(val owner: Owner) { fun d() {}; fun e() {}; fun g() {}; fun k() {} }\nclass Owner { fun h() {}; fun m() {} }\nclass Acc { fun k() {} }\nfun keys(m: Map<Key, Foo>, xs: List<Foo>, ys: List<Owner>) {\n    for ((k, v) in m) { k.a() }\n    m.keys.forEach { it.b() }\n    m.forEach { (k, v) -> k.c() }\n    val (ok, bad) = xs.partition { true }\n    ok.forEach { it.d() }\n    for (b in bad) { b.e() }\n    for ((x, y) in xs.zip(ys)) { x.g(); y.h() }\n    xs.fold(Acc()) { acc, x -> acc }.k()\n    xs.associateWith { it.owner }.values.forEach { it.m() }\n}\n"),
+        ("b.ts", "export class Lure { copy() {} }\ntype CopyFn = (text: string) => boolean;\nexport function useCopy(): [string, CopyFn] {\n  const copy: CopyFn = (text) => true;\n  return [\"\", copy];\n}\nexport function button() {\n  const [text, copy] = useCopy();\n  copy(text);\n}\n"),
+        ("C.java", "import java.util.Map;\nclass Bait { void a() {} void b() {} }\nclass Id { void a() {} }\nclass Row { void b() {} }\nclass Use {\n  void go(Map<Id, Row> m) {\n    m.forEach((k, v) -> { k.a(); v.b(); });\n    for (Id k : m.keySet()) { k.a(); }\n  }\n}\n"),
+    ]);
+    let mut missing = Vec::new();
+    for (from, to) in [
+        ("keys()", "a_key_a"),
+        ("keys()", "a_key_b"),
+        ("keys()", "a_key_c"),
+        ("keys()", "a_foo_d"),
+        ("keys()", "a_foo_e"),
+        ("keys()", "a_foo_g"),
+        ("keys()", "a_owner_h"),
+        ("keys()", "a_acc_k"),
+        ("keys()", "a_owner_m"),
+        ("button()", "b_usecopy_copy"),
+        (".go()", "c_id_a"),
+        (".go()", "c_row_b"),
+    ] {
+        if !got.contains(&(from.to_string(), to.to_string())) {
+            missing.push((from, to));
+        }
+    }
+    assert!(missing.is_empty(), "missing {missing:?}\n{got:?}");
+    // a key is no value, and nothing goes to a decoy
+    for bad in ["a_foo_a", "a_foo_b", "a_foo_c"] {
+        assert!(!got.iter().any(|(_, to)| to == bad), "{bad}: {got:?}");
+    }
+    for (from, to) in &got {
+        assert!(
+            !["decoy", "lure", "bait"].iter().any(|d| to.contains(d)),
+            "{from} -> {to}: {got:?}"
+        );
+    }
+}
