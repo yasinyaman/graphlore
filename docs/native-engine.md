@@ -1245,7 +1245,7 @@ but one convention finding, fixed since: `graphlore_surprises(limit=0)` cut its
 `shared_state` list without saying how much (`shared_state_left_out` does now).
 `SKELETON-EMPTY` went from 5 to 0, and the tool time stayed at 131 s.
 
-Rerun on graphs built by engine 0.5.3, and again by 0.5.4 through 0.5.25
+Rerun on graphs built by engine 0.5.3, and again by 0.5.4 through 0.5.27
 (2026-11-18), the audit raises nothing on the native graphs but its
 `GRAPH-ORPHAN-NODES` note on 19 of them; 115 to 172 s of tool time (on the 0.5.7 run, retrofit's build through `graphlore_build` took 5.1 s and was reported `SLOW` for crossing 5 s). What the table above still listed is
 gone:
