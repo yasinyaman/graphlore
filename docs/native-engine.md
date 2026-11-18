@@ -344,6 +344,20 @@ What the lookup takes from each language's own rules:
   `Aggregate` / `inject` give one. A closure inside another names the outer
   closure's parameter as the outer closure's (the inner parameter's type
   was looked up under the bare name).
+- **Swift's implicit members.** `session.request(.status(301))` writes no
+  type: `.status` is a static member of whatever the place asks for. The
+  place types it: the parameter the argument is for (by label or position,
+  on the overload the call is of), the type a declaration writes (`let e:
+  Endpoint = .made(1)`), or the result of the function it is returned from.
+  No type, no edge. It also says which overload a call is of: an argument
+  `.status(…)` fits a parameter whose type has a static `status`, not one
+  whose type has none (a protocol may get one from a conforming type, so it
+  is neither). For that the overloads of a Swift method include the ones an
+  extension of its type adds (`extension Session { func request(_ endpoint:
+  Endpoint) }` beside `Session.request(_: any URLConvertible)`), the
+  parameter's very type scores over one of its bases, and a trailing
+  closure goes to the parameter that asks for no label, of a function type
+  or of a type alias, before a labelled one.
 - **The arguments of a Rust macro.** The grammar gives what a macro is
   called with as tokens, with no call in them, so `assert_eq!(handle_count(
   &pool), 2)`, `assert!(pool.count() > 0)`, `vec![make_pool(), make_pool()]`
@@ -626,7 +640,7 @@ file pairs). The native graph has definitions graphify folds into the one
 around them (a function nested in a method, the setter beside a getter of the
 same name); an edge from one of those is compared as an edge from the paired
 definition it belongs to, as graphify records it. On the 31 repositories of the
-[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.16,
+[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.17,
 measured 2026-11-18), as native / graphify edges and the share of graphify's
 that the native graph has too:
 
@@ -642,15 +656,15 @@ that the native graph has too:
 | Scala | 100% | 2 / 0 | 46 / 20 (45%) | 21 / 22 (95%) | 75 / 32 (100%) |
 | C# | 92.7% | 347 / 280 (30%)³ | 2,787 / 2,450 (93%) | 87 / 86 (98%) | 1,259 / 806 (99%) |
 | Rust | 93.3% | 314 / 370 (75%) | 2,004 / 853 (86%) | 53 / 41 (93%) | 1,245 / 895 (81%) |
-| Swift | 95.9% | 166 / 166 (–)³ | 5,165 / 2,141 (82%) | 190 / 164 (100%) | 1,091 / 580 (62%) |
+| Swift | 95.9% | 166 / 166 (–)³ | 5,444 / 2,141 (82%) | 190 / 164 (100%) | 1,091 / 580 (62%) |
 | C | 100% | 89 / 77 (99%) | 864 / 791 (100%) | – | 253 / 130 (97%) |
 | C++ | 97.8% | 215 / 228 (93%) | 631 / 281 (33%)⁴ | 30 / 5 (100%) | 326 / 218 (88%) |
 | C/C++ headers | 90.6% | 164 / 172 (95%) | 361 / 348 (85%) | 11 / 12 (92%) | 515 / 289 (87%) |
 | Ruby | 99.7% | 42 / 0 | 445 / 375 (70%) | 46 / 15 (93%) | 28 / 0 |
 | PHP | 80.6% | 429 / 505 (84%) | 8,870 / 6,140 (90%) | 65 / 60 (98%) | 648 / 213 (95%) |
-| **All** | **94.4%** | **4,961 / 5,565 (75%)** | **43,757 / 27,832 (84%)** | **1,132 / 726 (97%)** | **12,415 / 6,775 (89%)** |
+| **All** | **94.4%** | **4,961 / 5,565 (75%)** | **44,037 / 27,832 (85%)** | **1,132 / 726 (97%)** | **12,415 / 6,775 (89%)** |
 
-Of the native calls, 12,799 (29%) are `INFERRED`, against 47% of graphify's.
+Of the native calls, 13,027 (30%) are `INFERRED`, against 47% of graphify's.
 That share was 20% before engine 0.5.5: a call of an overloaded name that the
 arguments do not decide used to be an `EXTRACTED` edge to the first overload,
 and is now an `INFERRED` edge to each overload that fits (999 calls, with
@@ -693,6 +707,15 @@ two edges of got are gone that named a function defined in another loop
 for a destructured loop variable of the same name. The maps of these
 repositories that hold project types are mostly looked up by key once, or
 not walked at all.
+Engine 0.5.17 (Swift's implicit members, and the overloads an extension
+adds) changes alamofire only: 158 calls of an implicit member it had no
+edge for (`.status(401)`, `.endpoints(…)`, `.payloads(2)`, `.retrier { … }`,
+all read), and 783 calls that go to another definition of the same name
+than before, none to nothing — `session.request(.get)` in a test is the
+`request(_ endpoint: Endpoint)` its test helpers add to `Session`, not the
+`request(_: any URLConvertible)` of the library, and `self.cURLDescription()`
+is the overload with no parameter, not the one it is called from. The
+call sites that tie between overloads go from 800 targets to 671.
 Engine 0.5.16 (the arguments of Rust macros) adds 171 edges, none gone: 164
 calls in ureq (80 `EXTRACTED`, 84 through a local the walk types by its
 value or not at all, as outside a macro), 5 in axum-realworld and 2 in
@@ -804,8 +827,8 @@ builds take 13.3 s for the 31 repositories against graphify's 81.3 s
 faster of two clean builds each): 8.7 times faster at the median, from 2.1
 (todoapi, whose bundled JavaScript the native engine reads in full) to 17.2
 times; retrofit 2.9 s against 13.1 s, guzzle 0.9 s / 6.1 s, alamofire 1.2 s /
-5.4 s, got 0.9 s / 4.7 s (engine 0.5.1; with all that 0.5.16 resolves the same
-31 builds take 16.3 to 18.9 s through Python, 15.6 to 16.2 s in the engine alone, retrofit 3.7 to 4.1 s). An update after a one-file change takes a third of
+5.4 s, got 0.9 s / 4.7 s (engine 0.5.1; with all that 0.5.17 resolves the same
+31 builds take 16.3 to 18.9 s through Python, 16.1 to 16.9 s in the engine alone, retrofit 3.7 to 4.1 s). An update after a one-file change takes a third of
 a build ([above](#incremental-updates)).
 
 ### What is left without an edge
@@ -846,7 +869,9 @@ test DSLs (`it('…', function () { app.use(…); res.download(…) })`), where 
 variable or a closure's parameter has no definition to be a local of. The
 calls inside a Rust macro were not in this table at all (no call was read
 there); since 0.5.16 they are read, 171 of them got an edge, and the 52
-that did not are counted (6,848 rows, Rust 424).
+that did not are counted (6,848 rows, Rust 424). The same goes for Swift's
+implicit members since 0.5.17: 39 whose place gives no type are rows now
+(6,887).
 
 ### The polyglot audit on native graphs
 
@@ -891,7 +916,7 @@ but one convention finding, fixed since: `graphlore_surprises(limit=0)` cut its
 `shared_state` list without saying how much (`shared_state_left_out` does now).
 `SKELETON-EMPTY` went from 5 to 0, and the tool time stayed at 131 s.
 
-Rerun on graphs built by engine 0.5.3, and again by 0.5.4 through 0.5.16
+Rerun on graphs built by engine 0.5.3, and again by 0.5.4 through 0.5.17
 (2026-11-18), the audit raises nothing on the native graphs but its
 `GRAPH-ORPHAN-NODES` note on 19 of them; 115 to 154 s of tool time (on the 0.5.7 run, retrofit's build through `graphlore_build` took 5.1 s and was reported `SLOW` for crossing 5 s). What the table above still listed is
 gone:

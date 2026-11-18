@@ -421,8 +421,25 @@ pub struct RefFact {
     /// What each argument is, as far as the site shows (at most 8).
     #[serde(default)]
     pub hints: Vec<ArgFact>,
+    /// Where a Swift implicit member (`.status(301)`) takes its type from.
+    #[serde(default)]
+    pub implicit: Option<Implicit>,
     #[serde(skip)]
     pub byte: usize,
+}
+
+/// What types a Swift implicit member expression (`.name(…)`, the path
+/// `[refs::IMPLICIT, name]`): the type is not written, the place is.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum Implicit {
+    /// An argument of a call: the index of that call among the file's
+    /// references, the argument's position and its label.
+    Arg { call: u32, index: u8, label: Option<String> },
+    /// The value of a declaration that writes its type (`let e: Endpoint =
+    /// .status(1)`).
+    Typed(Vec<String>),
+    /// The value a function returns: its declared result.
+    Return,
 }
 
 /// A parameter of a callable.
@@ -461,6 +478,10 @@ pub enum Arg {
     Class,
     /// A name, a member or a call: the resolver says what type that gives.
     Path(Vec<String>),
+    /// A Swift implicit member (`.post`, `.status(301)`): a static member of
+    /// the parameter's own type, so only a type that has one of that name
+    /// takes it.
+    Implicit(String),
 }
 
 /// An argument: the name it is passed under, if any, and what it is.

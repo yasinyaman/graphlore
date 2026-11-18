@@ -150,6 +150,12 @@ struct Binds {
     args: Vec<BoundArg>,
 }
 
+/// What a call reference calls, if anything (`Project::call_target`).
+type Called = Option<(DefRef, Confidence)>;
+
+/// The walk's per-reference state (`Project::suspend`).
+type Suspended = (bool, bool, Option<(usize, u16)>, Option<(usize, usize)>, Option<u8>, bool);
+
 /// A local's written type arguments, their element types, and the
 /// definition it is a local of.
 type LocalTargs<'a> = (&'a [Vec<String>], &'a [Option<Vec<String>>], usize);
@@ -1076,6 +1082,9 @@ pub struct Project<'a> {
     /// How many parts the tuple a local's value is has (0: no tuple), per
     /// local.
     tuple_locals: RefCell<HashMap<(usize, usize), usize>>,
+    /// What a call reference calls, with its overload picked, per reference
+    /// (`call_target`): what an implicit member in its arguments is typed by.
+    call_targets: RefCell<HashMap<(usize, usize), Called>>,
     /// The bindings a local's value gives, per local (`local_value_binds`).
     value_binds: RefCell<HashMap<(usize, usize), Option<Binds>>>,
     /// The bindings the last path walked ended with.
@@ -1182,6 +1191,7 @@ impl<'a> Project<'a> {
             local_types: RefCell::new(HashMap::new()),
             sealed_locals: RefCell::new(HashMap::new()),
             tuple_locals: RefCell::new(HashMap::new()),
+            call_targets: RefCell::new(HashMap::new()),
             value_binds: RefCell::new(HashMap::new()),
             end_binds: RefCell::new(None),
             typing_value: RefCell::new(false),
@@ -1400,6 +1410,12 @@ impl<'a> Project<'a> {
                         }
                         x
                     }
+                    // (a closure for the parameter that asks for no label,
+                    // before one a trailing closure could also stand for)
+                    Some(x) if swift && matches!(a.kind, crate::facts::Arg::Func) => {
+                        score += 1;
+                        x
+                    }
                     Some(x) => x,
                     None => continue,
                 },
@@ -1442,10 +1458,27 @@ impl<'a> Project<'a> {
             // the project can be)
             Arg::Func => match prim {
                 Some(Prim::Func) => Some(1),
+                // a name the project gives a type (`typealias Validation =
+                // (…) -> Result`): what a lambda is passed for
+                None if self
+                    .type_of_path(c.0, self.def(c).parent, ty, true)
+                    .is_some_and(|t| self.def(t).kind == DefKind::TypeAlias) =>
+                {
+                    Some(1)
+                }
                 Some(Prim::Any) | None => Some(0),
                 Some(_) => None,
             },
             Arg::Unknown | Arg::Null => Some(0),
+            // `.status(301)`: a static member of the parameter's type. A
+            // type that has it is the one meant; one that has none is not,
+            // unless it is a protocol (its conforming types add their own)
+            Arg::Implicit(member) => match self.param_type(c, ty) {
+                Some(pt) if self.class_member(pt, member, 4).is_some() => Some(2),
+                Some(pt) if self.def(pt).kind == DefKind::Interface => Some(0),
+                Some(_) => None,
+                None => Some(0),
+            },
             Arg::Path(path) => {
                 let at = if path.len() == 1 && path[0] == "self" {
                     // `this` in a lambda with a receiver is the receiver
@@ -1485,7 +1518,11 @@ impl<'a> Project<'a> {
                     // an object of the project is no string, number or flag
                     Some(_) => None,
                     None => match self.param_type(c, ty) {
-                        Some(pt) if pt == at || self.is_a(at, pt, 6) => Some(2),
+                        // (the parameter's very type over one of its bases:
+                        // `request(_: Endpoint)` over `request(_: any
+                        // URLConvertible)` for an `Endpoint`)
+                        Some(pt) if pt == at => Some(3),
+                        Some(pt) if self.is_a(at, pt, 6) => Some(2),
                         // not one of its bases: no fit, where a type's
                         // bases are all written on it. A Swift protocol can
                         // be conformed to in an extension elsewhere, and a
@@ -1639,6 +1676,18 @@ impl<'a> Project<'a> {
             })
             .collect();
         out.sort();
+        // Swift: those an extension of the type adds under the name
+        // (`extension Session { func request(_ endpoint: Endpoint) }`)
+        if self.family[m.0] == Some(Family::Swift) {
+            if let Some(c) = self.class_of(m.0, Some(m.1)) {
+                for x in self.members(c, &d.name) {
+                    let def = self.def(x);
+                    if def.kind.is_callable() && !def.decl_only && !out.contains(&x) {
+                        out.push(x);
+                    }
+                }
+            }
+        }
         // and those a base adds under the name: with other parameters (one
         // with the same is overridden, not another overload)
         let shape = |r: DefRef| -> Vec<String> {
@@ -3938,6 +3987,132 @@ impl<'a> Project<'a> {
         Some(whole)
     }
 
+    /// The per-reference state of the walk, taken out so another reference
+    /// can be resolved in the middle of one (`restore` puts it back).
+    fn suspend(&self) -> Suspended {
+        (
+            self.types_only.replace(false),
+            self.calling.replace(false),
+            self.recv.replace(None),
+            self.cur.replace(None),
+            self.args.replace(None),
+            self.self_arg.replace(false),
+        )
+    }
+
+    fn restore(&self, s: Suspended) {
+        *self.types_only.borrow_mut() = s.0;
+        *self.calling.borrow_mut() = s.1;
+        *self.recv.borrow_mut() = s.2;
+        *self.cur.borrow_mut() = s.3;
+        *self.args.borrow_mut() = s.4;
+        *self.self_arg.borrow_mut() = s.5;
+    }
+
+    /// What call reference `ri` of file `f` calls, with the overload its
+    /// arguments are for: a callable, or the one constructor that takes them.
+    fn call_target(&self, f: usize, ri: usize) -> Option<(DefRef, Confidence)> {
+        if let Some(known) = self.call_targets.borrow().get(&(f, ri)) {
+            return *known;
+        }
+        // (a call that comes back to itself has no answer)
+        self.call_targets.borrow_mut().insert((f, ri), None);
+        let r = &self.files[f].refs[ri];
+        let d = r.from_def;
+        let saved = self.suspend();
+        *self.calling.borrow_mut() = true;
+        *self.recv.borrow_mut() = r.recv.map(|i| (f, i));
+        *self.cur.borrow_mut() = Some((f, ri));
+        *self.args.borrow_mut() = r.args;
+        *self.self_arg.borrow_mut() = r.self_arg;
+        let found = match &r.implicit {
+            Some(place) => self.implicit_member(f, d, r, place),
+            None => self.resolve_path(f, d, &r.path, false),
+        };
+        let out = match found {
+            Some((Target::Def(m), conf)) if self.def(m).kind.is_callable() => {
+                let picked = self.pick_overload(f, d, m, r);
+                let conf = if picked.len() > 1 { Confidence::Inferred } else { conf };
+                Some((picked[0], conf))
+            }
+            // a construction: the one constructor that can take the call
+            Some((Target::Def(t), conf)) if self.def(t).kind.is_class_like() => {
+                let fitting: Vec<DefRef> = self
+                    .constructors(t)
+                    .into_iter()
+                    .filter(|c| self.fit(f, d, *c, r).is_some())
+                    .collect();
+                match fitting.as_slice() {
+                    [one] => Some((*one, conf)),
+                    _ => None,
+                }
+            }
+            _ => None,
+        };
+        self.restore(saved);
+        self.call_targets.borrow_mut().insert((f, ri), out);
+        out
+    }
+
+    /// A Swift implicit member (`.status(301)`, the path `[IMPLICIT, name]`):
+    /// the static member of that name on the type its place asks for — the
+    /// parameter it is an argument for, the type its declaration writes, or
+    /// the result of the function it is returned from. No type, no edge.
+    fn implicit_member(
+        &self,
+        f: usize,
+        d: Option<usize>,
+        r: &RefFact,
+        place: &crate::facts::Implicit,
+    ) -> Option<(Target, Confidence)> {
+        use crate::facts::Implicit;
+        let name = r.path.get(1)?;
+        let (ty, conf) = match place {
+            Implicit::Arg { call, index, label } => {
+                let (callee, conf) = self.call_target(f, *call as usize)?;
+                let plist = &self.def(callee).plist;
+                let param = match label {
+                    Some(l) => plist.iter().find(|p| p.name == *l)?,
+                    None => {
+                        let unlabeled = |p: &&crate::facts::ParamFact| p.name == "_";
+                        plist.get(usize::from(*index)).filter(unlabeled).or_else(|| {
+                            let mut all = plist.iter().filter(unlabeled);
+                            match (all.next(), all.next()) {
+                                (Some(one), None) => Some(one),
+                                _ => None,
+                            }
+                        })?
+                    }
+                };
+                (self.param_type(callee, &param.ty)?, conf)
+            }
+            Implicit::Typed(path) => {
+                let t = self.type_of_path(f, d, path, true)?;
+                (t, Confidence::Extracted)
+            }
+            Implicit::Return => {
+                let defs = &self.files[f].defs;
+                let mut cur = d;
+                let fun = loop {
+                    let x = cur?;
+                    if defs[x].kind.is_callable() {
+                        break x;
+                    }
+                    cur = defs[x].parent;
+                };
+                let (t, declared) = self.return_type((f, fun))?;
+                if !declared || defs[fun].sealed {
+                    return None;
+                }
+                (t, Confidence::Extracted)
+            }
+        };
+        if !self.def(ty).kind.is_class_like() {
+            return None;
+        }
+        self.class_member(ty, name, 4).map(|m| (Target::Def(m), conf))
+    }
+
     /// Why a call has no edge, when its name is the one callable of that name
     /// in the project (so an edge was plausible): the row
     /// `benchmarks/unresolved.py` counts. `None` for a name the project does
@@ -3960,6 +4135,8 @@ impl<'a> Project<'a> {
             "self: no such member on the type around".to_string()
         } else if head == "super" {
             "super: no such member on a base".to_string()
+        } else if head == crate::refs::IMPLICIT {
+            "implicit member: its place gives no type".to_string()
         } else if head == "()" {
             "receiver the walk cannot name".to_string()
         } else if self.is_local_name(f, d, head) || self.is_local_name(f, d, bare) {
@@ -4701,7 +4878,14 @@ pub fn resolve(
                 *p.self_arg.borrow_mut() = r.self_arg;
                 let is_call = matches!(r.kind, RefKind::Call | RefKind::New);
                 *p.cur.borrow_mut() = is_call.then_some((f, ri));
-                let found = if r.from_owner.is_some() && heritage {
+                let found = if let Some(place) = &r.implicit {
+                    // Swift `.status(301)`: a static member of the type the
+                    // place it stands in asks for
+                    let saved = p.suspend();
+                    let found = p.implicit_member(f, scope_def, r, place);
+                    p.restore(saved);
+                    found
+                } else if r.from_owner.is_some() && heritage {
                     p.resolve_path(f, None, &r.path, true)
                 } else {
                     p.resolve_path(f, scope_def, &r.path, strict)
@@ -5000,6 +5184,7 @@ pub fn resolve(
                     args: None,
                     self_arg: false,
                     hints: Vec::new(),
+                    implicit: None,
                     recv: None,
                     byte: u.byte,
                 };
