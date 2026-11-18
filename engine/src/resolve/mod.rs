@@ -79,6 +79,12 @@ impl Family {
     }
 
     /// Whether a method sees its class's members by their bare names.
+    /// Whether a name can have several definitions told apart by their
+    /// parameters.
+    fn overloads(self) -> bool {
+        matches!(self, Family::Jvm | Family::CSharp | Family::Swift | Family::C)
+    }
+
     fn implicit_this(self) -> bool {
         matches!(self, Family::Jvm | Family::CSharp | Family::C | Family::Swift | Family::Ruby)
     }
@@ -164,6 +170,268 @@ impl Confidence {
             Confidence::Inferred => 0.55,
         }
     }
+}
+
+/// Methods of Ruby's core objects (String, Array, Hash, Object): a project
+/// method of one of these names is not what an untyped receiver is asked.
+const RUBY_CORE_METHODS: &[&str] = &[
+    "shift",
+    "unshift",
+    "gsub",
+    "gsub!",
+    "sub",
+    "strip",
+    "split",
+    "join",
+    "select",
+    "reject",
+    "merge",
+    "merge!",
+    "fetch",
+    "freeze",
+    "inspect",
+    "pretty_inspect",
+    "to_s",
+    "to_h",
+    "to_a",
+    "to_sym",
+    "to_i",
+    "to_f",
+    "to_str",
+    "to_proc",
+    "to_json",
+    "keys",
+    "values",
+    "first",
+    "last",
+    "empty?",
+    "nil?",
+    "include?",
+    "key?",
+    "has_key?",
+    "respond_to?",
+    "send",
+    "public_send",
+    "size",
+    "length",
+    "count",
+    "clear",
+    "replace",
+    "concat",
+    "reverse",
+    "sort",
+    "sort_by",
+    "uniq",
+    "compact",
+    "flatten",
+    "detect",
+    "any?",
+    "all?",
+    "none?",
+    "start_with?",
+    "end_with?",
+    "match",
+    "match?",
+    "downcase",
+    "upcase",
+    "capitalize",
+    "encode",
+    "force_encoding",
+    "bytes",
+    "chars",
+    "lines",
+    "then",
+    "instance_of?",
+    "is_a?",
+    "kind_of?",
+    "equal?",
+    "eql?",
+    "hash",
+    "format",
+    "group_by",
+    "partition",
+    "each_with_object",
+    "each_with_index",
+    "inject",
+    "reduce",
+    "slice",
+    "take",
+    "drop",
+    "index",
+    "insert",
+    "sample",
+    "rotate",
+    "transform_values",
+    "transform_keys",
+    "each_key",
+    "each_value",
+    "each_pair",
+    "each_line",
+    "store",
+    "dig",
+    "values_at",
+    "collect",
+    "find_all",
+    "flat_map",
+    "zip",
+    "tally",
+    "succ",
+    "round",
+    "floor",
+    "ceil",
+    "times",
+    "upto",
+    "unpack",
+    "pack",
+    "scan",
+    "squeeze",
+    "center",
+    "ljust",
+    "rjust",
+    "prepend",
+    "append",
+    "to_set",
+    "entries",
+    "member?",
+    "cycle",
+    "lazy",
+    "instance_variable_get",
+    "instance_variable_set",
+    "define_method",
+    "method",
+    "methods",
+    "class",
+    "frozen?",
+    "tap",
+];
+
+/// The same for Swift's collections and strings.
+const SWIFT_CORE_METHODS: &[&str] = &[
+    "sorted",
+    "filter",
+    "reduce",
+    "forEach",
+    "contains",
+    "append",
+    "joined",
+    "split",
+    "compactMap",
+    "flatMap",
+    "prefix",
+    "suffix",
+    "dropFirst",
+    "dropLast",
+    "reversed",
+    "enumerated",
+    "firstIndex",
+    "lastIndex",
+    "lowercased",
+    "uppercased",
+    "hasPrefix",
+    "hasSuffix",
+    "replacingOccurrences",
+    "trimmingCharacters",
+    "components",
+    "encode",
+    "decode",
+    "removeAll",
+    "removeFirst",
+    "removeLast",
+    "allSatisfy",
+    "shuffled",
+    "randomElement",
+    "merging",
+    "mapValues",
+    "compactMapValues",
+    "withUnsafeBytes",
+    "resume",
+    "cancel",
+    "wait",
+    "signal",
+    "lock",
+    "unlock",
+    "async",
+    "sync",
+    "store",
+    "value",
+    "elementsEqual",
+    "starts",
+    "index",
+    "distance",
+    "formIndex",
+    "popLast",
+    "popFirst",
+    "union",
+    "intersection",
+    "subtracting",
+    "isSubset",
+    "isSuperset",
+    "addingPercentEncoding",
+    "data",
+    "write",
+];
+
+/// Words in the name of a generic function that returns something built
+/// around the type it is given, not a value of it.
+const WRAPPERS_OF_WHAT_THEY_ARE_GIVEN: &[&str] = &[
+    "list",
+    "set",
+    "map",
+    "array",
+    "seq",
+    "flow",
+    "collection",
+    "optional",
+    "option",
+    "task",
+    "future",
+    "channel",
+    "lazy",
+    "provider",
+    "empty",
+    "result",
+    "async",
+    "enumerable",
+    "vec",
+    "iterator",
+    "stream",
+    "observable",
+    "deferred",
+    "state",
+    "single",
+    "some",
+    "many",
+    "all",
+];
+
+/// What a built-in type name takes.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Prim {
+    Str,
+    Num,
+    Bool,
+    /// Anything: `Any`, `Object`, a type parameter.
+    Any,
+}
+
+/// The kind of value a parameter type named `name` takes, when the name is
+/// one every language's library has; `None` for a name the project may define.
+fn primitive(name: &str) -> Option<Prim> {
+    Some(match name {
+        "String" | "CharSequence" | "str" | "string" | "Substring" | "NSString"
+        | "StringBuilder" | "Char" | "char" | "Character" => Prim::Str,
+        "Int" | "Long" | "Short" | "Byte" | "Double" | "Float" | "int" | "long" | "short"
+        | "byte" | "double" | "float" | "Integer" | "Number" | "UInt" | "ULong" | "Int32"
+        | "Int64" | "UInt32" | "UInt64" | "decimal" | "uint" | "ulong" | "number" | "usize"
+        | "isize" | "i32" | "i64" | "u32" | "u64" | "u8" | "f32" | "f64" | "CGFloat"
+        | "TimeInterval" | "BigDecimal" | "BigInteger" | "size_t" => Prim::Num,
+        "Boolean" | "boolean" | "bool" | "Bool" => Prim::Bool,
+        "Any" | "Object" | "object" | "dynamic" | "any" | "unknown" | "AnyObject" | "id"
+        | "Comparable" | "Serializable" | "var" | "auto" => Prim::Any,
+        // a type parameter by convention: `T`, `R`, `E`, `TResult`
+        n if n.len() == 1 && n.chars().all(|c| c.is_ascii_uppercase()) => Prim::Any,
+        _ => return None,
+    })
 }
 
 /// A type worked out for something, and how surely.
@@ -371,6 +639,10 @@ pub struct Project<'a> {
     calling: RefCell<bool>,
     /// The receiver lambda the use being resolved sits in: `(file, index)`.
     recv: RefCell<Option<(usize, u16)>>,
+    /// Names some type answers to without defining them (`FileFacts::attrs`).
+    attrs: HashSet<(Family, String)>,
+    /// The use being resolved, when it is a call: `(file, index of the use)`.
+    cur: RefCell<Option<(usize, usize)>>,
     /// How many arguments the call being resolved passes.
     args: RefCell<Option<u8>>,
     /// One of them is `this`.
@@ -458,6 +730,8 @@ impl<'a> Project<'a> {
             types_only: RefCell::new(false),
             calling: RefCell::new(false),
             recv: RefCell::new(None),
+            attrs: HashSet::new(),
+            cur: RefCell::new(None),
             args: RefCell::new(None),
             self_arg: RefCell::new(false),
             recv_types: RefCell::new(HashMap::new()),
@@ -485,6 +759,9 @@ impl<'a> Project<'a> {
             let mut top: HashMap<String, Vec<usize>> = HashMap::new();
             let mut children: HashMap<usize, HashMap<String, Vec<usize>>> = HashMap::new();
             let fam = self.family[fi];
+            if let Some(fam) = fam {
+                self.attrs.extend(f.attrs.iter().map(|a| (fam, a.clone())));
+            }
             for (di, d) in f.defs.iter().enumerate() {
                 // a class with no name of its own answers to none
                 if d.anonymous {
@@ -599,6 +876,9 @@ impl<'a> Project<'a> {
                 {
                     // a call of a function whose result is a project type
                     Some((t, if declared { conf } else { Confidence::Inferred }))
+                } else if k.is_callable() && path.len() >= 2 && self.returns_self_param(r) {
+                    // `builder(x).tag(y)`: `tag` returns the builder it is called on
+                    self.type_of_path_inner(f, d, &path[..path.len() - 1])
                 } else if k.is_callable() && path.len() == 2 && is_factory(&def.name) {
                     // `Foo::new()`, `Foo.create()`: a type's own constructor
                     let owner = self.class_of(r.0, Some(r.1))?;
@@ -610,6 +890,230 @@ impl<'a> Project<'a> {
                 }
             }
             _ => None,
+        }
+    }
+
+    /// Whether callable `c` can take the call `r` makes, and how well: `None`
+    /// when the count of arguments, a name one is passed under or the type of
+    /// one rules it out; else a score, higher for each argument whose type is
+    /// the parameter's. What the facts do not say counts for nothing either
+    /// way.
+    fn fit(&self, f: usize, d: Option<usize>, c: DefRef, r: &RefFact) -> Option<i32> {
+        let def = self.def(c);
+        if def.params.is_none() {
+            return Some(0);
+        }
+        // a C# extension's first parameter is the receiver
+        let plist = match (&def.receiver, self.family[c.0]) {
+            (Some(_), Some(Family::CSharp)) if !def.plist.is_empty() => &def.plist[1..],
+            _ => &def.plist[..],
+        };
+        let variadic = plist.iter().any(|x| x.variadic);
+        if let Some(a) = r.args.map(usize::from) {
+            let required = plist.iter().filter(|x| !x.optional && !x.variadic).count();
+            if (a > plist.len() && !variadic) || a < required {
+                return None;
+            }
+        }
+        // Swift passes labelled arguments in order; elsewhere a name ends
+        // the positional ones
+        let swift = self.family[c.0] == Some(Family::Swift);
+        let (mut score, mut positional) = (0, true);
+        for (i, a) in r.hints.iter().enumerate() {
+            let param = match &a.label {
+                Some(l) => {
+                    positional = swift;
+                    let at = if swift { plist.get(i).filter(|x| x.name == *l) } else { None };
+                    at.or_else(|| plist.iter().find(|x| x.name == *l))?
+                }
+                None if positional => match plist.get(i).or(plist.last().filter(|x| x.variadic)) {
+                    // an unlabelled argument is not one Swift wants a label for
+                    Some(x) if swift && x.name != "_" && !x.name.is_empty() => {
+                        if !matches!(a.kind, crate::facts::Arg::Func) {
+                            return None;
+                        }
+                        x
+                    }
+                    Some(x) => x,
+                    None => continue,
+                },
+                None => continue,
+            };
+            score += self.arg_fits(f, d, c, &a.kind, &param.ty)?;
+        }
+        Some(score)
+    }
+
+    /// One argument against one parameter's written type.
+    fn arg_fits(
+        &self,
+        f: usize,
+        d: Option<usize>,
+        c: DefRef,
+        arg: &crate::facts::Arg,
+        ty: &[String],
+    ) -> Option<i32> {
+        use crate::facts::Arg;
+        let Some(name) = ty.last() else { return Some(0) };
+        let prim = primitive(name);
+        // a literal is no instance of a class of the project where nothing
+        // converts one implicitly
+        let strict = matches!(self.family[c.0], Some(Family::Jvm | Family::CSharp));
+        let literal = |want: Prim| match prim {
+            Some(p) if p == want => Some(1),
+            Some(Prim::Any) => Some(0),
+            Some(_) => None,
+            None if strict && self.param_type(c, ty).is_some() => None,
+            None => Some(0),
+        };
+        match arg {
+            Arg::Str => literal(Prim::Str),
+            Arg::Num => literal(Prim::Num),
+            Arg::Bool => literal(Prim::Bool),
+            Arg::Unknown | Arg::Null | Arg::Func => Some(0),
+            Arg::Path(path) => {
+                let at = if path.len() == 1 && path[0] == "self" {
+                    // `this` in a lambda with a receiver is the receiver
+                    let recv = *self.recv.borrow();
+                    recv.and_then(|(_, i)| self.receiver_type(f, d, i))
+                        .map(|(t, _)| t)
+                        .or_else(|| self.class_of(f, d))
+                } else {
+                    self.type_of_path(f, d, path, false)
+                };
+                let Some(at) = at else {
+                    // no type of the project: the type the source writes for
+                    // the name still says a string from a number, and whether
+                    // it is the parameter's own
+                    let written = (path.len() == 1)
+                        .then(|| self.local_written_type(f, d, &path[0]))
+                        .flatten();
+                    return match written {
+                        Some(w) if w.eq_ignore_ascii_case(name) => Some(1),
+                        Some(w) => match (primitive(&w), prim) {
+                            (Some(Prim::Any), _) | (_, Some(Prim::Any)) | (None, _) => Some(0),
+                            (Some(a), Some(b)) if a == b => Some(1),
+                            (Some(_), Some(_)) => None,
+                            (Some(_), None) if strict && self.param_type(c, ty).is_some() => None,
+                            (Some(_), None) => Some(0),
+                        },
+                        None => Some(0),
+                    };
+                };
+                match prim {
+                    Some(Prim::Any) => Some(0),
+                    // an object of the project is no string, number or flag
+                    Some(_) => None,
+                    None => match self.param_type(c, ty) {
+                        Some(pt) if pt == at || self.is_a(at, pt, 6) => Some(2),
+                        Some(_) => None,
+                        None => Some(0),
+                    },
+                }
+            }
+        }
+    }
+
+    /// The project type a parameter of `c` is written with.
+    fn param_type(&self, c: DefRef, ty: &[String]) -> Option<DefRef> {
+        self.type_of_path(c.0, self.def(c).parent, ty, true)
+            .filter(|t| self.def(*t).kind.is_class_like())
+    }
+
+    /// Whether type `t` has `base` among its bases.
+    fn is_a(&self, t: DefRef, base: DefRef, depth: usize) -> bool {
+        depth > 0 && self.bases(t).into_iter().any(|b| b == base || self.is_a(b, base, depth - 1))
+    }
+
+    /// Whether no type of the family answers to `name` but by one method:
+    /// no property or field of that name (Swift `var status`, Ruby
+    /// `@status`), and no attribute declared without a `def` (Ruby
+    /// `attr_reader :status`, `Struct.new(:status)`).
+    fn sole_holder(&self, fam: Family, name: &str) -> bool {
+        // nor a name the language's own strings, arrays and hashes answer to
+        let core = match fam {
+            Family::Ruby => RUBY_CORE_METHODS,
+            Family::Swift => SWIFT_CORE_METHODS,
+            _ => &[],
+        };
+        if core.contains(&name) || self.attrs.contains(&(fam, name.to_string())) {
+            return false;
+        }
+        !self
+            .by_name
+            .get(name)
+            .into_iter()
+            .flatten()
+            .any(|r| self.family[r.0] == Some(fam) && self.def(*r).kind.is_state())
+    }
+
+    /// The candidates that fit best; of those, the ones not marked deprecated
+    /// when some are not (a deprecated overload is kept for old callers).
+    fn top_fits(&self, fits: &[(DefRef, i32)]) -> Vec<DefRef> {
+        let top = fits.iter().map(|(_, s)| *s).max();
+        let best: Vec<DefRef> =
+            fits.iter().filter(|(_, s)| Some(*s) == top).map(|(c, _)| *c).collect();
+        let current: Vec<DefRef> = best.iter().copied().filter(|c| !self.deprecated(*c)).collect();
+        if current.is_empty() {
+            best
+        } else {
+            current
+        }
+    }
+
+    /// Whether a definition carries `@Deprecated` / `[Obsolete]` / `#[deprecated]`.
+    fn deprecated(&self, c: DefRef) -> bool {
+        self.files[c.0].refs.iter().any(|r| {
+            r.from_def == Some(c.1)
+                && r.kind == RefKind::Decorator
+                && r.path
+                    .iter()
+                    .any(|n| matches!(n.as_str(), "Deprecated" | "Obsolete" | "deprecated"))
+        })
+    }
+
+    /// The callables written beside `m` under its name: its overloads.
+    fn overloads(&self, m: DefRef) -> Vec<DefRef> {
+        let d = self.def(m);
+        let named = match d.parent {
+            Some(par) => self.children[m.0].get(&par).and_then(|x| x.get(&d.name)),
+            None => self.top[m.0].get(&d.name),
+        };
+        let mut out: Vec<DefRef> = named
+            .into_iter()
+            .flatten()
+            .map(|&i| (m.0, i))
+            .filter(|r| {
+                let x = self.def(*r);
+                x.kind.is_callable() && !x.decl_only && x.owner == d.owner
+            })
+            .collect();
+        out.sort();
+        out
+    }
+
+    /// Of the overloads of `m`, the one the call `r` can be of: the only one
+    /// that takes its arguments, else the one whose parameters are their
+    /// types. `m` when that does not decide.
+    fn pick_overload(&self, f: usize, d: Option<usize>, m: DefRef, r: &RefFact) -> DefRef {
+        // where one name can have several definitions at once; elsewhere a
+        // second definition replaces the first
+        if !self.family[m.0].is_some_and(Family::overloads) {
+            return m;
+        }
+        let all = self.overloads(m);
+        if all.len() < 2 {
+            return m;
+        }
+        let fits: Vec<(DefRef, i32)> =
+            all.iter().filter_map(|c| self.fit(f, d, *c, r).map(|s| (*c, s))).collect();
+        let best = self.top_fits(&fits);
+        match best.as_slice() {
+            [one] => *one,
+            // several fit alike: the one found, if it is one of them
+            many if many.contains(&m) => m,
+            [first, ..] => *first,
+            [] => m,
         }
     }
 
@@ -716,13 +1220,64 @@ impl<'a> Project<'a> {
                 if l.path.is_empty() {
                     return None;
                 }
-                let t = self.type_of_path(f, Some(x), &l.path, l.declared)?;
+                let t = self
+                    .type_of_path(f, Some(x), &l.path, l.declared)
+                    .or_else(|| self.given_result(f, x, l))?;
                 let conf = if l.declared { Confidence::Extracted } else { Confidence::Inferred };
                 return Some((t, conf));
             }
             cur = defs[x].parent;
         }
         None
+    }
+
+    /// The type of a local assigned a generic call that is handed a type
+    /// (`val s = retrofit.create(Service::class.java)`, `mock<Foo>()`,
+    /// `sp.GetRequiredService<IFoo>()`): that type, when the function called
+    /// returns its own type parameter — or is not the project's, and is not
+    /// named like something that wraps what it is given (`listOf<Foo>()`).
+    fn given_result(&self, f: usize, d: usize, l: &crate::facts::Local) -> Option<DefRef> {
+        let given = l.given.as_ref()?;
+        let name = l.path.last()?;
+        let before = self.recv.replace(None);
+        let callee = self.resolve_path(f, Some(d), &l.path, true);
+        *self.recv.borrow_mut() = before;
+        match callee {
+            Some((Target::Def(c), _)) if self.def(c).kind.is_callable() => {
+                let ret = self.files[c.0].refs.iter().find(|x| {
+                    x.from_def == Some(c.1) && x.kind == RefKind::Type && x.context == "return_type"
+                })?;
+                // it returns its own type parameter, not something of it
+                if ret.path.len() != 1 || !self.def(c).type_params.contains(&ret.path[0]) {
+                    return None;
+                }
+            }
+            Some(_) => return None,
+            None => {
+                let lower = name.to_lowercase();
+                let csharp = self.family[f] == Some(Family::CSharp);
+                // a type's name called (Kotlin `ArrayList<Foo>()`) builds
+                // that type; C# names its methods like types
+                if (!csharp && name.chars().next().is_some_and(char::is_uppercase))
+                    || WRAPPERS_OF_WHAT_THEY_ARE_GIVEN.iter().any(|w| lower.contains(w))
+                    || lower.ends_with("of")
+                {
+                    return None;
+                }
+            }
+        }
+        self.type_of_path(f, Some(d), given, true).filter(|t| self.def(*t).kind.is_class_like())
+    }
+
+    /// Whether callable `c` declares that it returns a type parameter its
+    /// type binds to itself (`fun tag(x: Any): T` in `Builder<T : Builder<T>>`).
+    fn returns_self_param(&self, c: DefRef) -> bool {
+        let ret = self.files[c.0].refs.iter().find(|x| {
+            x.from_def == Some(c.1) && x.kind == RefKind::Type && x.context == "return_type"
+        });
+        let Some(ret) = ret.filter(|r| r.path.len() == 1) else { return false };
+        self.class_of(c.0, Some(c.1))
+            .is_some_and(|o| self.def(o).self_params.contains(&ret.path[0]))
     }
 
     /// A parameter or local whose type is not known: it shadows every outer
@@ -1418,10 +1973,13 @@ impl<'a> Project<'a> {
                     // a type the project does not define has no method of
                     // the project's; a local of no known type is an unknown
                     // receiver: a distinctive method name may say what it is
-                    // (not where every type of the module is in scope with
-                    // no import to say which: Ruby, Swift)
+                    // Where every type of the module is in scope with no
+                    // import to say which (Ruby, Swift), only a name no
+                    // other type answers to
                     let open_world = matches!(fam, Family::Ruby | Family::Swift);
-                    if open_world || self.is_external_local(f, d, head) {
+                    if self.is_external_local(f, d, head)
+                        || (open_world && !self.sole_holder(fam, &rest[0]))
+                    {
                         return self.extension_method(f, &rest[0], on.as_deref());
                     }
                     return self.unknown_receiver(f, &rest[0], on.as_deref());
@@ -1488,6 +2046,24 @@ impl<'a> Project<'a> {
                                         .all(|x| self.def(*x).params.is_some_and(|n| n < a))
                                 })
                             });
+                            // the arguments' types, where the site shows them
+                            let cur = (*self.cur.borrow()).filter(|_| rest.is_empty());
+                            if let Some((cf, ci)) = cur {
+                                let r = &self.files[cf].refs[ci];
+                                let best = |x: DefRef| {
+                                    self.overloads(x)
+                                        .into_iter()
+                                        .filter_map(|c| self.fit(f, d, c, r))
+                                        .max()
+                                };
+                                match (best(m), best(o)) {
+                                    (None, Some(_)) => return None,
+                                    (Some(_), None) => return Some(Target::Def(m)),
+                                    (Some(a), Some(b)) if a > b => return Some(Target::Def(m)),
+                                    (Some(a), Some(b)) if b > a => return None,
+                                    _ => {}
+                                }
+                            }
                             // `buildString { emit(this) }`: the receiver is
                             // handed to the outer `emit`, not to its own
                             if too_few || (*self.self_arg.borrow() && rest.is_empty()) {
@@ -1574,6 +2150,8 @@ impl<'a> Project<'a> {
                 }
             }
         }
+        // the type the member being walked through was looked up on
+        let mut on: Option<DefRef> = None;
         for (i, seg) in rest.iter().enumerate() {
             if seg == "()" {
                 // the result of a call: constructing a type gives one of it;
@@ -1589,6 +2167,12 @@ impl<'a> Project<'a> {
                                 conf = conf.max(Confidence::Inferred);
                             }
                             t = Target::Def(r);
+                            continue;
+                        }
+                        // a result bound to the type itself: the type the
+                        // method was called on
+                        if let Some(on) = on.filter(|_| self.returns_self_param(c)) {
+                            t = Target::Def(on);
                             continue;
                         }
                     }
@@ -1616,6 +2200,11 @@ impl<'a> Project<'a> {
                             None => return None,
                         }
                     }
+                }
+            }
+            if let Target::Def(x) = t {
+                if self.def(x).kind.is_class_like() {
+                    on = Some(x);
                 }
             }
             let found = self.member(&t, seg, 3);
@@ -1859,6 +2448,19 @@ impl<'a> Project<'a> {
         let mine: Vec<DefRef> = seen.iter().copied().filter(|r| r.0 == f).collect();
         match (mine.as_slice(), seen.as_slice()) {
             ([one], _) | (_, [one]) => Some((Target::Def(*one), Confidence::Inferred)),
+            // one declaration written once per source set (Kotlin `expect` /
+            // `actual`): the one nearest the caller
+            (_, [first, ..])
+                if seen.iter().all(|r| {
+                    self.def(*r).receiver == self.def(*first).receiver
+                        && self.def(*r).plist.len() == self.def(*first).plist.len()
+                        && self.files[r.0].package == self.files[first.0].package
+                        && r.0 != first.0
+                        || r == first
+                }) =>
+            {
+                self.narrow(f, seen.clone()).map(|(r, _)| (Target::Def(r), Confidence::Inferred))
+            }
             _ => None,
         }
     }
@@ -2119,7 +2721,7 @@ pub fn resolve(
         for (f, facts) in files.iter().enumerate() {
             let Some(fam) = p.family[f] else { continue };
             let st = stats.entry(fam.name().to_string()).or_default();
-            for r in &facts.refs {
+            for (ri, r) in facts.refs.iter().enumerate() {
                 let src = p.source_of(f, r);
                 // a data model's table, read or written through the ORM
                 if let Some((table, write)) = p.orm_use(f, r) {
@@ -2158,6 +2760,8 @@ pub fn resolve(
                 *p.recv.borrow_mut() = r.recv.map(|i| (f, i));
                 *p.args.borrow_mut() = r.args;
                 *p.self_arg.borrow_mut() = r.self_arg;
+                let is_call = matches!(r.kind, RefKind::Call | RefKind::New);
+                *p.cur.borrow_mut() = is_call.then_some((f, ri));
                 let found = if r.from_owner.is_some() && heritage {
                     p.resolve_path(f, None, &r.path, true)
                 } else {
@@ -2166,8 +2770,23 @@ pub fn resolve(
                 *p.types_only.borrow_mut() = false;
                 *p.calling.borrow_mut() = false;
                 *p.recv.borrow_mut() = None;
+                // which of several overloads: the one the arguments are for
+                let found = match found {
+                    Some((Target::Def(m), conf))
+                        if is_call
+                            && p.def(m).kind.is_callable()
+                            && r.path.last().is_some_and(|s| s != "()") =>
+                    {
+                        *p.recv.borrow_mut() = r.recv.map(|i| (f, i));
+                        let picked = p.pick_overload(f, scope_def, m, r);
+                        *p.recv.borrow_mut() = None;
+                        Some((Target::Def(picked), conf))
+                    }
+                    other => other,
+                };
                 *p.args.borrow_mut() = None;
                 *p.self_arg.borrow_mut() = false;
+                *p.cur.borrow_mut() = None;
                 let built_type = match &found {
                     Some((Target::Def(t), _)) if p.def(*t).kind.is_class_like() => Some(*t),
                     _ => None,
@@ -2341,20 +2960,31 @@ pub fn resolve(
                 // constructor is named (the type still is). A Kotlin class has
                 // a primary constructor that is no definition: there the
                 // overload that fits is a guess
-                let fits: Vec<DefRef> = built
-                    .iter()
-                    .copied()
-                    .filter(|c| r.args.is_some() && p.def(*c).params == r.args)
-                    .collect();
+                // A Kotlin class's primary constructor is written in its
+                // header and is no definition: its parameters are the
+                // class's, and it competes with the secondary ones. When it
+                // is the one called, the type is all there is to name; when
+                // the class writes none (or the site does not decide), a
+                // secondary constructor that fits is a guess
                 let kotlin = facts.lang == Some(Lang::Kotlin);
+                let primary = built_type
+                    .filter(|t| kotlin && !built.is_empty() && p.def(*t).params.is_some());
+                *p.recv.borrow_mut() = r.recv.map(|i| (f, i));
+                let scored: Vec<(DefRef, i32)> = built
+                    .iter()
+                    .chain(primary.iter())
+                    .filter_map(|c| p.fit(f, scope_def, *c, r).map(|s| (*c, s)))
+                    .collect();
+                *p.recv.borrow_mut() = None;
+                let fits = p.top_fits(&scored);
                 let one = if built.len() == 1 && !kotlin {
                     built.first()
-                } else if fits.len() == 1 {
-                    fits.first()
+                } else if fits.len() == 1 && (r.args.is_some() || built.len() == 1) {
+                    fits.first().filter(|c| Some(**c) != primary)
                 } else {
                     None
                 };
-                let sure = !kotlin;
+                let sure = !kotlin || primary.is_some();
                 let picked = one.and_then(|c| p.node_id(*c));
                 if let Some(id) = picked.filter(|id| *id != src) {
                     edges.push(EdgeOut {
@@ -2396,6 +3026,7 @@ pub fn resolve(
                     from_owner: None,
                     args: None,
                     self_arg: false,
+                    hints: Vec::new(),
                     recv: None,
                     byte: u.byte,
                 };

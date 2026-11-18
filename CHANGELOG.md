@@ -237,6 +237,46 @@ All notable changes to this project are documented here. The format is based on
   and the file is unchanged since the build, instead of a line window.
 
 ### Fixed
+- Native engine 0.5.4, the three things 0.5.3 still named as missing. 1,088
+  more edges on the 31 audit repositories and 71 gone, and 1,175 calls moved
+  from one overload to another of the same name:
+  - **Overloads** (Java, Kotlin, Scala, C#, Swift, C++). A call was linked to
+    the first definition of a name; it is now the one that can take the call:
+    by the count of arguments (defaults and varargs counted), the name an
+    argument is passed under (`named(b = "x")`, `retries: 3`, Swift's labels),
+    and the type of each argument the site shows — a literal against `String`
+    / `Int` / `Boolean`, a typed local or a construction against a parameter
+    typed by a class of the project. `addParameter("value", String::class)`
+    no longer lands on `addParameter(parameterSpec)`. Constructors are chosen
+    the same way: Swift `View(frame: f)` and `View(name: "x")` are two
+    constructors (462 calls in alamofire, where the site decided nothing
+    before); a Kotlin primary constructor competes with the secondary ones;
+    an overload marked `@Deprecated` / `[Obsolete]` gives way to one that is
+    not. Kotlin annotations with arguments (`@Deprecated("old")`) are read as
+    the decorators they are (303 references).
+  - **The receiver or the class around.** Where a lambda's receiver and the
+    class around both have a method of the name, the arguments' types decide
+    (`buildCodeString { emit(this) }` passes a `CodeWriter`, which only the
+    outer `emit` takes); the guess remains for the calls they do not.
+  - **Results that are type parameters.** A method returning the type
+    parameter its type binds to itself (`tag(x): T` in `Taggable<T :
+    Taggable<T>>`) returns the type it was called on. A local assigned a call
+    handed a type (`retrofit.create(Service::class.java)`, `mock<Foo>()`,
+    `sp.GetRequiredService<IFoo>()`) is that type, when the function returns
+    its own type parameter or is a library's and not named like a wrapper
+    (`listOf<Foo>()`).
+  - **Kotlin `expect` / `actual`**: of the declarations of one extension, one
+    per source set, the nearest to the caller, where several candidates used
+    to mean none.
+  - **Untyped receivers in Ruby and Swift.** A method named on a parameter or
+    untyped local is linked (`INFERRED`) when no other type answers to the
+    name: no property or field of it, no `attr_reader` / `Struct.new` member /
+    delegator, and not a name of the core library (`shift`, `gsub`,
+    `sorted`). `env.needs_body?` is found; `env.status`, which a struct and a
+    class both answer, is not guessed.
+
+  The audit on graphs rebuilt by 0.5.4 raises nothing but its note on orphan
+  nodes; the 31 builds take 14.6 to 15 s (14.2 s with 0.5.3).
 - Native engine 0.5.3, what 0.5.2 still lacked. 1,859 more edges on the 31
   audit repositories (calls 41,063 to 42,408), 121 gone, most of those a
   local taken for a function of its name:

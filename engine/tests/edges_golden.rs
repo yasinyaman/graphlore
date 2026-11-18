@@ -660,3 +660,116 @@ fn the_receiver_comes_before_the_class_around() {
     // `also` passes the value as `it`: the lambda has no receiver
     assert_eq!(of(".also()"), ["a_maker_indent"], "{got:#?}");
 }
+
+#[test]
+fn an_overload_is_the_one_the_arguments_are_for() {
+    // by a literal's kind, an argument's type (a subclass counts), the count
+    // with defaults and varargs, and the name an argument is passed under
+    let got = call_ids("overloads", &[
+        ("A.java", "class Shape {}\nclass Circle extends Shape {}\nclass Painter {\n  void draw(String name) {}\n  void draw(int count) {}\n  void draw(Shape s) {}\n  void draw(Shape s, int times) {}\n  void draw(String fmt, Object... args) {}\n  Painter(String title) {}\n  Painter(Shape seed) {}\n}\nclass Use {\n  void byString(Painter p) { p.draw(\"x\"); }\n  void byNumber(Painter p) { p.draw(3); }\n  void byObject(Painter p) { Circle c = new Circle(); p.draw(c); }\n  void byCount(Painter p, Shape s) { p.draw(s, 2); }\n  void varargs(Painter p) { p.draw(\"%s %s\", 1, 2); }\n  void ctorS() { new Painter(\"t\"); }\n  void ctorO(Circle c) { new Painter(c); }\n}\n"),
+        ("b.kt", "package app\nclass TypeName\nclass KClassish\nclass Builder {\n    fun returns(t: TypeName, kdoc: String = \"\"): Builder = this\n    fun returns(t: KClassish, kdoc: String = \"\"): Builder = this\n    fun returns(t: KClassish, kdoc: String, vararg args: Any): Builder = this\n    fun named(a: Int = 0, b: String = \"\"): Builder = this\n    fun named(c: Boolean): Builder = this\n}\nfun byType(b: Builder, t: TypeName) { b.returns(t) }\nfun byOther(b: Builder) { val k = KClassish(); b.returns(k) }\nfun byName(b: Builder) { b.named(b = \"x\") }\nfun byBool(b: Builder) { b.named(true) }\n"),
+        ("c.swift", "struct Frame {}\nstruct View {\n    init(frame: Frame) {}\n    init(name: String) {}\n    func add(_ v: View) {}\n    func add(named n: String) {}\n}\nfunc a() { let v = View(name: \"x\"); v.add(named: \"y\") }\nfunc b(f: Frame, w: View) { let v = View(frame: f); v.add(w) }\n"),
+        ("d.cs", "namespace App;\npublic class Req {}\npublic class Client {\n    public void Send(string url) {}\n    public void Send(Req r) {}\n    public void Send(Req r, int retries = 1) {}\n}\npublic class U {\n    public void S(Client c) { c.Send(\"u\"); }\n    public void R(Client c, Req r) { c.Send(r); }\n    public void N(Client c, Req r) { c.Send(r, retries: 3); }\n}\n"),
+    ]);
+    for (from, to) in [
+        (".byString()", "a_painter_draw"),
+        (".byNumber()", "a_painter_draw_2"),
+        (".byObject()", "a_painter_draw_3"),
+        (".byCount()", "a_painter_draw_4"),
+        (".varargs()", "a_painter_draw_5"),
+        (".ctorS()", "a_painter_painter"),
+        (".ctorO()", "a_painter_painter_2"),
+        ("byType()", "b_builder_returns"),
+        ("byOther()", "b_builder_returns_2"),
+        ("byName()", "b_builder_named"),
+        ("byBool()", "b_builder_named_2"),
+        ("a()", "c_view_init_2"),
+        ("a()", "c_view_add_2"),
+        ("b()", "c_view_init"),
+        ("b()", "c_view_add"),
+        (".S()", "d_client_send"),
+        (".R()", "d_client_send_2"),
+        (".N()", "d_client_send_3"),
+    ] {
+        assert!(got.contains(&(from.to_string(), to.to_string())), "{from} -> {to}: {got:#?}");
+    }
+    // and no other overload of the name from the same caller
+    for (from, to) in &got {
+        let stem =
+            |id: &str| id.trim_end_matches(|c: char| c == '_' || c.is_ascii_digit()).to_string();
+        let same: Vec<_> = got.iter().filter(|(f, t)| f == from && stem(t) == stem(to)).collect();
+        assert_eq!(same.len(), 1, "{from}: {same:?}");
+    }
+}
+
+#[test]
+fn a_result_that_is_a_type_parameter() {
+    let got = edges("generic-results", &[
+        // `tag` returns the type parameter its interface binds to itself:
+        // the builder it was called on
+        ("a.kt", "package app\n\ninterface Taggable<out T : Taggable<T>> {\n    fun tag(x: Any): T = TODO()\n}\nclass Builder : Taggable<Builder> {\n    fun addMember(s: String): Builder = this\n}\nfun make(): Builder = Builder()\nfun chain() {\n    val b = make().tag(\"x\")\n    b.addMember(\"m\")\n    make().tag(\"y\").addMember(\"n\")\n}\n"),
+        // a call handed a type gives it, when it returns its own type parameter
+        ("b.kt", "package app\n\nclass Retrofit {\n    fun <T> create(service: Class<T>): T = TODO()\n    inline fun <reified T> make(): T = TODO()\n    fun <T> listOfThem(service: Class<T>): List<T> = TODO()\n}\ninterface Service { fun body(): String }\ninterface Empty { fun nothing() }\ninterface Sized { fun size(): Int }\nfun generic(retrofit: Retrofit) {\n    val example = retrofit.create(Service::class.java)\n    example.body()\n    val e = retrofit.make<Empty>()\n    e.nothing()\n}\nfun wrapped(retrofit: Retrofit) {\n    val many = retrofit.listOfThem(Sized::class.java)\n    many.size()\n    val more = listOf<Sized>()\n    more.size()\n}\n"),
+        // a function of a library, handed a type
+        ("c.cs", "namespace App;\npublic interface IFoo { void Run(); }\npublic class U {\n    public void M(System.IServiceProvider sp) {\n        var s = sp.GetRequiredService<IFoo>();\n        s.Run();\n    }\n}\n"),
+        // `expect` / `actual`: one declaration per source set, the nearest
+        ("common/Text.kt", "package text\nexpect fun String.shout(): String\n"),
+        ("jvm/Text.kt", "package text\nactual fun String.shout(): String = this\n"),
+        ("js/Text.kt", "package text\nactual fun String.shout(): String = this\n"),
+        ("jvm/Use.kt", "package text\nfun useJvm(s: String) = s.shout()\n"),
+    ]);
+    has(
+        &got,
+        &[
+            ("chain()", "calls", ".addMember()"),
+            ("generic()", "calls", ".body()"),
+            ("generic()", "calls", ".nothing()"),
+            (".M()", "calls", ".Run()"),
+            ("useJvm()", "calls", "shout()"),
+        ],
+    );
+    assert!(!got.contains(&("wrapped()".into(), "calls".into(), ".size()".into())), "{got:#?}");
+}
+
+#[test]
+fn an_untyped_ruby_receiver_and_the_names_it_may_be_asked() {
+    let got = edges("ruby-untyped", &[(
+        "lib/far.rb",
+        "class Env < Struct.new(:status, :body)\n  def needs_body?; end\nend\nclass Response\n  attr_reader :headers\n  def status; end\n  def finished?; end\n  def shift; end\nend\nclass Request\n  def headers; end\nend\nclass Adapter\n  def call(env, res, list)\n    env.needs_body?\n    res.finished?\n    env.status\n    res.headers\n    list.shift\n  end\nend\n",
+    )]);
+    has(
+        &got,
+        &[
+            // only one type has a method of the name
+            (".call()", "calls", ".needs_body?()"),
+            (".call()", "calls", ".finished?()"),
+        ],
+    );
+    // `status` is a member of the struct too, `headers` an attribute of
+    // another class, `shift` what every array answers to
+    for name in [".status()", ".headers()", ".shift()"] {
+        assert!(
+            !got.contains(&(".call()".into(), "calls".into(), name.into())),
+            "{name}: {got:#?}"
+        );
+    }
+}
+
+#[test]
+fn kotlin_constructors_primary_secondary_and_deprecated() {
+    let got = call_ids("kotlin-ctors", &[(
+        "a.kt",
+        "package app\n\nclass Name internal constructor(names: List<String>, nullable: Boolean = false) {\n  @Deprecated(\"old\", level = DeprecationLevel.HIDDEN)\n  public constructor(packageName: String, simpleName: String, vararg simpleNames: String) :\n    this(listOf(packageName, simpleName, *simpleNames))\n\n  public constructor(packageName: String, vararg simpleNames: String) :\n    this(listOf(packageName, *simpleNames))\n\n  public constructor(packageName: String, simpleNames: List<String>) :\n    this(mutableListOf(packageName))\n}\nfun two() { Name(\"a\", \"b\") }\nfun flag() { Name(listOf(\"a\"), true) }\n",
+    )]);
+    let ctors = |from: &str| -> Vec<&str> {
+        got.iter()
+            .filter(|(s, t)| s == from && t.contains("constructor"))
+            .map(|(_, t)| t.as_str())
+            .collect()
+    };
+    // two strings: the vararg constructor that is not deprecated
+    assert_eq!(ctors("two()"), ["a_name_constructor_2"], "{got:#?}");
+    // a flag second: only the primary constructor takes one, and it is the
+    // class's header, no definition of its own
+    assert!(ctors("flag()").is_empty(), "{got:#?}");
+}
