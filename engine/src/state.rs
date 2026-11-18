@@ -386,6 +386,7 @@ impl State {
             self_arg: false,
             hints: Vec::new(),
             implicit: None,
+            targs: 0,
             recv: None,
             byte: n.start_byte(),
         });

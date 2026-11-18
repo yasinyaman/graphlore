@@ -259,6 +259,12 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- Native engine 0.5.23, **the type arguments a call writes say which
+  overload it is of** (C#, Java): `client.Get<User>(id)` is the callable
+  that declares one type parameter, and a call that writes none, between a
+  callable and its generic twin of the same parameters, is the plain one.
+  In restsharp 81 tied targets are gone and 27 calls left with one target
+  are `EXTRACTED`; overloads that take different things stay tied.
 - Native engine 0.5.22, declared types and three lookups. On the 31 audit
   repositories: 249 calls and 150 reads and writes gained, 513 calls
   `INFERRED` → `EXTRACTED`, 9 calls gone; the share of `INFERRED` calls

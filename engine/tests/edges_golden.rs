@@ -1596,3 +1596,32 @@ fn types_a_declaration_writes_and_the_overload_a_chain_asks_for() {
         "{got:#?}"
     );
 }
+
+#[test]
+fn a_call_with_type_arguments_is_of_the_generic_callable() {
+    // `c.Get<int>(r)` writes a type argument: the callable that declares
+    // one. `c.Get(r)` writes none, and between `Get(Request)` and its
+    // generic twin of the same parameters the plain one is called. Where the
+    // parameters differ, in their type arguments too, the arguments decide
+    // as before, or nothing does
+    let got = calls_conf("generictwins", &[(
+        "Calls.cs",
+        "class Request {}\n\nclass Client {\n    public int Get(Request r) => 1;\n    public T Get<T>(Request r) => default;\n    public T Get<T>(string resource) => default;\n}\n\nclass Fixture {\n    public Task<T> Send<T>(IRequest<T> request) => null;\n    public Task Send(IRequest request) => null;\n}\n\nclass Use {\n    void Plain(Client c, Request r) {\n        c.Get(r);\n    }\n\n    void Generic(Client c, Request r) {\n        c.Get<int>(r);\n    }\n\n    void ByName(Client c) {\n        c.Get<int>(\"x\");\n    }\n\n    void Either(Fixture f, Request r) {\n        f.Send(r);\n    }\n}\n",
+    )]);
+    let from = |label: &str| -> Vec<(&str, &str)> {
+        got.iter()
+            .filter(|(from, _, _)| from == label)
+            .map(|(_, to, conf)| (to.as_str(), conf.as_str()))
+            .collect()
+    };
+    assert_eq!(from(".Plain()"), [("calls_client_get", "EXTRACTED")], "{got:#?}");
+    assert_eq!(from(".Generic()"), [("calls_client_get_2", "EXTRACTED")], "{got:#?}");
+    assert_eq!(from(".ByName()"), [("calls_client_get_3", "EXTRACTED")], "{got:#?}");
+    // (`Send<T>(IRequest<T>)` and `Send(IRequest)` take different things:
+    // the argument's type would say which, and the walk does not know it)
+    assert_eq!(
+        from(".Either()"),
+        [("calls_fixture_send", "INFERRED"), ("calls_fixture_send_2", "INFERRED")],
+        "{got:#?}"
+    );
+}

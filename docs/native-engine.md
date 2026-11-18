@@ -166,6 +166,14 @@ What the lookup takes from each language's own rules:
   to what it wraps: that the project has one `evaluate` says the caller is
   it, not the callee. A typed receiver, `self` and a tie between overloads
   are not guesses and keep their edge.
+- **The type arguments a call writes** (C#, Java). `client.Get<User>(id)`
+  is of a callable that declares as many type parameters; one that
+  declares none, or another number, cannot be meant. A call that writes
+  none says nothing by that (they may be inferred), but between a callable
+  and its generic twin of the very same parameters, as written, the plain
+  one is called: that is the languages' own tie-break, and the twin is the
+  one called with its argument written. `Send<T>(IRequest<T>)` beside
+  `Send(IRequest)` are no twins.
 - **The type a declaration writes comes first.** A variable, field or
   property declared with a type is of that type whatever it is assigned:
   Go `var rooms *Manager` set in an `init`, Kotlin `val kind: Kind =
@@ -729,7 +737,7 @@ file pairs). The native graph has definitions graphify folds into the one
 around them (a function nested in a method, the setter beside a getter of the
 same name); an edge from one of those is compared as an edge from the paired
 definition it belongs to, as graphify records it. On the 31 repositories of the
-[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.22,
+[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.23,
 measured 2026-11-18), as native / graphify edges and the share of graphify's
 that the native graph has too:
 
@@ -796,6 +804,18 @@ two edges of got are gone that named a function defined in another loop
 for a destructured loop variable of the same name. The maps of these
 repositories that hold project types are mostly looked up by key once, or
 not walked at all.
+Engine 0.5.23 (the type arguments a call writes) changes restsharp only,
+and only which of several overloads a call is linked to: 81 targets are
+gone and 27 calls that are left with one are `EXTRACTED`.
+`_client.GetAsync<TestClass>(new RestRequest())` was linked to
+`GetAsync(RestRequest, …)` as well as to `GetAsync<T>(RestRequest, …)`,
+`client.ExecutePostAsync(request, cancellationToken)` to the generic one
+too, and `client.PostJsonAsync<TRequest, TResponse>(resource, request)` to
+the overload with one type parameter. The table above
+pairs edges by the labels of their ends, which overloads share, so it does
+not move. aspnetcore-realworld's `SendAsync<TResponse>(IRequest<TResponse>)`
+beside `SendAsync(IRequest)` stays a tie: the two take different things,
+and only the argument's type would say which.
 Engine 0.5.22 (the type a declaration writes, the overload a chain asks
 for, a field before a function of its name, C# namespaces around) adds
 249 calls (142 `EXTRACTED`) and 150 reads and writes, turns 513 calls from
@@ -995,8 +1015,9 @@ Reading a sample of each side's edges the other lacks, per language:
   method name is guessed by, a short or common one (`app.use`, `app.set`)
   is left; whether `items.ForEach(…)` is `List<T>`'s own or a project
   extension for `IEnumerable<T>` when `items` is a library type; and which
-  of a generic and a plain overload a call without type arguments is
-  (`client.GetAsync(request)` beside `GetAsync<T>(…)`): each is linked,
+  of a generic and a plain overload a call without type arguments is when
+  the two take different things (`SendAsync(query)` beside
+  `SendAsync<T>(IRequest<T>)` and `SendAsync(IRequest)`): each is linked,
   `INFERRED`.
 - **What only the native graph has** is mostly what a name lookup by itself
   cannot see: calls through a module object (`httpx.Response(...)`), through a
@@ -1021,7 +1042,7 @@ builds take 13.3 s for the 31 repositories against graphify's 81.3 s
 faster of two clean builds each): 8.7 times faster at the median, from 2.1
 (todoapi, whose bundled JavaScript the native engine reads in full) to 17.2
 times; retrofit 2.9 s against 13.1 s, guzzle 0.9 s / 6.1 s, alamofire 1.2 s /
-5.4 s, got 0.9 s / 4.7 s (engine 0.5.1; with all that 0.5.19 resolves the same
+5.4 s, got 0.9 s / 4.7 s (engine 0.5.1; with all that 0.5.23 resolves the same
 31 builds take 16.3 to 18.9 s through Python, 16.1 to 18.1 s in the engine alone, retrofit 3.7 to 4.1 s). An update after a one-file change takes a third of
 a build ([above](#incremental-updates)).
 
@@ -1115,7 +1136,7 @@ but one convention finding, fixed since: `graphlore_surprises(limit=0)` cut its
 `shared_state` list without saying how much (`shared_state_left_out` does now).
 `SKELETON-EMPTY` went from 5 to 0, and the tool time stayed at 131 s.
 
-Rerun on graphs built by engine 0.5.3, and again by 0.5.4 through 0.5.21
+Rerun on graphs built by engine 0.5.3, and again by 0.5.4 through 0.5.22
 (2026-11-18), the audit raises nothing on the native graphs but its
 `GRAPH-ORPHAN-NODES` note on 19 of them; 115 to 159 s of tool time (on the 0.5.7 run, retrofit's build through `graphlore_build` took 5.1 s and was reported `SLOW` for crossing 5 s). What the table above still listed is
 gone:

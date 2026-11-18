@@ -1609,6 +1609,26 @@ impl<'a> Project<'a> {
         }
     }
 
+    /// Whether a call's written type arguments are read for `c`'s language
+    /// (C#, Java), so that a count of them says which callable is meant.
+    fn writes_type_arguments(&self, c: DefRef) -> bool {
+        use crate::lang::Lang;
+        matches!(self.files[c.0].lang, Some(Lang::CSharp | Lang::Java))
+    }
+
+    /// Whether two callables take the same parameters as written: they
+    /// differ in their type parameters alone (`Get(Request r)` beside
+    /// `Get<T>(Request r)`).
+    fn same_parameters(&self, a: DefRef, b: DefRef) -> bool {
+        let (x, y) = (&self.def(a).plist, &self.def(b).plist);
+        // (`IRequest<TResponse>` is not `IRequest`: the type as written,
+        // type arguments and all)
+        x.len() == y.len()
+            && x.iter().zip(y).all(|(p, q)| {
+                !p.written.is_empty() && p.written == q.written && p.variadic == q.variadic
+            })
+    }
+
     /// Whether `c` is a member of a C# 14 `extension(T x) { … }` block: the
     /// grammar reads the block as a constructor named `extension`.
     fn in_extension_block(&self, c: DefRef) -> bool {
@@ -1638,6 +1658,15 @@ impl<'a> Project<'a> {
             }
             _ => &def.plist[..],
         };
+        // type arguments written at the call (`client.Get<User>(id)`) are
+        // for a callable that declares as many type parameters; a call that
+        // writes none says nothing (they may be inferred)
+        if r.targs > 0
+            && self.writes_type_arguments(c)
+            && def.type_params.len() != usize::from(r.targs)
+        {
+            return None;
+        }
         let variadic = plist.iter().any(|x| x.variadic);
         if let Some(a) = r.args.map(usize::from) {
             let required = plist.iter().filter(|x| !x.optional && !x.variadic).count();
@@ -1993,6 +2022,21 @@ impl<'a> Project<'a> {
         let mut best = self.exact_first(self.top_fits(&fits), r);
         if best.is_empty() {
             return vec![m];
+        }
+        // a call that writes no type arguments, between a callable and its
+        // generic twin of the same parameters: the plain one (C# and Java
+        // prefer it; the generic one is called with its argument written)
+        if r.targs == 0 && best.len() > 1 && self.writes_type_arguments(m) {
+            let plain: Vec<DefRef> =
+                best.iter().copied().filter(|c| self.def(*c).type_params.is_empty()).collect();
+            let twins = !plain.is_empty()
+                && best.iter().all(|c| {
+                    self.def(*c).type_params.is_empty()
+                        || plain.iter().any(|p| self.same_parameters(*p, *c))
+                });
+            if twins && plain.len() < best.len() {
+                best = plain;
+            }
         }
         if let Some(at) = best.iter().position(|c| *c == m) {
             best.swap(0, at);
@@ -5762,6 +5806,7 @@ pub fn resolve(
                     self_arg: false,
                     hints: Vec::new(),
                     implicit: None,
+                    targs: 0,
                     recv: None,
                     byte: u.byte,
                 };
