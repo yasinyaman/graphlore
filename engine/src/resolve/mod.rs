@@ -17,6 +17,7 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 use serde_json::{json, Value};
 
@@ -170,6 +171,121 @@ impl Confidence {
             Confidence::Inferred => 0.55,
         }
     }
+}
+
+/// Members of the strings, collections and promises every language has: a
+/// use of one says nothing of what type a value is.
+const CORE_MEMBERS: &[&str] = &[
+    "append",
+    "extend",
+    "items",
+    "keys",
+    "values",
+    "get",
+    "set",
+    "pop",
+    "push",
+    "length",
+    "map",
+    "filter",
+    "forEach",
+    "reduce",
+    "then",
+    "catch",
+    "finally",
+    "toString",
+    "split",
+    "join",
+    "strip",
+    "lower",
+    "upper",
+    "format",
+    "update",
+    "add",
+    "remove",
+    "find",
+    "indexOf",
+    "includes",
+    "slice",
+    "concat",
+    "sort",
+    "reverse",
+    "size",
+    "count",
+    "isEmpty",
+    "contains",
+    "equals",
+    "hashCode",
+    "iterator",
+    "next",
+    "to_string",
+    "clone",
+    "unwrap",
+    "len",
+    "iter",
+    "into",
+    "as_ref",
+    "copy",
+    "clear",
+    "insert",
+    "delete",
+    "has",
+    "entries",
+    "trim",
+    "replace",
+    "startsWith",
+    "endsWith",
+    "substring",
+    "charAt",
+    "toLowerCase",
+    "toUpperCase",
+    "encode",
+    "decode",
+    "first",
+    "last",
+    "isNotEmpty",
+    "also",
+    "let",
+    "apply",
+    "run",
+    "hash",
+    "compareTo",
+    "getClass",
+    "wait",
+    "notify",
+    "ToString",
+    "Equals",
+    "GetHashCode",
+    "GetType",
+    "Count",
+    "Length",
+    "Add",
+    "Remove",
+    "Contains",
+    "Select",
+    "Where",
+    "Any",
+    "All",
+    "First",
+    "Last",
+    "startswith",
+    "endswith",
+    "isdigit",
+    "splitlines",
+    "setdefault",
+    "index",
+    "call",
+    "bind",
+];
+
+/// Whether a member name is one the language's own values answer to.
+fn is_core_member(fam: Family, name: &str) -> bool {
+    CORE_MEMBERS.contains(&name)
+        || match fam {
+            Family::Ruby => RUBY_CORE_METHODS.contains(&name),
+            Family::Swift => SWIFT_CORE_METHODS.contains(&name),
+            _ => false,
+        }
 }
 
 /// Methods of Ruby's core objects (String, Array, Hash, Object): a project
@@ -371,6 +487,42 @@ const SWIFT_CORE_METHODS: &[&str] = &[
     "write",
 ];
 
+/// Methods of a collection that give one of its elements.
+const ELEMENT_ACCESSORS: &[&str] = &[
+    "first",
+    "last",
+    "get",
+    "single",
+    "next",
+    "pop",
+    "peek",
+    "poll",
+    "firstOrNull",
+    "lastOrNull",
+    "singleOrNull",
+    "elementAt",
+    "random",
+    "getOrNull",
+    "removeFirst",
+    "removeLast",
+    "First",
+    "Last",
+    "Single",
+    "FirstOrDefault",
+    "LastOrDefault",
+    "SingleOrDefault",
+    "ElementAt",
+    "shift",
+    "sample",
+    "front",
+    "back",
+    "at",
+    "removeAt",
+    "min",
+    "max",
+    "orElseThrow",
+];
+
 /// Words in the name of a generic function that returns something built
 /// around the type it is given, not a value of it.
 const WRAPPERS_OF_WHAT_THEY_ARE_GIVEN: &[&str] = &[
@@ -410,6 +562,10 @@ enum Prim {
     Str,
     Num,
     Bool,
+    /// A class handed over as a value: `Class<T>`, `KClass<T>`, `Type`.
+    Class,
+    /// Something to call: a function type, `Runnable`, `Action`, `Func`.
+    Func,
     /// Anything: `Any`, `Object`, a type parameter.
     Any,
 }
@@ -426,6 +582,10 @@ fn primitive(name: &str) -> Option<Prim> {
         | "isize" | "i32" | "i64" | "u32" | "u64" | "u8" | "f32" | "f64" | "CGFloat"
         | "TimeInterval" | "BigDecimal" | "BigInteger" | "size_t" => Prim::Num,
         "Boolean" | "boolean" | "bool" | "Bool" => Prim::Bool,
+        "Class" | "KClass" | "Type" | "KType" => Prim::Class,
+        "Function" | "Runnable" | "Callable" | "Supplier" | "Consumer" | "Predicate" | "Action"
+        | "Func" | "BiFunction" | "BiConsumer" | "Closure" | "Function0" | "Function1"
+        | "Function2" => Prim::Func,
         "Any" | "Object" | "object" | "dynamic" | "any" | "unknown" | "AnyObject" | "id"
         | "Comparable" | "Serializable" | "var" | "auto" => Prim::Any,
         // a type parameter by convention: `T`, `R`, `E`, `TResult`
@@ -433,6 +593,9 @@ fn primitive(name: &str) -> Option<Prim> {
         _ => return None,
     })
 }
+
+/// `(definition, name)` -> the member names used on that name there.
+type UsedOn = HashMap<(usize, String), Vec<(String, bool)>>;
 
 /// A type worked out for something, and how surely.
 type Typed = Option<(DefRef, Confidence)>;
@@ -641,6 +804,16 @@ pub struct Project<'a> {
     recv: RefCell<Option<(usize, u16)>>,
     /// Names some type answers to without defining them (`FileFacts::attrs`).
     attrs: HashSet<(Family, String)>,
+    /// The types that declare a name without defining it (`Def::attrs`).
+    attr_owners: HashMap<(Family, String), Vec<DefRef>>,
+    /// Per file: the member names used on each name, per definition.
+    used_on: RefCell<HashMap<usize, Rc<UsedOn>>>,
+    /// What `structural_type` found for a local: `(file, definition, name)`.
+    structural: RefCell<HashMap<(usize, usize, String), Option<DefRef>>>,
+    /// The types of locals already worked out: `(file, index of the local)`.
+    local_types: RefCell<HashMap<(usize, usize), Typed>>,
+    /// The locals whose type is being worked out: `(file, index of the local)`.
+    typing: RefCell<HashSet<(usize, usize)>>,
     /// The use being resolved, when it is a call: `(file, index of the use)`.
     cur: RefCell<Option<(usize, usize)>>,
     /// How many arguments the call being resolved passes.
@@ -731,6 +904,11 @@ impl<'a> Project<'a> {
             calling: RefCell::new(false),
             recv: RefCell::new(None),
             attrs: HashSet::new(),
+            attr_owners: HashMap::new(),
+            used_on: RefCell::new(HashMap::new()),
+            structural: RefCell::new(HashMap::new()),
+            local_types: RefCell::new(HashMap::new()),
+            typing: RefCell::new(HashSet::new()),
             cur: RefCell::new(None),
             args: RefCell::new(None),
             self_arg: RefCell::new(false),
@@ -763,6 +941,11 @@ impl<'a> Project<'a> {
                 self.attrs.extend(f.attrs.iter().map(|a| (fam, a.clone())));
             }
             for (di, d) in f.defs.iter().enumerate() {
+                if let Some(fam) = fam {
+                    for a in &d.attrs {
+                        self.attr_owners.entry((fam, a.clone())).or_default().push((fi, di));
+                    }
+                }
                 // a class with no name of its own answers to none
                 if d.anonymous {
                     continue;
@@ -864,6 +1047,12 @@ impl<'a> Project<'a> {
         d: Option<usize>,
         path: &[String],
     ) -> Option<(DefRef, Confidence)> {
+        // an element of a collection: `xs[]`
+        if let Some((last, of)) = path.split_last() {
+            if last == crate::refs::ELEMENT {
+                return self.elem_of(f, d, of);
+            }
+        }
         let found = self.resolve_path(f, d, path, true);
         match found? {
             (Target::Def(r), conf) => {
@@ -970,7 +1159,16 @@ impl<'a> Project<'a> {
             Arg::Str => literal(Prim::Str),
             Arg::Num => literal(Prim::Num),
             Arg::Bool => literal(Prim::Bool),
-            Arg::Unknown | Arg::Null | Arg::Func => Some(0),
+            Arg::Class => literal(Prim::Class),
+            // a lambda is something to call: no string, number, flag or
+            // class (it may be an interface of one method, which a class of
+            // the project can be)
+            Arg::Func => match prim {
+                Some(Prim::Func) => Some(1),
+                Some(Prim::Any) | None => Some(0),
+                Some(_) => None,
+            },
+            Arg::Unknown | Arg::Null => Some(0),
             Arg::Path(path) => {
                 let at = if path.len() == 1 && path[0] == "self" {
                     // `this` in a lambda with a receiver is the receiver
@@ -979,15 +1177,20 @@ impl<'a> Project<'a> {
                         .map(|(t, _)| t)
                         .or_else(|| self.class_of(f, d))
                 } else {
-                    self.type_of_path(f, d, path, false)
+                    self.value_type_of(f, d, path)
                 };
+                // a field, a property or a constant: the type it is declared
+                // with, or its value's
+                let held = if at.is_none() { self.state_of(f, d, path) } else { None };
+                let at = at.or_else(|| held.and_then(|p| self.held_type(p)));
                 let Some(at) = at else {
                     // no type of the project: the type the source writes for
                     // the name still says a string from a number, and whether
                     // it is the parameter's own
                     let written = (path.len() == 1)
                         .then(|| self.local_written_type(f, d, &path[0]))
-                        .flatten();
+                        .flatten()
+                        .or_else(|| held.and_then(|p| self.written_field_type(p)));
                     return match written {
                         Some(w) if w.eq_ignore_ascii_case(name) => Some(1),
                         Some(w) => match (primitive(&w), prim) {
@@ -1006,18 +1209,69 @@ impl<'a> Project<'a> {
                     Some(_) => None,
                     None => match self.param_type(c, ty) {
                         Some(pt) if pt == at || self.is_a(at, pt, 6) => Some(2),
-                        Some(_) => None,
-                        None => Some(0),
+                        // not one of its bases: no fit, where a type's
+                        // bases are all written on it. A Swift protocol can
+                        // be conformed to in an extension elsewhere, and a
+                        // C++ class converts through a constructor
+                        Some(pt) if self.bases_are_written(pt) => None,
+                        Some(_) | None => Some(0),
                     },
                 }
             }
         }
     }
 
+    /// The field, property, variable or constant a path names, if it names one.
+    fn state_of(&self, f: usize, d: Option<usize>, path: &[String]) -> Option<DefRef> {
+        if path.iter().any(|s| s == "()") {
+            return None;
+        }
+        let recv = self.recv.replace(None);
+        let calling = self.calling.replace(false);
+        let found = self.resolve_path(f, d, path, true);
+        *self.calling.borrow_mut() = calling;
+        *self.recv.borrow_mut() = recv;
+        match found {
+            Some((Target::Def(p), _)) if self.def(p).kind.is_state() => Some(p),
+            _ => None,
+        }
+    }
+
+    /// The project type a field, property or constant holds.
+    fn held_type(&self, p: DefRef) -> Option<DefRef> {
+        let def = self.def(p);
+        let declared = def
+            .declared_type
+            .as_ref()
+            .and_then(|ty| self.type_of_path(p.0, def.parent, ty, true))
+            .filter(|t| self.def(*t).kind.is_class_like());
+        declared.or_else(|| {
+            self.class_of(p.0, def.parent)
+                .and_then(|owner| self.field_type(owner, &def.name, 3))
+                .or_else(|| self.state_type(p))
+                .map(|(t, _)| t)
+        })
+    }
+
+    /// The type a field is declared with, as written (`String`, `Int`).
+    fn written_field_type(&self, p: DefRef) -> Option<String> {
+        self.def(p).declared_type.as_ref()?.last().cloned()
+    }
+
     /// The project type a parameter of `c` is written with.
     fn param_type(&self, c: DefRef, ty: &[String]) -> Option<DefRef> {
         self.type_of_path(c.0, self.def(c).parent, ty, true)
             .filter(|t| self.def(*t).kind.is_class_like())
+    }
+
+    /// Whether every type that is a `base` says so where it is declared, so
+    /// that one that does not is not one.
+    fn bases_are_written(&self, base: DefRef) -> bool {
+        match self.family[base.0] {
+            Some(Family::Jvm | Family::CSharp) => true,
+            Some(Family::Swift) => self.def(base).kind != DefKind::Interface,
+            _ => false,
+        }
     }
 
     /// Whether type `t` has `base` among its bases.
@@ -1061,6 +1315,25 @@ impl<'a> Project<'a> {
         }
     }
 
+    /// Of candidates that fit alike, those that take exactly the arguments
+    /// passed, before those that need a default or a vararg to.
+    fn exact_first(&self, best: Vec<DefRef>, r: &RefFact) -> Vec<DefRef> {
+        let Some(a) = r.args.map(usize::from) else { return best };
+        let exact: Vec<DefRef> = best
+            .iter()
+            .copied()
+            .filter(|c| {
+                let pl = &self.def(*c).plist;
+                self.def(*c).params.is_some() && pl.len() == a && !pl.iter().any(|x| x.variadic)
+            })
+            .collect();
+        if exact.is_empty() {
+            best
+        } else {
+            exact
+        }
+    }
+
     /// Whether a definition carries `@Deprecated` / `[Obsolete]` / `#[deprecated]`.
     fn deprecated(&self, c: DefRef) -> bool {
         self.files[c.0].refs.iter().any(|r| {
@@ -1089,32 +1362,63 @@ impl<'a> Project<'a> {
             })
             .collect();
         out.sort();
+        // and those a base adds under the name: with other parameters (one
+        // with the same is overridden, not another overload)
+        let shape = |r: DefRef| -> Vec<String> {
+            self.def(r).plist.iter().map(|x| x.ty.last().cloned().unwrap_or_default()).collect()
+        };
+        if let Some(c) =
+            d.parent.map(|par| (m.0, par)).filter(|c| self.def(*c).kind.is_class_like())
+        {
+            let mut seen: Vec<DefRef> = vec![c];
+            let mut queue = self.bases(c);
+            while let Some(b) = queue.pop() {
+                if seen.contains(&b) || seen.len() > 8 {
+                    continue;
+                }
+                seen.push(b);
+                for x in self.members(b, &d.name) {
+                    let def = self.def(x);
+                    if def.kind.is_callable()
+                        && !def.decl_only
+                        && !out.iter().any(|o| shape(*o) == shape(x))
+                    {
+                        out.push(x);
+                    }
+                }
+                queue.extend(self.bases(b));
+            }
+        }
         out
     }
 
     /// Of the overloads of `m`, the one the call `r` can be of: the only one
     /// that takes its arguments, else the one whose parameters are their
     /// types. `m` when that does not decide.
-    fn pick_overload(&self, f: usize, d: Option<usize>, m: DefRef, r: &RefFact) -> DefRef {
+    ///
+    /// When several fit alike, all of them (at most four, the one found
+    /// first): the call is of one of them, and the facts do not say which.
+    fn pick_overload(&self, f: usize, d: Option<usize>, m: DefRef, r: &RefFact) -> Vec<DefRef> {
         // where one name can have several definitions at once; elsewhere a
         // second definition replaces the first
         if !self.family[m.0].is_some_and(Family::overloads) {
-            return m;
+            return vec![m];
         }
         let all = self.overloads(m);
         if all.len() < 2 {
-            return m;
+            return vec![m];
         }
         let fits: Vec<(DefRef, i32)> =
             all.iter().filter_map(|c| self.fit(f, d, *c, r).map(|s| (*c, s))).collect();
-        let best = self.top_fits(&fits);
-        match best.as_slice() {
-            [one] => *one,
-            // several fit alike: the one found, if it is one of them
-            many if many.contains(&m) => m,
-            [first, ..] => *first,
-            [] => m,
+        let mut best = self.exact_first(self.top_fits(&fits), r);
+        if best.is_empty() {
+            return vec![m];
         }
+        if let Some(at) = best.iter().position(|c| *c == m) {
+            best.swap(0, at);
+        }
+        best.truncate(4);
+        best
     }
 
     /// The receiver type of a lambda with one (`FileFacts::receivers`): the
@@ -1216,19 +1520,72 @@ impl<'a> Project<'a> {
         let mut cur = d;
         while let Some(x) = cur {
             if let Some(&li) = self.locals.get(&(f, x, name.to_string())) {
-                let l = &self.files[f].locals[li];
-                if l.path.is_empty() {
+                // typing a local can come back to it (`let session =
+                // session(using: x)`: the value names the local): the second
+                // time round it has no type
+                if let Some(known) = self.local_types.borrow().get(&(f, li)) {
+                    return *known;
+                }
+                // worked out from the top, the answer is the local's own and
+                // is kept; inside another typing it may be cut short
+                let whole = self.typing.borrow().is_empty() && *self.depth.borrow() == 0;
+                if !self.typing.borrow_mut().insert((f, li)) {
                     return None;
                 }
-                let t = self
-                    .type_of_path(f, Some(x), &l.path, l.declared)
-                    .or_else(|| self.given_result(f, x, l))?;
-                let conf = if l.declared { Confidence::Extracted } else { Confidence::Inferred };
-                return Some((t, conf));
+                // a local's type is the same whatever use asks for it: its
+                // value's path is what is called there (`x = f()` -> `f`),
+                // a written type is not
+                let value = !self.files[f].locals[li].declared;
+                let calling = self.calling.replace(value);
+                let recv = self.recv.replace(None);
+                let out = self.local_type_of(f, x, li, name);
+                *self.recv.borrow_mut() = recv;
+                *self.calling.borrow_mut() = calling;
+                self.typing.borrow_mut().remove(&(f, li));
+                if whole {
+                    self.local_types.borrow_mut().insert((f, li), out);
+                }
+                return out;
             }
             cur = defs[x].parent;
         }
         None
+    }
+
+    /// The type of local `li` of definition `x` (see `local_type`).
+    fn local_type_of(
+        &self,
+        f: usize,
+        x: usize,
+        li: usize,
+        name: &str,
+    ) -> Option<(DefRef, Confidence)> {
+        let l = &self.files[f].locals[li];
+        if l.path.is_empty() {
+            // no type written, nothing typeable assigned: the one
+            // type that answers everything asked of it here
+            return self.structural_type(f, x, name).map(|t| (t, Confidence::Inferred));
+        }
+        let t = self
+            .type_of_path(f, Some(x), &l.path, l.declared)
+            .or_else(|| self.given_result(f, x, l))
+            .or_else(|| self.bound_result(f, x, l))
+            .or_else(|| self.accessed(f, x, l));
+        let Some(t) = t else {
+            // a value the walk cannot type, unless it is of a
+            // library's type: the same
+            let external = l.declared
+                || matches!(
+                    l.path.first().and_then(|h| self.resolve_name(f, Some(x), h)),
+                    Some(Target::Ext(_, _))
+                );
+            if external {
+                return None;
+            }
+            return self.structural_type(f, x, name).map(|t| (t, Confidence::Inferred));
+        };
+        let conf = if l.declared { Confidence::Extracted } else { Confidence::Inferred };
+        Some((t, conf))
     }
 
     /// The type of a local assigned a generic call that is handed a type
@@ -1269,6 +1626,119 @@ impl<'a> Project<'a> {
         self.type_of_path(f, Some(d), given, true).filter(|t| self.def(*t).kind.is_class_like())
     }
 
+    /// The type of a value written as an argument: a path typed as a value,
+    /// whatever call is being resolved around it.
+    fn value_type_of(&self, f: usize, d: Option<usize>, path: &[String]) -> Option<DefRef> {
+        let calling = self.calling.replace(false);
+        let out = self.type_of_path(f, d, path, false);
+        *self.calling.borrow_mut() = calling;
+        out
+    }
+
+    /// The type of the elements of what `path` names: a local, parameter or
+    /// field declared as a collection (`xs: List<Foo>`, `Foo[] xs`), or the
+    /// result of a call that declares it returns one.
+    fn elem_of(&self, f: usize, d: Option<usize>, path: &[String]) -> Option<(DefRef, Confidence)> {
+        let typed = |file: usize, scope: Option<usize>, elem: &[String]| {
+            self.type_of_path(file, scope, elem, true)
+                .filter(|t| self.def(*t).kind.is_class_like())
+                .map(|t| (t, Confidence::Extracted))
+        };
+        if let [name] = path {
+            let defs = &self.files[f].defs;
+            let mut cur = d;
+            while let Some(x) = cur {
+                if let Some(&li) = self.locals.get(&(f, x, name.clone())) {
+                    let l = &self.files[f].locals[li];
+                    // a parameter's is on the definition's parameter list
+                    let elem = l.elem.clone().or_else(|| {
+                        defs[x].plist.iter().find(|p| p.name == *name).and_then(|p| p.elem.clone())
+                    });
+                    if let Some(e) = elem {
+                        return typed(f, Some(x), &e);
+                    }
+                    // another name for a collection: `val ys = xs`
+                    let alias = !l.declared
+                        && !l.path.is_empty()
+                        && l.path[0] != *name
+                        && l.path.last().is_some_and(|s| s != crate::refs::ELEMENT);
+                    return if alias {
+                        self.elem_of(f, Some(x), &l.path).map(|(t, _)| (t, Confidence::Inferred))
+                    } else {
+                        None
+                    };
+                }
+                cur = defs[x].parent;
+            }
+        }
+        let recv = self.recv.replace(None);
+        let calling = self.calling.replace(false);
+        let types = self.types_only.replace(false);
+        let called = path.last().is_some_and(|s| s == "()");
+        let found =
+            self.resolve_path(f, d, if called { &path[..path.len() - 1] } else { path }, true);
+        *self.types_only.borrow_mut() = types;
+        *self.calling.borrow_mut() = calling;
+        *self.recv.borrow_mut() = recv;
+        match found {
+            Some((Target::Def(p), _)) => {
+                let def = self.def(p);
+                // a call's result, or a field's own type
+                if def.kind.is_callable() != called && !def.kind.is_state() {
+                    return None;
+                }
+                typed(p.0, def.parent, def.elem.as_ref()?)
+            }
+            _ => None,
+        }
+    }
+
+    /// `val x = xs.first()`: an element of the collection `xs`.
+    fn accessed(&self, f: usize, d: usize, l: &crate::facts::Local) -> Option<DefRef> {
+        let (method, of) = l.path.split_last()?;
+        if of.is_empty() || !ELEMENT_ACCESSORS.contains(&method.as_str()) {
+            return None;
+        }
+        self.elem_of(f, Some(d), of).map(|(t, _)| t)
+    }
+
+    /// The type of a local assigned a call of a function that returns its
+    /// own type parameter, bound by an argument: `fun <T> pick(x: T): T`
+    /// gives the argument's type, `fun <T> head(xs: List<T>): T` its element's.
+    fn bound_result(&self, f: usize, d: usize, l: &crate::facts::Local) -> Option<DefRef> {
+        if l.value_args.is_empty() {
+            return None;
+        }
+        let recv = self.recv.replace(None);
+        let callee = self.resolve_path(f, Some(d), &l.path, true);
+        *self.recv.borrow_mut() = recv;
+        let Some((Target::Def(c), _)) = callee else { return None };
+        let def = self.def(c);
+        if !def.kind.is_callable() {
+            return None;
+        }
+        let ret = self.files[c.0].refs.iter().find(|x| {
+            x.from_def == Some(c.1) && x.kind == RefKind::Type && x.context == "return_type"
+        })?;
+        let [t] = ret.path.as_slice() else { return None };
+        if !def.type_params.contains(t) {
+            return None;
+        }
+        for (p, a) in def.plist.iter().zip(&l.value_args) {
+            let crate::facts::Arg::Path(q) = &a.kind else { continue };
+            if a.label.is_some() {
+                break;
+            }
+            if p.ty.len() == 1 && p.ty[0] == *t {
+                return self.value_type_of(f, Some(d), q);
+            }
+            if p.elem.as_ref().is_some_and(|e| e.len() == 1 && e[0] == *t) {
+                return self.elem_of(f, Some(d), q).map(|(x, _)| x);
+            }
+        }
+        None
+    }
+
     /// Whether callable `c` declares that it returns a type parameter its
     /// type binds to itself (`fun tag(x: Any): T` in `Builder<T : Builder<T>>`).
     fn returns_self_param(&self, c: DefRef) -> bool {
@@ -1278,6 +1748,100 @@ impl<'a> Project<'a> {
         let Some(ret) = ret.filter(|r| r.path.len() == 1) else { return false };
         self.class_of(c.0, Some(c.1))
             .is_some_and(|o| self.def(o).self_params.contains(&ret.path[0]))
+    }
+
+    /// The member names used on each name in each definition of file `f`.
+    fn used_on(&self, f: usize) -> Rc<UsedOn> {
+        if let Some(known) = self.used_on.borrow().get(&f) {
+            return known.clone();
+        }
+        let mut out: UsedOn = HashMap::new();
+        for r in &self.files[f].refs {
+            let (Some(d), [head, member, ..]) = (r.from_def, r.path.as_slice()) else { continue };
+            if member == "()" || matches!(head.as_str(), "self" | "super" | "()") {
+                continue;
+            }
+            // called there, or only read
+            let called = r.path.len() == 2 && matches!(r.kind, RefKind::Call);
+            let names = out.entry((d, head.clone())).or_default();
+            match names.iter_mut().find(|(n, _)| n == member) {
+                Some(known) => known.1 |= called,
+                None => names.push((member.clone(), called)),
+            }
+        }
+        let out = Rc::new(out);
+        self.used_on.borrow_mut().insert(f, out.clone());
+        out
+    }
+
+    /// Whether type `c` answers to `name`: a member of its own or of a base,
+    /// or a name it declares without defining (`Def::attrs`).
+    ///
+    /// `called`: the name is called there, which a field does not answer
+    /// (but in Ruby, where reading an attribute is a call).
+    fn answers(&self, c: DefRef, name: &str, called: bool, depth: usize) -> bool {
+        let strict = called && self.family[c.0] != Some(Family::Ruby);
+        self.members(c, name).iter().any(|m| !strict || self.def(*m).kind.is_callable())
+            || self.def(c).attrs.iter().any(|a| a == name)
+            || (depth > 0
+                && self.bases(c).into_iter().any(|b| self.answers(b, name, called, depth - 1)))
+    }
+
+    /// The type of a local nothing in the source types, from what is asked of
+    /// it: the one type of the project that answers every member name used on
+    /// it in its definition. Names the language's own strings and collections
+    /// have say nothing, and two names at least must say something. A guess:
+    /// duck typing writes no type, and a library's type could answer too.
+    fn structural_type(&self, f: usize, d: usize, name: &str) -> Option<DefRef> {
+        let key = (f, d, name.to_string());
+        if let Some(known) = self.structural.borrow().get(&key) {
+            return *known;
+        }
+        self.structural.borrow_mut().insert(key.clone(), None); // a cycle ends here
+        let fam = self.family[f]?;
+        let used = self.used_on(f);
+        let names: Vec<&(String, bool)> = used
+            .get(&(d, name.to_string()))
+            .into_iter()
+            .flatten()
+            .filter(|(n, _)| !is_core_member(fam, n))
+            .collect();
+        if names.len() < 2 {
+            return None;
+        }
+        // every type that has one of the names, then those that answer all
+        let mut pool: Vec<DefRef> = Vec::new();
+        for (n, _) in &names {
+            let defined =
+                self.by_name.get(n.as_str()).into_iter().flatten().copied().filter_map(|r| {
+                    let x = self.def(r);
+                    // the type it is a member of (a Go receiver's, an impl's)
+                    (self.family[r.0] == Some(fam) && (x.kind.is_callable() || x.kind.is_state()))
+                        .then(|| self.class_of(r.0, Some(r.1)))
+                        .flatten()
+                });
+            let declared = self.attr_owners.get(&(fam, n.clone())).into_iter().flatten().copied();
+            pool.extend(defined.chain(declared));
+        }
+        pool.sort();
+        pool.dedup();
+        let fits: Vec<DefRef> = pool
+            .into_iter()
+            .filter(|c| {
+                !self.def(*c).anonymous
+                    && names.iter().all(|(n, called)| self.answers(*c, n, *called, 4))
+            })
+            .collect();
+        // one type; or one that the others all derive from
+        let found = match fits.as_slice() {
+            [one] => Some(*one),
+            [] => None,
+            many => {
+                many.iter().copied().find(|b| many.iter().all(|c| c == b || self.is_a(*c, *b, 6)))
+            }
+        };
+        self.structural.borrow_mut().insert(key, found);
+        found
     }
 
     /// A parameter or local whose type is not known: it shadows every outer
@@ -1966,7 +2530,8 @@ impl<'a> Project<'a> {
             // a parameter or local of no known type, or of a type the project
             // does not define: only an extension written for it can be meant
             _ if !own_init
-                && (self.is_untyped_local(f, d, head) || self.is_external_local(f, d, head)) =>
+                && (self.is_untyped_local(f, d, head) || self.is_external_local(f, d, head))
+                && (*self.types_only.borrow() || self.local_type(f, d, head).is_none()) =>
             {
                 if rest.len() == 1 && !bases && *self.calling.borrow() {
                     let on = self.local_written_type(f, d, head);
@@ -2771,6 +3336,7 @@ pub fn resolve(
                 *p.calling.borrow_mut() = false;
                 *p.recv.borrow_mut() = None;
                 // which of several overloads: the one the arguments are for
+                let mut tied: Vec<DefRef> = Vec::new();
                 let found = match found {
                     Some((Target::Def(m), conf))
                         if is_call
@@ -2780,13 +3346,25 @@ pub fn resolve(
                         *p.recv.borrow_mut() = r.recv.map(|i| (f, i));
                         let picked = p.pick_overload(f, scope_def, m, r);
                         *p.recv.borrow_mut() = None;
-                        Some((Target::Def(picked), conf))
+                        // one of several that fit alike: each is a guess
+                        let conf = if picked.len() > 1 { Confidence::Inferred } else { conf };
+                        tied = picked[1..].to_vec();
+                        Some((Target::Def(picked[0]), conf))
                     }
                     other => other,
                 };
                 *p.args.borrow_mut() = None;
                 *p.self_arg.borrow_mut() = false;
                 *p.cur.borrow_mut() = None;
+                // a local called (`handler(x)`, `builder::add`) is the value
+                // it holds being called, not its type being constructed
+                if is_call && r.path.len() == 1 && p.is_local_name(f, scope_def, &r.path[0]) {
+                    if let Some((Target::Def(t), _)) = &found {
+                        if p.def(*t).kind.is_class_like() {
+                            continue;
+                        }
+                    }
+                }
                 let built_type = match &found {
                     Some((Target::Def(t), _)) if p.def(*t).kind.is_class_like() => Some(*t),
                     _ => None,
@@ -2976,7 +3554,7 @@ pub fn resolve(
                     .filter_map(|c| p.fit(f, scope_def, *c, r).map(|s| (*c, s)))
                     .collect();
                 *p.recv.borrow_mut() = None;
-                let fits = p.top_fits(&scored);
+                let fits = p.exact_first(p.top_fits(&scored), r);
                 let one = if built.len() == 1 && !kotlin {
                     built.first()
                 } else if fits.len() == 1 && (r.args.is_some() || built.len() == 1) {
@@ -2997,6 +3575,24 @@ pub fn resolve(
                         context: "constructor",
                         runs: None,
                     });
+                }
+                // the other overloads that fit the call as well as this one
+                if relation == "calls" {
+                    for other in &tied {
+                        let Some(id) = p.node_id(*other) else { continue };
+                        if id != target {
+                            edges.push(EdgeOut {
+                                source: src.clone(),
+                                target: id.to_string(),
+                                relation,
+                                confidence: Confidence::Inferred,
+                                file: f,
+                                line: r.line,
+                                context: r.context,
+                                runs: None,
+                            });
+                        }
+                    }
                 }
                 edges.push(EdgeOut {
                     source: src,

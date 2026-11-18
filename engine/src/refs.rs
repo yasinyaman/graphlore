@@ -309,6 +309,13 @@ fn signature_types(def: Node, src: &[u8], out: &mut Vec<(Vec<String>, &'static s
         match field {
             Some("receiver") => {}
             Some("parameters") => param_types(child, src, out),
+            // Go `(*Response, error)`: the first result is what a caller
+            // takes first
+            Some("result") if child.kind() == "parameter_list" => {
+                if let Some(first) = kids(child).into_iter().next() {
+                    types_in(first, src, "return_type", out);
+                }
+            }
             Some("return_type") | Some("result") | Some("returns") => {
                 types_in(child, src, "return_type", out)
             }
@@ -503,8 +510,10 @@ const WRAPPERS: &[&str] = &[
 
 /// The first type a type position names, through wrappers.
 fn first_type(n: Node, src: &[u8]) -> Option<Vec<String>> {
-    if matches!(n.kind(), "implicit_type" | "placeholder_type_specifier") {
-        return None; // `var`, `auto`
+    if matches!(n.kind(), "implicit_type" | "placeholder_type_specifier")
+        || (n.child_count() == 0 && text(n, src) == "var")
+    {
+        return None; // `var`, `auto`: the type is the value's
     }
     let mut v = Vec::new();
     types_in(n, src, "", &mut v);
@@ -963,6 +972,55 @@ fn arg_kind(v: Node, src: &[u8]) -> crate::facts::Arg {
         Arg::Null
     } else if is_closure(k) || k == "annotated_lambda" || k == "block" {
         Arg::Func
+    } else if matches!(k, "class_literal" | "typeof_expression")
+        || (k == "callable_reference" && text(v, src).ends_with("::class"))
+    {
+        Arg::Class
+    } else if matches!(
+        k,
+        "comparison_expression"
+            | "equality_expression"
+            | "conjunction_expression"
+            | "disjunction_expression"
+            | "check_expression"
+            | "instanceof_expression"
+            | "is_pattern_expression"
+    ) {
+        Arg::Bool
+    } else if matches!(k, "binary_expression" | "additive_expression" | "multiplicative_expression")
+    {
+        // `"a" + b` is a string; a comparison a flag; arithmetic on a number
+        // a number
+        let ks = kids(v);
+        let mut cursor = v.walk();
+        let op = v
+            .children(&mut cursor)
+            .find(|c| !c.is_named())
+            .map(|c| c.kind().to_string())
+            .unwrap_or_default();
+        let has = |want: Arg| ks.iter().any(|c| arg_kind(*c, src) == want);
+        if matches!(
+            op.as_str(),
+            "==" | "!=" | "<" | ">" | "<=" | ">=" | "&&" | "||" | "===" | "!=="
+        ) {
+            Arg::Bool
+        } else if has(Arg::Str) {
+            Arg::Str
+        } else if has(Arg::Num) {
+            Arg::Num
+        } else {
+            Arg::Unknown
+        }
+    } else if matches!(k, "cast_expression" | "as_expression") {
+        // `(Foo) x`, `x as Foo`: the type it is cast to
+        v.child_by_field_name("type")
+            .or_else(|| kids(v).into_iter().last())
+            .and_then(|t| first_type(t, src))
+            .map_or(Arg::Unknown, Arg::Path)
+    } else if callee(v, src).is_some_and(|(_, p)| {
+        p.last().is_some_and(|m| matches!(m.as_str(), "toString" | "ToString" | "to_string"))
+    }) {
+        Arg::Str
     } else {
         value_type(v, src)
             .or_else(|| path_of(v, src))
@@ -1081,9 +1139,26 @@ fn params_in(holder: Node, only_parameters: bool, src: &[u8]) -> Vec<crate::fact
             eq |= !x.is_named() && x.kind() == "=";
             dots |= x.kind() == "..." || x.kind() == "variadic_parameter";
         }
+        // a function type names no type of its own: `Function` stands for it
+        let mut ty = typed.map(|(_, ty, ..)| ty).unwrap_or_default();
+        if ty.is_empty() {
+            let mut stack = kids(c);
+            let mut hops = 0;
+            while let Some(x) = stack.pop() {
+                hops += 1;
+                if x.kind().contains("function_type") || x.kind() == "lambda_type" {
+                    ty = vec!["Function".into()];
+                    break;
+                }
+                if hops < 12 && (x.kind().contains("type") || x.kind().contains("annotation")) {
+                    stack.extend(kids(x));
+                }
+            }
+        }
         out.push(ParamFact {
             name,
-            ty: typed.map(|(_, ty, ..)| ty).unwrap_or_default(),
+            ty,
+            elem: written_elem(c, src),
             optional: eq
                 || k.contains("default")
                 || k == "optional_parameter"
@@ -1152,6 +1227,8 @@ fn bind_closure_params(closures: &[ClosureScope], refs: &mut [RefFact], locals: 
                 field: false,
                 assigned: false,
                 given: None,
+                elem: None,
+                value_args: Vec::new(),
                 from_def: None,
                 byte: *start,
             });
@@ -1546,6 +1623,7 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
             if facts.defs[di].kind.is_callable() {
                 facts.defs[di].lambda_receiver = lambda_receiver(n, src);
                 facts.defs[di].type_params = type_params(n, src);
+                facts.defs[di].elem = return_elem(n, src);
                 facts.defs[di].plist = param_list(n, src);
                 facts.defs[di].params = u8::try_from(facts.defs[di].plist.len()).ok();
                 if let Some(path) = body_value(n).and_then(|v| returned_path(v, src)) {
@@ -1609,6 +1687,8 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
                                         field: false,
                                         assigned: false,
                                         given: None,
+                                        elem: None,
+                                        value_args: Vec::new(),
                                         from_def: Some(di),
                                         byte: c.start_byte(),
                                     });
@@ -1639,6 +1719,8 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
                                         field: false,
                                         assigned: false,
                                         given: None,
+                                        elem: None,
+                                        value_args: Vec::new(),
                                         from_def: Some(di),
                                         byte: c.start_byte(),
                                     });
@@ -1656,6 +1738,8 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
                             field,
                             assigned: false,
                             given: None,
+                            elem: None,
+                            value_args: Vec::new(),
                             from_def: Some(di),
                             byte: ps.start_byte(),
                         });
@@ -1693,6 +1777,8 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
                                     field: true,
                                     assigned: false,
                                     given: None,
+                                    elem: None,
+                                    value_args: Vec::new(),
                                     from_def: Some(di),
                                     byte: x.start_byte(),
                                 });
@@ -1737,7 +1823,21 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
         if !by_node.contains_key(&n.id()) {
             // the parameters of a closure, a block or a handler that is no
             // definition of its own: names of its body only
-            let params = closure_params(n, src);
+            let mut params = closure_params(n, src);
+            // `xs.forEach { x -> … }`, `xs.map(x => …)`, `xs.each do |x|`:
+            // the first parameter is an element of `xs` (`x.let { … }`: `x`
+            // itself); a Kotlin lambda that names none has `it`
+            let lambda = n.kind() == "lambda_literal"
+                && !kids(n).iter().any(|c| c.kind() == "lambda_parameters");
+            if lambda || params.first().is_some_and(|(_, path, _)| path.is_empty()) {
+                if let Some(of) = iterated(&anc, n, src) {
+                    if lambda {
+                        params = vec![("it".to_string(), of, false)];
+                    } else {
+                        params[0].1 = of;
+                    }
+                }
+            }
             if !params.is_empty() {
                 // a parameter list stands for the block around it
                 let body = if n.kind().ends_with("_parameters") || n.kind() == "exception_variable"
@@ -1747,6 +1847,21 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
                     n
                 };
                 closures.push((body.start_byte(), body.end_byte(), params));
+            }
+            // `for (x in xs)`, `for x in xs`, `for _, x := range xs`
+            if let Some((name, of)) = loop_variable(n, src) {
+                locals.push(Local {
+                    name,
+                    path: of,
+                    declared: false,
+                    field: false,
+                    assigned: false,
+                    given: None,
+                    elem: None,
+                    value_args: Vec::new(),
+                    from_def: None,
+                    byte: n.start_byte(),
+                });
             }
         }
         if !by_node.contains_key(&n.id()) {
@@ -1767,9 +1882,18 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
                 if plain_assignment && path.is_empty() {
                     continue;
                 }
-                let given = (!declared && !path.is_empty())
-                    .then(|| declared_call(n).and_then(|c| given_type(c, src)))
-                    .flatten();
+                let call = (!declared && !path.is_empty()).then(|| declared_call(n)).flatten();
+                let given = call.and_then(|c| given_type(c, src));
+                let value_args = call
+                    .map(|c| arg_facts(c, src))
+                    .filter(|a| !a.is_empty() && a.len() <= 4)
+                    .unwrap_or_default();
+                // `val y = xs[0]`: an element of `xs`
+                if path.is_empty() && !declared {
+                    if let Some(of) = indexed(n, src) {
+                        path = of;
+                    }
+                }
                 locals.push(Local {
                     name,
                     path,
@@ -1777,6 +1901,8 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
                     field,
                     assigned: plain_assignment,
                     given,
+                    elem: if declared { written_elem(n, src) } else { None },
+                    value_args,
                     from_def: None,
                     byte: n.start_byte(),
                 });
@@ -1806,9 +1932,21 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
             receivers.push(found);
         }
         if facts.lang == Some(crate::lang::Lang::Ruby) {
-            for name in ruby_attrs(n, src) {
-                if !facts.attrs.contains(&name) {
-                    facts.attrs.push(name);
+            let found = ruby_attrs(n, src);
+            if !found.is_empty() {
+                // the class or module the declaration is written in
+                let owner = anc.iter().rev().find_map(|a| {
+                    by_node.get(&a.id()).copied().filter(|&di| facts.defs[di].kind.is_class_like())
+                });
+                for name in found {
+                    if let Some(di) = owner {
+                        if !facts.defs[di].attrs.contains(&name) {
+                            facts.defs[di].attrs.push(name.clone());
+                        }
+                    }
+                    if !facts.attrs.contains(&name) {
+                        facts.attrs.push(name);
+                    }
                 }
             }
         }
@@ -1966,6 +2104,355 @@ fn state_value(node: Node, src: &[u8]) -> Option<String> {
     (s.len() <= 200 && !s.contains('\n')).then_some(s)
 }
 
+/// The marker that ends a path naming an element of what comes before it.
+pub const ELEMENT: &str = "[]";
+
+/// Names of collection types whose one type argument is their element's.
+const COLLECTIONS: &[&str] = &[
+    "List",
+    "MutableList",
+    "ArrayList",
+    "LinkedList",
+    "Set",
+    "MutableSet",
+    "HashSet",
+    "LinkedHashSet",
+    "TreeSet",
+    "Collection",
+    "MutableCollection",
+    "Iterable",
+    "Sequence",
+    "Array",
+    "IEnumerable",
+    "IList",
+    "ICollection",
+    "IReadOnlyList",
+    "IReadOnlyCollection",
+    "Vec",
+    "VecDeque",
+    "Seq",
+    "Queue",
+    "Deque",
+    "ArrayDeque",
+    "Stack",
+    "list",
+    "set",
+    "frozenset",
+    "Iterator",
+    "Flow",
+    "Stream",
+    "ReadonlyArray",
+    "ImmutableList",
+    "IAsyncEnumerable",
+    "AsyncIterable",
+    "Flux",
+    "Slice",
+    "ArraySlice",
+    "NonEmptyList",
+    "PersistentList",
+];
+
+/// The element type a type position names, when it names a collection:
+/// `List<Foo>`, `Foo[]`, `[]Foo`, `[Foo]`, `list[Foo]`.
+fn elem_type(t: Node, src: &[u8]) -> Option<Vec<String>> {
+    // an array or slice type, through a pointer, a reference or an annotation
+    let mut stack = vec![(t, 0)];
+    while let Some((n, depth)) = stack.pop() {
+        if matches!(n.kind(), "array_type" | "slice_type" | "variadic_parameter") {
+            let inner = n.child_by_field_name("element").or_else(|| kids(n).into_iter().next())?;
+            return first_type(inner, src);
+        }
+        if depth < 3
+            && matches!(
+                n.kind(),
+                "type_annotation"
+                    | "pointer_type"
+                    | "reference_type"
+                    | "nullable_type"
+                    | "optional_type"
+                    | "type"
+                    | "parenthesized_type"
+            )
+        {
+            stack.extend(kids(n).into_iter().map(|c| (c, depth + 1)));
+        }
+    }
+    let mut v = Vec::new();
+    types_in(t, src, "", &mut v);
+    // the outer type, then its arguments
+    let mut it = v.into_iter().map(|(p, _)| p);
+    let outer = it.next()?;
+    let args: Vec<Vec<String>> = it.collect();
+    (COLLECTIONS.contains(&outer.last()?.as_str()) && args.len() == 1).then(|| args[0].clone())
+}
+
+/// The element type of the collection a declaration or a parameter is
+/// written as.
+fn written_elem(node: Node, src: &[u8]) -> Option<Vec<String>> {
+    let mut places = vec![node];
+    places.extend(
+        kids(node)
+            .into_iter()
+            .filter(|c| c.kind().ends_with("declaration") || c.kind().ends_with("declarator")),
+    );
+    places.into_iter().find_map(|n| {
+        n.child_by_field_name("type").and_then(|t| elem_type(t, src)).or_else(|| {
+            kids(n)
+                .into_iter()
+                .find(|c| {
+                    matches!(
+                        c.kind(),
+                        "user_type" | "type_annotation" | "nullable_type" | "array_type"
+                    )
+                })
+                .and_then(|t| elem_type(t, src))
+        })
+    })
+}
+
+/// The element type of the collection a callable declares it returns.
+fn return_elem(def: Node, src: &[u8]) -> Option<Vec<String>> {
+    let mut cursor = def.walk();
+    for (i, child) in def.children(&mut cursor).enumerate() {
+        let result = match def.field_name_for_child(i as u32) {
+            Some("return_type") | Some("returns") => true,
+            Some("result") => {
+                // Go `([]Foo, error)`: the first result
+                if child.kind() == "parameter_list" {
+                    return kids(child).into_iter().next().and_then(|f| written_elem(f, src));
+                }
+                true
+            }
+            Some("type") => !def.kind().contains("field") && !def.kind().contains("property"),
+            Some(_) => false,
+            None => {
+                matches!(child.kind(), "user_type" | "nullable_type")
+                    && def.kind() == "function_declaration"
+            }
+        };
+        if result {
+            return elem_type(child, src);
+        }
+    }
+    None
+}
+
+/// `xs[0]` as the value a declaration holds: an element of `xs`.
+fn indexed(decl: Node, src: &[u8]) -> Option<Vec<String>> {
+    fn subscript(v: Node) -> bool {
+        matches!(
+            v.kind(),
+            "subscript_expression"
+                | "index_expression"
+                | "element_access_expression"
+                | "indexing_expression"
+                | "subscript"
+                | "element_reference"
+        )
+    }
+    let v = value_node(decl).filter(|v| subscript(*v)).or_else(|| {
+        kids(decl).into_iter().find_map(|c| {
+            subscript(c).then_some(c).or_else(|| kids(c).into_iter().find(|x| subscript(*x)))
+        })
+    })?;
+    let object = ["object", "operand", "value", "expression", "array"]
+        .iter()
+        .find_map(|f| v.child_by_field_name(f))
+        .or_else(|| kids(v).into_iter().next())?;
+    let mut path = path_of(object, src).filter(|p| p[0] != UNKNOWN)?;
+    path.push(ELEMENT.into());
+    Some(path)
+}
+
+/// Methods whose lambda takes an element of the receiver first.
+const ITERATION_METHODS: &[&str] = &[
+    "forEach",
+    "map",
+    "filter",
+    "any",
+    "all",
+    "none",
+    "find",
+    "first",
+    "last",
+    "firstOrNull",
+    "lastOrNull",
+    "single",
+    "singleOrNull",
+    "count",
+    "sumOf",
+    "maxBy",
+    "minBy",
+    "maxByOrNull",
+    "minByOrNull",
+    "sortedBy",
+    "sortedByDescending",
+    "groupBy",
+    "associateBy",
+    "associate",
+    "associateWith",
+    "flatMap",
+    "mapNotNull",
+    "filterNot",
+    "takeWhile",
+    "dropWhile",
+    "partition",
+    "onEach",
+    "each",
+    "select",
+    "reject",
+    "collect",
+    "detect",
+    "find_all",
+    "filter_map",
+    "each_with_object",
+    "for_each",
+    "Where",
+    "Select",
+    "Any",
+    "All",
+    "First",
+    "FirstOrDefault",
+    "Single",
+    "SingleOrDefault",
+    "OrderBy",
+    "OrderByDescending",
+    "ForEach",
+    "some",
+    "every",
+    "findIndex",
+    "findLast",
+    "compactMap",
+    "allSatisfy",
+    "contains",
+    "removeAll",
+    "joinToString",
+    "distinctBy",
+    "indexOfFirst",
+    "sort_by",
+    "group_by",
+    "flat_map",
+    "min_by",
+    "max_by",
+];
+
+/// Methods whose lambda takes the receiver itself.
+const SELF_METHODS: &[&str] = &["let", "also", "takeIf", "takeUnless", "tap", "then"];
+
+/// What the first parameter of the lambda `n` is, from the call it is given
+/// to: an element of the receiver of an iteration method, or the receiver.
+fn iterated(anc: &[Node], n: Node, src: &[u8]) -> Option<Vec<String>> {
+    let lambda_start = n.start_byte();
+    let call = anc.iter().rev().take(5).find(|a| is_call_kind(a.kind()))?;
+    let (_, path) = callee(*call, src)?;
+    // given to the call, not the receiver the call is made on
+    let receiver_end = ["function", "object", "receiver"]
+        .iter()
+        .find_map(|f| call.child_by_field_name(f))
+        .or_else(|| kids(*call).into_iter().next())
+        .map_or(0, |r| r.end_byte());
+    if path.len() < 2 || path[0] == UNKNOWN || lambda_start < receiver_end {
+        return None;
+    }
+    let (method, receiver) = path.split_last()?;
+    let mut of = receiver.to_vec();
+    if ITERATION_METHODS.contains(&method.as_str()) {
+        of.push(ELEMENT.into());
+        Some(of)
+    } else if SELF_METHODS.contains(&method.as_str()) {
+        Some(of)
+    } else {
+        None
+    }
+}
+
+/// The variable of a loop over a collection, and the path of its elements.
+fn loop_variable(n: Node, src: &[u8]) -> Option<(String, Vec<String>)> {
+    let k = n.kind();
+    let (var, iterable) = match k {
+        // Go `for _, x := range xs`: the second name is the element
+        "range_clause" => {
+            let left = kids(n.child_by_field_name("left")?);
+            (*left.get(1)?, n.child_by_field_name("right")?)
+        }
+        "for_statement"
+        | "enhanced_for_statement"
+        | "foreach_statement"
+        | "for_in_statement"
+        | "for_expression"
+        | "for_in_clause"
+        | "for" => {
+            // a type written for the variable types it already
+            if n.child_by_field_name("type").is_some_and(|t| first_type(t, src).is_some()) {
+                return None;
+            }
+            let var = ["left", "name", "pattern", "item"]
+                .iter()
+                .find_map(|f| n.child_by_field_name(f))
+                .or_else(|| kids(n).into_iter().find(|c| c.kind() == "variable_declaration"))?;
+            let iterable = ["right", "value", "collection"]
+                .iter()
+                .find_map(|f| n.child_by_field_name(f))
+                .or_else(|| {
+                    // Kotlin: the expression after the variable
+                    let ks = kids(n);
+                    let at = ks.iter().position(|c| c.id() == var.id())?;
+                    ks.get(at + 1).copied()
+                })?;
+            // JS `for (k in obj)` names keys, not elements
+            let mut cursor = n.walk();
+            if k == "for_in_statement" && !n.children(&mut cursor).any(|c| c.kind() == "of") {
+                return None;
+            }
+            (var, iterable)
+        }
+        _ => return None,
+    };
+    // one name, not a pattern of several
+    let name = match var.kind() {
+        "identifier" | "simple_identifier" | "variable_name" => bound_name(var, src)?,
+        "variable_declaration" | "pattern" | "value_binding_pattern" => {
+            let ks = kids(var);
+            let ids: Vec<&Node> = ks
+                .iter()
+                .filter(|c| matches!(c.kind(), "identifier" | "simple_identifier"))
+                .collect();
+            match ids.as_slice() {
+                [one] if ks.len() == 1 || var.kind() == "variable_declaration" => {
+                    bound_name(**one, src)?
+                }
+                _ => return None,
+            }
+        }
+        _ => return None,
+    };
+    if name == "_" {
+        return None;
+    }
+    let mut path = path_of(iterable, src).filter(|p| p[0] != UNKNOWN)?;
+    path.push(ELEMENT.into());
+    Some((name, path))
+}
+
+/// The type a declaration writes for what it declares (`val x: Foo`, `Foo x`,
+/// `x: Foo = …`): on the declaration or on the declarator one level down.
+fn written_type(node: Node, src: &[u8]) -> Option<Vec<String>> {
+    let mut places = vec![node];
+    places.extend(
+        kids(node)
+            .into_iter()
+            .filter(|c| c.kind().ends_with("declaration") || c.kind().ends_with("declarator")),
+    );
+    places.into_iter().find_map(|n| {
+        n.child_by_field_name("type").and_then(|t| first_type(t, src)).or_else(|| {
+            kids(n)
+                .into_iter()
+                .find(|c| matches!(c.kind(), "user_type" | "type_annotation" | "nullable_type"))
+                .and_then(|t| first_type(t, src))
+        })
+    })
+}
+
 /// What constructs the value a declaration holds (`Settings()`).
 fn state_value_path(node: Node, src: &[u8]) -> Option<Vec<String>> {
     value_node(node).and_then(|v| value_type(v, src))
@@ -2109,6 +2596,8 @@ fn add_extras(
             table: crate::resources::declared_table(*node, src, None, ""),
             value: state_value(*node, src),
             value_path: state_value_path(*node, src),
+            declared_type: written_type(*node, src),
+            elem: written_elem(*node, src),
             receiver: None,
             anonymous: false,
             params: None,
@@ -2116,6 +2605,7 @@ fn add_extras(
             returns: Vec::new(),
             lambda_receiver: None,
             self_params: Vec::new(),
+            attrs: Vec::new(),
             type_params: Vec::new(),
             node_id: node.id(),
             start_byte: node.start_byte(),

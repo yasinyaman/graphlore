@@ -773,3 +773,100 @@ fn kotlin_constructors_primary_secondary_and_deprecated() {
     // class's header, no definition of its own
     assert!(ctors("flag()").is_empty(), "{got:#?}");
 }
+
+#[test]
+fn an_untyped_receiver_is_the_one_type_that_answers_all_asked_of_it() {
+    let got = call_ids("structural", &[
+        ("far.rb", "class Env < Struct.new(:status, :body, :url)\n  def needs_body?; end\n  def parallel?; end\nend\nclass Response\n  attr_reader :headers\n  def status; end\n  def body; end\n  def finished?; end\nend\nclass Request\n  attr_accessor :headers, :body\n  def url; end\nend\nclass Adapter\n  def call(env)\n    env.status\n    env.body\n    env.parallel?\n  end\n  def finish(res)\n    res.status\n    res.finished?\n  end\n  def one(x)\n    x.status\n  end\n  def both(y)\n    y.status\n    y.body\n  end\nend\n"),
+        ("a.py", "class Order:\n    def total(self): ...\n    def lines(self): ...\n    def cancel(self): ...\n\n\nclass Cart:\n    def total(self): ...\n    def lines(self): ...\n    def checkout(self): ...\n\n\ndef bill(order):\n    order.total()\n    order.cancel()\n\n\ndef show(thing):\n    thing.total()\n    thing.lines()\n\n\ndef pay(cart):\n    cart.checkout()\n    cart.lines()\n    return cart.items()\n"),
+        ("b.js", "class Queue { drain() {} flush() {} size() {} }\nclass Pipe { drain() {} pipe() {} }\nfunction run(q) { q.drain(); q.flush(); q.push(1); }\nfunction amb(q) { q.drain(); }\n"),
+    ]);
+    for (from, to) in [
+        // `status` and `body` are members of the struct `Env` inherits, and
+        // only `Env` answers `parallel?` as well
+        (".call()", "far_env_parallel_pred"),
+        (".finish()", "far_response_status"),
+        (".finish()", "far_response_finished_pred"),
+        ("bill()", "a_order_total"),
+        ("bill()", "a_order_cancel"),
+        ("pay()", "a_cart_checkout"),
+        ("run()", "b_queue_drain"),
+    ] {
+        assert!(got.contains(&(from.to_string(), to.to_string())), "{from} -> {to}: {got:#?}");
+    }
+    // one name asked, or names two types answer alike: nothing is guessed
+    for from in [".one()", ".both()", "show()", "amb()"] {
+        assert!(!got.iter().any(|(s, _)| s == from), "{from}: {got:#?}");
+    }
+}
+
+#[test]
+fn overloads_by_fields_expressions_bases_and_ties() {
+    let got = call_ids("overloads-more", &[("a.kt", "package app\nopen class TypeName\nclass ClassName : TypeName()\nval STRING: ClassName = ClassName()\nopen class Base {\n    fun returns(a: Int, b: Int): Base = this\n}\nclass Builder : Base() {\n    val owner: ClassName = ClassName()\n    val label: String = \"\"\n    fun returns(t: TypeName): Builder = this\n    fun returns(t: kotlin.reflect.KClass<*>): Builder = this\n    fun returns(t: String): Builder = this\n    fun returns(block: () -> Unit): Builder = this\n}\nfun byConstant(b: Builder) { b.returns(STRING) }\nfun byClassLiteral(b: Builder) { b.returns(String::class) }\nfun byField(b: Builder) { b.returns(b.owner) }\nfun byWritten(b: Builder) { b.returns(b.label) }\nfun byConcat(b: Builder, n: Any) { b.returns(\"a\" + n) }\nfun byLambda(b: Builder) { b.returns { } }\nfun byBase(b: Builder) { b.returns(1, 2) }\nfun undecided(b: Builder, x: Any) { b.returns(x) }\n")]);
+    let to = |from: &str| -> Vec<&str> {
+        got.iter()
+            .filter(|(s, t)| s == from && t.contains("returns"))
+            .map(|(_, t)| t.as_str())
+            .collect()
+    };
+    // a constant's declared type, a class literal, a field's type, a field's
+    // written `String`, a concatenation, a lambda, an overload of the base
+    assert_eq!(to("byConstant()"), ["a_builder_returns"], "{got:#?}");
+    assert_eq!(to("byClassLiteral()"), ["a_builder_returns_2"], "{got:#?}");
+    assert_eq!(to("byField()"), ["a_builder_returns"], "{got:#?}");
+    assert_eq!(to("byWritten()"), ["a_builder_returns_3"], "{got:#?}");
+    assert_eq!(to("byConcat()"), ["a_builder_returns_3"], "{got:#?}");
+    assert_eq!(to("byLambda()"), ["a_builder_returns_4"], "{got:#?}");
+    assert_eq!(to("byBase()"), ["a_base_returns"], "{got:#?}");
+    // an argument that says nothing: the call is of one of those that take
+    // one argument, and each is named
+    assert_eq!(to("undecided()").len(), 4, "{got:#?}");
+}
+
+#[test]
+fn an_element_of_a_typed_collection_and_a_result_bound_by_an_argument() {
+    let got = call_ids("elements", &[
+        ("a.kt", "package app\nclass Foo { fun a() {}; fun b() {}; fun c() {}; fun d() {}; fun e() {}; fun g() {}; fun h() {} }\nclass Repo { fun all(): List<Foo> = emptyList(); val cached: List<Foo> = emptyList() }\nfun <T> pick(x: T): T = x\nfun <T> head(xs: List<T>): T = xs[0]\nfun loops(xs: List<Foo>, repo: Repo) {\n    for (x in xs) { x.a() }\n    xs.forEach { it.b() }\n    xs.map { y -> y.c() }\n    val z = xs[0]\n    z.d()\n    val w = xs.first()\n    w.e()\n    for (r in repo.all()) { r.g() }\n    repo.cached.forEach { it.h() }\n}\nfun bound(xs: List<Foo>, f: Foo) {\n    val p = pick(f)\n    p.a()\n    val q = head(xs)\n    q.b()\n}\n"),
+        ("B.java", "import java.util.List;\nclass Item { void run() {} void stop() {} }\nclass Use {\n  void each(List<Item> items, Item[] arr) {\n    for (var i : items) { i.run(); }\n    for (var j : arr) { j.stop(); }\n    items.forEach(it -> it.run());\n  }\n}\n"),
+        ("c.go", "package x\n\ntype Node struct{}\n\nfunc (n *Node) Visit() {}\nfunc (n *Node) Leave() {}\nfunc nodes() []*Node { return nil }\nfunc Walk(ns []*Node) {\n\tfor _, n := range ns {\n\t\tn.Visit()\n\t}\n\tfor _, m := range nodes() {\n\t\tm.Leave()\n\t}\n}\n"),
+        ("d.py", "class Job:\n    def start(self): ...\n    def halt(self): ...\n\n\ndef run(jobs: list[Job]):\n    for j in jobs:\n        j.start()\n    first = jobs[0]\n    first.halt()\n"),
+        ("e.ts", "export class Task { exec() {} cancel() {} }\nexport function go(tasks: Task[], more: Array<Task>) {\n  for (const t of tasks) { t.exec(); }\n  more.forEach(m => m.cancel());\n}\n"),
+    ]);
+    for (from, to) in [
+        // a loop variable, `it`, a lambda's parameter, `xs[0]`, `xs.first()`,
+        // a loop over a call's result, a field's `forEach`
+        ("loops()", "a_foo_a"),
+        ("loops()", "a_foo_b"),
+        ("loops()", "a_foo_c"),
+        ("loops()", "a_foo_d"),
+        ("loops()", "a_foo_e"),
+        ("loops()", "a_foo_g"),
+        ("loops()", "a_foo_h"),
+        // `fun <T> pick(x: T): T` and `fun <T> head(xs: List<T>): T`
+        ("bound()", "a_foo_a"),
+        ("bound()", "a_foo_b"),
+        // Java `var` in a for-each over a list and over an array
+        (".each()", "b_item_run"),
+        (".each()", "b_item_stop"),
+        // Go `range` over a slice and over a call's result
+        ("Walk()", "c_node_visit"),
+        ("Walk()", "c_node_leave"),
+        ("run()", "d_job_start"),
+        ("run()", "d_job_halt"),
+        ("go()", "e_task_exec"),
+        ("go()", "e_task_cancel"),
+    ] {
+        assert!(got.contains(&(from.to_string(), to.to_string())), "{from} -> {to}: {got:#?}");
+    }
+}
+
+#[test]
+fn typing_a_local_named_like_what_it_is_built_from_ends() {
+    // `session` is assigned a call of `session`, and typing `request` comes
+    // back to it through its arguments: this used to recurse without end
+    let got = edges("self-typed", &[(
+        "a.swift",
+        "final class S {\n    func request(_ r: Int) -> S { self }\n    func exists(for r: S) -> Bool { true }\n}\nfunc session(using c: Int) -> S { S() }\nfunc test() {\n    let session = session(using: 1)\n    let request = session.request(2).request(3)\n    _ = session.exists(for: request)\n}\n",
+    )]);
+    has(&got, &[("test()", "calls", "session()"), ("test()", "calls", ".request()")]);
+}

@@ -115,6 +115,11 @@ pub struct Def {
     /// Those parameters, in order: what tells one overload from another.
     #[serde(default)]
     pub plist: Vec<ParamFact>,
+    /// Names a type answers to without a definition of them: Ruby
+    /// `attr_accessor :status`, the members of the `Struct.new(:a, :b)` it
+    /// inherits, `def_delegators`.
+    #[serde(default)]
+    pub attrs: Vec<String>,
     /// The names of the type parameters a callable declares (`<T>`).
     #[serde(default)]
     pub type_params: Vec<String>,
@@ -164,6 +169,13 @@ pub struct Def {
     /// so `settings.API_V1_STR` resolves through it.
     #[serde(default)]
     pub value_path: Option<Vec<String>>,
+    /// The element type of the collection a field is declared as, or a
+    /// callable declares it returns.
+    #[serde(default)]
+    pub elem: Option<Vec<String>>,
+    /// The type a variable, field or constant is declared with, as written.
+    #[serde(default)]
+    pub declared_type: Option<Vec<String>>,
     /// The tree-sitter node the definition came from, and its byte range:
     /// for attaching references, never serialised.
     #[serde(skip)]
@@ -293,6 +305,15 @@ pub struct Local {
     /// holds, not a local of its own, so it hides no outer name.
     #[serde(default)]
     pub assigned: bool,
+    /// The element type of the collection the local is declared as (`xs:
+    /// List<Foo>`, `Foo[] xs`, `xs []Foo`): what a loop over it, a lambda
+    /// given to its `forEach`, `xs.first()` and `xs[0]` have.
+    #[serde(default)]
+    pub elem: Option<Vec<String>>,
+    /// The arguments of the call the value is, as far as the site shows
+    /// (at most 4): what binds a type parameter the function returns.
+    #[serde(default)]
+    pub value_args: Vec<ArgFact>,
     /// The type the value's call is handed explicitly: its one type argument
     /// (`mock<Foo>()`, `GetService<IFoo>()`) or a class literal among its
     /// arguments (`create(Service::class.java)`, `typeof(Bar)`).
@@ -351,6 +372,9 @@ pub struct ParamFact {
     pub name: String,
     /// Its written type as a path; empty when it has none.
     pub ty: Vec<String>,
+    /// The element type, when that type is a collection's.
+    #[serde(default)]
+    pub elem: Option<Vec<String>>,
     /// It has a default value.
     pub optional: bool,
     /// It takes any number of arguments (`vararg`, `...`, `params`).
@@ -367,6 +391,8 @@ pub enum Arg {
     Null,
     /// A lambda or function literal.
     Func,
+    /// A class literal: `Foo::class`, `Foo.class`, `typeof(Foo)`.
+    Class,
     /// A name, a member or a call: the resolver says what type that gives.
     Path(Vec<String>),
 }
