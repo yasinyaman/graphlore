@@ -163,7 +163,7 @@ pub fn path_of(n: Node, src: &[u8]) -> Option<Vec<String>> {
     for (obj, member) in MEMBER_FIELDS {
         if let (Some(o), Some(m)) = (n.child_by_field_name(obj), n.child_by_field_name(member)) {
             let mut p = path_of(o, src).unwrap_or_else(|| vec![UNKNOWN.into()]);
-            p.extend(path_of(m, src)?);
+            p.extend(member_path(m, src)?);
             return Some(p);
         }
     }
@@ -175,7 +175,7 @@ pub fn path_of(n: Node, src: &[u8]) -> Option<Vec<String>> {
                 ks.first().and_then(|f| path_of(*f, src)).unwrap_or_else(|| vec![UNKNOWN.into()]);
             let suffix = ks.iter().find(|c| c.kind() == "navigation_suffix")?;
             let name = kids(*suffix).into_iter().last()?;
-            p.extend(path_of(name, src)?);
+            p.extend(member_path(name, src)?);
             Some(p)
         }
         "navigation_suffix" => kids(n).into_iter().last().and_then(|c| path_of(c, src)),
@@ -1845,6 +1845,20 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
                 facts.defs[di].self_params = self_params(n, src, &name);
                 // `class Response<T>`: what a declaration's type arguments bind
                 facts.defs[di].type_params = type_params(n, src);
+                // Rust `struct Script(Arc<Mutex<State>>)`: its numbered fields
+                if let Some(list) =
+                    kids(n).into_iter().find(|c| c.kind() == "ordered_field_declaration_list")
+                {
+                    let types: Vec<Node> = kids(list)
+                        .into_iter()
+                        .filter(|c| !is_comment(c) && !c.kind().contains("visibility"))
+                        .filter(|c| c.kind() != "attribute_item")
+                        .collect();
+                    facts.defs[di].rets =
+                        types.iter().map(|t| first_type(*t, src).unwrap_or_default()).collect();
+                    facts.defs[di].part_sealed =
+                        types.iter().map(|t| sealed_type(*t, src)).collect();
+                }
                 // Kotlin `class Name(val a: A, b: B = …)`: the primary
                 // constructor's parameters are the class's
                 if let Some(pc) = kids(n).into_iter().find(|c| c.kind() == "primary_constructor") {
@@ -2940,6 +2954,20 @@ fn written_targs(node: Node, src: &[u8]) -> Vec<Vec<String>> {
         .unwrap_or_default()
 }
 
+/// The name of a member as a path segment: a tuple's numbered field (Rust
+/// `self.0`, Swift `pair.1`) is its part (`[#0]`).
+fn member_path(m: Node, src: &[u8]) -> Option<Vec<String>> {
+    // (Swift's member sits in a `navigation_suffix`)
+    let m = match m.kind() {
+        "navigation_suffix" => kids(m).into_iter().last()?,
+        _ => m,
+    };
+    if m.kind() == "integer_literal" {
+        return text(m, src).parse().ok().map(|i| vec![tuple_part(i)]);
+    }
+    path_of(m, src)
+}
+
 /// The marker of the `i`th part of a tuple (`[#0]`, `[#1]`).
 pub fn tuple_part(i: usize) -> String {
     format!("[#{i}]")
@@ -3858,6 +3886,7 @@ fn add_extras(
             keyed: written_keyed(*node, src),
             targs: written_targs(*node, src),
             rets: Vec::new(),
+            part_sealed: Vec::new(),
             receiver: None,
             anonymous: false,
             params: None,
