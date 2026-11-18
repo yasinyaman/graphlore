@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{json, Value};
 
-use crate::facts::{Def, DefKind, FileFacts, ImportForm, RefFact, RefKind, Runs};
+use crate::facts::{Def, DefKind, FileFacts, ImportForm, ReceiverOf, RefFact, RefKind, Runs};
 use crate::graph::assemble::Assembled;
 use crate::graph::ids::slug;
 use crate::lang::Lang;
@@ -165,6 +165,9 @@ impl Confidence {
         }
     }
 }
+
+/// A type worked out for something, and how surely.
+type Typed = Option<(DefRef, Confidence)>;
 
 struct ExtNode {
     label: String,
@@ -366,6 +369,14 @@ pub struct Project<'a> {
     types_only: RefCell<bool>,
     /// The path being resolved is the callee of a call.
     calling: RefCell<bool>,
+    /// The receiver lambda the use being resolved sits in: `(file, index)`.
+    recv: RefCell<Option<(usize, u16)>>,
+    /// How many arguments the call being resolved passes.
+    args: RefCell<Option<u8>>,
+    /// One of them is `this`.
+    self_arg: RefCell<bool>,
+    /// The receiver type of each such lambda, once worked out.
+    recv_types: RefCell<HashMap<(usize, u16), Typed>>,
     /// Import -> files a resolved use went through it to.
     used: RefCell<HashMap<(usize, usize), HashSet<usize>>>,
 }
@@ -446,6 +457,10 @@ impl<'a> Project<'a> {
             depth: RefCell::new(0),
             types_only: RefCell::new(false),
             calling: RefCell::new(false),
+            recv: RefCell::new(None),
+            args: RefCell::new(None),
+            self_arg: RefCell::new(false),
+            recv_types: RefCell::new(HashMap::new()),
             used: RefCell::new(HashMap::new()),
         };
         p.index();
@@ -556,29 +571,40 @@ impl<'a> Project<'a> {
             *depth += 1;
         }
         let before = self.types_only.replace(declared);
-        let out = self.type_of_path_inner(f, d, path);
+        // the path was written somewhere else (a declaration, a signature):
+        // the receiver lambda around the use being resolved says nothing of it
+        let recv = self.recv.replace(None);
+        let out = self.type_of_path_inner(f, d, path).map(|(t, _)| t);
+        *self.recv.borrow_mut() = recv;
         *self.types_only.borrow_mut() = before;
         *self.depth.borrow_mut() -= 1;
         out
     }
 
-    fn type_of_path_inner(&self, f: usize, d: Option<usize>, path: &[String]) -> Option<DefRef> {
+    fn type_of_path_inner(
+        &self,
+        f: usize,
+        d: Option<usize>,
+        path: &[String],
+    ) -> Option<(DefRef, Confidence)> {
         let found = self.resolve_path(f, d, path, true);
         match found? {
-            (Target::Def(r), _) => {
+            (Target::Def(r), conf) => {
                 let def = self.def(r);
                 let k = def.kind;
                 if k.is_class_like() || k == DefKind::TypeAlias {
-                    Some(r)
-                } else if let Some(t) = k.is_callable().then(|| self.return_type(r)).flatten() {
-                    // a call of a function whose declared result is a project type
-                    Some(t)
+                    Some((r, conf))
+                } else if let Some((t, declared)) =
+                    k.is_callable().then(|| self.return_type(r)).flatten()
+                {
+                    // a call of a function whose result is a project type
+                    Some((t, if declared { conf } else { Confidence::Inferred }))
                 } else if k.is_callable() && path.len() == 2 && is_factory(&def.name) {
                     // `Foo::new()`, `Foo.create()`: a type's own constructor
                     let owner = self.class_of(r.0, Some(r.1))?;
-                    (self.def(owner).name == path[0]).then_some(owner)
+                    (self.def(owner).name == path[0]).then_some((owner, conf))
                 } else if k == DefKind::Constructor {
-                    self.class_of(r.0, Some(r.1))
+                    self.class_of(r.0, Some(r.1)).map(|t| (t, conf))
                 } else {
                     None
                 }
@@ -587,18 +613,97 @@ impl<'a> Project<'a> {
         }
     }
 
-    /// The project type a callable declares it returns.
-    fn return_type(&self, r: DefRef) -> Option<DefRef> {
-        let rt = self.files[r.0].refs.iter().find(|x| {
+    /// The receiver type of a lambda with one (`FileFacts::receivers`): the
+    /// value of `x.apply { … }` / `with(x) { … }`, or what the function called
+    /// declares for its lambda (`block: Builder.() -> Unit`).
+    fn receiver_type(&self, f: usize, d: Option<usize>, i: u16) -> Option<(DefRef, Confidence)> {
+        if let Some(known) = self.recv_types.borrow().get(&(f, i)) {
+            return *known;
+        }
+        let scope = self.files[f].receivers.get(usize::from(i))?;
+        // what names the receiver is written outside the lambda
+        let before = self.recv.replace(scope.outer.map(|o| (f, o)));
+        let types = self.types_only.replace(false);
+        let calling = self.calling.replace(false);
+        let out = match &scope.of {
+            ReceiverOf::Value(path) => self.type_of_path_inner(f, d, path),
+            ReceiverOf::Callee(path) => match self.resolve_path(f, d, path, true) {
+                Some((Target::Def(c), conf)) => self.def(c).lambda_receiver.clone().and_then(|p| {
+                    self.type_of_path(c.0, self.def(c).parent, &p, true).map(|t| (t, conf))
+                }),
+                _ => None,
+            },
+        }
+        .filter(|(t, _)| self.def(*t).kind.is_class_like());
+        *self.calling.borrow_mut() = calling;
+        *self.types_only.borrow_mut() = types;
+        *self.recv.borrow_mut() = before;
+        self.recv_types.borrow_mut().insert((f, i), out);
+        out
+    }
+
+    /// A bare name inside lambdas with a receiver: a member of the innermost
+    /// receiver that has one of that name (Kotlin looks there before the
+    /// class around).
+    fn receiver_member(
+        &self,
+        f: usize,
+        d: Option<usize>,
+        name: &str,
+    ) -> Option<(DefRef, Confidence)> {
+        let (file, mut at) = (*self.recv.borrow())?;
+        if file != f {
+            return None;
+        }
+        for _ in 0..8 {
+            if let Some((t, conf)) = self.receiver_type(f, d, at) {
+                if let Some(m) = self.class_member(t, name, 4) {
+                    return Some((m, conf));
+                }
+                // an extension written for the receiver's type
+                let on = self.def(t).name.clone();
+                if let Some((Target::Def(m), Confidence::Extracted)) =
+                    self.extension_method(f, name, Some(&on))
+                {
+                    return Some((m, conf));
+                }
+            }
+            at = self.files[f].receivers.get(usize::from(at))?.outer?;
+        }
+        None
+    }
+
+    /// The project type a callable returns, and whether it declares it. One
+    /// that declares nothing returns what its `return`s and expression body
+    /// construct (`fun builder(n) = Builder(n)`, `return self`), when they
+    /// agree: read from the body, so a guess.
+    fn return_type(&self, r: DefRef) -> Option<(DefRef, bool)> {
+        let declared = self.files[r.0].refs.iter().find(|x| {
             x.from_def == Some(r.1) && x.kind == RefKind::Type && x.context == "return_type"
-        })?;
+        });
+        let Some(rt) = declared else {
+            let mut found: Option<DefRef> = None;
+            for path in &self.def(r).returns {
+                let t = if path.len() == 1 && path[0] == "self" {
+                    self.class_of(r.0, Some(r.1))
+                } else {
+                    self.type_of_path(r.0, Some(r.1), path, false)
+                };
+                match (t, found) {
+                    (Some(t), None) => found = Some(t),
+                    (Some(t), Some(f)) if t != f => return None,
+                    _ => {}
+                }
+            }
+            return found.filter(|t| self.def(*t).kind.is_class_like()).map(|t| (t, false));
+        };
         let path = rt.path.clone();
         if path == ["self"] {
             // `-> Self`, `: this`: the method's own type (builders)
-            return self.class_of(r.0, Some(r.1));
+            return self.class_of(r.0, Some(r.1)).map(|t| (t, true));
         }
         let t = self.type_of_path(r.0, self.def(r).parent, &path, true)?;
-        self.def(t).kind.is_class_like().then_some(t)
+        self.def(t).kind.is_class_like().then_some((t, true))
     }
 
     /// The type of a local name or parameter seen from `d`.
@@ -674,12 +779,12 @@ impl<'a> Project<'a> {
         false
     }
 
-    /// A local that does not hide the outer name: one assigned from the outer
-    /// thing of its own name (`let agent = agent();`: on that line the name
-    /// still means the outer one, and the facts do not say which side of it a
-    /// use is on), a plain assignment where assigning declares nothing, or,
-    /// for a bare call (`called`), a local with a written type: `baseUrl(…)`
-    /// beside `String baseUrl` calls the method, not the string.
+    /// A local that does not hide the outer name: a plain assignment where
+    /// assigning declares nothing, or, for a bare call (`called`), a local
+    /// with a written type (`baseUrl(…)` beside `String baseUrl` calls the
+    /// method, not the string) or one assigned from the outer thing of its own
+    /// name (`let agent = agent();`: the call is the function's; a longer
+    /// initializer is `own_initializer`'s).
     fn local_keeps_outer(&self, f: usize, d: Option<usize>, name: &str, called: bool) -> bool {
         let defs = &self.files[f].defs;
         let mut cur = d;
@@ -687,8 +792,28 @@ impl<'a> Project<'a> {
             if let Some(&li) = self.locals.get(&(f, x, name.to_string())) {
                 let l = &self.files[f].locals[li];
                 return l.assigned
-                    || (called && l.declared)
-                    || l.path.first().is_some_and(|h| h == name);
+                    || (called && (l.declared || l.path.first().is_some_and(|h| h == name)));
+            }
+            cur = defs[x].parent;
+        }
+        false
+    }
+
+    /// Whether `path` is the value a local named like its head is declared
+    /// with (`val builder = builder(x).tag(y)`): the declaration does not
+    /// see itself, so there the head is the outer name.
+    fn own_initializer(&self, f: usize, d: Option<usize>, path: &[String]) -> bool {
+        let Some(name) = path.first() else { return false };
+        let defs = &self.files[f].defs;
+        let mut cur = d;
+        while let Some(x) = cur {
+            if let Some(&li) = self.locals.get(&(f, x, name.clone())) {
+                let l = &self.files[f].locals[li];
+                // the whole value, or a part of its chain (`tls::Config::builder()`
+                // in `let tls = tls::Config::builder().build()`)
+                return l.path.len() > 1
+                    && l.path[0] == *name
+                    && (path.starts_with(&l.path) || (path.len() > 1 && l.path.starts_with(path)));
             }
             cur = defs[x].parent;
         }
@@ -1191,9 +1316,32 @@ impl<'a> Project<'a> {
         path: &[String],
         bases: bool,
     ) -> Option<(Target, Confidence)> {
+        self.resolve_path_inner(f, d, path, bases).or_else(|| {
+            // `let request = request.with_agent(a)`: the name before the
+            // declaration is one the facts no longer hold (a parameter it
+            // shadows); only the method's name says what is called
+            (path.len() == 2
+                && !bases
+                && *self.calling.borrow()
+                && self.own_initializer(f, d, path))
+            .then(|| self.unknown_receiver(f, &path[1], None))
+            .flatten()
+        })
+    }
+
+    fn resolve_path_inner(
+        &self,
+        f: usize,
+        d: Option<usize>,
+        path: &[String],
+        bases: bool,
+    ) -> Option<(Target, Confidence)> {
         let fam = self.family[f]?;
         let (head, rest) = path.split_first()?;
         let mut conf = Confidence::Extracted;
+        // `val builder = builder(x).tag(y)`: inside its own initializer the
+        // name is still the outer one
+        let own_init = self.own_initializer(f, d, path);
         let mut t = match head.as_str() {
             "self" => {
                 if rest.is_empty() {
@@ -1262,17 +1410,29 @@ impl<'a> Project<'a> {
             },
             // a parameter or local of no known type, or of a type the project
             // does not define: only an extension written for it can be meant
-            _ if self.is_untyped_local(f, d, head) || self.is_external_local(f, d, head) => {
+            _ if !own_init
+                && (self.is_untyped_local(f, d, head) || self.is_external_local(f, d, head)) =>
+            {
                 if rest.len() == 1 && !bases && *self.calling.borrow() {
                     let on = self.local_written_type(f, d, head);
-                    return self.extension_method(f, &rest[0], on.as_deref());
+                    // a type the project does not define has no method of
+                    // the project's; a local of no known type is an unknown
+                    // receiver: a distinctive method name may say what it is
+                    // (not where every type of the module is in scope with
+                    // no import to say which: Ruby, Swift)
+                    let open_world = matches!(fam, Family::Ruby | Family::Swift);
+                    if open_world || self.is_external_local(f, d, head) {
+                        return self.extension_method(f, &rest[0], on.as_deref());
+                    }
+                    return self.unknown_receiver(f, &rest[0], on.as_deref());
                 }
                 return None;
             }
             // a local assigned something the walk cannot type (`let pool =
             // self.pool.lock().unwrap()`) still hides every outer name of its
             // own: only a distinctive method name says what is called on it
-            _ if self.is_local_name(f, d, head)
+            _ if !own_init
+                && self.is_local_name(f, d, head)
                 && !*self.types_only.borrow()
                 && !self.local_keeps_outer(
                     f,
@@ -1288,7 +1448,8 @@ impl<'a> Project<'a> {
                 }
                 return None;
             }
-            _ => match (!(rest.is_empty()
+            _ => match (!(own_init
+                || rest.is_empty()
                 // the name by itself, where an assignment only hinted at what
                 // it holds (`service = make()`), is the variable, not its
                 // type; and a bare call beside a local that cannot be what is
@@ -1301,6 +1462,42 @@ impl<'a> Project<'a> {
             .map(|(t, c)| {
                 conf = c;
                 Target::Def(t)
+            })
+            .or_else(|| {
+                // inside `x.apply { … }`: the receiver's member, before the
+                // names of the class around
+                if own_init || *self.types_only.borrow() {
+                    return None;
+                }
+                let (m, c) = self.receiver_member(f, d, head)?;
+                conf = conf.max(c);
+                // the class around has a callable of the name too: the
+                // receiver's is the one meant unless it cannot take the
+                // arguments (`buildString { emit(this, flags) }` hands the
+                // receiver to the outer `emit`). Types would say; the count
+                // of arguments is what the facts have, so this is a guess
+                if self.def(m).kind.is_callable() {
+                    if let Some(Target::Def(o)) = self.resolve_name(f, d, head) {
+                        if o != m && self.def(o).kind.is_callable() {
+                            let args = (*self.args.borrow()).filter(|_| rest.is_empty());
+                            let owner = self.def(m).parent.map(|p| (m.0, p));
+                            let too_few = args.is_some_and(|a| {
+                                owner.is_some_and(|c| {
+                                    self.members(c, head)
+                                        .iter()
+                                        .all(|x| self.def(*x).params.is_some_and(|n| n < a))
+                                })
+                            });
+                            // `buildString { emit(this) }`: the receiver is
+                            // handed to the outer `emit`, not to its own
+                            if too_few || (*self.self_arg.borrow() && rest.is_empty()) {
+                                return None;
+                            }
+                            conf = Confidence::Inferred;
+                        }
+                    }
+                }
+                Some(Target::Def(m))
             })
             .or_else(|| self.resolve_name(f, d, head))
             .or_else(|| {
@@ -1387,7 +1584,10 @@ impl<'a> Project<'a> {
                     }
                     // a method that declares its result: `builder().a().b()`
                     if self.def(c).kind.is_callable() {
-                        if let Some(r) = self.return_type(c) {
+                        if let Some((r, declared)) = self.return_type(c) {
+                            if !declared {
+                                conf = conf.max(Confidence::Inferred);
+                            }
                             t = Target::Def(r);
                             continue;
                         }
@@ -1397,6 +1597,26 @@ impl<'a> Project<'a> {
                     return self.unknown_receiver(f, &rest[i + 1], None);
                 }
                 return None;
+            }
+            // Ruby calls without parentheses: `stubs.match(env)` is what
+            // `stubs` returns, then `match`
+            if fam == Family::Ruby {
+                if let Target::Def(c) = t {
+                    if self.def(c).kind.is_callable() {
+                        match self.return_type(c) {
+                            Some((r, declared)) => {
+                                if !declared {
+                                    conf = conf.max(Confidence::Inferred);
+                                }
+                                t = Target::Def(r);
+                            }
+                            None if rest.len() == i + 1 && !bases => {
+                                return self.unknown_receiver(f, seg, None);
+                            }
+                            None => return None,
+                        }
+                    }
+                }
             }
             let found = self.member(&t, seg, 3);
             // a property with more after it: go on through its type
@@ -1600,11 +1820,18 @@ impl<'a> Project<'a> {
         let fam = self.family[f];
         let here = dir_of(&self.files[f].path);
         let pkg = self.files[f].package.as_deref();
-        let seen: Vec<DefRef> = self
-            .extensions
-            .get(name)?
-            .iter()
-            .copied()
+        // Rust: a method of an `impl Trait for` a type the project does not
+        // define (`impl RequestExt for http::Request<()>`) extends that type
+        let mut pool: Vec<DefRef> =
+            self.extensions.get(name).into_iter().flatten().copied().collect();
+        if fam == Some(Family::Rust) {
+            pool.extend(self.by_name.get(name).into_iter().flatten().copied().filter(|r| {
+                let d = self.def(*r);
+                d.kind.is_callable() && !d.decl_only && self.extended_type(*r).is_some()
+            }));
+        }
+        let seen: Vec<DefRef> = pool
+            .into_iter()
             .filter(|r| self.family[r.0] == fam && self.node_id(*r).is_some())
             .filter(|r| {
                 r.0 == f
@@ -1619,7 +1846,8 @@ impl<'a> Project<'a> {
                 .iter()
                 .copied()
                 .filter(|r| {
-                    self.def(*r).receiver.as_deref().is_some_and(|t| t.eq_ignore_ascii_case(on))
+                    let written = self.def(*r).receiver.clone().or_else(|| self.extended_type(*r));
+                    written.is_some_and(|t| t.eq_ignore_ascii_case(on))
                 })
                 .collect();
             let mine: Vec<DefRef> = exact.iter().copied().filter(|r| r.0 == f).collect();
@@ -1633,6 +1861,17 @@ impl<'a> Project<'a> {
             ([one], _) | (_, [one]) => Some((Target::Def(*one), Confidence::Inferred)),
             _ => None,
         }
+    }
+
+    /// The bare name of the type a Rust method is written for, when the
+    /// project does not define that type (`http::Request<()>` -> `Request`).
+    fn extended_type(&self, r: DefRef) -> Option<String> {
+        if self.family[r.0] != Some(Family::Rust) {
+            return None;
+        }
+        let owner = self.def(r).owner.as_deref()?;
+        let bare = owner.split('<').next()?.rsplit(['.', ':']).next()?.trim();
+        (!bare.is_empty() && self.type_named(r.0, bare).is_none()).then(|| bare.to_string())
     }
 
     /// Whether file `f` imports a whole namespace or package that file `g` is
@@ -1906,8 +2145,19 @@ pub fn resolve(
                     || state
                     || matches!(r.kind, RefKind::Attr)
                     || r.context == "implicit_call";
+                // a bare Ruby name that is a local is the local, not a call
+                // (typed or not: `s = stubs; s.match(x)` calls nothing at `s`)
+                if r.context == "implicit_call"
+                    && r.path.len() == 1
+                    && p.is_local_name(f, scope_def, &r.path[0])
+                {
+                    continue;
+                }
                 *p.types_only.borrow_mut() = heritage || r.kind == RefKind::Type;
                 *p.calling.borrow_mut() = matches!(r.kind, RefKind::Call | RefKind::New);
+                *p.recv.borrow_mut() = r.recv.map(|i| (f, i));
+                *p.args.borrow_mut() = r.args;
+                *p.self_arg.borrow_mut() = r.self_arg;
                 let found = if r.from_owner.is_some() && heritage {
                     p.resolve_path(f, None, &r.path, true)
                 } else {
@@ -1915,6 +2165,9 @@ pub fn resolve(
                 };
                 *p.types_only.borrow_mut() = false;
                 *p.calling.borrow_mut() = false;
+                *p.recv.borrow_mut() = None;
+                *p.args.borrow_mut() = None;
+                *p.self_arg.borrow_mut() = false;
                 let built_type = match &found {
                     Some((Target::Def(t), _)) if p.def(*t).kind.is_class_like() => Some(*t),
                     _ => None,
@@ -2142,6 +2395,8 @@ pub fn resolve(
                     from_def: u.from_def,
                     from_owner: None,
                     args: None,
+                    self_arg: false,
+                    recv: None,
                     byte: u.byte,
                 };
                 let src = p.source_of(f, &probe);

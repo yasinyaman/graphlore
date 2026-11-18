@@ -196,8 +196,10 @@ TEST_MARKERS = {
     ".java": r"@(Test|ParameterizedTest)\b",
     ".kt": r"@(Test|ParameterizedTest)\b",
     ".scala": r"\b(test|it|describe)\s*\(\s*\"|extends \w*(Suite|Spec)\b|Tests\s*\{",
-    ".cs": r"\[(Fact|Theory|Test|TestMethod)\b",
-    ".rs": r"#\[(test|cfg\(test\))\]",
+    # an attribute on a line of its own (`[Test],` is an element of a list), and
+    # `#[cfg(test)]` on a module or function (on a `let` or a `use` it is no test)
+    ".cs": r"^\s*\[(Fact|Theory|Test|TestMethod)\b[^\]\n]*\]\s*$",
+    ".rs": r"#\[test\]|#\[cfg\(test\)\]\s*\n\s*(pub(\([^)]*\))?\s+)?(mod|fn|impl)\b",
     ".swift": r"import XCTest|@Test\b",
     ".cpp": r"\bTEST(_F|_P)?\s*\(",
     ".rb": r"RSpec\.describe|^\s*describe\s|Minitest::Test",
@@ -716,7 +718,8 @@ def check_source(a: Audit, sub: Subject, sample: int) -> None:
                 if want.strip() != code.strip():
                     a.finding("FETCH-CODE-MISMATCH", "high", "bug", "fetch",
                               "`code` is not the file slice `lines` names", where, ext)
-            qual = (row.get("qualname") or "").rsplit(".", 1)[-1]
+            # the bare name: `Client.send`, and Ruby's `class ActiveSupport::TestCase`
+            qual = re.split(r"\.|::", row.get("qualname") or "")[-1]
             starts_here = [sp for sp in s._spans_for_file(row.get("file", ""))
                            if sp[2] == row.get("line")]
             if row.get("spanned") and qual and qual != name and starts_here:
@@ -1357,7 +1360,16 @@ def build_native(root: Path, repos: list[dict[str, Any]], rebuild: bool) -> None
                 fh.write(f"{NATIVE_OUT}/\n")
         out = d / NATIVE_OUT / "graph.json"
         if out.exists() and not rebuild:
-            continue
+            # a graph another version of the engine built is not what is being
+            # audited: rebuild it rather than read it as this engine's
+            try:
+                built_by = json.loads(out.read_text(encoding="utf-8")).get(
+                    "graph", {}).get("engine_version")
+            except (OSError, ValueError):
+                built_by = None
+            if built_by == getattr(graphlore_engine, "__version__", built_by):
+                continue
+            print(f"native {repo['key']}: graph built by engine {built_by}, rebuilding")
         commit = _git(d, "rev-parse", "HEAD").strip() or None
         rep = json.loads(graphlore_engine.build(str(d), out=str(out), commit=commit,
                                                 out_dir_name=NATIVE_OUT))
@@ -1470,7 +1482,8 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--engine", choices=("graphify", "native"), default="graphify",
                         help="audit the graphs graphify built (graphify-out/) or the ones "
                              "graphlore's native engine builds (graphlore-native/, built "
-                             "when missing or with --rebuild)")
+                             "when missing, built by another engine version, or "
+                             "with --rebuild)")
     parser.add_argument("--rebuild", action="store_true",
                         help="with --engine native: rebuild every native graph first")
     opts = parser.parse_args(argv)

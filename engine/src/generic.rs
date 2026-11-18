@@ -500,6 +500,8 @@ pub fn walk_defs(m: &dyn LanguageModule, root: Node, src: &[u8]) -> Vec<Def> {
                     receiver: None,
                     anonymous: false,
                     params: None,
+                    returns: Vec::new(),
+                    lambda_receiver: None,
                     node_id: node.id(),
                     start_byte: node.start_byte(),
                     end_byte: node.end_byte(),

@@ -8210,3 +8210,23 @@ def test_same_names_counts_the_definitions_past_the_first(tmp_path, monkeypatch)
     assert data["truncated"] is True and data["names_cut"] == 1
     assert "definitions_total" in data["hint"]
     assert "3 more definitions" in server.graphlore_same_names()
+
+
+def test_routes_in_a_frameworks_own_repository(tmp_path, monkeypatch):
+    """express's examples take the framework by `require('../../')`: the directory
+    whose package.json is the framework's."""
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    (tmp_path / "examples" / "hello").mkdir(parents=True)
+    (tmp_path / "examples/hello/index.js").write_text(
+        "var express = require('../../');\nvar app = express();\n"
+        "app.get('/hello', function (req, res) { res.send('hi'); });\n", encoding="utf-8")
+    (tmp_path / "index.js").write_text("module.exports = {};\n", encoding="utf-8")
+    _write_graph(tmp_path, {"nodes": [
+        {"id": "e", "label": "index.js", "source_file": "examples/hello/index.js",
+         "source_location": "L1"},
+    ], "edges": []})
+    for name, want in (("express", ["/hello"]), ("toolbox", [])):
+        (tmp_path / "package.json").write_text(json.dumps({"name": name}), encoding="utf-8")
+        server._GRAPH_CACHE.clear()
+        got = json.loads(server.graphlore_routes(as_json=True))
+        assert [r["pattern"] for r in got["routes"]] == want, name

@@ -143,7 +143,25 @@ fn top_key(p: &Project, files: &[FileFacts], f: usize, name: &str) -> Key {
 }
 
 pub(super) fn compose(p: &Project, files: &[FileFacts]) -> Vec<RouteNode> {
-    let any_server = files.iter().any(|f| f.http.server_import);
+    // the framework's own repository: a file takes it by a relative path
+    // (`require('../../')` in express's examples), which names the directory
+    // whose package.json is the framework's
+    let own: Vec<&str> = p
+        .modsys
+        .js_packages
+        .iter()
+        .filter(|(name, _)| crate::http::ecma::SERVER_FRAMEWORKS.contains(&name.as_str()))
+        .map(|(_, dir)| dir.trim_end_matches('/'))
+        .collect();
+    let takes_own = |f: &FileFacts| {
+        !own.is_empty()
+            && f.imports.iter().any(|i| {
+                i.module.starts_with('.')
+                    && super::normalize(&format!("{}/{}", super::dir_of(&f.path), i.module))
+                        .is_some_and(|t| own.contains(&t.as_str()))
+            })
+    };
+    let any_server = files.iter().any(|f| f.http.server_import || takes_own(f));
     // own prefixes and mounts, by router
     let mut own: HashMap<Key, (usize, PathExpr)> = HashMap::new();
     let mut mounts: HashMap<Key, Vec<Mount>> = HashMap::new();
@@ -362,6 +380,8 @@ fn handler_id(
             from_def: d,
             from_owner: None,
             args: None,
+            self_arg: false,
+            recv: None,
             byte: 0,
         };
         p.source_of(f, &r)
@@ -581,6 +601,8 @@ pub(super) fn link_calls(
                     from_def: c.from_def,
                     from_owner: None,
                     args: None,
+                    self_arg: false,
+                    recv: None,
                     byte: 0,
                 };
                 p.source_of(f, &r)

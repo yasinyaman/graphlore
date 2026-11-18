@@ -28,7 +28,7 @@ pub struct ModuleSystems {
     py_roots: HashSet<String>,
     // JS / TS
     tsconfigs: Vec<TsConfig>,
-    js_packages: Vec<(String, String)>,
+    pub(super) js_packages: Vec<(String, String)>,
     // Go
     go_modules: Vec<(String, String)>,
     go_dirs: HashMap<String, Vec<usize>>,

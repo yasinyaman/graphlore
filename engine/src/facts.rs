@@ -112,6 +112,15 @@ pub struct Def {
     /// How many parameters a callable declares.
     #[serde(default)]
     pub params: Option<u8>,
+    /// The receiver of the callable's last function-typed parameter (Kotlin
+    /// `block: Builder.() -> Unit`): what `this` is in a lambda passed to it.
+    #[serde(default)]
+    pub lambda_receiver: Option<Vec<String>>,
+    /// What a callable's `return`s and expression body construct or call
+    /// (`return Foo()`, `fun f() = Builder(x)`, `return self`), as paths: the
+    /// result of one that declares none.
+    #[serde(default)]
+    pub returns: Vec<Vec<String>>,
     /// Inside a test region of a source file (Rust `#[cfg(test)]`, `#[test]`).
     pub is_test: bool,
     /// The object a function is assigned to as a property (JS `res.send =
@@ -301,12 +310,36 @@ pub struct RefFact {
     /// The type a use belongs to when no definition encloses it: a Rust
     /// `impl Trait for Type` (the use is `Type`'s).
     pub from_owner: Option<String>,
+    /// The innermost lambda with a receiver the use sits in (an index into
+    /// `FileFacts::receivers`): there a bare name is the receiver's member.
+    #[serde(default)]
+    pub recv: Option<u16>,
     /// How many arguments a call or construction passes, where the site
     /// shows them: what picks one of several constructors.
     #[serde(default)]
     pub args: Option<u8>,
+    /// One of those arguments is `this` / `self`.
+    #[serde(default)]
+    pub self_arg: bool,
     #[serde(skip)]
     pub byte: usize,
+}
+
+/// Where the implicit receiver of a lambda comes from.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ReceiverOf {
+    /// `x.apply { … }`, `x.run { … }`, `with(x) { … }`: the value, as a path.
+    Value(Vec<String>),
+    /// `withIndent { … }`: the function called; its last parameter says the
+    /// receiver when it is typed `T.() -> R` (`Def::lambda_receiver`).
+    Callee(Vec<String>),
+}
+
+/// A lambda with a receiver, and the one around it.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ReceiverScope {
+    pub of: ReceiverOf,
+    pub outer: Option<u16>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -338,6 +371,9 @@ pub struct FileFacts {
     pub exports: Vec<(String, String)>,
     pub refs: Vec<RefFact>,
     pub locals: Vec<Local>,
+    /// Lambdas with a receiver (Kotlin `x.apply { … }`, `withIndent { … }`).
+    #[serde(default)]
+    pub receivers: Vec<ReceiverScope>,
     /// Environment variables, files, tables, events and keys the file uses.
     #[serde(default)]
     pub resources: Vec<crate::resources::ResourceUse>,
@@ -362,6 +398,7 @@ impl FileFacts {
             exports: Vec::new(),
             refs: Vec::new(),
             locals: Vec::new(),
+            receivers: Vec::new(),
             resources: Vec::new(),
             http: Default::default(),
             parse: ParseStatus::default(),

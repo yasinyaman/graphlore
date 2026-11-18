@@ -219,13 +219,13 @@ All notable changes to this project are documented here. The format is based on
   out** (the polyglot audit's `REPLY-TOO-LARGE` on native graphs, five to
   none). `graphlore_neighbors` takes `limit` (200): past it the result carries
   `total`, `truncated` and `counts` by relation and direction (retrofit's
-  `Call`, 752 neighbors: 98 KB to 10 KB). `graphlore_fetch` returns one
+  `Call`, 752 neighbors: 99 KB to 25 KB as JSON). `graphlore_fetch` returns one
   definition whole up to 8,000 tokens or `budget_tokens`, whichever is larger;
   a longer one is cut at a line with `cut` (`lines_shown`, `lines_total`,
   `tokens_total`), `lines_left_out` and a hint naming `graphlore_skeleton` and the budget that
-  returns all of it (guzzle's 3,100-line `CurlFactory`: 124 KB to 27 KB).
+  returns all of it (guzzle's 3,100-line `CurlFactory`: 124 KB to 29 KB).
   `graphlore_same_names` lists the first 25 definitions of a name and counts
-  them all in `definitions_total` (cpr's 647 definitions named `TEST`: 133 KB to 2 KB).
+  them all in `definitions_total` (cpr's 647 definitions named `TEST`: 134 KB to 6 KB).
 - With the native engine, `graphlore_build(cluster_only=True)` detects the
   communities of the graph on disk again (it was refused), and `update=True`
   is incremental (it rebuilt everything); under `GRAPHLORE_ENGINE=auto` both
@@ -237,6 +237,56 @@ All notable changes to this project are documented here. The format is based on
   and the file is unchanged since the build, instead of a line window.
 
 ### Fixed
+- Native engine 0.5.3, what 0.5.2 still lacked. 1,859 more edges on the 31
+  audit repositories (calls 41,063 to 42,408), 121 gone, most of those a
+  local taken for a function of its name:
+  - **Kotlin locals were typed only when the declaration wrote a type.** In
+    `val c = Writer(out)` the value sits beside the declaration, where the
+    walk did not look: `c.close()` reached nothing, or a method of that name
+    elsewhere. kotlinpoet gains 747 calls, such as `spec.toString()` to the
+    right class's `toString`.
+  - **A local keeps the chain it is assigned** (`val b = builder(x).tag(y)`,
+    Go `res := c.R().SetBody(b)`): it was dropped as untypeable, and is now
+    typed by following what each call returns (528 calls in resty). Inside
+    its own initializer a name is still the outer one (`val builder =
+    builder(x)`, Rust `let tls = tls::Config::builder()`).
+  - **Results read from the body.** A function that declares no result
+    returns what its `return`s and expression body construct, when they agree
+    (`fun builder(n) = Builder(n)`, Python `return Conn()` beside `return
+    None`, `return self`, the last expression of a Ruby method); a closure's
+    `return` is not the function's. Calls through such a result are
+    `INFERRED`. In Ruby a name called without parentheses is followed the same
+    way (`stubs.match(env)`, `s = stubs; s.match(env)`), and a local, typed or
+    not, is no longer read as a call of the type it holds.
+  - **Kotlin lambdas with a receiver.** In `x.apply { … }`, `x.run { … }`,
+    `with(x) { … }` and a lambda passed to a parameter typed `T.() -> R`
+    (`buildCodeBlock { indent() }`), a bare name is the receiver's member
+    before it is the class's around. `out.apply { emit("x") }` inside an
+    `emit` was a call of itself. Where both have the name the receiver's is
+    taken as a guess, unless it takes fewer parameters than the call passes or
+    the call hands over `this` (`buildCodeString { emit(this) }`).
+  - **Constructions typed by their declaration**: C# `Box b = new(1, 2)` and
+    C++ `Buf b(3)` / `Buf b{3}` call the type and its constructor (98 calls in
+    cpr, 28 in the C# repositories).
+  - **A parameter or local of no known type is an unknown receiver**: a method
+    only one type of the project has, near the caller, is `INFERRED` (as it
+    already was on the result of an unknown call). Not in Ruby and Swift,
+    which have no import to say which type is meant. In Rust, a method of an
+    `impl Trait for` a type of another crate is found on a local of that type
+    (38 calls in ureq).
+  - **Routes in a framework's own repository.** A file that takes the
+    framework by a relative path (`require('../../')` in express's examples)
+    imports it: the directory's `package.json` names it. Both `graphlore_routes`
+    and the native engine read such files now (express: no route to 53, and
+    139 route nodes with its tests' in the native graph).
+- `benchmarks/polyglot.py --engine native` read whatever native graph was on
+  disk: after an engine change it audited the previous engine's graphs, and
+  the rerun reported for engine 0.5.2 had read 0.5.1's. It now rebuilds a
+  graph built by another version of the engine and says so. It also no longer
+  reports `[Test],` (an element of a list) or `#[cfg(test)]` on a `let` as a
+  test the path rules miss, nor Ruby's `class ActiveSupport::TestCase` as a
+  span of another symbol. On graphs built by 0.5.3 the audit raises nothing
+  but its note on orphan nodes.
 - Native engine 0.5.2, the gaps the 0.5.1 comparison left (`calls` recall
   against graphify 82% to 84% on the 31 audit repositories; C# 80% to 93%,
   Ruby 60% to 66%, Kotlin 64% to 70%, Java 81% to 85%):

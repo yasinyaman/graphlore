@@ -94,6 +94,7 @@ import importlib.util
 import inspect
 import json
 import os
+import posixpath
 import re
 import secrets
 import shutil
@@ -6268,13 +6269,38 @@ def _project_imports_js_server(files: Iterable[str]) -> bool:
     """Whether some JS/TS file of the graph imports a server framework (express,
     fastify, koa-router, ...): the condition for keeping a route registered in a
     file that imports none itself, such as an Express app's `config/routes.js`
-    (`module.exports = function (app) { app.get('/x', h) }`)."""
+    (`module.exports = function (app) { app.get('/x', h) }`).
+
+    The framework's own repository counts too: there a file takes it by a relative
+    path (`require('../../')` in express's examples), which names the directory
+    whose `package.json` is the framework's."""
+    own: dict[str, bool] = {}
+
+    def is_framework_dir(rel: str) -> bool:
+        if rel not in own:
+            name = None
+            path = _resolve_in_project(posixpath.join(rel, "package.json"))
+            try:
+                if path is not None and path.is_file():
+                    name = json.loads(
+                        path.read_text(encoding="utf-8", errors="replace")).get("name")
+            except (OSError, ValueError, AttributeError):
+                name = None
+            own[rel] = name in _JS_SERVER_FRAMEWORKS
+        return own[rel]
+
     for f in files:
         js = _js_for_file(f)
-        if js is not None and any(
-                i.specifier == fw or i.specifier.startswith(fw + "/")
-                for i in js.imports for fw in _JS_SERVER_FRAMEWORKS):
-            return True
+        if js is None:
+            continue
+        for i in js.imports:
+            spec = i.specifier
+            if any(spec == fw or spec.startswith(fw + "/") for fw in _JS_SERVER_FRAMEWORKS):
+                return True
+            if spec.startswith("."):
+                target = posixpath.normpath(posixpath.join(posixpath.dirname(f), spec))
+                if not target.startswith("..") and is_framework_dir(target):
+                    return True
     return False
 
 
