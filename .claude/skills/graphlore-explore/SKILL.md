@@ -203,7 +203,7 @@ stripped) — the middle layer between the map and full code — and
   distant, each with its score and both `file:line`s (`score_kind` says whether
   it is an embedding or a tf-idf cosine). Read the score: near 1.0 is copied
   code; a low score is two things with the same role, which is why pairs under
-  the floor (0.7 on embeddings, 0.6 on tf-idf) are left out by default.
+  the floor (0.7 on embeddings, 0.5 on tf-idf) are left out by default.
 - **Auditing a dependency upgrade** → `graphlore_package_apis("<package>")` —
   which symbols of the external package are actually used, and from where.
 - **Finding an endpoint** → `graphlore_routes(pattern="/items")` — which URL

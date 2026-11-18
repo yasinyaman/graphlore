@@ -32,7 +32,7 @@ All notable changes to this project are documented here. The format is based on
   index, `mode` (`hybrid` / `bm25`), its tiers, what it indexed and skipped, and
   `dense_unavailable`. The text reply ends with a `Search:` line.
 - `score_kind` in `graphlore_duplication_scan`, and a default floor per backend:
-  0.7 on embedding scores (semble, built-in hybrid), 0.6 on the built-in
+  0.7 on embedding scores (semble, built-in hybrid), 0.5 on the built-in
   BM25-only index's tf-idf cosine. On the built-in index each seed is anchored
   on its own definition's chunk instead of a search for its first lines.
 - `benchmarks/search.py`: the built-in index (BM25 and hybrid) against semble on

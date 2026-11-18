@@ -120,7 +120,8 @@ _FILE_DECAY = 0.6
 # A file several of whose chunks match is more likely the answer: its best chunk
 # gains this share of the others' scores.
 _FILE_COHERENCE = 0.0
-# The same, applied to the BM25 ranking before it is fused with the dense one.
+# The same on the BM25-only index, for questions (not names: a symbol query wants
+# the one definition, and a file that mentions the name often loses it).
 _LEX_COHERENCE = 0.0
 _RERANK_DEPTH = 100
 
@@ -825,10 +826,10 @@ class CodeIndex:
             kind = _query_kind(query)
             lex = self._lexical(query, kind, overlay_weight)
             ranked = self._best(lex, max(top_k, _RERANK_DEPTH, _FUSION_DEPTH))
-            if _LEX_COHERENCE:
-                ranked = self._cohere(ranked[:_RERANK_DEPTH], _LEX_COHERENCE)
             use_dense = self.dense is not None and dense is not False
             if not use_dense:
+                if _LEX_COHERENCE and kind != "symbol":
+                    ranked = self._cohere(ranked[:_RERANK_DEPTH], _LEX_COHERENCE)
                 ranked = self._rerank(ranked, query)
                 return [Hit(self.chunks[c], round(s, 6)) for c, s in ranked[:top_k]]
             assert self.dense is not None
