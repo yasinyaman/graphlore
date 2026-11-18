@@ -3651,10 +3651,14 @@ _DUP_MAX_SIZE_RATIO = 3.0
 # floor applies to semble only.
 _SEMBLE_SCORE_FLOOR = 0.7
 # Default floors on the built-in index, by tier: embedding cosine on the hybrid
-# index, tf-idf cosine on the BM25-only one (see benchmarks/search.py for how they
-# were set).
+# index, tf-idf cosine on the BM25-only one. Set with `benchmarks/search.py
+# --calibrate` (19 repositories, 719 definitions, each against a near-clone — a
+# fifth of its lines dropped, three identifiers renamed — and against an unrelated
+# definition of a similar size): embedding 0.7 keeps 89% of the clones and 0.7% of
+# the unrelated pairs; tf-idf 0.5 keeps 86% of the clones and 0.3% of the pairs
+# (0.6 would drop a quarter of the clones for no fewer false pairs).
 _BUILTIN_DENSE_SCORE_FLOOR = 0.7
-_BUILTIN_LEXICAL_SCORE_FLOOR = 0.6
+_BUILTIN_LEXICAL_SCORE_FLOOR = 0.5
 
 
 def _score_floor(backend: _Backend) -> tuple[float, str]:
@@ -3717,7 +3721,7 @@ def graphlore_duplication_scan(
     sides, best score first. The score is the similarity of the two chunks (1.0 =
     the same text); ``score_kind`` says what it is — embedding similarity on semble
     and on the built-in hybrid index, tf-idf cosine on the built-in BM25-only one.
-    Pairs under the default floor (0.7 on embeddings, 0.6 on tf-idf) are left out
+    Pairs under the default floor (0.7 on embeddings, 0.5 on tf-idf) are left out
     unless ``min_score`` says otherwise: down there they are usually code with the
     same ROLE (two abstract bases, two SQL builders), not copied code. For names
     shared across modules, see graphlore_same_names.
@@ -3738,7 +3742,7 @@ def graphlore_duplication_scan(
         include_tests: True -> also report test ↔ source pairs, and identical
             bodies inside test code.
         min_score: Drop pairs the backend scores below this (when it reports
-            scores). Default: 0.7 on semble and the built-in hybrid index, 0.6 on
+            scores). Default: 0.7 on semble and the built-in hybrid index, 0.5 on
             the built-in BM25-only index, 0 on a custom backend; pass 0 to see
             every pair.
         scope: Which part of the graph to scan (see graphlore_god_nodes): path
