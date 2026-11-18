@@ -600,6 +600,41 @@ const UNWRAPPERS: &[&str] = &[
     "clone",
     "await",
     "Value",
+    "Result",
+    "lock",
+    "try_lock",
+    "borrow",
+    "borrow_mut",
+    "read",
+    "write",
+    "upgrade",
+    "unwrap_or",
+    "unwrap_or_else",
+    "join",
+    "block",
+    "getOrNull",
+    "value",
+    "GetAwaiter",
+    "GetResult",
+];
+
+/// Methods of a wrapper that give a wrapper of the same value
+/// (`res.map_err(…)?`, `opt.filter { … }`, `task.ConfigureAwait(false)`).
+const SEALED_KEEPING: &[&str] = &[
+    "map_err",
+    "ok_or",
+    "ok_or_else",
+    "ok",
+    "or",
+    "or_else",
+    "filter",
+    "as_deref",
+    "as_deref_mut",
+    "context",
+    "with_context",
+    "inspect",
+    "take",
+    "ConfigureAwait",
 ];
 
 /// Methods of a collection that give one of its elements.
@@ -944,6 +979,9 @@ pub struct Project<'a> {
     structural: RefCell<HashMap<(usize, usize, String), Option<DefRef>>>,
     /// The types of locals already worked out: `(file, index of the local)`.
     local_types: RefCell<HashMap<(usize, usize), Typed>>,
+    /// Whether a local assigned a value holds it in a sealed wrapper
+    /// (`let r = load();` with `fn load() -> Result<Foo, E>`), per local.
+    sealed_locals: RefCell<HashMap<(usize, usize), bool>>,
     /// The locals whose type is being worked out: `(file, index of the local)`.
     typing: RefCell<HashSet<(usize, usize)>>,
     /// The use being resolved, when it is a call: `(file, index of the use)`.
@@ -1040,6 +1078,7 @@ impl<'a> Project<'a> {
             used_on: RefCell::new(HashMap::new()),
             structural: RefCell::new(HashMap::new()),
             local_types: RefCell::new(HashMap::new()),
+            sealed_locals: RefCell::new(HashMap::new()),
             typing: RefCell::new(HashSet::new()),
             cur: RefCell::new(None),
             args: RefCell::new(None),
@@ -1618,6 +1657,12 @@ impl<'a> Project<'a> {
     /// construct (`fun builder(n) = Builder(n)`, `return self`), when they
     /// agree: read from the body, so a guess.
     fn return_type(&self, r: DefRef) -> Option<(DefRef, bool)> {
+        // `-> Option<Foo>`, `Promise<Foo>`: what the wrapper holds (whether
+        // it has to be opened first is the walk's `sealed`)
+        if let Some(inner) = self.def(r).wraps.as_ref().filter(|_| self.def(r).kind.is_callable()) {
+            let t = self.type_of_path(r.0, self.def(r).parent, inner, true)?;
+            return self.def(t).kind.is_class_like().then_some((t, true));
+        }
         let declared = self.files[r.0].refs.iter().find(|x| {
             x.from_def == Some(r.1) && x.kind == RefKind::Type && x.context == "return_type"
         });
@@ -1788,6 +1833,11 @@ impl<'a> Project<'a> {
                     });
                     if let Some(e) = elem {
                         return typed(f, Some(x), &e);
+                    }
+                    // an optional is a collection of at most one
+                    // (`opt.ifPresent { it.run() }`)
+                    if l.sealed {
+                        return typed(f, Some(x), &l.path);
                     }
                     // another name for a collection: `val ys = xs`
                     let alias = !l.declared
@@ -2253,6 +2303,25 @@ impl<'a> Project<'a> {
     }
 
     /// The bases of a type that resolve to project types.
+    /// The one other type declared beside `c` under its name (a generic and
+    /// a plain `RestResponse`, a class and its companion).
+    fn namesake(&self, c: DefRef) -> Option<DefRef> {
+        let d = self.def(c);
+        let named = match d.parent {
+            Some(par) => self.children[c.0].get(&par).and_then(|x| x.get(&d.name)),
+            None => self.top[c.0].get(&d.name),
+        }?;
+        let others: Vec<usize> = named
+            .iter()
+            .copied()
+            .filter(|&i| i != c.1 && self.files[c.0].defs[i].kind.is_class_like())
+            .collect();
+        match others.as_slice() {
+            [one] => Some((c.0, *one)),
+            _ => None,
+        }
+    }
+
     fn bases(&self, c: DefRef) -> Vec<DefRef> {
         if let Some(b) = self.bases_memo.borrow().get(&c) {
             return b.clone();
@@ -2279,6 +2348,10 @@ impl<'a> Project<'a> {
             if let Some((Target::Def(b), _)) = self.resolve_path(c.0, outer, &r.path, true) {
                 if b != c {
                     out.push(b);
+                } else if let Some(other) = self.namesake(c) {
+                    // C# `RestResponse<T> : RestResponse`: the base is the
+                    // other type of the name, not the class itself
+                    out.push(other);
                 }
             }
         }
@@ -2576,7 +2649,10 @@ impl<'a> Project<'a> {
             // an element (`xs[0].run()`) or a mapping (`xs.map { … }`) the
             // walk could not type is a receiver it cannot name: what is
             // called on it is found by a distinctive name alone
-            let marker = |s: &String| s == crate::refs::ELEMENT || s == crate::refs::MANY;
+            // (or an opened wrapper: `query.fetch_one().await?.into_comment()`)
+            let marker = |s: &String| {
+                s == crate::refs::ELEMENT || s == crate::refs::MANY || s == crate::refs::OPENED
+            };
             if let Some(at) = path.iter().rposition(marker) {
                 let mut unnamed = vec!["()".to_string()];
                 unnamed.extend_from_slice(&path[at + 1..]);
@@ -2605,8 +2681,36 @@ impl<'a> Project<'a> {
         want_many: bool,
     ) -> Option<(Target, Confidence)> {
         let fam = self.family[f]?;
+        // `await x`, `x?` (`refs::OPENED`): taken out of the path, and kept as
+        // where a wrapper is opened (`opened[i]`: before the `i`th name)
+        let stripped: Vec<String>;
+        let mut opened = Vec::new();
+        let path = if path.iter().any(|s| s == crate::refs::OPENED) {
+            let mut clean = Vec::with_capacity(path.len());
+            for s in path {
+                if s == crate::refs::OPENED {
+                    if let Some(last) = opened.last_mut() {
+                        *last = true;
+                    }
+                } else {
+                    clean.push(s.clone());
+                    opened.push(false);
+                }
+            }
+            // `opened[i]`: right after name `i`, so before name `i + 1`
+            stripped = clean;
+            &stripped[..]
+        } else {
+            path
+        };
+        let opened_after = |i: usize| opened.get(i).copied().unwrap_or(false);
         let (head, rest) = path.split_first()?;
         let mut conf = Confidence::Extracted;
+        // Whether `t` is what a sealed wrapper holds, not opened yet: after a
+        // name, field or call declared as one (`Optional<Foo>`, `-> Result<Foo,
+        // E>`, `Promise<Foo>`); until `await`, `?`, an unwrapper (`unwrap()`,
+        // `get()`, `.Result`) or `[]` (the parameter of `opt.map { … }`)
+        let mut sealed = false;
         // Whether `t` stands for a collection of itself: after a name
         // declared as one (`xs: List<Foo>`), a call that returns one, a
         // method that keeps one (`filter`, `sorted`) or `[+]`; until an
@@ -2871,6 +2975,10 @@ impl<'a> Project<'a> {
                 }
             }
         }
+        let head_def = match t {
+            Target::Def(p) if self.def(p).kind.is_state() => Some(p),
+            _ => None,
+        };
         if let Target::Def(p) = t {
             if !many && self.def(p).kind.is_state() && !rest.is_empty() {
                 let typed = self
@@ -2896,6 +3004,17 @@ impl<'a> Project<'a> {
                 }
             }
         }
+        // a local, parameter or field (named bare) declared as, or assigned,
+        // a sealed wrapper
+        if !many && !own_init && !rest.is_empty() {
+            sealed = match head_def {
+                Some(p) => self.def(p).sealed,
+                None => self.is_local_name(f, d, head) && self.local_sealed(f, d, head),
+            };
+        }
+        if opened_after(0) {
+            sealed = false;
+        }
         // the type the member being walked through was looked up on
         let mut on: Option<DefRef> = None;
         let mut skip = 0;
@@ -2904,15 +3023,40 @@ impl<'a> Project<'a> {
         for (i, seg) in rest.iter().enumerate() {
             if skip > 0 {
                 skip -= 1;
+                if skip == 0 && opened_after(i + 1) {
+                    sealed = false;
+                }
                 continue;
             }
             // `[]`: one of the collection
             // (of an optional, `xs.find { … }?.let { … }`: what it holds)
             if seg == crate::refs::ELEMENT {
-                if !many && !one {
+                if !many && !one && !sealed {
                     return None;
                 }
                 many = false;
+                sealed = false;
+                continue;
+            }
+            if sealed && seg != crate::refs::MANY {
+                // a method of the wrapper: what it gives is the wrapper's to
+                // say; as the thing called it is the library's
+                let called = rest.get(i + 1).is_some_and(|s| s == "()");
+                let last = i + 1 + usize::from(called) == rest.len();
+                if last && *self.calling.borrow() {
+                    return None;
+                }
+                if UNWRAPPERS.contains(&seg.as_str()) {
+                    sealed = false;
+                    // (and what it gives may be another: `lock().unwrap()`)
+                    one = true;
+                } else if !SEALED_KEEPING.contains(&seg.as_str()) {
+                    return None;
+                }
+                skip = usize::from(called);
+                if skip == 0 && opened_after(i + 1) {
+                    sealed = false;
+                }
                 continue;
             }
             // `[+]`: a collection of what the path named so far gives
@@ -2991,6 +3135,7 @@ impl<'a> Project<'a> {
                                 conf = conf.max(Confidence::Inferred);
                             }
                             t = Target::Def(r);
+                            sealed = self.def(c).sealed && !opened_after(i + 1);
                             continue;
                         }
                         // a result bound to the type itself: the type the
@@ -3061,6 +3206,7 @@ impl<'a> Project<'a> {
                     };
                     if let Some((ft, cf)) = self.field_type(c, seg, 3).or_else(declared) {
                         conf = conf.max(cf);
+                        sealed = self.member_sealed(c, seg, found.as_ref()) && !opened_after(i + 1);
                         t = Target::Def(ft);
                         continue;
                     }
@@ -3083,15 +3229,81 @@ impl<'a> Project<'a> {
                     }
                     let (ft, cf) = self.field_type(c, seg, 3)?;
                     conf = conf.max(cf);
+                    sealed = self.member_sealed(c, seg, None) && !opened_after(i + 1);
                     t = Target::Def(ft);
                 }
             }
+            if opened_after(i + 1) {
+                sealed = false;
+            }
         }
-        // a collection is no definition; one thing is no collection
-        if many != want_many {
+        // a collection is no definition; one thing is no collection (an
+        // optional is a collection of at most one)
+        if many != want_many && !(want_many && sealed) {
             return None;
         }
         Some((t, conf))
+    }
+
+    /// Whether member `name` of type `c` (found as `found`, or a field
+    /// assigned in a method) holds its value in a sealed wrapper.
+    fn member_sealed(&self, c: DefRef, name: &str, found: Option<&Target>) -> bool {
+        if let Some(Target::Def(p)) = found {
+            return self.def(*p).sealed;
+        }
+        match self.fields.get(&c).and_then(|m| m.get(name)) {
+            Some(&(fi, li)) => self.files[fi].locals[li].sealed,
+            None => self.bases(c).into_iter().any(|b| {
+                self.fields
+                    .get(&b)
+                    .and_then(|m| m.get(name))
+                    .is_some_and(|&(fi, li)| self.files[fi].locals[li].sealed)
+            }),
+        }
+    }
+
+    /// Whether a local or parameter holds a sealed wrapper: declared as one,
+    /// or assigned a call of a function that returns one and not opened
+    /// there (`let r = load();`, not `let r = load()?;`).
+    fn local_sealed(&self, f: usize, d: Option<usize>, name: &str) -> bool {
+        let defs = &self.files[f].defs;
+        let mut cur = d;
+        while let Some(x) = cur {
+            if let Some(&li) = self.locals.get(&(f, x, name.to_string())) {
+                let l = &self.files[f].locals[li];
+                if l.declared || l.sealed {
+                    return l.sealed;
+                }
+                if l.path.is_empty() || l.path.last().is_some_and(|s| s == crate::refs::OPENED) {
+                    return false;
+                }
+                if let Some(&known) = self.sealed_locals.borrow().get(&(f, li)) {
+                    return known;
+                }
+                // (worked out from the top it is the local's own answer and
+                // kept, as `local_type` keeps a type)
+                let whole = self.typing.borrow().is_empty() && *self.depth.borrow() == 0;
+                if *self.depth.borrow() > 3 || !self.typing.borrow_mut().insert((f, li)) {
+                    return false;
+                }
+                *self.depth.borrow_mut() += 1;
+                let recv = self.recv.replace(None);
+                let types = self.types_only.replace(false);
+                let value = self.resolve_path(f, Some(x), &l.path, true);
+                *self.types_only.borrow_mut() = types;
+                *self.recv.borrow_mut() = recv;
+                *self.depth.borrow_mut() -= 1;
+                self.typing.borrow_mut().remove(&(f, li));
+                let sealed = matches!(value, Some((Target::Def(c), _))
+                    if self.def(c).kind.is_callable() && self.def(c).sealed);
+                if whole {
+                    self.sealed_locals.borrow_mut().insert((f, li), sealed);
+                }
+                return sealed;
+            }
+            cur = defs[x].parent;
+        }
+        false
     }
 
     /// The element type of a local or parameter declared as a collection

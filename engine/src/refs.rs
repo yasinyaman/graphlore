@@ -221,8 +221,15 @@ pub fn path_of(n: Node, src: &[u8]) -> Option<Vec<String>> {
         | "type_annotation"
         | "parenthesized_expression"
         | "non_null_expression"
-        | "await_expression"
         | "unary_expression" => kids(n).into_iter().find_map(|c| path_of(c, src)),
+        // `await x`, Rust `x?`: what the wrapper holds
+        "await_expression" | "try_expression" => {
+            let mut p = kids(n).into_iter().find_map(|c| path_of(c, src))?;
+            if p.last().is_some_and(|s| s != OPENED) {
+                p.push(OPENED.into());
+            }
+            Some(p)
+        }
         // Java `a.b.C` written as names with no fields
         "scoped_type_identifier" | "scoped_identifier" | "qualified_identifier" => {
             let mut p = Vec::new();
@@ -556,7 +563,78 @@ const WRAPPERS: &[&str] = &[
     "shared_ptr",
     "weak_ptr",
     "optional",
+    "CompletableFuture",
+    "ListenableFuture",
+    "Deferred",
 ];
+
+/// Wrappers that hold their value closed: what is called on one is the
+/// wrapper's own method until it is opened (`unwrap()`, `get()`, `await`,
+/// `?`, `.Result`). The others (`Box`, `Arc`, `Rc`, `Readonly`) answer
+/// for what they hold.
+const SEALED: &[&str] = &[
+    "Option",
+    "Optional",
+    "optional",
+    "Mutex",
+    "RwLock",
+    "RefCell",
+    "Cell",
+    "Weak",
+    "weak_ptr",
+    "AtomicReference",
+    "Provider",
+    "Supplier",
+    "Mono",
+    "Future",
+    "Promise",
+    "CompletableFuture",
+    "ListenableFuture",
+    "Deferred",
+    "Result",
+    "Task",
+    "ValueTask",
+];
+
+/// A wrapper only in one language's library, where a project of another is
+/// free to define a type of that name (retrofit's `Result<T>`): Rust
+/// `Result`, C# `Task` / `ValueTask`.
+fn language_wrapper(name: &str, n: Node) -> bool {
+    match name {
+        "Result" => n.language().name() == Some("rust"),
+        "Task" | "ValueTask" => n.language().name() == Some("c_sharp"),
+        _ => false,
+    }
+}
+
+fn is_wrapper(name: &str, n: Node) -> bool {
+    WRAPPERS.contains(&name) || language_wrapper(name, n)
+}
+
+/// Whether the type a position writes is a wrapper's (`Option<Foo>`,
+/// `Promise<Foo>`), not a tuple or a union with one in it.
+fn wrapper_named(t: Node, src: &[u8]) -> bool {
+    path_of(t, src).and_then(|p| p.last().cloned()).is_some_and(|name| is_wrapper(&name, t))
+}
+
+/// Whether a type position is a wrapper that holds its value closed, or one
+/// around such a wrapper (`Arc<Mutex<Pool>>`), around a type it names.
+fn sealed_type(t: Node, src: &[u8]) -> bool {
+    // the type written is itself the wrapper (a tuple of one is not)
+    if !wrapper_named(t, src) {
+        return false;
+    }
+    let mut v = Vec::new();
+    types_in(t, src, "", &mut v);
+    let last = |p: &Vec<String>| p.last().cloned().unwrap_or_default();
+    if v.len() < 2 {
+        return false;
+    }
+    let sealed = |name: &str| {
+        SEALED.contains(&name) && (WRAPPERS.contains(&name) || language_wrapper(name, t))
+    };
+    v[..v.len() - 1].iter().any(|(p, _)| sealed(&last(p)))
+}
 
 /// The first type a type position names, through wrappers.
 fn first_type(n: Node, src: &[u8]) -> Option<Vec<String>> {
@@ -570,7 +648,7 @@ fn first_type(n: Node, src: &[u8]) -> Option<Vec<String>> {
     // types_in yields the outer type, then its arguments (in reverse order)
     let mut it = v.into_iter().map(|(p, _)| p);
     let first = it.next()?;
-    let wrapper = first.last().is_some_and(|l| WRAPPERS.contains(&l.as_str()));
+    let wrapper = first.last().is_some_and(|l| is_wrapper(l, n));
     if wrapper {
         let rest: Vec<Vec<String>> = it.collect();
         if let Some(inner) = rest.into_iter().last() {
@@ -585,11 +663,15 @@ fn first_type(n: Node, src: &[u8]) -> Option<Vec<String>> {
 /// when it names a type.
 fn value_type(v: Node, src: &[u8]) -> Option<Vec<String>> {
     match v.kind() {
-        "unary_expression"
-        | "await_expression"
-        | "parenthesized_expression"
-        | "reference_expression"
-        | "try_expression" => kids(v).into_iter().find_map(|c| value_type(c, src)),
+        "parenthesized_expression" | "reference_expression" | "unary_expression" => {
+            kids(v).into_iter().find_map(|c| value_type(c, src))
+        }
+        // `let x = load()?`, `val u = await find()`: what the wrapper holds
+        "await_expression" | "try_expression" => {
+            let mut p = kids(v).into_iter().find_map(|c| value_type(c, src))?;
+            p.push(OPENED.into());
+            Some(p)
+        }
         // a chain (`builder(x).tag(y)`) is kept: the resolver follows what
         // each call returns; one that starts at something unnameable is not
         // (a mapping of a collection, `xs.map { it.owner }`, is the
@@ -1291,6 +1373,7 @@ fn bind_closure_params(closures: &[ClosureScope], refs: &mut [RefFact], locals: 
                 given: None,
                 elem: None,
                 value_args: Vec::new(),
+                sealed: false,
                 from_def: None,
                 byte: *start,
             });
@@ -1542,7 +1625,13 @@ fn locals_of(n: Node, src: &[u8], in_params: bool) -> Vec<(String, Vec<String>, 
                     };
                     let valued = x
                         .child_by_field_name("value")
-                        .or_else(|| kids(x).into_iter().find(|c| callee(*c, src).is_some()))
+                        .or_else(|| {
+                            // (C# `var x = await f()`: no field names the value)
+                            kids(x).into_iter().find(|c| {
+                                callee(*c, src).is_some()
+                                    || matches!(c.kind(), "await_expression" | "try_expression")
+                            })
+                        })
                         .or_else(beside)
                         .and_then(|v| value_type(v, src));
                     match (&d_type, valued) {
@@ -1709,6 +1798,10 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
                 facts.defs[di].lambda_receiver = lambda_receiver(n, src);
                 facts.defs[di].type_params = type_params(n, src);
                 facts.defs[di].elem = return_elem(n, src);
+                if let Some((inner, sealed)) = return_wraps(n, src) {
+                    facts.defs[di].wraps = Some(inner);
+                    facts.defs[di].sealed = sealed;
+                }
                 facts.defs[di].plist = param_list(n, src);
                 facts.defs[di].params = u8::try_from(facts.defs[di].plist.len()).ok();
                 if let Some(path) = body_value(n).and_then(|v| returned_path(v, src)) {
@@ -1774,6 +1867,7 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
                                         given: None,
                                         elem: None,
                                         value_args: Vec::new(),
+                                        sealed: false,
                                         from_def: Some(di),
                                         byte: c.start_byte(),
                                     });
@@ -1806,6 +1900,7 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
                                         given: None,
                                         elem: None,
                                         value_args: Vec::new(),
+                                        sealed: false,
                                         from_def: Some(di),
                                         byte: c.start_byte(),
                                     });
@@ -1825,6 +1920,7 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
                             given: None,
                             elem: None,
                             value_args: Vec::new(),
+                            sealed: false,
                             from_def: Some(di),
                             byte: ps.start_byte(),
                         });
@@ -1864,6 +1960,7 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
                                     given: None,
                                     elem: None,
                                     value_args: Vec::new(),
+                                    sealed: false,
                                     from_def: Some(di),
                                     byte: x.start_byte(),
                                 });
@@ -1945,6 +2042,7 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
                     given: None,
                     elem: None,
                     value_args: Vec::new(),
+                    sealed: false,
                     from_def: None,
                     byte: n.start_byte(),
                 });
@@ -1989,6 +2087,7 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
                     given,
                     elem: if declared { written_elem(n, src) } else { None },
                     value_args,
+                    sealed: declared && written_sealed(n, src),
                     from_def: None,
                     byte: n.start_byte(),
                 });
@@ -2196,6 +2295,10 @@ pub const ELEMENT: &str = "[]";
 /// The marker after a path that names a collection of what comes before it
 /// (`xs.map { it.owner }` is `xs`, `[]`, `owner`, `[+]`).
 pub const MANY: &str = "[+]";
+
+/// A path segment: the wrapper the path named so far is opened (`await x`,
+/// Rust `x?`). Nothing to a value that is no wrapper.
+pub const OPENED: &str = "[?]";
 
 /// Methods that give a collection of what their lambda gives for each element.
 const MAPPING_METHODS: &[&str] = &[
@@ -2456,6 +2559,52 @@ fn written_elem(node: Node, src: &[u8]) -> Option<Vec<String>> {
                 .and_then(|t| elem_type(t, src))
         })
     })
+}
+
+/// Whether a declaration writes a sealed wrapper for what it declares
+/// (`opt: Optional<Foo>`, `Arc<Mutex<Pool>> pool`): the places
+/// `written_type` reads.
+fn written_sealed(node: Node, src: &[u8]) -> bool {
+    let mut places = vec![node];
+    places.extend(
+        kids(node)
+            .into_iter()
+            .filter(|c| c.kind().ends_with("declaration") || c.kind().ends_with("declarator")),
+    );
+    places.into_iter().any(|n| match n.child_by_field_name("type") {
+        Some(t) => sealed_type(t, src),
+        None => kids(n)
+            .into_iter()
+            .find(|c| matches!(c.kind(), "user_type" | "type_annotation" | "nullable_type"))
+            .is_some_and(|t| sealed_type(t, src)),
+    })
+}
+
+/// What a callable declares it returns, when that is a wrapper around a
+/// type (`-> Option<Foo>`, `Promise<Foo>`, `Task<Foo>`, `Box<dyn Foo>`): the
+/// type, and whether the wrapper holds it closed.
+fn return_wraps(def: Node, src: &[u8]) -> Option<(Vec<String>, bool)> {
+    let mut cursor = def.walk();
+    for (i, child) in def.children(&mut cursor).enumerate() {
+        let result = match def.field_name_for_child(i as u32) {
+            Some("return_type") | Some("returns") => true,
+            // (Go has no wrappers, and its results are a list)
+            Some("result") => child.kind() != "parameter_list",
+            Some("type") => !def.kind().contains("field") && !def.kind().contains("property"),
+            Some(_) => false,
+            None => {
+                matches!(child.kind(), "user_type" | "nullable_type")
+                    && def.kind() == "function_declaration"
+            }
+        };
+        if result {
+            if !wrapper_named(child, src) {
+                return None;
+            }
+            return first_type(child, src).map(|inner| (inner, sealed_type(child, src)));
+        }
+    }
+    None
 }
 
 /// The element type of the collection a callable declares it returns.
@@ -2940,6 +3089,8 @@ fn add_extras(
             value: state_value(*node, src),
             value_path: state_value_path(*node, src),
             declared_type: written_type(*node, src),
+            wraps: written_sealed(*node, src).then(|| written_type(*node, src)).flatten(),
+            sealed: written_sealed(*node, src),
             elem: written_elem(*node, src),
             receiver: None,
             anonymous: false,

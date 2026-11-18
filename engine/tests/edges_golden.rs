@@ -944,3 +944,47 @@ fn an_extension_on_a_closure_parameter_and_none_in_java() {
     assert!(got.contains(&(".run()".to_string(), "a_asaferror_2".to_string())), "{got:?}");
     assert!(!got.iter().any(|(from, _)| from == ".wait()"), "{got:?}");
 }
+
+#[test]
+fn what_a_wrapper_holds_once_it_is_opened() {
+    // every method has a namesake on a decoy type and on the wrapper's own
+    // API, so a name alone says nothing
+    let got = call_ids("wrappers", &[
+        ("a.rs", "use std::sync::{Arc, Mutex};\npub struct Decoy;\nimpl Decoy {\n    pub fn get(&self) {}\n    pub fn run(&self) {}\n    pub fn stop(&self) {}\n    pub fn ping(&self) {}\n}\npub struct Pool;\nimpl Pool {\n    pub fn get(&self) {}\n    pub fn is_some(&self) {}\n}\npub struct Conn;\nimpl Conn {\n    pub fn run(&self) {}\n    pub fn stop(&self) {}\n    pub fn ping(&self) {}\n}\npub fn open() -> Result<Conn, String> { Ok(Conn) }\npub struct Client { pool: Arc<Mutex<Pool>>, conn: Option<Conn> }\nimpl Client {\n    pub fn go(&self) -> Result<(), String> {\n        self.pool.lock().unwrap().get();\n        self.conn.as_ref().unwrap().run();\n        open()?.stop();\n        let c = open();\n        c.unwrap().ping();\n        self.conn.is_some();\n        Ok(())\n    }\n}\n"),
+        ("B.java", "import java.util.Optional;\nclass Lure { void run() {} void get() {} }\nclass User { void run() {} void stop() {} void get() {} }\nclass Repo {\n  Optional<User> find() { return Optional.empty(); }\n  void use(Optional<User> u) {\n    find().get().run();\n    find().orElseThrow().stop();\n    u.ifPresent(x -> x.run());\n    find().isPresent();\n  }\n}\n"),
+        ("c.ts", "export class Bait { load() {} save() {} }\nexport class Doc { load() {} save() {} then() {} }\nexport async function fetchDoc(): Promise<Doc> { return new Doc(); }\nexport async function go() {\n  (await fetchDoc()).load();\n  const d = await fetchDoc();\n  d.save();\n  fetchDoc().then();\n}\n"),
+        // `var x = await f()` (no field names a C# declarator's value), and a
+        // generic class whose base is the plain one of its name
+        ("E.cs", "using System.Threading.Tasks;\npublic abstract class ResBase { public void Check() {} }\npublic class Res<T> : Res { }\npublic class Res : ResBase { }\npublic class Api { public async Task<Res> Load() { return null; } }\nclass Job {\n  async Task Run(Api api) {\n    var r = await api.Load();\n    r.Check();\n  }\n}\n"),
+        ("D.cs", "using System.Threading.Tasks;\nclass Fake { public void Send() {} }\nclass Mail { public void Send() {} public void Wait() {} }\nclass Box {\n  Task<Mail> Make() { return null; }\n  async Task Go() {\n    (await Make()).Send();\n    Make().Result.Send();\n    Make().Wait();\n  }\n}\n"),
+    ]);
+    let mut missing = Vec::new();
+    for (from, to) in [
+        (".go()", "a_pool_get"),
+        (".go()", "a_conn_run"),
+        (".go()", "a_conn_stop"),
+        (".go()", "a_conn_ping"),
+        (".use()", "b_user_run"),
+        (".use()", "b_user_stop"),
+        ("go()", "c_doc_load"),
+        ("go()", "c_doc_save"),
+        (".Go()", "d_mail_send"),
+        (".Run()", "e_resbase_check"),
+    ] {
+        if !got.contains(&(from.to_string(), to.to_string())) {
+            missing.push((from, to));
+        }
+    }
+    assert!(missing.is_empty(), "missing {missing:?}\n{got:?}");
+    // the wrapper's own methods are the library's: `is_some()`, `isPresent()`,
+    // `then()`, `Wait()`, `get()` on the optional
+    for bad in ["a_pool_is_some", "b_user_get", "c_doc_then", "d_mail_wait"] {
+        assert!(!got.iter().any(|(_, to)| to == bad), "{bad}: {got:?}");
+    }
+    for (from, to) in &got {
+        assert!(
+            !["decoy", "lure", "bait", "fake"].iter().any(|d| to.contains(d)),
+            "{from} -> {to}"
+        );
+    }
+}
