@@ -6,6 +6,51 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+- **A built-in code search index**, so `graphlore_locate` and the duplication
+  scan's similarity tier work without the `[semble]` extra (`search.py`). Chunks
+  are the span engine's definitions (a class holds only its own lines), so every
+  hit joins to its graph node exactly; module code between definitions becomes
+  low-weight chunks, and files the span engine cannot read are cut into windows
+  and counted. Ranking is identifier-aware BM25F over the definition's name, its
+  path and its body (`getUserName`, `get_user_name` and their parts share terms),
+  an overlay from the graph (a node's docstring and the names of its callers and
+  callees), an exact-name boost for symbol queries, and a prior that ranks test
+  code, examples and type stubs below the implementation and spreads a ranking
+  over files. The index is built once per project and refreshed per call by file
+  (mtime, size); hidden, dependency, vendored, minified, oversized and binary
+  files are skipped and counted, and a cap says what it left out.
+- **An optional dense tier** for it, the `[embed]` extra (model2vec, numpy):
+  static code embeddings (`minishlab/potion-code-16M-v2`, or
+  `GRAPHLORE_EMBED_MODEL`) fused with BM25 by weighted reciprocal rank.
+  Vectors are cached by text hash under `GRAPHLORE_CACHE_DIR` (default
+  `~/.cache/graphlore`, never in the project), so an edit re-embeds only the
+  definitions it changed. Without the extra, or offline with no cached model,
+  the index answers with BM25 and the reply says why. The plugin installs it.
+- `backend` in `graphlore_locate` and `graphlore_duplication_scan` replies:
+  which backend answered (`builtin` / `semble` / `custom`) and, for the built-in
+  index, `mode` (`hybrid` / `bm25`), its tiers, what it indexed and skipped, and
+  `dense_unavailable`. The text reply ends with a `Search:` line.
+- `score_kind` in `graphlore_duplication_scan`, and a default floor per backend:
+  0.7 on embedding scores (semble, built-in hybrid), 0.5 on the built-in
+  BM25-only index's tf-idf cosine. On the built-in index each seed is anchored
+  on its own definition's chunk instead of a search for its first lines.
+- `benchmarks/search.py`: the built-in index (BM25 and hybrid) against semble on
+  the query set semble publishes for its own benchmark, scored the way semble
+  scores it (NDCG@10, recall@10, cold index time, warm query p50), plus the
+  calibration behind the duplication floors. On that set (1,251 queries, 63
+  repositories, 19 languages) the built-in index scores NDCG@10 0.814 with BM25
+  alone and 0.809 hybrid, against semble's 0.852; on the 44 repositories not
+  used to choose its constants, 0.799 and 0.797 against 0.842. The dense tier
+  helps semantic queries and some languages and costs others, so on this set it
+  does not raise the mean. Results in `docs/benchmark.md` and
+  `benchmarks/results-search.json`.
+- A kernel seam for an accelerator: the tokenizer and the BM25F loop sit behind
+  `_Kernel`, a `graphlore_accel` module with `KERNEL_ABI == 1` replaces the
+  Python reference when installed (`GRAPHLORE_SEARCH_KERNEL=python` forces the
+  reference), and `tests/fixtures/search_golden.json` holds the terms and
+  bit-exact scores it must reproduce.
+
 ### Changed
 - **The tree-sitter span walk is 3–5× faster, with the same spans.** It caches
   the per-type definition check, looks fields up by id (skipping fields the
@@ -14,6 +59,15 @@ All notable changes to this project are documented here. The format is based on
   abseil-cpp the walk went from 4.6 s to 1.0 s, and on guava from 14.7 s to
   4.4 s. Parsing is unchanged. The spans are identical on all 5,511 files of the
   polyglot clones plus abseil-cpp and guava.
+- `GRAPHLORE_SEMANTIC_BACKEND` unset (or `auto`) means semble when it is
+  installed and builds its index, else the built-in index; when semble is
+  installed but fails, the reply's `backend.note` says so. `builtin` and
+  `semble` pin one; a custom spec that fails is still an error.
+- `graphlore_locate` stays on the `lean` surface and `GRAPHLORE_TOOLSET=locate`
+  no longer falls back to `lean` in a default install; both now happen only when
+  `GRAPHLORE_SEMANTIC_BACKEND` names a backend that is not available.
+- The Hugging Face offline flags are set by `config.export_offline_env()`, shared
+  by semble and the built-in dense tier.
 
 ## [0.6.0] - 2026-11-15
 

@@ -23,7 +23,8 @@ graphlore is a Python MCP server (MCP Python SDK v2: `mcp.server.mcpserver.MCPSe
 - `_run_cli` passes an argv list with no shell. Never build a shell string.
 - A path that can reach the network checks `config.offline()` and is listed in the network table in `docs/configuration.md`; `_run_cli` uses `_cli_env()`.
 - Text replies that quote repository content wrap it in `_frame_repo_text(...)` and set `content_trust` / `untrusted_fields` in the payload.
-- Optional dependencies (`semble`, `tree-sitter`, `tiktoken`, `watchdog`, `uvicorn`) are imported inside functions and degrade to a fallback or install hint.
+- Optional dependencies (`semble`, `model2vec`/`numpy` for `[embed]`, `tree-sitter`, `tiktoken`, `watchdog`, `uvicorn`) are imported inside functions and degrade to a fallback or install hint.
+- `graphlore_locate` and the duplication scan run on semble when it is installed, else on the built-in index in `search.py` (BM25 always; static embeddings from `embed.py` with `[embed]`). Its kernel (`_PyKernel.tokenize` / `bm25f`) must keep matching `tests/fixtures/search_golden.json`.
 - graph.json analysis tools must work with no `graphify` binary and no optional extras.
 - Set `read_only_hint` / `destructive_hint` on every tool to match what it does.
 - A tool that ranks or audits the graph takes `scope: str = ""` and goes through `_scope_view`; it reports `view.payload()` and wraps its text in `_with_note`, so what the scope left out (vendored/minified files, external nodes) is always stated.
