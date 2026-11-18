@@ -120,6 +120,8 @@ _FILE_DECAY = 0.6
 # A file several of whose chunks match is more likely the answer: its best chunk
 # gains this share of the others' scores.
 _FILE_COHERENCE = 0.0
+# The same, applied to the BM25 ranking before it is fused with the dense one.
+_LEX_COHERENCE = 0.0
 _RERANK_DEPTH = 100
 
 _INDEX_CACHE_MAX = 2
@@ -756,6 +758,23 @@ class CodeIndex:
                 out[cid] = _EXACT_NAME_BOOST
         return out
 
+    def _cohere(self, pool: list[tuple[int, float]], frac: float) -> list[tuple[int, float]]:
+        """Each file's best chunk gains ``frac`` of the scores of the file's other
+        chunks in the pool (sorted best first; the result is too)."""
+        total: dict[str, float] = {}
+        best: dict[str, int] = {}
+        for cid, sc in pool:
+            f = self.chunks[cid].file_path
+            total[f] = total.get(f, 0.0) + sc
+            best.setdefault(f, cid)
+        out = [
+            (cid, sc + frac * (total[self.chunks[cid].file_path] - sc)
+             if best[self.chunks[cid].file_path] == cid else sc)
+            for cid, sc in pool
+        ]
+        out.sort(key=lambda kv: (-kv[1], self._order(kv[0])))
+        return out
+
     def _rerank(self, scored: list[tuple[int, float]], query: str) -> list[tuple[int, float]]:
         """The path prior, then the per-file decay, over the best candidates."""
         wants_tests = any(w.lower() in _TEST_WORDS for w in _WORD.findall(query))
@@ -765,18 +784,7 @@ class CodeIndex:
         ]
         pool.sort(key=lambda kv: (-kv[1], self._order(kv[0])))
         if _FILE_COHERENCE:
-            total: dict[str, float] = {}
-            best: dict[str, int] = {}
-            for cid, sc in pool:
-                f = self.chunks[cid].file_path
-                total[f] = total.get(f, 0.0) + sc
-                best.setdefault(f, cid)
-            pool = [
-                (cid, sc + _FILE_COHERENCE * (total[self.chunks[cid].file_path] - sc)
-                 if best[self.chunks[cid].file_path] == cid else sc)
-                for cid, sc in pool
-            ]
-            pool.sort(key=lambda kv: (-kv[1], self._order(kv[0])))
+            pool = self._cohere(pool, _FILE_COHERENCE)
         seen: Counter[str] = Counter()
         out = []
         for cid, s in pool:
@@ -817,6 +825,8 @@ class CodeIndex:
             kind = _query_kind(query)
             lex = self._lexical(query, kind, overlay_weight)
             ranked = self._best(lex, max(top_k, _RERANK_DEPTH, _FUSION_DEPTH))
+            if _LEX_COHERENCE:
+                ranked = self._cohere(ranked[:_RERANK_DEPTH], _LEX_COHERENCE)
             use_dense = self.dense is not None and dense is not False
             if not use_dense:
                 ranked = self._rerank(ranked, query)
