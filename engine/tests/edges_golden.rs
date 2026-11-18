@@ -1196,3 +1196,35 @@ fn numbered_fields_and_the_parts_of_a_tuple_a_local_holds() {
         assert!(!["fake", "mock", "ghost"].iter().any(|d| to.contains(d)), "{from} -> {to}");
     }
 }
+
+#[test]
+fn generics_through_values_nested_arguments_and_bases() {
+    let got = call_ids("generics2", &[
+        ("A.java", "import java.util.List;\nclass Decoy { void hi() {} void wave() {} void nod() {} }\nclass User { void hi() {} void wave() {} void nod() {} }\nfinal class Response<T> { T body() { return null; } }\ninterface Call<T> { Response<T> execute(); }\nclass Use {\n  void value(Call<User> call) {\n    var resp = call.execute();\n    resp.body().hi();\n  }\n  void nested(Call<List<User>> call) {\n    call.execute().body().get(0).wave();\n    Response<List<User>> r = call.execute();\n    for (var u : r.body()) { u.nod(); }\n  }\n}\n"),
+        ("b.kt", "package app\nclass Ghost { fun a() {}; fun hi() {}; fun up() {} }\nclass Foo { fun a() {} }\nclass Person { fun hi() {}; fun up() {} }\nclass Repo { fun all(): List<Foo> = emptyList() }\nopen class Store<T> { fun find(): T? = null }\nopen class Mid<T> : Store<T>()\nclass People : Store<Person>()\nclass Crowd : Mid<Person>()\nfun loop(repo: Repo) {\n    val xs = repo.all()\n    for (x in xs) { x.a() }\n}\nfun bases(p: People, c: Crowd) {\n    p.find()!!.hi()\n    c.find()!!.up()\n}\n"),
+        ("C.cs", "class Fake { public void Hi() {} }\nclass Member { public void Hi() {} }\nclass Repo<T> { public T Find() { return default; } }\nclass Members : Repo<Member> { }\nclass Use { void Go(Members m) { m.Find().Hi(); } }\n"),
+        ("d.ts", "export class Lure { greet() {} }\nexport class Guest { greet() {} }\nexport class Repo<T> { find(): T { return null as any; } }\nexport class Guests extends Repo<Guest> {}\nexport function party(g: Guests) { g.find().greet(); }\n"),
+    ]);
+    let mut missing = Vec::new();
+    for (from, to) in [
+        (".value()", "a_user_hi"),
+        (".nested()", "a_user_wave"),
+        (".nested()", "a_user_nod"),
+        ("loop()", "b_foo_a"),
+        ("bases()", "b_person_hi"),
+        ("bases()", "b_person_up"),
+        (".Go()", "c_member_hi"),
+        ("party()", "d_guest_greet"),
+    ] {
+        if !got.contains(&(from.to_string(), to.to_string())) {
+            missing.push((from, to));
+        }
+    }
+    assert!(missing.is_empty(), "missing {missing:?}\n{got:?}");
+    for (from, to) in &got {
+        assert!(
+            !["decoy", "ghost", "fake", "lure"].iter().any(|d| to.contains(d)),
+            "{from} -> {to}: {got:?}"
+        );
+    }
+}

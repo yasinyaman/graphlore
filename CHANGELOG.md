@@ -247,6 +247,20 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- Native engine 0.5.13, generics through values, nested arguments and
+  generic bases. On the 31 audit repositories three undecided overload edges
+  become the one overload that fits; the other patterns do not occur there
+  with project types on both sides:
+  - **A local typed by its value keeps the value's bindings**: `val r =
+    call.execute()` on a `Call<Contact>` makes `r.body()` a `Contact`.
+  - **A collection type argument binds its element**: `Call<List<Contributor>>`
+    makes `call.execute().body().get(0)` a `Contributor`.
+  - **A member a generic base declares takes the base's type arguments**:
+    `class People : Store<Person>` makes `people.find()` a `Person`, through
+    intermediate bases too (Java, Kotlin, C#, TypeScript, Swift).
+  - **A loop over a local assigned a call that returns a collection** (`val
+    xs = repo.all(); for (x in xs)`) has the element; the element step did
+    not look through the callable the local's path ends at.
 - Native engine 0.5.12, numbered fields. On the 31 audit repositories 28 of
   ureq's calls change, none is lost: 14 guesses by name are `EXTRACTED`, 13
   move to the trait or type the field holds.
