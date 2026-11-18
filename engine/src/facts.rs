@@ -109,6 +109,11 @@ pub struct Def {
     /// implements: no name lookup finds it.
     #[serde(default)]
     pub anonymous: bool,
+    /// What the grammar took for a declaration but the source makes a
+    /// variable (C++ `Pool pool(context);` beside a local `context`): kept
+    /// for the spans, no node and no name.
+    #[serde(default)]
+    pub misread: bool,
     /// How many parameters a callable declares.
     #[serde(default)]
     pub params: Option<u8>,
@@ -220,6 +225,11 @@ pub struct Def {
     /// The type a variable, field or constant is declared with, as written.
     #[serde(default)]
     pub declared_type: Option<Vec<String>>,
+    /// The first name of the outer type that declaration writes, before a
+    /// wrapper is taken off (`std` of `std::future<T>`): only the diagnostics
+    /// read it.
+    #[serde(default)]
+    pub written_head: Option<String>,
     /// What the wrapper a field is declared as, or a callable declares it
     /// returns, holds: `Option<Foo>`, `Promise<Foo>`, `Box<dyn Foo>` → `Foo`.
     #[serde(default)]
@@ -392,6 +402,10 @@ pub struct Local {
     /// `Arc<Mutex<Pool>>`): the path is what it holds (see `Def::sealed`).
     #[serde(default)]
     pub sealed: bool,
+    /// The first name of the type its declaration writes, as written (see
+    /// `Def::written_head`): only the diagnostics read it.
+    #[serde(default)]
+    pub written_head: Option<String>,
     pub from_def: Option<usize>,
     #[serde(skip)]
     pub byte: usize,

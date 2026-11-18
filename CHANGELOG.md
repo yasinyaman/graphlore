@@ -259,6 +259,17 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- **Native engine 0.5.30: C++ locals declared without a value, and the
+  constructions the grammar reads as declarations.** `Session session;` is a
+  local of its type, and `cpr::ThreadPool pool(context);` beside a local
+  `context` a variable constructed from it (not a function `pool`: it keeps
+  its span, gets no node and answers no name). cpr: 538 `EXTRACTED` and 140
+  `INFERRED` calls (overloads the arguments do not decide), 13 nodes of
+  misread declarations gone; hiredis: 10 reads and writes of struct fields.
+  The unresolved rows mark calls on `std` (`std::async`, a member of a
+  field or local declared with a `std::` type), even where the project
+  opens `namespace std`. C++'s unmarked rows: 50 → 28. The facts cache is
+  rebuilt once (`Def::misread`, `Def::written_head`, `Local::written_head`).
 - **Native engine 0.5.29: a library interface's one implementation is
   marked in the unresolved rows.** A call left without an edge whose one
   candidate is a member of a type implementing a library type

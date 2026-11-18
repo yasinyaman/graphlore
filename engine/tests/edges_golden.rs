@@ -1782,3 +1782,26 @@ fn rspec_lets_subjects_and_configured_helpers() {
         got.iter().filter(|(f, t, _)| f == "client_spec.rb" && t == "lib_client_client_build");
     assert_eq!(at_l2.count(), 0, "{got:#?}");
 }
+
+#[test]
+fn cpp_plain_declarations_and_misread_constructions_are_locals() {
+    // `Ledger book;` is a local of its type; `Pool pool(book);` beside the
+    // local `book` is a variable constructed from it, which the grammar reads
+    // as the declaration of a function `pool`
+    let got = calls_conf("cpplocals", &[
+        ("src/shop.h", "namespace shop {\nclass Ledger {\n  public:\n    void settle();\n};\nclass Pool {\n  public:\n    explicit Pool(Ledger& l);\n    int Submit(int x);\n};\nint pool(int);\nvoid Submit();\n}\n"),
+        ("src/other.h", "class Other {\n  public:\n    void settle();\n};\n"),
+        ("test/use.cpp", "#include \"../src/shop.h\"\n#include \"../src/other.h\"\nvoid run() {\n    shop::Ledger book;\n    book.settle();\n    shop::Pool pool(book);\n    pool.Submit(1);\n    int helper(shop::Ledger);\n}\n"),
+    ]);
+    let has = |from: &str, to: &str| got.iter().any(|(f, t, _)| f == from && t == to);
+    assert!(has("run()", "src_shop_ledger_settle"), "{got:#?}");
+    assert!(!has("run()", "src_other_other_settle"), "{got:#?}");
+    assert!(has("run()", "src_shop_pool"), "{got:#?}");
+    assert!(has("run()", "src_shop_pool_pool"), "{got:#?}");
+    assert!(has("run()", "src_shop_pool_submit"), "{got:#?}");
+    // the local hides the functions of its name
+    assert!(!has("run()", "src_shop_pool_2"), "{got:#?}");
+    assert!(!has("run()", "src_shop_submit"), "{got:#?}");
+    // no node for the misread declaration; a real one keeps its node
+    assert!(!got.iter().any(|(f, _, _)| f == "pool()"), "{got:#?}");
+}

@@ -743,6 +743,75 @@ fn value_type(v: Node, src: &[u8]) -> Option<Vec<String>> {
     }
 }
 
+/// C++ `Pool pool(context);` where every "parameter type" is a name the
+/// function has as a local or parameter: a variable constructed from them,
+/// which the grammar reads as the declaration of a function. The name, its
+/// type and the arguments.
+fn misread_variable<'t>(
+    n: Node<'t>,
+    src: &[u8],
+    anc: &[Node],
+    locals: &[Local],
+) -> Option<(String, Vec<String>, Vec<Node<'t>>)> {
+    if n.kind() != "declaration" || anc.last()?.kind() != "compound_statement" {
+        return None;
+    }
+    let decl = n.child_by_field_name("declarator").filter(|d| d.kind() == "function_declarator")?;
+    let name = decl.child_by_field_name("declarator").filter(|d| d.kind() == "identifier")?;
+    let params = decl.child_by_field_name("parameters")?;
+    let mut args = Vec::new();
+    for p in kids(params).into_iter().filter(|c| !is_comment(c)) {
+        // a bare name and nothing else: no declarator, no qualifier
+        if p.kind() != "parameter_declaration" || p.child_by_field_name("declarator").is_some() {
+            return None;
+        }
+        let ty = p.child_by_field_name("type").filter(|t| t.kind() == "type_identifier")?;
+        if p.named_child_count() != 1 {
+            return None;
+        }
+        args.push(ty);
+    }
+    if args.is_empty() {
+        return None; // `Pool pool();` declares a function
+    }
+    let func = anc
+        .iter()
+        .rev()
+        .find(|a| matches!(a.kind(), "function_definition" | "lambda_expression"))?;
+    let (lo, at) = (func.start_byte(), n.start_byte());
+    let params_of = func
+        .child_by_field_name("declarator")
+        .and_then(|d| {
+            let mut cur = d;
+            for _ in 0..4 {
+                if let Some(p) = cur.child_by_field_name("parameters") {
+                    return Some(p);
+                }
+                cur = cur.child_by_field_name("declarator")?;
+            }
+            None
+        })
+        .map(|ps| {
+            kids(ps)
+                .into_iter()
+                .filter_map(|p| {
+                    p.child_by_field_name("declarator").and_then(|d| bound_name(d, src))
+                })
+                .collect::<Vec<String>>()
+        })
+        .unwrap_or_default();
+    let known = |a: &Node| {
+        let t = text(*a, src);
+        params_of.contains(&t) || locals.iter().any(|l| l.name == t && lo <= l.byte && l.byte < at)
+    };
+    if !args.iter().all(known) {
+        return None;
+    }
+    // (as a declared local's type is written: `first_type`)
+    let ty = first_type(n.child_by_field_name("type")?, src)?;
+    Some((text(name, src), ty, args))
+}
+
 /// A construction whose type is written on the declaration and not at the
 /// call: C# `Box b = new(1, 2)` (a local, a field, a property), C++ `Buf b(3)`
 /// and `Buf b{3}`. The type's path and how many arguments are passed.
@@ -1502,6 +1571,7 @@ fn bind_closure_params(closures: &[ClosureScope], refs: &mut [RefFact], locals: 
                 targs: Vec::new(),
                 targ_elems: Vec::new(),
                 key: None,
+                written_head: None,
                 from_def: None,
                 byte: *start,
             });
@@ -1958,9 +2028,19 @@ fn locals_of(n: Node, src: &[u8], in_params: bool) -> Vec<(String, Vec<String>, 
                         .find(|c| matches!(c.kind(), "user_type" | "type_annotation"))
                         .and_then(|t| first_type(t, src))
                 });
+            // (C, C++ `Foo x;`: the declarator is the bare name)
+            let c_like = k == "declaration"
+                && matches!(
+                    crate::parse::current(),
+                    Some(crate::lang::Lang::C | crate::lang::Lang::Cpp)
+                );
             let mut declarators: Vec<Node> = kids(n)
                 .into_iter()
-                .filter(|c| c.kind().ends_with("declarator") || c.kind() == "variable_declaration")
+                .filter(|c| {
+                    c.kind().ends_with("declarator")
+                        || c.kind() == "variable_declaration"
+                        || (c_like && c.kind() == "identifier")
+                })
                 .collect();
             if declarators.is_empty() {
                 declarators.push(n);
@@ -2107,6 +2187,8 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
     let mut refs: Vec<RefFact> = Vec::new();
     let mut imports: Vec<ImportFact> = Vec::new();
     let mut locals: Vec<Local> = Vec::new();
+    // byte ranges of declarations the grammar misread (`misread_variable`)
+    let mut misread: Vec<(usize, usize)> = Vec::new();
     let push = |refs: &mut Vec<RefFact>, n: Node, kind, path: Vec<String>, context, def| {
         if path.is_empty() || path.last().is_some_and(|s| s == UNKNOWN || s.is_empty()) {
             return;
@@ -2301,6 +2383,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                                         targs: Vec::new(),
                                         targ_elems: Vec::new(),
                                         key: None,
+                                        written_head: None,
                                         from_def: Some(di),
                                         byte: c.start_byte(),
                                     });
@@ -2338,6 +2421,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                                         targs: Vec::new(),
                                         targ_elems: Vec::new(),
                                         key: None,
+                                        written_head: None,
                                         from_def: Some(di),
                                         byte: c.start_byte(),
                                     });
@@ -2365,6 +2449,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                             value_args: Vec::new(),
                             targ_elems: own.map(|c| written_targ_elems(c, src)).unwrap_or_default(),
                             key: own.and_then(|c| written_key(c, src)),
+                            written_head: None,
                             from_def: Some(di),
                             byte: ps.start_byte(),
                         });
@@ -2416,6 +2501,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                                         .map(|c| written_targ_elems(c, src))
                                         .unwrap_or_default(),
                                     key: own.and_then(|c| written_key(c, src)),
+                                    written_head: None,
                                     from_def: Some(di),
                                     byte: x.start_byte(),
                                 });
@@ -2533,6 +2619,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                     targs: Vec::new(),
                     targ_elems: Vec::new(),
                     key: None,
+                    written_head: None,
                     from_def: None,
                     byte: n.start_byte(),
                 });
@@ -2564,6 +2651,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                             targs: Vec::new(),
                             targ_elems: Vec::new(),
                             key: None,
+                            written_head: None,
                             from_def: None,
                             byte: n.start_byte(),
                         });
@@ -2586,6 +2674,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                     targs: Vec::new(),
                     targ_elems: Vec::new(),
                     key: None,
+                    written_head: None,
                     from_def: None,
                     byte: n.start_byte(),
                 });
@@ -2632,6 +2721,13 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                     targs: if declared { written_targs(n, src) } else { Vec::new() },
                     targ_elems: if declared { written_targ_elems(n, src) } else { Vec::new() },
                     key: if declared { written_key(n, src) } else { None },
+                    written_head: (declared
+                        && matches!(
+                            facts.lang,
+                            Some(crate::lang::Lang::C | crate::lang::Lang::Cpp)
+                        ))
+                    .then(|| written_head(n, src))
+                    .flatten(),
                     from_def: None,
                     byte: n.start_byte(),
                 });
@@ -2785,10 +2881,58 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                 r.args = args;
             }
         }
+        // C++ `Pool pool(context);` beside a local `context`: the grammar
+        // reads a declaration of a function `pool`, the language a variable
+        // (a local hides a type of its name)
+        if facts.lang == Some(crate::lang::Lang::Cpp) {
+            if let Some((name, ty, args)) = misread_variable(n, src, &anc, &locals) {
+                let (lo, hi) = (n.start_byte(), n.end_byte());
+                for d in facts.defs.iter_mut() {
+                    if d.name == name && lo <= d.start_byte && d.end_byte <= hi {
+                        d.misread = true;
+                    }
+                }
+                misread.push((lo, hi));
+                let at = refs.len();
+                push(&mut refs, n, RefKind::New, ty.clone(), "constructor", None);
+                if let Some(r) = refs.get_mut(at) {
+                    r.args = u8::try_from(args.len()).ok();
+                }
+                for a in args {
+                    push(&mut refs, a, RefKind::Indirect, vec![text(a, src)], "argument", None);
+                }
+                locals.push(Local {
+                    name,
+                    path: ty,
+                    declared: true,
+                    field: false,
+                    assigned: false,
+                    given: None,
+                    elem: None,
+                    value_args: Vec::new(),
+                    sealed: false,
+                    keyed: false,
+                    targs: Vec::new(),
+                    targ_elems: Vec::new(),
+                    key: None,
+                    written_head: written_head(n, src),
+                    from_def: None,
+                    byte: n.start_byte(),
+                });
+            }
+        }
         let mut cursor = n.walk();
         let children: Vec<Node> = n.children(&mut cursor).filter(|c| c.is_named()).collect();
         anc.push(n);
         stack.extend(children.into_iter().rev().map(|c| (c, depth + 1)));
+    }
+    // (what the signature of a misread declaration wrote is no use: its
+    // "parameter types" are the arguments, read above)
+    if !misread.is_empty() {
+        refs.retain(|r| {
+            !(matches!(r.context, "parameter_type" | "return_type")
+                && misread.iter().any(|&(lo, hi)| lo <= r.byte && r.byte < hi))
+        });
     }
     add_extras(&mut facts.defs, &extras, m, src);
     let defs = &facts.defs;
@@ -2802,7 +2946,9 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
     if !declaring.is_empty() {
         refs.retain(|r| !(r.path.len() == 1 && declaring.contains(&r.byte)));
     }
-    refs.extend(state.finish(defs, &imports, m.needs_import(), |bytes| innermost(defs, bytes)));
+    refs.extend(state.finish(defs, &imports, m.needs_import(), |bytes| {
+        innermost_where(defs, bytes, |d| !d.misread)
+    }));
     // `assert_eq!(handle_count(&pool), 2)`: the grammar gives a macro's
     // arguments as tokens; read as expressions they are calls like any other
     for mac in macros {
@@ -4613,6 +4759,23 @@ fn written_type(node: Node, src: &[u8]) -> Option<Vec<String>> {
     })
 }
 
+/// The first name of the outer type a declaration writes (see
+/// `Def::written_head`).
+fn written_head(node: Node, src: &[u8]) -> Option<String> {
+    let t = std::iter::once(node)
+        .chain(
+            kids(node)
+                .into_iter()
+                .filter(|c| c.kind().ends_with("declaration") || c.kind().ends_with("declarator")),
+        )
+        .find_map(|n| n.child_by_field_name("type"))?;
+    // (as written: the readers of types drop a C++ namespace)
+    let written = text(t, src);
+    let head =
+        written.split(|c: char| !(c.is_alphanumeric() || c == '_')).find(|s| !s.is_empty())?;
+    Some(head.to_string())
+}
+
 /// A type of the language itself, as written (C# `string`, `string?`): no
 /// type of the project, but what an extension can be written for.
 fn predefined(t: Node, src: &[u8]) -> Option<Vec<String>> {
@@ -4644,11 +4807,12 @@ pub(crate) fn innermost(defs: &[Def], bytes: &[usize]) -> Vec<Option<usize>> {
 /// whose parent is the class) gives way to that method, which is what calls
 /// `make()`. A field or constant declared outside any callable keeps its uses.
 pub(crate) fn homes(defs: &[Def], bytes: &[usize]) -> Vec<Option<usize>> {
+    // (a variable the grammar took for a declaration is home to nothing)
     if !defs.iter().any(|d| d.extra) {
-        return innermost(defs, bytes);
+        return innermost_where(defs, bytes, |d| !d.misread);
     }
-    let all = innermost(defs, bytes);
-    let plain = innermost_where(defs, bytes, |d| !d.extra);
+    let all = innermost_where(defs, bytes, |d| !d.misread);
+    let plain = innermost_where(defs, bytes, |d| !d.extra && !d.misread);
     all.into_iter()
         .zip(plain)
         .map(|(a, p)| match (a, p) {
@@ -4785,6 +4949,7 @@ fn add_extras(
             value: state_value(*node, src),
             value_path: state_value_path(*node, src),
             declared_type: written_type(*node, src),
+            written_head: written_head(*node, src),
             wraps: written_sealed(*node, src).then(|| written_type(*node, src)).flatten(),
             sealed: written_sealed(*node, src),
             elem: written_elem(*node, src),
@@ -4800,6 +4965,7 @@ fn add_extras(
             part_sealed: Vec::new(),
             receiver: None,
             anonymous: false,
+            misread: false,
             params: block.map(|_| 0),
             plist: Vec::new(),
             returns,
