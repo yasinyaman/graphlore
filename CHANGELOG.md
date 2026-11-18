@@ -259,6 +259,14 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- Native engine 0.5.24, the diagnostics tell a library's name from a
+  missing edge (graph.json is unchanged). Each row of `build --unresolved`
+  carries `library_like`: why it is most likely a library's name the
+  project happens to define once (a name the language's own types answer
+  to, a library's receiver, `self` in a type with a base the project does
+  not define, a definition that is test code for a call that is not), or
+  null. `benchmarks/unresolved.py` prints both totals and takes `--real`:
+  of 6,285 rows on the 31 audit repositories, 2,114 are not marked.
 - Native engine 0.5.23, **the type arguments a call writes say which
   overload it is of** (C#, Java): `client.Get<User>(id)` is the callable
   that declares one type parameter, and a call that writes none, between a

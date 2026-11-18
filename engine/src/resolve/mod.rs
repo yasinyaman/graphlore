@@ -2864,6 +2864,21 @@ impl<'a> Project<'a> {
         out
     }
 
+    /// Whether a type writes a base the project does not define: its members
+    /// are not all the project's.
+    fn has_outside_base(&self, c: DefRef) -> bool {
+        let f = &self.files[c.0];
+        let cname = &self.def(c).name;
+        let outer = self.def(c).parent;
+        f.refs.iter().any(|r| {
+            let mine = r.from_def == Some(c.1) || r.from_owner.as_ref().is_some_and(|o| o == cname);
+            mine && matches!(
+                r.kind,
+                RefKind::Inherits | RefKind::Implements | RefKind::Base | RefKind::MixesIn
+            ) && !matches!(self.resolve_path(c.0, outer, &r.path, true), Some((Target::Def(_), _)))
+        })
+    }
+
     /// The bases one declaration of a type writes.
     fn written_bases(&self, c: DefRef) -> Vec<DefRef> {
         let mut out = Vec::new();
@@ -4625,6 +4640,38 @@ impl<'a> Project<'a> {
             || self.scopes[f].imported.contains(&c.0)
             || dir_of(&self.files[c.0].path) == dir_of(&self.files[f].path);
         let cd = self.def(c);
+        // a row that is most likely a library's name the project happens to
+        // have one definition of, and why: not what the engine is missing
+        let core = match fam {
+            Family::Ecma => ECMA_CORE_METHODS,
+            Family::CSharp => CSHARP_CORE_METHODS,
+            Family::Ruby => RUBY_CORE_METHODS,
+            Family::Swift => SWIFT_CORE_METHODS,
+            _ => &[],
+        };
+        let lower = name.to_lowercase();
+        let test = |i: usize, def: &Def| {
+            def.is_test || crate::community::is_test_path(&self.files[i].path)
+        };
+        let library_like = if reason == "library name" || reason == "local of a library type" {
+            Some("the receiver is a library's")
+        } else if core.contains(&name.as_str())
+            || COMMON_METHODS.iter().any(|m| m.to_lowercase() == lower)
+            || self.builtin(f, name)
+        {
+            Some("a name the language's own types answer to")
+        } else if c.0 != f && test(c.0, cd) && !crate::community::is_test_path(&self.files[f].path)
+        {
+            Some("the one definition is test code, the call is not")
+        } else if matches!(head, "self" | "super")
+            && r.path.len() == 2
+            && self.class_of(f, d).is_some_and(|t| self.has_outside_base(t))
+        {
+            // (`$this->fail()` in a PHPUnit test, `self.assertEqual()`)
+            Some("the type around has a base the project does not define")
+        } else {
+            None
+        };
         Some(json!({
             "file": self.files[f].path,
             "line": r.line,
@@ -4641,6 +4688,7 @@ impl<'a> Project<'a> {
                 "member": cd.parent.is_some(),
             },
             "candidate_visible": visible,
+            "library_like": library_like,
         }))
     }
 

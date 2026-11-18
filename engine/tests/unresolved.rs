@@ -45,7 +45,41 @@ fn an_unresolved_call_is_written_with_its_reason() {
     assert_eq!(row["in_definition"], true);
     assert_eq!(row["candidate"]["file"], "lib/ledger.py");
     assert_eq!(row["candidate_visible"], false);
+    assert_eq!(row["library_like"], Value::Null);
     // the graph is the same whether the rows were asked for or not
     assert_eq!(plain["nodes"], asked["nodes"]);
     assert_eq!(plain["links"], asked["links"]);
+}
+
+#[test]
+fn a_row_that_is_a_librarys_name_says_so() {
+    let dir = project(
+        "library",
+        &[
+            // a test double has the one `header_line` of the project: the
+            // call in `app/` is of a library's response
+            ("tests/fake.py", "class FakeReply:\n    def header_line(self): ...\n"),
+            ("app/use.py", "def run(reply):\n    reply.header_line()\n"),
+            // `once` is every emitter's; the project's one is a namesake
+            (
+                "lib/bus.js",
+                "class Bus {\n  once(name) { return name; }\n}\nmodule.exports = Bus;\n",
+            ),
+            ("lib/wire.js", "function wire(socket) {\n  socket.once('close');\n}\n"),
+        ],
+    );
+    let out = dir.join("unresolved.json");
+    let mut opts = BuildOptions::new(&dir);
+    opts.unresolved = Some(out.clone());
+    build_graph(&opts).unwrap();
+    let rows: Vec<Value> = serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+    let why = |file: &str| {
+        rows.iter()
+            .find(|r| r["file"] == file)
+            .map(|r| r["library_like"].clone())
+            .unwrap_or_default()
+    };
+    assert_eq!(why("app/use.py"), "the one definition is test code, the call is not", "{rows:#?}");
+    assert_eq!(why("lib/wire.js"), "a name the language's own types answer to", "{rows:#?}");
 }
