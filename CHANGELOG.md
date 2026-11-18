@@ -247,6 +247,18 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- Native engine 0.5.11, tuples taken apart. On the 31 audit repositories 38
+  more edges and 18 gone (14 of them in minified bootstrap bundles):
+  - **A declaration that takes a tuple apart types each name by its part**:
+    `let (agent, clock) = setup()`, `var (client, probe) = Setup()`, `val
+    (l, r) = two()`, `let (t, b) = split()`, `const [door, lock] = parts()`,
+    `a, b = two()`, Go `a, b := both()`, for results written as `(A, B)`,
+    `[A, B]`, `Pair<A, B>`, `Triple`, `tuple[A, B]` or Go's result list.
+  - **The first name of such a declaration was the whole result**, and a
+    tuple-returning function's result was one of its parts; a tuple now names
+    no one type (Go's `v, err := f()` still takes `f`'s first result).
+  - Kotlin and Python declarations that take a value apart are locals: they
+    hid nothing, and the names fell through to outer ones.
 - Native engine 0.5.10, what a mapping's function gives, and lists of lists.
   On the 31 audit repositories 5 more edges, none gone:
   - **A lambda of several statements** gives its last expression (Kotlin,

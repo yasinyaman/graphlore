@@ -1657,6 +1657,10 @@ fn locals_of(n: Node, src: &[u8], in_params: bool) -> Vec<(String, Vec<String>, 
                     declared.clone()
                 };
                 for x in inner {
+                    // (`var (a, b) = F()`: taken apart where it is visited)
+                    if destructured(x, src).is_some() {
+                        continue;
+                    }
                     let name = if x.id() == n.id() {
                         n.child_by_field_name("name").and_then(|nm| bound_name(nm, src))
                     } else {
@@ -1854,6 +1858,7 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
                 facts.defs[di].elem = return_elem(n, src);
                 facts.defs[di].keyed = return_keyed(n, src);
                 facts.defs[di].targs = return_targs(n, src);
+                facts.defs[di].rets = return_tuple(n, src);
                 if let Some((inner, sealed)) = return_wraps(n, src) {
                     facts.defs[di].wraps = Some(inner);
                     facts.defs[di].sealed = sealed;
@@ -2142,7 +2147,35 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
             // (Python, Ruby); elsewhere it writes a variable declared before
             let plain_assignment = matches!(n.kind(), "assignment" | "assignment_expression")
                 && !m.assignment_declares();
-            for (name, mut path, declared, field) in locals_of(n, src, false) {
+            // `let (a, b) = f()`: each name is a part of what `f` returns
+            let parts = destructured(n, src);
+            if let Some((names, value)) = &parts {
+                if let Some(of) = value_type(*value, src) {
+                    for (i, name) in names.iter().enumerate().filter(|(_, n)| *n != "_") {
+                        let mut path = of.clone();
+                        path.push(tuple_part(i));
+                        locals.push(Local {
+                            name: name.clone(),
+                            path,
+                            declared: false,
+                            field: false,
+                            assigned: plain_assignment,
+                            given: None,
+                            elem: None,
+                            value_args: Vec::new(),
+                            sealed: false,
+                            keyed: false,
+                            targs: Vec::new(),
+                            from_def: None,
+                            byte: n.start_byte(),
+                        });
+                    }
+                }
+            }
+            let taken_apart = parts.is_some();
+            for (name, mut path, declared, field) in
+                locals_of(n, src, false).into_iter().filter(|_| !taken_apart)
+            {
                 // Ruby `s = stubs`: a bare name on the right is a call (or
                 // another local), and the local is what that gives
                 if path.is_empty() && facts.lang == Some(crate::lang::Lang::Ruby) {
@@ -2905,6 +2938,157 @@ fn written_targs(node: Node, src: &[u8]) -> Vec<Vec<String>> {
         })
         .find(|a| !a.is_empty())
         .unwrap_or_default()
+}
+
+/// The marker of the `i`th part of a tuple (`[#0]`, `[#1]`).
+pub fn tuple_part(i: usize) -> String {
+    format!("[#{i}]")
+}
+
+/// Which part of a tuple a path segment names, if it is a tuple part.
+pub fn tuple_index(seg: &str) -> Option<usize> {
+    seg.strip_prefix("[#")?.strip_suffix(']')?.parse().ok()
+}
+
+/// The parts of the tuple a type position names: `(A, B)` (Rust, Swift, C#,
+/// TS `[A, B]`), `Pair<A, B>`, `Triple`, `tuple[A, B]`, `Tuple<A, B>`.
+fn tuple_parts(t: Node, src: &[u8]) -> Vec<Vec<String>> {
+    let mut stack = vec![(t, 0)];
+    while let Some((n, depth)) = stack.pop() {
+        if n.kind() == "tuple_type" {
+            return kids(n)
+                .into_iter()
+                .filter(|c| !is_comment(c))
+                .map(|c| {
+                    let ty = c.child_by_field_name("type").unwrap_or(c);
+                    first_type(ty, src).unwrap_or_default()
+                })
+                .collect();
+        }
+        if let Some((name, given)) = generic_args(n, src) {
+            if matches!(name.as_str(), "Pair" | "Triple" | "tuple" | "Tuple" | "ValueTuple") {
+                return given.into_iter().map(|a| first_type(a, src).unwrap_or_default()).collect();
+            }
+            return Vec::new();
+        }
+        if depth < 3 && matches!(n.kind(), "type_annotation" | "type" | "nullable_type") {
+            stack.extend(kids(n).into_iter().map(|c| (c, depth + 1)));
+        }
+    }
+    Vec::new()
+}
+
+/// The parts of the tuple a callable declares it returns (Go: its results).
+fn return_tuple(def: Node, src: &[u8]) -> Vec<Vec<String>> {
+    let mut cursor = def.walk();
+    for (i, child) in def.children(&mut cursor).enumerate() {
+        let result = match def.field_name_for_child(i as u32) {
+            Some("return_type") | Some("returns") => true,
+            Some("result") if child.kind() == "parameter_list" => {
+                let parts: Vec<Vec<String>> = kids(child)
+                    .into_iter()
+                    .filter(|c| c.kind() == "parameter_declaration")
+                    .map(|c| {
+                        c.child_by_field_name("type")
+                            .and_then(|t| first_type(t, src))
+                            .unwrap_or_default()
+                    })
+                    .collect();
+                return if parts.len() >= 2 { parts } else { Vec::new() };
+            }
+            Some("result") => true,
+            Some("type") => !def.kind().contains("field") && !def.kind().contains("property"),
+            // (Swift's grammar files the result type under `name`)
+            Some("name") => child.kind() == "tuple_type",
+            Some(_) => false,
+            None => {
+                matches!(child.kind(), "user_type" | "nullable_type" | "tuple_type")
+                    && def.kind() == "function_declaration"
+            }
+        };
+        if result {
+            return tuple_parts(child, src);
+        }
+    }
+    Vec::new()
+}
+
+/// A declaration that takes a tuple apart (`let (a, b) = f()`, `val (a, b) =
+/// f()`, `var (a, b) = F()`, `a, b = f()`, `const [a, b] = f()`, Go `a, b :=
+/// f()`): its names in order (`_` where none is bound) and its value.
+fn destructured<'t>(n: Node<'t>, src: &[u8]) -> Option<(Vec<String>, Node<'t>)> {
+    let one = |c: Node| -> String {
+        let mut cur = c;
+        for _ in 0..3 {
+            if matches!(cur.kind(), "identifier" | "simple_identifier") {
+                return text(cur, src);
+            }
+            let ks: Vec<Node> = kids(cur).into_iter().filter(|x| !is_comment(x)).collect();
+            match ks.last() {
+                Some(x)
+                    if matches!(cur.kind(), "mut_pattern" | "variable_declaration" | "pattern") =>
+                {
+                    cur = *x
+                }
+                _ => break,
+            }
+        }
+        "_".to_string()
+    };
+    let names_of = |p: Node| -> Option<Vec<String>> {
+        if !matches!(
+            p.kind(),
+            "tuple_pattern"
+                | "array_pattern"
+                | "pattern_list"
+                | "multi_variable_declaration"
+                | "pattern"
+                | "expression_list"
+                | "parenthesized_variable_designation"
+        ) {
+            return None;
+        }
+        let names: Vec<String> = kids(p).into_iter().filter(|c| !is_comment(c)).map(one).collect();
+        (names.len() >= 2).then_some(names)
+    };
+    let (pattern, value) = match n.kind() {
+        "let_declaration" => (n.child_by_field_name("pattern")?, n.child_by_field_name("value")?),
+        "assignment" | "short_var_declaration" => {
+            let right = n.child_by_field_name("right")?;
+            let right = if right.kind() == "expression_list" {
+                match kids(right).as_slice() {
+                    [one] => *one,
+                    _ => return None,
+                }
+            } else {
+                right
+            };
+            (n.child_by_field_name("left")?, right)
+        }
+        "variable_declarator" => {
+            let p = n
+                .child_by_field_name("name")
+                .or_else(|| kids(n).into_iter().find(|c| c.kind() == "tuple_pattern"))?;
+            let v = n.child_by_field_name("value").or_else(|| {
+                kids(n).into_iter().find(|c| {
+                    callee(*c, src).is_some()
+                        || matches!(c.kind(), "await_expression" | "try_expression")
+                })
+            })?;
+            (p, v)
+        }
+        "property_declaration" => {
+            let p = n.child_by_field_name("name").or_else(|| {
+                kids(n).into_iter().find(|c| c.kind() == "multi_variable_declaration")
+            })?;
+            let v = n
+                .child_by_field_name("value")
+                .or_else(|| kids(n).into_iter().rev().find(|c| callee(*c, src).is_some()))?;
+            (p, v)
+        }
+        _ => return None,
+    };
+    Some((names_of(pattern)?, value))
 }
 
 /// The type arguments of the type a callable declares it returns.
@@ -3673,6 +3857,7 @@ fn add_extras(
             elem: written_elem(*node, src),
             keyed: written_keyed(*node, src),
             targs: written_targs(*node, src),
+            rets: Vec::new(),
             receiver: None,
             anonymous: false,
             params: None,

@@ -1109,3 +1109,59 @@ fn lambda_bodies_references_groups_and_lists_of_lists() {
         );
     }
 }
+
+#[test]
+fn a_tuple_taken_apart() {
+    // every method has a namesake on the other part and on a decoy
+    let got = call_ids("tuples", &[
+        ("a.rs", "pub struct Fake;\nimpl Fake { pub fn go(&self) {} pub fn stop(&self) {} }\npub struct Agent;\nimpl Agent { pub fn go(&self) {} pub fn stop(&self) {} }\npub struct Clock;\nimpl Clock { pub fn go(&self) {} pub fn stop(&self) {} }\nfn setup() -> (Agent, Clock) { (Agent, Clock) }\npub fn run() {\n    let (mut agent, clock) = setup();\n    agent.go();\n    clock.stop();\n}\n"),
+        ("B.cs", "class Mock { public void Send() {} public void Check() {} }\nclass Client { public void Send() {} public void Check() {} }\nclass Probe { public void Send() {} public void Check() {} }\nclass T {\n  (Client, Probe) Setup() { return (null, null); }\n  void Run() {\n    var (client, probe) = Setup();\n    client.Send();\n    probe.Check();\n  }\n}\n"),
+        ("c.kt", "package app\nclass Ghost { fun a() {}; fun b() {} }\nclass Left { fun a() {}; fun b() {} }\nclass Right { fun a() {}; fun b() {} }\nfun two(): Pair<Left, Right> = Pair(Left(), Right())\nfun pairs() {\n    val (l, r) = two()\n    l.a()\n    r.b()\n}\n"),
+        ("d.swift", "class Ghost { func up() {}; func down() {} }\nclass Top { func up() {}; func down() {} }\nclass Bottom { func up() {}; func down() {} }\nfunc split() -> (Top, Bottom) { (Top(), Bottom()) }\nfunc halves() {\n    let (t, b) = split()\n    t.up()\n    b.down()\n}\n"),
+        ("e.ts", "export class Lure { open() {} shut() {} }\nexport class Door { open() {} shut() {} }\nexport class Lock { open() {} shut() {} }\nfunction parts(): [Door, Lock] { return [new Door(), new Lock()]; }\nexport function house() {\n  const [door, lock] = parts();\n  door.open();\n  lock.shut();\n}\n"),
+        ("f.go", "package x\n\ntype Ghost struct{}\n\nfunc (g *Ghost) Ping() {}\nfunc (g *Ghost) Pong() {}\n\ntype Ping struct{}\n\nfunc (p *Ping) Ping() {}\nfunc (p *Ping) Pong() {}\n\ntype Pong struct{}\n\nfunc (p *Pong) Ping() {}\nfunc (p *Pong) Pong() {}\nfunc both() (*Ping, *Pong) { return nil, nil }\nfunc Play() {\n\ta, b := both()\n\ta.Ping()\n\tb.Pong()\n}\n"),
+    ]);
+    let mut missing = Vec::new();
+    for (from, to) in [
+        ("run()", "a_agent_go"),
+        ("run()", "a_clock_stop"),
+        (".Run()", "b_client_send"),
+        (".Run()", "b_probe_check"),
+        ("pairs()", "c_left_a"),
+        ("pairs()", "c_right_b"),
+        ("halves()", "d_top_up"),
+        ("halves()", "d_bottom_down"),
+        ("house()", "e_door_open"),
+        ("house()", "e_lock_shut"),
+        ("Play()", "f_ping_ping"),
+        ("Play()", "f_pong_pong"),
+    ] {
+        if !got.contains(&(from.to_string(), to.to_string())) {
+            missing.push((from, to));
+        }
+    }
+    assert!(missing.is_empty(), "missing {missing:?}\n{got:?}");
+    // no part is the other one, and nothing goes to a decoy
+    for bad in [
+        "a_agent_stop",
+        "a_clock_go",
+        "b_client_check",
+        "b_probe_send",
+        "c_left_b",
+        "c_right_a",
+        "d_top_down",
+        "d_bottom_up",
+        "e_door_shut",
+        "e_lock_open",
+        "f_ping_pong",
+        "f_pong_ping",
+    ] {
+        assert!(!got.iter().any(|(_, to)| to == bad), "{bad}: {got:?}");
+    }
+    for (from, to) in &got {
+        assert!(
+            !["fake", "mock", "ghost", "lure"].iter().any(|d| to.contains(d)),
+            "{from} -> {to}"
+        );
+    }
+}
