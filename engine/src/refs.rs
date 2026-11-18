@@ -1379,6 +1379,7 @@ fn bind_closure_params(closures: &[ClosureScope], refs: &mut [RefFact], locals: 
                 sealed: false,
                 keyed: false,
                 targs: Vec::new(),
+                targ_elems: Vec::new(),
                 from_def: None,
                 byte: *start,
             });
@@ -1845,6 +1846,8 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
                 facts.defs[di].self_params = self_params(n, src, &name);
                 // `class Response<T>`: what a declaration's type arguments bind
                 facts.defs[di].type_params = type_params(n, src);
+                // `class UserRepo : Repo<User>`: what it binds its bases' to
+                facts.defs[di].base_targs = base_targs(n, src);
                 // Rust `struct Script(Arc<Mutex<State>>)`: its numbered fields
                 if let Some(list) =
                     kids(n).into_iter().find(|c| c.kind() == "ordered_field_declaration_list")
@@ -1872,6 +1875,7 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
                 facts.defs[di].elem = return_elem(n, src);
                 facts.defs[di].keyed = return_keyed(n, src);
                 facts.defs[di].targs = return_targs(n, src);
+                facts.defs[di].targ_elems = return_targ_elems(n, src);
                 facts.defs[di].rets = return_tuple(n, src);
                 if let Some((inner, sealed)) = return_wraps(n, src) {
                     facts.defs[di].wraps = Some(inner);
@@ -1945,6 +1949,7 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
                                         sealed: false,
                                         keyed: false,
                                         targs: Vec::new(),
+                                        targ_elems: Vec::new(),
                                         from_def: Some(di),
                                         byte: c.start_byte(),
                                     });
@@ -1980,6 +1985,7 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
                                         sealed: false,
                                         keyed: false,
                                         targs: Vec::new(),
+                                        targ_elems: Vec::new(),
                                         from_def: Some(di),
                                         byte: c.start_byte(),
                                     });
@@ -2005,6 +2011,7 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
                             given: None,
                             elem: None,
                             value_args: Vec::new(),
+                            targ_elems: own.map(|c| written_targ_elems(c, src)).unwrap_or_default(),
                             from_def: Some(di),
                             byte: ps.start_byte(),
                         });
@@ -2048,6 +2055,9 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
                                     given: None,
                                     elem: None,
                                     value_args: Vec::new(),
+                                    targ_elems: own
+                                        .map(|c| written_targ_elems(c, src))
+                                        .unwrap_or_default(),
                                     from_def: Some(di),
                                     byte: x.start_byte(),
                                 });
@@ -2151,6 +2161,7 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
                     sealed: false,
                     keyed: false,
                     targs: Vec::new(),
+                    targ_elems: Vec::new(),
                     from_def: None,
                     byte: n.start_byte(),
                 });
@@ -2180,6 +2191,7 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
                             sealed: false,
                             keyed: false,
                             targs: Vec::new(),
+                            targ_elems: Vec::new(),
                             from_def: None,
                             byte: n.start_byte(),
                         });
@@ -2226,6 +2238,7 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
                     sealed: declared && written_sealed(n, src),
                     keyed: declared && written_keyed(n, src),
                     targs: if declared { written_targs(n, src) } else { Vec::new() },
+                    targ_elems: if declared { written_targ_elems(n, src) } else { Vec::new() },
                     from_def: None,
                     byte: n.start_byte(),
                 });
@@ -2930,6 +2943,126 @@ fn targs_of(t: Node, src: &[u8]) -> Vec<Vec<String>> {
         }
         _ => Vec::new(),
     }
+}
+
+/// The element type of each type argument a type position writes that is a
+/// collection (`Call<List<Contributor>>`: `[Some(["Contributor"])]`).
+fn targ_elems_of(t: Node, src: &[u8]) -> Vec<Option<Vec<String>>> {
+    match generic_args(t, src) {
+        Some((name, given)) if !is_wrapper(&name, t) => {
+            given.into_iter().map(|a| elem_type(a, src)).collect()
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// `targ_elems_of` for what a declaration declares (see `written_targs`).
+fn written_targ_elems(node: Node, src: &[u8]) -> Vec<Option<Vec<String>>> {
+    let mut places = vec![node];
+    places.extend(
+        kids(node)
+            .into_iter()
+            .filter(|c| c.kind().ends_with("declaration") || c.kind().ends_with("declarator")),
+    );
+    places
+        .into_iter()
+        .map(|n| match n.child_by_field_name("type") {
+            Some(t) => targ_elems_of(t, src),
+            None => kids(n)
+                .into_iter()
+                .find(|c| matches!(c.kind(), "user_type" | "type_annotation" | "nullable_type"))
+                .map(|t| targ_elems_of(t, src))
+                .unwrap_or_default(),
+        })
+        .find(|a| !a.is_empty())
+        .unwrap_or_default()
+}
+
+/// `targ_elems_of` for the type a callable declares it returns.
+fn return_targ_elems(def: Node, src: &[u8]) -> Vec<Option<Vec<String>>> {
+    let mut cursor = def.walk();
+    for (i, child) in def.children(&mut cursor).enumerate() {
+        let result = match def.field_name_for_child(i as u32) {
+            Some("return_type") | Some("returns") => true,
+            Some("result") => child.kind() != "parameter_list",
+            Some("type") => !def.kind().contains("field") && !def.kind().contains("property"),
+            Some(_) => false,
+            None => {
+                matches!(child.kind(), "user_type" | "nullable_type")
+                    && def.kind() == "function_declaration"
+            }
+        };
+        if result {
+            return targ_elems_of(child, src);
+        }
+    }
+    Vec::new()
+}
+
+/// A class's bases written with type arguments, from its heritage clauses:
+/// Java `extends` / `implements`, Kotlin's delegation specifiers, C#'s base
+/// list, TS `extends` / `implements`, Swift's inheritance specifiers.
+fn base_targs(class: Node, src: &[u8]) -> Vec<(Vec<String>, Vec<Vec<String>>)> {
+    let heritage = |k: &str| {
+        matches!(
+            k,
+            "superclass"
+                | "super_interfaces"
+                | "extends_interfaces"
+                | "delegation_specifier"
+                | "delegation_specifiers"
+                | "base_list"
+                | "class_heritage"
+                | "extends_clause"
+                | "implements_clause"
+                | "inheritance_specifier"
+                | "type_list"
+                | "constructor_invocation"
+                | "interface_type_list"
+        )
+    };
+    let mut out = Vec::new();
+    let mut stack: Vec<(Node, usize)> =
+        kids(class).into_iter().filter(|c| heritage(c.kind())).map(|c| (c, 0)).collect();
+    while let Some((n, depth)) = stack.pop() {
+        // TS `extends Repo<User>`: the name and its arguments side by side
+        if n.kind() == "extends_clause" {
+            let args = kids(n).into_iter().find(|c| c.kind() == "type_arguments");
+            let value = n.child_by_field_name("value").and_then(|v| path_of(v, src));
+            if let (Some(args), Some(name)) = (args, value) {
+                let args: Option<Vec<Vec<String>>> = kids(args)
+                    .into_iter()
+                    .filter(|c| !is_comment(c))
+                    .map(|a| first_type(a, src))
+                    .collect();
+                if let Some(args) = args.filter(|a| !a.is_empty()) {
+                    out.push((name, args));
+                }
+                continue;
+            }
+        }
+        let generic = matches!(n.kind(), "generic_type" | "generic_name")
+            || (n.kind() == "user_type" && kids(n).iter().any(|c| c.kind() == "type_arguments"));
+        if generic {
+            let name = match n.kind() {
+                "user_type" => path_of(n, src),
+                _ => n
+                    .child_by_field_name("name")
+                    .or_else(|| n.child_by_field_name("type"))
+                    .or_else(|| kids(n).into_iter().next())
+                    .and_then(|c| path_of(c, src)),
+            };
+            let args = targs_of(n, src);
+            if let (Some(name), false) = (name, args.is_empty()) {
+                out.push((name, args));
+            }
+            continue;
+        }
+        if depth < 4 {
+            stack.extend(kids(n).into_iter().map(|c| (c, depth + 1)));
+        }
+    }
+    out
 }
 
 /// The type arguments a declaration writes on what it declares.
@@ -3885,6 +4018,8 @@ fn add_extras(
             elem: written_elem(*node, src),
             keyed: written_keyed(*node, src),
             targs: written_targs(*node, src),
+            targ_elems: written_targ_elems(*node, src),
+            base_targs: Vec::new(),
             rets: Vec::new(),
             part_sealed: Vec::new(),
             receiver: None,

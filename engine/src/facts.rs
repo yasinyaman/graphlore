@@ -182,6 +182,14 @@ pub struct Def {
     /// parameter of the class around is written as its name.
     #[serde(default)]
     pub targs: Vec<Vec<String>>,
+    /// For each of `targs`, the element type when it is a collection
+    /// (`Call<List<Contributor>>`: `Contributor`).
+    #[serde(default)]
+    pub targ_elems: Vec<Option<Vec<String>>>,
+    /// A class's bases written with type arguments (`class UserRepo :
+    /// Repo<User>`: `(["Repo"], [["User"]])`).
+    #[serde(default)]
+    pub base_targs: Vec<(Vec<String>, Vec<Vec<String>>)>,
     /// The parts of the tuple a callable declares it returns (`-> (A, B)`,
     /// `Pair<A, B>`, Go `(A, B, error)`), or a Rust tuple struct's numbered
     /// fields, in order; an empty path for a part with no type to name.
@@ -344,6 +352,9 @@ pub struct Local {
     /// `Def::targs`): what the class's type parameters stand for here.
     #[serde(default)]
     pub targs: Vec<Vec<String>>,
+    /// For each of `targs`, the element type when it is a collection.
+    #[serde(default)]
+    pub targ_elems: Vec<Option<Vec<String>>>,
     /// The arguments of the call the value is, as far as the site shows
     /// (at most 4): what binds a type parameter the function returns.
     #[serde(default)]
