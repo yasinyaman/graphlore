@@ -424,6 +424,10 @@ pub struct RefFact {
     /// Where a Swift implicit member (`.status(301)`) takes its type from.
     #[serde(default)]
     pub implicit: Option<Implicit>,
+    /// How many type arguments a call writes for what it calls
+    /// (`client.Get<User>(id)`: 1); 0 when it writes none.
+    #[serde(default)]
+    pub targs: u8,
     #[serde(skip)]
     pub byte: usize,
 }
@@ -462,6 +466,10 @@ pub struct ParamFact {
     pub optional: bool,
     /// It takes any number of arguments (`vararg`, `...`, `params`).
     pub variadic: bool,
+    /// Its type exactly as written, type arguments and all, without spaces
+    /// (`IRequest<TResponse>`); empty where the grammar has no `type` field.
+    #[serde(default)]
+    pub written: String,
 }
 
 /// What an argument of a call is.

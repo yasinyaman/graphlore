@@ -1382,6 +1382,10 @@ fn params_in(holder: Node, only_parameters: bool, src: &[u8]) -> Vec<crate::fact
                 || dots
                 || ["splat", "variadic", "spread", "rest"].iter().any(|w| k.contains(w))
                 || t.starts_with("params "),
+            written: c
+                .child_by_field_name("type")
+                .map(|ty| text(ty, src).split_whitespace().collect())
+                .unwrap_or_default(),
         });
     }
     out
@@ -1575,6 +1579,24 @@ fn param_node<'t>(ps: Node<'t>, name: &str, src: &[u8]) -> Option<Node<'t>> {
         }
     }
     None
+}
+
+/// How many type arguments a call writes for what it calls: C#
+/// `client.Get<User>(id)` (the called name is a `generic_name`), Java
+/// `this.<User>get(id)`.
+fn call_targs(n: Node) -> u8 {
+    let called = n.child_by_field_name("function").map(|f| {
+        if f.kind() == "member_access_expression" {
+            f.child_by_field_name("name").unwrap_or(f)
+        } else {
+            f
+        }
+    });
+    let list = called
+        .filter(|x| x.kind() == "generic_name")
+        .and_then(|x| kids(x).into_iter().find(|c| c.kind() == "type_argument_list"))
+        .or_else(|| n.child_by_field_name("type_arguments"));
+    list.map(|l| kids(l).len().min(255) as u8).unwrap_or(0)
 }
 
 /// Names a statement binds whose type the source states at the binding:
@@ -2007,6 +2029,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
             self_arg: false,
             hints: Vec::new(),
             implicit: None,
+            targs: 0,
             recv: None,
             byte: n.start_byte(),
         });
@@ -2621,6 +2644,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                 r.args = arg_count(n);
                 r.self_arg = passes_self(n, src);
                 r.hints = arg_facts(n, src);
+                r.targs = call_targs(n);
             }
             // functions handed over as values: `MockTransport(app)`,
             // `map(str.strip, xs)`, `hooks = [on_request]` inside an argument
