@@ -259,6 +259,19 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- Native engine 0.5.20, two wrong readings. On the 31 audit repositories:
+  21 edges gained, 38 calls gone.
+  - **`parent`, `base` and `cls` are the object's base or class only in the
+    language that says so**. A Go variable named `parent` was read as a
+    base class (`parent.SetProxy(…)` had no edge), and so were a Python
+    parameter `base` and a Java parameter `cls`.
+  - **C# `base.X()` is the base class's `X`**, where it was read as
+    `this.X()`: 13 `EXTRACTED` calls from an override to itself are gone
+    (`base.Dispose(disposing)`), and a base the project defines is reached.
+  - **A guess by name alone never links a definition to itself**:
+    `inner.evaluate()` inside `evaluate()` is a wrapper handing on to what
+    it wraps. 25 `INFERRED` self-calls are gone, 4 of them a real recursion
+    on another object.
 - Native engine 0.5.19, C# extensions and partial types. On the 31 audit
   repositories: 618 calls gained (197 `EXTRACTED`), 51 `INFERRED` ones now
   `EXTRACTED`, 7 gone; restsharp, whose extensions are C# 14 blocks, gets

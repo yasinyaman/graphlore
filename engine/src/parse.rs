@@ -1,7 +1,7 @@
 //! Parsing one file: a per-thread parser per language, a deadline per parse,
 //! and the facts the language module extracts.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::ops::ControlFlow;
@@ -16,11 +16,20 @@ use crate::lang::{self, Lang};
 
 thread_local! {
     static PARSERS: RefCell<HashMap<Lang, Parser>> = RefCell::new(HashMap::new());
+    /// The language of the tree this thread parsed last: the one it reads.
+    static CURRENT: Cell<Option<Lang>> = const { Cell::new(None) };
+}
+
+/// The language of the tree this thread is reading (the last one it parsed).
+/// A node does not say it: several grammars report no name.
+pub fn current() -> Option<Lang> {
+    CURRENT.with(Cell::get)
 }
 
 /// Parse `src` as `lang`, giving up after `deadline`. `Err(true)` when it timed
 /// out, `Err(false)` when the grammar could not be loaded.
 pub fn parse(lang: Lang, src: &[u8], deadline: Option<Duration>) -> Result<Tree, bool> {
+    CURRENT.with(|c| c.set(Some(lang)));
     PARSERS.with(|cell| {
         let mut parsers = cell.borrow_mut();
         let parser = match parsers.entry(lang) {

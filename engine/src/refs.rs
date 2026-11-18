@@ -37,9 +37,9 @@ const NAME_KINDS: &[&str] = &[
     "bound_identifier",
 ];
 /// Receivers that mean the enclosing type.
-const SELF_KINDS: &[&str] =
-    &["this", "self", "self_expression", "this_expression", "crate", "base"];
-const SUPER_KINDS: &[&str] = &["super", "super_expression", "base_expression"];
+const SELF_KINDS: &[&str] = &["this", "self", "self_expression", "this_expression", "crate"];
+/// (`base` is C#'s: `base.Run()` is the base class's `Run`)
+const SUPER_KINDS: &[&str] = &["super", "super_expression", "base_expression", "base"];
 /// `(object, member)` field pairs of member-access shapes.
 pub const MEMBER_FIELDS: &[(&str, &str)] = &[
     ("object", "property"),
@@ -81,6 +81,32 @@ const DECORATOR_KINDS: &[&str] =
 pub const UNKNOWN: &str = "()";
 
 /// The dotted path a node names, as far as the walk can tell.
+/// Whether a plain name is the language's word for the object a method is
+/// called on (`self`) or for its base (`super`): `this`, `self`, `cls`,
+/// `Self`, `super`, `base`, `parent`, each only where the language means it.
+/// Elsewhere it is a name like any other (Go `parent.addChild(c)`, a Python
+/// parameter `base`, a Java parameter `cls`).
+fn receiver_word(t: &str) -> Option<&'static str> {
+    use crate::lang::Lang as L;
+    if !matches!(t, "this" | "self" | "cls" | "Self" | "super" | "base" | "parent") {
+        return None;
+    }
+    let word = if matches!(t, "super" | "base" | "parent") { "super" } else { "self" };
+    // a tree parsed outside the build (no language on record) keeps every word
+    let Some(lang) = crate::parse::current() else { return Some(word) };
+    let means = match t {
+        "this" => !matches!(lang, L::Python | L::Go | L::Rust | L::Ruby | L::Swift | L::C),
+        // (`self` stays the object everywhere: where it is no keyword it is
+        // the alias of one, JavaScript `var self = this`)
+        "self" | "Self" => true,
+        "cls" => lang == L::Python,
+        "super" => !matches!(lang, L::Go | L::C | L::Cpp | L::CSharp | L::Php),
+        "base" => lang == L::CSharp,
+        _ => lang == L::Php, // `parent`
+    };
+    means.then_some(word)
+}
+
 pub fn path_of(n: Node, src: &[u8]) -> Option<Vec<String>> {
     let k = n.kind();
     if SELF_KINDS.contains(&k) {
@@ -102,10 +128,9 @@ pub fn path_of(n: Node, src: &[u8]) -> Option<Vec<String>> {
     }
     if NAME_KINDS.contains(&k) {
         let t = text(n, src);
-        return match t.as_str() {
-            "this" | "self" | "cls" | "Self" => Some(vec!["self".into()]),
-            "super" | "base" | "parent" => Some(vec!["super".into()]),
-            _ => Some(vec![t.trim_start_matches('$').to_string()]),
+        return match receiver_word(&t) {
+            Some(word) => Some(vec![word.into()]),
+            None => Some(vec![t.trim_start_matches('$').to_string()]),
         };
     }
     // `x!`, `x!!`: the value itself
