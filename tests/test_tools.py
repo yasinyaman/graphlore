@@ -7775,6 +7775,7 @@ def test_builtin_search_keeps_vectors_on_disk(tmp_path, monkeypatch):
 
 
 def test_builtin_search_says_why_there_is_no_dense_tier(tmp_path, monkeypatch):
+    import importlib.util
     import sys
 
     from graphlore import embed
@@ -7797,6 +7798,8 @@ def test_builtin_search_says_why_there_is_no_dense_tier(tmp_path, monkeypatch):
     fake = type(sys)("model2vec")
     fake.StaticModel = _Static
     monkeypatch.setitem(sys.modules, "model2vec", fake)
+    if importlib.util.find_spec("numpy") is None:  # CI installs no [embed] extra
+        monkeypatch.setitem(sys.modules, "numpy", type(sys)("numpy"))
     monkeypatch.setenv("GRAPHLORE_OFFLINE", "1")
     monkeypatch.delenv("HF_HUB_OFFLINE", raising=False)
     embed._MODEL_CACHE.clear()
