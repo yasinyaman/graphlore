@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Changed
+- **The tree-sitter span walk is 3–5× faster, with the same spans.** It caches
+  the per-type definition check, looks fields up by id (skipping fields the
+  grammar does not have), does not descend into leaves, and tries a bound
+  anonymous function only on a node with a `value` or `left` field. On
+  abseil-cpp the walk went from 4.6 s to 1.0 s, and on guava from 14.7 s to
+  4.4 s. Parsing is unchanged. The spans are identical on all 5,511 files of the
+  polyglot clones plus abseil-cpp and guava.
+
 ## [0.6.0] - 2026-11-15
 
 Every tool was run on 31 real repositories in 14 languages
