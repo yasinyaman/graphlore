@@ -2937,9 +2937,10 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                 misread.push((lo, hi));
             }
         }
-        // C, C++ `typedef struct conn conn_t;`: what the alias names
+        // C, C++ `typedef struct conn conn_t;`, C++ `using Header = …;`: what
+        // the alias names
         if matches!(facts.lang, Some(crate::lang::Lang::C | crate::lang::Lang::Cpp))
-            && n.kind() == "type_definition"
+            && matches!(n.kind(), "type_definition" | "alias_declaration")
         {
             if let Some(t) = n.child_by_field_name("type") {
                 let (lo, hi) = (n.start_byte(), n.end_byte());
@@ -5037,11 +5038,7 @@ fn add_extras(
             value_path: state_value_path(*node, src),
             declared_type: written_type(*node, src),
             written_head: written_head(*node, src),
-            alias_args: if *kind == crate::facts::DefKind::TypeAlias {
-                node.child_by_field_name("type").map(|t| template_args(t, src)).unwrap_or_default()
-            } else {
-                Vec::new()
-            },
+            alias_args: Vec::new(),
             wraps: written_sealed(*node, src).then(|| written_type(*node, src)).flatten(),
             sealed: written_sealed(*node, src),
             elem: written_elem(*node, src),

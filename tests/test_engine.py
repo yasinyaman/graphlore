@@ -143,6 +143,12 @@ _SNIPPETS = {
     "session.h": "namespace cpr {\nclass Session {\n public:\n  void SetUrl(const Url& url);\n"
                  "};\n}\n",
     "cookies.cpp": "const std::string& Cookie::GetDomain() const {\n  return domain_;\n}\n",
+    "api.h": "namespace cpr {\nusing Header = std::map<std::string, std::string>;\n"
+             "using AsyncResponse = AsyncWrapper<Response>;\n}\n",
+    # an `#if` whose branches each leave a brace open is read once
+    "pool.cpp": "namespace m {\nvoid Pool::Run() {\n#if NEW_API\n    if (poll(1)) {\n#else\n"
+                "    if (wait(1)) {\n#endif\n        return;\n    }\n}\n"
+                "void Pool::Stop() {\n}\n}\n",
     "cart.rb": (FIXTURES / "polyglot" / "lib" / "shop" / "cart.rb").read_text(encoding="utf-8"),
     "Stack.php": (FIXTURES / "polyglot" / "php" / "src" / "Stack.php").read_text(encoding="utf-8"),
 }

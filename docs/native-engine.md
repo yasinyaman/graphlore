@@ -767,7 +767,7 @@ file pairs). The native graph has definitions graphify folds into the one
 around them (a function nested in a method, the setter beside a getter of the
 same name); an edge from one of those is compared as an edge from the paired
 definition it belongs to, as graphify records it. On the 31 repositories of the
-[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.32,
+[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.33,
 measured 2026-11-18), as native / graphify edges and the share of graphify's
 that the native graph has too:
 
@@ -785,13 +785,13 @@ that the native graph has too:
 | Rust | 93.3% | 314 / 370 (75%) | 2,016 / 853 (86%) | 53 / 41 (93%) | 1,245 / 895 (81%) |
 | Swift | 95.9% | 166 / 166 (–)³ | 5,494 / 2,141 (83%) | 190 / 164 (100%) | 1,091 / 580 (62%) |
 | C | 100% | 89 / 77 (99%) | 864 / 791 (100%) | – | 253 / 130 (97%) |
-| C++ | 98.7% | 215 / 228 (93%) | 801 / 281 (34%)⁴ | 30 / 5 (100%) | 352 / 234 (88%) |
-| C/C++ headers | 91.4% | 164 / 172 (95%) | 382 / 348 (87%) | 12 / 12 (92%) | 563 / 312 (90%) |
+| C++ | 98.7% | 215 / 228 (93%) | 765 / 281 (29%)⁴ | 30 / 5 (100%) | 350 / 234 (88%) |
+| C/C++ headers | 91.4% | 164 / 172 (95%) | 371 / 348 (84%) | 12 / 12 (92%) | 563 / 312 (90%) |
 | Ruby | 99.7% | 42 / 0 | 443 / 375 (69%) | 46 / 15 (93%) | 28 / 0 |
 | PHP | 80.6% | 429 / 505 (84%) | 8,873 / 6,140 (90%) | 65 / 60 (98%) | 648 / 213 (95%) |
-| **All** | **94.4%** | **4,962 / 5,565 (75%)** | **44,558 / 27,832 (85%)** | **1,137 / 726 (97%)** | **12,475 / 6,814 (89%)** |
+| **All** | **94.4%** | **4,962 / 5,565 (75%)** | **44,510 / 27,832 (85%)** | **1,137 / 726 (97%)** | **12,473 / 6,814 (89%)** |
 
-Of the native calls, 12,748 (29%) are `INFERRED`, against 47% of graphify's.
+Of the native calls, 12,737 (29%) are `INFERRED`, against 47% of graphify's.
 That share was 20% before engine 0.5.5: a call of an overloaded name that the
 arguments do not decide used to be an `EXTRACTED` edge to the first overload,
 and is now an `INFERRED` edge to each overload that fits (999 calls, with
@@ -834,10 +834,28 @@ two edges of got are gone that named a function defined in another loop
 for a destructured loop variable of the same name. The maps of these
 repositories that hold project types are mostly looked up by key once, or
 not walked at all.
+Engine 0.5.33 (C++ preprocessor branches) gives the parser an `#if … #else
+… #endif` once when every branch leaves the same number of braces open
+(`if (error_code) {` under `#if` and again under `#else`, closed once after
+`#endif`): the other branches and the directive lines are blanked in place,
+so bytes and lines keep their places. The parser saw two open braces and
+read the rest of the file into the function around: in cpr's
+`multiperform.cpp` the 25 methods after `DoMultiPerform` were nested in it.
+`spans.py` blanks the same way (`_blank_duplicate_branches`), so the spans
+stay equal; of the 187 C and C++ files of the audit repositories, 2 are
+blanked (`multiperform.cpp`, hiredis's `adapters/libuv.h`). Calls to those
+methods now reach their definitions, not the header's prototypes. The drop
+of C++ calls in the table above (801 to 765, 34% to 29%) is graphify's: it
+parses the file the old way, and its 24 calls from `DoMultiPerform` pair
+with nothing now. 10 calls are lost: `session->PrepareGet()` on the
+structured binding `for (const auto& [session, method] : sessions_)`, which
+had an edge only because `session` named another method's parameter while
+everything was one function; a pair taken apart from a `std::vector` of
+`std::pair`s is not read yet.
 Engine 0.5.32 (C++ aliases and specializations) reads `using AsyncResponse =
-AsyncWrapper<Response>;` as a definition (an `alias_declaration` has no hint
-word, so it is an extra definition of the C family module and `spans.py`'s
-spans are unchanged; graphify has these nodes too) and follows an alias or a
+AsyncWrapper<Response>;` as a definition (graphify has these nodes too;
+since 0.5.33 it is a span of `spans.py`'s rule as well, by its node type
+`alias_declaration`, which has no hint word) and follows an alias or a
 `typedef` to the type it names. A specialization (`class AsyncWrapper<T,
 true>`) also answers to its template's name, and the arguments an alias
 writes pick it: `<Response, true>` fits `<T, true>`, not `<T, false>`. A
@@ -1233,7 +1251,7 @@ implicit members since 0.5.17: 39 whose place gives no type are rows now
 closure parameters and variables of express's tests. What is left at file
 level there is `app.use` and `app.set` (842 rows of express), names too
 short and too common to guess by. Engine 0.5.19 takes 123 more off (6,362;
-C# 349 from 470; 6,360 with 0.5.20, 6,348 with 0.5.21, 6,285 with 0.5.22, 6,237 with 0.5.25, 6,206 with 0.5.27, 6,166 with 0.5.28, 6,156 with 0.5.30, 6,140 with 0.5.31, 6,132 with 0.5.32). Most of what C# has left is not the project's: `Assert.
+C# 349 from 470; 6,360 with 0.5.20, 6,348 with 0.5.21, 6,285 with 0.5.22, 6,237 with 0.5.25, 6,206 with 0.5.27, 6,166 with 0.5.28, 6,156 with 0.5.30, 6,140 with 0.5.31, 6,132 with 0.5.32, 6,126 with 0.5.33). Most of what C# has left is not the project's: `Assert.
 NotNull` beside its own `Ensure.NotNull` (77), `WireMockServer.Start` (23).
 
 By then most rows were of that kind: a library's name the project happens
@@ -1278,7 +1296,7 @@ type declares: symfony-demo's `$user->getFullName()` is marked beside the
 on `std` (`std::async(…)`, and a member of a field or local declared with a
 `std::` type, as written, `Def::written_head` / `Local::written_head`: the
 readers of types drop a C++ namespace), and reads C++ locals; C++ is left
-with 28 unmarked rows, from 50, with 12 after 0.5.31's namespaces and 6 after 0.5.32's aliases.) The 2,114 by language: PHP 445, TypeScript 405, Ruby 304, C# 196, Rust 192,
+with 28 unmarked rows, from 50, with 12 after 0.5.31's namespaces 6 after 0.5.32's aliases and none after 0.5.33's preprocessor branches.) The 2,114 by language: PHP 445, TypeScript 405, Ruby 304, C# 196, Rust 192,
 C++ 169, Swift 94, Kotlin 79, JavaScript 71, Java 49, Go 34, C 33, Python
 20, TSX 19, Scala 4. They are still an upper bound: the marks are
 conservative, and PHP's and TypeScript's rows are mostly PSR-7 and Node

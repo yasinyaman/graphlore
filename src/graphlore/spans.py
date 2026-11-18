@@ -202,10 +202,18 @@ def _grammar_cached(lang: str) -> bool:
         return False
 
 
+# Definitions whose node type has no hint word: C++ `using AsyncResponse =
+# AsyncWrapper<Response>;` (not every `alias`: Python's `aliased_import` names a
+# module it imports).
+_TS_SYMBOL_TYPES = frozenset({"alias_declaration"})
+
+
 def _is_ts_symbol(node_type: str) -> bool:
     t = node_type.lower()
     if t in _TS_CALL_TYPES or t.endswith(_TS_NON_SYMBOL_SUFFIXES):
         return False
+    if t in _TS_SYMBOL_TYPES:
+        return True
     # Calls/invocations expose the callee under a `name` field but define nothing —
     # Java `method_invocation`, C# `invocation_expression`, Ruby `method_call`, PHP
     # `function_call_expression`, etc. Match by substring so we don't have to
@@ -413,6 +421,105 @@ def _ts_child_name(node: Any) -> str | None:
     return None
 
 
+_PP_SPACE = b" \t\n\x0c\r"  # what Rust's `is_ascii_whitespace` strips
+
+
+def _blank_duplicate_branches(src: bytes) -> bytes:
+    """C, C++: an ``#if`` … ``#elif``/``#else`` … ``#endif`` whose every branch
+    leaves the same number of braces open (not none) is one piece of code
+    written once per configuration (``if (error_code) {`` under ``#if`` and
+    again under ``#else``, closed once after ``#endif``); the parser, seeing every
+    branch, would swallow the rest of the file into the function around. The
+    source with the directive lines and every branch but the first blanked
+    (each byte but a newline or carriage return a space), else ``src``.
+
+    The native engine's ``parse::blank_duplicate_branches`` is the same rule.
+    """
+    if b"#" not in src:
+        return src
+    lines: list[tuple[int, int]] = []
+    start = 0
+    for i, b in enumerate(src):
+        if b == 0x0A:
+            lines.append((start, i))
+            start = i + 1
+    if start < len(src):
+        lines.append((start, len(src)))
+    stack: list[tuple[list[int], list[list[int]]]] = []  # (directives, [[first, delta]])
+    blank: list[tuple[int, int]] = []
+    in_comment = False
+    continued = False
+    for li, (lo, hi) in enumerate(lines):
+        line = src[lo:hi]
+        was_continued = continued
+        continued = line.endswith(b"\\") or line.endswith(b"\\\r")
+        if was_continued:
+            continue
+        trimmed = line.lstrip(_PP_SPACE)
+        if not in_comment and trimmed[:1] == b"#":
+            rest = trimmed[1:].lstrip(_PP_SPACE)
+            n = 0
+            while n < len(rest) and (65 <= rest[n] <= 90 or 97 <= rest[n] <= 122):
+                n += 1
+            word = rest[:n]
+            if word in (b"if", b"ifdef", b"ifndef"):
+                stack.append(([li], [[li + 1, 0]]))
+            elif word in (b"elif", b"else", b"elifdef", b"elifndef"):
+                if stack:
+                    stack[-1][0].append(li)
+                    stack[-1][1].append([li + 1, 0])
+            elif word == b"endif":
+                if stack:
+                    directives, branches = stack.pop()
+                    first = branches[0][1]
+                    if len(branches) >= 2 and first != 0 and all(b[1] == first for b in branches):
+                        blank.extend((d, d) for d in directives)
+                        blank.append((li, li))
+                        for a, b in zip(directives[1:], directives[2:], strict=False):
+                            blank.append((a + 1, b - 1))
+                        if len(directives) >= 2:
+                            blank.append((directives[-1] + 1, li - 1))
+                    if stack:
+                        stack[-1][1][-1][1] += first
+            continue
+        delta = 0
+        i = 0
+        while i < len(line):
+            c = line[i]
+            if in_comment:
+                if c == 0x2A and line[i + 1:i + 2] == b"/":
+                    in_comment = False
+                    i += 1
+            elif c == 0x2F and line[i + 1:i + 2] == b"/":
+                break
+            elif c == 0x2F and line[i + 1:i + 2] == b"*":
+                in_comment = True
+                i += 1
+            elif c in (0x22, 0x27):
+                i += 1
+                while i < len(line) and line[i] != c:
+                    if line[i] == 0x5C:
+                        i += 1
+                    i += 1
+            elif c == 0x7B:
+                delta += 1
+            elif c == 0x7D:
+                delta -= 1
+            i += 1
+        if stack:
+            stack[-1][1][-1][1] += delta
+    if not blank:
+        return src
+    out = bytearray(src)
+    last = len(lines) - 1
+    for a, b in blank:
+        for lo, hi in lines[a:min(b, last) + 1]:
+            for k in range(lo, hi):
+                if out[k] != 0x0D:
+                    out[k] = 0x20
+    return bytes(out)
+
+
 def _spans_treesitter(src: bytes, rel: str) -> list[tuple[int, int, int, str]]:
     """def/class/etc. spans for any tree-sitter-supported language (optional dep).
 
@@ -430,7 +537,9 @@ def _spans_treesitter(src: bytes, rel: str) -> list[tuple[int, int, int, str]]:
             return engine.file_spans(src, rel) or []
         return []
     try:
-        root = parser.parse(src).root_node
+        # (C, C++: an `#if` written once per configuration is parsed once)
+        parsed = _blank_duplicate_branches(src) if _lang in ("c", "cpp") else src
+        root = parser.parse(parsed).root_node
     except Exception:
         return []
     spans: list[tuple[int, int, int, str]] = []

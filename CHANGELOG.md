@@ -259,6 +259,16 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- **Native engine 0.5.33 and `spans.py`: a C/C++ `#if` written once per
+  configuration is parsed once.** When every branch of an `#if … #else …
+  #endif` leaves the same number of braces open, the parser is given the
+  first branch (the rest and the directives are blanked in place); it used
+  to read the rest of the file into the function around (cpr's
+  `multiperform.cpp`: 25 methods nested in `DoMultiPerform`). C++ `using X
+  = …;` is a span of `spans.py`'s rule too (`fetch` on an alias returned the
+  namespace around it). C++'s unmarked unresolved rows 6 → 0. 10 calls on a
+  structured binding (`for (auto& [session, method] : sessions_)`) had an
+  edge only by accident and are gone.
 - **Native engine 0.5.32: C++ type aliases and template specializations.**
   `using X = T<…>;` is a definition (graphify has these nodes too) and an
   alias or `typedef` is followed to the type it names; its arguments pick a
