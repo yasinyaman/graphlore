@@ -57,3 +57,19 @@ def _full_toolset(monkeypatch):
     ``server.TOOLSET`` themselves.
     """
     monkeypatch.setattr(server, "TOOLSET", "full")
+
+
+@pytest.fixture(autouse=True)
+def _builtin_search_offline_model(monkeypatch):
+    """The built-in search's dense tier off, and no vector cache on disk, unless a
+    test asks for them: a real embedding model would make the suite depend on a
+    download (tests inject a fake model through ``embed._load_model``)."""
+    from graphlore import embed, search
+
+    monkeypatch.setenv("GRAPHLORE_EMBED_MODEL", "off")
+    monkeypatch.setenv("GRAPHLORE_CACHE_DIR", "off")
+    search._INDEX_CACHE.clear()
+    embed._MODEL_CACHE.clear()
+    yield
+    search._INDEX_CACHE.clear()
+    embed._MODEL_CACHE.clear()

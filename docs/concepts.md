@@ -136,39 +136,99 @@ extra): it re-syncs the graph on structural source changes, ignores cosmetic
 edits and non-source churn (VCS internals, virtualenvs, its own output), and
 debounces via `GRAPHLORE_WATCH_DEBOUNCE`.
 
-## Semantic bridge (optional `[semble]`)
+## Search bridge (built-in index or semble)
 
-`pip install "graphlore[semble]"` adds `graphlore_locate`, which joins
-[semble](https://github.com/MinishLab/semble)'s semantic code search to the graph
-in one call. Graphify gives **structure** (how code connects); semble gives
-**retrieval** (which code is semantically relevant) — they're complementary.
+`graphlore_locate` joins code search to the graph in one call. Graphify gives
+**structure** (how code connects); search gives **retrieval** (which code is
+relevant to a question) — they're complementary.
 
 `graphlore_locate("how does retry backoff work")`:
-1. semble finds the most relevant code and resolves the top hit to its enclosing
-   graph node (better than label matching).
+1. the search finds the most relevant code and resolves the top hit to its
+   enclosing graph node (better than label matching).
 2. returns the token-budgeted subgraph around it (**structure**).
-3. runs semble `find_related` and cross-checks: a cousin that is semantically
-   similar but **not** within the seed's structural neighborhood is flagged as a
+3. runs `find_related` on the top hit and cross-checks: a cousin that is similar
+   but **not** within the seed's structural neighborhood is flagged as a
    `hidden_link` (with its hop distance) — a duplication / missing-abstraction /
    implicit-coupling candidate that neither tool surfaces alone.
 
-**The first semantic call downloads a model.** semble runs locally and needs no
-API key, but on first use it fetches its embedding model from the Hugging Face Hub
-(`minishlab/potion-code-16M-v2` as of semble 0.7) and caches it; later calls need
-no network. To fetch it ahead of time:
+**Which search answers** is `GRAPHLORE_SEMANTIC_BACKEND`, and `backend` in every
+reply says what did:
+
+| Setting | Backend |
+|---|---|
+| unset / `auto` (default) | [semble](https://github.com/MinishLab/semble) when it is installed and builds its index, else the built-in index |
+| `builtin` | the built-in index only |
+| `semble` | semble only; without the extra, `graphlore_locate` returns an install hint |
+| `module.path:Factory` | your own backend implementing `search` / `find_related`; a failure is an error, never answered by another backend |
+
+### The built-in index
+
+graphlore's own index (`search.py`) needs no extra, so `graphlore_locate` works
+in a default install. It is built on what graphlore already has and a
+general-purpose search does not:
+
+- **One chunk per definition.** Chunks are the span engine's functions, methods
+  and classes (a class holds only its own lines, not its methods'), so every hit
+  joins to its graph node exactly. Module-level code between definitions is a
+  low-weight `module` chunk; a file the span engine cannot read (another language
+  without `[treesitter]`) is cut into 40-line windows, counted in
+  `window_chunked_files`.
+- **Identifier-aware BM25F.** `getUserName`, `get_user_name` and `GetUserName`
+  share a term, and so do their parts (`user`, `name`); the definition's name and
+  qualified name, the file path and the body are scored as separate fields, with
+  the name weighted highest. A query that is a symbol (`Client._send`) gets an
+  exact-name boost; a question loses its stopwords.
+- **A graph overlay.** A node's docstring and the names of what it calls and what
+  calls it are a second, small index, so a definition can be found by the words
+  its neighbours use.
+- **A prior on where code lives.** Test code, examples and type stubs rank below
+  the implementation unless the query asks for tests, and each further chunk of
+  one file counts for less, so a question with two homes shows both.
+- **Static embeddings, optional.** With the `[embed]` extra
+  (`pip install "graphlore[embed]"`), each chunk also gets a
+  [model2vec](https://github.com/MinishLab/model2vec) static embedding
+  (`minishlab/potion-code-16M-v2` by default, `GRAPHLORE_EMBED_MODEL`), and the
+  two rankings are fused by weighted reciprocal rank: names lean on BM25,
+  questions on the embedding. `mode` in the reply is `hybrid`; without the extra
+  it is `bm25`, and `dense_unavailable` says why. A BM25 index matches the code's
+  own words: "where are failed requests retried" finds `retry`, not code that
+  says `attempt` and `backoff`; that is what the embedding adds.
+
+The index is built on the first call and kept for the session, one per project:
+every later call stats the project's files and re-reads only those whose
+modification time or size changed. Embedding vectors are kept on disk by text
+hash under `GRAPHLORE_CACHE_DIR` (default `~/.cache/graphlore`, never inside the
+project), so a restart or an edit re-embeds only the definitions whose text
+changed. Hidden directories, dependency and build trees, vendored or minified
+files, files over 1 MB and binaries are skipped, and `backend.skipped` counts
+them; past 20,000 files or 200,000 chunks the index stops and says so.
+
+How it compares with semble, on semble's own query set (NDCG@10, index time,
+query latency): [benchmark](benchmark.md#search-quality-built-in-index-and-semble).
+
+The tokenizer and the BM25F loop sit behind a small kernel interface with a
+pure-Python reference. An optional compiled accelerator (a `graphlore_accel`
+module, not shipped) can replace it; `tests/fixtures/search_golden.json` holds
+the terms and bit-exact scores it must reproduce.
+
+### semble
+
+With the `[semble]` extra, semble answers by default: static embeddings plus
+BM25 and its own reranking. **The first call downloads a model.** semble, like
+the built-in dense tier, fetches `minishlab/potion-code-16M-v2` from the Hugging
+Face Hub on first use and caches it; later calls need no network. To fetch it
+ahead of time:
 
 ```bash
 python -c "from model2vec import StaticModel; StaticModel.from_pretrained('minishlab/potion-code-16M-v2')"
 ```
 
 For a machine without network access, copy `~/.cache/huggingface` over from one
-that has run the command, or point `SEMBLE_MODEL_NAME` at a local copy of the model.
-
-The extra is optional: without it the core tools are unchanged and `graphlore_locate`
-returns an install hint. Any other embedding backend can be plugged in via
-`GRAPHLORE_SEMANTIC_BACKEND=module.path:Factory` (implementing `search` /
-`find_related`). It also pairs well with running semble's own MCP server
-alongside graphlore.
+that has run the command, or point `SEMBLE_MODEL_NAME` (semble) /
+`GRAPHLORE_EMBED_MODEL` (built-in) at a local copy of the model. With
+`GRAPHLORE_OFFLINE=1` and no cached model, the built-in index answers with BM25
+alone. graphlore also pairs well with running semble's own MCP server
+alongside it.
 
 The chunk→node join and the freshness cosmetic-vs-structural check work
 **across languages**: Python uses the stdlib `ast` (no extra deps), and every

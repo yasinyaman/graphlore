@@ -50,11 +50,13 @@ A `LanguageNotFoundError: Download error` means the grammars are unavailable and
 - `imports.py` — import statements read from the importing file's source (Python via `ast`, JS/TS via tree-sitter): `ImportChecker.kind` says when the import behind a file-level import edge runs (module-level, deferred, type-checking) and rejects an edge the source contradicts (`import yaml` linked to a first-party `yaml.py`).
 - `resolve.py` — edges the graph lacks and the source proves: `_resolved(nodes, edges)` returns the graph's edges plus calls and imports made through a module object (`mod.func()`; Python, plus JS/TS default and dynamic imports), marked `resolved_by: "graphlore"`, as one cached list.
 - `review.py` — the review analyses with no MCP dependency: unreferenced code, same-named symbols, identical bodies, layer rules.
+- `embed.py` — the optional dense tier of the built-in search: loads a model2vec static model (`[embed]` extra) behind `config.export_offline_env()`, and `VectorStore` keeps chunk vectors by text hash (in memory, and on disk under `GRAPHLORE_CACHE_DIR`, never in the project). Imports only `config`.
+- `search.py` — graphlore's own code search, the default `graphlore_locate` / duplication-scan backend when semble is absent: one chunk per span-engine definition (a container holds only its own lines), identifier-aware BM25F over name / path / body plus a graph overlay (docstring, call-neighbour names), the dense tier fused by weighted reciprocal rank, a path prior and per-file decay. `index_for_project()` keeps one `CodeIndex` per (`PROJECT_DIR`, model) and refreshes it per call by file (mtime, size). The hot loops sit behind `_Kernel` (`tokenize`, `bm25f`); `tests/fixtures/search_golden.json` is the contract an accelerator must meet bit for bit.
 - `server.py` — the whole MCP surface in one ~5,000-line module: the `mcp` instance, 33 tools, resources, prompts, toolset trimming, the opt-in watcher, HTTP bearer auth and `main()`.
 
 Tools come in two kinds. **CLI-backed** tools (`build`, `add`, `query`, `path`, `explain`) shell out through `_run_cli`, always as an argv list with no shell; `graphlore_label_communities(method="cli")` is a sixth `_run_cli` caller (`graphify label`). Callers detect failure by the `ERROR` prefix of the returned string. **graph.json analysis** tools read the graph directly and must keep working with no `graphify` binary and no optional extras installed.
 
-Optional dependencies (`semble`, `tree-sitter`, `tiktoken`, `watchdog`, `uvicorn`) are imported lazily inside functions and degrade to a fallback or an install hint; nothing may raise `ImportError` at module import.
+Optional dependencies (`semble`, `model2vec`/`numpy` for `[embed]`, `tree-sitter`, `tiktoken`, `watchdog`, `uvicorn`) are imported lazily inside functions and degrade to a fallback or an install hint; nothing may raise `ImportError` at module import.
 
 ## Conventions that span files
 
@@ -97,7 +99,7 @@ The version is duplicated in `pyproject.toml`, `server.__version__`, `.claude-pl
 `README.md` is the landing page, and PyPI's long description: what graphlore is, quick start, the 12 `lean` tools, the benchmark headline and an FAQ. Keep it short; detail goes to `docs/`:
 
 - `docs/tools.md` — all 33 tools, resources, prompts, what a result carries
-- `docs/concepts.md` — resolved edges, import checks, analysis scope, freshness, the semantic bridge, naming communities
+- `docs/concepts.md` — resolved edges, import checks, analysis scope, freshness, the search bridge (built-in index or semble), naming communities
 - `docs/configuration.md` — running, the plugin, toolsets, transports, the network table, environment variables
 - `docs/benchmark.md` — method and results (`docs/benchmark*.html` are the rendered reports)
 - `docs/benchmark-polyglot.md` — every tool run on 31 real repositories in 14 languages: what works per language, what does not, and the findings (`benchmarks/polyglot.py` reruns it)
@@ -113,7 +115,7 @@ Links from the README into the repository are absolute (`https://github.com/yasi
 The repository root is itself a Claude Code plugin and its own marketplace (`.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json` with `"source": "./"`). Consequences:
 
 - `.claude/skills/` is what the plugin ships to users, not only a project-local skill directory. Anything added there is installed for everyone.
-- The plugin's MCP server runs `uvx --from "graphlore[graphify,treesitter,semble] @ ${CLAUDE_PLUGIN_ROOT}" graphlore`, i.e. it builds this package from the installed copy of the repo. Renaming the console script, the package or those extras breaks the plugin.
+- The plugin's MCP server runs `uvx --from "graphlore[graphify,treesitter,semble,embed] @ ${CLAUDE_PLUGIN_ROOT}" graphlore`, i.e. it builds this package from the installed copy of the repo. Renaming the console script, the package or those extras breaks the plugin.
 - Users stay on the manifest's `version` until it changes, so a fix reaches plugin users only with a version bump.
 - Check manifest changes with `claude plugin validate --strict .`; it passes clean.
 - Claude Code's project instructions live in `.claude/CLAUDE.md`, not at the root. A `CLAUDE.md` at a plugin root is not loaded as plugin context and makes the validator warn, so don't add one there.

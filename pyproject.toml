@@ -43,6 +43,10 @@ dependencies = [
 [project.optional-dependencies]
 graphify = ["graphifyy"]
 semble = ["semble>=0.3"]
+# The dense tier of the built-in search (GRAPHLORE_SEMANTIC_BACKEND unset or
+# builtin): static code embeddings, fused with its always-on BM25 tier. The first
+# use downloads the model (minishlab/potion-code-16M-v2) from the Hugging Face Hub.
+embed = ["model2vec>=0.10", "numpy>=1.24"]
 # Multi-language span/structure backend for graphify_locate and graphify_freshness
 # (Python works without it via stdlib ast). tree-sitter also ships with graphify.
 # Bounds: the floors are the oldest pair the suite passes with (Python 3.10,
@@ -58,7 +62,7 @@ tiktoken = ["tiktoken>=0.7"]
 # source changes. Off by default so the stdio server stays light.
 watch = ["watchdog>=4.0"]
 all = [
-    "graphifyy", "semble>=0.3",
+    "graphifyy", "semble>=0.3", "model2vec>=0.10", "numpy>=1.24",
     "tree-sitter>=0.23,<1.0", "tree-sitter-language-pack>=1.11,<2.0",
     "tiktoken>=0.7", "watchdog>=4.0",
 ]
@@ -101,6 +105,13 @@ pythonpath = ["src"]
 python_version = "3.10"
 files = ["src/graphlore"]
 ignore_missing_imports = true
+
+# numpy's stubs use syntax newer than python_version 3.10; the dense tier only
+# calls it inside functions, so treat it (and model2vec) as untyped.
+[[tool.mypy.overrides]]
+module = ["numpy", "numpy.*", "model2vec", "model2vec.*"]
+follow_imports = "skip"
+follow_imports_for_stubs = true
 
 [tool.coverage.run]
 source = ["graphlore"]
