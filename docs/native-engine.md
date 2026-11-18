@@ -1055,7 +1055,7 @@ edge although its name is the one callable of that name in the project, with
 the reason the walk stopped (graph.json is the same with or without it). A
 name a library also has (`setHeader`, PSR-7's `getHeaderLine`, PHPUnit's
 `fail`) is counted too, so the table is an upper bound and its samples
-(`--samples N`) say which rows are real. On the 31 repositories, without
+(`--samples N`) say which rows are real (the split below says how many). On the 31 repositories, without
 vendored and minified files (engine 0.5.15, 2026-11-18): 6,796 calls.
 
 | Reason the walk stopped | Calls | of them at file level |
@@ -1092,6 +1092,26 @@ level there is `app.use` and `app.set` (842 rows of express), names too
 short and too common to guess by. Engine 0.5.19 takes 123 more off (6,362;
 C# 349 from 470; 6,360 with 0.5.20, 6,348 with 0.5.21, 6,285 with 0.5.22). Most of what C# has left is not the project's: `Assert.
 NotNull` beside its own `Ensure.NotNull` (77), `WireMockServer.Start` (23).
+
+By then most rows were of that kind: a library's name the project happens
+to define once. Since engine 0.5.24 each row says whether it is, and why
+(`library_like`), and the script prints both totals (`--real` shows only
+the rest). Of the 6,285 rows (engine 0.5.24, 2026-11-18):
+
+| | Calls |
+|---|--:|
+| a name the language's own types answer to (`each`, `clone`, `once`, `add`, `Split`) | 2,626 |
+| the receiver is a library's (`MockResponse().setBody`, a local of a library type) | 1,002 |
+| `self` / `super` in a type with a base the project does not define (PHPUnit's `$this->fail()`) | 329 |
+| the one definition is test code and the call is not (PSR-7's `getHeaderLine` beside a test double) | 214 |
+| **none of these: what an edge is still plausible for** | **2,114** |
+
+The 2,114 by language: PHP 445, TypeScript 405, Ruby 304, C# 196, Rust 192,
+C++ 169, Swift 94, Kotlin 79, JavaScript 71, Java 49, Go 34, C 33, Python
+20, TSX 19, Scala 4. They are still an upper bound: the marks are
+conservative, and PHP's and TypeScript's rows are mostly PSR-7 and Node
+names on parameters the source gives no type (`$request->getUri()`,
+`response.setHeader(…)`).
 
 ### The polyglot audit on native graphs
 
@@ -1136,9 +1156,9 @@ but one convention finding, fixed since: `graphlore_surprises(limit=0)` cut its
 `shared_state` list without saying how much (`shared_state_left_out` does now).
 `SKELETON-EMPTY` went from 5 to 0, and the tool time stayed at 131 s.
 
-Rerun on graphs built by engine 0.5.3, and again by 0.5.4 through 0.5.22
+Rerun on graphs built by engine 0.5.3, and again by 0.5.4 through 0.5.23
 (2026-11-18), the audit raises nothing on the native graphs but its
-`GRAPH-ORPHAN-NODES` note on 19 of them; 115 to 159 s of tool time (on the 0.5.7 run, retrofit's build through `graphlore_build` took 5.1 s and was reported `SLOW` for crossing 5 s). What the table above still listed is
+`GRAPH-ORPHAN-NODES` note on 19 of them; 115 to 172 s of tool time (on the 0.5.7 run, retrofit's build through `graphlore_build` took 5.1 s and was reported `SLOW` for crossing 5 s). What the table above still listed is
 gone:
 
 - **`REPLY-TOO-LARGE`**: `graphlore_neighbors` cuts a hub at `limit` and says

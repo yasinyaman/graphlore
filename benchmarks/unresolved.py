@@ -5,12 +5,16 @@ The engine links a call only when the source says what is called. This asks
 what it leaves out that an edge was plausible for: calls whose name is the one
 callable of that name in the project (`graphlore_engine build --unresolved`
 writes them, each with the reason the walk stopped). A name a library also has
-(`getHeaderLine`, `setHeader`) is counted too: the table is an upper bound,
-and the samples say which rows are real.
+(`getHeaderLine`, `setHeader`) is counted too, so the total is an upper bound.
+The engine marks the rows that are most likely a library's name (the receiver
+is a library's, the name is one the language's own types answer to, or the one
+definition is test code and the call is not): the second total leaves them
+out, and --real shows only the rest.
 
   python benchmarks/unresolved.py REPO
   python benchmarks/unresolved.py --root /tmp/polyglot            # every repository under it
   python benchmarks/unresolved.py --root /tmp/polyglot --samples 5 --language rust
+  python benchmarks/unresolved.py --root /tmp/polyglot --real --samples 5
   python benchmarks/unresolved.py --root /tmp/polyglot --json out.json --baseline before.json
 
 Each repository is built into a temporary directory; nothing is written to it.
@@ -95,6 +99,8 @@ def main() -> int:
     ap.add_argument("--samples", type=int, default=0, help="print this many rows per reason")
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--all", action="store_true", help="count vendored and minified files too")
+    ap.add_argument("--real", action="store_true",
+                    help="leave out the rows that are most likely a library's name")
     ap.add_argument("--json", help="write the counts here")
     ap.add_argument("--baseline", help="an earlier --json to compare the counts with")
     args = ap.parse_args()
@@ -110,11 +116,17 @@ def main() -> int:
         rows = [r for r in rows if r.get("language") == args.language]
     if args.reason:
         rows = [r for r in rows if args.reason in r["reason"]]
+    library = collections.Counter(r["library_like"] for r in rows if r.get("library_like"))
+    real = [r for r in rows if not r.get("library_like")]
+    everything = len(rows)
+    if args.real:
+        rows = real
 
     counts = table(rows)
     before: dict[str, dict[str, int]] = {}
     if args.baseline:
-        before = json.loads(Path(args.baseline).read_text()).get("counts", {})
+        key = "real_counts" if args.real else "counts"
+        before = json.loads(Path(args.baseline).read_text()).get(key, {})
         if args.language:
             before = {k: v for k, v in before.items() if k == args.language}
         if args.reason:
@@ -126,16 +138,22 @@ def main() -> int:
         return "" if was is None or was == now else f" ({now - was:+d})"
 
     total = len(rows)
-    print(f"{total} calls without an edge whose name is one definition of the project "
+    print(f"{everything} calls without an edge whose name is one definition of the project "
           f"({len(repos)} repositories)")
+    print(f"{len(real)} of them not a library's name by the engine's reckoning; the other "
+          f"{everything - len(real)}:")
+    for why, n in library.most_common():
+        print(f"  {n:6}  {why}")
     by_reason: collections.Counter[str] = collections.Counter(r["reason"] for r in rows)
     print("\nby reason:")
     for reason, n in by_reason.most_common():
         was = sum(v.get(reason, 0) for v in before.values()) if before else None
         file_level = sum(1 for r in rows if r["reason"] == reason and not r.get("in_definition"))
         hidden = sum(1 for r in rows if r["reason"] == reason and not r.get("candidate_visible"))
+        mine = sum(1 for r in rows if r["reason"] == reason and not r.get("library_like"))
         print(f"  {n:6}{delta(n, was):9}  {reason}   "
-              f"[{file_level} at file level, {hidden} with the candidate out of sight]")
+              f"[{mine} not a library's name, {file_level} at file level, "
+              f"{hidden} with the candidate out of sight]")
     print("\nby language:")
     for lang in sorted(counts, key=lambda k: -sum(counts[k].values())):
         n = sum(counts[lang].values())
@@ -155,7 +173,10 @@ def main() -> int:
                 print(f"    {r['repo']}/{r['file']}:{r['line']}  {r['path']}  ({where(r)})"
                       f"  -> {cand['file']} {cand['qualname']}")
     if args.json:
-        Path(args.json).write_text(json.dumps({"total": total, "counts": counts}, indent=1))
+        Path(args.json).write_text(json.dumps(
+            {"total": total, "real": len(real), "counts": counts, "real_counts": table(real)},
+            indent=1,
+        ))
     return 0
 
 
