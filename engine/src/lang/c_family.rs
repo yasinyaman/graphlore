@@ -25,8 +25,10 @@ static CPP_HEADER_MARK: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 impl LanguageModule for CFamily {
-    /// Variables at file or namespace scope (not `extern` ones, which name a
-    /// variable defined elsewhere), and `static` data members of a class.
+    /// Variables at file or namespace scope, and `static` data members of a
+    /// class. An `extern` one names a variable defined elsewhere: it is kept
+    /// as a declaration of it (`Def::decl_only`, no node), so a header that
+    /// uses it has the name in scope and its type.
     fn state_defs<'t>(&self, n: Node<'t>, src: &[u8]) -> Vec<(Node<'t>, Node<'t>, DefKind)> {
         let words = |n: Node| -> Vec<String> {
             kids(n)
@@ -37,8 +39,25 @@ impl LanguageModule for CFamily {
         };
         let in_class = n.kind() == "field_declaration"
             && n.parent().is_some_and(|p| p.kind() == "field_declaration_list");
+        // (through the `#if` / `#ifdef` groups a file-level declaration sits
+        // in, `#ifndef _WIN32 extern … #endif`, and the `extern "C" { … }` a
+        // header wraps itself in)
+        let mut up = n.parent();
+        for _ in 0..12 {
+            match up {
+                Some(p)
+                    if p.kind().starts_with("preproc_")
+                        || p.kind() == "linkage_specification"
+                        || (p.kind() == "declaration_list"
+                            && p.parent().is_some_and(|q| q.kind() == "linkage_specification")) =>
+                {
+                    up = p.parent()
+                }
+                _ => break,
+            }
+        }
         let at_file = n.kind() == "declaration"
-            && n.parent().is_some_and(|p| {
+            && up.is_some_and(|p| {
                 p.kind() == "translation_unit"
                     || (p.kind() == "declaration_list"
                         && p.parent().is_some_and(|q| q.kind() == "namespace_definition"))
@@ -46,10 +65,15 @@ impl LanguageModule for CFamily {
         if !(in_class || at_file) {
             return Vec::new();
         }
-        let w = words(n);
-        if w.iter().any(|x| x == "extern") {
+        // (`ffc_internal ffc_inline` above a function: macro words the
+        // grammar recovers into a declaration with no `;` of its own)
+        let ended = n
+            .child(n.child_count().saturating_sub(1))
+            .is_some_and(|c| c.kind() == ";" && !c.is_missing());
+        if !ended {
             return Vec::new();
         }
+        let w = words(n);
         let constant = w.iter().any(|x| x == "const" || x == "constexpr");
         let kind = match (in_class, constant) {
             (_, true) => DefKind::Constant,

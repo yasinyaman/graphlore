@@ -259,6 +259,15 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- **Native engine 0.5.34: a C `typedef struct X { … } X;` is its struct.**
+  A local typed by such an alias reaches the struct's members (the target
+  0.5.32 wrote for it was the first type in the body, now the struct's own
+  name). A function returning a pointer types its parameters; `extern T x;`
+  declares the variable defined elsewhere (no node); a file-level variable
+  inside an `#if` group or `extern "C" { … }` is a variable. hiredis: 34
+  calls through function-pointer fields (`r->fn->createString(…)`), 836
+  reads, 324 writes, 312 uses; C's unmarked unresolved rows 33 → 0. The
+  facts cache is rebuilt once.
 - **Native engine 0.5.33 and `spans.py`: a C/C++ `#if` written once per
   configuration is parsed once.** When every branch of an `#if … #else …
   #endif` leaves the same number of braces open, the parser is given the
