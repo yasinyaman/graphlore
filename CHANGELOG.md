@@ -259,6 +259,16 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- Native engine 0.5.21, **names bound with a type the source states are
+  locals**: a loop variable written with its type (Java `for (Pet pet :
+  pets)`, C# `foreach (Pet pet in pets)`), a type pattern (`o instanceof
+  Pet p`, `o is Pet p`), and what a wrapper holds (Rust `if let Some(p) =
+  e`, `while let`, a `match` arm's `Some(p)` / `Ok(p)` or the fields of an
+  enum variant; Swift `if let p = e`, `guard let q = e`). A local assigned a
+  field or a variable is typed by what that holds. On the 31 audit
+  repositories: 29 calls and 27 reads, uses and writes gained; 24 edges of
+  alamofire gone that read such a name as the class's method or property
+  of the same name (`task` after `guard let task = …`).
 - Native engine 0.5.20, two wrong readings. On the 31 audit repositories:
   21 edges gained, 38 calls gone.
   - **`parent`, `base` and `cls` are the object's base or class only in the

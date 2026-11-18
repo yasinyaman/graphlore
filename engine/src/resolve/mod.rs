@@ -1595,6 +1595,12 @@ impl<'a> Project<'a> {
                     (self.def(owner).name == path[0]).then_some((owner, conf))
                 } else if k == DefKind::Constructor {
                     self.class_of(r.0, Some(r.1)).map(|t| (t, conf))
+                } else if k.is_state() && !*self.types_only.borrow() {
+                    // a value that is a field or a variable (`guard let q =
+                    // cat`): the type that holds, as surely as it is written
+                    let written = def.declared_type.is_some();
+                    self.held_type(r)
+                        .map(|t| (t, if written { conf } else { Confidence::Inferred }))
                 } else {
                     None
                 }

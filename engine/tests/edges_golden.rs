@@ -1538,3 +1538,32 @@ fn a_guess_by_name_never_links_a_definition_to_itself() {
         .collect();
     assert_eq!(from_evaluate, [("wrap_wrapper_prepare_all", "INFERRED")], "{got:#?}");
 }
+
+#[test]
+fn names_bound_with_a_type_the_source_states() {
+    // a loop variable written with its type, a type pattern, and a name
+    // bound to what a wrapper holds are locals of that type. `Err(e)` holds
+    // no type the source names, and neither does a name with no pattern
+    let got = calls_conf("patternbindings", &[
+        ("Owner.java", "import java.util.List;\n\nclass Pet {\n    boolean isNew() { return true; }\n    String label() { return \"\"; }\n}\n\nclass Owner {\n    List<Pet> pets;\n\n    List<Pet> getPets() { return pets; }\n\n    void find(Object o) {\n        for (Pet pet : getPets()) {\n            pet.isNew();\n        }\n        if (o instanceof Pet p) {\n            p.label();\n        }\n    }\n}\n"),
+        ("Keeper.cs", "class Animal {\n    public bool IsNew() => true;\n    public string Label() => \"\";\n}\n\nclass Keeper {\n    List<Animal> animals;\n\n    void Find(object o) {\n        foreach (Animal animal in animals) {\n            animal.IsNew();\n        }\n        if (o is Animal a) {\n            a.Label();\n        }\n    }\n}\n"),
+        ("yard.rs", "pub struct Dog;\n\nimpl Dog {\n    pub fn bark(&self) {}\n    pub fn fetch(&self) {}\n    pub fn feed(&self) {}\n    pub fn walk(&self) {}\n    pub fn len(&self) -> usize { 0 }\n}\n\npub enum Slot {\n    Full(Dog),\n    Empty,\n}\n\npub struct Yard {\n    dog: Option<Dog>,\n}\n\nimpl Yard {\n    pub fn dog(&self) -> Option<&Dog> {\n        self.dog.as_ref()\n    }\n\n    pub fn load(&self) -> Result<Dog, String> {\n        Err(String::new())\n    }\n\n    pub fn find(&self, slot: Slot) {\n        if let Some(p) = self.dog() {\n            p.bark();\n        }\n        match self.load() {\n            Ok(found) => found.fetch(),\n            Err(e) => {\n                e.len();\n            }\n        }\n        match slot {\n            Slot::Full(inner) => inner.feed(),\n            Slot::Empty => {}\n        }\n        while let Some(next) = &self.dog {\n            next.walk();\n        }\n    }\n}\n"),
+        ("Zoo.swift", "class Cat {\n    func purr() {}\n    func nap() {}\n}\n\nclass Zoo {\n    var cat: Cat?\n\n    func load() -> Cat? { cat }\n\n    func find() {\n        if let p = load() {\n            p.purr()\n        }\n        guard let q = cat else { return }\n        q.nap()\n    }\n}\n"),
+    ]);
+    // every call that reaches a method of each animal, whoever makes it
+    let reached = |prefix: &str| -> BTreeSet<&str> {
+        got.iter()
+            .filter(|(_, to, _)| to.starts_with(prefix))
+            .map(|(_, to, _)| to.as_str())
+            .collect()
+    };
+    let want: BTreeSet<&str> = ["owner_pet_isnew", "owner_pet_label"].into_iter().collect();
+    assert_eq!(reached("owner_pet_"), want, "{got:#?}");
+    let want: BTreeSet<&str> = ["keeper_animal_isnew", "keeper_animal_label"].into_iter().collect();
+    assert_eq!(reached("keeper_animal_"), want, "{got:#?}");
+    let want: BTreeSet<&str> =
+        ["yard_dog_bark", "yard_dog_feed", "yard_dog_fetch", "yard_dog_walk"].into_iter().collect();
+    assert_eq!(reached("yard_dog_"), want, "{got:#?}");
+    let want: BTreeSet<&str> = ["zoo_cat_nap", "zoo_cat_purr"].into_iter().collect();
+    assert_eq!(reached("zoo_cat_"), want, "{got:#?}");
+}
