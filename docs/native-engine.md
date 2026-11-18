@@ -344,6 +344,15 @@ What the lookup takes from each language's own rules:
   `Aggregate` / `inject` give one. A closure inside another names the outer
   closure's parameter as the outer closure's (the inner parameter's type
   was looked up under the bare name).
+- **The arguments of a Rust macro.** The grammar gives what a macro is
+  called with as tokens, with no call in them, so `assert_eq!(handle_count(
+  &pool), 2)`, `assert!(pool.count() > 0)`, `vec![make_pool(), make_pool()]`
+  and `format!("{}", c.name())` named nothing. The arguments in `( … )` or
+  `[ … ]` are parsed again as an expression, on their own, and the calls and
+  constructions in them are placed where they stand in the file, a macro
+  inside a macro too. Arguments that are no expressions (a `{ … }` body,
+  `a => b` arms, a pattern) parse with an error and are left out, and so is
+  the pattern of `matches!(value, Pattern)`.
 - **Tuples taken apart.** A callable's result that is a tuple — `-> (A, B)`
   (Rust, Swift), `(A, B) Method()` (C#), `[A, B]` (TypeScript), `Pair<A, B>`
   / `Triple` (Kotlin), `tuple[A, B]` (Python), a Go function's results — is
@@ -617,7 +626,7 @@ file pairs). The native graph has definitions graphify folds into the one
 around them (a function nested in a method, the setter beside a getter of the
 same name); an edge from one of those is compared as an edge from the paired
 definition it belongs to, as graphify records it. On the 31 repositories of the
-[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.15,
+[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.16,
 measured 2026-11-18), as native / graphify edges and the share of graphify's
 that the native graph has too:
 
@@ -632,16 +641,16 @@ that the native graph has too:
 | Kotlin | 99.4% | 368 / 333 (95%) | 4,682 / 2,108 (71%) | 96 / 56 (93%) | 1,087 / 673 (91%) |
 | Scala | 100% | 2 / 0 | 46 / 20 (45%) | 21 / 22 (95%) | 75 / 32 (100%) |
 | C# | 92.7% | 347 / 280 (30%)³ | 2,787 / 2,450 (93%) | 87 / 86 (98%) | 1,259 / 806 (99%) |
-| Rust | 93.3% | 314 / 370 (75%) | 1,850 / 853 (81%) | 53 / 41 (93%) | 1,244 / 895 (81%) |
+| Rust | 93.3% | 314 / 370 (75%) | 2,004 / 853 (86%) | 53 / 41 (93%) | 1,245 / 895 (81%) |
 | Swift | 95.9% | 166 / 166 (–)³ | 5,165 / 2,141 (82%) | 190 / 164 (100%) | 1,091 / 580 (62%) |
 | C | 100% | 89 / 77 (99%) | 864 / 791 (100%) | – | 253 / 130 (97%) |
 | C++ | 97.8% | 215 / 228 (93%) | 631 / 281 (33%)⁴ | 30 / 5 (100%) | 326 / 218 (88%) |
 | C/C++ headers | 90.6% | 164 / 172 (95%) | 361 / 348 (85%) | 11 / 12 (92%) | 515 / 289 (87%) |
 | Ruby | 99.7% | 42 / 0 | 445 / 375 (70%) | 46 / 15 (93%) | 28 / 0 |
 | PHP | 80.6% | 429 / 505 (84%) | 8,870 / 6,140 (90%) | 65 / 60 (98%) | 648 / 213 (95%) |
-| **All** | **94.4%** | **4,961 / 5,565 (75%)** | **43,603 / 27,832 (84%)** | **1,132 / 726 (97%)** | **12,414 / 6,775 (89%)** |
+| **All** | **94.4%** | **4,961 / 5,565 (75%)** | **43,757 / 27,832 (84%)** | **1,132 / 726 (97%)** | **12,415 / 6,775 (89%)** |
 
-Of the native calls, 12,715 (29%) are `INFERRED`, against 47% of graphify's.
+Of the native calls, 12,799 (29%) are `INFERRED`, against 47% of graphify's.
 That share was 20% before engine 0.5.5: a call of an overloaded name that the
 arguments do not decide used to be an `EXTRACTED` edge to the first overload,
 and is now an `INFERRED` edge to each overload that fits (999 calls, with
@@ -684,6 +693,13 @@ two edges of got are gone that named a function defined in another loop
 for a destructured loop variable of the same name. The maps of these
 repositories that hold project types are mostly looked up by key once, or
 not walked at all.
+Engine 0.5.16 (the arguments of Rust macros) adds 171 edges, none gone: 164
+calls in ureq (80 `EXTRACTED`, 84 through a local the walk types by its
+value or not at all, as outside a macro), 5 in axum-realworld and 2 in
+actix-realworld. Nearly all are a test's assertions (`assert_eq!(request(
+&agent, a.clone()), "1")`), so what they add is the tests of a function.
+The share of graphify's Rust calls the native graph has goes from 81% to
+86%.
 Engine 0.5.14 (keys, partition, zip, fold, associateWith, returned
 functions) adds one edge: `copy(id)` in fastapi-template's columns, the
 right guess 0.5.11 had lost, now from what `useCopyToClipboard` returns.
@@ -788,8 +804,8 @@ builds take 13.3 s for the 31 repositories against graphify's 81.3 s
 faster of two clean builds each): 8.7 times faster at the median, from 2.1
 (todoapi, whose bundled JavaScript the native engine reads in full) to 17.2
 times; retrofit 2.9 s against 13.1 s, guzzle 0.9 s / 6.1 s, alamofire 1.2 s /
-5.4 s, got 0.9 s / 4.7 s (engine 0.5.1; with all that 0.5.14 resolves the same
-31 builds take 16.3 to 18.9 s through Python, 15.3 to 16.2 s in the engine alone, retrofit 3.7 to 4.1 s). An update after a one-file change takes a third of
+5.4 s, got 0.9 s / 4.7 s (engine 0.5.1; with all that 0.5.16 resolves the same
+31 builds take 16.3 to 18.9 s through Python, 15.6 to 16.2 s in the engine alone, retrofit 3.7 to 4.1 s). An update after a one-file change takes a third of
 a build ([above](#incremental-updates)).
 
 ### What is left without an edge
@@ -828,9 +844,9 @@ C# 470, Rust 372, Go 345, Kotlin 262, C++ 228, Python 153, Swift 97, Scala
 outside any definition: the callbacks of JavaScript, TypeScript and Ruby
 test DSLs (`it('…', function () { app.use(…); res.download(…) })`), where a
 variable or a closure's parameter has no definition to be a local of. The
-calls inside a Rust macro (`assert_eq!(handle_count(&pool), 2)`) are not in
-the table at all: the grammar gives a macro's arguments as tokens, so the
-engine reads no call there.
+calls inside a Rust macro were not in this table at all (no call was read
+there); since 0.5.16 they are read, 171 of them got an edge, and the 52
+that did not are counted (6,848 rows, Rust 424).
 
 ### The polyglot audit on native graphs
 
@@ -875,7 +891,7 @@ but one convention finding, fixed since: `graphlore_surprises(limit=0)` cut its
 `shared_state` list without saying how much (`shared_state_left_out` does now).
 `SKELETON-EMPTY` went from 5 to 0, and the tool time stayed at 131 s.
 
-Rerun on graphs built by engine 0.5.3, and again by 0.5.4 through 0.5.14
+Rerun on graphs built by engine 0.5.3, and again by 0.5.4 through 0.5.16
 (2026-11-18), the audit raises nothing on the native graphs but its
 `GRAPH-ORPHAN-NODES` note on 19 of them; 115 to 154 s of tool time (on the 0.5.7 run, retrofit's build through `graphlore_build` took 5.1 s and was reported `SLOW` for crossing 5 s). What the table above still listed is
 gone:

@@ -1793,6 +1793,16 @@ pub fn import(n: Node, form: ImportForm, module: impl Into<String>) -> ImportFac
 /// Read the references, imports and package of `facts`' file; `facts.defs`
 /// must already be filled.
 pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts) {
+    read_at(m, root, src, facts, 0);
+}
+
+/// `read`, `depth` macros deep (a Rust macro's arguments are read again as
+/// expressions: `macro_refs`).
+fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts, depth: usize) {
+    let rust = facts.lang == Some(crate::lang::Lang::Rust);
+    // Rust macro invocations, for the calls in their arguments
+    let mut macros: Vec<Node> = Vec::new();
+    let macro_depth = depth;
     let by_node: HashMap<usize, usize> =
         facts.defs.iter().enumerate().map(|(i, d)| (d.node_id, i)).collect();
     let mut refs: Vec<RefFact> = Vec::new();
@@ -1833,6 +1843,9 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
         steps += 1;
         if steps > 2_000_000 {
             break;
+        }
+        if rust && n.kind() == "macro_invocation" {
+            macros.push(n);
         }
         if facts.package.is_none() {
             if let Some(p) = m.package_of(n, src) {
@@ -2439,6 +2452,11 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
     add_extras(&mut facts.defs, &extras, m, src);
     let defs = &facts.defs;
     refs.extend(state.finish(defs, &imports, m.needs_import(), |bytes| innermost(defs, bytes)));
+    // `assert_eq!(handle_count(&pool), 2)`: the grammar gives a macro's
+    // arguments as tokens; read as expressions they are calls like any other
+    for mac in macros {
+        refs.extend(macro_refs(m, mac, src, macro_depth));
+    }
     bind_closure_params(&closures, &mut refs, &mut locals);
     facts.receivers = bind_receivers(&receivers, &mut refs);
     // the innermost definition around each use (a sweep: defs are in source
@@ -2469,6 +2487,79 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
     facts.refs = refs;
     facts.imports = imports;
     facts.locals = locals;
+}
+
+/// The calls and constructions in the arguments of a Rust macro invocation
+/// (`assert!(f(x))`, `vec![a(), b()]`, `format!("{}", c.name())`): the token
+/// tree is parsed again as an expression, on its own, and what it holds is
+/// placed where it stands in the file. Arguments that are no expressions (a
+/// `{ … }` body, a pattern, `a => b` arms) parse with an error and are left
+/// out, and so is the pattern after the first argument of `matches!`.
+fn macro_refs(m: &dyn LanguageModule, mac: Node, src: &[u8], depth: usize) -> Vec<RefFact> {
+    const PREFIX: &[u8] = b"fn __m(){";
+    if depth >= 3 {
+        return Vec::new();
+    }
+    let Some(tt) = kids(mac).into_iter().find(|c| c.kind() == "token_tree") else {
+        return Vec::new();
+    };
+    let tokens = &src[tt.start_byte()..tt.end_byte()];
+    if !matches!(tokens.first(), Some(b'(' | b'[')) || tokens.len() > 20_000 {
+        return Vec::new();
+    }
+    let name = mac
+        .child_by_field_name("macro")
+        .map(|n| text(n, src))
+        .unwrap_or_default()
+        .rsplit("::")
+        .next()
+        .unwrap_or_default()
+        .to_string();
+    // `matches!(value, Pattern)`: only the value is an expression
+    let tokens: Vec<u8> = if matches!(name.as_str(), "matches" | "assert_matches") {
+        let (mut level, mut cut) = (0usize, None);
+        for (i, b) in tokens.iter().enumerate() {
+            match b {
+                b'(' | b'[' | b'{' => level += 1,
+                b')' | b']' | b'}' => level = level.saturating_sub(1),
+                b',' if level == 1 => {
+                    cut = Some(i);
+                    break;
+                }
+                _ => {}
+            }
+        }
+        match cut {
+            Some(i) => [&tokens[..i], b")".as_slice()].concat(),
+            None => tokens.to_vec(),
+        }
+    } else {
+        tokens.to_vec()
+    };
+    let wrapped = [PREFIX, tokens.as_slice(), b";}".as_slice()].concat();
+    let Ok(tree) = crate::parse::parse(crate::lang::Lang::Rust, &wrapped, None) else {
+        return Vec::new();
+    };
+    if tree.root_node().has_error() {
+        return Vec::new();
+    }
+    let mut scratch = FileFacts::new(String::new(), Some(crate::lang::Lang::Rust), false, &wrapped);
+    read_at(m, tree.root_node(), &wrapped, &mut scratch, depth + 1);
+    let row = tt.start_position().row as u32;
+    scratch
+        .refs
+        .into_iter()
+        .filter(|r| matches!(r.kind, RefKind::Call | RefKind::New))
+        // (a closure's parameter inside the arguments is a local nothing here keeps)
+        .filter(|r| r.byte >= PREFIX.len() && !r.path.iter().any(|s| s.contains('@')))
+        .map(|mut r| {
+            r.byte = tt.start_byte() + (r.byte - PREFIX.len());
+            r.line += row;
+            r.from_def = None;
+            r.recv = None;
+            r
+        })
+        .collect()
 }
 
 /// The value node of a declaration: `= …` of an assignment, a declarator, a
