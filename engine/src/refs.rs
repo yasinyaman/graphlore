@@ -106,10 +106,53 @@ pub fn path_of(n: Node, src: &[u8]) -> Option<Vec<String>> {
             _ => Some(vec![t.trim_start_matches('$').to_string()]),
         };
     }
-    // `f().m`: the result of a call, marked `()` after the callee (before the
-    // member shapes: Java / Ruby / PHP calls carry `object` and `name` fields)
+    // `x!`, `x!!`: the value itself
+    if k == "postfix_expression" {
+        let mut cursor = n.walk();
+        if n.children(&mut cursor).any(|c| c.kind() == "bang" || c.kind() == "!!") {
+            return path_of(
+                n.child_by_field_name("target").or_else(|| kids(n).into_iter().next())?,
+                src,
+            );
+        }
+    }
+    // `xs[0]`: an element of `xs`
+    if matches!(
+        k,
+        "subscript_expression"
+            | "index_expression"
+            | "element_access_expression"
+            | "indexing_expression"
+            | "subscript"
+            | "element_reference"
+    ) {
+        let object = ["object", "operand", "value", "expression", "array"]
+            .iter()
+            .find_map(|f| n.child_by_field_name(f))
+            .or_else(|| kids(n).into_iter().next())?;
+        let mut p = path_of(object, src).filter(|p| p[0] != UNKNOWN)?;
+        p.push(ELEMENT.into());
+        return Some(p);
+    }
+    // `[x.owner for x in xs]`: a collection of what each element gives
+    if matches!(k, "list_comprehension" | "set_comprehension" | "generator_expression") {
+        let clause = kids(n).into_iter().find(|c| c.kind() == "for_in_clause")?;
+        let var = bound_name(clause.child_by_field_name("left")?, src)?;
+        let of = path_of(clause.child_by_field_name("right")?, src)?;
+        let each = path_of(n.child_by_field_name("body")?, src)?;
+        return mapped(&of, &var, each);
+    }
     if is_call_kind(k) || matches!(k, "new_expression" | "object_creation_expression") {
-        return match callee(n, src) {
+        // the callee is read once: a chain of calls is as deep as it is long
+        let called = callee(n, src);
+        // `xs.map { it.owner }`: a collection of what the lambda gives
+        if let Some(p) = called.as_ref().and_then(|(_, p)| mapped_call(n, src, p)) {
+            return Some(p);
+        }
+        // `f().m`: the result of a call, marked `()` after the callee (before
+        // the member shapes: Java / Ruby / PHP calls carry `object` and `name`
+        // fields)
+        return match called {
             Some((_, mut p)) if p.last().is_some_and(|s| s != UNKNOWN) => {
                 p.push(UNKNOWN.into());
                 Some(p)
@@ -276,7 +319,10 @@ fn types_in(
             for c in kids(node) {
                 if matches!(
                     c.kind(),
-                    "type_arguments" | "type_parameter" | "template_argument_list"
+                    "type_arguments"
+                        | "type_parameter"
+                        | "template_argument_list"
+                        | "type_argument_list"
                 ) {
                     stack.extend(kids(c).into_iter().map(|a| (a, "generic_arg")));
                 }
@@ -295,7 +341,11 @@ fn types_in(
             }
             continue;
         }
-        let sub = if k == "type_arguments" || k == "type_parameter" { "generic_arg" } else { ctx };
+        let sub = if matches!(k, "type_arguments" | "type_parameter" | "type_argument_list") {
+            "generic_arg"
+        } else {
+            ctx
+        };
         stack.extend(kids(node).into_iter().map(|c| (c, sub)));
     }
 }
@@ -542,7 +592,19 @@ fn value_type(v: Node, src: &[u8]) -> Option<Vec<String>> {
         | "try_expression" => kids(v).into_iter().find_map(|c| value_type(c, src)),
         // a chain (`builder(x).tag(y)`) is kept: the resolver follows what
         // each call returns; one that starts at something unnameable is not
-        _ => callee(v, src).map(|(_, p)| p).filter(|p| p.first().is_some_and(|s| s != UNKNOWN)),
+        // (a mapping of a collection, `xs.map { it.owner }`, is the
+        // collection of what each gives)
+        _ => {
+            if matches!(
+                v.kind(),
+                "list_comprehension" | "set_comprehension" | "generator_expression"
+            ) {
+                return path_of(v, src).filter(|p| p.first().is_some_and(|s| s != UNKNOWN));
+            }
+            let called = callee(v, src).map(|(_, p)| p)?;
+            let mapped = if is_call_kind(v.kind()) { mapped_call(v, src, &called) } else { None };
+            Some(mapped.unwrap_or(called)).filter(|p| p.first().is_some_and(|s| s != UNKNOWN))
+        }
     }
 }
 
@@ -1236,11 +1298,14 @@ fn bind_closure_params(closures: &[ClosureScope], refs: &mut [RefFact], locals: 
     }
 }
 
+/// A closure's parameter: its name, the path of its type, whether declared.
+type Param = (String, Vec<String>, bool);
+
 /// The names a closure binds: `|headers|` (Ruby, Rust), `x -> …` (Java),
 /// `{ property -> … }` (Kotlin), `item => …` (JS, C#), `lambda x: …`,
 /// `rescue => e`. Typed where the source writes a type, else untyped: either
 /// way the name is not an outer one.
-fn closure_params(n: Node, src: &[u8]) -> Vec<(String, Vec<String>, bool)> {
+fn closure_params(n: Node, src: &[u8]) -> Vec<Param> {
     let mut stack: Vec<(Node, usize)> = match n.kind() {
         "block_parameters"
         | "lambda_parameters"
@@ -1258,15 +1323,30 @@ fn closure_params(n: Node, src: &[u8]) -> Vec<(String, Vec<String>, bool)> {
             .filter_map(|f| n.child_by_field_name(f))
             .map(|p| (p, 0))
             .collect(),
+        // Swift `{ p in … }`, `{ (p: Plane) -> Pilot in … }`
+        "lambda_literal" => n
+            .child_by_field_name("type")
+            .into_iter()
+            .flat_map(kids)
+            .filter(|c| c.kind() == "lambda_function_type_parameters")
+            .flat_map(kids)
+            .map(|p| (p, 0))
+            .collect(),
         _ => return Vec::new(),
     };
-    let mut out = Vec::new();
+    // in the order written: which parameter is the first matters (an
+    // element, an index); `_` keeps its place
+    let mut out: Vec<(usize, Param)> = Vec::new();
     while let Some((p, depth)) = stack.pop() {
         let k = p.kind();
-        if matches!(k, "identifier" | "simple_identifier" | "variable_name") {
-            if let Some(name) = bound_name(p, src) {
-                if !matches!(name.as_str(), "self" | "this" | "_") {
-                    out.push((name, Vec::new(), false));
+        // (C# `d => …`: the parameter is the node itself)
+        if matches!(k, "identifier" | "simple_identifier" | "variable_name" | "implicit_parameter")
+        {
+            let name =
+                if k == "implicit_parameter" { Some(text(p, src)) } else { bound_name(p, src) };
+            if let Some(name) = name {
+                if !matches!(name.as_str(), "self" | "this") {
+                    out.push((p.start_byte(), (name, Vec::new(), false)));
                 }
             }
             continue;
@@ -1276,7 +1356,11 @@ fn closure_params(n: Node, src: &[u8]) -> Vec<(String, Vec<String>, bool)> {
         }
         let typed = locals_of(p, src, true);
         if !typed.is_empty() {
-            out.extend(typed.into_iter().map(|(name, path, declared, _)| (name, path, declared)));
+            out.extend(
+                typed
+                    .into_iter()
+                    .map(|(name, path, declared, _)| (p.start_byte(), (name, path, declared))),
+            );
             continue;
         }
         // a parameter with a default or a pattern: its name, not its value
@@ -1285,7 +1369,8 @@ fn closure_params(n: Node, src: &[u8]) -> Vec<(String, Vec<String>, bool)> {
             None => stack.extend(kids(p).into_iter().map(|c| (c, depth + 1))),
         }
     }
-    out
+    out.sort_by_key(|(byte, _)| *byte);
+    out.into_iter().map(|(_, param)| param).collect()
 }
 
 fn locals_of(n: Node, src: &[u8], in_params: bool) -> Vec<(String, Vec<String>, bool, bool)> {
@@ -1827,17 +1912,18 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
             // `xs.forEach { x -> … }`, `xs.map(x => …)`, `xs.each do |x|`:
             // the first parameter is an element of `xs` (`x.let { … }`: `x`
             // itself); a Kotlin lambda that names none has `it`
-            let lambda = n.kind() == "lambda_literal"
-                && !kids(n).iter().any(|c| c.kind() == "lambda_parameters");
-            if lambda || params.first().is_some_and(|(_, path, _)| path.is_empty()) {
-                if let Some(of) = iterated(&anc, n, src) {
-                    if lambda {
-                        params = vec![("it".to_string(), of, false)];
-                    } else {
-                        params[0].1 = of;
+            // (Swift's has `$0`)
+            let lambda = implicit_parameter(n);
+            if lambda.is_some() || params.first().is_some_and(|(_, path, _)| path.is_empty()) {
+                if let Some((at, of)) = iterated(&anc, n, src) {
+                    match (lambda, params.get_mut(at)) {
+                        (Some(it), _) if at == 0 => params = vec![(it.to_string(), of, false)],
+                        (None, Some(p)) if p.1.is_empty() => p.1 = of,
+                        _ => {}
                     }
                 }
             }
+            params.retain(|(name, ..)| name != "_");
             if !params.is_empty() {
                 // a parameter list stands for the block around it
                 let body = if n.kind().ends_with("_parameters") || n.kind() == "exception_variable"
@@ -2107,6 +2193,164 @@ fn state_value(node: Node, src: &[u8]) -> Option<String> {
 /// The marker that ends a path naming an element of what comes before it.
 pub const ELEMENT: &str = "[]";
 
+/// The marker after a path that names a collection of what comes before it
+/// (`xs.map { it.owner }` is `xs`, `[]`, `owner`, `[+]`).
+pub const MANY: &str = "[+]";
+
+/// Methods that give a collection of what their lambda gives for each element.
+const MAPPING_METHODS: &[&str] = &[
+    "map",
+    "mapNotNull",
+    "flatMap",
+    "Select",
+    "SelectMany",
+    "collect",
+    "flat_map",
+    "filter_map",
+    "compactMap",
+    "mapTo",
+    "mapIndexedNotNull",
+];
+
+/// The path of a collection made of what `each` gives per element of `of`,
+/// `var` being the name the element goes by in `each`.
+fn mapped(of: &[String], var: &str, each: Vec<String>) -> Option<Vec<String>> {
+    if each.first().is_none_or(|h| h == UNKNOWN) || of.first().is_none_or(|h| h == UNKNOWN) {
+        return None;
+    }
+    let mut out = if each[0] == var {
+        // a member of the element
+        let mut p = of.to_vec();
+        p.push(ELEMENT.into());
+        p.extend(each.into_iter().skip(1));
+        p
+    } else {
+        // something built or called per element: `Bar(it)`
+        each
+    };
+    out.push(MANY.into());
+    Some(out)
+}
+
+/// The one expression a lambda's body is, through the block that holds it.
+fn single_expression(body: Node) -> Option<Node> {
+    let mut cur = body;
+    for _ in 0..6 {
+        match cur.kind() {
+            "statements" | "block" | "statement_block" | "block_body" | "body_statement"
+            | "compound_statement" => {
+                let ks: Vec<Node> = kids(cur).into_iter().filter(|c| !is_comment(c)).collect();
+                match ks.as_slice() {
+                    [one] => cur = *one,
+                    _ => return None,
+                }
+            }
+            "expression_statement" | "return_statement" | "return" => {
+                cur = kids(cur).into_iter().last()?;
+            }
+            _ => return Some(cur),
+        }
+    }
+    None
+}
+
+/// `xs.map { it.owner }`, `xs.map(x => x.owner)`, `xs.map(&:owner)`,
+/// `xs.stream().map(x -> x.owner())`: the path of the collection it gives.
+fn mapped_call(n: Node, src: &[u8], path: &[String]) -> Option<Vec<String>> {
+    let (method, of) = path.split_last()?;
+    if of.is_empty() || !MAPPING_METHODS.contains(&method.as_str()) {
+        return None;
+    }
+    match mapped_by(n, src, of) {
+        // a function is given and what it gives has no name: the result is
+        // a collection of something unknown, not of the same elements
+        Mapped::Unnamed => Some(vec![UNKNOWN.into()]),
+        Mapped::To(p) => Some(p),
+        Mapped::NoFunction => None,
+    }
+}
+
+enum Mapped {
+    To(Vec<String>),
+    Unnamed,
+    NoFunction,
+}
+
+fn mapped_by(n: Node, src: &[u8], of: &[String]) -> Mapped {
+    match mapped_path(n, src, of) {
+        Ok(Some(p)) => Mapped::To(p),
+        Ok(None) => Mapped::Unnamed,
+        Err(()) => Mapped::NoFunction,
+    }
+}
+
+/// `Err` when the call is given no function to map with (Java
+/// `.collect(toList())`), `Ok(None)` when it is and its result has no path.
+fn mapped_path(n: Node, src: &[u8], of: &[String]) -> Result<Option<Vec<String>>, ()> {
+    // the one function given to it: an argument, a trailing lambda, a block
+    let mut given: Vec<Node> = Vec::new();
+    if let Some((list, _)) = argument_list(n) {
+        for a in list.into_iter().flat_map(kids).filter(|c| !is_comment(c)) {
+            given.push(if a.kind().contains("argument") && a.kind() != "block_argument" {
+                kids(a).into_iter().last().unwrap_or(a)
+            } else {
+                a
+            });
+        }
+    }
+    if let Some(sfx) = kids(n).into_iter().find(|c| c.kind() == "call_suffix") {
+        given.extend(kids(sfx).into_iter().filter_map(|c| match c.kind() {
+            "annotated_lambda" => kids(c).into_iter().find(|c| c.kind() == "lambda_literal"),
+            // Swift's trailing closure
+            "lambda_literal" => Some(c),
+            _ => None,
+        }));
+    }
+    given.extend(n.child_by_field_name("block"));
+    let [f] = given.as_slice() else { return Err(()) };
+    // Ruby `&:owner`: the method of that name on each element
+    if f.kind() == "block_argument" {
+        let Some(sym) = kids(*f).into_iter().find(|c| c.kind() == "simple_symbol") else {
+            return Ok(None);
+        };
+        let name = text(sym, src).trim_start_matches(':').to_string();
+        return Ok(mapped(of, "", vec![String::new(), name]));
+    }
+    if !(is_closure(f.kind()) || f.kind() == "block") {
+        return Err(());
+    }
+    let params = f
+        .child_by_field_name("parameters")
+        .or_else(|| f.child_by_field_name("parameter"))
+        .or_else(|| {
+            kids(*f).into_iter().find(|c| {
+                matches!(c.kind(), "lambda_parameters" | "block_parameters" | "closure_parameters")
+            })
+        });
+    let names = match params.map(|ps| closure_params(ps, src)) {
+        Some(names) if !names.is_empty() => names,
+        _ => closure_params(*f, src),
+    };
+    // the first parameter is the element (`xs.map((x, i) => …)`)
+    let var = match names.first() {
+        Some((one, ..)) => one.clone(),
+        // a lambda that names no parameter has `it` or `$0`
+        None => match implicit_parameter(*f) {
+            Some(it) => it.to_string(),
+            None => return Ok(None),
+        },
+    };
+    let body = f.child_by_field_name("body").or_else(|| {
+        kids(*f).into_iter().rfind(|c| !c.kind().contains("parameter") && !is_comment(c))
+    });
+    let each = body
+        .and_then(single_expression)
+        .and_then(|e| path_of(e, src))
+        // what another parameter gives has no name outside the lambda
+        .filter(|each| !names.iter().skip(1).any(|(other, ..)| *other == each[0]));
+    Ok(each.and_then(|each| mapped(of, &var, each)))
+}
+
 /// Names of collection types whose one type argument is their element's.
 const COLLECTIONS: &[&str] = &[
     "List",
@@ -2179,10 +2423,14 @@ fn elem_type(t: Node, src: &[u8]) -> Option<Vec<String>> {
     }
     let mut v = Vec::new();
     types_in(t, src, "", &mut v);
-    // the outer type, then its arguments
-    let mut it = v.into_iter().map(|(p, _)| p);
-    let outer = it.next()?;
-    let args: Vec<Vec<String>> = it.collect();
+    // the outer type and its arguments, in whichever order the grammar
+    // gives them
+    let at = v.iter().position(|(_, ctx)| *ctx != "generic_arg").unwrap_or(0);
+    if v.is_empty() {
+        return None;
+    }
+    let (outer, _) = v.remove(at);
+    let args: Vec<Vec<String>> = v.into_iter().map(|(p, _)| p).collect();
     (COLLECTIONS.contains(&outer.last()?.as_str()) && args.len() == 1).then(|| args[0].clone())
 }
 
@@ -2334,14 +2582,106 @@ const ITERATION_METHODS: &[&str] = &[
     "flat_map",
     "min_by",
     "max_by",
+    "for_each",
+    "ForEach",
+    "each",
+    "each_with_index",
+    "onEach",
+    "mapNotNull",
+    "flatMap",
+    "filterNot",
+    "sortedBy",
+    "sortedByDescending",
+    "groupBy",
+    "associateBy",
+    "associateWith",
+    "associate",
+    "partition",
+    "takeWhile",
+    "dropWhile",
+    "indexOfFirst",
+    "firstNotNullOfOrNull",
+    "some",
+    "every",
+    "findLast",
+    "findIndex",
+    "Where",
+    "Select",
+    "SelectMany",
+    "Any",
+    "All",
+    "First",
+    "FirstOrDefault",
+    "Single",
+    "SingleOrDefault",
+    "Last",
+    "LastOrDefault",
+    "Count",
+    "OrderBy",
+    "OrderByDescending",
+    "GroupBy",
+    "ToDictionary",
+    "RemoveAll",
+    "Find",
+    "FindAll",
+    "Exists",
+    "select",
+    "reject",
+    "detect",
+    "find_all",
+    "collect",
+    "flat_map",
+    "filter_map",
+    "sort_by",
+    "group_by",
+    "min_by_key",
+    "max_by_key",
+    "sort_by_key",
+    "position",
+    "take_while",
+    "skip_while",
+    "inspect",
+    "retain",
+    "compactMap",
+    "contains",
+    "allSatisfy",
+    "anyMatch",
+    "allMatch",
+    "noneMatch",
+    "removeIf",
+    "peek",
+    "ifPresent",
+    "sumBy",
+    "maxOf",
+    "minOf",
+    "maxByOrNull",
+    "minByOrNull",
 ];
+
+/// Methods whose lambda takes an index, then an element of the receiver.
+const INDEXED_METHODS: &[&str] =
+    &["forEachIndexed", "mapIndexed", "mapIndexedNotNull", "filterIndexed", "onEachIndexed"];
 
 /// Methods whose lambda takes the receiver itself.
 const SELF_METHODS: &[&str] = &["let", "also", "takeIf", "takeUnless", "tap", "then"];
 
+/// The name of the one parameter a lambda that declares none has: Kotlin
+/// `it`, Swift `$0` (read as `0`).
+fn implicit_parameter(n: Node) -> Option<&'static str> {
+    if n.kind() != "lambda_literal"
+        || n.child_by_field_name("type").is_some()
+        || kids(n).iter().any(|c| c.kind() == "lambda_parameters")
+    {
+        return None;
+    }
+    // the two grammars share the node's kind
+    let swift = n.language().name().is_some_and(|l| l == "swift");
+    Some(if swift { "0" } else { "it" })
+}
+
 /// What the first parameter of the lambda `n` is, from the call it is given
 /// to: an element of the receiver of an iteration method, or the receiver.
-fn iterated(anc: &[Node], n: Node, src: &[u8]) -> Option<Vec<String>> {
+fn iterated(anc: &[Node], n: Node, src: &[u8]) -> Option<(usize, Vec<String>)> {
     let lambda_start = n.start_byte();
     let call = anc.iter().rev().take(5).find(|a| is_call_kind(a.kind()))?;
     let (_, path) = callee(*call, src)?;
@@ -2358,9 +2698,12 @@ fn iterated(anc: &[Node], n: Node, src: &[u8]) -> Option<Vec<String>> {
     let mut of = receiver.to_vec();
     if ITERATION_METHODS.contains(&method.as_str()) {
         of.push(ELEMENT.into());
-        Some(of)
+        Some((0, of))
+    } else if INDEXED_METHODS.contains(&method.as_str()) {
+        of.push(ELEMENT.into());
+        Some((1, of))
     } else if SELF_METHODS.contains(&method.as_str()) {
-        Some(of)
+        Some((0, of))
     } else {
         None
     }

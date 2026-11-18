@@ -870,3 +870,77 @@ fn typing_a_local_named_like_what_it_is_built_from_ends() {
     )]);
     has(&got, &[("test()", "calls", "session()"), ("test()", "calls", ".request()")]);
 }
+
+#[test]
+fn a_chain_of_calls_on_a_collection() {
+    // every method has a namesake on a `Decoy`, so its name alone says nothing
+    let got = call_ids("chains", &[
+        ("a.kt", "package app\nclass Decoy { fun a() {}; fun b() {}; fun c() {}; fun d() {}; fun run() {}; fun stop() {}; fun ping() {}; fun own() {} }\nclass Owner { fun run() {}; fun stop() {}; fun ping() {}; fun own() {} }\nclass Foo(val owner: Owner, val ok: Boolean) { fun a() {}; fun b() {}; fun c() {}; fun d() {}; fun boss(): Owner = owner; fun kids(): List<Foo> = emptyList() }\nfun chains(xs: List<Foo>) {\n    xs.filter { it.ok }.first().a()\n    xs.filter { it.ok }.forEach { it.b() }\n    xs.map { it.owner }.forEach { it.run() }\n    xs.map { it.boss() }.first().stop()\n    xs.sortedBy { it.ok }.map { x -> x.owner }.filter { true }.forEach { o -> o.ping() }\n    xs.flatMap { it.kids() }.forEach { it.c() }\n    val owners = xs.map { it.owner }\n    for (o in owners) { o.own() }\n    xs.filter { it.ok }.forEachIndexed { i, x -> x.d() }\n}\nfun unknown(xs: List<Foo>) {\n    xs.map { it.toString() }.forEach { it.a() }\n    xs.map { 1 }.first().b()\n}\n"),
+        ("B.java", "import java.util.List;\nclass Bait { void run() {} void go() {} void end() {} }\nclass Boss { void run() {} void stop() {} }\nclass Item { Boss boss() { return null; } boolean ok() { return true; } void go() {} void end() {} }\nclass Use {\n  void chain(List<Item> items) {\n    items.stream().filter(i -> i.ok()).forEach(i -> i.go());\n    items.stream().map(i -> i.boss()).forEach(o -> o.run());\n    items.stream().filter(i -> i.ok()).findFirst().get().end();\n  }\n}\n"),
+        ("e.ts", "export class Lure { run() {} exec() {} }\nexport class Lead { run() {} }\nexport class Task { lead: Lead; ok: boolean; exec() {} }\nexport function go(tasks: Task[]) {\n  tasks.filter(t => t.ok).forEach(t => t.exec());\n  tasks.filter(t => t.ok).map((t, i) => t.lead).forEach((o, i) => o.run());\n}\n"),
+        ("d.py", "class Dummy:\n    def run(self): ...\n\n\nclass Chief:\n    def run(self): ...\n\n\nclass Job:\n    chief: Chief\n\n    def start(self): ...\n\n\ndef run(jobs: list[Job]):\n    chiefs = [j.chief for j in jobs]\n    for c in chiefs:\n        c.run()\n"),
+        ("f.rs", "pub struct Fake;\nimpl Fake {\n    pub fn run(&self) {}\n    pub fn go(&self) {}\n}\npub struct Head;\nimpl Head { pub fn run(&self) {} }\npub struct Part { pub head: Head }\nimpl Part {\n    pub fn go(&self) {}\n    pub fn head(&self) -> &Head { &self.head }\n}\npub fn chain(parts: Vec<Part>) {\n    parts.iter().filter(|p| true).for_each(|p| p.go());\n    parts.iter().map(|p| p.head()).for_each(|h| h.run());\n}\n"),
+        ("G.cs", "using System.Collections.Generic;\nusing System.Linq;\nclass Mock { public void Run() {} public void Go() {} public void End() {} }\nclass Chef { public void Run() {} }\nclass Dish { public Chef Chef; public bool Ok; public void Go() {} public void End() {} }\nclass Kitchen {\n  void Chain(List<Dish> dishes) {\n    dishes.Where(d => d.Ok).ToList().ForEach(d => d.Go());\n    foreach (var c in dishes.Select(d => d.Chef)) { c.Run(); }\n    dishes.Where(d => d.Ok).First().End();\n  }\n}\n"),
+        ("h.swift", "class Ghost { func run() {}; func go() {} }\nclass Pilot { func run() {} }\nclass Plane { var pilot = Pilot(); var ok = true; func go() {} }\nfunc chain(planes: [Plane]) {\n    planes.filter { $0.ok }.forEach { $0.go() }\n    planes.map { $0.pilot }.forEach { $0.run() }\n    planes.map { p in p.pilot }.first!.run()\n}\n"),
+    ]);
+    let mut missing = Vec::new();
+    for (from, to) in [
+        ("chains()", "a_foo_a"),
+        ("chains()", "a_foo_b"),
+        ("chains()", "a_owner_run"),
+        ("chains()", "a_owner_stop"),
+        ("chains()", "a_owner_ping"),
+        ("chains()", "a_foo_c"),
+        ("chains()", "a_owner_own"),
+        // the element is the second parameter of `forEachIndexed`'s lambda
+        ("chains()", "a_foo_d"),
+        (".chain()", "b_item_go"),
+        (".chain()", "b_boss_run"),
+        (".chain()", "b_item_end"),
+        ("go()", "e_task_exec"),
+        ("go()", "e_lead_run"),
+        ("run()", "d_chief_run"),
+        ("chain()", "f_part_go"),
+        ("chain()", "f_head_run"),
+        (".Chain()", "g_dish_go"),
+        (".Chain()", "g_chef_run"),
+        (".Chain()", "g_dish_end"),
+        ("chain()", "h_plane_go"),
+        ("chain()", "h_pilot_run"),
+    ] {
+        if !got.contains(&(from.to_string(), to.to_string())) {
+            missing.push((from, to));
+        }
+    }
+    assert!(missing.is_empty(), "missing {missing:?}\n{got:?}");
+    // nothing goes to a namesake, a mapping whose result has no name is not
+    // a collection of the same elements, and `first()` called on a collection
+    // is the library's method, not the element's type
+    for (from, to) in &got {
+        assert!(
+            from != "unknown()"
+                && !["decoy", "bait", "lure", "dummy", "fake", "mock", "ghost"]
+                    .iter()
+                    .any(|d| to.contains(d))
+                && !["a_foo", "a_owner", "b_item", "g_dish", "e_task", "h_plane"]
+                    .contains(&to.as_str()),
+            "{from} -> {to}: {got:?}"
+        );
+    }
+}
+
+#[test]
+fn an_extension_on_a_closure_parameter_and_none_in_java() {
+    let got = call_ids("closure-extension", &[
+        // `error` is the closure's, not the property of that name; the
+        // extension of a type the project does not define answers, and the
+        // label says which overload
+        ("a.swift", "struct AFError: Error {}\nextension Error {\n    func asAFError(orFailWith message: String) -> AFError { AFError() }\n    func asAFError(or other: AFError) -> AFError { other }\n}\nclass Task {\n    var error: AFError?\n    func mapError(_ f: (Error) -> AFError) {}\n    func run() {\n        mapError { error in\n            error.asAFError(or: AFError())\n        }\n    }\n}\n"),
+        // a Kotlin extension is no method to Java: `latch.await()` is the
+        // library's
+        ("K.kt", "package app\nclass Call<T>\nfun <T> Call<T>.await(): T = TODO()\nfun <T> Call<T?>.await(): T? = null\n"),
+        ("J.java", "package app;\nimport java.util.concurrent.CountDownLatch;\nclass J {\n  void wait(CountDownLatch latch) throws Exception { latch.await(); }\n}\n"),
+    ]);
+    assert!(got.contains(&(".run()".to_string(), "a_asaferror_2".to_string())), "{got:?}");
+    assert!(!got.iter().any(|(from, _)| from == ".wait()"), "{got:?}");
+}

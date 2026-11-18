@@ -487,6 +487,121 @@ const SWIFT_CORE_METHODS: &[&str] = &[
     "write",
 ];
 
+/// Whether a path segment is something of collections: an element, a method
+/// that keeps the collection or one that gives an element.
+fn is_collection_step(seg: &str) -> bool {
+    seg == crate::refs::ELEMENT
+        || KEEPING_METHODS.contains(&seg)
+        || ELEMENT_ACCESSORS.contains(&seg)
+}
+
+/// Methods of a collection that give a collection of the same elements.
+const KEEPING_METHODS: &[&str] = &[
+    "filter",
+    "filterNot",
+    "filterNotNull",
+    "sorted",
+    "sortedBy",
+    "sortedByDescending",
+    "sortedWith",
+    "sortedDescending",
+    "reversed",
+    "distinct",
+    "distinctBy",
+    "take",
+    "takeWhile",
+    "takeLast",
+    "drop",
+    "dropWhile",
+    "dropLast",
+    "toList",
+    "toMutableList",
+    "toSet",
+    "toMutableSet",
+    "toTypedArray",
+    "asSequence",
+    "asIterable",
+    "asReversed",
+    "onEach",
+    "shuffled",
+    "subList",
+    "slice",
+    "stream",
+    "parallelStream",
+    "collect",
+    "toArray",
+    "iterator",
+    "iter",
+    "into_iter",
+    "iter_mut",
+    "rev",
+    "skip",
+    "step_by",
+    "peekable",
+    "cloned",
+    "copied",
+    "to_vec",
+    "Where",
+    "OrderBy",
+    "OrderByDescending",
+    "ThenBy",
+    "Take",
+    "Skip",
+    "Distinct",
+    "Reverse",
+    "ToList",
+    "ToArray",
+    "AsEnumerable",
+    "AsQueryable",
+    "select",
+    "reject",
+    "sort",
+    "sort_by",
+    "uniq",
+    "compact",
+    "reverse",
+    "take_while",
+    "drop_while",
+    "to_a",
+    "each",
+    "toSorted",
+    "toReversed",
+    "prefix",
+    "suffix",
+    "dropFirst",
+    "limit",
+    "peek",
+    "lazy",
+    "unmodifiable",
+    "asList",
+    "toCollection",
+    "filterIsInstance",
+    "sort_by_key",
+    "dedup",
+    "freeze",
+    "dup",
+    "clone",
+    "copy",
+];
+
+/// Methods of an optional that give what it holds.
+const UNWRAPPERS: &[&str] = &[
+    "get",
+    "unwrap",
+    "expect",
+    "unwrap_or_default",
+    "orElseThrow",
+    "orElse",
+    "orElseGet",
+    "getOrThrow",
+    "as_ref",
+    "as_mut",
+    "cloned",
+    "clone",
+    "await",
+    "Value",
+];
+
 /// Methods of a collection that give one of its elements.
 const ELEMENT_ACCESSORS: &[&str] = &[
     "first",
@@ -520,7 +635,24 @@ const ELEMENT_ACCESSORS: &[&str] = &[
     "removeAt",
     "min",
     "max",
-    "orElseThrow",
+    "find",
+    "find_by",
+    "detect",
+    "Find",
+    "findLast",
+    "minBy",
+    "maxBy",
+    "minByOrNull",
+    "maxByOrNull",
+    "min_by",
+    "max_by",
+    "min_by_key",
+    "max_by_key",
+    "nth",
+    "findFirst",
+    "findAny",
+    "MinBy",
+    "MaxBy",
 ];
 
 /// Words in the name of a generic function that returns something built
@@ -1671,26 +1803,31 @@ impl<'a> Project<'a> {
                 cur = defs[x].parent;
             }
         }
+        // a field, a call's result, or a chain of collection methods on
+        // one (`xs.filter { … }.sortedBy { … }`, `xs.map { it.owner }`)
+        if *self.depth.borrow() > 3 {
+            return None;
+        }
+        *self.depth.borrow_mut() += 1;
         let recv = self.recv.replace(None);
         let calling = self.calling.replace(false);
         let types = self.types_only.replace(false);
-        let called = path.last().is_some_and(|s| s == "()");
-        let found =
-            self.resolve_path(f, d, if called { &path[..path.len() - 1] } else { path }, true);
+        let found = self.resolve_path_inner(f, d, path, true, true);
         *self.types_only.borrow_mut() = types;
         *self.calling.borrow_mut() = calling;
         *self.recv.borrow_mut() = recv;
+        *self.depth.borrow_mut() -= 1;
         match found {
-            Some((Target::Def(p), _)) => {
-                let def = self.def(p);
-                // a call's result, or a field's own type
-                if def.kind.is_callable() != called && !def.kind.is_state() {
-                    return None;
-                }
-                typed(p.0, def.parent, def.elem.as_ref()?)
-            }
+            Some((Target::Def(t), conf)) if self.def(t).kind.is_class_like() => Some((t, conf)),
             _ => None,
         }
+    }
+
+    /// The element type of what definition `p` is declared as or returns.
+    fn elem_type_of(&self, p: DefRef) -> Option<DefRef> {
+        let def = self.def(p);
+        self.type_of_path(p.0, def.parent, def.elem.as_ref()?, true)
+            .filter(|t| self.def(*t).kind.is_class_like())
     }
 
     /// `val x = xs.first()`: an element of the collection `xs`.
@@ -1758,7 +1895,7 @@ impl<'a> Project<'a> {
         let mut out: UsedOn = HashMap::new();
         for r in &self.files[f].refs {
             let (Some(d), [head, member, ..]) = (r.from_def, r.path.as_slice()) else { continue };
-            if member == "()" || matches!(head.as_str(), "self" | "super" | "()") {
+            if member.starts_with(['(', '[']) || matches!(head.as_str(), "self" | "super" | "()") {
                 continue;
             }
             // called there, or only read
@@ -2435,7 +2572,16 @@ impl<'a> Project<'a> {
         path: &[String],
         bases: bool,
     ) -> Option<(Target, Confidence)> {
-        self.resolve_path_inner(f, d, path, bases).or_else(|| {
+        self.resolve_path_inner(f, d, path, bases, false).or_else(|| {
+            // an element (`xs[0].run()`) or a mapping (`xs.map { … }`) the
+            // walk could not type is a receiver it cannot name: what is
+            // called on it is found by a distinctive name alone
+            let marker = |s: &String| s == crate::refs::ELEMENT || s == crate::refs::MANY;
+            if let Some(at) = path.iter().rposition(marker) {
+                let mut unnamed = vec!["()".to_string()];
+                unnamed.extend_from_slice(&path[at + 1..]);
+                return self.resolve_path_inner(f, d, &unnamed, bases, false);
+            }
             // `let request = request.with_agent(a)`: the name before the
             // declaration is one the facts no longer hold (a parameter it
             // shadows); only the method's name says what is called
@@ -2448,20 +2594,43 @@ impl<'a> Project<'a> {
         })
     }
 
+    /// `want_many`: the path is asked what it is a collection of (`elem_of`):
+    /// the answer is the element type, and a path that names one thing is none.
     fn resolve_path_inner(
         &self,
         f: usize,
         d: Option<usize>,
         path: &[String],
         bases: bool,
+        want_many: bool,
     ) -> Option<(Target, Confidence)> {
         let fam = self.family[f]?;
         let (head, rest) = path.split_first()?;
         let mut conf = Confidence::Extracted;
+        // Whether `t` stands for a collection of itself: after a name
+        // declared as one (`xs: List<Foo>`), a call that returns one, a
+        // method that keeps one (`filter`, `sorted`) or `[+]`; until an
+        // element is taken (`first()`, `[]`).
+        let mut many = false;
+        // what comes after position `i` is something of collections, or the
+        // path ends there and a collection is what is asked for
+        let collection_next = |i: usize| match rest.get(i) {
+            Some(s) => is_collection_step(s),
+            None => want_many,
+        };
         // `val builder = builder(x).tag(y)`: inside its own initializer the
         // name is still the outer one
         let own_init = self.own_initializer(f, d, path);
+        // a local or parameter declared as a collection
+        let head_many =
+            (!own_init && collection_next(0)).then(|| self.local_elem(f, d, head)).flatten();
         let mut t = match head.as_str() {
+            _ if head_many.is_some() => {
+                let (elem, c) = head_many?;
+                conf = c;
+                many = true;
+                Target::Def(elem)
+            }
             "self" => {
                 if rest.is_empty() {
                     return None;
@@ -2547,7 +2716,11 @@ impl<'a> Project<'a> {
                     {
                         return self.extension_method(f, &rest[0], on.as_deref());
                     }
-                    return self.unknown_receiver(f, &rest[0], on.as_deref());
+                    // (or the one extension of that name in sight: `{ error
+                    // in error.asAFError() }`)
+                    return self
+                        .unknown_receiver(f, &rest[0], on.as_deref())
+                        .or_else(|| self.extension_method(f, &rest[0], on.as_deref()));
                 }
                 return None;
             }
@@ -2691,7 +2864,15 @@ impl<'a> Project<'a> {
         // a property named bare (implicit `this`), or a module variable, with
         // more after it: on through its type
         if let Target::Def(p) = t {
-            if self.def(p).kind.is_state() && !rest.is_empty() {
+            if !many && self.def(p).kind.is_state() && collection_next(0) {
+                if let Some(elem) = self.elem_type_of(p) {
+                    t = Target::Def(elem);
+                    many = true;
+                }
+            }
+        }
+        if let Target::Def(p) = t {
+            if !many && self.def(p).kind.is_state() && !rest.is_empty() {
                 let typed = self
                     .class_of(p.0, self.def(p).parent)
                     .and_then(|owner| self.field_type(owner, &self.def(p).name.clone(), 3))
@@ -2717,13 +2898,91 @@ impl<'a> Project<'a> {
         }
         // the type the member being walked through was looked up on
         let mut on: Option<DefRef> = None;
+        let mut skip = 0;
+        // an element was just taken and may still be in an optional
+        let mut one = false;
         for (i, seg) in rest.iter().enumerate() {
+            if skip > 0 {
+                skip -= 1;
+                continue;
+            }
+            // `[]`: one of the collection
+            // (of an optional, `xs.find { … }?.let { … }`: what it holds)
+            if seg == crate::refs::ELEMENT {
+                if !many && !one {
+                    return None;
+                }
+                many = false;
+                continue;
+            }
+            // `[+]`: a collection of what the path named so far gives
+            if seg == crate::refs::MANY {
+                let Target::Def(x) = t else { return None };
+                let def = self.def(x);
+                let of = if def.kind.is_class_like() {
+                    Some(x)
+                } else if def.kind.is_callable() {
+                    self.return_type(x).map(|(r, _)| r)
+                } else if def.kind.is_state() {
+                    self.held_type(x)
+                } else {
+                    None
+                };
+                t = Target::Def(of.filter(|_| !many)?);
+                many = true;
+                continue;
+            }
+            if many {
+                // a method of collections: its name says what it gives
+                // (called, or read like a property: Swift `xs.first`); as
+                // the thing called it is the library's method, nothing here
+                if i + 1 == rest.len() && *self.calling.borrow() {
+                    return None;
+                }
+                if ELEMENT_ACCESSORS.contains(&seg.as_str()) {
+                    many = false;
+                    one = true;
+                } else if !KEEPING_METHODS.contains(&seg.as_str()) {
+                    return None;
+                }
+                skip = usize::from(rest.get(i + 1).is_some_and(|s| s == "()"));
+                continue;
+            }
+            // `xs.first().unwrap()`, `xs.stream().findFirst().get()`: the
+            // element out of the optional it came in, unless its type has
+            // a member of that name
+            if std::mem::take(&mut one) && UNWRAPPERS.contains(&seg.as_str()) {
+                if let Target::Def(c) = t {
+                    if self.class_member(c, seg, 4).is_none() {
+                        // (as the thing called, it is the library's)
+                        if i + 1 == rest.len() && *self.calling.borrow() {
+                            return None;
+                        }
+                        one = true;
+                        skip = usize::from(rest.get(i + 1).is_some_and(|s| s == "()"));
+                        continue;
+                    }
+                }
+            }
             if seg == "()" {
                 // the result of a call: constructing a type gives one of it;
                 // anything else returns what the walk cannot know
                 if let Target::Def(c) = t {
                     if self.def(c).kind.is_class_like() {
                         continue;
+                    }
+                    // a function that declares it returns a collection, with
+                    // something of collections after it
+                    // (`flatMap { it.children() }`: each gives a collection,
+                    // and the whole is one of their elements)
+                    let flat = rest.get(i + 1).is_some_and(|s| s == crate::refs::MANY);
+                    if self.def(c).kind.is_callable() && (flat || collection_next(i + 1)) {
+                        if let Some(elem) = self.elem_type_of(c) {
+                            t = Target::Def(elem);
+                            many = true;
+                            skip = usize::from(flat);
+                            continue;
+                        }
                     }
                     // a method that declares its result: `builder().a().b()`
                     if self.def(c).kind.is_callable() {
@@ -2777,9 +3036,30 @@ impl<'a> Project<'a> {
             let through_property = matches!(&found, Some(Target::Def(p))
                 if matches!(self.def(*p).kind, DefKind::Property | DefKind::Constant))
                 && i + 1 < rest.len();
+            // a field declared as a collection, with something of
+            // collections after it
+            if let Some(Target::Def(p)) = &found {
+                let flat = rest.get(i + 1).is_some_and(|s| s == crate::refs::MANY);
+                if self.def(*p).kind.is_state() && (flat || collection_next(i + 1)) {
+                    if let Some(elem) = self.elem_type_of(*p) {
+                        t = Target::Def(elem);
+                        many = true;
+                        skip = usize::from(flat);
+                        continue;
+                    }
+                }
+            }
             if through_property {
                 if let Target::Def(c) = t {
-                    if let Some((ft, cf)) = self.field_type(c, seg, 3) {
+                    // (a class attribute with only an annotation, `chief:
+                    // Chief`, is typed where it is declared)
+                    let declared = || match &found {
+                        Some(Target::Def(p)) => {
+                            self.held_type(*p).map(|t| (t, Confidence::Extracted))
+                        }
+                        _ => None,
+                    };
+                    if let Some((ft, cf)) = self.field_type(c, seg, 3).or_else(declared) {
                         conf = conf.max(cf);
                         t = Target::Def(ft);
                         continue;
@@ -2807,7 +3087,20 @@ impl<'a> Project<'a> {
                 }
             }
         }
+        // a collection is no definition; one thing is no collection
+        if many != want_many {
+            return None;
+        }
         Some((t, conf))
+    }
+
+    /// The element type of a local or parameter declared as a collection
+    /// (or another name for one).
+    fn local_elem(&self, f: usize, d: Option<usize>, name: &str) -> Option<(DefRef, Confidence)> {
+        if !self.is_local_name(f, d, name) {
+            return None;
+        }
+        self.elem_of(f, d, std::slice::from_ref(&name.to_string()))
     }
 
     fn walk(&self, t: Target, rest: &[String], conf: Confidence) -> Option<(Target, Confidence)> {
@@ -2972,13 +3265,18 @@ impl<'a> Project<'a> {
         on: Option<&str>,
     ) -> Option<(Target, Confidence)> {
         let fam = self.family[f];
+        // Java has no extensions: a Kotlin one is a static method there,
+        // never `latch.await()`
+        if self.files[f].lang == Some(crate::lang::Lang::Java) {
+            return None;
+        }
         let here = dir_of(&self.files[f].path);
         let pkg = self.files[f].package.as_deref();
         // Rust: a method of an `impl Trait for` a type the project does not
         // define (`impl RequestExt for http::Request<()>`) extends that type
         let mut pool: Vec<DefRef> =
             self.extensions.get(name).into_iter().flatten().copied().collect();
-        if fam == Some(Family::Rust) {
+        if matches!(fam, Some(Family::Rust | Family::Swift)) {
             pool.extend(self.by_name.get(name).into_iter().flatten().copied().filter(|r| {
                 let d = self.def(*r);
                 d.kind.is_callable() && !d.decl_only && self.extended_type(*r).is_some()
@@ -3013,6 +3311,18 @@ impl<'a> Project<'a> {
         let mine: Vec<DefRef> = seen.iter().copied().filter(|r| r.0 == f).collect();
         match (mine.as_slice(), seen.as_slice()) {
             ([one], _) | (_, [one]) => Some((Target::Def(*one), Confidence::Inferred)),
+            // the overloads of one extension (`asAFError(or:)`,
+            // `asAFError(orFailWith:)`): `pick_overload` says which
+            (_, [first, ..])
+                if fam.is_some_and(Family::overloads)
+                    && seen.iter().all(|r| {
+                        r.0 == first.0
+                            && self.def(*r).parent == self.def(*first).parent
+                            && self.def(*r).receiver == self.def(*first).receiver
+                    }) =>
+            {
+                Some((Target::Def(*first), Confidence::Inferred))
+            }
             // one declaration written once per source set (Kotlin `expect` /
             // `actual`): the one nearest the caller
             (_, [first, ..])
@@ -3033,7 +3343,8 @@ impl<'a> Project<'a> {
     /// The bare name of the type a Rust method is written for, when the
     /// project does not define that type (`http::Request<()>` -> `Request`).
     fn extended_type(&self, r: DefRef) -> Option<String> {
-        if self.family[r.0] != Some(Family::Rust) {
+        // (and a method of a Swift `extension Error { … }`)
+        if !matches!(self.family[r.0], Some(Family::Rust | Family::Swift)) {
             return None;
         }
         let owner = self.def(r).owner.as_deref()?;
