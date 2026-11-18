@@ -302,6 +302,9 @@ pub struct ImportFact {
     pub is_static: bool,
     /// A C `<system>` include, a Ruby `require` (not `require_relative`).
     pub system: bool,
+    /// Rust `pub use`: what it imports, the module passes on.
+    #[serde(default)]
+    pub public: bool,
     #[serde(skip)]
     pub byte: usize,
 }

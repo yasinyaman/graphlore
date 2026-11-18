@@ -1469,6 +1469,25 @@ impl<'a> Project<'a> {
             }
             p.scopes[f].imported.extend(more);
         }
+        // Rust: what a module star-imported (`use crate::prelude::*;`)
+        // passes on with `pub use crate::error::Error;`. Only a star import:
+        // a crate root re-exports most of the crate, and a file that names
+        // one thing out of it does not see the rest
+        let public: Vec<Vec<usize>> = (0..files.len()).map(|g| p.rust_public(g)).collect();
+        for f in 0..files.len() {
+            if p.family[f] != Some(Family::Rust) {
+                continue;
+            }
+            let mut more = Vec::new();
+            for (star, _) in &p.scopes[f].stars {
+                if let Target::Module(fs) = star {
+                    for &g in fs {
+                        more.extend(public[g].iter().copied().filter(|&h| h != f));
+                    }
+                }
+            }
+            p.scopes[f].imported.extend(more);
+        }
         // … and the files a module it imports passes on (`module.exports =
         // require('./lib/app')`, `exports.response = res`, `export * from`):
         // a package's entry stands for the files it is made of
@@ -1495,6 +1514,34 @@ impl<'a> Project<'a> {
             }
         }
         p
+    }
+
+    /// The files a Rust module's `pub use` names are in.
+    fn rust_public(&self, g: usize) -> Vec<usize> {
+        let mut out = Vec::new();
+        let s = &self.scopes[g];
+        for (i, imp) in self.files[g].imports.iter().enumerate() {
+            if !imp.public {
+                continue;
+            }
+            match s.modules.get(i) {
+                Some(ModRes::Target(Target::Module(fs))) => out.extend(fs.iter().copied()),
+                Some(ModRes::Target(Target::Def((h, _)))) => out.push(*h),
+                _ => {}
+            }
+            for (name, alias) in &imp.names {
+                let local = alias.as_deref().unwrap_or(name);
+                if let Some((b, _)) = s.bindings.get(local) {
+                    if let Some(Target::Def((h, _))) = self.eval(b, 2) {
+                        out.push(h);
+                    }
+                }
+            }
+        }
+        out.retain(|&h| h != g);
+        out.sort_unstable();
+        out.dedup();
+        out
     }
 
     /// The files module `g` passes on to whoever imports it: the ones it
@@ -1666,6 +1713,12 @@ impl<'a> Project<'a> {
                     (self.def(owner).name == path[0]).then_some((owner, conf))
                 } else if k == DefKind::Constructor {
                     self.class_of(r.0, Some(r.1)).map(|t| (t, conf))
+                } else if k == DefKind::EnumMember && !*self.types_only.borrow() {
+                    // `Path.method(.get)`: a case makes a value of its enum
+                    def.parent
+                        .map(|p| (r.0, p))
+                        .filter(|e| self.def(*e).kind.is_class_like())
+                        .map(|e| (e, conf))
                 } else if k.is_state() && !*self.types_only.borrow() {
                     // a value that is a field or a variable (`guard let q =
                     // cat`): the type that holds, as surely as it is written
@@ -1867,6 +1920,9 @@ impl<'a> Project<'a> {
                         None => Some(0),
                     };
                 };
+                // (a parameter whose written type the project defines is that
+                // type, whatever its name: an `enum Type` is no `Class`)
+                let prim = prim.filter(|_| self.param_type(c, ty).is_none());
                 match prim {
                     Some(Prim::Any) => Some(0),
                     // an object of the project is no string, number or flag
@@ -3328,6 +3384,20 @@ impl<'a> Project<'a> {
                 unnamed.extend_from_slice(&path[at + 1..]);
                 return self.resolve_path_inner(f, d, &unnamed, bases, false);
             }
+            // Laravel `auth()->user()`: the model the project authenticates
+            // with, the one class that extends `Authenticatable`
+            if self.family[f] == Some(Family::Php)
+                && path.len() >= 5
+                && path[0] == "auth"
+                && path[1] == "()"
+                && path[2] == "user"
+                && path[3] == "()"
+                && self.resolve_name(f, d, "auth").is_none_or(|t| matches!(t, Target::Ext(..)))
+            {
+                if let Some(model) = self.authenticatable_model() {
+                    return self.walk(Target::Def(model), &path[4..], Confidence::Inferred);
+                }
+            }
             // C# top-level statements (`var builder = …; builder.Services.
             // AddJwt()`): a variable that names nothing in sight, called with
             // the name of an extension the file can see. (A capital head is a
@@ -3536,7 +3606,7 @@ impl<'a> Project<'a> {
                         .unknown_receiver(f, &rest[0], on.as_deref())
                         .or_else(|| self.extension_method(f, &rest[0], on.as_deref()));
                 }
-                return None;
+                return self.extension_property_hop(f, rest, bases, conf);
             }
             // a local assigned something the walk cannot type (`let pool =
             // self.pool.lock().unwrap()`) still hides every outer name of its
@@ -3566,7 +3636,7 @@ impl<'a> Project<'a> {
                         .filter(|_| rest.len() == 1);
                     return self.unknown_receiver(f, rest.last()?, on.as_deref());
                 }
-                return None;
+                return self.extension_property_hop(f, rest, bases, conf);
             }
             _ => match (!(own_init
                 || rest.is_empty()
@@ -4288,6 +4358,21 @@ impl<'a> Project<'a> {
                 None => {
                     // `self.repo.find()`: through the field's type
                     let Target::Def(c) = t else { return None };
+                    // Lombok: `getTags()` / `setTags(…)` / `isActive()` of a
+                    // class annotated `@Data`, `@Getter`, `@Setter` or `@Value`
+                    // is the field it reads or writes
+                    if self.def(c).kind.is_class_like() && !bases {
+                        if let Some(field) = self.lombok_field(c, seg) {
+                            if i + 1 == rest.len() {
+                                return Some((Target::Def(field), conf));
+                            }
+                            if rest[i + 1] == "()" {
+                                t = Target::Def(self.held_type(field)?);
+                                skip = 1;
+                                continue;
+                            }
+                        }
+                    }
                     // the last name is no member of the type: an extension
                     // written for it (`typeSpec.trimmedToString()`)
                     if self.def(c).kind.is_class_like() && i + 1 == rest.len() && !bases {
@@ -4671,50 +4756,92 @@ impl<'a> Project<'a> {
     ) -> Option<(Target, Confidence)> {
         use crate::facts::Implicit;
         let name = r.path.get(1)?;
-        let (ty, conf) = match place {
-            Implicit::Arg { call, index, label } => {
-                let (callee, conf) = self.call_target(f, *call as usize)?;
-                let plist = &self.def(callee).plist;
-                let param = match label {
-                    Some(l) => plist.iter().find(|p| p.name == *l)?,
-                    None => {
-                        let unlabeled = |p: &&crate::facts::ParamFact| p.name == "_";
-                        plist.get(usize::from(*index)).filter(unlabeled).or_else(|| {
-                            let mut all = plist.iter().filter(unlabeled);
-                            match (all.next(), all.next()) {
-                                (Some(one), None) => Some(one),
-                                _ => None,
-                            }
-                        })?
-                    }
-                };
-                (self.param_type(callee, &param.ty)?, conf)
-            }
+        // the type the place asks for, as a project type, or as the name of a
+        // library type it writes
+        let (ty, written, conf): (Option<DefRef>, Option<String>, Confidence) = match place {
+            Implicit::Arg { call, index, label } => match self.call_target(f, *call as usize) {
+                Some((callee, conf)) => {
+                    let plist = &self.def(callee).plist;
+                    let param = match label {
+                        Some(l) => plist.iter().find(|p| p.name == *l)?,
+                        None => {
+                            let unlabeled = |p: &&crate::facts::ParamFact| p.name == "_";
+                            plist.get(usize::from(*index)).filter(unlabeled).or_else(|| {
+                                let mut all = plist.iter().filter(unlabeled);
+                                match (all.next(), all.next()) {
+                                    (Some(one), None) => Some(one),
+                                    _ => None,
+                                }
+                            })?
+                        }
+                    };
+                    (self.param_type(callee, &param.ty), param.ty.last().cloned(), conf)
+                }
+                None => {
+                    // `Endpoint(path: .delay(…))`, a struct that declares no
+                    // `init`: its memberwise one takes the stored property
+                    // the label names
+                    let label = label.as_ref()?;
+                    let r2 = &self.files[f].refs[*call as usize];
+                    let saved = self.suspend();
+                    let t = self.type_of_path(f, r2.from_def, &r2.path, false);
+                    self.restore(saved);
+                    let t = t.filter(|t| {
+                        self.def(*t).kind.is_class_like() && self.constructors(*t).is_empty()
+                    })?;
+                    let field = self
+                        .members(t, label)
+                        .into_iter()
+                        .find(|m| self.def(*m).kind.is_state())?;
+                    (self.held_type(field), self.written_field_type(field), Confidence::Extracted)
+                }
+            },
             Implicit::Typed(path) => {
-                let t = self.type_of_path(f, d, path, true)?;
-                (t, Confidence::Extracted)
+                (self.type_of_path(f, d, path, true), path.last().cloned(), Confidence::Extracted)
             }
             Implicit::Return => {
                 let defs = &self.files[f].defs;
                 let mut cur = d;
-                let fun = loop {
+                loop {
                     let x = cur?;
+                    // `static let x: HTTPHeader = { … return .acceptEncoding(…) }()`:
+                    // the closure that initializes a property returns its type
+                    if defs[x].kind.is_state() {
+                        let p = (f, x);
+                        break (
+                            self.held_type(p),
+                            self.written_field_type(p),
+                            Confidence::Extracted,
+                        );
+                    }
                     if defs[x].kind.is_callable() {
-                        break x;
+                        let (t, declared) = self.return_type((f, x))?;
+                        if !declared || defs[x].sealed {
+                            return None;
+                        }
+                        break (Some(t), None, Confidence::Extracted);
                     }
                     cur = defs[x].parent;
-                };
-                let (t, declared) = self.return_type((f, fun))?;
-                if !declared || defs[fun].sealed {
-                    return None;
                 }
-                (t, Confidence::Extracted)
             }
         };
-        if !self.def(ty).kind.is_class_like() {
-            return None;
+        match ty.filter(|t| self.def(*t).kind.is_class_like()) {
+            Some(ty) => self.class_member(ty, name, 4).map(|m| (Target::Def(m), conf)),
+            // a library type: a static member an extension of it adds
+            // (`.streamCompletionQueue(forRequestID:)` for a `DispatchQueue`)
+            None => {
+                let written = written?;
+                let bare = written.split('<').next()?.trim_end_matches('?').to_string();
+                let mut cands = self.by_name.get(name.as_str())?.iter().copied().filter(|c| {
+                    self.family[c.0] == Some(Family::Swift)
+                        && self.extended_type(*c).is_some_and(|t| t == bare)
+                });
+                match (cands.next(), cands.next()) {
+                    (Some(one), None) => Some((Target::Def(one), conf)),
+                    _ => None,
+                }
+            }
         }
-        self.class_member(ty, name, 4).map(|m| (Target::Def(m), conf))
     }
 
     /// Why a call has no edge, when its name is the one callable of that name
@@ -5153,6 +5280,102 @@ impl<'a> Project<'a> {
         })
     }
 
+    /// The one PHP class whose written base is `Authenticatable`
+    /// (`Illuminate\Foundation\Auth\User as Authenticatable`): what
+    /// Laravel's `auth()->user()` gives.
+    fn authenticatable_model(&self) -> Option<DefRef> {
+        let mut found = None;
+        for (fi, file) in self.files.iter().enumerate() {
+            if self.family[fi] != Some(Family::Php) {
+                continue;
+            }
+            for r in &file.refs {
+                if matches!(r.kind, RefKind::Inherits | RefKind::Base)
+                    && r.path.last().is_some_and(|n| n == "Authenticatable")
+                {
+                    let Some(d) = r.from_def else { continue };
+                    if found.is_some_and(|x| x != (fi, d)) {
+                        return None;
+                    }
+                    found = Some((fi, d));
+                }
+            }
+        }
+        found.filter(|c| self.def(*c).kind.is_class_like())
+    }
+
+    /// The field a Lombok accessor reads or writes: `getTags` / `isActive` /
+    /// `setTags` of a type (or a base) annotated `@Data`, `@Value`, `@Getter`
+    /// or `@Setter`, or whose field of that name is.
+    fn lombok_field(&self, c: DefRef, name: &str) -> Option<DefRef> {
+        if self.files[c.0].lang != Some(crate::lang::Lang::Java) {
+            return None;
+        }
+        let (prop, setter) = if let Some(p) = name.strip_prefix("get") {
+            (p, false)
+        } else if let Some(p) = name.strip_prefix("is") {
+            (p, false)
+        } else {
+            (name.strip_prefix("set")?, true)
+        };
+        let mut chars = prop.chars();
+        let first = chars.next().filter(|c| c.is_uppercase())?;
+        let field: String = first.to_lowercase().chain(chars).collect();
+        let marked = |d: DefRef, words: &[&str]| {
+            self.files[d.0].refs.iter().any(|r| {
+                r.from_def == Some(d.1)
+                    && r.kind == RefKind::Decorator
+                    && r.path.last().is_some_and(|n| words.contains(&n.as_str()))
+            })
+        };
+        let words: &[&str] =
+            if setter { &["Data", "Setter"] } else { &["Data", "Value", "Getter"] };
+        let mut types = vec![c];
+        types.extend(self.bases(c));
+        types.into_iter().find_map(|t| {
+            let f = self.members(t, &field).into_iter().find(|m| self.def(*m).kind.is_state())?;
+            (marked(t, words) || marked(f, words)).then_some(f)
+        })
+    }
+
+    /// Swift `request.headers.update(…)` on a local of a library type (or
+    /// of none the walk knows): `headers` is a property extensions add to
+    /// library types; when every such property of the name holds the same
+    /// project type, the walk goes on through it (`INFERRED`).
+    fn extension_property_hop(
+        &self,
+        f: usize,
+        rest: &[String],
+        bases: bool,
+        conf: Confidence,
+    ) -> Option<(Target, Confidence)> {
+        if self.family[f] != Some(Family::Swift) || rest.len() < 2 || bases {
+            return None;
+        }
+        let name = rest.first().filter(|s| !s.starts_with('[') && *s != "()")?;
+        let mut held: Option<DefRef> = None;
+        for c in self.by_name.get(name.as_str())?.iter().copied() {
+            // (a property an extension of a library type adds is the
+            // extension's child; a method carries the type as its owner)
+            let in_extension = self.def(c).parent.is_some_and(|p| {
+                let e = self.def((c.0, p));
+                e.kind == DefKind::Extension && self.type_named(c.0, &e.name).is_none()
+            });
+            if self.family[c.0] != Some(Family::Swift)
+                || !self.def(c).kind.is_state()
+                || !(in_extension || self.extended_type(c).is_some())
+            {
+                continue;
+            }
+            let t = self.held_type(c)?;
+            if held.is_some_and(|h| h != t) {
+                return None;
+            }
+            held = Some(t);
+        }
+        self.walk(Target::Def(held?), &rest[1..], conf.max(Confidence::Inferred))
+    }
+
     /// An extension named `name` written for type `c`, or for one of its
     /// bases (`client.BuildUri(r)` on a `RestClient`, written for
     /// `IRestClient`): that is what the language calls. Else what
@@ -5409,7 +5632,15 @@ impl<'a> Project<'a> {
             return None;
         }
         let fam = self.family[f];
-        if fam == Some(Family::Ecma) && ECMA_CORE_METHODS.contains(&name) {
+        // (nor a name the language's own types answer to: Node's `once`,
+        // Rust's `Mutex::lock`, C++'s `c_str`)
+        let core: &[&str] = match fam {
+            Some(Family::Ecma) => ECMA_CORE_METHODS,
+            Some(Family::Rust) => RUST_CORE_METHODS,
+            Some(Family::C) => CPP_CORE_METHODS,
+            _ => &[],
+        };
+        if core.contains(&name) {
             return None;
         }
         let cands: Vec<DefRef> = self
@@ -5754,15 +5985,29 @@ pub fn resolve(
                         let tk = p.def(t).kind;
                         let rel = match r.kind {
                             RefKind::Call | RefKind::New => {
-                                // a type alias called: a conversion (Go
-                                // `HandlerFunc(f)`)
-                                if !(tk.is_callable()
+                                // a Lombok accessor called: the field it reads
+                                // or writes
+                                if tk.is_state() && r.kind == RefKind::Call {
+                                    let called = r.path.last().map(String::as_str).unwrap_or("");
+                                    if called != p.def(t).name {
+                                        if called.starts_with("set") {
+                                            "writes"
+                                        } else {
+                                            "reads"
+                                        }
+                                    } else {
+                                        continue;
+                                    }
+                                } else if !(tk.is_callable()
                                     || tk.is_class_like()
                                     || tk == DefKind::TypeAlias)
                                 {
+                                    // a type alias called: a conversion (Go
+                                    // `HandlerFunc(f)`)
                                     continue;
+                                } else {
+                                    "calls"
                                 }
-                                "calls"
                             }
                             RefKind::Inherits => "inherits",
                             RefKind::Implements => "implements",

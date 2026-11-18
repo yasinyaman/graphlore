@@ -166,6 +166,23 @@ What the lookup takes from each language's own rules:
   to what it wraps: that the project has one `evaluate` says the caller is
   it, not the callee. A typed receiver, `self` and a tie between overloads
   are not guesses and keep their edge.
+- **Small cases the source states.** A Swift implicit member is typed by
+  more places: the closure that initializes a property (its declared
+  type), the label of a memberwise initializer (the stored property), a
+  library type's static member that a project extension adds, and a
+  property extensions add to library types when every such property of the
+  name holds one project type (`request.headers` on a `URLRequest`,
+  `INFERRED`). An enum case or entry is a value of its enum (`Path.status(…)`,
+  `KModifier.EXTERNAL`). Java Lombok: `getX()` / `isX()` / `setX(…)` on a
+  type (or a base) annotated `@Data`, `@Value`, `@Getter` or `@Setter`, or
+  whose field is, reads or writes the field `x`. Laravel's `auth()->user()`
+  is the one PHP class that extends `Authenticatable` (`INFERRED`). A Rust
+  pattern binding the walk cannot type (`Err(e)`) is an untyped local, and
+  a module star-imported passes on what its `pub use` names (`use
+  crate::prelude::*`). A parameter type the project defines is that type
+  even when its name is a language one's (`enum Type` is no `Class`). And a
+  guess by name never takes a name Rust's or C++'s own types answer to
+  (`lock`, `clone`, `c_str`), as for JavaScript's.
 - **What the source writes at a declaration's value.** A cast is the type
   it writes, as surely as a declaration (`var a = (Box)o`, `o as Box`,
   TypeScript `<Cup>o`, Kotlin `o as? Jar`). A C# primary constructor's
@@ -750,7 +767,7 @@ file pairs). The native graph has definitions graphify folds into the one
 around them (a function nested in a method, the setter beside a getter of the
 same name); an edge from one of those is compared as an edge from the paired
 definition it belongs to, as graphify records it. On the 31 repositories of the
-[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.25,
+[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.27,
 measured 2026-11-18), as native / graphify edges and the share of graphify's
 that the native graph has too:
 
@@ -765,16 +782,16 @@ that the native graph has too:
 | Kotlin | 99.4% | 368 / 333 (95%) | 4,786 / 2,108 (71%) | 96 / 56 (93%) | 1,079 / 673 (91%) |
 | Scala | 100% | 2 / 0 | 46 / 20 (45%) | 21 / 22 (95%) | 75 / 32 (100%) |
 | C# | 92.7% | 347 / 280 (30%)³ | 2,860 / 2,450 (96%) | 87 / 86 (98%) | 1,248 / 806 (99%) |
-| Rust | 93.3% | 314 / 370 (75%) | 2,011 / 853 (86%) | 53 / 41 (93%) | 1,245 / 895 (81%) |
-| Swift | 95.9% | 166 / 166 (–)³ | 5,466 / 2,141 (83%) | 190 / 164 (100%) | 1,091 / 580 (62%) |
+| Rust | 93.3% | 314 / 370 (75%) | 2,016 / 853 (86%) | 53 / 41 (93%) | 1,245 / 895 (81%) |
+| Swift | 95.9% | 166 / 166 (–)³ | 5,494 / 2,141 (83%) | 190 / 164 (100%) | 1,091 / 580 (62%) |
 | C | 100% | 89 / 77 (99%) | 864 / 791 (100%) | – | 253 / 130 (97%) |
-| C++ | 97.8% | 215 / 228 (93%) | 653 / 281 (33%)⁴ | 30 / 5 (100%) | 326 / 218 (88%) |
-| C/C++ headers | 90.6% | 164 / 172 (95%) | 359 / 348 (85%) | 11 / 12 (92%) | 515 / 289 (87%) |
+| C++ | 97.8% | 215 / 228 (93%) | 645 / 281 (33%)⁴ | 30 / 5 (100%) | 326 / 218 (88%) |
+| C/C++ headers | 90.6% | 164 / 172 (95%) | 358 / 348 (85%) | 11 / 12 (92%) | 515 / 289 (87%) |
 | Ruby | 99.7% | 42 / 0 | 442 / 375 (69%) | 46 / 15 (93%) | 28 / 0 |
-| PHP | 80.6% | 429 / 505 (84%) | 8,870 / 6,140 (90%) | 65 / 60 (98%) | 648 / 213 (95%) |
-| **All** | **94.4%** | **4,961 / 5,565 (75%)** | **44,349 / 27,832 (85%)** | **1,132 / 726 (97%)** | **12,401 / 6,775 (89%)** |
+| PHP | 80.6% | 429 / 505 (84%) | 8,873 / 6,140 (90%) | 65 / 60 (98%) | 648 / 213 (95%) |
+| **All** | **94.4%** | **4,961 / 5,565 (75%)** | **44,375 / 27,832 (85%)** | **1,132 / 726 (97%)** | **12,401 / 6,775 (89%)** |
 
-Of the native calls, 12,595 (28%) are `INFERRED`, against 47% of graphify's.
+Of the native calls, 12,609 (28%) are `INFERRED`, against 47% of graphify's.
 That share was 20% before engine 0.5.5: a call of an overloaded name that the
 arguments do not decide used to be an `EXTRACTED` edge to the first overload,
 and is now an `INFERRED` edge to each overload that fits (999 calls, with
@@ -817,6 +834,34 @@ two edges of got are gone that named a function defined in another loop
 for a destructured loop variable of the same name. The maps of these
 repositories that hold project types are mostly looked up by key once, or
 not walked at all.
+Engine 0.5.27 (the small cases the diagnostics left: Swift's implicit
+members, Lombok, Laravel's user, Rust's `Err(e)`, a type named like a
+primitive) adds 264 calls (183 `EXTRACTED`) and 302 reads and writes, and
+takes 252 calls away, 227 of them kotlinpoet's moving to another overload. alamofire gets 30 calls of implicit members
+whose place gave no type: a `return .userAgent(…)` in the closure that
+initializes `static let defaultUserAgent: HTTPHeader`, a static member an
+extension of a library type adds (`.streamCompletionQueue(forRequestID:)`
+for a `DispatchQueue` parameter), the label of a struct's memberwise
+initializer (`Endpoint(path: .delay(…))`, the stored `var path =
+Path.method(.get)`) and `request.headers.update(.contentType(…))` through
+the `headers` property extensions add to `URLRequest` and
+`HTTPURLResponse`. quarkus-realworld gets 301 reads and writes from Lombok
+accessors (`filter.getTags()` reads the field `tags` of a `@Data` class);
+laravel-realworld 3 calls through `auth()->user()`, the one class that
+extends `Authenticatable`; actix-realworld 18 calls of `e.error_response()`
+in `Err(e)` arms, `INFERRED`: `e` is a local of no written type, and
+`Error` is in sight through `use crate::prelude::*` and the prelude's `pub
+use crate::error::Error`. kotlinpoet's 171 `EXTRACTED` calls that moved go
+to another overload of the same name: `addModifiers(KModifier.EXTERNAL)`
+is `addModifiers(vararg KModifier)` now that an enum entry is a value of
+its enum, not the overload taking an `Iterable`. Of the 252 gone, 22 were
+`INFERRED` guesses by a name Rust's or C++'s own types answer to
+(`state.lock()` on a `Mutex`, `header_string.c_str()` on a `std::string`),
+227 kotlinpoet's moved overloads (171 `EXTRACTED`, 56 `INFERRED`), and 3
+restsharp's ties now decided; one right guess goes with
+the 22 (`key.kind()` on a `PrivateKey` taken out of a tuple). retrofit's
+`new PhoneNumber("867-5309", Type.MOBILE)` keeps its constructor: its
+`enum Type` is the project's, not a language `Class`.
 Engine 0.5.25 (from what the 0.5.24 diagnostics left: C# primary
 constructors, a cast, an object a function returns, a Python `@property`,
 C#'s top-level programs) adds 83 calls (60 `EXTRACTED`) and 157 reads,
@@ -1077,7 +1122,7 @@ builds take 13.3 s for the 31 repositories against graphify's 81.3 s
 faster of two clean builds each): 8.7 times faster at the median, from 2.1
 (todoapi, whose bundled JavaScript the native engine reads in full) to 17.2
 times; retrofit 2.9 s against 13.1 s, guzzle 0.9 s / 6.1 s, alamofire 1.2 s /
-5.4 s, got 0.9 s / 4.7 s (engine 0.5.1; with all that 0.5.25 resolves the same
+5.4 s, got 0.9 s / 4.7 s (engine 0.5.1; with all that 0.5.27 resolves the same
 31 builds take 16.3 to 18.9 s through Python, 15.8 to 18.1 s in the engine alone, retrofit 3.7 to 4.1 s). An update after a one-file change takes a third of
 a build ([above](#incremental-updates)).
 
@@ -1125,7 +1170,7 @@ implicit members since 0.5.17: 39 whose place gives no type are rows now
 closure parameters and variables of express's tests. What is left at file
 level there is `app.use` and `app.set` (842 rows of express), names too
 short and too common to guess by. Engine 0.5.19 takes 123 more off (6,362;
-C# 349 from 470; 6,360 with 0.5.20, 6,348 with 0.5.21, 6,285 with 0.5.22, 6,237 with 0.5.25). Most of what C# has left is not the project's: `Assert.
+C# 349 from 470; 6,360 with 0.5.20, 6,348 with 0.5.21, 6,285 with 0.5.22, 6,237 with 0.5.25, 6,206 with 0.5.27). Most of what C# has left is not the project's: `Assert.
 NotNull` beside its own `Ensure.NotNull` (77), `WireMockServer.Start` (23).
 
 By then most rows were of that kind: a library's name the project happens
@@ -1149,7 +1194,8 @@ library's type or global (`Date.now()`, `Object.freeze(…)`,
 standard types (`lock`, `clone`, `kind`, `c_str`): of the 6,237 rows of
 0.5.25, 1,610 are left unmarked — PHP 396, TypeScript 315, Ruby 298, Rust
 119, Swift 93, C# 79, Kotlin 67, JavaScript 55, C++ 50, Java 44, Go 34, C
-33, Python 17, TSX 6, Scala 4.) The 2,114 by language: PHP 445, TypeScript 405, Ruby 304, C# 196, Rust 192,
+33, Python 17, TSX 6, Scala 4. 0.5.27 leaves 1,545: Swift 61 from 93, Java
+32 from 44, Rust 101 from 119.) The 2,114 by language: PHP 445, TypeScript 405, Ruby 304, C# 196, Rust 192,
 C++ 169, Swift 94, Kotlin 79, JavaScript 71, Java 49, Go 34, C 33, Python
 20, TSX 19, Scala 4. They are still an upper bound: the marks are
 conservative, and PHP's and TypeScript's rows are mostly PSR-7 and Node

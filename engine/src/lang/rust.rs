@@ -184,7 +184,8 @@ impl LanguageModule for Rust {
                 // inside an inline `mod tests { … }`, `super` is this file's own
                 // module, not its parent's file
                 let inline = inline_mods(n, src);
-                let mut out = Vec::new();
+                let public = kids(n).iter().any(|c| c.kind() == "visibility_modifier");
+                let mut out: Vec<ImportFact> = Vec::new();
                 for (path, alias, wildcard) in leaves {
                     let Some(path) = out_of_inline(path, &inline, wildcard) else { continue };
                     if wildcard {
@@ -201,6 +202,9 @@ impl LanguageModule for Rust {
                         f.names.push((last.clone(), alias));
                         out.push(f);
                     }
+                }
+                for f in &mut out {
+                    f.public = public;
                 }
                 Some(out)
             }

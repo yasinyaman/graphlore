@@ -205,6 +205,7 @@ pub(super) fn compose(p: &Project, files: &[FileFacts]) -> Vec<RouteNode> {
                         runs: crate::facts::Runs::ModuleLevel,
                         is_static: false,
                         system: false,
+                        public: false,
                         byte: 0,
                     };
                     let fam = p.family[f].unwrap_or(Family::Ecma);

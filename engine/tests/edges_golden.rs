@@ -1684,3 +1684,69 @@ fn a_cast_says_what_a_local_is() {
         );
     }
 }
+
+#[test]
+fn lombok_accessors_read_and_write_their_fields() {
+    // `@Data` / `@Getter` / `@Setter` write accessors the source does not:
+    // `getTags()` reads the field `tags`, `setTags(…)` writes it; a class
+    // without the annotation has no such accessor
+    let got = edges("lombok", &[
+        ("Filter.java", "import lombok.Data;\n\n@Data\nclass Filter {\n    private String tags;\n    private boolean active;\n}\n"),
+        ("Plain.java", "class Plain {\n    private String name;\n}\n"),
+        ("Use.java", "class Use {\n    void run(Filter filter, Plain plain) {\n        filter.getTags();\n        filter.isActive();\n        filter.setTags(\"a\");\n        plain.getName();\n    }\n}\n"),
+    ]);
+    has(
+        &got,
+        &[(".run()", "reads", "tags"), (".run()", "reads", "active"), (".run()", "writes", "tags")],
+    );
+    assert!(!got.iter().any(|(_, r, t)| r == "reads" && t == "name"), "{got:#?}");
+}
+
+#[test]
+fn laravels_authenticated_user_is_the_authenticatable_model() {
+    let got = calls_conf("laravelauth", &[
+        ("app/Models/User.php", "<?php\nnamespace App\\Models;\n\nuse Illuminate\\Foundation\\Auth\\User as Authenticatable;\n\nclass User extends Authenticatable\n{\n    public function articles() { return 1; }\n}\n"),
+        ("app/Http/Controllers/ArticleController.php", "<?php\nnamespace App\\Http\\Controllers;\n\nclass ArticleController\n{\n    public function store()\n    {\n        return auth()->user()->articles();\n    }\n}\n"),
+    ]);
+    assert!(
+        got.iter().any(|(from, to, conf)| from == ".store()"
+            && to == "app_models_user_user_articles"
+            && conf == "INFERRED"),
+        "{got:#?}"
+    );
+}
+
+#[test]
+fn a_rust_error_binding_and_a_name_a_prelude_passes_on() {
+    // `Err(e)` binds a local the source gives no type: a distinctive method
+    // name says what it is, and the file that defines it is in sight through
+    // the `pub use` of a prelude the caller star-imports
+    let got = calls_conf("rusterr", &[
+        ("Cargo.toml", "[package]\nname = \"app\"\nversion = \"0.1.0\"\n"),
+        ("src/lib.rs", "pub mod error;\npub mod prelude;\npub mod app;\n"),
+        ("src/error.rs", "pub struct Error;\n\nimpl Error {\n    pub fn error_response(&self) -> u16 { 500 }\n}\n"),
+        ("src/prelude.rs", "pub use crate::error::Error;\n"),
+        ("src/app.rs", "use crate::prelude::*;\n\npub fn handle(res: Result<u16, Error>) -> u16 {\n    match res {\n        Ok(v) => v,\n        Err(e) => e.error_response(),\n    }\n}\n"),
+    ]);
+    assert!(
+        got.iter()
+            .any(|(from, to, _)| from == "handle()" && to == "src_error_error_error_response"),
+        "{got:#?}"
+    );
+}
+
+#[test]
+fn swift_implicit_members_of_closure_initializers_library_types_and_memberwise_inits() {
+    let got = calls_conf("swiftplaces", &[(
+        "a.swift",
+        "import Foundation\n\nstruct HTTPHeader {\n    static func contentType(_ value: String) -> HTTPHeader { HTTPHeader() }\n    static func userAgent(_ value: String) -> HTTPHeader { HTTPHeader() }\n    static let defaultAgent: HTTPHeader = {\n        return .userAgent(\"x\")\n    }()\n}\n\nstruct HTTPHeaders {\n    mutating func update(_ header: HTTPHeader) {}\n}\n\nextension URLRequest {\n    var headers: HTTPHeaders {\n        get { HTTPHeaders() }\n        set {}\n    }\n}\n\nextension DispatchQueue {\n    static func completionQueue(for id: Int) -> DispatchQueue { .main }\n}\n\nstruct Endpoint {\n    struct Path {\n        static func status(_ code: Int) -> Path { Path() }\n    }\n\n    var path = Path.status(200)\n}\n\nfunc respond(on queue: DispatchQueue) {}\n\nfunc encode(into request: URLRequest) {\n    var request = request\n    request.headers.update(.contentType(\"json\"))\n    respond(on: .completionQueue(for: 1))\n    _ = Endpoint(path: .status(404))\n}\n",
+    )]);
+    for target in [
+        "a_httpheader_useragent",
+        "a_httpheader_contenttype",
+        "a_completionqueue",
+        "a_endpoint_path_status",
+    ] {
+        assert!(got.iter().any(|(_, to, _)| to == target), "{target}: {got:#?}");
+    }
+}
