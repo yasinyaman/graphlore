@@ -13,16 +13,39 @@ use crate::refs::{import, path_of};
 
 pub struct CSharp;
 
+/// Whether a node is a C# 14 extension block, as the grammar reads it: a
+/// constructor named `extension` in a class of another name.
+pub(crate) fn extension_block(n: Node, src: &[u8]) -> bool {
+    n.kind() == "constructor_declaration"
+        && n.child_by_field_name("name").is_some_and(|x| text(x, src) == "extension")
+}
+
 impl LanguageModule for CSharp {
     /// `static bool IsEmpty(this string? value)`: the type of the `this`
     /// parameter, bare (`string`, `IEnumerable`).
     fn receiver_of(&self, node: Node, src: &[u8]) -> Option<String> {
-        if node.kind() != "method_declaration" {
-            return None;
-        }
-        let params = node.child_by_field_name("parameters")?;
+        // C# 14 `extension(IClient client) { public Uri BuildUri(…) { … } }`:
+        // the grammar reads the block as a constructor named `extension` and
+        // its members as local functions; each is written for the block's
+        // parameter (a `static` one is the type's, not an instance's)
+        let block = (node.kind() == "local_function_statement")
+            .then(|| node.parent().and_then(|b| b.parent()))
+            .flatten()
+            .filter(|c| extension_block(*c, src));
+        let (params, this) = match block {
+            Some(c) => {
+                if kids(node).iter().any(|m| m.kind() == "modifier" && text(*m, src) == "static") {
+                    return None;
+                }
+                (c.child_by_field_name("parameters")?, true)
+            }
+            None if node.kind() == "method_declaration" => {
+                (node.child_by_field_name("parameters")?, false)
+            }
+            None => return None,
+        };
         let first = kids(params).into_iter().find(|p| p.kind() == "parameter")?;
-        let this = all_kids(first).iter().any(|c| text(*c, src) == "this");
+        let this = this || all_kids(first).iter().any(|c| text(*c, src) == "this");
         let ty = first.child_by_field_name("type").filter(|_| this)?;
         let t = text(ty, src);
         let bare = t.split('<').next().unwrap_or("").trim_end_matches(['?', ']', '[']);

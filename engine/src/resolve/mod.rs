@@ -451,6 +451,46 @@ const RUBY_CORE_METHODS: &[&str] = &[
     "tap",
 ];
 
+/// Instance methods of .NET's own strings, collections and types: on a
+/// receiver that is not a project type they are the library's before an
+/// extension of the same name (`List<T>.ForEach`, `string.Split`).
+const CSHARP_CORE_METHODS: &[&str] = &[
+    "Split",
+    "ForEach",
+    "GetProperties",
+    "Contains",
+    "Find",
+    "FindAll",
+    "Add",
+    "AddRange",
+    "Remove",
+    "Clear",
+    "IndexOf",
+    "Insert",
+    "CopyTo",
+    "ToString",
+    "Equals",
+    "GetHashCode",
+    "GetType",
+    "Trim",
+    "Replace",
+    "Substring",
+    "StartsWith",
+    "EndsWith",
+    "ToLower",
+    "ToUpper",
+    "CompareTo",
+    "Join",
+    "Format",
+    "GetEnumerator",
+    "Dispose",
+    "Close",
+    "Read",
+    "Write",
+    "GetBytes",
+    "GetString",
+];
+
 /// Names JavaScript's own arrays, strings, promises and maps answer to, and
 /// Node's and the DOM's event emitters and streams: on a receiver the walk
 /// cannot type they say nothing about a project method of the same name
@@ -1559,6 +1599,15 @@ impl<'a> Project<'a> {
         }
     }
 
+    /// Whether `c` is a member of a C# 14 `extension(T x) { … }` block: the
+    /// grammar reads the block as a constructor named `extension`.
+    fn in_extension_block(&self, c: DefRef) -> bool {
+        self.def(c).parent.is_some_and(|p| {
+            let block = &self.files[c.0].defs[p];
+            block.kind == DefKind::Constructor && block.name == "extension"
+        })
+    }
+
     /// Whether callable `c` can take the call `r` makes, and how well: `None`
     /// when the count of arguments, a name one is passed under or the type of
     /// one rules it out; else a score, higher for each argument whose type is
@@ -1569,9 +1618,14 @@ impl<'a> Project<'a> {
         if def.params.is_none() {
             return Some(0);
         }
-        // a C# extension's first parameter is the receiver
+        // a C# extension's first parameter is the receiver (a member of an
+        // `extension(T x) { … }` block has it on the block)
         let plist = match (&def.receiver, self.family[c.0]) {
-            (Some(_), Some(Family::CSharp)) if !def.plist.is_empty() => &def.plist[1..],
+            (Some(_), Some(Family::CSharp))
+                if !def.plist.is_empty() && !self.in_extension_block(c) =>
+            {
+                &def.plist[1..]
+            }
             _ => &def.plist[..],
         };
         let variadic = plist.iter().any(|x| x.variadic);
@@ -2532,9 +2586,40 @@ impl<'a> Project<'a> {
         false
     }
 
+    /// The other declarations of a C# `partial` type: the definitions of its
+    /// fully qualified name with as many type parameters (`RestResponse<T>`
+    /// beside `RestResponse` is another type).
+    fn partials(&self, c: DefRef) -> Vec<DefRef> {
+        let def = self.def(c);
+        if self.family[c.0] != Some(Family::CSharp) || !def.kind.is_class_like() {
+            return Vec::new();
+        }
+        let Some(fq) = self.fqn_of(c.0, c.1) else { return Vec::new() };
+        self.fqn
+            .get(&fq)
+            .into_iter()
+            .flatten()
+            .copied()
+            .filter(|r| {
+                let other = self.def(*r);
+                *r != c
+                    && self.family[r.0] == Some(Family::CSharp)
+                    && other.kind == def.kind
+                    && other.type_params.len() == def.type_params.len()
+            })
+            .collect()
+    }
+
+    /// The field `name` of type `c`, declared on it or on another declaration
+    /// of a partial type.
+    fn field_of(&self, c: DefRef, name: &str) -> Option<(usize, usize)> {
+        let own = |t: &DefRef| self.fields.get(t).and_then(|m| m.get(name)).copied();
+        own(&c).or_else(|| self.partials(c).iter().find_map(own))
+    }
+
     /// The type of a field of a type (through its bases).
     fn field_type(&self, c: DefRef, name: &str, depth: usize) -> Option<(DefRef, Confidence)> {
-        if let Some(&(fi, li)) = self.fields.get(&c).and_then(|m| m.get(name)) {
+        if let Some((fi, li)) = self.field_of(c, name) {
             let l = &self.files[fi].locals[li];
             let t = self.type_of_path(fi, l.from_def, &l.path, l.declared)?;
             let conf = if l.declared { Confidence::Extracted } else { Confidence::Inferred };
@@ -2669,6 +2754,11 @@ impl<'a> Project<'a> {
                 }
             }
         }
+        // a C# partial type: what its other declarations hold
+        for p in self.partials(c) {
+            let more = self.children[p.0].get(&p.1).and_then(|m| m.get(name));
+            out.extend(more.into_iter().flatten().map(|&d| (p.0, d)));
+        }
         out
     }
 
@@ -2707,6 +2797,21 @@ impl<'a> Project<'a> {
             return b.clone();
         }
         self.bases_memo.borrow_mut().insert(c, Vec::new()); // a cycle ends here
+        let mut out = self.written_bases(c);
+        // a C# partial type has the bases any of its declarations writes
+        for p in self.partials(c) {
+            for b in self.written_bases(p) {
+                if b != c && !out.contains(&b) {
+                    out.push(b);
+                }
+            }
+        }
+        self.bases_memo.borrow_mut().insert(c, out.clone());
+        out
+    }
+
+    /// The bases one declaration of a type writes.
+    fn written_bases(&self, c: DefRef) -> Vec<DefRef> {
         let mut out = Vec::new();
         let f = &self.files[c.0];
         let cname = &self.def(c).name;
@@ -2735,7 +2840,6 @@ impl<'a> Project<'a> {
                 }
             }
         }
-        self.bases_memo.borrow_mut().insert(c, out.clone());
         out
     }
 
@@ -3240,7 +3344,11 @@ impl<'a> Project<'a> {
                 && (*self.types_only.borrow() || self.local_type(f, d, head).is_none()) =>
             {
                 if rest.len() == 1 && !bases && *self.calling.borrow() {
-                    let on = self.local_written_type(f, d, head);
+                    // (`var message = new HttpRequestMessage()`: the type it
+                    // constructs is the one an extension is written for)
+                    let on = self
+                        .local_written_type(f, d, head)
+                        .or_else(|| self.local_built_type(f, d, head));
                     // a type the project does not define has no method of
                     // the project's; a local of no known type is an unknown
                     // receiver: a distinctive method name may say what it is
@@ -3283,7 +3391,10 @@ impl<'a> Project<'a> {
                     }
                 }
                 if !bases && (rest.len() == 1 || (rest.len() == 2 && rest[0] == "()")) {
-                    let on = self.local_written_type(f, d, head).filter(|_| rest.len() == 1);
+                    let on = self
+                        .local_written_type(f, d, head)
+                        .or_else(|| self.local_built_type(f, d, head))
+                        .filter(|_| rest.len() == 1);
                     return self.unknown_receiver(f, rest.last()?, on.as_deref());
                 }
                 return None;
@@ -3452,6 +3563,19 @@ impl<'a> Project<'a> {
                             && self.holds_project_value(p)
                         {
                             return self.unknown_receiver(f, &rest[0], None);
+                        }
+                        // a field of a type the project does not define
+                        // (`WireMockServer _server`): an extension written
+                        // for that type
+                        if bound.is_none()
+                            && rest.len() == 1
+                            && !bases
+                            && *self.calling.borrow()
+                            && !*self.types_only.borrow()
+                        {
+                            if let Some(found) = self.extension_on_member(f, p, &rest[0]) {
+                                return Some(found);
+                            }
                         }
                         let (b, imp) = bound?;
                         let m = self.eval(b, 3)?;
@@ -3912,6 +4036,12 @@ impl<'a> Project<'a> {
                             t = Target::Def(ft);
                             continue;
                         }
+                        // a property of a type the project does not define
+                        // (`request.Name.IsNotEmpty()`, `string Name`): only
+                        // an extension written for that type can be meant
+                        if i + 2 == rest.len() && !bases && *self.calling.borrow() {
+                            return self.extension_on_member(f, *p, &rest[i + 1]);
+                        }
                     }
                 }
                 return None;
@@ -3924,8 +4054,7 @@ impl<'a> Project<'a> {
                     // the last name is no member of the type: an extension
                     // written for it (`typeSpec.trimmedToString()`)
                     if self.def(c).kind.is_class_like() && i + 1 == rest.len() && !bases {
-                        let on = self.def(c).name.clone();
-                        return self.extension_method(f, seg, Some(&on));
+                        return self.extension_for(f, seg, c);
                     }
                     if !self.def(c).kind.is_class_like() || i + 1 == rest.len() {
                         return None;
@@ -4728,6 +4857,54 @@ impl<'a> Project<'a> {
         })
     }
 
+    /// An extension named `name` written for type `c`, or for one of its
+    /// bases (`client.BuildUri(r)` on a `RestClient`, written for
+    /// `IRestClient`): that is what the language calls. Else what
+    /// `extension_method` makes of the type's own name.
+    fn extension_for(&self, f: usize, name: &str, c: DefRef) -> Option<(Target, Confidence)> {
+        let own = self.extension_method(f, name, Some(&self.def(c).name));
+        if matches!(own, Some((_, Confidence::Extracted))) {
+            return own;
+        }
+        let mut seen = vec![c];
+        let mut frontier = vec![c];
+        for _ in 0..4 {
+            let mut next = Vec::new();
+            for t in frontier {
+                for b in self.bases(t) {
+                    if !seen.contains(&b) {
+                        seen.push(b);
+                        next.push(b);
+                    }
+                }
+            }
+            for b in &next {
+                let found = self.extension_method(f, name, Some(&self.def(*b).name));
+                if matches!(found, Some((_, Confidence::Extracted))) {
+                    return found;
+                }
+            }
+            if next.is_empty() {
+                break;
+            }
+            frontier = next;
+        }
+        own
+    }
+
+    /// `name` called on a field or property `p` whose written type the
+    /// project does not define: the extension written for that type, else
+    /// the one extension of the name in sight (`extension_method`). Where no
+    /// type is written there is nothing to go by.
+    fn extension_on_member(&self, f: usize, p: DefRef, name: &str) -> Option<(Target, Confidence)> {
+        let def = self.def(p);
+        let written = def.declared_type.as_ref()?.last()?;
+        if self.type_named(p.0, written).is_some() {
+            return None;
+        }
+        self.extension_method(f, name, Some(written))
+    }
+
     /// An extension function or method named `name` (`Def::receiver`) that
     /// file `f` can see: its own, one in a file it imports, in its directory
     /// or in its package. `on` is the receiver's type when the source writes
@@ -4765,6 +4942,12 @@ impl<'a> Project<'a> {
                     || self.scopes[f].imported.contains(&r.0)
                     || dir_of(&self.files[r.0].path) == here
                     || (pkg.is_some() && self.files[r.0].package.as_deref() == pkg)
+                    // C#: a namespace sees what the ones around it declare
+                    // (`RestSharp.Tests` sees `RestSharp`'s extensions)
+                    || (fam == Some(Family::CSharp)
+                        && pkg.zip(self.files[r.0].package.as_deref()).is_some_and(|(mine, its)| {
+                            mine.strip_prefix(its).is_some_and(|rest| rest.starts_with('.'))
+                        }))
                     || self.uses_namespace_of(f, r.0)
             })
             .collect();
@@ -4780,8 +4963,26 @@ impl<'a> Project<'a> {
             let mine: Vec<DefRef> = exact.iter().copied().filter(|r| r.0 == f).collect();
             match (mine.as_slice(), exact.as_slice()) {
                 ([one], _) | (_, [one]) => return Some((Target::Def(*one), Confidence::Extracted)),
+                // the overloads of one extension written for the type:
+                // `pick_overload` says which
+                (_, [first, ..])
+                    if fam.is_some_and(Family::overloads)
+                        && exact.iter().all(|r| {
+                            r.0 == first.0 && self.def(*r).parent == self.def(*first).parent
+                        }) =>
+                {
+                    return Some((Target::Def(*first), Confidence::Extracted));
+                }
                 _ => {}
             }
+        }
+        // a receiver of a type the project does not define, or of none the
+        // walk knows: a name .NET's own strings, lists and types answer to
+        // (`items.ForEach(…)`, `text.Split(' ')`) is theirs before an
+        // extension's
+        let known = on.is_some_and(|o| self.type_named(f, o).is_some());
+        if fam == Some(Family::CSharp) && !known && CSHARP_CORE_METHODS.contains(&name) {
+            return None;
         }
         let mine: Vec<DefRef> = seen.iter().copied().filter(|r| r.0 == f).collect();
         match (mine.as_slice(), seen.as_slice()) {
@@ -4848,6 +5049,23 @@ impl<'a> Project<'a> {
             if let Some(&li) = self.locals.get(&(f, x, name.to_string())) {
                 let l = &self.files[f].locals[li];
                 return l.path.last().filter(|_| l.declared).cloned();
+            }
+            cur = defs[x].parent;
+        }
+        None
+    }
+
+    /// The one name a local's value is built from (`var m = new Message()`),
+    /// where no type is written: a hint for an extension written for it.
+    fn local_built_type(&self, f: usize, d: Option<usize>, name: &str) -> Option<String> {
+        let defs = &self.files[f].defs;
+        let mut cur = d;
+        while let Some(x) = cur {
+            if let Some(&li) = self.locals.get(&(f, x, name.to_string())) {
+                return match self.files[f].locals[li].path.as_slice() {
+                    [one] => Some(one.clone()),
+                    _ => None,
+                };
             }
             cur = defs[x].parent;
         }

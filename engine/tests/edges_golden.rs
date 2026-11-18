@@ -1444,3 +1444,53 @@ fn a_method_named_on_what_a_test_file_cannot_type() {
     assert_eq!(from("send.js"), want, "{got:#?}");
     assert!(from("run()").is_empty(), "{got:#?}");
 }
+
+#[test]
+fn csharp_extensions_through_blocks_bases_and_library_types() {
+    // an `extension(T x) { … }` block's members are written for `T`; a
+    // receiver has the extensions of its bases, a partial type the bases and
+    // members of all its declarations, and a namespace sees the ones around
+    // it. A field or property of a type the project does not define is
+    // answered by the extension written for that type, never by a name
+    // .NET's own lists answer to
+    let got = calls_conf("csextensions", &[
+        ("Shop/Client.cs", "namespace Shop;\n\npublic interface IClient { Uri Make(Request r); }\n\npublic partial class Client : IClient {\n    public Uri Make(Request r) => null;\n}\n\npublic class Request {\n    public string Name { get; set; }\n}\n"),
+        ("Shop/Client.Async.cs", "namespace Shop;\n\npublic partial class Client {\n    public int Later() => 1;\n}\n"),
+        ("Shop/ClientExtensions.cs", "namespace Shop;\n\npublic static class ClientExtensions {\n    extension(IClient client) {\n        public Uri BuildUri(Request request) {\n            return client.Make(request);\n        }\n\n        public Uri BuildUri(Request request, bool full) {\n            return client.Make(request);\n        }\n    }\n\n    public static int Count(this IClient client) => 1;\n}\n\npublic static class StringExtensions {\n    extension(string input) {\n        public bool IsBlank() {\n            return input.Length == 0;\n        }\n    }\n\n    public static bool IsNotEmpty(this string? value) => value != null;\n}\n"),
+        ("Shop/WireExtensions.cs", "using Wire;\n\nnamespace Shop;\n\npublic static class WireExtensions {\n    public static int Capture(this WireServer server, int n) => n;\n    public static int Capture(this WireMessage message) => 1;\n}\n\npublic static class ListExtensions {\n    public static void ForEach<T>(this IEnumerable<T> items) {}\n}\n"),
+        ("Shop/Use.cs", "using Wire;\n\nnamespace Shop;\n\npublic class Use {\n    readonly Client _client = new();\n    readonly WireServer _server = new();\n    readonly List<int> _items = new();\n\n    public void Run(Request request, IClient other) {\n        _client.BuildUri(request);\n        other.BuildUri(request, true);\n        _client.Count();\n        _server.Capture(1);\n        request.Name.IsNotEmpty();\n        request.Name.IsBlank();\n        _items.ForEach();\n    }\n\n    public void Send() {\n        var message = new WireMessage();\n        message.Capture();\n    }\n}\n"),
+        ("Shop.Tests/UseTests.cs", "namespace Shop.Tests;\n\npublic class UseTests {\n    public void Builds(Client client, Request request) {\n        client.BuildUri(request);\n        client.Later();\n        client.Make(request);\n    }\n}\n"),
+    ]);
+    let from = |label: &str| -> BTreeSet<(&str, &str)> {
+        got.iter()
+            .filter(|(from, _, _)| from == label)
+            .map(|(_, to, conf)| (to.as_str(), conf.as_str()))
+            .collect()
+    };
+    let block = "shop_clientextensions_clientextensions_extension_builduri";
+    let two = "shop_clientextensions_clientextensions_extension_builduri_2";
+    let want: BTreeSet<(&str, &str)> = [
+        (block, "EXTRACTED"),
+        (two, "EXTRACTED"),
+        ("shop_clientextensions_clientextensions_count", "EXTRACTED"),
+        ("shop_wireextensions_wireextensions_capture", "EXTRACTED"),
+        ("shop_clientextensions_stringextensions_isnotempty", "EXTRACTED"),
+        ("shop_clientextensions_stringextensions_extension_isblank", "EXTRACTED"),
+    ]
+    .into_iter()
+    .collect();
+    assert_eq!(from(".Run()"), want, "{got:#?}");
+    // (`var message = new WireMessage()`: the type it constructs says which
+    // `Capture`)
+    let want: BTreeSet<(&str, &str)> =
+        [("shop_wireextensions_wireextensions_capture_2", "EXTRACTED")].into_iter().collect();
+    assert_eq!(from(".Send()"), want, "{got:#?}");
+    let want: BTreeSet<(&str, &str)> = [
+        (block, "EXTRACTED"),
+        ("shop_client_async_client_later", "EXTRACTED"),
+        ("shop_client_client_make", "EXTRACTED"),
+    ]
+    .into_iter()
+    .collect();
+    assert_eq!(from(".Builds()"), want, "{got:#?}");
+}
