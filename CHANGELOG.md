@@ -247,6 +247,52 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- Native engine 0.5.6, chains of calls on a collection. On the 31 audit
+  repositories: 144 more calls, 479 more `reads` and 46 more `writes`, and 12
+  edges gone (ten of them a closure's parameter taken for a method or
+  property of its name):
+  - **A chain keeps what it is a collection of.** After a name declared as a
+    collection, a method that keeps it (`filter`, `sortedBy`, `toList`,
+    `stream()`, `iter()`, `Where`, `ToList`) leaves a collection of the same
+    elements, one that takes an element (`first()`, `get(i)`, `find`,
+    `FirstOrDefault()`, Swift `xs.first`) gives the element, and unwrapping
+    an optional (`unwrap()`, `orElseThrow()`, `.get()` after `findFirst()`)
+    changes nothing: `xs.filter { it.ok }.first().a()` calls `Foo.a`.
+  - **A mapping is the collection of what its function gives**, when that is
+    one expression: `xs.map { it.owner }`, `xs.map(x => x.owner)`,
+    `items.stream().map(i -> i.boss())`, `dishes.Select(d => d.Chef)`,
+    `planes.map { $0.pilot }`, Ruby `xs.map(&:owner)`, Python
+    `[j.chief for j in jobs]`; `flatMap { it.kids() }` the elements of what
+    each gives. A local assigned such a chain is a collection to the loop
+    over it. A mapping the walk cannot name is a collection of nothing known,
+    never of the same elements.
+  - **Closure parameters in Swift and C#** (`{ p in … }`, `$0`, `d => …`) are
+    names of the closure, as in the other languages: they no longer resolve to
+    an outer method or property of the same name, and an iteration method
+    types them. The element is the second parameter of Kotlin's
+    `forEachIndexed` / `mapIndexed`.
+  - **Lambda parameters were read in reverse**: with two or more,
+    `tasks.forEach((t, i) => t.exec())` typed `i` as the element and left `t`
+    untyped (since 0.5.5).
+  - A property with more after it is typed where it is declared when its
+    class says nothing more (`chief: Chief` in a Python class body, a C++
+    member, `appRule.http.createArticle()`).
+  - C# `List<Dish>` and the like give their element type (the grammar's
+    `type_argument_list` was not read).
+  - The overloads of one extension function (`asAFError(or:)` /
+    `asAFError(orFailWith:)`, Kotlin `Collection<CodeBlock>.joinToCode`) are
+    told apart by the arguments instead of resolving to nothing; a method of
+    a Swift `extension` of a type the project does not define answers an
+    untyped receiver as a Rust `impl Trait for` one does. A Kotlin extension
+    is never the target of a Java `x.name()` (`latch.await()` named
+    retrofit's `Call<T>.await()` while this was being written).
+  - `xs.first()` as the thing called is the library's method: no edge to the
+    element's type.
+
+  The audit on graphs rebuilt by 0.5.6 raises nothing but its note on orphan
+  nodes; the 31 builds take 16.8 to 17.8 s (16.1 to 16.6 s with 0.5.5). A
+  first version read the callee of every call twice and took minutes on a
+  long builder chain (ureq); the timing run caught it.
 - Native engine 0.5.5, what 0.5.4 could not decide. 759 more edges on the 31
   audit repositories and 32 gone (most of those a loop variable taken for a
   function of its name: `for (const hook of hooks) hook(x)`):
