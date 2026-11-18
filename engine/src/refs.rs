@@ -4278,13 +4278,21 @@ fn written_type(node: Node, src: &[u8]) -> Option<Vec<String>> {
             .filter(|c| c.kind().ends_with("declaration") || c.kind().ends_with("declarator")),
     );
     places.into_iter().find_map(|n| {
-        n.child_by_field_name("type").and_then(|t| first_type(t, src)).or_else(|| {
+        let field = n.child_by_field_name("type");
+        field.and_then(|t| first_type(t, src).or_else(|| predefined(t, src))).or_else(|| {
             kids(n)
                 .into_iter()
                 .find(|c| matches!(c.kind(), "user_type" | "type_annotation" | "nullable_type"))
                 .and_then(|t| first_type(t, src))
         })
     })
+}
+
+/// A type of the language itself, as written (C# `string`, `string?`): no
+/// type of the project, but what an extension can be written for.
+fn predefined(t: Node, src: &[u8]) -> Option<Vec<String>> {
+    let t = if t.kind() == "nullable_type" { kids(t).into_iter().next()? } else { t };
+    (t.kind() == "predefined_type").then(|| vec![text(t, src)])
 }
 
 /// What constructs the value a declaration holds (`Settings()`).

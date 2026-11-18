@@ -133,7 +133,27 @@ What the lookup takes from each language's own rules:
   own, those it imports, its directory, its package or a namespace it uses) —
   `EXTRACTED` when the receiver's type is the one the extension is written
   for, `INFERRED` when one extension has the name. `self.x()` in a Rust `impl
-  Trait for` a type of another crate is the method beside it.
+  Trait for` a type of another crate is the method beside it. The
+  receiver's type counts with its bases (`client.BuildUri(r)` on a
+  `RestClient`, written for `IRestClient`), and several overloads written
+  for it are one extension, chosen among by their arguments. The members of
+  a C# 14 `extension(IRestClient client) { … }` block are written for the
+  block's parameter (the grammar reads the block as a constructor named
+  `extension` and its members as local functions; they stay nodes under
+  that name). A field or property of a type the project does not define is
+  answered by the extension written for the type it declares
+  (`WireMockServer _server` then `_server.ConfigureBodyCapturer(…)`, `string
+  Name` then `request.Name.IsNotEmpty()`), and a local by the type its
+  value constructs (`var message = new HttpRequestMessage()`). A C#
+  namespace sees the extensions of the namespaces around it (`RestSharp.Tests`
+  those of `RestSharp`). On a receiver that is no type of the project, a name
+  .NET's own strings, lists and types answer to (`ForEach`, `Split`,
+  `GetProperties`, `Contains`) is theirs: no edge.
+- **C# partial types.** The declarations of a `partial` type (the
+  definitions of one fully qualified name with as many type parameters)
+  are one type: a member, a field or a base that one declaration writes is
+  found from any of them (`class RestClient : IRestClient` in one file,
+  `RestClient.Async.cs` in another).
 - **A closure's parameters are names of the closure only**: `r` in
   `func(w http.ResponseWriter, r *http.Request) { … }` is the request there
   and whatever `r` was outside, and an untyped block parameter hides the
@@ -665,7 +685,7 @@ file pairs). The native graph has definitions graphify folds into the one
 around them (a function nested in a method, the setter beside a getter of the
 same name); an edge from one of those is compared as an edge from the paired
 definition it belongs to, as graphify records it. On the 31 repositories of the
-[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.18,
+[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.19,
 measured 2026-11-18), as native / graphify edges and the share of graphify's
 that the native graph has too:
 
@@ -677,19 +697,19 @@ that the native graph has too:
 | TSX | 99.7% | 253 / 316 (80%) | 435 / 456 (95%) | – | 42 / 4 |
 | Go | 100% | 538 / 950 (47%)² | 6,702 / 3,167 (99%) | 19 / 14 (100%) | 678 / 355 (99%) |
 | Java | 100% | 1,105 / 1,010 (100%) | 5,680 / 5,123 (85%) | 415 / 168 (94%) | 3,989 / 1,930 (98%) |
-| Kotlin | 99.4% | 368 / 333 (95%) | 4,682 / 2,108 (71%) | 96 / 56 (93%) | 1,087 / 673 (91%) |
+| Kotlin | 99.4% | 368 / 333 (95%) | 4,705 / 2,108 (71%) | 96 / 56 (93%) | 1,079 / 673 (91%) |
 | Scala | 100% | 2 / 0 | 46 / 20 (45%) | 21 / 22 (95%) | 75 / 32 (100%) |
-| C# | 92.7% | 347 / 280 (30%)³ | 2,787 / 2,450 (93%) | 87 / 86 (98%) | 1,259 / 806 (99%) |
-| Rust | 93.3% | 314 / 370 (75%) | 2,004 / 853 (86%) | 53 / 41 (93%) | 1,245 / 895 (81%) |
-| Swift | 95.9% | 166 / 166 (–)³ | 5,444 / 2,141 (82%) | 190 / 164 (100%) | 1,091 / 580 (62%) |
+| C# | 92.7% | 347 / 280 (30%)³ | 2,811 / 2,450 (94%) | 87 / 86 (98%) | 1,216 / 806 (99%) |
+| Rust | 93.3% | 314 / 370 (75%) | 2,009 / 853 (86%) | 53 / 41 (93%) | 1,245 / 895 (81%) |
+| Swift | 95.9% | 166 / 166 (–)³ | 5,445 / 2,141 (82%) | 190 / 164 (100%) | 1,091 / 580 (62%) |
 | C | 100% | 89 / 77 (99%) | 864 / 791 (100%) | – | 253 / 130 (97%) |
 | C++ | 97.8% | 215 / 228 (93%) | 631 / 281 (33%)⁴ | 30 / 5 (100%) | 326 / 218 (88%) |
 | C/C++ headers | 90.6% | 164 / 172 (95%) | 361 / 348 (85%) | 11 / 12 (92%) | 515 / 289 (87%) |
 | Ruby | 99.7% | 42 / 0 | 445 / 375 (70%) | 46 / 15 (93%) | 28 / 0 |
 | PHP | 80.6% | 429 / 505 (84%) | 8,870 / 6,140 (90%) | 65 / 60 (98%) | 648 / 213 (95%) |
-| **All** | **94.4%** | **4,961 / 5,565 (75%)** | **44,060 / 27,832 (85%)** | **1,132 / 726 (97%)** | **12,415 / 6,775 (89%)** |
+| **All** | **94.4%** | **4,961 / 5,565 (75%)** | **44,115 / 27,832 (85%)** | **1,132 / 726 (97%)** | **12,364 / 6,775 (89%)** |
 
-Of the native calls, 13,041 (30%) are `INFERRED`, against 47% of graphify's.
+Of the native calls, 13,015 (30%) are `INFERRED`, against 47% of graphify's.
 That share was 20% before engine 0.5.5: a call of an overloaded name that the
 arguments do not decide used to be an `EXTRACTED` edge to the first overload,
 and is now an `INFERRED` edge to each overload that fits (999 calls, with
@@ -732,6 +752,33 @@ two edges of got are gone that named a function defined in another loop
 for a destructured loop variable of the same name. The maps of these
 repositories that hold project types are mostly looked up by key once, or
 not walked at all.
+Engine 0.5.19 (C# extension blocks, extensions through bases and on
+library types, partial types) adds 618 calls (197 `EXTRACTED`, 421
+`INFERRED`), turns 51 `INFERRED` ones `EXTRACTED` and takes 7 away.
+restsharp gets 570 of them: its extensions are written in more than 30 C#
+14 `extension(…)` blocks that named nothing (`client.BuildUri(request)`,
+`request.AddHeader(…)`, `new RestRequest().AddObjectStatic(data)`), on an
+`IRestClient` that `RestClient` implements in another declaration of the
+partial class. Of its 392 new `INFERRED` calls, 290 are a call of an
+overloaded extension the arguments do not decide (`client.GetAsync(request)`
+beside `GetAsync<T>(…)`: each that fits is linked), and the 22 read of the
+other 102 are right, `INFERRED` because the receiver is a local typed by
+its value. Unifying partial types also gives it 121 reads, uses and
+references of members another declaration holds, and 91 `references` edges
+are gone in restsharp and kotlinpoet: they named the type a call started
+from when the call itself named nothing (`new RestRequest(…).AddJsonBody(…)`
+was a reference to `RestRequest`; the construction still calls it).
+kotlinpoet gets 34 new calls, most of extensions on properties of library
+types (`parameters.toImmutableList()`, `arguments.joinToCode(…)`), and 27 of its
+`INFERRED` calls of overloaded extensions (`annotated`, `parameterizedBy`)
+are `EXTRACTED`; aspnetcore-realworld gets `article.Title.GenerateSlug()`
+and seven `services.AddJwt(…)`; ureq, actix-realworld and alamofire one to
+four each (`details.uri.host_port()`). Gone: three self-loops (a polyfill
+`Split` calling `string.Split`, and two tests named like the extension they
+call, which now call it), `typeof(T).GetProperties()` (reflection, linked
+to the project's `GetProperties(this object)`), and three right ones the
+same guard costs (`obj.GetProperties(…)` on a type parameter twice,
+`contentHeaders.ForEach(…)`).
 Engine 0.5.18 (CommonJS modules as what they export, and the receivers of
 a test file) adds 329 calls and takes 12 away. express gets 234: 110
 `EXTRACTED` calls of `createApplication` from the tests and examples that
@@ -845,7 +892,15 @@ Reading a sample of each side's edges the other lacks, per language:
   more than one level (`Map<K, List<V>>`'s values are lists of an unknown
   type), a Rust trait's type arguments (`impl Repo<User> for UserRepo`),
   a Python dictionary iterated for its keys (`for k in d`), or a lambda
-  given to `zip` that takes the pair apart.
+  given to `zip` that takes the pair apart. Nor does it say what an
+  object built at run time is (`var app = express()`, where the
+  application is a function that methods are mixed into): a distinctive
+  method name is guessed by, a short or common one (`app.use`, `app.set`)
+  is left; whether `items.ForEach(…)` is `List<T>`'s own or a project
+  extension for `IEnumerable<T>` when `items` is a library type; and which
+  of a generic and a plain overload a call without type arguments is
+  (`client.GetAsync(request)` beside `GetAsync<T>(…)`): each is linked,
+  `INFERRED`.
 - **What only the native graph has** is mostly what a name lookup by itself
   cannot see: calls through a module object (`httpx.Response(...)`), through a
   typed local or field (`client = httpx.Client(); client.get()`,
@@ -916,7 +971,9 @@ implicit members since 0.5.17: 39 whose place gives no type are rows now
 (6,887). Engine 0.5.18 takes 402 rows off (6,485; JavaScript 1,473): the
 closure parameters and variables of express's tests. What is left at file
 level there is `app.use` and `app.set` (842 rows of express), names too
-short and too common to guess by.
+short and too common to guess by. Engine 0.5.19 takes 123 more off (6,362;
+C# 349 from 470). Most of what C# has left is not the project's: `Assert.
+NotNull` beside its own `Ensure.NotNull` (77), `WireMockServer.Start` (23).
 
 ### The polyglot audit on native graphs
 

@@ -259,6 +259,29 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- Native engine 0.5.19, C# extensions and partial types. On the 31 audit
+  repositories: 618 calls gained (197 `EXTRACTED`), 51 `INFERRED` ones now
+  `EXTRACTED`, 7 gone; restsharp, whose extensions are C# 14 blocks, gets
+  570.
+  - **The members of an `extension(T x) { … }` block are extensions written
+    for `T`**: `client.BuildUri(request)`, `request.AddHeader(…)`. They had
+    no edge.
+  - **A receiver has the extensions of its bases** (`RestClient` those
+    written for `IRestClient`), `EXTRACTED`; several overloads written for
+    the receiver's type are one extension, chosen by their arguments.
+  - **A C# partial type is all its declarations**: a member, field or base
+    one of them writes is found from any (restsharp: 121 more reads, uses
+    and references).
+  - **A field or property of a library type is answered by the extension
+    written for that type** (`string Name` then `request.Name.IsNotEmpty()`,
+    `WireMockServer _server`), a local by the type its value constructs,
+    and a C# namespace sees the extensions of the namespaces around it.
+  - **A name .NET's own strings, lists and types answer to is no evidence**
+    on a receiver that is no type of the project (`ForEach`, `Split`,
+    `GetProperties`): two wrong edges gone, three right ones with them.
+  - A call that names nothing no longer leaves a `references` edge to the
+    type it started from when it now resolves (91 in restsharp and
+    kotlinpoet).
 - Native engine 0.5.18, CommonJS modules and the receivers of a test file.
   On the 31 audit repositories: 329 calls gained, 12 gone; a test of express
   now reaches the method of `lib/` it exercises (`graphlore_tests_for`).
