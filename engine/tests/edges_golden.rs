@@ -1267,3 +1267,27 @@ fn keys_partitions_zips_folds_and_a_returned_function() {
         );
     }
 }
+
+#[test]
+fn the_calls_in_a_rust_macros_arguments() {
+    let got = call_ids("macros", &[(
+        "a.rs",
+        "pub struct Pool;\nimpl Pool {\n    pub fn count(&self) -> usize { 0 }\n    pub fn label(&self) -> String { String::new() }\n}\npub enum Kind { A(u8), B }\nfn handle_count(p: &Pool) -> usize { p.count() }\nfn make_pool() -> Pool { Pool }\nfn kind_of(p: &Pool) -> Kind { Kind::B }\nfn never_called() {}\npub fn checks() {\n    let pool = make_pool();\n    assert_eq!(handle_count(&pool), 2);\n    assert!(pool.count() > 0, \"empty: {}\", pool.label());\n    let pools = vec![make_pool(), make_pool()];\n    assert!(matches!(kind_of(&pool), Kind::A(never_called)));\n    println!(\"{}\", pools.len());\n}\n",
+    )]);
+    let mut missing = Vec::new();
+    for (from, to) in [
+        ("checks()", "a_handle_count"),
+        ("checks()", "a_pool_count"),
+        ("checks()", "a_pool_label"),
+        ("checks()", "a_make_pool"),
+        // inside a macro inside a macro
+        ("checks()", "a_kind_of"),
+    ] {
+        if !got.contains(&(from.to_string(), to.to_string())) {
+            missing.push((from, to));
+        }
+    }
+    assert!(missing.is_empty(), "missing {missing:?}\n{got:?}");
+    // the pattern of `matches!` is no expression: nothing in it is called
+    assert!(!got.iter().any(|(_, to)| to == "a_never_called" || to.contains("kind_a")), "{got:?}");
+}

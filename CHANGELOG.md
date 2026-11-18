@@ -259,6 +259,15 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- Native engine 0.5.16: **the calls in a Rust macro's arguments are read**.
+  The grammar gives them as tokens, so `assert_eq!(handle_count(&pool), 2)`,
+  `assert!(pool.count() > 0)`, `vec![make_pool()]` and `format!("{}",
+  c.name())` named nothing; the arguments are parsed again as an expression
+  and their calls placed where they stand, a macro inside a macro too. What
+  is no expression (a `{ … }` body, `a => b` arms, the pattern of
+  `matches!`) is left out. 171 more edges on the 31 audit repositories, none
+  gone, nearly all a test's assertions: the share of graphify's Rust calls
+  the native graph has goes from 81% to 86%.
 - Native engine 0.5.15: the import edges a Swift file gets from the files it
   uses were written in an order that differed from run to run (the same
   edges; a set's own order). They are in file order now.

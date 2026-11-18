@@ -115,6 +115,12 @@ def main() -> int:
     before: dict[str, dict[str, int]] = {}
     if args.baseline:
         before = json.loads(Path(args.baseline).read_text()).get("counts", {})
+        if args.language:
+            before = {k: v for k, v in before.items() if k == args.language}
+        if args.reason:
+            before = {
+                k: {r: n for r, n in v.items() if args.reason in r} for k, v in before.items()
+            }
 
     def delta(now: int, was: int | None) -> str:
         return "" if was is None or was == now else f" ({now - was:+d})"
