@@ -107,6 +107,9 @@ pub fn is_symbol(kind: &str) -> bool {
     if CALL_TYPES.contains(&t.as_str()) || NON_SYMBOL_SUFFIXES.iter().any(|s| t.ends_with(s)) {
         return false;
     }
+    if SYMBOL_TYPES.contains(&t.as_str()) {
+        return true;
+    }
     // calls expose the callee under `name` but define nothing
     if t.contains("invocation") || t.contains("call") {
         return false;
@@ -372,6 +375,10 @@ pub fn classify<'t, M: LanguageModule + ?Sized>(m: &M, node: Node<'t>, src: &[u8
 }
 
 /// What a definition is, from its node type alone.
+/// `spans._TS_SYMBOL_TYPES`: definitions whose node type has no hint word (C++
+/// `using AsyncResponse = AsyncWrapper<Response>;`).
+const SYMBOL_TYPES: &[&str] = &["alias_declaration"];
+
 pub fn kind_of(kind: &str) -> DefKind {
     let t = kind.to_ascii_lowercase();
     let has = |h: &str| t.contains(h);
@@ -404,7 +411,7 @@ pub fn kind_of(kind: &str) -> DefKind {
         DefKind::Class
     } else if has("module") {
         DefKind::Module
-    } else if has("type") {
+    } else if has("type") || t == "alias_declaration" {
         DefKind::TypeAlias
     } else {
         DefKind::Other

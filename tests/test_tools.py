@@ -1094,6 +1094,23 @@ def test_engine_file_spans_without_the_engine(monkeypatch):
     assert server.engine.file_spans(b"x", "a.go") is None
 
 
+def test_cpp_branches_written_once_per_configuration_are_blanked():
+    """An `#if` whose branches each leave a brace open is read once: the first
+    branch stays, the rest and the directives are blanked in place."""
+    from graphlore.spans import _blank_duplicate_branches as blank
+
+    src = (b"void f() {\n#if A\n    if (x) {\n#else\n    if (y) {  // '{'\n#endif\n"
+           b"        g();\n    }\n}\n")
+    out = blank(src)
+    assert len(out) == len(src) and out.count(b"\n") == src.count(b"\n")
+    assert b"if (x) {" in out and b"if (y)" not in out and b"#" not in out
+    # balanced branches, a one-branch guard and a brace in a string: untouched
+    for keep in (b"#if A\nvoid a() {}\n#else\nvoid b() {}\n#endif\n",
+                 b"#ifdef __cplusplus\nextern \"C\" {\n#endif\nint x;\n",
+                 b"#if A\nchar c = '{';\n#else\nchar c = '{';\n#endif\n"):
+        assert blank(keep) is keep
+
+
 def test_engine_version_pins_stay_in_sync():
     """engine/Cargo.toml's version is the engine's only copy; the schema graphlore
     reads must be the one the engine writes."""

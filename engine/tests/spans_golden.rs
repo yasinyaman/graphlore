@@ -284,3 +284,25 @@ fn properties_and_constants_are_extra_definitions() {
     let extra: Vec<&str> = facts.defs.iter().filter(|d| d.extra).map(|d| d.name.as_str()).collect();
     assert_eq!(extra, ["MAX"]);
 }
+
+#[test]
+fn cpp_an_if_written_once_per_configuration_is_read_once() {
+    // each branch opens `if (code) {`, closed once after `#endif`: the
+    // parser is given the first branch, so the methods after are the
+    // class's, not the first method's; a balanced `#if` and a one-branch
+    // `#ifdef` (an `extern "C" {` guard) are read as before
+    let src = "namespace m {\nvoid Pool::Run() {\n    int code = 0;\n#if NEW_API\n    code = poll(1);\n    if (code) {\n        log(\"poll\");\n#else\n    code = wait(1);\n    if (code) {\n        log(\"wait\");\n#endif\n        return;\n    }\n}\n#if FAST\nvoid fast() {}\n#else\nvoid slow() {}\n#endif\nvoid Pool::Stop() {\n}\n}\n";
+    let got = quals("pool.cpp", src);
+    has_all(&got, &["m.Pool.Run", "m.Pool.Stop", "m.fast", "m.slow"]);
+    assert!(!got.iter().any(|q| q.starts_with("m.Pool.Run.")), "{got:?}");
+    assert_eq!(span("pool.cpp", src, "m.Pool.Run"), (2, 15, 2));
+    assert_eq!(span("pool.cpp", src, "m.Pool.Stop"), (21, 22, 21));
+}
+
+#[test]
+fn cpp_an_alias_declaration_is_a_definition() {
+    // `using X = …;` has no hint word in its node type: it is named exactly
+    let src = "namespace cpr {\nusing Header = std::map<std::string, std::string>;\nusing AsyncResponse = AsyncWrapper<Response>;\n}\n";
+    has_all(&quals("api.h", src), &["cpr.Header", "cpr.AsyncResponse"]);
+    assert_eq!(span("api.h", src, "cpr.AsyncResponse"), (3, 3, 3));
+}
