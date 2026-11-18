@@ -3012,16 +3012,40 @@ impl<'a> Project<'a> {
     /// Whether a type writes a base the project does not define: its members
     /// are not all the project's.
     fn has_outside_base(&self, c: DefRef) -> bool {
+        !self.outside_bases(c).is_empty()
+    }
+
+    /// The last names of the bases a type writes that the project does not
+    /// define.
+    fn outside_bases(&self, c: DefRef) -> Vec<&str> {
         let f = &self.files[c.0];
         let cname = &self.def(c).name;
         let outer = self.def(c).parent;
-        f.refs.iter().any(|r| {
-            let mine = r.from_def == Some(c.1) || r.from_owner.as_ref().is_some_and(|o| o == cname);
-            mine && matches!(
-                r.kind,
-                RefKind::Inherits | RefKind::Implements | RefKind::Base | RefKind::MixesIn
-            ) && !matches!(self.resolve_path(c.0, outer, &r.path, true), Some((Target::Def(_), _)))
-        })
+        f.refs
+            .iter()
+            .filter(|r| {
+                let mine =
+                    r.from_def == Some(c.1) || r.from_owner.as_ref().is_some_and(|o| o == cname);
+                mine && matches!(
+                    r.kind,
+                    RefKind::Inherits | RefKind::Implements | RefKind::Base | RefKind::MixesIn
+                ) && !matches!(
+                    self.resolve_path(c.0, outer, &r.path, true),
+                    Some((Target::Def(_), _))
+                )
+            })
+            .filter_map(|r| r.path.last().map(|s| s.trim_start_matches('\\')))
+            .collect()
+    }
+
+    /// Whether a type implements a library type that declares members a
+    /// caller names (`implements RequestInterface`, `extends Writable`): not
+    /// a marker (`Sendable`, `JsonSerializable`), not an exception base, and
+    /// not in Ruby, where a mix-in or a base class leaves a class's own
+    /// methods its own.
+    fn implements_library_type(&self, c: DefRef) -> bool {
+        self.family[c.0] != Some(Family::Ruby)
+            && self.outside_bases(c).iter().any(|b| !MARKER_BASES.contains(b))
     }
 
     /// The bases one declaration of a type writes.
@@ -5011,6 +5035,17 @@ impl<'a> Project<'a> {
         {
             // (`$this->fail()` in a PHPUnit test, `self.assertEqual()`)
             Some("the type around has a base the project does not define")
+        } else if r.path.len() >= 2
+            && UNTYPED_RECEIVER_REASONS.contains(&reason.as_str())
+            && cd.parent.is_some()
+            // (a member extension function is the project's own)
+            && cd.receiver.is_none()
+            && self.class_of(c.0, Some(c.1)).is_some_and(|t| self.implements_library_type(t))
+        {
+            // (`$request->getUri()` on an untyped parameter: the project's
+            // one `getUri` is a `RequestInterface` implementation, and the
+            // receiver may be any other)
+            Some("the one definition implements a library type's member")
         } else {
             None
         };
@@ -6720,3 +6755,53 @@ fn external_base(kind: RefKind, fam: Family, path: &[String]) -> &'static str {
         _ => "inherits",
     }
 }
+
+/// The reasons of an unresolved row whose receiver has no type the source
+/// gives: any implementation of a library type could be it.
+const UNTYPED_RECEIVER_REASONS: &[&str] = &[
+    "untyped local or parameter",
+    "closure parameter outside any definition",
+    "local the walk cannot type",
+    "head name not found",
+    "field or variable: its type names nothing",
+];
+
+/// Library bases that declare no member a call would name: markers,
+/// equality and ordering, serialization, the roots of errors.
+const MARKER_BASES: &[&str] = &[
+    "Sendable",
+    "Equatable",
+    "Hashable",
+    "Comparable",
+    "Codable",
+    "Encodable",
+    "Decodable",
+    "Identifiable",
+    "CustomStringConvertible",
+    "CustomDebugStringConvertible",
+    "Stringable",
+    "JsonSerializable",
+    "Serializable",
+    "Cloneable",
+    "Error",
+    "Exception",
+    "Throwable",
+    "RuntimeException",
+    "IllegalStateException",
+    "IllegalArgumentException",
+    "IEquatable",
+    "IComparable",
+    "Debug",
+    "Clone",
+    "Copy",
+    "PartialEq",
+    "Eq",
+    "Hash",
+    "Default",
+    "Display",
+    "Closeable",
+    "AutoCloseable",
+    "IDisposable",
+    "IAsyncDisposable",
+    "Disposable",
+];

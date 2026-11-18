@@ -1216,7 +1216,22 @@ standard types (`lock`, `clone`, `kind`, `c_str`): of the 6,237 rows of
 119, Swift 93, C# 79, Kotlin 67, JavaScript 55, C++ 50, Java 44, Go 34, C
 33, Python 17, TSX 6, Scala 4. 0.5.27 leaves 1,545: Swift 61 from 93, Java
 32 from 44, Rust 101 from 119. 0.5.28 leaves 1,486: Ruby 239 from 298, with
-99 fewer "bare name: not in scope" rows — faraday's spec lets.) The 2,114 by language: PHP 445, TypeScript 405, Ruby 304, C# 196, Rust 192,
+99 fewer "bare name: not in scope" rows — faraday's spec lets. Since 0.5.29
+one more kind is marked: the one definition is a member of a type that
+implements a library type declaring members (`class UnvalidatedUriRequest
+implements RequestInterface`, `class Http2ClientRequest extends Writable`)
+and the receiver has no type the source gives (an untyped parameter or
+local, a closure's parameter, a `$variable`, a field of no named type), so
+it may be any implementation: guzzle's `$request->getHeaderLine()` and got's
+`response.setHeader()` in a test server's callback. A marker base
+(`Sendable`, `JsonSerializable`, `Closeable`, an exception root) does not
+count, nor a Ruby base or mix-in (a class's own methods stay its own), nor a
+member extension function. 477 rows: got 191, guzzle 253, the rest JVM and
+C# tests; 1,009 are left unmarked — Ruby 239, PHP 137, TypeScript 124, Rust
+100, C# 76, Swift 61, JavaScript 55, C++ 50, Kotlin 47, Go 34, C 33, Java 26,
+Python 17, TSX 6, Scala 4. The mark does not know which members the library
+type declares: symfony-demo's `$user->getFullName()` is marked beside the
+`getRoles()` `UserInterface` does declare.) The 2,114 by language: PHP 445, TypeScript 405, Ruby 304, C# 196, Rust 192,
 C++ 169, Swift 94, Kotlin 79, JavaScript 71, Java 49, Go 34, C 33, Python
 20, TSX 19, Scala 4. They are still an upper bound: the marks are
 conservative, and PHP's and TypeScript's rows are mostly PSR-7 and Node

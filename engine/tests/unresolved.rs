@@ -83,3 +83,46 @@ fn a_row_that_is_a_librarys_name_says_so() {
     assert_eq!(why("app/use.py"), "the one definition is test code, the call is not", "{rows:#?}");
     assert_eq!(why("lib/wire.js"), "a name the language's own types answer to", "{rows:#?}");
 }
+
+#[test]
+fn a_library_interfaces_one_implementation_is_marked_on_an_untyped_receiver() {
+    let dir = project(
+        "interface",
+        &[
+            // the project's one `getUri` implements PSR-7's interface: an
+            // untyped `$request` may be any request
+            (
+                "src/Request.php",
+                "<?php\nnamespace App;\nuse Psr\\Http\\Message\\RequestInterface;\nclass Unvalidated implements RequestInterface {\n    public function getUri() { return 1; }\n}\n",
+            ),
+            // a type of the project's own with no outside base: still a gap
+            ("src/Ledger.php", "<?php\nnamespace App;\nclass Ledger {\n    public function settle() { return 1; }\n}\n"),
+            // a marker interface declares no member a call names: a gap
+            (
+                "src/Tag.php",
+                "<?php\nnamespace App;\nclass Tag implements \\JsonSerializable {\n    public function label() { return 1; }\n    public function jsonSerialize(): mixed { return 1; }\n}\n",
+            ),
+            // a typed receiver of a project type without the member: a gap
+            ("src/Plain.php", "<?php\nnamespace App;\nclass Plain {\n}\n"),
+            (
+                "app/use.php",
+                "<?php\nfunction send($request) {\n    return $request->getUri();\n}\nfunction pay($book) {\n    return $book->settle();\n}\nfunction typed(\\App\\Plain $p) {\n    return $p->getUri();\n}\nfunction show($tag) {\n    return $tag->label();\n}\n",
+            ),
+        ],
+    );
+    let out = dir.join("unresolved.json");
+    let mut opts = BuildOptions::new(&dir);
+    opts.unresolved = Some(out.clone());
+    build_graph(&opts).unwrap();
+    let rows: Vec<Value> = serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+    let row = |line: u64| rows.iter().find(|r| r["line"] == line).cloned();
+    let untyped = row(3).expect("$request->getUri() is a row");
+    assert_eq!(untyped["library_like"], "the one definition implements a library type's member");
+    let own = row(6).expect("$book->settle() is a row");
+    assert_eq!(own["library_like"], Value::Null, "{own:#?}");
+    let typed = row(9).expect("$p->getUri() is a row");
+    assert_eq!(typed["library_like"], Value::Null, "{typed:#?}");
+    let marker = row(12).expect("$tag->label() is a row");
+    assert_eq!(marker["library_like"], Value::Null, "{marker:#?}");
+}
