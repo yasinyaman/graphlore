@@ -236,7 +236,52 @@ All notable changes to this project are documented here. The format is based on
   carries (`region_start`..`end_line`) when the span engine has no span for it
   and the file is unchanged since the build, instead of a line window.
 
+### Changed
+- **A call of an overloaded name that the arguments do not decide is an
+  `INFERRED` edge to each overload that fits** (native engine 0.5.5; Java,
+  Kotlin, Scala, C#, Swift, C++), where it was an `EXTRACTED` edge to the
+  first. `baseUrl(server.url("/"))` may be `baseUrl(String)`, `baseUrl(URL)`
+  or `baseUrl(HttpUrl)`: all three are callers' targets now, so
+  `graphlore_impact` on any of them lists the call, and `strict=True` (only
+  extracted edges) leaves it out. 999 calls of the 31 audit repositories
+  changed this way; the share of `INFERRED` calls goes from 20% to 29%.
+
 ### Fixed
+- Native engine 0.5.5, what 0.5.4 could not decide. 759 more edges on the 31
+  audit repositories and 32 gone (most of those a loop variable taken for a
+  function of its name: `for (const hook of hooks) hook(x)`):
+  - **Untyped receivers, by what is asked of them.** A parameter or local
+    with no type is the one type of the project that answers every member
+    used on it in its definition, when two names or more that are not the
+    language's own are used: Ruby `def call(env)` with `env.status`,
+    `env.body` and `env.parallel?` is an `Env`, where `env.status` alone named
+    a struct and a class. Python, JavaScript and PHP parameters, and locals
+    the walk cannot type in any language, are typed the same way.
+  - **More arguments typed for the choice among overloads**: a field,
+    property or constant by its declared type or its value's; a lambda
+    against a function-typed parameter; a class literal against `Class` /
+    `KClass`; a concatenation, a comparison, `x.toString()`, a cast. An
+    overload that takes exactly the arguments passed comes before one that
+    needs a default; overloads a base class adds compete.
+  - **Elements of typed collections.** The variable of a loop over a
+    `List<Foo>`, `Foo[]`, `[]Foo` or `list[Foo]` (or over a call that
+    declares it returns one), the parameter of a lambda given to `forEach` /
+    `map` / `filter` (Kotlin's `it`), `xs[0]` and `xs.first()` are `Foo`.
+  - **Type parameters bound by an argument**: `fun <T> pick(x: T): T` gives
+    the argument's type, `fun <T> head(xs: List<T>): T` its element's.
+  - Go `resp, err := client.Get(url)` takes the first of the function's
+    results (it took the last, `error`): 235 calls in resty. Java `var x =
+    …` and `for (var x : xs)` are typed by the value; `var` was read as the
+    name of a type.
+  - A local that holds a value and is called (`handler(x)`, `builder::add`)
+    is no longer a construction of its type.
+  - A local assigned a call of its own name whose arguments name another
+    local (`let session = session(using: c)`) no longer sends the resolver
+    round in circles (a crash on four files of alamofire while this was
+    being written, caught by the comparison run; a golden holds it).
+
+  The audit on graphs rebuilt by 0.5.5 raises nothing but its note on orphan
+  nodes; the 31 builds take 16.1 to 16.6 s (14.6 to 15 s with 0.5.4).
 - Native engine 0.5.4, the three things 0.5.3 still named as missing. 1,088
   more edges on the 31 audit repositories and 71 gone, and 1,175 calls moved
   from one overload to another of the same name:

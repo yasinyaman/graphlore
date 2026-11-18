@@ -206,7 +206,37 @@ What the lookup takes from each language's own rules:
   header, competes with the secondary ones and is the class itself). The same
   comparison decides between a receiver's method and the class's around a
   lambda.
-- **Results that are type parameters.** A method that returns a type
+- **Arguments the site types.** For the choice among overloads an argument
+  is: a literal (string, number, flag), a lambda (against a parameter of a
+  function type, `Runnable`, `Action`), a class literal (against `Class` /
+  `KClass`), a concatenation with a string, a comparison, `x.toString()`, a
+  cast's type; a local, by its type or the type the source writes for it; a
+  field, property or constant, by its declared type or its value's. When
+  several overloads still fit alike, the one that takes exactly the arguments
+  passed comes before one that needs a default or a vararg; overloads a base
+  class adds under the name compete; and when nothing decides, **each
+  overload that fits is linked and every one of those edges is `INFERRED`**:
+  the call is of one of them (at most four are named).
+- **Untyped receivers, by what is asked of them.** A parameter or local with
+  no type and no typeable value is the one type of the project that answers
+  every member used on it in its definition — a method or field of its own or
+  of a base, in Ruby an attribute too — when at least two names that are not
+  the language's own (`map`, `get`, `to_s`) are used and one type fits (or
+  one that all the others derive from). `def call(env)` using `env.status`,
+  `env.body` and `env.parallel?` is an `Env`; a name called must be callable
+  (not in Ruby, where reading an attribute is a call). `INFERRED`: duck
+  typing writes no type, and a library's type could answer too.
+- **Elements of typed collections.** A local, parameter or field declared as
+  a collection (`List<Foo>`, `Foo[]`, `[]Foo`, `[Foo]`, `list[Foo]`), or a
+  function that declares it returns one, gives its element type to the
+  variable of a loop over it (`for (x in xs)`, `for x in xs`, `for _, x :=
+  range xs`, Java `for (var x : xs)`), to the first parameter of a lambda
+  given to an iteration method (`xs.forEach { x -> … }`, `xs.map(x => …)`,
+  Kotlin's `it`; `x.let { … }` has `x` itself), to `xs[0]` and to
+  `xs.first()` / `xs.get(i)`. Go's `v, err := f()` takes `f`'s first result.
+- **Results that are type parameters.** A function that returns its own type
+  parameter gives the type of the argument that binds it: `fun <T> pick(x:
+  T): T` the argument's, `fun <T> head(xs: List<T>): T` its element's. A method that returns a type
   parameter its type binds to itself (`fun tag(x: Any): T` in `interface
   Taggable<T : Taggable<T>>`, Java `B<T extends B<T>>`) returns the type it
   was called on, so a builder chain keeps its type. A local assigned a call
@@ -460,36 +490,40 @@ file pairs). The native graph has definitions graphify folds into the one
 around them (a function nested in a method, the setter beside a getter of the
 same name); an edge from one of those is compared as an edge from the paired
 definition it belongs to, as graphify records it. On the 31 repositories of the
-[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.4,
+[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.5,
 measured 2026-11-18), as native / graphify edges and the share of graphify's
 that the native graph has too:
 
 | Language | same definition | imports (file pairs) | calls | bases | type references |
 |---|--:|--:|--:|--:|--:|
-| Python | 100% | 212 / 219 (96%) | 2,958 / 834 (94%) | 73 / 62 (100%) | 439 / 494 (68%) |
-| JavaScript | 93.5%⁵ | 190 / 305 (59%) | 1,313 / 2,058 (43%)¹ | 1 / 1 | 3 / 0 |
-| TypeScript | 99.4% | 527 / 634 (83%) | 809 / 687 (98%) | 25 / 20 (100%) | 736 / 156 (88%) |
+| Python | 100% | 212 / 219 (96%) | 2,963 / 834 (94%) | 73 / 62 (100%) | 439 / 494 (68%) |
+| JavaScript | 93.5%⁵ | 190 / 305 (59%) | 1,316 / 2,058 (43%)¹ | 1 / 1 | 3 / 0 |
+| TypeScript | 99.4% | 527 / 634 (83%) | 807 / 687 (98%) | 25 / 20 (100%) | 737 / 156 (88%) |
 | TSX | 99.7% | 253 / 316 (80%) | 435 / 456 (95%) | – | 42 / 4 |
-| Go | 100% | 538 / 950 (47%)² | 6,464 / 3,167 (99%) | 19 / 14 (100%) | 679 / 355 (100%) |
+| Go | 100% | 538 / 950 (47%)² | 6,700 / 3,167 (99%) | 19 / 14 (100%) | 678 / 355 (99%) |
 | Java | 100% | 1,105 / 1,010 (100%) | 5,661 / 5,123 (85%) | 415 / 168 (94%) | 3,989 / 1,930 (98%) |
-| Kotlin | 99.4% | 368 / 333 (95%) | 4,562 / 2,108 (71%) | 96 / 56 (93%) | 1,081 / 673 (91%) |
+| Kotlin | 99.4% | 368 / 333 (95%) | 4,594 / 2,108 (71%) | 96 / 56 (93%) | 1,085 / 673 (91%) |
 | Scala | 100% | 2 / 0 | 46 / 20 (45%) | 21 / 22 (95%) | 75 / 32 (100%) |
-| C# | 92.7% | 347 / 280 (30%)³ | 2,652 / 2,450 (93%) | 87 / 86 (98%) | 1,256 / 806 (99%) |
-| Rust | 93.3% | 314 / 370 (75%) | 1,807 / 853 (81%) | 53 / 41 (93%) | 1,242 / 895 (81%) |
-| Swift | 95.9% | 165 / 166 (–)³ | 5,147 / 2,141 (82%) | 190 / 164 (100%) | 1,090 / 580 (62%) |
+| C# | 92.7% | 347 / 280 (30%)³ | 2,777 / 2,450 (93%) | 87 / 86 (98%) | 1,256 / 806 (99%) |
+| Rust | 93.3% | 314 / 370 (75%) | 1,826 / 853 (82%) | 53 / 41 (93%) | 1,242 / 895 (81%) |
+| Swift | 95.9% | 166 / 166 (–)³ | 5,152 / 2,141 (82%) | 190 / 164 (100%) | 1,091 / 580 (62%) |
 | C | 100% | 89 / 77 (99%) | 864 / 791 (100%) | – | 253 / 130 (97%) |
-| C++ | 97.8% | 215 / 228 (93%) | 597 / 281 (33%)⁴ | 30 / 5 (100%) | 326 / 218 (88%) |
-| C/C++ headers | 90.6% | 164 / 172 (95%) | 360 / 348 (85%) | 11 / 12 (92%) | 515 / 289 (87%) |
-| Ruby | 99.7% | 42 / 0 | 433 / 375 (69%) | 46 / 15 (93%) | 28 / 0 |
+| C++ | 97.8% | 215 / 228 (93%) | 631 / 281 (33%)⁴ | 30 / 5 (100%) | 326 / 218 (88%) |
+| C/C++ headers | 90.6% | 164 / 172 (95%) | 361 / 348 (85%) | 11 / 12 (92%) | 515 / 289 (87%) |
+| Ruby | 99.7% | 42 / 0 | 445 / 375 (70%) | 46 / 15 (93%) | 28 / 0 |
 | PHP | 80.6% | 429 / 505 (84%) | 8,863 / 6,140 (90%) | 65 / 60 (98%) | 648 / 213 (95%) |
-| **All** | **94.4%** | **4,960 / 5,565 (75%)** | **42,971 / 27,832 (84%)** | **1,132 / 726 (97%)** | **12,402 / 6,775 (89%)** |
+| **All** | **94.4%** | **4,961 / 5,565 (75%)** | **43,441 / 27,832 (84%)** | **1,132 / 726 (97%)** | **12,407 / 6,775 (89%)** |
 
-Of the native calls, 8,771 (20%) are `INFERRED`, against 47% of graphify's.
-The share of graphify's calls found moves little from 0.5.2 to 0.5.4 (84.1% to
-84.3%) while the native graph gains some 2,900 edges: most of what these
-versions add — a call through a Kotlin `val` typed by its value, through a
-chain's results, to the constructor the arguments are for — graphify does not
-have either. Nor does this table see a call that moved from one overload to
+Of the native calls, 12,582 (29%) are `INFERRED`, against 47% of graphify's.
+That share was 20% before engine 0.5.5: a call of an overloaded name that the
+arguments do not decide used to be an `EXTRACTED` edge to the first overload,
+and is now an `INFERRED` edge to each overload that fits (999 calls, with
+the edges to the other overloads). The share of graphify's calls found has
+moved little since 0.5.2 (84.1% to 84.3%) while the native graph gained some
+3,700 edges: most of what these versions add — a call through a Kotlin `val`
+typed by its value, through a chain's results, through an element of a typed
+collection, to the constructor the arguments are for — graphify does not have
+either. Nor does this table see a call that moved from one overload to
 another of the same name: 0.5.4 moved 1,175 of them (742 in Kotlin, 288 in
 Java, 109 in Swift, 33 in C#).
 Reading a sample of each side's edges the other lacks, per language:
@@ -518,15 +552,16 @@ Reading a sample of each side's edges the other lacks, per language:
   a `references` edge here, and a method that builds an anonymous class
   (`new ToStringConverterFactory() { … }`) calls, in graphify's graph, the
   first anonymous class of that name in the file.
-- **What the native graph still lacks**, read from the same samples: an
-  overload among several that the count, the names and the types of the
-  arguments do not tell apart (an argument whose type the walk cannot say:
-  the result of a library call, an arithmetic expression), where the one
-  found first is named; a result typed by a type parameter that only the
-  arguments' types bind (`fun <T> first(xs: List<T>): T`); and, in the
-  languages that write no types, a receiver that is a parameter whose
-  method several types have (Ruby `env.status`): nothing in the source says
-  which, and nothing is guessed.
+- **What the source does not say**, and the native graph therefore leaves
+  open rather than lacks: which overload a call is of when the argument that
+  would decide is the result of a library call (`baseUrl(server.url("/"))`:
+  `String`, `URL` or `HttpUrl`?) — each overload that fits is linked,
+  `INFERRED`; and what an untyped parameter is when only one member is asked
+  of it and several types have it (Ruby `x.status`), or when two types answer
+  everything asked — no edge. Generic results are followed for a type
+  parameter bound to the type itself, handed explicitly, or bound by an
+  argument or its elements; not through a chain of generic calls
+  (`xs.map { … }.first()`).
 - **What only the native graph has** is mostly what a name lookup by itself
   cannot see: calls through a module object (`httpx.Response(...)`), through a
   typed local or field (`client = httpx.Client(); client.get()`,
@@ -550,8 +585,8 @@ builds take 13.3 s for the 31 repositories against graphify's 81.3 s
 faster of two clean builds each): 8.7 times faster at the median, from 2.1
 (todoapi, whose bundled JavaScript the native engine reads in full) to 17.2
 times; retrofit 2.9 s against 13.1 s, guzzle 0.9 s / 6.1 s, alamofire 1.2 s /
-5.4 s, got 0.9 s / 4.7 s (engine 0.5.1; with all that 0.5.4 resolves the same
-31 builds take 14.6 to 15 s). An update after a one-file change takes a third of
+5.4 s, got 0.9 s / 4.7 s (engine 0.5.1; with all that 0.5.5 resolves the same
+31 builds take 16.1 to 16.6 s). An update after a one-file change takes a third of
 a build ([above](#incremental-updates)).
 
 ### The polyglot audit on native graphs
@@ -597,9 +632,9 @@ but one convention finding, fixed since: `graphlore_surprises(limit=0)` cut its
 `shared_state` list without saying how much (`shared_state_left_out` does now).
 `SKELETON-EMPTY` went from 5 to 0, and the tool time stayed at 131 s.
 
-Rerun on graphs built by engine 0.5.3, and again by 0.5.4 (2026-11-18), the
-audit raises nothing on the native graphs but its `GRAPH-ORPHAN-NODES` note on
-19 of them; 115 to 121 s of tool time. What the table above still listed is
+Rerun on graphs built by engine 0.5.3, and again by 0.5.4 and 0.5.5
+(2026-11-18), the audit raises nothing on the native graphs but its
+`GRAPH-ORPHAN-NODES` note on 19 of them; 115 to 122 s of tool time. What the table above still listed is
 gone:
 
 - **`REPLY-TOO-LARGE`**: `graphlore_neighbors` cuts a hub at `limit` and says
