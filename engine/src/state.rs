@@ -382,6 +382,7 @@ impl State {
             context,
             from_def: None,
             from_owner: None,
+            args: None,
             byte: n.start_byte(),
         });
     }

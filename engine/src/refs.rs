@@ -529,6 +529,60 @@ fn value_type(v: Node, src: &[u8]) -> Option<Vec<String>> {
     }
 }
 
+fn is_comment(n: &Node) -> bool {
+    n.kind().contains("comment")
+}
+
+/// How many arguments a call passes: the entries of its argument list, and a
+/// trailing lambda (Kotlin, Swift) as one more.
+fn arg_count(n: Node) -> Option<u8> {
+    let direct = n.child_by_field_name("arguments");
+    let suffix = kids(n).into_iter().find(|c| c.kind() == "call_suffix");
+    let (list, trailing) = match (direct, suffix) {
+        (Some(a), _) => (a, 0),
+        (None, Some(sfx)) => {
+            let ks = kids(sfx);
+            let lambda = ks.iter().filter(|c| c.kind().contains("lambda")).count();
+            match ks.into_iter().find(|c| c.kind() == "value_arguments") {
+                Some(args) => (args, lambda),
+                None => return u8::try_from(lambda).ok(),
+            }
+        }
+        (None, None) => {
+            kids(n).into_iter().find(|c| c.kind().contains("argument")).map(|a| (a, 0))?
+        }
+    };
+    u8::try_from(kids(list).iter().filter(|c| !is_comment(c)).count() + trailing).ok()
+}
+
+/// How many parameters a callable declares (`self` / `cls` apart).
+fn param_count(n: Node, src: &[u8]) -> Option<u8> {
+    let list = n
+        .child_by_field_name("parameters")
+        .or_else(|| n.child_by_field_name("declarator")?.child_by_field_name("parameters"))
+        .or_else(|| {
+            kids(n).into_iter().find(|c| {
+                matches!(
+                    c.kind(),
+                    "function_value_parameters" | "parameter_list" | "formal_parameters"
+                )
+            })
+        });
+    let count = match list {
+        Some(ps) => kids(ps)
+            .iter()
+            .filter(|c| !is_comment(c) && c.kind() != "receiver_parameter")
+            .filter(|c| {
+                !matches!(c.kind(), "identifier" | "self_parameter")
+                    || !matches!(text(**c, src).as_str(), "self" | "cls" | "&self" | "&mut self")
+            })
+            .count(),
+        // Swift `init(a: Int, b: Int)`: the parameters are the declaration's own
+        None => kids(n).iter().filter(|c| c.kind() == "parameter").count(),
+    };
+    u8::try_from(count).ok()
+}
+
 fn is_self_member(n: Node, src: &[u8]) -> Option<String> {
     for (obj, member) in MEMBER_FIELDS {
         if let (Some(o), Some(m)) = (n.child_by_field_name(obj), n.child_by_field_name(member)) {
@@ -542,6 +596,104 @@ fn is_self_member(n: Node, src: &[u8]) -> Option<String> {
 }
 
 /// Typed names a node declares: `(name, type path, declared, field)`.
+/// A closure's byte range and the names it binds (name, type path, declared).
+type ClosureScope = (usize, usize, Vec<(String, Vec<String>, bool)>);
+
+/// Give each closure parameter a name of its own (`r@1042`) in the uses
+/// inside the closure, and a local of that name: `r` in `func(w
+/// http.ResponseWriter, r *http.Request) { … }` is the request there and
+/// whatever `r` was outside, and an untyped block parameter is no outer name.
+fn bind_closure_params(closures: &[ClosureScope], refs: &mut [RefFact], locals: &mut Vec<Local>) {
+    if closures.is_empty() {
+        return;
+    }
+    // innermost first: the smallest range that holds a use binds its name
+    let mut order: Vec<usize> = (0..closures.len()).collect();
+    order.sort_by_key(|&i| closures[i].1 - closures[i].0);
+    let mut used = vec![false; closures.len()];
+    for r in refs.iter_mut() {
+        let Some(head) = r.path.first() else { continue };
+        let bare = head.trim_start_matches('$');
+        let found = order.iter().copied().find(|&i| {
+            let (start, end, params) = &closures[i];
+            *start <= r.byte && r.byte < *end && params.iter().any(|(n, _, _)| n == bare)
+        });
+        if let Some(i) = found {
+            let sigil = if head.starts_with('$') { "$" } else { "" };
+            r.path[0] = format!("{sigil}{bare}@{}", closures[i].0);
+            used[i] = true;
+        }
+    }
+    for (i, (start, _, params)) in closures.iter().enumerate() {
+        if !used[i] {
+            continue;
+        }
+        for (name, path, declared) in params {
+            locals.push(Local {
+                name: format!("{name}@{start}"),
+                path: path.clone(),
+                declared: *declared,
+                field: false,
+                assigned: false,
+                from_def: None,
+                byte: *start,
+            });
+        }
+    }
+}
+
+/// The names a closure binds: `|headers|` (Ruby, Rust), `x -> …` (Java),
+/// `{ property -> … }` (Kotlin), `item => …` (JS, C#), `lambda x: …`,
+/// `rescue => e`. Typed where the source writes a type, else untyped: either
+/// way the name is not an outer one.
+fn closure_params(n: Node, src: &[u8]) -> Vec<(String, Vec<String>, bool)> {
+    let mut stack: Vec<(Node, usize)> = match n.kind() {
+        "block_parameters"
+        | "lambda_parameters"
+        | "closure_parameters"
+        | "inferred_parameters"
+        | "exception_variable" => vec![(n, 0)],
+        "arrow_function"
+        | "function_expression"
+        | "lambda_expression"
+        | "anonymous_function"
+        | "anonymous_function_creation_expression"
+        | "func_literal"
+        | "lambda" => ["parameter", "parameters"]
+            .iter()
+            .filter_map(|f| n.child_by_field_name(f))
+            .map(|p| (p, 0))
+            .collect(),
+        _ => return Vec::new(),
+    };
+    let mut out = Vec::new();
+    while let Some((p, depth)) = stack.pop() {
+        let k = p.kind();
+        if matches!(k, "identifier" | "simple_identifier" | "variable_name") {
+            if let Some(name) = bound_name(p, src) {
+                if !matches!(name.as_str(), "self" | "this" | "_") {
+                    out.push((name, Vec::new(), false));
+                }
+            }
+            continue;
+        }
+        if k.contains("type") || depth > 3 {
+            continue;
+        }
+        let typed = locals_of(p, src, true);
+        if !typed.is_empty() {
+            out.extend(typed.into_iter().map(|(name, path, declared, _)| (name, path, declared)));
+            continue;
+        }
+        // a parameter with a default or a pattern: its name, not its value
+        match p.child_by_field_name("name").or_else(|| p.child_by_field_name("pattern")) {
+            Some(name) => stack.push((name, depth + 1)),
+            None => stack.extend(kids(p).into_iter().map(|c| (c, depth + 1))),
+        }
+    }
+    out
+}
+
 fn locals_of(n: Node, src: &[u8], in_params: bool) -> Vec<(String, Vec<String>, bool, bool)> {
     let k = n.kind();
     let mut out = Vec::new();
@@ -784,6 +936,7 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
             context,
             from_def: def,
             from_owner: None,
+            args: None,
             byte: n.start_byte(),
         });
     };
@@ -794,6 +947,8 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
     // `(node, depth)`; `anc` holds the ancestors of the node being visited
     let mut stack = vec![(root, 0usize)];
     let mut anc: Vec<Node> = Vec::new();
+    // closures that are no definitions: (start, end, the names they bind)
+    let mut closures: Vec<ClosureScope> = Vec::new();
     let mut steps = 0usize;
     while let Some((n, depth)) = stack.pop() {
         anc.truncate(depth);
@@ -831,6 +986,15 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
         if let Some(&di) = by_node.get(&n.id()) {
             if let Some(o) = m.object_of(n, src) {
                 facts.defs[di].object = Some(o);
+            }
+            if facts.defs[di].kind.is_callable() {
+                facts.defs[di].receiver = m.receiver_of(n, src);
+            }
+            if matches!(n.kind(), "object_creation_expression" | "object_literal") {
+                facts.defs[di].anonymous = true;
+            }
+            if facts.defs[di].kind.is_callable() {
+                facts.defs[di].params = param_count(n, src);
             }
             if facts.defs[di].kind.is_class_like() {
                 let name = facts.defs[di].name.clone();
@@ -1011,6 +1175,21 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
             }
         }
         if !by_node.contains_key(&n.id()) {
+            // the parameters of a closure, a block or a handler that is no
+            // definition of its own: names of its body only
+            let params = closure_params(n, src);
+            if !params.is_empty() {
+                // a parameter list stands for the block around it
+                let body = if n.kind().ends_with("_parameters") || n.kind() == "exception_variable"
+                {
+                    anc.last().copied().unwrap_or(n)
+                } else {
+                    n
+                };
+                closures.push((body.start_byte(), body.end_byte(), params));
+            }
+        }
+        if !by_node.contains_key(&n.id()) {
             // an untyped `x = …` declares a local only where assigning declares
             // (Python, Ruby); elsewhere it writes a variable declared before
             let plain_assignment = matches!(n.kind(), "assignment" | "assignment_expression")
@@ -1063,7 +1242,30 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
             // reference, not a call of the enclosing scope
         } else if let Some((kind, path)) = callee(n, src) {
             let context = if kind == RefKind::New { "constructor" } else { "call" };
-            push(&mut refs, n, kind, path, context, None);
+            // `new Callback<T>() { … }` is a definition itself: the class has
+            // that type as its base, and the method around it constructs it
+            let anon = by_node.get(&n.id()).copied().filter(|_| {
+                kind == RefKind::New && crate::generic::anonymous_class(n, src).is_some()
+            });
+            let at = match anon {
+                Some(di) => {
+                    push(&mut refs, n, RefKind::Base, path.clone(), "", Some(di));
+                    let at = refs.len();
+                    let outer = facts.defs[di].parent;
+                    if outer.is_some() {
+                        push(&mut refs, n, kind, path, context, outer);
+                    }
+                    at
+                }
+                None => {
+                    let at = refs.len();
+                    push(&mut refs, n, kind, path, context, None);
+                    at
+                }
+            };
+            if let Some(r) = refs.get_mut(at) {
+                r.args = arg_count(n);
+            }
             // functions handed over as values: `MockTransport(app)`,
             // `map(str.strip, xs)`, `hooks = [on_request]` inside an argument
             if let Some(args) = n.child_by_field_name("arguments").or_else(|| {
@@ -1105,6 +1307,7 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
     add_extras(&mut facts.defs, &extras, m, src);
     let defs = &facts.defs;
     refs.extend(state.finish(defs, &imports, m.needs_import(), |bytes| innermost(defs, bytes)));
+    bind_closure_params(&closures, &mut refs, &mut locals);
     // the innermost definition around each use (a sweep: defs are in source
     // pre-order, so a stack of open ranges is the chain of ancestors)
     assign_defs(&facts.defs, &mut refs);
@@ -1303,6 +1506,9 @@ fn add_extras(
             table: crate::resources::declared_table(*node, src, None, ""),
             value: state_value(*node, src),
             value_path: state_value_path(*node, src),
+            receiver: None,
+            anonymous: false,
+            params: None,
             node_id: node.id(),
             start_byte: node.start_byte(),
             end_byte: node.end_byte(),

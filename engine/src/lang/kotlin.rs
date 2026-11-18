@@ -15,6 +15,22 @@ use crate::refs::path_of;
 pub struct Kotlin;
 
 impl LanguageModule for Kotlin {
+    /// `fun KmProperty.toPropertySpec()`: the receiver's type.
+    fn receiver_of(&self, node: Node, src: &[u8]) -> Option<String> {
+        if node.kind() != "function_declaration" {
+            return None;
+        }
+        let recv = kids(node).into_iter().find(|c| c.kind() == "receiver_type")?;
+        let mut queue: std::collections::VecDeque<Node> = kids(recv).into();
+        while let Some(n) = queue.pop_front() {
+            if n.kind() == "type_identifier" {
+                return Some(text(n, src));
+            }
+            queue.extend(kids(n));
+        }
+        None
+    }
+
     /// Top-level `var` / `val` (class and companion properties are
     /// `extra_def`'s).
     fn state_defs<'t>(&self, n: Node<'t>, src: &[u8]) -> Vec<(Node<'t>, Node<'t>, DefKind)> {

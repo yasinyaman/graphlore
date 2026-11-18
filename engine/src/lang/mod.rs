@@ -334,6 +334,12 @@ pub trait LanguageModule: Send + Sync {
         None
     }
 
+    /// The type a definition node extends when it is an extension function or
+    /// method: Kotlin `fun T.name()`, C# `static R Name(this T x)`.
+    fn receiver_of(&self, _node: Node, _src: &[u8]) -> Option<String> {
+        None
+    }
+
     /// Whether a node is a field or property declaration whose `type` field is
     /// a type reference of the enclosing type.
     fn is_field(&self, node: Node) -> bool {

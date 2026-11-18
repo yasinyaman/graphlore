@@ -14,6 +14,22 @@ use crate::refs::{import, path_of};
 pub struct CSharp;
 
 impl LanguageModule for CSharp {
+    /// `static bool IsEmpty(this string? value)`: the type of the `this`
+    /// parameter, bare (`string`, `IEnumerable`).
+    fn receiver_of(&self, node: Node, src: &[u8]) -> Option<String> {
+        if node.kind() != "method_declaration" {
+            return None;
+        }
+        let params = node.child_by_field_name("parameters")?;
+        let first = kids(params).into_iter().find(|p| p.kind() == "parameter")?;
+        let this = all_kids(first).iter().any(|c| text(*c, src) == "this");
+        let ty = first.child_by_field_name("type").filter(|_| this)?;
+        let t = text(ty, src);
+        let bare = t.split('<').next().unwrap_or("").trim_end_matches(['?', ']', '[']);
+        let last = bare.rsplit('.').next().unwrap_or("").trim();
+        (!last.is_empty()).then(|| last.to_string())
+    }
+
     /// `static` fields (shared by the whole program) and `const` / `static
     /// readonly` ones (constants).
     fn state_defs<'t>(&self, n: Node<'t>, src: &[u8]) -> Vec<(Node<'t>, Node<'t>, DefKind)> {

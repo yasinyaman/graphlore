@@ -99,6 +99,19 @@ pub struct Def {
     /// The type this definition belongs to when that is not its lexical parent:
     /// a Go receiver, a Rust `impl` target, C++ `Session::Get`, a Swift extension.
     pub owner: Option<String>,
+    /// The type an extension function or method is written for (Kotlin `fun
+    /// Km.toSpec()`, C# `static R Name(this string s)`): a member of that type
+    /// to its callers, a plain function where it is defined.
+    #[serde(default)]
+    pub receiver: Option<String>,
+    /// A class with no name of its own (Java `new Callback<T>() { … }`, a
+    /// Kotlin `object : Listener { … }`), which goes by the type it
+    /// implements: no name lookup finds it.
+    #[serde(default)]
+    pub anonymous: bool,
+    /// How many parameters a callable declares.
+    #[serde(default)]
+    pub params: Option<u8>,
     /// Inside a test region of a source file (Rust `#[cfg(test)]`, `#[test]`).
     pub is_test: bool,
     /// The object a function is assigned to as a property (JS `res.send =
@@ -288,6 +301,10 @@ pub struct RefFact {
     /// The type a use belongs to when no definition encloses it: a Rust
     /// `impl Trait for Type` (the use is `Type`'s).
     pub from_owner: Option<String>,
+    /// How many arguments a call or construction passes, where the site
+    /// shows them: what picks one of several constructors.
+    #[serde(default)]
+    pub args: Option<u8>,
     #[serde(skip)]
     pub byte: usize,
 }
