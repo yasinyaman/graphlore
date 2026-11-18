@@ -154,7 +154,8 @@ pub fn assemble(files: &[FileFacts]) -> Assembled {
         };
         let module = lang.module();
         let defs = &facts.defs;
-        let emitted: Vec<bool> = defs.iter().map(|d| module.emits_node(d.kind)).collect();
+        let emitted: Vec<bool> =
+            defs.iter().map(|d| module.emits_node(d.kind) && !d.misread).collect();
         let parents = resolve_parents(defs, &emitted);
         let mut node_ids: Vec<Option<String>> = vec![None; defs.len()];
         let mut chains: Vec<Vec<String>> = vec![Vec::new(); defs.len()];

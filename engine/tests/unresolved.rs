@@ -126,3 +126,32 @@ fn a_library_interfaces_one_implementation_is_marked_on_an_untyped_receiver() {
     let marker = row(12).expect("$tag->label() is a row");
     assert_eq!(marker["library_like"], Value::Null, "{marker:#?}");
 }
+
+#[test]
+fn cpp_std_names_are_the_librarys_even_where_the_project_opens_std() {
+    let dir = project(
+        "cppstd",
+        &[
+            // the project opens `namespace std` for a specialization, and has
+            // one `async` and one `share` of its own
+            (
+                "include/wrap.h",
+                "namespace shop {\ntemplate <class T> class Wrapper {\n  public:\n    T share() { return future.share(); }\n  private:\n    std::future<T> future;\n};\ntemplate <class Fn> auto async(Fn fn) { return fn(); }\n}\nnamespace std {\ntemplate <> struct hash<shop::Wrapper<int>> {};\n}\n",
+            ),
+            ("src/run.cpp", "#include \"../include/wrap.h\"\nint run() {\n    auto f = std::async(std::launch::async, [] { return 1; });\n    std::promise<void> release;\n    auto gate = release.get_future().share();\n    return 0;\n}\n"),
+        ],
+    );
+    let out = dir.join("unresolved.json");
+    let mut opts = BuildOptions::new(&dir);
+    opts.unresolved = Some(out.clone());
+    build_graph(&opts).unwrap();
+    let rows: Vec<Value> = serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+    let row = |path: &str| rows.iter().find(|r| r["path"] == path).cloned();
+    let call = row("std.async").expect("std::async is a row");
+    assert_eq!(call["library_like"], "the head is a library's type or global", "{call:#?}");
+    let local = row("release.get_future.().share").expect("release's share is a row");
+    assert_eq!(local["library_like"], "the receiver is a library's", "{local:#?}");
+    let held = row("future.share").expect("future.share is a row");
+    assert_eq!(held["library_like"], "the receiver is a library's", "{held:#?}");
+}

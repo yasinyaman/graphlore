@@ -767,7 +767,7 @@ file pairs). The native graph has definitions graphify folds into the one
 around them (a function nested in a method, the setter beside a getter of the
 same name); an edge from one of those is compared as an edge from the paired
 definition it belongs to, as graphify records it. On the 31 repositories of the
-[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.28,
+[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.30,
 measured 2026-11-18), as native / graphify edges and the share of graphify's
 that the native graph has too:
 
@@ -785,13 +785,13 @@ that the native graph has too:
 | Rust | 93.3% | 314 / 370 (75%) | 2,016 / 853 (86%) | 53 / 41 (93%) | 1,245 / 895 (81%) |
 | Swift | 95.9% | 166 / 166 (–)³ | 5,494 / 2,141 (83%) | 190 / 164 (100%) | 1,091 / 580 (62%) |
 | C | 100% | 89 / 77 (99%) | 864 / 791 (100%) | – | 253 / 130 (97%) |
-| C++ | 97.8% | 215 / 228 (93%) | 645 / 281 (33%)⁴ | 30 / 5 (100%) | 326 / 218 (88%) |
+| C++ | 97.8% | 215 / 228 (93%) | 745 / 281 (34%)⁴ | 30 / 5 (100%) | 326 / 218 (88%) |
 | C/C++ headers | 90.6% | 164 / 172 (95%) | 358 / 348 (85%) | 11 / 12 (92%) | 515 / 289 (87%) |
 | Ruby | 99.7% | 42 / 0 | 443 / 375 (69%) | 46 / 15 (93%) | 28 / 0 |
 | PHP | 80.6% | 429 / 505 (84%) | 8,873 / 6,140 (90%) | 65 / 60 (98%) | 648 / 213 (95%) |
-| **All** | **94.4%** | **4,962 / 5,565 (75%)** | **44,376 / 27,832 (85%)** | **1,136 / 726 (97%)** | **12,401 / 6,775 (89%)** |
+| **All** | **94.4%** | **4,962 / 5,565 (75%)** | **44,491 / 27,832 (85%)** | **1,136 / 726 (97%)** | **12,401 / 6,775 (89%)** |
 
-Of the native calls, 12,608 (28%) are `INFERRED`, against 47% of graphify's.
+Of the native calls, 12,743 (29%) are `INFERRED`, against 47% of graphify's.
 That share was 20% before engine 0.5.5: a call of an overloaded name that the
 arguments do not decide used to be an `EXTRACTED` edge to the first overload,
 and is now an `INFERRED` edge to each overload that fits (999 calls, with
@@ -834,6 +834,20 @@ two edges of got are gone that named a function defined in another loop
 for a destructured loop variable of the same name. The maps of these
 repositories that hold project types are mostly looked up by key once, or
 not walked at all.
+Engine 0.5.30 (C++ locals) reads `Session session;` as a local of its type
+(a declaration without a value had none: only `T x = …`, `T x(1)` and `T
+x{…}` were read), and `cpr::ThreadPool pool(context);` as a variable
+constructed from the local `context`: the grammar reads a declaration of a
+function `pool` taking a `context`, and the language makes it a variable
+because the local hides any type of that name. Such a declaration keeps its
+span (`spans.py` reads it the same way) and gets no node and answers no name
+(`Def::misread`). cpr gets 538 `EXTRACTED` calls and 140 `INFERRED` ones
+(`session.SetUrl(…)` 136 times, `multiperform.AddSession(…)` 46; the
+`INFERRED` ones are calls of overloads the arguments do not decide, such as
+`session.SetPayload(…)`), and 13 nodes of misread declarations are gone
+(`std::istringstream stream(headers)` was a function `stream` of
+`parseHeader`, with a call to it); hiredis gets 10 reads and writes of a
+struct's fields (`redisOptions options; options.push_cb = …`).
 Engine 0.5.28 (RSpec) reads `let(:conn) { … }`, `let!`, `subject(:request)
 { … }` and a nameless `subject { … }` as methods of the block they are
 written in: a name of that `describe` / `context` only, the innermost of
@@ -1190,7 +1204,7 @@ implicit members since 0.5.17: 39 whose place gives no type are rows now
 closure parameters and variables of express's tests. What is left at file
 level there is `app.use` and `app.set` (842 rows of express), names too
 short and too common to guess by. Engine 0.5.19 takes 123 more off (6,362;
-C# 349 from 470; 6,360 with 0.5.20, 6,348 with 0.5.21, 6,285 with 0.5.22, 6,237 with 0.5.25, 6,206 with 0.5.27, 6,166 with 0.5.28). Most of what C# has left is not the project's: `Assert.
+C# 349 from 470; 6,360 with 0.5.20, 6,348 with 0.5.21, 6,285 with 0.5.22, 6,237 with 0.5.25, 6,206 with 0.5.27, 6,166 with 0.5.28, 6,156 with 0.5.30). Most of what C# has left is not the project's: `Assert.
 NotNull` beside its own `Ensure.NotNull` (77), `WireMockServer.Start` (23).
 
 By then most rows were of that kind: a library's name the project happens
@@ -1231,7 +1245,11 @@ C# tests; 1,009 are left unmarked — Ruby 239, PHP 137, TypeScript 124, Rust
 100, C# 76, Swift 61, JavaScript 55, C++ 50, Kotlin 47, Go 34, C 33, Java 26,
 Python 17, TSX 6, Scala 4. The mark does not know which members the library
 type declares: symfony-demo's `$user->getFullName()` is marked beside the
-`getRoles()` `UserInterface` does declare.) The 2,114 by language: PHP 445, TypeScript 405, Ruby 304, C# 196, Rust 192,
+`getRoles()` `UserInterface` does declare. 0.5.30 marks the C and C++ calls
+on `std` (`std::async(…)`, and a member of a field or local declared with a
+`std::` type, as written, `Def::written_head` / `Local::written_head`: the
+readers of types drop a C++ namespace), and reads C++ locals; C++ is left
+with 28 unmarked rows, from 50.) The 2,114 by language: PHP 445, TypeScript 405, Ruby 304, C# 196, Rust 192,
 C++ 169, Swift 94, Kotlin 79, JavaScript 71, Java 49, Go 34, C 33, Python
 20, TSX 19, Scala 4. They are still an upper bound: the marks are
 conservative, and PHP's and TypeScript's rows are mostly PSR-7 and Node

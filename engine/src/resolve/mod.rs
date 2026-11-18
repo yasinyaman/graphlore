@@ -1585,8 +1585,9 @@ impl<'a> Project<'a> {
                         self.attr_owners.entry((fam, a.clone())).or_default().push((fi, di));
                     }
                 }
-                // a class with no name of its own answers to none
-                if d.anonymous {
+                // a class with no name of its own answers to none, nor a
+                // variable the grammar took for a declaration
+                if d.anonymous || d.misread {
                     continue;
                 }
                 // a method declared for a type (Go receiver, Rust impl, C++
@@ -2698,6 +2699,20 @@ impl<'a> Project<'a> {
 
     /// A local assigned something external (`ts := httptest.NewServer()`):
     /// its methods are the external type's, never a project namesake's.
+    /// The first name of the type a local's declaration writes (C, C++:
+    /// `std` of `std::promise<void> release;`).
+    fn local_written_head(&self, f: usize, d: Option<usize>, name: &str) -> Option<&str> {
+        let defs = &self.files[f].defs;
+        let mut cur = d;
+        while let Some(x) = cur {
+            if let Some(&li) = self.locals.get(&(f, x, name.to_string())) {
+                return self.files[f].locals[li].written_head.as_deref();
+            }
+            cur = defs[x].parent;
+        }
+        None
+    }
+
     fn is_external_local(&self, f: usize, d: Option<usize>, name: &str) -> bool {
         let defs = &self.files[f].defs;
         let mut cur = d;
@@ -5014,12 +5029,26 @@ impl<'a> Project<'a> {
             && bare_head.chars().next().is_some_and(|c| c.is_uppercase())
             && !self.by_name.contains_key(bare_head)
             && !self.is_local_name(f, d, bare_head);
+        // C, C++: `std::…` is the library's, even where the project opens
+        // `namespace std { }` to add a specialization
+        let std_head = fam == Family::C && bare_head == "std" && r.path.len() >= 2;
+        // a field or variable declared with a `std::` type
+        let std_field = || {
+            let held = self.resolve_path(f, d, &r.path[..1], true);
+            matches!(held, Some((Target::Def(t), _)) if self.def(t).written_head.as_deref() == Some("std"))
+        };
+        let std_held = fam == Family::C
+            && (self.local_written_head(f, d, bare_head) == Some("std")
+                || (reason == "field or variable: its type names nothing" && std_field()));
         let test = |i: usize, def: &Def| {
             def.is_test || crate::community::is_test_path(&self.files[i].path)
         };
-        let library_like = if reason == "library name" || reason == "local of a library type" {
+        let library_like = if reason == "library name"
+            || reason == "local of a library type"
+            || std_held
+        {
             Some("the receiver is a library's")
-        } else if outside_head {
+        } else if outside_head || std_head {
             Some("the head is a library's type or global")
         } else if core.contains(&name.as_str())
             || COMMON_METHODS.iter().any(|m| m.to_lowercase() == lower)
