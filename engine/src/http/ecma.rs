@@ -18,7 +18,7 @@ use crate::facts::FileFacts;
 use crate::generic::{kids, line, text};
 use crate::refs::{innermost, path_of, string_value};
 
-const SERVER_FRAMEWORKS: &[&str] =
+pub const SERVER_FRAMEWORKS: &[&str] =
     &["express", "fastify", "koa-router", "@koa/router", "restify", "polka"];
 const ROUTER_NAMES: &[&str] = &["app", "router", "server", "api", "routes", "route", "r"];
 const HANDLER_KINDS: &[&str] = &[

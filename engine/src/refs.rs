@@ -525,7 +525,198 @@ fn value_type(v: Node, src: &[u8]) -> Option<Vec<String>> {
         | "parenthesized_expression"
         | "reference_expression"
         | "try_expression" => kids(v).into_iter().find_map(|c| value_type(c, src)),
-        _ => callee(v, src).map(|(_, p)| p).filter(|p| !p.iter().any(|s| s == UNKNOWN)),
+        // a chain (`builder(x).tag(y)`) is kept: the resolver follows what
+        // each call returns; one that starts at something unnameable is not
+        _ => callee(v, src).map(|(_, p)| p).filter(|p| p.first().is_some_and(|s| s != UNKNOWN)),
+    }
+}
+
+/// A construction whose type is written on the declaration and not at the
+/// call: C# `Box b = new(1, 2)` (a local, a field, a property), C++ `Buf b(3)`
+/// and `Buf b{3}`. The type's path and how many arguments are passed.
+fn declared_construction(
+    n: Node,
+    src: &[u8],
+    anc: &[Node],
+    lang: Option<crate::lang::Lang>,
+) -> Option<(Vec<String>, Option<u8>)> {
+    let count =
+        |list: Node| u8::try_from(kids(list).iter().filter(|c| !is_comment(c)).count()).ok();
+    match n.kind() {
+        "implicit_object_creation_expression" => {
+            let decl =
+                anc.iter().rev().take(3).find(|a| {
+                    matches!(a.kind(), "variable_declaration" | "property_declaration")
+                })?;
+            let path = path_of(decl.child_by_field_name("type")?, src)?;
+            let args = kids(n).into_iter().find(|c| c.kind() == "argument_list").and_then(count);
+            Some((path, args))
+        }
+        "init_declarator" if lang == Some(crate::lang::Lang::Cpp) => {
+            let value = n.child_by_field_name("value")?;
+            if !matches!(value.kind(), "argument_list" | "initializer_list") {
+                return None;
+            }
+            // the object itself, not a pointer or a reference to one
+            if n.child_by_field_name("declarator")?.kind() != "identifier" {
+                return None;
+            }
+            let decl = anc.last().filter(|a| a.kind() == "declaration")?;
+            let path = path_of(decl.child_by_field_name("type")?, src)?;
+            Some((path, count(value)))
+        }
+        _ => None,
+    }
+}
+
+/// The receiver type of a callable's last function-typed parameter that has
+/// one: Kotlin `fun withIndent(block: Builder.() -> Unit)`.
+fn lambda_receiver(n: Node, src: &[u8]) -> Option<Vec<String>> {
+    let params = kids(n).into_iter().find(|c| c.kind() == "function_value_parameters")?;
+    kids(params).into_iter().rev().filter(|p| p.kind() == "parameter").find_map(|p| {
+        let mut stack = kids(p);
+        while let Some(c) = stack.pop() {
+            match c.kind() {
+                "function_type" => {
+                    let recv = kids(c).into_iter().find(|x| x.kind() == "receiver_type")?;
+                    return first_type(recv, src);
+                }
+                "nullable_type" | "parenthesized_type" | "type_modifiers" => stack.extend(kids(c)),
+                _ => {}
+            }
+        }
+        None
+    })
+}
+
+/// A Kotlin call with a trailing lambda: the lambda's byte range and where
+/// its receiver, if it has one, comes from.
+fn receiver_lambda(n: Node, src: &[u8]) -> Option<(usize, usize, crate::facts::ReceiverOf)> {
+    use crate::facts::ReceiverOf;
+    if n.kind() != "call_expression" {
+        return None;
+    }
+    let suffix = kids(n).into_iter().find(|c| c.kind() == "call_suffix")?;
+    let ks = kids(suffix);
+    let lambda = ks.iter().find(|c| c.kind() == "annotated_lambda")?;
+    let (_, path) = callee(n, src)?;
+    let last = path.last()?.as_str();
+    let of = match last {
+        // the scope functions whose lambda has the value as its receiver
+        "apply" | "run" if path.len() > 1 => ReceiverOf::Value(path[..path.len() - 1].to_vec()),
+        "with" if path.len() == 1 => {
+            let args = ks.iter().find(|c| c.kind() == "value_arguments")?;
+            let arg = kids(*args).into_iter().next()?;
+            let value = kids(arg).into_iter().last()?;
+            ReceiverOf::Value(path_of(value, src).filter(|p| p[0] != UNKNOWN)?)
+        }
+        // `it`, not a receiver
+        "also" | "let" | "takeIf" | "takeUnless" => return None,
+        _ if path[0] == UNKNOWN => return None,
+        _ => ReceiverOf::Callee(path),
+    };
+    Some((lambda.start_byte(), lambda.end_byte(), of))
+}
+
+/// Give each use the innermost receiver lambda around it, and each lambda the
+/// one around it.
+fn bind_receivers(
+    found: &[(usize, usize, crate::facts::ReceiverOf)],
+    refs: &mut [RefFact],
+) -> Vec<crate::facts::ReceiverScope> {
+    if found.is_empty() || found.len() > usize::from(u16::MAX) {
+        return Vec::new();
+    }
+    // smallest range first: the first that holds a position is the innermost
+    let mut order: Vec<usize> = (0..found.len()).collect();
+    order.sort_by_key(|&i| found[i].1 - found[i].0);
+    let innermost = |byte: usize, inside: Option<usize>| {
+        order.iter().copied().find(|&i| {
+            Some(i) != inside
+                && found[i].0 <= byte
+                && byte < found[i].1
+                && inside.is_none_or(|x| found[i].1 - found[i].0 > found[x].1 - found[x].0)
+        })
+    };
+    for r in refs.iter_mut() {
+        r.recv = innermost(r.byte, None).and_then(|i| u16::try_from(i).ok());
+    }
+    found
+        .iter()
+        .enumerate()
+        .map(|(i, (start, _, of))| crate::facts::ReceiverScope {
+            of: of.clone(),
+            outer: innermost(*start, Some(i)).and_then(|o| u16::try_from(o).ok()),
+        })
+        .collect()
+}
+
+/// A function written where a value goes: its `return` is its own.
+fn is_closure(kind: &str) -> bool {
+    matches!(
+        kind,
+        "arrow_function"
+            | "function_expression"
+            | "lambda_expression"
+            | "lambda_literal"
+            | "anonymous_function"
+            | "anonymous_function_creation_expression"
+            | "func_literal"
+            | "closure_expression"
+            | "lambda"
+            | "do_block"
+    )
+}
+
+/// The value of a `return` statement.
+fn returned_value<'t>(n: Node<'t>, src: &[u8]) -> Option<Node<'t>> {
+    let v = match n.kind() {
+        "return_statement" | "return_expression" | "return" => {
+            kids(n).into_iter().find(|c| !is_comment(c))?
+        }
+        // Kotlin `return x`, `return@label x` (also `throw`, `break`)
+        "jump_expression" if text(n, src).starts_with("return") => {
+            kids(n).into_iter().rfind(|c| c.kind() != "label" && !is_comment(c))?
+        }
+        "control_transfer_statement" => n.child_by_field_name("result")?,
+        _ => return None,
+    };
+    // Ruby `return Foo.new`: the one argument
+    if v.kind() == "argument_list" {
+        let ks = kids(v);
+        return (ks.len() == 1).then(|| ks[0]);
+    }
+    Some(v)
+}
+
+/// The value a definition's body is, where it is an expression: Kotlin `fun
+/// f() = x`, Scala `def f = x`, `() => x`, the last expression of a Ruby method.
+fn body_value(n: Node) -> Option<Node> {
+    if let Some(fb) = kids(n).into_iter().find(|c| c.kind() == "function_body") {
+        return fb.child(0).filter(|c| c.kind() == "=").and_then(|_| kids(fb).into_iter().last());
+    }
+    let body = n.child_by_field_name("body")?;
+    match body.kind() {
+        "body_statement" => kids(body).into_iter().rfind(|c| !is_comment(c)),
+        k if k.contains("block") || k.contains("statement") || k == "function_body" => None,
+        _ if matches!(n.kind(), "arrow_function" | "function_definition" | "lambda_expression") => {
+            Some(body)
+        }
+        _ => None,
+    }
+}
+
+/// What a returned value constructs or calls; `self` for the object itself.
+fn returned_path(v: Node, src: &[u8]) -> Option<Vec<String>> {
+    if path_of(v, src).is_some_and(|p| p == ["self"]) {
+        return Some(vec!["self".into()]);
+    }
+    value_type(v, src)
+}
+
+fn note_return(def: &mut Def, path: Vec<String>) {
+    if def.returns.len() < 4 && !def.returns.contains(&path) {
+        def.returns.push(path);
     }
 }
 
@@ -553,6 +744,22 @@ fn arg_count(n: Node) -> Option<u8> {
         }
     };
     u8::try_from(kids(list).iter().filter(|c| !is_comment(c)).count() + trailing).ok()
+}
+
+/// Whether a call passes `this` / `self` as one of its arguments.
+fn passes_self(n: Node, src: &[u8]) -> bool {
+    let list = n.child_by_field_name("arguments").or_else(|| {
+        let sfx = kids(n).into_iter().find(|c| c.kind() == "call_suffix")?;
+        kids(sfx).into_iter().find(|c| c.kind() == "value_arguments")
+    });
+    list.is_some_and(|l| {
+        kids(l).into_iter().any(|a| {
+            // the argument itself, or the value of `name = this`
+            let v =
+                if a.kind().contains("argument") { kids(a).into_iter().last() } else { Some(a) };
+            v.and_then(|v| path_of(v, src)).is_some_and(|p| p == ["self"])
+        })
+    })
 }
 
 /// How many parameters a callable declares (`self` / `cls` apart).
@@ -849,13 +1056,31 @@ fn locals_of(n: Node, src: &[u8], in_params: bool) -> Vec<(String, Vec<String>, 
                         bound_name(x, src)
                     };
                     let Some(name) = name else { continue };
+                    // Kotlin `val c = Plain()`: the value sits beside the
+                    // `variable_declaration`, in the property declaration
+                    let beside = || {
+                        (d.kind() == "variable_declaration" && k == "property_declaration")
+                            .then(|| {
+                                kids(n)
+                                    .into_iter()
+                                    .filter(|c| c.id() != d.id())
+                                    .find(|c| callee(*c, src).is_some())
+                            })
+                            .flatten()
+                    };
                     let valued = x
                         .child_by_field_name("value")
                         .or_else(|| kids(x).into_iter().find(|c| callee(*c, src).is_some()))
+                        .or_else(beside)
                         .and_then(|v| value_type(v, src));
                     match (&d_type, valued) {
                         (Some(t), _) => out.push((name, t.clone(), true, field)),
                         (None, Some(t)) => out.push((name, t, false, field)),
+                        // `val n = 5` in a function: a local all the same,
+                        // which hides the outer name
+                        _ if k == "property_declaration" && !field => {
+                            out.push((name, Vec::new(), false, false));
+                        }
                         _ => {}
                     }
                 }
@@ -937,6 +1162,8 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
             from_def: def,
             from_owner: None,
             args: None,
+            self_arg: false,
+            recv: None,
             byte: n.start_byte(),
         });
     };
@@ -949,6 +1176,8 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
     let mut anc: Vec<Node> = Vec::new();
     // closures that are no definitions: (start, end, the names they bind)
     let mut closures: Vec<ClosureScope> = Vec::new();
+    // lambdas with a receiver: (start, end, where the receiver comes from)
+    let mut receivers: Vec<(usize, usize, crate::facts::ReceiverOf)> = Vec::new();
     let mut steps = 0usize;
     while let Some((n, depth)) = stack.pop() {
         anc.truncate(depth);
@@ -994,7 +1223,11 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
                 facts.defs[di].anonymous = true;
             }
             if facts.defs[di].kind.is_callable() {
+                facts.defs[di].lambda_receiver = lambda_receiver(n, src);
                 facts.defs[di].params = param_count(n, src);
+                if let Some(path) = body_value(n).and_then(|v| returned_path(v, src)) {
+                    note_return(&mut facts.defs[di], path);
+                }
             }
             if facts.defs[di].kind.is_class_like() {
                 let name = facts.defs[di].name.clone();
@@ -1194,7 +1427,16 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
             // (Python, Ruby); elsewhere it writes a variable declared before
             let plain_assignment = matches!(n.kind(), "assignment" | "assignment_expression")
                 && !m.assignment_declares();
-            for (name, path, declared, field) in locals_of(n, src, false) {
+            for (name, mut path, declared, field) in locals_of(n, src, false) {
+                // Ruby `s = stubs`: a bare name on the right is a call (or
+                // another local), and the local is what that gives
+                if path.is_empty() && facts.lang == Some(crate::lang::Lang::Ruby) {
+                    if let Some(r) =
+                        n.child_by_field_name("right").filter(|r| r.kind() == "identifier")
+                    {
+                        path = vec![text(r, src)];
+                    }
+                }
                 if plain_assignment && path.is_empty() {
                     continue;
                 }
@@ -1227,6 +1469,20 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
                 {
                     push(&mut refs, n, RefKind::Call, path, "jsx", None);
                 }
+            }
+        }
+        if let Some(found) = receiver_lambda(n, src) {
+            receivers.push(found);
+        }
+        // `return Foo()` in a definition (not in a closure inside it)
+        if let Some(path) = returned_value(n, src).and_then(|v| returned_path(v, src)) {
+            let home = anc.iter().rev().find_map(|a| match by_node.get(&a.id()) {
+                Some(&di) if facts.defs[di].kind.is_callable() => Some(Some(di)),
+                _ if is_closure(a.kind()) => Some(None),
+                _ => None,
+            });
+            if let Some(Some(di)) = home {
+                note_return(&mut facts.defs[di], path);
             }
         }
         // reads and writes of variables, fields and constants, and of what
@@ -1265,6 +1521,7 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
             };
             if let Some(r) = refs.get_mut(at) {
                 r.args = arg_count(n);
+                r.self_arg = passes_self(n, src);
             }
             // functions handed over as values: `MockTransport(app)`,
             // `map(str.strip, xs)`, `hooks = [on_request]` inside an argument
@@ -1298,6 +1555,12 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
                     }
                 }
             }
+        } else if let Some((path, args)) = declared_construction(n, src, &anc, facts.lang) {
+            let at = refs.len();
+            push(&mut refs, n, RefKind::New, path, "constructor", None);
+            if let Some(r) = refs.get_mut(at) {
+                r.args = args;
+            }
         }
         let mut cursor = n.walk();
         let children: Vec<Node> = n.children(&mut cursor).filter(|c| c.is_named()).collect();
@@ -1308,6 +1571,7 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
     let defs = &facts.defs;
     refs.extend(state.finish(defs, &imports, m.needs_import(), |bytes| innermost(defs, bytes)));
     bind_closure_params(&closures, &mut refs, &mut locals);
+    facts.receivers = bind_receivers(&receivers, &mut refs);
     // the innermost definition around each use (a sweep: defs are in source
     // pre-order, so a stack of open ranges is the chain of ancestors)
     assign_defs(&facts.defs, &mut refs);
@@ -1509,6 +1773,8 @@ fn add_extras(
             receiver: None,
             anonymous: false,
             params: None,
+            returns: Vec::new(),
+            lambda_receiver: None,
             node_id: node.id(),
             start_byte: node.start_byte(),
             end_byte: node.end_byte(),

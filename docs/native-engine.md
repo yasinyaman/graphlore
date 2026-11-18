@@ -152,6 +152,39 @@ What the lookup takes from each language's own rules:
   named; when that picks none or several, only the type is. A Kotlin class's
   primary constructor is no definition, so a secondary one that fits is
   `INFERRED`.
+- **A construction typed by its declaration**: C# `Box b = new(1, 2)` (a
+  local, a field, a property) and C++ `Buf b(3)` / `Buf b{3}` construct the
+  type the declaration names.
+- **What a call gives.** A function that declares its result gives that type;
+  one that declares none gives what its `return`s and expression body
+  construct, when they agree (`fun builder(n) = Builder(n)`, `return Conn()`
+  beside `return None`, `return self`, the last expression of a Ruby method),
+  and what is reached through such a result is `INFERRED`. A closure's `return`
+  is the closure's. A local keeps the whole chain it is assigned
+  (`val b = builder(x).tag(y)`, `res := c.R().SetBody(b)`) and is typed by
+  following each call's result; in Kotlin the value sits beside the
+  declaration (`val c = Writer(out)`). Inside its own initializer a name is
+  still the outer one (`val builder = builder(x)`, `let tls =
+  tls::Config::builder()`). In Ruby a name called without parentheses is
+  followed the same way (`stubs.match(env)`, `s = stubs`).
+- **Lambdas with a receiver** (Kotlin). Inside `x.apply { … }`, `x.run { … }`,
+  `with(x) { … }` and a lambda passed to a parameter typed `T.() -> R`
+  (`buildCodeBlock { indent() }`), a bare name is a member of the receiver, or
+  an extension written for its type, before it is a name of the class around;
+  nested lambdas are looked through from the innermost. When the class around
+  has a callable of that name too, the receiver's is taken (`INFERRED`: types
+  would decide) unless it takes fewer parameters than the call passes or the
+  call hands over `this` (`buildString { emit(this) }` gives the receiver to
+  the outer `emit`). `also` and `let` pass the value as `it` and have no
+  receiver.
+- **A receiver of no known type** — a parameter or a local the source gives no
+  type and no typeable value — is an unknown receiver like the result of an
+  unknown call: a method only one type of the project has, in a file the
+  caller imports or its directory, is `INFERRED`. Not in Ruby and Swift, where
+  every type of the module is in scope and no import says which, and not on a
+  local whose type is one the project does not define: there only an
+  extension written for that type can be meant (in Rust, a method of an `impl
+  Trait for` that type).
 - **Anonymous classes** (Java `new Callback<T>() { … }`, Kotlin `object :
   Listener { … }`) are definitions that go by the type they implement and
   answer to no name: the method around constructs the type, the class
@@ -396,31 +429,35 @@ file pairs). The native graph has definitions graphify folds into the one
 around them (a function nested in a method, the setter beside a getter of the
 same name); an edge from one of those is compared as an edge from the paired
 definition it belongs to, as graphify records it. On the 31 repositories of the
-[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.2,
+[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.3,
 measured 2026-11-18), as native / graphify edges and the share of graphify's
 that the native graph has too:
 
 | Language | same definition | imports (file pairs) | calls | bases | type references |
 |---|--:|--:|--:|--:|--:|
-| Python | 100% | 212 / 219 (96%) | 2,956 / 834 (94%) | 73 / 62 (100%) | 439 / 494 (68%) |
-| JavaScript | 93.5%⁵ | 190 / 305 (59%) | 1,313 / 2,058 (43%)¹ | 1 / 1 | 3 / 0 |
+| Python | 100% | 212 / 219 (96%) | 2,958 / 834 (94%) | 73 / 62 (100%) | 439 / 494 (68%) |
+| JavaScript | 93.5%⁵ | 190 / 305 (59%) | 1,311 / 2,058 (43%)¹ | 1 / 1 | 3 / 0 |
 | TypeScript | 99.4% | 527 / 634 (83%) | 809 / 687 (98%) | 25 / 20 (100%) | 736 / 156 (88%) |
 | TSX | 99.7% | 253 / 316 (80%) | 435 / 456 (95%) | – | 42 / 4 |
-| Go | 100% | 538 / 950 (47%)² | 5,936 / 3,167 (99%) | 19 / 14 (100%) | 679 / 355 (100%) |
+| Go | 100% | 538 / 950 (47%)² | 6,464 / 3,167 (99%) | 19 / 14 (100%) | 679 / 355 (100%) |
 | Java | 100% | 1,105 / 1,010 (100%) | 5,660 / 5,123 (85%) | 415 / 168 (94%) | 3,989 / 1,930 (98%) |
-| Kotlin | 99.4% | 368 / 333 (95%) | 3,844 / 2,108 (70%) | 96 / 56 (93%) | 1,015 / 673 (81%) |
+| Kotlin | 99.4% | 368 / 333 (95%) | 4,499 / 2,108 (70%) | 96 / 56 (93%) | 1,014 / 673 (81%) |
 | Scala | 100% | 2 / 0 | 46 / 20 (45%) | 21 / 22 (95%) | 75 / 32 (100%) |
-| C# | 92.7% | 347 / 280 (30%)³ | 2,615 / 2,450 (93%) | 87 / 86 (98%) | 1,252 / 806 (99%) |
-| Rust | 93.3% | 314 / 370 (75%) | 1,753 / 853 (79%) | 53 / 41 (93%) | 1,242 / 895 (81%) |
-| Swift | 95.9% | 165 / 166 (–)³ | 4,695 / 2,141 (82%) | 190 / 164 (100%) | 1,080 / 580 (62%) |
+| C# | 92.7% | 347 / 280 (30%)³ | 2,643 / 2,450 (93%) | 87 / 86 (98%) | 1,252 / 806 (99%) |
+| Rust | 93.3% | 314 / 370 (75%) | 1,807 / 853 (81%) | 53 / 41 (93%) | 1,242 / 895 (81%) |
+| Swift | 95.9% | 165 / 166 (–)³ | 4,668 / 2,141 (82%) | 190 / 164 (100%) | 1,090 / 580 (62%) |
 | C | 100% | 89 / 77 (99%) | 864 / 791 (100%) | – | 253 / 130 (97%) |
-| C++ | 97.8% | 215 / 228 (93%) | 505 / 281 (33%)⁴ | 30 / 5 (100%) | 326 / 218 (88%) |
-| C/C++ headers | 90.6% | 164 / 172 (95%) | 360 / 348 (85%) | 11 / 12 (92%) | 515 / 289 (84%) |
-| Ruby | 99.7% | 42 / 0 | 409 / 375 (66%) | 46 / 15 (93%) | 28 / 0 |
+| C++ | 97.8% | 215 / 228 (93%) | 600 / 281 (33%)⁴ | 30 / 5 (100%) | 326 / 218 (88%) |
+| C/C++ headers | 90.6% | 164 / 172 (95%) | 360 / 348 (85%) | 11 / 12 (92%) | 515 / 289 (87%) |
+| Ruby | 99.7% | 42 / 0 | 421 / 375 (68%) | 46 / 15 (93%) | 28 / 0 |
 | PHP | 80.6% | 429 / 505 (84%) | 8,863 / 6,140 (90%) | 65 / 60 (98%) | 648 / 213 (95%) |
-| **All** | **94.4%** | **4,960 / 5,565 (75%)** | **41,063 / 27,832 (84%)** | **1,132 / 726 (97%)** | **12,322 / 6,775 (88%)** |
+| **All** | **94.4%** | **4,960 / 5,565 (75%)** | **42,408 / 27,832 (84%)** | **1,132 / 726 (97%)** | **12,331 / 6,775 (88%)** |
 
-Of the native calls, 7,442 (18%) are `INFERRED`, against 47% of graphify's.
+Of the native calls, 8,689 (20%) are `INFERRED`, against 47% of graphify's.
+The share of graphify's calls found moves little from 0.5.2 to 0.5.3 (84.1% to
+84.3%) while the native graph gains 1,859 edges: most of what 0.5.3 adds — a
+call through a Kotlin `val` typed by its value, through a chain's results —
+graphify does not have either.
 Reading a sample of each side's edges the other lacks, per language:
 
 - **What only graphify has** is mostly its own guesses and artefacts.
@@ -447,14 +484,14 @@ Reading a sample of each side's edges the other lacks, per language:
   a `references` edge here, and a method that builds an anonymous class
   (`new ToStringConverterFactory() { … }`) calls, in graphify's graph, the
   first anonymous class of that name in the file.
-- **What the native graph still lacks**, read from the same samples: a call
-  with an implicit receiver inside a lambda that has one (Kotlin
-  `withIndent { add("…") }`, `apply { addProperty(…) }`); a receiver typed
-  only by the result of a call that declares none the walk can read
-  (`funBuilder.returns(…)` after `val funBuilder = builder(name)`,
-  `retrofit.create(Service.class)`, Ruby's `stubs.get('/api')`); a
-  target-typed construction (C# `Box b = new(1, 2)`) and a C++ `Buf b(3)`,
-  which name no constructor.
+- **What the native graph still lacks**, read from the same samples: which of
+  several overloads taking the same number of arguments is called
+  (`returns(TypeName)` or `returns(KClass<*>)`: the first is named); a result
+  whose type is a type parameter (`fun <T> create(service: Class<T>): T`,
+  `tag(x): T`); an extension with several declarations to choose from (Kotlin
+  `expect` / `actual` across source sets); and, in the languages that write no
+  types, a receiver that is a parameter (Ruby `env.status`, where only the
+  method's name would say, and several types answer to it).
 - **What only the native graph has** is mostly what a name lookup by itself
   cannot see: calls through a module object (`httpx.Response(...)`), through a
   typed local or field (`client = httpx.Client(); client.get()`,
@@ -478,7 +515,8 @@ builds take 13.3 s for the 31 repositories against graphify's 81.3 s
 faster of two clean builds each): 8.7 times faster at the median, from 2.1
 (todoapi, whose bundled JavaScript the native engine reads in full) to 17.2
 times; retrofit 2.9 s against 13.1 s, guzzle 0.9 s / 6.1 s, alamofire 1.2 s /
-5.4 s, got 0.9 s / 4.7 s. An update after a one-file change takes a third of
+5.4 s, got 0.9 s / 4.7 s (engine 0.5.1; with all that 0.5.3 resolves the same
+31 builds take 14.2 s). An update after a one-file change takes a third of
 a build ([above](#incremental-updates)).
 
 ### The polyglot audit on native graphs
@@ -524,19 +562,28 @@ but one convention finding, fixed since: `graphlore_surprises(limit=0)` cut its
 `shared_state` list without saying how much (`shared_state_left_out` does now).
 `SKELETON-EMPTY` went from 5 to 0, and the tool time stayed at 131 s.
 
-Rerun with engine 0.5.2 (2026-11-18), whose graphs carry 10% more call edges
-(constructors, extensions, Ruby's bare names), the audit raises what the run
-before it did and nothing else: `REPLY-TOO-LARGE` 5, `TEST-PATH-MISSED` 2,
-`ROUTES-SILENT-EMPTY` 1 (express registers its own routes through
-`app[method]`), 19 graphs with orphan nodes; 113 s of tool time. The clean
-builds of the 31 repositories take 13.1 s.
+Rerun on graphs built by engine 0.5.3 (2026-11-18), the audit raises nothing
+on the native graphs but its `GRAPH-ORPHAN-NODES` note on 19 of them; 115 s of
+tool time. What the table above still listed is gone:
 
-`REPLY-TOO-LARGE` is gone since: `graphlore_neighbors` cuts a hub at `limit`
-and says how its neighbors split by relation, `graphlore_fetch` cuts one
-definition over 8,000 tokens at a line and names the budget that returns all
-of it, and `graphlore_same_names` lists the first 25 definitions of a name
-([tools](tools.md)). retrofit's `Call` went from 98 KB to 10 KB, guzzle's
-`CurlFactory` from 124 KB to 27 KB, cpr's `TEST` from 133 KB to 2 KB.
+- **`REPLY-TOO-LARGE`**: `graphlore_neighbors` cuts a hub at `limit` and says
+  how its neighbors split by relation, `graphlore_fetch` cuts one definition
+  over 8,000 tokens at a line and names the budget that returns all of it,
+  and `graphlore_same_names` lists the first 25 definitions of a name
+  ([tools](tools.md)). As JSON, the 752 neighbors of retrofit's `Call` went
+  from 99 KB to 25 KB, guzzle's 3,100-line `CurlFactory` from 124 KB to 29 KB,
+  cpr's 647 definitions named `TEST` from 134 KB to 6 KB.
+- **`ROUTES-SILENT-EMPTY`**: express's examples take the framework by
+  `require('../../')`; a relative import of the directory whose `package.json`
+  names a server framework now counts as importing it (139 route nodes).
+- **`TEST-PATH-MISSED`** and a `FETCH-SHADOW-SPAN` this run raised were the
+  audit's own: `[Test],` as an element of a list, `#[cfg(test)]` on a `let`,
+  and Ruby's `class ActiveSupport::TestCase` compared by its whole name.
+
+An earlier version of this page reported a rerun "with engine 0.5.2" that had
+in fact read graphs engine 0.5.1 built: the audit kept a native graph it found
+on disk. It now rebuilds one built by another version of the engine and says
+so.
 
 The first native run also found three bugs that had nothing to do with the
 engine, and they are now fixed for both engines. A Go function type in a map

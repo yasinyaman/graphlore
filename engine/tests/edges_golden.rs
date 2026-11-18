@@ -424,7 +424,7 @@ fn extension_functions_are_members_to_their_callers() {
         ("src/Auth/Signer.cs", "using App.Extensions;\n\nnamespace App.Auth;\n\npublic class Signer\n{\n    public bool Sign(string realm)\n    {\n        return !realm.IsBlank();\n    }\n}\n"),
         // Rust: `self.x()` in an impl for a type of another crate
         ("Cargo.toml", "[package]\nname = \"x\"\nversion = \"0.1.0\"\n"),
-        ("src/lib.rs", "use http::uri::Authority;\n\npub(crate) trait AuthorityExt {\n    fn userinfo(&self) -> Option<&str>;\n    fn username(&self) -> Option<&str>;\n}\n\nimpl AuthorityExt for Authority {\n    fn userinfo(&self) -> Option<&str> { None }\n    fn username(&self) -> Option<&str> { self.userinfo() }\n}\n"),
+        ("src/lib.rs", "use http::uri::Authority;\n\npub(crate) trait AuthorityExt {\n    fn userinfo(&self) -> Option<&str>;\n    fn username(&self) -> Option<&str>;\n}\n\nimpl AuthorityExt for Authority {\n    fn userinfo(&self) -> Option<&str> { None }\n    fn username(&self) -> Option<&str> { self.userinfo() }\n}\n\nfn first() {\n    let a = http::uri::Authority::from_static(\"x\");\n    let a = a.userinfo();\n}\n"),
     ]);
     has(
         &got,
@@ -433,6 +433,8 @@ fn extension_functions_are_members_to_their_callers() {
             ("render()", "calls", "trimmedText()"),
             (".Sign()", "calls", ".IsBlank()"),
             (".username()", "calls", ".userinfo()"),
+            // a local of that external type, rebound from itself
+            ("first()", "calls", ".userinfo()"),
         ],
     );
 }
@@ -516,4 +518,145 @@ fn an_anonymous_class_is_built_by_the_method_around_it() {
         ],
     );
     assert!(!got.contains(&(".go()".into(), "calls".into(), "Runnable".into())), "{got:#?}");
+}
+
+#[test]
+fn a_construction_typed_by_its_declaration() {
+    let got = edges("declared-new", &[
+        ("B.cs", "namespace App;\npublic class Box {\n    public Box(int w, int h) {}\n}\npublic class UseBox {\n    public void Target() { Box b = new(1, 2); }\n}\n"),
+        ("g.cpp", "class Buf {\n public:\n  Buf(int n) {}\n};\nvoid fill() { Buf b(3); }\nvoid plain() { int x(3); Buf* p = nullptr; }\n"),
+    ]);
+    has(
+        &got,
+        &[
+            (".Target()", "calls", "Box"),
+            (".Target()", "calls", ".Box()"),
+            ("fill()", "calls", "Buf"),
+            ("fill()", "calls", ".Buf()"),
+        ],
+    );
+    assert!(!got.iter().any(|(s, r, _)| s == "plain()" && r == "calls"), "{got:#?}");
+}
+
+#[test]
+fn a_function_returns_what_its_body_constructs() {
+    let got = edges("returns", &[
+        // an expression body, and a chain through it
+        ("a.kt", "package app\nclass Builder(val n: String) {\n    fun named(t: String): Builder { return this }\n    fun build() = Spec()\n}\nclass Spec { fun emit() {} }\nfun builder(n: String) = Builder(n)\nfun use() {\n    val b = builder(\"x\")\n    b.named(\"t\")\n    builder(\"y\").build().emit()\n}\n"),
+        // `return Conn()` beside `return None`, `return self`; two types: none
+        ("b.py", "class Conn:\n    def open(self):\n        return self\n\n    def close(self):\n        pass\n\n\nclass Other:\n    def stop(self):\n        pass\n\n\ndef dial(host):\n    if not host:\n        return None\n    return Conn()\n\n\ndef mixed(x):\n    if x:\n        return Conn()\n    return Other()\n\n\ndef run():\n    dial(\"h\").open().close()\n\n\ndef unsure():\n    mixed(1).stop()\n"),
+        // a closure's `return` is the closure's
+        ("c.js", "class Queue { drain() {} }\nclass Other { halt() {} }\nclass Third { halt() {} }\nfunction makeQueue() { return new Queue(); }\nfunction each(xs) { xs.forEach(function (x) { return new Other(); }); }\nfunction run() {\n  const q = makeQueue();\n  q.drain();\n}\nfunction not() {\n  each([]).halt();\n}\n"),
+        // Ruby: the last expression, and calls without parentheses
+        ("d.rb", "class Stubs\n  def match(env); end\nend\nclass Client\n  def stubs\n    Stubs.new\n  end\n  def run\n    stubs.match(1)\n  end\n  def later\n    s = stubs\n    s.match(2)\n  end\nend\n"),
+    ]);
+    has(
+        &got,
+        &[
+            ("use()", "calls", ".named()"),
+            ("use()", "calls", ".build()"),
+            ("use()", "calls", ".emit()"),
+            ("run()", "calls", ".open()"),
+            ("run()", "calls", ".close()"),
+            ("run()", "calls", ".drain()"),
+            (".run()", "calls", ".match()"),
+            (".later()", "calls", ".match()"),
+        ],
+    );
+    assert!(!got.contains(&("unsure()".into(), "calls".into(), ".stop()".into())), "{got:#?}");
+    assert!(!got.contains(&("not()".into(), "calls".into(), ".halt()".into())), "{got:#?}");
+    // the typed local `s` is no call of the type
+    assert!(!got.contains(&(".later()".into(), "calls".into(), "Stubs".into())), "{got:#?}");
+}
+
+#[test]
+fn a_kotlin_local_is_what_its_value_gives() {
+    let got = edges("kotlin-locals", &[(
+        "a.kt",
+        "package app\n\ninterface Taggable {\n    fun tag(x: Any): Taggable\n}\nclass Writer(val indent: String) {\n    fun close() {}\n}\nclass Spec {\n    class Builder : Taggable {\n        override fun tag(x: Any): Builder = this\n        fun addMember(s: String): Builder = this\n    }\n    companion object {\n        fun builder(n: String): Builder = Builder()\n        fun get(a: String): Spec {\n            val builder = builder(a).tag(a)\n            builder.addMember(\"x\")\n            return Spec()\n        }\n    }\n}\nfun shut(indent: String) {\n    val c = Writer(indent)\n    c.close()\n}\n",
+    )]);
+    has(
+        &got,
+        &[
+            // the value sits beside the declaration: `val c = Writer(…)`
+            ("shut()", "calls", "Writer"),
+            ("shut()", "calls", ".close()"),
+            // in its own initializer the name is the outer one; afterwards
+            // the local, typed through the chain
+            (".get()", "calls", ".builder()"),
+            (".get()", "calls", ".tag()"),
+            (".get()", "calls", ".addMember()"),
+        ],
+    );
+}
+
+#[test]
+fn a_bare_name_in_a_receiver_lambda_is_the_receivers() {
+    let got = edges("receivers", &[(
+        "a.kt",
+        "package app\n\nclass Spec {\n    fun addMember(s: String): Spec = this\n    fun build(): Spec = this\n}\nclass Block {\n    class Builder {\n        fun add(s: String): Builder = this\n        fun indent(): Builder = this\n        fun withIndent(block: Builder.() -> Unit): Builder { block(); return this }\n    }\n}\nfun buildBlock(action: Block.Builder.() -> Unit): Block = Block()\n\nclass Maker {\n    fun add(s: String) {}\n    fun indent() {}\n    fun build() {}\n\n    fun typed(action: Int) {\n        buildBlock { indent() }\n    }\n    fun scoped(args: List<String>): Spec {\n        return Spec().apply { args.forEach { a -> addMember(a) } }\n    }\n    fun nested(b: Block.Builder) {\n        b.withIndent { add(\"x\") }\n        with(b) { indent() }\n    }\n    fun it(): Spec = Spec().also { build() }\n}\n",
+    )]);
+    let to = |from: &str, name: &str| -> Vec<String> {
+        got.iter()
+            .filter(|(s, r, t)| s == from && r == "calls" && t == name)
+            .map(|(_, _, t)| t.clone())
+            .collect()
+    };
+    // which `indent` / `add` / `build`: the receiver's, not the class's around
+    let targets = |from: &str| -> BTreeSet<String> {
+        got.iter()
+            .filter(|(s, r, _)| s == from && r == "calls")
+            .map(|(_, _, t)| t.clone())
+            .collect()
+    };
+    assert_eq!(to(".typed()", ".indent()").len(), 1, "{got:#?}");
+    assert!(targets(".scoped()").contains(".addMember()"), "{got:#?}");
+    assert!(targets(".nested()").contains(".add()"), "{got:#?}");
+    assert!(targets(".it()").contains(".build()"), "{got:#?}");
+}
+
+/// `(source label, target id)` of the call edges of a project, to tell two
+/// methods of one name apart.
+fn call_ids(name: &str, files: &[(&str, &str)]) -> BTreeSet<(String, String)> {
+    let dir = project(name, files);
+    let (g, _) = build_graph(&BuildOptions::new(&dir)).unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+    let label = |id: &str| {
+        g["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|n| n["id"] == id)
+            .map(|n| n["label"].as_str().unwrap().to_string())
+            .unwrap_or_default()
+    };
+    g["links"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|e| e["relation"] == "calls")
+        .map(|e| (label(e["source"].as_str().unwrap()), e["target"].as_str().unwrap().to_string()))
+        .collect()
+}
+
+#[test]
+fn the_receiver_comes_before_the_class_around() {
+    let got = call_ids("receiver-order", &[(
+        "a.kt",
+        "package app\n\nclass Builder {\n    fun indent(): Builder = this\n}\nfun buildBlock(action: Builder.() -> Unit) {}\n\nclass Maker {\n    fun indent() {}\n    fun inside() {\n        buildBlock { indent() }\n    }\n    fun outside() {\n        indent()\n    }\n    fun also(b: Builder) {\n        b.also { indent() }\n    }\n}\nclass Other {\n    fun indent(to: Builder, by: Int) {}\n    fun hands() {\n        buildBlock { indent(this, 2) }\n    }\n}\nclass Third {\n    fun indent(to: Builder) {}\n    fun gives() {\n        buildBlock { indent(this) }\n    }\n}\n",
+    )]);
+    let of = |from: &str| -> Vec<&str> {
+        got.iter()
+            .filter(|(s, t)| s == from && t.ends_with("_indent"))
+            .map(|(_, t)| t.as_str())
+            .collect()
+    };
+    assert_eq!(of(".inside()"), ["a_builder_indent"], "{got:#?}");
+    // the receiver's `indent` takes nothing: two arguments go to the class's
+    assert_eq!(of(".hands()"), ["a_other_indent"], "{got:#?}");
+    // and the receiver handed over as `this` goes to the class's as well
+    assert_eq!(of(".gives()"), ["a_third_indent"], "{got:#?}");
+    assert_eq!(of(".outside()"), ["a_maker_indent"], "{got:#?}");
+    // `also` passes the value as `it`: the lambda has no receiver
+    assert_eq!(of(".also()"), ["a_maker_indent"], "{got:#?}");
 }

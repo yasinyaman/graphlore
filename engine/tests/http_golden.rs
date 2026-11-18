@@ -548,3 +548,23 @@ fn paths_that_slug_alike_keep_their_own_nodes() {
         .collect();
     assert_eq!(ids.len(), 2, "{ids:?}");
 }
+
+#[test]
+fn a_framework_taken_by_relative_path_in_its_own_repository() {
+    let files: &[(&str, &str)] = &[
+        ("package.json", "{ \"name\": \"express\", \"main\": \"index.js\" }\n"),
+        ("index.js", "module.exports = require('./lib/express');\n"),
+        ("lib/express.js", "exports = module.exports = function createApplication() {};\n"),
+        (
+            "examples/hello/index.js",
+            "var express = require('../../');\nvar app = express();\n\napp.get('/hello', function (req, res) {\n  res.send('hi');\n});\n",
+        ),
+    ];
+    let (got, _) = routes("own-framework", files);
+    assert!(got.iter().any(|(r, _)| r == "GET /hello"), "{got:#?}");
+    // the same file in a package of another name registers nothing
+    let mut other = files.to_vec();
+    other[0] = ("package.json", "{ \"name\": \"toolbox\" }\n");
+    let (got, _) = routes("own-other", &other);
+    assert!(got.is_empty(), "{got:#?}");
+}

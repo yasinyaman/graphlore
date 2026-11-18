@@ -383,6 +383,8 @@ impl State {
             from_def: None,
             from_owner: None,
             args: None,
+            self_arg: false,
+            recv: None,
             byte: n.start_byte(),
         });
     }
