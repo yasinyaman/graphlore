@@ -1625,3 +1625,62 @@ fn a_call_with_type_arguments_is_of_the_generic_callable() {
         "{got:#?}"
     );
 }
+
+#[test]
+fn primary_constructors_returned_objects_properties_and_top_level_programs() {
+    // C# primary constructor parameters are typed names of the class; a
+    // name taken out of the object a hook returns is the function it names;
+    // a Python `@property` read with more after it is what it returns; and a
+    // C# top-level variable that names nothing in sight, called by an
+    // extension's name, is that extension's receiver — never a library's
+    // static class (`HttpUtility.UrlEncode`)
+    let got = calls_conf("returnedmembers", &[
+        ("Handler.cs", "namespace App;\n\npublic class ConduitContext {\n    public int SaveChangesAsync() => 1;\n}\n\npublic class QueryHandler(ConduitContext context) {\n    public int Handle() {\n        return context.SaveChangesAsync();\n    }\n}\n"),
+        ("Services.cs", "namespace App;\n\npublic static class ServicesExtensions {\n    public static IServiceCollection AddConduit(this IServiceCollection services) => services;\n    public static string UrlEncode(this string input) => input;\n}\n"),
+        ("Program.cs", "using App;\n\nvar builder = WebApplication.CreateBuilder(args);\nbuilder.Services.AddConduit();\nvar encoded = HttpUtility.UrlEncode(\"x\");\n"),
+        ("web/useToast.ts", "const useCustomToast = () => {\n  const showSuccessToast = (description: string) => {\n    return description\n  }\n  const unused = () => 1\n  return { showSuccessToast, hide: unused }\n}\nexport default useCustomToast\n"),
+        ("web/Delete.tsx", "import useCustomToast from \"./useToast\"\n\nconst DeleteUser = () => {\n  const { showSuccessToast, hide } = useCustomToast()\n  const onDone = () => {\n    showSuccessToast(\"deleted\")\n    hide()\n  }\n  return onDone\n}\nexport default DeleteUser\n"),
+        ("client.py", "class Cookies:\n    def extract_cookies(self, response):\n        return None\n\n\nclass Client:\n    @property\n    def cookies(self) -> Cookies:\n        return Cookies()\n\n    def send(self, response):\n        self.cookies.extract_cookies(response)\n"),
+    ]);
+    let has = |from: &str, to: &str, conf: &str| {
+        got.contains(&(from.to_string(), to.to_string(), conf.to_string()))
+    };
+    assert!(has(".Handle()", "handler_conduitcontext_savechangesasync", "EXTRACTED"), "{got:#?}");
+    assert!(has("Program.cs", "services_servicesextensions_addconduit", "INFERRED"), "{got:#?}");
+    assert!(
+        !got.iter().any(|(_, to, _)| to == "services_servicesextensions_urlencode"),
+        "{got:#?}"
+    );
+    assert!(
+        has("onDone()", "web_usetoast_usecustomtoast_showsuccesstoast", "INFERRED"),
+        "{got:#?}"
+    );
+    assert!(has("onDone()", "web_usetoast_usecustomtoast_unused", "INFERRED"), "{got:#?}");
+    assert!(has(".send()", "client_cookies_extract_cookies", "EXTRACTED"), "{got:#?}");
+}
+
+#[test]
+fn a_cast_says_what_a_local_is() {
+    // `(Foo)x`, `x as Foo`, `<Foo>x`: the type the cast writes, in each
+    // language that writes one
+    let got = calls_conf("casts", &[
+        ("Use.cs", "class Box {\n    public int Open() => 1;\n    public int Shut() => 1;\n}\n\nclass Use {\n    void Run(object o) {\n        var a = (Box)o;\n        var b = o as Box;\n        a.Open();\n        b.Shut();\n    }\n}\n"),
+        ("Use.java", "class Lid {\n    int lift() { return 1; }\n}\n\nclass UseLid {\n    void run(Object o) {\n        var a = (Lid) o;\n        a.lift();\n    }\n}\n"),
+        ("use.ts", "class Cup {\n  fill() { return 1 }\n  pour() { return 1 }\n}\n\nfunction run(o: unknown) {\n  const a = o as Cup\n  const b = <Cup>o\n  a.fill()\n  b.pour()\n}\n"),
+        ("Use.kt", "class Jar {\n    fun seal() = 1\n    fun crack() = 1\n}\n\nfun run(o: Any) {\n    val a = o as Jar\n    val b = o as? Jar\n    a.seal()\n    b?.crack()\n}\n"),
+    ]);
+    for target in [
+        "use_cs_box_open",
+        "use_cs_box_shut",
+        "use_java_lid_lift",
+        "use_ts_cup_fill",
+        "use_ts_cup_pour",
+        "use_kt_jar_seal",
+        "use_kt_jar_crack",
+    ] {
+        assert!(
+            got.iter().any(|(_, to, conf)| to == target && conf == "EXTRACTED"),
+            "{target}: {got:#?}"
+        );
+    }
+}

@@ -689,8 +689,33 @@ fn first_type(n: Node, src: &[u8]) -> Option<Vec<String>> {
 /// What a value constructs: `Foo()`, `new Foo()`, `Foo::new()`, `Foo{}`,
 /// `&Foo{}`, `Foo.new`. The path is the callee's; the resolver keeps it only
 /// when it names a type.
+/// A cast: what the value is, written at the site.
+fn is_cast(n: Node) -> bool {
+    matches!(n.kind(), "cast_expression" | "as_expression" | "type_assertion")
+}
+
 fn value_type(v: Node, src: &[u8]) -> Option<Vec<String>> {
     match v.kind() {
+        // a cast says what the value is: C# / Java `(Foo)x`, C# `x as Foo`
+        // (`right`), TS `x as Foo` and Kotlin `x as Foo` / `as?` (the type
+        // child), TS `<Foo>x`
+        "cast_expression" => v.child_by_field_name("type").and_then(|t| first_type(t, src)),
+        "as_expression" => v
+            .child_by_field_name("right")
+            .or_else(|| {
+                kids(v).into_iter().rev().find(|c| {
+                    matches!(
+                        c.kind(),
+                        "type_identifier" | "user_type" | "generic_type" | "nullable_type"
+                    ) || c.kind().ends_with("_type")
+                })
+            })
+            .and_then(|t| first_type(t, src)),
+        "type_assertion" => kids(v)
+            .into_iter()
+            .find(|c| c.kind() == "type_arguments")
+            .and_then(|t| kids(t).into_iter().next())
+            .and_then(|t| first_type(t, src)),
         "parenthesized_expression" | "reference_expression" | "unary_expression" => {
             kids(v).into_iter().find_map(|c| value_type(c, src))
         }
@@ -903,6 +928,31 @@ fn returned_path(v: Node, src: &[u8]) -> Option<Vec<String>> {
 
 /// `return [copiedText, copy]`: the names a callable returns as a tuple or
 /// an array literal, the first time it does.
+/// `return { show, hide: close }`: the members of an object literal a
+/// function returns, each with the name its value is.
+fn note_members(def: &mut Def, v: Node, src: &[u8]) {
+    if !def.returned_members.is_empty() || v.kind() != "object" {
+        return;
+    }
+    for c in kids(v) {
+        match c.kind() {
+            "shorthand_property_identifier" => {
+                let t = text(c, src);
+                def.returned_members.push((t.clone(), t));
+            }
+            "pair" => {
+                let key =
+                    c.child_by_field_name("key").filter(|k| k.kind() == "property_identifier");
+                let value = c.child_by_field_name("value").filter(|x| x.kind() == "identifier");
+                if let (Some(k), Some(x)) = (key, value) {
+                    def.returned_members.push((text(k, src), text(x, src)));
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 fn note_parts(def: &mut Def, v: Node, src: &[u8]) {
     if !def.returned_parts.is_empty()
         || !matches!(v.kind(), "array" | "tuple_expression" | "tuple" | "list" | "array_literal")
@@ -1825,17 +1875,51 @@ fn locals_of(n: Node, src: &[u8], in_params: bool) -> Vec<(String, Vec<String>, 
         }
         // `const x = new Foo()`, `let x = Foo::new()`, `let x: Foo = …`
         "variable_declarator" | "let_declaration" | "init_declarator" => {
+            // `const { show, hide: close } = useToast()`: each name is that
+            // member of what the value is
+            let pattern = n.child_by_field_name("name").filter(|x| x.kind() == "object_pattern");
+            if let Some(pattern) = pattern {
+                let value = n.child_by_field_name("value");
+                let Some(mut of) = value.and_then(|v| value_type(v, src)) else { return out };
+                if value.is_some_and(|v| v.kind() == "call_expression") {
+                    of.push(UNKNOWN.into());
+                }
+                for c in kids(pattern) {
+                    let (key, name) = match c.kind() {
+                        "shorthand_property_identifier_pattern" => (text(c, src), text(c, src)),
+                        "pair_pattern" => {
+                            let k = c.child_by_field_name("key").map(|x| text(x, src));
+                            let v = c
+                                .child_by_field_name("value")
+                                .filter(|x| x.kind() == "identifier")
+                                .map(|x| text(x, src));
+                            match (k, v) {
+                                (Some(k), Some(v)) => (k, v),
+                                _ => continue,
+                            }
+                        }
+                        _ => continue,
+                    };
+                    let mut path = of.clone();
+                    path.push(key);
+                    out.push((name, path, false, false));
+                }
+                return out;
+            }
             let name = n
                 .child_by_field_name("name")
                 .or_else(|| n.child_by_field_name("pattern"))
                 .or_else(|| n.child_by_field_name("declarator"))
                 .and_then(|x| bound_name(x, src));
             let declared = n.child_by_field_name("type").and_then(|t| first_type(t, src));
-            let valued = n.child_by_field_name("value").and_then(|v| value_type(v, src));
+            let value = n.child_by_field_name("value");
+            let valued = value.and_then(|v| value_type(v, src));
+            // (a cast writes the type as surely as a declaration does)
+            let cast = value.is_some_and(is_cast);
             if let Some(name) = name {
                 match (declared, valued) {
                     (Some(t), _) => out.push((name, t, true, false)),
-                    (None, Some(t)) => out.push((name, t, false, false)),
+                    (None, Some(t)) => out.push((name, t, cast, false)),
                     _ => {}
                 }
             }
@@ -1912,24 +1996,26 @@ fn locals_of(n: Node, src: &[u8], in_params: bool) -> Vec<(String, Vec<String>, 
                                 kids(n)
                                     .into_iter()
                                     .filter(|c| c.id() != d.id())
-                                    .find(|c| callee(*c, src).is_some())
+                                    .find(|c| callee(*c, src).is_some() || is_cast(*c))
                             })
                             .flatten()
                     };
-                    let valued = x
+                    let value = x
                         .child_by_field_name("value")
                         .or_else(|| {
                             // (C# `var x = await f()`: no field names the value)
                             kids(x).into_iter().find(|c| {
                                 callee(*c, src).is_some()
+                                    || is_cast(*c)
                                     || matches!(c.kind(), "await_expression" | "try_expression")
                             })
                         })
-                        .or_else(beside)
-                        .and_then(|v| value_type(v, src));
+                        .or_else(beside);
+                    let cast = value.is_some_and(is_cast);
+                    let valued = value.and_then(|v| value_type(v, src));
                     match (&d_type, valued) {
                         (Some(t), _) => out.push((name, t.clone(), true, field)),
-                        (None, Some(t)) => out.push((name, t, false, field)),
+                        (None, Some(t)) => out.push((name, t, cast, field)),
                         // `val n = 5` in a function: a local all the same,
                         // which hides the outer name
                         _ if k == "property_declaration" && !field => {
@@ -2140,6 +2226,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                         note_return(&mut facts.defs[di], path);
                     }
                     note_parts(&mut facts.defs[di], v, src);
+                    note_members(&mut facts.defs[di], v, src);
                 }
             }
             if facts.defs[di].kind.is_class_like() {
@@ -2291,8 +2378,12 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                 for (p, ctx) in types {
                     push(&mut refs, n, RefKind::Type, p, ctx, Some(di));
                 }
+                // (C#'s primary constructor is a `parameter_list` on the class)
+                let csharp = facts.lang == Some(crate::lang::Lang::CSharp);
                 for c in kids(n) {
-                    if matches!(c.kind(), "primary_constructor" | "class_parameters") {
+                    if matches!(c.kind(), "primary_constructor" | "class_parameters")
+                        || (csharp && c.kind() == "parameter_list")
+                    {
                         let mut st = vec![c];
                         while let Some(x) = st.pop() {
                             let found = locals_of(x, src, true);
@@ -2592,6 +2683,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                     note_return(&mut facts.defs[di], path);
                 }
                 note_parts(&mut facts.defs[di], v, src);
+                note_members(&mut facts.defs[di], v, src);
             }
         }
         // reads and writes of variables, fields and constants, and of what
@@ -4665,6 +4757,7 @@ fn add_extras(
             keyed: written_keyed(*node, src),
             key: written_key(*node, src),
             returned_parts: Vec::new(),
+            returned_members: Vec::new(),
             targs: written_targs(*node, src),
             targ_elems: written_targ_elems(*node, src),
             base_targs: Vec::new(),

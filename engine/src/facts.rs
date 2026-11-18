@@ -185,6 +185,11 @@ pub struct Def {
     /// not.
     #[serde(default)]
     pub returned_parts: Vec<String>,
+    /// The members of an object literal a function returns, as `(key, the
+    /// name its value is)`: `return { show, hide: close }` gives `(show,
+    /// show)` and `(hide, close)`.
+    #[serde(default)]
+    pub returned_members: Vec<(String, String)>,
     /// The type arguments written on a field's declared type, or on the type a
     /// callable declares it returns (`Response<User>`: `[["User"]]`); a type
     /// parameter of the class around is written as its name.

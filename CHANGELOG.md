@@ -259,6 +259,24 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- Native engine 0.5.25, five readings the 0.5.24 diagnostics pointed to.
+  On the 31 audit repositories: 83 calls (60 `EXTRACTED`) and 157 reads,
+  writes, uses and references gained, 8 edges gone.
+  - **C# primary constructor parameters are typed names of the class**
+    (`class QueryHandler(ConduitContext context)`, then
+    `context.SaveChangesAsync()`): aspnetcore-realworld's handlers had no
+    edge for what they use.
+  - **A cast types a local** (C# / Java `(Box)o`, `o as Box`, TypeScript
+    `<Cup>o`, Kotlin `o as? Jar`), `EXTRACTED`.
+  - **A name taken out of the object a function returns is the function it
+    names** (`const { showSuccessToast } = useCustomToast()` beside `return
+    { showSuccessToast, … }`), `INFERRED`.
+  - **A Python `@property` with more read after it is what it returns**
+    (`self.cookies.extract_cookies(…)`).
+  - **A C# top-level variable that names nothing in sight, called by an
+    extension's name, is its receiver** (`builder.Services.AddJwt()` in
+    `Program.cs`), `INFERRED`; never for a capital head, which is a
+    library's static call.
 - Native engine 0.5.24, the diagnostics tell a library's name from a
   missing edge (graph.json is unchanged). Each row of `build --unresolved`
   carries `library_like`: why it is most likely a library's name the

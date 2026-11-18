@@ -1931,6 +1931,17 @@ impl<'a> Project<'a> {
         }
     }
 
+    /// Whether a Python method is a `@property` (or `@cached_property`).
+    fn is_property(&self, c: DefRef) -> bool {
+        self.files[c.0].refs.iter().any(|r| {
+            r.from_def == Some(c.1)
+                && r.kind == RefKind::Decorator
+                && r.path
+                    .last()
+                    .is_some_and(|n| matches!(n.as_str(), "property" | "cached_property"))
+        })
+    }
+
     /// Whether a definition carries `@Deprecated` / `[Obsolete]` / `#[deprecated]`.
     fn deprecated(&self, c: DefRef) -> bool {
         self.files[c.0].refs.iter().any(|r| {
@@ -3246,6 +3257,24 @@ impl<'a> Project<'a> {
                 unnamed.extend_from_slice(&path[at + 1..]);
                 return self.resolve_path_inner(f, d, &unnamed, bases, false);
             }
+            // C# top-level statements (`var builder = …; builder.Services.
+            // AddJwt()`): a variable that names nothing in sight, called with
+            // the name of an extension the file can see. (A capital head is a
+            // library's type, `HttpUtility.UrlEncode(s)`: a static call.)
+            if self.family[f] == Some(Family::CSharp)
+                && path.len() >= 2
+                && path[0].chars().next().is_some_and(|c| c.is_lowercase())
+                && !bases
+                && *self.calling.borrow()
+                && !path.iter().any(|s| s.starts_with('[') || s.contains('@'))
+                && !self.is_local_name(f, d, &path[0])
+                && self.resolve_name(f, d, &path[0]).is_none()
+                && self.qualified(f, d, &path[..1]).is_none()
+            {
+                if let Some(found) = self.extension_method(f, path.last()?, None) {
+                    return Some(found);
+                }
+            }
             // `let request = request.with_agent(a)`: the name before the
             // declaration is one the facts no longer hold (a parameter it
             // shadows); only the method's name says what is called
@@ -3986,6 +4015,25 @@ impl<'a> Project<'a> {
                             continue;
                         }
                     }
+                    // `useToast().show`: a member of the object literal the
+                    // function returns, which names a function of its own
+                    if let Some(next) = rest.get(i + 1) {
+                        let def = self.def(c);
+                        let named = def.returned_members.iter().find(|(k, _)| k == next);
+                        if let Some((_, local)) = named {
+                            let inner = self.children[c.0]
+                                .get(&c.1)
+                                .and_then(|m| m.get(local))
+                                .and_then(|ds| ds.first())
+                                .map(|&x| (c.0, x))
+                                .filter(|x| self.def(*x).kind.is_callable());
+                            if let Some(inner) = inner {
+                                t = Target::Def(inner);
+                                skip = 1;
+                                continue;
+                            }
+                        }
+                    }
                     // several callables of the name (`Result.response()`
                     // beside `response(Response)`): a call in the middle of
                     // a chain writes no arguments the walk keeps, so the one
@@ -4067,7 +4115,25 @@ impl<'a> Project<'a> {
                     on = Some(x);
                 }
             }
-            let found = self.member(&t, seg, 3);
+            let mut found = self.member(&t, seg, 3);
+            // Python `@property def cookies(self) -> Cookies`: read without
+            // a call, with more after it, it is what it returns
+            if let Some(Target::Def(m)) = &found {
+                let m = *m;
+                let next = rest.get(i + 1);
+                if fam == Family::Python
+                    && self.def(m).kind.is_callable()
+                    && next.is_some_and(|s| s != "()" && !s.starts_with('['))
+                    && self.is_property(m)
+                {
+                    if let Some((r, declared)) = self.return_type(m) {
+                        if !declared {
+                            conf = conf.max(Confidence::Inferred);
+                        }
+                        found = Some(Target::Def(r));
+                    }
+                }
+            }
             // a property with more after it: go on through its type
             let through_property = matches!(&found, Some(Target::Def(p))
                 if matches!(self.def(*p).kind, DefKind::Property | DefKind::Constant))
@@ -4799,7 +4865,10 @@ impl<'a> Project<'a> {
             cur = defs[x].parent;
         };
         let l = &self.files[f].locals[li];
-        if l.declared || !l.path.last().is_some_and(|s| crate::refs::tuple_index(s).is_some()) {
+        // (`const [text, copy] = useCopy()`, `const { show } = useToast()`)
+        let part = l.path.last().is_some_and(|s| crate::refs::tuple_index(s).is_some());
+        let member = l.path.len() >= 3 && l.path[l.path.len() - 2] == "()";
+        if l.declared || !(part || member) {
             return None;
         }
         if !self.typing.borrow_mut().insert((f, li)) {
