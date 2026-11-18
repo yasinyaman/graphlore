@@ -3938,6 +3938,83 @@ impl<'a> Project<'a> {
         Some(whole)
     }
 
+    /// Why a call has no edge, when its name is the one callable of that name
+    /// in the project (so an edge was plausible): the row
+    /// `benchmarks/unresolved.py` counts. `None` for a name the project does
+    /// not define, or defines more than once.
+    fn explain_unresolved(&self, f: usize, d: Option<usize>, r: &RefFact) -> Option<Value> {
+        let name = r.path.last().filter(|s| !s.starts_with('[') && *s != "()")?;
+        let fam = self.family[f]?;
+        let mut cands = self.by_name.get(name.as_str())?.iter().copied().filter(|c| {
+            self.def(*c).kind.is_callable()
+                && self.family[c.0] == Some(fam)
+                && self.node_id(*c).is_some()
+        });
+        let (c, None) = (cands.next()?, cands.next()) else { return None };
+        let marker = r.path.iter().any(|s| s.starts_with('['));
+        let head = r.path[0].as_str();
+        let bare = head.split('@').next().unwrap_or(head);
+        let reason = if r.path.len() == 1 {
+            "bare name: not in scope".to_string()
+        } else if head == "self" {
+            "self: no such member on the type around".to_string()
+        } else if head == "super" {
+            "super: no such member on a base".to_string()
+        } else if head == "()" {
+            "receiver the walk cannot name".to_string()
+        } else if self.is_local_name(f, d, head) || self.is_local_name(f, d, bare) {
+            if self.is_untyped_local(f, d, head) {
+                "untyped local or parameter".to_string()
+            } else if self.is_external_local(f, d, head) {
+                "local of a library type".to_string()
+            } else {
+                match self.local_type(f, d, head) {
+                    Some((t, _)) if r.path.len() == 2 => {
+                        format!("typed local: no such member on its type ({:?})", self.def(t).kind)
+                    }
+                    Some(_) => "typed local: a step of the path names nothing".to_string(),
+                    None => "local the walk cannot type".to_string(),
+                }
+            }
+        } else if head.contains('@') {
+            "closure parameter outside any definition".to_string()
+        } else {
+            match self.resolve_path(f, d, &r.path[..1], true) {
+                Some((Target::Def(t), _)) if self.def(t).kind.is_class_like() => {
+                    "type: no such member".to_string()
+                }
+                Some((Target::Def(t), _)) if self.def(t).kind.is_state() => {
+                    "field or variable: its type names nothing".to_string()
+                }
+                Some((Target::Def(_), _)) => "function: its result names nothing".to_string(),
+                Some((Target::Ext(..), _)) => "library name".to_string(),
+                Some(_) => "module or namespace: no such name".to_string(),
+                None => "head name not found".to_string(),
+            }
+        };
+        let visible = c.0 == f
+            || self.scopes[f].imported.contains(&c.0)
+            || dir_of(&self.files[c.0].path) == dir_of(&self.files[f].path);
+        let cd = self.def(c);
+        Some(json!({
+            "file": self.files[f].path,
+            "line": r.line,
+            "language": self.files[f].lang.map(|l| l.name()),
+            "path": r.path.join("."),
+            "name": name,
+            "in_definition": d.is_some(),
+            "markers": marker,
+            "reason": reason,
+            "candidate": {
+                "file": self.files[c.0].path,
+                "qualname": cd.qualname,
+                "extension": cd.receiver.is_some() || self.extended_type(c).is_some(),
+                "member": cd.parent.is_some(),
+            },
+            "candidate_visible": visible,
+        }))
+    }
+
     /// Whether the path being walked is a call to link (not a local's value
     /// being typed).
     fn linking_call(&self) -> bool {
@@ -4560,8 +4637,11 @@ pub fn resolve(
     files: &[FileFacts],
     asm: &mut Assembled,
     manifests: Vec<(String, PathBuf)>,
-) -> (Vec<Value>, Vec<Value>, BTreeMap<String, ResolveStats>) {
+    diagnose: bool,
+) -> (Vec<Value>, Vec<Value>, BTreeMap<String, ResolveStats>, Vec<Value>) {
     let mut edges: Vec<EdgeOut> = Vec::new();
+    // calls left without an edge whose name is one definition of the project
+    let mut left: Vec<Value> = Vec::new();
     let mut stats: BTreeMap<String, ResolveStats> = BTreeMap::new();
     let mut ext_nodes: Vec<(String, String, &'static str)> = Vec::new();
     let mut resource_nodes: Vec<(String, String, ResourceKind)> = Vec::new();
@@ -4791,6 +4871,9 @@ pub fn resolve(
                                 && !p.is_local_name(f, scope_def, &r.path[0]))
                             .then(|| p.resolve_path(f, scope_def, &r.path[..1], true))
                             .flatten();
+                            if diagnose && is_call {
+                                left.extend(p.explain_unresolved(f, scope_def, r));
+                            }
                             if let Some((Target::Def(t), conf)) = head_type {
                                 if p.def(t).kind.is_class_like() {
                                     if let Some(id) = p.node_id(t) {
@@ -5177,7 +5260,7 @@ pub fn resolve(
             }
         }
     }
-    (nodes, links, stats)
+    (nodes, links, stats, left)
 }
 
 /// ORM methods that read rows of a model's table, and that write them.

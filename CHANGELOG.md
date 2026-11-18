@@ -7,6 +7,18 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **What the native engine leaves without an edge, by reason.** `python -m
+  graphlore_engine build ROOT --unresolved PATH` (engine 0.5.15) also writes
+  every call that got no edge although its name is the one callable of that
+  name in the project, with the reason the walk stopped (`untyped local or
+  parameter`, `closure parameter outside any definition`, `type: no such
+  member`, …); graph.json is the same with or without it.
+  `benchmarks/unresolved.py` counts them by reason and language for one
+  repository or a directory of them, leaves vendored and minified files out,
+  prints samples and compares with an earlier run. On the 31 audit
+  repositories: 6,796 calls, more than a third of them in the file-level
+  callbacks of JavaScript, TypeScript and Ruby test DSLs
+  ([native-engine.md](docs/native-engine.md#what-is-left-without-an-edge)).
 - **Files that change together.** graphlore reads the project's git history
   (one local `git log`: the last 1000 commits that are not merges, renames
   followed, commits of more than 30 files skipped) and measures, per pair of
@@ -247,6 +259,9 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- Native engine 0.5.15: the import edges a Swift file gets from the files it
+  uses were written in an order that differed from run to run (the same
+  edges; a set's own order). They are in file order now.
 - Native engine 0.5.14, the rest of collections and tuples. On the 31 audit
   repositories one edge comes back (`copy(id)` in fastapi-template, lost in
   0.5.11); the rest does not occur there with project types:

@@ -617,7 +617,7 @@ file pairs). The native graph has definitions graphify folds into the one
 around them (a function nested in a method, the setter beside a getter of the
 same name); an edge from one of those is compared as an edge from the paired
 definition it belongs to, as graphify records it. On the 31 repositories of the
-[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.14,
+[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.15,
 measured 2026-11-18), as native / graphify edges and the share of graphify's
 that the native graph has too:
 
@@ -791,6 +791,46 @@ times; retrofit 2.9 s against 13.1 s, guzzle 0.9 s / 6.1 s, alamofire 1.2 s /
 5.4 s, got 0.9 s / 4.7 s (engine 0.5.1; with all that 0.5.14 resolves the same
 31 builds take 16.3 to 18.9 s through Python, 15.3 to 16.2 s in the engine alone, retrofit 3.7 to 4.1 s). An update after a one-file change takes a third of
 a build ([above](#incremental-updates)).
+
+### What is left without an edge
+
+The comparison above measures the native graph against graphify's. What the
+engine itself leaves out is measured by `benchmarks/unresolved.py`: `python -m
+graphlore_engine build ROOT --unresolved PATH` writes every call that got no
+edge although its name is the one callable of that name in the project, with
+the reason the walk stopped (graph.json is the same with or without it). A
+name a library also has (`setHeader`, PSR-7's `getHeaderLine`, PHPUnit's
+`fail`) is counted too, so the table is an upper bound and its samples
+(`--samples N`) say which rows are real. On the 31 repositories, without
+vendored and minified files (engine 0.5.15, 2026-11-18): 6,796 calls.
+
+| Reason the walk stopped | Calls | of them at file level |
+|---|--:|--:|
+| the head name is nothing the file can see | 1,572 | 579 |
+| a field or variable whose type names nothing | 1,332 | 1,071 |
+| a closure's parameter outside any definition | 696 | 600 |
+| a library's name | 557 | 280 |
+| `self`: no such member on the type around | 517 | 17 |
+| a local of a library type | 435 | 0 |
+| a local the walk cannot type | 376 | 0 |
+| a bare name not in scope | 311 | 163 |
+| an untyped local or parameter | 218 | 0 |
+| a function whose result names nothing | 180 | 65 |
+| a typed local, a step of the path names nothing | 174 | 0 |
+| a receiver the walk cannot name | 149 | 15 |
+| a type with no such member | 122 | 10 |
+| a typed local with no such member on its type | 128 | 0 |
+| other | 29 | 0 |
+
+By language: JavaScript 1,892, PHP 988, Ruby 726, TypeScript 602, Java 566,
+C# 470, Rust 372, Go 345, Kotlin 262, C++ 228, Python 153, Swift 97, Scala
+43, C 33, TSX 19. More than a third of the rows (2,515) are at file level,
+outside any definition: the callbacks of JavaScript, TypeScript and Ruby
+test DSLs (`it('…', function () { app.use(…); res.download(…) })`), where a
+variable or a closure's parameter has no definition to be a local of. The
+calls inside a Rust macro (`assert_eq!(handle_count(&pool), 2)`) are not in
+the table at all: the grammar gives a macro's arguments as tokens, so the
+engine reads no call there.
 
 ### The polyglot audit on native graphs
 

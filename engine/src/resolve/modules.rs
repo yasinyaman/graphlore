@@ -1064,7 +1064,10 @@ pub fn import_edges(
         if used.is_empty() {
             all.to_vec()
         } else {
-            used.iter().copied().collect()
+            // (in file order: a set's own order differs from run to run)
+            let mut files: Vec<usize> = used.iter().copied().collect();
+            files.sort_unstable();
+            files
         }
     };
     match &t {
