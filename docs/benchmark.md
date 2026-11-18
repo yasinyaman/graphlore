@@ -169,7 +169,10 @@ warm index, then the median over repositories. 4 CPU cores, no GPU, measured
 - A cold index of a large repository is slow in both: the slowest builds were
   18 s (BM25) and 21 s (hybrid) against semble's 18 s; most of graphlore's time
   is the span engine's tree-sitter walk, which later tools reuse. The index is
-  then kept and refreshed per file, so this is paid once per session.
+  then kept and refreshed per file, so this is paid once per session. These
+  index times were measured before the span walk was made 3–5× faster
+  (CHANGELOG, Unreleased); the built-in index builds faster now than this table
+  says, and its rankings are unchanged, since the spans are the same.
 - The graph overlay (docstrings, call-neighbour names) is not measured here: the
   benchmark repositories have no Graphify graph.
 
