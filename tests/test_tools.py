@@ -8135,3 +8135,78 @@ def test_a_string_with_comment_characters_does_not_hide_a_decorator(tmp_path, mo
     data = json.loads(server.graphlore_unreferenced(as_json=True))
     assert data["registered_by_decorator"].get("Test") == 1
     assert ".fullWildcardMatchesAny()" not in {r["node"] for r in data["unreferenced"]}
+
+
+def test_neighbors_cuts_a_hub_and_says_what_it_left_out(tmp_path, monkeypatch):
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    callers = [{"id": f"c{i}", "label": f"caller{i}()", "source_file": f"pkg/c{i}.py"}
+               for i in range(12)]
+    _write_graph(tmp_path, {
+        "nodes": [{"id": "hub", "label": "hub()", "source_file": "pkg/hub.py"},
+                  {"id": "dep", "label": "dep()", "source_file": "pkg/dep.py"}, *callers],
+        "links": [
+            *({"source": c["id"], "target": "hub", "relation": "calls"} for c in callers),
+            {"source": "hub", "target": "dep", "relation": "calls"},
+        ],
+    })
+    data = json.loads(server.graphlore_neighbors("hub()", limit=5, as_json=True))
+    assert len(data["neighbors"]) == 5 and data["total"] == 13
+    assert data["truncated"] is True
+    assert data["counts"] == {"calls in": 12, "calls out": 1}
+    assert "limit" in data["hint"]
+    text = server.graphlore_neighbors("hub()", limit=5)
+    assert "13 neighbors, showing 5" in text and "8 more" in text
+    # under the limit nothing is cut and nothing says so
+    whole = json.loads(server.graphlore_neighbors("hub()", as_json=True))
+    assert whole["truncated"] is False and len(whole["neighbors"]) == 13
+    assert "counts" not in whole and "hint" not in whole
+
+
+def test_fetch_cuts_one_huge_definition_and_points_at_its_members(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "_FETCH_BLOCK_CAP", 60)
+    body = ["class Big:"] + [f"    field_{i} = {i}" for i in range(400)]
+    _fetch_project(tmp_path, monkeypatch, "\n".join(body) + "\n", [
+        {"id": "big", "label": "Big", "source_file": "m.py", "line": 1},
+    ])
+    data = json.loads(server.graphlore_fetch(["Big"], budget_tokens=10, as_json=True))
+    it = data["fetched"][0]
+    assert data["truncated"] is True
+    assert it["cut"]["lines_total"] == "1-401" and it["cut"]["tokens_total"] > 60
+    lo, hi = (int(x) for x in it["cut"]["lines_shown"].split("-"))
+    assert data["lines_left_out"] == 401 - hi
+    assert lo == 1 and hi < 401 and it["lines"] == it["cut"]["lines_shown"]
+    assert it["code"].count("\n") == hi - lo and it["tokens"] <= 90
+    assert f"budget_tokens={it['cut']['tokens_total']}" in data["hint"]
+    assert "graphlore_skeleton" in data["hint"]
+    text = server.graphlore_fetch(["Big"], budget_tokens=10)
+    assert "cut: lines 1-" in text and "of 1-401" in text
+    # a budget that covers it returns it whole
+    whole = json.loads(server.graphlore_fetch(
+        ["Big"], budget_tokens=it["cut"]["tokens_total"], as_json=True))
+    assert whole["truncated"] is False and "cut" not in whole["fetched"][0]
+    assert whole["fetched"][0]["lines"] == "1-401"
+
+
+def test_same_names_counts_the_definitions_past_the_first(tmp_path, monkeypatch):
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    monkeypatch.setattr(server, "_SAME_NAME_DEFS", 3)
+    files = [f"pkg/m{i}.py" for i in range(6)]
+    _write_graph(tmp_path, {
+        "nodes": [
+            *({"id": f"f{i}", "label": f"m{i}.py", "source_file": f} for i, f in enumerate(files)),
+            *({"id": f"d{i}", "label": "render()", "source_file": f, "source_location": "L1"}
+              for i, f in enumerate(files)),
+        ],
+        "links": [{"source": f"f{i}", "target": f"d{i}", "relation": "contains"}
+                  for i in range(6)],
+    })
+    for f in files:
+        (tmp_path / f).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / f).write_text("def render():\n    return 1\n")
+    data = json.loads(server.graphlore_same_names(as_json=True))
+    g = data["names"][0]
+    assert g["name"] == "render" and len(g["definitions"]) == 3
+    assert g["definitions_total"] == 6
+    assert data["truncated"] is True and data["names_cut"] == 1
+    assert "definitions_total" in data["hint"]
+    assert "3 more definitions" in server.graphlore_same_names()

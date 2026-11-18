@@ -531,6 +531,13 @@ before it did and nothing else: `REPLY-TOO-LARGE` 5, `TEST-PATH-MISSED` 2,
 `app[method]`), 19 graphs with orphan nodes; 113 s of tool time. The clean
 builds of the 31 repositories take 13.1 s.
 
+`REPLY-TOO-LARGE` is gone since: `graphlore_neighbors` cuts a hub at `limit`
+and says how its neighbors split by relation, `graphlore_fetch` cuts one
+definition over 8,000 tokens at a line and names the budget that returns all
+of it, and `graphlore_same_names` lists the first 25 definitions of a name
+([tools](tools.md)). retrofit's `Call` went from 98 KB to 10 KB, guzzle's
+`CurlFactory` from 124 KB to 27 KB, cpr's `TEST` from 133 KB to 2 KB.
+
 The first native run also found three bugs that had nothing to do with the
 engine, and they are now fixed for both engines. A Go function type in a map
 type (`map[string]func() hash.Hash`) was taken for a function named `string`,

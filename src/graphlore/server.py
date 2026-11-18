@@ -620,6 +620,11 @@ def _cli_env() -> dict[str, str] | None:
 # Marks the parts of a reply that are repository text (source, docstrings, CLI
 # output derived from them): data to read, never instructions to follow.
 _CONTENT_TRUST = "untrusted_repo_text"
+# graphlore_same_names lists this many definitions of one name, counts the rest.
+_SAME_NAME_DEFS = 25
+# graphlore_fetch returns a definition whole up to this many tokens (or the
+# budget, when that is larger); a longer one is cut at a line and says so.
+_FETCH_BLOCK_CAP = 8000
 
 
 def _frame_repo_text(body: str) -> str:
@@ -2789,18 +2794,23 @@ def graphlore_search(pattern: str, limit: int = 25, as_json: bool = False) -> st
 
 
 @_tool(annotations=ToolAnnotations(title="Node neighbors", read_only_hint=True))
-def graphlore_neighbors(node: str, as_json: bool = False, scope: str = "") -> str:
+def graphlore_neighbors(
+    node: str, as_json: bool = False, scope: str = "", limit: int = 200,
+) -> str:
     """List the direct (1-hop) neighbors of a node, with relations.
 
     Production code is listed before tests, most connected first. Includes the
     calls and imports graphlore resolves from the source (a call through an
     imported module, ``mod.func()``), which graph.json alone does not carry.
+    A hub has more neighbors than fit a reply: past ``limit`` the result says
+    how many there are (``total``) and how they split by relation (``counts``).
 
     Args:
         node: The node (id, label or bare name). When several nodes match, the
             result says which one was used and lists the others with their ids.
         scope: Which neighbors to list — path prefixes / globs, ``!pattern``,
             ``-tests``, ``-external``, ``-vendored``. Empty leaves nothing out.
+        limit: Cap on listed neighbors.
     """
     graph = _load_graph()
     if isinstance(graph, str):
@@ -2844,19 +2854,39 @@ def graphlore_neighbors(node: str, as_json: bool = False, scope: str = "") -> st
         row.update(flags.get((nid, t, rel) if out else (t, nid, rel), {}))
         neigh.append(row)
     matched, matched_text = _matched(node, picked)
+    total = len(neigh)
+    shown = neigh[:max(0, limit)]
     payload: dict[str, Any] = {
-        "node": _node_label(n), "neighbors": neigh,
+        "node": _node_label(n), "neighbors": shown, "total": total,
+        "truncated": total > len(shown),
         "scope": view.payload(), "resolved_edges": resolved.payload(),
     }
     if matched:
         payload["matched"] = matched
-    text = [f"{_node_label(n)} has {len(neigh)} neighbors:"]
+    text = [
+        f"{_node_label(n)} has {total} neighbors"
+        + (f", showing {len(shown)}" if total > len(shown) else "") + ":"
+    ]
     text += [
         (f"  —{x['relation']}→ {x['node']}" if x["direction"] == "out"
          else f"  ←{x['relation']}— {x['node']}")
         + (f"  [{_flag_suffix(x)[2:]}]" if _flag_suffix(x) else "")
-        for x in neigh
+        for x in shown
     ]
+    if total > len(shown):
+        # what the cut left out, by kind: the rows shown are the most connected
+        tally: dict[str, int] = {}
+        for x in neigh:
+            key = f"{x['relation']} {x['direction']}"
+            tally[key] = tally.get(key, 0) + 1
+        payload["counts"] = dict(sorted(tally.items(), key=lambda kv: (-kv[1], kv[0])))
+        _cut_hint(payload, "Raise limit for the rest, narrow with scope= (-tests, a path), "
+                           "or follow one kind of edge with graphlore_impact(relations=…).")
+        text.append(
+            f"  … {total - len(shown)} more ("
+            + ", ".join(f"{v} {k}" for k, v in payload["counts"].items()) + " in all). "
+            + payload["hint"]
+        )
     if not neigh:
         payload["note"] = _EMPTY_NOTE
         text.append(_EMPTY_NOTE)
@@ -4357,7 +4387,10 @@ def graphlore_fetch(
     return exactly those lines (± ``context_lines``). One budget is shared across all
     nodes — once it's hit the remaining nodes are named in ``not_fetched`` and
     ``truncated`` is set (the first code block is always included, so the result is
-    never empty). A name resolves like graphlore_neighbors: an ambiguous or
+    never empty). One definition longer than 8,000 tokens (or the budget, when
+    that is larger) is cut at a line: its entry carries ``cut`` (``lines_shown``,
+    ``lines_total``, ``tokens_total``) and the hint names the budget that returns
+    all of it. A name resolves like graphlore_neighbors: an ambiguous or
     substring match carries ``matched``, a miss lands in ``not_found`` with
     ``did_you_mean`` candidates. Each entry says ``file_changed_since_build``
     (null when the graph records no build commit) and sets ``span_mismatch`` when
@@ -4448,6 +4481,19 @@ def graphlore_fetch(
         lines, clo, chi = block
         code = "\n".join(lines)
         toks = _count_tokens(code)
+        # One definition can be thousands of lines (a 3,000-line class): past
+        # the larger of the budget and _FETCH_BLOCK_CAP it is cut at a line
+        # and says so; its members are what to ask for next.
+        cap = max(budget_tokens, _FETCH_BLOCK_CAP)
+        cut: dict[str, Any] | None = None
+        if toks > cap and len(lines) > 1:
+            keep = max(1, len(lines) * cap // toks)
+            code = "\n".join(lines[:keep])
+            cut = {
+                "lines_shown": f"{clo}-{clo + keep - 1}", "lines_total": f"{clo}-{chi}",
+                "tokens_total": toks,
+            }
+            toks = _count_tokens(code)
         # The first code block always goes in (so output is never empty); after that,
         # stop at the shared budget — same truncate-at-boundary contract as subgraph.
         if code_blocks and running + toks > budget_tokens:
@@ -4456,26 +4502,46 @@ def graphlore_fetch(
             continue
         running += toks
         code_blocks += 1
-        fetched.append({
+        entry: dict[str, Any] = {
             "node": _node_label(n),
             "qualname": qual if qual and qual != _node_label(n) else None,
-            "file": f, "line": line or None, "lines": f"{clo}-{chi}",
+            "file": f, "line": line or None,
+            "lines": cut["lines_shown"] if cut else f"{clo}-{chi}",
             "code": code, "tokens": toks, "spanned": spanned,
             **provenance,
-        })
+        }
+        if cut:
+            entry["cut"] = cut
+        fetched.append(entry)
 
+    cuts = [it for it in fetched if it.get("cut")]
     payload: dict[str, Any] = {
         "fetched": fetched,
         "not_found": not_found,
-        "truncated": truncated,
+        "truncated": truncated or bool(cuts),
         "approx_tokens": running,
     }
+    hints = []
     if truncated:
         payload["not_fetched"] = not_fetched
-        payload["hint"] = (
-            "Call graphlore_fetch again with the names in not_fetched, or raise "
-            "budget_tokens."
+        hints.append("Call graphlore_fetch again with the names in not_fetched, or raise "
+                     "budget_tokens.")
+    cut_hint = ""
+    if cuts:
+        payload["lines_left_out"] = sum(
+            int(it["cut"]["lines_total"].split("-")[1])
+            - int(it["cut"]["lines_shown"].split("-")[1]) for it in cuts)
+        biggest = max(it["cut"]["tokens_total"] for it in cuts)
+        members = _tool_hint(
+            "graphlore_skeleton", "list its members with graphlore_skeleton(file) and ")
+        cut_hint = (
+            f"A definition over {max(budget_tokens, _FETCH_BLOCK_CAP)} tokens was cut "
+            f"(see its `cut`): {members}fetch the member you need, or pass "
+            f"budget_tokens={biggest} for all of it."
         )
+        hints.append(cut_hint)
+    if hints:
+        payload["hint"] = " ".join(hints)
     if not_found:
         payload["did_you_mean"] = {q: _suggestions(all_nodes, q) for q in not_found}
     payload["build_drift"], _ = _drift_note(drift, (it["file"] for it in fetched if it["file"]))
@@ -4500,6 +4566,10 @@ def graphlore_fetch(
             m = it["matched"]
             how = "by substring" if m["by"] == "substring" else f"{m['count']} nodes"
             head += f"  [asked '{it['requested']}': matched {how}; pass an id to pick another]"
+        if it.get("cut"):
+            c = it["cut"]
+            head += (f"  [cut: lines {c['lines_shown']} of {c['lines_total']}, "
+                     f"~{c['tokens_total']} tokens in all]")
         if it["code"] is None:
             parts.append(f"# {head}  ({loc}) — {it.get('note', 'source unavailable')}")
         else:
@@ -4515,6 +4585,8 @@ def graphlore_fetch(
            "(call again with these names or raise budget_tokens)" if truncated else "")
         + (f"; {len(not_found)} not found: {missing}" if not_found else "")
     )
+    if cut_hint:
+        summary += "\n" + cut_hint
     text = summary + ("\n\n" + _frame_repo_text("\n\n".join(parts)) if parts else "")
     # Every requested name missing is a failure; a partial miss is not.
     return _fmt(payload, as_json, text, is_error=bool(not_found) and not fetched)
@@ -5804,17 +5876,33 @@ def graphlore_same_names(
         across_languages,
     )
     shown = groups[:max(0, limit)]
+    cut_groups = 0
     for g in shown:
         for d in g["definitions"]:
             d.pop("id", None)
+        # a name a whole test suite repeats (`TEST`, `setUp`) has hundreds of
+        # definitions: list the first, count the rest
+        if len(g["definitions"]) > _SAME_NAME_DEFS:
+            g["definitions_total"] = len(g["definitions"])
+            g["definitions"] = g["definitions"][:_SAME_NAME_DEFS]
+            cut_groups += 1
     payload = {
         "name_count": len(groups),
         "names": shown,
-        "truncated": len(groups) > len(shown),
+        "truncated": len(groups) > len(shown) or bool(cut_groups),
         "scope": view.payload(),
     }
-    _cut_hint(payload, "Raise limit for the rest of the name_count names, or narrow with "
-                       "scope= / kinds=.")
+    hints = []
+    if len(groups) > len(shown):
+        hints.append("Raise limit for the rest of the name_count names, or narrow with "
+                     "scope= / kinds=.")
+    if cut_groups:
+        payload["names_cut"] = cut_groups
+        hints.append(
+            f"{cut_groups} name(s) list their first {_SAME_NAME_DEFS} definitions "
+            "(definitions_total says how many there are): narrow with scope= to see the "
+            "others.")
+    _cut_hint(payload, " ".join(hints))
     if not groups:
         return _fmt(
             payload, as_json,
@@ -5834,6 +5922,10 @@ def graphlore_same_names(
                 f"referenced by {d['referenced_by']}, used in its own file: "
                 + ("yes" if d["used_in_own_file"] else "no")
             )
+        if "definitions_total" in g:
+            lines.append(
+                f"      … {g['definitions_total'] - len(g['definitions'])} more definitions "
+                "(narrow with scope= to see them)")
     return _fmt(payload, as_json, _with_note("\n".join(lines), view))
 
 
