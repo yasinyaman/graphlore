@@ -1577,6 +1577,152 @@ fn param_node<'t>(ps: Node<'t>, name: &str, src: &[u8]) -> Option<Node<'t>> {
     None
 }
 
+/// Names a statement binds whose type the source states at the binding:
+/// `(name, path, declared)`. A loop variable written with its type (Java
+/// `for (Pet pet : pets)`, C# `foreach (Pet pet in pets)`), a type pattern
+/// (Java `o instanceof Pet p`, C# `o is Pet p`, `case Pet p:`), and a name
+/// bound to what a wrapper holds: Rust `if let Some(p) = e`, `while let`,
+/// `let Some(p) = e else { … }`, a `match` arm's `Some(p)` / `Ok(p)` or the
+/// fields of an enum variant, Swift `if let p = e` / `guard let p = e`. A
+/// pattern that writes no name (`x is Foo`) binds none.
+fn bound_by_pattern(n: Node, src: &[u8]) -> Vec<(String, Vec<String>, bool)> {
+    let mut out = Vec::new();
+    let typed = |ty: Option<Node>, name: Option<Node>, out: &mut Vec<_>| {
+        let ty = ty.and_then(|t| first_type(t, src));
+        let name = name.filter(|x| x.kind() == "identifier").map(|x| text(x, src));
+        if let (Some(ty), Some(name)) = (ty, name) {
+            out.push((name, ty, true));
+        }
+    };
+    match n.kind() {
+        "enhanced_for_statement" | "foreach_statement" => {
+            let name = n.child_by_field_name("name").or_else(|| n.child_by_field_name("left"));
+            typed(n.child_by_field_name("type"), name, &mut out);
+        }
+        "instanceof_expression" => {
+            typed(n.child_by_field_name("right"), n.child_by_field_name("name"), &mut out)
+        }
+        "declaration_pattern" => {
+            typed(n.child_by_field_name("type"), n.child_by_field_name("name"), &mut out)
+        }
+        "let_condition" | "let_declaration" => {
+            let pattern = n.child_by_field_name("pattern");
+            let value = n.child_by_field_name("value").and_then(|v| held_path(v, src));
+            if let Some(p) = pattern {
+                out.extend(held_by_pattern(p, value.as_deref(), src));
+            }
+        }
+        "match_expression" => {
+            let value = n.child_by_field_name("value").and_then(|v| held_path(v, src));
+            let arms = n.child_by_field_name("body").map(kids).unwrap_or_default();
+            for arm in arms.into_iter().filter(|a| a.kind() == "match_arm") {
+                let pattern =
+                    arm.child_by_field_name("pattern").and_then(|p| kids(p).into_iter().next());
+                if let Some(p) = pattern {
+                    out.extend(held_by_pattern(p, value.as_deref(), src));
+                }
+            }
+        }
+        // Swift: `bound_identifier`, `=`, then the value, once per binding
+        "if_statement" | "guard_statement" => {
+            let mut cursor = n.walk();
+            let all: Vec<(Option<&str>, Node)> = n
+                .children(&mut cursor)
+                .enumerate()
+                .map(|(i, c)| (n.field_name_for_child(i as u32), c))
+                .collect();
+            for (i, (field, c)) in all.iter().enumerate() {
+                if *field != Some("bound_identifier") {
+                    continue;
+                }
+                let name = text(*c, src);
+                let eq = all.get(i + 1).is_some_and(|(_, x)| x.kind() == "=");
+                let value = all.get(i + 2).filter(|_| eq).and_then(|(_, v)| held_path(*v, src));
+                // `if let pet {`, `if let pet = pet`, `guard let self`: the
+                // name goes on meaning what it meant
+                let Some(mut path) = value else { continue };
+                if path[0] == UNKNOWN || path == [name.clone()] || name == "self" {
+                    continue;
+                }
+                path.push(OPENED.into());
+                out.push((name, path, false));
+            }
+        }
+        _ => {}
+    }
+    out
+}
+
+/// The path of a value a pattern takes apart: what it constructs or calls
+/// (`load()`), else the name or field it is (`pet`, `&self.pet`).
+fn held_path(v: Node, src: &[u8]) -> Option<Vec<String>> {
+    value_type(v, src).or_else(|| {
+        let mut v = v;
+        while matches!(v.kind(), "reference_expression" | "parenthesized_expression") {
+            v = kids(v).into_iter().last()?;
+        }
+        path_of(v, src)
+    })
+}
+
+/// What a Rust pattern binds out of a value: `Some(p)` / `Ok(p)` is what the
+/// value holds once opened, `Slot::Full(a, b)` the fields of that variant.
+/// `Err(e)` and a pattern that names nothing bind nothing the source types.
+fn held_by_pattern(
+    p: Node,
+    value: Option<&[String]>,
+    src: &[u8],
+) -> Vec<(String, Vec<String>, bool)> {
+    let mut p = p;
+    while matches!(p.kind(), "reference_pattern" | "ref_pattern" | "mut_pattern") {
+        match kids(p).into_iter().last() {
+            Some(inner) => p = inner,
+            None => return Vec::new(),
+        }
+    }
+    if p.kind() != "tuple_struct_pattern" {
+        return Vec::new();
+    }
+    let Some(ty) = p.child_by_field_name("type") else { return Vec::new() };
+    let binds: Vec<Node> = kids(p).into_iter().filter(|c| c.id() != ty.id()).collect();
+    let name_of = |c: Node| {
+        let mut c = c;
+        while matches!(c.kind(), "reference_pattern" | "ref_pattern" | "mut_pattern") {
+            c = kids(c).into_iter().last()?;
+        }
+        (c.kind() == "identifier").then(|| text(c, src)).filter(|n| n != "_")
+    };
+    let variant = text(ty, src);
+    match variant.as_str() {
+        "Some" | "Ok" => {
+            let (Some(value), [one]) = (value, binds.as_slice()) else { return Vec::new() };
+            if value.first().is_some_and(|h| h == UNKNOWN) {
+                return Vec::new();
+            }
+            let mut path = value.to_vec();
+            path.push(OPENED.into());
+            // (`if let Some(x) = x`: the name goes on meaning what it meant)
+            name_of(*one)
+                .filter(|n| value != [n.clone()])
+                .map(|n| vec![(n, path, false)])
+                .unwrap_or_default()
+        }
+        "Err" | "None" => Vec::new(),
+        _ => {
+            let Some(of) = path_of(ty, src) else { return Vec::new() };
+            binds
+                .iter()
+                .enumerate()
+                .filter_map(|(i, c)| {
+                    let mut path = of.clone();
+                    path.push(tuple_part(i));
+                    Some((name_of(*c)?, path, false))
+                })
+                .collect()
+        }
+    }
+}
+
 fn locals_of(n: Node, src: &[u8], in_params: bool) -> Vec<(String, Vec<String>, bool, bool)> {
     let k = n.kind();
     let mut out = Vec::new();
@@ -2301,6 +2447,26 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                         });
                     }
                 }
+            }
+            // `for (Pet pet : pets)`, `o is Pet p`, `if let Some(p) = e`
+            for (name, path, declared) in bound_by_pattern(n, src) {
+                locals.push(Local {
+                    name,
+                    path,
+                    declared,
+                    field: false,
+                    assigned: false,
+                    given: None,
+                    elem: None,
+                    value_args: Vec::new(),
+                    sealed: false,
+                    keyed: false,
+                    targs: Vec::new(),
+                    targ_elems: Vec::new(),
+                    key: None,
+                    from_def: None,
+                    byte: n.start_byte(),
+                });
             }
             let taken_apart = parts.is_some();
             for (name, mut path, declared, field) in
