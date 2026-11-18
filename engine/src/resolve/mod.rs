@@ -1263,6 +1263,9 @@ pub struct Project<'a> {
     /// What a call reference calls, with its overload picked, per reference
     /// (`call_target`): what an implicit member in its arguments is typed by.
     call_targets: RefCell<HashMap<(usize, usize), Called>>,
+    /// Whether the reference being resolved was answered by a name alone
+    /// (`fallback_method`, a single extension in sight): no scope said so.
+    guessed: std::cell::Cell<bool>,
     /// The bindings a local's value gives, per local (`local_value_binds`).
     value_binds: RefCell<HashMap<(usize, usize), Option<Binds>>>,
     /// The bindings the last path walked ended with.
@@ -1370,6 +1373,7 @@ impl<'a> Project<'a> {
             sealed_locals: RefCell::new(HashMap::new()),
             tuple_locals: RefCell::new(HashMap::new()),
             call_targets: RefCell::new(HashMap::new()),
+            guessed: std::cell::Cell::new(false),
             value_binds: RefCell::new(HashMap::new()),
             end_binds: RefCell::new(None),
             typing_value: RefCell::new(false),
@@ -4986,7 +4990,10 @@ impl<'a> Project<'a> {
         }
         let mine: Vec<DefRef> = seen.iter().copied().filter(|r| r.0 == f).collect();
         match (mine.as_slice(), seen.as_slice()) {
-            ([one], _) | (_, [one]) => Some((Target::Def(*one), Confidence::Inferred)),
+            ([one], _) | (_, [one]) => {
+                self.guessed.set(true);
+                Some((Target::Def(*one), Confidence::Inferred))
+            }
             // the overloads of one extension (`asAFError(or:)`,
             // `asAFError(orFailWith:)`): `pick_overload` says which
             (_, [first, ..])
@@ -5142,6 +5149,9 @@ impl<'a> Project<'a> {
             || c.0 == f
             || self.scopes[f].imported.contains(&c.0)
             || dir_of(&self.files[c.0].path) == dir_of(&self.files[f].path);
+        if evident {
+            self.guessed.set(true);
+        }
         evident.then_some(c)
     }
 
@@ -5354,6 +5364,7 @@ pub fn resolve(
                 *p.self_arg.borrow_mut() = r.self_arg;
                 let is_call = matches!(r.kind, RefKind::Call | RefKind::New);
                 *p.cur.borrow_mut() = is_call.then_some((f, ri));
+                p.guessed.set(false);
                 let found = if let Some(place) = &r.implicit {
                     // Swift `.status(301)`: a static member of the type the
                     // place it stands in asks for
@@ -5390,6 +5401,16 @@ pub fn resolve(
                 *p.args.borrow_mut() = None;
                 *p.self_arg.borrow_mut() = false;
                 *p.cur.borrow_mut() = None;
+                // a guess by name alone on another object never links a
+                // definition to itself: `base.evaluate()` inside `evaluate()`
+                // is a wrapper handing on to what it wraps
+                if p.guessed.get() && tied.is_empty() && r.path.len() >= 2 {
+                    if let Some((Target::Def(t), Confidence::Inferred)) = &found {
+                        if t.0 == f && r.from_def == Some(t.1) {
+                            continue;
+                        }
+                    }
+                }
                 // a local called (`handler(x)`, `builder::add`) is the value
                 // it holds being called, not its type being constructed
                 if is_call && r.path.len() == 1 && p.is_local_name(f, scope_def, &r.path[0]) {

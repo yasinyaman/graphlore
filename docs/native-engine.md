@@ -154,6 +154,18 @@ What the lookup takes from each language's own rules:
   are one type: a member, a field or a base that one declaration writes is
   found from any of them (`class RestClient : IRestClient` in one file,
   `RestClient.Async.cs` in another).
+- **The words for the object and its base are each language's own.** `this`,
+  `self`, `super`, C# `base`, PHP `parent::` and Python's `cls` mean the
+  object a method is called on or its base only in the language that says
+  so. Elsewhere they are names: a Go parameter `parent` (`parent.addChild(c)`),
+  a Python parameter `base`, a Java parameter `cls`. `self` stays the object
+  everywhere: where it is no keyword it is the alias of one (JavaScript
+  `var self = this`).
+- **A guess never links a definition to itself.** `inner.evaluate()` inside
+  `evaluate()`, on a receiver the walk cannot type, is a wrapper handing on
+  to what it wraps: that the project has one `evaluate` says the caller is
+  it, not the callee. A typed receiver, `self` and a tie between overloads
+  are not guesses and keep their edge.
 - **A closure's parameters are names of the closure only**: `r` in
   `func(w http.ResponseWriter, r *http.Request) { … }` is the request there
   and whatever `r` was outside, and an untyped block parameter hides the
@@ -685,31 +697,31 @@ file pairs). The native graph has definitions graphify folds into the one
 around them (a function nested in a method, the setter beside a getter of the
 same name); an edge from one of those is compared as an edge from the paired
 definition it belongs to, as graphify records it. On the 31 repositories of the
-[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.19,
+[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.20,
 measured 2026-11-18), as native / graphify edges and the share of graphify's
 that the native graph has too:
 
 | Language | same definition | imports (file pairs) | calls | bases | type references |
 |---|--:|--:|--:|--:|--:|
-| Python | 100% | 212 / 219 (96%) | 2,963 / 834 (94%) | 73 / 62 (100%) | 439 / 494 (68%) |
+| Python | 100% | 212 / 219 (96%) | 2,962 / 834 (94%) | 73 / 62 (100%) | 439 / 494 (68%) |
 | JavaScript | 93.5%⁵ | 190 / 305 (59%) | 1,341 / 2,058 (43%)¹ | 1 / 1 | 3 / 0 |
 | TypeScript | 99.4% | 527 / 634 (83%) | 805 / 687 (98%) | 25 / 20 (100%) | 737 / 156 (88%) |
 | TSX | 99.7% | 253 / 316 (80%) | 435 / 456 (95%) | – | 42 / 4 |
-| Go | 100% | 538 / 950 (47%)² | 6,702 / 3,167 (99%) | 19 / 14 (100%) | 678 / 355 (99%) |
-| Java | 100% | 1,105 / 1,010 (100%) | 5,680 / 5,123 (85%) | 415 / 168 (94%) | 3,989 / 1,930 (98%) |
-| Kotlin | 99.4% | 368 / 333 (95%) | 4,705 / 2,108 (71%) | 96 / 56 (93%) | 1,079 / 673 (91%) |
+| Go | 100% | 538 / 950 (47%)² | 6,713 / 3,167 (99%) | 19 / 14 (100%) | 678 / 355 (99%) |
+| Java | 100% | 1,105 / 1,010 (100%) | 5,679 / 5,123 (85%) | 415 / 168 (94%) | 3,989 / 1,930 (98%) |
+| Kotlin | 99.4% | 368 / 333 (95%) | 4,699 / 2,108 (70%) | 96 / 56 (93%) | 1,079 / 673 (91%) |
 | Scala | 100% | 2 / 0 | 46 / 20 (45%) | 21 / 22 (95%) | 75 / 32 (100%) |
-| C# | 92.7% | 347 / 280 (30%)³ | 2,811 / 2,450 (94%) | 87 / 86 (98%) | 1,216 / 806 (99%) |
-| Rust | 93.3% | 314 / 370 (75%) | 2,009 / 853 (86%) | 53 / 41 (93%) | 1,245 / 895 (81%) |
+| C# | 92.7% | 347 / 280 (30%)³ | 2,796 / 2,450 (94%) | 87 / 86 (98%) | 1,216 / 806 (99%) |
+| Rust | 93.3% | 314 / 370 (75%) | 2,007 / 853 (86%) | 53 / 41 (93%) | 1,245 / 895 (81%) |
 | Swift | 95.9% | 166 / 166 (–)³ | 5,445 / 2,141 (82%) | 190 / 164 (100%) | 1,091 / 580 (62%) |
 | C | 100% | 89 / 77 (99%) | 864 / 791 (100%) | – | 253 / 130 (97%) |
 | C++ | 97.8% | 215 / 228 (93%) | 631 / 281 (33%)⁴ | 30 / 5 (100%) | 326 / 218 (88%) |
-| C/C++ headers | 90.6% | 164 / 172 (95%) | 361 / 348 (85%) | 11 / 12 (92%) | 515 / 289 (87%) |
-| Ruby | 99.7% | 42 / 0 | 445 / 375 (70%) | 46 / 15 (93%) | 28 / 0 |
+| C/C++ headers | 90.6% | 164 / 172 (95%) | 359 / 348 (85%) | 11 / 12 (92%) | 515 / 289 (87%) |
+| Ruby | 99.7% | 42 / 0 | 442 / 375 (69%) | 46 / 15 (93%) | 28 / 0 |
 | PHP | 80.6% | 429 / 505 (84%) | 8,870 / 6,140 (90%) | 65 / 60 (98%) | 648 / 213 (95%) |
-| **All** | **94.4%** | **4,961 / 5,565 (75%)** | **44,115 / 27,832 (85%)** | **1,132 / 726 (97%)** | **12,364 / 6,775 (89%)** |
+| **All** | **94.4%** | **4,961 / 5,565 (75%)** | **44,093 / 27,832 (85%)** | **1,132 / 726 (97%)** | **12,364 / 6,775 (89%)** |
 
-Of the native calls, 13,015 (30%) are `INFERRED`, against 47% of graphify's.
+Of the native calls, 13,010 (30%) are `INFERRED`, against 47% of graphify's.
 That share was 20% before engine 0.5.5: a call of an overloaded name that the
 arguments do not decide used to be an `EXTRACTED` edge to the first overload,
 and is now an `INFERRED` edge to each overload that fits (999 calls, with
@@ -752,6 +764,23 @@ two edges of got are gone that named a function defined in another loop
 for a destructured loop variable of the same name. The maps of these
 repositories that hold project types are mostly looked up by key once, or
 not walked at all.
+Engine 0.5.20 (each language's own words for the object and its base,
+and no guess from a definition to itself) is a correction more than a
+gain: 14 calls, 3 reads and 4 writes are new, 38 calls are gone. New are
+the calls on a Go variable named `parent` (`parent.SetProxy(…)`,
+`parent.replaceChild(…)` in resty and chi), which was read as a base class
+that Go does not have. Gone are 13 `EXTRACTED` calls from a C# method to
+itself: `base.SaveChangesAsync(…)`, `base.Dispose(disposing)` were read as
+`this.…`; the base is a library's there, and `base.GetValueFromXml(…)`
+now reaches the base class of the project. Gone too are 25 `INFERRED`
+calls from a definition to itself that a name alone had made:
+`evaluator.evaluate(trust, forHost: host)` inside `evaluate`,
+`clazz.getDeclaredField(name)`, `declaredType.asElement()` — 18 of them a
+call of another object's method of that name, 3 inside a minified bundle,
+and 4 a real recursion on another object
+(`extendsBound?.recursiveParameterizedTypesTo(types)`), which is what the
+rule costs. graphify's graph has some of these loops too, which is why
+Kotlin's and Ruby's share drops a point.
 Engine 0.5.19 (C# extension blocks, extensions through bases and on
 library types, partial types) adds 618 calls (197 `EXTRACTED`, 421
 `INFERRED`), turns 51 `INFERRED` ones `EXTRACTED` and takes 7 away.
@@ -972,7 +1001,7 @@ implicit members since 0.5.17: 39 whose place gives no type are rows now
 closure parameters and variables of express's tests. What is left at file
 level there is `app.use` and `app.set` (842 rows of express), names too
 short and too common to guess by. Engine 0.5.19 takes 123 more off (6,362;
-C# 349 from 470). Most of what C# has left is not the project's: `Assert.
+C# 349 from 470; 6,360 with 0.5.20). Most of what C# has left is not the project's: `Assert.
 NotNull` beside its own `Ensure.NotNull` (77), `WireMockServer.Start` (23).
 
 ### The polyglot audit on native graphs

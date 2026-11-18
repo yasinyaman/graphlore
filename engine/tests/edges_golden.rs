@@ -1494,3 +1494,47 @@ fn csharp_extensions_through_blocks_bases_and_library_types() {
     .collect();
     assert_eq!(from(".Builds()"), want, "{got:#?}");
 }
+
+#[test]
+fn receiver_words_are_each_languages_own() {
+    // `parent`, `base`, `cls` and `this` mean the object or its base only
+    // where the language says so: a Go parameter `parent`, a Python
+    // parameter `base` and Java parameters `cls` and `base` are names like
+    // any other,
+    // while C# `base.Run()`, PHP `parent::run()` and Python `super()` still
+    // reach the base
+    let got = calls_conf("receiverwords", &[
+        ("tree.go", "package tree\n\ntype node struct{ kids []*node }\n\nfunc (n *node) addChild(c *node) *node { return c }\n\nfunc insert(parent *node, base *node) {\n\tparent.addChild(base)\n}\n"),
+        ("app.py", "class Base:\n    def run(self):\n        return 1\n\n\nclass Child(Base):\n    def run(self):\n        return super().run()\n\n\ndef go(base: Base, parent: Base):\n    base.run()\n    parent.run()\n"),
+        ("Shapes.cs", "class A {\n    public virtual int Run() => 1;\n}\n\nclass B : A {\n    public override int Run() => base.Run();\n}\n"),
+        ("web.php", "<?php\nclass P {\n    public function run() { return 1; }\n}\n\nclass Q extends P {\n    public function run() { return parent::run(); }\n}\n"),
+        ("Maker.java", "class Maker {\n    Object make(Class<?> cls, Helper base) {\n        return base.build(cls);\n    }\n}\n\nclass Helper {\n    Object build(Class<?> c) { return c; }\n}\n"),
+    ]);
+    let has = |from: &str, to: &str, conf: &str| {
+        got.contains(&(from.to_string(), to.to_string(), conf.to_string()))
+    };
+    assert!(has("insert()", "tree_node_addchild", "EXTRACTED"), "{got:#?}");
+    assert!(has("go()", "app_base_run", "EXTRACTED"), "{got:#?}");
+    assert!(has(".run()", "app_base_run", "EXTRACTED"), "{got:#?}");
+    assert!(has(".Run()", "shapes_a_run", "EXTRACTED"), "{got:#?}");
+    assert!(!has(".Run()", "shapes_b_run", "EXTRACTED"), "{got:#?}");
+    assert!(has(".run()", "web_p_run", "EXTRACTED"), "{got:#?}");
+    assert!(has(".make()", "maker_helper_build", "EXTRACTED"), "{got:#?}");
+}
+
+#[test]
+fn a_guess_by_name_never_links_a_definition_to_itself() {
+    // `inner.evaluate()` inside `evaluate()` is a wrapper handing on to what
+    // it wraps: the one `evaluate` of the project is the caller, not the
+    // callee. A distinctive name on another object still gets its guess
+    let got = calls_conf("selfguess", &[(
+        "wrap.py",
+        "class Wrapper:\n    def evaluate(self, inner, other):\n        other.prepare_all()\n        return inner.evaluate()\n\n    def prepare_all(self):\n        return 1\n",
+    )]);
+    let from_evaluate: Vec<(&str, &str)> = got
+        .iter()
+        .filter(|(from, _, _)| from == ".evaluate()")
+        .map(|(_, to, conf)| (to.as_str(), conf.as_str()))
+        .collect();
+    assert_eq!(from_evaluate, [("wrap_wrapper_prepare_all", "INFERRED")], "{got:#?}");
+}
