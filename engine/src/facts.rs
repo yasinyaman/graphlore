@@ -190,6 +190,11 @@ pub struct Def {
     /// show)` and `(hide, close)`.
     #[serde(default)]
     pub returned_members: Vec<(String, String)>,
+    /// The lines a name is seen in, when that is narrower than its parent:
+    /// an RSpec `let(:conn)` is a name of the `describe` / `context` block
+    /// it is written in.
+    #[serde(default)]
+    pub scope_lines: Option<(u32, u32)>,
     /// The type arguments written on a field's declared type, or on the type a
     /// callable declares it returns (`Response<User>`: `[["User"]]`); a type
     /// parameter of the class around is written as its name.
@@ -557,6 +562,10 @@ pub struct FileFacts {
     /// `attr_accessor :status`, `Struct.new(:headers)`, `def_delegators`.
     #[serde(default)]
     pub attrs: Vec<String>,
+    /// RSpec `config.include Helpers`: the modules every spec has the
+    /// methods of.
+    #[serde(default)]
+    pub spec_includes: Vec<Vec<String>>,
     /// Lambdas with a receiver (Kotlin `x.apply { … }`, `withIndent { … }`).
     #[serde(default)]
     pub receivers: Vec<ReceiverScope>,
@@ -585,6 +594,7 @@ impl FileFacts {
             refs: Vec::new(),
             locals: Vec::new(),
             attrs: Vec::new(),
+            spec_includes: Vec::new(),
             receivers: Vec::new(),
             resources: Vec::new(),
             http: Default::default(),

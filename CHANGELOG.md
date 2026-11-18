@@ -259,6 +259,19 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- **Native engine 0.5.28: RSpec `let` and `subject` are definitions.**
+  `let(:conn) { … }`, `let!`, `subject(:request) { … }` and a nameless
+  `subject { … }` are methods of the `describe` / `context` block they are
+  written in: the innermost of several of one name answers a use, and a use
+  outside every such block names nothing. What the block's last expression
+  gives is the method's result (`conn.get` reaches `Faraday::Connection#get`
+  through `let(:conn) { Faraday::Connection.new }`). A module that
+  `RSpec.configure`'s `config.include M` puts in every example answers a
+  bare name a spec calls that nothing else answers to. faraday: 374 new
+  definitions, 484 calls (442 `EXTRACTED`); 9 `INFERRED` guesses on a block
+  parameter inside a `let` are gone. Calls left without an edge: 6,206 →
+  6,166, Ruby's unmarked rows 298 → 239. The facts cache is rebuilt once
+  (new `Def::scope_lines`, `FileFacts::spec_includes`).
 - Native engine 0.5.27, the small cases the diagnostics left. On the 31
   audit repositories: 264 calls (183 `EXTRACTED`) and 302 reads and writes
   gained, 252 calls gone (227 of them kotlinpoet's, moved to another

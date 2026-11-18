@@ -1750,3 +1750,35 @@ fn swift_implicit_members_of_closure_initializers_library_types_and_memberwise_i
         assert!(got.iter().any(|(_, to, _)| to == target), "{target}: {got:#?}");
     }
 }
+
+#[test]
+fn rspec_lets_subjects_and_configured_helpers() {
+    // `let(:conn) { … }` is a method of the block it is written in: the
+    // innermost around a use, none outside; what its block gives is its
+    // result. `config.include M` puts M's methods in every spec, not in the
+    // library's own files
+    let got = calls_conf("rspeclet", &[
+        ("lib/client.rb", "class Client\n  def initialize(x); end\n  def fetch; end\n  def build; end\nend\n\nclass Other\n  def conn; end\nend\n"),
+        ("lib/plain.rb", "def run\n  helper_call\nend\n"),
+        ("spec/support/helpers.rb", "module Shop\n  module Helpers\n    def helper_call; end\n  end\nend\n\nRSpec.configure do |config|\n  config.include Shop::Helpers, type: :integration\nend\n"),
+        ("spec/client_spec.rb", "shared_examples \"x\" do\n  it { conn.build }\nend\n\ndescribe Client do\n  subject { conn }\n  context \"a\" do\n    let(:conn) { Client.new(1) }\n    subject(:request) { conn.build }\n    it(\"a\") { conn.fetch }\n  end\n  context \"b\" do\n    let(:conn) { Other.new }\n    it(\"b\") { conn.conn }\n  end\n  it \"c\" do\n    helper_call\n  end\nend\n"),
+    ]);
+    let has = |from: &str, to: &str| got.iter().any(|(f, t, _)| f == from && t == to);
+    // the two `let(:conn)` are two definitions, each the one its block sees
+    assert!(has("conn()", "lib_client_client"), "{got:#?}");
+    assert!(has("conn()", "lib_client_other"), "{got:#?}");
+    assert!(has("client_spec.rb", "spec_client_spec_conn"), "{got:#?}");
+    assert!(has("client_spec.rb", "spec_client_spec_conn_2"), "{got:#?}");
+    assert!(has("client_spec.rb", "lib_client_client_fetch"), "{got:#?}");
+    assert!(has("client_spec.rb", "lib_client_other_conn"), "{got:#?}");
+    assert!(has("request()", "lib_client_client_build"), "{got:#?}");
+    assert!(has("client_spec.rb", "spec_support_helpers_shop_helpers_helper_call"), "{got:#?}");
+    assert!(!has("run()", "spec_support_helpers_shop_helpers_helper_call"), "{got:#?}");
+    // `subject { conn }` declares; it does not call itself. A use outside
+    // every block that declares the name (the outer subject, shared
+    // examples) names nothing: which `conn` runs is the example's
+    assert!(!has("subject()", "spec_client_spec_subject"), "{got:#?}");
+    let at_l2 =
+        got.iter().filter(|(f, t, _)| f == "client_spec.rb" && t == "lib_client_client_build");
+    assert_eq!(at_l2.count(), 0, "{got:#?}");
+}

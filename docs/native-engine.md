@@ -767,7 +767,7 @@ file pairs). The native graph has definitions graphify folds into the one
 around them (a function nested in a method, the setter beside a getter of the
 same name); an edge from one of those is compared as an edge from the paired
 definition it belongs to, as graphify records it. On the 31 repositories of the
-[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.27,
+[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.28,
 measured 2026-11-18), as native / graphify edges and the share of graphify's
 that the native graph has too:
 
@@ -787,11 +787,11 @@ that the native graph has too:
 | C | 100% | 89 / 77 (99%) | 864 / 791 (100%) | – | 253 / 130 (97%) |
 | C++ | 97.8% | 215 / 228 (93%) | 645 / 281 (33%)⁴ | 30 / 5 (100%) | 326 / 218 (88%) |
 | C/C++ headers | 90.6% | 164 / 172 (95%) | 358 / 348 (85%) | 11 / 12 (92%) | 515 / 289 (87%) |
-| Ruby | 99.7% | 42 / 0 | 442 / 375 (69%) | 46 / 15 (93%) | 28 / 0 |
+| Ruby | 99.7% | 42 / 0 | 443 / 375 (69%) | 46 / 15 (93%) | 28 / 0 |
 | PHP | 80.6% | 429 / 505 (84%) | 8,873 / 6,140 (90%) | 65 / 60 (98%) | 648 / 213 (95%) |
-| **All** | **94.4%** | **4,961 / 5,565 (75%)** | **44,375 / 27,832 (85%)** | **1,132 / 726 (97%)** | **12,401 / 6,775 (89%)** |
+| **All** | **94.4%** | **4,962 / 5,565 (75%)** | **44,376 / 27,832 (85%)** | **1,136 / 726 (97%)** | **12,401 / 6,775 (89%)** |
 
-Of the native calls, 12,609 (28%) are `INFERRED`, against 47% of graphify's.
+Of the native calls, 12,608 (28%) are `INFERRED`, against 47% of graphify's.
 That share was 20% before engine 0.5.5: a call of an overloaded name that the
 arguments do not decide used to be an `EXTRACTED` edge to the first overload,
 and is now an `INFERRED` edge to each overload that fits (999 calls, with
@@ -834,6 +834,26 @@ two edges of got are gone that named a function defined in another loop
 for a destructured loop variable of the same name. The maps of these
 repositories that hold project types are mostly looked up by key once, or
 not walked at all.
+Engine 0.5.28 (RSpec) reads `let(:conn) { … }`, `let!`, `subject(:request)
+{ … }` and a nameless `subject { … }` as methods of the block they are
+written in: a name of that `describe` / `context` only, the innermost of
+several of one name around a use, and none outside them (a use in
+`shared_examples`, or in an outer `subject` whose `conn` an inner context
+declares, names nothing: which one runs is the example's). What the block's
+last expression gives is the method's result, so `conn.get(…)` reaches
+`Faraday::Connection#get` through `let(:conn) { Faraday::Connection.new }`.
+A module `RSpec.configure`'s `config.include M` puts in every example
+answers a name a spec calls that nothing else answers to
+(`httpbin_connection`, `EXTRACTED`: a spec's bare call runs only if it is
+included). In faraday, the one repository of the 31 with RSpec lets, that is
+374 new definitions and 484 calls (442 `EXTRACTED`), 68 gone: 52 moved
+into the `let` they are written in (`Faraday::Adapter::Test::Stubs.new`
+from the file to `stubs()`), and 9 were `INFERRED` guesses on a block
+parameter (`Faraday.new { |b| b.adapter(:test) }`) that, inside a `let`, is
+an untyped local like any method's, which Ruby's rule types only by a name
+no other type answers to (`adapter` is also a delegator of `Connection`).
+The table above barely moves (Ruby 442 → 443 calls): graphify has no
+definition for a `let`, so its edges pair with nothing.
 Engine 0.5.27 (the small cases the diagnostics left: Swift's implicit
 members, Lombok, Laravel's user, Rust's `Err(e)`, a type named like a
 primitive) adds 264 calls (183 `EXTRACTED`) and 302 reads and writes, and
@@ -1170,7 +1190,7 @@ implicit members since 0.5.17: 39 whose place gives no type are rows now
 closure parameters and variables of express's tests. What is left at file
 level there is `app.use` and `app.set` (842 rows of express), names too
 short and too common to guess by. Engine 0.5.19 takes 123 more off (6,362;
-C# 349 from 470; 6,360 with 0.5.20, 6,348 with 0.5.21, 6,285 with 0.5.22, 6,237 with 0.5.25, 6,206 with 0.5.27). Most of what C# has left is not the project's: `Assert.
+C# 349 from 470; 6,360 with 0.5.20, 6,348 with 0.5.21, 6,285 with 0.5.22, 6,237 with 0.5.25, 6,206 with 0.5.27, 6,166 with 0.5.28). Most of what C# has left is not the project's: `Assert.
 NotNull` beside its own `Ensure.NotNull` (77), `WireMockServer.Start` (23).
 
 By then most rows were of that kind: a library's name the project happens
@@ -1195,7 +1215,8 @@ standard types (`lock`, `clone`, `kind`, `c_str`): of the 6,237 rows of
 0.5.25, 1,610 are left unmarked — PHP 396, TypeScript 315, Ruby 298, Rust
 119, Swift 93, C# 79, Kotlin 67, JavaScript 55, C++ 50, Java 44, Go 34, C
 33, Python 17, TSX 6, Scala 4. 0.5.27 leaves 1,545: Swift 61 from 93, Java
-32 from 44, Rust 101 from 119.) The 2,114 by language: PHP 445, TypeScript 405, Ruby 304, C# 196, Rust 192,
+32 from 44, Rust 101 from 119. 0.5.28 leaves 1,486: Ruby 239 from 298, with
+99 fewer "bare name: not in scope" rows — faraday's spec lets.) The 2,114 by language: PHP 445, TypeScript 405, Ruby 304, C# 196, Rust 192,
 C++ 169, Swift 94, Kotlin 79, JavaScript 71, Java 49, Go 34, C 33, Python
 20, TSX 19, Scala 4. They are still an upper bound: the marks are
 conservative, and PHP's and TypeScript's rows are mostly PSR-7 and Node
