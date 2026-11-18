@@ -924,8 +924,8 @@ builds take 13.3 s for the 31 repositories against graphify's 81.3 s
 faster of two clean builds each): 8.7 times faster at the median, from 2.1
 (todoapi, whose bundled JavaScript the native engine reads in full) to 17.2
 times; retrofit 2.9 s against 13.1 s, guzzle 0.9 s / 6.1 s, alamofire 1.2 s /
-5.4 s, got 0.9 s / 4.7 s (engine 0.5.1; with all that 0.5.18 resolves the same
-31 builds take 16.3 to 18.9 s through Python, 16.1 to 17.4 s in the engine alone, retrofit 3.7 to 4.1 s). An update after a one-file change takes a third of
+5.4 s, got 0.9 s / 4.7 s (engine 0.5.1; with all that 0.5.19 resolves the same
+31 builds take 16.3 to 18.9 s through Python, 16.1 to 18.1 s in the engine alone, retrofit 3.7 to 4.1 s). An update after a one-file change takes a third of
 a build ([above](#incremental-updates)).
 
 ### What is left without an edge
@@ -1018,7 +1018,7 @@ but one convention finding, fixed since: `graphlore_surprises(limit=0)` cut its
 `shared_state` list without saying how much (`shared_state_left_out` does now).
 `SKELETON-EMPTY` went from 5 to 0, and the tool time stayed at 131 s.
 
-Rerun on graphs built by engine 0.5.3, and again by 0.5.4 through 0.5.18
+Rerun on graphs built by engine 0.5.3, and again by 0.5.4 through 0.5.19
 (2026-11-18), the audit raises nothing on the native graphs but its
 `GRAPH-ORPHAN-NODES` note on 19 of them; 115 to 159 s of tool time (on the 0.5.7 run, retrofit's build through `graphlore_build` took 5.1 s and was reported `SLOW` for crossing 5 s). What the table above still listed is
 gone:
