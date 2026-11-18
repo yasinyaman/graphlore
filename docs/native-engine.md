@@ -524,6 +524,13 @@ but one convention finding, fixed since: `graphlore_surprises(limit=0)` cut its
 `shared_state` list without saying how much (`shared_state_left_out` does now).
 `SKELETON-EMPTY` went from 5 to 0, and the tool time stayed at 131 s.
 
+Rerun with engine 0.5.2 (2026-11-18), whose graphs carry 10% more call edges
+(constructors, extensions, Ruby's bare names), the audit raises what the run
+before it did and nothing else: `REPLY-TOO-LARGE` 5, `TEST-PATH-MISSED` 2,
+`ROUTES-SILENT-EMPTY` 1 (express registers its own routes through
+`app[method]`), 19 graphs with orphan nodes; 113 s of tool time. The clean
+builds of the 31 repositories take 13.1 s.
+
 The first native run also found three bugs that had nothing to do with the
 engine, and they are now fixed for both engines. A Go function type in a map
 type (`map[string]func() hash.Hash`) was taken for a function named `string`,
