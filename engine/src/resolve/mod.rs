@@ -2699,6 +2699,33 @@ impl<'a> Project<'a> {
 
     /// A local assigned something external (`ts := httptest.NewServer()`):
     /// its methods are the external type's, never a project namesake's.
+    /// The members named `name` of a namespace: its block's, and in C and
+    /// C++ those of every block that opens the same namespace
+    /// (`namespace cpr { … }` in each header), its own first.
+    fn namespace_members(&self, c: DefRef, name: &str) -> Vec<DefRef> {
+        let own = self.children[c.0].get(&c.1).and_then(|m| m.get(name));
+        let mut out: Vec<DefRef> = own.into_iter().flatten().map(|&k| (c.0, k)).collect();
+        if self.family[c.0] != Some(Family::C) {
+            return out;
+        }
+        let key = qual_key(Family::C, &self.def(c).qualname);
+        for &other in self.by_qual.get(&key).into_iter().flatten() {
+            if other == c || self.def(other).kind != DefKind::Namespace {
+                continue;
+            }
+            let kids = self.children[other.0].get(&other.1).and_then(|m| m.get(name));
+            out.extend(kids.into_iter().flatten().map(|&k| (other.0, k)));
+        }
+        // a method defined for a type in the block (`Response Session::Get()
+        // { … }` inside `namespace cpr { }`) is the type's, no name of the
+        // namespace
+        out.retain(|m| {
+            let d = self.def(*m);
+            !(d.owner.is_some() && d.kind.is_callable())
+        });
+        out
+    }
+
     /// The first name of the type a local's declaration writes (C, C++:
     /// `std` of `std::promise<void> release;`).
     fn local_written_head(&self, f: usize, d: Option<usize>, name: &str) -> Option<&str> {
@@ -3168,8 +3195,7 @@ impl<'a> Project<'a> {
             Target::Def(c) => {
                 let d = self.def(*c);
                 if d.kind == DefKind::Namespace {
-                    let kids = self.children[c.0].get(&c.1)?.get(name)?;
-                    return self.best(kids.iter().map(|&k| (c.0, k))).map(Target::Def);
+                    return self.best(self.namespace_members(*c, name)).map(Target::Def);
                 }
                 if name == "new" && self.family[c.0] == Some(Family::Ruby) {
                     return Some(Target::Def(*c)); // `Klass.new` constructs Klass
@@ -4362,6 +4388,29 @@ impl<'a> Project<'a> {
                 }
             }
             let mut found = self.member(&t, seg, 3);
+            // C++ `cpr::async(…)` beside `class async`: the name called is the
+            // function, a name with `::` after it the type
+            if let Target::Def(ns) = t {
+                if fam == Family::C && self.def(ns).kind == DefKind::Namespace {
+                    let more = rest.get(i + 1).is_some_and(|s| s != "()" && !s.starts_with('['));
+                    let cands = self.namespace_members(ns, seg);
+                    let fits: Vec<DefRef> = cands
+                        .iter()
+                        .copied()
+                        .filter(|m| {
+                            let k = self.def(*m).kind;
+                            if more {
+                                k.is_class_like() || k == DefKind::Namespace
+                            } else {
+                                k.is_callable()
+                            }
+                        })
+                        .collect();
+                    if let Some(m) = self.best(fits) {
+                        found = Some(Target::Def(m));
+                    }
+                }
+            }
             // Python `@property def cookies(self) -> Cookies`: read without
             // a call, with more after it, it is what it returns
             if let Some(Target::Def(m)) = &found {
