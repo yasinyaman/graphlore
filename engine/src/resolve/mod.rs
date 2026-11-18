@@ -1720,11 +1720,27 @@ impl<'a> Project<'a> {
                 // C, C++ `using AsyncResponseC = AsyncWrapper<Response, true>;`,
                 // `typedef struct conn conn_t;`: the type the alias names, and of
                 // a template's specializations the one its arguments fit
-                let aliased = (k == DefKind::TypeAlias && self.family[r.0] == Some(Family::C))
-                    .then_some(def.declared_type.as_ref())
+                let c_alias = k == DefKind::TypeAlias && self.family[r.0] == Some(Family::C);
+                // `typedef struct reader { … } reader;`: the struct written
+                // inside the alias, which holds the members
+                let inside = c_alias
+                    .then(|| self.children[r.0].get(&r.1))
                     .flatten()
-                    .and_then(|ty| self.type_of_path(r.0, def.parent, ty, true))
-                    .filter(|t| *t != r && self.def(*t).kind.is_class_like());
+                    .map(|m| {
+                        m.values()
+                            .flatten()
+                            .map(|&i| (r.0, i))
+                            .filter(|c| self.def(*c).kind.is_class_like())
+                            .collect::<Vec<DefRef>>()
+                    })
+                    .and_then(|v| (v.len() == 1).then(|| v[0]));
+                let aliased = inside.or_else(|| {
+                    c_alias
+                        .then_some(def.declared_type.as_ref())
+                        .flatten()
+                        .and_then(|ty| self.type_of_path(r.0, def.parent, ty, true))
+                        .filter(|t| *t != r && self.def(*t).kind.is_class_like())
+                });
                 if let Some(t) = aliased {
                     Some((self.specialization_for(t, &def.alias_args), conf))
                 } else if k.is_class_like() || k == DefKind::TypeAlias {

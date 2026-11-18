@@ -1436,19 +1436,30 @@ fn arg_facts(n: Node, src: &[u8]) -> Vec<crate::facts::ArgFact> {
     out
 }
 
+/// C, C++: the parameter list of a function written down its declarator
+/// chain (`void *create(int n)` is a `pointer_declarator` around the
+/// `function_declarator`, `Foo& get(int i)` a `reference_declarator`).
+fn declarator_params(n: Node) -> Option<Node> {
+    let mut d = n.child_by_field_name("declarator")?;
+    for _ in 0..6 {
+        if let Some(ps) = d.child_by_field_name("parameters") {
+            return Some(ps);
+        }
+        d = d.child_by_field_name("declarator").or_else(|| {
+            // (`reference_declarator` names no field for what it wraps)
+            kids(d).into_iter().find(|c| c.kind().ends_with("declarator"))
+        })?;
+    }
+    None
+}
+
 /// The parameters a callable declares (`self` / `cls` apart).
 fn param_list(n: Node, src: &[u8]) -> Vec<crate::facts::ParamFact> {
-    let list = n
-        .child_by_field_name("parameters")
-        .or_else(|| n.child_by_field_name("declarator")?.child_by_field_name("parameters"))
-        .or_else(|| {
-            kids(n).into_iter().find(|c| {
-                matches!(
-                    c.kind(),
-                    "function_value_parameters" | "parameter_list" | "formal_parameters"
-                )
-            })
-        });
+    let list = n.child_by_field_name("parameters").or_else(|| declarator_params(n)).or_else(|| {
+        kids(n).into_iter().find(|c| {
+            matches!(c.kind(), "function_value_parameters" | "parameter_list" | "formal_parameters")
+        })
+    });
     // Swift writes the parameters as the declaration's own children
     match list {
         Some(l) => params_in(l, false, src),
@@ -2397,10 +2408,8 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                             | "primary_constructor"
                     )
                 }));
-                if let Some(decl) = n.child_by_field_name("declarator") {
-                    if let Some(ps) = decl.child_by_field_name("parameters") {
-                        pstack.push(ps);
-                    }
+                if let Some(ps) = declarator_params(n) {
+                    pstack.push(ps);
                 }
                 while let Some(ps) = pstack.pop() {
                     let found = locals_of(ps, src, true);
@@ -2950,7 +2959,20 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                         && d.end_byte <= hi
                         && d.declared_type.is_none()
                     {
-                        d.declared_type = first_type(t, src);
+                        // `typedef struct conn { … } conn_t;`: the struct's own
+                        // name (what its body holds is no target), none for an
+                        // anonymous one
+                        d.declared_type = if matches!(
+                            t.kind(),
+                            "struct_specifier"
+                                | "union_specifier"
+                                | "enum_specifier"
+                                | "class_specifier"
+                        ) {
+                            t.child_by_field_name("name").map(|nm| vec![text(nm, src)])
+                        } else {
+                            first_type(t, src)
+                        };
                         d.alias_args = template_args(t, src);
                     }
                 }
@@ -4960,6 +4982,12 @@ fn assign_local_defs(defs: &[Def], locals: &mut [Local]) {
 
 /// Properties and constants as definitions, after the `spans.py` ones (so
 /// every index into `defs` stays valid), each under the definition around it.
+/// C, C++ `extern redisAllocFuncs hiredisAllocFns;`: a declaration of a
+/// variable defined elsewhere.
+fn is_extern(n: Node, src: &[u8]) -> bool {
+    kids(n).iter().any(|c| c.kind() == "storage_class_specifier" && text(*c, src) == "extern")
+}
+
 fn add_extras(
     defs: &mut Vec<Def>,
     extras: &[(Node, Node, crate::facts::DefKind, bool)],
@@ -5031,7 +5059,7 @@ fn add_extras(
             is_test: false,
             object: None,
             extra: true,
-            decl_only: false,
+            decl_only: *state && is_extern(*node, src),
             container: crate::state::holds_container(*node, src),
             table: crate::resources::declared_table(*node, src, None, ""),
             value: state_value(*node, src),

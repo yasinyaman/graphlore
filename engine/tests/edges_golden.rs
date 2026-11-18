@@ -1864,3 +1864,66 @@ fn cpp_aliases_and_specializations_name_their_template() {
     // the guide is no function, and no call of it is made
     assert!(!got.iter().any(|(_, t, _)| t == "include_wrap_wrapper"), "{got:#?}");
 }
+
+#[test]
+fn c_a_typedef_struct_is_the_struct_written_inside_it() {
+    // `typedef struct reader { … } reader;` is the struct it writes, whose
+    // members the alias holds no copy of; a bodiless `typedef struct conn
+    // conn_t;` names `conn`; an anonymous struct's fields are the alias's.
+    // A function returning a pointer types its parameters as any other.
+    let files: &[(&str, &str)] = &[
+        ("read.h", "typedef struct funcs {\n    void *(*create)(int);\n} funcs;\n\ntypedef struct reader {\n    funcs *fn;\n    int pos;\n} reader;\n\nstruct conn {\n    int fd;\n};\ntypedef struct conn conn_t;\n\ntypedef struct {\n    int port;\n} opts;\n\ntypedef struct other {\n    void *(*create)(int);\n    int pos;\n} other;\n"),
+        ("read.c", "#include \"read.h\"\nvoid *run(reader *r, conn_t *c, opts *o) {\n    r->pos = c->fd + o->port;\n    return r->fn->create(1);\n}\n"),
+    ];
+    let calls = calls_conf("ctypedef", files);
+    assert!(
+        calls.contains(&("run()".into(), "read_h_funcs_funcs_create".into(), "EXTRACTED".into())),
+        "{calls:#?}"
+    );
+    assert!(!calls.iter().any(|(_, t, _)| t == "read_h_other_other_create"), "{calls:#?}");
+    let got = edges("ctypedef2", files);
+    has(
+        &got,
+        &[
+            ("run()", "writes", "pos"),
+            ("run()", "reads", "fd"),
+            ("run()", "reads", "port"),
+            ("run()", "reads", "fn"),
+        ],
+    );
+}
+
+#[test]
+fn c_an_extern_variable_declares_the_definition_elsewhere() {
+    // the header's `extern allocs fns;` puts `fns` and its type in scope for
+    // the header's own inline functions; it is no node: reads go to the
+    // definition in the `.c` file
+    let files: &[(&str, &str)] = &[
+        // (inside an `#ifndef`, as a platform guard writes it)
+        ("alloc.h", "#ifdef __cplusplus\nextern \"C\" {\n#endif\ntypedef struct allocs {\n    void *(*mallocFn)(int);\n} allocs;\n\n#ifndef _WIN32\nextern allocs fns;\n\nhi_static hi_inline\nvoid *hi_free(void *p) {\n    return p;\n}\n\nstatic inline void *hi_malloc(int n) {\n    return fns.mallocFn(n);\n}\n#endif\n#ifdef __cplusplus\n}\n#endif\n"),
+        ("alloc.c", "#include \"alloc.h\"\nallocs fns = { 0 };\n"),
+    ];
+    let calls = calls_conf("cextern", files);
+    assert!(
+        calls.contains(&(
+            "hi_malloc()".into(),
+            "alloc_h_allocs_allocs_mallocfn".into(),
+            "EXTRACTED".into()
+        )),
+        "{calls:#?}"
+    );
+    let dir = project("cextern2", files);
+    let (g, _) = build_graph(&BuildOptions::new(&dir)).unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+    let ids: Vec<&str> =
+        g["nodes"].as_array().unwrap().iter().filter_map(|n| n["id"].as_str()).collect();
+    assert!(ids.contains(&"alloc_c_fns") && !ids.contains(&"alloc_h_fns"), "{ids:?}");
+    // macro words above a function are no variable
+    assert!(!ids.contains(&"alloc_h_hi_inline"), "{ids:?}");
+    let reads = g["links"].as_array().unwrap().iter().any(|e| {
+        e["relation"] == "reads"
+            && e["source"] == "alloc_h_hi_malloc"
+            && e["target"] == "alloc_c_fns"
+    });
+    assert!(reads);
+}

@@ -767,7 +767,7 @@ file pairs). The native graph has definitions graphify folds into the one
 around them (a function nested in a method, the setter beside a getter of the
 same name); an edge from one of those is compared as an edge from the paired
 definition it belongs to, as graphify records it. On the 31 repositories of the
-[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.33,
+[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.34,
 measured 2026-11-18), as native / graphify edges and the share of graphify's
 that the native graph has too:
 
@@ -786,12 +786,12 @@ that the native graph has too:
 | Swift | 95.9% | 166 / 166 (–)³ | 5,494 / 2,141 (83%) | 190 / 164 (100%) | 1,091 / 580 (62%) |
 | C | 100% | 89 / 77 (99%) | 864 / 791 (100%) | – | 253 / 130 (97%) |
 | C++ | 98.7% | 215 / 228 (93%) | 765 / 281 (29%)⁴ | 30 / 5 (100%) | 350 / 234 (88%) |
-| C/C++ headers | 91.4% | 164 / 172 (95%) | 371 / 348 (84%) | 12 / 12 (92%) | 563 / 312 (90%) |
+| C/C++ headers | 91.4% | 164 / 172 (95%) | 372 / 348 (84%) | 12 / 12 (92%) | 563 / 312 (90%) |
 | Ruby | 99.7% | 42 / 0 | 443 / 375 (69%) | 46 / 15 (93%) | 28 / 0 |
 | PHP | 80.6% | 429 / 505 (84%) | 8,873 / 6,140 (90%) | 65 / 60 (98%) | 648 / 213 (95%) |
-| **All** | **94.4%** | **4,962 / 5,565 (75%)** | **44,510 / 27,832 (85%)** | **1,137 / 726 (97%)** | **12,473 / 6,814 (89%)** |
+| **All** | **94.4%** | **4,962 / 5,565 (75%)** | **44,511 / 27,832 (85%)** | **1,137 / 726 (97%)** | **12,473 / 6,814 (89%)** |
 
-Of the native calls, 12,737 (29%) are `INFERRED`, against 47% of graphify's.
+Of the native calls, 12,739 (29%) are `INFERRED`, against 47% of graphify's.
 That share was 20% before engine 0.5.5: a call of an overloaded name that the
 arguments do not decide used to be an `EXTRACTED` edge to the first overload,
 and is now an `INFERRED` edge to each overload that fits (999 calls, with
@@ -834,6 +834,28 @@ two edges of got are gone that named a function defined in another loop
 for a destructured loop variable of the same name. The maps of these
 repositories that hold project types are mostly looked up by key once, or
 not walked at all.
+Engine 0.5.34 (C `typedef struct`) reads `typedef struct redisReader { … }
+redisReader;` as the struct written inside it: the alias is a definition
+whose child is the struct, and its members are the struct's (a local
+`redisReader *r` typed by the alias found none, so `r->fn` named nothing).
+A bodiless `typedef struct conn conn_t;` names `conn`; the target 0.5.32
+wrote for an alias with a body was the first type of the body (`redisReader`
+named `redisReplyObjectFunctions`) and named nothing only because it was
+an alias in turn. Three gaps behind it went with it: a function returning a
+pointer (`void *createStringObject(…)`) had no parameters typed (its
+`function_declarator` sits under a `pointer_declarator`); `extern
+hiredisAllocFuncs hiredisAllocFns;` declared nothing, so a header's inline
+functions had no such name in scope (it is a declaration of the definition
+now, `decl_only`, no node, as a prototype is); and a file-level variable
+inside an `#if` group or a header's `extern "C" { … }` was none (a
+declaration the grammar recovers from macro words, `ffc_internal
+ffc_inline` above a function, with no `;` of its own, is still none).
+hiredis gets 34 calls (`r->fn->createString(…)`, the slot of the function
+pointer, as an interface method is the call's target), 836 reads, 324
+writes and 312 uses of the structs passed (`redisContext`, `redisReply`),
+and 16 file-level variables (`FFC_POWERS_OF_FIVE`, `ossl_locks`); a
+`Q_OBJECT` read as a field `friend` is gone. C's unmarked unresolved rows:
+33 → 0.
 Engine 0.5.33 (C++ preprocessor branches) gives the parser an `#if … #else
 … #endif` once when every branch leaves the same number of braces open
 (`if (error_code) {` under `#if` and again under `#else`, closed once after
@@ -1251,7 +1273,7 @@ implicit members since 0.5.17: 39 whose place gives no type are rows now
 closure parameters and variables of express's tests. What is left at file
 level there is `app.use` and `app.set` (842 rows of express), names too
 short and too common to guess by. Engine 0.5.19 takes 123 more off (6,362;
-C# 349 from 470; 6,360 with 0.5.20, 6,348 with 0.5.21, 6,285 with 0.5.22, 6,237 with 0.5.25, 6,206 with 0.5.27, 6,166 with 0.5.28, 6,156 with 0.5.30, 6,140 with 0.5.31, 6,132 with 0.5.32, 6,126 with 0.5.33). Most of what C# has left is not the project's: `Assert.
+C# 349 from 470; 6,360 with 0.5.20, 6,348 with 0.5.21, 6,285 with 0.5.22, 6,237 with 0.5.25, 6,206 with 0.5.27, 6,166 with 0.5.28, 6,156 with 0.5.30, 6,140 with 0.5.31, 6,132 with 0.5.32, 6,126 with 0.5.33, 6,093 with 0.5.34). Most of what C# has left is not the project's: `Assert.
 NotNull` beside its own `Ensure.NotNull` (77), `WireMockServer.Start` (23).
 
 By then most rows were of that kind: a library's name the project happens
