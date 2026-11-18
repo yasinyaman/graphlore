@@ -55,11 +55,14 @@ the lines under the seed: a question often has two homes (the tool that exposes
 a behavior and the module that implements it). "Seed calls into" lists what the
 seed calls in other files — where the implementation lives when the seed is a thin
 wrapper — and "Also matched" lists the other top hits by definition. Works
-across Python, JS/TS, Go, Java, Rust, C++ and 165+ languages. Needs the optional
-`[semble]` extra; without it, fall back to `graphlore_search` (name-based) and the
-structural flow below. The first semantic call downloads semble's embedding model
-from the Hugging Face Hub (cached afterwards) — expect it to be slow once, and to
-fail on a machine without network access until the model is fetched ahead of time.
+across Python, JS/TS, Go, Java, Rust, C++ and 165+ languages, with no extra
+installed: it runs on semble when present, else on graphlore's built-in index
+(`backend` in the reply says which). The built-in index without the `[embed]`
+extra is BM25 only (`mode: "bm25"`): phrase the query in the words the code would
+use (`retry backoff timeout`, a function name) rather than a paraphrase. With
+`[embed]` or semble, the first call downloads an embedding model from the Hugging
+Face Hub (cached afterwards) — expect it to be slow once; on a machine without
+network access the built-in index answers with BM25 until the model is fetched.
 
 ## Canonical flow (cheap → targeted)
 
@@ -159,7 +162,7 @@ stripped) — the middle layer between the map and full code — and
   god nodes → `graphlore_surprises` for hidden coupling → write a short
   architecture summary. (The `onboard` MCP prompt scripts this.)
 - **Tracing a bug** → `graphlore_locate("<symptom in plain words>")` (or
-  `graphlore_search` without the `[semble]` extra) → `graphlore_subgraph` around the
+  `graphlore_search` for a name you already know) → `graphlore_subgraph` around the
   best match → `graphlore_path` between suspects → check `graphlore_surprises` and the
   hidden links locate returned (`semantic_cousins` with `linked: false`). (The `trace_bug` MCP prompt scripts this.)
 - **Explaining a flow** → `graphlore_query` the flow for entry points →
@@ -196,10 +199,11 @@ stripped) — the middle layer between the map and full code — and
   structural changes between two git refs, cosmetic-only edits separated.
 - **Hunting duplication** → `graphlore_same_names()` and the `identical_bodies`
   tier of `graphlore_duplication_scan()` first (both exact, no model), then the
-  scan's semantic `pairs` — definitions that are similar but structurally
-  distant, each with its score and both `file:line`s (needs the `[semble]`
-  extra). Read the score: near 1.0 is copied code; a low score is two things
-  with the same role, which is why pairs under 0.7 are left out by default.
+  scan's similarity `pairs` — definitions that are similar but structurally
+  distant, each with its score and both `file:line`s (`score_kind` says whether
+  it is an embedding or a tf-idf cosine). Read the score: near 1.0 is copied
+  code; a low score is two things with the same role, which is why pairs under
+  the floor (0.7 on embeddings, 0.5 on tf-idf) are left out by default.
 - **Auditing a dependency upgrade** → `graphlore_package_apis("<package>")` —
   which symbols of the external package are actually used, and from where.
 - **Finding an endpoint** → `graphlore_routes(pattern="/items")` — which URL

@@ -39,5 +39,19 @@ def offline() -> bool:
     return (env("OFFLINE", "") or "").strip().lower() in ("1", "true", "yes", "on")
 
 
+# The Hugging Face libraries behind the embedding models (semble's, and the
+# built-in search's dense tier) read these before any download.
+HF_OFFLINE_ENV = {"HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1"}
+
+
+def export_offline_env() -> None:
+    """Offline: tell the Hugging Face libraries not to download, for this process
+    and every child. Unset values only, so an explicit setting wins. Takes effect
+    only for libraries not yet imported."""
+    if offline():
+        for k, v in HF_OFFLINE_ENV.items():
+            os.environ.setdefault(k, v)
+
+
 PROJECT_DIR = Path(env("PROJECT_DIR", ".")).resolve()
 OUT_DIR_NAME = env("OUT_DIR", "graphify-out")

@@ -1,0 +1,2861 @@
+{
+ "semble_ref": "v0.7.3",
+ "repos": {
+  "abseil-cpp": {
+   "bm25": {
+    "language": "cpp",
+    "queries": 20,
+    "ndcg10": 0.7649,
+    "recall10": 0.925,
+    "index_ms": 13608.3,
+    "query_p50_ms": 18.165,
+    "by_category": {
+     "architecture": 0.8155,
+     "semantic": 0.7111,
+     "symbol": 1.0
+    },
+    "chunks": 24851
+   },
+   "hybrid": {
+    "language": "cpp",
+    "queries": 20,
+    "ndcg10": 0.905,
+    "recall10": 1.0,
+    "index_ms": 16048.1,
+    "query_p50_ms": 20.624,
+    "by_category": {
+     "architecture": 0.8155,
+     "semantic": 0.8979,
+     "symbol": 1.0
+    },
+    "chunks": 24851
+   },
+   "semble": {
+    "language": "cpp",
+    "queries": 20,
+    "ndcg10": 0.88,
+    "recall10": 1.0,
+    "index_ms": 12797.3,
+    "query_p50_ms": 4.064,
+    "by_category": {
+     "architecture": 1.0,
+     "semantic": 0.8733,
+     "symbol": 0.8333
+    }
+   }
+  },
+  "aeson": {
+   "bm25": {
+    "language": "haskell",
+    "queries": 20,
+    "ndcg10": 0.8254,
+    "recall10": 0.95,
+    "index_ms": 987.5,
+    "query_p50_ms": 1.508,
+    "by_category": {
+     "architecture": 0.6893,
+     "semantic": 0.8708
+    },
+    "chunks": 1841
+   },
+   "hybrid": {
+    "language": "haskell",
+    "queries": 20,
+    "ndcg10": 0.8771,
+    "recall10": 0.975,
+    "index_ms": 1114.4,
+    "query_p50_ms": 1.883,
+    "by_category": {
+     "architecture": 0.8123,
+     "semantic": 0.8987
+    },
+    "chunks": 1841
+   },
+   "semble": {
+    "language": "haskell",
+    "queries": 20,
+    "ndcg10": 0.7683,
+    "recall10": 0.975,
+    "index_ms": 574.2,
+    "query_p50_ms": 6.332,
+    "by_category": {
+     "architecture": 0.6297,
+     "semantic": 0.8145
+    }
+   }
+  },
+  "aiohttp": {
+   "bm25": {
+    "language": "python",
+    "queries": 21,
+    "ndcg10": 0.9145,
+    "recall10": 0.9762,
+    "index_ms": 554.9,
+    "query_p50_ms": 0.956,
+    "by_category": {
+     "architecture": 0.8988,
+     "semantic": 0.8791,
+     "symbol": 1.0
+    },
+    "chunks": 1955
+   },
+   "hybrid": {
+    "language": "python",
+    "queries": 21,
+    "ndcg10": 0.8429,
+    "recall10": 0.9762,
+    "index_ms": 1020.1,
+    "query_p50_ms": 1.132,
+    "by_category": {
+     "architecture": 0.8834,
+     "semantic": 0.7242,
+     "symbol": 1.0
+    },
+    "chunks": 1955
+   },
+   "semble": {
+    "language": "python",
+    "queries": 21,
+    "ndcg10": 0.8551,
+    "recall10": 0.9524,
+    "index_ms": 759.2,
+    "query_p50_ms": 1.819,
+    "by_category": {
+     "architecture": 0.8634,
+     "semantic": 0.7681,
+     "symbol": 1.0
+    }
+   }
+  },
+  "alamofire": {
+   "bm25": {
+    "language": "swift",
+    "queries": 20,
+    "ndcg10": 0.9215,
+    "recall10": 1.0,
+    "index_ms": 609.7,
+    "query_p50_ms": 1.07,
+    "by_category": {
+     "architecture": 0.8569,
+     "semantic": 0.8962,
+     "symbol": 1.0
+    },
+    "chunks": 1518
+   },
+   "hybrid": {
+    "language": "swift",
+    "queries": 20,
+    "ndcg10": 0.911,
+    "recall10": 1.0,
+    "index_ms": 1239.0,
+    "query_p50_ms": 1.502,
+    "by_category": {
+     "architecture": 0.7339,
+     "semantic": 0.9107,
+     "symbol": 1.0
+    },
+    "chunks": 1518
+   },
+   "semble": {
+    "language": "swift",
+    "queries": 20,
+    "ndcg10": 0.9775,
+    "recall10": 1.0,
+    "index_ms": 734.4,
+    "query_p50_ms": 2.117,
+    "by_category": {
+     "architecture": 1.0,
+     "semantic": 0.9592,
+     "symbol": 1.0
+    }
+   }
+  },
+  "axios": {
+   "bm25": {
+    "language": "javascript",
+    "queries": 20,
+    "ndcg10": 0.8491,
+    "recall10": 1.0,
+    "index_ms": 206.6,
+    "query_p50_ms": 0.493,
+    "by_category": {
+     "architecture": 0.7175,
+     "semantic": 0.8217,
+     "symbol": 1.0
+    },
+    "chunks": 388
+   },
+   "hybrid": {
+    "language": "javascript",
+    "queries": 20,
+    "ndcg10": 0.9342,
+    "recall10": 1.0,
+    "index_ms": 271.4,
+    "query_p50_ms": 0.7,
+    "by_category": {
+     "architecture": 0.7666,
+     "semantic": 0.9834,
+     "symbol": 1.0
+    },
+    "chunks": 388
+   },
+   "semble": {
+    "language": "javascript",
+    "queries": 20,
+    "ndcg10": 0.8666,
+    "recall10": 0.95,
+    "index_ms": 184.0,
+    "query_p50_ms": 1.929,
+    "by_category": {
+     "architecture": 0.6276,
+     "semantic": 0.9104,
+     "symbol": 1.0
+    }
+   }
+  },
+  "axum": {
+   "bm25": {
+    "language": "rust",
+    "queries": 20,
+    "ndcg10": 0.7354,
+    "recall10": 0.85,
+    "index_ms": 620.1,
+    "query_p50_ms": 1.086,
+    "by_category": {
+     "architecture": 0.6712,
+     "semantic": 0.7793,
+     "symbol": 0.6667
+    },
+    "chunks": 1659
+   },
+   "hybrid": {
+    "language": "rust",
+    "queries": 20,
+    "ndcg10": 0.7806,
+    "recall10": 0.9,
+    "index_ms": 1119.8,
+    "query_p50_ms": 1.584,
+    "by_category": {
+     "architecture": 0.7102,
+     "semantic": 0.8385,
+     "symbol": 0.6667
+    },
+    "chunks": 1659
+   },
+   "semble": {
+    "language": "rust",
+    "queries": 20,
+    "ndcg10": 0.8151,
+    "recall10": 0.95,
+    "index_ms": 641.5,
+    "query_p50_ms": 2.278,
+    "by_category": {
+     "architecture": 0.8,
+     "semantic": 0.8289,
+     "symbol": 0.7854
+    }
+   }
+  },
+  "bash-it": {
+   "bm25": {
+    "language": "bash",
+    "queries": 20,
+    "ndcg10": 0.6235,
+    "recall10": 0.775,
+    "index_ms": 928.2,
+    "query_p50_ms": 0.993,
+    "by_category": {
+     "architecture": 0.6934,
+     "semantic": 0.5921,
+     "symbol": 0.6774
+    },
+    "chunks": 1326
+   },
+   "hybrid": {
+    "language": "bash",
+    "queries": 20,
+    "ndcg10": 0.7238,
+    "recall10": 0.85,
+    "index_ms": 1388.8,
+    "query_p50_ms": 2.143,
+    "by_category": {
+     "architecture": 0.8155,
+     "semantic": 0.6831,
+     "symbol": 0.7929
+    },
+    "chunks": 1326
+   },
+   "semble": {
+    "language": "bash",
+    "queries": 20,
+    "ndcg10": 0.6525,
+    "recall10": 0.825,
+    "index_ms": 892.6,
+    "query_p50_ms": 2.267,
+    "by_category": {
+     "architecture": 0.8155,
+     "semantic": 0.6045,
+     "symbol": 0.7123
+    }
+   }
+  },
+  "bats-core": {
+   "bm25": {
+    "language": "bash",
+    "queries": 20,
+    "ndcg10": 0.9346,
+    "recall10": 1.0,
+    "index_ms": 45.6,
+    "query_p50_ms": 0.254,
+    "by_category": {
+     "architecture": 0.9473,
+     "semantic": 0.9278
+    },
+    "chunks": 81
+   },
+   "hybrid": {
+    "language": "bash",
+    "queries": 20,
+    "ndcg10": 0.7753,
+    "recall10": 1.0,
+    "index_ms": 128.8,
+    "query_p50_ms": 0.457,
+    "by_category": {
+     "architecture": 1.0,
+     "semantic": 0.6542
+    },
+    "chunks": 81
+   },
+   "semble": {
+    "language": "bash",
+    "queries": 20,
+    "ndcg10": 0.8662,
+    "recall10": 1.0,
+    "index_ms": 55.7,
+    "query_p50_ms": 1.559,
+    "by_category": {
+     "architecture": 0.7231,
+     "semantic": 0.9432
+    }
+   }
+  },
+  "cats": {
+   "bm25": {
+    "language": "scala",
+    "queries": 20,
+    "ndcg10": 0.8465,
+    "recall10": 0.9,
+    "index_ms": 1860.0,
+    "query_p50_ms": 1.567,
+    "by_category": {
+     "architecture": 0.6053,
+     "semantic": 0.8508,
+     "symbol": 1.0
+    },
+    "chunks": 7034
+   },
+   "hybrid": {
+    "language": "scala",
+    "queries": 20,
+    "ndcg10": 0.8517,
+    "recall10": 0.9,
+    "index_ms": 3764.2,
+    "query_p50_ms": 2.205,
+    "by_category": {
+     "architecture": 0.6312,
+     "semantic": 0.8508,
+     "symbol": 1.0
+    },
+    "chunks": 7034
+   },
+   "semble": {
+    "language": "scala",
+    "queries": 20,
+    "ndcg10": 0.9113,
+    "recall10": 0.9,
+    "index_ms": 2062.1,
+    "query_p50_ms": 3.572,
+    "by_category": {
+     "architecture": 0.8066,
+     "semantic": 0.9,
+     "symbol": 1.0
+    }
+   }
+  },
+  "chi": {
+   "bm25": {
+    "language": "go",
+    "queries": 18,
+    "ndcg10": 0.8156,
+    "recall10": 0.9722,
+    "index_ms": 419.4,
+    "query_p50_ms": 0.764,
+    "by_category": {
+     "architecture": 0.8595,
+     "semantic": 0.7659,
+     "symbol": 0.877
+    },
+    "chunks": 533
+   },
+   "hybrid": {
+    "language": "go",
+    "queries": 18,
+    "ndcg10": 0.8383,
+    "recall10": 1.0,
+    "index_ms": 666.8,
+    "query_p50_ms": 1.034,
+    "by_category": {
+     "architecture": 0.8045,
+     "semantic": 0.8479,
+     "symbol": 0.877
+    },
+    "chunks": 533
+   },
+   "semble": {
+    "language": "go",
+    "queries": 18,
+    "ndcg10": 0.8699,
+    "recall10": 1.0,
+    "index_ms": 348.2,
+    "query_p50_ms": 1.938,
+    "by_category": {
+     "architecture": 0.7547,
+     "semantic": 0.9444,
+     "symbol": 0.877
+    }
+   }
+  },
+  "circe": {
+   "bm25": {
+    "language": "scala",
+    "queries": 19,
+    "ndcg10": 0.8728,
+    "recall10": 1.0,
+    "index_ms": 405.4,
+    "query_p50_ms": 1.499,
+    "by_category": {
+     "architecture": 0.7236,
+     "semantic": 0.9058,
+     "symbol": 1.0
+    },
+    "chunks": 1211
+   },
+   "hybrid": {
+    "language": "scala",
+    "queries": 19,
+    "ndcg10": 0.866,
+    "recall10": 1.0,
+    "index_ms": 584.4,
+    "query_p50_ms": 1.683,
+    "by_category": {
+     "architecture": 0.7524,
+     "semantic": 0.8811,
+     "symbol": 1.0
+    },
+    "chunks": 1211
+   },
+   "semble": {
+    "language": "scala",
+    "queries": 19,
+    "ndcg10": 0.898,
+    "recall10": 0.9474,
+    "index_ms": 296.7,
+    "query_p50_ms": 1.994,
+    "by_category": {
+     "architecture": 0.7262,
+     "semantic": 0.9482,
+     "symbol": 1.0
+    }
+   }
+  },
+  "click": {
+   "bm25": {
+    "language": "python",
+    "queries": 20,
+    "ndcg10": 0.9446,
+    "recall10": 1.0,
+    "index_ms": 178.4,
+    "query_p50_ms": 0.553,
+    "by_category": {
+     "architecture": 1.0,
+     "semantic": 0.9631,
+     "symbol": 0.8155
+    },
+    "chunks": 634
+   },
+   "hybrid": {
+    "language": "python",
+    "queries": 20,
+    "ndcg10": 0.9077,
+    "recall10": 1.0,
+    "index_ms": 586.1,
+    "query_p50_ms": 1.327,
+    "by_category": {
+     "architecture": 0.9385,
+     "semantic": 0.9262,
+     "symbol": 0.8155
+    },
+    "chunks": 634
+   },
+   "semble": {
+    "language": "python",
+    "queries": 20,
+    "ndcg10": 1.0,
+    "recall10": 1.0,
+    "index_ms": 337.8,
+    "query_p50_ms": 1.506,
+    "by_category": {
+     "architecture": 1.0,
+     "semantic": 1.0,
+     "symbol": 1.0
+    }
+   }
+  },
+  "cobra": {
+   "bm25": {
+    "language": "go",
+    "queries": 20,
+    "ndcg10": 0.9068,
+    "recall10": 1.0,
+    "index_ms": 539.0,
+    "query_p50_ms": 0.75,
+    "by_category": {
+     "architecture": 1.0,
+     "semantic": 0.8642,
+     "symbol": 0.877
+    },
+    "chunks": 663
+   },
+   "hybrid": {
+    "language": "go",
+    "queries": 20,
+    "ndcg10": 0.9007,
+    "recall10": 1.0,
+    "index_ms": 990.9,
+    "query_p50_ms": 1.118,
+    "by_category": {
+     "architecture": 0.877,
+     "semantic": 0.9201,
+     "symbol": 0.877
+    },
+    "chunks": 663
+   },
+   "semble": {
+    "language": "go",
+    "queries": 20,
+    "ndcg10": 0.971,
+    "recall10": 1.0,
+    "index_ms": 510.2,
+    "query_p50_ms": 1.85,
+    "by_category": {
+     "architecture": 1.0,
+     "semantic": 0.9472,
+     "symbol": 1.0
+    }
+   }
+  },
+  "commons-lang": {
+   "bm25": {
+    "language": "java",
+    "queries": 21,
+    "ndcg10": 0.7714,
+    "recall10": 0.9286,
+    "index_ms": 1921.1,
+    "query_p50_ms": 2.152,
+    "by_category": {
+     "architecture": 0.748,
+     "semantic": 0.711,
+     "symbol": 1.0
+    },
+    "chunks": 5164
+   },
+   "hybrid": {
+    "language": "java",
+    "queries": 21,
+    "ndcg10": 0.8059,
+    "recall10": 0.9762,
+    "index_ms": 4220.4,
+    "query_p50_ms": 2.685,
+    "by_category": {
+     "architecture": 0.871,
+     "semantic": 0.7365,
+     "symbol": 1.0
+    },
+    "chunks": 5164
+   },
+   "semble": {
+    "language": "java",
+    "queries": 21,
+    "ndcg10": 0.8829,
+    "recall10": 0.9762,
+    "index_ms": 3315.9,
+    "query_p50_ms": 2.865,
+    "by_category": {
+     "architecture": 0.871,
+     "semantic": 0.852,
+     "symbol": 1.0
+    }
+   }
+  },
+  "curl": {
+   "bm25": {
+    "language": "c",
+    "queries": 20,
+    "ndcg10": 0.6942,
+    "recall10": 0.95,
+    "index_ms": 4946.4,
+    "query_p50_ms": 2.51,
+    "by_category": {
+     "architecture": 0.6434,
+     "semantic": 0.7357
+    },
+    "chunks": 7743
+   },
+   "hybrid": {
+    "language": "c",
+    "queries": 20,
+    "ndcg10": 0.6711,
+    "recall10": 0.85,
+    "index_ms": 8424.8,
+    "query_p50_ms": 3.072,
+    "by_category": {
+     "architecture": 0.4699,
+     "semantic": 0.8357
+    },
+    "chunks": 7743
+   },
+   "semble": {
+    "language": "c",
+    "queries": 20,
+    "ndcg10": 0.7051,
+    "recall10": 0.875,
+    "index_ms": 5262.3,
+    "query_p50_ms": 3.038,
+    "by_category": {
+     "architecture": 0.6285,
+     "semantic": 0.7679
+    }
+   }
+  },
+  "dapper": {
+   "bm25": {
+    "language": "csharp",
+    "queries": 20,
+    "ndcg10": 0.8643,
+    "recall10": 1.0,
+    "index_ms": 595.9,
+    "query_p50_ms": 0.833,
+    "by_category": {
+     "architecture": 0.8155,
+     "semantic": 0.848,
+     "symbol": 1.0
+    },
+    "chunks": 862
+   },
+   "hybrid": {
+    "language": "csharp",
+    "queries": 20,
+    "ndcg10": 0.798,
+    "recall10": 0.95,
+    "index_ms": 852.5,
+    "query_p50_ms": 1.181,
+    "by_category": {
+     "architecture": 0.5434,
+     "semantic": 0.9067,
+     "symbol": 0.6667
+    },
+    "chunks": 862
+   },
+   "semble": {
+    "language": "csharp",
+    "queries": 20,
+    "ndcg10": 0.8419,
+    "recall10": 1.0,
+    "index_ms": 499.5,
+    "query_p50_ms": 4.754,
+    "by_category": {
+     "architecture": 0.5878,
+     "semantic": 0.8836,
+     "symbol": 1.0
+    }
+   }
+  },
+  "ecto": {
+   "bm25": {
+    "language": "elixir",
+    "queries": 19,
+    "ndcg10": 0.8794,
+    "recall10": 1.0,
+    "index_ms": 967.4,
+    "query_p50_ms": 0.852,
+    "by_category": {
+     "architecture": 0.877,
+     "semantic": 0.9048,
+     "symbol": 0.7718
+    },
+    "chunks": 847
+   },
+   "hybrid": {
+    "language": "elixir",
+    "queries": 19,
+    "ndcg10": 0.9085,
+    "recall10": 0.9474,
+    "index_ms": 1530.5,
+    "query_p50_ms": 1.265,
+    "by_category": {
+     "architecture": 1.0,
+     "semantic": 0.9716,
+     "symbol": 0.5436
+    },
+    "chunks": 847
+   },
+   "semble": {
+    "language": "elixir",
+    "queries": 19,
+    "ndcg10": 0.9026,
+    "recall10": 1.0,
+    "index_ms": 1163.7,
+    "query_p50_ms": 1.932,
+    "by_category": {
+     "architecture": 1.0,
+     "semantic": 0.8961,
+     "symbol": 0.8333
+    }
+   }
+  },
+  "exposed": {
+   "bm25": {
+    "language": "kotlin",
+    "queries": 20,
+    "ndcg10": 0.6392,
+    "recall10": 0.875,
+    "index_ms": 817.6,
+    "query_p50_ms": 1.261,
+    "by_category": {
+     "architecture": 0.582,
+     "semantic": 0.5741,
+     "symbol": 1.0
+    },
+    "chunks": 1777
+   },
+   "hybrid": {
+    "language": "kotlin",
+    "queries": 20,
+    "ndcg10": 0.7012,
+    "recall10": 0.875,
+    "index_ms": 1297.7,
+    "query_p50_ms": 1.622,
+    "by_category": {
+     "architecture": 0.2439,
+     "semantic": 0.7352,
+     "symbol": 1.0
+    },
+    "chunks": 1777
+   },
+   "semble": {
+    "language": "kotlin",
+    "queries": 20,
+    "ndcg10": 0.6478,
+    "recall10": 0.925,
+    "index_ms": 858.6,
+    "query_p50_ms": 2.726,
+    "by_category": {
+     "architecture": 0.4266,
+     "semantic": 0.6197,
+     "symbol": 1.0
+    }
+   }
+  },
+  "express": {
+   "bm25": {
+    "language": "javascript",
+    "queries": 20,
+    "ndcg10": 0.8797,
+    "recall10": 0.95,
+    "index_ms": 63.0,
+    "query_p50_ms": 0.29,
+    "by_category": {
+     "architecture": 0.8331,
+     "semantic": 0.9631,
+     "symbol": 0.7103
+    },
+    "chunks": 172
+   },
+   "hybrid": {
+    "language": "javascript",
+    "queries": 20,
+    "ndcg10": 0.8744,
+    "recall10": 0.95,
+    "index_ms": 93.2,
+    "query_p50_ms": 0.53,
+    "by_category": {
+     "architecture": 0.8342,
+     "semantic": 0.9018,
+     "symbol": 0.877
+    },
+    "chunks": 172
+   },
+   "semble": {
+    "language": "javascript",
+    "queries": 20,
+    "ndcg10": 0.9491,
+    "recall10": 1.0,
+    "index_ms": 89.8,
+    "query_p50_ms": 1.356,
+    "by_category": {
+     "architecture": 0.9261,
+     "semantic": 0.95,
+     "symbol": 1.0
+    }
+   }
+  },
+  "fastapi": {
+   "bm25": {
+    "language": "python",
+    "queries": 20,
+    "ndcg10": 0.8166,
+    "recall10": 0.9333,
+    "index_ms": 288.7,
+    "query_p50_ms": 0.829,
+    "by_category": {
+     "architecture": 0.7897,
+     "semantic": 0.7255,
+     "symbol": 1.0
+    },
+    "chunks": 455
+   },
+   "hybrid": {
+    "language": "python",
+    "queries": 20,
+    "ndcg10": 0.7786,
+    "recall10": 0.95,
+    "index_ms": 419.8,
+    "query_p50_ms": 0.928,
+    "by_category": {
+     "architecture": 0.6293,
+     "semantic": 0.771,
+     "symbol": 1.0
+    },
+    "chunks": 455
+   },
+   "semble": {
+    "language": "python",
+    "queries": 20,
+    "ndcg10": 0.7862,
+    "recall10": 0.9167,
+    "index_ms": 660.9,
+    "query_p50_ms": 1.808,
+    "by_category": {
+     "architecture": 0.7371,
+     "semantic": 0.6954,
+     "symbol": 1.0
+    }
+   }
+  },
+  "flask": {
+   "bm25": {
+    "language": "python",
+    "queries": 21,
+    "ndcg10": 0.8655,
+    "recall10": 0.9286,
+    "index_ms": 255.7,
+    "query_p50_ms": 0.743,
+    "by_category": {
+     "architecture": 0.8105,
+     "semantic": 0.8638,
+     "symbol": 1.0
+    },
+    "chunks": 478
+   },
+   "hybrid": {
+    "language": "python",
+    "queries": 21,
+    "ndcg10": 0.8145,
+    "recall10": 0.9762,
+    "index_ms": 398.7,
+    "query_p50_ms": 0.881,
+    "by_category": {
+     "architecture": 0.8041,
+     "semantic": 0.8056,
+     "symbol": 0.871
+    },
+    "chunks": 478
+   },
+   "semble": {
+    "language": "python",
+    "queries": 21,
+    "ndcg10": 0.8879,
+    "recall10": 1.0,
+    "index_ms": 389.5,
+    "query_p50_ms": 1.616,
+    "by_category": {
+     "architecture": 0.8304,
+     "semantic": 0.929,
+     "symbol": 0.871
+    }
+   }
+  },
+  "fmtlib": {
+   "bm25": {
+    "language": "cpp",
+    "queries": 20,
+    "ndcg10": 0.7986,
+    "recall10": 1.0,
+    "index_ms": 1009.4,
+    "query_p50_ms": 1.513,
+    "by_category": {
+     "architecture": 0.754,
+     "semantic": 0.8007,
+     "symbol": 0.8333
+    },
+    "chunks": 2378
+   },
+   "hybrid": {
+    "language": "cpp",
+    "queries": 20,
+    "ndcg10": 0.8162,
+    "recall10": 1.0,
+    "index_ms": 1513.8,
+    "query_p50_ms": 1.758,
+    "by_category": {
+     "architecture": 0.8333,
+     "semantic": 0.8088,
+     "symbol": 0.8333
+    },
+    "chunks": 2378
+   },
+   "semble": {
+    "language": "cpp",
+    "queries": 20,
+    "ndcg10": 0.9162,
+    "recall10": 1.0,
+    "index_ms": 1138.1,
+    "query_p50_ms": 1.782,
+    "by_category": {
+     "architecture": 0.877,
+     "semantic": 0.933,
+     "symbol": 0.877
+    }
+   }
+  },
+  "gin": {
+   "bm25": {
+    "language": "go",
+    "queries": 20,
+    "ndcg10": 0.8412,
+    "recall10": 0.975,
+    "index_ms": 1083.7,
+    "query_p50_ms": 0.791,
+    "by_category": {
+     "architecture": 0.8975,
+     "semantic": 0.7671,
+     "symbol": 1.0
+    },
+    "chunks": 1720
+   },
+   "hybrid": {
+    "language": "go",
+    "queries": 20,
+    "ndcg10": 0.8696,
+    "recall10": 0.9583,
+    "index_ms": 1573.9,
+    "query_p50_ms": 1.914,
+    "by_category": {
+     "architecture": 0.8125,
+     "semantic": 0.8653,
+     "symbol": 1.0
+    },
+    "chunks": 1720
+   },
+   "semble": {
+    "language": "go",
+    "queries": 20,
+    "ndcg10": 0.8899,
+    "recall10": 0.975,
+    "index_ms": 894.6,
+    "query_p50_ms": 1.985,
+    "by_category": {
+     "architecture": 0.8729,
+     "semantic": 0.869,
+     "symbol": 1.0
+    }
+   }
+  },
+  "gson": {
+   "bm25": {
+    "language": "java",
+    "queries": 20,
+    "ndcg10": 0.8154,
+    "recall10": 0.9,
+    "index_ms": 1757.6,
+    "query_p50_ms": 3.026,
+    "by_category": {
+     "architecture": 0.5181,
+     "semantic": 0.8235,
+     "symbol": 1.0
+    },
+    "chunks": 4286
+   },
+   "hybrid": {
+    "language": "java",
+    "queries": 20,
+    "ndcg10": 0.8469,
+    "recall10": 0.975,
+    "index_ms": 3074.6,
+    "query_p50_ms": 4.917,
+    "by_category": {
+     "architecture": 0.8135,
+     "semantic": 0.7684,
+     "symbol": 1.0
+    },
+    "chunks": 4286
+   },
+   "semble": {
+    "language": "java",
+    "queries": 20,
+    "ndcg10": 0.8921,
+    "recall10": 1.0,
+    "index_ms": 2101.4,
+    "query_p50_ms": 2.759,
+    "by_category": {
+     "architecture": 0.6776,
+     "semantic": 0.9131,
+     "symbol": 1.0
+    }
+   }
+  },
+  "guzzle": {
+   "bm25": {
+    "language": "php",
+    "queries": 20,
+    "ndcg10": 0.9145,
+    "recall10": 0.975,
+    "index_ms": 203.2,
+    "query_p50_ms": 0.532,
+    "by_category": {
+     "architecture": 1.0,
+     "semantic": 0.8685,
+     "symbol": 1.0
+    },
+    "chunks": 353
+   },
+   "hybrid": {
+    "language": "php",
+    "queries": 20,
+    "ndcg10": 0.864,
+    "recall10": 0.925,
+    "index_ms": 370.3,
+    "query_p50_ms": 0.713,
+    "by_category": {
+     "architecture": 1.0,
+     "semantic": 0.7908,
+     "symbol": 1.0
+    },
+    "chunks": 353
+   },
+   "semble": {
+    "language": "php",
+    "queries": 20,
+    "ndcg10": 0.9232,
+    "recall10": 0.975,
+    "index_ms": 197.7,
+    "query_p50_ms": 2.836,
+    "by_category": {
+     "architecture": 1.0,
+     "semantic": 0.8819,
+     "symbol": 1.0
+    }
+   }
+  },
+  "http4s": {
+   "bm25": {
+    "language": "scala",
+    "queries": 20,
+    "ndcg10": 0.8304,
+    "recall10": 0.9,
+    "index_ms": 1249.7,
+    "query_p50_ms": 1.358,
+    "by_category": {
+     "architecture": 0.9355,
+     "semantic": 0.7715,
+     "symbol": 1.0
+    },
+    "chunks": 2790
+   },
+   "hybrid": {
+    "language": "scala",
+    "queries": 20,
+    "ndcg10": 0.8205,
+    "recall10": 0.95,
+    "index_ms": 1910.9,
+    "query_p50_ms": 1.879,
+    "by_category": {
+     "architecture": 0.8684,
+     "semantic": 0.7718,
+     "symbol": 1.0
+    },
+    "chunks": 2790
+   },
+   "semble": {
+    "language": "scala",
+    "queries": 20,
+    "ndcg10": 0.9547,
+    "recall10": 1.0,
+    "index_ms": 1333.2,
+    "query_p50_ms": 5.454,
+    "by_category": {
+     "architecture": 0.9439,
+     "semantic": 0.9473,
+     "symbol": 1.0
+    }
+   }
+  },
+  "httpx": {
+   "bm25": {
+    "language": "python",
+    "queries": 21,
+    "ndcg10": 0.9056,
+    "recall10": 0.9762,
+    "index_ms": 166.6,
+    "query_p50_ms": 0.586,
+    "by_category": {
+     "architecture": 0.8022,
+     "semantic": 0.9334,
+     "symbol": 1.0
+    },
+    "chunks": 573
+   },
+   "hybrid": {
+    "language": "python",
+    "queries": 21,
+    "ndcg10": 0.8867,
+    "recall10": 0.9762,
+    "index_ms": 404.0,
+    "query_p50_ms": 0.877,
+    "by_category": {
+     "architecture": 0.7922,
+     "semantic": 0.8973,
+     "symbol": 1.0
+    },
+    "chunks": 573
+   },
+   "semble": {
+    "language": "python",
+    "queries": 21,
+    "ndcg10": 0.9043,
+    "recall10": 0.9762,
+    "index_ms": 281.4,
+    "query_p50_ms": 1.66,
+    "by_category": {
+     "architecture": 0.8796,
+     "semantic": 0.9114,
+     "symbol": 0.9262
+    }
+   }
+  },
+  "jackson-databind": {
+   "bm25": {
+    "language": "java",
+    "queries": 20,
+    "ndcg10": 0.7557,
+    "recall10": 0.875,
+    "index_ms": 4130.6,
+    "query_p50_ms": 7.865,
+    "by_category": {
+     "architecture": 0.5981,
+     "semantic": 0.7019,
+     "symbol": 0.9678
+    },
+    "chunks": 10756
+   },
+   "hybrid": {
+    "language": "java",
+    "queries": 20,
+    "ndcg10": 0.6974,
+    "recall10": 0.9,
+    "index_ms": 4854.0,
+    "query_p50_ms": 9.991,
+    "by_category": {
+     "architecture": 0.5302,
+     "semantic": 0.61,
+     "symbol": 0.9678
+    },
+    "chunks": 10756
+   },
+   "semble": {
+    "language": "java",
+    "queries": 20,
+    "ndcg10": 0.7085,
+    "recall10": 0.9,
+    "index_ms": 5270.5,
+    "query_p50_ms": 3.322,
+    "by_category": {
+     "architecture": 0.6666,
+     "semantic": 0.5512,
+     "symbol": 0.9795
+    }
+   }
+  },
+  "kotlinx-coroutines": {
+   "bm25": {
+    "language": "kotlin",
+    "queries": 20,
+    "ndcg10": 0.8696,
+    "recall10": 1.0,
+    "index_ms": 943.2,
+    "query_p50_ms": 1.06,
+    "by_category": {
+     "architecture": 1.0,
+     "semantic": 0.8138,
+     "symbol": 1.0
+    },
+    "chunks": 1584
+   },
+   "hybrid": {
+    "language": "kotlin",
+    "queries": 20,
+    "ndcg10": 0.8505,
+    "recall10": 1.0,
+    "index_ms": 1437.0,
+    "query_p50_ms": 1.559,
+    "by_category": {
+     "architecture": 0.877,
+     "semantic": 0.8129,
+     "symbol": 1.0
+    },
+    "chunks": 1584
+   },
+   "semble": {
+    "language": "kotlin",
+    "queries": 20,
+    "ndcg10": 0.9074,
+    "recall10": 1.0,
+    "index_ms": 1117.5,
+    "query_p50_ms": 3.758,
+    "by_category": {
+     "architecture": 0.8333,
+     "semantic": 0.9035,
+     "symbol": 1.0
+    }
+   }
+  },
+  "ktor": {
+   "bm25": {
+    "language": "kotlin",
+    "queries": 20,
+    "ndcg10": 0.7887,
+    "recall10": 0.95,
+    "index_ms": 400.5,
+    "query_p50_ms": 1.251,
+    "by_category": {
+     "architecture": 0.6416,
+     "semantic": 0.7546,
+     "symbol": 1.0
+    },
+    "chunks": 831
+   },
+   "hybrid": {
+    "language": "kotlin",
+    "queries": 20,
+    "ndcg10": 0.7929,
+    "recall10": 0.9,
+    "index_ms": 675.7,
+    "query_p50_ms": 1.708,
+    "by_category": {
+     "architecture": 0.6648,
+     "semantic": 0.7435,
+     "symbol": 1.0
+    },
+    "chunks": 831
+   },
+   "semble": {
+    "language": "kotlin",
+    "queries": 20,
+    "ndcg10": 0.8524,
+    "recall10": 0.95,
+    "index_ms": 558.3,
+    "query_p50_ms": 2.544,
+    "by_category": {
+     "architecture": 0.7987,
+     "semantic": 0.7797,
+     "symbol": 1.0
+    }
+   }
+  },
+  "laravel-framework": {
+   "bm25": {
+    "language": "php",
+    "queries": 20,
+    "ndcg10": 0.7815,
+    "recall10": 0.95,
+    "index_ms": 6886.5,
+    "query_p50_ms": 2.957,
+    "by_category": {
+     "architecture": 0.7833,
+     "semantic": 0.7796,
+     "symbol": 0.7827
+    },
+    "chunks": 17183
+   },
+   "hybrid": {
+    "language": "php",
+    "queries": 20,
+    "ndcg10": 0.5673,
+    "recall10": 0.925,
+    "index_ms": 7895.8,
+    "query_p50_ms": 3.743,
+    "by_category": {
+     "architecture": 0.5025,
+     "semantic": 0.522,
+     "symbol": 0.7827
+    },
+    "chunks": 17183
+   },
+   "semble": {
+    "language": "php",
+    "queries": 20,
+    "ndcg10": 0.7881,
+    "recall10": 1.0,
+    "index_ms": 6880.3,
+    "query_p50_ms": 3.252,
+    "by_category": {
+     "architecture": 0.7281,
+     "semantic": 0.7816,
+     "symbol": 0.9077
+    }
+   }
+  },
+  "lazy.nvim": {
+   "bm25": {
+    "language": "lua",
+    "queries": 20,
+    "ndcg10": 0.7232,
+    "recall10": 0.975,
+    "index_ms": 568.0,
+    "query_p50_ms": 0.79,
+    "by_category": {
+     "architecture": 0.7892,
+     "semantic": 0.6691
+    },
+    "chunks": 699
+   },
+   "hybrid": {
+    "language": "lua",
+    "queries": 20,
+    "ndcg10": 0.8221,
+    "recall10": 0.975,
+    "index_ms": 667.1,
+    "query_p50_ms": 1.104,
+    "by_category": {
+     "architecture": 0.9724,
+     "semantic": 0.6992
+    },
+    "chunks": 699
+   },
+   "semble": {
+    "language": "lua",
+    "queries": 20,
+    "ndcg10": 0.7621,
+    "recall10": 0.975,
+    "index_ms": 359.0,
+    "query_p50_ms": 1.874,
+    "by_category": {
+     "architecture": 0.8382,
+     "semantic": 0.6998
+    }
+   }
+  },
+  "libuv": {
+   "bm25": {
+    "language": "c",
+    "queries": 20,
+    "ndcg10": 0.6398,
+    "recall10": 0.925,
+    "index_ms": 1664.5,
+    "query_p50_ms": 0.812,
+    "by_category": {
+     "architecture": 0.5,
+     "semantic": 0.6553,
+     "symbol": 0.5
+    },
+    "chunks": 2758
+   },
+   "hybrid": {
+    "language": "c",
+    "queries": 20,
+    "ndcg10": 0.6322,
+    "recall10": 0.9,
+    "index_ms": 2594.4,
+    "query_p50_ms": 1.137,
+    "by_category": {
+     "architecture": 1.0,
+     "semantic": 0.6119,
+     "symbol": 0.6309
+    },
+    "chunks": 2758
+   },
+   "semble": {
+    "language": "c",
+    "queries": 20,
+    "ndcg10": 0.6238,
+    "recall10": 0.9,
+    "index_ms": 1718.8,
+    "query_p50_ms": 2.976,
+    "by_category": {
+     "architecture": 0.5,
+     "semantic": 0.6097,
+     "symbol": 1.0
+    }
+   }
+  },
+  "messagepack-csharp": {
+   "bm25": {
+    "language": "csharp",
+    "queries": 20,
+    "ndcg10": 0.765,
+    "recall10": 0.875,
+    "index_ms": 1898.9,
+    "query_p50_ms": 2.058,
+    "by_category": {
+     "architecture": 0.2394,
+     "semantic": 0.879,
+     "symbol": 0.9187
+    },
+    "chunks": 2372
+   },
+   "hybrid": {
+    "language": "csharp",
+    "queries": 20,
+    "ndcg10": 0.8266,
+    "recall10": 0.925,
+    "index_ms": 2406.7,
+    "query_p50_ms": 1.91,
+    "by_category": {
+     "architecture": 0.4421,
+     "semantic": 0.926,
+     "symbol": 0.9187
+    },
+    "chunks": 2372
+   },
+   "semble": {
+    "language": "csharp",
+    "queries": 20,
+    "ndcg10": 0.8811,
+    "recall10": 0.9333,
+    "index_ms": 1516.7,
+    "query_p50_ms": 4.759,
+    "by_category": {
+     "architecture": 0.7099,
+     "semantic": 0.8646,
+     "symbol": 1.0
+    }
+   }
+  },
+  "mini.nvim": {
+   "bm25": {
+    "language": "lua",
+    "queries": 20,
+    "ndcg10": 0.975,
+    "recall10": 1.0,
+    "index_ms": 2766.2,
+    "query_p50_ms": 1.574,
+    "by_category": {
+     "architecture": 1.0,
+     "semantic": 0.9688
+    },
+    "chunks": 2428
+   },
+   "hybrid": {
+    "language": "lua",
+    "queries": 20,
+    "ndcg10": 0.9181,
+    "recall10": 1.0,
+    "index_ms": 4852.0,
+    "query_p50_ms": 2.153,
+    "by_category": {
+     "architecture": 1.0,
+     "semantic": 0.8976
+    },
+    "chunks": 2428
+   },
+   "semble": {
+    "language": "lua",
+    "queries": 20,
+    "ndcg10": 0.9815,
+    "recall10": 1.0,
+    "index_ms": 2834.7,
+    "query_p50_ms": 1.853,
+    "by_category": {
+     "architecture": 1.0,
+     "semantic": 0.9769
+    }
+   }
+  },
+  "model2vec": {
+   "bm25": {
+    "language": "python",
+    "queries": 20,
+    "ndcg10": 0.7938,
+    "recall10": 0.975,
+    "index_ms": 125.8,
+    "query_p50_ms": 0.528,
+    "by_category": {
+     "architecture": 0.739,
+     "semantic": 0.7703,
+     "symbol": 1.0
+    },
+    "chunks": 138
+   },
+   "hybrid": {
+    "language": "python",
+    "queries": 20,
+    "ndcg10": 0.8046,
+    "recall10": 0.975,
+    "index_ms": 138.3,
+    "query_p50_ms": 0.692,
+    "by_category": {
+     "architecture": 0.8135,
+     "semantic": 0.7396,
+     "symbol": 1.0
+    },
+    "chunks": 138
+   },
+   "semble": {
+    "language": "python",
+    "queries": 20,
+    "ndcg10": 0.7376,
+    "recall10": 0.975,
+    "index_ms": 121.8,
+    "query_p50_ms": 2.418,
+    "by_category": {
+     "architecture": 0.6905,
+     "semantic": 0.7287,
+     "symbol": 0.877
+    }
+   }
+  },
+  "monolog": {
+   "bm25": {
+    "language": "php",
+    "queries": 20,
+    "ndcg10": 0.8846,
+    "recall10": 0.95,
+    "index_ms": 441.7,
+    "query_p50_ms": 2.23,
+    "by_category": {
+     "architecture": 0.6804,
+     "semantic": 0.929,
+     "symbol": 1.0
+    },
+    "chunks": 1108
+   },
+   "hybrid": {
+    "language": "php",
+    "queries": 20,
+    "ndcg10": 0.8276,
+    "recall10": 0.875,
+    "index_ms": 953.1,
+    "query_p50_ms": 2.6,
+    "by_category": {
+     "architecture": 0.4617,
+     "semantic": 0.9244,
+     "symbol": 1.0
+    },
+    "chunks": 1108
+   },
+   "semble": {
+    "language": "php",
+    "queries": 20,
+    "ndcg10": 0.8802,
+    "recall10": 0.925,
+    "index_ms": 531.6,
+    "query_p50_ms": 2.488,
+    "by_category": {
+     "architecture": 0.6981,
+     "semantic": 0.9113,
+     "symbol": 1.0
+    }
+   }
+  },
+  "newtonsoft-json": {
+   "bm25": {
+    "language": "csharp",
+    "queries": 20,
+    "ndcg10": 0.9007,
+    "recall10": 1.0,
+    "index_ms": 2847.8,
+    "query_p50_ms": 4.157,
+    "by_category": {
+     "architecture": 0.9866,
+     "semantic": 0.8268,
+     "symbol": 1.0
+    },
+    "chunks": 4016
+   },
+   "hybrid": {
+    "language": "csharp",
+    "queries": 20,
+    "ndcg10": 0.8272,
+    "recall10": 1.0,
+    "index_ms": 4194.6,
+    "query_p50_ms": 4.557,
+    "by_category": {
+     "architecture": 0.6831,
+     "semantic": 0.8588,
+     "symbol": 1.0
+    },
+    "chunks": 4016
+   },
+   "semble": {
+    "language": "csharp",
+    "queries": 20,
+    "ndcg10": 0.8915,
+    "recall10": 1.0,
+    "index_ms": 2593.4,
+    "query_p50_ms": 15.676,
+    "by_category": {
+     "architecture": 0.9251,
+     "semantic": 0.8436,
+     "symbol": 1.0
+    }
+   }
+  },
+  "nlohmann-json": {
+   "bm25": {
+    "language": "cpp",
+    "queries": 20,
+    "ndcg10": 0.8101,
+    "recall10": 1.0,
+    "index_ms": 1071.4,
+    "query_p50_ms": 1.39,
+    "by_category": {
+     "architecture": 0.7608,
+     "semantic": 0.7877,
+     "symbol": 1.0
+    },
+    "chunks": 1599
+   },
+   "hybrid": {
+    "language": "cpp",
+    "queries": 20,
+    "ndcg10": 0.8685,
+    "recall10": 1.0,
+    "index_ms": 1633.1,
+    "query_p50_ms": 2.01,
+    "by_category": {
+     "architecture": 0.9126,
+     "semantic": 0.7981,
+     "symbol": 1.0
+    },
+    "chunks": 1599
+   },
+   "semble": {
+    "language": "cpp",
+    "queries": 20,
+    "ndcg10": 0.8481,
+    "recall10": 0.975,
+    "index_ms": 1232.8,
+    "query_p50_ms": 2.349,
+    "by_category": {
+     "architecture": 0.777,
+     "semantic": 0.8524,
+     "symbol": 1.0
+    }
+   }
+  },
+  "nvm": {
+   "bm25": {
+    "language": "bash",
+    "queries": 20,
+    "ndcg10": 1.0,
+    "recall10": 1.0,
+    "index_ms": 160.5,
+    "query_p50_ms": 0.461,
+    "by_category": {
+     "architecture": 1.0,
+     "semantic": 1.0
+    },
+    "chunks": 164
+   },
+   "hybrid": {
+    "language": "bash",
+    "queries": 20,
+    "ndcg10": 0.9262,
+    "recall10": 1.0,
+    "index_ms": 219.1,
+    "query_p50_ms": 0.671,
+    "by_category": {
+     "architecture": 0.8155,
+     "semantic": 0.9385
+    },
+    "chunks": 164
+   },
+   "semble": {
+    "language": "bash",
+    "queries": 20,
+    "ndcg10": 1.0,
+    "recall10": 1.0,
+    "index_ms": 265.4,
+    "query_p50_ms": 1.611,
+    "by_category": {
+     "architecture": 1.0,
+     "semantic": 1.0
+    }
+   }
+  },
+  "pandoc": {
+   "bm25": {
+    "language": "haskell",
+    "queries": 20,
+    "ndcg10": 0.6731,
+    "recall10": 0.95,
+    "index_ms": 6598.0,
+    "query_p50_ms": 3.692,
+    "by_category": {
+     "architecture": 0.7061,
+     "semantic": 0.6511
+    },
+    "chunks": 12277
+   },
+   "hybrid": {
+    "language": "haskell",
+    "queries": 20,
+    "ndcg10": 0.6846,
+    "recall10": 0.95,
+    "index_ms": 7447.3,
+    "query_p50_ms": 6.652,
+    "by_category": {
+     "architecture": 0.7404,
+     "semantic": 0.6474
+    },
+    "chunks": 12277
+   },
+   "semble": {
+    "language": "haskell",
+    "queries": 20,
+    "ndcg10": 0.7091,
+    "recall10": 0.95,
+    "index_ms": 4310.7,
+    "query_p50_ms": 2.99,
+    "by_category": {
+     "architecture": 0.6696,
+     "semantic": 0.7354
+    }
+   }
+  },
+  "phoenix": {
+   "bm25": {
+    "language": "elixir",
+    "queries": 19,
+    "ndcg10": 0.811,
+    "recall10": 1.0,
+    "index_ms": 629.7,
+    "query_p50_ms": 0.777,
+    "by_category": {
+     "architecture": 0.9355,
+     "semantic": 0.7628,
+     "symbol": 0.5496
+    },
+    "chunks": 623
+   },
+   "hybrid": {
+    "language": "elixir",
+    "queries": 19,
+    "ndcg10": 0.8108,
+    "recall10": 1.0,
+    "index_ms": 1068.9,
+    "query_p50_ms": 1.027,
+    "by_category": {
+     "architecture": 0.8868,
+     "semantic": 0.7724,
+     "symbol": 0.6726
+    },
+    "chunks": 623
+   },
+   "semble": {
+    "language": "elixir",
+    "queries": 19,
+    "ndcg10": 0.8891,
+    "recall10": 1.0,
+    "index_ms": 707.9,
+    "query_p50_ms": 2.067,
+    "by_category": {
+     "architecture": 0.8624,
+     "semantic": 0.8758,
+     "symbol": 1.0
+    }
+   }
+  },
+  "plug": {
+   "bm25": {
+    "language": "elixir",
+    "queries": 20,
+    "ndcg10": 0.8258,
+    "recall10": 1.0,
+    "index_ms": 398.4,
+    "query_p50_ms": 0.591,
+    "by_category": {
+     "architecture": 1.0,
+     "semantic": 0.8182,
+     "symbol": 0.6872
+    },
+    "chunks": 282
+   },
+   "hybrid": {
+    "language": "elixir",
+    "queries": 20,
+    "ndcg10": 0.8358,
+    "recall10": 1.0,
+    "index_ms": 543.7,
+    "query_p50_ms": 0.881,
+    "by_category": {
+     "architecture": 0.877,
+     "semantic": 0.8182,
+     "symbol": 0.877
+    },
+    "chunks": 282
+   },
+   "semble": {
+    "language": "elixir",
+    "queries": 20,
+    "ndcg10": 0.9262,
+    "recall10": 1.0,
+    "index_ms": 474.5,
+    "query_p50_ms": 1.747,
+    "by_category": {
+     "architecture": 1.0,
+     "semantic": 0.8946,
+     "symbol": 1.0
+    }
+   }
+  },
+  "pydantic": {
+   "bm25": {
+    "language": "python",
+    "queries": 20,
+    "ndcg10": 0.678,
+    "recall10": 0.825,
+    "index_ms": 1007.1,
+    "query_p50_ms": 1.507,
+    "by_category": {
+     "architecture": 0.4581,
+     "semantic": 0.7153,
+     "symbol": 0.9262
+    },
+    "chunks": 2585
+   },
+   "hybrid": {
+    "language": "python",
+    "queries": 20,
+    "ndcg10": 0.6576,
+    "recall10": 0.85,
+    "index_ms": 2005.6,
+    "query_p50_ms": 3.124,
+    "by_category": {
+     "architecture": 0.4618,
+     "semantic": 0.6611,
+     "symbol": 0.9262
+    },
+    "chunks": 2585
+   },
+   "semble": {
+    "language": "python",
+    "queries": 20,
+    "ndcg10": 0.7838,
+    "recall10": 0.9,
+    "index_ms": 1586.7,
+    "query_p50_ms": 3.077,
+    "by_category": {
+     "architecture": 0.6492,
+     "semantic": 0.7664,
+     "symbol": 1.0
+    }
+   }
+  },
+  "rack": {
+   "bm25": {
+    "language": "ruby",
+    "queries": 18,
+    "ndcg10": 0.7842,
+    "recall10": 1.0,
+    "index_ms": 406.6,
+    "query_p50_ms": 0.633,
+    "by_category": {
+     "architecture": 0.877,
+     "semantic": 0.7054,
+     "symbol": 0.8861
+    },
+    "chunks": 728
+   },
+   "hybrid": {
+    "language": "ruby",
+    "queries": 18,
+    "ndcg10": 0.8322,
+    "recall10": 1.0,
+    "index_ms": 524.0,
+    "query_p50_ms": 1.278,
+    "by_category": {
+     "architecture": 0.8333,
+     "semantic": 0.8049,
+     "symbol": 0.8861
+    },
+    "chunks": 728
+   },
+   "semble": {
+    "language": "ruby",
+    "queries": 18,
+    "ndcg10": 0.8902,
+    "recall10": 1.0,
+    "index_ms": 457.7,
+    "query_p50_ms": 1.948,
+    "by_category": {
+     "architecture": 1.0,
+     "semantic": 0.8024,
+     "symbol": 1.0
+    }
+   }
+  },
+  "rails": {
+   "bm25": {
+    "language": "ruby",
+    "queries": 20,
+    "ndcg10": 0.6113,
+    "recall10": 0.85,
+    "index_ms": 973.7,
+    "query_p50_ms": 2.352,
+    "by_category": {
+     "architecture": 0.5666,
+     "semantic": 0.6314,
+     "symbol": 0.6766
+    },
+    "chunks": 1847
+   },
+   "hybrid": {
+    "language": "ruby",
+    "queries": 20,
+    "ndcg10": 0.6341,
+    "recall10": 0.875,
+    "index_ms": 1468.8,
+    "query_p50_ms": 1.624,
+    "by_category": {
+     "architecture": 0.587,
+     "semantic": 0.6704,
+     "symbol": 0.6766
+    },
+    "chunks": 1847
+   },
+   "semble": {
+    "language": "ruby",
+    "queries": 20,
+    "ndcg10": 0.854,
+    "recall10": 0.925,
+    "index_ms": 476.8,
+    "query_p50_ms": 2.02,
+    "by_category": {
+     "architecture": 0.8455,
+     "semantic": 0.8495,
+     "symbol": 0.8812
+    }
+   }
+  },
+  "redis": {
+   "bm25": {
+    "language": "c",
+    "queries": 20,
+    "ndcg10": 0.8385,
+    "recall10": 1.0,
+    "index_ms": 8306.5,
+    "query_p50_ms": 2.776,
+    "by_category": {
+     "architecture": 0.8377,
+     "semantic": 0.8393
+    },
+    "chunks": 10927
+   },
+   "hybrid": {
+    "language": "c",
+    "queries": 20,
+    "ndcg10": 0.8378,
+    "recall10": 1.0,
+    "index_ms": 10338.9,
+    "query_p50_ms": 3.639,
+    "by_category": {
+     "architecture": 0.8932,
+     "semantic": 0.7823
+    },
+    "chunks": 10927
+   },
+   "semble": {
+    "language": "c",
+    "queries": 20,
+    "ndcg10": 0.9224,
+    "recall10": 1.0,
+    "index_ms": 8707.3,
+    "query_p50_ms": 2.284,
+    "by_category": {
+     "architecture": 0.9431,
+     "semantic": 0.9018
+    }
+   }
+  },
+  "redux": {
+   "bm25": {
+    "language": "javascript",
+    "queries": 20,
+    "ndcg10": 0.8152,
+    "recall10": 0.9,
+    "index_ms": 130.0,
+    "query_p50_ms": 0.306,
+    "by_category": {
+     "architecture": 0.871,
+     "semantic": 0.6753,
+     "symbol": 1.0
+    },
+    "chunks": 129
+   },
+   "hybrid": {
+    "language": "javascript",
+    "queries": 20,
+    "ndcg10": 0.8889,
+    "recall10": 1.0,
+    "index_ms": 76.4,
+    "query_p50_ms": 0.555,
+    "by_category": {
+     "architecture": 0.8767,
+     "semantic": 0.8353,
+     "symbol": 1.0
+    },
+    "chunks": 129
+   },
+   "semble": {
+    "language": "javascript",
+    "queries": 20,
+    "ndcg10": 0.9176,
+    "recall10": 0.975,
+    "index_ms": 54.8,
+    "query_p50_ms": 1.532,
+    "by_category": {
+     "architecture": 0.9033,
+     "semantic": 0.8813,
+     "symbol": 1.0
+    }
+   }
+  },
+  "requests": {
+   "bm25": {
+    "language": "python",
+    "queries": 20,
+    "ndcg10": 0.9137,
+    "recall10": 1.0,
+    "index_ms": 84.6,
+    "query_p50_ms": 0.429,
+    "by_category": {
+     "architecture": 0.9885,
+     "semantic": 0.8405,
+     "symbol": 0.9262
+    },
+    "chunks": 317
+   },
+   "hybrid": {
+    "language": "python",
+    "queries": 20,
+    "ndcg10": 0.9476,
+    "recall10": 1.0,
+    "index_ms": 210.6,
+    "query_p50_ms": 0.707,
+    "by_category": {
+     "architecture": 0.9771,
+     "semantic": 0.9352,
+     "symbol": 0.9262
+    },
+    "chunks": 317
+   },
+   "semble": {
+    "language": "python",
+    "queries": 20,
+    "ndcg10": 0.9674,
+    "recall10": 1.0,
+    "index_ms": 173.4,
+    "query_p50_ms": 1.553,
+    "by_category": {
+     "architecture": 0.9771,
+     "semantic": 0.9385,
+     "symbol": 1.0
+    }
+   }
+  },
+  "serde": {
+   "bm25": {
+    "language": "rust",
+    "queries": 20,
+    "ndcg10": 0.7799,
+    "recall10": 0.925,
+    "index_ms": 1477.7,
+    "query_p50_ms": 1.875,
+    "by_category": {
+     "architecture": 0.8036,
+     "semantic": 0.5936,
+     "symbol": 1.0
+    },
+    "chunks": 3727
+   },
+   "hybrid": {
+    "language": "rust",
+    "queries": 20,
+    "ndcg10": 0.8018,
+    "recall10": 0.975,
+    "index_ms": 2240.8,
+    "query_p50_ms": 2.296,
+    "by_category": {
+     "architecture": 0.7518,
+     "semantic": 0.753,
+     "symbol": 1.0
+    },
+    "chunks": 3727
+   },
+   "semble": {
+    "language": "rust",
+    "queries": 20,
+    "ndcg10": 0.7269,
+    "recall10": 0.975,
+    "index_ms": 1249.7,
+    "query_p50_ms": 3.081,
+    "by_category": {
+     "architecture": 0.7886,
+     "semantic": 0.7007,
+     "symbol": 0.6121
+    }
+   }
+  },
+  "sinatra": {
+   "bm25": {
+    "language": "ruby",
+    "queries": 20,
+    "ndcg10": 0.8571,
+    "recall10": 1.0,
+    "index_ms": 114.6,
+    "query_p50_ms": 0.343,
+    "by_category": {
+     "architecture": 0.7974,
+     "semantic": 0.836,
+     "symbol": 0.9385
+    },
+    "chunks": 271
+   },
+   "hybrid": {
+    "language": "ruby",
+    "queries": 20,
+    "ndcg10": 0.8771,
+    "recall10": 1.0,
+    "index_ms": 148.1,
+    "query_p50_ms": 0.649,
+    "by_category": {
+     "architecture": 0.7297,
+     "semantic": 0.918,
+     "symbol": 0.9385
+    },
+    "chunks": 271
+   },
+   "semble": {
+    "language": "ruby",
+    "queries": 20,
+    "ndcg10": 0.9815,
+    "recall10": 1.0,
+    "index_ms": 92.6,
+    "query_p50_ms": 1.751,
+    "by_category": {
+     "architecture": 0.9262,
+     "semantic": 1.0,
+     "symbol": 1.0
+    }
+   }
+  },
+  "snapkit": {
+   "bm25": {
+    "language": "swift",
+    "queries": 13,
+    "ndcg10": 0.8379,
+    "recall10": 0.9231,
+    "index_ms": 108.4,
+    "query_p50_ms": 0.632,
+    "by_category": {
+     "architecture": 0.7769,
+     "semantic": 0.7945,
+     "symbol": 1.0
+    },
+    "chunks": 250
+   },
+   "hybrid": {
+    "language": "swift",
+    "queries": 13,
+    "ndcg10": 0.7231,
+    "recall10": 0.9231,
+    "index_ms": 177.0,
+    "query_p50_ms": 0.845,
+    "by_category": {
+     "architecture": 0.5586,
+     "semantic": 0.6749,
+     "symbol": 1.0
+    },
+    "chunks": 250
+   },
+   "semble": {
+    "language": "swift",
+    "queries": 13,
+    "ndcg10": 0.8005,
+    "recall10": 0.9231,
+    "index_ms": 124.3,
+    "query_p50_ms": 4.458,
+    "by_category": {
+     "architecture": 0.708,
+     "semantic": 0.7546,
+     "symbol": 1.0
+    }
+   }
+  },
+  "starlette": {
+   "bm25": {
+    "language": "python",
+    "queries": 21,
+    "ndcg10": 0.9134,
+    "recall10": 0.9762,
+    "index_ms": 137.9,
+    "query_p50_ms": 0.483,
+    "by_category": {
+     "architecture": 0.8347,
+     "semantic": 1.0,
+     "symbol": 1.0
+    },
+    "chunks": 648
+   },
+   "hybrid": {
+    "language": "python",
+    "queries": 21,
+    "ndcg10": 0.9197,
+    "recall10": 0.9762,
+    "index_ms": 313.7,
+    "query_p50_ms": 0.793,
+    "by_category": {
+     "architecture": 0.8613,
+     "semantic": 0.9679,
+     "symbol": 1.0
+    },
+    "chunks": 648
+   },
+   "semble": {
+    "language": "python",
+    "queries": 21,
+    "ndcg10": 0.9632,
+    "recall10": 0.9524,
+    "index_ms": 240.7,
+    "query_p50_ms": 2.262,
+    "by_category": {
+     "architecture": 0.9297,
+     "semantic": 1.0,
+     "symbol": 1.0
+    }
+   }
+  },
+  "telescope.nvim": {
+   "bm25": {
+    "language": "lua",
+    "queries": 20,
+    "ndcg10": 0.8311,
+    "recall10": 0.95,
+    "index_ms": 606.1,
+    "query_p50_ms": 0.998,
+    "by_category": {
+     "architecture": 0.8712,
+     "semantic": 0.8095
+    },
+    "chunks": 1020
+   },
+   "hybrid": {
+    "language": "lua",
+    "queries": 20,
+    "ndcg10": 0.7609,
+    "recall10": 0.95,
+    "index_ms": 1042.8,
+    "query_p50_ms": 1.429,
+    "by_category": {
+     "architecture": 0.708,
+     "semantic": 0.7894
+    },
+    "chunks": 1020
+   },
+   "semble": {
+    "language": "lua",
+    "queries": 20,
+    "ndcg10": 0.7627,
+    "recall10": 0.975,
+    "index_ms": 635.4,
+    "query_p50_ms": 1.931,
+    "by_category": {
+     "architecture": 0.7955,
+     "semantic": 0.745
+    }
+   }
+  },
+  "tokio": {
+   "bm25": {
+    "language": "rust",
+    "queries": 20,
+    "ndcg10": 0.8468,
+    "recall10": 0.95,
+    "index_ms": 2946.0,
+    "query_p50_ms": 2.287,
+    "by_category": {
+     "architecture": 0.7821,
+     "semantic": 0.843,
+     "symbol": 0.9167
+    },
+    "chunks": 5852
+   },
+   "hybrid": {
+    "language": "rust",
+    "queries": 20,
+    "ndcg10": 0.7707,
+    "recall10": 0.975,
+    "index_ms": 5574.8,
+    "query_p50_ms": 2.898,
+    "by_category": {
+     "architecture": 0.6262,
+     "semantic": 0.7783,
+     "symbol": 0.9051
+    },
+    "chunks": 5852
+   },
+   "semble": {
+    "language": "rust",
+    "queries": 20,
+    "ndcg10": 0.9369,
+    "recall10": 0.95,
+    "index_ms": 3426.1,
+    "query_p50_ms": 2.815,
+    "by_category": {
+     "architecture": 0.8029,
+     "semantic": 0.99,
+     "symbol": 1.0
+    }
+   }
+  },
+  "trpc": {
+   "bm25": {
+    "language": "typescript",
+    "queries": 20,
+    "ndcg10": 0.8458,
+    "recall10": 0.95,
+    "index_ms": 471.8,
+    "query_p50_ms": 1.175,
+    "by_category": {
+     "architecture": 0.697,
+     "semantic": 0.9059,
+     "symbol": 1.0
+    },
+    "chunks": 1239
+   },
+   "hybrid": {
+    "language": "typescript",
+    "queries": 20,
+    "ndcg10": 0.8324,
+    "recall10": 0.925,
+    "index_ms": 879.0,
+    "query_p50_ms": 1.452,
+    "by_category": {
+     "architecture": 0.5811,
+     "semantic": 1.0,
+     "symbol": 1.0
+    },
+    "chunks": 1239
+   },
+   "semble": {
+    "language": "typescript",
+    "queries": 20,
+    "ndcg10": 0.8492,
+    "recall10": 0.925,
+    "index_ms": 402.6,
+    "query_p50_ms": 4.422,
+    "by_category": {
+     "architecture": 0.7767,
+     "semantic": 0.8243,
+     "symbol": 1.0
+    }
+   }
+  },
+  "vapor": {
+   "bm25": {
+    "language": "swift",
+    "queries": 20,
+    "ndcg10": 0.6518,
+    "recall10": 0.95,
+    "index_ms": 1138.7,
+    "query_p50_ms": 1.071,
+    "by_category": {
+     "architecture": 0.5827,
+     "semantic": 0.7041,
+     "symbol": 0.4769
+    },
+    "chunks": 2182
+   },
+   "hybrid": {
+    "language": "swift",
+    "queries": 20,
+    "ndcg10": 0.6885,
+    "recall10": 0.95,
+    "index_ms": 1704.6,
+    "query_p50_ms": 1.27,
+    "by_category": {
+     "architecture": 0.5228,
+     "semantic": 0.7746,
+     "symbol": 0.4521
+    },
+    "chunks": 2182
+   },
+   "semble": {
+    "language": "swift",
+    "queries": 20,
+    "ndcg10": 0.7654,
+    "recall10": 0.95,
+    "index_ms": 932.0,
+    "query_p50_ms": 2.282,
+    "by_category": {
+     "architecture": 0.4909,
+     "semantic": 0.7739,
+     "symbol": 1.0
+    }
+   }
+  },
+  "vitest": {
+   "bm25": {
+    "language": "typescript",
+    "queries": 20,
+    "ndcg10": 0.729,
+    "recall10": 0.85,
+    "index_ms": 1465.8,
+    "query_p50_ms": 1.446,
+    "by_category": {
+     "architecture": 0.75,
+     "semantic": 0.6436,
+     "symbol": 1.0
+    },
+    "chunks": 2322
+   },
+   "hybrid": {
+    "language": "typescript",
+    "queries": 20,
+    "ndcg10": 0.6459,
+    "recall10": 0.875,
+    "index_ms": 2170.4,
+    "query_p50_ms": 1.878,
+    "by_category": {
+     "architecture": 0.4797,
+     "semantic": 0.64,
+     "symbol": 1.0
+    },
+    "chunks": 2322
+   },
+   "semble": {
+    "language": "typescript",
+    "queries": 20,
+    "ndcg10": 0.684,
+    "recall10": 0.925,
+    "index_ms": 1234.8,
+    "query_p50_ms": 2.276,
+    "by_category": {
+     "architecture": 0.753,
+     "semantic": 0.6511,
+     "symbol": 0.6667
+    }
+   }
+  },
+  "xmonad": {
+   "bm25": {
+    "language": "haskell",
+    "queries": 20,
+    "ndcg10": 0.7913,
+    "recall10": 1.0,
+    "index_ms": 287.4,
+    "query_p50_ms": 0.504,
+    "by_category": {
+     "architecture": 0.8057,
+     "semantic": 0.7817
+    },
+    "chunks": 438
+   },
+   "hybrid": {
+    "language": "haskell",
+    "queries": 20,
+    "ndcg10": 0.7859,
+    "recall10": 1.0,
+    "index_ms": 288.4,
+    "query_p50_ms": 0.8,
+    "by_category": {
+     "architecture": 0.8572,
+     "semantic": 0.7384
+    },
+    "chunks": 438
+   },
+   "semble": {
+    "language": "haskell",
+    "queries": 20,
+    "ndcg10": 0.8487,
+    "recall10": 1.0,
+    "index_ms": 166.0,
+    "query_p50_ms": 2.323,
+    "by_category": {
+     "architecture": 0.8476,
+     "semantic": 0.8494
+    }
+   }
+  },
+  "zig": {
+   "bm25": {
+    "language": "zig",
+    "queries": 20,
+    "ndcg10": 0.9275,
+    "recall10": 1.0,
+    "index_ms": 18489.0,
+    "query_p50_ms": 20.177,
+    "by_category": {
+     "architecture": 0.877,
+     "semantic": 0.9365
+    },
+    "chunks": 19177
+   },
+   "hybrid": {
+    "language": "zig",
+    "queries": 20,
+    "ndcg10": 0.879,
+    "recall10": 1.0,
+    "index_ms": 20832.3,
+    "query_p50_ms": 8.192,
+    "by_category": {
+     "architecture": 1.0,
+     "semantic": 0.8577
+    },
+    "chunks": 19177
+   },
+   "semble": {
+    "language": "zig",
+    "queries": 20,
+    "ndcg10": 0.8881,
+    "recall10": 1.0,
+    "index_ms": 17635.7,
+    "query_p50_ms": 4.228,
+    "by_category": {
+     "architecture": 0.7103,
+     "semantic": 0.9195
+    }
+   }
+  },
+  "zig-clap": {
+   "bm25": {
+    "language": "zig",
+    "queries": 20,
+    "ndcg10": 0.9196,
+    "recall10": 1.0,
+    "index_ms": 250.9,
+    "query_p50_ms": 0.465,
+    "by_category": {
+     "architecture": 0.8155,
+     "semantic": 0.9312
+    },
+    "chunks": 126
+   },
+   "hybrid": {
+    "language": "zig",
+    "queries": 20,
+    "ndcg10": 0.9262,
+    "recall10": 1.0,
+    "index_ms": 159.5,
+    "query_p50_ms": 0.686,
+    "by_category": {
+     "architecture": 0.8155,
+     "semantic": 0.9385
+    },
+    "chunks": 126
+   },
+   "semble": {
+    "language": "zig",
+    "queries": 20,
+    "ndcg10": 0.9381,
+    "recall10": 1.0,
+    "index_ms": 113.7,
+    "query_p50_ms": 1.839,
+    "by_category": {
+     "architecture": 1.0,
+     "semantic": 0.9312
+    }
+   }
+  },
+  "zls": {
+   "bm25": {
+    "language": "zig",
+    "queries": 20,
+    "ndcg10": 0.7886,
+    "recall10": 0.95,
+    "index_ms": 1475.6,
+    "query_p50_ms": 0.776,
+    "by_category": {
+     "architecture": 0.8044,
+     "semantic": 0.7801
+    },
+    "chunks": 1364
+   },
+   "hybrid": {
+    "language": "zig",
+    "queries": 20,
+    "ndcg10": 0.8056,
+    "recall10": 1.0,
+    "index_ms": 2186.3,
+    "query_p50_ms": 1.912,
+    "by_category": {
+     "architecture": 0.7556,
+     "semantic": 0.8326
+    },
+    "chunks": 1364
+   },
+   "semble": {
+    "language": "zig",
+    "queries": 20,
+    "ndcg10": 0.871,
+    "recall10": 1.0,
+    "index_ms": 1430.6,
+    "query_p50_ms": 1.95,
+    "by_category": {
+     "architecture": 0.8082,
+     "semantic": 0.9048
+    }
+   }
+  },
+  "zod": {
+   "bm25": {
+    "language": "typescript",
+    "queries": 20,
+    "ndcg10": 0.7051,
+    "recall10": 0.9,
+    "index_ms": 2980.0,
+    "query_p50_ms": 4.994,
+    "by_category": {
+     "architecture": 0.8266,
+     "semantic": 0.6765,
+     "symbol": 0.6667
+    },
+    "chunks": 5510
+   },
+   "hybrid": {
+    "language": "typescript",
+    "queries": 20,
+    "ndcg10": 0.6879,
+    "recall10": 0.95,
+    "index_ms": 4044.9,
+    "query_p50_ms": 5.318,
+    "by_category": {
+     "architecture": 0.6008,
+     "semantic": 0.7195,
+     "symbol": 0.6667
+    },
+    "chunks": 5510
+   },
+   "semble": {
+    "language": "typescript",
+    "queries": 20,
+    "ndcg10": 0.6427,
+    "recall10": 0.925,
+    "index_ms": 2365.0,
+    "query_p50_ms": 6.238,
+    "by_category": {
+     "architecture": 0.5263,
+     "semantic": 0.6629,
+     "symbol": 0.7103
+    }
+   }
+  }
+ },
+ "summary": {
+  "repos": 63,
+  "bm25": {
+   "ndcg10": 0.8135,
+   "recall10": 0.9518,
+   "index_ms_median": 629.7,
+   "query_p50_ms_median": 1.06,
+   "by_language": {
+    "bash": 0.8527,
+    "c": 0.7241,
+    "cpp": 0.7912,
+    "csharp": 0.8433,
+    "elixir": 0.8387,
+    "go": 0.8545,
+    "haskell": 0.7633,
+    "java": 0.7808,
+    "javascript": 0.848,
+    "kotlin": 0.7658,
+    "lua": 0.8431,
+    "php": 0.8602,
+    "python": 0.8606,
+    "ruby": 0.7509,
+    "rust": 0.7874,
+    "scala": 0.8499,
+    "swift": 0.8037,
+    "typescript": 0.76,
+    "zig": 0.8786
+   },
+   "by_category": {
+    "architecture": 0.7852,
+    "semantic": 0.8021,
+    "symbol": 0.901
+   }
+  },
+  "hybrid": {
+   "ndcg10": 0.8092,
+   "recall10": 0.9589,
+   "index_ms_median": 1119.8,
+   "query_p50_ms_median": 1.559,
+   "by_language": {
+    "bash": 0.8084,
+    "c": 0.7137,
+    "cpp": 0.8632,
+    "csharp": 0.8173,
+    "elixir": 0.8517,
+    "go": 0.8695,
+    "haskell": 0.7825,
+    "java": 0.7834,
+    "javascript": 0.8992,
+    "kotlin": 0.7816,
+    "lua": 0.8337,
+    "php": 0.753,
+    "python": 0.84,
+    "ruby": 0.7811,
+    "rust": 0.7844,
+    "scala": 0.8461,
+    "swift": 0.7742,
+    "typescript": 0.7221,
+    "zig": 0.8703
+   },
+   "by_category": {
+    "architecture": 0.7574,
+    "semantic": 0.8091,
+    "symbol": 0.901
+   }
+  },
+  "semble": {
+   "ndcg10": 0.8516,
+   "recall10": 0.9667,
+   "index_ms_median": 707.9,
+   "query_p50_ms_median": 2.278,
+   "by_language": {
+    "bash": 0.8396,
+    "c": 0.7504,
+    "cpp": 0.8814,
+    "csharp": 0.8715,
+    "elixir": 0.9059,
+    "go": 0.9103,
+    "haskell": 0.7754,
+    "java": 0.8278,
+    "javascript": 0.9111,
+    "kotlin": 0.8026,
+    "lua": 0.8354,
+    "php": 0.8638,
+    "python": 0.8761,
+    "ruby": 0.9086,
+    "rust": 0.8263,
+    "scala": 0.9213,
+    "swift": 0.8478,
+    "typescript": 0.7253,
+    "zig": 0.899
+   },
+   "by_category": {
+    "architecture": 0.8077,
+    "semantic": 0.8468,
+    "symbol": 0.947
+   }
+  }
+ },
+ "overrides": [],
+ "dev_repos": [
+  "aiohttp",
+  "axios",
+  "gin",
+  "gson",
+  "guzzle",
+  "sinatra",
+  "tokio",
+  "trpc",
+  "messagepack-csharp",
+  "ktor",
+  "cats",
+  "alamofire",
+  "nlohmann-json",
+  "phoenix",
+  "curl",
+  "bats-core",
+  "aeson",
+  "telescope.nvim",
+  "zig"
+ ],
+ "calibration": {
+  "tfidf": {
+   "pairs": 719,
+   "clone": {
+    "p5": 0.343,
+    "p10": 0.444,
+    "p25": 0.59,
+    "p50": 0.716
+   },
+   "other": {
+    "p50": 0.024,
+    "p90": 0.096,
+    "p99": 0.219,
+    "p99.5": 0.285
+   },
+   "at_0.5": {
+    "clones_kept": 0.865,
+    "others_kept": 0.0028
+   },
+   "at_0.6": {
+    "clones_kept": 0.733,
+    "others_kept": 0.0028
+   },
+   "at_0.7": {
+    "clones_kept": 0.54,
+    "others_kept": 0.0028
+   },
+   "at_0.8": {
+    "clones_kept": 0.317,
+    "others_kept": 0.0014
+   }
+  },
+  "dense": {
+   "pairs": 719,
+   "clone": {
+    "p5": 0.61,
+    "p10": 0.686,
+    "p25": 0.806,
+    "p50": 0.892
+   },
+   "other": {
+    "p50": 0.162,
+    "p90": 0.403,
+    "p99": 0.634,
+    "p99.5": 0.758
+   },
+   "at_0.5": {
+    "clones_kept": 0.978,
+    "others_kept": 0.0431
+   },
+   "at_0.6": {
+    "clones_kept": 0.955,
+    "others_kept": 0.0167
+   },
+   "at_0.7": {
+    "clones_kept": 0.889,
+    "others_kept": 0.007
+   },
+   "at_0.8": {
+    "clones_kept": 0.766,
+    "others_kept": 0.0042
+   }
+  }
+ },
+ "measured": "2026-11-18, semble 0.7.3, model2vec 0.10.0, Python 3.12, 4 CPU cores, CPU only"
+}

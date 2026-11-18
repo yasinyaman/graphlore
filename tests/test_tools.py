@@ -956,6 +956,7 @@ def test_locate_cross_check_flags_hidden_link(tmp_path, monkeypatch):
 
 
 def test_locate_without_semble_degrades(project, monkeypatch):
+    monkeypatch.setenv("GRAPHLORE_SEMANTIC_BACKEND", "semble")  # semble only, no fallback
     monkeypatch.setattr(server, "_semble_index", lambda: None)
     out = server.graphlore_locate("anything")
     assert "semble" in out and "pip install" in out
@@ -990,6 +991,7 @@ def test_duplication_scan_flags_distant_cousins(tmp_path, monkeypatch):
 
 
 def test_duplication_scan_without_semble_degrades(project, monkeypatch):
+    monkeypatch.setenv("GRAPHLORE_SEMANTIC_BACKEND", "semble")
     monkeypatch.setattr(server, "_semble_index", lambda: None)
     out = server.graphlore_duplication_scan()
     assert "semble" in out and "pip install" in out
@@ -1834,8 +1836,15 @@ def test_apply_toolset_full_is_noop(monkeypatch):
 
 def test_effective_lean_tools_gates_locate_on_semble(monkeypatch):
     import importlib.util as iu
-    # semble absent -> graphlore_locate (needs the extra) is dropped from lean
     monkeypatch.setattr(iu, "find_spec", lambda name: None if name == "semble" else object())
+    # by default the built-in index backs locate: it stays without semble
+    monkeypatch.delenv("GRAPHLORE_SEMANTIC_BACKEND", raising=False)
+    monkeypatch.delenv("GRAPHIFY_SEMANTIC_BACKEND", raising=False)
+    assert "graphlore_locate" in server._effective_lean_tools()
+    monkeypatch.setenv("GRAPHLORE_SEMANTIC_BACKEND", "builtin")
+    assert "graphlore_locate" in server._effective_lean_tools()
+    # semble asked for but absent -> graphlore_locate is dropped from lean
+    monkeypatch.setenv("GRAPHLORE_SEMANTIC_BACKEND", "semble")
     assert "graphlore_locate" not in server._effective_lean_tools()
     # semble present -> it stays
     monkeypatch.setattr(iu, "find_spec", lambda name: object())
@@ -1882,6 +1891,11 @@ def test_locate_toolset_falls_back_to_lean_without_semble(monkeypatch, capsys):
     monkeypatch.setattr(iu, "find_spec", lambda name: None if name == "semble" else object())
     monkeypatch.delenv("GRAPHIFY_SEMANTIC_BACKEND", raising=False)
     monkeypatch.setattr(server, "TOOLSET", "locate")
+    # the default backend is always there: no fallback
+    monkeypatch.delenv("GRAPHLORE_SEMANTIC_BACKEND", raising=False)
+    assert server._effective_toolset_tools() == set(server.LOCATE_TOOLS)
+    assert "falling back" not in capsys.readouterr().err
+    monkeypatch.setenv("GRAPHLORE_SEMANTIC_BACKEND", "semble")
     assert server._effective_toolset_tools() == server._effective_lean_tools()
     assert "falling back" in capsys.readouterr().err
 
@@ -4340,11 +4354,13 @@ def test_duplication_scan_compares_definitions_and_reports_scores(tmp_path, monk
 
 
 def test_semantic_tools_say_the_first_call_downloads_a_model(project, monkeypatch):
+    monkeypatch.setenv("GRAPHLORE_SEMANTIC_BACKEND", "semble")
     monkeypatch.setattr(server, "_semble_index", lambda: None)
     out = server.graphlore_duplication_scan()
     assert "Hugging Face" in out and "graphlore_same_names" in out
     for tool in (server.graphlore_locate, server.graphlore_duplication_scan):
-        assert "downloads" in tool.__doc__ and "SEMBLE_MODEL_NAME" in tool.__doc__
+        assert "download" in tool.__doc__ and "Hugging Face" in tool.__doc__
+    assert "from_pretrained" in server.graphlore_locate.__doc__
 
 
 # --- surprises: expected coupling and name-resolved edges ---------------------
@@ -4859,6 +4875,7 @@ def _quote_project(tmp_path):
 
 def test_duplication_scan_reports_identical_bodies_without_a_model(tmp_path, monkeypatch):
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    monkeypatch.setenv("GRAPHLORE_SEMANTIC_BACKEND", "semble")
     monkeypatch.setattr(server, "_semble_index", lambda: None)
     _quote_project(tmp_path)
     data = json.loads(server.graphlore_duplication_scan(as_json=True))
@@ -6773,7 +6790,7 @@ def test_semble_that_fails_to_load_is_not_reported_as_missing(project, monkeypat
     fake.__spec__ = importlib.machinery.ModuleSpec("semble", None)
     monkeypatch.setitem(sys.modules, "semble", fake)
     monkeypatch.delenv("GRAPHLORE_OFFLINE", raising=False)
-    monkeypatch.delenv("GRAPHLORE_SEMANTIC_BACKEND", raising=False)
+    monkeypatch.setenv("GRAPHLORE_SEMANTIC_BACKEND", "semble")
     error = json.loads(server.graphlore_locate("anything", as_json=True))["error"]
     assert "semble is installed but could not build its index" in error
     assert "403 Forbidden" in error and "needs the optional" not in error
@@ -7447,3 +7464,423 @@ def test_a_string_with_comment_characters_does_not_hide_a_decorator(tmp_path, mo
     data = json.loads(server.graphlore_unreferenced(as_json=True))
     assert data["registered_by_decorator"].get("Test") == 1
     assert ".fullWildcardMatchesAny()" not in {r["node"] for r in data["unreferenced"]}
+
+
+# --- the built-in search (search.py / embed.py) -------------------------------
+
+_BILLING = '''"""Billing."""
+import math
+
+RATE = 0.2
+
+
+class Invoice:
+    """An invoice."""
+
+    currency = "EUR"
+
+    def total_amount(self, lines):
+        return sum(line.price * line.qty for line in lines)
+
+    def apply_discount(self, percent):
+        self.discount = percent
+        return self
+
+
+def retry_with_backoff(call, attempts=3):
+    for attempt in range(attempts):
+        try:
+            return call()
+        except TimeoutError:
+            math.sqrt(attempt)
+    raise RuntimeError("gave up")
+'''
+
+_SHIPPING = '''def compute_shipping(weight, distance):
+    base = weight * 0.5
+    return base + distance * 0.1
+
+
+def retry_request(call, attempts=3):
+    for attempt in range(attempts):
+        try:
+            return call()
+        except TimeoutError:
+            pass
+    raise RuntimeError("gave up")
+'''
+
+
+def _search_project(root):
+    """Two Python modules, a vendored copy, and the graph graphify would build."""
+    _write(root, "app/billing.py", _BILLING)
+    _write(root, "app/shipping.py", _SHIPPING)
+    _write(root, "vendor/lib/billing.py", _BILLING)
+
+    def fn(nid, label, file, line, **extra):
+        return {"id": nid, "label": label, "source_file": file,
+                "source_location": f"L{line}", "file_type": "code", **extra}
+
+    _write_graph(root, {
+        "nodes": [
+            fn("bill", "billing.py", "app/billing.py", 1),
+            fn("inv", "Invoice", "app/billing.py", 7),
+            fn("tot", ".total_amount()", "app/billing.py", 12),
+            fn("disc", ".apply_discount()", "app/billing.py", 15),
+            fn("rwb", "retry_with_backoff()", "app/billing.py", 20,
+               docstring="Call again after a pause when the network times out."),
+            fn("ship", "compute_shipping()", "app/shipping.py", 1),
+            fn("rr", "retry_request()", "app/shipping.py", 6),
+        ],
+        "links": [
+            {"source": "bill", "target": "inv", "relation": "contains"},
+            {"source": "inv", "target": "tot", "relation": "method"},
+            {"source": "inv", "target": "disc", "relation": "method"},
+            {"source": "ship", "target": "rr", "relation": "calls"},
+        ],
+    })
+
+
+def _builtin(root, monkeypatch, **env):
+    from graphlore import search
+    monkeypatch.setattr(server.config, "PROJECT_DIR", root)
+    monkeypatch.setenv("GRAPHLORE_SEMANTIC_BACKEND", "builtin")
+    for k, v in env.items():
+        monkeypatch.setenv(k, v)
+    server._GRAPH_CACHE.clear()
+    graph = server._load_graph()
+    nodes, edges = server._nodes_edges(graph)
+    return search, nodes, edges
+
+
+def test_builtin_search_tokenizer_joins_identifier_spellings():
+    from graphlore import search
+    terms = [set(search._tokenize(w)) for w in ("getUserName", "get_user_name", "GetUserName")]
+    assert terms[0] == terms[1] == terms[2] == {"getusername", "get", "user", "nam"}
+    assert {"http", "server", "httpserver"} <= set(search._tokenize("HTTPServer"))
+    assert search._tokenize("retries retrying retried") == ["retry"] * 3
+    assert search._tokenize("x 42") == []  # one letter and pure numbers are no terms
+    assert search._query_kind("Client._send") == "symbol"
+    assert search._query_kind("retry") == "symbol"
+    assert search._query_kind("where are failed requests retried") == "natural"
+    assert search._query_kind("def f(x):\n    return g(x)") == "code"
+    # a question loses its stopwords, a name keeps every part
+    assert search._query_terms("how is the invoice total computed", "natural") == [
+        "invoic", "total", "comput"]
+
+
+def test_builtin_search_kernel_matches_the_golden_contract():
+    """The contract an accelerator must meet: same terms, bit-identical scores."""
+    from pathlib import Path
+
+    from graphlore import search
+    fixture = Path(__file__).parent / "fixtures" / "search_golden.json"
+    golden = json.loads(fixture.read_text(encoding="utf-8"))
+    assert golden["kernel_abi"] == search._KERNEL_ABI
+    kernels = [search._PyKernel()]
+    if search._kernel().name != "python":  # an installed accelerator is held to it too
+        kernels.append(search._kernel())
+    b = golden["bm25f"]
+    for kernel in kernels:
+        for case in golden["tokenize"]:
+            assert kernel.tokenize(case["text"]) == case["terms"]
+        out = kernel.bm25f(
+            [(idf, {int(c): tuple(v) for c, v in p.items()}) for idf, p in b["terms"]],
+            {int(c): tuple(v) for c, v in b["lengths"].items()},
+            tuple(b["avg"]), tuple(b["params"]),
+        )
+        assert {str(c): [s.hex(), m] for c, (s, m) in out.items()} == b["expected"]
+    assert tuple(b["params"]) == (
+        search._K1, search._W_NAME, search._W_PATH, search._W_BODY,
+        search._B_NAME, search._B_PATH, search._B_BODY)
+
+
+def test_builtin_search_chunks_are_definitions_that_join_exactly(tmp_path, monkeypatch):
+    _search_project(tmp_path)
+    search, nodes, edges = _builtin(tmp_path, monkeypatch)
+    idx = search.index_for_project(nodes, edges)
+    chunks = [c for c in idx.chunks.values() if c.file_path == "app/billing.py"]
+    defs = {c.qualname: c for c in chunks if c.kind == "definition"}
+    assert set(defs) == {"Invoice", "Invoice.total_amount", "Invoice.apply_discount",
+                         "retry_with_backoff"}
+    # every definition chunk resolves to the node standing at its definition line
+    for c in defs.values():
+        node = server._node_for_location(nodes, c.file_path, c.start_line, c.end_line)
+        assert int(server._node_line(node)) == c.def_line
+    # a container indexes its own lines, not its methods'
+    cid = next(k for k, c in idx.chunks.items() if c.qualname == "Invoice")
+    assert "currency" in idx.fwd[cid] and "discount" not in idx.fwd[cid]
+    # module code before the first definition is one low-weight chunk
+    assert [c.kind for c in chunks if c.start_line == 1] == ["module"]
+    info = idx.info()
+    assert info["skipped"] == {"vendored": 1} and info["tiers"] == ["bm25"]
+
+
+def test_builtin_search_ranks_names_and_words(tmp_path, monkeypatch):
+    _search_project(tmp_path)
+    search, nodes, edges = _builtin(tmp_path, monkeypatch)
+    idx = search.index_for_project(nodes, edges)
+    assert idx.search("apply_discount", 1)[0].chunk.qualname == "Invoice.apply_discount"
+    assert idx.search("Invoice.total_amount", 1)[0].chunk.qualname == "Invoice.total_amount"
+    top = idx.search("how is the shipping cost computed from weight", 1)[0].chunk
+    assert top.qualname == "compute_shipping"
+    # the graph overlay: a word only the node's docstring carries
+    assert idx.search("network pause", 1)[0].chunk.qualname == "retry_with_backoff"
+    assert idx.search("network pause", 1, overlay_weight=0) == [] or (
+        idx.search("network pause", 1, overlay_weight=0)[0].chunk.qualname
+        != "retry_with_backoff")
+    assert idx.search("zzzqqq", 3) == []
+    # find_related: the near-copy in another file, scored as a cosine
+    hit = idx.search("retry_with_backoff", 1)[0]
+    related = idx.find_related(hit, 3)
+    assert related[0].chunk.qualname == "retry_request"
+    assert 0.5 < related[0].score <= 1.0
+    assert all(r.chunk.qualname != "retry_with_backoff" for r in related)
+    exact = idx.hit_for_span("app/billing.py", 12, 13)
+    assert exact is not None and exact.chunk.qualname == "Invoice.total_amount"
+
+
+def test_builtin_search_refreshes_only_changed_files(tmp_path, monkeypatch):
+    import os
+    _search_project(tmp_path)
+    search, nodes, edges = _builtin(tmp_path, monkeypatch)
+    idx = search.index_for_project(nodes, edges)
+    version = idx.version
+    ship_cids = idx.files["app/shipping.py"].cids
+    assert search.index_for_project(nodes, edges) is idx and idx.version == version
+    path = tmp_path / "app/billing.py"
+    path.write_text(_BILLING.replace("total_amount", "grand_total"), encoding="utf-8")
+    st = path.stat()
+    os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns + 10**9))
+    idx2 = search.index_for_project(nodes, edges)
+    assert idx2 is idx and idx.version == version + 1
+    assert idx.files["app/shipping.py"].cids == ship_cids  # not re-read
+    assert idx.search("grand_total", 1)[0].chunk.qualname == "Invoice.grand_total"
+    assert "totalamount" not in idx.postings
+    # incremental ranks exactly like cold
+    queries = ["retry", "shipping weight", "grand_total", "discount percent"]
+    warm = [[(h.chunk, h.score) for h in idx.search(q, 5)] for q in queries]
+    search._INDEX_CACHE.clear()
+    cold_idx = search.index_for_project(nodes, edges)
+    assert cold_idx is not idx
+    assert [[(h.chunk, h.score) for h in cold_idx.search(q, 5)] for q in queries] == warm
+    # a deleted file leaves the index
+    (tmp_path / "app/shipping.py").unlink()
+    assert "app/shipping.py" not in search.index_for_project(nodes, edges).files
+    # another project is another index
+    other = tmp_path / "other"
+    _write(other, "x.py", "def lonely():\n    return 1\n")
+    monkeypatch.setattr(server.config, "PROJECT_DIR", other)
+    assert search.index_for_project().files.keys() == {"x.py"}
+
+
+def test_builtin_search_stays_in_the_project(tmp_path, monkeypatch):
+    outside = tmp_path / "outside"
+    _write(outside, "secret.py", "def leaked_secret():\n    return 'token'\n")
+    root = tmp_path / "proj"
+    _write(root, "a.py", "def inside():\n    return 1\n")
+    (root / "link.py").symlink_to(outside / "secret.py")
+    (root / "linkdir").symlink_to(outside, target_is_directory=True)
+    _write_graph(root, {"nodes": [
+        {"id": "s", "label": "leaked_secret()", "source_file": "../outside/secret.py",
+         "source_location": "L1"},
+        {"id": "s2", "label": "leaked_secret()", "source_file": str(outside / "secret.py"),
+         "source_location": "L1"},
+    ], "links": []})
+    search, nodes, edges = _builtin(root, monkeypatch)
+    idx = search.index_for_project(nodes, edges)
+    assert set(idx.files) == {"a.py"}
+    assert idx.search("leaked_secret", 3) == []
+
+
+def test_builtin_search_caps_and_windows_are_reported(tmp_path, monkeypatch):
+    from graphlore import search
+    _write(tmp_path, "big.py", "def big():\n    return 1\n" + "# pad\n" * 400)
+    _write(tmp_path, "web/app.js", "\n".join(f"const v{i} = {i};" for i in range(90)))
+    _write(tmp_path, "bin.py", "x = 1\n\0\0")
+    monkeypatch.setattr(search, "_SEARCH_MAX_FILE_BYTES", 2000)
+    monkeypatch.setattr(search, "_spans_for_file", lambda rel: [])  # no span engine
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    idx = search.index_for_project()
+    info = idx.info()
+    assert info["skipped"] == {"binary": 1, "oversize": 1}
+    assert info["window_chunked_files"] == 1
+    assert sorted((c.start_line, c.end_line) for c in idx.chunks.values()) == [
+        (1, 40), (41, 80), (81, 90)]
+    monkeypatch.setattr(search, "_SEARCH_MAX_CHUNKS", 0)
+    search._INDEX_CACHE.clear()
+    assert search.index_for_project() is None  # nothing indexed: no index
+
+
+class _FakeModel:
+    """A deterministic stand-in for a model2vec StaticModel: a bag of hashed words."""
+
+    calls = 0
+
+    def encode(self, texts):
+        import numpy as np
+        _FakeModel.calls += len(texts)
+        out = np.zeros((len(texts), 64), dtype=np.float32)
+        for i, t in enumerate(texts):
+            for w in t.lower().split():
+                out[i, hash(w.strip("():,.")) % 64] += 1.0
+        return out
+
+
+def _fake_dense(monkeypatch, model=None):
+    import pytest
+
+    from graphlore import embed
+    pytest.importorskip("numpy")
+    monkeypatch.setenv("GRAPHLORE_EMBED_MODEL", "fake/model")
+    monkeypatch.setattr(embed, "_load_model", lambda spec: (model or _FakeModel(), ""))
+    _FakeModel.calls = 0
+
+
+def test_builtin_search_hybrid_tier_with_a_model(tmp_path, monkeypatch):
+    import os
+    _search_project(tmp_path)
+    _fake_dense(monkeypatch)
+    search, nodes, edges = _builtin(tmp_path, monkeypatch)
+    idx = search.index_for_project(nodes, edges)
+    assert idx.mode() == "hybrid" and idx.info()["model"] == "fake/model"
+    assert _FakeModel.calls == len(idx.chunks)
+    assert idx.search("apply_discount", 1)[0].chunk.qualname == "Invoice.apply_discount"
+    hit = idx.search("retry_with_backoff", 1)[0]
+    related = idx.find_related(hit, 2)
+    assert related[0].chunk.qualname == "retry_request" and 0 < related[0].score <= 1
+    assert idx.search("retry", 3, dense=False)  # the lexical ranking stays reachable
+    # an edit re-embeds only the definitions whose text changed
+    path = tmp_path / "app/shipping.py"
+    path.write_text(_SHIPPING.replace("0.1", "0.2"), encoding="utf-8")
+    st = path.stat()
+    os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns + 10**9))
+    search.index_for_project(nodes, edges)
+    assert idx.last_embedded == 1
+
+
+def test_builtin_search_keeps_vectors_on_disk(tmp_path, monkeypatch):
+    _search_project(tmp_path / "p")
+    _fake_dense(monkeypatch)
+    search, nodes, edges = _builtin(tmp_path / "p", monkeypatch,
+                                    GRAPHLORE_CACHE_DIR=str(tmp_path / "cache"))
+    idx = search.index_for_project(nodes, edges)
+    assert _FakeModel.calls == len(idx.chunks)
+    saved = list((tmp_path / "cache").rglob("vectors-*.npz"))
+    assert len(saved) == 1 and not (tmp_path / "p" / "graphify-out" / "vectors").exists()
+    search._INDEX_CACHE.clear()
+    _FakeModel.calls = 0
+    again = search.index_for_project(nodes, edges)
+    assert again is not idx and again.mode() == "hybrid" and _FakeModel.calls == 0
+
+
+def test_builtin_search_says_why_there_is_no_dense_tier(tmp_path, monkeypatch):
+    import importlib.util
+    import sys
+
+    from graphlore import embed
+    _search_project(tmp_path)
+    monkeypatch.setenv("GRAPHLORE_EMBED_MODEL", "minishlab/potion-code-16M-v2")
+    monkeypatch.setitem(sys.modules, "model2vec", None)  # the [embed] extra is absent
+    search, nodes, edges = _builtin(tmp_path, monkeypatch)
+    idx = search.index_for_project(nodes, edges)
+    assert idx.mode() == "bm25" and "[embed]" in idx.dense_reason
+    data = json.loads(server.graphlore_locate("apply_discount", as_json=True))
+    assert data["backend"]["mode"] == "bm25" and "[embed]" in data["backend"]["dense_unavailable"]
+    assert "BM25 only" in server.graphlore_locate("apply_discount")
+
+    # offline with no cached model: BM25 only, the reason says offline, nothing fetched
+    class _Static:
+        @staticmethod
+        def from_pretrained(spec, force_download=False):
+            raise OSError("not in cache")
+
+    fake = type(sys)("model2vec")
+    fake.StaticModel = _Static
+    monkeypatch.setitem(sys.modules, "model2vec", fake)
+    if importlib.util.find_spec("numpy") is None:  # CI installs no [embed] extra
+        monkeypatch.setitem(sys.modules, "numpy", type(sys)("numpy"))
+    monkeypatch.setenv("GRAPHLORE_OFFLINE", "1")
+    monkeypatch.delenv("HF_HUB_OFFLINE", raising=False)
+    embed._MODEL_CACHE.clear()
+    search._INDEX_CACHE.clear()
+    idx = search.index_for_project(nodes, edges)
+    assert idx.mode() == "bm25" and "GRAPHLORE_OFFLINE" in idx.dense_reason
+    assert server.os.environ.get("HF_HUB_OFFLINE") == "1"
+
+
+def test_locate_on_the_builtin_index(tmp_path, monkeypatch):
+    _search_project(tmp_path)
+    _builtin(tmp_path, monkeypatch)
+    monkeypatch.delenv("GRAPHLORE_SEMANTIC_BACKEND")  # the default, without semble
+    monkeypatch.setattr(server, "_semble_index", lambda: None)
+    data = json.loads(server.graphlore_locate("apply_discount", as_json=True))
+    assert data["seed"]["node"] == ".apply_discount()" and data["seed"]["line"] == 15
+    assert data["backend"]["name"] == "builtin" and data["backend"]["tiers"] == ["bm25"]
+    text = server.graphlore_locate("retry_with_backoff")
+    assert "retry_request" in text and "Search: built-in, BM25 only" in text
+    miss = json.loads(server.graphlore_locate("zzzqqq", as_json=True))
+    assert miss["seed"] is None and miss["backend"]["name"] == "builtin"
+    # nothing to search: an error, still JSON
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    _write_graph(empty, {"nodes": [], "links": []})
+    monkeypatch.setattr(server.config, "PROJECT_DIR", empty)
+    server._GRAPH_CACHE.clear()
+    err = json.loads(server.graphlore_locate("x", as_json=True))
+    assert "no source file to index" in err["error"]
+
+
+def test_duplication_scan_on_the_builtin_index(tmp_path, monkeypatch):
+    _search_project(tmp_path)
+    _builtin(tmp_path, monkeypatch)
+    data = json.loads(server.graphlore_duplication_scan(min_distance=1, as_json=True))
+    assert data["semantic_tier"] == "ran" and data["score_kind"] == "tf-idf cosine"
+    assert data["score_floor"] == server._BUILTIN_LEXICAL_SCORE_FLOOR
+    assert data["seeds_unanchored"] == 0  # anchored on the definition's own chunk
+    pair = {frozenset((p["a"], p["b"])) for p in data["pairs"]}
+    assert frozenset(("retry_with_backoff()", "retry_request()")) in pair
+    assert data["backend"]["name"] == "builtin"
+    _fake_dense(monkeypatch)
+    search_mod = __import__("graphlore.search", fromlist=["x"])
+    search_mod._INDEX_CACHE.clear()
+    dense = json.loads(server.graphlore_duplication_scan(min_distance=1, as_json=True))
+    assert dense["score_kind"] == "embedding cosine"
+    assert dense["score_floor"] == server._BUILTIN_DENSE_SCORE_FLOOR
+
+
+def test_semantic_backend_dispatch(tmp_path, monkeypatch):
+    import importlib.machinery
+    import sys
+    import types
+    _search_project(tmp_path)
+    _builtin(tmp_path, monkeypatch)
+    real_semble_index = server._semble_index
+    sentinel = object()
+    monkeypatch.setattr(server, "_semble_index", lambda: sentinel)
+    for value in ("", "auto", "semble"):
+        monkeypatch.setenv("GRAPHLORE_SEMANTIC_BACKEND", value)
+        assert server._semantic_backend() == (sentinel, "semble", "")
+    monkeypatch.setenv("GRAPHLORE_SEMANTIC_BACKEND", "builtin")
+    b = server._semantic_backend()
+    assert b.name == "builtin" and isinstance(b.index, server._CodeIndex)
+    # a custom spec that fails is an error, never answered by another backend
+    monkeypatch.setenv("GRAPHLORE_SEMANTIC_BACKEND", "no_such_module:Nope")
+    assert server._semantic_backend() == (None, "custom", "")
+    assert "failed to load" in json.loads(server.graphlore_locate("x", as_json=True))["error"]
+
+    # the default, with a semble that cannot build its index: the built-in one
+    # answers, and says why
+    class _Broken:
+        @staticmethod
+        def from_path(path):
+            raise OSError("403 Forbidden for huggingface.co")
+
+    fake = types.ModuleType("semble")
+    fake.SembleIndex = _Broken
+    fake.__spec__ = importlib.machinery.ModuleSpec("semble", None)
+    monkeypatch.setitem(sys.modules, "semble", fake)
+    monkeypatch.setattr(server, "_semble_index", real_semble_index)
+    monkeypatch.delenv("GRAPHLORE_SEMANTIC_BACKEND")
+    data = json.loads(server.graphlore_locate("apply_discount", as_json=True))
+    assert data["backend"]["name"] == "builtin" and "403 Forbidden" in data["backend"]["note"]

@@ -66,8 +66,9 @@ pip install graphifyy && graphify install
 - Claude Desktop: add it to `claude_desktop_config.json`
   (macOS `~/Library/Application Support/Claude/`, Windows `%APPDATA%\Claude\`).
 
-Optional extras, installed as `graphlore[extra]`: `semble` (semantic
-`graphlore_locate` and the duplication scan), `treesitter` (spans for non-Python
+Optional extras, installed as `graphlore[extra]`: `embed` (static code
+embeddings for the built-in search behind `graphlore_locate`), `semble` (semble
+as that search instead), `treesitter` (spans for non-Python
 languages; usually already present through Graphify), `tiktoken` (exact token
 counts), `watch` (re-sync on file changes). Until the first PyPI release, use
 the GitHub form wherever a message says `pip install "graphlore[extra]"`:
@@ -98,7 +99,7 @@ helps a model pick the right tool.
 | Tool | What it answers |
 |---|---|
 | `graphlore_overview` | Call first: size, most connected nodes, communities, suggested next steps |
-| `graphlore_locate` | A natural-language question → the enclosing symbol, its subgraph and hidden links (needs `[semble]`) |
+| `graphlore_locate` | A question or a name → the enclosing symbol, its subgraph and hidden links (built-in search; better with `[embed]` or `[semble]`) |
 | `graphlore_search` | Which nodes match this name or id |
 | `graphlore_neighbors` | The direct neighbors of a node |
 | `graphlore_subgraph` | The neighborhood around a node, under a token budget |
@@ -141,6 +142,11 @@ resolved symbol's real span.
 
 Every repository measured is an HTTP-client library and the baseline is a naive
 grep, so treat the numbers as indicative.
+
+The search behind `locate` was measured on its own on semble's published query
+set (1,251 queries, 63 repositories, 19 languages, semble's scoring): the
+built-in BM25 index, with no extra installed, reaches NDCG@10 0.814 against
+semble's 0.852, with a median cold index of 0.6 s and a median query of 1 ms.
 → [Method, per-language results and caveats](https://github.com/yasinyaman/graphlore/blob/master/docs/benchmark.md)
 
 ## FAQ
@@ -179,7 +185,7 @@ names.
 ### Does it need an API key or send my code anywhere?
 
 The analysis tools read local files and need no key. A few paths can reach the
-network: the first semantic search downloads an embedding model, the first use
+network: the first embedding search (`[embed]` or `[semble]`) downloads a model, the first use
 of a language downloads its tree-sitter grammar, Graphify can call an LLM
 backend when you set its key, and `graphlore_add` fetches a URL.
 `GRAPHLORE_OFFLINE=1` refuses or restricts the ones graphlore controls; the
@@ -198,6 +204,16 @@ and PHP frameworks
 and both say which files they did not read.
 [What was measured in each language](https://github.com/yasinyaman/graphlore/blob/master/docs/benchmark-polyglot.md),
 on 31 real repositories.
+
+### Does graphlore_locate need semble or an embedding model?
+
+No. graphlore has its own search index: one chunk per function, method or
+class, ranked with identifier-aware BM25, so `graphlore_locate` works in a
+default install and every hit lands on its graph node. The `[embed]` extra adds
+static code embeddings, which match a question to code that uses other words;
+with the `[semble]` extra, semble answers instead. Each reply's `backend` field
+says which search answered.
+→ [The search bridge](https://github.com/yasinyaman/graphlore/blob/master/docs/concepts.md#search-bridge-built-in-index-or-semble)
 
 ### Why do I see only 12 tools?
 
@@ -228,7 +244,7 @@ own. The old `GRAPHIFY_*` environment variables still work.
 ## Documentation
 
 - [Tool reference](https://github.com/yasinyaman/graphlore/blob/master/docs/tools.md): all 33 tools, resources, prompts, what a result carries
-- [How graphlore works](https://github.com/yasinyaman/graphlore/blob/master/docs/concepts.md): resolved edges, import checks, analysis scope, freshness, semantic bridge, naming communities
+- [How graphlore works](https://github.com/yasinyaman/graphlore/blob/master/docs/concepts.md): resolved edges, import checks, analysis scope, freshness, the search bridge, naming communities
 - [Configuration](https://github.com/yasinyaman/graphlore/blob/master/docs/configuration.md): toolsets, HTTP transport and security, offline mode, environment variables
 - [Benchmark](https://github.com/yasinyaman/graphlore/blob/master/docs/benchmark.md): method, cross-language results, caveats
 - [Changelog](https://github.com/yasinyaman/graphlore/blob/master/CHANGELOG.md) · [Contributing](https://github.com/yasinyaman/graphlore/blob/master/CONTRIBUTING.md) · [Guidance for coding agents](https://github.com/yasinyaman/graphlore/blob/master/AGENTS.md)
