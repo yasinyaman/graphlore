@@ -1,6 +1,7 @@
 """``python -m graphlore_engine``: the engine's command line.
 
     build ROOT [--out PATH] [--commit SHA] [--no-docs] [--out-dir-name NAME] [--incremental]
+               [--unresolved PATH]
     cluster GRAPH
     spans FILE [--as PATH]
     languages
@@ -34,6 +35,9 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--threads", type=int)
     b.add_argument("--incremental", action="store_true",
                    help="reuse the facts of files unchanged since the last build")
+    b.add_argument("--unresolved", metavar="PATH",
+                   help="also write the calls left without an edge whose name is one "
+                        "definition of the project, each with the reason (JSON)")
     c = sub.add_parser("cluster", help="detect a graph.json's communities again")
     c.add_argument("graph")
     s = sub.add_parser("spans", help="print the definition spans of one file")
@@ -63,7 +67,7 @@ def main(argv: list[str] | None = None) -> int:
         report = build(
             args.root, out=out, commit=args.commit, documents=not args.no_docs,
             out_dir_name=args.out_dir_name, max_file_bytes=args.max_file_bytes,
-            threads=args.threads, incremental=args.incremental,
+            threads=args.threads, incremental=args.incremental, unresolved=args.unresolved,
         )
     except RuntimeError as e:
         print(f"ERROR: {e}", file=sys.stderr)

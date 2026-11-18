@@ -59,6 +59,11 @@ pub struct BuildOptions {
     /// Reuse the facts of files unchanged since the last build (`update=True`).
     /// The cache is written either way.
     pub incremental: bool,
+    /// Where to write the calls the resolver left without an edge although
+    /// their name is one definition of the project (a JSON list, each with
+    /// the reason): what `benchmarks/unresolved.py` reads. `None` writes
+    /// nothing; graph.json is the same either way.
+    pub unresolved: Option<PathBuf>,
 }
 
 impl BuildOptions {
@@ -73,6 +78,7 @@ impl BuildOptions {
             parse_timeout: Some(DEFAULT_PARSE_TIMEOUT),
             threads: None,
             incremental: false,
+            unresolved: None,
         }
     }
 }
@@ -219,8 +225,12 @@ pub fn build_graph(opts: &BuildOptions) -> Result<(Value, BuildReport), String> 
 
     let mut assembled = graph::assemble::assemble(&facts);
     lap("assemble", &mut phases);
-    let (ext_nodes, edges, resolution) =
-        resolve::resolve(&root, &facts, &mut assembled, found.manifests);
+    let (ext_nodes, edges, resolution, unresolved) =
+        resolve::resolve(&root, &facts, &mut assembled, found.manifests, opts.unresolved.is_some());
+    if let Some(path) = &opts.unresolved {
+        let text = serde_json::to_string(&unresolved).map_err(|e| e.to_string())?;
+        std::fs::write(path, text).map_err(|e| format!("cannot write {}: {e}", path.display()))?;
+    }
     lap("resolve", &mut phases);
     assembled.nodes.extend(ext_nodes);
     assembled.links.extend(edges);
