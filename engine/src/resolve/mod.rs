@@ -2862,6 +2862,130 @@ impl<'a> Project<'a> {
         self.def(slot).kind.is_callable().then_some(slot)
     }
 
+    /// JS `this.lookup()` in an ES5 constructor `function View() {…}`: the
+    /// function assigned to `View.prototype.lookup` (`Def::object` `View`).
+    fn constructor_member(&self, f: usize, d: Option<usize>, name: &str) -> Option<DefRef> {
+        let defs = &self.files[f].defs;
+        let mut cur = d;
+        while let Some(x) = cur {
+            if defs[x].kind.is_callable() && defs[x].object.is_none() {
+                let ctor = defs[x].name.as_str();
+                let cands: Vec<DefRef> = defs
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, y)| y.name == name && y.object.as_deref() == Some(ctor))
+                    .map(|(i, _)| (f, i))
+                    .collect();
+                if !cands.is_empty() {
+                    return self.best(cands);
+                }
+            }
+            cur = defs[x].parent;
+        }
+        None
+    }
+
+    /// JS `this.x` in a function expression no definition holds, by what the
+    /// function is attached to (`RefFact::this_of`): `app[method] = function
+    /// () { this.route() }` is `app.route`; a callback a Mongoose schema is
+    /// handed (`UserSchema.path('name').validate(function () {
+    /// this.skipValidation() })`) runs on a document, whose methods are the
+    /// file's `UserSchema.methods`, `INFERRED`.
+    fn this_of_member(&self, f: usize, name: &str) -> Option<(DefRef, Confidence)> {
+        let of = (*self.cur.borrow())
+            .filter(|(cf, _)| *cf == f)
+            .and_then(|(cf, ri)| self.files[cf].refs[ri].this_of.clone())?;
+        let defs = &self.files[f].defs;
+        let named = |object: &str| -> Vec<DefRef> {
+            defs.iter()
+                .enumerate()
+                .filter(|(_, y)| y.name == name && y.object.as_deref() == Some(object))
+                .map(|(i, _)| (f, i))
+                .collect()
+        };
+        let head = of.first()?;
+        if of.len() == 1 {
+            return self.best(named(head)).map(|m| (m, Confidence::Extracted));
+        }
+        let schema = defs.iter().any(|y| {
+            y.name == *head
+                && y.kind.is_state()
+                && y.value_path.as_deref().is_some_and(|v| v.last().is_some_and(|s| s == "Schema"))
+        });
+        schema.then(|| self.best(named("methods"))).flatten().map(|m| (m, Confidence::Inferred))
+    }
+
+    /// JS: a member of what a framework hands a function. A parameter named
+    /// `req` / `request` (`res` / `response`) of no written type, in a
+    /// project that builds the framework's request (response) object
+    /// itself, express's `Object.create(http.IncomingMessage.prototype)`:
+    /// the functions assigned to that object, or to an `app.request`
+    /// (`app.response`). A local constructing a Mongoose model (`new
+    /// Article(…)`, `Article` a `mongoose.model('Article')`): a function of
+    /// the `methods` of the schema the model is registered with.
+    fn handed_member(&self, f: usize, d: Option<usize>, head: &str, name: &str) -> Option<DefRef> {
+        if self.local_type(f, d, head).is_some() {
+            return None;
+        }
+        let bare = head.split('@').next().unwrap_or(head);
+        let untyped = head.contains('@') || self.is_untyped_local(f, d, head);
+        let proto = match bare {
+            "req" | "request" if untyped => Some(("IncomingMessage", "request")),
+            "res" | "response" if untyped => Some(("ServerResponse", "response")),
+            _ => None,
+        };
+        if let Some((created, alias)) = proto {
+            let mut cands: Vec<DefRef> = Vec::new();
+            let mut built = false;
+            for (g, facts) in self.files.iter().enumerate() {
+                if self.family[g] != Some(Family::Ecma) {
+                    continue;
+                }
+                for obj in facts.defs.iter().filter(|x| {
+                    x.kind.is_state()
+                        && x.created_from.as_deref().is_some_and(|p| {
+                            p.len() >= 2
+                                && p[p.len() - 2] == created
+                                && p[p.len() - 1] == "prototype"
+                        })
+                }) {
+                    built = true;
+                    cands.extend(facts.defs.iter().enumerate().filter_map(|(i, y)| {
+                        (y.name == name && y.object.as_deref() == Some(obj.name.as_str()))
+                            .then_some((g, i))
+                    }));
+                }
+            }
+            // (only a project that builds the object itself)
+            if !built {
+                return None;
+            }
+            // (`app.response.message = function`: what the app adds to them)
+            for (g, facts) in self.files.iter().enumerate() {
+                if self.family[g] == Some(Family::Ecma) {
+                    cands.extend(facts.defs.iter().enumerate().filter_map(|(i, y)| {
+                        (y.name == name && y.object.as_deref() == Some(alias)).then_some((g, i))
+                    }));
+                }
+            }
+            return self.best(cands);
+        }
+        // a document of a Mongoose model
+        let path = self.local_path(f, d, head)?;
+        let [model] = path.as_slice() else { return None };
+        let Some(Target::Def(v)) = self.resolve_name(f, d, model) else { return None };
+        let registered = self.def(v).model_name.as_ref()?;
+        let mut cands: Vec<DefRef> = Vec::new();
+        for (g, facts) in self.files.iter().enumerate() {
+            if facts.models.iter().any(|(n, _)| n == registered) {
+                cands.extend(facts.defs.iter().enumerate().filter_map(|(i, y)| {
+                    (y.name == name && y.object.as_deref() == Some("methods")).then_some((g, i))
+                }));
+            }
+        }
+        self.best(cands)
+    }
+
     /// The path a local's declaration gives it (its type as written).
     fn local_path(&self, f: usize, d: Option<usize>, name: &str) -> Option<&Vec<String>> {
         let defs = &self.files[f].defs;
@@ -3800,6 +3924,13 @@ impl<'a> Project<'a> {
         // a local or parameter declared as a collection
         let head_many =
             (!own_init && collection_next(0)).then(|| self.local_elem(f, d, head)).flatten();
+        // JS: what a framework hands a function (express's own `req` / `res`),
+        // a document of a Mongoose model
+        if fam == Family::Ecma && !rest.is_empty() && !bases && head_many.is_none() {
+            if let Some(m) = self.handed_member(f, d, head, &rest[0]) {
+                return self.walk(Target::Def(m), &rest[1..], Confidence::Inferred);
+            }
+        }
         let mut t = match head.as_str() {
             _ if head_many.is_some() => {
                 let (elem, c) = head_many?;
@@ -3825,9 +3956,13 @@ impl<'a> Project<'a> {
                     // method beside this one in an `impl` for a type the
                     // project does not define (`impl AuthorityExt for Authority`)
                     None => {
-                        let m = self
+                        let found = self
                             .object_member(f, d, &rest[0])
-                            .or_else(|| self.owner_sibling(f, d, &rest[0]))?;
+                            .or_else(|| self.owner_sibling(f, d, &rest[0]))
+                            .or_else(|| self.constructor_member(f, d, &rest[0]))
+                            .map(|m| (m, conf))
+                            .or_else(|| self.this_of_member(f, &rest[0]));
+                        let (m, conf) = found?;
                         return self.walk(Target::Def(m), &rest[1..], conf);
                     }
                 }
@@ -6683,6 +6818,7 @@ pub fn resolve(
                     hints: Vec::new(),
                     implicit: None,
                     targs: 0,
+                    this_of: None,
                     recv: None,
                     byte: u.byte,
                 };

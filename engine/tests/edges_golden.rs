@@ -1963,3 +1963,67 @@ fn c_a_function_put_in_a_slot_is_what_the_slot_dispatches_to() {
         "{got:#?}"
     );
 }
+
+#[test]
+fn js_this_and_what_a_framework_hands_a_function() {
+    // express builds its own request and response objects: a handler's
+    // untyped `req` / `res` is one of them (`INFERRED`), and what the app
+    // adds to `app.response` too
+    let got = calls_conf("jsframework", &[
+        ("lib/request.js", "var http = require('http');\nvar req = Object.create(http.IncomingMessage.prototype);\nmodule.exports = req;\nreq.is = function is(types) { return types; };\n"),
+        ("lib/response.js", "var http = require('http');\nvar res = Object.create(http.ServerResponse.prototype);\nmodule.exports = res;\nres.redirect = function redirect(url) { return url; };\n"),
+        ("lib/application.js", "var app = exports = module.exports = {};\napp.route = function route(path) { return path; };\n['get', 'put'].forEach(function (method) {\n  app[method] = function (path) {\n    return this.route(path);\n  };\n});\n"),
+        ("lib/view.js", "function View(name) {\n  this.path = this.lookup(name);\n}\nView.prototype.lookup = function lookup(name) { return name; };\n"),
+        ("examples/index.js", "var app = require('../lib/application');\napp.response.message = function (msg) { return msg; };\n"),
+        ("test/req.js", "var app = require('../lib/application');\napp.use(function (req, res) {\n  req.is('json');\n  res.redirect('/');\n  res.message('hi');\n});\n"),
+    ]);
+    let has = |from: &str, to: &str| {
+        got.iter().find(|(f, t, _)| f == from && t == to).map(|(_, _, c)| c.clone())
+    };
+    assert_eq!(has("req.js", "lib_request_is").as_deref(), Some("INFERRED"), "{got:#?}");
+    assert_eq!(has("req.js", "lib_response_redirect").as_deref(), Some("INFERRED"), "{got:#?}");
+    assert_eq!(has("req.js", "examples_index_message").as_deref(), Some("INFERRED"), "{got:#?}");
+    // `this` in `app[method] = function` is `app`; in an ES5 constructor,
+    // its prototype's functions
+    assert_eq!(
+        has("application.js", "lib_application_route").as_deref(),
+        Some("EXTRACTED"),
+        "{got:#?}"
+    );
+    assert_eq!(has("View()", "lib_view_lookup").as_deref(), Some("EXTRACTED"), "{got:#?}");
+
+    // a project that builds no request object: `req` is the framework's
+    let other = calls_conf(
+        "jsframework2",
+        &[("lib/users.js", "exports.logout = function logout(req, res) {\n  req.logout();\n};\n")],
+    );
+    assert!(!other.iter().any(|(_, t, _)| t == "lib_users_logout"), "{other:#?}");
+}
+
+#[test]
+fn js_a_mongoose_document_has_its_schemas_methods() {
+    // `this` in a callback a schema is handed runs on a document; `new
+    // Article(…)` of `mongoose.model('Article')` is one, of the schema the
+    // model is registered with
+    let got = calls_conf("jsmongoose", &[
+        ("app/models/user.js", "const mongoose = require('mongoose');\nconst Schema = mongoose.Schema;\nconst UserSchema = new Schema({});\nUserSchema.path('name').validate(function (name) {\n  if (this.skipValidation()) return true;\n  return name;\n});\nUserSchema.methods = {\n  skipValidation: function () { return false; }\n};\nmongoose.model('User', UserSchema);\n"),
+        ("app/models/article.js", "const mongoose = require('mongoose');\nconst ArticleSchema = new mongoose.Schema({});\nArticleSchema.methods = {\n  uploadAndSave: function (file) { return file; }\n};\nmongoose.model('Article', ArticleSchema);\n"),
+        ("app/controllers/articles.js", "const mongoose = require('mongoose');\nconst Article = mongoose.model('Article');\nexports.create = function (req, res) {\n  const article = new Article(req.body);\n  return article.uploadAndSave(req.file);\n};\n"),
+        // a callback a non-schema call is handed: its `this` is not a document
+        ("app/other.js", "const emitter = require('events');\nemitter.on('x', function () {\n  this.uploadAndSave();\n});\n"),
+    ]);
+    let has = |from: &str, to: &str| {
+        got.iter().find(|(f, t, _)| f == from && t == to).map(|(_, _, c)| c.clone())
+    };
+    assert_eq!(
+        has("user.js", "app_models_user_skipvalidation").as_deref(),
+        Some("INFERRED"),
+        "{got:#?}"
+    );
+    assert_eq!(
+        has("create()", "app_models_article_uploadandsave").as_deref(),
+        Some("INFERRED"),
+        "{got:#?}"
+    );
+    assert!(!got.iter().any(|(f, t, _)| f == "other.js" && t.starts_with("app_")), "{got:#?}");
+}

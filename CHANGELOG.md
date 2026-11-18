@@ -259,6 +259,15 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- **Native engine 0.5.36: JavaScript receivers the source states.** `this`
+  in a function expression is what it is attached to (`app[method] =
+  function`, a callback a Mongoose schema is handed); in an ES5 constructor,
+  its prototype's functions; a Mongoose document has its schema's
+  `methods`; express's own `req` / `res` objects
+  (`Object.create(http.IncomingMessage.prototype)`) type a handler's untyped
+  `req` / `res`. express: 158 calls, the Mongoose demo 49 (`INFERRED` where
+  a convention, not the source, says what the receiver is). JavaScript's
+  unmarked unresolved rows 55 → 18. The facts cache is rebuilt once.
 - **Native engine 0.5.35: C function-pointer slots dispatch to the functions
   put in them.** An initializer (`.close = redisNetClose`, or by position)
   or an assignment (`ac->ev.addRead = redisLibuvAddRead;`) gives a

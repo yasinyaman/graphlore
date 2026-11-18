@@ -327,7 +327,15 @@ impl LanguageModule for Ecma {
             return None;
         };
         let object = pair_or_method.parent().filter(|o| o.kind() == "object")?;
-        let decl = object.parent().filter(|d| d.kind() == "variable_declarator")?;
+        let holder = object.parent()?;
+        // `UserSchema.methods = { encryptPassword: function () {} }`: the
+        // member it is assigned to, as `obj.name = function` names its object
+        if holder.kind() == "assignment_expression" {
+            let left =
+                holder.child_by_field_name("left").filter(|l| l.kind() == "member_expression")?;
+            return path_of(left, src)?.into_iter().rfind(|s| s != "prototype" && s != "()");
+        }
+        let decl = Some(holder).filter(|d| d.kind() == "variable_declarator")?;
         decl.child_by_field_name("name").filter(|x| x.kind() == "identifier").map(|x| text(x, src))
     }
 

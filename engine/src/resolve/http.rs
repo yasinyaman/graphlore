@@ -385,6 +385,7 @@ fn handler_id(
             hints: Vec::new(),
             implicit: None,
             targs: 0,
+            this_of: None,
             recv: None,
             byte: 0,
         };
@@ -609,6 +610,7 @@ pub(super) fn link_calls(
                     hints: Vec::new(),
                     implicit: None,
                     targs: 0,
+                    this_of: None,
                     recv: None,
                     byte: 0,
                 };

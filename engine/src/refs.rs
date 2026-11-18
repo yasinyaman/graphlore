@@ -2308,6 +2308,8 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
     let mut locals: Vec<Local> = Vec::new();
     // byte ranges of declarations the grammar misread (`misread_variable`)
     let mut misread: Vec<(usize, usize)> = Vec::new();
+    // JS: what a `this` at each byte belongs to (`RefFact::this_of`)
+    let mut this_at: HashMap<usize, Vec<String>> = HashMap::new();
     let push = |refs: &mut Vec<RefFact>, n: Node, kind, path: Vec<String>, context, def| {
         if path.is_empty() || path.last().is_some_and(|s| s == UNKNOWN || s.is_empty()) {
             return;
@@ -2324,6 +2326,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
             hints: Vec::new(),
             implicit: None,
             targs: 0,
+            this_of: None,
             recv: None,
             byte: n.start_byte(),
         });
@@ -2998,6 +3001,41 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                 r.args = args;
             }
         }
+        // JS `this` in a function expression no definition holds
+        if n.kind() == "this"
+            && matches!(
+                facts.lang,
+                Some(
+                    crate::lang::Lang::JavaScript
+                        | crate::lang::Lang::TypeScript
+                        | crate::lang::Lang::Tsx
+                )
+            )
+        {
+            if let Some(of) = this_attached(&anc, src) {
+                this_at.insert(n.start_byte(), of);
+            }
+        }
+        // JS `mongoose.model('Article', ArticleSchema)`: a model registered
+        if n.kind() == "call_expression"
+            && matches!(
+                facts.lang,
+                Some(crate::lang::Lang::JavaScript | crate::lang::Lang::TypeScript)
+            )
+        {
+            let callee = n.child_by_field_name("function").and_then(|c| path_of(c, src));
+            if callee.is_some_and(|c| c == ["mongoose", "model"] || c == ["model"]) {
+                let args: Vec<Node> = n
+                    .child_by_field_name("arguments")
+                    .map(|a| kids(a).into_iter().filter(|c| !is_comment(c)).collect())
+                    .unwrap_or_default();
+                if let [name, schema, ..] = args.as_slice() {
+                    if let (Some(name), "identifier") = (string_arg(*name, src), schema.kind()) {
+                        facts.models.push((name, text(*schema, src)));
+                    }
+                }
+            }
+        }
         // C, C++: a function put in a slot of a struct
         if matches!(facts.lang, Some(crate::lang::Lang::C | crate::lang::Lang::Cpp)) {
             facts.slots.extend(slot_facts(n, src));
@@ -3100,6 +3138,11 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
             !(matches!(r.context, "parameter_type" | "return_type")
                 && misread.iter().any(|&(lo, hi)| lo <= r.byte && r.byte < hi))
         });
+    }
+    if !this_at.is_empty() {
+        for r in refs.iter_mut().filter(|r| r.path.first().is_some_and(|h| h == "self")) {
+            r.this_of = this_at.get(&r.byte).cloned();
+        }
     }
     add_extras(&mut facts.defs, &extras, m, src);
     let defs = &facts.defs;
@@ -4968,6 +5011,87 @@ fn predefined(t: Node, src: &[u8]) -> Option<Vec<String>> {
 }
 
 /// What constructs the value a declaration holds (`Settings()`).
+/// The call a declaration's value is, and its arguments: `mongoose.model`,
+/// `['Article']` of `const Article = mongoose.model('Article')`.
+fn value_call<'t>(node: Node<'t>) -> Option<(Node<'t>, Vec<Node<'t>>)> {
+    let v = value_node(node)?;
+    if v.kind() != "call_expression" {
+        return None;
+    }
+    let args = v.child_by_field_name("arguments")?;
+    Some((
+        v.child_by_field_name("function")?,
+        kids(args).into_iter().filter(|c| !is_comment(c)).collect(),
+    ))
+}
+
+/// JS `var req = Object.create(http.IncomingMessage.prototype)`: the path of
+/// what the object is created from (see `Def::created_from`).
+fn created_from(node: Node, src: &[u8]) -> Option<Vec<String>> {
+    let (callee, args) = value_call(node)?;
+    (path_of(callee, src)? == ["Object", "create"]).then_some(())?;
+    path_of(*args.first()?, src)
+}
+
+/// JS `const Article = mongoose.model('Article')`: the model's name (see
+/// `Def::model_name`).
+fn model_named(node: Node, src: &[u8]) -> Option<String> {
+    let (callee, args) = value_call(node)?;
+    let path = path_of(callee, src)?;
+    if !(path == ["mongoose", "model"] || path == ["model"]) || args.len() != 1 {
+        return None;
+    }
+    string_arg(args[0], src)
+}
+
+/// The text of a string literal argument, without its quotes.
+fn string_arg(n: Node, src: &[u8]) -> Option<String> {
+    if !matches!(n.kind(), "string" | "template_string") {
+        return None;
+    }
+    let t = text(n, src);
+    let t = t.trim_matches(|c| c == '\'' || c == '"' || c == '`');
+    (!t.contains("${")).then(|| t.to_string())
+}
+
+/// JS: what a function expression `this` belongs to is attached to (see
+/// `RefFact::this_of`), from the ancestors of the `this` node; `None` inside
+/// a definition (whose object `Def::object` says) or an arrow function's
+/// own `this` (it has none: the one around).
+fn this_attached(anc: &[Node], src: &[u8]) -> Option<Vec<String>> {
+    for (i, a) in anc.iter().enumerate().rev() {
+        match a.kind() {
+            "arrow_function" => continue,
+            "function_expression" | "function" | "generator_function" => {
+                let parent = anc.get(i.checked_sub(1)?)?;
+                return match parent.kind() {
+                    // `app[method] = function () {…}`
+                    "assignment_expression" => {
+                        let left = parent.child_by_field_name("left")?;
+                        (left.kind() == "subscript_expression")
+                            .then(|| path_of(left.child_by_field_name("object")?, src))
+                            .flatten()
+                    }
+                    // `UserSchema.path('name').validate(function () {…})`
+                    "arguments" => {
+                        let call = anc.get(i.checked_sub(2)?)?;
+                        (call.kind() == "call_expression")
+                            .then(|| path_of(call.child_by_field_name("function")?, src))
+                            .flatten()
+                    }
+                    _ => None,
+                };
+            }
+            "function_declaration"
+            | "method_definition"
+            | "class_body"
+            | "generator_function_declaration" => return None,
+            _ => {}
+        }
+    }
+    None
+}
+
 fn state_value_path(node: Node, src: &[u8]) -> Option<Vec<String>> {
     let mut v = value_node(node)?;
     // `var app = module.exports = express()`: what the last one assigns
@@ -5166,6 +5290,8 @@ fn add_extras(
             anonymous: false,
             misread: false,
             inline_body: inline,
+            created_from: kind.is_state().then(|| created_from(*node, src)).flatten(),
+            model_name: kind.is_state().then(|| model_named(*node, src)).flatten(),
             params: block.map(|_| 0),
             plist: Vec::new(),
             returns,

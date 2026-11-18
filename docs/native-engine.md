@@ -767,14 +767,14 @@ file pairs). The native graph has definitions graphify folds into the one
 around them (a function nested in a method, the setter beside a getter of the
 same name); an edge from one of those is compared as an edge from the paired
 definition it belongs to, as graphify records it. On the 31 repositories of the
-[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.35,
+[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.36,
 measured 2026-11-18), as native / graphify edges and the share of graphify's
 that the native graph has too:
 
 | Language | same definition | imports (file pairs) | calls | bases | type references |
 |---|--:|--:|--:|--:|--:|
 | Python | 100% | 212 / 219 (96%) | 2,970 / 834 (94%) | 73 / 62 (100%) | 440 / 494 (68%) |
-| JavaScript | 93.5%⁵ | 190 / 305 (59%) | 1,341 / 2,058 (43%)¹ | 1 / 1 | 3 / 0 |
+| JavaScript | 93.5%⁵ | 190 / 305 (59%) | 1,386 / 2,058 (43%)¹ | 1 / 1 | 3 / 0 |
 | TypeScript | 99.4% | 527 / 634 (83%) | 805 / 687 (98%) | 25 / 20 (100%) | 740 / 156 (88%) |
 | TSX | 99.7% | 253 / 316 (80%) | 435 / 456 (95%) | – | 42 / 4 |
 | Go | 100% | 538 / 950 (47%)² | 6,723 / 3,167 (99%) | 19 / 14 (100%) | 679 / 355 (99%) |
@@ -789,9 +789,9 @@ that the native graph has too:
 | C/C++ headers | 91.4% | 164 / 172 (95%) | 372 / 348 (84%) | 12 / 12 (92%) | 563 / 312 (90%) |
 | Ruby | 99.7% | 42 / 0 | 443 / 375 (69%) | 46 / 15 (93%) | 28 / 0 |
 | PHP | 80.6% | 429 / 505 (84%) | 8,873 / 6,140 (90%) | 65 / 60 (98%) | 648 / 213 (95%) |
-| **All** | **94.4%** | **4,962 / 5,565 (75%)** | **44,511 / 27,832 (85%)** | **1,137 / 726 (97%)** | **12,473 / 6,814 (89%)** |
+| **All** | **94.4%** | **4,962 / 5,565 (75%)** | **44,556 / 27,832 (85%)** | **1,137 / 726 (97%)** | **12,473 / 6,814 (89%)** |
 
-Of the native calls, 12,739 (29%) are `INFERRED`, against 47% of graphify's.
+Of the native calls, 12,772 (29%) are `INFERRED`, against 47% of graphify's.
 That share was 20% before engine 0.5.5: a call of an overloaded name that the
 arguments do not decide used to be an `EXTRACTED` edge to the first overload,
 and is now an `INFERRED` edge to each overload that fits (999 calls, with
@@ -834,6 +834,29 @@ two edges of got are gone that named a function defined in another loop
 for a destructured loop variable of the same name. The maps of these
 repositories that hold project types are mostly looked up by key once, or
 not walked at all.
+Engine 0.5.36 (JavaScript receivers) reads four things the source states. A
+`this` in a function expression no definition holds is what the function
+is attached to (`RefFact::this_of`): `app[method] = function () {
+this.route() }` calls `app.route`. In an ES5 constructor `function View()
+{ this.lookup() }` it is the functions assigned to `View.prototype`. A
+callback a Mongoose schema is handed (`UserSchema.path('name').validate(function
+() { this.skipValidation() })`) runs on a document, whose methods are the
+file's `UserSchema.methods = { … }` (an object literal assigned to a member
+is that member's object now, as `obj.name = function` was), `INFERRED`; so
+is a local constructing a model (`new Article(…)`, `Article` a
+`mongoose.model('Article')`, registered with `mongoose.model('Article',
+ArticleSchema)`). And a project that builds a framework's request or
+response object itself, as express does (`var req =
+Object.create(http.IncomingMessage.prototype)`, `Def::created_from`), types
+a handler's untyped `req` / `res` by it and by what an app adds to
+`app.response`, `INFERRED`: express's tests and examples get 158 calls
+(`res.send` 99, `res.render` 18, `res.json` 17), the Mongoose demo 49. A
+project that builds no such object leaves `req` the framework's
+(`req.logout()` is passport's). The object-literal rule also makes jQuery's
+`jQuery.fn = { ready: function () {…} }` methods to the guess by method
+name, so vendored bundles (jQuery, Prism, Epoch, a Dokka `main.js`) get
+some 60 calls inside themselves; the analysis scope leaves those files out.
+JavaScript's unmarked unresolved rows: 55 → 18.
 Engine 0.5.35 (C function-pointer slots) reads a struct of function pointers
 as an interface and what is put in its slots as the implementations: an
 initializer of a variable, by name (`.async_read = redisAsyncRead`) or by
@@ -1294,7 +1317,7 @@ implicit members since 0.5.17: 39 whose place gives no type are rows now
 closure parameters and variables of express's tests. What is left at file
 level there is `app.use` and `app.set` (842 rows of express), names too
 short and too common to guess by. Engine 0.5.19 takes 123 more off (6,362;
-C# 349 from 470; 6,360 with 0.5.20, 6,348 with 0.5.21, 6,285 with 0.5.22, 6,237 with 0.5.25, 6,206 with 0.5.27, 6,166 with 0.5.28, 6,156 with 0.5.30, 6,140 with 0.5.31, 6,132 with 0.5.32, 6,126 with 0.5.33, 6,093 with 0.5.34). Most of what C# has left is not the project's: `Assert.
+C# 349 from 470; 6,360 with 0.5.20, 6,348 with 0.5.21, 6,285 with 0.5.22, 6,237 with 0.5.25, 6,206 with 0.5.27, 6,166 with 0.5.28, 6,156 with 0.5.30, 6,140 with 0.5.31, 6,132 with 0.5.32, 6,126 with 0.5.33, 6,093 with 0.5.34, 6,047 with 0.5.36). Most of what C# has left is not the project's: `Assert.
 NotNull` beside its own `Ensure.NotNull` (77), `WireMockServer.Start` (23).
 
 By then most rows were of that kind: a library's name the project happens
