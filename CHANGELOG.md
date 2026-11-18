@@ -259,6 +259,30 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- Native engine 0.5.18, CommonJS modules and the receivers of a test file.
+  On the 31 audit repositories: 329 calls gained, 12 gone; a test of express
+  now reaches the method of `lib/` it exercises (`graphlore_tests_for`).
+  - **A CommonJS module is what it assigns to `module.exports`**: `const Foo
+    = require('./foo'); new Foo()`, `make()` and `Foo.create()` resolve to the
+    class or function `foo.js` assigns there (`exports = module.exports =
+    createApplication` too). They had no edge.
+  - **`module.exports = require('./lib/app')` is that module** (a
+    `re_exports` edge), and `exports.name = bound` passes a name on: in
+    express-mongoose-demo the OAuth routes are handled by `users.login`
+    (`exports.authCallback = login`), not by the routes file's function.
+  - **A closure's parameter and a module variable at file level are unknown
+    receivers**, as an untyped local is: `res.sendFile(…)` in an `it(…)`
+    callback and `app.listen()` after `var app = express()` get an
+    `INFERRED` edge by a distinctive method name. A function assigned to an
+    object (`res.sendFile = function sendFile() {}`) counts as its method;
+    never on a variable holding a library's value, and a name of three
+    letters (`app.use`) is still no evidence.
+  - **In sight includes what an imported module passes on**: a file that
+    requires a package's entry has the files that entry re-exports.
+  - **Names JavaScript's own types and Node's emitters and streams answer to
+    are no evidence** (`once`, `pipe`, `concat`, `abort`): 12 `INFERRED`
+    calls of got's own `pipe` / `unpipe` / `abort` on untyped receivers are
+    gone.
 - Native engine 0.5.17, Swift's implicit members and the overloads an
   extension adds. In alamofire: 158 calls that had no edge, and 783 that go
   to another definition of the same name than before (none to nothing).

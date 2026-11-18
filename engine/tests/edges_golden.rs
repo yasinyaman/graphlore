@@ -1343,3 +1343,104 @@ fn a_trailing_closure_picks_the_parameter_that_asks_for_no_label() {
         got.iter().filter(|(from, _)| from == ".check()").map(|(_, to)| to.as_str()).collect();
     assert_eq!(to, ["a_request_validate"], "{got:?}");
 }
+
+/// `(source label, target id, confidence)` of every `calls` edge.
+fn calls_conf(name: &str, files: &[(&str, &str)]) -> BTreeSet<(String, String, String)> {
+    let dir = project(name, files);
+    let (g, _) = build_graph(&BuildOptions::new(&dir)).unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+    let label = |id: &str| {
+        g["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|n| n["id"] == id)
+            .map(|n| n["label"].as_str().unwrap().to_string())
+            .unwrap_or_default()
+    };
+    g["links"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|e| e["relation"] == "calls")
+        .map(|e| {
+            (
+                label(e["source"].as_str().unwrap()),
+                e["target"].as_str().unwrap().to_string(),
+                e["confidence"].as_str().unwrap().to_string(),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn a_commonjs_module_is_what_it_assigns_to_its_exports() {
+    // `require` gives what the module assigns to `module.exports`: a class,
+    // a function, or the module another one passes on. A module that only
+    // names its exports is called by none of this
+    let got = calls_conf("cjsdefault", &[
+        ("foo.js", "class Foo {\n  run() { return 1; }\n  static create() { return new Foo(); }\n}\nmodule.exports = Foo;\n"),
+        ("make.js", "module.exports = function makeThing() { return 2; };\n"),
+        ("lib/app.js", "var proto = require('./proto');\nexports = module.exports = createApp;\nfunction createApp() { return {}; }\nexports.proto = proto;\n"),
+        ("lib/proto.js", "var proto = module.exports = {};\nproto.boot = function boot() { return 3; };\n"),
+        ("index.js", "module.exports = require('./lib/app');\n"),
+        ("names.js", "exports.one = function one() { return 1; };\n"),
+        ("user.js", "const Foo = require('./foo');\nconst make = require('./make');\nconst app = require('./');\nconst names = require('./names');\n\nfunction go() {\n  const f = new Foo();\n  f.run();\n  Foo.create();\n  make();\n  app();\n  app.proto.boot();\n  names();\n}\n"),
+    ]);
+    let from_go: BTreeSet<(&str, &str)> = got
+        .iter()
+        .filter(|(from, _, _)| from == "go()")
+        .map(|(_, to, conf)| (to.as_str(), conf.as_str()))
+        .collect();
+    let want: BTreeSet<(&str, &str)> = [
+        ("foo_foo", "EXTRACTED"),
+        ("foo_foo_run", "INFERRED"),
+        ("foo_foo_create", "EXTRACTED"),
+        ("make_makething", "EXTRACTED"),
+        ("lib_app_createapp", "EXTRACTED"),
+        ("lib_proto_boot", "EXTRACTED"),
+    ]
+    .into_iter()
+    .collect();
+    assert_eq!(from_go, want, "{got:#?}");
+}
+
+#[test]
+fn a_method_named_on_what_a_test_file_cannot_type() {
+    // the package's entry passes its files on: a test that requires it has
+    // their methods in sight. A closure's parameter and a module variable
+    // holding what the walk cannot type are receivers it cannot name: a
+    // distinctive name says what is called. Not on a library's value, not by
+    // a name every emitter answers to, not for a function the module exports,
+    // and not from a file that imports none of it
+    let lib = [
+        ("index.js", "module.exports = require('./lib/app');\n"),
+        ("lib/app.js", "var proto = require('./proto');\nvar res = require('./response');\nvar util = require('./util');\nexports = module.exports = createApp;\nfunction createApp() {\n  var app = function () {};\n  return app;\n}\nexports.proto = proto;\nexports.response = res;\nexports.util = util;\n"),
+        ("lib/proto.js", "var app = module.exports = {};\napp.enable = function enable(name) { return name; };\napp.listen = function listen() { return 1; };\napp.once = function once() { return 2; };\n"),
+        ("lib/response.js", "var res = module.exports = {};\nres.sendFile = function sendFile(path) { return path; };\n"),
+        ("lib/util.js", "exports.helper = function helper() { return 1; };\n"),
+    ];
+    let mut files = lib.to_vec();
+    files.push((
+        "test/send.js",
+        "var make = require('../');\nvar http = require('http');\nvar app = module.exports = make();\nvar server = http.createServer(app);\n\napp.enable('x');\nserver.listen(3000);\napp.once('close');\n\ndescribe('res', function () {\n  it('sends', function (done) {\n    app.use(function (req, res) {\n      res.sendFile('x');\n      res.helper();\n    });\n  });\n});\n",
+    ));
+    files.push(("other/alone.js", "function run(res) {\n  res.sendFile('x');\n}\n"));
+    let got = calls_conf("cjssight", &files);
+    let from = |label: &str| -> BTreeSet<(&str, &str)> {
+        got.iter()
+            .filter(|(from, _, _)| from == label)
+            .map(|(_, to, conf)| (to.as_str(), conf.as_str()))
+            .collect()
+    };
+    let want: BTreeSet<(&str, &str)> = [
+        ("lib_app_createapp", "EXTRACTED"),
+        ("ext_npm_http", "EXTRACTED"),
+        ("lib_proto_enable", "INFERRED"),
+        ("lib_response_sendfile", "INFERRED"),
+    ]
+    .into_iter()
+    .collect();
+    assert_eq!(from("send.js"), want, "{got:#?}");
+    assert!(from("run()").is_empty(), "{got:#?}");
+}

@@ -4289,7 +4289,12 @@ fn written_type(node: Node, src: &[u8]) -> Option<Vec<String>> {
 
 /// What constructs the value a declaration holds (`Settings()`).
 fn state_value_path(node: Node, src: &[u8]) -> Option<Vec<String>> {
-    value_node(node).and_then(|v| value_type(v, src))
+    let mut v = value_node(node)?;
+    // `var app = module.exports = express()`: what the last one assigns
+    while v.kind() == "assignment_expression" {
+        v = v.child_by_field_name("right")?;
+    }
+    value_type(v, src)
 }
 
 fn inside_callable(defs: &[Def], byte: usize) -> bool {
