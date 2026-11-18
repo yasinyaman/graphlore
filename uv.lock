@@ -862,6 +862,10 @@ dependencies = [
 [package.optional-dependencies]
 all = [
     { name = "graphifyy" },
+    { name = "model2vec" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
+    { name = "numpy", version = "2.5.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "semble" },
     { name = "tiktoken" },
     { name = "tree-sitter" },
@@ -875,6 +879,12 @@ dev = [
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "ruff" },
+]
+embed = [
+    { name = "model2vec" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
+    { name = "numpy", version = "2.5.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
 ]
 graphify = [
     { name = "graphifyy" },
@@ -900,7 +910,11 @@ requires-dist = [
     { name = "graphifyy", marker = "extra == 'all'" },
     { name = "graphifyy", marker = "extra == 'graphify'" },
     { name = "mcp", specifier = ">=2.1,<3.0" },
+    { name = "model2vec", marker = "extra == 'all'", specifier = ">=0.10" },
+    { name = "model2vec", marker = "extra == 'embed'", specifier = ">=0.10" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.12" },
+    { name = "numpy", marker = "extra == 'all'", specifier = ">=1.24" },
+    { name = "numpy", marker = "extra == 'embed'", specifier = ">=1.24" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=5.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6" },
@@ -915,7 +929,7 @@ requires-dist = [
     { name = "watchdog", marker = "extra == 'all'", specifier = ">=4.0" },
     { name = "watchdog", marker = "extra == 'watch'", specifier = ">=4.0" },
 ]
-provides-extras = ["graphify", "semble", "treesitter", "tiktoken", "watch", "all", "dev"]
+provides-extras = ["graphify", "semble", "embed", "treesitter", "tiktoken", "watch", "all", "dev"]
 
 [[package]]
 name = "h11"

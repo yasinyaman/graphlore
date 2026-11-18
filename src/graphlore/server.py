@@ -21,10 +21,11 @@ CLI-backed tools:
 
 graph.json analysis tools (no CLI needed):
   - graphlore_overview   : one-shot orientation (call this first)
-  - graphlore_locate     : semantic search (semble) -> enclosing node -> token-budgeted
-                          subgraph + hidden links  [needs the optional [semble] extra]
+  - graphlore_locate     : code search (built-in BM25 [+ embeddings with [embed]], or
+                          semble) -> enclosing node -> token-budgeted subgraph +
+                          hidden links
   - graphlore_duplication_scan: repo-wide duplication audit — identical bodies
-                          (exact), then hidden links  [the latter needs [semble]]
+                          (exact), then hidden links (similar, unconnected code)
   - graphlore_god_nodes  : highest-degree nodes
   - graphlore_surprises  : unexpected cross-domain connections
   - graphlore_communities: Leiden community summaries
@@ -78,8 +79,9 @@ diff), scope.py (the analysis scope: vendored / external / test filtering),
 apis.py and routes.py (per-file extractors), imports.py (import statements read
 from source, per language: what they can mean and when they run), resolve.py (calls and imports
 through a module object, added at read time), review.py (unreferenced
-code, same-named symbols, identical bodies, layer rules), and this module (the
-MCPServer surface: tools, resources, prompts, main).
+code, same-named symbols, identical bodies, layer rules), embed.py (the optional
+static-embedding tier), search.py (the built-in code search index), and this
+module (the MCPServer surface: tools, resources, prompts, main).
 
 Usage:
   GRAPHLORE_PROJECT_DIR=/path/to/repo python server.py
@@ -215,6 +217,14 @@ from .scope import (  # noqa: F401  (re-exported for the tools + tests)
     _scoped,
     _vendored_by_path,
 )
+from .search import (  # noqa: F401  (re-exported for the tools + tests)
+    _INDEX_CACHE,
+    _PyKernel,
+    _query_kind,
+    _tokenize,
+)
+from .search import CodeIndex as _CodeIndex
+from .search import index_for_project as _search_index_for_project
 from .spans import (  # noqa: F401
     _SPAN_CACHE,
     _SPAN_CACHE_MAX,
@@ -271,8 +281,8 @@ TOOLSET = config.env("TOOLSET", _DEFAULT_TOOLSET).strip().lower()
 # A coherent, mostly dependency-free core that still supports the whole documented
 # flow: build -> orient (overview) -> find (search) -> traverse (subgraph/
 # neighbors/impact) -> jump to source (node_details/fetch). graphlore_locate is
-# included too but needs the optional [semble] extra, so _effective_lean_tools
-# drops it when absent.
+# included too: its built-in index needs no extra, and _effective_lean_tools drops
+# it only when GRAPHLORE_SEMANTIC_BACKEND names a backend that is not available.
 LEAN_TOOLS = frozenset({
     "graphlore_build",
     "graphlore_overview",
@@ -288,10 +298,10 @@ LEAN_TOOLS = frozenset({
     "graphlore_project",
 })
 # Mega-tool-style surface: one way in (locate), one way to the code (fetch), plus
-# the minimum to stay oriented and in sync. Requires a semantic backend — without
-# one the server falls back to the lean surface at boot (see
-# _effective_toolset_tools) rather than advertising a locate tool that can only
-# return an install hint.
+# the minimum to stay oriented and in sync. Requires a search backend — when
+# GRAPHLORE_SEMANTIC_BACKEND names one that is unavailable the server falls back to
+# the lean surface at boot (see _effective_toolset_tools) rather than advertising a
+# locate tool that can only return an install hint.
 LOCATE_TOOLS = frozenset({
     "graphlore_locate",
     "graphlore_fetch",
@@ -570,8 +580,9 @@ def _tool(*, annotations: ToolAnnotations) -> Callable[[_F], _F]:
     return decorator
 
 
-# The Hugging Face libraries behind semble read these before any download.
-_HF_OFFLINE_ENV = {"HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1"}
+# The Hugging Face libraries behind the embedding models read these before any
+# download (defined in config so the lower-layer embed module shares them).
+_HF_OFFLINE_ENV = config.HF_OFFLINE_ENV
 
 
 def _offline_error(what: str) -> str:
@@ -582,12 +593,9 @@ def _offline_error(what: str) -> str:
 
 
 def _export_offline_env() -> None:
-    """Offline: tell the Hugging Face libraries (semble's model loader) not to
-    download, for this process and every child. Unset values only, so an explicit
-    setting wins. Takes effect only for libraries not yet imported."""
-    if config.offline():
-        for k, v in _HF_OFFLINE_ENV.items():
-            os.environ.setdefault(k, v)
+    """Offline: tell the Hugging Face libraries not to download (see
+    config.export_offline_env)."""
+    config.export_offline_env()
 
 
 def _cli_env() -> dict[str, str] | None:
@@ -797,7 +805,8 @@ def _files_of(nodes: list[dict], ids: Iterable[str]) -> list[str]:
 
 
 class SemanticIndex(Protocol):
-    """Pluggable semantic-search backend (semble is the default).
+    """Pluggable search backend (semble when installed, else graphlore's built-in
+    index, :class:`search.CodeIndex`).
 
     Implement this and point ``GRAPHLORE_SEMANTIC_BACKEND`` at ``your.module:Factory``
     to swap in a stronger backend — local sentence-transformers, an OpenAI-compatible
@@ -857,20 +866,109 @@ def _load_custom_semantic_index(spec: str) -> Any:
         return None
 
 
-def _semantic_index() -> Any:
-    """The active semantic index, dispatched by ``GRAPHLORE_SEMANTIC_BACKEND``.
+# Why the last built-in index build raised ("" when it did not).
+_BUILTIN_LOAD_ERROR = ""
 
-    Default (unset or ``semble``) is the local semble index: no API key and no
-    service, but NOT network-free on first use — semble downloads its embedding
-    model from the Hugging Face Hub once and caches it (see ``_MODEL_DOWNLOAD_NOTE``).
-    Any other value is treated as a ``module.path:Factory`` spec implementing
-    :class:`SemanticIndex`. The semble path stays a separate ``_semble_index`` call
-    so it remains the default and so tests can stub it directly.
+
+def _builtin_index(nodes: list[dict] | None = None, edges: list[dict] | None = None) -> Any:
+    """graphlore's own index of config.PROJECT_DIR (search.py), or None when the
+    project has no source file to search. Never raises."""
+    global _BUILTIN_LOAD_ERROR
+    try:
+        index = _search_index_for_project(nodes, edges)
+    except Exception as exc:  # noqa: BLE001 - a broken build degrades to "no index"
+        _BUILTIN_LOAD_ERROR = f"{type(exc).__name__}: {str(exc).strip()[:200]}"
+        return None
+    _BUILTIN_LOAD_ERROR = ""
+    return index
+
+
+class _Backend(NamedTuple):
+    """The search backend that answers a call: ``index`` (None when it could not
+    load), ``name`` (``builtin`` / ``semble`` / ``custom``) and a ``note`` when the
+    default fell back from semble to the built-in index."""
+
+    index: Any
+    name: str
+    note: str = ""
+
+
+def _semantic_backend(
+    nodes: list[dict] | None = None, edges: list[dict] | None = None
+) -> _Backend:
+    """The active search backend, dispatched by ``GRAPHLORE_SEMANTIC_BACKEND``.
+
+    - unset / ``auto``: semble when it is installed and builds its index, else the
+      built-in index (BM25, plus static embeddings with the ``[embed]`` extra).
+    - ``semble``: semble only. Not network-free on first use: semble downloads its
+      embedding model from the Hugging Face Hub once (``_MODEL_DOWNLOAD_NOTE``).
+    - ``builtin``: the built-in index only.
+    - anything else: a ``module.path:Factory`` spec implementing
+      :class:`SemanticIndex`; a failure is reported, never answered by another backend.
+
+    ``nodes`` / ``edges`` feed the built-in index's graph overlay. The semble path
+    stays a separate ``_semble_index`` call so tests can stub it directly.
     """
-    backend = config.env("SEMANTIC_BACKEND", "").strip()
-    if not backend or backend.lower() == "semble":
-        return _semble_index()
-    return _load_custom_semantic_index(backend)
+    spec = config.env("SEMANTIC_BACKEND", "").strip()
+    low = spec.lower()
+    if low in ("", "auto"):
+        index = _semble_index()
+        if index is not None:
+            return _Backend(index, "semble")
+        note = ""
+        if _SEMBLE_LOAD_ERROR and importlib.util.find_spec("semble") is not None:
+            note = (
+                f"semble is installed but could not build its index ({_SEMBLE_LOAD_ERROR}); "
+                "the built-in index answered instead."
+            )
+        return _Backend(_builtin_index(nodes, edges), "builtin", note)
+    if low == "semble":
+        return _Backend(_semble_index(), "semble")
+    if low == "builtin":
+        return _Backend(_builtin_index(nodes, edges), "builtin")
+    return _Backend(_load_custom_semantic_index(spec), "custom")
+
+
+def _semantic_index() -> Any:
+    """The active backend's index (see :func:`_semantic_backend`), or None."""
+    return _semantic_backend().index
+
+
+def _backend_payload(backend: _Backend) -> dict[str, Any]:
+    """What a reply says about the backend that answered it, so a lexical answer
+    is never mistaken for an embedding one."""
+    out: dict[str, Any] = {"name": backend.name}
+    index = backend.index
+    if backend.name == "builtin" and isinstance(index, _CodeIndex):
+        out["mode"] = index.mode()
+        out.update(index.info())
+        if index.dense is None and index.dense_reason:
+            out["dense_unavailable"] = index.dense_reason
+    elif backend.name == "custom":
+        out["spec"] = config.env("SEMANTIC_BACKEND", "").strip()
+    if backend.note:
+        out["note"] = backend.note
+    return out
+
+
+def _backend_line(payload: dict[str, Any]) -> str:
+    """One line naming the backend, for the text reply (outside any repo frame)."""
+    name = payload.get("name")
+    if name == "builtin":
+        if payload.get("mode") == "hybrid":
+            line = f"Search: built-in, hybrid (BM25 + {payload.get('model')})"
+        else:
+            why = str(payload.get("dense_unavailable") or "").split(". ")[0][:160]
+            line = "Search: built-in, BM25 only" + (f" — no dense tier: {why}" if why else "")
+        if payload.get("truncated"):
+            line += f". {payload.get('hint')}"
+    elif name == "custom":
+        line = f"Search: custom backend {payload.get('spec')}"
+    else:
+        line = "Search: semble"
+    if payload.get("note"):
+        line += f"\n{payload['note']}"
+    return line
 
 
 # Appended to the semble-missing error so the first-run cost is known before
@@ -887,18 +985,30 @@ _MODEL_DOWNLOAD_NOTE = (
 
 
 def _no_semantic_index_error(tool: str) -> str:
-    """Why _semantic_index() returned None, with the right fix for the active config.
+    """Why the active backend has no index, with the right fix for the config.
 
     With a custom GRAPHLORE_SEMANTIC_BACKEND configured, the failure is that spec —
     telling the user to install semble would misdiagnose it (semble may even be
     installed but deliberately bypassed).
     """
     backend = config.env("SEMANTIC_BACKEND", "").strip()
-    if backend and backend.lower() != "semble":
+    low = backend.lower()
+    if low in ("", "auto", "builtin"):
+        if _BUILTIN_LOAD_ERROR:
+            return (
+                f"ERROR: {tool}: the built-in search index could not be built "
+                f"({_BUILTIN_LOAD_ERROR})."
+            )
+        return (
+            f"ERROR: {tool}: the built-in search found no source file to index under "
+            f"{config.PROJECT_DIR}. Check GRAPHLORE_PROJECT_DIR (graphlore_project "
+            "shows it)."
+        )
+    if low != "semble":
         return (
             f"ERROR: {tool}: semantic backend '{backend}' failed to load. Check the "
             "GRAPHLORE_SEMANTIC_BACKEND 'module.path:Factory' spec (or unset it to use "
-            "the default semble backend)."
+            "the default: semble when installed, else the built-in search)."
         )
     if config.offline() and importlib.util.find_spec("semble") is not None:
         return (
@@ -913,8 +1023,9 @@ def _no_semantic_index_error(tool: str) -> str:
             "downloaded. " + _MODEL_DOWNLOAD_NOTE
         )
     return (
-        f"ERROR: {tool} needs the optional 'semble' extra. "
-        "Install with: pip install 'graphlore[semble]'. " + _MODEL_DOWNLOAD_NOTE
+        f"ERROR: {tool}: GRAPHLORE_SEMANTIC_BACKEND=semble needs the optional 'semble' "
+        "extra. Install with: pip install 'graphlore[semble]', or unset the variable to "
+        "use the built-in search. " + _MODEL_DOWNLOAD_NOTE
     )
 
 
@@ -3257,7 +3368,7 @@ def graphlore_locate(
     related_k: int = 8,
     as_json: bool = False,
 ) -> str:
-    """Semantic search (semble) -> graph structure, in one call, with a cross-check.
+    """Code search -> graph structure, in one call, with a cross-check.
 
     Finds the code most relevant to `query`, maps the top hit to its enclosing
     graph node, returns the token-budgeted subgraph around it, AND lists
@@ -3271,31 +3382,40 @@ def graphlore_locate(
     ``also_matched``, the other top hits by the definition they fall in
     (production code before tests; hits on a file's header — docstring and
     imports — are counted, not listed, and marked ``header`` in
-    ``semantic_hits``). Needs the optional `semble` extra:
-    pip install 'graphlore[semble]'.
+    ``semantic_hits``).
 
-    First call downloads a model: with the default semble backend it fetches
-    semble's embedding model from the Hugging Face Hub (minishlab/potion-code-16M-v2
-    as of semble 0.7) and caches it; later calls need no network. Prefetch with
-    ``python -c "from model2vec import StaticModel;
+    The search runs on semble when it is installed, else on graphlore's built-in
+    index; ``backend`` in the reply says which. The built-in index needs no extra:
+    BM25 over identifier-aware terms, one chunk per definition (so every hit joins
+    to its graph node exactly). With the `[embed]` extra it adds static code
+    embeddings (`mode: hybrid`), which is what lets a question match code that
+    uses other words; without it, phrase the query in the code's own vocabulary.
+
+    First call may download a model: semble, and the built-in dense tier, fetch
+    minishlab/potion-code-16M-v2 from the Hugging Face Hub once and cache it.
+    Prefetch with ``python -c "from model2vec import StaticModel;
     StaticModel.from_pretrained('minishlab/potion-code-16M-v2')"``; for a machine
-    without network access copy ``~/.cache/huggingface`` over, or point
-    ``SEMBLE_MODEL_NAME`` at a local copy of the model.
+    without network access copy ``~/.cache/huggingface`` over. With GRAPHLORE_OFFLINE
+    and no cached model, the built-in index answers with BM25 alone and says so.
     """
     graph = _load_graph()
     if isinstance(graph, str):
         return _err(graph, as_json)
     nodes, edges = _nodes_edges(graph)
 
-    index = _semantic_index()
+    backend = _semantic_backend(nodes, edges)
+    index = backend.index
     if index is None:
         return _err(_no_semantic_index_error("graphlore_locate"), as_json)
+    backend_info = _backend_payload(backend)
+    backend_text = _backend_line(backend_info)
     hits = index.search(query, top_k=max(1, top_k))
     if not hits:
         msg = f"No semantic matches for '{query}'."
         return _fmt(
-            {"query": query, "seed": None, "semantic_hits": [], "note": msg},
-            as_json, msg,
+            {"query": query, "seed": None, "semantic_hits": [], "note": msg,
+             "backend": backend_info},
+            as_json, msg + "\n" + backend_text,
         )
 
     def _loc(h: Any) -> tuple[str, int, int]:
@@ -3320,11 +3440,12 @@ def graphlore_locate(
             "seed": None,
             "semantic_hits": semantic_hits,
             "note": "top hit did not map to a graph node; showing semantic results only",
+            "backend": backend_info,
         }
         note_text = f"Top match {fp0}:{sl0} has no graph node. Semantic hits:\n" + "\n".join(
             f"  {h['file']}:{h['lines']}" for h in semantic_hits
         )
-        return _fmt(payload, as_json, note_text)
+        return _fmt(payload, as_json, note_text + "\n" + backend_text)
 
     labels = _display_labels(nodes)
     adj = _adjacency(edges)
@@ -3469,6 +3590,7 @@ def graphlore_locate(
         "semantic_cousins": cousins,
         "hidden_link_count": len(hidden),
         "build_drift": drift_payload,
+        "backend": backend_info,
     }
     text: list[str] = [
         f"Query: {query!r}",
@@ -3513,6 +3635,7 @@ def graphlore_locate(
         text += [f"  {c['node']}  distance={c['distance']}" for c in linked]
     if drift_text:
         text.append("\n" + drift_text)
+    text.append("\n" + backend_text)
     return _fmt(payload, as_json, "\n".join(text))
 
 
@@ -3527,6 +3650,22 @@ _DUP_MAX_SIZE_RATIO = 3.0
 # the same role and no shared code. A custom backend's scale is unknown, so the
 # floor applies to semble only.
 _SEMBLE_SCORE_FLOOR = 0.7
+# Default floors on the built-in index, by tier: embedding cosine on the hybrid
+# index, tf-idf cosine on the BM25-only one (see benchmarks/search.py for how they
+# were set).
+_BUILTIN_DENSE_SCORE_FLOOR = 0.7
+_BUILTIN_LEXICAL_SCORE_FLOOR = 0.6
+
+
+def _score_floor(backend: _Backend) -> tuple[float, str]:
+    """(default score floor, what the score is) for the backend's find_related."""
+    if backend.name == "semble":
+        return _SEMBLE_SCORE_FLOOR, "embedding similarity (semble)"
+    if backend.name == "builtin" and isinstance(backend.index, _CodeIndex):
+        if backend.index.mode() == "hybrid":
+            return _BUILTIN_DENSE_SCORE_FLOOR, "embedding cosine"
+        return _BUILTIN_LEXICAL_SCORE_FLOOR, "tf-idf cosine"
+    return 0.0, "backend score"
 
 
 def _span_len(n: dict) -> int:
@@ -3576,20 +3715,19 @@ def graphlore_duplication_scan(
 
     Every pair carries the backend's similarity ``score`` and ``file:line`` for both
     sides, best score first. The score is the similarity of the two chunks (1.0 =
-    the same text). On the default semble backend, pairs under 0.7 are left out
+    the same text); ``score_kind`` says what it is — embedding similarity on semble
+    and on the built-in hybrid index, tf-idf cosine on the built-in BM25-only one.
+    Pairs under the default floor (0.7 on embeddings, 0.6 on tf-idf) are left out
     unless ``min_score`` says otherwise: down there they are usually code with the
     same ROLE (two abstract bases, two SQL builders), not copied code. For names
     shared across modules, see graphlore_same_names.
 
-    Cost of tier 2 scales with node_budget (one semantic round-trip per seed), so
-    the tool is intentionally outside the lean surface. Tier 2 needs the optional
-    `semble` extra; without it the result is tier 1 alone, and says so.
-    First call downloads a model: semble fetches its embedding model from the
-    Hugging Face Hub (minishlab/potion-code-16M-v2 as of semble 0.7) and caches
-    it; later calls need no network. Prefetch with ``python -c "from model2vec
-    import StaticModel; StaticModel.from_pretrained('minishlab/potion-code-16M-v2')"``;
-    for a machine without network access copy ``~/.cache/huggingface`` over, or
-    point ``SEMBLE_MODEL_NAME`` at a local copy of the model.
+    Cost of tier 2 scales with node_budget (one similarity query per seed), so
+    the tool is intentionally outside the lean surface. Tier 2 runs on semble when
+    it is installed, else on the built-in index (no extra needed; the `[embed]`
+    extra adds embeddings). The first embedding run may download
+    minishlab/potion-code-16M-v2 from the Hugging Face Hub once (see
+    graphlore_locate for prefetching).
 
     Args:
         node_budget: Max seed definitions to scan (largest first).
@@ -3600,7 +3738,8 @@ def graphlore_duplication_scan(
         include_tests: True -> also report test ↔ source pairs, and identical
             bodies inside test code.
         min_score: Drop pairs the backend scores below this (when it reports
-            scores). Default: 0.7 on semble, 0 on a custom backend; pass 0 to see
+            scores). Default: 0.7 on semble and the built-in hybrid index, 0.6 on
+            the built-in BM25-only index, 0 on a custom backend; pass 0 to see
             every pair.
         scope: Which part of the graph to scan (see graphlore_god_nodes): path
             prefixes / globs, ``!pattern``, ``-tests``, ``+vendored``, ``all``.
@@ -3639,7 +3778,8 @@ def graphlore_duplication_scan(
     else:
         identical_lines.append("Identical bodies (exact): none.")
 
-    index = _semantic_index()
+    backend = _semantic_backend(all_nodes, all_edges)
+    index = backend.index
     if index is None:
         # No semantic backend: the exact tier still stands on its own.
         why = (
@@ -3658,9 +3798,10 @@ def graphlore_duplication_scan(
         }
         text = "\n".join(identical_lines) + "\n\nSemantic tier not run: " + why
         return _fmt(payload, as_json, _with_note(text, view))
+    default_floor, score_kind = _score_floor(backend)
     if min_score is None:
-        backend = config.env("SEMANTIC_BACKEND", "").strip().lower()
-        min_score = _SEMBLE_SCORE_FLOOR if backend in ("", "semble") else 0.0
+        min_score = default_floor
+    backend_info = _backend_payload(backend)
     adj = _adjacency(all_edges)
     in_scope = {_node_id(n) for n in view.nodes}
     defs = _Definitions(all_nodes, all_edges)
@@ -3702,16 +3843,21 @@ def graphlore_duplication_scan(
         except (TypeError, ValueError):
             sline = 0
         span = _span_for(sfile, sline)
-        # Anchor the seed to the chunk holding its OWN source: search with the
-        # head of its body and take the hit that overlaps its span. Searching by
-        # label alone matched whatever chunk mentions the name.
+        # Anchor the seed to the chunk holding its OWN source. The built-in index
+        # has one chunk per definition and hands it over directly; otherwise search
+        # with the head of its body and take the hit that overlaps its span
+        # (searching by label alone matched whatever chunk mentions the name).
+        anchor = None
+        if span is not None and hasattr(index, "hit_for_span"):
+            anchor = index.hit_for_span(sfile, span[0], span[1])
         query = _node_label(seed)
-        if span is not None:
+        if anchor is None and span is not None:
             head = _read_source_lines(sfile, sline, min(span[1], sline + 14))
             if head is not None:
                 query = "\n".join(head[0])[:800] or query
-        hits = index.search(query, top_k=3 if span is not None else 1)
-        anchor = None
+        hits = [] if anchor is not None else index.search(
+            query, top_k=3 if span is not None else 1
+        )
         for h in hits:
             c = h.chunk
             if span is None or (
@@ -3787,6 +3933,8 @@ def graphlore_duplication_scan(
         "seeds_unanchored": unanchored,
         "seeded_by": "definition size" if by_shape else "degree",
         "score_floor": min_score,
+        "score_kind": score_kind,
+        "backend": backend_info,
         "pair_count": len(ranked),
         "pairs": shown,
         "skipped": dict(skipped),
@@ -3810,6 +3958,7 @@ def graphlore_duplication_scan(
                 f" Pairs scoring under {min_score:g} are usually code with the same role, "
                 "not copies; min_score=0 lists them."
             )
+    skip_note += f"\n{_backend_line(backend_info)} (pair score: {score_kind})."
     lines = [*identical_lines, ""]
     if not shown:
         lines.append(
@@ -6128,16 +6277,20 @@ def _registered_tool_names() -> set[str]:
 
 
 def _semantic_backend_available() -> bool:
-    """Whether graphlore_locate has a working backend (semble or a custom one).
+    """Whether graphlore_locate has a working backend.
 
-    A custom GRAPHLORE_SEMANTIC_BACKEND is only "available" when its
-    ``module.path:Factory`` spec is well-formed and the module resolves — a typo'd
-    spec must NOT advertise a locate surface whose every call can only error.
+    The default (unset / ``auto``) and ``builtin`` always do: the built-in index
+    needs no extra. ``semble`` needs the extra. A custom GRAPHLORE_SEMANTIC_BACKEND
+    is only "available" when its ``module.path:Factory`` spec is well-formed and the
+    module resolves — a typo'd spec must NOT advertise a locate surface whose every
+    call can only error.
     """
     import importlib.util
 
     backend = config.env("SEMANTIC_BACKEND", "").strip()
-    if backend and backend.lower() != "semble":
+    if backend.lower() in ("", "auto", "builtin"):
+        return True
+    if backend.lower() != "semble":
         if ":" not in backend:
             return False
         mod_name = backend.partition(":")[0]
@@ -6149,10 +6302,11 @@ def _semantic_backend_available() -> bool:
 
 
 def _effective_lean_tools() -> set[str]:
-    """LEAN_TOOLS minus tools whose optional dependency is absent.
+    """LEAN_TOOLS minus tools whose backend is unavailable.
 
-    graphlore_locate needs the [semble] extra; in a default install it would only
-    return an install-this error, so it's dropped from the lean surface rather than
+    graphlore_locate always has the built-in index, unless GRAPHLORE_SEMANTIC_BACKEND
+    names semble without the extra, or a custom backend that does not resolve: then
+    it could only return an error, so it's dropped from the lean surface rather than
     advertised as a core tool.
     """
     lean = set(LEAN_TOOLS)
@@ -6188,8 +6342,10 @@ def _effective_toolset_tools() -> set[str] | None:
         return None
     if name == "locate" and not _semantic_backend_available():
         print(
-            "graphlore: GRAPHLORE_TOOLSET=locate needs the [semble] extra "
-            "(or GRAPHLORE_SEMANTIC_BACKEND); falling back to the lean toolset.",
+            "graphlore: GRAPHLORE_TOOLSET=locate needs a search backend, and "
+            "GRAPHLORE_SEMANTIC_BACKEND names one that is not available (semble without "
+            "the [semble] extra, or a custom spec that does not resolve); falling back "
+            "to the lean toolset.",
             file=sys.stderr,
             flush=True,
         )
