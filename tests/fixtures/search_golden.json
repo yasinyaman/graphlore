@@ -1,0 +1,159 @@
+{
+ "_comment": "Contract of the built-in search kernel (graphlore/search.py, KERNEL_ABI 1). Any accelerator must return exactly these terms and these scores (float.hex). Regenerate only on a deliberate ranking change.",
+ "kernel_abi": 1,
+ "tokenize": [
+  {
+   "text": "getUserName get_user_name GetUserName",
+   "terms": [
+    "getusername",
+    "get",
+    "user",
+    "nam",
+    "getusername",
+    "get",
+    "user",
+    "nam",
+    "getusername",
+    "get",
+    "user",
+    "nam"
+   ]
+  },
+  {
+   "text": "HTTPServer parseJSON2Response __init__ $scope",
+   "terms": [
+    "httpserver",
+    "http",
+    "server",
+    "parsejson2response",
+    "pars",
+    "json",
+    "respons",
+    "init",
+    "scop"
+   ]
+  },
+  {
+   "text": "retries retrying retried classes processes status",
+   "terms": [
+    "retry",
+    "retry",
+    "retry",
+    "class",
+    "process",
+    "status"
+   ]
+  },
+  {
+   "text": "def _send_single_request(self, request):\n    return self._transport.handle(request)",
+   "terms": [
+    "def",
+    "sendsinglerequest",
+    "send",
+    "singl",
+    "request",
+    "self",
+    "request",
+    "return",
+    "self",
+    "transport",
+    "handl",
+    "request"
+   ]
+  },
+  {
+   "text": "naïve café 東京 x y 42 http2",
+   "terms": [
+    "naïv",
+    "café",
+    "東京",
+    "http2",
+    "http"
+   ]
+  }
+ ],
+ "bm25f": {
+  "terms": [
+   [
+    1.25,
+    {
+     "0": [
+      1,
+      0,
+      2
+     ],
+     "1": [
+      0,
+      1,
+      0
+     ],
+     "2": [
+      0,
+      0,
+      5
+     ]
+    }
+   ],
+   [
+    0.5,
+    {
+     "1": [
+      0,
+      0,
+      1
+     ],
+     "2": [
+      2,
+      1,
+      1
+     ]
+    }
+   ]
+  ],
+  "lengths": {
+   "0": [
+    2,
+    3,
+    40
+   ],
+   "1": [
+    1,
+    3,
+    12
+   ],
+   "2": [
+    3,
+    4,
+    90
+   ]
+  },
+  "avg": [
+   2.0,
+   3.333,
+   47.0
+  ],
+  "params": [
+   1.2,
+   4.0,
+   1.5,
+   1.0,
+   0.3,
+   0.3,
+   0.75
+  ],
+  "expected": {
+   "0": [
+    "0x1.0c777bae0a5e5p+0",
+    1
+   ],
+   "1": [
+    "0x1.07d9898a54a3cp+0",
+    2
+   ],
+   "2": [
+    "0x1.54b2d2b55c092p+0",
+    2
+   ]
+  }
+ }
+}

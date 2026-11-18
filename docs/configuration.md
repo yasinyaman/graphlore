@@ -40,8 +40,9 @@ next to a current version number, means the session predates the update.
 
 ## Which toolset
 
-The server starts on the **`lean`** surface: 12 tools (11 without a semantic
-backend, which drops `graphlore_locate`) — `build`, `overview`, `locate`,
+The server starts on the **`lean`** surface: 12 tools (11 when
+`GRAPHLORE_SEMANTIC_BACKEND` names a backend that is not available, which drops
+`graphlore_locate`) — `build`, `overview`, `locate`,
 `search`, `neighbors`, `subgraph`, `impact`, `node_details`, `fetch`,
 `communities`, `freshness` and `project`. That covers the whole explore loop:
 orient → find → traverse → blast radius → read the code. A smaller surface helps
@@ -52,7 +53,7 @@ turn. Choose with `GRAPHLORE_TOOLSET`:
 |---|---|---|
 | `lean` (default) | 12 | Exploring, debugging, answering "where/how is X" |
 | `full` | all 33 | Reviewing structure (cycles, layers, dead or duplicated code), routes and package APIs, naming communities, diffs, the CLI passthroughs (`query`, `path`, `explain`, `add`) |
-| `locate` | 5 | A semantic backend is installed and you want one way in (`graphlore_locate`), one way to the code (`graphlore_fetch`), plus `overview` / `build` / `freshness`; falls back to `lean` without a backend |
+| `locate` | 5 | One way in (`graphlore_locate`), one way to the code (`graphlore_fetch`), plus `overview` / `build` / `freshness`; falls back to `lean` only when `GRAPHLORE_SEMANTIC_BACKEND` names a backend that is not available |
 
 An unknown value falls back to `lean` with a warning on stderr; the boot banner
 prints the toolset and its tool count. The server instructions and prompts are
@@ -107,7 +108,8 @@ GRAPHLORE_TRANSPORT=streamable-http GRAPHLORE_HOST=0.0.0.0 GRAPHLORE_API_KEY=$(o
 
 ## What reaches the network, and when
 
-The graph.json analysis tools read local files only. These are the exceptions:
+The graph.json analysis tools read local files only, and so does the built-in
+search index's BM25 tier. These are the exceptions:
 
 | Path | When it goes out | With `GRAPHLORE_OFFLINE=1` |
 |---|---|---|
@@ -115,7 +117,8 @@ The graph.json analysis tools read local files only. These are the exceptions:
 | `graphlore_build` | `mode="deep"`, and a default build of doc/paper/image files, which graphify extracts with an LLM backend when a key is set | `mode` refused; `code_only` forced (local AST only) unless `cluster_only`, and the result says so |
 | `graphlore_label_communities(method="cli")` | graphify calls the LLM backend whose key is set | Refused; `method="auto"` skips it. Sampling still works: that request goes to your MCP client, not out of the server |
 | `graphlore_query` / `path` / `explain` | Up to graphify: they are its own commands | Run, with the backend keys removed from the CLI's environment |
-| Semantic search (`[semble]`: `graphlore_locate`, `graphlore_duplication_scan`) | First use: semble downloads its embedding model from the Hugging Face Hub, then caches it | `HF_HUB_OFFLINE=1` / `TRANSFORMERS_OFFLINE=1` are set before semble is imported, so only a cached model loads; otherwise the error says how to prefetch it |
+| Semantic search (`[semble]`: `graphlore_locate`, `graphlore_duplication_scan`) | First use: semble downloads its embedding model from the Hugging Face Hub, then caches it | `HF_HUB_OFFLINE=1` / `TRANSFORMERS_OFFLINE=1` are set before semble is imported, so only a cached model loads; otherwise the built-in index answers (backend unset), or the error says how to prefetch it (`GRAPHLORE_SEMANTIC_BACKEND=semble`) |
+| Built-in search, dense tier (`[embed]`: the same two tools) | First use: model2vec downloads `GRAPHLORE_EMBED_MODEL` (default `minishlab/potion-code-16M-v2`) from the Hugging Face Hub, then caches it | The same flags are set before model2vec is imported, so only a cached model loads; otherwise the index answers with BM25 alone and `backend.dense_unavailable` says why |
 | `GRAPHLORE_TOKENIZER=tiktoken` | First use: tiktoken fetches its encoding file unless cached | Not loaded; the chars/3.5 estimate is used |
 | tree-sitter grammars (`[treesitter]`) | First use of a language: the grammar is downloaded from GitHub releases and cached | Only grammars already in the cache are used; other files get no spans (with `GRAPHLORE_ENGINE=native` or `auto`, the native engine's compiled-in grammars answer instead) |
 | Native engine (`graphlore-engine`, `GRAPHLORE_ENGINE=native`) | Never: its grammars are compiled into the wheel and a build reads local files only | Unchanged |
@@ -186,9 +189,12 @@ has the results on 31 repositories and the roadmap.
 | `GRAPHLORE_PORT` | `8000` | Bind port for HTTP transports |
 | `GRAPHLORE_API_KEY` | _(unset)_ | Require `Authorization: Bearer <key>` on HTTP transports |
 | `GRAPHLORE_ALLOWED_HOSTS` | _(unset)_ | DNS-rebinding `Host` allowlist for HTTP (comma-separated, `:*` port wildcards; `*` disables). Unset = SDK default: loopback-only when bound to loopback |
-| `GRAPHLORE_TOOLSET` | `lean` | `lean` (12 core exploration tools) \| `full` (all 33) \| `locate` (minimal locate-first surface; falls back to `lean` without a semantic backend). See [Which toolset](#which-toolset) |
+| `GRAPHLORE_TOOLSET` | `lean` | `lean` (12 core exploration tools) \| `full` (all 33) \| `locate` (minimal locate-first surface; falls back to `lean` when the configured backend is unavailable). See [Which toolset](#which-toolset) |
 | `GRAPHLORE_TOKENIZER` | _(heuristic)_ | `tiktoken` → exact token counts (needs the `[tiktoken]` extra); else chars/3.5 estimate |
-| `GRAPHLORE_SEMANTIC_BACKEND` | `semble` | Semantic index: `semble`, or `module.path:Factory` implementing `search`/`find_related` (validated at boot) |
+| `GRAPHLORE_SEMANTIC_BACKEND` | _(auto)_ | Search backend of `graphlore_locate` and the duplication scan: unset / `auto` → semble when installed and loadable, else the built-in index; `semble` → semble only; `builtin` → the built-in index only; or `module.path:Factory` implementing `search`/`find_related` (its module is checked at boot, the factory at the first call) |
+| `GRAPHLORE_EMBED_MODEL` | `minishlab/potion-code-16M-v2` | The built-in index's dense tier (`[embed]` extra): a Hugging Face model id, a local model directory, or `off` for BM25 only |
+| `GRAPHLORE_CACHE_DIR` | `$XDG_CACHE_HOME/graphlore` (`~/.cache/graphlore`) | Where the built-in index keeps chunk vectors between runs (one folder per project; never inside the project); `off` keeps them in memory only |
+| `GRAPHLORE_SEARCH_KERNEL` | _(auto)_ | `python` forces the built-in index's reference kernel even when an accelerator (`graphlore_accel`) is installed |
 | `GRAPHLORE_RESOLVE` | `1` | Resolve calls and imports made through a module object (`mod.func()`) from the source at read time; `0` reads graph.json as it is |
 | `GRAPHLORE_WATCH` | `0` | Filesystem watcher: auto re-sync on structural changes (`[watch]` extra) |
 | `GRAPHLORE_WATCH_DEBOUNCE` | `2.0` | Watcher debounce window (seconds) |

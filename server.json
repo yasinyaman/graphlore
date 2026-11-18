@@ -36,7 +36,7 @@
         },
         {
           "name": "GRAPHLORE_TOOLSET",
-          "description": "Tool surface: lean (12 core exploration tools), full (all 33) or locate (5, needs a semantic backend).",
+          "description": "Tool surface: lean (12 core exploration tools), full (all 33) or locate (5, a locate-first surface).",
           "default": "lean",
           "choices": [
             "lean",
