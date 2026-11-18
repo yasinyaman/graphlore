@@ -259,6 +259,22 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- Native engine 0.5.17, Swift's implicit members and the overloads an
+  extension adds. In alamofire: 158 calls that had no edge, and 783 that go
+  to another definition of the same name than before (none to nothing).
+  - **`.status(301)` is typed by its place**: the parameter the argument is
+    for, the type a declaration writes (`let e: Endpoint = .made(1)`), or the
+    result of the function it is returned from. No type, no edge.
+  - **It says which overload a call is of**: an argument `.status(…)` fits a
+    parameter whose type has a static `status` and not one whose type has
+    none.
+  - **A Swift method's overloads include the ones an extension of its type
+    adds**: `session.request(.get)` in alamofire's tests is the
+    `request(_ endpoint: Endpoint)` the test helpers add to `Session`, where
+    it was the library's `request(_: any URLConvertible)`.
+  - The parameter's very type scores over one of its bases, and a trailing
+    closure goes to the parameter that asks for no label (a function type,
+    or a type alias) before a labelled one.
 - Native engine 0.5.16: **the calls in a Rust macro's arguments are read**.
   The grammar gives them as tokens, so `assert_eq!(handle_count(&pool), 2)`,
   `assert!(pool.count() > 0)`, `vec![make_pool()]` and `format!("{}",

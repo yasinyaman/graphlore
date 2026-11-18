@@ -12,7 +12,9 @@ use std::collections::HashMap;
 
 use tree_sitter::Node;
 
-use crate::facts::{Def, FileFacts, ImportFact, ImportForm, Local, RefFact, RefKind, Runs};
+use crate::facts::{
+    Def, FileFacts, Implicit, ImportFact, ImportForm, Local, RefFact, RefKind, Runs,
+};
 use crate::generic::{kids, line, text};
 use crate::lang::LanguageModule;
 
@@ -1130,6 +1132,17 @@ fn argument_list(n: Node) -> Option<(Option<Node>, usize)> {
 fn arg_kind(v: Node, src: &[u8]) -> crate::facts::Arg {
     use crate::facts::Arg;
     let k = v.kind();
+    // Swift `.post`, `.status(301)`
+    let implicit = implicit_member_call(v, src).or_else(|| {
+        (k == "prefix_expression" && src.get(v.start_byte()) == Some(&b'.'))
+            .then(|| v.child_by_field_name("target"))
+            .flatten()
+            .filter(|t| t.kind() == "simple_identifier")
+            .map(|t| text(t, src))
+    });
+    if let Some(name) = implicit {
+        return Arg::Implicit(name);
+    }
     if k.contains("string") || k.contains("char_literal") || k == "character_literal" {
         Arg::Str
     } else if k.contains("integer")
@@ -1822,6 +1835,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
             args: None,
             self_arg: false,
             hints: Vec::new(),
+            implicit: None,
             recv: None,
             byte: n.start_byte(),
         });
@@ -2377,6 +2391,18 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
         } else if n.parent().is_some_and(|p| p.kind() == "decorator") {
             // the decorator expression itself is the definition's decorator
             // reference, not a call of the enclosing scope
+        } else if let Some(name) = implicit_member_call(n, src) {
+            // Swift `.status(301)`: a static member of the type the place asks
+            // for (an argument's parameter, a declared type, a result)
+            if let Some(of) = implicit_place(&anc, src) {
+                let at = refs.len();
+                push(&mut refs, n, RefKind::Call, vec![IMPLICIT.into(), name], "call", None);
+                if let Some(r) = refs.get_mut(at) {
+                    r.args = arg_count(n);
+                    r.hints = arg_facts(n, src);
+                    r.implicit = Some(of);
+                }
+            }
         } else if let Some((kind, path)) = callee(n, src) {
             let context = if kind == RefKind::New { "constructor" } else { "call" };
             // `new Callback<T>() { … }` is a definition itself: the class has
@@ -2484,9 +2510,77 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
             imp.runs = Runs::Deferred;
         }
     }
+    // an implicit member in an argument: the call it is an argument of, by
+    // its place among the references (the node's byte until here)
+    let at: HashMap<usize, u32> = refs
+        .iter()
+        .enumerate()
+        .filter(|(_, r)| matches!(r.kind, RefKind::Call | RefKind::New))
+        .map(|(i, r)| (r.byte, i as u32))
+        .collect();
+    for r in refs.iter_mut() {
+        if let Some(Implicit::Arg { call, .. }) = &mut r.implicit {
+            match at.get(&(*call as usize)) {
+                Some(i) => *call = *i,
+                None => r.implicit = None,
+            }
+        }
+    }
+    refs.retain(|r| r.path.first().is_none_or(|h| h != IMPLICIT) || r.implicit.is_some());
     facts.refs = refs;
     facts.imports = imports;
     facts.locals = locals;
+}
+
+/// The head of the path of a Swift implicit member expression (`.name`).
+pub const IMPLICIT: &str = "[.]";
+
+/// `.status(301)`: the name of an implicit member that is called.
+fn implicit_member_call(n: Node, src: &[u8]) -> Option<String> {
+    if n.kind() != "call_expression" {
+        return None;
+    }
+    let head = kids(n).into_iter().next().filter(|c| c.kind() == "prefix_expression")?;
+    if src.get(head.start_byte()) != Some(&b'.') {
+        return None;
+    }
+    let target = head.child_by_field_name("target")?;
+    (target.kind() == "simple_identifier").then(|| text(target, src))
+}
+
+/// The place an implicit member stands in, which is what types it: an
+/// argument of a call (`anc` ends `call_expression`, `call_suffix`,
+/// `value_arguments`, `value_argument`), the value of a declaration with a
+/// written type, or what a `return` gives.
+fn implicit_place(anc: &[Node], src: &[u8]) -> Option<Implicit> {
+    let parent = anc.last()?;
+    match parent.kind() {
+        "value_argument" => {
+            let list = anc.get(anc.len().checked_sub(2)?)?;
+            let call = anc.iter().rev().find(|a| a.kind() == "call_expression")?;
+            let index = kids(*list)
+                .into_iter()
+                .filter(|c| c.kind() == "value_argument")
+                .position(|c| c.id() == parent.id())?;
+            let label = parent
+                .child_by_field_name("name")
+                .map(|l| text(l, src).trim_end_matches(':').trim().to_string())
+                .filter(|l| !l.is_empty());
+            Some(Implicit::Arg {
+                call: u32::try_from(call.start_byte()).ok()?,
+                index: u8::try_from(index).ok()?,
+                label,
+            })
+        }
+        "property_declaration" => written_type(*parent, src).map(Implicit::Typed),
+        "control_transfer_statement" => Some(Implicit::Return),
+        // `{ .status(1) }`: the one expression of a body is what it returns
+        "statements" => {
+            let body = anc.get(anc.len().checked_sub(2)?)?;
+            (body.kind() == "function_body" && kids(*parent).len() == 1).then_some(Implicit::Return)
+        }
+        _ => None,
+    }
 }
 
 /// The calls and constructions in the arguments of a Rust macro invocation
@@ -2552,6 +2646,7 @@ fn macro_refs(m: &dyn LanguageModule, mac: Node, src: &[u8], depth: usize) -> Ve
         .filter(|r| matches!(r.kind, RefKind::Call | RefKind::New))
         // (a closure's parameter inside the arguments is a local nothing here keeps)
         .filter(|r| r.byte >= PREFIX.len() && !r.path.iter().any(|s| s.contains('@')))
+        .filter(|r| r.implicit.is_none())
         .map(|mut r| {
             r.byte = tt.start_byte() + (r.byte - PREFIX.len());
             r.line += row;

@@ -1291,3 +1291,55 @@ fn the_calls_in_a_rust_macros_arguments() {
     // the pattern of `matches!` is no expression: nothing in it is called
     assert!(!got.iter().any(|(_, to)| to == "a_never_called" || to.contains("kind_a")), "{got:?}");
 }
+
+#[test]
+fn a_swift_implicit_member_is_typed_by_its_place() {
+    // `Decoy` has every static name too: only the place says which type
+    let got = call_ids("implicit", &[(
+        "a.swift",
+        "struct Decoy {\n    static func status(_ code: Int) -> Decoy { Decoy() }\n    static func method(_ m: Int) -> Decoy { Decoy() }\n    static func named(_ n: Int) -> Decoy { Decoy() }\n    static func made(_ n: Int) -> Decoy { Decoy() }\n    static func given(_ n: Int) -> Decoy { Decoy() }\n    static func lost(_ n: Int) -> Decoy { Decoy() }\n}\nstruct Endpoint {\n    static func status(_ code: Int) -> Endpoint { Endpoint() }\n    static func method(_ m: Int) -> Endpoint { Endpoint() }\n    static func named(_ n: Int) -> Endpoint { Endpoint() }\n    static func made(_ n: Int) -> Endpoint { Endpoint() }\n    static func given(_ n: Int) -> Endpoint { Endpoint() }\n    static func lost(_ n: Int) -> Endpoint { Endpoint() }\n}\nclass Session {\n    func request(_ endpoint: Endpoint, retries: Int = 0) -> Session { self }\n    func send(to endpoint: Endpoint) {}\n}\nfunc positional(session: Session) {\n    session.request(.status(301))\n    session.request(.method(1), retries: 2)\n}\nfunc labelled(session: Session) {\n    session.send(to: .named(1))\n}\nfunc declared() {\n    let e: Endpoint = .made(1)\n    print(e)\n}\nfunc returned() -> Endpoint {\n    return .given(2)\n}\nfunc unknown(x: Int) {\n    somethingElse(.lost(1))\n}\n",
+    )]);
+    let mut missing = Vec::new();
+    for (from, to) in [
+        ("positional()", "a_endpoint_status"),
+        ("positional()", "a_endpoint_method"),
+        ("labelled()", "a_endpoint_named"),
+        ("declared()", "a_endpoint_made"),
+        ("returned()", "a_endpoint_given"),
+    ] {
+        if !got.contains(&(from.to_string(), to.to_string())) {
+            missing.push((from, to));
+        }
+    }
+    assert!(missing.is_empty(), "missing {missing:?}\n{got:?}");
+    // a place that gives no type names nothing, and nothing is the decoy's
+    for (from, to) in &got {
+        assert!(from != "unknown()" && !to.contains("decoy_"), "{from} -> {to}: {got:?}");
+    }
+}
+
+#[test]
+fn an_implicit_member_picks_the_overload_an_extension_adds() {
+    // the type's own `request` takes a protocol; its extension's takes the
+    // `Endpoint` whose static member the argument is
+    let got = call_ids("implicit-overload", &[(
+        "a.swift",
+        "protocol Convertible {}\nstruct Other { static func status(_ c: Int) -> Other { Other() } }\nstruct Endpoint: Convertible {\n    static func status(_ code: Int) -> Endpoint { Endpoint() }\n}\nclass Session {\n    func request(_ convertible: any Convertible, retries: Int = 0) -> Session { self }\n}\nextension Session {\n    func request(_ endpoint: Endpoint, retries: Int = 0) -> Session { self }\n}\nfunc run(session: Session) {\n    session.request(.status(401), retries: 1)\n}\n",
+    )]);
+    let to: Vec<&str> =
+        got.iter().filter(|(from, _)| from == "run()").map(|(_, to)| to.as_str()).collect();
+    assert_eq!(to, ["a_endpoint_status", "a_session_request_2"], "{got:?}");
+}
+
+#[test]
+fn a_trailing_closure_picks_the_parameter_that_asks_for_no_label() {
+    // the type's own `validate` takes a closure under no label; its
+    // extension's take a labelled sequence, a labelled autoclosure, nothing
+    let got = call_ids("trailing", &[(
+        "a.swift",
+        "typealias Validation = (Int) -> Bool\nclass Request {\n    func validate(_ validation: @escaping Validation) -> Self { self }\n    func check() {\n        validate { _ in true }\n    }\n}\nextension Request {\n    func validate<S: Sequence>(statusCode codes: S) -> Self { self }\n    func validate<S: Sequence>(contentType types: @escaping @autoclosure () -> S) -> Self { self }\n    func validate() -> Self { self }\n}\n",
+    )]);
+    let to: Vec<&str> =
+        got.iter().filter(|(from, _)| from == ".check()").map(|(_, to)| to.as_str()).collect();
+    assert_eq!(to, ["a_request_validate"], "{got:?}");
+}
