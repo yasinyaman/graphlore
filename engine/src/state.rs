@@ -384,6 +384,7 @@ impl State {
             from_owner: None,
             args: None,
             self_arg: false,
+            hints: Vec::new(),
             recv: None,
             byte: n.start_byte(),
         });

@@ -112,6 +112,17 @@ pub struct Def {
     /// How many parameters a callable declares.
     #[serde(default)]
     pub params: Option<u8>,
+    /// Those parameters, in order: what tells one overload from another.
+    #[serde(default)]
+    pub plist: Vec<ParamFact>,
+    /// The names of the type parameters a callable declares (`<T>`).
+    #[serde(default)]
+    pub type_params: Vec<String>,
+    /// The type parameters of a type that are bound by the type itself
+    /// (`interface Builder<T : Builder<T>>`): a method that returns one
+    /// returns the type it was called on.
+    #[serde(default)]
+    pub self_params: Vec<String>,
     /// The receiver of the callable's last function-typed parameter (Kotlin
     /// `block: Builder.() -> Unit`): what `this` is in a lambda passed to it.
     #[serde(default)]
@@ -282,6 +293,11 @@ pub struct Local {
     /// holds, not a local of its own, so it hides no outer name.
     #[serde(default)]
     pub assigned: bool,
+    /// The type the value's call is handed explicitly: its one type argument
+    /// (`mock<Foo>()`, `GetService<IFoo>()`) or a class literal among its
+    /// arguments (`create(Service::class.java)`, `typeof(Bar)`).
+    #[serde(default)]
+    pub given: Option<Vec<String>>,
     pub from_def: Option<usize>,
     #[serde(skip)]
     pub byte: usize,
@@ -321,8 +337,45 @@ pub struct RefFact {
     /// One of those arguments is `this` / `self`.
     #[serde(default)]
     pub self_arg: bool,
+    /// What each argument is, as far as the site shows (at most 8).
+    #[serde(default)]
+    pub hints: Vec<ArgFact>,
     #[serde(skip)]
     pub byte: usize,
+}
+
+/// A parameter of a callable.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct ParamFact {
+    /// The name a caller writes for it (Swift's external label; `_` for none).
+    pub name: String,
+    /// Its written type as a path; empty when it has none.
+    pub ty: Vec<String>,
+    /// It has a default value.
+    pub optional: bool,
+    /// It takes any number of arguments (`vararg`, `...`, `params`).
+    pub variadic: bool,
+}
+
+/// What an argument of a call is.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum Arg {
+    Unknown,
+    Str,
+    Num,
+    Bool,
+    Null,
+    /// A lambda or function literal.
+    Func,
+    /// A name, a member or a call: the resolver says what type that gives.
+    Path(Vec<String>),
+}
+
+/// An argument: the name it is passed under, if any, and what it is.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ArgFact {
+    pub label: Option<String>,
+    pub kind: Arg,
 }
 
 /// Where the implicit receiver of a lambda comes from.
@@ -371,6 +424,10 @@ pub struct FileFacts {
     pub exports: Vec<(String, String)>,
     pub refs: Vec<RefFact>,
     pub locals: Vec<Local>,
+    /// Names a type answers to without a definition of that name: Ruby
+    /// `attr_accessor :status`, `Struct.new(:headers)`, `def_delegators`.
+    #[serde(default)]
+    pub attrs: Vec<String>,
     /// Lambdas with a receiver (Kotlin `x.apply { … }`, `withIndent { … }`).
     #[serde(default)]
     pub receivers: Vec<ReceiverScope>,
@@ -398,6 +455,7 @@ impl FileFacts {
             exports: Vec::new(),
             refs: Vec::new(),
             locals: Vec::new(),
+            attrs: Vec::new(),
             receivers: Vec::new(),
             resources: Vec::new(),
             http: Default::default(),
