@@ -259,6 +259,16 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- **Native engine 0.5.29: a library interface's one implementation is
+  marked in the unresolved rows.** A call left without an edge whose one
+  candidate is a member of a type implementing a library type
+  (`implements RequestInterface`, `extends Writable`), on a receiver the
+  source gives no type, is `library_like` ("the one definition implements a
+  library type's member"): the receiver may be any implementation. Marker
+  bases (`Sendable`, `JsonSerializable`, `Closeable`, exception roots), Ruby
+  and member extension functions are left out. 477 of the 31 repositories'
+  6,166 rows (got 191, guzzle 253); 1,009 are left unmarked, from 1,486
+  (PHP 393 → 137, TypeScript 315 → 124). graph.json is unchanged.
 - **Native engine 0.5.28: RSpec `let` and `subject` are definitions.**
   `let(:conn) { … }`, `let!`, `subject(:request) { … }` and a nameless
   `subject { … }` are methods of the `describe` / `context` block they are
