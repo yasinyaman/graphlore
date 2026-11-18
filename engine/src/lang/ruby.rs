@@ -103,6 +103,11 @@ impl LanguageModule for Ruby {
             return None;
         }
         let p = n.parent()?;
+        // `items.each { … }`: the receiver is a method of `self` called first
+        if p.kind() == "call" && p.child_by_field_name("receiver").is_some_and(|r| r.id() == n.id())
+        {
+            return Some(vec![(RefKind::Call, vec![text(n, src)], "implicit_call")]);
+        }
         let is_target = p.child_by_field_name("left").is_some_and(|l| l.id() == n.id())
             || matches!(
                 p.kind(),
@@ -116,6 +121,7 @@ impl LanguageModule for Ruby {
                     | "block_parameter"
                     | "method"
                     | "singleton_method"
+                    | "setter"
                     | "call"
                     | "argument_list"
                     | "pair"

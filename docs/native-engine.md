@@ -124,6 +124,40 @@ function's declared result). Then, for the whole project
 An external module's contents are unknown, so a wildcard import of one
 (`#include <stdio.h>`, `using System;`) names nothing.
 
+What the lookup takes from each language's own rules:
+
+- **Extension functions and methods** (Kotlin `fun KmProperty.toSpec()`, C#
+  `static bool IsBlank(this string s)`) are members to their callers: a call
+  whose last name is no member of the receiver's type, or whose receiver the
+  walk cannot type, is looked up among the extensions the file can see (its
+  own, those it imports, its directory, its package or a namespace it uses) —
+  `EXTRACTED` when the receiver's type is the one the extension is written
+  for, `INFERRED` when one extension has the name. `self.x()` in a Rust `impl
+  Trait for` a type of another crate is the method beside it.
+- **A closure's parameters are names of the closure only**: `r` in
+  `func(w http.ResponseWriter, r *http.Request) { … }` is the request there
+  and whatever `r` was outside, and an untyped block parameter hides the
+  outer name inside the block, not after it.
+- **Ruby.** A bare name that is no local is a call (`render json:
+  article_params`, `items.each { … }`, the value of a pair), and so is the
+  method behind `self.class.from(x)`. A module or class is every file that
+  opens it: `Utils::Headers` is found from any `module Faraday`, and `class
+  Far::Compact` is `Compact` in `Far`. A method at the top level of another
+  file is in scope only for the files that require it (two specs each
+  defining `response` are not each other's).
+- **Constructions.** `new Foo(…)` (`Foo(…)`, `Foo.new`) is a call of the
+  type and of the constructor the type declares (`__init__`, `constructor`,
+  `initialize`, `__construct`, a Java / C# / C++ / Swift constructor). Of
+  several overloads the one taking as many arguments as the site passes is
+  named; when that picks none or several, only the type is. A Kotlin class's
+  primary constructor is no definition, so a secondary one that fits is
+  `INFERRED`.
+- **Anonymous classes** (Java `new Callback<T>() { … }`, Kotlin `object :
+  Listener { … }`) are definitions that go by the type they implement and
+  answer to no name: the method around constructs the type, the class
+  `implements` / `inherits` it, and the names inside are looked up through the
+  class and method around.
+
 ### Communities
 
 `engine/src/community/` runs Leiden (local moving, refinement, aggregation, so
@@ -362,31 +396,31 @@ file pairs). The native graph has definitions graphify folds into the one
 around them (a function nested in a method, the setter beside a getter of the
 same name); an edge from one of those is compared as an edge from the paired
 definition it belongs to, as graphify records it. On the 31 repositories of the
-[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.1,
-measured 2026-11-17), as native / graphify edges and the share of graphify's
+[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.2,
+measured 2026-11-18), as native / graphify edges and the share of graphify's
 that the native graph has too:
 
 | Language | same definition | imports (file pairs) | calls | bases | type references |
 |---|--:|--:|--:|--:|--:|
-| Python | 100% | 212 / 219 (96%) | 2,080 / 834 (94%) | 73 / 62 (100%) | 439 / 494 (68%) |
-| JavaScript | 93.5%⁵ | 190 / 305 (59%) | 1,378 / 2,058 (44%)¹ | 1 / 1 | 3 / 0 |
-| TypeScript | 99.4% | 527 / 634 (83%) | 778 / 687 (98%) | 25 / 20 (100%) | 736 / 156 (88%) |
+| Python | 100% | 212 / 219 (96%) | 2,956 / 834 (94%) | 73 / 62 (100%) | 439 / 494 (68%) |
+| JavaScript | 93.5%⁵ | 190 / 305 (59%) | 1,313 / 2,058 (43%)¹ | 1 / 1 | 3 / 0 |
+| TypeScript | 99.4% | 527 / 634 (83%) | 809 / 687 (98%) | 25 / 20 (100%) | 736 / 156 (88%) |
 | TSX | 99.7% | 253 / 316 (80%) | 435 / 456 (95%) | – | 42 / 4 |
-| Go | 100% | 538 / 950 (47%)² | 5,864 / 3,167 (98%) | 19 / 14 (100%) | 673 / 355 (100%) |
-| Java | 100% | 1,105 / 1,010 (100%) | 5,179 / 5,123 (81%) | 215 / 168 (94%) | 4,021 / 1,930 (98%) |
-| Kotlin | 99.4% | 368 / 333 (95%) | 3,527 / 2,108 (64%) | 87 / 56 (88%) | 1,093 / 673 (81%) |
+| Go | 100% | 538 / 950 (47%)² | 5,936 / 3,167 (99%) | 19 / 14 (100%) | 679 / 355 (100%) |
+| Java | 100% | 1,105 / 1,010 (100%) | 5,660 / 5,123 (85%) | 415 / 168 (94%) | 3,989 / 1,930 (98%) |
+| Kotlin | 99.4% | 368 / 333 (95%) | 3,844 / 2,108 (70%) | 96 / 56 (93%) | 1,015 / 673 (81%) |
 | Scala | 100% | 2 / 0 | 46 / 20 (45%) | 21 / 22 (95%) | 75 / 32 (100%) |
-| C# | 92.7% | 347 / 280 (30%)³ | 2,259 / 2,450 (80%) | 87 / 86 (98%) | 1,249 / 806 (99%) |
-| Rust | 93.3% | 314 / 370 (75%) | 1,754 / 853 (79%) | 53 / 41 (93%) | 1,241 / 895 (81%) |
-| Swift | 95.9% | 165 / 166 (–)³ | 4,020 / 2,141 (82%) | 190 / 164 (100%) | 1,080 / 580 (62%) |
+| C# | 92.7% | 347 / 280 (30%)³ | 2,615 / 2,450 (93%) | 87 / 86 (98%) | 1,252 / 806 (99%) |
+| Rust | 93.3% | 314 / 370 (75%) | 1,753 / 853 (79%) | 53 / 41 (93%) | 1,242 / 895 (81%) |
+| Swift | 95.9% | 165 / 166 (–)³ | 4,695 / 2,141 (82%) | 190 / 164 (100%) | 1,080 / 580 (62%) |
 | C | 100% | 89 / 77 (99%) | 864 / 791 (100%) | – | 253 / 130 (97%) |
-| C++ | 97.8% | 215 / 228 (93%) | 488 / 281 (33%)⁴ | 30 / 5 (100%) | 326 / 218 (88%) |
+| C++ | 97.8% | 215 / 228 (93%) | 505 / 281 (33%)⁴ | 30 / 5 (100%) | 326 / 218 (88%) |
 | C/C++ headers | 90.6% | 164 / 172 (95%) | 360 / 348 (85%) | 11 / 12 (92%) | 515 / 289 (84%) |
-| Ruby | 99.7% | 42 / 0 | 308 / 375 (60%) | 36 / 15 (93%) | 50 / 0 |
-| PHP | 80.6% | 429 / 505 (84%) | 7,040 / 6,140 (90%) | 65 / 60 (98%) | 648 / 213 (95%) |
-| **All** | **94.4%** | **4,960 / 5,565 (75%)** | **36,380 / 27,832 (82%)** | **913 / 726 (96%)** | **12,444 / 6,775 (87%)** |
+| Ruby | 99.7% | 42 / 0 | 409 / 375 (66%) | 46 / 15 (93%) | 28 / 0 |
+| PHP | 80.6% | 429 / 505 (84%) | 8,863 / 6,140 (90%) | 65 / 60 (98%) | 648 / 213 (95%) |
+| **All** | **94.4%** | **4,960 / 5,565 (75%)** | **41,063 / 27,832 (84%)** | **1,132 / 726 (97%)** | **12,322 / 6,775 (88%)** |
 
-Of the native calls, 7,249 (20%) are `INFERRED`, against 47% of graphify's.
+Of the native calls, 7,442 (18%) are `INFERRED`, against 47% of graphify's.
 Reading a sample of each side's edges the other lacks, per language:
 
 - **What only graphify has** is mostly its own guesses and artefacts.
@@ -409,19 +443,18 @@ Reading a sample of each side's edges the other lacks, per language:
   `funSpec.toString()` linked to a test's own `toString()` (262 of Kotlin's 716
   in kotlinpoet), `Truth.assertThat()` to a project `assertThat` (653 in
   retrofit), `@handlers.insert(i, h)` to the builder's `insert`, `server.enqueue`,
-  `Unirest.delete`. A construction (`new RestRequest()`) goes to the
-  constructor in graphify's C# graphs and to the class in the native one (most
-  of C#'s gap), and `Article.find_by(…)` is a `calls` edge to the model there, a
-  `references` edge here.
-- **What the native graph still lacks**, read from the same samples: calls of
-  **extension functions and methods** on a receiver the project does not
-  define (`property.toPropertySpec()` in Kotlin, `realm.IsEmpty()` in C#,
-  `self.userinfo()` in a Rust `impl Trait for` an external type); Ruby methods
-  called **without a receiver or parentheses** (`Article.new(article_params)`);
-  Java **anonymous classes** (`new Callback<String>() { … }` is a node of its
-  own that calls `Callback`, where the method around it should, and it does not
-  inherit it); and a receiver whose type comes out of a generic call
-  (`retrofit.create(Service.class)`).
+  `Unirest.delete`. `Article.find_by(…)` is a `calls` edge to the model there,
+  a `references` edge here, and a method that builds an anonymous class
+  (`new ToStringConverterFactory() { … }`) calls, in graphify's graph, the
+  first anonymous class of that name in the file.
+- **What the native graph still lacks**, read from the same samples: a call
+  with an implicit receiver inside a lambda that has one (Kotlin
+  `withIndent { add("…") }`, `apply { addProperty(…) }`); a receiver typed
+  only by the result of a call that declares none the walk can read
+  (`funBuilder.returns(…)` after `val funBuilder = builder(name)`,
+  `retrofit.create(Service.class)`, Ruby's `stubs.get('/api')`); a
+  target-typed construction (C# `Box b = new(1, 2)`) and a C++ `Buf b(3)`,
+  which name no constructor.
 - **What only the native graph has** is mostly what a name lookup by itself
   cannot see: calls through a module object (`httpx.Response(...)`), through a
   typed local or field (`client = httpx.Client(); client.get()`,

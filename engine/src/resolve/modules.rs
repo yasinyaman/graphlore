@@ -987,7 +987,7 @@ pub fn scope_lookup(
             let mut cur = d;
             while let Some(x) = cur {
                 if defs[x].kind.is_class_like() {
-                    prefixes.push(format!("{}.", defs[x].qualname));
+                    prefixes.push(format!("{}.", defs[x].qualname.replace("::", ".")));
                 }
                 cur = defs[x].parent;
             }
@@ -1000,7 +1000,16 @@ pub fn scope_lookup(
                     .into_iter()
                     .flatten()
                     .copied()
-                    .filter(|r| p.family[r.0] == Some(fam));
+                    .filter(|r| p.family[r.0] == Some(fam))
+                    // a constant is found wherever it is written (autoload);
+                    // a method at another file's top level only when this
+                    // file requires that one
+                    .filter(|r| {
+                        !pre.is_empty()
+                            || r.0 == f
+                            || !p.def(*r).kind.is_callable()
+                            || p.scopes[f].imported.contains(&r.0)
+                    });
                 if let Some(r) = p.best(found) {
                     return Some(Target::Def(r));
                 }

@@ -412,3 +412,108 @@ fn what_a_local_hides_and_what_it_does_not() {
         "{got:#?}"
     );
 }
+
+#[test]
+fn extension_functions_are_members_to_their_callers() {
+    let got = edges("extensions", &[
+        // Kotlin: an extension called on a lambda parameter, on a typed local
+        // whose class has no such member, and on a call's result
+        ("src/main/kotlin/app/Specs.kt", "package app\n\nclass KmProperty\nclass TypeSpec { fun build(): TypeSpec = this }\n\nfun render(props: List<KmProperty>): String {\n    val spec: TypeSpec = TypeSpec()\n    props.map { property -> property.toPropertySpec() }\n    spec.build().trimmedText()\n    return spec.trimmedText()\n}\n\nprivate fun KmProperty.toPropertySpec(): String = \"\"\n\nprivate fun TypeSpec.trimmedText(): String = \"\"\n"),
+        // C#: an extension method on a string, from a file that uses its namespace
+        ("src/Extensions/StringExtensions.cs", "namespace App.Extensions;\n\npublic static class StringExtensions\n{\n    internal static bool IsBlank(this string? value) => string.IsNullOrWhiteSpace(value);\n}\n"),
+        ("src/Auth/Signer.cs", "using App.Extensions;\n\nnamespace App.Auth;\n\npublic class Signer\n{\n    public bool Sign(string realm)\n    {\n        return !realm.IsBlank();\n    }\n}\n"),
+        // Rust: `self.x()` in an impl for a type of another crate
+        ("Cargo.toml", "[package]\nname = \"x\"\nversion = \"0.1.0\"\n"),
+        ("src/lib.rs", "use http::uri::Authority;\n\npub(crate) trait AuthorityExt {\n    fn userinfo(&self) -> Option<&str>;\n    fn username(&self) -> Option<&str>;\n}\n\nimpl AuthorityExt for Authority {\n    fn userinfo(&self) -> Option<&str> { None }\n    fn username(&self) -> Option<&str> { self.userinfo() }\n}\n"),
+    ]);
+    has(
+        &got,
+        &[
+            ("render()", "calls", "toPropertySpec()"),
+            ("render()", "calls", "trimmedText()"),
+            (".Sign()", "calls", ".IsBlank()"),
+            (".username()", "calls", ".userinfo()"),
+        ],
+    );
+}
+
+#[test]
+fn a_bare_ruby_name_is_a_call_unless_a_local_has_it() {
+    let got = edges("ruby-bare", &[
+        (
+            "app/articles_controller.rb",
+            "class ArticlesController\n  def create\n    @article = Article.new(article_params)\n    render json: @article, status: status_code\n  end\n\n  def index\n    items.each do |headers|\n      log(headers)\n    end\n    build(response_headers: headers)\n  rescue => status_code\n    log(status_code)\n  end\n\n  def headers=(hash)\n    @headers = hash\n  end\n\n  def headers; end\n  def items; end\n  def log(x); end\n  def build(h); end\n  def status_code; end\n\n  private\n\n  def article_params; end\nend\n",
+        ),
+        // a method at the top level of a file this one does not require is
+        // not this file's `response`
+        ("spec/a_spec.rb", "RSpec.describe Thing do\n  def response(_env)\n    1\n  end\nend\n"),
+        ("spec/b_spec.rb", "RSpec.describe Thing do\n  let(:response) { 1 }\n  it 'works' do\n    expect(response.status).to eq(200)\n  end\nend\n"),
+    ]);
+    assert!(!got.iter().any(|(_, _, t)| t == ".response()"), "{got:#?}");
+    has(
+        &got,
+        &[
+            // an argument, a pair's value, a receiver: each is a call
+            (".create()", "calls", ".article_params()"),
+            (".create()", "calls", ".status_code()"),
+            (".index()", "calls", ".items()"),
+            (".index()", "calls", ".headers()"),
+            (".index()", "calls", ".log()"),
+        ],
+    );
+    // `rescue => status_code` and the block's `|headers|` are locals there:
+    // one call of `headers` (line 11), none of `status_code` in `index`
+    assert!(
+        !got.contains(&(".index()".into(), "calls".into(), ".status_code()".into())),
+        "{got:#?}"
+    );
+    assert!(!got.iter().any(|(_, r, _)| r == "indirect_call"), "{got:#?}");
+}
+
+#[test]
+fn a_ruby_module_is_every_file_that_opens_it() {
+    let got = edges("ruby-open", &[
+        ("lib/far.rb", "require 'far/utils'\nrequire 'far/error'\nmodule Far\n  class Conn\n    def run\n      h = Utils::Headers.new\n      h.fetch_it\n      raise Far::ParsingError.new(1)\n    end\n    def again\n      self.class.from(1)\n    end\n    def self.from(x); end\n  end\nend\n"),
+        ("lib/far/utils.rb", "require 'far/utils/headers'\nmodule Far\n  module Utils\n    def self.helper; end\n  end\nend\n"),
+        ("lib/far/utils/headers.rb", "module Far\n  module Utils\n    class Headers\n      def fetch_it; end\n    end\n  end\nend\n"),
+        // `class Far::Compact` is `Compact` in `Far`
+        ("lib/far/error.rb", "module Far\n  class Error < StandardError; end\n  class ParsingError < Error; end\nend\nclass Far::Compact\n  def go; Far::Utils.helper; end\nend\n"),
+    ]);
+    has(
+        &got,
+        &[
+            (".run()", "calls", "Headers"),
+            (".run()", "calls", ".fetch_it()"),
+            (".run()", "calls", "ParsingError"),
+            (".again()", "calls", ".from()"),
+            (".go()", "calls", ".helper()"),
+        ],
+    );
+}
+
+#[test]
+fn an_anonymous_class_is_built_by_the_method_around_it() {
+    let got = edges("anonymous", &[
+        ("A.java", "interface Callback<T> { void onResponse(T body); }\nclass Helper {\n  Helper(String name) {}\n  void run() {}\n}\n\nclass Client {\n  void enqueue(Callback<String> cb) {}\n\n  void go() {\n    final Helper helper = new Helper(\"a\");\n    enqueue(new Callback<String>() {\n      @Override public void onResponse(String body) {\n        helper.run();\n        finish();\n      }\n    });\n    Runnable r = new Runnable() { public void run() { finish(); } };\n  }\n  void finish() {}\n}\n"),
+        ("K.kt", "package app\n\ninterface Listener<T> { fun onDone(v: T) }\nclass Bus { fun add(l: Listener<String>) {} }\nclass Screen(val bus: Bus) {\n    fun start() {\n        bus.add(object : Listener<String> {\n            override fun onDone(v: String) { stop() }\n        })\n    }\n    fun stop() {}\n}\n"),
+    ]);
+    has(
+        &got,
+        &[
+            // the method constructs; the class has the type as its base
+            (".go()", "calls", "Callback"),
+            ("Callback<String>", "implements", "Callback"),
+            // a type the project does not define: the anonymous class is not it
+            ("Runnable", "inherits", "Runnable"),
+            // `new Helper(…)` runs the constructor Helper declares
+            (".go()", "calls", "Helper"),
+            (".go()", "calls", ".Helper()"),
+            // inside, the names of the class around
+            (".onResponse()", "calls", ".finish()"),
+            (".onResponse()", "calls", ".run()"),
+            ("Listener", "implements", "Listener"),
+            (".onDone()", "calls", ".stop()"),
+        ],
+    );
+    assert!(!got.contains(&(".go()".into(), "calls".into(), "Runnable".into())), "{got:#?}");
+}

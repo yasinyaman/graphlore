@@ -226,6 +226,40 @@ All notable changes to this project are documented here. The format is based on
   and the file is unchanged since the build, instead of a line window.
 
 ### Fixed
+- Native engine 0.5.2, the gaps the 0.5.1 comparison left (`calls` recall
+  against graphify 82% to 84% on the 31 audit repositories; C# 80% to 93%,
+  Ruby 60% to 66%, Kotlin 64% to 70%, Java 81% to 85%):
+  - **Extension functions and methods** are members to their callers: Kotlin
+    `property.toPropertySpec()` (`fun KmProperty.toPropertySpec()`), C#
+    `realm.IsBlank()` (`static bool IsBlank(this string s)`, from a file that
+    uses its namespace), and `self.userinfo()` in a Rust `impl Trait for` a
+    type of another crate. `EXTRACTED` when the receiver's type is the one the
+    extension is written for, `INFERRED` when one visible extension has the
+    name.
+  - **A closure's parameters are scoped to the closure.** They were locals of
+    the whole function: in Go, `r` of `func(w http.ResponseWriter, r
+    *http.Request)` hid the `r := chi.NewRouter()` around it, and an untyped
+    block parameter could name a function elsewhere (`done` in a test, linked
+    to a library's `done()`).
+  - **Ruby.** A bare name passed as an argument or as a pair's value
+    (`Article.new(article_params)`, `status: status_code`) and the receiver of
+    a call (`current_user.follow(@user)`) are calls of the method, no longer an
+    `indirect_call` or nothing; `self.class.from(x)` is the class's method. A
+    module or class reopened in another file is one scope
+    (`Utils::Headers.new`, `Faraday::ParsingError.new` and `class Far::Compact`
+    resolve). A method at the top level of a file the caller does not require
+    is no longer in scope, and the name in `def headers=(hash)` is no call.
+  - **Anonymous classes.** `new Callback<String>() { … }` (Java) and `object :
+    Listener<T> { … }` (Kotlin): the method around constructs the type, the
+    anonymous class `implements` / `inherits` it (also when the type is
+    external), and no name lookup lands on the anonymous class itself.
+  - **Constructors.** A construction is a call of the constructor the type
+    declares as well as of the type (`new RestRequest(url)` → `RestRequest`
+    and its `.RestRequest()`; Python `__init__`, JS/TS `constructor`, Ruby
+    `initialize`, PHP `__construct`, Swift `init`), so `graphlore_impact` on a
+    constructor lists the code that builds the type. Of several overloads the
+    one taking as many arguments as the site passes is named; when that picks
+    none or several, only the type is.
 - Native engine 0.5.1, from comparing its graphs with graphify's edge by
   edge on the 31 audit repositories:
   - A call in a field assignment inside a method (`self._uri = urlparse(url)`

@@ -361,6 +361,7 @@ fn handler_id(
             context: "",
             from_def: d,
             from_owner: None,
+            args: None,
             byte: 0,
         };
         p.source_of(f, &r)
@@ -579,6 +580,7 @@ pub(super) fn link_calls(
                     context: "",
                     from_def: c.from_def,
                     from_owner: None,
+                    args: None,
                     byte: 0,
                 };
                 p.source_of(f, &r)

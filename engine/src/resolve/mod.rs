@@ -337,6 +337,8 @@ pub struct Project<'a> {
     children: Vec<HashMap<usize, HashMap<String, Vec<usize>>>>,
     /// Every definition by bare name.
     by_name: HashMap<String, Vec<DefRef>>,
+    /// Extension functions and methods (`Def::receiver`), by name.
+    extensions: HashMap<String, Vec<DefRef>>,
     /// Every definition by qualname.
     by_qual: HashMap<String, Vec<DefRef>>,
     /// Package-qualified names (`a.b.C`, `Shop.Models.Item`) of the families
@@ -366,6 +368,16 @@ pub struct Project<'a> {
     calling: RefCell<bool>,
     /// Import -> files a resolved use went through it to.
     used: RefCell<HashMap<(usize, usize), HashSet<usize>>>,
+}
+
+/// The key of a qualified name in `by_qual`: Ruby writes one name both ways
+/// (`class Far::Compact`, and `class Compact` inside `module Far`).
+fn qual_key(fam: Family, qualname: &str) -> String {
+    if fam == Family::Ruby {
+        qualname.replace("::", ".")
+    } else {
+        qualname.to_string()
+    }
 }
 
 fn is_top(defs: &[Def], d: usize) -> bool {
@@ -418,6 +430,7 @@ impl<'a> Project<'a> {
             top: Vec::new(),
             children: Vec::new(),
             by_name: HashMap::new(),
+            extensions: HashMap::new(),
             by_qual: HashMap::new(),
             fqn: HashMap::new(),
             namespaces: HashSet::new(),
@@ -458,6 +471,10 @@ impl<'a> Project<'a> {
             let mut children: HashMap<usize, HashMap<String, Vec<usize>>> = HashMap::new();
             let fam = self.family[fi];
             for (di, d) in f.defs.iter().enumerate() {
+                // a class with no name of its own answers to none
+                if d.anonymous {
+                    continue;
+                }
                 // a method declared for a type (Go receiver, Rust impl, C++
                 // `A::m`) is no module-level name
                 if is_top(&f.defs, di) && !(d.owner.is_some() && d.kind.is_callable()) {
@@ -470,7 +487,10 @@ impl<'a> Project<'a> {
                 if self.def_ids[fi].get(di).is_some_and(|x| x.is_some()) {
                     self.by_name.entry(d.name.clone()).or_default().push((fi, di));
                 }
-                self.by_qual.entry(d.qualname.clone()).or_default().push((fi, di));
+                self.by_qual.entry(qual_key(fam, &d.qualname)).or_default().push((fi, di));
+                if d.receiver.is_some() && !d.decl_only {
+                    self.extensions.entry(d.name.clone()).or_default().push((fi, di));
+                }
                 if d.kind == DefKind::Namespace {
                     let ns = d.qualname.replace("::", ".");
                     self.namespaces.insert((fam, ns.clone()));
@@ -799,7 +819,7 @@ impl<'a> Project<'a> {
         let fam = self.family[r.0];
         let cands: Vec<DefRef> = self
             .by_qual
-            .get(&d.qualname)
+            .get(&fam.map_or_else(|| d.qualname.clone(), |x| qual_key(x, &d.qualname)))
             .into_iter()
             .flatten()
             .copied()
@@ -896,6 +916,46 @@ impl<'a> Project<'a> {
         self.bases(c).into_iter().find_map(|b| self.class_member(b, name, depth - 1))
     }
 
+    /// The constructors a type declares, in source order.
+    fn constructors(&self, c: DefRef) -> Vec<DefRef> {
+        let cname = &self.def(c).name;
+        let mut out: Vec<DefRef> = self.children[c.0]
+            .get(&c.1)
+            .into_iter()
+            .flat_map(|m| m.values().flatten())
+            .map(|&d| (c.0, d))
+            .filter(|r| {
+                let d = self.def(*r);
+                (d.kind == DefKind::Constructor && d.name != "deinit")
+                    || (d.kind.is_callable()
+                        && (d.name == *cname
+                            || matches!(
+                                d.name.as_str(),
+                                "__init__" | "constructor" | "initialize" | "__construct"
+                            )))
+            })
+            .collect();
+        out.sort();
+        out
+    }
+
+    /// A member of a Ruby module or class that another file adds: `module
+    /// Faraday` is opened again by every file that puts something in it.
+    fn reopened_member(&self, c: DefRef, name: &str) -> Option<DefRef> {
+        if self.family[c.0] != Some(Family::Ruby) {
+            return None;
+        }
+        let key = format!("{}.{name}", qual_key(Family::Ruby, &self.def(c).qualname));
+        self.best(
+            self.by_qual
+                .get(&key)
+                .into_iter()
+                .flatten()
+                .copied()
+                .filter(|r| self.family[r.0] == Some(Family::Ruby)),
+        )
+    }
+
     /// `name` looked up inside a target.
     fn member(&self, t: &Target, name: &str, depth: usize) -> Option<Target> {
         match t {
@@ -908,7 +968,9 @@ impl<'a> Project<'a> {
                 if name == "new" && self.family[c.0] == Some(Family::Ruby) {
                     return Some(Target::Def(*c)); // `Klass.new` constructs Klass
                 }
-                self.class_member(*c, name, 4).map(Target::Def)
+                self.class_member(*c, name, 4)
+                    .or_else(|| self.reopened_member(*c, name))
+                    .map(Target::Def)
             }
             Target::Module(files) => {
                 if let Some(d) = self.top_in(files, name) {
@@ -996,7 +1058,7 @@ impl<'a> Project<'a> {
             .defs
             .iter()
             .enumerate()
-            .filter(|(_, d)| d.kind.is_class_like() && d.name == name)
+            .filter(|(_, d)| d.kind.is_class_like() && d.name == name && !d.anonymous)
             .map(|(i, _)| (f, i))
             .collect();
         if !local.is_empty() {
@@ -1137,11 +1199,21 @@ impl<'a> Project<'a> {
                 if rest.is_empty() {
                     return None;
                 }
+                // Ruby `self.class.from(x)`: a method of the class itself
+                if fam == Family::Ruby && rest.len() > 1 && rest[0] == "class" {
+                    let c = self.class_of(f, d)?;
+                    let skip = if rest.get(1).is_some_and(|s| s == "()") { 2 } else { 1 };
+                    return self.walk(Target::Def(c), &rest[skip..], conf);
+                }
                 match self.class_of(f, d) {
                     Some(c) => Target::Def(c),
-                    // JS `this` inside a function assigned to an object
+                    // JS `this` inside a function assigned to an object; a
+                    // method beside this one in an `impl` for a type the
+                    // project does not define (`impl AuthorityExt for Authority`)
                     None => {
-                        let m = self.object_member(f, d, &rest[0])?;
+                        let m = self
+                            .object_member(f, d, &rest[0])
+                            .or_else(|| self.owner_sibling(f, d, &rest[0]))?;
                         return self.walk(Target::Def(m), &rest[1..], conf);
                     }
                 }
@@ -1165,9 +1237,7 @@ impl<'a> Project<'a> {
                 if rest.len() != 1 || bases {
                     return None;
                 }
-                return self
-                    .fallback_method(f, &rest[0])
-                    .map(|r| (Target::Def(r), Confidence::Inferred));
+                return self.unknown_receiver(f, &rest[0], None);
             }
             // PHP `$x`: a variable. Its declared or assigned type, else only
             // a distinctive method name
@@ -1190,8 +1260,14 @@ impl<'a> Project<'a> {
                     return None;
                 }
             },
+            // a parameter or local of no known type, or of a type the project
+            // does not define: only an extension written for it can be meant
             _ if self.is_untyped_local(f, d, head) || self.is_external_local(f, d, head) => {
-                return None
+                if rest.len() == 1 && !bases && *self.calling.borrow() {
+                    let on = self.local_written_type(f, d, head);
+                    return self.extension_method(f, &rest[0], on.as_deref());
+                }
+                return None;
             }
             // a local assigned something the walk cannot type (`let pool =
             // self.pool.lock().unwrap()`) still hides every outer name of its
@@ -1207,9 +1283,8 @@ impl<'a> Project<'a> {
                 && self.local_type(f, d, head).is_none() =>
             {
                 if !bases && (rest.len() == 1 || (rest.len() == 2 && rest[0] == "()")) {
-                    return self
-                        .fallback_method(f, rest.last()?)
-                        .map(|r| (Target::Def(r), Confidence::Inferred));
+                    let on = self.local_written_type(f, d, head).filter(|_| rest.len() == 1);
+                    return self.unknown_receiver(f, rest.last()?, on.as_deref());
                 }
                 return None;
             }
@@ -1268,10 +1343,7 @@ impl<'a> Project<'a> {
                         conf = Confidence::Inferred;
                         Target::Def(self.type_named(f, head)?)
                     } else if !bases && (rest.len() == 1 || (rest.len() == 2 && rest[0] == "()")) {
-                        let last = rest.last()?;
-                        return self
-                            .fallback_method(f, last)
-                            .map(|r| (Target::Def(r), Confidence::Inferred));
+                        return self.unknown_receiver(f, rest.last()?, None);
                     } else {
                         return None;
                     }
@@ -1322,9 +1394,7 @@ impl<'a> Project<'a> {
                     }
                 }
                 if rest.len() == i + 2 && !bases {
-                    return self
-                        .fallback_method(f, &rest[i + 1])
-                        .map(|r| (Target::Def(r), Confidence::Inferred));
+                    return self.unknown_receiver(f, &rest[i + 1], None);
                 }
                 return None;
             }
@@ -1348,6 +1418,12 @@ impl<'a> Project<'a> {
                 None => {
                     // `self.repo.find()`: through the field's type
                     let Target::Def(c) = t else { return None };
+                    // the last name is no member of the type: an extension
+                    // written for it (`typeSpec.trimmedToString()`)
+                    if self.def(c).kind.is_class_like() && i + 1 == rest.len() && !bases {
+                        let on = self.def(c).name.clone();
+                        return self.extension_method(f, seg, Some(&on));
+                    }
                     if !self.def(c).kind.is_class_like() || i + 1 == rest.len() {
                         return None;
                     }
@@ -1408,7 +1484,16 @@ impl<'a> Project<'a> {
                     .into_iter()
                     .flatten()
                     .copied()
-                    .filter(|r| self.family[r.0] == Some(fam));
+                    .filter(|r| self.family[r.0] == Some(fam))
+                    // Ruby: a method at another file's top level is there
+                    // only for the files that require it
+                    .filter(|r| {
+                        fam != Family::Ruby
+                            || !pre.is_empty()
+                            || r.0 == f
+                            || !self.def(*r).kind.is_callable()
+                            || self.scopes[f].imported.contains(&r.0)
+                    });
                 if let Some(r) = self.best(found) {
                     let t = self.walk_target(Target::Def(r), &path[k..])?;
                     return Some((t, Confidence::Extracted));
@@ -1486,6 +1571,122 @@ impl<'a> Project<'a> {
             })
             .collect();
         self.narrow(f, cands).map(|(r, _)| r)
+    }
+
+    /// A method called on a receiver the walk cannot type: an extension of
+    /// that name the caller can see, else a method only one type has.
+    fn unknown_receiver(
+        &self,
+        f: usize,
+        name: &str,
+        on: Option<&str>,
+    ) -> Option<(Target, Confidence)> {
+        self.extension_method(f, name, on).or_else(|| {
+            self.fallback_method(f, name).map(|r| (Target::Def(r), Confidence::Inferred))
+        })
+    }
+
+    /// An extension function or method named `name` (`Def::receiver`) that
+    /// file `f` can see: its own, one in a file it imports, in its directory
+    /// or in its package. `on` is the receiver's type when the source writes
+    /// it: the extension written for that type is `EXTRACTED`; otherwise a
+    /// single candidate (the file's own first) is `INFERRED`.
+    fn extension_method(
+        &self,
+        f: usize,
+        name: &str,
+        on: Option<&str>,
+    ) -> Option<(Target, Confidence)> {
+        let fam = self.family[f];
+        let here = dir_of(&self.files[f].path);
+        let pkg = self.files[f].package.as_deref();
+        let seen: Vec<DefRef> = self
+            .extensions
+            .get(name)?
+            .iter()
+            .copied()
+            .filter(|r| self.family[r.0] == fam && self.node_id(*r).is_some())
+            .filter(|r| {
+                r.0 == f
+                    || self.scopes[f].imported.contains(&r.0)
+                    || dir_of(&self.files[r.0].path) == here
+                    || (pkg.is_some() && self.files[r.0].package.as_deref() == pkg)
+                    || self.uses_namespace_of(f, r.0)
+            })
+            .collect();
+        if let Some(on) = on {
+            let exact: Vec<DefRef> = seen
+                .iter()
+                .copied()
+                .filter(|r| {
+                    self.def(*r).receiver.as_deref().is_some_and(|t| t.eq_ignore_ascii_case(on))
+                })
+                .collect();
+            let mine: Vec<DefRef> = exact.iter().copied().filter(|r| r.0 == f).collect();
+            match (mine.as_slice(), exact.as_slice()) {
+                ([one], _) | (_, [one]) => return Some((Target::Def(*one), Confidence::Extracted)),
+                _ => {}
+            }
+        }
+        let mine: Vec<DefRef> = seen.iter().copied().filter(|r| r.0 == f).collect();
+        match (mine.as_slice(), seen.as_slice()) {
+            ([one], _) | (_, [one]) => Some((Target::Def(*one), Confidence::Inferred)),
+            _ => None,
+        }
+    }
+
+    /// Whether file `f` imports a whole namespace or package that file `g` is
+    /// in (`using App.Extensions;`, `import app.specs.*`).
+    fn uses_namespace_of(&self, f: usize, g: usize) -> bool {
+        let Some(fam) = self.family[f] else { return false };
+        self.scopes[f].stars.iter().any(|(star, _)| match star {
+            Target::Ns(ns) => {
+                self.pkg_files.get(&(fam, ns.clone())).is_some_and(|fs| fs.contains(&g))
+            }
+            Target::Module(fs) => fs.contains(&g),
+            _ => false,
+        })
+    }
+
+    /// The type a local is declared with, bare (`string`, `KmProperty`).
+    fn local_written_type(&self, f: usize, d: Option<usize>, name: &str) -> Option<String> {
+        let defs = &self.files[f].defs;
+        let mut cur = d;
+        while let Some(x) = cur {
+            if let Some(&li) = self.locals.get(&(f, x, name.to_string())) {
+                let l = &self.files[f].locals[li];
+                return l.path.last().filter(|_| l.declared).cloned();
+            }
+            cur = defs[x].parent;
+        }
+        None
+    }
+
+    /// `self.name()` in a method whose type the project does not define: the
+    /// method of that name written for the same type in this file.
+    fn owner_sibling(&self, f: usize, d: Option<usize>, name: &str) -> Option<DefRef> {
+        let defs = &self.files[f].defs;
+        let mut cur = d;
+        let owner = loop {
+            let x = cur?;
+            if let Some(o) = &defs[x].owner {
+                break o.clone();
+            }
+            cur = defs[x].parent;
+        };
+        let cands: Vec<DefRef> = defs
+            .iter()
+            .enumerate()
+            .filter(|(_, x)| x.name == name && x.owner.as_deref() == Some(owner.as_str()))
+            .map(|(i, _)| (f, i))
+            // not the caller itself: `(**self).is_open()` in `impl Transport
+            // for Box<T>` forwards to another type's method
+            .filter(|r| self.node_id(*r).is_some() && Some(r.1) != d)
+            .collect();
+        match cands.as_slice() {
+            [one] => Some(*one),
+            _ => None,
+        }
     }
 
     /// `x.name()` on a receiver of unknown type: a method that only one type
@@ -1714,6 +1915,10 @@ pub fn resolve(
                 };
                 *p.types_only.borrow_mut() = false;
                 *p.calling.borrow_mut() = false;
+                let built_type = match &found {
+                    Some((Target::Def(t), _)) if p.def(*t).kind.is_class_like() => Some(*t),
+                    _ => None,
+                };
                 let (target, relation, conf) = match found {
                     Some((Target::Def(t), conf)) => {
                         let Some(id) = p.node_id(t) else { continue };
@@ -1785,7 +1990,13 @@ pub fn resolve(
                                     continue;
                                 }
                                 if tk.is_callable() {
-                                    "indirect_call"
+                                    // Ruby has no bare function values: a method
+                                    // named as an argument is called there
+                                    if p.family[f] == Some(Family::Ruby) {
+                                        "calls"
+                                    } else {
+                                        "indirect_call"
+                                    }
                                 } else if tk.is_class_like() {
                                     "uses" // a type handed over as a value
                                 } else {
@@ -1867,6 +2078,43 @@ pub fn resolve(
                 if target == src && relation != "calls" {
                     continue;
                 }
+                // constructing a type runs the constructor it declares
+                let built = match built_type {
+                    Some(t) if relation == "calls" => p.constructors(t),
+                    _ => Vec::new(),
+                };
+                // of several overloads, the one that takes as many arguments
+                // as the site passes; when that names none or several, no
+                // constructor is named (the type still is). A Kotlin class has
+                // a primary constructor that is no definition: there the
+                // overload that fits is a guess
+                let fits: Vec<DefRef> = built
+                    .iter()
+                    .copied()
+                    .filter(|c| r.args.is_some() && p.def(*c).params == r.args)
+                    .collect();
+                let kotlin = facts.lang == Some(Lang::Kotlin);
+                let one = if built.len() == 1 && !kotlin {
+                    built.first()
+                } else if fits.len() == 1 {
+                    fits.first()
+                } else {
+                    None
+                };
+                let sure = !kotlin;
+                let picked = one.and_then(|c| p.node_id(*c));
+                if let Some(id) = picked.filter(|id| *id != src) {
+                    edges.push(EdgeOut {
+                        source: src.clone(),
+                        target: id.to_string(),
+                        relation: "calls",
+                        confidence: if sure { conf } else { Confidence::Inferred },
+                        file: f,
+                        line: r.line,
+                        context: "constructor",
+                        runs: None,
+                    });
+                }
                 edges.push(EdgeOut {
                     source: src,
                     target,
@@ -1893,6 +2141,7 @@ pub fn resolve(
                     context: "",
                     from_def: u.from_def,
                     from_owner: None,
+                    args: None,
                     byte: u.byte,
                 };
                 let src = p.source_of(f, &probe);
