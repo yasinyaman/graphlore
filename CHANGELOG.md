@@ -38,7 +38,13 @@ All notable changes to this project are documented here. The format is based on
 - `benchmarks/search.py`: the built-in index (BM25 and hybrid) against semble on
   the query set semble publishes for its own benchmark, scored the way semble
   scores it (NDCG@10, recall@10, cold index time, warm query p50), plus the
-  calibration behind the duplication floors. Results in `docs/benchmark.md`.
+  calibration behind the duplication floors. On that set (1,251 queries, 63
+  repositories, 19 languages) the built-in index scores NDCG@10 0.814 with BM25
+  alone and 0.809 hybrid, against semble's 0.852; on the 44 repositories not
+  used to choose its constants, 0.799 and 0.797 against 0.842. The dense tier
+  helps semantic queries and some languages and costs others, so on this set it
+  does not raise the mean. Results in `docs/benchmark.md` and
+  `benchmarks/results-search.json`.
 - A kernel seam for an accelerator: the tokenizer and the BM25F loop sit behind
   `_Kernel`, a `graphlore_accel` module with `KERNEL_ABI == 1` replaces the
   Python reference when installed (`GRAPHLORE_SEARCH_KERNEL=python` forces the
