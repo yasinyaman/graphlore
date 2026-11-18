@@ -767,7 +767,7 @@ file pairs). The native graph has definitions graphify folds into the one
 around them (a function nested in a method, the setter beside a getter of the
 same name); an edge from one of those is compared as an edge from the paired
 definition it belongs to, as graphify records it. On the 31 repositories of the
-[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.36,
+[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.37,
 measured 2026-11-18), as native / graphify edges and the share of graphify's
 that the native graph has too:
 
@@ -857,6 +857,21 @@ project that builds no such object leaves `req` the framework's
 name, so vendored bundles (jQuery, Prism, Epoch, a Dokka `main.js`) get
 some 60 calls inside themselves; the analysis scope leaves those files out.
 JavaScript's unmarked unresolved rows: 55 → 18.
+Engine 0.5.37 reads one more convention, the document a Mongoose model's
+static hands its callback (`User.load(options, function (err, user) {
+user.authenticate() })`, the second parameter, `FileFacts::callbacks`), and
+says why each of the 17 JavaScript rows left is no gap (graph unchanged
+otherwise): a call of the caller's own local or parameter, a callback it
+was handed (`done(err)`; 42 rows in all languages); the one candidate in
+vendored or minified code (`app.param` beside jQuery's); a member that is a
+field assigned a value (`this.engine = opts.engines[ext]`); a receiver that
+is a property defined at run time (`Object.defineProperty(this, 'router',
+…)`, an `Object.create` descriptor, `FileFacts::runtime_props`); a
+receiver holding a library's value (`const app = express()`; 36 in all,
+most of them got's `server.listen`); a property middleware attaches to a
+request (`req.article = …`, `FileFacts::request_props`); and the request
+a framework hands a function where the project builds none (passport's
+`req.logout()`). JavaScript's unmarked rows: 18 → 0; in all, 926 → 801.
 Engine 0.5.35 (C function-pointer slots) reads a struct of function pointers
 as an interface and what is put in its slots as the implementations: an
 initializer of a variable, by name (`.async_read = redisAsyncRead`) or by
@@ -1317,7 +1332,7 @@ implicit members since 0.5.17: 39 whose place gives no type are rows now
 closure parameters and variables of express's tests. What is left at file
 level there is `app.use` and `app.set` (842 rows of express), names too
 short and too common to guess by. Engine 0.5.19 takes 123 more off (6,362;
-C# 349 from 470; 6,360 with 0.5.20, 6,348 with 0.5.21, 6,285 with 0.5.22, 6,237 with 0.5.25, 6,206 with 0.5.27, 6,166 with 0.5.28, 6,156 with 0.5.30, 6,140 with 0.5.31, 6,132 with 0.5.32, 6,126 with 0.5.33, 6,093 with 0.5.34, 6,047 with 0.5.36). Most of what C# has left is not the project's: `Assert.
+C# 349 from 470; 6,360 with 0.5.20, 6,348 with 0.5.21, 6,285 with 0.5.22, 6,237 with 0.5.25, 6,206 with 0.5.27, 6,166 with 0.5.28, 6,156 with 0.5.30, 6,140 with 0.5.31, 6,132 with 0.5.32, 6,126 with 0.5.33, 6,093 with 0.5.34, 6,047 with 0.5.36, 6,046 with 0.5.37). Most of what C# has left is not the project's: `Assert.
 NotNull` beside its own `Ensure.NotNull` (77), `WireMockServer.Start` (23).
 
 By then most rows were of that kind: a library's name the project happens

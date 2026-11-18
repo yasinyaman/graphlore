@@ -2009,6 +2009,8 @@ fn js_a_mongoose_document_has_its_schemas_methods() {
         ("app/models/user.js", "const mongoose = require('mongoose');\nconst Schema = mongoose.Schema;\nconst UserSchema = new Schema({});\nUserSchema.path('name').validate(function (name) {\n  if (this.skipValidation()) return true;\n  return name;\n});\nUserSchema.methods = {\n  skipValidation: function () { return false; }\n};\nmongoose.model('User', UserSchema);\n"),
         ("app/models/article.js", "const mongoose = require('mongoose');\nconst ArticleSchema = new mongoose.Schema({});\nArticleSchema.methods = {\n  uploadAndSave: function (file) { return file; }\n};\nmongoose.model('Article', ArticleSchema);\n"),
         ("app/controllers/articles.js", "const mongoose = require('mongoose');\nconst Article = mongoose.model('Article');\nexports.create = function (req, res) {\n  const article = new Article(req.body);\n  return article.uploadAndSave(req.file);\n};\n"),
+        // the document a model's static hands its callback (second parameter)
+        ("config/passport.js", "const mongoose = require('mongoose');\nconst User = mongoose.model('User');\nUser.findOne({}, function (err, user) {\n  user.skipValidation();\n});\n"),
         // a callback a non-schema call is handed: its `this` is not a document
         ("app/other.js", "const emitter = require('events');\nemitter.on('x', function () {\n  this.uploadAndSave();\n});\n"),
     ]);
@@ -2017,6 +2019,11 @@ fn js_a_mongoose_document_has_its_schemas_methods() {
     };
     assert_eq!(
         has("user.js", "app_models_user_skipvalidation").as_deref(),
+        Some("INFERRED"),
+        "{got:#?}"
+    );
+    assert_eq!(
+        has("passport.js", "app_models_user_skipvalidation").as_deref(),
         Some("INFERRED"),
         "{got:#?}"
     );

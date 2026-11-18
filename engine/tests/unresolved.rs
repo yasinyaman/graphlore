@@ -155,3 +155,66 @@ fn cpp_std_names_are_the_librarys_even_where_the_project_opens_std() {
     let held = row("future.share").expect("future.share is a row");
     assert_eq!(held["library_like"], "the receiver is a library's", "{held:#?}");
 }
+
+#[test]
+fn js_rows_that_are_no_gap_say_why() {
+    let dir = project(
+        "jsmarks",
+        &[
+            // a candidate in minified code; a project function `listen` beside
+            // an app that holds a library's value; `logout` beside passport's
+            ("public/js/lib.min.js", "var q = {};\nq.param = function param(a) { return a; };\n"),
+            ("server.js", "const express = require('express');\nconst app = express();\nfunction listen() {\n  app.listen(3000);\n}\n"),
+            ("routes.js", "module.exports = function (app) {\n  app.param('id', 1);\n};\n"),
+            ("users.js", "exports.logout = function logout(req, res) {\n  req.logout();\n};\n"),
+            // a callback the caller is handed
+            ("redirect.js", "function test(app, done) {\n  return done(null, app);\n}\n"),
+            ("finish.js", "function done(x) { return x; }\n"),
+            // a field holding a function; a property defined at run time
+            ("view.js", "function engine(a) { return a; }\nfunction route(p) { return p; }\nfunction View(opts) {\n  this.engine = opts.engines.html;\n  Object.defineProperty(this, 'router', { get: function () { return 1; } });\n}\nView.prototype.render = function render() {\n  this.engine(1);\n  this.router.route('/');\n};\n"),
+            // a property middleware attaches to the request
+            ("articles.js", "exports.load = function (req, res, next, id) {\n  req.article = { id: id };\n  next();\n};\nexports.destroy = function (req, res) {\n  req.article.removeComment(1);\n  const article = req.article;\n  article.addComment(2);\n};\n"),
+            ("lib/models.js", "var proto = {};\nproto.removeComment = function removeComment(i) { return i; };\nproto.addComment = function addComment(i) { return i; };\n"),
+        ],
+    );
+    let out = dir.join("unresolved.json");
+    let mut opts = BuildOptions::new(&dir);
+    opts.unresolved = Some(out.clone());
+    build_graph(&opts).unwrap();
+    let rows: Vec<Value> = serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+    let why = |path: &str| {
+        rows.iter()
+            .find(|r| r["path"] == path)
+            .map(|r| r["library_like"].clone())
+            .unwrap_or(Value::Null)
+    };
+    assert_eq!(why("app.param"), "the one definition is in vendored or minified code", "{rows:#?}");
+    assert_eq!(why("app.listen"), "the receiver holds a library's value", "{rows:#?}");
+    assert_eq!(
+        why("req.logout"),
+        "the receiver is what a framework hands the function",
+        "{rows:#?}"
+    );
+    assert_eq!(why("done"), "the name is a local or parameter of the caller", "{rows:#?}");
+    assert_eq!(
+        why("self.engine"),
+        "the member is a field assigned a value, not a method",
+        "{rows:#?}"
+    );
+    assert_eq!(
+        why("self.router.route"),
+        "the receiver is a property defined at run time",
+        "{rows:#?}"
+    );
+    assert_eq!(
+        why("req.article.removeComment"),
+        "the receiver is a property middleware attaches to a request",
+        "{rows:#?}"
+    );
+    assert_eq!(
+        why("article.addComment"),
+        "the receiver is a property middleware attaches to a request",
+        "{rows:#?}"
+    );
+}

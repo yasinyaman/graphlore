@@ -259,6 +259,15 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- **Native engine 0.5.37: JavaScript's unresolved rows say why they are no
+  gap.** New marks: a call of the caller's own local or parameter (a
+  callback it was handed), a candidate in vendored or minified code, a
+  member that is a field assigned a value, a property defined at run time
+  (`Object.defineProperty`), a receiver holding a library's value (`const
+  app = express()`), a property middleware attaches to a request, the
+  request a framework hands a function. The document a Mongoose model's
+  static hands its callback is typed (`INFERRED`). JavaScript's unmarked
+  rows 18 → 0; all languages 926 → 801.
 - **Native engine 0.5.36: JavaScript receivers the source states.** `this`
   in a function expression is what it is attached to (`app[method] =
   function`, a callback a Mongoose schema is handed); in an ES5 constructor,
