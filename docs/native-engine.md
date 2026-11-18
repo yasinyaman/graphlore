@@ -1142,7 +1142,14 @@ the rest). Of the 6,285 rows (engine 0.5.24, 2026-11-18):
 | **none of these: what an edge is still plausible for** | **2,114** |
 
 (0.5.25 takes 48 of those 2,114 off: C# 196 → 166, TSX 19 → 6, Python 20
-→ 17, Kotlin 79 → 77; 2,066 are left.) The 2,114 by language: PHP 445, TypeScript 405, Ruby 304, C# 196, Rust 192,
+→ 17, Kotlin 79 → 77; 2,066 are left. Since 0.5.26 two more kinds are
+marked: a capital head that is no name of the project and no local, a
+library's type or global (`Date.now()`, `Object.freeze(…)`,
+`Assert.NotNull(…)`, 476 rows), and the methods of Rust's and C++'s
+standard types (`lock`, `clone`, `kind`, `c_str`): of the 6,237 rows of
+0.5.25, 1,610 are left unmarked — PHP 396, TypeScript 315, Ruby 298, Rust
+119, Swift 93, C# 79, Kotlin 67, JavaScript 55, C++ 50, Java 44, Go 34, C
+33, Python 17, TSX 6, Scala 4.) The 2,114 by language: PHP 445, TypeScript 405, Ruby 304, C# 196, Rust 192,
 C++ 169, Swift 94, Kotlin 79, JavaScript 71, Java 49, Go 34, C 33, Python
 20, TSX 19, Scala 4. They are still an upper bound: the marks are
 conservative, and PHP's and TypeScript's rows are mostly PSR-7 and Node
@@ -1192,7 +1199,7 @@ but one convention finding, fixed since: `graphlore_surprises(limit=0)` cut its
 `shared_state` list without saying how much (`shared_state_left_out` does now).
 `SKELETON-EMPTY` went from 5 to 0, and the tool time stayed at 131 s.
 
-Rerun on graphs built by engine 0.5.3, and again by 0.5.4 through 0.5.23
+Rerun on graphs built by engine 0.5.3, and again by 0.5.4 through 0.5.25
 (2026-11-18), the audit raises nothing on the native graphs but its
 `GRAPH-ORPHAN-NODES` note on 19 of them; 115 to 172 s of tool time (on the 0.5.7 run, retrofit's build through `graphlore_build` took 5.1 s and was reported `SLOW` for crossing 5 s). What the table above still listed is
 gone:

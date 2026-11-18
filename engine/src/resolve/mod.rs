@@ -491,6 +491,77 @@ const CSHARP_CORE_METHODS: &[&str] = &[
     "GetString",
 ];
 
+/// Methods of Rust's standard types (`Mutex::lock`, `Clone::clone`,
+/// `io::Error::kind`): what the diagnostics count as a library's name.
+const RUST_CORE_METHODS: &[&str] = &[
+    "lock",
+    "clone",
+    "kind",
+    "iter",
+    "iter_mut",
+    "into_iter",
+    "get",
+    "get_mut",
+    "insert",
+    "remove",
+    "push",
+    "pop",
+    "len",
+    "is_empty",
+    "resize",
+    "clear",
+    "extend",
+    "parse",
+    "unwrap",
+    "expect",
+    "map",
+    "and_then",
+    "as_ref",
+    "as_mut",
+    "to_string",
+    "to_owned",
+    "into_owned",
+    "read",
+    "write",
+    "flush",
+    "take",
+    "replace",
+    "contains",
+    "split",
+    "trim",
+    "next",
+];
+
+/// Methods of C++'s standard library (`std::string::c_str`).
+const CPP_CORE_METHODS: &[&str] = &[
+    "c_str",
+    "size",
+    "length",
+    "empty",
+    "begin",
+    "end",
+    "find",
+    "substr",
+    "push_back",
+    "emplace_back",
+    "reserve",
+    "data",
+    "at",
+    "front",
+    "back",
+    "erase",
+    "insert",
+    "clear",
+    "reset",
+    "get",
+    "lock",
+    "unlock",
+    "load",
+    "store",
+    "count",
+    "str",
+];
+
 /// Names JavaScript's own arrays, strings, promises and maps answer to, and
 /// Node's and the DOM's event emitters and streams: on a receiver the walk
 /// cannot type they say nothing about a project method of the same name
@@ -4713,14 +4784,26 @@ impl<'a> Project<'a> {
             Family::CSharp => CSHARP_CORE_METHODS,
             Family::Ruby => RUBY_CORE_METHODS,
             Family::Swift => SWIFT_CORE_METHODS,
+            Family::Rust => RUST_CORE_METHODS,
+            Family::C => CPP_CORE_METHODS,
             _ => &[],
         };
         let lower = name.to_lowercase();
+        // a capital head that names nothing of the project and no local:
+        // a library's type or global (`Date.now()`, `Assert.NotNull(x)`)
+        let bare_head = head.split('@').next().unwrap_or(head);
+        let outside_head = r.path.len() >= 2
+            && reason == "head name not found"
+            && bare_head.chars().next().is_some_and(|c| c.is_uppercase())
+            && !self.by_name.contains_key(bare_head)
+            && !self.is_local_name(f, d, bare_head);
         let test = |i: usize, def: &Def| {
             def.is_test || crate::community::is_test_path(&self.files[i].path)
         };
         let library_like = if reason == "library name" || reason == "local of a library type" {
             Some("the receiver is a library's")
+        } else if outside_head {
+            Some("the head is a library's type or global")
         } else if core.contains(&name.as_str())
             || COMMON_METHODS.iter().any(|m| m.to_lowercase() == lower)
             || self.builtin(f, name)
