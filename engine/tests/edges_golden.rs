@@ -1832,3 +1832,35 @@ fn cpp_a_namespace_is_every_block_that_opens_it() {
     assert!(!has("include_async_task_2"), "{got:#?}");
     assert!(has("include_async_task_stop"), "{got:#?}");
 }
+
+#[test]
+fn cpp_aliases_and_specializations_name_their_template() {
+    // `using Cancellable = Wrapper<int, true>` is the specialization its
+    // arguments fit; a bare `Wrapper` does not say which one, so a member
+    // only one specialization declares is that one's, `INFERRED`; a
+    // deduction guide declares no function
+    let got = calls_conf("cppspec", &[
+        ("include/wrap.h", "namespace shop {\ntemplate <typename T, bool cancellable = false>\nclass Wrapper;\ntemplate <typename T>\nclass Wrapper<T, false> {\n  public:\n    bool valid() const { return true; }\n    int wait() { return 0; }\n};\ntemplate <typename T>\nclass Wrapper<T, true> : public Wrapper<T, false> {\n  public:\n    int cancel() { return 0; }\n    int wait() { return 1; }\n};\ntemplate <typename T>\nWrapper(T&&, bool) -> Wrapper<T, true>;\n}\n"),
+        ("include/other.h", "struct Other {\n    int cancel() { return 0; }\n};\n"),
+        ("include/conn.h", "struct conn {\n    int fd;\n};\ntypedef struct conn conn_t;\nint close_conn(conn_t* c);\n"),
+        ("test/use.cpp", "#include \"../include/wrap.h\"\n#include \"../include/other.h\"\nusing namespace shop;\nusing Cancellable = Wrapper<int, true>;\nusing Plain = Wrapper<int, false>;\nvoid exact() {\n    Cancellable c{1, true};\n    c.cancel();\n    c.wait();\n    Plain p{1};\n    p.wait();\n}\nvoid bare() {\n    Wrapper w{1, true};\n    w.cancel();\n    w.wait();\n}\n"),
+    ]);
+    let edge = |from: &str, to: &str| {
+        got.iter().find(|(f, t, _)| f == from && t == to).map(|(_, _, c)| c.as_str())
+    };
+    assert_eq!(
+        edge("exact()", "include_wrap_wrapper_t_true_cancel"),
+        Some("EXTRACTED"),
+        "{got:#?}"
+    );
+    assert_eq!(edge("exact()", "include_wrap_wrapper_t_true_wait"), Some("EXTRACTED"), "{got:#?}");
+    assert_eq!(edge("exact()", "include_wrap_wrapper_t_false_wait"), Some("EXTRACTED"), "{got:#?}");
+    assert_eq!(edge("exact()", "include_other_other_cancel"), None, "{got:#?}");
+    // the bare name: `cancel` is one specialization's only
+    assert_eq!(edge("bare()", "include_wrap_wrapper_t_true_cancel"), Some("INFERRED"), "{got:#?}");
+    // `wait` both declare: which one is not known, so no edge names one
+    assert_eq!(edge("bare()", "include_wrap_wrapper_t_false_wait"), None, "{got:#?}");
+    assert_eq!(edge("bare()", "include_wrap_wrapper_t_true_wait"), None, "{got:#?}");
+    // the guide is no function, and no call of it is made
+    assert!(!got.iter().any(|(_, t, _)| t == "include_wrap_wrapper"), "{got:#?}");
+}

@@ -499,6 +499,7 @@ pub fn walk_defs(m: &dyn LanguageModule, root: Node, src: &[u8]) -> Vec<Def> {
                     value_path: None,
                     declared_type: None,
                     written_head: None,
+                    alias_args: Vec::new(),
                     wraps: None,
                     keyed: false,
                     key: None,
