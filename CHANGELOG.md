@@ -259,6 +259,29 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- Native engine 0.5.27, the small cases the diagnostics left. On the 31
+  audit repositories: 264 calls (183 `EXTRACTED`) and 302 reads and writes
+  gained, 252 calls gone (227 of them kotlinpoet's, moved to another
+  overload).
+  - **Swift implicit members are typed by more places**: a property's
+    initializing closure, a memberwise initializer's label, a library
+    type's static member a project extension adds, and the `headers`
+    extensions add to `URLRequest` (alamofire: 30 calls, the untyped ones
+    from 39 to 7).
+  - **Lombok accessors read and write their fields** (`filter.getTags()` on
+    a `@Data` class; quarkus-realworld: 301 reads and writes).
+  - **Laravel's `auth()->user()` is the class that extends
+    `Authenticatable`** (`INFERRED`).
+  - **A Rust `Err(e)` binds an untyped local**, and a star-imported module
+    passes on what its `pub use` names (actix-realworld: 18 calls of
+    `e.error_response()`, `INFERRED`).
+  - **An enum case is a value of its enum**: kotlinpoet's
+    `addModifiers(KModifier.EXTERNAL)` goes to the `vararg` overload.
+  - **A project type named like a language one is the project's** (`enum
+    Type`): retrofit's `new PhoneNumber(…, Type.MOBILE)` keeps its
+    constructor.
+  - **A guess by name never takes Rust's or C++'s own method names**
+    (`lock`, `c_str`): 22 wrong `INFERRED` calls gone.
 - Native engine 0.5.26, two more kinds of library names in the
   diagnostics (graph.json is unchanged): a capital head that names nothing
   of the project and no local (`Date.now()`, `Assert.NotNull(…)`), and the

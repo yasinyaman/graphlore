@@ -1765,11 +1765,17 @@ fn held_by_pattern(
         (c.kind() == "identifier").then(|| text(c, src)).filter(|n| n != "_")
     };
     let variant = text(ty, src);
+    // a name the pattern binds whose type the walk cannot tell (`Err(e)`,
+    // `Some(x)` of something unnamed) is still a local: it hides the outer
+    // names, and a distinctive method name may say what it is
+    let untyped = |binds: &[Node]| -> Vec<(String, Vec<String>, bool)> {
+        binds.iter().filter_map(|c| name_of(*c)).map(|n| (n, Vec::new(), false)).collect()
+    };
     match variant.as_str() {
         "Some" | "Ok" => {
-            let (Some(value), [one]) = (value, binds.as_slice()) else { return Vec::new() };
+            let (Some(value), [one]) = (value, binds.as_slice()) else { return untyped(&binds) };
             if value.first().is_some_and(|h| h == UNKNOWN) {
-                return Vec::new();
+                return untyped(&binds);
             }
             let mut path = value.to_vec();
             path.push(OPENED.into());
@@ -1779,7 +1785,7 @@ fn held_by_pattern(
                 .map(|n| vec![(n, path, false)])
                 .unwrap_or_default()
         }
-        "Err" | "None" => Vec::new(),
+        "Err" | "None" => untyped(&binds),
         _ => {
             let Some(of) = path_of(ty, src) else { return Vec::new() };
             binds
@@ -2078,6 +2084,7 @@ pub fn import(n: Node, form: ImportForm, module: impl Into<String>) -> ImportFac
         runs: Runs::ModuleLevel,
         is_static: false,
         system: false,
+        public: false,
         byte: n.start_byte(),
     }
 }
