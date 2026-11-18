@@ -247,6 +247,22 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- Native engine 0.5.9, what a declaration's type arguments bind. On the 31
+  audit repositories 19 more edges, none gone, and 12 of retrofit's calls
+  that were guesses by name are `EXTRACTED`:
+  - **`Response<Contact> r` makes `Response`'s `T` a `Contact`**: `r.body()`
+    with `fun body(): T`, `r.value` with `T value`, an element of `r.all()`
+    with `List<T> all()` and a constructor's `val item: T` are `Contact`s.
+    A result written with the class's own parameter passes it on:
+    `call.execute().body().getName()` on a `Call<Contact>` reaches
+    `Contact.getName` through `Response<T> execute()`. Locals, parameters,
+    fields and declared results all carry their type arguments (`targs`).
+  - **A parameter's own declaration** is read for what it holds, whether it
+    is a map and its type arguments (`Optional<User> u`, `Map<K, V> m`):
+    parameters missed what 0.5.7 and 0.5.8 read for other locals.
+  - **A method of a generic Rust impl or C++ template** (`impl<T>
+    Holder<T>`, `CurlContainer<T>::Add`) finds its type; the owner was
+    looked up with its type parameters in the name.
 - Native engine 0.5.8, maps and pairs. On the 31 audit repositories 10 edges
   change, most to the definition the call is of:
   - **A map's values.** `Map<K, V>`, `HashMap`, `Dictionary`, `dict[K, V]`,

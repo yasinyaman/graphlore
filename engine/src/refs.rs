@@ -1377,6 +1377,7 @@ fn bind_closure_params(closures: &[ClosureScope], refs: &mut [RefFact], locals: 
                 value_args: Vec::new(),
                 sealed: false,
                 keyed: false,
+                targs: Vec::new(),
                 from_def: None,
                 byte: *start,
             });
@@ -1457,6 +1458,25 @@ fn closure_params(n: Node, src: &[u8]) -> Vec<Param> {
     }
     out.sort_by_key(|(byte, _)| *byte);
     out.into_iter().map(|(_, param)| param).collect()
+}
+
+/// The parameter of a parameter list (or the parameter itself) that declares
+/// `name`.
+fn param_node<'t>(ps: Node<'t>, name: &str, src: &[u8]) -> Option<Node<'t>> {
+    let mut stack = vec![(ps, 0)];
+    while let Some((n, depth)) = stack.pop() {
+        let k = n.kind();
+        if k.contains("parameter") && !k.ends_with("parameters") && !k.ends_with("_list") {
+            if locals_of(n, src, true).iter().any(|(x, ..)| x == name) {
+                return Some(n);
+            }
+            continue;
+        }
+        if depth < 3 {
+            stack.extend(kids(n).into_iter().map(|c| (c, depth + 1)));
+        }
+    }
+    None
 }
 
 fn locals_of(n: Node, src: &[u8], in_params: bool) -> Vec<(String, Vec<String>, bool, bool)> {
@@ -1790,6 +1810,8 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
             if facts.defs[di].kind.is_class_like() {
                 let name = facts.defs[di].name.clone();
                 facts.defs[di].self_params = self_params(n, src, &name);
+                // `class Response<T>`: what a declaration's type arguments bind
+                facts.defs[di].type_params = type_params(n, src);
                 // Kotlin `class Name(val a: A, b: B = …)`: the primary
                 // constructor's parameters are the class's
                 if let Some(pc) = kids(n).into_iter().find(|c| c.kind() == "primary_constructor") {
@@ -1802,6 +1824,7 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
                 facts.defs[di].type_params = type_params(n, src);
                 facts.defs[di].elem = return_elem(n, src);
                 facts.defs[di].keyed = return_keyed(n, src);
+                facts.defs[di].targs = return_targs(n, src);
                 if let Some((inner, sealed)) = return_wraps(n, src) {
                     facts.defs[di].wraps = Some(inner);
                     facts.defs[di].sealed = sealed;
@@ -1873,6 +1896,7 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
                                         value_args: Vec::new(),
                                         sealed: false,
                                         keyed: false,
+                                        targs: Vec::new(),
                                         from_def: Some(di),
                                         byte: c.start_byte(),
                                     });
@@ -1907,6 +1931,7 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
                                         value_args: Vec::new(),
                                         sealed: false,
                                         keyed: false,
+                                        targs: Vec::new(),
                                         from_def: Some(di),
                                         byte: c.start_byte(),
                                     });
@@ -1917,7 +1942,13 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
                         }
                     }
                     for (name, path, declared, field) in found {
+                        // what its own declaration writes (`Optional<User> u`,
+                        // `Map<K, V> m`, `Call<Contact> call`)
+                        let own = declared.then(|| param_node(ps, &name, src)).flatten();
                         locals.push(Local {
+                            sealed: own.is_some_and(|c| written_sealed(c, src)),
+                            keyed: own.is_some_and(|c| written_keyed(c, src)),
+                            targs: own.map(|c| written_targs(c, src)).unwrap_or_default(),
                             name,
                             path,
                             declared,
@@ -1926,8 +1957,6 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
                             given: None,
                             elem: None,
                             value_args: Vec::new(),
-                            sealed: false,
-                            keyed: false,
                             from_def: Some(di),
                             byte: ps.start_byte(),
                         });
@@ -1958,7 +1987,11 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
                                 st.extend(kids(x));
                             }
                             for (name, path, declared, _) in found {
+                                let own = declared.then(|| param_node(x, &name, src)).flatten();
                                 locals.push(Local {
+                                    sealed: own.is_some_and(|c| written_sealed(c, src)),
+                                    keyed: own.is_some_and(|c| written_keyed(c, src)),
+                                    targs: own.map(|c| written_targs(c, src)).unwrap_or_default(),
                                     name,
                                     path,
                                     declared,
@@ -1967,8 +2000,6 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
                                     given: None,
                                     elem: None,
                                     value_args: Vec::new(),
-                                    sealed: false,
-                                    keyed: false,
                                     from_def: Some(di),
                                     byte: x.start_byte(),
                                 });
@@ -2071,6 +2102,7 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
                     value_args: Vec::new(),
                     sealed: false,
                     keyed: false,
+                    targs: Vec::new(),
                     from_def: None,
                     byte: n.start_byte(),
                 });
@@ -2117,6 +2149,7 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
                     value_args,
                     sealed: declared && written_sealed(n, src),
                     keyed: declared && written_keyed(n, src),
+                    targs: if declared { written_targs(n, src) } else { Vec::new() },
                     from_def: None,
                     byte: n.start_byte(),
                 });
@@ -2612,6 +2645,100 @@ const MAPS: &[&str] = &[
     "Record",
     "ReadonlyMap",
 ];
+
+/// The generic type a type position names, through annotations and
+/// pointers: its name and the nodes of its type arguments, in order.
+fn generic_args<'t>(t: Node<'t>, src: &[u8]) -> Option<(String, Vec<Node<'t>>)> {
+    let mut stack = vec![(t, 0)];
+    while let Some((n, depth)) = stack.pop() {
+        let args = kids(n).into_iter().find(|c| {
+            matches!(
+                c.kind(),
+                "type_arguments"
+                    | "type_argument_list"
+                    | "template_argument_list"
+                    | "type_parameter"
+            )
+        });
+        if let Some(args) = args {
+            let name = path_of(n, src).and_then(|p| p.last().cloned())?;
+            let given = kids(args).into_iter().filter(|c| !is_comment(c)).collect();
+            return Some((name, given));
+        }
+        if depth < 3
+            && matches!(
+                n.kind(),
+                "type_annotation"
+                    | "nullable_type"
+                    | "optional_type"
+                    | "type"
+                    | "pointer_type"
+                    | "reference_type"
+                    | "parenthesized_type"
+                    | "user_type"
+            )
+        {
+            stack.extend(kids(n).into_iter().map(|c| (c, depth + 1)));
+        }
+    }
+    None
+}
+
+/// The type arguments a type position writes (`Response<User>`: `[["User"]]`),
+/// unless it is a wrapper's, whose argument is the type itself.
+fn targs_of(t: Node, src: &[u8]) -> Vec<Vec<String>> {
+    match generic_args(t, src) {
+        Some((name, given)) if !is_wrapper(&name, t) => {
+            let args: Option<Vec<Vec<String>>> =
+                given.into_iter().map(|a| first_type(a, src)).collect();
+            args.unwrap_or_default()
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// The type arguments a declaration writes on what it declares.
+fn written_targs(node: Node, src: &[u8]) -> Vec<Vec<String>> {
+    let mut places = vec![node];
+    places.extend(
+        kids(node)
+            .into_iter()
+            .filter(|c| c.kind().ends_with("declaration") || c.kind().ends_with("declarator")),
+    );
+    places
+        .into_iter()
+        .map(|n| match n.child_by_field_name("type") {
+            Some(t) => targs_of(t, src),
+            None => kids(n)
+                .into_iter()
+                .find(|c| matches!(c.kind(), "user_type" | "type_annotation" | "nullable_type"))
+                .map(|t| targs_of(t, src))
+                .unwrap_or_default(),
+        })
+        .find(|a| !a.is_empty())
+        .unwrap_or_default()
+}
+
+/// The type arguments of the type a callable declares it returns.
+fn return_targs(def: Node, src: &[u8]) -> Vec<Vec<String>> {
+    let mut cursor = def.walk();
+    for (i, child) in def.children(&mut cursor).enumerate() {
+        let result = match def.field_name_for_child(i as u32) {
+            Some("return_type") | Some("returns") => true,
+            Some("result") => child.kind() != "parameter_list",
+            Some("type") => !def.kind().contains("field") && !def.kind().contains("property"),
+            Some(_) => false,
+            None => {
+                matches!(child.kind(), "user_type" | "nullable_type")
+                    && def.kind() == "function_declaration"
+            }
+        };
+        if result {
+            return targs_of(child, src);
+        }
+    }
+    Vec::new()
+}
 
 /// The type of the values of the map a type position names: `Map<K, V>`,
 /// `dict[K, V]`, Go `map[K]V`, Swift `[K: V]`.
@@ -3357,6 +3484,7 @@ fn add_extras(
             sealed: written_sealed(*node, src),
             elem: written_elem(*node, src),
             keyed: written_keyed(*node, src),
+            targs: written_targs(*node, src),
             receiver: None,
             anonymous: false,
             params: None,

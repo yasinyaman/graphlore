@@ -293,6 +293,18 @@ What the lookup takes from each language's own rules:
   the value second. The same pair beside an index gives the element
   (`xs.withIndex()`, `xs.iter().enumerate()`, `xs.enumerated()`). The key's
   type is not recorded: keys are mostly strings and numbers.
+- **What a declaration's type arguments bind.** A local, parameter, field
+  or result written with type arguments (`Response<Contact> r`, `b:
+  Crate<Owner>`, `fun execute(): Response<T>`) binds the type parameters of
+  the generic type it names (`class Response<T>`): `r.body()` with `fun
+  body(): T` is a `Contact`, and so is `r.value` with `T value`, an element
+  of `r.all()` with `List<T> all()`, and a constructor's `val item: T`. A
+  result written with the class's own parameter passes the binding on:
+  `call.execute().body().getName()` on a `Call<Contact>` reaches
+  `Contact.getName` through `Response<T> execute()`. Only a member of the
+  class the bindings are for takes them (a member a base class declares
+  does not, nor a method's own type parameter); a wrapper's argument is the
+  type itself, as before. A local typed by its value carries no bindings.
 - **Results that are type parameters.** A function that returns its own type
   parameter gives the type of the argument that binds it: `fun <T> pick(x:
   T): T` the argument's, `fun <T> head(xs: List<T>): T` its element's. A method that returns a type
@@ -549,7 +561,7 @@ file pairs). The native graph has definitions graphify folds into the one
 around them (a function nested in a method, the setter beside a getter of the
 same name); an edge from one of those is compared as an edge from the paired
 definition it belongs to, as graphify records it. On the 31 repositories of the
-[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.8,
+[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.9,
 measured 2026-11-18), as native / graphify edges and the share of graphify's
 that the native graph has too:
 
@@ -560,7 +572,7 @@ that the native graph has too:
 | TypeScript | 99.4% | 527 / 634 (83%) | 807 / 687 (98%) | 25 / 20 (100%) | 737 / 156 (88%) |
 | TSX | 99.7% | 253 / 316 (80%) | 435 / 456 (95%) | – | 42 / 4 |
 | Go | 100% | 538 / 950 (47%)² | 6,702 / 3,167 (99%) | 19 / 14 (100%) | 678 / 355 (99%) |
-| Java | 100% | 1,105 / 1,010 (100%) | 5,665 / 5,123 (85%) | 415 / 168 (94%) | 3,989 / 1,930 (98%) |
+| Java | 100% | 1,105 / 1,010 (100%) | 5,680 / 5,123 (85%) | 415 / 168 (94%) | 3,989 / 1,930 (98%) |
 | Kotlin | 99.4% | 368 / 333 (95%) | 4,682 / 2,108 (71%) | 96 / 56 (93%) | 1,087 / 673 (91%) |
 | Scala | 100% | 2 / 0 | 46 / 20 (45%) | 21 / 22 (95%) | 75 / 32 (100%) |
 | C# | 92.7% | 347 / 280 (30%)³ | 2,787 / 2,450 (93%) | 87 / 86 (98%) | 1,259 / 806 (99%) |
@@ -571,9 +583,9 @@ that the native graph has too:
 | C/C++ headers | 90.6% | 164 / 172 (95%) | 361 / 348 (85%) | 11 / 12 (92%) | 515 / 289 (87%) |
 | Ruby | 99.7% | 42 / 0 | 445 / 375 (70%) | 46 / 15 (93%) | 28 / 0 |
 | PHP | 80.6% | 429 / 505 (84%) | 8,870 / 6,140 (90%) | 65 / 60 (98%) | 648 / 213 (95%) |
-| **All** | **94.4%** | **4,961 / 5,565 (75%)** | **43,574 / 27,832 (84%)** | **1,132 / 726 (97%)** | **12,412 / 6,775 (89%)** |
+| **All** | **94.4%** | **4,961 / 5,565 (75%)** | **43,589 / 27,832 (84%)** | **1,132 / 726 (97%)** | **12,412 / 6,775 (89%)** |
 
-Of the native calls, 12,727 (29%) are `INFERRED`, against 47% of graphify's.
+Of the native calls, 12,715 (29%) are `INFERRED`, against 47% of graphify's.
 That share was 20% before engine 0.5.5: a call of an overloaded name that the
 arguments do not decide used to be an `EXTRACTED` edge to the first overload,
 and is now an `INFERRED` edge to each overload that fits (999 calls, with
@@ -616,6 +628,14 @@ two edges of got are gone that named a function defined in another loop
 for a destructured loop variable of the same name. The maps of these
 repositories that hold project types are mostly looked up by key once, or
 not walked at all.
+Engine 0.5.9 (type arguments) adds 19 edges and drops none, and 12 of
+retrofit's calls that were guesses by name are now `EXTRACTED`: retrofit's
+tests take a `Response<T>` or `Result<T>` out of a recording observer
+(`observer.takeValue().code()`, `result.response()`), and its samples call
+a service through a `BehaviorDelegate<T>`. A method of a generic Rust impl
+or C++ template (`impl<T> Holder<T>`, `CurlContainer<T>::Add`) now finds
+its type (the owner was looked up with its parameters in the name): three
+more reads and writes of a field in cpr.
 Reading a sample of each side's edges the other lacks, per language:
 
 - **What only graphify has** is mostly its own guesses and artefacts.
@@ -678,8 +698,8 @@ builds take 13.3 s for the 31 repositories against graphify's 81.3 s
 faster of two clean builds each): 8.7 times faster at the median, from 2.1
 (todoapi, whose bundled JavaScript the native engine reads in full) to 17.2
 times; retrofit 2.9 s against 13.1 s, guzzle 0.9 s / 6.1 s, alamofire 1.2 s /
-5.4 s, got 0.9 s / 4.7 s (engine 0.5.1; with all that 0.5.8 resolves the same
-31 builds take 16.8 to 17.8 s, retrofit 3.7 to 4.1 s). An update after a one-file change takes a third of
+5.4 s, got 0.9 s / 4.7 s (engine 0.5.1; with all that 0.5.9 resolves the same
+31 builds take 16.3 to 18.4 s, retrofit 3.7 to 4.1 s). An update after a one-file change takes a third of
 a build ([above](#incremental-updates)).
 
 ### The polyglot audit on native graphs
@@ -725,7 +745,7 @@ but one convention finding, fixed since: `graphlore_surprises(limit=0)` cut its
 `shared_state` list without saying how much (`shared_state_left_out` does now).
 `SKELETON-EMPTY` went from 5 to 0, and the tool time stayed at 131 s.
 
-Rerun on graphs built by engine 0.5.3, and again by 0.5.4 through 0.5.8
+Rerun on graphs built by engine 0.5.3, and again by 0.5.4 through 0.5.9
 (2026-11-18), the audit raises nothing on the native graphs but its
 `GRAPH-ORPHAN-NODES` note on 19 of them; 115 to 154 s of tool time (on the 0.5.7 run, retrofit's build through `graphlore_build` took 5.1 s and was reported `SLOW` for crossing 5 s). What the table above still listed is
 gone:

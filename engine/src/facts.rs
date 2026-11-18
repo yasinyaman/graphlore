@@ -177,6 +177,11 @@ pub struct Def {
     /// gives entries (or keys), not values.
     #[serde(default)]
     pub keyed: bool,
+    /// The type arguments written on a field's declared type, or on the type a
+    /// callable declares it returns (`Response<User>`: `[["User"]]`); a type
+    /// parameter of the class around is written as its name.
+    #[serde(default)]
+    pub targs: Vec<Vec<String>>,
     /// The type a variable, field or constant is declared with, as written.
     #[serde(default)]
     pub declared_type: Option<Vec<String>>,
@@ -326,6 +331,10 @@ pub struct Local {
     /// Declared as a map (`elem` is its values' type; see `Def::keyed`).
     #[serde(default)]
     pub keyed: bool,
+    /// The type arguments its declared type is written with (see
+    /// `Def::targs`): what the class's type parameters stand for here.
+    #[serde(default)]
+    pub targs: Vec<Vec<String>>,
     /// The arguments of the call the value is, as far as the site shows
     /// (at most 4): what binds a type parameter the function returns.
     #[serde(default)]
