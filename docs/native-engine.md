@@ -166,6 +166,24 @@ What the lookup takes from each language's own rules:
   to what it wraps: that the project has one `evaluate` says the caller is
   it, not the callee. A typed receiver, `self` and a tie between overloads
   are not guesses and keep their edge.
+- **The type a declaration writes comes first.** A variable, field or
+  property declared with a type is of that type whatever it is assigned:
+  Go `var rooms *Manager` set in an `init`, Kotlin `val kind: Kind =
+  builder.kind`, C++ `static HttpServer* server = new HttpServer();`. What
+  it is assigned types it only where no type is written (`INFERRED`).
+- **The overload a chain asks for.** A call in the middle of a chain writes
+  no arguments the walk keeps, so of several callables of one name
+  (`Result.response()` beside the static `response(Response)`) the one
+  whose result has the member asked next is followed, when exactly one
+  has it (`INFERRED`: the chain chose, not the arguments).
+- **A field before a function of its name**, when a member is asked of it
+  and it is not called: Kotlin `constructor(builder: Builder, tags: TagMap
+  = builder.buildTagMap())` beside a companion's `fun builder(…)`, Swift
+  `eventMonitor?.request(…)` beside `func eventMonitor(…)`.
+- **C# names are looked up in every namespace around the file's**:
+  `Users.UserHelpers.Create()` from `App.Features.Articles` is
+  `App.Features.Users.UserHelpers`, and a base written `:
+  Interceptors.Interceptor` is the project's class.
 - **Names bound with a type the source states.** A loop variable written
   with its type (Java `for (Pet pet : pets)`, C# `foreach (Pet pet in
   pets)`) and a type pattern (Java `o instanceof Pet p`, C# `o is Pet p`,
@@ -711,7 +729,7 @@ file pairs). The native graph has definitions graphify folds into the one
 around them (a function nested in a method, the setter beside a getter of the
 same name); an edge from one of those is compared as an edge from the paired
 definition it belongs to, as graphify records it. On the 31 repositories of the
-[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.21,
+[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.22,
 measured 2026-11-18), as native / graphify edges and the share of graphify's
 that the native graph has too:
 
@@ -721,21 +739,21 @@ that the native graph has too:
 | JavaScript | 93.5%⁵ | 190 / 305 (59%) | 1,341 / 2,058 (43%)¹ | 1 / 1 | 3 / 0 |
 | TypeScript | 99.4% | 527 / 634 (83%) | 805 / 687 (98%) | 25 / 20 (100%) | 737 / 156 (88%) |
 | TSX | 99.7% | 253 / 316 (80%) | 435 / 456 (95%) | – | 42 / 4 |
-| Go | 100% | 538 / 950 (47%)² | 6,713 / 3,167 (99%) | 19 / 14 (100%) | 678 / 355 (99%) |
-| Java | 100% | 1,105 / 1,010 (100%) | 5,694 / 5,123 (85%) | 415 / 168 (94%) | 3,989 / 1,930 (98%) |
-| Kotlin | 99.4% | 368 / 333 (95%) | 4,699 / 2,108 (70%) | 96 / 56 (93%) | 1,079 / 673 (91%) |
+| Go | 100% | 538 / 950 (47%)² | 6,723 / 3,167 (99%) | 19 / 14 (100%) | 679 / 355 (99%) |
+| Java | 100% | 1,105 / 1,010 (100%) | 5,718 / 5,123 (85%) | 415 / 168 (94%) | 3,989 / 1,930 (98%) |
+| Kotlin | 99.4% | 368 / 333 (95%) | 4,783 / 2,108 (71%) | 96 / 56 (93%) | 1,079 / 673 (91%) |
 | Scala | 100% | 2 / 0 | 46 / 20 (45%) | 21 / 22 (95%) | 75 / 32 (100%) |
-| C# | 92.7% | 347 / 280 (30%)³ | 2,798 / 2,450 (94%) | 87 / 86 (98%) | 1,217 / 806 (99%) |
+| C# | 92.7% | 347 / 280 (30%)³ | 2,808 / 2,450 (94%) | 87 / 86 (98%) | 1,223 / 806 (99%) |
 | Rust | 93.3% | 314 / 370 (75%) | 2,011 / 853 (86%) | 53 / 41 (93%) | 1,245 / 895 (81%) |
-| Swift | 95.9% | 166 / 166 (–)³ | 5,440 / 2,141 (82%) | 190 / 164 (100%) | 1,091 / 580 (62%) |
+| Swift | 95.9% | 166 / 166 (–)³ | 5,467 / 2,141 (83%) | 190 / 164 (100%) | 1,091 / 580 (62%) |
 | C | 100% | 89 / 77 (99%) | 864 / 791 (100%) | – | 253 / 130 (97%) |
-| C++ | 97.8% | 215 / 228 (93%) | 631 / 281 (33%)⁴ | 30 / 5 (100%) | 326 / 218 (88%) |
+| C++ | 97.8% | 215 / 228 (93%) | 653 / 281 (33%)⁴ | 30 / 5 (100%) | 326 / 218 (88%) |
 | C/C++ headers | 90.6% | 164 / 172 (95%) | 359 / 348 (85%) | 11 / 12 (92%) | 515 / 289 (87%) |
 | Ruby | 99.7% | 42 / 0 | 442 / 375 (69%) | 46 / 15 (93%) | 28 / 0 |
 | PHP | 80.6% | 429 / 505 (84%) | 8,870 / 6,140 (90%) | 65 / 60 (98%) | 648 / 213 (95%) |
-| **All** | **94.4%** | **4,961 / 5,565 (75%)** | **44,110 / 27,832 (85%)** | **1,132 / 726 (97%)** | **12,365 / 6,775 (89%)** |
+| **All** | **94.4%** | **4,961 / 5,565 (75%)** | **44,287 / 27,832 (85%)** | **1,132 / 726 (97%)** | **12,372 / 6,775 (89%)** |
 
-Of the native calls, 13,016 (30%) are `INFERRED`, against 47% of graphify's.
+Of the native calls, 12,596 (28%) are `INFERRED`, against 47% of graphify's.
 That share was 20% before engine 0.5.5: a call of an overloaded name that the
 arguments do not decide used to be an `EXTRACTED` edge to the first overload,
 and is now an `INFERRED` edge to each overload that fits (999 calls, with
@@ -778,6 +796,28 @@ two edges of got are gone that named a function defined in another loop
 for a destructured loop variable of the same name. The maps of these
 repositories that hold project types are mostly looked up by key once, or
 not walked at all.
+Engine 0.5.22 (the type a declaration writes, the overload a chain asks
+for, a field before a function of its name, C# namespaces around) adds
+249 calls (142 `EXTRACTED`) and 150 reads and writes, turns 513 calls from
+`INFERRED` to `EXTRACTED` and takes 9 calls away. 509 of the 513 are
+cpr's: its test files declare `static HttpServer* server = new
+HttpServer();`, and a call like `server->GetBaseUrl()` was typed by what
+the variable is assigned, a guess; its declaration says it, and C++'s `INFERRED` calls
+fall from 692 to 189. The same reading types Go's package variables (`var
+roomManager *Manager`) and Kotlin's properties (`val kind: Kind =
+builder.kind`); kotlinpoet gets 75 new calls from that and from its
+constructor parameters. retrofit gets 46 calls, most through
+`result.response().isSuccessful()`: `Result` has a static `response(Response)`
+beside `response()`, and the walk followed the first; alamofire 51, 48 of
+them `eventMonitor?.request(self, didSuspendTask: task)`, where a method
+`eventMonitor(…)` hid the property. The 9 gone are kotlinpoet's and were
+ties: `WildcardTypeName.producerOf(ANY.copy(nullable = true))` was linked to
+three overloads, and now that `ANY` is a `ClassName` by its declaration two
+of them cannot take it; `FunSpec.builder("foo").contextReceivers(genericType)`
+goes to the `vararg` overload its interface declares, not to the one taking
+an `Iterable`. In restsharp and aspnetcore-realworld four bases written
+through a namespace (`: Interceptors.Interceptor`) are the project's class
+now, where they were an external name.
 Engine 0.5.21 (names bound with a type the source states) adds 29 calls
 (19 `EXTRACTED`) and 27 reads, uses and writes, and takes 24 edges away.
 New are the calls on a loop variable written with its type (Java `for
@@ -1029,7 +1069,7 @@ implicit members since 0.5.17: 39 whose place gives no type are rows now
 closure parameters and variables of express's tests. What is left at file
 level there is `app.use` and `app.set` (842 rows of express), names too
 short and too common to guess by. Engine 0.5.19 takes 123 more off (6,362;
-C# 349 from 470; 6,360 with 0.5.20, 6,348 with 0.5.21). Most of what C# has left is not the project's: `Assert.
+C# 349 from 470; 6,360 with 0.5.20, 6,348 with 0.5.21, 6,285 with 0.5.22). Most of what C# has left is not the project's: `Assert.
 NotNull` beside its own `Ensure.NotNull` (77), `WireMockServer.Start` (23).
 
 ### The polyglot audit on native graphs
@@ -1075,7 +1115,7 @@ but one convention finding, fixed since: `graphlore_surprises(limit=0)` cut its
 `shared_state` list without saying how much (`shared_state_left_out` does now).
 `SKELETON-EMPTY` went from 5 to 0, and the tool time stayed at 131 s.
 
-Rerun on graphs built by engine 0.5.3, and again by 0.5.4 through 0.5.20
+Rerun on graphs built by engine 0.5.3, and again by 0.5.4 through 0.5.21
 (2026-11-18), the audit raises nothing on the native graphs but its
 `GRAPH-ORPHAN-NODES` note on 19 of them; 115 to 159 s of tool time (on the 0.5.7 run, retrofit's build through `graphlore_build` took 5.1 s and was reported `SLOW` for crossing 5 s). What the table above still listed is
 gone:

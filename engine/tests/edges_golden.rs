@@ -1567,3 +1567,32 @@ fn names_bound_with_a_type_the_source_states() {
     let want: BTreeSet<&str> = ["zoo_cat_nap", "zoo_cat_purr"].into_iter().collect();
     assert_eq!(reached("zoo_cat_"), want, "{got:#?}");
 }
+
+#[test]
+fn types_a_declaration_writes_and_the_overload_a_chain_asks_for() {
+    // a Go package variable and a Kotlin property are what their declaration
+    // writes, whatever they are assigned; a Kotlin constructor parameter with
+    // no `val` is the parameter in the class header, not the function of its
+    // name; of two `reply`s the one whose result has what is asked next is
+    // called; and a C# name is looked up in the namespaces around the file's
+    let got = calls_conf("declaredtypes", &[
+        ("rooms.go", "package main\n\ntype Manager struct{}\n\nfunc NewRoomManager() *Manager { return &Manager{} }\n\nfunc (m *Manager) Submit(id string) {}\n\nvar roomManager *Manager\n\nfunc setup() {\n\troomManager = NewRoomManager()\n\troomManager.Submit(\"a\")\n}\n"),
+        ("Spec.kt", "package shop\n\nclass TagMap\n\nclass Kind {\n    fun implicitModifiers(): Int = 1\n}\n\nclass Builder {\n    val kind: Kind = Kind()\n    fun buildTagMap(): TagMap = TagMap()\n}\n\nclass Spec private constructor(builder: Builder, private val tagMap: TagMap = builder.buildTagMap()) {\n    val kind: Kind = builder.kind\n\n    fun emit() {\n        kind.implicitModifiers()\n    }\n\n    companion object {\n        fun builder(name: String): Builder = Builder()\n    }\n}\n"),
+        ("Result.java", "class Reply<T> {\n    boolean isSuccessful() { return true; }\n}\n\nfinal class Result<T> {\n    static <T> Result<T> reply(Reply<T> reply) { return new Result<>(); }\n\n    Reply<T> reply() { return null; }\n}\n\nclass Use {\n    void check(Result<String> result) {\n        result.reply().isSuccessful();\n    }\n}\n"),
+        ("app/features/users/UserHelpers.cs", "namespace App.Features.Users;\n\npublic static class UserHelpers {\n    public static int CreateDefaultUser(object fixture) => 1;\n}\n"),
+        ("app/features/articles/ListTests.cs", "namespace App.Features.Articles;\n\npublic class ListTests {\n    public void Run() {\n        Users.UserHelpers.CreateDefaultUser(this);\n    }\n}\n"),
+    ]);
+    let has = |from: &str, to: &str, conf: &str| {
+        got.contains(&(from.to_string(), to.to_string(), conf.to_string()))
+    };
+    assert!(has("setup()", "rooms_manager_submit", "EXTRACTED"), "{got:#?}");
+    assert!(has(".emit()", "spec_kind_implicitmodifiers", "EXTRACTED"), "{got:#?}");
+    assert!(has("Spec", "spec_builder_buildtagmap", "EXTRACTED"), "{got:#?}");
+    // (the result of the `reply` that takes no argument: a choice between
+    // overloads the chain made, so a guess)
+    assert!(has(".check()", "result_reply_issuccessful", "INFERRED"), "{got:#?}");
+    assert!(
+        has(".Run()", "app_features_users_userhelpers_userhelpers_createdefaultuser", "EXTRACTED"),
+        "{got:#?}"
+    );
+}
