@@ -2429,3 +2429,41 @@ fn kotlin_visible_extensions_class_literals_receivers_and_enum_entries() {
         "{got:#?}"
     );
 }
+
+#[test]
+fn csharp_project_usings_preprocessor_alternatives_and_visible_extensions() {
+    // An extension is seen through the project's `<Using Include>`, the SDK's
+    // implicit usings (enabled in `Directory.Build.props`), a `global using`
+    // of another file, or the project's global namespace; one in a namespace
+    // the file does not use is not. A class whose body holds an expression
+    // written per target framework (`#if NET … #else … #endif`) and a
+    // condition opened and closed under `#if` still has its members. A call
+    // on a receiver the walk cannot type is the extension of that name the
+    // file sees.
+    let got = links("csusings", &[
+        ("Directory.Build.props", "<Project>\n  <PropertyGroup>\n    <ImplicitUsings>enable</ImplicitUsings>\n  </PropertyGroup>\n</Project>\n"),
+        ("Api/Api.csproj", "<Project Sdk=\"Microsoft.NET.Sdk.Web\">\n  <ItemGroup>\n    <Using Include=\"TodoApi\" />\n  </ItemGroup>\n</Project>\n"),
+        ("Api/Program.cs", "var builder = WebApplication.CreateBuilder(args);\nbuilder.AddServiceDefaults();\nbuilder.Services.AddRateLimiting();\nbuilder.Services.AddGlobalThing();\nbuilder.Services.AddOpenApi(options => options.AddBearer());\nbuilder.Services.AddHidden();\n"),
+        ("Api/Extensions/RateLimit.cs", "namespace TodoApi;\n\npublic static class RateLimitExtensions {\n    public static IServiceCollection AddRateLimiting(this IServiceCollection services) => services;\n}\n"),
+        ("Api/Extensions/OpenApi.cs", "public static class OpenApiOptionsExtensions {\n    public static OpenApiOptions AddBearer(this OpenApiOptions options) => options;\n}\n"),
+        ("Api/Globals.cs", "global using Todo.Globals;\n"),
+        ("Api/Things/Global.cs", "namespace Todo.Globals;\n\npublic static class GlobalExtensions {\n    public static IServiceCollection AddGlobalThing(this IServiceCollection services) => services;\n}\n"),
+        ("Api/Hidden/Hidden.cs", "namespace Todo.Hidden;\n\npublic static class HiddenExtensions {\n    public static IServiceCollection AddHidden(this IServiceCollection services) => services;\n}\n"),
+        ("Defaults/Defaults.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\">\n</Project>\n"),
+        ("Defaults/Extensions.cs", "namespace Microsoft.Extensions.Hosting;\n\npublic static class Extensions {\n    public static TBuilder AddServiceDefaults<TBuilder>(this TBuilder builder) where TBuilder : IHostApplicationBuilder => builder;\n}\n"),
+        ("Lib/Lib.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\">\n</Project>\n"),
+        ("Lib/Http.cs", "namespace Lib.Ext;\n\nstatic class HttpResponseExtensions {\n    public static Exception? MaybeException(this HttpResponseMessage httpResponse, bool @throw)\n        => httpResponse.IsSuccessStatusCode || !@throw\n            ? null\n#if NET\n            : new HttpRequestException($\"failed {httpResponse.StatusCode}\", null, httpResponse.StatusCode);\n#else\n            : new HttpRequestException($\"failed {httpResponse.StatusCode}\");\n#endif\n\n    public static string ReadIt(this HttpResponseMessage response) {\n#if NET\n        if (response != null) {\n#endif\n        var x = 1;\n#if NET\n        }\n#endif\n        return \"\";\n    }\n}\n"),
+        ("Lib/Use.cs", "using Lib.Ext;\n\nnamespace Lib;\n\nclass Use {\n    void Go(System.Net.Http.HttpClient c) {\n        var r = c.GetAsync(\"x\").Result;\n        r.Content.Headers.ReadIt();\n        r.ReadIt();\n    }\n}\n"),
+    ]);
+    let to = |s: &str, t: &str| got.iter().any(|(a, r, b, _)| a == s && r == "calls" && b == t);
+    for (s, t) in [
+        ("api_program", "api_extensions_ratelimit_ratelimitextensions_addratelimiting"),
+        ("api_program", "api_things_global_globalextensions_addglobalthing"),
+        ("api_program", "api_extensions_openapi_openapioptionsextensions_addbearer"),
+        ("api_program", "defaults_extensions_extensions_addservicedefaults"),
+        ("lib_use_use_go", "lib_http_httpresponseextensions_readit"),
+    ] {
+        assert!(to(s, t), "{s} -> {t}: {got:#?}");
+    }
+    assert!(!to("api_program", "api_hidden_hidden_hiddenextensions_addhidden"), "{got:#?}");
+}

@@ -489,6 +489,31 @@ const CSHARP_CORE_METHODS: &[&str] = &[
     "Write",
     "GetBytes",
     "GetString",
+    // LINQ (`Enumerable`)
+    "All",
+    "Any",
+    "Select",
+    "SelectMany",
+    "Where",
+    "First",
+    "FirstOrDefault",
+    "Single",
+    "SingleOrDefault",
+    "Last",
+    "LastOrDefault",
+    "Count",
+    "Sum",
+    "OrderBy",
+    "OrderByDescending",
+    "GroupBy",
+    "ToList",
+    "ToArray",
+    "ToDictionary",
+    "Distinct",
+    "Skip",
+    "Take",
+    "Concat",
+    "Aggregate",
 ];
 
 /// Methods of Rust's standard types (`Mutex::lock`, `Clone::clone`,
@@ -2158,6 +2183,46 @@ impl<'a> Project<'a> {
         }
     }
 
+    /// C#: a member of a project type the project's own source generator
+    /// writes (`client.Options.EncodeQuery` of a `ReadOnlyRestClientOptions`
+    /// made from `[GenerateImmutable] RestClientOptions`): the type answers no
+    /// such member in the source, the project has an `ISourceGenerator` /
+    /// `IIncrementalGenerator`, and a type whose name the receiver's contains
+    /// declares the member.
+    fn generated_member(&self, f: usize, d: Option<usize>, path: &[String]) -> bool {
+        let Some((name, prefix)) = path.split_last() else { return false };
+        if prefix.is_empty() || !self.has_source_generator() {
+            return false;
+        }
+        let Some(_guard) = DepthGuard::enter(&LIBRARY_DEPTH, 2) else { return false };
+        let Some(t) = self.type_of_path(f, d, prefix, false) else { return false };
+        let tname = self.def(t).name.clone();
+        if self.answers(t, name, true, 4) {
+            return false;
+        }
+        self.by_name.get(name.as_str()).into_iter().flatten().any(|m| {
+            let owner = self.def(*m).parent.map(|p| (m.0, p));
+            owner.is_some_and(|o| {
+                let oname = &self.def(o).name;
+                o != t && oname.len() < tname.len() && tname.contains(oname.as_str())
+            })
+        })
+    }
+
+    /// Whether the project has a C# source generator (a class implementing
+    /// `ISourceGenerator` or `IIncrementalGenerator`).
+    fn has_source_generator(&self) -> bool {
+        self.files.iter().any(|g| {
+            g.lang == Some(crate::lang::Lang::CSharp)
+                && g.refs.iter().any(|r| {
+                    matches!(r.kind, RefKind::Inherits | RefKind::Implements | RefKind::Base)
+                        && r.path.last().is_some_and(|n| {
+                            n == "ISourceGenerator" || n == "IIncrementalGenerator"
+                        })
+                })
+        })
+    }
+
     /// Kotlin: a member a compiler plugin adds to an annotated class, called on
     /// the class (`UserResponse.serializer()` of a `@Serializable` one,
     /// kotlinx.serialization).
@@ -3372,6 +3437,14 @@ impl<'a> Project<'a> {
                 if matches!(self.resolve_name(f, scope(x), head), Some(Target::Ext(_, _))) {
                     return true;
                 }
+                // (C# `string value`, `int n`: the language's own types)
+                if l.declared
+                    && self.family[f] == Some(Family::CSharp)
+                    && l.path.len() == 1
+                    && CSHARP_PREDEFINED.contains(&l.path[0].as_str())
+                {
+                    return true;
+                }
                 // (Kotlin `String::class`: a `KClass`, imported or not)
                 if l.declared
                     && l.name.starts_with(crate::refs::CAST)
@@ -3453,7 +3526,8 @@ impl<'a> Project<'a> {
         path: &[String],
         bases: bool,
     ) -> Option<(Target, Confidence)> {
-        if self.files[f].lang != Some(crate::lang::Lang::Kotlin)
+        let lang = self.files[f].lang;
+        if !matches!(lang, Some(crate::lang::Lang::Kotlin | crate::lang::Lang::CSharp))
             || bases
             || !*self.calling.borrow()
             || *self.types_only.borrow()
@@ -3462,7 +3536,25 @@ impl<'a> Project<'a> {
             return None;
         }
         let name = path.last()?;
-        if name.starts_with('[') || name == "()" || KOTLIN_CORE_METHODS.contains(&name.as_str()) {
+        let core = if lang == Some(crate::lang::Lang::CSharp) {
+            CSHARP_CORE_METHODS
+        } else {
+            KOTLIN_CORE_METHODS
+        };
+        if name.starts_with('[') || name == "()" || core.contains(&name.as_str()) {
+            return None;
+        }
+        // (a capital head that names nothing of the project is a library's
+        // type, and the call its static member: `HttpUtility.UrlEncode(x)`,
+        // never `string.UrlEncode` of the project)
+        // (only the call made on the type itself: `Class.forName(…).kotlin
+        // .toFileSpec()` calls it on what the chain gives)
+        let head = path[0].as_str();
+        if path.len() == 2
+            && head.chars().next().is_some_and(char::is_uppercase)
+            && !self.is_local_name(f, d, head)
+            && self.resolve_name(f, d, head).is_none()
+        {
             return None;
         }
         let _guard = DepthGuard::enter(&LIBRARY_DEPTH, 1)?;
@@ -3531,13 +3623,29 @@ impl<'a> Project<'a> {
     /// whose head is no package or name of the project (`okhttp3.Response`).
     fn java_library_type(&self, g: usize, scope: Option<usize>, ty: &[String]) -> bool {
         let kotlin = self.files[g].lang == Some(crate::lang::Lang::Kotlin);
-        if !(kotlin || self.files[g].lang == Some(crate::lang::Lang::Java)) || ty.is_empty() {
+        let csharp = self.files[g].lang == Some(crate::lang::Lang::CSharp);
+        if !(kotlin || csharp || self.files[g].lang == Some(crate::lang::Lang::Java))
+            || ty.is_empty()
+        {
             return false;
         }
-        match self.resolve_path(g, scope, ty, true) {
+        if csharp && ty.len() == 1 && CSHARP_PREDEFINED.contains(&ty[0].as_str()) {
+            return true;
+        }
+        // (a type written, resolved as one: a local of the type's name is no
+        // value here, and resolving it as one comes back to the locals)
+        let Some(_guard) = DepthGuard::enter(&LIBRARY_DEPTH, 3) else { return false };
+        let types = self.types_only.replace(true);
+        let held = self.resolve_path(g, scope, ty, true);
+        *self.types_only.borrow_mut() = types;
+        match held {
             Some((Target::Ext(..), _)) => return true,
             Some(_) => return false,
             None => {}
+        }
+        // (C#: a namespace or type no import names is nothing to go by)
+        if csharp {
+            return false;
         }
         let head = ty[0].as_str();
         match self.resolve_name(g, scope, head) {
@@ -3561,8 +3669,10 @@ impl<'a> Project<'a> {
     /// a `String`, `server.takeRequest()` of a `MockWebServer`).
     fn java_library_receiver(&self, f: usize, d: Option<usize>, path: &[String]) -> bool {
         let lang = self.files[f].lang;
-        if !matches!(lang, Some(crate::lang::Lang::Java | crate::lang::Lang::Kotlin))
-            || path.len() < 2
+        if !matches!(
+            lang,
+            Some(crate::lang::Lang::Java | crate::lang::Lang::Kotlin | crate::lang::Lang::CSharp)
+        ) || path.len() < 2
         {
             return false;
         }
@@ -4136,6 +4246,40 @@ impl<'a> Project<'a> {
                 }
             }
             s.modules.push(res);
+        }
+        // C#: the namespaces the project makes every file see (its manifest's
+        // `<Using>` items, the SDK's implicit usings, `global using`), as
+        // `using`s of the file's own; no import edge is written for them
+        if fam == Family::CSharp {
+            let own: Vec<&str> = self.files[f].imports.iter().map(|i| i.module.as_str()).collect();
+            for ns in self.modsys.cs_usings(&self.files[f].path) {
+                if own.contains(&ns.as_str()) {
+                    continue;
+                }
+                let mut imp = self.files[f].imports.first().cloned().unwrap_or_else(|| {
+                    crate::facts::ImportFact {
+                        line: 0,
+                        form: ImportForm::Wildcard,
+                        module: String::new(),
+                        names: Vec::new(),
+                        alias: None,
+                        runs: crate::facts::Runs::ModuleLevel,
+                        is_static: false,
+                        system: false,
+                        public: false,
+                        global: false,
+                        byte: 0,
+                    }
+                });
+                imp.form = ImportForm::Wildcard;
+                imp.module = ns;
+                imp.alias = None;
+                imp.is_static = false;
+                imp.names.clear();
+                if let ModRes::Target(t) = modules::resolve_import(self, fam, f, &imp) {
+                    s.stars.push((t, usize::MAX));
+                }
+            }
         }
         s
     }
@@ -5135,6 +5279,9 @@ impl<'a> Project<'a> {
                 // after it: on through what the extension gives
                 // (`String::class.asClassName().constructorReference()`)
                 if rest.len() >= 3 && rest[1] == "()" && self.is_external_local(f, d, head) {
+                    // (it types what the extension returns, which can come back
+                    // here)
+                    let _guard = DepthGuard::enter(&LIBRARY_DEPTH, 2)?;
                     let on = self.local_written_type(f, d, head);
                     let calling = self.calling.replace(true);
                     let ext = self.extension_method(f, &rest[0], on.as_deref());
@@ -6796,6 +6943,27 @@ impl<'a> Project<'a> {
         } else if c.0 != f && test(c.0, cd) && !crate::community::is_test_path(&self.files[f].path)
         {
             Some("the one definition is test code, the call is not")
+        } else if matches!(fam, Family::CSharp | Family::Jvm)
+            && cd.receiver.is_some()
+            && !self.extension_visible(f, c)
+        {
+            // (C#, Kotlin: an extension is called only where its namespace is
+            // used; `req.With(…)` on MockHttp's request, `AddAuthentication()`
+            // beside another project's extension of the name)
+            Some("the one definition is an extension the caller does not see")
+        } else if fam == Family::CSharp && self.generated_member(f, d, &r.path) {
+            // (restsharp's `ReadOnlyRestClientOptions`, which its own source
+            // generator fills from `RestClientOptions`)
+            Some("the member is one a compiler plugin generates")
+        } else if matches!(fam, Family::CSharp | Family::Jvm)
+            && r.path.len() >= 3
+            && !r.path[1].starts_with(['[', '('])
+            && !self.by_name.contains_key(r.path[1].as_str())
+            && (head.contains('@') || self.is_untyped_local(f, d, head))
+        {
+            // (`c.HttpContext.GetTokenAsync()`: no type of the project has a
+            // member `HttpContext`, so what it gives is a library's)
+            Some("the receiver is a library's")
         } else if fam == Family::Jvm && self.plugin_member(f, d, &r.path) {
             // (`UserResponse.serializer()` of a `@Serializable` class)
             Some("the member is one a compiler plugin generates")
@@ -7394,6 +7562,34 @@ impl<'a> Project<'a> {
         self.extension_method(f, name, Some(written))
     }
 
+    /// Whether file `f` sees the extension `r`: its own, one in a file it
+    /// imports, in its directory or in its package, a namespace around its
+    /// own (C#), one it `using`s, or the global namespace of its project.
+    fn extension_visible(&self, f: usize, r: DefRef) -> bool {
+        let fam = self.family[f];
+        let here = dir_of(&self.files[f].path);
+        let pkg = self.files[f].package.as_deref();
+        r.0 == f
+        || self.scopes[f].imported.contains(&r.0)
+        || dir_of(&self.files[r.0].path) == here
+        || (pkg.is_some() && self.files[r.0].package.as_deref() == pkg)
+        // C#: a namespace sees what the ones around it declare
+        // (`RestSharp.Tests` sees `RestSharp`'s extensions)
+        || (fam == Some(Family::CSharp)
+        && pkg.zip(self.files[r.0].package.as_deref()).is_some_and(|(mine, its)| {
+        mine.strip_prefix(its).is_some_and(|rest| rest.starts_with('.'))
+        }))
+        || self.uses_namespace_of(f, r.0)
+        // C#: the global namespace, seen by every file of the
+        // project (`public static class OpenApiOptionsExtensions`
+        // with no namespace, called from `Program.cs`)
+        || (fam == Some(Family::CSharp)
+        && self.files[r.0].package.is_none()
+        && self.modsys.cs_project_of(&self.files[f].path).is_some_and(|p| {
+        self.modsys.cs_project_of(&self.files[r.0].path) == Some(p)
+        }))
+    }
+
     /// An extension function or method named `name` (`Def::receiver`) that
     /// file `f` can see: its own, one in a file it imports, in its directory
     /// or in its package. `on` is the receiver's type when the source writes
@@ -7411,8 +7607,6 @@ impl<'a> Project<'a> {
         if self.files[f].lang == Some(crate::lang::Lang::Java) {
             return None;
         }
-        let here = dir_of(&self.files[f].path);
-        let pkg = self.files[f].package.as_deref();
         // Rust: a method of an `impl Trait for` a type the project does not
         // define (`impl RequestExt for http::Request<()>`) extends that type
         let mut pool: Vec<DefRef> =
@@ -7426,19 +7620,7 @@ impl<'a> Project<'a> {
         let seen: Vec<DefRef> = pool
             .into_iter()
             .filter(|r| self.family[r.0] == fam && self.node_id(*r).is_some())
-            .filter(|r| {
-                r.0 == f
-                    || self.scopes[f].imported.contains(&r.0)
-                    || dir_of(&self.files[r.0].path) == here
-                    || (pkg.is_some() && self.files[r.0].package.as_deref() == pkg)
-                    // C#: a namespace sees what the ones around it declare
-                    // (`RestSharp.Tests` sees `RestSharp`'s extensions)
-                    || (fam == Some(Family::CSharp)
-                        && pkg.zip(self.files[r.0].package.as_deref()).is_some_and(|(mine, its)| {
-                            mine.strip_prefix(its).is_some_and(|rest| rest.starts_with('.'))
-                        }))
-                    || self.uses_namespace_of(f, r.0)
-            })
+            .filter(|r| self.extension_visible(f, *r))
             .collect();
         if let Some(on) = on {
             let exact: Vec<DefRef> = seen
@@ -7524,11 +7706,19 @@ impl<'a> Project<'a> {
     /// in (`using App.Extensions;`, `import app.specs.*`).
     fn uses_namespace_of(&self, f: usize, g: usize) -> bool {
         let Some(fam) = self.family[f] else { return false };
+        let in_ns = |ns: &str| {
+            self.pkg_files.get(&(fam, ns.to_string())).is_some_and(|fs| fs.contains(&g))
+                || self.files[g].package.as_deref() == Some(ns)
+        };
         self.scopes[f].stars.iter().any(|(star, _)| match star {
-            Target::Ns(ns) => {
-                self.pkg_files.get(&(fam, ns.clone())).is_some_and(|fs| fs.contains(&g))
-            }
+            Target::Ns(ns) => in_ns(ns),
             Target::Module(fs) => fs.contains(&g),
+            // (C#: `using RestSharp.Serializers;` where a file opens `namespace
+            // RestSharp.Serializers { … }` as a block, a definition of its own)
+            Target::Def(c) if self.def(*c).kind == DefKind::Namespace => {
+                let d = self.def(*c);
+                in_ns(&d.qualname) || self.fqn_of(c.0, c.1).is_some_and(|q| in_ns(&q)) || (c.0 == g)
+            }
             _ => false,
         })
     }
@@ -8882,6 +9072,12 @@ const KOTLIN_CORE_METHODS: &[&str] = &[
     "check",
     "error",
     "lazy",
+];
+
+/// C#'s predefined types (`string`, `int`, …): never a project type.
+const CSHARP_PREDEFINED: &[&str] = &[
+    "string", "int", "long", "short", "byte", "sbyte", "uint", "ulong", "ushort", "bool", "double",
+    "float", "decimal", "char", "object", "dynamic", "nint", "nuint",
 ];
 
 /// Kotlin: the types every file sees without an import (`kotlin.*`,

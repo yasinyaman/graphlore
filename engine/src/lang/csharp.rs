@@ -98,6 +98,7 @@ impl LanguageModule for CSharp {
             None => import(n, ImportForm::Wildcard, module),
         };
         f.is_static = is_static;
+        f.global = all_kids(n).iter().any(|c| c.kind() == "global");
         Some(vec![f])
     }
 

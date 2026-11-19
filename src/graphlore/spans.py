@@ -467,7 +467,7 @@ def _ts_child_name(node: Any) -> str | None:
 _PP_SPACE = b" \t\n\x0c\r"  # what Rust's `is_ascii_whitespace` strips
 
 
-def _blank_duplicate_branches(src: bytes) -> bytes:
+def _blank_duplicate_branches(src: bytes, any_balance: bool = False) -> bytes:
     """C, C++: an ``#if`` … ``#elif``/``#else`` … ``#endif`` whose every branch
     leaves the same number of braces open (not none) is one piece of code
     written once per configuration (``if (error_code) {`` under ``#if`` and
@@ -476,7 +476,13 @@ def _blank_duplicate_branches(src: bytes) -> bytes:
     source with the directive lines and every branch but the first blanked
     (each byte but a newline or carriage return a space), else ``src``.
 
-    The native engine's ``parse::blank_duplicate_branches`` is the same rule.
+    With ``any_balance`` (C#, asked only for a source that does not parse as
+    written) a group whose branches open no braces counts too: one expression
+    written per target framework (``? null`` / ``#if NET`` / ``: new X(a, b)`` /
+    ``#else`` / ``: new X(a)`` / ``#endif``).
+
+    The native engine's ``parse::blank_duplicate_branches`` and
+    ``blank_alternative_branches`` are the same rule.
     """
     if b"#" not in src:
         return src
@@ -515,13 +521,20 @@ def _blank_duplicate_branches(src: bytes) -> bytes:
                 if stack:
                     directives, branches = stack.pop()
                     first = branches[0][1]
-                    if len(branches) >= 2 and first != 0 and all(b[1] == first for b in branches):
+                    if (len(branches) >= 2 and (first != 0 or any_balance)
+                            and all(b[1] == first for b in branches)):
                         blank.extend((d, d) for d in directives)
                         blank.append((li, li))
                         for a, b in zip(directives[1:], directives[2:], strict=False):
                             blank.append((a + 1, b - 1))
                         if len(directives) >= 2:
                             blank.append((directives[-1] + 1, li - 1))
+                    elif any_balance and len(branches) == 1 and first != 0:
+                        # (C#: a lone branch that opens or closes a brace, `#if
+                        # NET` / `if (…) {` / `#endif` … `#if NET` / `}` /
+                        # `#endif`: the code it wraps, unwrapped)
+                        blank.append((directives[0], li))
+                        first = 0
                     if stack:
                         stack[-1][1][-1][1] += first
             continue
@@ -583,6 +596,14 @@ def _spans_treesitter(src: bytes, rel: str) -> list[tuple[int, int, int, str]]:
         # (C, C++: an `#if` written once per configuration is parsed once)
         parsed = _blank_duplicate_branches(src) if lang in ("c", "cpp") else src
         root = parser.parse(parsed).root_node
+        # (C#: a source that does not parse as written, again with each `#if`'s
+        # other branches blanked; kept when that parses clean)
+        if lang == "csharp" and root.has_error:
+            alt = _blank_duplicate_branches(src, any_balance=True)
+            if alt is not src:
+                alt_root = parser.parse(alt).root_node
+                if not alt_root.has_error:
+                    root = alt_root
     except Exception:
         return []
     spans: list[tuple[int, int, int, str]] = []

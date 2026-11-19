@@ -351,6 +351,9 @@ pub struct ImportFact {
     /// Rust `pub use`: what it imports, the module passes on.
     #[serde(default)]
     pub public: bool,
+    /// C# `global using X;`: every file of the project sees `X`.
+    #[serde(default)]
+    pub global: bool,
     #[serde(skip)]
     pub byte: usize,
 }

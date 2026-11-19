@@ -430,3 +430,41 @@ fn kotlin_rows_on_plugin_members_library_values_and_anonymous_bases_say_so() {
     // (`own.lonely()` resolves: no row)
     assert!(!rows.iter().any(|r| r["name"] == "lonely"), "{rows:#?}");
 }
+
+#[test]
+fn csharp_rows_on_hidden_extensions_generated_members_and_library_values_say_so() {
+    let dir = project(
+        "csmarks",
+        &[
+            ("App/App.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\">\n</Project>\n"),
+            // an extension whose namespace the caller does not use
+            ("App/Ext/With.cs", "namespace App.Ext;\n\nstatic class WithExtensions {\n    internal static T WithIt<T>(this T self) => self;\n}\n"),
+            // a source generator, the type it fills and the one it copies
+            ("App/Gen/Generator.cs", "namespace App.Gen;\n\npublic class ImmutableGenerator : IIncrementalGenerator {\n    public void Initialize(object context) { }\n}\n"),
+            ("App/Options.cs", "namespace App;\n\npublic class ClientOptions {\n    public bool EncodeQueryIt() => true;\n}\n\npublic partial class ReadOnlyClientOptions { }\n\npublic sealed record Name(string Value) {\n    public int Len => Value.SpanLength();\n}\n\npublic class Own { public void Lonely() { } }\n"),
+            ("App/Use.cs", "using RichardSzalay.MockHttp;\n\nnamespace App.Tests;\n\nclass Use {\n    void Go(ReadOnlyClientOptions options, Own own) {\n        var m = new MockHttpMessageHandler();\n        m.When(\"x\", req => req.WithIt());\n        var q = options.EncodeQueryIt();\n        m.When(\"y\", c => c.HttpContext.GetTokenIt());\n        own.Lonely();\n    }\n}\n"),
+            ("App/Lib.cs", "namespace App;\n\npublic class Tokens {\n    public string GetTokenIt() => \"\";\n    public int SpanLength() => 0;\n}\n"),
+        ],
+    );
+    let out = dir.join("unresolved.json");
+    let mut opts = BuildOptions::new(&dir);
+    opts.unresolved = Some(out.clone());
+    build_graph(&opts).unwrap();
+    let rows: Vec<Value> = serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+    let why = |name: &str| {
+        rows.iter()
+            .find(|r| r["name"] == name)
+            .map(|r| r["library_like"].clone())
+            .unwrap_or_else(|| panic!("no row {name}: {rows:#?}"))
+    };
+    assert_eq!(
+        why("WithIt"),
+        "the one definition is an extension the caller does not see",
+        "{rows:#?}"
+    );
+    assert_eq!(why("EncodeQueryIt"), "the member is one a compiler plugin generates", "{rows:#?}");
+    assert_eq!(why("GetTokenIt"), "the receiver is a library's", "{rows:#?}");
+    assert_eq!(why("SpanLength"), "the receiver is a library's", "{rows:#?}");
+    assert!(!rows.iter().any(|r| r["name"] == "Lonely"), "{rows:#?}");
+}

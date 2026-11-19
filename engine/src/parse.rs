@@ -86,7 +86,23 @@ pub fn file_facts(
     let blanked =
         matches!(lang, Lang::C | Lang::Cpp).then(|| blank_duplicate_branches(src)).flatten();
     let src = blanked.as_deref().unwrap_or(src);
-    match parse(lang, src, deadline) {
+    let parsed = parse(lang, src, deadline);
+    // C#: a source that does not parse as written, again with each `#if`'s
+    // other branches blanked; kept when that parses clean
+    let alternative = match &parsed {
+        Ok(tree) if lang == Lang::CSharp && tree.root_node().has_error() => {
+            blank_alternative_branches(src).and_then(|b| match parse(lang, &b, deadline) {
+                Ok(t) if !t.root_node().has_error() => Some((b, t)),
+                _ => None,
+            })
+        }
+        _ => None,
+    };
+    let (src, parsed): (&[u8], _) = match &alternative {
+        Some((b, t)) => (b.as_slice(), Ok(t.clone())),
+        None => (src, parsed),
+    };
+    match parsed {
         Ok(tree) => {
             let root = tree.root_node();
             let module = lang.module();
@@ -125,6 +141,19 @@ pub fn facts_for_source(rel: &str, src: &[u8], deadline: Option<Duration>) -> Fi
 /// where they were), or `None` when no group is like that. `spans.py`'s
 /// `_blank_duplicate_branches` is the same rule.
 pub fn blank_duplicate_branches(src: &[u8]) -> Option<Vec<u8>> {
+    blank_branches(src, false)
+}
+
+/// C#: an `#if` … `#else` … `#endif` whose branches leave as many braces open
+/// as each other, none included (`? null\n#if NET\n: new X(a, b)\n#else\n: new
+/// X(a)\n#endif`: one expression written per target framework), blanked to its
+/// first branch. Asked only when the source as written does not parse.
+/// `spans.py`'s `_blank_duplicate_branches(src, any_balance=True)` is the same.
+pub fn blank_alternative_branches(src: &[u8]) -> Option<Vec<u8>> {
+    blank_branches(src, true)
+}
+
+fn blank_branches(src: &[u8], any_balance: bool) -> Option<Vec<u8>> {
     // the lines, as byte ranges without their newline
     let mut lines: Vec<(usize, usize)> = Vec::new();
     let mut start = 0;
@@ -177,7 +206,7 @@ pub fn blank_duplicate_branches(src: &[u8]) -> Option<Vec<u8>> {
                     if let Some(g) = stack.pop() {
                         let first = g.branches[0].1;
                         let alike = g.branches.len() >= 2
-                            && first != 0
+                            && (first != 0 || any_balance)
                             && g.branches.iter().all(|(_, d)| *d == first);
                         if alike {
                             for &d in &g.directives {
@@ -192,6 +221,14 @@ pub fn blank_duplicate_branches(src: &[u8]) -> Option<Vec<u8>> {
                                     blank.push((last + 1, li - 1));
                                 }
                             }
+                        }
+                        // (C#: a lone branch that opens or closes a brace,
+                        // `#if NET` / `if (…) {` / `#endif` … `#if NET` / `}` /
+                        // `#endif`: the code it wraps, unwrapped)
+                        let mut first = first;
+                        if !alike && any_balance && g.branches.len() == 1 && first != 0 {
+                            blank.push((g.directives[0], li));
+                            first = 0;
                         }
                         if let Some(parent) = stack.last_mut() {
                             if let Some(b) = parent.branches.last_mut() {

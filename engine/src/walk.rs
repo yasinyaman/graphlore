@@ -103,7 +103,9 @@ pub fn discover(root: &Path, out_dir_name: &str, documents: bool, max_bytes: u64
             continue;
         };
         let base = rel.rsplit('/').next().unwrap_or(&rel);
-        if MANIFESTS.contains(&base) {
+        // (C# projects: `X.csproj`, and `Directory.Build.props` for the tree)
+        if MANIFESTS.contains(&base) || base.ends_with(".csproj") || base == "Directory.Build.props"
+        {
             result.manifests.push((rel.clone(), path.to_path_buf()));
         }
         let kind = if let Some(lang) = lang::detect(&rel, None) {

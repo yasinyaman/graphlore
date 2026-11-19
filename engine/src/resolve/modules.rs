@@ -40,9 +40,150 @@ pub struct ModuleSystems {
     /// `[dev-dependencies]`, `[target.….dependencies]`, `[dependencies.x]`),
     /// `-` as `_`: a path headed by one is a library's.
     pub(super) rs_dependencies: HashSet<String>,
+    /// C#: each project (the directory of a `.csproj`, or of a
+    /// `Directory.Build.props` for the tree under it) and the namespaces all
+    /// its files see without a `using` of their own: the manifest's `<Using
+    /// Include="…" />`, the SDK's implicit usings, and every `global using`.
+    cs_projects: Vec<CsProject>,
     // Swift: file -> module; module -> files
     swift_module: HashMap<usize, String>,
     swift_files: HashMap<String, Vec<usize>>,
+}
+
+/// A C# project manifest (`.csproj`) or a `Directory.Build.props` (`tree`):
+/// its directory, `<Using Include>` items (and, for a project, its files'
+/// `global using`s), `<ImplicitUsings>` when written, and the SDK.
+#[derive(Debug, Default, Clone)]
+pub(super) struct CsProject {
+    dir: String,
+    tree: bool,
+    usings: Vec<String>,
+    implicit: Option<bool>,
+    sdk: Option<String>,
+}
+
+impl ModuleSystems {
+    /// C#: the directory of the project (nearest `.csproj`) a file is in.
+    pub(super) fn cs_project_of(&self, path: &str) -> Option<&str> {
+        self.cs_projects.iter().find(|c| !c.tree && in_dir(path, &c.dir)).map(|c| c.dir.as_str())
+    }
+
+    /// C#: the namespaces a file sees without a `using` of its own: its
+    /// project's (the nearest `.csproj`), those of every `Directory.Build.props`
+    /// above it, and the SDK's implicit usings when either enables them.
+    pub(super) fn cs_usings(&self, path: &str) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        let mut project: Option<&CsProject> = None;
+        let mut implicit: Option<bool> = None;
+        // (the nearest first)
+        for c in self.cs_projects.iter().filter(|c| in_dir(path, &c.dir)) {
+            if !c.tree {
+                if project.is_some() {
+                    continue;
+                }
+                project = Some(c);
+            }
+            implicit = implicit.or(c.implicit);
+            for n in &c.usings {
+                if !out.contains(n) {
+                    out.push(n.clone());
+                }
+            }
+        }
+        if implicit == Some(true) {
+            let sdk = project.and_then(|c| c.sdk.as_deref()).unwrap_or("Microsoft.NET.Sdk");
+            for n in implicit_usings(sdk) {
+                if !out.iter().any(|x| x == n) {
+                    out.push(n.to_string());
+                }
+            }
+        }
+        out
+    }
+}
+
+/// Whether `path` is in directory `dir` (`""` is the root).
+fn in_dir(path: &str, dir: &str) -> bool {
+    dir.is_empty() || path.strip_prefix(dir).is_some_and(|r| r.starts_with('/'))
+}
+
+/// The implicit usings of an SDK (`<ImplicitUsings>enable`), by its name.
+fn implicit_usings(sdk: &str) -> &'static [&'static str] {
+    const BASE: &[&str] = &[
+        "System",
+        "System.Collections.Generic",
+        "System.IO",
+        "System.Linq",
+        "System.Net.Http",
+        "System.Threading",
+        "System.Threading.Tasks",
+    ];
+    const WEB: &[&str] = &[
+        "System",
+        "System.Collections.Generic",
+        "System.IO",
+        "System.Linq",
+        "System.Net.Http",
+        "System.Net.Http.Json",
+        "System.Threading",
+        "System.Threading.Tasks",
+        "Microsoft.AspNetCore.Builder",
+        "Microsoft.AspNetCore.Hosting",
+        "Microsoft.AspNetCore.Http",
+        "Microsoft.AspNetCore.Routing",
+        "Microsoft.Extensions.Configuration",
+        "Microsoft.Extensions.DependencyInjection",
+        "Microsoft.Extensions.Hosting",
+        "Microsoft.Extensions.Logging",
+    ];
+    const WORKER: &[&str] = &[
+        "System",
+        "System.Collections.Generic",
+        "System.IO",
+        "System.Linq",
+        "System.Net.Http",
+        "System.Threading",
+        "System.Threading.Tasks",
+        "Microsoft.Extensions.Configuration",
+        "Microsoft.Extensions.DependencyInjection",
+        "Microsoft.Extensions.Hosting",
+        "Microsoft.Extensions.Logging",
+    ];
+    if sdk.contains(".Web") || sdk.contains("Razor") {
+        WEB
+    } else if sdk.contains(".Worker") {
+        WORKER
+    } else {
+        BASE
+    }
+}
+
+/// The namespaces a `.csproj` (or `Directory.Build.props`) makes every file
+/// see by `<Using Include="X" />` (not `Static` or `Alias` ones, nor `Remove`).
+fn cs_project(dir: String, tree: bool, src: &str) -> CsProject {
+    let implicit = src
+        .split("<ImplicitUsings>")
+        .nth(1)
+        .and_then(|r| r.split('<').next())
+        .map(|v| matches!(v.trim(), "enable" | "true"));
+    let sdk = src.split("Sdk=\"").nth(1).and_then(|r| r.split('"').next()).map(String::from);
+    CsProject { dir, tree, usings: csproj_usings(src), implicit, sdk }
+}
+
+fn csproj_usings(src: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for item in src.split("<Using ").skip(1) {
+        let tag = item.split('>').next().unwrap_or("");
+        if tag.contains("Static=") || tag.contains("Alias=") {
+            continue;
+        }
+        if let Some(name) = tag.split("Include=\"").nth(1).and_then(|r| r.split('"').next()) {
+            if !out.iter().any(|x| x == name) {
+                out.push(name.to_string());
+            }
+        }
+    }
+    out
 }
 
 fn read_manifest(p: &Project, rel: &str) -> Option<String> {
@@ -233,7 +374,38 @@ impl ModuleSystems {
                         }
                     }
                 }
+                b if b.ends_with(".csproj") || b == "Directory.Build.props" => {
+                    if let Some(src) = read_manifest(p, rel) {
+                        let tree = b == "Directory.Build.props";
+                        m.cs_projects.push(cs_project(dir.clone(), tree, &src));
+                    }
+                }
                 _ => {}
+            }
+        }
+        // the longest directory first: a file's project is the nearest
+        m.cs_projects.sort_by_key(|c| std::cmp::Reverse(c.dir.len()));
+        for f in p.files.iter() {
+            if f.lang != Some(Lang::CSharp) {
+                continue;
+            }
+            let globals: Vec<String> = f
+                .imports
+                .iter()
+                .filter(|i| i.global && i.alias.is_none())
+                .map(|i| i.module.clone())
+                .collect();
+            if globals.is_empty() {
+                continue;
+            }
+            if let Some(proj) =
+                m.cs_projects.iter_mut().find(|c| !c.tree && in_dir(&f.path, &c.dir))
+            {
+                for g in globals {
+                    if !proj.usings.contains(&g) {
+                        proj.usings.push(g);
+                    }
+                }
             }
         }
         m.go_modules.sort_by_key(|(path, _)| std::cmp::Reverse(path.len()));

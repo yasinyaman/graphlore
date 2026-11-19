@@ -2365,18 +2365,26 @@ fn locals_of(n: Node, src: &[u8], in_params: bool) -> Vec<(String, Vec<String>, 
     let mut out = Vec::new();
     // parameters: `x: Foo`, `Foo x`, `x Foo`, `$x: Foo`
     if in_params && k.contains("parameter") && !k.ends_with("parameters") && !k.ends_with("_list") {
-        let ty = n.child_by_field_name("type").and_then(|t| first_type(t, src)).or_else(|| {
-            kids(n)
-                .into_iter()
-                .find(|c| {
-                    // (Kotlin `user: User? = null`: a nullable type)
-                    matches!(
-                        c.kind(),
-                        "user_type" | "type_annotation" | "named_type" | "type" | "nullable_type"
-                    )
-                })
-                .and_then(|t| first_type(t, src))
-        });
+        // (C#'s `string Value`: a predefined type is the type written)
+        let ty = n
+            .child_by_field_name("type")
+            .and_then(|t| first_type(t, src).or_else(|| predefined(t, src)))
+            .or_else(|| {
+                kids(n)
+                    .into_iter()
+                    .find(|c| {
+                        // (Kotlin `user: User? = null`: a nullable type)
+                        matches!(
+                            c.kind(),
+                            "user_type"
+                                | "type_annotation"
+                                | "named_type"
+                                | "type"
+                                | "nullable_type"
+                        )
+                    })
+                    .and_then(|t| first_type(t, src))
+            });
         // an untyped parameter still shadows outer names (path left empty)
         let ty = ty.or_else(|| Some(Vec::new()));
         if let Some(ty) = ty {
@@ -2833,6 +2841,7 @@ pub fn import(n: Node, form: ImportForm, module: impl Into<String>) -> ImportFac
         is_static: false,
         system: false,
         public: false,
+        global: false,
         byte: n.start_byte(),
     }
 }

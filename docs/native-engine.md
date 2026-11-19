@@ -767,7 +767,7 @@ file pairs). The native graph has definitions graphify folds into the one
 around them (a function nested in a method, the setter beside a getter of the
 same name); an edge from one of those is compared as an edge from the paired
 definition it belongs to, as graphify records it. On the 31 repositories of the
-[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.45,
+[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.46,
 measured 2026-11-19), as native / graphify edges and the share of graphify's
 that the native graph has too:
 
@@ -781,7 +781,7 @@ that the native graph has too:
 | Java | 100% | 1,105 / 1,010 (100%) | 5,703 / 5,123 (85%) | 415 / 168 (94%) | 3,989 / 1,930 (98%) |
 | Kotlin | 99.4% | 368 / 333 (95%) | 5,030 / 2,108 (71%) | 96 / 56 (93%) | 1,201 / 673 (92%) |
 | Scala | 100% | 2 / 0 | 46 / 20 (45%) | 21 / 22 (95%) | 75 / 32 (100%) |
-| C# | 92.7% | 347 / 280 (30%)³ | 2,859 / 2,450 (96%) | 87 / 86 (98%) | 1,245 / 806 (99%) |
+| C# | 92.7% | 342 / 280 (30%)³ | 3,073 / 2,463 (97%) | 87 / 86 (98%) | 1,242 / 807 (99%) |
 | Rust | 93.3% | 324 / 370 (79%) | 2,175 / 853 (87%) | 53 / 41 (93%) | 1,218 / 895 (81%) |
 | Swift | 95.9% | 166 / 166 (–)³ | 5,496 / 2,141 (83%) | 190 / 164 (100%) | 1,089 / 580 (62%) |
 | C | 100% | 89 / 77 (99%) | 864 / 791 (100%) | – | 253 / 130 (97%) |
@@ -789,9 +789,9 @@ that the native graph has too:
 | C/C++ headers | 91.4% | 164 / 172 (95%) | 372 / 348 (84%) | 12 / 12 (92%) | 563 / 312 (90%) |
 | Ruby | 99.7% | 42 / 0 | 441 / 375 (69%) | 46 / 15 (93%) | 28 / 0 |
 | PHP | 80.6% | 429 / 505 (84%) | 8,873 / 6,140 (90%) | 65 / 60 (98%) | 648 / 213 (95%) |
-| **All** | **94.4%** | **4,972 / 5,565 (75%)** | **44,946 / 27,832 (85%)** | **1,152 / 726 (97%)** | **12,603 / 6,814 (89%)** |
+| **All** | **94.4%** | **4,967 / 5,565 (75%)** | **45,160 / 27,845 (85%)** | **1,152 / 726 (97%)** | **12,600 / 6,815 (89%)** |
 
-Of the native calls, 12,498 (28%) are `INFERRED`, against 47% of graphify's.
+Of the native calls, 12,500 (28%) are `INFERRED`, against 47% of graphify's.
 That share was 20% before engine 0.5.5: a call of an overloaded name that the
 arguments do not decide used to be an `EXTRACTED` edge to the first overload,
 and is now an `INFERRED` edge to each overload that fits (999 calls, with
@@ -1123,6 +1123,51 @@ ktor-realworld's, 3 retrofit's). Unlike Java's, most were gaps:
 Kotlin's calls go from 4,790 to 5,030 with fewer `INFERRED` (2,383 →
 2,057), and its type references from 1,079 to 1,201 (92% of graphify's).
 Kotlin's unmarked rows: 43 → 0; Swift's 61 → 59; in all, 572 → 527.
+Engine 0.5.46 takes on C#'s 76 unmarked rows (63 restsharp's, 12
+todoapi's, 1 aspnetcore-realworld's):
+
+- **Preprocessor alternatives.** restsharp writes expressions and
+  conditions once per target framework (`? null` / `#if NET` / `: new
+  HttpRequestException(msg, null, code)` / `#else` / `: new
+  HttpRequestException(msg)` / `#endif`; `#if NET` / `if (!OperatingSystem
+  .IsBrowser()) {` / `#endif` … `#if NET` / `}` / `#endif`). The grammar,
+  seeing every branch, made an `ERROR` of the whole class: `RestClient`,
+  `HttpResponseExtensions` and others had no members, and their methods
+  were top-level functions. A C# source that does not parse as written is
+  parsed again with each `#if`'s other branches blanked, and a lone branch
+  that opens or closes a brace unwrapped (`parse::blank_alternative_branches`,
+  `spans._blank_duplicate_branches(src, any_balance=True)`); that parse is
+  kept only if it is clean. The C/C++ rule is unchanged.
+- **What a project makes every file see.** A `.csproj`'s `<Using Include>`
+  items, the SDK's implicit usings (`<ImplicitUsings>enable` in the project or
+  a `Directory.Build.props`, by the `Sdk` the project names: `.Web` adds
+  `Microsoft.Extensions.Hosting` and the rest), every `global using` of the
+  project's files, and the project's global namespace are now `using`s of
+  each file (`ModuleSystems::cs_usings`; no import edge). todoapi's
+  `Program.cs` reaches `builder.AddServiceDefaults()` (an extension declared
+  in `Microsoft.Extensions.Hosting` by the ServiceDefaults project) and
+  `builder.Services.AddRateLimiting()` (`<Using Include="TodoApi" />`).
+  `using RestSharp.Serializers;` where a file opens that namespace as a block
+  is a namespace again, not a definition.
+- **An extension the file sees,** as for Kotlin in 0.5.45
+  (`visible_extension`, `INFERRED`), with LINQ's names (`All`, `Select`,
+  `Where`, …) added to `CSHARP_CORE_METHODS`. A capital head that names
+  nothing of the project is a library type's static call
+  (`HttpUtility.UrlEncode(x)` is never the project's `string.UrlEncode()`).
+- **Types.** A parameter written with a predefined type (`string Value`, a
+  record's too) has that type, a library's.
+- **Marks.** An extension whose namespace the caller does not use (`req.With(…)`
+  on MockHttp's request beside restsharp's internal `With`, todoapi's
+  `AddAuthentication()` beside another project's); a member of a type the
+  project's own source generator fills (`ReadOnlyRestClientOptions` from
+  `[GenerateImmutable] RestClientOptions`); a receiver behind a member no
+  project type has (`c.HttpContext.GetTokenAsync()`).
+
+restsharp's calls change most: some 230 `INFERRED` edges become `EXTRACTED`
+(extension calls on a `RestClient` or `RestRequest` that is typed now), and
+the constructors of `RestRequest` are reached (155 calls). C#'s calls go
+from 2,859 to 3,073 (97% of graphify's). C#'s unmarked rows: 76 → 0; in
+all, 527 → 451.
 Engine 0.5.35 (C function-pointer slots) reads a struct of function pointers
 as an interface and what is put in its slots as the implementations: an
 initializer of a variable, by name (`.async_read = redisAsyncRead`) or by
@@ -1583,7 +1628,7 @@ implicit members since 0.5.17: 39 whose place gives no type are rows now
 closure parameters and variables of express's tests. What is left at file
 level there is `app.use` and `app.set` (842 rows of express), names too
 short and too common to guess by. Engine 0.5.19 takes 123 more off (6,362;
-C# 349 from 470; 6,360 with 0.5.20, 6,348 with 0.5.21, 6,285 with 0.5.22, 6,237 with 0.5.25, 6,206 with 0.5.27, 6,166 with 0.5.28, 6,156 with 0.5.30, 6,140 with 0.5.31, 6,132 with 0.5.32, 6,126 with 0.5.33, 6,093 with 0.5.34, 6,047 with 0.5.36, 6,046 with 0.5.37, 6,017 with 0.5.38, 6,005 with 0.5.40, 5,947 with 0.5.42, 5,930 with 0.5.43, 5,950 with 0.5.44, 5,903 with 0.5.45). Most of what C# has left is not the project's: `Assert.
+C# 349 from 470; 6,360 with 0.5.20, 6,348 with 0.5.21, 6,285 with 0.5.22, 6,237 with 0.5.25, 6,206 with 0.5.27, 6,166 with 0.5.28, 6,156 with 0.5.30, 6,140 with 0.5.31, 6,132 with 0.5.32, 6,126 with 0.5.33, 6,093 with 0.5.34, 6,047 with 0.5.36, 6,046 with 0.5.37, 6,017 with 0.5.38, 6,005 with 0.5.40, 5,947 with 0.5.42, 5,930 with 0.5.43, 5,950 with 0.5.44, 5,903 with 0.5.45, 5,829 with 0.5.46). Most of what C# has left is not the project's: `Assert.
 NotNull` beside its own `Ensure.NotNull` (77), `WireMockServer.Start` (23).
 
 By then most rows were of that kind: a library's name the project happens

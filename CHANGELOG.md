@@ -316,6 +316,23 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- **Native engine 0.5.46: C# preprocessor alternatives, project usings,
+  extensions.**
+  - A C# file whose `#if` / `#else` branches split an expression or a brace
+    (restsharp's `RestClient`, `HttpResponseExtensions`) no longer loses its
+    class: it is parsed again with the other branches blanked, kept when that
+    parses clean. The span engine (`spans.py`) does the same.
+  - `.csproj` `<Using Include>` items, the SDK's implicit usings (from the
+    project or `Directory.Build.props`), `global using` lines and the
+    project's global namespace are seen by every file of the project.
+  - A call by the name of an extension the file sees, on a receiver the walk
+    cannot type, is that extension (`INFERRED`); a static call on a library
+    type (`HttpUtility.UrlEncode`) is never a project extension.
+  - Predefined parameter types (`string Value`) are read.
+  - New marks: an extension whose namespace the caller does not use; a member
+    a source generator writes; a receiver behind a member no project type has.
+  - C#'s unmarked unresolved rows go from 76 to 0; across all languages, 527
+    to 451.
 - **Native engine 0.5.45: Kotlin extensions, class literals, receivers.**
   - A call by the name of an extension the file sees (imported or of its
     package) on a receiver the walk cannot type is that extension
