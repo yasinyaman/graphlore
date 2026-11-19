@@ -3540,7 +3540,12 @@ impl<'a> Project<'a> {
         d: Option<usize>,
         path: &[String],
     ) -> Option<(DefRef, usize, Option<Binds>)> {
-        let k = path.iter().position(|s| LIBRARY_ACCESSORS.contains(&s.as_str()))?;
+        let accessors = if self.family[f] == Some(Family::Go) {
+            GO_LIBRARY_ACCESSORS
+        } else {
+            LIBRARY_ACCESSORS
+        };
+        let k = path.iter().position(|s| accessors.contains(&s.as_str()))?;
         // (it resolves a path itself, which can come back here)
         let _guard = DepthGuard::enter(&LIBRARY_DEPTH, 2)?;
         if k == 0 || path.get(k + 1).is_none_or(|s| s != "()") {
@@ -3674,6 +3679,12 @@ impl<'a> Project<'a> {
         let Some((Target::Def(c), _)) = self.resolve_path(f, d, &path[..end], true) else {
             return false;
         };
+        self.gives_library_type(c)
+    }
+
+    /// Whether a callable's written result is a library's type (`func room(id
+    /// string) broadcast.Broadcaster`).
+    fn gives_library_type(&self, c: DefRef) -> bool {
         let def = self.def(c);
         if !def.kind.is_callable() {
             return false;
@@ -3705,8 +3716,9 @@ impl<'a> Project<'a> {
                 let l = &self.files[f].locals[li];
                 // (Rust: a local and a function share one namespace, so a
                 // declared local called is the local, `current_time()` of a
-                // `current_time: Arc<dyn Fn() -> Instant>`)
-                let rust = self.family[f] == Some(Family::Rust);
+                // `current_time: Arc<dyn Fn() -> Instant>`; Go the same: `m
+                // := mx` walks `mx` as the value it calls)
+                let rust = matches!(self.family[f], Some(Family::Rust | Family::Go));
                 // (a file's own local stands for every callback's of the name:
                 // a bare call is the function the file defines, `u()` beside a
                 // `var u` of another callback in a minified bundle)
@@ -4149,6 +4161,15 @@ impl<'a> Project<'a> {
     }
 
     /// `name` looked up inside a target.
+    /// Go: an embedded struct is a field named after its type (`cb.base` of
+    /// `type Breaker struct { base }`), which is that type.
+    fn embedded_field(&self, c: DefRef, name: &str) -> Option<DefRef> {
+        if self.family[c.0] != Some(Family::Go) {
+            return None;
+        }
+        self.bases(c).into_iter().find(|b| self.def(*b).name == name)
+    }
+
     fn member(&self, t: &Target, name: &str, depth: usize) -> Option<Target> {
         match t {
             Target::Def(c) => {
@@ -4162,6 +4183,7 @@ impl<'a> Project<'a> {
                 self.class_member(*c, name, 4)
                     .or_else(|| self.reopened_member(*c, name))
                     .or_else(|| self.deref_member(*c, name))
+                    .or_else(|| self.embedded_field(*c, name))
                     .map(Target::Def)
             }
             Target::Module(files) => {
@@ -4533,6 +4555,15 @@ impl<'a> Project<'a> {
         // Rust: what a library's generic type gives through an accessor of
         // the one project type it holds (`res.body_mut()` of a
         // `Response<Body>`, `stream.get_mut()` of a `TlsStream<ErrorCapture>`)
+        if fam == Family::Go && !bases {
+            if let Some((t, skip, binds)) = self.library_accessor(f, d, path) {
+                let rest = &path[skip..];
+                if rest.is_empty() {
+                    return None;
+                }
+                return self.walk_bound(t, binds, rest, Confidence::Inferred);
+            }
+        }
         if fam == Family::Rust && !bases {
             // a path into a crate the project depends on (`serde_json::from_reader`)
             // names that crate's item: no guess by its last name
@@ -5441,7 +5472,11 @@ impl<'a> Project<'a> {
                         }
                     }
                 }
-                if rest.len() == i + 2 && !bases {
+                // (what a project function gives is a library's value: no
+                // guess by the name called on it, `room(id).Submit(post)`)
+                let library = matches!(t, Target::Def(c) if fam == Family::Go
+                    && self.gives_library_type(c));
+                if rest.len() == i + 2 && !bases && !library {
                     return self.unknown_receiver(f, &rest[i + 1], None);
                 }
                 return None;
@@ -6330,7 +6365,14 @@ impl<'a> Project<'a> {
                 && r.path.len() >= 2
                 && !crate_head
                 && self.rust_library_receiver(f, d, &r.path))
-            || (fam == Family::Ecma && r.path.len() >= 3 && self.library_field_step(f, d, &r.path))
+            || (matches!(fam, Family::Ecma | Family::Go)
+                && r.path.len() >= 3
+                && self.library_field_step(f, d, &r.path))
+            // (Go `room(id).Submit(post)`, `room` declared to give a
+            // `broadcast.Broadcaster`)
+            || (fam == Family::Go
+                && r.path.len() >= 3
+                && self.library_result(f, d, &r.path[..r.path.len() - 1]))
         {
             Some("the receiver is a library's")
         } else if outside_head || std_head || crate_head {
@@ -8326,6 +8368,10 @@ type Declared = (Vec<String>, Vec<Vec<String>>, Vec<Vec<Vec<String>>>, usize, Op
 
 const LIBRARY_ACCESSORS: &[&str] =
     &["get_ref", "get_mut", "into_inner", "body", "body_mut", "into_body", "inner", "inner_mut"];
+
+/// Go: what a generic of the standard library hands back of the one type it
+/// holds (`sw.Load()` of an `atomic.Pointer[window]`).
+const GO_LIBRARY_ACCESSORS: &[&str] = &["Load", "Swap"];
 
 thread_local! {
     /// How deep `library_accessor` / `library_result` are in each other.

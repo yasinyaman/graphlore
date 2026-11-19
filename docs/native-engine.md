@@ -767,7 +767,7 @@ file pairs). The native graph has definitions graphify folds into the one
 around them (a function nested in a method, the setter beside a getter of the
 same name); an edge from one of those is compared as an edge from the paired
 definition it belongs to, as graphify records it. On the 31 repositories of the
-[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.42,
+[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.43,
 measured 2026-11-19), as native / graphify edges and the share of graphify's
 that the native graph has too:
 
@@ -777,8 +777,8 @@ that the native graph has too:
 | JavaScript | 93.5%⁵ | 190 / 305 (59%) | 1,335 / 2,058 (43%)¹ | 1 / 1 | 3 / 0 |
 | TypeScript | 99.4% | 527 / 634 (83%) | 806 / 687 (98%) | 39 / 20 (100%) | 770 / 156 (88%) |
 | TSX | 99.7% | 253 / 316 (80%) | 435 / 456 (95%) | 1 / 0 | 42 / 4 |
-| Go | 100% | 538 / 950 (47%)² | 6,723 / 3,167 (99%) | 19 / 14 (100%) | 679 / 355 (99%) |
-| Java | 100% | 1,105 / 1,010 (100%) | 5,720 / 5,123 (85%) | 415 / 168 (94%) | 3,989 / 1,930 (98%) |
+| Go | 100% | 538 / 950 (47%)² | 6,776 / 3,167 (99%) | 19 / 14 (100%) | 689 / 355 (99%) |
+| Java | 100% | 1,105 / 1,010 (100%) | 5,719 / 5,123 (85%) | 415 / 168 (94%) | 3,989 / 1,930 (98%) |
 | Kotlin | 99.4% | 368 / 333 (95%) | 4,786 / 2,108 (71%) | 96 / 56 (93%) | 1,079 / 673 (91%) |
 | Scala | 100% | 2 / 0 | 46 / 20 (45%) | 21 / 22 (95%) | 75 / 32 (100%) |
 | C# | 92.7% | 347 / 280 (30%)³ | 2,860 / 2,450 (96%) | 87 / 86 (98%) | 1,248 / 806 (99%) |
@@ -787,11 +787,11 @@ that the native graph has too:
 | C | 100% | 89 / 77 (99%) | 864 / 791 (100%) | – | 253 / 130 (97%) |
 | C++ | 98.7% | 215 / 228 (93%) | 765 / 281 (29%)⁴ | 30 / 5 (100%) | 350 / 234 (88%) |
 | C/C++ headers | 91.4% | 164 / 172 (95%) | 372 / 348 (84%) | 12 / 12 (92%) | 563 / 312 (90%) |
-| Ruby | 99.7% | 42 / 0 | 443 / 375 (69%) | 46 / 15 (93%) | 28 / 0 |
+| Ruby | 99.7% | 42 / 0 | 441 / 375 (69%) | 46 / 15 (93%) | 28 / 0 |
 | PHP | 80.6% | 429 / 505 (84%) | 8,873 / 6,140 (90%) | 65 / 60 (98%) | 648 / 213 (95%) |
-| **All** | **94.4%** | **4,962 / 5,565 (75%)** | **44,556 / 27,832 (85%)** | **1,137 / 726 (97%)** | **12,473 / 6,814 (89%)** |
+| **All** | **94.4%** | **4,972 / 5,565 (75%)** | **44,717 / 27,832 (85%)** | **1,152 / 726 (97%)** | **12,486 / 6,814 (89%)** |
 
-Of the native calls, 12,772 (29%) are `INFERRED`, against 47% of graphify's.
+Of the native calls, 12,835 (29%) are `INFERRED`, against 47% of graphify's.
 That share was 20% before engine 0.5.5: a call of an overloaded name that the
 arguments do not decide used to be an `EXTRACTED` edge to the first overload,
 and is now an `INFERRED` edge to each overload that fits (999 calls, with
@@ -1004,6 +1004,44 @@ helper, and in minified bundles (retrofit's Dokka scripts, alamofire's
 jQuery) calls joined to a namesake in another module of the bundle (some
 600). TypeScript's unmarked rows: 88 → 0; JavaScript stays at 0; in all,
 705 → 615.
+Engine 0.5.43 takes on Go's 18 unmarked rows (13 of them resty's, 4
+chi's, 1 gin-examples'):
+
+- **Values a declaration copies.** `m := mx`, `cbc := cb.circuitBreakerBase`
+  and `req := res.Request` are locals with that value (Go, like Rust, keeps a
+  local and a function in one namespace: the name in the value is the
+  local). A type assertion is the type it states (`encoder :=
+  pool.Get().(ioResetterWriter)`), and so is the first name of its comma-ok
+  form (`b, ok := r.Body.(*bytes.Buffer)`); a function literal is a local of
+  no type, which hides the function of its name (`h := func(…)`).
+- **Defined types.** `type HeaderRouter map[string][]HeaderRoute`, `type
+  nodes []*node`: a type that is no alias takes methods like a struct, and
+  `RouteHeaders().Route(…).RouteDefault()` follows them.
+- **Rows of an anonymous struct.** In `for _, tt := range []struct{ req
+  *Request }{…}` (or over a variable assigned such a literal, `tests :=
+  []struct{…}{…}`) `tt.req` is a local of the loop of the type the field is
+  written with (`tt.req@byte`); a function-typed field is what it returns
+  once called (`writer.wrap(original)`).
+- **The standard library's generics and embedding.** `sw.Load()` of an
+  `atomic.Pointer[slidingWindow]` gives the `slidingWindow`
+  (`library_accessor`, `INFERRED`), and an embedded struct is a field named
+  after its type (`cb.circuitBreakerBase.open()`).
+- **Package names.** An import path names the package Go conventions give
+  it: `github.com/dustin/go-broadcast` is `broadcast`, `gopkg.in/yaml.v3`
+  `yaml`. A function declared to give such a library type is no project
+  receiver: `room(id).Submit(post)` is no longer guessed by `Submit`'s name.
+- **Marks.** A receiver behind a field of a library type
+  (`r.bodyBuf.Bytes()`, `r.RawRequest.WithContext()`), and behind the result
+  of a function declared to give one.
+
+One rule changes for every language: in a callable, a local and a field of
+one name are two names (in a class a field's declaration stays the field).
+The field used to hide the local: faraday's `options = …` beside `@options`
+read `options` as the method, retrofit's `Headers headers = (Headers) a`
+beside `this.headers` lost `headers.value()`. Go's calls gain 53 edges
+(6,723 → 6,776; chi and resty), and its type references 10; a dozen methods
+of defined types move from their file to their type. Go's unmarked rows: 18
+→ 0; in all, 615 → 597.
 Engine 0.5.35 (C function-pointer slots) reads a struct of function pointers
 as an interface and what is put in its slots as the implementations: an
 initializer of a variable, by name (`.async_read = redisAsyncRead`) or by
@@ -1464,7 +1502,7 @@ implicit members since 0.5.17: 39 whose place gives no type are rows now
 closure parameters and variables of express's tests. What is left at file
 level there is `app.use` and `app.set` (842 rows of express), names too
 short and too common to guess by. Engine 0.5.19 takes 123 more off (6,362;
-C# 349 from 470; 6,360 with 0.5.20, 6,348 with 0.5.21, 6,285 with 0.5.22, 6,237 with 0.5.25, 6,206 with 0.5.27, 6,166 with 0.5.28, 6,156 with 0.5.30, 6,140 with 0.5.31, 6,132 with 0.5.32, 6,126 with 0.5.33, 6,093 with 0.5.34, 6,047 with 0.5.36, 6,046 with 0.5.37, 6,017 with 0.5.38, 6,005 with 0.5.40, 5,947 with 0.5.42). Most of what C# has left is not the project's: `Assert.
+C# 349 from 470; 6,360 with 0.5.20, 6,348 with 0.5.21, 6,285 with 0.5.22, 6,237 with 0.5.25, 6,206 with 0.5.27, 6,166 with 0.5.28, 6,156 with 0.5.30, 6,140 with 0.5.31, 6,132 with 0.5.32, 6,126 with 0.5.33, 6,093 with 0.5.34, 6,047 with 0.5.36, 6,046 with 0.5.37, 6,017 with 0.5.38, 6,005 with 0.5.40, 5,947 with 0.5.42, 5,930 with 0.5.43). Most of what C# has left is not the project's: `Assert.
 NotNull` beside its own `Ensure.NotNull` (77), `WireMockServer.Start` (23).
 
 By then most rows were of that kind: a library's name the project happens

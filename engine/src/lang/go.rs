@@ -66,7 +66,10 @@ impl LanguageModule for Go {
             "type_spec" => match node.child_by_field_name("type").map(|t| t.kind()) {
                 Some("struct_type") => DefKind::Struct,
                 Some("interface_type") => DefKind::Interface,
-                _ => DefKind::TypeAlias,
+                // `type HeaderRouter map[string][]HeaderRoute`, `type Level
+                // int`: a defined type (not an alias, `type X = Y`) takes
+                // methods like a struct does
+                _ => DefKind::Struct,
             },
             "type_alias" => DefKind::TypeAlias,
             k => generic::kind_of(k),

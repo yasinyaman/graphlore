@@ -333,3 +333,34 @@ fn typescript_rows_on_library_values_and_run_time_members_say_so() {
     assert_eq!(why("boundTo"), "the receiver is a library's", "{rows:#?}");
     assert_eq!(why("lonely"), Value::Null, "{rows:#?}");
 }
+
+#[test]
+fn go_rows_on_library_fields_results_and_function_locals_say_so() {
+    let dir = project(
+        "gomarks",
+        &[
+            ("go.mod", "module example.com/m\n\ngo 1.22\n"),
+            // a field declared with a library's type, a function declared to
+            // give one, a local function value, and a call that is a gap
+            ("a.go", "package m\n\nimport (\n\t\"bytes\"\n\t\"net/http\"\n\n\t\"github.com/dustin/go-broadcast\"\n)\n\ntype Request struct {\n\tbodyBuf    *bytes.Buffer\n\tRawRequest *http.Request\n\tmine       *Own\n}\n\ntype Own struct{}\n\nfunc (r *Request) Send() {\n\t_ = r.bodyBuf.Len()\n\tr.RawRequest.WithContext()\n\th := func(s string) string { return s }\n\t_ = h(\"x\")\n\tr.mine.lonely()\n}\n\nfunc room(id string) broadcast.Broadcaster { return nil }\n\nfunc Post() {\n\troom(\"x\").Submit(1)\n}\n"),
+            ("b.go", "package m\n\nfunc Len() int { return 0 }\nfunc WithContext() {}\nfunc h(s string) string { return s }\nfunc Submit(x int) {}\nfunc lonely() {}\n"),
+        ],
+    );
+    let out = dir.join("unresolved.json");
+    let mut opts = BuildOptions::new(&dir);
+    opts.unresolved = Some(out.clone());
+    build_graph(&opts).unwrap();
+    let rows: Vec<Value> = serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+    let why = |name: &str| {
+        rows.iter()
+            .find(|r| r["name"] == name)
+            .map(|r| r["library_like"].clone())
+            .unwrap_or_else(|| panic!("no row {name}: {rows:#?}"))
+    };
+    assert_eq!(why("Len"), "the receiver is a library's", "{rows:#?}");
+    assert_eq!(why("WithContext"), "the receiver is a library's", "{rows:#?}");
+    assert_eq!(why("Submit"), "the receiver is a library's", "{rows:#?}");
+    assert_eq!(why("h"), "the name is a local or parameter of the caller", "{rows:#?}");
+    assert_eq!(why("lonely"), Value::Null, "{rows:#?}");
+}

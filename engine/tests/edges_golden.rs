@@ -2272,3 +2272,69 @@ fn typescript_casts_object_types_returned_objects_and_callback_scopes() {
         assert!(!to(s, t), "{s} -> {t}: {got:#?}");
     }
 }
+
+#[test]
+fn go_copied_locals_defined_types_anonymous_rows_atomics_and_assertions() {
+    // `m := mx` is what `mx` is; `type HeaderRouter map[…]` takes methods
+    // like a struct; a loop over rows of an anonymous struct knows each
+    // field's type (a function-typed field gives its result once called);
+    // `atomic.Pointer[T].Load()` gives the `T`; an embedded struct is a field
+    // named after its type; `x.(*T)` is a `T`; a function declared to give a
+    // library's type is no project receiver (`room(id).Submit`)
+    let got = links("gocopies", &[
+        ("go.mod", "module example.com/m\n\ngo 1.22\n"),
+        ("mux.go", "package m\n\ntype Mux struct{ parent *Mux }\n\nfunc (mx *Mux) updateSubRoutes() {}\n\nfunc (mx *Mux) MethodNotAllowed() {\n\tm := mx\n\tfor m.parent != nil {\n\t\tm = m.parent\n\t}\n\tm.updateSubRoutes()\n}\n\ntype Other struct{}\n\nfunc (o *Other) updateSubRoutes()             {}\nfunc (o *Other) Route(p string) HeaderRouter { return nil }\nfunc (o *Other) RouteDefault()               {}\nfunc (o *Other) SetInterval(i int)           {}\nfunc (o *Other) Bytes() []byte               { return nil }\nfunc (o *Other) Submit(x int)                {}\nfunc (o *Other) Tee()                        {}\n\ntype HeaderRoute struct{}\ntype HeaderRouter map[string][]HeaderRoute\n\nfunc RouteHeaders() HeaderRouter { return HeaderRouter{} }\n\nfunc (hr HeaderRouter) Route(p string) HeaderRouter { return hr }\nfunc (hr HeaderRouter) RouteDefault()               {}\n\nfunc Use() {\n\tRouteHeaders().Route(\"x\").RouteDefault()\n}\n"),
+        ("rows.go", "package m\n\ntype Request struct{}\n\nfunc (r *Request) SetResult(v any) *Request { return r }\n\ntype Client struct{}\n\nfunc (c *Client) SetResult(v any) {}\n\ntype Writer interface{ Tee() }\n\nfunc Rows() {\n\tfor _, tt := range []struct {\n\t\tname string\n\t\treq  *Request\n\t}{} {\n\t\ttt.req.SetResult(nil)\n\t}\n\ttests := []struct {\n\t\tclient *Client\n\t\twrap   func(int) Writer\n\t}{}\n\tfor _, tc := range tests {\n\t\ttc.client.SetResult(nil)\n\t\tw := tc.wrap(1)\n\t\tw.Tee()\n\t}\n}\n"),
+        ("breaker.go", "package m\n\nimport (\n\t\"bytes\"\n\t\"sync/atomic\"\n\n\t\"github.com/dustin/go-broadcast\"\n)\n\ntype window struct{}\n\nfunc (w *window) SetInterval(i int) {}\n\ntype base struct {\n\tsw atomic.Pointer[window]\n}\n\nfunc (b *base) Direct() {}\n\ntype Breaker struct {\n\tbase\n}\n\nfunc (cb *Breaker) Reset() {\n\tcbc := cb.base\n\tcbc.sw.Load().SetInterval(1)\n\tcb.base.Direct()\n}\n\ntype Body struct{}\n\nfunc (b *Body) Bytes() []byte { return nil }\n\ntype Req struct{ Body any }\n\nfunc Mid(r *Req) {\n\tif b, ok := r.Body.(*Body); ok {\n\t\t_ = b.Bytes()\n\t}\n\tif buf, ok := r.Body.(*bytes.Buffer); ok {\n\t\t_ = buf.Bytes()\n\t}\n}\n\nfunc room(id string) broadcast.Broadcaster { return nil }\n\nfunc Post() {\n\troom(\"x\").Submit(1)\n}\n"),
+    ]);
+    let to = |s: &str, t: &str| got.iter().any(|(a, _, b, _)| a == s && b == t);
+    for (s, t) in [
+        ("mux_mux_methodnotallowed", "mux_mux_updatesubroutes"),
+        ("mux_use", "mux_headerrouter_route"),
+        ("mux_use", "mux_headerrouter_routedefault"),
+        ("rows_rows", "rows_request_setresult"),
+        ("rows_rows", "rows_client_setresult"),
+        ("rows_rows", "rows_writer_tee"),
+        ("breaker_breaker_reset", "breaker_window_setinterval"),
+        ("breaker_breaker_reset", "breaker_base_direct"),
+        ("breaker_mid", "breaker_body_bytes"),
+    ] {
+        assert!(to(s, t), "{s} -> {t}: {got:#?}");
+    }
+    for (s, t) in [
+        ("mux_mux_methodnotallowed", "mux_other_updatesubroutes"),
+        ("mux_use", "mux_other_route"),
+        ("mux_use", "mux_other_routedefault"),
+        ("rows_rows", "mux_other_tee"),
+        ("breaker_breaker_reset", "mux_other_setinterval"),
+        ("breaker_mid", "mux_other_bytes"),
+        ("breaker_post", "mux_other_submit"),
+    ] {
+        assert!(!to(s, t), "{s} -> {t}: {got:#?}");
+    }
+    // (`bytes.Buffer`'s `Bytes` is the library's: one edge from `Mid`, to `Body`)
+    let bytes: Vec<_> =
+        got.iter().filter(|(a, _, b, _)| a == "breaker_mid" && b.ends_with("_bytes")).collect();
+    assert_eq!(bytes.len(), 1, "{got:#?}");
+}
+
+#[test]
+fn a_local_beside_a_field_of_its_name_is_the_local_in_a_method_only() {
+    // Java `Headers headers = (Headers) a; headers.value()` beside
+    // `this.headers = …`: the local; C# `readonly string _path = …` read by
+    // a method is still the field
+    let got = links("fieldlocal", &[
+        ("src/Headers.java", "package app;\npublic class Headers {\n  public String[] value() { return null; }\n}\n"),
+        ("src/Builder.java", "package app;\npublic class Builder {\n  private String[] headers;\n  public String[] value() { return null; }\n  void parse(Object a) {\n    Headers headers = (Headers) a;\n    this.headers = headers.value();\n  }\n}\n"),
+        ("Tests.cs", "class Tests {\n    readonly string _path = System.IO.Path.Combine(\"a\", \"b\");\n    string PathFor(string f) => System.IO.Path.Combine(_path, f);\n}\n"),
+    ]);
+    let to = |s: &str, t: &str| got.iter().any(|(a, _, b, _)| a == s && b == t);
+    assert!(to("src_builder_builder_parse", "src_headers_headers_value"), "{got:#?}");
+    assert!(!to("src_builder_builder_parse", "src_builder_builder_value"), "{got:#?}");
+    assert!(
+        got.iter().any(|(a, r, b, _)| a == "tests_tests_pathfor"
+            && r == "reads"
+            && b == "tests_tests_path"),
+        "{got:#?}"
+    );
+}

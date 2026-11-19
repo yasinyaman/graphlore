@@ -2543,7 +2543,7 @@ fn locals_of(n: Node, src: &[u8], in_params: bool) -> Vec<(String, Vec<String>, 
                 return out;
             };
             for (name, value) in kids(l).into_iter().zip(kids(r)) {
-                if let Some(t) = value_type(value, src) {
+                if let Some(t) = go_value(value, src) {
                     out.push((text(name, src), t, false, false));
                 }
             }
@@ -2551,6 +2551,181 @@ fn locals_of(n: Node, src: &[u8], in_params: bool) -> Vec<(String, Vec<String>, 
         _ => {}
     }
     out
+}
+
+/// Go: where a name holds rows of an anonymous struct (`start..end`), the
+/// name, and each field with the type it is written with.
+type AnonRows = (usize, usize, String, Vec<(String, Vec<String>)>);
+
+/// The fields of the anonymous struct a Go slice or array literal holds
+/// (`[]struct{ name string; req *Request }{…}`).
+fn go_anonymous_fields(lit: Node, src: &[u8]) -> Option<Vec<(String, Vec<String>)>> {
+    if lit.kind() != "composite_literal" {
+        return None;
+    }
+    let ty = lit.child_by_field_name("type")?;
+    if !matches!(ty.kind(), "slice_type" | "array_type") {
+        return None;
+    }
+    let st = ty.child_by_field_name("element").filter(|e| e.kind() == "struct_type")?;
+    let list = kids(st).into_iter().find(|c| c.kind() == "field_declaration_list")?;
+    let mut out = Vec::new();
+    for fd in kids(list).into_iter().filter(|c| c.kind() == "field_declaration") {
+        // (a function-typed field is what it returns once called: `wrap
+        // func(http.ResponseWriter) WrapResponseWriter`, `tt.wrap(w)`; the
+        // parameters are none of its type)
+        let ty = fd.child_by_field_name("type").and_then(|t| {
+            if t.kind() == "function_type" {
+                t.child_by_field_name("result")
+            } else {
+                Some(t)
+            }
+        });
+        let Some(t) = ty.and_then(|t| first_type(t, src)) else {
+            continue;
+        };
+        let mut cursor = fd.walk();
+        for name in fd.children_by_field_name("name", &mut cursor) {
+            out.push((text(name, src), t.clone()));
+        }
+    }
+    (!out.is_empty()).then_some(out)
+}
+
+/// Go: a variable assigned a slice of an anonymous struct (to the end of the
+/// block it is declared in), and a `range` over one, whose element variable
+/// has those fields in the loop.
+fn go_anonymous_rows(
+    n: Node,
+    parent: Option<Node>,
+    src: &[u8],
+    vars: &mut Vec<AnonRows>,
+    loops: &mut Vec<AnonRows>,
+) {
+    match n.kind() {
+        "short_var_declaration" => {
+            let (Some(l), Some(r)) =
+                (n.child_by_field_name("left"), n.child_by_field_name("right"))
+            else {
+                return;
+            };
+            let (ls, rs) = (kids(l), kids(r));
+            if let ([name], [value]) = (ls.as_slice(), rs.as_slice()) {
+                if let (Some(fields), Some(p)) = (go_anonymous_fields(*value, src), parent) {
+                    vars.push((n.end_byte(), p.end_byte(), text(*name, src), fields));
+                }
+            }
+        }
+        "range_clause" => {
+            let (Some(l), Some(r), Some(p)) =
+                (n.child_by_field_name("left"), n.child_by_field_name("right"), parent)
+            else {
+                return;
+            };
+            let Some(var) = kids(l).get(1).map(|v| text(*v, src)).filter(|v| v != "_") else {
+                return;
+            };
+            let at = n.start_byte();
+            let fields = go_anonymous_fields(r, src).or_else(|| {
+                (r.kind() == "identifier").then(|| text(r, src)).and_then(|name| {
+                    vars.iter()
+                        .rev()
+                        .find(|(s, e, v, _)| *v == name && *s <= at && at < *e)
+                        .map(|(.., f)| f.clone())
+                })
+            });
+            if let Some(fields) = fields {
+                loops.push((n.end_byte(), p.end_byte(), var, fields));
+            }
+        }
+        _ => {}
+    }
+}
+
+/// `tt.req.SetResult(…)` in a loop over rows of an anonymous struct: `tt.req`
+/// is a local of the loop (`tt.req@start`) of the type the field is written
+/// with.
+fn bind_anonymous_fields(loops: &[AnonRows], refs: &mut [RefFact], locals: &mut Vec<Local>) {
+    if loops.is_empty() {
+        return;
+    }
+    let mut made: Vec<String> = Vec::new();
+    let rename = |path: &mut Vec<String>,
+                  byte: usize,
+                  made: &mut Vec<String>|
+     -> Option<(String, Vec<String>, usize)> {
+        let head = path.first()?;
+        let (start, _, var, fields) = loops
+            .iter()
+            .filter(|(s, e, v, _)| *s <= byte && byte < *e && v == head)
+            .min_by_key(|(s, e, ..)| e - s)?;
+        let (field, ty) = fields.iter().find(|(f, _)| Some(f) == path.get(1))?;
+        let name = format!("{var}.{field}@{start}");
+        path.splice(0..2, [name.clone()]);
+        if made.contains(&name) {
+            return None;
+        }
+        made.push(name.clone());
+        Some((name, ty.clone(), *start))
+    };
+    let mut new = Vec::new();
+    for r in refs.iter_mut() {
+        new.extend(rename(&mut r.path, r.byte, &mut made));
+    }
+    for l in locals.iter_mut() {
+        new.extend(rename(&mut l.path, l.byte, &mut made));
+    }
+    for (name, path, byte) in new {
+        locals.push(Local {
+            name,
+            path,
+            declared: true,
+            field: false,
+            assigned: false,
+            given: None,
+            elem: None,
+            value_args: Vec::new(),
+            sealed: false,
+            keyed: false,
+            targs: Vec::new(),
+            targ_elems: Vec::new(),
+            key: None,
+            written_head: None,
+            from_def: None,
+            byte,
+        });
+    }
+}
+
+/// Go's comma-ok forms (`b, ok := x.(*T)`, `v, ok := m[k]`, `v, ok :=
+/// <-ch`): what the first of the two names is.
+fn go_comma_ok(value: Node, names: &[String], src: &[u8]) -> Option<Vec<String>> {
+    if crate::parse::current() != Some(crate::lang::Lang::Go) || names.len() != 2 || names[0] == "_"
+    {
+        return None;
+    }
+    match value.kind() {
+        "type_assertion_expression" | "index_expression" => go_value(value, src),
+        _ => None,
+    }
+}
+
+/// Go: what a short variable declaration's value is. Besides what
+/// `value_type` reads: a name or a selector it copies (`m := mx`, `cbc :=
+/// cb.circuitBreakerBase`), the type an assertion states (`b, ok :=
+/// r.Body.(*bytes.Buffer)`), and for a function literal no type at all (`h
+/// := func(…)`: still a local, which hides outer names).
+fn go_value(value: Node, src: &[u8]) -> Option<Vec<String>> {
+    match value.kind() {
+        "identifier" | "selector_expression" => {
+            path_of(value, src).filter(|p| p.first().is_some_and(|h| h != UNKNOWN))
+        }
+        "type_assertion_expression" => {
+            value.child_by_field_name("type").and_then(|t| first_type(t, src))
+        }
+        "func_literal" => Some(Vec::new()),
+        _ => value_type(value, src),
+    }
 }
 
 /// The text of a string literal without its quotes.
@@ -2634,6 +2809,10 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
     let mut anc: Vec<Node> = Vec::new();
     // closures that are no definitions: (start, end, the names they bind)
     let mut closures: Vec<ClosureScope> = Vec::new();
+    // Go: variables holding a slice of an anonymous struct, and the loops over
+    // one (`(start, end, name, fields)`)
+    let mut anon_vars: Vec<AnonRows> = Vec::new();
+    let mut anon_loops: Vec<AnonRows> = Vec::new();
     // JS / TS: the functions that are no definitions (callbacks), whose
     // variables are names of their own (before `bind_closure_params`)
     let mut callbacks: Vec<(usize, usize)> = Vec::new();
@@ -2999,6 +3178,11 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
         if n.kind() == "match_expression" && facts.lang == Some(crate::lang::Lang::Rust) {
             closures.extend(arm_scopes(n, src));
         }
+        // Go `tests := []struct{ req *Request }{…}`, `for _, tt := range
+        // tests`: the fields of the anonymous struct each element is
+        if facts.lang == Some(crate::lang::Lang::Go) {
+            go_anonymous_rows(n, anc.last().copied(), src, &mut anon_vars, &mut anon_loops);
+        }
         if !by_node.contains_key(&n.id()) {
             // the parameters of a closure, a block or a handler that is no
             // definition of its own: names of its body only
@@ -3151,6 +3335,27 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                             byte: n.start_byte(),
                         });
                     }
+                } else if let Some(path) = go_comma_ok(*value, names, src) {
+                    // Go `b, ok := r.Body.(*bytes.Buffer)`, `v, ok := m[k]`:
+                    // the first name is the value, the second a bool
+                    locals.push(Local {
+                        name: names[0].clone(),
+                        path,
+                        declared: false,
+                        field: false,
+                        assigned: plain_assignment,
+                        given: None,
+                        elem: None,
+                        value_args: Vec::new(),
+                        sealed: false,
+                        keyed: false,
+                        targs: Vec::new(),
+                        targ_elems: Vec::new(),
+                        key: None,
+                        written_head: None,
+                        from_def: None,
+                        byte: n.start_byte(),
+                    });
                 } else if let Some(of) = value_type(*value, src) {
                     for (i, name) in names.iter().enumerate().filter(|(_, n)| *n != "_") {
                         let mut path = of.clone();
@@ -3698,6 +3903,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
             }
         }
     }
+    bind_anonymous_fields(&anon_loops, &mut refs, &mut locals);
     bind_closure_params(&closures, &mut refs, &mut locals);
     facts.receivers = bind_receivers(&receivers, &mut refs);
     // the innermost definition around each use (a sweep: defs are in source
@@ -3770,7 +3976,17 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
             !b.declared,
         ))
     });
-    locals.dedup_by(|b, a| a.from_def == b.from_def && a.name == b.name);
+    // (in a callable, a field and a local of one name are both kept: the
+    // field of an anonymous struct, `tests := []struct{ expectedURL string
+    // }`, beside `expectedURL, _ := url.Parse(…)`; Ruby `@options =
+    // options.request` beside `options = …`. In a class, a field's
+    // declaration is the field: C# `readonly string _path = …`)
+    let callable = |d: Option<usize>| d.is_some_and(|d| facts.defs[d].kind.is_callable());
+    locals.dedup_by(|b, a| {
+        a.from_def == b.from_def
+            && a.name == b.name
+            && (a.field == b.field || !callable(a.from_def))
+    });
     for imp in imports.iter_mut() {
         if imp.runs == Runs::ModuleLevel && inside_callable(&facts.defs, imp.byte) {
             imp.runs = Runs::Deferred;

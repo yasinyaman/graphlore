@@ -316,6 +316,27 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- **Native engine 0.5.43: Go's copied values, defined types, anonymous rows.**
+  - A Go local assigned a name or a field (`m := mx`, `cbc := cb.base`) is
+    typed by it; a type assertion (`x.(*T)`, also in `v, ok := x.(*T)`) is
+    its type; a local function value (`h := func(…)`) hides the function of
+    its name.
+  - A defined type that is no alias (`type HeaderRouter map[…]`, `type nodes
+    []*node`) takes its methods like a struct.
+  - In a loop over rows of an anonymous struct (`for _, tt := range
+    []struct{ req *Request }{…}`), `tt.req` has the field's type.
+  - `atomic.Pointer[T].Load()` gives the `T`; an embedded struct is a field
+    named after its type.
+  - An import path names its package as Go conventions do (`go-broadcast` is
+    `broadcast`, `yaml.v3` is `yaml`), and a function declared to give a
+    library type is no longer a project receiver guessed by a method's name.
+  - New marks: a receiver behind a library-typed field or a library-typed
+    result.
+  - In every language, a local beside a field of its name inside a method is
+    the local (faraday's `options`, retrofit's `headers`); a class's field
+    declaration is still the field.
+  - Go's unmarked unresolved rows go from 18 to 0; across all languages, 615
+    to 597.
 - **Native engine 0.5.42: TypeScript callbacks, casts, object types.**
   - A variable of a JS/TS callback at file level (a test body) is a name of
     that callback and is typed. It used to type nothing, and it was linked by

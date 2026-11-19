@@ -945,7 +945,21 @@ fn go_last(path: &str) -> String {
     {
         segs.pop();
     }
-    segs.last().unwrap_or(&path).replace('-', "_")
+    let last = segs.last().unwrap_or(&path);
+    // the package name an import path conventionally declares:
+    // `github.com/dustin/go-broadcast` is `broadcast`, `gopkg.in/yaml.v3`
+    // `yaml`, `github.com/mattn/go-sqlite3` `sqlite3`
+    let last = match last.rsplit_once(".v") {
+        Some((name, v))
+            if !name.is_empty() && !v.is_empty() && v.chars().all(|c| c.is_ascii_digit()) =>
+        {
+            name
+        }
+        _ => last,
+    };
+    let last = last.strip_prefix("go-").filter(|s| !s.is_empty()).unwrap_or(last);
+    let last = last.strip_suffix("-go").filter(|s| !s.is_empty()).unwrap_or(last);
+    last.replace('-', "_")
 }
 
 /// A name a JS/TS module exports without defining it: `export { a as b }`,
