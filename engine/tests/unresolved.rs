@@ -364,3 +364,35 @@ fn go_rows_on_library_fields_results_and_function_locals_say_so() {
     assert_eq!(why("h"), "the name is a local or parameter of the caller", "{rows:#?}");
     assert_eq!(why("lonely"), Value::Null, "{rows:#?}");
 }
+
+#[test]
+fn java_rows_on_library_fields_java_lang_and_qualified_names_say_so() {
+    let dir = project(
+        "javamarks",
+        &[
+            // a field of a library type, of a `java.lang` type, of a fully
+            // qualified type, a field beside a method of its name, a library
+            // result, a qualified construction; and a call that is a gap
+            ("src/app/Calls.java", "package app;\n\nimport java.util.List;\nimport okhttp3.Request;\nimport okhttp3.mockwebserver.MockWebServer;\n\npublic final class Calls {\n  private static final String SET = \"abc\";\n  private final okhttp3.Response rawResponse = null;\n  public final MockWebServer server = new MockWebServer();\n  final List<String> factories = null;\n  public List<String> factories() { return factories; }\n  Request request() { return null; }\n  private final Own mine = null;\n\n  void go() {\n    SET.codePointCount(0, 1);\n    rawResponse.isSuccessful();\n    server.takeRequest().getRequestUrl().queryParameter(\"n\");\n    factories.lastIndexOf(\"x\");\n    request().tag(Object.class);\n    new okhttp3.Response.Builder().code(200).message(\"m\");\n    mine.lonely();\n  }\n}\n"),
+            ("src/app/Own.java", "package app;\nclass Own {}\n"),
+            ("src/app/Utils.java", "package app;\nfinal class Utils {\n  static int codePointCount(int a, int b) { return 0; }\n  boolean isSuccessful() { return true; }\n  String queryParameter(String n) { return n; }\n  int lastIndexOf(Object o) { return 0; }\n  Object tag(Object c) { return c; }\n  Object message(String m) { return m; }\n  void lonely() {}\n}\n"),
+        ],
+    );
+    let out = dir.join("unresolved.json");
+    let mut opts = BuildOptions::new(&dir);
+    opts.unresolved = Some(out.clone());
+    build_graph(&opts).unwrap();
+    let rows: Vec<Value> = serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+    let why = |name: &str| {
+        rows.iter()
+            .find(|r| r["name"] == name)
+            .map(|r| r["library_like"].clone())
+            .unwrap_or_else(|| panic!("no row {name}: {rows:#?}"))
+    };
+    for name in ["codePointCount", "isSuccessful", "queryParameter", "lastIndexOf", "tag"] {
+        assert_eq!(why(name), "the receiver is a library's", "{name}: {rows:#?}");
+    }
+    assert_eq!(why("message"), "the head is a library's type or global", "{rows:#?}");
+    assert_eq!(why("lonely"), Value::Null, "{rows:#?}");
+}

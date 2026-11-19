@@ -3321,6 +3321,10 @@ impl<'a> Project<'a> {
                 if matches!(self.resolve_name(f, scope(x), head), Some(Target::Ext(_, _))) {
                     return true;
                 }
+                // (Java `String readBody`, `((Class<?>) type)`: `java.lang`)
+                if l.declared && self.java_library_type(f, scope(x), &l.path.clone()) {
+                    return true;
+                }
                 // (`let res = crate::get(url).call().unwrap()`, `call` declared
                 // `-> Result<Response<Body>, Error>` with `Response` a library's)
                 let path = l.path.clone();
@@ -3360,6 +3364,70 @@ impl<'a> Project<'a> {
             cur = defs[x].parent;
         }
         None
+    }
+
+    /// Java: whether a written type is a library's: one an import names,
+    /// a `java.lang` type the project does not define, or a qualified name
+    /// whose head is no package or name of the project (`okhttp3.Response`).
+    fn java_library_type(&self, g: usize, scope: Option<usize>, ty: &[String]) -> bool {
+        if self.files[g].lang != Some(crate::lang::Lang::Java) || ty.is_empty() {
+            return false;
+        }
+        match self.resolve_path(g, scope, ty, true) {
+            Some((Target::Ext(..), _)) => return true,
+            Some(_) => return false,
+            None => {}
+        }
+        let head = ty[0].as_str();
+        match self.resolve_name(g, scope, head) {
+            Some(Target::Ext(..)) => true,
+            Some(_) => false,
+            None if ty.len() == 1 => JAVA_LANG_TYPES.contains(&head),
+            None => {
+                head.chars().next().is_some_and(|c| c.is_lowercase())
+                    && !self.pkg_files.keys().any(|(fam, pkg)| {
+                        *fam == Family::Jvm && (pkg == head || pkg.starts_with(&format!("{head}.")))
+                    })
+            }
+        }
+    }
+
+    /// Java: whether what a path is called on is a library's value: the
+    /// head a field, a variable or a local declared with a library's type
+    /// (`rawResponse.headers()` of an `okhttp3.Response`, `SET.indexOf(…)` of
+    /// a `String`, `server.takeRequest()` of a `MockWebServer`).
+    fn java_library_receiver(&self, f: usize, d: Option<usize>, path: &[String]) -> bool {
+        if self.files[f].lang != Some(crate::lang::Lang::Java) || path.len() < 2 {
+            return false;
+        }
+        let Some(_guard) = DepthGuard::enter(&LIBRARY_DEPTH, 2) else { return false };
+        let head = &path[0];
+        let mut cur = local_start(d);
+        while let Some(x) = cur {
+            if let Some(&li) = self.locals.get(&(f, x, head.clone())) {
+                let l = &self.files[f].locals[li];
+                return l.declared && self.java_library_type(f, scope(x), &l.path);
+            }
+            cur = self.up(f, x);
+        }
+        match self.resolve_path(f, d, &path[..1], true) {
+            Some((Target::Def(v), _)) if self.def(v).kind.is_state() => {
+                let def = self.def(v);
+                def.declared_type
+                    .as_ref()
+                    .is_some_and(|t| self.java_library_type(v.0, def.parent, t))
+            }
+            // a field beside a method of its name is no definition of its own
+            // (one node per name in a type), but its declaration is kept:
+            // `callAdapterFactories.indexOf(…)` of a `List<…>`
+            _ => self.class_of(f, d).is_some_and(|c| {
+                let held = self.fields.get(&c).and_then(|m| m.get(head.as_str()));
+                held.is_some_and(|&(g, li)| {
+                    let l = &self.files[g].locals[li];
+                    l.declared && self.java_library_type(g, Some(c.1), &l.path)
+                })
+            }),
+        }
     }
 
     /// Whether a step before a path's last name is a field or property
@@ -4794,7 +4862,13 @@ impl<'a> Project<'a> {
             // does not define: only an extension written for it can be meant
             _ if !own_init
                 && (self.is_untyped_local(f, d, head) || self.is_external_local(f, d, head))
-                && (*self.types_only.borrow() || self.local_type(f, d, head).is_none()) =>
+                && (*self.types_only.borrow() || self.local_type(f, d, head).is_none())
+                // (Java, C#: methods and variables are named apart, and a bare
+                // call beside a typed local is the method: `baseUrl(…)` beside
+                // `String baseUrl`)
+                && !(rest.is_empty()
+                    && matches!(fam, Family::Jvm | Family::CSharp)
+                    && self.local_keeps_outer(f, d, head, *self.calling.borrow())) =>
             {
                 if rest.len() == 1 && !bases && *self.calling.borrow() {
                     // (`var message = new HttpRequestMessage()`: the type it
@@ -5004,6 +5078,21 @@ impl<'a> Project<'a> {
                 if written {
                     unpicked = true;
                     conf = conf.max(Confidence::Inferred);
+                }
+            }
+        }
+        // a constructor named with a member after it is its class
+        // (`FakeCall.<Error>sneakyThrow(e)` inside `FakeCall`)
+        if let Target::Def(m) = t {
+            let def = self.def(m);
+            if def.kind == DefKind::Constructor
+                && def.name == *head
+                && rest.first().is_some_and(|s| s != "()")
+            {
+                if let Some(c) =
+                    def.parent.map(|x| (m.0, x)).filter(|c| self.def(*c).kind.is_class_like())
+                {
+                    t = Target::Def(c);
                 }
             }
         }
@@ -6314,6 +6403,13 @@ impl<'a> Project<'a> {
             && bare_head.chars().next().is_some_and(|c| c.is_uppercase())
             && !self.by_name.contains_key(bare_head)
             && !self.is_local_name(f, d, bare_head);
+        // Java: a fully qualified name of a package the project has none of
+        // (`new okhttp3.Response.Builder()`)
+        let outside_head = outside_head
+            || (reason == "head name not found"
+                && r.path.len() >= 3
+                && !self.is_local_name(f, d, bare_head)
+                && self.java_library_type(f, d, &r.path[..2]));
         // C, C++: `std::…` is the library's, even where the project opens
         // `namespace std { }` to add a specialization
         let std_head = fam == Family::C && bare_head == "std" && r.path.len() >= 2;
@@ -6369,10 +6465,12 @@ impl<'a> Project<'a> {
                 && r.path.len() >= 3
                 && self.library_field_step(f, d, &r.path))
             // (Go `room(id).Submit(post)`, `room` declared to give a
-            // `broadcast.Broadcaster`)
-            || (fam == Family::Go
+            // `broadcast.Broadcaster`; Java `call.request().tag(…)`, `request()`
+            // declared to give an `okhttp3.Request`)
+            || (matches!(fam, Family::Go | Family::Jvm)
                 && r.path.len() >= 3
                 && self.library_result(f, d, &r.path[..r.path.len() - 1]))
+            || self.java_library_receiver(f, d, &r.path)
         {
             Some("the receiver is a library's")
         } else if outside_head || std_head || crate_head {
@@ -8356,6 +8454,52 @@ fn scope(x: usize) -> Option<usize> {
 
 /// Rust's own types, as a parameter writes them (`uri: &str`): a receiver of
 /// one is the language's.
+/// Java: the types of `java.lang`, which every file sees without an import.
+const JAVA_LANG_TYPES: &[&str] = &[
+    "String",
+    "Object",
+    "Class",
+    "Integer",
+    "Long",
+    "Short",
+    "Byte",
+    "Double",
+    "Float",
+    "Boolean",
+    "Character",
+    "Number",
+    "Math",
+    "StrictMath",
+    "System",
+    "Thread",
+    "Runtime",
+    "Throwable",
+    "Exception",
+    "RuntimeException",
+    "Error",
+    "StringBuilder",
+    "StringBuffer",
+    "CharSequence",
+    "Iterable",
+    "Comparable",
+    "Runnable",
+    "Void",
+    "Enum",
+    "Record",
+    "ClassLoader",
+    "Process",
+    "ProcessBuilder",
+    "ThreadLocal",
+    "AutoCloseable",
+    "Cloneable",
+    "IllegalArgumentException",
+    "IllegalStateException",
+    "NullPointerException",
+    "UnsupportedOperationException",
+    "IndexOutOfBoundsException",
+    "InterruptedException",
+];
+
 const RUST_OWN_TYPES: &[&str] = &[
     "str", "String", "bool", "char", "u8", "u16", "u32", "u64", "u128", "usize", "i8", "i16",
     "i32", "i64", "i128", "isize", "f32", "f64", "Vec", "HashMap", "HashSet", "BTreeMap",

@@ -255,6 +255,11 @@ pub fn path_of(n: Node, src: &[u8]) -> Option<Vec<String>> {
         "attribute" if n.child_by_field_name("object").is_none() => {
             n.child_by_field_name("name").and_then(|c| path_of(c, src))
         }
+        // `((WildcardType) type).getLowerBounds()`: the cast is a local of
+        // the type it writes (`cast_receivers`)
+        "parenthesized_expression" if kids(n).iter().any(|c| is_cast(*c)) => {
+            kids(n).into_iter().find(|c| is_cast(*c)).map(|c| vec![cast_local(c)])
+        }
         "pointer_type"
         | "reference_type"
         | "nullable_type"
@@ -744,6 +749,15 @@ fn wrapper_first_arg(n: Node) -> Option<Node> {
 /// What a value constructs: `Foo()`, `new Foo()`, `Foo::new()`, `Foo{}`,
 /// `&Foo{}`, `Foo.new`. The path is the callee's; the resolver keeps it only
 /// when it names a type.
+/// The name of the local a parenthesized cast is (`((T) x).m()`): what
+/// `path_of` reads as the receiver, and `cast_receivers` declares.
+fn cast_local(cast: Node) -> String {
+    format!("{CAST}@{}", cast.start_byte())
+}
+
+/// The head of the local a parenthesized cast is.
+pub const CAST: &str = "(cast)";
+
 /// A cast: what the value is, written at the site.
 fn is_cast(n: Node) -> bool {
     matches!(n.kind(), "cast_expression" | "as_expression" | "type_assertion")
@@ -3177,6 +3191,32 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
         // its own `v`, a name of that arm only
         if n.kind() == "match_expression" && facts.lang == Some(crate::lang::Lang::Rust) {
             closures.extend(arm_scopes(n, src));
+        }
+        // `((WildcardType) type).getLowerBounds()`: a local of the type the
+        // cast writes, which `path_of` names
+        if n.kind() == "parenthesized_expression" {
+            if let Some(c) = kids(n).into_iter().find(|c| is_cast(*c)) {
+                if let Some(path) = value_type(c, src) {
+                    locals.push(Local {
+                        name: cast_local(c),
+                        path,
+                        declared: true,
+                        field: false,
+                        assigned: false,
+                        given: None,
+                        elem: None,
+                        value_args: Vec::new(),
+                        sealed: false,
+                        keyed: false,
+                        targs: Vec::new(),
+                        targ_elems: Vec::new(),
+                        key: None,
+                        written_head: None,
+                        from_def: None,
+                        byte: c.start_byte(),
+                    });
+                }
+            }
         }
         // Go `tests := []struct{ req *Request }{…}`, `for _, tt := range
         // tests`: the fields of the anonymous struct each element is

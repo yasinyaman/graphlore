@@ -2338,3 +2338,39 @@ fn a_local_beside_a_field_of_its_name_is_the_local_in_a_method_only() {
         "{got:#?}"
     );
 }
+
+#[test]
+fn java_casts_constructor_heads_and_java_lang_receivers() {
+    // A parenthesized cast is a value of the type it writes: `((Get)
+    // annotation).value()` is `Get.value`, a cast to a library type is no
+    // project receiver; `FakeCall.<Error>sneakyThrow(e)` inside `FakeCall` is
+    // the class's method, not its constructor's; a `String` local is
+    // `java.lang`'s, never guessed by a method name; `vets = new
+    // ArrayList<>()` writes the field; C `((reply*)r)->type` reads the field
+    let got = links("javacasts", &[
+        ("src/app/Get.java", "package app;\npublic @interface Get {\n  String value();\n}\n"),
+        ("src/app/Utils.java", "package app;\nfinal class Utils {\n  static String value() { return null; }\n  static int indexOf(Object[] a, Object b) { return 0; }\n  static Object[] getLowerBounds() { return null; }\n}\n"),
+        ("src/app/Calls.java", "package app;\n\nimport java.lang.reflect.WildcardType;\nimport java.util.ArrayList;\nimport java.util.List;\n\npublic final class Calls {\n  static final class FakeCall {\n    FakeCall(int x) {}\n    Object run(Throwable error) {\n      throw FakeCall.<Error>sneakyThrow(error);\n    }\n    private static <T extends Throwable> T sneakyThrow(Throwable t) throws T { throw (T) t; }\n  }\n  private List<String> vets;\n  String parse(Object annotation, Object type) {\n    String readBody = \"x\";\n    readBody.indexOf(\"y\");\n    ((WildcardType) type).getLowerBounds();\n    if (vets == null) {\n      vets = new ArrayList<>();\n    }\n    return ((Get) annotation).value();\n  }\n}\n"),
+        ("reply.h", "typedef struct reply { int type; char *str; } reply;\n"),
+        ("async.c", "#include \"reply.h\"\nint check(void *r) {\n    return ((reply*)r)->type;\n}\n"),
+    ]);
+    let to = |s: &str, t: &str| got.iter().any(|(a, _, b, _)| a == s && b == t);
+    let rel = |s: &str, r: &str, t: &str| got.iter().any(|(a, x, b, _)| a == s && x == r && b == t);
+    assert!(
+        to("src_app_calls_calls_fakecall_run", "src_app_calls_calls_fakecall_sneakythrow"),
+        "{got:#?}"
+    );
+    assert!(
+        !to("src_app_calls_calls_fakecall_run", "src_app_calls_calls_fakecall_fakecall"),
+        "{got:#?}"
+    );
+    assert!(to("src_app_calls_calls_parse", "src_app_get_get_value"), "{got:#?}");
+    assert!(!to("src_app_calls_calls_parse", "src_app_utils_utils_value"), "{got:#?}");
+    assert!(!to("src_app_calls_calls_parse", "src_app_utils_utils_indexof"), "{got:#?}");
+    assert!(!to("src_app_calls_calls_parse", "src_app_utils_utils_getlowerbounds"), "{got:#?}");
+    assert!(rel("src_app_calls_calls_parse", "writes", "src_app_calls_calls_vets"), "{got:#?}");
+    assert!(
+        got.iter().any(|(a, x, b, _)| a == "async_check" && x == "reads" && b.ends_with("_type")),
+        "{got:#?}"
+    );
+}

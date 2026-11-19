@@ -316,6 +316,24 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- **Native engine 0.5.44: Java casts, `java.lang`, library receivers.**
+  - A parenthesized cast is a value of the type it writes, in every
+    language that has one: `((Get) annotation).value()` links, and C's
+    `((reply*)r)->type` reads the field. A cast to a library type is no
+    longer linked by a method's name to a project namesake.
+  - `FakeCall.<Error>sneakyThrow(e)` inside `FakeCall` is the class's
+    method, not its constructor.
+  - `java.lang` types (`String`, `Class`, …) are the library's: a local of
+    one is never guessed to a project method of the same name.
+  - Java, Kotlin, C#: a bare call beside a typed local is the method even
+    when the local's type is a library's, and an assignment to a field of a
+    library type is a write.
+  - New marks: a receiver declared with a library type (imported,
+    `java.lang`, or a fully qualified name such as `okhttp3.Response`);
+    a field beside a method of its name; a library-typed method result;
+    a construction by a fully qualified library name.
+  - Java's unmarked unresolved rows go from 24 to 0; across all languages,
+    597 to 572. 21 wrong inferred edges are gone.
 - **Native engine 0.5.43: Go's copied values, defined types, anonymous rows.**
   - A Go local assigned a name or a field (`m := mx`, `cbc := cb.base`) is
     typed by it; a type assertion (`x.(*T)`, also in `v, ok := x.(*T)`) is
