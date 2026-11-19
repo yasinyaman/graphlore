@@ -1493,9 +1493,9 @@ impl<'a> Project<'a> {
         // a package's entry stands for the files it is made of
         let passes: Vec<Vec<usize>> = (0..files.len()).map(|g| p.passes_on(g)).collect();
         if passes.iter().any(|x| !x.is_empty()) {
-            for f in 0..files.len() {
+            for (f, scope) in p.scopes.iter_mut().enumerate() {
                 let mut seen: HashSet<usize> = HashSet::new();
-                let mut frontier: Vec<usize> = p.scopes[f].imported.iter().copied().collect();
+                let mut frontier: Vec<usize> = scope.imported.iter().copied().collect();
                 for _ in 0..3 {
                     let mut next = Vec::new();
                     for g in frontier {
@@ -1510,7 +1510,7 @@ impl<'a> Project<'a> {
                         break;
                     }
                 }
-                p.scopes[f].imported.extend(seen);
+                scope.imported.extend(seen);
             }
         }
         p
