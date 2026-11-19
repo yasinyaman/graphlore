@@ -653,7 +653,12 @@ fn rust_path(p: &Project, f: usize, segs: &[String]) -> ModRes {
             return walk(p, Target::Module(files), r);
         }
         name => {
-            if let Some(t) = p.member(&Target::Module(vec![f]), name, 0) {
+            // (what a `use` path walks are modules, never a function of the
+            // name: `pub use agent::Agent;` beside `fn agent()`)
+            let module = submodule(p, &[f], name);
+            if let Some(t) = module {
+                t
+            } else if let Some(t) = p.member(&Target::Module(vec![f]), name, 0) {
                 t
             } else if let Some(k) = p.modsys.rs_crates.get(name) {
                 match p.modsys.rs_files.get(&(k.clone(), Vec::new())) {

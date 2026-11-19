@@ -232,9 +232,12 @@ pub fn path_of(n: Node, src: &[u8]) -> Option<Vec<String>> {
             }
             (!p.is_empty()).then_some(p)
         }
-        "generic_type" | "generic_name" | "parameterized_type" | "template_type" => n
+        // (Rust `x.get::<T>()`: `generic_function`, the callee in `function`)
+        "generic_type" | "generic_name" | "parameterized_type" | "template_type"
+        | "generic_function" => n
             .child_by_field_name("name")
             .or_else(|| n.child_by_field_name("type"))
+            .or_else(|| n.child_by_field_name("function"))
             .or_else(|| kids(n).into_iter().next())
             .and_then(|c| path_of(c, src)),
         "attribute" if n.child_by_field_name("object").is_none() => {
@@ -673,17 +676,46 @@ fn first_type(n: Node, src: &[u8]) -> Option<Vec<String>> {
     }
     let mut v = Vec::new();
     types_in(n, src, "", &mut v);
-    // types_in yields the outer type, then its arguments (in reverse order)
-    let mut it = v.into_iter().map(|(p, _)| p);
-    let first = it.next()?;
+    let first = v.into_iter().next()?.0;
     let wrapper = first.last().is_some_and(|l| is_wrapper(l, n));
+    // a wrapper holds its own first type argument (`Result<Response<Body>,
+    // Error>` is a `Response`, `Option<Box<Foo>>` a `Foo`), not the innermost
+    // type written in it
     if wrapper {
-        let rest: Vec<Vec<String>> = it.collect();
-        if let Some(inner) = rest.into_iter().last() {
+        if let Some(inner) = wrapper_first_arg(n).and_then(|a| first_type(a, src)) {
             return Some(inner);
         }
     }
     Some(first)
+}
+
+/// The first type argument of the generic type a position writes, lifetimes
+/// left out (`Ref<'a, T>`): through references, pointers and annotations.
+fn wrapper_first_arg(n: Node) -> Option<Node> {
+    let mut stack = vec![(n, 0)];
+    while let Some((node, depth)) = stack.pop() {
+        let k = node.kind();
+        if matches!(k, "generic_type" | "generic_name" | "parameterized_type" | "template_type")
+            || (k == "user_type" && kids(node).iter().any(|c| c.kind() == "type_arguments"))
+        {
+            let args = kids(node).into_iter().find(|c| {
+                matches!(
+                    c.kind(),
+                    "type_arguments"
+                        | "type_parameter"
+                        | "template_argument_list"
+                        | "type_argument_list"
+                )
+            })?;
+            return kids(args).into_iter().find(|a| {
+                !is_comment(a) && !matches!(a.kind(), "lifetime" | "type_projection_modifiers")
+            });
+        }
+        if depth < 4 {
+            stack.extend(kids(node).into_iter().rev().map(|c| (c, depth + 1)));
+        }
+    }
+    None
 }
 
 /// What a value constructs: `Foo()`, `new Foo()`, `Foo::new()`, `Foo{}`,
@@ -717,7 +749,19 @@ fn value_type(v: Node, src: &[u8]) -> Option<Vec<String>> {
             .and_then(|t| kids(t).into_iter().next())
             .and_then(|t| first_type(t, src)),
         "parenthesized_expression" | "reference_expression" | "unary_expression" => {
-            kids(v).into_iter().find_map(|c| value_type(c, src))
+            kids(v).into_iter().find_map(|c| value_type(c, src)).or_else(|| {
+                // Rust `let stream = &mut self.stream;`: a reference to a field
+                // is that field
+                (v.kind() == "reference_expression")
+                    .then(|| kids(v).into_iter().find(|c| c.kind() == "field_expression"))
+                    .flatten()
+                    .and_then(|c| path_of(c, src))
+            })
+        }
+        // Rust `let config = details.config;`: the field (C and C++ declare
+        // a local's type)
+        "field_expression" if crate::parse::current() == Some(crate::lang::Lang::Rust) => {
+            path_of(v, src).filter(|p| p.first().is_some_and(|s| s != UNKNOWN))
         }
         // `let x = load()?`, `val u = await find()`: what the wrapper holds
         "await_expression" | "try_expression" => {
@@ -1306,6 +1350,88 @@ fn declared_call(n: Node) -> Option<Node> {
 /// The type a call is handed explicitly: its one type argument (`mock<Foo>()`,
 /// `sp.GetService<IFoo>()`) or the one class literal among its arguments
 /// (`create(Service::class.java)`, `create(Service.class)`, `typeof(Bar)`).
+/// Rust: the one type a turbofish hands a call that the chain after it
+/// keeps (`req.extensions().get::<AgentInstance>()?.clone()`,
+/// `serde_json::from_str::<Config>(s).unwrap()`): through `?` and the
+/// calls that keep a value (`clone`, `unwrap`, `expect`, …).
+/// Calls whose one type argument (`get::<T>()`, `from_str::<T>(s)`) is the
+/// type of what they give, `Option` / `Result` aside.
+const TURBOFISH_RESULTS: &[&str] = &[
+    "get",
+    "get_mut",
+    "remove",
+    "parse",
+    "downcast",
+    "downcast_ref",
+    "downcast_mut",
+    "get_result",
+    "first",
+    "from_str",
+    "from_slice",
+    "from_value",
+    "from_reader",
+    "deserialize",
+];
+
+fn kept_turbofish(call: Node, src: &[u8]) -> Option<Vec<String>> {
+    if crate::parse::current() != Some(crate::lang::Lang::Rust) {
+        return None;
+    }
+    let mut node = call;
+    for _ in 0..8 {
+        match node.kind() {
+            "try_expression" | "reference_expression" | "parenthesized_expression" => {
+                node = kids(node).into_iter().find(|c| !is_comment(c))?;
+            }
+            "call_expression" => {
+                let func = node.child_by_field_name("function")?;
+                match func.kind() {
+                    "generic_function" => {
+                        // Only a call whose type argument is what it gives:
+                        // `load::<T>` gives a `Vec<T>`, `collect::<C>` a C.
+                        let callee = func.child_by_field_name("function")?;
+                        let last = match callee.kind() {
+                            "field_expression" => callee.child_by_field_name("field"),
+                            "scoped_identifier" => callee.child_by_field_name("name"),
+                            _ => Some(callee),
+                        }
+                        .map(|x| text(x, src))?;
+                        if !TURBOFISH_RESULTS.contains(&last.as_str()) {
+                            return None;
+                        }
+                        let targs = func.child_by_field_name("type_arguments")?;
+                        let ks: Vec<Node> =
+                            kids(targs).into_iter().filter(|x| !is_comment(x)).collect();
+                        return match ks.as_slice() {
+                            [one] => first_type(*one, src),
+                            _ => None,
+                        };
+                    }
+                    "field_expression" => {
+                        let name = func.child_by_field_name("field").map(|x| text(x, src))?;
+                        if !matches!(
+                            name.as_str(),
+                            "clone"
+                                | "cloned"
+                                | "copied"
+                                | "unwrap"
+                                | "expect"
+                                | "to_owned"
+                                | "unwrap_or_default"
+                        ) {
+                            return None;
+                        }
+                        node = func.child_by_field_name("value")?;
+                    }
+                    _ => return None,
+                }
+            }
+            _ => return None,
+        }
+    }
+    None
+}
+
 fn given_type(call: Node, src: &[u8]) -> Option<Vec<String>> {
     // the call's own type arguments: not those of a call it is chained on,
     // nor of its arguments
@@ -2830,7 +2956,19 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                     continue;
                 }
                 let call = (!declared && !path.is_empty()).then(|| declared_call(n)).flatten();
-                let given = call.and_then(|c| given_type(c, src));
+                // Rust: only a call whose turbofish is what it gives
+                // (`get::<T>()`, not `load::<T>()`, a `Vec<T>`)
+                let rust = crate::parse::current() == Some(crate::lang::Lang::Rust);
+                let given =
+                    call.and_then(
+                        |c| {
+                            if rust {
+                                kept_turbofish(c, src)
+                            } else {
+                                given_type(c, src)
+                            }
+                        },
+                    );
                 let value_args = call
                     .map(|c| arg_facts(c, src))
                     .filter(|a| !a.is_empty() && a.len() <= 4)
@@ -3059,6 +3197,29 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                     }
                 }
                 _ => {}
+            }
+        }
+        // Rust `impl Deref for X { type Target = T; }`
+        if n.kind() == "impl_item" && facts.lang == Some(crate::lang::Lang::Rust) {
+            let deref = n
+                .child_by_field_name("trait")
+                .and_then(|t| path_of(t, src))
+                .is_some_and(|p| p.last().is_some_and(|s| s == "Deref"));
+            let ty = n.child_by_field_name("type").and_then(|t| first_type(t, src));
+            if let (true, Some(ty)) = (deref, ty) {
+                let target = n.child_by_field_name("body").and_then(|b| {
+                    kids(b).into_iter().find_map(|item| {
+                        (item.kind() == "type_item"
+                            && item
+                                .child_by_field_name("name")
+                                .is_some_and(|x| text(x, src) == "Target"))
+                        .then(|| item.child_by_field_name("type").and_then(|t| first_type(t, src)))
+                        .flatten()
+                    })
+                });
+                if let Some(target) = target {
+                    facts.derefs.push((ty, target));
+                }
             }
         }
         // JS `const article = req.article`: a name given a request's property
@@ -3991,6 +4152,8 @@ fn targs_of(t: Node, src: &[u8]) -> Vec<Vec<String>> {
                 given.into_iter().map(|a| first_type(a, src)).collect();
             args.unwrap_or_default()
         }
+        // (`Result<Response<Body>, Error>`: those of what the wrapper holds)
+        Some(_) => wrapper_first_arg(t).map(|a| targs_of(a, src)).unwrap_or_default(),
         _ => Vec::new(),
     }
 }
@@ -4002,6 +4165,7 @@ fn targ_elems_of(t: Node, src: &[u8]) -> Vec<Option<Vec<String>>> {
         Some((name, given)) if !is_wrapper(&name, t) => {
             given.into_iter().map(|a| elem_type(a, src)).collect()
         }
+        Some(_) => wrapper_first_arg(t).map(|a| targ_elems_of(a, src)).unwrap_or_default(),
         _ => Vec::new(),
     }
 }

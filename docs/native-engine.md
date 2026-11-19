@@ -767,8 +767,8 @@ file pairs). The native graph has definitions graphify folds into the one
 around them (a function nested in a method, the setter beside a getter of the
 same name); an edge from one of those is compared as an edge from the paired
 definition it belongs to, as graphify records it. On the 31 repositories of the
-[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.37,
-measured 2026-11-18), as native / graphify edges and the share of graphify's
+[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.38,
+measured 2026-11-19), as native / graphify edges and the share of graphify's
 that the native graph has too:
 
 | Language | same definition | imports (file pairs) | calls | bases | type references |
@@ -778,11 +778,11 @@ that the native graph has too:
 | TypeScript | 99.4% | 527 / 634 (83%) | 805 / 687 (98%) | 25 / 20 (100%) | 740 / 156 (88%) |
 | TSX | 99.7% | 253 / 316 (80%) | 435 / 456 (95%) | – | 42 / 4 |
 | Go | 100% | 538 / 950 (47%)² | 6,723 / 3,167 (99%) | 19 / 14 (100%) | 679 / 355 (99%) |
-| Java | 100% | 1,105 / 1,010 (100%) | 5,718 / 5,123 (85%) | 415 / 168 (94%) | 3,989 / 1,930 (98%) |
+| Java | 100% | 1,105 / 1,010 (100%) | 5,720 / 5,123 (85%) | 415 / 168 (94%) | 3,989 / 1,930 (98%) |
 | Kotlin | 99.4% | 368 / 333 (95%) | 4,786 / 2,108 (71%) | 96 / 56 (93%) | 1,079 / 673 (91%) |
 | Scala | 100% | 2 / 0 | 46 / 20 (45%) | 21 / 22 (95%) | 75 / 32 (100%) |
 | C# | 92.7% | 347 / 280 (30%)³ | 2,860 / 2,450 (96%) | 87 / 86 (98%) | 1,248 / 806 (99%) |
-| Rust | 93.3% | 314 / 370 (75%) | 2,016 / 853 (86%) | 53 / 41 (93%) | 1,245 / 895 (81%) |
+| Rust | 93.3% | 324 / 370 (79%) | 2,142 / 853 (87%) | 53 / 41 (93%) | 1,200 / 895 (81%) |
 | Swift | 95.9% | 166 / 166 (–)³ | 5,494 / 2,141 (83%) | 190 / 164 (100%) | 1,091 / 580 (62%) |
 | C | 100% | 89 / 77 (99%) | 864 / 791 (100%) | – | 253 / 130 (97%) |
 | C++ | 98.7% | 215 / 228 (93%) | 765 / 281 (29%)⁴ | 30 / 5 (100%) | 350 / 234 (88%) |
@@ -872,6 +872,34 @@ most of them got's `server.listen`); a property middleware attaches to a
 request (`req.article = …`, `FileFacts::request_props`); and the request
 a framework hands a function where the project builds none (passport's
 `req.logout()`). JavaScript's unmarked rows: 18 → 0; in all, 926 → 801.
+Engine 0.5.38 takes on Rust's unmarked rows (96, 95 of them ureq's). A
+field and a method of one name are two things in Rust (and C, C++, Java):
+`self.input` with no `()` after it is the field even where a trait method
+`input()` is in sight, so `self.input.unconsumed()` is the field type's
+method, and `self.config` read in `fmt` is a `reads` of the field, not a
+`references` of the method `config()` (ureq: 45 references become reads).
+A wrapper's inner type is its own first type argument
+(`Result<Response<Body>, Error>` holds a `Response`, not `Body`, the last
+type written in it); a library generic's accessor (`get_ref`, `get_mut`,
+`into_inner`, `body`, `body_mut`, `inner`, …) gives its one project type
+argument (`res.body_mut().with_config()` on a `Response<Body>`,
+`self.stream.get_mut()` on a `TlsStream<ErrorCapture<…>>`), `INFERRED`;
+the turbofish of a call that gives what it names (`get::<T>()`,
+`parse::<T>()`, `from_str::<T>()`, `downcast_ref::<T>()`) types its local,
+and that of one that gives a collection or something else (`load::<T>()`,
+`get_results::<T>()`, `collect::<C>()`) does not; a type implementing
+`Deref<Target = T>` has `T`'s members; `crate::Agent` is the root's `pub
+use agent::Agent`, not the `pub fn agent()` beside it (11 imports now name
+`Agent`, not `lib.rs`); and a local assigned a field (`let config =
+details.config;`, `let stream = &mut self.stream;`) is typed by the field,
+`INFERRED`. ureq gets 151 calls more and 85 of its `INFERRED` calls become
+`EXTRACTED`; a wrong `indirect_call` to the test function `config()` (the
+argument was the local `config`) is gone. Rust's unmarked rows: 96 → 56;
+in all, 801 → 761. What is left there is mostly a library's: a field
+typed by one (`self.builder.header()` on `http::request::Builder`), `self`
+in an impl for a library type, an alias of one (`type Call<T> =
+ureq_proto::client::Call<T>`), a path headed by a crate (`serde_json::`,
+`std::`).
 Engine 0.5.35 (C function-pointer slots) reads a struct of function pointers
 as an interface and what is put in its slots as the implementations: an
 initializer of a variable, by name (`.async_read = redisAsyncRead`) or by
@@ -1332,7 +1360,7 @@ implicit members since 0.5.17: 39 whose place gives no type are rows now
 closure parameters and variables of express's tests. What is left at file
 level there is `app.use` and `app.set` (842 rows of express), names too
 short and too common to guess by. Engine 0.5.19 takes 123 more off (6,362;
-C# 349 from 470; 6,360 with 0.5.20, 6,348 with 0.5.21, 6,285 with 0.5.22, 6,237 with 0.5.25, 6,206 with 0.5.27, 6,166 with 0.5.28, 6,156 with 0.5.30, 6,140 with 0.5.31, 6,132 with 0.5.32, 6,126 with 0.5.33, 6,093 with 0.5.34, 6,047 with 0.5.36, 6,046 with 0.5.37). Most of what C# has left is not the project's: `Assert.
+C# 349 from 470; 6,360 with 0.5.20, 6,348 with 0.5.21, 6,285 with 0.5.22, 6,237 with 0.5.25, 6,206 with 0.5.27, 6,166 with 0.5.28, 6,156 with 0.5.30, 6,140 with 0.5.31, 6,132 with 0.5.32, 6,126 with 0.5.33, 6,093 with 0.5.34, 6,047 with 0.5.36, 6,046 with 0.5.37, 6,017 with 0.5.38). Most of what C# has left is not the project's: `Assert.
 NotNull` beside its own `Ensure.NotNull` (77), `WireMockServer.Start` (23).
 
 By then most rows were of that kind: a library's name the project happens

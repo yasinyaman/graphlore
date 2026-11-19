@@ -3083,11 +3083,167 @@ impl<'a> Project<'a> {
                 if head.is_empty() || matches!(head, "self" | "super" | "()") {
                     return false;
                 }
-                return matches!(self.resolve_name(f, Some(x), head), Some(Target::Ext(_, _)));
+                if matches!(self.resolve_name(f, Some(x), head), Some(Target::Ext(_, _))) {
+                    return true;
+                }
+                // (`let res = crate::get(url).call().unwrap()`, `call` declared
+                // `-> Result<Response<Body>, Error>` with `Response` a library's)
+                let path = l.path.clone();
+                return self.library_result(f, Some(x), &path);
             }
             cur = defs[x].parent;
         }
         false
+    }
+
+    /// Rust: a member of the project type `c` dereferences to (`impl Deref
+    /// for AgentRef { type Target = Agent; }`), when `c` has none of its own.
+    fn deref_member(&self, c: DefRef, name: &str) -> Option<DefRef> {
+        if self.family[c.0] != Some(Family::Rust) {
+            return None;
+        }
+        let cname = &self.def(c).name;
+        let _guard = DepthGuard::enter(&LIBRARY_DEPTH, 2)?;
+        for (g, facts) in self.files.iter().enumerate() {
+            if self.family[g] != Some(Family::Rust) {
+                continue;
+            }
+            for (ty, target) in &facts.derefs {
+                if ty.last() != Some(cname) || self.type_of_path(g, None, ty, true) != Some(c) {
+                    continue;
+                }
+                let Some(t) = self.type_of_path(g, None, target, true) else { continue };
+                if t != c && self.def(t).kind.is_class_like() {
+                    return self.class_member(t, name, 4);
+                }
+            }
+        }
+        None
+    }
+
+    /// Rust `x.body_mut()` on a value of a library's generic type holding one
+    /// project type (`Response<Body>`, `TlsStream<ErrorCapture<…>>`): that
+    /// type, and how many segments the value and the accessor call take. The
+    /// value is a local or a field declared so, or the result of a project
+    /// callable declared so (unwrapped).
+    fn library_accessor(
+        &self,
+        f: usize,
+        d: Option<usize>,
+        path: &[String],
+    ) -> Option<(DefRef, usize)> {
+        let k = path.iter().position(|s| LIBRARY_ACCESSORS.contains(&s.as_str()))?;
+        // (it resolves a path itself, which can come back here)
+        let _guard = DepthGuard::enter(&LIBRARY_DEPTH, 2)?;
+        if k == 0 || path.get(k + 1).is_none_or(|s| s != "()") {
+            return None;
+        }
+        let mut prefix: Vec<String> = path[..k].to_vec();
+        let mut at = d;
+        // what the value is declared with: (type, type arguments, where)
+        let mut declared: Option<Declared> = None;
+        if prefix.len() == 1 {
+            let defs = &self.files[f].defs;
+            let mut cur = d;
+            while let Some(x) = cur {
+                if let Some(&li) = self.locals.get(&(f, x, prefix[0].clone())) {
+                    let l = &self.files[f].locals[li];
+                    if l.declared {
+                        declared = Some((l.path.clone(), l.targs.clone(), f, Some(x)));
+                    } else if !l.path.is_empty() && l.path[0] != prefix[0] {
+                        // (`let res = crate::get(url).call().unwrap()`: its value)
+                        prefix = l.path.clone();
+                        at = Some(x);
+                    }
+                    break;
+                }
+                cur = defs[x].parent;
+            }
+        }
+        let prefix = &prefix[..];
+        let d = at;
+        let declared = declared.or_else(|| {
+            // a field, or the result of a call
+            let mut end = prefix.len();
+            while end > 0 {
+                let seg = prefix[end - 1].as_str();
+                if seg == "()"
+                    || seg.starts_with('[')
+                    || UNWRAPPERS.contains(&seg)
+                    || seg == "clone"
+                {
+                    end -= 1;
+                } else {
+                    break;
+                }
+            }
+            if end == 0 {
+                return None;
+            }
+            let Some((Target::Def(c), _)) = self.resolve_path(f, d, &prefix[..end], true) else {
+                return None;
+            };
+            let def = self.def(c);
+            if def.kind.is_state() {
+                return def.declared_type.clone().map(|t| (t, def.targs.clone(), c.0, def.parent));
+            }
+            if def.kind.is_callable() && end < prefix.len() {
+                return def.wraps.clone().map(|t| (t, def.targs.clone(), c.0, def.parent));
+            }
+            None
+        });
+        let (ty, targs, g, scope) = declared?;
+        // the type is a library's, and holds one type of the project
+        if !matches!(self.resolve_path(g, scope, &ty, true), Some((Target::Ext(..), _))) {
+            return None;
+        }
+        let held: Vec<DefRef> = targs
+            .iter()
+            .filter_map(|a| self.type_of_path(g, scope, a, true))
+            .filter(|t| self.def(*t).kind.is_class_like())
+            .collect();
+        match held.as_slice() {
+            [one] => Some((*one, k + 2)),
+            _ => None,
+        }
+    }
+
+    /// Whether a value path ends at a call of a project callable declared to
+    /// give a library's type (what it wraps, or its written result), past
+    /// the unwrapping (`.unwrap()`, `?`, `.clone()`) that keeps it.
+    fn library_result(&self, f: usize, d: Option<usize>, path: &[String]) -> bool {
+        let Some(_guard) = DepthGuard::enter(&LIBRARY_DEPTH, 2) else { return false };
+        let mut end = path.len();
+        while end > 0 {
+            let seg = path[end - 1].as_str();
+            if seg == "()" || seg.starts_with('[') || UNWRAPPERS.contains(&seg) || seg == "clone" {
+                end -= 1;
+            } else {
+                break;
+            }
+        }
+        if end == 0 || end == path.len() {
+            return false;
+        }
+        let Some((Target::Def(c), _)) = self.resolve_path(f, d, &path[..end], true) else {
+            return false;
+        };
+        let def = self.def(c);
+        if !def.kind.is_callable() {
+            return false;
+        }
+        let written = def.wraps.clone().or_else(|| {
+            self.files[c.0]
+                .refs
+                .iter()
+                .find(|x| {
+                    x.from_def == Some(c.1) && x.kind == RefKind::Type && x.context == "return_type"
+                })
+                .map(|x| x.path.clone())
+        });
+        written.is_some_and(|w| {
+            matches!(self.resolve_path(c.0, def.parent, &w, true), Some((Target::Ext(..), _)))
+        })
     }
 
     /// A local that does not hide the outer name: a plain assignment where
@@ -3553,6 +3709,7 @@ impl<'a> Project<'a> {
                 }
                 self.class_member(*c, name, 4)
                     .or_else(|| self.reopened_member(*c, name))
+                    .or_else(|| self.deref_member(*c, name))
                     .map(Target::Def)
             }
             Target::Module(files) => {
@@ -3921,6 +4078,18 @@ impl<'a> Project<'a> {
         want_many: bool,
     ) -> Option<(Target, Confidence)> {
         let fam = self.family[f]?;
+        // Rust: what a library's generic type gives through an accessor of
+        // the one project type it holds (`res.body_mut()` of a
+        // `Response<Body>`, `stream.get_mut()` of a `TlsStream<ErrorCapture>`)
+        if fam == Family::Rust && !bases {
+            if let Some((t, skip)) = self.library_accessor(f, d, path) {
+                let rest = &path[skip..];
+                if rest.is_empty() {
+                    return None;
+                }
+                return self.walk(Target::Def(t), rest, Confidence::Inferred);
+            }
+        }
         // `let p = setup(); p.0.go()`: a part of the tuple a local holds is
         // that part of its value
         if let Some(whole) = self.tuple_local_path(f, d, path) {
@@ -4771,6 +4940,25 @@ impl<'a> Project<'a> {
                 }
             }
             let mut found = self.member(&t, seg, 3);
+            // Rust, C, C++, Java: fields and methods are named apart, and a
+            // name with no call after it is the field (`self.input.unconsumed()`
+            // beside `fn input(&self)`)
+            if let (Some(Target::Def(m)), Target::Def(c)) = (&found, &t) {
+                // (a call's own path has no `()` after its last name)
+                let called = rest.get(i + 1).is_some_and(|s| s == "()")
+                    || (i + 1 == rest.len() && *self.calling.borrow());
+                if !called
+                    && self.def(*m).kind.is_callable()
+                    && matches!(fam, Family::Rust | Family::C | Family::Jvm)
+                    && self.def(*c).kind.is_class_like()
+                {
+                    let field =
+                        self.members(*c, seg).into_iter().find(|x| self.def(*x).kind.is_state());
+                    if let Some(x) = field {
+                        found = Some(Target::Def(x));
+                    }
+                }
+            }
             // C++ `cpr::async(…)` beside `class async`: the name called is the
             // function, a name with `::` after it the type
             if let Target::Def(ns) = t {
@@ -7426,4 +7614,38 @@ fn vendored_path(path: &str) -> bool {
                 "vendor" | "node_modules" | "wwwroot" | "third_party" | "dist" | "bower_components"
             )
         })
+}
+
+/// Accessors of a library's generic type that give the value it holds
+/// (`Response::body_mut`, `TlsStream::get_mut`, `BufReader::into_inner`).
+/// A value's declared type, its type arguments, and the file and scope
+/// they are written in.
+type Declared = (Vec<String>, Vec<Vec<String>>, usize, Option<usize>);
+
+const LIBRARY_ACCESSORS: &[&str] =
+    &["get_ref", "get_mut", "into_inner", "body", "body_mut", "into_body", "inner", "inner_mut"];
+
+thread_local! {
+    /// How deep `library_accessor` / `library_result` are in each other.
+    static LIBRARY_DEPTH: std::cell::Cell<u8> = const { std::cell::Cell::new(0) };
+}
+
+/// A depth counter held for a scope: `enter` refuses past `max`.
+struct DepthGuard(&'static std::thread::LocalKey<std::cell::Cell<u8>>);
+
+impl DepthGuard {
+    fn enter(key: &'static std::thread::LocalKey<std::cell::Cell<u8>>, max: u8) -> Option<Self> {
+        let depth = key.with(std::cell::Cell::get);
+        if depth >= max {
+            return None;
+        }
+        key.with(|c| c.set(depth + 1));
+        Some(DepthGuard(key))
+    }
+}
+
+impl Drop for DepthGuard {
+    fn drop(&mut self) {
+        self.0.with(|c| c.set(c.get().saturating_sub(1)));
+    }
 }

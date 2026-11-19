@@ -628,6 +628,10 @@ pub struct FileFacts {
     /// (the name, the property).
     #[serde(default)]
     pub request_aliases: Vec<(String, String)>,
+    /// Rust `impl Deref for AgentRef { type Target = Agent; }`: the type,
+    /// and the type it dereferences to.
+    #[serde(default)]
+    pub derefs: Vec<(Vec<String>, Vec<String>)>,
     /// Lambdas with a receiver (Kotlin `x.apply { … }`, `withIndent { … }`).
     #[serde(default)]
     pub receivers: Vec<ReceiverScope>,
@@ -663,6 +667,7 @@ impl FileFacts {
             runtime_props: Vec::new(),
             request_props: Vec::new(),
             request_aliases: Vec::new(),
+            derefs: Vec::new(),
             receivers: Vec::new(),
             resources: Vec::new(),
             http: Default::default(),

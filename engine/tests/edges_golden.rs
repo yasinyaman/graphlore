@@ -2034,3 +2034,81 @@ fn js_a_mongoose_document_has_its_schemas_methods() {
     );
     assert!(!got.iter().any(|(f, t, _)| f == "other.js" && t.starts_with("app_")), "{got:#?}");
 }
+
+/// `(source id, relation, target id, confidence)` of every edge.
+fn links(name: &str, files: &[(&str, &str)]) -> BTreeSet<(String, String, String, String)> {
+    let dir = project(name, files);
+    let (g, _) = build_graph(&BuildOptions::new(&dir)).unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+    g["links"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| {
+            let s = |k: &str| e[k].as_str().unwrap_or_default().to_string();
+            (s("source"), s("relation"), s("target"), s("confidence"))
+        })
+        .collect()
+}
+
+#[test]
+fn rust_fields_beside_methods_library_wrappers_turbofish_and_deref() {
+    // A Rust field and a method of one name are two things: `self.input` is
+    // the field, `self.input()` the method. A library generic's accessor
+    // (`body_mut`, `get_mut`) gives its one project type argument; the
+    // turbofish of `get::<T>()` is what it gives, `load::<T>()`'s is not; a
+    // wrapper's inner type is its first argument (`Response`, not `Body`); a
+    // `Deref` type has its target's members; `crate::Agent` is the root's
+    // `pub use`, not the `fn agent` beside it
+    let got = links("rustfields", &[
+        ("Cargo.toml", "[package]\nname = \"app\"\nversion = \"0.1.0\"\n"),
+        ("src/lib.rs", "pub mod agent;\npub mod buf;\npub mod wrap;\n\npub use agent::Agent;\n\npub fn agent() -> Agent {\n    Agent::new()\n}\n"),
+        ("src/agent.rs", "pub struct Agent {\n    config: u8,\n}\n\nimpl Agent {\n    pub fn new() -> Agent {\n        Agent { config: 0 }\n    }\n    pub fn config_builder() -> u8 {\n        0\n    }\n    pub fn configure(&self) -> u8 {\n        self.config\n    }\n    pub fn config(&self) -> u8 {\n        1\n    }\n}\n\npub struct Other;\n\nimpl Other {\n    pub fn configure(&self) -> u8 {\n        2\n    }\n}\n\npub struct AgentRef {\n    agent: Agent,\n}\n\nimpl std::ops::Deref for AgentRef {\n    type Target = Agent;\n    fn deref(&self) -> &Agent {\n        &self.agent\n    }\n}\n\nimpl AgentRef {\n    pub fn run(&self) -> u8 {\n        self.configure()\n    }\n}\n\npub fn make() -> u8 {\n    crate::Agent::config_builder()\n}\n"),
+        ("src/buf.rs", "pub struct ConsumeBuf;\n\nimpl ConsumeBuf {\n    pub fn unconsumed(&self) -> usize {\n        0\n    }\n}\n\npub struct Decoy;\n\nimpl Decoy {\n    pub fn unconsumed(&self) -> usize {\n        1\n    }\n}\n\npub trait Buffers {\n    fn input(&self) -> &Decoy;\n}\n\npub struct LazyBuffers {\n    input: ConsumeBuf,\n    decoy: Decoy,\n}\n\nimpl Buffers for LazyBuffers {\n    fn input(&self) -> &Decoy {\n        &self.decoy\n    }\n}\n\nimpl LazyBuffers {\n    pub fn left(&self) -> usize {\n        self.input.unconsumed()\n    }\n    pub fn via(&self) -> usize {\n        self.input().unconsumed()\n    }\n}\n"),
+        ("src/wrap.rs", "use crate::agent::Agent;\nuse http::Response;\nuse native_tls::TlsStream;\n\npub struct Body;\n\nimpl Body {\n    pub fn with_config(&self) -> u8 {\n        0\n    }\n    pub fn headers(&self) -> u8 {\n        0\n    }\n}\n\npub struct Reader;\n\nimpl Reader {\n    pub fn with_config(&self) -> u8 {\n        1\n    }\n    pub fn take_captured(&self) -> u8 {\n        1\n    }\n}\n\npub struct Capture;\n\nimpl Capture {\n    pub fn take_captured(&self) -> u8 {\n        2\n    }\n}\n\npub struct Instance(pub Agent);\n\npub fn call() -> Result<Response<Body>, std::io::Error> {\n    todo!()\n}\n\npub fn read() -> u8 {\n    let mut res = call().unwrap();\n    res.headers();\n    res.body_mut().with_config()\n}\n\npub fn from_ext(ext: &http::Extensions) -> u8 {\n    let instance = ext.get::<Instance>().unwrap().clone();\n    instance.0.configure()\n}\n\npub fn loaded(q: diesel::Query) -> u8 {\n    let rows = q.load::<Body>(1).unwrap();\n    rows.with_config();\n    let all = q.get_results::<Body>(1).unwrap();\n    all.with_config()\n}\n\npub struct Details<'a> {\n    pub stream: &'a Reader,\n}\n\npub fn plain(d: &Details) -> u8 {\n    let s = d.stream;\n    s.with_config()\n}\n\npub struct Holder {\n    stream: Reader,\n    tls: TlsStream<Capture>,\n}\n\nimpl Holder {\n    pub fn go(&mut self) -> u8 {\n        let s = &mut self.stream;\n        s.with_config()\n    }\n    pub fn captured(&mut self) -> u8 {\n        self.tls.get_mut().take_captured()\n    }\n}\n"),
+    ]);
+    let has = |s: &str, r: &str, t: &str, c: &str| {
+        got.contains(&(s.to_string(), r.to_string(), t.to_string(), c.to_string()))
+    };
+    let to = |s: &str, t: &str| got.iter().any(|(a, _, b, _)| a == s && b == t);
+    // field and method
+    assert!(
+        has("src_buf_lazybuffers_left", "calls", "src_buf_consumebuf_unconsumed", "EXTRACTED"),
+        "{got:#?}"
+    );
+    assert!(!to("src_buf_lazybuffers_left", "src_buf_decoy_unconsumed"), "{got:#?}");
+    assert!(
+        has("src_buf_lazybuffers_via", "calls", "src_buf_decoy_unconsumed", "EXTRACTED"),
+        "{got:#?}"
+    );
+    assert!(
+        has("src_agent_agent_configure", "reads", "src_agent_agent_config_2", "EXTRACTED"),
+        "{got:#?}"
+    );
+    assert!(!to("src_agent_agent_configure", "src_agent_agent_config"), "{got:#?}");
+    // a library generic's accessor, a wrapper's first argument
+    assert!(has("src_wrap_read", "calls", "src_wrap_body_with_config", "INFERRED"), "{got:#?}");
+    assert!(!to("src_wrap_read", "src_wrap_body_headers"), "{got:#?}");
+    assert!(!to("src_wrap_read", "src_wrap_reader_with_config"), "{got:#?}");
+    assert!(
+        has("src_wrap_holder_captured", "calls", "src_wrap_capture_take_captured", "INFERRED"),
+        "{got:#?}"
+    );
+    assert!(!to("src_wrap_holder_captured", "src_wrap_reader_take_captured"), "{got:#?}");
+    // `let s = &mut self.stream;`
+    assert!(to("src_wrap_holder_go", "src_wrap_reader_with_config"), "{got:#?}");
+    // `let s = d.stream;`
+    assert!(to("src_wrap_plain", "src_wrap_reader_with_config"), "{got:#?}");
+    assert!(!to("src_wrap_plain", "src_wrap_body_with_config"), "{got:#?}");
+    // turbofish
+    assert!(to("src_wrap_from_ext", "src_agent_agent_configure"), "{got:#?}");
+    assert!(!to("src_wrap_from_ext", "src_agent_other_configure"), "{got:#?}");
+    assert!(!to("src_wrap_loaded", "src_wrap_body_with_config"), "{got:#?}");
+    // Deref, crate::X
+    assert!(to("src_agent_agentref_run", "src_agent_agent_configure"), "{got:#?}");
+    assert!(!to("src_agent_agentref_run", "src_agent_other_configure"), "{got:#?}");
+    assert!(
+        has("src_agent_make", "calls", "src_agent_agent_config_builder", "EXTRACTED"),
+        "{got:#?}"
+    );
+}

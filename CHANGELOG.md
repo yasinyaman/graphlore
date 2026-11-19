@@ -316,6 +316,19 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- **Native engine 0.5.38: Rust fields beside methods, library wrappers,
+  turbofish, `Deref`.** A Rust field and a method of one name are told
+  apart (`self.input` with no `()` is the field; also C, C++, Java), so a
+  field read is `reads`, not a `references` of the method. A wrapper's inner
+  type is its first type argument (`Result<Response<Body>, E>` holds a
+  `Response`, not `Body`). A library generic's accessor (`body_mut`,
+  `get_mut`, `into_inner`, …) gives its one project type argument
+  (`INFERRED`). `get::<T>()` / `parse::<T>()` type their local by `T`;
+  `load::<T>()` does not. A `Deref<Target = T>` type has `T`'s members.
+  `crate::Agent` resolves through the root's `pub use` beside a `fn agent`.
+  A local assigned a field (`let c = d.config;`, `&mut self.stream`) is
+  typed by it. Rust's unmarked unresolved rows 96 → 56; all languages
+  801 → 761.
 - **Native engine 0.5.37: JavaScript's unresolved rows say why they are no
   gap.** New marks: a call of the caller's own local or parameter (a
   callback it was handed), a candidate in vendored or minified code, a
