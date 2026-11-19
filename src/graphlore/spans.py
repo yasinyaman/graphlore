@@ -147,6 +147,16 @@ _CPP_HEADER_MARK = re.compile(
     rb"|(?:public|private|protected)\s*:)", re.M)
 # Parser cache keyed by language name; value is a parser or None (unavailable).
 _TS_PARSERS: dict[str, Any] = {}
+# The span walk visits every named node, so what it decides per node type is
+# cached: whether the type can be a definition (`_ts_is_symbol_type`), and per
+# language the ids of the fields it reads (None: the grammar has no such field,
+# so the lookup can be skipped).
+_TS_SYMBOL_CACHE: dict[str, bool] = {}
+_TS_FIELD_NAMES = ("name", "key", "property", "value", "left", "right", "body",
+                   "receiver", "type")
+_TS_FIELDS: dict[str, dict[str, int | None]] = {}
+# The only node types `_ts_anonymous_class` can name.
+_TS_ANON_CLASS_TYPES = frozenset({"object_creation_expression", "object_literal", "assignment"})
 
 
 def _ts_parser_for(rel: str, src: bytes | None = None) -> tuple[Any, str | None]:
@@ -225,6 +235,38 @@ def _is_ts_symbol(node_type: str) -> bool:
     return not _TS_SYMBOL_WORD_HINTS.isdisjoint(t.split("_"))
 
 
+def _ts_is_symbol_type(node_type: str) -> bool:
+    """`_is_ts_symbol`, or a keyword-named definition; cached per type."""
+    hit = _TS_SYMBOL_CACHE.get(node_type)
+    if hit is None:
+        hit = _is_ts_symbol(node_type) or node_type in _TS_KEYWORD_NAMES
+        _TS_SYMBOL_CACHE[node_type] = hit
+    return hit
+
+
+def _ts_fields(lang: str, language: Any) -> dict[str, int | None]:
+    """Field ids of `_TS_FIELD_NAMES` in a grammar, cached per language."""
+    fields = _TS_FIELDS.get(lang)
+    if fields is None:
+        fields = {}
+        for name in _TS_FIELD_NAMES:
+            try:
+                fields[name] = language.field_id_for_name(name)
+            except Exception:  # noqa: BLE001 - an unknown field reads as absent
+                fields[name] = None
+        _TS_FIELDS[lang] = fields
+    return fields
+
+
+def _ts_field(node: Any, name: str, fields: dict[str, int | None] | None) -> Any:
+    """``node.child_by_field_name(name)``; with ``fields`` (from `_ts_fields`) by
+    id, and None without a lookup when the grammar has no such field."""
+    if fields is None:
+        return node.child_by_field_name(name)
+    fid = fields.get(name)
+    return None if fid is None else node.child_by_field_id(fid)
+
+
 def _spans_python(src: bytes) -> list[tuple[int, int, int, str]]:
     """Decorator-aware def/class spans from Python source (stdlib ast).
 
@@ -287,7 +329,8 @@ def _ts_receiver_type(recv: Any) -> str | None:
     return None
 
 
-def _ts_bound_function(node: Any) -> tuple[str, Any] | None:
+def _ts_bound_function(node: Any,
+                       fields: dict[str, int | None] | None = None) -> tuple[str, Any] | None:
     """An *anonymous* function bound to a name, so the binding name becomes the
     qualname (the arrow/closure carries no ``name`` field of its own). Covers
     ``const f = () => …`` / ``var h = func(){}`` (name+value), object properties
@@ -295,16 +338,16 @@ def _ts_bound_function(node: Any) -> tuple[str, Any] | None:
     (property+value) and assignments ``exports.send = function () {…}`` /
     ``res.send = …`` (left+right, named by the member assigned to). ``None`` for
     non-function bindings or a function that already has its own name (handled by
-    the normal path)."""
-    name = (node.child_by_field_name("name")
-            or node.child_by_field_name("key")
-            or node.child_by_field_name("property"))
-    value = node.child_by_field_name("value")
+    the normal path). ``fields`` (from `_ts_fields`) only speeds up the lookups."""
+    name = (_ts_field(node, "name", fields)
+            or _ts_field(node, "key", fields)
+            or _ts_field(node, "property", fields))
+    value = _ts_field(node, "value", fields)
     if name is None and value is None:
-        left = node.child_by_field_name("left")
+        left = _ts_field(node, "left", fields)
         if left is not None and left.type == "member_expression":
-            left = left.child_by_field_name("property")
-        name, value = left, node.child_by_field_name("right")
+            left = _ts_field(left, "property", fields)
+        name, value = left, _ts_field(node, "right", fields)
     if name is None or value is None or not name.type.endswith("identifier"):
         return None
     if value.type == "call_expression":
@@ -316,7 +359,7 @@ def _ts_bound_function(node: Any) -> tuple[str, Any] | None:
         return None
     if vt.endswith("_type"):
         return None  # a type written out (Go `map[string]func() int`), not a function
-    if value.child_by_field_name("name") is not None:
+    if _ts_field(value, "name", fields) is not None:
         return None
     return name.text.decode("utf-8", "replace"), value
 
@@ -529,7 +572,7 @@ def _spans_treesitter(src: bytes, rel: str) -> list[tuple[int, int, int, str]]:
     and the qualname chains enclosing named symbols. Empty when the tree-sitter
     backend or the language is unavailable (caller then uses the point heuristic).
     """
-    parser, _lang = _ts_parser_for(rel, src)
+    parser, lang = _ts_parser_for(rel, src)
     if parser is None:
         # No Python tree-sitter (or no grammar, offline): with the native engine
         # chosen, its compiled-in grammars answer with the same rule.
@@ -538,70 +581,90 @@ def _spans_treesitter(src: bytes, rel: str) -> list[tuple[int, int, int, str]]:
         return []
     try:
         # (C, C++: an `#if` written once per configuration is parsed once)
-        parsed = _blank_duplicate_branches(src) if _lang in ("c", "cpp") else src
+        parsed = _blank_duplicate_branches(src) if lang in ("c", "cpp") else src
         root = parser.parse(parsed).root_node
     except Exception:
         return []
     spans: list[tuple[int, int, int, str]] = []
+    fields = _ts_fields(lang or "", parser.language)
+    f_name, f_body, f_recv, f_type = (fields["name"], fields["body"],
+                                      fields["receiver"], fields["type"])
+    f_value, f_left = fields["value"], fields["left"]
+    symbol_cache = _TS_SYMBOL_CACHE
 
+    def add(child: Any, qual: str) -> None:
+        def_line = child.start_point[0] + 1
+        end = child.end_point[0] + 1
+        spans.append((_ts_region_start(child, def_line), end, def_line, qual))
+
+    # Every check below is the one the generic rules make; they are only ordered
+    # so that a node pays for the lookups that can still change the answer.
     def walk(node: Any, prefix: str) -> None:
         for child in node.named_children:
-            is_sym = _is_ts_symbol(child.type) or child.type in _TS_KEYWORD_NAMES
-            name_node = child.child_by_field_name("name") if is_sym else None
-            if name_node is not None and child.type.endswith("_specifier") \
-                    and child.child_by_field_name("body") is None:
+            t = child.type
+            if not child.child_count:
+                # a leaf has no fields and no children: only a keyword-named
+                # definition can come of it
+                kname = _TS_KEYWORD_NAMES.get(t)
+                if kname is not None:
+                    add(child, f"{prefix}{kname}")
+                continue
+            is_sym = symbol_cache.get(t)
+            if is_sym is None:
+                is_sym = _ts_is_symbol_type(t)
+            name_node = child.child_by_field_id(f_name) \
+                if is_sym and f_name is not None else None
+            if name_node is not None and t.endswith("_specifier") \
+                    and (f_body is None or child.child_by_field_id(f_body) is None):
                 # C/C++ `struct config cfg` in a signature, or a forward
                 # declaration: the type is named here, not defined
                 walk(child, prefix)
-            elif name_node is not None and child.type == "mod_item" \
-                    and child.child_by_field_name("body") is None:
+            elif name_node is not None and t == "mod_item" \
+                    and (f_body is None or child.child_by_field_id(f_body) is None):
                 pass  # Rust `mod foo;` names a file, it defines nothing here
             elif name_node is not None:
                 base = name_node.text.decode("utf-8", "replace")
-                recv = child.child_by_field_name("receiver")  # Go method: prefix type
+                # Go method: prefix the receiver's type
+                recv = child.child_by_field_id(f_recv) if f_recv is not None else None
                 if recv is not None and (rt := _ts_receiver_type(recv)):
                     base = f"{rt}.{base}"
                 qual = f"{prefix}{base}"
-                def_line = child.start_point[0] + 1
-                end = child.end_point[0] + 1
-                spans.append((_ts_region_start(child, def_line), end, def_line, qual))
+                add(child, qual)
                 walk(child, qual + ".")
-            elif is_sym and "impl" in child.type.lower() \
-                    and (type_node := child.child_by_field_name("type")) is not None:
+            elif is_sym and f_type is not None and "impl" in t.lower() \
+                    and (type_node := child.child_by_field_id(f_type)) is not None:
                 # Rust `impl Pool { ... }`: no `name` field, but the `type` field
                 # contributes to the qualname chain (so methods read `Pool.acquire`)
                 # without a span. Restricted to impl-like nodes so a C++
                 # function_definition's `type` (its return type) isn't mistaken for one.
                 # Strip generics: `impl ConfigBuilder<X>` -> `ConfigBuilder.`, not the
                 # full `ConfigBuilder<X>.`.
-                base = type_node.child_by_field_name("type") or type_node
+                base = type_node.child_by_field_id(f_type) or type_node
                 walk(child, f"{prefix}{base.text.decode('utf-8', 'replace')}.")
-            elif (is_sym or (child.type in _TS_PROTOTYPE_TYPES
+            elif (is_sym or (t in _TS_PROTOTYPE_TYPES
                              and _ts_declares_function(child))) \
                     and (dname := _ts_declarator_name(child)) is not None:
                 # C/C++ function/method: the name lives in the declarator chain
                 qual = f"{prefix}{dname}"
-                def_line = child.start_point[0] + 1
-                end = child.end_point[0] + 1
-                spans.append((_ts_region_start(child, def_line), end, def_line, qual))
+                add(child, qual)
                 walk(child, qual + ".")
             elif is_sym and (kname := _ts_child_name(child)) is not None:
                 # no `name` field in this grammar (Kotlin), or a keyword-named
                 # definition (Swift `init`)
                 qual = f"{prefix}{kname}"
-                def_line = child.start_point[0] + 1
-                end = child.end_point[0] + 1
-                spans.append((_ts_region_start(child, def_line), end, def_line, qual))
+                add(child, qual)
                 walk(child, qual + ".")
-            elif (anon := _ts_anonymous_class(child)) is not None:
+            elif t in _TS_ANON_CLASS_TYPES and (anon := _ts_anonymous_class(child)) is not None:
                 # a class with no name of its own: named by what it implements
                 qual = f"{prefix}{anon}"
-                def_line = child.start_point[0] + 1
-                end = child.end_point[0] + 1
-                spans.append((_ts_region_start(child, def_line), end, def_line, qual))
+                add(child, qual)
                 walk(child, qual + ".")
-            elif (bound := _ts_bound_function(child)) is not None:
-                # anonymous function bound to a name: `const f = () => …`
+            elif child.child_count >= 2 and (
+                    (f_value is not None and child.child_by_field_id(f_value) is not None)
+                    or (f_left is not None and child.child_by_field_id(f_left) is not None)) \
+                    and (bound := _ts_bound_function(child, fields)) is not None:
+                # anonymous function bound to a name: `const f = () => …`. It takes
+                # two children, one of them a `value` or a `left`.
                 bname, fn = bound
                 qual = f"{prefix}{bname}"
                 def_line = fn.start_point[0] + 1
