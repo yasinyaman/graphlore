@@ -118,6 +118,12 @@ pub fn path_of(n: Node, src: &[u8]) -> Option<Vec<String>> {
     if k == "unit_expression" {
         return Some(vec![UNIT.into()]);
     }
+    // TS `net.Server`, `http2.Http2Server` written as a type
+    if k == "nested_type_identifier" {
+        let mut p = path_of(n.child_by_field_name("module")?, src)?;
+        p.push(text(n.child_by_field_name("name")?, src));
+        return Some(p);
+    }
     if SUPER_KINDS.contains(&k) {
         return Some(vec!["super".into()]);
     }
@@ -1169,6 +1175,14 @@ fn returned_path(v: Node, src: &[u8]) -> Option<Vec<String>> {
 /// `return { show, hide: close }`: the members of an object literal a
 /// function returns, each with the name its value is.
 fn note_members(def: &mut Def, v: Node, src: &[u8]) {
+    // (`return {base, setConfig} as Client`: the object under the cast)
+    let mut v = v;
+    while is_cast(v) {
+        match v.named_child(0) {
+            Some(inner) => v = inner,
+            None => return,
+        }
+    }
     if !def.returned_members.is_empty() || v.kind() != "object" {
         return;
     }
@@ -1181,9 +1195,18 @@ fn note_members(def: &mut Def, v: Node, src: &[u8]) {
             "pair" => {
                 let key =
                     c.child_by_field_name("key").filter(|k| k.kind() == "property_identifier");
-                let value = c.child_by_field_name("value").filter(|x| x.kind() == "identifier");
-                if let (Some(k), Some(x)) = (key, value) {
-                    def.returned_members.push((text(k, src), text(x, src)));
+                let value = c.child_by_field_name("value");
+                // (`contentType: () => contentType`: the function is the
+                // definition named by its key)
+                let named = match value.map(|x| x.kind()) {
+                    Some("identifier") => value.map(|x| text(x, src)),
+                    Some("arrow_function" | "function_expression" | "function") => {
+                        key.map(|k| text(k, src))
+                    }
+                    _ => None,
+                };
+                if let (Some(k), Some(x)) = (key, named) {
+                    def.returned_members.push((text(k, src), x));
                 }
             }
             _ => {}
@@ -1214,6 +1237,31 @@ fn note_parts(def: &mut Def, v: Node, src: &[u8]) {
         .collect();
     if names.len() >= 2 && names.iter().any(|n| !n.is_empty()) {
         def.returned_parts = names;
+    }
+}
+
+/// TS `new Http2ClientRequest(…) as unknown as ClientRequest`: the class a
+/// returned value constructs under casts, the first time one does.
+fn note_cast(def: &mut Def, v: Node, src: &[u8]) {
+    if def.cast_from.is_some() || !is_cast(v) {
+        return;
+    }
+    let mut cur = v;
+    for _ in 0..4 {
+        if !is_cast(cur) {
+            break;
+        }
+        // (`x as T`: the expression first; `<T>x`: the expression last)
+        let inner = if cur.kind() == "type_assertion" {
+            kids(cur).into_iter().rfind(|c| c.is_named())
+        } else {
+            cur.named_child(0)
+        };
+        let Some(inner) = inner else { return };
+        cur = inner;
+    }
+    if cur.kind() == "new_expression" {
+        def.cast_from = cur.child_by_field_name("constructor").and_then(|c| path_of(c, src));
     }
 }
 
@@ -2586,6 +2634,15 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
     let mut anc: Vec<Node> = Vec::new();
     // closures that are no definitions: (start, end, the names they bind)
     let mut closures: Vec<ClosureScope> = Vec::new();
+    // JS / TS: the functions that are no definitions (callbacks), whose
+    // variables are names of their own (before `bind_closure_params`)
+    let mut callbacks: Vec<(usize, usize)> = Vec::new();
+    let ecma = matches!(
+        facts.lang,
+        Some(
+            crate::lang::Lang::JavaScript | crate::lang::Lang::TypeScript | crate::lang::Lang::Tsx
+        )
+    );
     // lambdas with a receiver: (start, end, where the receiver comes from)
     let mut receivers: Vec<(usize, usize, crate::facts::ReceiverOf)> = Vec::new();
     let mut steps = 0usize;
@@ -2626,7 +2683,15 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                 }
             }
         }
+        if ecma && is_closure(n.kind()) && !by_node.contains_key(&n.id()) {
+            callbacks.push((n.start_byte(), n.end_byte()));
+        }
         if let Some(&di) = by_node.get(&n.id()) {
+            if facts.defs[di].parent.is_none()
+                && anc.iter().any(|a| is_closure(a.kind()) && !by_node.contains_key(&a.id()))
+            {
+                facts.defs[di].in_callback = true;
+            }
             if let Some(o) = m.object_of(n, src) {
                 facts.defs[di].object = Some(o);
             }
@@ -2704,6 +2769,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                     }
                     note_parts(&mut facts.defs[di], v, src);
                     note_members(&mut facts.defs[di], v, src);
+                    note_cast(&mut facts.defs[di], v, src);
                 }
             }
             if facts.defs[di].kind.is_class_like() {
@@ -3252,6 +3318,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                 }
                 note_parts(&mut facts.defs[di], v, src);
                 note_members(&mut facts.defs[di], v, src);
+                note_cast(&mut facts.defs[di], v, src);
             }
         }
         // reads and writes of variables, fields and constants, and of what
@@ -3602,6 +3669,34 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
     // arguments as tokens; read as expressions they are calls like any other
     for mac in macros {
         refs.extend(macro_refs(m, mac, src, macro_depth));
+    }
+    // `test('…', async t => { const server = createServer(); … })`: a
+    // variable of a callback no definition holds is a name of that callback
+    // (`server@byte`, as its parameters are), not one the whole file shares
+    if ecma && !callbacks.is_empty() {
+        let bytes: Vec<usize> = locals.iter().map(|l| l.byte).collect();
+        for (l, home) in locals.iter_mut().zip(homes(&facts.defs, &bytes)) {
+            if home.is_some() || l.field || l.name.contains('@') {
+                continue;
+            }
+            let around = callbacks
+                .iter()
+                .filter(|(s, e)| *s <= l.byte && l.byte < *e)
+                .min_by_key(|(s, e)| e - s);
+            if let Some(&(s, e)) = around {
+                // (`var a = function () {}` in a minified bundle: the name is
+                // the definition there)
+                let defined = facts
+                    .defs
+                    .iter()
+                    .any(|d| d.name == l.name && s <= d.start_byte && d.start_byte < e);
+                if defined {
+                    continue;
+                }
+                closures.push((s, e, vec![(l.name.clone(), l.path.clone(), l.declared)]));
+                l.name = format!("{}@{s}", l.name);
+            }
+        }
     }
     bind_closure_params(&closures, &mut refs, &mut locals);
     facts.receivers = bind_receivers(&receivers, &mut refs);
@@ -5866,6 +5961,8 @@ fn add_extras(
             elem: written_elem(*node, src),
             keyed: written_keyed(*node, src),
             key: written_key(*node, src),
+            cast_from: None,
+            in_callback: false,
             returned_parts: Vec::new(),
             returned_members: Vec::new(),
             scope_lines,

@@ -767,16 +767,16 @@ file pairs). The native graph has definitions graphify folds into the one
 around them (a function nested in a method, the setter beside a getter of the
 same name); an edge from one of those is compared as an edge from the paired
 definition it belongs to, as graphify records it. On the 31 repositories of the
-[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.40,
+[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.42,
 measured 2026-11-19), as native / graphify edges and the share of graphify's
 that the native graph has too:
 
 | Language | same definition | imports (file pairs) | calls | bases | type references |
 |---|--:|--:|--:|--:|--:|
 | Python | 100% | 212 / 219 (96%) | 2,970 / 834 (94%) | 73 / 62 (100%) | 440 / 494 (68%) |
-| JavaScript | 93.5%⁵ | 190 / 305 (59%) | 1,386 / 2,058 (43%)¹ | 1 / 1 | 3 / 0 |
-| TypeScript | 99.4% | 527 / 634 (83%) | 805 / 687 (98%) | 25 / 20 (100%) | 740 / 156 (88%) |
-| TSX | 99.7% | 253 / 316 (80%) | 435 / 456 (95%) | – | 42 / 4 |
+| JavaScript | 93.5%⁵ | 190 / 305 (59%) | 1,335 / 2,058 (43%)¹ | 1 / 1 | 3 / 0 |
+| TypeScript | 99.4% | 527 / 634 (83%) | 806 / 687 (98%) | 39 / 20 (100%) | 770 / 156 (88%) |
+| TSX | 99.7% | 253 / 316 (80%) | 435 / 456 (95%) | 1 / 0 | 42 / 4 |
 | Go | 100% | 538 / 950 (47%)² | 6,723 / 3,167 (99%) | 19 / 14 (100%) | 679 / 355 (99%) |
 | Java | 100% | 1,105 / 1,010 (100%) | 5,720 / 5,123 (85%) | 415 / 168 (94%) | 3,989 / 1,930 (98%) |
 | Kotlin | 99.4% | 368 / 333 (95%) | 4,786 / 2,108 (71%) | 96 / 56 (93%) | 1,079 / 673 (91%) |
@@ -964,6 +964,46 @@ the function's own type parameter put through a std conversion
 the language's own types (`uri: &str`, `RUST_OWN_TYPES`; not where the
 project defines a type of that name, as ureq's `Duration`). Rust's
 unmarked rows: 7 → 0; in all, 712 → 705.
+Engine 0.5.42 takes on TypeScript's 88 unmarked rows (87 of them got's):
+
+- **Variables of a callback (JS / TS).** A variable written in a function
+  that is no definition (`test('…', async t => { const request = http2Request(…);
+  request.setHeaders(…) })`) is a name of that callback, `request@byte`
+  (the pass before `refs::bind_closure_params`), as its parameters already were. Until now no
+  definition held such a local, and it typed nothing. One no callback holds
+  is the file's (`FILE_SCOPE`), visible from the functions written in it.
+  Neither shadows a name the file imports (`var request =
+  require('supertest')`), a definition of its name (`var a = function`) or a
+  top-level definition. A bare call of a file-level name keeps the function
+  it names.
+- **A construction under a cast.** A callable that declares a library type
+  but builds a project class under a cast gives that class
+  (`(): ClientRequest => new Http2ClientRequest(…) as unknown as
+  ClientRequest`, `Def::cast_from`), `INFERRED`.
+- **Object types.** A type alias of an object type or an intersection is an
+  interface: `type Got = { readonly defaults: InstanceDefaults }`, with the
+  named parts of `A & B` as its bases. The property signatures of interfaces
+  and of such aliases are properties with the type they write.
+- **Members of object literals.** A call's result has the functions of the
+  object literal it returns (`return { contentType: () => … }`, `return {
+  setConfig } as Client`). A module variable has those of an
+  `Object.assign(f, { before() {} })` literal, seen from its file and those
+  that import it.
+- **Qualified types.** A type written qualified (`server: net.Server`) is
+  read.
+- **Marks.** A run-time member: a function puts it on a value it makes
+  (`promise.buffer = function` in `asPromise`) and it is called on a value
+  the walk cannot type. A receiver behind a property of a library type
+  (`server.http.listen()`). A typed local whose type is partly a library's.
+
+The graph gains 285 property nodes in got and 355 in fastapi-template (the
+generated client's types), and loses edges that were wrong: `indirect_call`
+to functions that only share a name with a value passed (`body`, `error`,
+`cb`), `cookieJar.getCookieString()` (tough-cookie's) linked to a test
+helper, and in minified bundles (retrofit's Dokka scripts, alamofire's
+jQuery) calls joined to a namesake in another module of the bundle (some
+600). TypeScript's unmarked rows: 88 → 0; JavaScript stays at 0; in all,
+705 → 615.
 Engine 0.5.35 (C function-pointer slots) reads a struct of function pointers
 as an interface and what is put in its slots as the implementations: an
 initializer of a variable, by name (`.async_read = redisAsyncRead`) or by
@@ -1424,7 +1464,7 @@ implicit members since 0.5.17: 39 whose place gives no type are rows now
 closure parameters and variables of express's tests. What is left at file
 level there is `app.use` and `app.set` (842 rows of express), names too
 short and too common to guess by. Engine 0.5.19 takes 123 more off (6,362;
-C# 349 from 470; 6,360 with 0.5.20, 6,348 with 0.5.21, 6,285 with 0.5.22, 6,237 with 0.5.25, 6,206 with 0.5.27, 6,166 with 0.5.28, 6,156 with 0.5.30, 6,140 with 0.5.31, 6,132 with 0.5.32, 6,126 with 0.5.33, 6,093 with 0.5.34, 6,047 with 0.5.36, 6,046 with 0.5.37, 6,017 with 0.5.38, 6,005 with 0.5.40). Most of what C# has left is not the project's: `Assert.
+C# 349 from 470; 6,360 with 0.5.20, 6,348 with 0.5.21, 6,285 with 0.5.22, 6,237 with 0.5.25, 6,206 with 0.5.27, 6,166 with 0.5.28, 6,156 with 0.5.30, 6,140 with 0.5.31, 6,132 with 0.5.32, 6,126 with 0.5.33, 6,093 with 0.5.34, 6,047 with 0.5.36, 6,046 with 0.5.37, 6,017 with 0.5.38, 6,005 with 0.5.40, 5,947 with 0.5.42). Most of what C# has left is not the project's: `Assert.
 NotNull` beside its own `Ensure.NotNull` (77), `WireMockServer.Start` (23).
 
 By then most rows were of that kind: a library's name the project happens

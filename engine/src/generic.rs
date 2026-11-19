@@ -530,6 +530,8 @@ pub fn walk_defs(m: &dyn LanguageModule, root: Node, src: &[u8]) -> Vec<Def> {
                     params: None,
                     plist: Vec::new(),
                     returns: Vec::new(),
+                    cast_from: None,
+                    in_callback: false,
                     lambda_receiver: None,
                     self_params: Vec::new(),
                     attrs: Vec::new(),

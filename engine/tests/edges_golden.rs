@@ -2220,3 +2220,55 @@ fn rust_match_arms_wrappers_tuples_of_generics_and_called_locals() {
         assert!(!to(s, t), "{s} -> {t}: {got:#?}");
     }
 }
+
+#[test]
+fn typescript_casts_object_types_returned_objects_and_callback_scopes() {
+    // A function that declares a library's type but builds a project class
+    // under a cast gives that class (`new Http2ClientRequest() as unknown as
+    // ClientRequest`; one that declares a project type keeps it); an object
+    // type alias answers for its properties (`type Got = { defaults:
+    // InstanceDefaults }`); a call's result has the functions of the object
+    // literal it returns; `Object.assign(f, { before() {} })` has the
+    // literal's; and a callback's variables are its own (`server` of two
+    // tests is two), never a name the file imports
+    let got = links("tsbinds", &[
+        ("package.json", "{\"name\":\"app\",\"version\":\"1.0.0\"}\n"),
+        ("src/capture.ts", "export function captureRequest(path: string): {body: () => string; contentType: () => string | undefined} {\n\tlet contentType: string | undefined;\n\treturn {\n\t\tbody: () => path,\n\t\tcontentType: () => contentType,\n\t};\n}\nexport class Wrong {\n\tcontentType(): string { return ''; }\n\tbody(): string { return ''; }\n}\nexport type Client = {base: string};\nexport const createClient = (): Client => {\n\tconst setConfig = (c: unknown) => c;\n\treturn {base: '', setConfig} as Client;\n};\nexport const client = createClient();\nexport class Wrong2 { setConfig(c: unknown) { return c; } }\n"),
+        ("src/client.ts", "import type {ClientRequest} from 'node:http';\nexport class Http2ClientRequest {\n\tsetHeaders(h: unknown): this { return this; }\n\tgetHeader(n: string): string { return ''; }\n}\nexport class Other {\n\tsetHeaders(h: unknown): this { return this; }\n\tgetHeader(n: string): string { return ''; }\n}\nexport const request = (url: string): ClientRequest => new Http2ClientRequest() as unknown as ClientRequest;\nexport const plain = (url: string): Other => new Http2ClientRequest() as unknown as Other;\n"),
+        ("src/helpers.ts", "const runTest = (title: string) => title;\nexport const test = Object.assign(runTest, {\n\tbefore(fn: () => void) { fn(); },\n\tafter(fn: () => void) { fn(); },\n});\nexport class Hooks {\n\tbefore(fn: () => void) { fn(); }\n\tafter(fn: () => void) { fn(); }\n}\n"),
+        ("src/options.ts", "export class Options {\n\tmerge(o: unknown): void {}\n\tfreeze(): void {}\n}\nexport class Decoy {\n\tmerge(o: unknown): void {}\n\tfreeze(): void {}\n}\nexport type InstanceDefaults = {\n\toptions: Options;\n\tmutable: boolean;\n};\nexport type Got = {\n\treadonly defaults: InstanceDefaults;\n\textend(x: unknown): Got;\n};\nexport const create = (defaults: InstanceDefaults): Got => {\n\tdefaults.options.freeze();\n\treturn {defaults, extend: (x: unknown) => create(defaults)};\n};\n"),
+        ("test/a.test.ts", "import {request, plain} from '../src/client';\nimport {create, Options} from '../src/options';\nimport {captureRequest, client} from '../src/capture';\nimport {test} from '../src/helpers';\nimport http2 from 'node:http2';\n\ntest.before(() => {});\nconst r = request('x');\nr.setHeaders({});\nr.getHeader('a');\nconst p = plain('x');\np.getHeader('b');\nconst got = create({options: new Options(), mutable: false});\nconst instance = got.extend({});\ninstance.defaults.options.merge({});\nconst captured = captureRequest('/');\ncaptured.contentType();\nclient.setConfig({});\nconst server = http2.createSecureServer({});\nserver.listen(0);\n"),
+        ("test/b.test.ts", "import {request as http2Request} from '../src/client';\nimport {captureRequest} from '../src/capture';\nconst test = (name: string, fn: (t: unknown) => void) => fn(name);\ntest('x', async t => {\n\tconst request = http2Request('x');\n\trequest.setHeaders({});\n\tconst captured = captureRequest('/');\n\tcaptured.contentType();\n});\n"),
+        ("test/c.test.ts", "import {request as http2Request, Http2ClientRequest} from '../src/client';\nimport {Options} from '../src/options';\nconst supertest = require('supertest');\nconst test = (n: string, f: () => void) => f();\ntest('one', () => {\n\tconst server = http2Request('x');\n\tserver.setHeaders({});\n});\ntest('two', () => {\n\tconst server = new Options();\n\tserver.freeze();\n});\ntest('three', () => {\n\tsupertest('x').expect(200);\n});\n")
+    ]);
+    let to = |s: &str, t: &str| got.iter().any(|(a, _, b, _)| a == s && b == t);
+    for (s, t) in [
+        ("test_a_test", "src_client_http2clientrequest_setheaders"),
+        ("test_a_test", "src_client_http2clientrequest_getheader"),
+        ("test_a_test", "src_client_other_getheader"),
+        ("test_a_test", "src_options_options_merge"),
+        ("src_options_create", "src_options_options_freeze"),
+        ("test_a_test", "src_capture_capturerequest_contenttype"),
+        ("test_a_test", "src_capture_createclient_setconfig"),
+        ("test_a_test", "src_helpers_before"),
+        ("test_b_test", "src_client_http2clientrequest_setheaders"),
+        ("test_b_test", "src_capture_capturerequest_contenttype"),
+        ("test_c_test", "src_client_http2clientrequest_setheaders"),
+        ("test_c_test", "src_options_options_freeze"),
+        ("test_c_test", "ext_npm_supertest"),
+    ] {
+        assert!(to(s, t), "{s} -> {t}: {got:#?}");
+    }
+    for (s, t) in [
+        ("test_a_test", "src_client_other_setheaders"),
+        ("test_a_test", "src_options_decoy_merge"),
+        ("test_a_test", "src_capture_wrong_contenttype"),
+        ("test_a_test", "src_capture_wrong2_setconfig"),
+        ("test_a_test", "src_helpers_hooks_before"),
+        ("test_b_test", "src_capture_wrong_contenttype"),
+        ("test_c_test", "src_options_decoy_freeze"),
+        ("test_c_test", "src_client_other_setheaders"),
+    ] {
+        assert!(!to(s, t), "{s} -> {t}: {got:#?}");
+    }
+}

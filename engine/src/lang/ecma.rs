@@ -238,6 +238,16 @@ impl LanguageModule for Ecma {
     fn kind_of(&self, node: Node, src: &[u8]) -> DefKind {
         match node.kind() {
             "internal_module" | "module" => DefKind::Namespace,
+            // TS `type Got = { defaults: InstanceDefaults }`, `type P<T> =
+            // Promise<T> & Shape<T>`: an object type, which answers for its
+            // members as an interface does (a plain `type X = Y` stays an alias)
+            "type_alias_declaration"
+                if node
+                    .child_by_field_name("value")
+                    .is_some_and(|v| matches!(v.kind(), "object_type" | "intersection_type")) =>
+            {
+                DefKind::Interface
+            }
             "method_definition"
                 if node.child_by_field_name("name").map(|n| text(n, src)).as_deref()
                     == Some("constructor") =>
@@ -335,6 +345,18 @@ impl LanguageModule for Ecma {
                 holder.child_by_field_name("left").filter(|l| l.kind() == "member_expression")?;
             return path_of(left, src)?.into_iter().rfind(|s| s != "prototype" && s != "()");
         }
+        // `const test = Object.assign(runTest, { before() {} })`: the
+        // literal's members are the variable's
+        let holder = if holder.kind() == "arguments" {
+            let call = holder.parent().filter(|c| c.kind() == "call_expression")?;
+            let callee = call.child_by_field_name("function").and_then(|c| path_of(c, src))?;
+            if callee != ["Object", "assign"] {
+                return None;
+            }
+            call.parent()?
+        } else {
+            holder
+        };
         let decl = Some(holder).filter(|d| d.kind() == "variable_declarator")?;
         decl.child_by_field_name("name").filter(|x| x.kind() == "identifier").map(|x| text(x, src))
     }
@@ -358,6 +380,37 @@ impl LanguageModule for Ecma {
                 let name =
                     n.child_by_field_name("name").or_else(|| n.child_by_field_name("property"))?;
                 (!is_function(n.child_by_field_name("value"))).then_some((name, DefKind::Property))
+            }
+            // TS `options: Options;` of an interface or of a type alias's
+            // object type (`type InstanceDefaults = { options: Options }`,
+            // also inside an `&`): a property with the type it writes. Not one
+            // of a type literal written for a parameter or a result
+            "property_signature" => {
+                let holder = n.parent()?;
+                let declared = match holder.kind() {
+                    "interface_body" => true,
+                    "object_type" => {
+                        let mut up = holder.parent();
+                        let mut hops = 0;
+                        while let Some(u) = up.filter(|u| {
+                            matches!(u.kind(), "intersection_type" | "parenthesized_type")
+                        }) {
+                            up = u.parent();
+                            hops += 1;
+                            if hops > 4 {
+                                break;
+                            }
+                        }
+                        up.is_some_and(|u| u.kind() == "type_alias_declaration")
+                    }
+                    _ => false,
+                };
+                let name = n.child_by_field_name("name")?;
+                let function = n
+                    .child_by_field_name("type")
+                    .and_then(|t| t.named_child(0))
+                    .is_some_and(|t| t.kind() == "function_type");
+                (declared && !function).then_some((name, DefKind::Property))
             }
             // a module-level `const X = …` that is not a function
             "variable_declarator" => {
@@ -483,6 +536,26 @@ impl LanguageModule for Ecma {
                     out.extend(paths_in(c, src).into_iter().map(|p| (RefKind::Inherits, p)))
                 }
                 _ => {}
+            }
+        }
+        // TS `type P<T> = Promise<T> & Shape<T>`: the named parts of the
+        // intersection are what it is made of, as bases
+        if n.kind() == "type_alias_declaration" {
+            if let Some(v) =
+                n.child_by_field_name("value").filter(|v| v.kind() == "intersection_type")
+            {
+                let mut stack = vec![v];
+                while let Some(x) = stack.pop() {
+                    match x.kind() {
+                        "intersection_type" | "parenthesized_type" => stack.extend(kids(x)),
+                        "type_identifier" | "generic_type" | "nested_type_identifier" => {
+                            if let Some(p) = path_of(x, src) {
+                                out.push((RefKind::Inherits, p));
+                            }
+                        }
+                        _ => {}
+                    }
+                }
             }
         }
         out

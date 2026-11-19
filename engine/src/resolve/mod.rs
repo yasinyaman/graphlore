@@ -1664,7 +1664,34 @@ impl<'a> Project<'a> {
         let mut fields: HashMap<DefRef, HashMap<String, (usize, usize)>> = HashMap::new();
         for (fi, f) in self.files.iter().enumerate() {
             for (li, l) in f.locals.iter().enumerate() {
-                let Some(d) = l.from_def else { continue };
+                // a local no definition holds (a callback's at file level) is
+                // the file's, unless the file defines that name itself (a
+                // module constant stays the definition it is)
+                let d = match l.from_def {
+                    Some(d) => d,
+                    // (JS / TS only: C#'s top-level programs, Swift's and
+                    // Kotlin's scripts read their file-level names otherwise)
+                    // (nor a name the file imports, `var request =
+                    // require('supertest')`, nor one with no value the walk
+                    // reads, which would only hide what other rules find:
+                    // `const EventHandler = { trigger() {} }`)
+                    None if l.field
+                        || self.family[fi] != Some(Family::Ecma)
+                        // (a top-level definition of the name is what it
+                        // means; a member of an object literal is no such name)
+                        || self.top[fi]
+                            .get(&l.name)
+                            .is_some_and(|ds| ds.iter().any(|&x| f.defs[x].object.is_none()))
+                        || l.path.is_empty()
+                        || f.imports.iter().any(|i| {
+                            i.alias.as_deref() == Some(l.name.as_str())
+                                || i.names.iter().any(|(o, a)| a.as_deref().unwrap_or(o) == l.name)
+                        }) =>
+                    {
+                        continue
+                    }
+                    None => FILE_SCOPE,
+                };
                 if l.field {
                     if let Some(c) = self.class_of(fi, Some(d)) {
                         fields.entry(c).or_default().entry(l.name.clone()).or_insert((fi, li));
@@ -2351,14 +2378,24 @@ impl<'a> Project<'a> {
             // `-> Self`, `: this`: the method's own type (builders)
             return self.class_of(r.0, Some(r.1)).map(|t| (t, true));
         }
-        let t = self.type_of_path(r.0, scope_for(&path), &path, true)?;
-        self.def(t).kind.is_class_like().then_some((t, true))
+        let declared = self
+            .type_of_path(r.0, scope_for(&path), &path, true)
+            .filter(|t| self.def(*t).kind.is_class_like());
+        if declared.is_some() {
+            return declared.map(|t| (t, true));
+        }
+        // TS `(): ClientRequest => new Http2ClientRequest() as unknown as
+        // ClientRequest`: a type of the project's built under a cast, where
+        // the type written is none (a guess: the cast says otherwise)
+        let cast = self.def(r).cast_from.as_ref()?;
+        self.type_of_path(r.0, Some(r.1), cast, true)
+            .filter(|t| self.def(*t).kind.is_class_like())
+            .map(|t| (t, false))
     }
 
     /// The type of a local name or parameter seen from `d`.
     fn local_type(&self, f: usize, d: Option<usize>, name: &str) -> Option<(DefRef, Confidence)> {
-        let defs = &self.files[f].defs;
-        let mut cur = d;
+        let mut cur = local_start(d);
         while let Some(x) = cur {
             if let Some(&li) = self.locals.get(&(f, x, name.to_string())) {
                 // typing a local can come back to it (`let session =
@@ -2390,7 +2427,7 @@ impl<'a> Project<'a> {
                 }
                 return out;
             }
-            cur = defs[x].parent;
+            cur = self.up(f, x);
         }
         None
     }
@@ -2435,7 +2472,7 @@ impl<'a> Project<'a> {
             self.files[f].closure_args.iter().find(|(b, ..)| *b == byte)?;
         let k = names.iter().position(|n| n == param)?;
         let calling = self.calling.replace(true);
-        let found = self.resolve_path(f, Some(x), callee, true);
+        let found = self.resolve_path(f, scope(x), callee, true);
         *self.calling.borrow_mut() = calling;
         let Some((Target::Def(c), conf)) = found else { return None };
         let def = self.def(c);
@@ -2469,7 +2506,7 @@ impl<'a> Project<'a> {
             return self.structural_type(f, x, name).map(|t| (t, Confidence::Inferred));
         }
         let t = self
-            .type_of_path(f, Some(x), &l.path, l.declared)
+            .type_of_path(f, scope(x), &l.path, l.declared)
             .or_else(|| self.given_result(f, x, l))
             .or_else(|| self.bound_result(f, x, l))
             .or_else(|| self.accessed(f, x, l))
@@ -2479,7 +2516,7 @@ impl<'a> Project<'a> {
             // library's type: the same
             let external = l.declared
                 || matches!(
-                    l.path.first().and_then(|h| self.resolve_name(f, Some(x), h)),
+                    l.path.first().and_then(|h| self.resolve_name(f, scope(x), h)),
                     Some(Target::Ext(_, _))
                 );
             if external {
@@ -2500,7 +2537,7 @@ impl<'a> Project<'a> {
         let given = l.given.as_ref()?;
         let name = l.path.last()?;
         let before = self.recv.replace(None);
-        let callee = self.resolve_path(f, Some(d), &l.path, true);
+        let callee = self.resolve_path(f, scope(d), &l.path, true);
         *self.recv.borrow_mut() = before;
         match callee {
             Some((Target::Def(c), _)) if self.def(c).kind.is_callable() => {
@@ -2526,7 +2563,7 @@ impl<'a> Project<'a> {
                 }
             }
         }
-        self.type_of_path(f, Some(d), given, true).filter(|t| self.def(*t).kind.is_class_like())
+        self.type_of_path(f, scope(d), given, true).filter(|t| self.def(*t).kind.is_class_like())
     }
 
     /// The type of a value written as an argument: a path typed as a value,
@@ -2561,31 +2598,32 @@ impl<'a> Project<'a> {
         };
         if let [name] = path {
             let defs = &self.files[f].defs;
-            let mut cur = d;
+            let mut cur = local_start(d);
             while let Some(x) = cur {
                 if let Some(&li) = self.locals.get(&(f, x, name.clone())) {
                     let l = &self.files[f].locals[li];
                     // a parameter's is on the definition's parameter list
-                    let param = defs[x].plist.iter().find(|p| p.name == *name);
+                    let param =
+                        scope(x).and_then(|x| defs[x].plist.iter().find(|p| p.name == *name));
                     let elem = l.elem.clone().or_else(|| param.and_then(|p| p.elem.clone()));
                     let keyed = l.keyed || param.is_some_and(|p| p.keyed);
                     if let Some(e) = elem {
                         // (the first of a map's pair is its key)
                         if how == crate::refs::KEY && keyed {
                             let key = l.key.clone().or_else(|| param.and_then(|p| p.key.clone()));
-                            return key.and_then(|k| typed(f, Some(x), &k));
+                            return key.and_then(|k| typed(f, scope(x), &k));
                         }
                         let fits = match how {
                             crate::refs::ITERATED | crate::refs::KEY => !keyed,
                             crate::refs::VALUE => keyed,
                             _ => true,
                         };
-                        return if fits { typed(f, Some(x), &e) } else { None };
+                        return if fits { typed(f, scope(x), &e) } else { None };
                     }
                     // an optional is a collection of at most one
                     // (`opt.ifPresent { it.run() }`)
                     if l.sealed && how != crate::refs::VALUE {
-                        return typed(f, Some(x), &l.path);
+                        return typed(f, scope(x), &l.path);
                     }
                     // another name for a collection: `val ys = xs`
                     let alias = !l.declared
@@ -2593,13 +2631,13 @@ impl<'a> Project<'a> {
                         && l.path[0] != *name
                         && !l.path.is_empty();
                     return if alias {
-                        self.elem_of_as(f, Some(x), &l.path, how)
+                        self.elem_of_as(f, scope(x), &l.path, how)
                             .map(|(t, _)| (t, Confidence::Inferred))
                     } else {
                         None
                     };
                 }
-                cur = defs[x].parent;
+                cur = self.up(f, x);
             }
         }
         // a field, a call's result, or a chain of collection methods on
@@ -2640,7 +2678,7 @@ impl<'a> Project<'a> {
         }
         // (a map's `first()` is an entry; `get(k)` its value)
         let how = if lookup { crate::refs::ELEMENT } else { crate::refs::ITERATED };
-        self.elem_of_as(f, Some(d), of, how).map(|(t, _)| t)
+        self.elem_of_as(f, scope(d), of, how).map(|(t, _)| t)
     }
 
     /// The type of a local assigned a call of a function that returns its
@@ -2651,7 +2689,7 @@ impl<'a> Project<'a> {
             return None;
         }
         let recv = self.recv.replace(None);
-        let callee = self.resolve_path(f, Some(d), &l.path, true);
+        let callee = self.resolve_path(f, scope(d), &l.path, true);
         *self.recv.borrow_mut() = recv;
         let Some((Target::Def(c), _)) = callee else { return None };
         let def = self.def(c);
@@ -2671,10 +2709,10 @@ impl<'a> Project<'a> {
                 break;
             }
             if p.ty.len() == 1 && p.ty[0] == *t {
-                return self.value_type_of(f, Some(d), q);
+                return self.value_type_of(f, scope(d), q);
             }
             if p.elem.as_ref().is_some_and(|e| e.len() == 1 && e[0] == *t) {
-                return self.elem_of(f, Some(d), q).map(|(x, _)| x);
+                return self.elem_of(f, scope(d), q).map(|(x, _)| x);
             }
         }
         None
@@ -2692,13 +2730,13 @@ impl<'a> Project<'a> {
             w.as_str(),
             "Arc" | "Rc" | "Box" | "Weak" | "Cell" | "RefCell" | "Mutex" | "RwLock"
         ) || !matches!(m.as_str(), "new" | "downgrade" | "clone" | "from")
-            || self.resolve_name(f, Some(x), w).is_some_and(|t| matches!(t, Target::Def(_)))
+            || self.resolve_name(f, scope(x), w).is_some_and(|t| matches!(t, Target::Def(_)))
         {
             return None;
         }
         let [a] = l.value_args.as_slice() else { return None };
         let crate::facts::Arg::Path(q) = &a.kind else { return None };
-        self.value_type_of(f, Some(x), q).filter(|t| self.def(*t).kind.is_class_like())
+        self.value_type_of(f, scope(x), q).filter(|t| self.def(*t).kind.is_class_like())
     }
 
     /// Whether callable `c` declares that it returns a type parameter its
@@ -2809,13 +2847,12 @@ impl<'a> Project<'a> {
     /// A parameter or local whose type is not known: it shadows every outer
     /// name, so nothing is resolved through it.
     fn is_untyped_local(&self, f: usize, d: Option<usize>, name: &str) -> bool {
-        let defs = &self.files[f].defs;
-        let mut cur = d;
+        let mut cur = local_start(d);
         while let Some(x) = cur {
             if let Some(&li) = self.locals.get(&(f, x, name.to_string())) {
                 return self.files[f].locals[li].path.is_empty();
             }
-            cur = defs[x].parent;
+            cur = self.up(f, x);
         }
         false
     }
@@ -3026,6 +3063,93 @@ impl<'a> Project<'a> {
     /// (`app.response`). A local constructing a Mongoose model (`new
     /// Article(…)`, `Article` a `mongoose.model('Article')`): a function of
     /// the `methods` of the schema the model is registered with.
+    /// JS / TS: a module variable's member that an object literal it holds
+    /// defines (`const test = Object.assign(runTest, { before() {} })`,
+    /// `const api = { get() {} }`), seen from any file that names it.
+    fn held_object_member(&self, v: DefRef, name: &str) -> Option<DefRef> {
+        let def = self.def(v);
+        if self.family[v.0] != Some(Family::Ecma) || !def.kind.is_state() || def.parent.is_some() {
+            return None;
+        }
+        let cands: Vec<DefRef> = self.files[v.0]
+            .defs
+            .iter()
+            .enumerate()
+            .filter(|(_, x)| {
+                x.name == name
+                    && x.object.as_deref() == Some(def.name.as_str())
+                    && x.kind.is_callable()
+            })
+            .map(|(i, _)| (v.0, i))
+            .collect();
+        self.best(cands)
+    }
+
+    /// JS / TS: `name` of what `head` holds, when it is the result of a call
+    /// (a local the walk cannot type, a module variable with no type) and the
+    /// function called returns an object literal with a function of that name
+    /// (`return { contentType: () => … }`, `return { setConfig }`).
+    fn returned_member(
+        &self,
+        f: usize,
+        d: Option<usize>,
+        head: &str,
+        name: &str,
+    ) -> Option<DefRef> {
+        let _guard = DepthGuard::enter(&LIBRARY_DEPTH, 2)?;
+        let (value, g, scope): (Vec<String>, usize, Option<usize>) = if self
+            .is_local_name(f, d, head)
+        {
+            // (a type that answers the name is what is meant)
+            if self.local_type(f, d, head).is_some_and(|(t, _)| self.answers(t, name, true, 4)) {
+                return None;
+            }
+            let mut cur = local_start(d);
+            let mut found = None;
+            while let Some(x) = cur {
+                if let Some(&li) = self.locals.get(&(f, x, head.to_string())) {
+                    let l = &self.files[f].locals[li];
+                    if !l.declared && !l.path.is_empty() {
+                        found = Some((l.path.clone(), f, scope(x)));
+                    }
+                    break;
+                }
+                cur = self.up(f, x);
+            }
+            found?
+        } else {
+            let Some((Target::Def(v), _)) = self.resolve_path(f, d, &[head.to_string()], true)
+            else {
+                return None;
+            };
+            let def = self.def(v);
+            if !def.kind.is_state()
+                || self.held_type(v).is_some_and(|t| self.answers(t, name, true, 4))
+            {
+                return None;
+            }
+            (def.value_path.clone()?, v.0, def.parent)
+        };
+        if value.last().is_some_and(|s| s.starts_with('[')) {
+            return None;
+        }
+        let calling = self.calling.replace(true);
+        let callee = self.resolve_path(g, scope, &value, true);
+        *self.calling.borrow_mut() = calling;
+        let Some((Target::Def(c), _)) = callee else { return None };
+        let def = self.def(c);
+        if !def.kind.is_callable() {
+            return None;
+        }
+        let (_, local) = def.returned_members.iter().find(|(k, _)| k == name)?;
+        self.children[c.0]
+            .get(&c.1)?
+            .get(local)?
+            .iter()
+            .map(|&x| (c.0, x))
+            .find(|x| self.def(*x).kind.is_callable())
+    }
+
     fn handed_member(&self, f: usize, d: Option<usize>, head: &str, name: &str) -> Option<DefRef> {
         if self.local_type(f, d, head).is_some() {
             return None;
@@ -3151,13 +3275,12 @@ impl<'a> Project<'a> {
 
     /// The path a local's declaration gives it (its type as written).
     fn local_path(&self, f: usize, d: Option<usize>, name: &str) -> Option<&Vec<String>> {
-        let defs = &self.files[f].defs;
-        let mut cur = d;
+        let mut cur = local_start(d);
         while let Some(x) = cur {
             if let Some(&li) = self.locals.get(&(f, x, name.to_string())) {
                 return Some(&self.files[f].locals[li].path);
             }
-            cur = defs[x].parent;
+            cur = self.up(f, x);
         }
         None
     }
@@ -3165,20 +3288,18 @@ impl<'a> Project<'a> {
     /// The first name of the type a local's declaration writes (C, C++:
     /// `std` of `std::promise<void> release;`).
     fn local_written_head(&self, f: usize, d: Option<usize>, name: &str) -> Option<&str> {
-        let defs = &self.files[f].defs;
-        let mut cur = d;
+        let mut cur = local_start(d);
         while let Some(x) = cur {
             if let Some(&li) = self.locals.get(&(f, x, name.to_string())) {
                 return self.files[f].locals[li].written_head.as_deref();
             }
-            cur = defs[x].parent;
+            cur = self.up(f, x);
         }
         None
     }
 
     fn is_external_local(&self, f: usize, d: Option<usize>, name: &str) -> bool {
-        let defs = &self.files[f].defs;
-        let mut cur = d;
+        let mut cur = local_start(d);
         while let Some(x) = cur {
             if let Some(&li) = self.locals.get(&(f, x, name.to_string())) {
                 let l = &self.files[f].locals[li];
@@ -3197,18 +3318,29 @@ impl<'a> Project<'a> {
                 if head.is_empty() || matches!(head, "self" | "super" | "()") {
                     return false;
                 }
-                if matches!(self.resolve_name(f, Some(x), head), Some(Target::Ext(_, _))) {
+                if matches!(self.resolve_name(f, scope(x), head), Some(Target::Ext(_, _))) {
                     return true;
                 }
                 // (`let res = crate::get(url).call().unwrap()`, `call` declared
                 // `-> Result<Response<Body>, Error>` with `Response` a library's)
                 let path = l.path.clone();
-                return self.library_result(f, Some(x), &path)
-                    || self.library_part(f, Some(x), &path);
+                return self.library_result(f, scope(x), &path)
+                    || self.library_part(f, scope(x), &path);
             }
-            cur = defs[x].parent;
+            cur = self.up(f, x);
         }
         false
+    }
+
+    /// The scope above `x` in a search for a local: its parent definition,
+    /// then the file's own locals (a callback's variables, `name@byte`, seen
+    /// from a function written inside it), then none.
+    fn up(&self, f: usize, x: usize) -> Option<usize> {
+        if x == FILE_SCOPE {
+            None
+        } else {
+            self.files[f].defs[x].parent.or(Some(FILE_SCOPE))
+        }
     }
 
     /// The parameter `name` of the callable around `d`, with that callable.
@@ -3228,6 +3360,36 @@ impl<'a> Project<'a> {
             cur = defs[x].parent;
         }
         None
+    }
+
+    /// Whether a step before a path's last name is a field or property
+    /// declared with a library's type (`server.http.listen()`, `http:
+    /// http.Server`): what follows is that library type's.
+    fn library_field_step(&self, f: usize, d: Option<usize>, path: &[String]) -> bool {
+        let Some(_guard) = DepthGuard::enter(&LIBRARY_DEPTH, 2) else { return false };
+        for k in 2..path.len() {
+            let seg = path[k - 1].as_str();
+            if seg == "()" || seg.starts_with('[') {
+                return false;
+            }
+            match self.resolve_path(f, d, &path[..k], true) {
+                Some((Target::Def(v), _)) if self.def(v).kind.is_state() => {
+                    let def = self.def(v);
+                    let ty = def.declared_type.as_ref();
+                    if ty.is_some_and(|t| {
+                        matches!(
+                            self.resolve_path(v.0, def.parent, t, true),
+                            Some((Target::Ext(..), _))
+                        )
+                    }) {
+                        return true;
+                    }
+                }
+                Some((Target::Ext(..), _)) => return true,
+                _ => return false,
+            }
+        }
+        false
     }
 
     /// Rust: `std`, `core`, `alloc` or a crate a `Cargo.toml` depends on.
@@ -3389,21 +3551,20 @@ impl<'a> Project<'a> {
         // what the value is declared with: (type, type arguments, where)
         let mut declared: Option<Declared> = None;
         if prefix.len() == 1 {
-            let defs = &self.files[f].defs;
-            let mut cur = d;
+            let mut cur = local_start(d);
             while let Some(x) = cur {
                 if let Some(&li) = self.locals.get(&(f, x, prefix[0].clone())) {
                     let l = &self.files[f].locals[li];
                     if l.declared {
-                        declared = Some((l.path.clone(), l.targs.clone(), Vec::new(), f, Some(x)));
+                        declared = Some((l.path.clone(), l.targs.clone(), Vec::new(), f, scope(x)));
                     } else if !l.path.is_empty() && l.path[0] != prefix[0] {
                         // (`let res = crate::get(url).call().unwrap()`: its value)
                         prefix = l.path.clone();
-                        at = Some(x);
+                        at = scope(x);
                     }
                     break;
                 }
-                cur = defs[x].parent;
+                cur = self.up(f, x);
             }
         }
         let prefix = &prefix[..];
@@ -3538,8 +3699,7 @@ impl<'a> Project<'a> {
     /// name (`let agent = agent();`: the call is the function's; a longer
     /// initializer is `own_initializer`'s).
     fn local_keeps_outer(&self, f: usize, d: Option<usize>, name: &str, called: bool) -> bool {
-        let defs = &self.files[f].defs;
-        let mut cur = d;
+        let mut cur = local_start(d);
         while let Some(x) = cur {
             if let Some(&li) = self.locals.get(&(f, x, name.to_string())) {
                 let l = &self.files[f].locals[li];
@@ -3547,11 +3707,16 @@ impl<'a> Project<'a> {
                 // declared local called is the local, `current_time()` of a
                 // `current_time: Arc<dyn Fn() -> Instant>`)
                 let rust = self.family[f] == Some(Family::Rust);
+                // (a file's own local stands for every callback's of the name:
+                // a bare call is the function the file defines, `u()` beside a
+                // `var u` of another callback in a minified bundle)
                 return l.assigned
                     || (called
-                        && ((l.declared && !rust) || l.path.first().is_some_and(|h| h == name)));
+                        && (x == FILE_SCOPE
+                            || (l.declared && !rust)
+                            || l.path.first().is_some_and(|h| h == name)));
             }
-            cur = defs[x].parent;
+            cur = self.up(f, x);
         }
         false
     }
@@ -3561,8 +3726,7 @@ impl<'a> Project<'a> {
     /// see itself, so there the head is the outer name.
     fn own_initializer(&self, f: usize, d: Option<usize>, path: &[String]) -> bool {
         let Some(name) = path.first() else { return false };
-        let defs = &self.files[f].defs;
-        let mut cur = d;
+        let mut cur = local_start(d);
         while let Some(x) = cur {
             if let Some(&li) = self.locals.get(&(f, x, name.clone())) {
                 let l = &self.files[f].locals[li];
@@ -3572,33 +3736,31 @@ impl<'a> Project<'a> {
                     && l.path[0] == *name
                     && (path.starts_with(&l.path) || (path.len() > 1 && l.path.starts_with(path)));
             }
-            cur = defs[x].parent;
+            cur = self.up(f, x);
         }
         false
     }
 
     /// A "local" recorded from a plain assignment that declares nothing.
     fn local_is_hint(&self, f: usize, d: Option<usize>, name: &str) -> bool {
-        let defs = &self.files[f].defs;
-        let mut cur = d;
+        let mut cur = local_start(d);
         while let Some(x) = cur {
             if let Some(&li) = self.locals.get(&(f, x, name.to_string())) {
                 return self.files[f].locals[li].assigned;
             }
-            cur = defs[x].parent;
+            cur = self.up(f, x);
         }
         false
     }
 
     /// Whether a name is a parameter or local of the enclosing definitions.
     fn is_local_name(&self, f: usize, d: Option<usize>, name: &str) -> bool {
-        let defs = &self.files[f].defs;
-        let mut cur = d;
+        let mut cur = local_start(d);
         while let Some(x) = cur {
             if self.locals.contains_key(&(f, x, name.to_string())) {
                 return true;
             }
-            cur = defs[x].parent;
+            cur = self.up(f, x);
         }
         false
     }
@@ -4458,6 +4620,30 @@ impl<'a> Project<'a> {
             if let Some(m) = self.handed_member(f, d, head, &rest[0]) {
                 return self.walk(Target::Def(m), &rest[1..], Confidence::Inferred);
             }
+            // `test.before()` of `const test = Object.assign(runTest, {
+            // before() {} })`: the member the literal it holds defines
+            if !self.is_local_name(f, d, head) {
+                // (its own file or one this file imports, never a namesake
+                // found by directory: bootstrap.js beside bootstrap.esm.js)
+                let in_sight = |v: DefRef| {
+                    v.0 == f || self.scopes.get(f).is_some_and(|s| s.imported.contains(&v.0))
+                };
+                if let Some(Target::Def(v)) = self.resolve_name(f, d, head).filter(|t| match t {
+                    Target::Def(v) => in_sight(*v),
+                    _ => false,
+                }) {
+                    if let Some(m) = self.held_object_member(v, &rest[0]) {
+                        return self.walk(Target::Def(m), &rest[1..], Confidence::Extracted);
+                    }
+                }
+            }
+            // `const captured = captureRequest()`, `captured.contentType()`:
+            // a member of the object literal the function returns
+            if !own_init {
+                if let Some(m) = self.returned_member(f, d, head, &rest[0]) {
+                    return self.walk(Target::Def(m), &rest[1..], Confidence::Inferred);
+                }
+            }
         }
         let mut t = match head.as_str() {
             _ if head_many.is_some() => {
@@ -4873,7 +5059,7 @@ impl<'a> Project<'a> {
                 }
                 None => self
                     .local_targs(f, d, head)
-                    .and_then(|(args, elems, x)| self.binds_for(c, args, elems, f, Some(x), None))
+                    .and_then(|(args, elems, x)| self.binds_for(c, args, elems, f, scope(x), None))
                     // `val r = call.execute()`: the bindings its value gives
                     .or_else(|| self.local_value_binds(f, d, head, c)),
             };
@@ -5538,14 +5724,13 @@ impl<'a> Project<'a> {
         name: &str,
         ty: DefRef,
     ) -> Option<Binds> {
-        let defs = &self.files[f].defs;
-        let mut cur = d;
+        let mut cur = local_start(d);
         let (x, li) = loop {
             let x = cur?;
             if let Some(&li) = self.locals.get(&(f, x, name.to_string())) {
                 break (x, li);
             }
-            cur = defs[x].parent;
+            cur = self.up(f, x);
         };
         let l = &self.files[f].locals[li];
         if l.declared || l.path.is_empty() || l.path.last().is_some_and(|s| s.starts_with('[')) {
@@ -5562,7 +5747,7 @@ impl<'a> Project<'a> {
         let recv = self.recv.replace(None);
         let types = self.types_only.replace(false);
         self.end_binds.replace(None);
-        let value = self.resolve_path(f, Some(x), &l.path, true);
+        let value = self.resolve_path(f, scope(x), &l.path, true);
         let at_end = self.end_binds.replace(None);
         *self.types_only.borrow_mut() = types;
         *self.recv.borrow_mut() = recv;
@@ -5612,7 +5797,7 @@ impl<'a> Project<'a> {
                     .take_while(|(_, a)| a.label.is_none())
                     .find(|(p, _)| p.ty.len() == 1 && p.ty[0] == *tp)
                     .and_then(|(_, a)| match &a.kind {
-                        crate::facts::Arg::Path(q) => self.value_type_of(f, Some(x), q),
+                        crate::facts::Arg::Path(q) => self.value_type_of(f, scope(x), q),
                         _ => None,
                     })
                     .filter(|t| self.def(*t).kind.is_class_like());
@@ -5627,7 +5812,7 @@ impl<'a> Project<'a> {
                             scope: td.parent,
                         }
                     }
-                    None => BoundArg { path: Vec::new(), elem: None, file: f, scope: Some(x) },
+                    None => BoundArg { path: Vec::new(), elem: None, file: f, scope: scope(x) },
                 }
             })
             .collect();
@@ -5777,14 +5962,13 @@ impl<'a> Project<'a> {
     /// The type arguments a local or parameter is declared with, and the
     /// definition it is a local of.
     fn local_targs(&self, f: usize, d: Option<usize>, name: &str) -> Option<LocalTargs<'_>> {
-        let defs = &self.files[f].defs;
-        let mut cur = d;
+        let mut cur = local_start(d);
         while let Some(x) = cur {
             if let Some(&li) = self.locals.get(&(f, x, name.to_string())) {
                 let l = &self.files[f].locals[li];
                 return (!l.targs.is_empty()).then_some((&l.targs[..], &l.targ_elems[..], x));
             }
-            cur = defs[x].parent;
+            cur = self.up(f, x);
         }
         None
     }
@@ -5801,14 +5985,13 @@ impl<'a> Project<'a> {
             "Item4" => 3,
             _ => return None,
         };
-        let defs = &self.files[f].defs;
-        let mut cur = d;
+        let mut cur = local_start(d);
         let (x, li) = loop {
             let x = cur?;
             if let Some(&li) = self.locals.get(&(f, x, head.clone())) {
                 break (x, li);
             }
-            cur = defs[x].parent;
+            cur = self.up(f, x);
         };
         let l = &self.files[f].locals[li];
         if l.declared || l.path.is_empty() || l.path.iter().any(|s| s.starts_with("[#")) {
@@ -5824,7 +6007,7 @@ impl<'a> Project<'a> {
                     return None;
                 }
                 let recv = self.recv.replace(None);
-                let value = self.resolve_path(f, Some(x), &l.path, true);
+                let value = self.resolve_path(f, scope(x), &l.path, true);
                 *self.recv.borrow_mut() = recv;
                 self.typing.borrow_mut().remove(&(f, li));
                 let n = match value {
@@ -6132,13 +6315,22 @@ impl<'a> Project<'a> {
             && !self.is_local_name(f, d, bare_head)
             && self.rust_crate_name(bare_head)
             && !matches!(self.resolve_path(f, d, &r.path[..1], true), Some((Target::Def(_), _)));
+        // a typed local whose type is made of a library's (`type
+        // ExtendedServer = https.Server & { url: string }`, `class X extends
+        // EventEmitter`), the name not its own: the library part's
+        let library_part = reason.starts_with("typed local: no such member")
+            && self
+                .local_type(f, d, head)
+                .is_some_and(|(t, _)| self.has_outside_base(t) && !self.answers(t, name, true, 4));
         let library_like = if reason == "library name"
             || reason == "local of a library type"
             || std_held
+            || library_part
             || (fam == Family::Rust
                 && r.path.len() >= 2
                 && !crate_head
                 && self.rust_library_receiver(f, d, &r.path))
+            || (fam == Family::Ecma && r.path.len() >= 3 && self.library_field_step(f, d, &r.path))
         {
             Some("the receiver is a library's")
         } else if outside_head || std_head || crate_head {
@@ -6189,6 +6381,16 @@ impl<'a> Project<'a> {
         {
             // (`this.router.route()`, `router` from `Object.defineProperty`)
             Some("the receiver is a property defined at run time")
+        } else if fam == Family::Ecma
+            && r.path.len() >= 2
+            && cd.object.is_some()
+            && cd.parent.is_some()
+            && UNTYPED_RECEIVER_REASONS.contains(&reason.as_str())
+        {
+            // (`promise.buffer = function () {…}` inside `asPromise`: a
+            // member a function puts on a value it makes, called on one the
+            // walk cannot type)
+            Some("the member is put on a value at run time")
         } else if fam == Family::Ecma && holds_library_value() {
             // (`const app = express(); app.listen(…)`)
             Some("the receiver holds a library's value")
@@ -6251,8 +6453,7 @@ impl<'a> Project<'a> {
     /// or assigned a call of a function that returns one and not opened
     /// there (`let r = load();`, not `let r = load()?;`).
     fn local_sealed(&self, f: usize, d: Option<usize>, name: &str) -> bool {
-        let defs = &self.files[f].defs;
-        let mut cur = d;
+        let mut cur = local_start(d);
         while let Some(x) = cur {
             if let Some(&li) = self.locals.get(&(f, x, name.to_string())) {
                 let l = &self.files[f].locals[li];
@@ -6274,7 +6475,7 @@ impl<'a> Project<'a> {
                 *self.depth.borrow_mut() += 1;
                 let recv = self.recv.replace(None);
                 let types = self.types_only.replace(false);
-                let value = self.resolve_path(f, Some(x), &l.path, true);
+                let value = self.resolve_path(f, scope(x), &l.path, true);
                 *self.types_only.borrow_mut() = types;
                 *self.recv.borrow_mut() = recv;
                 *self.depth.borrow_mut() -= 1;
@@ -6286,7 +6487,7 @@ impl<'a> Project<'a> {
                 }
                 return sealed;
             }
-            cur = defs[x].parent;
+            cur = self.up(f, x);
         }
         false
     }
@@ -6302,18 +6503,20 @@ impl<'a> Project<'a> {
     /// The type of the keys of the map a local or parameter is declared as.
     fn local_key(&self, f: usize, d: Option<usize>, name: &str) -> Option<DefRef> {
         let defs = &self.files[f].defs;
-        let mut cur = d;
+        let mut cur = local_start(d);
         while let Some(x) = cur {
             if let Some(&li) = self.locals.get(&(f, x, name.to_string())) {
                 let l = &self.files[f].locals[li];
                 let key = l.key.clone().or_else(|| {
-                    defs[x].plist.iter().find(|p| p.name == *name).and_then(|p| p.key.clone())
+                    scope(x)
+                        .and_then(|x| defs[x].plist.iter().find(|p| p.name == *name))
+                        .and_then(|p| p.key.clone())
                 })?;
                 return self
-                    .type_of_path(f, Some(x), &key, true)
+                    .type_of_path(f, scope(x), &key, true)
                     .filter(|t| self.def(*t).kind.is_class_like());
             }
-            cur = defs[x].parent;
+            cur = self.up(f, x);
         }
         None
     }
@@ -6321,14 +6524,13 @@ impl<'a> Project<'a> {
     /// The function a local holds when it is a part of a callable's tuple
     /// that names one (`const [text, copy] = useCopy()`).
     fn local_function(&self, f: usize, d: Option<usize>, name: &str) -> Option<DefRef> {
-        let defs = &self.files[f].defs;
-        let mut cur = d;
+        let mut cur = local_start(d);
         let (x, li) = loop {
             let x = cur?;
             if let Some(&li) = self.locals.get(&(f, x, name.to_string())) {
                 break (x, li);
             }
-            cur = defs[x].parent;
+            cur = self.up(f, x);
         };
         let l = &self.files[f].locals[li];
         // (`const [text, copy] = useCopy()`, `const { show } = useToast()`)
@@ -6342,7 +6544,7 @@ impl<'a> Project<'a> {
         }
         let recv = self.recv.replace(None);
         let calling = self.calling.replace(false);
-        let found = self.resolve_path(f, Some(x), &l.path, true);
+        let found = self.resolve_path(f, scope(x), &l.path, true);
         *self.calling.borrow_mut() = calling;
         *self.recv.borrow_mut() = recv;
         self.typing.borrow_mut().remove(&(f, li));
@@ -6355,13 +6557,14 @@ impl<'a> Project<'a> {
     /// Whether a local or parameter is declared as a map.
     fn local_keyed(&self, f: usize, d: Option<usize>, name: &str) -> bool {
         let defs = &self.files[f].defs;
-        let mut cur = d;
+        let mut cur = local_start(d);
         while let Some(x) = cur {
             if let Some(&li) = self.locals.get(&(f, x, name.to_string())) {
                 return self.files[f].locals[li].keyed
-                    || defs[x].plist.iter().any(|p| p.name == *name && p.keyed);
+                    || scope(x)
+                        .is_some_and(|x| defs[x].plist.iter().any(|p| p.name == *name && p.keyed));
             }
-            cur = defs[x].parent;
+            cur = self.up(f, x);
         }
         false
     }
@@ -6874,14 +7077,13 @@ impl<'a> Project<'a> {
 
     /// The type a local is declared with, bare (`string`, `KmProperty`).
     fn local_written_type(&self, f: usize, d: Option<usize>, name: &str) -> Option<String> {
-        let defs = &self.files[f].defs;
-        let mut cur = d;
+        let mut cur = local_start(d);
         while let Some(x) = cur {
             if let Some(&li) = self.locals.get(&(f, x, name.to_string())) {
                 let l = &self.files[f].locals[li];
                 return l.path.last().filter(|_| l.declared).cloned();
             }
-            cur = defs[x].parent;
+            cur = self.up(f, x);
         }
         None
     }
@@ -6889,8 +7091,7 @@ impl<'a> Project<'a> {
     /// The one name a local's value is built from (`var m = new Message()`),
     /// where no type is written: a hint for an extension written for it.
     fn local_built_type(&self, f: usize, d: Option<usize>, name: &str) -> Option<String> {
-        let defs = &self.files[f].defs;
-        let mut cur = d;
+        let mut cur = local_start(d);
         while let Some(x) = cur {
             if let Some(&li) = self.locals.get(&(f, x, name.to_string())) {
                 return match self.files[f].locals[li].path.as_slice() {
@@ -6898,7 +7099,7 @@ impl<'a> Project<'a> {
                     _ => None,
                 };
             }
-            cur = defs[x].parent;
+            cur = self.up(f, x);
         }
         None
     }
@@ -8096,6 +8297,21 @@ fn vendored_path(path: &str) -> bool {
 
 /// Accessors of a library's generic type that give the value it holds
 /// (`Response::body_mut`, `TlsStream::get_mut`, `BufReader::into_inner`).
+/// The scope of the locals no definition holds: a callback's variables at
+/// file level (`test('…', async t => { const request = …; request.m() })`).
+const FILE_SCOPE: usize = usize::MAX;
+
+/// Where a search for a local name starts: the definition around, or the
+/// file's own locals for a use no definition holds.
+fn local_start(d: Option<usize>) -> Option<usize> {
+    Some(d.unwrap_or(FILE_SCOPE))
+}
+
+/// A local's scope as a definition to resolve from (`None` for the file's).
+fn scope(x: usize) -> Option<usize> {
+    (x != FILE_SCOPE).then_some(x)
+}
+
 /// Rust's own types, as a parameter writes them (`uri: &str`): a receiver of
 /// one is the language's.
 const RUST_OWN_TYPES: &[&str] = &[

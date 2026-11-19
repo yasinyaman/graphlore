@@ -154,6 +154,16 @@ pub struct Def {
     /// result of one that declares none.
     #[serde(default)]
     pub returns: Vec<Vec<String>>,
+    /// TS: the class its body constructs under a cast (`new
+    /// Http2ClientRequest(…) as unknown as ClientRequest`): what it gives
+    /// when the type it declares is no type of the project.
+    #[serde(default)]
+    pub cast_from: Option<Vec<String>>,
+    /// Written inside a function that is no definition (a test callback at
+    /// file level: `test('…', () => { const request = () => got() })`): no
+    /// module-level name, though no definition is its parent.
+    #[serde(default)]
+    pub in_callback: bool,
     /// Inside a test region of a source file (Rust `#[cfg(test)]`, `#[test]`).
     pub is_test: bool,
     /// The object a function is assigned to as a property (JS `res.send =

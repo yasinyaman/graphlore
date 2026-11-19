@@ -316,6 +316,23 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- **Native engine 0.5.42: TypeScript callbacks, casts, object types.**
+  - A variable of a JS/TS callback at file level (a test body) is a name of
+    that callback and is typed. It used to type nothing, and it was linked by
+    name to a namesake elsewhere.
+  - A function declared to give a library type but building a project class
+    under a cast (`new X() as unknown as T`) gives that class.
+  - `type X = { … }` and `A & B` aliases answer for their properties, and
+    interface and alias property signatures are property nodes.
+  - A call's result has the functions of the object literal it returns.
+  - `Object.assign(f, { … })` has the literal's members.
+  - Qualified types (`net.Server`) are read.
+  - New marks: a member put on a value at run time; a receiver behind a
+    library-typed property; a typed local whose type is partly a library's.
+  - Wrong name links are gone (`indirect_call` to a namesake of a value;
+    cross-module namesakes in minified bundles).
+  - TypeScript's unmarked unresolved rows go from 88 to 0; across all
+    languages, 705 to 615.
 - **Native engine 0.5.41: Rust's last unresolved rows say why.** New marks
   for the "receiver is a library's" row:
   - a local or closure parameter of a library's type;

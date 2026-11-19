@@ -298,3 +298,38 @@ fn rust_closure_parameters_type_parameters_and_own_types_of_the_language() {
     assert_eq!(why("lonely"), Value::Null, "{rows:#?}");
     assert_eq!(why("far"), Value::Null, "{rows:#?}");
 }
+
+#[test]
+fn typescript_rows_on_library_values_and_run_time_members_say_so() {
+    let dir = project(
+        "tsmarks",
+        &[
+            ("package.json", "{\"name\":\"app\",\"version\":\"1.0.0\"}\n"),
+            // a member a function puts on a value it makes, called on a value
+            // the walk cannot type
+            ("src/as-promise.ts", "export default function asPromise(): Promise<string> {\n\tconst promise = Promise.resolve('x') as any;\n\tpromise.bufferOf = function () { return 1; };\n\treturn promise;\n}\n"),
+            ("test/promise.ts", "const test = (n: string, f: (got: unknown) => void) => f(null);\ntest('x', async got => {\n\tconst promise = (got as any)();\n\tpromise.bufferOf();\n});\n"),
+            // a property of a library type; a typed local whose type is partly
+            // a library's; a parameter written with a library's qualified type
+            ("test/server.ts", "import http from 'node:http';\nimport net from 'node:net';\nexport type TestServer = {\n\thttp: http.Server;\n\tmine: Own;\n};\nexport type Extended = http.Server & {url: string};\nexport class Own {\n\tfar(): number { return 0; }\n}\nexport function start(server: TestServer, other: Extended) {\n\tserver.http.listenOn();\n\tother.closeAll();\n\tserver.mine.lonely();\n}\nexport const bind = (socket: net.Server) => socket.boundTo();\n"),
+            ("src/helpers.ts", "export function listenOn() {}\nexport function closeAll() {}\nexport function lonely() {}\nexport function boundTo() {}\n"),
+        ],
+    );
+    let out = dir.join("unresolved.json");
+    let mut opts = BuildOptions::new(&dir);
+    opts.unresolved = Some(out.clone());
+    build_graph(&opts).unwrap();
+    let rows: Vec<Value> = serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+    let why = |name: &str| {
+        rows.iter()
+            .find(|r| r["name"] == name)
+            .map(|r| r["library_like"].clone())
+            .unwrap_or_else(|| panic!("no row {name}: {rows:#?}"))
+    };
+    assert_eq!(why("bufferOf"), "the member is put on a value at run time", "{rows:#?}");
+    assert_eq!(why("listenOn"), "the receiver is a library's", "{rows:#?}");
+    assert_eq!(why("closeAll"), "the receiver is a library's", "{rows:#?}");
+    assert_eq!(why("boundTo"), "the receiver is a library's", "{rows:#?}");
+    assert_eq!(why("lonely"), Value::Null, "{rows:#?}");
+}
