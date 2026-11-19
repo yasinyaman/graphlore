@@ -316,6 +316,25 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- **Native engine 0.5.40: Rust bindings through constructors, associated
+  types, closures and match arms.**
+  - A class's type parameter is bound by what its constructor is passed
+    (`ErrorCapture::wrap(x)`) and by the type arguments nested in a library
+    generic (`TlsStream<ErrorCapture<T>>`).
+  - Tuples are typed through `unwrap_or((a, b))`, through a loop over an
+    array of tuples, and through tuple parts written as generics.
+  - `Self::Out` is the alias of the method's own `impl` block; an impl's
+    `type Result` is no longer a module-level name.
+  - `().chain()` resolves to the trait the project implements for `()`.
+  - A closure's parameters are what the callee's `Fn` writes, and a
+    function-trait value called gives its result.
+  - A tuple variant's fields are typed, and each `match` arm binds its own
+    names.
+  - `pub use dep::m;` is followed, and a called local shadows a function of
+    the same name.
+  - A lifetime is no type.
+  - Rust's unmarked unresolved rows go from 16 to 7; across all languages,
+    721 to 712.
 - **Native engine 0.5.39: Rust's unresolved rows on library values say so.**
   New marks: a field or tuple field declared with a library type
   (`self.builder`, `self.0`), `self` in an `impl` for a library type, a local

@@ -2127,3 +2127,96 @@ fn a_rust_path_into_a_dependency_is_no_guess_by_its_last_name() {
     assert!(!to("src_run_go", "src_own_sendbody_from_reader"), "{got:#?}");
     assert!(to("src_run_go", "src_own_parse_all"), "{got:#?}");
 }
+
+#[test]
+fn rust_bindings_through_constructors_associated_types_closures_and_variants() {
+    // A class's type parameter bound by what its constructor is passed
+    // (`ErrorCapture::wrap(TransportAdapter::new())`) and by the type
+    // arguments written inside a library generic (`TlsStream<ErrorCapture<
+    // TransportAdapter>>`); a tuple's default (`unwrap_or((a, b))`) and a
+    // loop over an array of tuples; `Self::Out` of the impl (of its own
+    // block, where a type has several), never a free alias; `().chain()`;
+    // a closure's parameters as the callee's `Fn` writes them (a library's
+    // type: no guess by name); a tuple variant's field; `crate::http` a
+    // crate's `pub use`; a local called is the local
+    let got = links("rustbinds", &[
+        ("Cargo.toml", "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n[dependencies]\nureq-proto = \"0.1\"\nnative-tls = \"0.2\"\n"),
+        ("src/body.rs", "use std::io;\npub enum BodyInner { None, ByteVec(io::Cursor<Vec<u8>>), Mine(Holder) }\npub struct Holder;\nimpl Holder { pub fn hold(&self) -> u8 { 0 } }\npub struct Wrap;\nimpl Wrap { pub fn get_ref(&self) -> u8 { 0 } pub fn hold(&self) -> u8 { 1 } }\npub fn as_body(inner: &mut BodyInner) -> u8 {\n    match inner {\n        BodyInner::None => 0,\n        BodyInner::ByteVec(v) => { v.get_ref(); 0 }\n        BodyInner::Mine(h) => h.hold(),\n    }\n}\n"),
+        ("src/cap.rs", "use crate::io::TransportAdapter;\nuse native_tls::TlsStream;\npub struct ErrorCapture<S> {\n    stream: S,\n}\nimpl<S> ErrorCapture<S> {\n    fn wrap(stream: S) -> Self { ErrorCapture { stream } }\n    fn get_mut(&mut self) -> &mut S { &mut self.stream }\n}\npub fn connect() {\n    let mut adapter = ErrorCapture::wrap(TransportAdapter::new());\n    adapter.get_mut().set_timeout_at();\n}\npub struct NativeTlsTransport {\n    stream: TlsStream<ErrorCapture<TransportAdapter>>,\n}\nimpl NativeTlsTransport {\n    fn transmit(&mut self) {\n        let stream = &mut self.stream;\n        stream.get_mut().get_mut().set_timeout();\n    }\n}\n"),
+        ("src/chain.rs", "pub trait Link {\n    fn chain<N>(self, next: N) -> Chained<Self, N> where Self: Sized { Chained(self, next) }\n}\npub struct Chained<A, B>(A, B);\nimpl<A, B> Link for Chained<A, B> {}\nimpl Link for () {}\npub struct Tcp;\npub struct Other;\nimpl Other { pub fn chain(self) -> u8 { 0 } }\npub fn build() {\n    let _c = ().chain(Tcp).chain(Tcp);\n}\n"),
+        ("src/conn.rs", "pub trait Transport {\n    fn boxed(self) -> u8 where Self: Sized { 0 }\n}\npub struct Boxy;\nimpl Boxy { pub fn boxed(self) -> u8 { 1 } }\npub struct Wire;\nimpl Transport for Wire {}\npub trait Connector {\n    type Out: Transport;\n    fn connect(&self) -> Result<Option<Self::Out>, ()>;\n}\npub struct Script;\nimpl Connector for Script {\n    type Out = Wire;\n    fn connect(&self) -> Result<Option<Self::Out>, ()> { Ok(None) }\n}\npub fn run(script: Script) -> Result<u8, ()> {\n    Ok(script.connect()?.unwrap().boxed())\n}\npub struct Plug;\nimpl Plug { pub fn plugged(&self) -> u8 { 0 } }\npub struct Wire2;\nimpl Wire2 { pub fn plugged(&self) -> u8 { 1 } }\npub trait Maker { type Made; fn make(&self) -> Self::Made; }\npub struct Factory;\nimpl Maker for Factory {\n    type Made = Plug;\n    fn make(&self) -> Self::Made { Plug }\n}\npub trait Other2 { type Made; fn other(&self) -> Self::Made; }\nimpl Other2 for Factory {\n    type Made = Wire2;\n    fn other(&self) -> Self::Made { Wire2 }\n}\npub fn use_factory(f: Factory) -> u8 { f.make().plugged() }\npub type Free = Wire;\npub fn free(w: Free) -> u8 { w.boxed() }\n"),
+        ("src/handler.rs", "use crate::http::{Request, Uri};\npub struct Req;\nimpl Req { pub fn headers(&self) -> u8 { 0 } pub fn mine(&self) -> u8 { 0 } }\npub struct Decoy2;\nimpl Decoy2 { pub fn mine(&self) -> u8 { 1 } }\npub struct TestHandler;\nimpl TestHandler {\n    fn new(pattern: &'static str, handler: impl Fn(Uri, Request<()>) -> u8 + 'static) -> Self { TestHandler }\n    fn own<F: Fn(Req) -> u8>(pattern: &'static str, handler: F) -> Self { TestHandler }\n}\npub fn setup() {\n    TestHandler::new(\"/post\", |uri, req| { req.headers(); uri.query(); 0 });\n    TestHandler::own(\"/own\", |r| r.mine());\n}\npub struct Mine;\nimpl Mine { pub fn query(&self) -> u8 { 0 } }\npub fn resolve(uri: &Uri) -> u8 { uri.authority2(); 0 }\npub struct Auth;\nimpl Auth { pub fn authority2(&self) -> u8 { 0 } }\n"),
+        ("src/io.rs", "pub struct TransportAdapter;\nimpl TransportAdapter {\n    pub fn new() -> TransportAdapter { TransportAdapter }\n    pub fn set_timeout_at(&mut self) {}\n    pub fn set_timeout(&mut self) {}\n}\npub struct Decoy;\nimpl Decoy {\n    pub fn set_timeout_at(&mut self) {}\n    pub fn set_timeout(&mut self) {}\n}\n"),
+        ("src/lib.rs", "pub mod io;\npub mod cap;\npub mod time;\npub mod conn;\npub mod chain;\npub mod handler;\npub mod body;\npub mod part;\npub use ureq_proto::http;\n"),
+        ("src/part.rs", "use std::path::Path;\npub struct Part;\nimpl Part { pub fn file_name(&self) -> u8 { 0 } pub fn authority3(&self) -> u8 { 0 } }\npub fn file<P: AsRef<Path>>(path: P) -> u8 { path.as_ref().file_name(); 0 }\npub fn authority(uri: &str) -> u8 { uri.parse::<u8>().unwrap().authority3(); 0 }\n"),
+        ("src/time.rs", "pub enum Instant { Exact, NotHappening }\nimpl Instant {\n    pub fn duration_since(&self) -> Duration { Duration }\n}\npub struct Duration;\nimpl Duration { pub fn is_not_happening(&self) -> bool { true } }\npub struct Late;\nimpl Late {\n    pub fn duration_since(&self) -> u8 { 0 }\n    pub fn is_not_happening(&self) -> bool { false }\n}\npub enum Timeout { Global, PerRead }\npub struct NextTimeout { pub after: Duration }\npub struct Timings { pub times: Vec<(Timeout, Instant)> }\nimpl Timings {\n    pub fn next(&self) -> Duration {\n        let (_reason, at) = self.times.iter().map(|x| x).min_by(|a, b| a.cmp(b)).unwrap_or((Timeout::Global, Instant::NotHappening));\n        at.duration_since()\n    }\n}\npub struct State { pub reads: Vec<NextTimeout>, pub writes: Vec<NextTimeout> }\npub fn check(state: std::sync::Arc<std::sync::Mutex<State>>) {\n    let state = state.lock().unwrap();\n    for (operations, seconds) in [(&state.reads, 1), (&state.writes, 2)] {\n        for timeout in operations {\n            timeout.after.is_not_happening();\n        }\n    }\n}\npub fn connect() -> u8 { 0 }\npub fn connect_with(connect: impl FnOnce(u8) -> u8) -> u8 { connect(1) }\npub struct Details { pub current_time: std::sync::Arc<dyn Fn() -> Instant + Send + Sync + 'static> }\npub fn elapsed(details: &Details) { let current_time = details.current_time.clone(); current_time().duration_since(); }\n"),
+    ]);
+    let to = |s: &str, t: &str| got.iter().any(|(a, _, b, _)| a == s && b == t);
+    let yes = [
+        ("src_cap_connect", "src_io_transportadapter_set_timeout_at"),
+        ("src_cap_nativetlstransport_transmit", "src_io_transportadapter_set_timeout"),
+        ("src_time_timings_next", "src_time_instant_duration_since"),
+        ("src_time_check", "src_time_duration_is_not_happening"),
+        ("src_time_elapsed", "src_time_instant_duration_since"),
+        ("src_conn_run", "src_conn_transport_boxed"),
+        ("src_conn_use_factory", "src_conn_plug_plugged"),
+        ("src_chain_build", "src_chain_link_chain"),
+        ("src_handler_setup", "src_handler_req_mine"),
+        ("src_body_as_body", "src_body_holder_hold"),
+    ];
+    for (s, t) in yes {
+        assert!(to(s, t), "{s} -> {t}: {got:#?}");
+    }
+    let no = [
+        ("src_cap_connect", "src_io_decoy_set_timeout_at"),
+        ("src_cap_nativetlstransport_transmit", "src_io_decoy_set_timeout"),
+        ("src_time_timings_next", "src_time_late_duration_since"),
+        ("src_time_check", "src_time_late_is_not_happening"),
+        ("src_conn_run", "src_conn_boxy_boxed"),
+        ("src_conn_use_factory", "src_conn_wire2_plugged"),
+        ("src_conn_free", "src_conn_transport_boxed"),
+        ("src_chain_build", "src_chain_other_chain"),
+        ("src_handler_setup", "src_handler_decoy2_mine"),
+        ("src_handler_setup", "src_handler_req_headers"),
+        ("src_handler_setup", "src_handler_mine_query"),
+        ("src_handler_resolve", "src_handler_auth_authority2"),
+        ("src_body_as_body", "src_body_wrap_hold"),
+        ("src_body_as_body", "src_body_wrap_get_ref"),
+        ("src_time_connect_with", "src_time_connect"),
+    ];
+    for (s, t) in no {
+        assert!(!to(s, t), "{s} -> {t}: {got:#?}");
+    }
+}
+
+#[test]
+fn rust_match_arms_wrappers_tuples_of_generics_and_called_locals() {
+    // Each arm binds its own name (`A::Text(v)` and `A::Num(v)` are two);
+    // `Arc::downgrade(&self.pool)` holds what it is passed and `upgrade()` /
+    // `lock().unwrap()` open it; a tuple's part written `Arc<Mutex<State>>` is
+    // `State`; a parameter `now: Arc<dyn Fn() -> Instant>` called gives an
+    // `Instant`, and is the parameter, not the method `now()` beside it
+    let got = links("rustarms", &[
+        ("Cargo.toml", "[package]\nname = \"app\"\nversion = \"0.1.0\"\n"),
+        ("src/lib.rs", "pub mod p;\n"),
+        ("src/p.rs", "use std::sync::{Arc, Mutex};\n\npub struct Text;\nimpl Text {\n    pub fn show(&self) -> u8 { 0 }\n}\npub struct Num;\nimpl Num {\n    pub fn show(&self) -> u8 { 1 }\n}\npub enum A {\n    T(Text),\n    N(Num),\n}\npub fn show(a: &A) -> u8 {\n    match a {\n        A::T(v) => v.show(),\n        A::N(v) => v.show(),\n    }\n}\n\npub struct Pool;\nimpl Pool {\n    pub fn register(&mut self) {}\n}\npub struct Other;\nimpl Other {\n    pub fn register(&mut self) {}\n}\npub struct ConnectionPool {\n    pool: Arc<Mutex<Pool>>,\n}\nimpl ConnectionPool {\n    pub fn make(&self) {\n        let pool = Arc::downgrade(&self.pool);\n        let _f = move || match pool.upgrade() {\n            Some(pool) => pool.lock().unwrap().register(),\n            None => {}\n        };\n    }\n}\n\npub struct Duration;\nimpl Duration {\n    pub fn is_not_happening(&self) -> bool { true }\n}\npub struct Late;\nimpl Late {\n    pub fn is_not_happening(&self) -> bool { false }\n}\npub struct NextTimeout {\n    pub after: Duration,\n}\npub struct State {\n    pub reads: Vec<NextTimeout>,\n}\npub struct Agent;\nfn setup() -> (Agent, Arc<Mutex<State>>) {\n    todo!()\n}\npub fn check() {\n    let (_agent, state) = setup();\n    let state = state.lock().unwrap();\n    for t in &state.reads {\n        t.after.is_not_happening();\n    }\n}\n\npub struct Instant;\nimpl Instant {\n    pub fn since(&self) -> u8 { 0 }\n}\npub struct Clock;\nimpl Clock {\n    pub fn now(&self) -> Late { Late }\n    pub fn since(&self) -> u8 { 1 }\n}\npub fn elapsed(now: Arc<dyn Fn() -> Instant + Send + Sync + 'static>) -> u8 {\n    now().since()\n}\n"),
+    ]);
+    let to = |s: &str, t: &str| got.iter().any(|(a, _, b, _)| a == s && b == t);
+    for (s, t) in [
+        ("src_p_show", "src_p_text_show"),
+        ("src_p_show", "src_p_num_show"),
+        ("src_p_connectionpool_make", "src_p_pool_register"),
+        ("src_p_check", "src_p_duration_is_not_happening"),
+        ("src_p_elapsed", "src_p_instant_since"),
+    ] {
+        assert!(to(s, t), "{s} -> {t}: {got:#?}");
+    }
+    for (s, t) in [
+        ("src_p_connectionpool_make", "src_p_other_register"),
+        ("src_p_check", "src_p_late_is_not_happening"),
+        ("src_p_elapsed", "src_p_clock_since"),
+        ("src_p_elapsed", "src_p_clock_now"),
+    ] {
+        assert!(!to(s, t), "{s} -> {t}: {got:#?}");
+    }
+}

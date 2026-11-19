@@ -767,7 +767,7 @@ file pairs). The native graph has definitions graphify folds into the one
 around them (a function nested in a method, the setter beside a getter of the
 same name); an edge from one of those is compared as an edge from the paired
 definition it belongs to, as graphify records it. On the 31 repositories of the
-[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.38,
+[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.40,
 measured 2026-11-19), as native / graphify edges and the share of graphify's
 that the native graph has too:
 
@@ -782,7 +782,7 @@ that the native graph has too:
 | Kotlin | 99.4% | 368 / 333 (95%) | 4,786 / 2,108 (71%) | 96 / 56 (93%) | 1,079 / 673 (91%) |
 | Scala | 100% | 2 / 0 | 46 / 20 (45%) | 21 / 22 (95%) | 75 / 32 (100%) |
 | C# | 92.7% | 347 / 280 (30%)³ | 2,860 / 2,450 (96%) | 87 / 86 (98%) | 1,248 / 806 (99%) |
-| Rust | 93.3% | 324 / 370 (79%) | 2,142 / 853 (87%) | 53 / 41 (93%) | 1,200 / 895 (81%) |
+| Rust | 93.3% | 324 / 370 (79%) | 2,175 / 853 (87%) | 53 / 41 (93%) | 1,218 / 895 (81%) |
 | Swift | 95.9% | 166 / 166 (–)³ | 5,494 / 2,141 (83%) | 190 / 164 (100%) | 1,091 / 580 (62%) |
 | C | 100% | 89 / 77 (99%) | 864 / 791 (100%) | – | 253 / 130 (97%) |
 | C++ | 98.7% | 215 / 228 (93%) | 765 / 281 (29%)⁴ | 30 / 5 (100%) | 350 / 234 (88%) |
@@ -918,6 +918,44 @@ variant or an array of tuples (3), a `P: AsRef<Path>` parameter, a library
 type re-exported under the crate (`pub use ureq_proto::http;` then
 `crate::http::Uri`), `uri.parse().unwrap()` with no turbofish, a trait
 method on a generic result, and `().chain(…)` on the unit type (2).
+Engine 0.5.40 takes those on. A class's type parameter is bound by what
+its constructor is passed (`fn wrap(stream: S) -> Self`, called as
+`ErrorCapture::wrap(TransportAdapter::new())`: `get_mut() -> &mut S` gives
+a `TransportAdapter`) and by the type arguments written inside a library
+generic (`TlsStream<ErrorCapture<TransportAdapter>>`, `Def::inner_targs`;
+`walk_bound` walks calls under those bindings). A tuple's default gives its
+parts (`….unwrap_or((Timeout::Global, Instant::NotHappening))`), so does a
+loop over an array of tuples (`for (ops, n) in [(&state.reads, 1), …]`),
+and a tuple part written `Arc<Mutex<State>>` is `State` (its `type` field
+was taken for it, `Arc`). `Self::Out` is the `type Out = …;` of the
+method's own `impl` block (a type with several, one per `impl Handler<X>`,
+takes the nearest before the method); an associated type is no
+module-level name any more, so a bare `Result` in actix-realworld is the
+crate's alias, not `CreateArticleOuter::Result` (11 references move), and a
+free alias is still not followed. `?` opening a `Result<Option<T>, E>` lets
+the `.unwrap()` after it through. Rust's unit value is a receiver of its
+own (`().chain(next)`, `refs::UNIT`): the trait the project implements for
+`()` that has the name. A closure passed to a call is handed what the
+callee's `Fn` writes (`handler: impl Fn(Uri, Request<()>)`, `F: Fn(Req)`,
+`ParamFact::fn_args`, `FileFacts::closure_args`); a function trait type
+itself is its result (`current_time: Arc<dyn Fn() -> Instant>`,
+`current_time()`), and no longer the first type written in it (`Request`
+of `impl Fn(Uri, Request<()>)`). A tuple variant's fields are its parts
+(`BodyInner::ByteVec(v)`), each `match` arm binds its own names
+(`refs::arm_scopes`: `v` of two arms is two locals), and a lifetime names
+no type (`&'static str` was typed `static`). `pub use ureq_proto::http;` is
+followed (`crate::http::Uri` is the crate's: 4 imports now name it), a
+called local shadows a function of its name, `clone()` / `to_owned()` and
+an opening (`upgrade()`, `lock()`) on a type that has no such method keep
+the type, a wrapper's constructor holds what it is passed
+(`Arc::downgrade(&self.pool)`), and `let state = state.lock().unwrap();`
+opens the declaration it shadows. ureq: 41 calls more, 8 fewer (two
+`connect(…)` were the crate's `connect` for an `impl FnOnce` parameter of
+that name, three guesses by name now see a library's receiver, and three
+are the same calls, `EXTRACTED` now). Rust's
+unmarked rows: 16 → 7; in all, 721 → 712. The 7 are library calls:
+closure parameters of library types (`req.headers()`, 5), a parameter
+typed by its own type parameter (`path.as_ref()`), a parameter of `&str`.
 Engine 0.5.35 (C function-pointer slots) reads a struct of function pointers
 as an interface and what is put in its slots as the implementations: an
 initializer of a variable, by name (`.async_read = redisAsyncRead`) or by
@@ -1378,7 +1416,7 @@ implicit members since 0.5.17: 39 whose place gives no type are rows now
 closure parameters and variables of express's tests. What is left at file
 level there is `app.use` and `app.set` (842 rows of express), names too
 short and too common to guess by. Engine 0.5.19 takes 123 more off (6,362;
-C# 349 from 470; 6,360 with 0.5.20, 6,348 with 0.5.21, 6,285 with 0.5.22, 6,237 with 0.5.25, 6,206 with 0.5.27, 6,166 with 0.5.28, 6,156 with 0.5.30, 6,140 with 0.5.31, 6,132 with 0.5.32, 6,126 with 0.5.33, 6,093 with 0.5.34, 6,047 with 0.5.36, 6,046 with 0.5.37, 6,017 with 0.5.38). Most of what C# has left is not the project's: `Assert.
+C# 349 from 470; 6,360 with 0.5.20, 6,348 with 0.5.21, 6,285 with 0.5.22, 6,237 with 0.5.25, 6,206 with 0.5.27, 6,166 with 0.5.28, 6,156 with 0.5.30, 6,140 with 0.5.31, 6,132 with 0.5.32, 6,126 with 0.5.33, 6,093 with 0.5.34, 6,047 with 0.5.36, 6,046 with 0.5.37, 6,017 with 0.5.38, 6,005 with 0.5.40). Most of what C# has left is not the project's: `Assert.
 NotNull` beside its own `Ensure.NotNull` (77), `WireMockServer.Start` (23).
 
 By then most rows were of that kind: a library's name the project happens

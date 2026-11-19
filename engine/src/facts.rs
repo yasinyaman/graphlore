@@ -221,6 +221,10 @@ pub struct Def {
     /// (`Call<List<Contributor>>`: `Contributor`).
     #[serde(default)]
     pub targ_elems: Vec<Option<Vec<String>>>,
+    /// For each of `targs`, the type arguments it is written with in turn
+    /// (`TlsStream<ErrorCapture<TransportAdapter>>`: `[[["TransportAdapter"]]]`).
+    #[serde(default)]
+    pub inner_targs: Vec<Vec<Vec<String>>>,
     /// A class's bases written with type arguments (`class UserRepo :
     /// Repo<User>`: `(["Repo"], [["User"]])`).
     #[serde(default)]
@@ -520,6 +524,11 @@ pub struct ParamFact {
     /// (`IRequest<TResponse>`); empty where the grammar has no `type` field.
     #[serde(default)]
     pub written: String,
+    /// Rust: what a function it is passed takes, in order, when its type is
+    /// one (`impl Fn(Uri, Request<()>)`, `&dyn Fn(A)`, or a type parameter
+    /// bound `F: Fn(A)`): the types a closure written for it is handed.
+    #[serde(default)]
+    pub fn_args: Vec<Vec<String>>,
 }
 
 /// What an argument of a call is.
@@ -595,6 +604,11 @@ pub struct FileFacts {
     pub exports: Vec<(String, String)>,
     pub refs: Vec<RefFact>,
     pub locals: Vec<Local>,
+    /// Rust closures passed to a call: the closure's first byte (its
+    /// parameters are `name@byte`), the call's path, the argument's place and
+    /// the closure's parameters in order (`_` keeps its place).
+    #[serde(default)]
+    pub closure_args: Vec<(usize, Vec<String>, u8, Vec<String>)>,
     /// Names a type answers to without a definition of that name: Ruby
     /// `attr_accessor :status`, `Struct.new(:headers)`, `def_delegators`.
     #[serde(default)]
@@ -659,6 +673,7 @@ impl FileFacts {
             exports: Vec::new(),
             refs: Vec::new(),
             locals: Vec::new(),
+            closure_args: Vec::new(),
             attrs: Vec::new(),
             spec_includes: Vec::new(),
             slots: Vec::new(),

@@ -79,6 +79,9 @@ const DECORATOR_KINDS: &[&str] =
     &["decorator", "marker_annotation", "annotation", "attribute", "attribute_item"];
 
 pub const UNKNOWN: &str = "()";
+/// Rust's unit value `()` as a receiver (`().chain(next)`): what the traits
+/// the project implements for `()` answer, never an unnamed receiver.
+pub const UNIT: &str = "(unit)";
 
 /// The dotted path a node names, as far as the walk can tell.
 /// Whether a plain name is the language's word for the object a method is
@@ -111,6 +114,9 @@ pub fn path_of(n: Node, src: &[u8]) -> Option<Vec<String>> {
     let k = n.kind();
     if SELF_KINDS.contains(&k) {
         return Some(vec![if k == "crate" { "crate".into() } else { "self".into() }]);
+    }
+    if k == "unit_expression" {
+        return Some(vec![UNIT.into()]);
     }
     if SUPER_KINDS.contains(&k) {
         return Some(vec!["super".into()]);
@@ -348,6 +354,11 @@ fn types_in(
     let mut stack = vec![(n, context)];
     while let Some((node, ctx)) = stack.pop() {
         let k = node.kind();
+        // Rust `&'static str`: a lifetime names no type (its `identifier`
+        // child is `static`)
+        if k == "lifetime" {
+            continue;
+        }
         if matches!(k, "generic_type" | "generic_name" | "parameterized_type" | "template_type")
             || (k == "user_type" && kids(node).iter().any(|c| c.kind() == "type_arguments"))
         {
@@ -673,6 +684,12 @@ fn first_type(n: Node, src: &[u8]) -> Option<Vec<String>> {
         || (n.child_count() == 0 && text(n, src) == "var")
     {
         return None; // `var`, `auto`: the type is the value's
+    }
+    // Rust `impl Fn(Uri, Request<()>) -> R`, `&dyn FnMut(A)`: a function,
+    // whose argument types are none of its own; calling it gives its result
+    // (`current_time: Arc<dyn Fn() -> Instant>`, `current_time()`)
+    if let Some(f) = fn_trait_type(n) {
+        return f.child_by_field_name("return_type").and_then(|r| first_type(r, src));
     }
     let mut v = Vec::new();
     types_in(n, src, "", &mut v);
@@ -1653,10 +1670,86 @@ fn param_list(n: Node, src: &[u8]) -> Vec<crate::facts::ParamFact> {
         })
     });
     // Swift writes the parameters as the declaration's own children
-    match list {
+    let mut out = match list {
         Some(l) => params_in(l, false, src),
         None => params_in(n, true, src),
+    };
+    // Rust `fn own<F: Fn(Req) -> u8>(handler: F)`: what the bound takes
+    if n.kind() == "function_item" || n.kind() == "function_signature_item" {
+        let bounds = fn_bounds(n, src);
+        for p in out.iter_mut().filter(|p| p.fn_args.is_empty() && p.ty.len() == 1) {
+            if let Some((_, args)) = bounds.iter().find(|(name, _)| *name == p.ty[0]) {
+                p.fn_args = args.clone();
+            }
+        }
     }
+    out
+}
+
+/// Rust: the function trait a type position is itself (`Fn(A) -> R`),
+/// through references, `impl` / `dyn` and added bounds; not one inside a
+/// generic (`Vec<Box<dyn Fn()>>`).
+fn fn_trait_type(n: Node) -> Option<Node> {
+    let mut cur = n;
+    for _ in 0..6 {
+        cur = match cur.kind() {
+            "function_type" => return cur.child_by_field_name("trait").map(|_| cur),
+            "reference_type" | "pointer_type" => cur.child_by_field_name("type")?,
+            "abstract_type" | "dynamic_type" => {
+                cur.child_by_field_name("trait").or_else(|| cur.named_child(0))?
+            }
+            "bounded_type" => cur.named_child(0)?,
+            _ => return None,
+        };
+    }
+    None
+}
+
+/// Rust: the argument types of the `Fn` / `FnMut` / `FnOnce` a type position
+/// writes (`impl Fn(A, B) -> R`, `&dyn Fn(A)`, `Box<dyn FnMut(A)>`).
+fn fn_args_of(t: Node, src: &[u8]) -> Option<Vec<Vec<String>>> {
+    let mut stack = vec![(t, 0)];
+    while let Some((n, depth)) = stack.pop() {
+        if n.kind() == "function_type" {
+            let named = n.child_by_field_name("trait").map(|x| text(x, src));
+            if !named.as_deref().is_some_and(|x| matches!(x, "Fn" | "FnMut" | "FnOnce")) {
+                return None;
+            }
+            let ps = n.child_by_field_name("parameters")?;
+            return Some(
+                kids(ps)
+                    .into_iter()
+                    .filter(|c| !is_comment(c) && c.is_named())
+                    .map(|c| first_type(c, src).unwrap_or_default())
+                    .collect(),
+            );
+        }
+        if depth < 5 {
+            stack.extend(kids(n).into_iter().map(|c| (c, depth + 1)));
+        }
+    }
+    None
+}
+
+/// Rust: a function's type parameters bound by a function trait, with what
+/// it takes (`<F: Fn(Req)>`, `where F: FnMut(A, B)`).
+fn fn_bounds(n: Node, src: &[u8]) -> Vec<(String, Vec<Vec<String>>)> {
+    let mut out = Vec::new();
+    let mut holders: Vec<Node> = Vec::new();
+    if let Some(tp) = n.child_by_field_name("type_parameters") {
+        holders.extend(kids(tp));
+    }
+    if let Some(w) = kids(n).into_iter().find(|c| c.kind() == "where_clause") {
+        holders.extend(kids(w));
+    }
+    for h in holders {
+        let name = h.child_by_field_name("left").or_else(|| h.child_by_field_name("name"));
+        let (Some(name), Some(b)) = (name, h.child_by_field_name("bounds")) else { continue };
+        if let Some(args) = fn_args_of(b, src) {
+            out.push((text(name, src), args));
+        }
+    }
+    out
 }
 
 /// The parameters written in `holder`; `only_parameters` when it holds other
@@ -1750,6 +1843,10 @@ fn params_in(holder: Node, only_parameters: bool, src: &[u8]) -> Vec<crate::fact
                 .child_by_field_name("type")
                 .map(|ty| text(ty, src).split_whitespace().collect())
                 .unwrap_or_default(),
+            fn_args: c
+                .child_by_field_name("type")
+                .and_then(|t| fn_args_of(t, src))
+                .unwrap_or_default(),
         });
     }
     out
@@ -1765,6 +1862,21 @@ fn is_self_member(n: Node, src: &[u8]) -> Option<String> {
         }
     }
     None
+}
+
+/// Rust: the names each arm of a `match` binds, as a scope of the arm
+/// (`BodyInner::ByteVec(v)`: `v` is the variant's field there only).
+fn arm_scopes(n: Node, src: &[u8]) -> Vec<ClosureScope> {
+    let value = n.child_by_field_name("value").and_then(|v| held_path(v, src));
+    let arms = n.child_by_field_name("body").map(kids).unwrap_or_default();
+    arms.into_iter()
+        .filter(|a| a.kind() == "match_arm")
+        .filter_map(|arm| {
+            let p = arm.child_by_field_name("pattern").and_then(|p| kids(p).into_iter().next())?;
+            let binds = held_by_pattern(p, value.as_deref(), src);
+            (!binds.is_empty()).then(|| (arm.start_byte(), arm.end_byte(), binds))
+        })
+        .collect()
 }
 
 /// Typed names a node declares: `(name, type path, declared, field)`.
@@ -1846,7 +1958,13 @@ fn rename_closure_heads(
         });
         if let Some(i) = found {
             let sigil = if head.starts_with('$') { "$" } else { "" };
-            l.path[0] = format!("{sigil}{bare}@{}", closures[i].0);
+            let renamed = format!("{sigil}{bare}@{}", closures[i].0);
+            // (a scope's own name keeps the outer one in its value: `Some(pool)
+            // => …` of `match pool.upgrade()`)
+            if l.name == renamed {
+                continue;
+            }
+            l.path[0] = renamed;
             used[i] = true;
         }
     }
@@ -1999,6 +2117,8 @@ fn bound_by_pattern(n: Node, src: &[u8]) -> Vec<(String, Vec<String>, bool)> {
                 out.extend(held_by_pattern(p, value.as_deref(), src));
             }
         }
+        // (Rust: each arm is a scope of its own, `arm_scopes`)
+        "match_expression" if crate::parse::current() == Some(crate::lang::Lang::Rust) => {}
         "match_expression" => {
             let value = n.child_by_field_name("value").and_then(|v| held_path(v, src));
             let arms = n.child_by_field_name("body").map(kids).unwrap_or_default();
@@ -2544,6 +2664,25 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                     facts.defs[di].params = u8::try_from(facts.defs[di].plist.len()).ok();
                 }
             }
+            // Rust `ByteVec(io::Cursor<Vec<u8>>)`: a tuple variant's numbered
+            // fields, as a tuple struct's (`BodyInner::ByteVec(v)` binds `v`
+            // to the first)
+            if facts.defs[di].kind == crate::facts::DefKind::EnumMember {
+                if let Some(list) = n
+                    .child_by_field_name("body")
+                    .filter(|b| b.kind() == "ordered_field_declaration_list")
+                {
+                    let types: Vec<Node> = kids(list)
+                        .into_iter()
+                        .filter(|c| !is_comment(c) && !c.kind().contains("visibility"))
+                        .filter(|c| c.kind() != "attribute_item")
+                        .collect();
+                    facts.defs[di].rets =
+                        types.iter().map(|t| first_type(*t, src).unwrap_or_default()).collect();
+                    facts.defs[di].part_sealed =
+                        types.iter().map(|t| sealed_type(*t, src)).collect();
+                }
+            }
             if facts.defs[di].kind.is_callable() {
                 facts.defs[di].lambda_receiver = lambda_receiver(n, src);
                 facts.defs[di].type_params = type_params(n, src);
@@ -2789,6 +2928,11 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                 }
             }
         }
+        // Rust `match inner { A::X(v) => …, A::Y(v) => … }`: each arm binds
+        // its own `v`, a name of that arm only
+        if n.kind() == "match_expression" && facts.lang == Some(crate::lang::Lang::Rust) {
+            closures.extend(arm_scopes(n, src));
+        }
         if !by_node.contains_key(&n.id()) {
             // the parameters of a closure, a block or a handler that is no
             // definition of its own: names of its body only
@@ -2838,6 +2982,8 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                     }
                 }
             }
+            // (in order, `_` in its place: which one is which is by position)
+            let all_params: Vec<String> = params.iter().map(|(name, ..)| name.clone()).collect();
             params.retain(|(name, ..)| name != "_");
             if !params.is_empty() {
                 // a parameter list stands for the block around it
@@ -2859,6 +3005,28 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                     {
                         let names = params.iter().map(|(name, ..)| name.clone()).collect();
                         facts.callbacks.push((body.start_byte(), callee, names));
+                    }
+                }
+                // Rust: a closure passed to a call, and its place among the
+                // arguments (`TestHandler::new("/", |uri, req| …)`)
+                if n.kind() == "closure_parameters" && anc.len() >= 3 {
+                    let (args, call) = (anc[anc.len() - 2], anc[anc.len() - 3]);
+                    if args.kind() == "arguments" && call.kind() == "call_expression" {
+                        let place = kids(args)
+                            .into_iter()
+                            .filter(|c| !is_comment(c) && c.is_named())
+                            .position(|c| c.id() == body.id());
+                        let callee =
+                            call.child_by_field_name("function").and_then(|c| path_of(c, src));
+                        if let (Some(place), Some(callee)) = (place, callee) {
+                            let names = all_params.clone();
+                            facts.closure_args.push((
+                                body.start_byte(),
+                                callee,
+                                place as u8,
+                                names,
+                            ));
+                        }
                     }
                 }
                 closures.push((body.start_byte(), body.end_byte(), params));
@@ -2893,7 +3061,31 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
             // `let (a, b) = f()`: each name is a part of what `f` returns
             let parts = destructured(n, src);
             if let Some((names, value)) = &parts {
-                if let Some(of) = value_type(*value, src) {
+                // Rust `let (_, at) = xs.min_by(…).unwrap_or((Timeout::Global,
+                // Instant::NotHappening))`: each name is what the default gives
+                if let Some(given) = default_tuple(*value, names.len(), src) {
+                    for (i, name) in names.iter().enumerate().filter(|(_, n)| *n != "_") {
+                        let Some(path) = given[i].clone() else { continue };
+                        locals.push(Local {
+                            name: name.clone(),
+                            path,
+                            declared: false,
+                            field: false,
+                            assigned: plain_assignment,
+                            given: None,
+                            elem: None,
+                            value_args: Vec::new(),
+                            sealed: false,
+                            keyed: false,
+                            targs: Vec::new(),
+                            targ_elems: Vec::new(),
+                            key: None,
+                            written_head: None,
+                            from_def: None,
+                            byte: n.start_byte(),
+                        });
+                    }
+                } else if let Some(of) = value_type(*value, src) {
                     for (i, name) in names.iter().enumerate().filter(|(_, n)| *n != "_") {
                         let mut path = of.clone();
                         path.push(tuple_part(i));
@@ -3425,6 +3617,53 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
     let bytes: Vec<usize> = facts.slots.iter().map(|s| s.byte).collect();
     for (s, d) in facts.slots.iter_mut().zip(homes(&facts.defs, &bytes)) {
         s.from_def = d;
+    }
+    // Rust `let state = state.lock().unwrap();`: the declaration kept below
+    // is what the shadow opened, no longer a closed wrapper
+    if facts.lang == Some(crate::lang::Lang::Rust) {
+        let opened: Vec<(Option<usize>, String, Vec<String>)> = locals
+            .iter()
+            .filter(|l| {
+                !l.declared
+                    && l.path.len() > 1
+                    && l.path[0] == l.name
+                    && l.path[1..].iter().all(|s| {
+                        s == "()"
+                            || s == OPENED
+                            || matches!(
+                                s.as_str(),
+                                "lock"
+                                    | "try_lock"
+                                    | "read"
+                                    | "write"
+                                    | "borrow"
+                                    | "borrow_mut"
+                                    | "unwrap"
+                                    | "expect"
+                                    | "as_ref"
+                                    | "as_mut"
+                                    | "clone"
+                            )
+                    })
+            })
+            .map(|l| (l.from_def, l.name.clone(), l.path[1..].to_vec()))
+            .collect();
+        for l in locals.iter_mut() {
+            let Some((_, _, steps)) =
+                opened.iter().find(|(d, n, _)| *d == l.from_def && *n == l.name)
+            else {
+                continue;
+            };
+            if l.declared {
+                l.sealed = false;
+            } else if l.path.first().is_some_and(|h| *h != l.name)
+                && l.path.last().is_some_and(|s| s.starts_with('['))
+            {
+                // (`let state = setup().1; let state = state.lock().unwrap();`:
+                // the value with what opened it)
+                l.path.extend(steps.iter().cloned());
+            }
+        }
     }
     // one per (definition, name, field): a declared type over a guessed one
     locals.retain(|l| !matches!(l.path.as_slice(), [t] if t == "var" || t == "auto" || t == "let"));
@@ -4282,6 +4521,40 @@ fn base_targs(class: Node, src: &[u8]) -> Vec<(Vec<String>, Vec<Vec<String>>)> {
     out
 }
 
+/// For each type argument a type position writes, its own type arguments
+/// (see `targs_of`).
+fn inner_targs_of(t: Node, src: &[u8]) -> Vec<Vec<Vec<String>>> {
+    match generic_args(t, src) {
+        Some((name, given)) if !is_wrapper(&name, t) => {
+            given.into_iter().map(|a| targs_of(a, src)).collect()
+        }
+        Some(_) => wrapper_first_arg(t).map(|a| inner_targs_of(a, src)).unwrap_or_default(),
+        _ => Vec::new(),
+    }
+}
+
+/// `inner_targs_of` for what a declaration declares (see `written_targs`).
+fn written_inner_targs(node: Node, src: &[u8]) -> Vec<Vec<Vec<String>>> {
+    let mut places = vec![node];
+    places.extend(
+        kids(node)
+            .into_iter()
+            .filter(|c| c.kind().ends_with("declaration") || c.kind().ends_with("declarator")),
+    );
+    places
+        .into_iter()
+        .map(|n| match n.child_by_field_name("type") {
+            Some(t) => inner_targs_of(t, src),
+            None => kids(n)
+                .into_iter()
+                .find(|c| matches!(c.kind(), "user_type" | "type_annotation" | "nullable_type"))
+                .map(|t| inner_targs_of(t, src))
+                .unwrap_or_default(),
+        })
+        .find(|a| a.iter().any(|x| !x.is_empty()))
+        .unwrap_or_default()
+}
+
 /// The type arguments a declaration writes on what it declares.
 fn written_targs(node: Node, src: &[u8]) -> Vec<Vec<String>> {
     let mut places = vec![node];
@@ -4338,7 +4611,13 @@ fn tuple_parts(t: Node, src: &[u8]) -> Vec<Vec<String>> {
                 .into_iter()
                 .filter(|c| !is_comment(c))
                 .map(|c| {
-                    let ty = c.child_by_field_name("type").unwrap_or(c);
+                    // (a Swift tuple item's `type`; a generic type's `type`
+                    // field is its bare name: `Arc` of `Arc<Mutex<State>>`)
+                    let ty = if c.kind() == "generic_type" {
+                        c
+                    } else {
+                        c.child_by_field_name("type").unwrap_or(c)
+                    };
                     first_type(ty, src).unwrap_or_default()
                 })
                 .collect();
@@ -4467,6 +4746,44 @@ fn destructured<'t>(n: Node<'t>, src: &[u8]) -> Option<(Vec<String>, Node<'t>)> 
         _ => return None,
     };
     Some((names_of(pattern)?, value))
+}
+
+/// Rust: the parts of the tuple a value falls back to (`….unwrap_or((a, b))`,
+/// `….unwrap_or_else(|| (a, b))`), as value paths, when it has `n` of them.
+fn default_tuple(value: Node, n: usize, src: &[u8]) -> Option<Vec<Option<Vec<String>>>> {
+    if crate::parse::current() != Some(crate::lang::Lang::Rust) || value.kind() != "call_expression"
+    {
+        return None;
+    }
+    let func = value.child_by_field_name("function")?;
+    let name = func.child_by_field_name("field").map(|x| text(x, src))?;
+    let arg = kids(value.child_by_field_name("arguments")?)
+        .into_iter()
+        .find(|c| !is_comment(c) && c.is_named())?;
+    let tuple = match name.as_str() {
+        "unwrap_or" => arg,
+        "unwrap_or_else" if arg.kind() == "closure_expression" => {
+            arg.child_by_field_name("body")?
+        }
+        _ => return None,
+    };
+    tuple_values(tuple, n, src)
+}
+
+/// The value paths of the parts of a tuple expression with `n` parts.
+fn tuple_values(tuple: Node, n: usize, src: &[u8]) -> Option<Vec<Option<Vec<String>>>> {
+    if tuple.kind() != "tuple_expression" {
+        return None;
+    }
+    let parts: Vec<Node> =
+        kids(tuple).into_iter().filter(|c| !is_comment(c) && c.is_named()).collect();
+    (parts.len() == n).then(|| {
+        parts
+            .into_iter()
+            .map(|p| value_type(p, src).or_else(|| path_of(p, src)))
+            .map(|p| p.filter(|p| p.first().is_some_and(|h| h != UNKNOWN)))
+            .collect()
+    })
 }
 
 /// The type arguments of the type a callable declares it returns.
@@ -5171,6 +5488,27 @@ fn loop_vars(n: Node, src: &[u8]) -> Option<Vec<(String, Vec<String>)>> {
         path.push(ELEMENT.into());
         return Some(vec![(name, path)]);
     }
+    // Rust `for (ops, n) in [(&state.reads, 1), (&state.writes, 2)]`: each
+    // name is what the first tuple of the array has in its place
+    if k == "for_expression"
+        && var.kind() == "tuple_pattern"
+        && iterable.kind() == "array_expression"
+    {
+        let names: Vec<String> = kids(var)
+            .into_iter()
+            .filter(|c| !is_comment(c) && c.is_named())
+            .map(|c| bound_name(c, src).unwrap_or_else(|| "_".to_string()))
+            .collect();
+        let first = kids(iterable).into_iter().find(|c| !is_comment(c) && c.is_named())?;
+        let given = tuple_values(first, names.len(), src)?;
+        return Some(
+            names
+                .into_iter()
+                .zip(given)
+                .filter_map(|(name, p)| p.filter(|_| name != "_").map(|p| (name, p)))
+                .collect(),
+        );
+    }
     if let Some((key, value)) = pair_names(var, src) {
         // `for ((a, b) in xs.zip(ys))`, Python `zip(xs, ys)`: one of each
         if let Some((left, right)) = zipped(iterable, src) {
@@ -5533,6 +5871,7 @@ fn add_extras(
             scope_lines,
             targs: written_targs(*node, src),
             targ_elems: written_targ_elems(*node, src),
+            inner_targs: written_inner_targs(*node, src),
             base_targs: Vec::new(),
             rets: Vec::new(),
             part_sealed: Vec::new(),

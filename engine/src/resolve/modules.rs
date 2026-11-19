@@ -705,12 +705,38 @@ fn rust_path(p: &Project, f: usize, segs: &[String]) -> ModRes {
         }
     };
     for s in rest {
-        match p.member(&t, s, 2) {
+        match p.member(&t, s, 2).or_else(|| pub_use_member(p, &t, s)) {
             Some(x) => t = x,
             None => return ModRes::Missing,
         }
     }
     ModRes::Target(t)
+}
+
+/// Rust: a name a module passes on with `pub use` (`pub use ureq_proto::http;`
+/// in `lib.rs`, so `crate::http::Uri` is the crate's), read from its import
+/// facts: the scopes are built in one pass, before the module's own exists.
+fn pub_use_member(p: &Project, t: &Target, name: &str) -> Option<Target> {
+    let Target::Module(files) = t else { return None };
+    for &g in files {
+        for imp in p.files[g].imports.iter().filter(|i| i.public) {
+            let Some((orig, _)) = imp.names.iter().find(|(o, a)| a.as_deref().unwrap_or(o) == name)
+            else {
+                continue;
+            };
+            match resolve_import(p, Family::Rust, g, imp) {
+                ModRes::Ext(label) => {
+                    let e = p.ext(&label, Family::Rust.ecosystem());
+                    return Some(Target::Ext(e, vec![orig.clone()]));
+                }
+                // (a module of the project: what it names, without going
+                // round again through another `pub use`)
+                ModRes::Target(m) => return p.member(&m, orig, 1),
+                ModRes::Missing => {}
+            }
+        }
+    }
+    None
 }
 
 fn walk(p: &Project, mut t: Target, segs: &[String]) -> ModRes {

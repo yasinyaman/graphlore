@@ -242,6 +242,10 @@ impl LanguageModule for Rust {
     fn heritage_owner(&self, n: Node, src: &[u8]) -> Option<String> {
         let t = n.child_by_field_name("type")?;
         let base = t.child_by_field_name("type").unwrap_or(t);
+        // (`impl Connector for ()`: the unit type, `refs::UNIT` to its callers)
+        if base.kind() == "unit_type" {
+            return Some("()".to_string());
+        }
         path_of(base, src).and_then(|p| p.last().cloned())
     }
 

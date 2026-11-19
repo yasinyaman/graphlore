@@ -1597,7 +1597,10 @@ impl<'a> Project<'a> {
                 let bare = (fam == Some(Family::C) && d.kind.is_class_like())
                     .then(|| specialized(&d.name))
                     .flatten();
-                if is_top(&f.defs, di) && !(d.owner.is_some() && d.kind.is_callable()) {
+                // (nor a Rust associated type: `type Out = Wire;` in an `impl`)
+                let owned = d.kind.is_callable()
+                    || (fam == Some(Family::Rust) && d.kind == DefKind::TypeAlias);
+                if is_top(&f.defs, di) && !(d.owner.is_some() && owned) {
                     top.entry(d.name.clone()).or_default().push(di);
                     if let Some(b) = bare {
                         top.entry(b.to_string()).or_default().push(di);
@@ -1634,7 +1637,9 @@ impl<'a> Project<'a> {
                     self.fqn.entry(fq).or_default().push((fi, di));
                 }
                 if let Some(owner) = &d.owner {
-                    if d.kind.is_callable() {
+                    // (and a Rust associated type: `type Out = Wire;` in an `impl`)
+                    if d.kind.is_callable() || (fam == Family::Rust && d.kind == DefKind::TypeAlias)
+                    {
                         let bare = owner.rsplit(['.', ':']).next().unwrap_or(owner).to_string();
                         self.owner_methods.entry((fam, bare)).or_default().push((fi, di));
                     }
@@ -1721,6 +1726,15 @@ impl<'a> Project<'a> {
                 // `typedef struct conn conn_t;`: the type the alias names, and of
                 // a template's specializations the one its arguments fit
                 let c_alias = k == DefKind::TypeAlias && self.family[r.0] == Some(Family::C);
+                // Rust `type Out = Wire;` in an `impl` or a trait: the
+                // associated type is what it names (`Self::Out`); an alias of
+                // its own module is followed by nothing here
+                let rust_assoc = k == DefKind::TypeAlias
+                    && self.family[r.0] == Some(Family::Rust)
+                    && (def.owner.is_some()
+                        || def
+                            .parent
+                            .is_some_and(|p| self.files[r.0].defs[p].kind.is_class_like()));
                 // `typedef struct reader { … } reader;`: the struct written
                 // inside the alias, which holds the members
                 let inside = c_alias
@@ -1735,7 +1749,7 @@ impl<'a> Project<'a> {
                     })
                     .and_then(|v| (v.len() == 1).then(|| v[0]));
                 let aliased = inside.or_else(|| {
-                    c_alias
+                    (c_alias || rust_assoc)
                         .then_some(def.declared_type.as_ref())
                         .flatten()
                         .and_then(|ty| self.type_of_path(r.0, def.parent, ty, true))
@@ -2301,8 +2315,16 @@ impl<'a> Project<'a> {
         }
         // `-> Option<Foo>`, `Promise<Foo>`: what the wrapper holds (whether
         // it has to be opened first is the walk's `sealed`)
+        // (`Self::Out` is seen from the method: its own type's member)
+        let scope_for = |p: &[String]| {
+            if p.len() > 1 && p[0] == "self" {
+                Some(r.1)
+            } else {
+                self.def(r).parent
+            }
+        };
         if let Some(inner) = self.def(r).wraps.as_ref().filter(|_| self.def(r).kind.is_callable()) {
-            let t = self.type_of_path(r.0, self.def(r).parent, inner, true)?;
+            let t = self.type_of_path(r.0, scope_for(inner), inner, true)?;
             return self.def(t).kind.is_class_like().then_some((t, true));
         }
         let declared = self.files[r.0].refs.iter().find(|x| {
@@ -2329,7 +2351,7 @@ impl<'a> Project<'a> {
             // `-> Self`, `: this`: the method's own type (builders)
             return self.class_of(r.0, Some(r.1)).map(|t| (t, true));
         }
-        let t = self.type_of_path(r.0, self.def(r).parent, &path, true)?;
+        let t = self.type_of_path(r.0, scope_for(&path), &path, true)?;
         self.def(t).kind.is_class_like().then_some((t, true))
     }
 
@@ -2373,6 +2395,57 @@ impl<'a> Project<'a> {
         None
     }
 
+    /// Rust: of several associated types `name` of type `c` (one per `impl`
+    /// block), the one written in file `f` nearest before definition `d`, else
+    /// nearest after it; `None` when there are not several.
+    fn assoc_type_near(&self, c: DefRef, name: &str, f: usize, d: Option<usize>) -> Option<DefRef> {
+        let at = self.files[f].defs[d?].start_byte;
+        let cands: Vec<DefRef> = self
+            .members(c, name)
+            .into_iter()
+            .filter(|m| self.def(*m).kind == DefKind::TypeAlias)
+            .collect();
+        if cands.len() < 2 {
+            return None;
+        }
+        let here = cands.iter().filter(|m| m.0 == f);
+        let before = here.clone().filter(|m| self.def(**m).start_byte <= at);
+        before
+            .max_by_key(|m| self.def(**m).start_byte)
+            .or_else(|| here.min_by_key(|m| self.def(**m).start_byte))
+            .copied()
+    }
+
+    /// Rust: the type a closure's parameter `name@byte` (of a closure written
+    /// in definition `x`) is handed, as the function the closure is passed
+    /// to writes it (`handler: impl Fn(Uri, Request<()>)`, `F: Fn(Req)`):
+    /// the path, the file and scope it is written in, and how sure the call is.
+    fn closure_param_written(
+        &self,
+        f: usize,
+        x: usize,
+        name: &str,
+    ) -> Option<(Vec<String>, usize, Option<usize>, Confidence)> {
+        if self.family[f] != Some(Family::Rust) {
+            return None;
+        }
+        let (param, byte) = name.split_once('@')?;
+        let byte: usize = byte.parse().ok()?;
+        let (_, callee, place, names) =
+            self.files[f].closure_args.iter().find(|(b, ..)| *b == byte)?;
+        let k = names.iter().position(|n| n == param)?;
+        let calling = self.calling.replace(true);
+        let found = self.resolve_path(f, Some(x), callee, true);
+        *self.calling.borrow_mut() = calling;
+        let Some((Target::Def(c), conf)) = found else { return None };
+        let def = self.def(c);
+        if !def.kind.is_callable() {
+            return None;
+        }
+        let ty = def.plist.get(usize::from(*place))?.fn_args.get(k)?;
+        (!ty.is_empty()).then(|| (ty.clone(), c.0, Some(c.1), conf))
+    }
+
     /// The type of local `li` of definition `x` (see `local_type`).
     fn local_type_of(
         &self,
@@ -2383,6 +2456,14 @@ impl<'a> Project<'a> {
     ) -> Option<(DefRef, Confidence)> {
         let l = &self.files[f].locals[li];
         if l.path.is_empty() {
+            // Rust: a closure's parameter is what the function it is passed
+            // to says its `Fn` takes
+            if let Some((ty, g, scope, conf)) = self.closure_param_written(f, x, name) {
+                return self
+                    .type_of_path(g, scope, &ty, true)
+                    .filter(|t| self.def(*t).kind.is_class_like())
+                    .map(|t| (t, conf));
+            }
             // no type written, nothing typeable assigned: the one
             // type that answers everything asked of it here
             return self.structural_type(f, x, name).map(|t| (t, Confidence::Inferred));
@@ -2391,7 +2472,8 @@ impl<'a> Project<'a> {
             .type_of_path(f, Some(x), &l.path, l.declared)
             .or_else(|| self.given_result(f, x, l))
             .or_else(|| self.bound_result(f, x, l))
-            .or_else(|| self.accessed(f, x, l));
+            .or_else(|| self.accessed(f, x, l))
+            .or_else(|| self.wrapped_arg(f, x, l));
         let Some(t) = t else {
             // a value the walk cannot type, unless it is of a
             // library's type: the same
@@ -2596,6 +2678,27 @@ impl<'a> Project<'a> {
             }
         }
         None
+    }
+
+    /// Rust: what a wrapper's own constructor is passed is what the local
+    /// holds (`Arc::downgrade(&self.pool)`, `Arc::new(x)`, `Rc::clone(&x)`;
+    /// the wrapper itself answers for what it holds).
+    fn wrapped_arg(&self, f: usize, x: usize, l: &crate::facts::Local) -> Option<DefRef> {
+        if self.family[f] != Some(Family::Rust) {
+            return None;
+        }
+        let [w, m] = l.path.as_slice() else { return None };
+        if !matches!(
+            w.as_str(),
+            "Arc" | "Rc" | "Box" | "Weak" | "Cell" | "RefCell" | "Mutex" | "RwLock"
+        ) || !matches!(m.as_str(), "new" | "downgrade" | "clone" | "from")
+            || self.resolve_name(f, Some(x), w).is_some_and(|t| matches!(t, Target::Def(_)))
+        {
+            return None;
+        }
+        let [a] = l.value_args.as_slice() else { return None };
+        let crate::facts::Arg::Path(q) = &a.kind else { return None };
+        self.value_type_of(f, Some(x), q).filter(|t| self.def(*t).kind.is_class_like())
     }
 
     /// Whether callable `c` declares that it returns a type parameter its
@@ -3080,6 +3183,17 @@ impl<'a> Project<'a> {
             if let Some(&li) = self.locals.get(&(f, x, name.to_string())) {
                 let l = &self.files[f].locals[li];
                 let head = l.path.first().map(String::as_str).unwrap_or("");
+                // Rust: a closure's parameter the function it is passed to
+                // hands a library's type (`|uri, req|` for `Fn(Uri, Request<()>)`)
+                if head.is_empty() {
+                    if let Some((ty, g, scope, _)) = self.closure_param_written(f, x, name) {
+                        return match self.resolve_path(g, scope, &ty, true) {
+                            Some((Target::Ext(..), _)) => true,
+                            Some(_) => false,
+                            None => ty.len() >= 2 && self.rust_crate_name(&ty[0]),
+                        };
+                    }
+                }
                 if head.is_empty() || matches!(head, "self" | "super" | "()") {
                     return false;
                 }
@@ -3089,7 +3203,8 @@ impl<'a> Project<'a> {
                 // (`let res = crate::get(url).call().unwrap()`, `call` declared
                 // `-> Result<Response<Body>, Error>` with `Response` a library's)
                 let path = l.path.clone();
-                return self.library_result(f, Some(x), &path);
+                return self.library_result(f, Some(x), &path)
+                    || self.library_part(f, Some(x), &path);
             }
             cur = defs[x].parent;
         }
@@ -3218,7 +3333,7 @@ impl<'a> Project<'a> {
         f: usize,
         d: Option<usize>,
         path: &[String],
-    ) -> Option<(DefRef, usize)> {
+    ) -> Option<(DefRef, usize, Option<Binds>)> {
         let k = path.iter().position(|s| LIBRARY_ACCESSORS.contains(&s.as_str()))?;
         // (it resolves a path itself, which can come back here)
         let _guard = DepthGuard::enter(&LIBRARY_DEPTH, 2)?;
@@ -3236,7 +3351,7 @@ impl<'a> Project<'a> {
                 if let Some(&li) = self.locals.get(&(f, x, prefix[0].clone())) {
                     let l = &self.files[f].locals[li];
                     if l.declared {
-                        declared = Some((l.path.clone(), l.targs.clone(), f, Some(x)));
+                        declared = Some((l.path.clone(), l.targs.clone(), Vec::new(), f, Some(x)));
                     } else if !l.path.is_empty() && l.path[0] != prefix[0] {
                         // (`let res = crate::get(url).call().unwrap()`: its value)
                         prefix = l.path.clone();
@@ -3272,26 +3387,65 @@ impl<'a> Project<'a> {
             };
             let def = self.def(c);
             if def.kind.is_state() {
-                return def.declared_type.clone().map(|t| (t, def.targs.clone(), c.0, def.parent));
+                return def
+                    .declared_type
+                    .clone()
+                    .map(|t| (t, def.targs.clone(), def.inner_targs.clone(), c.0, def.parent));
             }
             if def.kind.is_callable() && end < prefix.len() {
-                return def.wraps.clone().map(|t| (t, def.targs.clone(), c.0, def.parent));
+                return def
+                    .wraps
+                    .clone()
+                    .map(|t| (t, def.targs.clone(), def.inner_targs.clone(), c.0, def.parent));
             }
             None
         });
-        let (ty, targs, g, scope) = declared?;
+        let (ty, targs, inner, g, scope) = declared?;
         // the type is a library's, and holds one type of the project
         if !matches!(self.resolve_path(g, scope, &ty, true), Some((Target::Ext(..), _))) {
             return None;
         }
-        let held: Vec<DefRef> = targs
+        let held: Vec<(usize, DefRef)> = targs
             .iter()
-            .filter_map(|a| self.type_of_path(g, scope, a, true))
-            .filter(|t| self.def(*t).kind.is_class_like())
+            .enumerate()
+            .filter_map(|(i, a)| self.type_of_path(g, scope, a, true).map(|t| (i, t)))
+            .filter(|(_, t)| self.def(*t).kind.is_class_like())
             .collect();
         match held.as_slice() {
-            [one] => Some((*one, k + 2)),
+            // (`TlsStream<ErrorCapture<TransportAdapter>>`: what the held
+            // type's own parameters stand for)
+            [(i, one)] => {
+                let binds =
+                    inner.get(*i).and_then(|args| self.binds_for(*one, args, &[], g, scope, None));
+                Some((*one, k + 2, binds))
+            }
             _ => None,
+        }
+    }
+
+    /// Rust: whether a value path ends at a numbered part of a project type
+    /// declared with a library's type (`BodyInner::ByteVec(v)`, the variant
+    /// `ByteVec(io::Cursor<Vec<u8>>)`; `self.0` of `struct D(&Response)`).
+    fn library_part(&self, f: usize, d: Option<usize>, path: &[String]) -> bool {
+        if self.family[f] != Some(Family::Rust) {
+            return false;
+        }
+        let Some((last, of)) = path.split_last() else { return false };
+        let Some(i) = crate::refs::tuple_index(last) else { return false };
+        if of.is_empty() {
+            return false;
+        }
+        let Some(_guard) = DepthGuard::enter(&LIBRARY_DEPTH, 2) else { return false };
+        let Some((Target::Def(c), _)) = self.resolve_path(f, d, of, true) else { return false };
+        let def = self.def(c);
+        if !(def.kind.is_class_like() || def.kind == DefKind::EnumMember) {
+            return false;
+        }
+        let Some(ty) = def.rets.get(i).filter(|t| !t.is_empty()) else { return false };
+        match self.resolve_path(c.0, def.parent, ty, true) {
+            Some((Target::Ext(..), _)) => true,
+            Some(_) => false,
+            None => ty.len() >= 2 && self.rust_crate_name(&ty[0]),
         }
     }
 
@@ -3345,8 +3499,13 @@ impl<'a> Project<'a> {
         while let Some(x) = cur {
             if let Some(&li) = self.locals.get(&(f, x, name.to_string())) {
                 let l = &self.files[f].locals[li];
+                // (Rust: a local and a function share one namespace, so a
+                // declared local called is the local, `current_time()` of a
+                // `current_time: Arc<dyn Fn() -> Instant>`)
+                let rust = self.family[f] == Some(Family::Rust);
                 return l.assigned
-                    || (called && (l.declared || l.path.first().is_some_and(|h| h == name)));
+                    || (called
+                        && ((l.declared && !rust) || l.path.first().is_some_and(|h| h == name)));
             }
             cur = defs[x].parent;
         }
@@ -4178,12 +4337,12 @@ impl<'a> Project<'a> {
             {
                 return None;
             }
-            if let Some((t, skip)) = self.library_accessor(f, d, path) {
+            if let Some((t, skip, binds)) = self.library_accessor(f, d, path) {
                 let rest = &path[skip..];
                 if rest.is_empty() {
                     return None;
                 }
-                return self.walk(Target::Def(t), rest, Confidence::Inferred);
+                return self.walk_bound(t, binds, rest, Confidence::Inferred);
             }
         }
         // `let p = setup(); p.0.go()`: a part of the tuple a local holds is
@@ -4276,6 +4435,16 @@ impl<'a> Project<'a> {
                     return self.walk(Target::Def(c), &rest[skip..], conf);
                 }
                 match self.class_of(f, d) {
+                    // Rust `Self::Result` where the type has one `type Result`
+                    // per `impl` (`impl Handler<A> for DbExecutor`, `impl
+                    // Handler<B> for …`): the one of this method's block, the
+                    // nearest before it in the file
+                    Some(c) if fam == Family::Rust && d.is_some() => {
+                        match self.assoc_type_near(c, &rest[0], f, d) {
+                            Some(a) => return self.walk(Target::Def(a), &rest[1..], conf),
+                            None => Target::Def(c),
+                        }
+                    }
                     Some(c) => Target::Def(c),
                     // JS `this` inside a function assigned to an object; a
                     // method beside this one in an `impl` for a type the
@@ -4306,6 +4475,32 @@ impl<'a> Project<'a> {
                 return self.walk(Target::Def(m), &rest[1..], conf);
             }
             "crate" if fam == Family::Rust => modules::crate_root(self, f)?,
+            // Rust `().chain(next)`: what a trait the project implements for
+            // the unit type gives, when only one of them has the name
+            crate::refs::UNIT if fam == Family::Rust => {
+                let name = rest.first()?;
+                let mut found: Vec<DefRef> = Vec::new();
+                for (g, file) in self.files.iter().enumerate() {
+                    if self.family[g] != Some(Family::Rust) {
+                        continue;
+                    }
+                    for r in &file.refs {
+                        if !matches!(r.kind, RefKind::Implements | RefKind::Base)
+                            || r.from_owner.as_deref() != Some("()")
+                        {
+                            continue;
+                        }
+                        let Some(tr) = self.type_of_path(g, None, &r.path, true) else { continue };
+                        if let Some(m) = self.class_member(tr, name, 4) {
+                            if !found.contains(&m) {
+                                found.push(m);
+                            }
+                        }
+                    }
+                }
+                let [m] = found.as_slice() else { return None };
+                return self.walk_bound(*m, None, &rest[1..], conf);
+            }
             "()" => {
                 // a receiver the walk could not name: a method by name alone
                 if rest.len() != 1 || bases {
@@ -4674,8 +4869,14 @@ impl<'a> Project<'a> {
                 }
                 let Target::Def(c) = t else { return None };
                 let def = self.def(c);
-                // Rust `self.0` on `struct Script(Arc<Mutex<State>>)`
-                if def.kind.is_class_like() {
+                // Rust `self.0` on `struct Script(Arc<Mutex<State>>)`, and
+                // what `BodyInner::Mine(h)` binds (a tuple variant's field)
+                if def.kind.is_class_like() || def.kind == DefKind::EnumMember {
+                    // (`self.0()` of a `struct CurrentTime(Arc<dyn Fn() ->
+                    // Instant>)`: a function called, which constructs nothing)
+                    if i + 1 == rest.len() && self.linking_call() && fam == Family::Rust {
+                        return None;
+                    }
                     let p = def.rets.get(part).filter(|p| !p.is_empty())?;
                     let ft = self
                         .type_of_path(c.0, def.parent, p, true)
@@ -4984,6 +5185,11 @@ impl<'a> Project<'a> {
                             );
                             t = Target::Def(r);
                             sealed = self.def(c).sealed && !opened_after(i + 1);
+                            // (`-> Result<Option<T>, E>` opened by `?`: what
+                            // it gave may be another, `?.unwrap()`)
+                            if self.def(c).sealed && opened_after(i + 1) {
+                                unwrapping = true;
+                            }
                             continue;
                         }
                         // `fun body(): T` on a `Response<Contact>`
@@ -5036,6 +5242,24 @@ impl<'a> Project<'a> {
                 }
             }
             let mut found = self.member(&t, seg, 3);
+            // Rust `x.clone()`, `x.to_owned()` on a type that defines no such
+            // method: the std trait's, which gives the same type; and a
+            // wrapper's opening (`pool.upgrade()`, `lock().unwrap()`) on what
+            // the wrapper was typed as (a value being typed only: as the call
+            // linked, it is the library's)
+            if found.is_none()
+                && fam == Family::Rust
+                && (matches!(seg.as_str(), "clone" | "to_owned")
+                    || UNWRAPPERS.contains(&seg.as_str()))
+                && !(i + 1 == rest.len() && self.linking_call())
+            {
+                if let Target::Def(c) = t {
+                    if self.def(c).kind.is_class_like() {
+                        skip = usize::from(rest.get(i + 1).is_some_and(|s| s == "()"));
+                        continue;
+                    }
+                }
+            }
             // Rust, C, C++, Java: fields and methods are named apart, and a
             // name with no call after it is the field (`self.input.unconsumed()`
             // beside `fn input(&self)`)
@@ -5305,6 +5529,7 @@ impl<'a> Project<'a> {
                 let def = self.def(c);
                 self.return_type(c).filter(|(r, _)| *r == ty).and_then(|(r, _)| {
                     self.binds_for(r, &def.targs, &def.targ_elems, c.0, def.parent, at_end.as_ref())
+                        .or_else(|| self.binds_from_args(c, r, l, f, x))
                 })
             }
             _ => None,
@@ -5313,6 +5538,56 @@ impl<'a> Project<'a> {
             self.value_binds.borrow_mut().insert((f, li), out.clone());
         }
         out
+    }
+
+    /// The bindings a constructor's arguments give its class's type
+    /// parameters (`fn wrap(stream: S) -> Self` in `ErrorCapture<S>`, called
+    /// as `ErrorCapture::wrap(TransportAdapter::new())`): a parameter written
+    /// as the class's own parameter takes the type of what is passed.
+    fn binds_from_args(
+        &self,
+        c: DefRef,
+        owner: DefRef,
+        l: &crate::facts::Local,
+        f: usize,
+        x: usize,
+    ) -> Option<Binds> {
+        let params = &self.def(owner).type_params;
+        if params.is_empty() || l.value_args.is_empty() {
+            return None;
+        }
+        let def = self.def(c);
+        let mut any = false;
+        let args = params
+            .iter()
+            .map(|tp| {
+                let passed = def
+                    .plist
+                    .iter()
+                    .zip(&l.value_args)
+                    .take_while(|(_, a)| a.label.is_none())
+                    .find(|(p, _)| p.ty.len() == 1 && p.ty[0] == *tp)
+                    .and_then(|(_, a)| match &a.kind {
+                        crate::facts::Arg::Path(q) => self.value_type_of(f, Some(x), q),
+                        _ => None,
+                    })
+                    .filter(|t| self.def(*t).kind.is_class_like());
+                match passed {
+                    Some(t) => {
+                        any = true;
+                        let td = self.def(t);
+                        BoundArg {
+                            path: vec![td.name.clone()],
+                            elem: None,
+                            file: t.0,
+                            scope: td.parent,
+                        }
+                    }
+                    None => BoundArg { path: Vec::new(), elem: None, file: f, scope: Some(x) },
+                }
+            })
+            .collect();
+        any.then_some(Binds { owner, args })
     }
 
     /// The bindings `args` (written in file `f`, scope `scope`) give `owner`'s
@@ -6054,6 +6329,58 @@ impl<'a> Project<'a> {
             return None;
         }
         self.elem_of(f, d, std::slice::from_ref(&name.to_string()))
+    }
+
+    /// A walk from `start` under bindings `b` of its type parameters, with
+    /// calls in it: a call gives what its callable declares it returns, or
+    /// the type a parameter it returns stands for (`fn get_mut(&mut self) ->
+    /// &mut S` under `S = TransportAdapter`); an unwrapper the type has no
+    /// member for is skipped (`?.unwrap()`).
+    fn walk_bound(
+        &self,
+        start: DefRef,
+        mut b: Option<Binds>,
+        rest: &[String],
+        conf: Confidence,
+    ) -> Option<(Target, Confidence)> {
+        let mut t = start;
+        let mut on: Option<DefRef> = None;
+        let mut skip_call = false;
+        for seg in rest {
+            if seg == "()" {
+                if std::mem::take(&mut skip_call) {
+                    continue;
+                }
+                let def = self.def(t);
+                if def.kind.is_class_like() {
+                    continue;
+                }
+                if !def.kind.is_callable() {
+                    return None;
+                }
+                let next = self.return_type(t).map(|(r, _)| r).or_else(|| {
+                    let p = self.return_path(t)?;
+                    self.bound_type(b.as_ref(), p, t, on).filter(|(_, n)| !n).map(|(r, _)| r)
+                })?;
+                b = None;
+                t = next;
+                continue;
+            }
+            if seg == crate::refs::OPENED {
+                continue;
+            }
+            match self.member(&Target::Def(t), seg, 3) {
+                Some(Target::Def(m)) => {
+                    on = Some(t);
+                    t = m;
+                }
+                None if UNWRAPPERS.contains(&seg.as_str()) && self.def(t).kind.is_class_like() => {
+                    skip_call = true;
+                }
+                _ => return None,
+            }
+        }
+        Some((Target::Def(t), conf))
     }
 
     fn walk(&self, t: Target, rest: &[String], conf: Confidence) -> Option<(Target, Confidence)> {
@@ -7727,7 +8054,7 @@ fn vendored_path(path: &str) -> bool {
 /// (`Response::body_mut`, `TlsStream::get_mut`, `BufReader::into_inner`).
 /// A value's declared type, its type arguments, and the file and scope
 /// they are written in.
-type Declared = (Vec<String>, Vec<Vec<String>>, usize, Option<usize>);
+type Declared = (Vec<String>, Vec<Vec<String>>, Vec<Vec<Vec<String>>>, usize, Option<usize>);
 
 const LIBRARY_ACCESSORS: &[&str] =
     &["get_ref", "get_mut", "into_inner", "body", "body_mut", "into_body", "inner", "inner_mut"];
