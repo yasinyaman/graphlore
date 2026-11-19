@@ -36,6 +36,10 @@ pub struct ModuleSystems {
     rs_mod: HashMap<usize, (String, Vec<String>)>,
     rs_files: HashMap<(String, Vec<String>), Vec<usize>>,
     rs_crates: HashMap<String, String>,
+    /// The crates a `Cargo.toml` depends on (`[dependencies]`,
+    /// `[dev-dependencies]`, `[target.….dependencies]`, `[dependencies.x]`),
+    /// `-` as `_`: a path headed by one is a library's.
+    pub(super) rs_dependencies: HashSet<String>,
     // Swift: file -> module; module -> files
     swift_module: HashMap<usize, String>,
     swift_files: HashMap<String, Vec<usize>>,
@@ -134,6 +138,35 @@ fn toml_value(src: &str, section: &str, key: &str) -> Option<String> {
     None
 }
 
+/// The crate names a Cargo.toml depends on, crudely: the keys of every
+/// `…dependencies` table and the `x` of a `[…dependencies.x]` one.
+fn cargo_dependencies(src: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut in_deps = false;
+    for line in src.lines() {
+        let t = line.trim();
+        if t.starts_with('[') {
+            let section = t.trim_matches(|c| c == '[' || c == ']').trim();
+            in_deps = section.ends_with("dependencies");
+            if let Some((head, name)) = section.rsplit_once('.') {
+                if head.ends_with("dependencies") {
+                    out.push(name.trim_matches('"').replace('-', "_"));
+                }
+            }
+            continue;
+        }
+        if in_deps {
+            if let Some((k, _)) = t.split_once('=') {
+                let k = k.trim().trim_matches('"');
+                if !k.is_empty() && !k.starts_with('#') && !k.contains('.') {
+                    out.push(k.replace('-', "_"));
+                }
+            }
+        }
+    }
+    out
+}
+
 impl ModuleSystems {
     pub fn build(p: &Project) -> ModuleSystems {
         let mut m = ModuleSystems::default();
@@ -187,6 +220,7 @@ impl ModuleSystems {
                 }
                 "Cargo.toml" => {
                     if let Some(src) = read_manifest(p, rel) {
+                        m.rs_dependencies.extend(cargo_dependencies(&src));
                         let name = toml_value(&src, "lib", "name")
                             .or_else(|| toml_value(&src, "package", "name"));
                         if let Some(name) = name {

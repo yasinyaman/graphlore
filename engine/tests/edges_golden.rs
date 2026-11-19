@@ -2112,3 +2112,18 @@ fn rust_fields_beside_methods_library_wrappers_turbofish_and_deref() {
         "{got:#?}"
     );
 }
+
+#[test]
+fn a_rust_path_into_a_dependency_is_no_guess_by_its_last_name() {
+    // `serde_json::from_reader` is the crate's, though the project has one
+    // method of that name; a project module is still followed
+    let got = links("rustcrate", &[
+        ("Cargo.toml", "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n[dependencies]\nserde_json = \"1\"\n"),
+        ("src/lib.rs", "pub mod run;\npub mod own;\n"),
+        ("src/own.rs", "pub struct SendBody;\n\nimpl SendBody {\n    pub fn from_reader() {}\n}\n\npub fn parse_all() {}\n"),
+        ("src/run.rs", "pub fn go() {\n    serde_json::from_reader(1);\n    crate::own::parse_all();\n}\n"),
+    ]);
+    let to = |s: &str, t: &str| got.iter().any(|(a, _, b, _)| a == s && b == t);
+    assert!(!to("src_run_go", "src_own_sendbody_from_reader"), "{got:#?}");
+    assert!(to("src_run_go", "src_own_parse_all"), "{got:#?}");
+}

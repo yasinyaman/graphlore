@@ -3298,10 +3298,13 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                 misread.push((lo, hi));
             }
         }
-        // C, C++ `typedef struct conn conn_t;`, C++ `using Header = …;`: what
-        // the alias names
-        if matches!(facts.lang, Some(crate::lang::Lang::C | crate::lang::Lang::Cpp))
-            && matches!(n.kind(), "type_definition" | "alias_declaration")
+        // C, C++ `typedef struct conn conn_t;`, C++ `using Header = …;`, Rust
+        // `type Call<T> = ureq_proto::client::Call<T>;`: what the alias names
+        // (resolution follows only a C-family alias; a Rust one's says whose
+        // type it is)
+        if (matches!(facts.lang, Some(crate::lang::Lang::C | crate::lang::Lang::Cpp))
+            && matches!(n.kind(), "type_definition" | "alias_declaration"))
+            || (facts.lang == Some(crate::lang::Lang::Rust) && n.kind() == "type_item")
         {
             if let Some(t) = n.child_by_field_name("type") {
                 let (lo, hi) = (n.start_byte(), n.end_byte());

@@ -3096,6 +3096,93 @@ impl<'a> Project<'a> {
         false
     }
 
+    /// Rust: `std`, `core`, `alloc` or a crate a `Cargo.toml` depends on.
+    fn rust_crate_name(&self, name: &str) -> bool {
+        matches!(name, "std" | "core" | "alloc") || self.modsys.rs_dependencies.contains(name)
+    }
+
+    /// Rust: whether what a call's path is made on is a library's value:
+    /// `self` in an `impl` for a library type (`impl UriExt for Uri`), a
+    /// field or tuple field declared with a library type (`self.builder` an
+    /// `http::request::Builder`, `self.0` a `&Response<B>`), or a local typed
+    /// by an alias of one (`type Call<T> = ureq_proto::client::Call<T>`).
+    fn rust_library_receiver(&self, f: usize, d: Option<usize>, path: &[String]) -> bool {
+        let Some(_guard) = DepthGuard::enter(&LIBRARY_DEPTH, 2) else { return false };
+        let ext = |g: usize, scope: Option<usize>, ty: &[String]| match self
+            .resolve_path(g, scope, ty, true)
+        {
+            Some((Target::Ext(..), _)) => true,
+            Some(_) => false,
+            // (`ureq_proto::client::Call`, a crate used by its path)
+            None => ty.len() >= 2 && self.rust_crate_name(&ty[0]),
+        };
+        let head = path[0].as_str();
+        if head == "self" {
+            let defs = &self.files[f].defs;
+            let mut cur = d;
+            while let Some(x) = cur {
+                if defs[x].kind.is_class_like() {
+                    break;
+                }
+                if let Some(owner) = &defs[x].owner {
+                    let plain = owner.split('<').next().unwrap_or(owner).trim();
+                    let bare = plain.rsplit(['.', ':']).next().unwrap_or(plain);
+                    if self.type_named(f, bare).is_none()
+                        && matches!(self.resolve_name(f, Some(x), bare), Some(Target::Ext(..)))
+                    {
+                        return true;
+                    }
+                    break;
+                }
+                cur = defs[x].parent;
+            }
+        }
+        // a step before the name: a field or tuple field of a library type
+        for k in 2..path.len() {
+            let seg = path[k - 1].as_str();
+            if seg == "()" || (seg.starts_with('[') && !seg.starts_with("[#")) {
+                break;
+            }
+            if let Some(i) = seg.strip_prefix("[#").and_then(|x| x.strip_suffix(']')) {
+                let Ok(i) = i.parse::<usize>() else { break };
+                let holder = if k == 2 && head == "self" {
+                    self.class_of(f, d)
+                } else {
+                    self.type_of_path(f, d, &path[..k - 1], false)
+                };
+                if let Some(t) = holder {
+                    let def = self.def(t);
+                    if def.rets.get(i).is_some_and(|r| ext(t.0, def.parent, r)) {
+                        return true;
+                    }
+                }
+                break;
+            }
+            match self.resolve_path(f, d, &path[..k], true) {
+                Some((Target::Def(v), _)) if self.def(v).kind.is_state() => {
+                    let def = self.def(v);
+                    if def.declared_type.as_ref().is_some_and(|t| ext(v.0, def.parent, t)) {
+                        return true;
+                    }
+                }
+                Some((Target::Ext(..), _)) => return true,
+                _ => break,
+            }
+        }
+        // a local typed by an alias of a library type
+        if path.len() >= 2 {
+            if let Some((t, _)) = self.local_type(f, d, head) {
+                let def = self.def(t);
+                if def.kind == DefKind::TypeAlias
+                    && def.declared_type.as_ref().is_some_and(|ty| ext(t.0, def.parent, ty))
+                {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
     /// Rust: a member of the project type `c` dereferences to (`impl Deref
     /// for AgentRef { type Target = Agent; }`), when `c` has none of its own.
     fn deref_member(&self, c: DefRef, name: &str) -> Option<DefRef> {
@@ -4082,6 +4169,15 @@ impl<'a> Project<'a> {
         // the one project type it holds (`res.body_mut()` of a
         // `Response<Body>`, `stream.get_mut()` of a `TlsStream<ErrorCapture>`)
         if fam == Family::Rust && !bases {
+            // a path into a crate the project depends on (`serde_json::from_reader`)
+            // names that crate's item: no guess by its last name
+            if path.len() >= 2
+                && self.rust_crate_name(&path[0])
+                && !self.is_local_name(f, d, &path[0])
+                && self.resolve_name(f, d, &path[0]).is_none()
+            {
+                return None;
+            }
             if let Some((t, skip)) = self.library_accessor(f, d, path) {
                 let rest = &path[skip..];
                 if rest.is_empty() {
@@ -5710,12 +5806,23 @@ impl<'a> Project<'a> {
             }
             _ => false,
         };
+        // Rust: `std::`, `core::`, `alloc::` or a crate the project depends
+        // on (`serde_json::from_reader`, `axum::Server::bind`)
+        let crate_head = fam == Family::Rust
+            && r.path.len() >= 2
+            && !self.is_local_name(f, d, bare_head)
+            && self.rust_crate_name(bare_head)
+            && !matches!(self.resolve_path(f, d, &r.path[..1], true), Some((Target::Def(_), _)));
         let library_like = if reason == "library name"
             || reason == "local of a library type"
             || std_held
+            || (fam == Family::Rust
+                && r.path.len() >= 2
+                && !crate_head
+                && self.rust_library_receiver(f, d, &r.path))
         {
             Some("the receiver is a library's")
-        } else if outside_head || std_head {
+        } else if outside_head || std_head || crate_head {
             Some("the head is a library's type or global")
         } else if core.contains(&name.as_str())
             || COMMON_METHODS.iter().any(|m| m.to_lowercase() == lower)

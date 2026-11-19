@@ -316,6 +316,13 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- **Native engine 0.5.39: Rust's unresolved rows on library values say so.**
+  New marks: a field or tuple field declared with a library type
+  (`self.builder`, `self.0`), `self` in an `impl` for a library type, a local
+  typed by an alias of one, and a path headed by `std`, `core`, `alloc` or a
+  crate the `Cargo.toml` depends on. Such a path is no longer guessed by its
+  last name (`serde_json::from_reader` beside a project `from_reader`). Rust's
+  unmarked rows 56 → 16; all languages 761 → 721.
 - **Native engine 0.5.38: Rust fields beside methods, library wrappers,
   turbofish, `Deref`.** A Rust field and a method of one name are told
   apart (`self.input` with no `()` is the field; also C, C++, Java), so a

@@ -218,3 +218,46 @@ fn js_rows_that_are_no_gap_say_why() {
         "{rows:#?}"
     );
 }
+
+#[test]
+fn rust_rows_on_library_values_say_so() {
+    let dir = project(
+        "rsmarks",
+        &[
+            (
+                "Cargo.toml",
+                "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n[dependencies]\nserde_json = \"1\"\nureq-proto = { version = \"0.1\" }\n\n[dependencies.http]\nversion = \"1\"\n",
+            ),
+            ("src/lib.rs", "pub mod req;\npub mod ext;\npub mod run;\npub mod own;\n"),
+            // a field and a tuple field of a library type
+            ("src/req.rs", "use http::request::Builder;\nuse http::Response;\n\npub struct RequestBuilder {\n    builder: Builder,\n}\n\nimpl RequestBuilder {\n    pub fn method_ref(&self) -> u8 {\n        self.builder.method_ref()\n    }\n    pub fn version(&self) -> u8 {\n        0\n    }\n    pub fn header(self) -> Self {\n        self\n    }\n}\n\npub struct DebugResponse<'a>(&'a Response<u8>);\n\nimpl<'a> DebugResponse<'a> {\n    pub fn show(&self) -> u8 {\n        self.0.version()\n    }\n}\n"),
+            // `self` in an impl for a library type
+            ("src/ext.rs", "use http::Uri;\n\npub trait UriExt {\n    fn port_of(&self) -> u8;\n}\n\nimpl UriExt for Uri {\n    fn port_of(&self) -> u8 {\n        self.authority_text()\n    }\n}\n\npub struct Tests;\n\nimpl Tests {\n    pub fn authority_text(&self) -> u8 {\n        0\n    }\n}\n"),
+            // an alias of a library type; paths headed by `std` and a dependency
+            ("src/run.rs", "type Call<T> = ureq_proto::client::Call<T>;\n\npub fn go(call: Call<u8>) {\n    call.header();\n    serde_json::from_reader(1);\n    std::thread::spawn(1);\n}\n"),
+            // the project's own field: no mark
+            ("src/own.rs", "use crate::req::RequestBuilder;\n\npub struct SendBody;\n\nimpl SendBody {\n    pub fn from_reader() {}\n    pub fn spawn() {}\n    pub fn lonely(&self) {}\n}\n\npub struct Holder {\n    inner: RequestBuilder,\n}\n\nimpl Holder {\n    pub fn f(&self) {\n        self.inner.lonely();\n    }\n}\n"),
+        ],
+    );
+    let out = dir.join("unresolved.json");
+    let mut opts = BuildOptions::new(&dir);
+    opts.unresolved = Some(out.clone());
+    build_graph(&opts).unwrap();
+    let rows: Vec<Value> = serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+    let why = |path: &str| {
+        rows.iter()
+            .find(|r| r["path"] == path)
+            .map(|r| r["library_like"].clone())
+            .unwrap_or_else(|| panic!("no row {path}: {rows:#?}"))
+    };
+    let receiver = "the receiver is a library's";
+    let head = "the head is a library's type or global";
+    assert_eq!(why("self.builder.method_ref"), receiver, "{rows:#?}");
+    assert_eq!(why("self.[#0].version"), receiver, "{rows:#?}");
+    assert_eq!(why("self.authority_text"), receiver, "{rows:#?}");
+    assert_eq!(why("call.header"), receiver, "{rows:#?}");
+    assert_eq!(why("serde_json.from_reader"), head, "{rows:#?}");
+    assert_eq!(why("std.thread.spawn"), head, "{rows:#?}");
+    assert_eq!(why("self.inner.lonely"), Value::Null, "{rows:#?}");
+}

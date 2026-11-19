@@ -895,11 +895,29 @@ details.config;`, `let stream = &mut self.stream;`) is typed by the field,
 `INFERRED`. ureq gets 151 calls more and 85 of its `INFERRED` calls become
 `EXTRACTED`; a wrong `indirect_call` to the test function `config()` (the
 argument was the local `config`) is gone. Rust's unmarked rows: 96 → 56;
-in all, 801 → 761. What is left there is mostly a library's: a field
-typed by one (`self.builder.header()` on `http::request::Builder`), `self`
-in an impl for a library type, an alias of one (`type Call<T> =
-ureq_proto::client::Call<T>`), a path headed by a crate (`serde_json::`,
-`std::`).
+in all, 801 → 761.
+Engine 0.5.39 marks the Rust rows that are a library's (graph unchanged on
+the 31 repositories): the receiver is a library's when a step before the
+name is a field or tuple field declared with a library type
+(`self.builder.header()`, `self.builder` an `http::request::Builder`;
+`self.0.version()` on a `&Response<B>`), when it is `self` in an `impl` for
+a library type (`impl UriExt for Uri`), or a local typed by an alias of one
+(`type Call<T> = ureq_proto::client::Call<T>`: a Rust alias now records
+what it names, `declared_type`, which only C and C++ follow); the head is a
+library's when the path starts at `std`, `core`, `alloc` or a crate a
+`Cargo.toml` depends on (`serde_json::from_reader`, `axum::Server::bind`;
+`ModuleSystems::rs_dependencies`). Such a path is also never guessed by its
+last name any more (`serde_json::from_reader` beside the project's one
+`SendBody::from_reader`). Rust's unmarked rows: 56 → 16; in all, 761 → 721.
+The 16 left are the resolver's own limits, all in ureq: a type parameter
+bound through a project generic (`ErrorCapture<TransportAdapter>`:
+`adapter.get_mut().set_timeout_at()`, `stream.get_mut().get_mut()`, 3), a
+closure's parameters typed only by the `Fn(&Uri, &Request<()>, …)` bound
+of the function it is passed to (4), a value taken out of a tuple, an enum
+variant or an array of tuples (3), a `P: AsRef<Path>` parameter, a library
+type re-exported under the crate (`pub use ureq_proto::http;` then
+`crate::http::Uri`), `uri.parse().unwrap()` with no turbofish, a trait
+method on a generic result, and `().chain(…)` on the unit type (2).
 Engine 0.5.35 (C function-pointer slots) reads a struct of function pointers
 as an interface and what is put in its slots as the implementations: an
 initializer of a variable, by name (`.async_read = redisAsyncRead`) or by
