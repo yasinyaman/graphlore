@@ -956,6 +956,14 @@ are the same calls, `EXTRACTED` now). Rust's
 unmarked rows: 16 → 7; in all, 721 → 712. The 7 are library calls:
 closure parameters of library types (`req.headers()`, 5), a parameter
 typed by its own type parameter (`path.as_ref()`), a parameter of `&str`.
+Engine 0.5.41 marks them (graph unchanged): the receiver is a library's
+when it is a local or a closure's parameter the walk knows is of a
+library's type (`|uri, req|` handed `Uri` and `Request<()>`), a value of
+the function's own type parameter put through a std conversion
+(`path.as_ref()` of `P: AsRef<Path>`), or a parameter written with one of
+the language's own types (`uri: &str`, `RUST_OWN_TYPES`; not where the
+project defines a type of that name, as ureq's `Duration`). Rust's
+unmarked rows: 7 → 0; in all, 712 → 705.
 Engine 0.5.35 (C function-pointer slots) reads a struct of function pointers
 as an interface and what is put in its slots as the implementations: an
 initializer of a variable, by name (`.async_read = redisAsyncRead`) or by

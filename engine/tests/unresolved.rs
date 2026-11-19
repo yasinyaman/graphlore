@@ -261,3 +261,40 @@ fn rust_rows_on_library_values_say_so() {
     assert_eq!(why("std.thread.spawn"), head, "{rows:#?}");
     assert_eq!(why("self.inner.lonely"), Value::Null, "{rows:#?}");
 }
+
+#[test]
+fn rust_closure_parameters_type_parameters_and_own_types_of_the_language() {
+    let dir = project(
+        "rsmarks2",
+        &[
+            ("Cargo.toml", "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n[dependencies]\nureq-proto = \"0.1\"\n"),
+            ("src/lib.rs", "pub mod handler;\npub mod part;\npub mod time;\npub use ureq_proto::http;\n"),
+            // closure parameters the callee hands a library's types; one it
+            // hands a project type (no mark)
+            ("src/handler.rs", "use crate::http::{Request, Uri};\n\npub struct Req;\nimpl Req {\n    pub fn mine(&self) -> u8 { 0 }\n}\npub struct Part;\nimpl Part {\n    pub fn headers(&self) -> u8 { 0 }\n}\npub struct Builder;\nimpl Builder {\n    pub fn query(&self) -> u8 { 0 }\n}\npub struct TestHandler;\nimpl TestHandler {\n    fn new(pattern: &'static str, handler: impl Fn(Uri, Request<()>) -> u8) -> Self { TestHandler }\n    fn own<F: Fn(Req) -> u8>(pattern: &'static str, handler: F) -> Self { TestHandler }\n}\npub fn setup() {\n    TestHandler::new(\"/post\", |uri, req| { req.headers(); uri.query() });\n    TestHandler::own(\"/own\", |r| r.lonely());\n}\n"),
+            // a value of the function's own type parameter, a `&str`; a
+            // parameter of the project's own `Duration` (no mark)
+            ("src/part.rs", "use std::path::Path;\nuse crate::time::Duration;\n\npub struct Form;\nimpl Form {\n    pub fn file_name(&self) -> u8 { 0 }\n    pub fn authority_of(&self) -> u8 { 0 }\n    pub fn lonely(&self) -> u8 { 0 }\n    pub fn far(&self) -> u8 { 0 }\n}\npub fn file<P: AsRef<Path>>(path: P) -> u8 {\n    path.as_ref().file_name()\n}\npub fn authority(uri: &str) -> u8 {\n    uri.parse::<u8>().unwrap().authority_of()\n}\npub fn wait(d: Duration) -> u8 {\n    d.far()\n}\n"),
+            ("src/time.rs", "pub struct Duration;\n"),
+        ],
+    );
+    let out = dir.join("unresolved.json");
+    let mut opts = BuildOptions::new(&dir);
+    opts.unresolved = Some(out.clone());
+    build_graph(&opts).unwrap();
+    let rows: Vec<Value> = serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+    let why = |name: &str| {
+        rows.iter()
+            .find(|r| r["name"] == name)
+            .map(|r| r["library_like"].clone())
+            .unwrap_or_else(|| panic!("no row {name}: {rows:#?}"))
+    };
+    let receiver = "the receiver is a library's";
+    assert_eq!(why("headers"), receiver, "{rows:#?}");
+    assert_eq!(why("query"), receiver, "{rows:#?}");
+    assert_eq!(why("file_name"), receiver, "{rows:#?}");
+    assert_eq!(why("authority_of"), receiver, "{rows:#?}");
+    assert_eq!(why("lonely"), Value::Null, "{rows:#?}");
+    assert_eq!(why("far"), Value::Null, "{rows:#?}");
+}

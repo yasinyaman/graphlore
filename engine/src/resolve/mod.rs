@@ -3211,6 +3211,25 @@ impl<'a> Project<'a> {
         false
     }
 
+    /// The parameter `name` of the callable around `d`, with that callable.
+    fn param_of(
+        &self,
+        f: usize,
+        d: Option<usize>,
+        name: &str,
+    ) -> Option<(&crate::facts::ParamFact, DefRef)> {
+        let defs = &self.files[f].defs;
+        let mut cur = d;
+        while let Some(x) = cur {
+            if defs[x].kind.is_callable() {
+                // (a local of the name in between hides it)
+                return defs[x].plist.iter().find(|p| p.name == name).map(|p| (p, (f, x)));
+            }
+            cur = defs[x].parent;
+        }
+        None
+    }
+
     /// Rust: `std`, `core`, `alloc` or a crate a `Cargo.toml` depends on.
     fn rust_crate_name(&self, name: &str) -> bool {
         matches!(name, "std" | "core" | "alloc") || self.modsys.rs_dependencies.contains(name)
@@ -3282,6 +3301,31 @@ impl<'a> Project<'a> {
                 }
                 Some((Target::Ext(..), _)) => return true,
                 _ => break,
+            }
+        }
+        // a local or closure parameter of a library's type (`|uri, req|` for
+        // `Fn(Uri, Request<()>)`)
+        if path.len() >= 2 && self.is_local_name(f, d, head) && self.is_external_local(f, d, head) {
+            return true;
+        }
+        // a value of the function's own type parameter put through a std
+        // conversion (`path.as_ref()` of `path: P` with `P: AsRef<Path>`), or
+        // a parameter written with the language's own type (`uri: &str`)
+        if path.len() >= 2 && !head.contains('@') {
+            if let Some((p, c)) = self.param_of(f, d, head) {
+                let def = self.def(c);
+                let written = p.written.trim_start_matches('&').trim_start_matches("mut");
+                let own = p.ty.len() == 1 && def.type_params.contains(&p.ty[0]);
+                if own && matches!(path[1].as_str(), "as_ref" | "as_mut" | "into" | "borrow") {
+                    return true;
+                }
+                let bare = written.split('<').next().unwrap_or("");
+                // (not a type of the project's of that name: ureq's `Duration`)
+                if RUST_OWN_TYPES.contains(&bare)
+                    && !matches!(self.resolve_name(c.0, Some(c.1), bare), Some(Target::Def(_)))
+                {
+                    return true;
+                }
             }
         }
         // a local typed by an alias of a library type
@@ -8052,6 +8096,14 @@ fn vendored_path(path: &str) -> bool {
 
 /// Accessors of a library's generic type that give the value it holds
 /// (`Response::body_mut`, `TlsStream::get_mut`, `BufReader::into_inner`).
+/// Rust's own types, as a parameter writes them (`uri: &str`): a receiver of
+/// one is the language's.
+const RUST_OWN_TYPES: &[&str] = &[
+    "str", "String", "bool", "char", "u8", "u16", "u32", "u64", "u128", "usize", "i8", "i16",
+    "i32", "i64", "i128", "isize", "f32", "f64", "Vec", "HashMap", "HashSet", "BTreeMap",
+    "BTreeSet", "VecDeque", "Path", "PathBuf", "Duration",
+];
+
 /// A value's declared type, its type arguments, and the file and scope
 /// they are written in.
 type Declared = (Vec<String>, Vec<Vec<String>>, Vec<Vec<Vec<String>>>, usize, Option<usize>);

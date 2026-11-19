@@ -316,6 +316,17 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- **Native engine 0.5.41: Rust's last unresolved rows say why.** New marks
+  for the "receiver is a library's" row:
+  - a local or closure parameter of a library's type;
+  - a value of the function's own type parameter put through `as_ref` /
+    `into` / `borrow`;
+  - a parameter written with one of the language's own types (`&str`,
+    `String`, numbers, `Vec`), unless the project defines a type of that
+    name.
+
+  The graph is unchanged. Rust's unmarked rows go from 7 to 0; across all
+  languages, 712 to 705.
 - **Native engine 0.5.40: Rust bindings through constructors, associated
   types, closures and match arms.**
   - A class's type parameter is bound by what its constructor is passed
