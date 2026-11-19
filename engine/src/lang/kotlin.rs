@@ -23,6 +23,18 @@ impl LanguageModule for Kotlin {
         let recv = kids(node).into_iter().find(|c| c.kind() == "receiver_type")?;
         let mut queue: std::collections::VecDeque<Node> = kids(recv).into();
         while let Some(n) = queue.pop_front() {
+            // `PropertySpec.Builder.addOriginatingKSFile(…)`: the whole name
+            // written (the type arguments left out)
+            if n.kind() == "user_type" {
+                let parts: Vec<String> = kids(n)
+                    .into_iter()
+                    .filter(|c| c.kind() == "type_identifier")
+                    .map(|c| text(c, src))
+                    .collect();
+                if !parts.is_empty() {
+                    return Some(parts.join("."));
+                }
+            }
             if n.kind() == "type_identifier" {
                 return Some(text(n, src));
             }

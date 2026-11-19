@@ -316,6 +316,28 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- **Native engine 0.5.45: Kotlin extensions, class literals, receivers.**
+  - A call by the name of an extension the file sees (imported or of its
+    package) on a receiver the walk cannot type is that extension
+    (`INFERRED`).
+  - Extension receivers are matched by their whole name: an extension for
+    `PropertySpec.Builder` is not one for `AliasSpec.Builder`. An extension
+    in the middle of a chain, or on a library value, gives what it returns.
+    `apply` / `also` keep the type.
+  - `String::class` is no longer a call that constructs `String`: it is a
+    type reference, and a `KClass` value, which picks the right overload of
+    `asClassName()` and similar.
+  - Nullable parameter types (`User?`, also C#'s), enum entries' members,
+    a property beside a method of its name, a body property beside a plain
+    constructor parameter of its name, `if` expression bodies, locals typed
+    through an extension, `this` in `receive<T>().apply { }`, and a
+    `let { }` parameter of a call given a class literal are now typed.
+  - New marks: a member a compiler plugin generates (`@Serializable`'s
+    `serializer()`); Kotlin library-typed receivers; a library-typed
+    function result held in a local; a type parameter bound to a library
+    type; `super` under an anonymous object's library base.
+  - Kotlin's unmarked unresolved rows go from 43 to 0; across all languages,
+    572 to 527.
 - **Native engine 0.5.44: Java casts, `java.lang`, library receivers.**
   - A parenthesized cast is a value of the type it writes, in every
     language that has one: `((Get) annotation).value()` links, and C's

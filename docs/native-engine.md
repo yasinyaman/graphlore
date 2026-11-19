@@ -767,7 +767,7 @@ file pairs). The native graph has definitions graphify folds into the one
 around them (a function nested in a method, the setter beside a getter of the
 same name); an edge from one of those is compared as an edge from the paired
 definition it belongs to, as graphify records it. On the 31 repositories of the
-[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.44,
+[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.45,
 measured 2026-11-19), as native / graphify edges and the share of graphify's
 that the native graph has too:
 
@@ -779,19 +779,19 @@ that the native graph has too:
 | TSX | 99.7% | 253 / 316 (80%) | 435 / 456 (95%) | 1 / 0 | 42 / 4 |
 | Go | 100% | 538 / 950 (47%)² | 6,776 / 3,167 (99%) | 19 / 14 (100%) | 689 / 355 (99%) |
 | Java | 100% | 1,105 / 1,010 (100%) | 5,703 / 5,123 (85%) | 415 / 168 (94%) | 3,989 / 1,930 (98%) |
-| Kotlin | 99.4% | 368 / 333 (95%) | 4,790 / 2,108 (71%) | 96 / 56 (93%) | 1,079 / 673 (91%) |
+| Kotlin | 99.4% | 368 / 333 (95%) | 5,030 / 2,108 (71%) | 96 / 56 (93%) | 1,201 / 673 (92%) |
 | Scala | 100% | 2 / 0 | 46 / 20 (45%) | 21 / 22 (95%) | 75 / 32 (100%) |
-| C# | 92.7% | 347 / 280 (30%)³ | 2,860 / 2,450 (96%) | 87 / 86 (98%) | 1,248 / 806 (99%) |
+| C# | 92.7% | 347 / 280 (30%)³ | 2,859 / 2,450 (96%) | 87 / 86 (98%) | 1,245 / 806 (99%) |
 | Rust | 93.3% | 324 / 370 (79%) | 2,175 / 853 (87%) | 53 / 41 (93%) | 1,218 / 895 (81%) |
-| Swift | 95.9% | 166 / 166 (–)³ | 5,494 / 2,141 (83%) | 190 / 164 (100%) | 1,091 / 580 (62%) |
+| Swift | 95.9% | 166 / 166 (–)³ | 5,496 / 2,141 (83%) | 190 / 164 (100%) | 1,089 / 580 (62%) |
 | C | 100% | 89 / 77 (99%) | 864 / 791 (100%) | – | 253 / 130 (97%) |
 | C++ | 98.7% | 215 / 228 (93%) | 765 / 281 (29%)⁴ | 30 / 5 (100%) | 350 / 234 (88%) |
 | C/C++ headers | 91.4% | 164 / 172 (95%) | 372 / 348 (84%) | 12 / 12 (92%) | 563 / 312 (90%) |
 | Ruby | 99.7% | 42 / 0 | 441 / 375 (69%) | 46 / 15 (93%) | 28 / 0 |
 | PHP | 80.6% | 429 / 505 (84%) | 8,873 / 6,140 (90%) | 65 / 60 (98%) | 648 / 213 (95%) |
-| **All** | **94.4%** | **4,972 / 5,565 (75%)** | **44,705 / 27,832 (85%)** | **1,152 / 726 (97%)** | **12,486 / 6,814 (89%)** |
+| **All** | **94.4%** | **4,972 / 5,565 (75%)** | **44,946 / 27,832 (85%)** | **1,152 / 726 (97%)** | **12,603 / 6,814 (89%)** |
 
-Of the native calls, 12,831 (29%) are `INFERRED`, against 47% of graphify's.
+Of the native calls, 12,498 (28%) are `INFERRED`, against 47% of graphify's.
 That share was 20% before engine 0.5.5: a call of an overloaded name that the
 arguments do not decide used to be an `EXTRACTED` edge to the first overload,
 and is now an `INFERRED` edge to each overload that fits (999 calls, with
@@ -1074,6 +1074,55 @@ Engine 0.5.44 takes on Java's 24 unmarked rows, all of them retrofit's:
 
 21 wrong `INFERRED` edges become marked rows (5,930 → 5,950 rows). Java's
 unmarked rows: 24 → 0; Kotlin's 44 → 43; in all, 597 → 572.
+Engine 0.5.45 takes on Kotlin's 43 unmarked rows (35 kotlinpoet's, 5
+ktor-realworld's, 3 retrofit's). Unlike Java's, most were gaps:
+
+- **An extension the file sees.** A Kotlin extension from elsewhere cannot
+  be called without an import, so a call by the name of one the file sees
+  (its own, its package's, one it imports, a member extension of a type
+  around) on a receiver the walk cannot type is that extension
+  (`visible_extension`, `INFERRED`): `declaredFields.asSequence().find { … }
+  .toOptional()`, `user.email.isEmailValid()`, `ch.code.toHexStr()`. The
+  receiver's written type, where the source states it, must be the
+  extension's or one of its type parameters, and a name Kotlin's own types
+  answer to (`KOTLIN_CORE_METHODS`: `map`, `let`, `first`, …) is theirs.
+- **Receivers by their whole name.** An extension written for
+  `PropertySpec.Builder` is no longer one for every `Builder`: a receiver
+  keeps its qualified name, is matched as a dotted suffix
+  (`receiver_matches`), and extensions for other receivers are no overloads
+  of each other. An extension in the middle of a chain gives what it returns
+  (`PropertySpec.builder(…).addOriginatingKSFile(f).mutable(…)`), and so does
+  one called on a library value (`String::class.asClassName()`). `x.apply {
+  … }` and `x.also { … }` keep `x`'s type.
+- **Class literals.** `String::class` and `Thread.State::class` were read as
+  calls that construct the class (some 230 `calls` edges, 26 of them
+  retrofit's `create(Service::class.java)`, none of which graphify has). Now
+  each is a `references` edge to the class and a local of the library's
+  `KClass`, which picks the `KClass<*>` extension among `asClassName`'s
+  overloads: some 200 `INFERRED` ties become one `EXTRACTED` edge.
+- **Types the walk missed.** A nullable parameter type (`user: User? =
+  null`, and C#'s `RestResponse?`), an enum entry's members (its enum's:
+  `TypeSpec.Kind.CLASS.implicitFunctionModifiers()`, Swift's
+  `TestTrusts.leaf.trust`), a property beside a method of its name
+  (`primaryConstructor?.parameter(name)`), a body property beside a plain
+  constructor parameter of its name (`private var out = LineWrapper(out)`),
+  what both branches of an `if` expression body call, a local typed through
+  an extension's result (`val best = ClassName(…).member("x")`), `this` in
+  `ctx.receive<UserDTO>().apply { … }` (the one project type argument of a
+  library call, `INFERRED`), and the parameter of `request.tag(Invocation::
+  class.java)?.let { invocation -> … }`.
+- **Marks.** A member a compiler plugin adds (`UserResponse.serializer()` of
+  a `@Serializable` class); a receiver declared with a library type, with
+  Kotlin's implicit types (`format: SerialFormat`); a local holding what a
+  project function declared to give a library type returns (`val o =
+  spec.toJavaFileObject()`); a type parameter the receiver binds to a library
+  type (`response.body()?.repeat(5)` of a `Response<String>`, no longer
+  guessed by the method's name); `super` in an anonymous object with a
+  library base.
+
+Kotlin's calls go from 4,790 to 5,030 with fewer `INFERRED` (2,383 →
+2,057), and its type references from 1,079 to 1,201 (92% of graphify's).
+Kotlin's unmarked rows: 43 → 0; Swift's 61 → 59; in all, 572 → 527.
 Engine 0.5.35 (C function-pointer slots) reads a struct of function pointers
 as an interface and what is put in its slots as the implementations: an
 initializer of a variable, by name (`.async_read = redisAsyncRead`) or by
@@ -1534,7 +1583,7 @@ implicit members since 0.5.17: 39 whose place gives no type are rows now
 closure parameters and variables of express's tests. What is left at file
 level there is `app.use` and `app.set` (842 rows of express), names too
 short and too common to guess by. Engine 0.5.19 takes 123 more off (6,362;
-C# 349 from 470; 6,360 with 0.5.20, 6,348 with 0.5.21, 6,285 with 0.5.22, 6,237 with 0.5.25, 6,206 with 0.5.27, 6,166 with 0.5.28, 6,156 with 0.5.30, 6,140 with 0.5.31, 6,132 with 0.5.32, 6,126 with 0.5.33, 6,093 with 0.5.34, 6,047 with 0.5.36, 6,046 with 0.5.37, 6,017 with 0.5.38, 6,005 with 0.5.40, 5,947 with 0.5.42, 5,930 with 0.5.43, 5,950 with 0.5.44). Most of what C# has left is not the project's: `Assert.
+C# 349 from 470; 6,360 with 0.5.20, 6,348 with 0.5.21, 6,285 with 0.5.22, 6,237 with 0.5.25, 6,206 with 0.5.27, 6,166 with 0.5.28, 6,156 with 0.5.30, 6,140 with 0.5.31, 6,132 with 0.5.32, 6,126 with 0.5.33, 6,093 with 0.5.34, 6,047 with 0.5.36, 6,046 with 0.5.37, 6,017 with 0.5.38, 6,005 with 0.5.40, 5,947 with 0.5.42, 5,930 with 0.5.43, 5,950 with 0.5.44, 5,903 with 0.5.45). Most of what C# has left is not the project's: `Assert.
 NotNull` beside its own `Ensure.NotNull` (77), `WireMockServer.Start` (23).
 
 By then most rows were of that kind: a library's name the project happens

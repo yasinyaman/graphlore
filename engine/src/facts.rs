@@ -576,6 +576,9 @@ pub enum ReceiverOf {
     /// `withIndent { … }`: the function called; its last parameter says the
     /// receiver when it is typed `T.() -> R` (`Def::lambda_receiver`).
     Callee(Vec<String>),
+    /// `ctx.receive<UserDTO>().apply { … }`: the value, and the one type
+    /// argument its call writes, which types it where the value does not.
+    Given(Vec<String>, Vec<String>),
 }
 
 /// A lambda with a receiver, and the one around it.

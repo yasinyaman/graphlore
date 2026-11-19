@@ -1694,7 +1694,20 @@ impl<'a> Project<'a> {
                 };
                 if l.field {
                     if let Some(c) = self.class_of(fi, Some(d)) {
-                        fields.entry(c).or_default().entry(l.name.clone()).or_insert((fi, li));
+                        // (the property's own initializer says what it holds,
+                        // before a constructor parameter of its name: Kotlin
+                        // `class CodeWriter(out: Appendable) { private var out
+                        // = LineWrapper(out) }`)
+                        let own = d != FILE_SCOPE && {
+                            let x = &f.defs[d];
+                            x.kind.is_state() && x.name == l.name
+                        };
+                        let entry = fields.entry(c).or_default();
+                        if own {
+                            entry.insert(l.name.clone(), (fi, li));
+                        } else {
+                            entry.entry(l.name.clone()).or_insert((fi, li));
+                        }
                     }
                 } else {
                     locals.insert((fi, d, l.name.clone()), li);
@@ -2145,6 +2158,26 @@ impl<'a> Project<'a> {
         }
     }
 
+    /// Kotlin: a member a compiler plugin adds to an annotated class, called on
+    /// the class (`UserResponse.serializer()` of a `@Serializable` one,
+    /// kotlinx.serialization).
+    fn plugin_member(&self, f: usize, d: Option<usize>, path: &[String]) -> bool {
+        const GENERATED: &[(&str, &str)] = &[("Serializable", "serializer")];
+        let [head, name] = path else { return false };
+        let Some((Target::Def(c), _)) = self.resolve_path(f, d, std::slice::from_ref(head), true)
+        else {
+            return false;
+        };
+        GENERATED.iter().any(|(annotation, member)| {
+            name == member
+                && self.files[c.0].refs.iter().any(|r| {
+                    r.from_def == Some(c.1)
+                        && r.kind == RefKind::Decorator
+                        && r.path.last().is_some_and(|n| n == annotation)
+                })
+        })
+    }
+
     /// Whether a Python method is a `@property` (or `@cached_property`).
     fn is_property(&self, c: DefRef) -> bool {
         self.files[c.0].refs.iter().any(|r| {
@@ -2180,7 +2213,13 @@ impl<'a> Project<'a> {
             .map(|&i| (m.0, i))
             .filter(|r| {
                 let x = self.def(*r);
-                x.kind.is_callable() && !x.decl_only && x.owner == d.owner
+                // (extensions written for other types are no overloads:
+                // `PropertySpec.Builder.addOriginatingKSFile` beside
+                // `TypeAliasSpec.Builder.addOriginatingKSFile`)
+                x.kind.is_callable()
+                    && !x.decl_only
+                    && x.owner == d.owner
+                    && x.receiver == d.receiver
             })
             .collect();
         out.sort();
@@ -2284,6 +2323,18 @@ impl<'a> Project<'a> {
         let calling = self.calling.replace(false);
         let out = match &scope.of {
             ReceiverOf::Value(path) => self.type_of_path_inner(f, d, path),
+            // the value's own type first; else, when the call is a library's,
+            // the project type its one type argument names (`INFERRED`)
+            ReceiverOf::Given(path, given) => self.type_of_path_inner(f, d, path).or_else(|| {
+                let callee = path.strip_suffix(&["()".to_string()]).unwrap_or(path);
+                // (a guess by the method's name is no project call)
+                let library = !matches!(
+                    self.resolve_path(f, d, callee, false),
+                    Some((Target::Def(_), Confidence::Extracted))
+                );
+                let t = self.type_of_path(f, d, given, true)?;
+                (library && self.def(t).kind.is_class_like()).then_some((t, Confidence::Inferred))
+            }),
             ReceiverOf::Callee(path) => match self.resolve_path(f, d, path, true) {
                 Some((Target::Def(c), conf)) => self.def(c).lambda_receiver.clone().and_then(|p| {
                     self.type_of_path(c.0, self.def(c).parent, &p, true).map(|t| (t, conf))
@@ -3321,6 +3372,15 @@ impl<'a> Project<'a> {
                 if matches!(self.resolve_name(f, scope(x), head), Some(Target::Ext(_, _))) {
                     return true;
                 }
+                // (Kotlin `String::class`: a `KClass`, imported or not)
+                if l.declared
+                    && l.name.starts_with(crate::refs::CAST)
+                    && l.path.len() == 1
+                    && l.path[0] == crate::refs::CLASS_LITERAL_TYPE
+                    && !matches!(self.resolve_name(f, scope(x), head), Some(Target::Def(_)))
+                {
+                    return true;
+                }
                 // (Java `String readBody`, `((Class<?>) type)`: `java.lang`)
                 if l.declared && self.java_library_type(f, scope(x), &l.path.clone()) {
                     return true;
@@ -3328,7 +3388,19 @@ impl<'a> Project<'a> {
                 // (`let res = crate::get(url).call().unwrap()`, `call` declared
                 // `-> Result<Response<Body>, Error>` with `Response` a library's)
                 let path = l.path.clone();
-                return self.library_result(f, scope(x), &path)
+                // (`val o = spec.toJavaFileObject()`, declared to give a
+                // `JavaFileObject`: a value path names the callable bare)
+                let called_library = !l.declared
+                    && matches!(self.family[f], Some(Family::Jvm))
+                    && path.last().is_some_and(|s| !s.starts_with('[') && s != "()")
+                    && DepthGuard::enter(&LIBRARY_DEPTH, 2).is_some_and(|_guard| {
+                        let calling = self.calling.replace(true);
+                        let held = self.resolve_path(f, scope(x), &path, false);
+                        *self.calling.borrow_mut() = calling;
+                        matches!(held, Some((Target::Def(c), _)) if self.gives_library_type(c))
+                    });
+                return called_library
+                    || self.library_result(f, scope(x), &path)
                     || self.library_part(f, scope(x), &path);
             }
             cur = self.up(f, x);
@@ -3366,11 +3438,100 @@ impl<'a> Project<'a> {
         None
     }
 
+    /// Kotlin: a call by the name of an extension the file sees (its own, one
+    /// of its package, one it imports, a member extension of a type around)
+    /// on a receiver the walk could not type is that extension: an extension
+    /// from elsewhere cannot be called without an import
+    /// (`declaredFields.asSequence().find { … }.toOptional()`,
+    /// `user.email.isEmailValid()`). The receiver's written type, where the
+    /// source states it, must be the extension's or a type parameter of it;
+    /// a name Kotlin's own types answer to is theirs.
+    fn visible_extension(
+        &self,
+        f: usize,
+        d: Option<usize>,
+        path: &[String],
+        bases: bool,
+    ) -> Option<(Target, Confidence)> {
+        if self.files[f].lang != Some(crate::lang::Lang::Kotlin)
+            || bases
+            || !*self.calling.borrow()
+            || *self.types_only.borrow()
+            || path.len() < 2
+        {
+            return None;
+        }
+        let name = path.last()?;
+        if name.starts_with('[') || name == "()" || KOTLIN_CORE_METHODS.contains(&name.as_str()) {
+            return None;
+        }
+        let _guard = DepthGuard::enter(&LIBRARY_DEPTH, 1)?;
+        let on = self.written_receiver(f, d, &path[..path.len() - 1]);
+        let found = self.extension_method(f, name, on.as_deref())?;
+        if let (Some(on), (Target::Def(x), Confidence::Inferred)) = (&on, &found) {
+            let def = self.def(*x);
+            let fits = def
+                .receiver
+                .as_deref()
+                .is_none_or(|r| receiver_matches(r, on) || def.type_params.iter().any(|t| t == r));
+            if !fits {
+                return None;
+            }
+        }
+        Some(found)
+    }
+
+    /// The written type's last name of what a path holds, where the source
+    /// states it: a field's or local's declared type, a call's written result.
+    fn written_receiver(&self, f: usize, d: Option<usize>, prefix: &[String]) -> Option<String> {
+        let (callee, called) = match prefix.split_last() {
+            Some((last, rest)) if last == "()" => (rest, true),
+            _ => (prefix, false),
+        };
+        if callee.is_empty() {
+            return None;
+        }
+        if !called && callee.len() == 1 {
+            let mut cur = local_start(d);
+            while let Some(x) = cur {
+                if let Some(&li) = self.locals.get(&(f, x, callee[0].clone())) {
+                    let l = &self.files[f].locals[li];
+                    return l.declared.then(|| l.path.last().cloned()).flatten();
+                }
+                cur = self.up(f, x);
+            }
+        }
+        let calling = self.calling.replace(called);
+        let held = self.resolve_path(f, d, callee, false);
+        *self.calling.borrow_mut() = calling;
+        let Some((Target::Def(c), _)) = held else { return None };
+        let def = self.def(c);
+        if called && def.kind.is_callable() {
+            let written = def.wraps.clone().or_else(|| {
+                self.files[c.0]
+                    .refs
+                    .iter()
+                    .find(|x| {
+                        x.from_def == Some(c.1)
+                            && x.kind == RefKind::Type
+                            && x.context == "return_type"
+                    })
+                    .map(|x| x.path.clone())
+            });
+            return written.and_then(|w| w.last().cloned());
+        }
+        if !called && def.kind.is_state() {
+            return def.declared_type.as_ref().and_then(|t| t.last().cloned());
+        }
+        None
+    }
+
     /// Java: whether a written type is a library's: one an import names,
     /// a `java.lang` type the project does not define, or a qualified name
     /// whose head is no package or name of the project (`okhttp3.Response`).
     fn java_library_type(&self, g: usize, scope: Option<usize>, ty: &[String]) -> bool {
-        if self.files[g].lang != Some(crate::lang::Lang::Java) || ty.is_empty() {
+        let kotlin = self.files[g].lang == Some(crate::lang::Lang::Kotlin);
+        if !(kotlin || self.files[g].lang == Some(crate::lang::Lang::Java)) || ty.is_empty() {
             return false;
         }
         match self.resolve_path(g, scope, ty, true) {
@@ -3382,7 +3543,9 @@ impl<'a> Project<'a> {
         match self.resolve_name(g, scope, head) {
             Some(Target::Ext(..)) => true,
             Some(_) => false,
-            None if ty.len() == 1 => JAVA_LANG_TYPES.contains(&head),
+            None if ty.len() == 1 => {
+                JAVA_LANG_TYPES.contains(&head) || (kotlin && KOTLIN_IMPLICIT_TYPES.contains(&head))
+            }
             None => {
                 head.chars().next().is_some_and(|c| c.is_lowercase())
                     && !self.pkg_files.keys().any(|(fam, pkg)| {
@@ -3397,7 +3560,10 @@ impl<'a> Project<'a> {
     /// (`rawResponse.headers()` of an `okhttp3.Response`, `SET.indexOf(…)` of
     /// a `String`, `server.takeRequest()` of a `MockWebServer`).
     fn java_library_receiver(&self, f: usize, d: Option<usize>, path: &[String]) -> bool {
-        if self.files[f].lang != Some(crate::lang::Lang::Java) || path.len() < 2 {
+        let lang = self.files[f].lang;
+        if !matches!(lang, Some(crate::lang::Lang::Java | crate::lang::Lang::Kotlin))
+            || path.len() < 2
+        {
             return false;
         }
         let Some(_guard) = DepthGuard::enter(&LIBRARY_DEPTH, 2) else { return false };
@@ -3406,7 +3572,29 @@ impl<'a> Project<'a> {
         while let Some(x) = cur {
             if let Some(&li) = self.locals.get(&(f, x, head.clone())) {
                 let l = &self.files[f].locals[li];
-                return l.declared && self.java_library_type(f, scope(x), &l.path);
+                if l.declared && self.java_library_type(f, scope(x), &l.path) {
+                    return true;
+                }
+                // a method that gives the type parameter the local binds to
+                // a library's type: `response.body()?.repeat(5)` of a
+                // `Response<String>`
+                if l.declared && path.len() >= 4 && path[2] == "()" {
+                    let Some(c) = self.type_of_path(f, scope(x), &l.path, true) else {
+                        return false;
+                    };
+                    let Some(m) = self.class_member(c, &path[1], 4) else { return false };
+                    let written = self.files[m.0].refs.iter().find(|r| {
+                        r.from_def == Some(m.1)
+                            && r.kind == RefKind::Type
+                            && r.context == "return_type"
+                    });
+                    let Some([t]) = written.map(|r| r.path.as_slice()) else { return false };
+                    let at = self.def(c).type_params.iter().position(|p| p == t);
+                    return at
+                        .and_then(|i| l.targs.get(i))
+                        .is_some_and(|arg| self.java_library_type(f, scope(x), arg));
+                }
+                return false;
             }
             cur = self.up(f, x);
         }
@@ -4090,6 +4278,30 @@ impl<'a> Project<'a> {
 
     /// Whether a type writes a base the project does not define: its members
     /// are not all the project's.
+    /// Kotlin `object : SimpleTypeVisitor8<…>() { … super.visitUnknown(…) }`
+    /// written in a function: the anonymous object is no definition, and the
+    /// base it writes is the function's; whether such a base, up to the type
+    /// around, is one the project does not define.
+    fn anonymous_outside_base(&self, f: usize, d: Option<usize>) -> bool {
+        let defs = &self.files[f].defs;
+        let mut cur = d;
+        while let Some(x) = cur.filter(|&x| defs[x].kind.is_callable()) {
+            let outside = self.files[f].refs.iter().any(|r| {
+                r.from_def == Some(x)
+                    && matches!(r.kind, RefKind::Inherits | RefKind::Implements | RefKind::Base)
+                    && !matches!(
+                        self.resolve_path(f, defs[x].parent, &r.path, true),
+                        Some((Target::Def(_), _))
+                    )
+            });
+            if outside {
+                return true;
+            }
+            cur = defs[x].parent;
+        }
+        false
+    }
+
     fn has_outside_base(&self, c: DefRef) -> bool {
         !self.outside_bases(c).is_empty()
     }
@@ -4252,6 +4464,14 @@ impl<'a> Project<'a> {
                     .or_else(|| self.reopened_member(*c, name))
                     .or_else(|| self.deref_member(*c, name))
                     .or_else(|| self.embedded_field(*c, name))
+                    // an enum entry is a value of its enum: `Kind.CLASS.keyword`
+                    // is `Kind`'s (an entry with a body of its own answers first)
+                    .or_else(|| {
+                        let parent = d.parent.map(|x| (c.0, x))?;
+                        (d.kind == DefKind::EnumMember && self.def(parent).kind.is_class_like())
+                            .then(|| self.class_member(parent, name, 4))
+                            .flatten()
+                    })
                     .map(Target::Def)
             }
             Target::Module(files) => {
@@ -4553,6 +4773,11 @@ impl<'a> Project<'a> {
             }
         }
         found.or_else(|| {
+            // Kotlin: what the walk cannot type, called by the name of an
+            // extension the file sees, is that extension
+            if let Some(found) = self.visible_extension(f, d, path, bases) {
+                return Some(found);
+            }
             // an element (`xs[0].run()`) or a mapping (`xs.map { … }`) the
             // walk could not type is a receiver it cannot name: what is
             // called on it is found by a distinctive name alone
@@ -4763,6 +4988,18 @@ impl<'a> Project<'a> {
                     let skip = if rest.get(1).is_some_and(|s| s == "()") { 2 } else { 1 };
                     return self.walk(Target::Def(c), &rest[skip..], conf);
                 }
+                // Kotlin `x.apply { this.m() }`: `this` is the innermost
+                // receiver the walk can type, before the class around
+                if fam == Family::Jvm {
+                    let recv = *self.recv.borrow();
+                    if let Some((file, at)) = recv.filter(|(file, _)| *file == f) {
+                        let _ = file;
+                        if let Some((t, cf)) = self.receiver_type(f, d, at) {
+                            conf = conf.max(cf);
+                            return self.walk(Target::Def(t), rest, conf);
+                        }
+                    }
+                }
                 match self.class_of(f, d) {
                     // Rust `Self::Result` where the type has one `type Result`
                     // per `impl` (`impl Handler<A> for DbExecutor`, `impl
@@ -4894,6 +5131,33 @@ impl<'a> Project<'a> {
                         .unknown_receiver(f, &rest[0], on.as_deref())
                         .or_else(|| self.extension_method(f, &rest[0], on.as_deref()));
                 }
+                // an extension called on a local of a library type, with more
+                // after it: on through what the extension gives
+                // (`String::class.asClassName().constructorReference()`)
+                if rest.len() >= 3 && rest[1] == "()" && self.is_external_local(f, d, head) {
+                    let on = self.local_written_type(f, d, head);
+                    let calling = self.calling.replace(true);
+                    let ext = self.extension_method(f, &rest[0], on.as_deref());
+                    *self.calling.borrow_mut() = calling;
+                    if let Some((Target::Def(x), cf)) = ext {
+                        if self.def(x).receiver.is_some() {
+                            let (r, declared) = self.return_type(x)?;
+                            let cf = if declared { cf } else { cf.max(Confidence::Inferred) };
+                            let conf = conf.max(cf);
+                            if let Some(found) = self.walk(Target::Def(r), &rest[2..], conf) {
+                                return Some(found);
+                            }
+                            // (or an extension of what it gives:
+                            // `Int::class.asTypeName().jvmWildcard()`)
+                            if rest.len() == 3 {
+                                return self
+                                    .extension_for(f, &rest[2], r)
+                                    .map(|(t, c)| (t, conf.max(c)));
+                            }
+                            return None;
+                        }
+                    }
+                }
                 return self.extension_property_hop(f, rest, bases, conf);
             }
             // a local assigned something the walk cannot type (`let pool =
@@ -5008,6 +5272,19 @@ impl<'a> Project<'a> {
                         if let Some((t, cf)) = held {
                             conf = cf;
                             return Some(Target::Def(t));
+                        }
+                        // (a property of the name beside it: Kotlin `var
+                        // primaryConstructor: FunSpec?` beside `fun
+                        // primaryConstructor(…)`, `primaryConstructor?.parameter(n)`)
+                        if fam == Family::Jvm {
+                            let prop = self.class_of(f, d).and_then(|c| {
+                                self.members(c, head)
+                                    .into_iter()
+                                    .find(|m| self.def(*m).kind.is_state())
+                            });
+                            if let Some(p) = prop {
+                                return Some(Target::Def(p));
+                            }
                         }
                     }
                 }
@@ -5563,8 +5840,12 @@ impl<'a> Project<'a> {
                 }
                 // (what a project function gives is a library's value: no
                 // guess by the name called on it, `room(id).Submit(post)`)
+                // (Java, Kotlin: or a type parameter the receiver binds to a
+                // library's type, `response.body()?.repeat(5)` of a
+                // `Response<String>`)
                 let library = matches!(t, Target::Def(c) if fam == Family::Go
-                    && self.gives_library_type(c));
+                    && self.gives_library_type(c))
+                    || (fam == Family::Jvm && self.java_library_receiver(f, d, path));
                 if rest.len() == i + 2 && !bases && !library {
                     return self.unknown_receiver(f, &rest[i + 1], None);
                 }
@@ -5789,6 +6070,17 @@ impl<'a> Project<'a> {
                 None => {
                     // `self.repo.find()`: through the field's type
                     let Target::Def(c) = t else { return None };
+                    // Kotlin `x.apply { … }` / `x.also { … }` give `x` back
+                    // (a type with members of those names answers above)
+                    if fam == Family::Jvm
+                        && matches!(seg.as_str(), "apply" | "also")
+                        && rest.get(i + 1).is_some_and(|s| s == "()")
+                        && i + 2 < rest.len()
+                        && self.def(c).kind.is_class_like()
+                    {
+                        skip = 1;
+                        continue;
+                    }
                     // Lombok: `getTags()` / `setTags(…)` / `isActive()` of a
                     // class annotated `@Data`, `@Getter`, `@Setter` or `@Value`
                     // is the field it reads or writes
@@ -5806,8 +6098,29 @@ impl<'a> Project<'a> {
                     }
                     // the last name is no member of the type: an extension
                     // written for it (`typeSpec.trimmedToString()`)
-                    if self.def(c).kind.is_class_like() && i + 1 == rest.len() && !bases {
+                    // (also while a value is typed, which asks for types:
+                    // `val best = ClassName(…).member("x")`)
+                    let extensions = !bases || *self.calling.borrow();
+                    if self.def(c).kind.is_class_like() && i + 1 == rest.len() && extensions {
                         return self.extension_for(f, seg, c);
+                    }
+                    // one called in the middle of a chain: the `()` after it
+                    // gives what it returns (`PropertySpec.builder(…)
+                    // .addOriginatingKSFile(f).mutable(…)`)
+                    if self.def(c).kind.is_class_like()
+                        && rest.get(i + 1).is_some_and(|s| s == "()")
+                        && extensions
+                    {
+                        let calling = self.calling.replace(true);
+                        let ext = self.extension_for(f, seg, c);
+                        *self.calling.borrow_mut() = calling;
+                        if let Some((Target::Def(x), cf)) = ext {
+                            if self.def(x).receiver.is_some() {
+                                conf = conf.max(cf);
+                                t = Target::Def(x);
+                                continue;
+                            }
+                        }
                     }
                     if !self.def(c).kind.is_class_like() || i + 1 == rest.len() {
                         return None;
@@ -6483,9 +6796,13 @@ impl<'a> Project<'a> {
         } else if c.0 != f && test(c.0, cd) && !crate::community::is_test_path(&self.files[f].path)
         {
             Some("the one definition is test code, the call is not")
+        } else if fam == Family::Jvm && self.plugin_member(f, d, &r.path) {
+            // (`UserResponse.serializer()` of a `@Serializable` class)
+            Some("the member is one a compiler plugin generates")
         } else if matches!(head, "self" | "super")
             && r.path.len() == 2
-            && self.class_of(f, d).is_some_and(|t| self.has_outside_base(t))
+            && (self.class_of(f, d).is_some_and(|t| self.has_outside_base(t))
+                || self.anonymous_outside_base(f, d))
         {
             // (`$this->fail()` in a PHPUnit test, `self.assertEqual()`)
             Some("the type around has a base the project does not define")
@@ -7033,7 +7350,8 @@ impl<'a> Project<'a> {
     /// `IRestClient`): that is what the language calls. Else what
     /// `extension_method` makes of the type's own name.
     fn extension_for(&self, f: usize, name: &str, c: DefRef) -> Option<(Target, Confidence)> {
-        let own = self.extension_method(f, name, Some(&self.def(c).name));
+        // (by the qualified name: `PropertySpec.Builder`, not every `Builder`)
+        let own = self.extension_method(f, name, Some(&self.def(c).qualname));
         if matches!(own, Some((_, Confidence::Extracted))) {
             return own;
         }
@@ -7050,7 +7368,7 @@ impl<'a> Project<'a> {
                 }
             }
             for b in &next {
-                let found = self.extension_method(f, name, Some(&self.def(*b).name));
+                let found = self.extension_method(f, name, Some(&self.def(*b).qualname));
                 if matches!(found, Some((_, Confidence::Extracted))) {
                     return found;
                 }
@@ -7128,7 +7446,7 @@ impl<'a> Project<'a> {
                 .copied()
                 .filter(|r| {
                     let written = self.def(*r).receiver.clone().or_else(|| self.extended_type(*r));
-                    written.is_some_and(|t| t.eq_ignore_ascii_case(on))
+                    written.is_some_and(|t| receiver_matches(&t, on))
                 })
                 .collect();
             let mine: Vec<DefRef> = exact.iter().copied().filter(|r| r.0 == f).collect();
@@ -8454,6 +8772,165 @@ fn scope(x: usize) -> Option<usize> {
 
 /// Rust's own types, as a parameter writes them (`uri: &str`): a receiver of
 /// one is the language's.
+/// Whether an extension's written receiver (`PropertySpec.Builder`, `Builder`,
+/// `string`) is the type `on` names, written bare or qualified: equal, or one a
+/// dotted suffix of the other.
+fn receiver_matches(written: &str, on: &str) -> bool {
+    let suffix = |long: &str, short: &str| {
+        long.len() > short.len()
+            && long.ends_with(short)
+            && long.as_bytes()[long.len() - short.len() - 1] == b'.'
+    };
+    written.eq_ignore_ascii_case(on) || suffix(written, on) || suffix(on, written)
+}
+
+/// Kotlin: names the standard library's types and scope functions answer to,
+/// never taken for a project extension on a receiver the walk cannot type.
+const KOTLIN_CORE_METHODS: &[&str] = &[
+    "let",
+    "apply",
+    "also",
+    "run",
+    "with",
+    "takeIf",
+    "takeUnless",
+    "use",
+    "map",
+    "mapNotNull",
+    "flatMap",
+    "filter",
+    "filterNot",
+    "filterIsInstance",
+    "first",
+    "firstOrNull",
+    "last",
+    "lastOrNull",
+    "single",
+    "singleOrNull",
+    "find",
+    "forEach",
+    "forEachIndexed",
+    "any",
+    "all",
+    "none",
+    "count",
+    "sum",
+    "sumOf",
+    "toList",
+    "toMutableList",
+    "toSet",
+    "toMutableSet",
+    "toMap",
+    "toMutableMap",
+    "toTypedArray",
+    "joinToString",
+    "plus",
+    "minus",
+    "contains",
+    "get",
+    "set",
+    "getOrNull",
+    "getOrElse",
+    "getOrPut",
+    "isEmpty",
+    "isNotEmpty",
+    "isNullOrEmpty",
+    "isNullOrBlank",
+    "isBlank",
+    "isNotBlank",
+    "orEmpty",
+    "repeat",
+    "toString",
+    "equals",
+    "hashCode",
+    "compareTo",
+    "sortedBy",
+    "sortedWith",
+    "sorted",
+    "groupBy",
+    "associate",
+    "associateBy",
+    "associateWith",
+    "distinct",
+    "reversed",
+    "zip",
+    "asSequence",
+    "iterator",
+    "trim",
+    "split",
+    "replace",
+    "startsWith",
+    "endsWith",
+    "substring",
+    "lowercase",
+    "uppercase",
+    "format",
+    "toInt",
+    "toLong",
+    "toDouble",
+    "toBoolean",
+    "copy",
+    "invoke",
+    "add",
+    "addAll",
+    "remove",
+    "removeAll",
+    "clear",
+    "put",
+    "putAll",
+    "require",
+    "check",
+    "error",
+    "lazy",
+];
+
+/// Kotlin: the types every file sees without an import (`kotlin.*`,
+/// `kotlin.collections.*`, …).
+const KOTLIN_IMPLICIT_TYPES: &[&str] = &[
+    "String",
+    "Int",
+    "Long",
+    "Short",
+    "Byte",
+    "Double",
+    "Float",
+    "Boolean",
+    "Char",
+    "Any",
+    "Unit",
+    "Nothing",
+    "Number",
+    "Array",
+    "List",
+    "MutableList",
+    "Map",
+    "MutableMap",
+    "Set",
+    "MutableSet",
+    "Collection",
+    "MutableCollection",
+    "Iterable",
+    "Sequence",
+    "Pair",
+    "Triple",
+    "Regex",
+    "CharSequence",
+    "Comparable",
+    "Throwable",
+    "Exception",
+    "Lazy",
+    "Result",
+    "StringBuilder",
+    "IntArray",
+    "ByteArray",
+    "LongArray",
+    "ArrayList",
+    "HashMap",
+    "HashSet",
+    "LinkedHashMap",
+    "LinkedHashSet",
+];
+
 /// Java: the types of `java.lang`, which every file sees without an import.
 const JAVA_LANG_TYPES: &[&str] = &[
     "String",

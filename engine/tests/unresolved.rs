@@ -396,3 +396,37 @@ fn java_rows_on_library_fields_java_lang_and_qualified_names_say_so() {
     assert_eq!(why("message"), "the head is a library's type or global", "{rows:#?}");
     assert_eq!(why("lonely"), Value::Null, "{rows:#?}");
 }
+
+#[test]
+fn kotlin_rows_on_plugin_members_library_values_and_anonymous_bases_say_so() {
+    let dir = project(
+        "ktmarks",
+        &[
+            ("src/app/A.kt", "package app\n\nimport kotlinx.serialization.Serializable\nimport kotlinx.serialization.SerialFormat\nimport javax.tools.JavaFileObject\nimport javax.lang.model.util.SimpleTypeVisitor8\n\n@Serializable\ndata class UserResponse(val name: String)\n\nclass Response<T> {\n  fun body(): T? = null\n}\n\nclass Spec {\n  fun toJavaFileObject(): JavaFileObject = TODO()\n}\n\nabstract class Ser {\n  protected abstract val format: SerialFormat\n  fun module() = format.serializersModule.moduleOf()\n}\n\nclass Own { fun lonely() {} }\n\nfun visit(t: Any) = t.accept(object : SimpleTypeVisitor8<Int, Void?>() {\n  override fun visitNoType(t: Any, p: Void?): Int = super.visitUnknownType(t, p)\n}, null)\n\nfun use(response: Response<String>, spec: Spec, own: Own) {\n  UserResponse.serializer()\n  response.body()?.repeatIt(5)\n  val o = spec.toJavaFileObject()\n  o.getCharContentOf(true)\n  own.lonely()\n}\n"),
+            ("src/app/B.kt", "package app\n\nclass Other {\n  fun serializer(): Int = 0\n  fun repeatIt(n: Int) {}\n  fun getCharContentOf(b: Boolean) {}\n  fun moduleOf() {}\n  fun visitUnknownType(t: Any, p: Any?): Int = 0\n}\n"),
+        ],
+    );
+    let out = dir.join("unresolved.json");
+    let mut opts = BuildOptions::new(&dir);
+    opts.unresolved = Some(out.clone());
+    build_graph(&opts).unwrap();
+    let rows: Vec<Value> = serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+    let why = |name: &str| {
+        rows.iter()
+            .find(|r| r["name"] == name)
+            .map(|r| r["library_like"].clone())
+            .unwrap_or_else(|| panic!("no row {name}: {rows:#?}"))
+    };
+    assert_eq!(why("serializer"), "the member is one a compiler plugin generates", "{rows:#?}");
+    for name in ["repeatIt", "getCharContentOf", "moduleOf"] {
+        assert_eq!(why(name), "the receiver is a library's", "{name}: {rows:#?}");
+    }
+    assert_eq!(
+        why("visitUnknownType"),
+        "the type around has a base the project does not define",
+        "{rows:#?}"
+    );
+    // (`own.lonely()` resolves: no row)
+    assert!(!rows.iter().any(|r| r["name"] == "lonely"), "{rows:#?}");
+}

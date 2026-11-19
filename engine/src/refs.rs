@@ -112,6 +112,11 @@ fn receiver_word(t: &str) -> Option<&'static str> {
 
 pub fn path_of(n: Node, src: &[u8]) -> Option<Vec<String>> {
     let k = n.kind();
+    // Kotlin `String::class`: a class literal, a local of the library's
+    // `KClass` type (no call: `callable_reference` reads like one)
+    if is_class_literal(n, src) {
+        return Some(vec![cast_local(n)]);
+    }
     if SELF_KINDS.contains(&k) {
         return Some(vec![if k == "crate" { "crate".into() } else { "self".into() }]);
     }
@@ -305,6 +310,9 @@ pub fn is_call_kind(k: &str) -> bool {
 /// The callee of a call node, and whether it constructs (`new`).
 pub fn callee(n: Node, src: &[u8]) -> Option<(RefKind, Vec<String>)> {
     let k = n.kind();
+    if is_class_literal(n, src) {
+        return None;
+    }
     if matches!(
         k,
         "new_expression"
@@ -755,6 +763,21 @@ fn cast_local(cast: Node) -> String {
     format!("{CAST}@{}", cast.start_byte())
 }
 
+/// Kotlin's class literal: `String::class` (a `callable_reference`) or
+/// `Thread.State::class` (a navigation whose last suffix is `::class`).
+fn is_class_literal(n: Node, src: &[u8]) -> bool {
+    match n.kind() {
+        "callable_reference" => text(n, src).ends_with("::class"),
+        "navigation_expression" => kids(n)
+            .last()
+            .is_some_and(|s| s.kind() == "navigation_suffix" && text(*s, src) == "::class"),
+        _ => false,
+    }
+}
+
+/// The type of the local a Kotlin class literal is.
+pub const CLASS_LITERAL_TYPE: &str = "KClass";
+
 /// The head of the local a parenthesized cast is.
 pub const CAST: &str = "(cast)";
 
@@ -1073,7 +1096,21 @@ fn receiver_lambda(n: Node, src: &[u8]) -> Option<(usize, usize, crate::facts::R
     let last = path.last()?.as_str();
     let of = match last {
         // the scope functions whose lambda has the value as its receiver
-        "apply" | "run" if path.len() > 1 => ReceiverOf::Value(path[..path.len() - 1].to_vec()),
+        "apply" | "run" if path.len() > 1 => {
+            let value = path[..path.len() - 1].to_vec();
+            // (`ctx.receive<UserDTO>().apply { … }`: the type argument of the
+            // call the value is)
+            let given = kids(n)
+                .into_iter()
+                .find(|c| c.kind() == "navigation_expression")
+                .and_then(|nav| kids(nav).into_iter().next())
+                .filter(|v| v.kind() == "call_expression")
+                .and_then(|v| given_type(v, src));
+            match given {
+                Some(g) => ReceiverOf::Given(value, g),
+                None => ReceiverOf::Value(value),
+            }
+        }
         "with" if path.len() == 1 => {
             let args = ks.iter().find(|c| c.kind() == "value_arguments")?;
             let arg = kids(*args).into_iter().next()?;
@@ -1174,6 +1211,26 @@ fn body_value(n: Node) -> Option<Node> {
         }
         _ => None,
     }
+}
+
+/// The values a Kotlin `if` expression gives: the last expression of each
+/// branch, when it has an `else` (nothing for a nested `if` or `when`).
+fn branch_values(v: Node) -> Vec<Node> {
+    if v.kind() != "if_expression" || v.child_by_field_name("alternative").is_none() {
+        return Vec::new();
+    }
+    ["consequence", "alternative"]
+        .iter()
+        .filter_map(|f| v.child_by_field_name(f))
+        .filter_map(|b| {
+            let inner = kids(b).into_iter().rfind(|c| !is_comment(c))?;
+            if inner.kind() == "statements" {
+                kids(inner).into_iter().rfind(|c| !is_comment(c))
+            } else {
+                Some(inner)
+            }
+        })
+        .collect()
 }
 
 /// What a returned value constructs or calls; `self` for the object itself.
@@ -1949,7 +2006,12 @@ type ClosureScope = (usize, usize, Vec<(String, Vec<String>, bool)>);
 /// inside the closure, and a local of that name: `r` in `func(w
 /// http.ResponseWriter, r *http.Request) { … }` is the request there and
 /// whatever `r` was outside, and an untyped block parameter is no outer name.
-fn bind_closure_params(closures: &[ClosureScope], refs: &mut [RefFact], locals: &mut Vec<Local>) {
+fn bind_closure_params(
+    closures: &[ClosureScope],
+    given: &HashMap<usize, Vec<String>>,
+    refs: &mut [RefFact],
+    locals: &mut Vec<Local>,
+) {
     if closures.is_empty() {
         return;
     }
@@ -1975,14 +2037,14 @@ fn bind_closure_params(closures: &[ClosureScope], refs: &mut [RefFact], locals: 
         if !used[i] {
             continue;
         }
-        for (name, path, declared) in params {
+        for (k, (name, path, declared)) in params.iter().enumerate() {
             locals.push(Local {
                 name: format!("{name}@{start}"),
                 path: path.clone(),
                 declared: *declared,
                 field: false,
                 assigned: false,
-                given: None,
+                given: given.get(start).filter(|_| k == 0 && !*declared).cloned(),
                 elem: None,
                 value_args: Vec::new(),
                 sealed: false,
@@ -2307,7 +2369,11 @@ fn locals_of(n: Node, src: &[u8], in_params: bool) -> Vec<(String, Vec<String>, 
             kids(n)
                 .into_iter()
                 .find(|c| {
-                    matches!(c.kind(), "user_type" | "type_annotation" | "named_type" | "type")
+                    // (Kotlin `user: User? = null`: a nullable type)
+                    matches!(
+                        c.kind(),
+                        "user_type" | "type_annotation" | "named_type" | "type" | "nullable_type"
+                    )
                 })
                 .and_then(|t| first_type(t, src))
         });
@@ -2823,6 +2889,9 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
     let mut anc: Vec<Node> = Vec::new();
     // closures that are no definitions: (start, end, the names they bind)
     let mut closures: Vec<ClosureScope> = Vec::new();
+    // the type handed to the call a Kotlin `let` / `also` lambda's receiver
+    // is, by the lambda's first byte
+    let mut closure_given: HashMap<usize, Vec<String>> = HashMap::new();
     // Go: variables holding a slice of an anonymous struct, and the loops over
     // one (`(start, end, name, fields)`)
     let mut anon_vars: Vec<AnonRows> = Vec::new();
@@ -2959,6 +3028,13 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                 if let Some(v) = body_value(n) {
                     if let Some(path) = returned_path(v, src) {
                         note_return(&mut facts.defs[di], path);
+                    }
+                    // Kotlin `fun f() = if (c) { a() } else { b() }`: what each
+                    // branch ends with (they must agree to type anything)
+                    for b in branch_values(v) {
+                        if let Some(path) = returned_path(b, src) {
+                            note_return(&mut facts.defs[di], path);
+                        }
                     }
                     note_parts(&mut facts.defs[di], v, src);
                     note_members(&mut facts.defs[di], v, src);
@@ -3193,10 +3269,27 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
             closures.extend(arm_scopes(n, src));
         }
         // `((WildcardType) type).getLowerBounds()`: a local of the type the
-        // cast writes, which `path_of` names
-        if n.kind() == "parenthesized_expression" {
-            if let Some(c) = kids(n).into_iter().find(|c| is_cast(*c)) {
-                if let Some(path) = value_type(c, src) {
+        // cast writes, which `path_of` names (and Kotlin's `X::class`, a
+        // `KClass`)
+        let class_literal = is_class_literal(n, src);
+        // (the class a literal names is a type it refers to:
+        // `retrofit.create(Service::class.java)`)
+        if class_literal {
+            let named = kids(n).into_iter().next().and_then(|c| path_of(c, src));
+            if let Some(p) = named.filter(|p| p.first().is_some_and(|h| h != UNKNOWN)) {
+                push(&mut refs, n, RefKind::Type, p, "class_literal", None);
+            }
+        }
+        if n.kind() == "parenthesized_expression" || class_literal {
+            let cast =
+                if class_literal { Some(n) } else { kids(n).into_iter().find(|c| is_cast(*c)) };
+            if let Some(c) = cast {
+                let path = if class_literal {
+                    Some(vec![CLASS_LITERAL_TYPE.to_string()])
+                } else {
+                    value_type(c, src)
+                };
+                if let Some(path) = path {
                     locals.push(Local {
                         name: cast_local(c),
                         path,
@@ -3317,6 +3410,27 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                                 names,
                             ));
                         }
+                    }
+                }
+                // Kotlin `request.tag(Invocation::class.java)?.let { invocation
+                // -> … }`: the type the receiver's call is handed, which
+                // `given_result` checks before it types the parameter
+                if facts.lang == Some(crate::lang::Lang::Kotlin) {
+                    let call = anc.iter().rev().take(4).find(|a| a.kind() == "call_expression");
+                    let given = call
+                        .filter(|c| {
+                            callee(**c, src).is_some_and(|(_, p)| {
+                                p.last().is_some_and(|l| matches!(l.as_str(), "let" | "also"))
+                            })
+                        })
+                        .and_then(|c| {
+                            kids(*c).into_iter().find(|k| k.kind() == "navigation_expression")
+                        })
+                        .and_then(|nav| kids(nav).into_iter().next())
+                        .filter(|v| v.kind() == "call_expression")
+                        .and_then(|v| given_type(v, src));
+                    if let Some(g) = given {
+                        closure_given.insert(body.start_byte(), g);
                     }
                 }
                 closures.push((body.start_byte(), body.end_byte(), params));
@@ -3944,7 +4058,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
         }
     }
     bind_anonymous_fields(&anon_loops, &mut refs, &mut locals);
-    bind_closure_params(&closures, &mut refs, &mut locals);
+    bind_closure_params(&closures, &closure_given, &mut refs, &mut locals);
     facts.receivers = bind_receivers(&receivers, &mut refs);
     // the innermost definition around each use (a sweep: defs are in source
     // pre-order, so a stack of open ranges is the chain of ancestors)
@@ -4275,6 +4389,8 @@ fn mapped(of: &[String], var: &str, each: Vec<String>) -> Option<Vec<String>> {
 /// `&:owner`).
 fn referenced(f: Node, src: &[u8]) -> Option<Vec<String>> {
     match f.kind() {
+        // (Kotlin `String::class` is a class literal, no function)
+        "callable_reference" if text(f, src).ends_with("::class") => None,
         "callable_reference" | "method_reference" => {
             let ks: Vec<Node> = kids(f).into_iter().filter(|c| !is_comment(c)).collect();
             let (last, of) = ks.split_last()?;

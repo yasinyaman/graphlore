@@ -2374,3 +2374,58 @@ fn java_casts_constructor_heads_and_java_lang_receivers() {
         "{got:#?}"
     );
 }
+
+#[test]
+fn kotlin_visible_extensions_class_literals_receivers_and_enum_entries() {
+    // An extension the file sees (imported, or of its package) is what a
+    // receiver the walk cannot type calls by its name; an extension written
+    // for `PropertySpec.Builder` is not `AliasSpec.Builder`'s; `String::class`
+    // is a `KClass` (no call of `String`); an enum entry has its enum's
+    // members; a property beside a method of its name is the property; a
+    // body property beside a plain constructor parameter of its name holds
+    // its own value; `x.apply { … }` and `ctx.receive<T>().apply { this.m() }`
+    // keep and give the type; an `if` expression body gives what both
+    // branches call
+    let got = links("ktext", &[
+        ("src/app/util/Opt.kt", "package app.util\n\nclass Optional<T>(val v: T?)\n\nfun <T : Any> T?.toOptional(): Optional<T> = Optional(this)\n\nfun String.isEmailValid(): Boolean = this.isNotBlank()\n"),
+        ("src/other/Hidden.kt", "package other\n\nfun Int.lonelyExt(): Int = this\n"),
+        ("src/app/Specs.kt", "package app\n\nimport app.util.toOptional\nimport app.util.isEmailValid\nimport kotlin.reflect.KClass\n\nclass PropertySpec {\n  class Builder {\n    fun mutable(b: Boolean): Builder = this\n  }\n  companion object {\n    fun builder(n: String): Builder = Builder()\n  }\n}\n\nclass AliasSpec {\n  class Builder {\n    fun mutable(b: Boolean): Builder = this\n  }\n}\n\nfun AliasSpec.Builder.addFile(x: Int): AliasSpec.Builder = this\nfun PropertySpec.Builder.addFile(x: Int): PropertySpec.Builder = this\n\nclass FunSpec {\n  fun parameter(n: String): Int = 0\n}\n\nclass TypeSpec {\n  enum class Kind(val keyword: String) {\n    CLASS(\"class\");\n\n    fun implicitModifiers(): Set<String> = setOf()\n  }\n  class Builder {\n    var primaryConstructor: FunSpec? = null\n    fun primaryConstructor(p: FunSpec?): Builder = this\n    fun addInitializerBlock(): Builder = this\n    fun go() {\n      primaryConstructor?.parameter(\"x\")\n    }\n  }\n  companion object {\n    fun classBuilder(n: String): Builder = Builder()\n  }\n}\n\nclass LineWrapper(out: Appendable) {\n  fun newline() {}\n}\n\nclass CodeWriter(out: Appendable) {\n  private var out = LineWrapper(out)\n  fun emit() {\n    out.newline()\n  }\n}\n\nclass ClassName {\n  fun constructorReference(): Int = 0\n}\n\nfun KClass<*>.asClassName(): ClassName = ClassName()\nfun Class<*>.asClassName(): ClassName = ClassName()\n\nclass User(val email: String)\n\nclass UserDTO(val user: User? = null) {\n  fun validLogin(): Int = 0\n}\n\nclass Uses(private val flag: Boolean) {\n  private fun classBuilder() =\n    if (flag) {\n      TypeSpec.classBuilder(\"a\")\n    } else {\n      TypeSpec.classBuilder(\"b\")\n    }\n\n  fun all(names: List<String>, dto: UserDTO, ctx: io.ktor.ApplicationCall, n: Int) {\n    names.asSequence().find { it == \"a\" }.toOptional()\n    dto.user!!.email.isEmailValid()\n    n.lonelyExt()\n    PropertySpec.builder(\"x\").addFile(1).apply { }.mutable(true)\n    TypeSpec.Kind.CLASS.implicitModifiers()\n    classBuilder().primaryConstructor(null).addInitializerBlock()\n    ctx.receive<UserDTO>().apply { this.validLogin() }\n    String::class.asClassName().constructorReference()\n  }\n}\n"),
+        ("src/other/Decoy.kt", "package other\n\nclass Decoy {\n  fun toOptional(): Int = 0\n  fun isEmailValid(): Boolean = true\n  fun mutable(b: Boolean) {}\n  fun parameter(n: String) {}\n  fun newline() {}\n  fun implicitModifiers(): Int = 0\n  fun addInitializerBlock() {}\n  fun validLogin(): Int = 0\n  fun constructorReference(): Int = 0\n}\n"),
+    ]);
+    let to = |s: &str, t: &str| got.iter().any(|(a, r, b, _)| a == s && r == "calls" && b == t);
+    for (s, t) in [
+        ("src_app_specs_uses_all", "src_app_util_opt_tooptional"),
+        ("src_app_specs_uses_all", "src_app_util_opt_isemailvalid"),
+        ("src_app_specs_uses_all", "src_app_specs_addfile_2"),
+        ("src_app_specs_uses_all", "src_app_specs_propertyspec_builder_mutable"),
+        ("src_app_specs_uses_all", "src_app_specs_typespec_kind_implicitmodifiers"),
+        ("src_app_specs_uses_all", "src_app_specs_typespec_builder_addinitializerblock"),
+        ("src_app_specs_uses_all", "src_app_specs_userdto_validlogin"),
+        ("src_app_specs_uses_all", "src_app_specs_asclassname"),
+        ("src_app_specs_uses_all", "src_app_specs_classname_constructorreference"),
+        ("src_app_specs_typespec_builder_go", "src_app_specs_funspec_parameter"),
+        ("src_app_specs_codewriter_emit", "src_app_specs_linewrapper_newline"),
+    ] {
+        assert!(to(s, t), "{s} -> {t}: {got:#?}");
+    }
+    for (s, t) in [
+        ("src_app_specs_uses_all", "src_other_decoy_decoy_tooptional"),
+        ("src_app_specs_uses_all", "src_other_decoy_decoy_isemailvalid"),
+        ("src_app_specs_uses_all", "src_other_hidden_lonelyext"),
+        ("src_app_specs_uses_all", "src_app_specs_addfile"),
+        ("src_app_specs_uses_all", "src_app_specs_aliasspec_builder_mutable"),
+        ("src_app_specs_uses_all", "src_other_decoy_decoy_validlogin"),
+        ("src_app_specs_uses_all", "src_app_specs_asclassname_2"),
+        ("src_app_specs_uses_all", "src_app_specs_string"),
+    ] {
+        assert!(!to(s, t), "{s} -> {t}: {got:#?}");
+    }
+    // (a class literal is a type it refers to, no call)
+    assert!(
+        !got.iter().any(|(a, r, b, _)| a == "src_app_specs_uses_all"
+            && r == "calls"
+            && b.starts_with("ext_")
+            && b.ends_with("string")),
+        "{got:#?}"
+    );
+}
