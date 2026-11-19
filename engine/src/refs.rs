@@ -2424,13 +2424,35 @@ fn locals_of(n: Node, src: &[u8], in_params: bool) -> Vec<(String, Vec<String>, 
     }
     match k {
         // `x = Foo()`, `self.x = Foo()`, `$x = new Foo`, `@x = Foo.new`
+        // PHP `/** @var \App\Entity\Post $post */` over `$post = …;`: the
+        // type the docblock states is the local's declared type
+        "expression_statement" => {
+            let Some(e) = n.named_child(0).filter(|e| e.kind() == "assignment_expression") else {
+                return out;
+            };
+            let Some(l) = e.child_by_field_name("left").filter(|l| l.kind() == "variable_name")
+            else {
+                return out;
+            };
+            let Some(doc) = n.prev_named_sibling().filter(|c| c.kind() == "comment") else {
+                return out;
+            };
+            let Some(name) = bound_name(l, src) else { return out };
+            if let Some(ty) = php_var_doc(&text(doc, src), &name) {
+                out.push((name, ty, true, false));
+            }
+        }
         "assignment" | "assignment_expression" => {
             let (Some(l), Some(r)) =
                 (n.child_by_field_name("left"), n.child_by_field_name("right"))
             else {
                 return out;
             };
-            let Some(ty) = value_type(r, src) else {
+            // (PHP `$this->request = $request;`: the field holds what the
+            // variable holds, a parameter's written type)
+            let php_variable = r.kind() == "variable_name" && is_self_member(l, src).is_some();
+            let ty = value_type(r, src).or_else(|| php_variable.then(|| vec![text(r, src)]));
+            let Some(ty) = ty else {
                 // assigned something the walk cannot type: still a local that
                 // shadows outer names
                 if matches!(l.kind(), "identifier" | "variable_name") {
@@ -4175,6 +4197,37 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
     facts.refs = refs;
     facts.imports = imports;
     facts.locals = locals;
+}
+
+/// The type a PHP `/** @var T $name */` docblock states for `name` (or a
+/// bare `/** @var T */`): `?T` and `T|null` are `T`; an array, a generic, a
+/// union of two types or a scalar states no class.
+fn php_var_doc(doc: &str, name: &str) -> Option<Vec<String>> {
+    if !doc.starts_with("/**") {
+        return None;
+    }
+    let rest = doc.split("@var").nth(1)?;
+    let mut words = rest.split_whitespace();
+    let ty = words.next()?.trim_end_matches("*/");
+    if let Some(v) = words.next().filter(|w| w.starts_with('$')) {
+        if v.trim_start_matches('$') != name.trim_start_matches('$') {
+            return None;
+        }
+    }
+    let parts: Vec<&str> =
+        ty.trim_start_matches('?').split('|').filter(|p| !p.eq_ignore_ascii_case("null")).collect();
+    let [ty] = parts.as_slice() else { return None };
+    if ty.is_empty() || ty.contains(['[', '<', '{', '(', '&']) {
+        return None;
+    }
+    let path: Vec<String> = ty.split('\\').filter(|p| !p.is_empty()).map(str::to_string).collect();
+    let last = path.last()?;
+    if !last.chars().next().is_some_and(|c| c.is_ascii_uppercase())
+        || path.iter().any(|p| !p.chars().all(|c| c.is_alphanumeric() || c == '_'))
+    {
+        return None;
+    }
+    Some(path)
 }
 
 /// The head of the path of a Swift implicit member expression (`.name`).

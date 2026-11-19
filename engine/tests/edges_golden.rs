@@ -350,6 +350,35 @@ fn php_variables_are_typed_by_what_they_are_assigned() {
 }
 
 #[test]
+fn php_docblock_types_and_names_relative_to_the_files_namespace() {
+    // `/** @var \App\Entity\Post $post */` types the local it is written
+    // over; `Handler\Check::run()` in `namespace App;` is `App\Handler\Check`,
+    // also beside a `namespace App\Handler { … }` block of another file. A
+    // `Page::getTitle` and a second `run` are decoys
+    let got = calls_conf("phpdoc", &[
+        ("src/Entity/Post.php", "<?php\nnamespace App\\Entity;\n\nclass Post\n{\n    public function getTitle() { return 1; }\n}\n"),
+        ("src/Entity/Page.php", "<?php\nnamespace App\\Entity;\n\nclass Page\n{\n    public function getTitle() { return 2; }\n}\n"),
+        ("src/Handler/Check.php", "<?php\nnamespace App\\Handler;\n\nclass Check\n{\n    public static function run() { return 1; }\n}\n"),
+        ("src/Other/Runner.php", "<?php\nnamespace App\\Other;\n\nclass Runner\n{\n    public static function run() { return 2; }\n}\n"),
+        ("tests/bootstrap.php", "<?php\nnamespace App\\Handler {\n    function curl_setopt($h) { return true; }\n}\n"),
+        ("src/Show.php", "<?php\nnamespace App;\n\nclass Show\n{\n    public function title($repo)\n    {\n        /** @var \\App\\Entity\\Post $post */\n        $post = $repo->find(1);\n        return $post->getTitle();\n    }\n\n    public function check()\n    {\n        return Handler\\Check::run();\n    }\n}\n"),
+    ]);
+    let to = |from: &str| -> Vec<(String, String)> {
+        got.iter().filter(|(s, ..)| s == from).map(|(_, t, c)| (t.clone(), c.clone())).collect()
+    };
+    assert_eq!(
+        to(".title()"),
+        [("src_entity_post_post_gettitle".to_string(), "EXTRACTED".to_string())],
+        "{got:#?}"
+    );
+    assert_eq!(
+        to(".check()"),
+        [("src_handler_check_check_run".to_string(), "EXTRACTED".to_string())],
+        "{got:#?}"
+    );
+}
+
+#[test]
 fn an_untyped_local_hides_outer_names_and_super_in_a_test_module_is_the_file() {
     // `pool.get(…)` on a local the walk cannot type is not the crate's `get`,
     // which `use super::*` in `mod tests` used to bring into the file's scope

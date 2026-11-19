@@ -788,7 +788,7 @@ that the native graph has too:
 | C++ | 98.7% | 215 / 228 (93%) | 765 / 281 (29%)⁴ | 30 / 5 (100%) | 350 / 234 (88%) |
 | C/C++ headers | 91.4% | 164 / 172 (95%) | 372 / 348 (84%) | 12 / 12 (92%) | 563 / 312 (90%) |
 | Ruby | 99.7% | 42 / 0 | 441 / 375 (69%) | 46 / 15 (93%) | 28 / 0 |
-| PHP | 80.6% | 429 / 505 (84%) | 8,873 / 6,140 (90%) | 65 / 60 (98%) | 648 / 213 (95%) |
+| PHP | 80.6% | 429 / 505 (84%) | 8,871 / 6,140 (90%) | 65 / 60 (98%) | 657 / 213 (95%) |
 | **All** | **94.4%** | **4,967 / 5,565 (75%)** | **45,160 / 27,845 (85%)** | **1,152 / 726 (97%)** | **12,600 / 6,815 (89%)** |
 
 Of the native calls, 12,500 (28%) are `INFERRED`, against 47% of graphify's.
@@ -1168,6 +1168,41 @@ restsharp's calls change most: some 230 `INFERRED` edges become `EXTRACTED`
 the constructors of `RestRequest` are reached (155 calls). C#'s calls go
 from 2,859 to 3,073 (97% of graphify's). C#'s unmarked rows: 76 → 0; in
 all, 527 → 451.
+
+Engine 0.5.47 (PHP) takes PHP's 137 unmarked rows to none. Most were PSR-7
+names (`getHeaderLine`, `hasHeader`, `getBody`) on values the source types
+as a library's, and PHP's own functions:
+
+- **Docblock types.** `/** @var \App\Entity\Post $post */` over `$post =
+  …;` declares the local's type (`refs::php_var_doc`; `?T` and `T|null` are
+  `T`, an array, a generic or a union names nothing). symfony-demo's tests
+  and controllers reach `Post::getTitle()` and `User::getEmail()`, and 11
+  `INFERRED` edges become `EXTRACTED`.
+- **Names relative to the file's namespace.** `Handler\HostValidator::
+  isNumericIpv4Host()` in `namespace GuzzleHttp;` is
+  `GuzzleHttp\Handler\HostValidator`, also when another file opens a
+  `namespace GuzzleHttp\Handler { … }` block, which holds only its own
+  block's names.
+- **A property assigned a parameter.** `private $request;` with
+  `$this->request = $request;` in the constructor holds what the parameter
+  is declared with; a property whose declaration writes its type keeps that
+  type (`protected Article $article;`).
+- **Marks.** A bare call whose one definition is a method (`rewind($fp)`,
+  `getenv(…)`: PHP's functions); a receiver that is a library's value — a
+  local or property declared with a library type or a class of the global
+  namespace (`new \ReflectionProperty(…)`), what a project method declared
+  to give one returns anywhere along the path
+  (`$mock->getLastRequest()->getUri()->getQuery()`, an invokable's
+  `__invoke`, a member only subclasses declare); a project type taking the
+  member from its library base or trait (`ChunkedBodyStream` uses
+  `StreamDecoratorTrait`; `(new RedirectTestMethodRequest(…))->withBody()`);
+  a local holding what a library's call gives (`$cacheMethod->invoke(…)`,
+  Doctrine's `findOneBy`).
+
+guzzle loses 9 `INFERRED` edges to its `UnvalidatedUriRequest` test double,
+guesses on PSR-7 responses, which are rows now (marked). PHP's calls: 8,871
+(90% of graphify's). Unmarked rows in all: 451 → 314 (Ruby 239, Swift 59,
+Python 9, Scala 4, TSX 3); rows in all 5,838.
 Engine 0.5.35 (C function-pointer slots) reads a struct of function pointers
 as an interface and what is put in its slots as the implementations: an
 initializer of a variable, by name (`.async_read = redisAsyncRead`) or by
@@ -1628,7 +1663,7 @@ implicit members since 0.5.17: 39 whose place gives no type are rows now
 closure parameters and variables of express's tests. What is left at file
 level there is `app.use` and `app.set` (842 rows of express), names too
 short and too common to guess by. Engine 0.5.19 takes 123 more off (6,362;
-C# 349 from 470; 6,360 with 0.5.20, 6,348 with 0.5.21, 6,285 with 0.5.22, 6,237 with 0.5.25, 6,206 with 0.5.27, 6,166 with 0.5.28, 6,156 with 0.5.30, 6,140 with 0.5.31, 6,132 with 0.5.32, 6,126 with 0.5.33, 6,093 with 0.5.34, 6,047 with 0.5.36, 6,046 with 0.5.37, 6,017 with 0.5.38, 6,005 with 0.5.40, 5,947 with 0.5.42, 5,930 with 0.5.43, 5,950 with 0.5.44, 5,903 with 0.5.45, 5,829 with 0.5.46). Most of what C# has left is not the project's: `Assert.
+C# 349 from 470; 6,360 with 0.5.20, 6,348 with 0.5.21, 6,285 with 0.5.22, 6,237 with 0.5.25, 6,206 with 0.5.27, 6,166 with 0.5.28, 6,156 with 0.5.30, 6,140 with 0.5.31, 6,132 with 0.5.32, 6,126 with 0.5.33, 6,093 with 0.5.34, 6,047 with 0.5.36, 6,046 with 0.5.37, 6,017 with 0.5.38, 6,005 with 0.5.40, 5,947 with 0.5.42, 5,930 with 0.5.43, 5,950 with 0.5.44, 5,903 with 0.5.45, 5,829 with 0.5.46, 5,838 with 0.5.47). Most of what C# has left is not the project's: `Assert.
 NotNull` beside its own `Ensure.NotNull` (77), `WireMockServer.Start` (23).
 
 By then most rows were of that kind: a library's name the project happens

@@ -1719,6 +1719,24 @@ impl<'a> Project<'a> {
                 };
                 if l.field {
                     if let Some(c) = self.class_of(fi, Some(d)) {
+                        // (PHP `$this->article = $article;` tells a property's
+                        // type only when its declaration writes none:
+                        // `protected Article $article;` is its own type)
+                        let written = !l.declared
+                            && self.family[fi] == Some(Family::Php)
+                            && matches!(l.path.as_slice(), [v] if v.starts_with('$'))
+                            && self.children[c.0]
+                                .get(&c.1)
+                                .and_then(|m| m.get(&l.name))
+                                .is_some_and(|ds| {
+                                    ds.iter().any(|&x| {
+                                        let x = &self.files[c.0].defs[x];
+                                        x.kind.is_state() && x.declared_type.is_some()
+                                    })
+                                });
+                        if written {
+                            continue;
+                        }
                         // (the property's own initializer says what it holds,
                         // before a constructor parameter of its name: Kotlin
                         // `class CodeWriter(out: Appendable) { private var out
@@ -3618,6 +3636,226 @@ impl<'a> Project<'a> {
         None
     }
 
+    /// PHP: whether a written type is a library's: one a `use` names, or a
+    /// class of the global namespace the project does not define (PHP's own,
+    /// `\ReflectionProperty`, or an extension's).
+    fn php_library_type(&self, g: usize, scope: Option<usize>, ty: &[String]) -> bool {
+        let mut ty: Vec<String> = ty.to_vec();
+        if let Some(h) = ty.first_mut() {
+            *h = h.trim_start_matches('\\').to_string();
+        }
+        if ty.first().is_none_or(|h| h.is_empty() || h.starts_with('$')) {
+            return false;
+        }
+        let Some(_guard) = DepthGuard::enter(&LIBRARY_DEPTH, 3) else { return false };
+        let types = self.types_only.replace(true);
+        let held = self.resolve_path(g, scope, &ty, true);
+        *self.types_only.borrow_mut() = types;
+        match held {
+            Some((Target::Ext(..), _)) => true,
+            Some(_) => false,
+            None => {
+                ty.len() == 1
+                    && ty[0].chars().next().is_some_and(char::is_uppercase)
+                    && !self.by_name.get(ty[0].as_str()).is_some_and(|ds| {
+                        ds.iter().any(|x| {
+                            self.family[x.0] == Some(Family::Php)
+                                && self.def(*x).kind.is_class_like()
+                        })
+                    })
+            }
+        }
+    }
+
+    /// PHP: whether a local or field holds a library's value: declared with a
+    /// library's type, built from one (`new \ReflectionProperty(…)`), assigned
+    /// a parameter declared with one (`$this->request = $request;`), or what a
+    /// project callable declared to give one returns.
+    fn php_holds_library(&self, g: usize, scope: Option<usize>, l: &crate::facts::Local) -> bool {
+        if l.path.is_empty() {
+            return false;
+        }
+        if l.declared {
+            return self.php_library_type(g, scope, &l.path);
+        }
+        if let [v] = l.path.as_slice() {
+            if let Some(name) = v.strip_prefix('$') {
+                let mut cur = local_start(scope);
+                while let Some(x) = cur {
+                    if let Some(&li) = self.locals.get(&(g, x, name.to_string())) {
+                        let other = &self.files[g].locals[li];
+                        return other.declared
+                            && self.php_library_type(g, crate::resolve::scope(x), &other.path);
+                    }
+                    cur = self.up(g, x);
+                }
+                return false;
+            }
+        }
+        self.php_library_type(g, scope, &l.path) || self.library_result(g, scope, &l.path)
+    }
+
+    /// PHP: whether what a call's path is made on is a library's value: a
+    /// local (`$x`) or a field of the object (`$this->x`) that holds one.
+    fn php_library_receiver(&self, f: usize, d: Option<usize>, path: &[String]) -> bool {
+        if self.family[f] != Some(Family::Php) || path.len() < 2 {
+            return false;
+        }
+        let Some(_guard) = DepthGuard::enter(&LIBRARY_DEPTH, 2) else { return false };
+        let head = path[0].as_str();
+        if let Some(name) = head.strip_prefix('$') {
+            let mut cur = local_start(d);
+            while let Some(x) = cur {
+                if let Some(&li) = self.locals.get(&(f, x, name.to_string())) {
+                    let l = &self.files[f].locals[li];
+                    return self.php_holds_library(f, scope(x), l);
+                }
+                cur = self.up(f, x);
+            }
+            return false;
+        }
+        if head == "self" {
+            let Some(c) = self.class_of(f, d) else { return false };
+            if let Some((g, li)) = self.field_of(c, &path[1]) {
+                let l = &self.files[g].locals[li];
+                return self.php_holds_library(g, l.from_def, l);
+            }
+            return self.members(c, &path[1]).into_iter().any(|m| {
+                let def = self.def(m);
+                def.kind.is_state()
+                    && def
+                        .declared_type
+                        .as_ref()
+                        .is_some_and(|t| self.php_library_type(m.0, def.parent, t))
+            });
+        }
+        false
+    }
+
+    /// PHP: whether a local the walk cannot type holds what a library's call
+    /// gives: a method of a library's value (`$cacheMethod->invoke(…)`, a
+    /// `ReflectionMethod`), or one a project type lacks and takes from its
+    /// library base (`$tags->findOneBy(…)`, a Doctrine `ServiceEntityRepository`).
+    fn php_library_value(&self, f: usize, d: Option<usize>, name: &str) -> bool {
+        if self.family[f] != Some(Family::Php) {
+            return false;
+        }
+        let Some(_guard) = DepthGuard::enter(&LIBRARY_DEPTH, 2) else { return false };
+        let mut cur = local_start(d);
+        let found = loop {
+            let Some(x) = cur else { return false };
+            if let Some(&li) = self.locals.get(&(f, x, name.to_string())) {
+                break (x, li);
+            }
+            cur = self.up(f, x);
+        };
+        let (x, li) = found;
+        let l = &self.files[f].locals[li];
+        let mut p: &[String] = &l.path;
+        while p.last().is_some_and(|s| s == "()") {
+            p = &p[..p.len() - 1];
+        }
+        let [receiver @ .., method] = p else { return false };
+        if receiver.is_empty() {
+            return false;
+        }
+        let at = scope(x);
+        if let [v] = receiver {
+            if let Some(v) = v.strip_prefix('$') {
+                let mut cur = local_start(at);
+                while let Some(y) = cur {
+                    if let Some(&vi) = self.locals.get(&(f, y, v.to_string())) {
+                        let other = &self.files[f].locals[vi];
+                        if self.php_holds_library(f, scope(y), other) {
+                            return true;
+                        }
+                        break;
+                    }
+                    cur = self.up(f, y);
+                }
+            }
+        }
+        match self.resolve_path(f, at, receiver, true) {
+            Some((Target::Ext(..), _)) => true,
+            Some((Target::Def(t), _)) => {
+                self.def(t).kind.is_class_like()
+                    && self.has_outside_base(t)
+                    && !self.answers(t, method, true, 4)
+            }
+            _ => false,
+        }
+    }
+
+    /// PHP: whether a call in the middle of a path gives a library's value:
+    /// a project callable declared to give one (`$mock->getLastRequest()`,
+    /// `: ?RequestInterface`), an invokable object (`$handler(…)`, its
+    /// `__invoke` declared to give a `PromiseInterface`), or a member the
+    /// receiver's type lacks and only its subclasses declare, each to give a
+    /// library's value (`RequestException::create(…)->getResponse()`).
+    fn php_library_step(&self, f: usize, d: Option<usize>, path: &[String]) -> bool {
+        if self.family[f] != Some(Family::Php) || path.len() < 3 {
+            return false;
+        }
+        let Some(_guard) = DepthGuard::enter(&LIBRARY_DEPTH, 2) else { return false };
+        let gives = |c: DefRef| -> bool {
+            if self.def(c).kind.is_callable() {
+                return self.gives_library_type(c);
+            }
+            let invoke = self.members(c, "__invoke");
+            !invoke.is_empty() && invoke.into_iter().all(|m| self.gives_library_type(m))
+        };
+        for i in 1..path.len() - 1 {
+            if path[i] != "()" {
+                continue;
+            }
+            match self.resolve_path(f, d, &path[..i], true) {
+                Some((Target::Def(c), _)) if gives(c) => return true,
+                Some(_) => {}
+                None => {
+                    // the member a subclass declares
+                    if i < 2 {
+                        return false;
+                    }
+                    let Some((Target::Def(t), _)) = self.resolve_path(f, d, &path[..i - 1], true)
+                    else {
+                        return false;
+                    };
+                    let below = |p: DefRef| {
+                        let mut seen = vec![p];
+                        let mut k = 0;
+                        while k < seen.len() && k < 16 {
+                            for b in self.bases(seen[k]) {
+                                if b == t {
+                                    return true;
+                                }
+                                if !seen.contains(&b) {
+                                    seen.push(b);
+                                }
+                            }
+                            k += 1;
+                        }
+                        false
+                    };
+                    let held: Vec<DefRef> = self
+                        .by_name
+                        .get(path[i - 1].as_str())
+                        .into_iter()
+                        .flatten()
+                        .copied()
+                        .filter(|&m| {
+                            self.family[m.0] == Some(Family::Php)
+                                && self.def(m).kind.is_callable()
+                                && self.def(m).parent.is_some_and(|p| below((m.0, p)))
+                        })
+                        .collect();
+                    return !held.is_empty()
+                        && held.into_iter().all(|m| self.gives_library_type(m));
+                }
+            }
+        }
+        false
+    }
+
     /// Java: whether a written type is a library's: one an import names,
     /// a `java.lang` type the project does not define, or a qualified name
     /// whose head is no package or name of the project (`okhttp3.Response`).
@@ -5444,6 +5682,18 @@ impl<'a> Project<'a> {
                 conf = cf;
                 Some(Target::Def(t))
             }) {
+                // PHP `Handler\HostValidator::check()` in `namespace
+                // GuzzleHttp;`: a namespace block of the head's name (`namespace
+                // GuzzleHttp\Handler { … }` in a bootstrap file) holds only its
+                // own block; the name is the file's namespace's first
+                Some(Target::Def(c))
+                    if fam == Family::Php
+                        && !rest.is_empty()
+                        && self.def(c).kind == DefKind::Namespace
+                        && self.qualified(f, d, path).is_some() =>
+                {
+                    return self.qualified(f, d, path);
+                }
                 Some(t) => t,
                 None => {
                     if let Some(found) = self.qualified(f, d, path) {
@@ -6798,7 +7048,8 @@ impl<'a> Project<'a> {
         let (c, None) = (cands.next()?, cands.next()) else { return None };
         let marker = r.path.iter().any(|s| s.starts_with('['));
         let head = r.path[0].as_str();
-        let bare = head.split('@').next().unwrap_or(head);
+        // (PHP: `$x` is the local `x`)
+        let bare = head.split('@').next().unwrap_or(head).trim_start_matches('$');
         let reason = if r.path.len() == 1 {
             "bare name: not in scope".to_string()
         } else if head == "self" {
@@ -6810,6 +7061,7 @@ impl<'a> Project<'a> {
         } else if head == "()" {
             "receiver the walk cannot name".to_string()
         } else if self.is_local_name(f, d, head) || self.is_local_name(f, d, bare) {
+            let head = if self.is_local_name(f, d, head) { head } else { bare };
             if self.is_untyped_local(f, d, head) {
                 "untyped local or parameter".to_string()
             } else if self.is_external_local(f, d, head) {
@@ -6911,8 +7163,20 @@ impl<'a> Project<'a> {
         // EventEmitter`), the name not its own: the library part's
         let library_part = reason.starts_with("typed local: no such member")
             && self
-                .local_type(f, d, head)
+                .local_type(f, d, head.trim_start_matches('$'))
                 .is_some_and(|(t, _)| self.has_outside_base(t) && !self.answers(t, name, true, 4));
+        // (PHP `(new RedirectTestMethodRequest(…))->withBody(…)`, the class
+        // extending a library's `Request`: a type built in the path)
+        let library_part = library_part
+            || (fam == Family::Php
+                && reason == "type: no such member"
+                && r.path.get(1).is_some_and(|s| s == "()")
+                && matches!(
+                    self.resolve_path(f, d, &r.path[..1], true),
+                    Some((Target::Def(t), _)) if self.def(t).kind.is_class_like()
+                        && self.has_outside_base(t)
+                        && !self.answers(t, name, true, 4)
+                ));
         let library_like = if reason == "library name"
             || reason == "local of a library type"
             || std_held
@@ -6921,18 +7185,25 @@ impl<'a> Project<'a> {
                 && r.path.len() >= 2
                 && !crate_head
                 && self.rust_library_receiver(f, d, &r.path))
-            || (matches!(fam, Family::Ecma | Family::Go)
+            || (matches!(fam, Family::Ecma | Family::Go | Family::Php)
                 && r.path.len() >= 3
                 && self.library_field_step(f, d, &r.path))
             // (Go `room(id).Submit(post)`, `room` declared to give a
             // `broadcast.Broadcaster`; Java `call.request().tag(…)`, `request()`
             // declared to give an `okhttp3.Request`)
-            || (matches!(fam, Family::Go | Family::Jvm)
+            || (matches!(fam, Family::Go | Family::Jvm | Family::Php)
                 && r.path.len() >= 3
                 && self.library_result(f, d, &r.path[..r.path.len() - 1]))
             || self.java_library_receiver(f, d, &r.path)
+            || self.php_library_receiver(f, d, &r.path)
+            || self.php_library_step(f, d, &r.path)
         {
             Some("the receiver is a library's")
+        } else if fam == Family::Php
+            && reason == "local the walk cannot type"
+            && self.php_library_value(f, d, bare)
+        {
+            Some("the local holds what a library's call gives")
         } else if outside_head || std_head || crate_head {
             Some("the head is a library's type or global")
         } else if core.contains(&name.as_str())
@@ -6943,6 +7214,14 @@ impl<'a> Project<'a> {
         } else if c.0 != f && test(c.0, cd) && !crate::community::is_test_path(&self.files[f].path)
         {
             Some("the one definition is test code, the call is not")
+        } else if fam == Family::Php
+            && r.path.len() == 1
+            && !head.starts_with('$')
+            && cd.kind == DefKind::Method
+        {
+            // (PHP calls a method only through `$this->`, `self::` or an
+            // object: a bare `rewind($fp)` is PHP's own function)
+            Some("the one definition is a method, the call a function")
         } else if matches!(fam, Family::CSharp | Family::Jvm)
             && cd.receiver.is_some()
             && !self.extension_visible(f, c)

@@ -468,3 +468,39 @@ fn csharp_rows_on_hidden_extensions_generated_members_and_library_values_say_so(
     assert_eq!(why("SpanLength"), "the receiver is a library's", "{rows:#?}");
     assert!(!rows.iter().any(|r| r["name"] == "Lonely"), "{rows:#?}");
 }
+
+#[test]
+fn php_rows_on_library_values_functions_and_library_bases_say_so() {
+    let dir = project(
+        "phpmarks",
+        &[
+            // the project's one `rewind` is a method: a bare `rewind($fp)` is
+            // PHP's function
+            ("lib/Stream.php", "<?php\nnamespace Lib;\n\nclass Stream\n{\n    public function rewind() { return 1; }\n}\n"),
+            // names a library's values answer to, each defined once
+            ("lib/Uri.php", "<?php\nnamespace Lib;\n\nclass Uri\n{\n    public function getQueryIt() { return 1; }\n    public function getTargetIt() { return 1; }\n    public function setValueIt() { return 1; }\n    public function storeIt() { return 1; }\n    public function withBodyIt() { return 1; }\n}\n"),
+            ("src/Mock.php", "<?php\nnamespace App;\n\nuse Psr\\Http\\Message\\RequestInterface;\n\nclass Mock\n{\n    public function getLastRequest(): ?RequestInterface { return null; }\n}\n"),
+            ("src/Holder.php", "<?php\nnamespace App;\n\nuse Psr\\Http\\Message\\RequestInterface;\n\nclass Holder\n{\n    private $request;\n\n    public function __construct(RequestInterface $request)\n    {\n        $this->request = $request;\n    }\n\n    public function target()\n    {\n        return $this->request->getTargetIt();\n    }\n}\n"),
+            ("src/Sub.php", "<?php\nnamespace App;\n\nuse GuzzleHttp\\Psr7\\Request;\n\nclass Sub extends Request\n{\n}\n"),
+            ("src/Use.php", "<?php\nnamespace App;\n\nclass Use\n{\n    public function go(Mock $mock, $fp)\n    {\n        rewind($fp);\n        $mock->getLastRequest()->getUri()->getQueryIt();\n        $p = new \\ReflectionProperty('a', 'b');\n        $p->setValueIt();\n        $m = new \\ReflectionMethod('a', 'b');\n        $cache = $m->invoke($fp);\n        $cache->storeIt();\n        (new Sub())->withBodyIt();\n    }\n}\n"),
+        ],
+    );
+    let out = dir.join("unresolved.json");
+    let mut opts = BuildOptions::new(&dir);
+    opts.unresolved = Some(out.clone());
+    build_graph(&opts).unwrap();
+    let rows: Vec<Value> = serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+    let why = |name: &str| {
+        rows.iter()
+            .find(|r| r["name"] == name)
+            .map(|r| r["library_like"].clone())
+            .unwrap_or_else(|| panic!("no row {name}: {rows:#?}"))
+    };
+    assert_eq!(why("rewind"), "the one definition is a method, the call a function", "{rows:#?}");
+    assert_eq!(why("getQueryIt"), "the receiver is a library's", "{rows:#?}");
+    assert_eq!(why("getTargetIt"), "the receiver is a library's", "{rows:#?}");
+    assert_eq!(why("setValueIt"), "the receiver is a library's", "{rows:#?}");
+    assert_eq!(why("storeIt"), "the local holds what a library's call gives", "{rows:#?}");
+    assert_eq!(why("withBodyIt"), "the receiver is a library's", "{rows:#?}");
+}

@@ -316,6 +316,26 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- **Native engine 0.5.47: PHP docblock types, namespace-relative names,
+  library values.**
+  - `/** @var \App\Entity\Post $post */` over an assignment declares the
+    local's type: symfony-demo's `$post->getTitle()` and `$user->getEmail()`
+    are `EXTRACTED` calls.
+  - `Handler\HostValidator::isNumericIpv4Host()` in `namespace GuzzleHttp;`
+    resolves to `GuzzleHttp\Handler\HostValidator`, also beside a braced
+    `namespace GuzzleHttp\Handler { … }` block in another file.
+  - A property with no written type assigned a constructor parameter
+    (`$this->request = $request;`) holds the parameter's declared type.
+  - guzzle no longer guesses its `UnvalidatedUriRequest` test double for
+    `getBody()` / `getHeaderLine()` on PSR-7 responses (9 edges); those
+    calls are `build --unresolved` rows marked as a library's.
+  - New marks: a bare call whose one definition is a method (PHP's own
+    `rewind()`), a library's value anywhere along a path (a project method
+    declared to give a PSR type, an invokable's `__invoke`, a member only
+    subclasses declare, a global class such as `\ReflectionProperty`), a
+    project type taking the member from a library base or trait, and a
+    local holding what a library's call gives. PHP's unmarked rows on the
+    31 audit repositories go from 137 to 0; 451 → 314 in all.
 - **Native engine 0.5.46: C# preprocessor alternatives, project usings,
   extensions.**
   - A C# file whose `#if` / `#else` branches split an expression or a brace
