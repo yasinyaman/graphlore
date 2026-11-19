@@ -13,7 +13,8 @@ Tool surface: GRAPHLORE_TOOLSET=lean (the default) registers LEAN_TOOLS only,
 =full all of the tools below, =locate LOCATE_TOOLS.
 
 CLI-backed tools:
-  - graphlore_build      : build / update the graph from a folder
+  - graphlore_build      : build / update the graph from a folder (graphify, or
+                          the native engine with GRAPHLORE_ENGINE=native|auto)
   - graphlore_query      : natural-language graph query
   - graphlore_path       : path between two nodes
   - graphlore_explain    : full explanation of a single node
@@ -27,7 +28,7 @@ graph.json analysis tools (no CLI needed):
   - graphlore_duplication_scan: repo-wide duplication audit — identical bodies
                           (exact), then hidden links (similar, unconnected code)
   - graphlore_god_nodes  : highest-degree nodes
-  - graphlore_surprises  : unexpected cross-domain connections
+  - graphlore_surprises  : unexpected cross-domain connections, shared state, co-change
   - graphlore_communities: Leiden community summaries
   - graphlore_search     : node name/label search
   - graphlore_neighbors  : 1-hop neighbors of a node
@@ -73,7 +74,8 @@ Prompts:
   - explain_flow : explain how a named flow/feature works
   - review       : review structure — cycles, layering, dead and duplicated code
 
-Internal layout: config.py (shared PROJECT_DIR), graph.py (graph.json load +
+Internal layout: config.py (shared PROJECT_DIR), engine.py (graphify CLI or the
+native graphlore_engine extractor), graph.py (graph.json load +
 node/edge/traversal helpers), spans.py (tree-sitter/ast span engine + structural
 diff), scope.py (the analysis scope: vendored / external / test filtering),
 apis.py and routes.py (per-file extractors), imports.py (import statements read
@@ -94,6 +96,7 @@ import importlib.util
 import inspect
 import json
 import os
+import posixpath
 import re
 import secrets
 import shutil
@@ -120,7 +123,8 @@ from mcp.types import (
     ToolAnnotations,
 )
 
-from . import config
+from . import config, engine
+from . import history as history_mod  # noqa: F401  (tests reach _parse)
 from .apis import (  # noqa: F401  (re-exported for the tools + tests)
     _API_CACHE,
     _API_CACHE_MAX,
@@ -132,9 +136,12 @@ from .graph import (  # noqa: F401  (re-exported for the tools + tests)
     _CHARS_PER_TOKEN,
     _CONTAINMENT_RELATIONS,
     _GRAPH_CACHE,
+    _HTTP_RELATIONS,
     _IMPORT_RELATIONS,
     _NON_DEPENDENCY_RELATIONS,
     _PAYLOAD_ENVELOPE_CHARS,
+    _STATE_KINDS,
+    _STATE_RELATIONS,
     _adjacency,
     _approx_tokens,
     _bare_name,
@@ -150,6 +157,7 @@ from .graph import (  # noqa: F401  (re-exported for the tools + tests)
     _edge_flags,
     _edge_rel,
     _edge_set,
+    _engine_resolved,
     _exact_node_index,
     _file_import_edges,
     _find_cycles,
@@ -159,11 +167,15 @@ from .graph import (  # noqa: F401  (re-exported for the tools + tests)
     _hop_records,
     _is_external_node,
     _is_file_hub_node,
+    _is_resource_node,
+    _is_route_node,
+    _is_state_node,
     _is_surprise_edge,
     _is_test_path,
     _load_graph,
     _module_import_adjacency,
     _name_index,
+    _native_routes,
     _node_file,
     _node_id,
     _node_label,
@@ -174,9 +186,13 @@ from .graph import (  # noqa: F401  (re-exported for the tools + tests)
     _rel,
     _relation_adjacency,
     _resolve_node,
+    _shared_state,
     _substring_matches,
     _tiered_import_cycles,
+    _top_dir,
+    _with_written_by,
 )
+from .history import _HISTORY_CACHE, History, history  # noqa: F401
 from .imports import (  # noqa: F401  (re-exported for the tools + tests)
     ImportChecker,
     _imports_for_file,
@@ -613,6 +629,11 @@ def _cli_env() -> dict[str, str] | None:
 # Marks the parts of a reply that are repository text (source, docstrings, CLI
 # output derived from them): data to read, never instructions to follow.
 _CONTENT_TRUST = "untrusted_repo_text"
+# graphlore_same_names lists this many definitions of one name, counts the rest.
+_SAME_NAME_DEFS = 25
+# graphlore_fetch returns a definition whole up to this many tokens (or the
+# budget, when that is larger); a longer one is cut at a line and says so.
+_FETCH_BLOCK_CAP = 8000
 
 
 def _frame_repo_text(body: str) -> str:
@@ -1124,8 +1145,11 @@ class _DisplayLabels:
             # keep the call-marker convention of callable labels: `.foo()` ->
             # `Bar.foo()`, `inner()` -> `outer.inner()`
             named = f"{qual}()" if base.endswith("()") else qual
-            # a top-level function's qualified name IS its label: no help
-            got = named if named != base else None
+            # a top-level function's qualified name IS its label: no help, and
+            # nor is an undotted one for a `.name()` label (a function bound to
+            # an object key inside a callback): `filter()` tells six apart no
+            # better than `.filter()` did, the file:line suffix does
+            got = named if named != base and "." in qual else None
         self._fqns[nid] = got
         return got
 
@@ -1740,6 +1764,17 @@ def graphlore_build(
     vendored/minified files in the graph and on a graphify-out/ that git neither
     ignores nor tracks.
 
+    GRAPHLORE_ENGINE picks the extractor: ``graphify`` (default) runs the graphify
+    CLI; ``native`` runs graphlore's experimental native engine (the
+    graphlore-engine package: definitions with real spans, containment,
+    Markdown/RST headings, resolved imports, calls, bases and type references, and
+    communities, in 14 languages, all local); ``auto`` uses native when installed
+    and graphify for what native cannot do. With native, ``mode`` is refused,
+    ``cluster_only`` detects the communities of the graph on disk again,
+    ``update`` parses only the files changed since the last native build,
+    ``code_only`` skips the document headings
+    and ``no_viz`` has no effect.
+
     Args:
         path: Folder to extract the graph from (relative to the project dir or absolute).
         mode: "deep" -> more aggressive INFERRED edges; empty -> default.
@@ -1756,6 +1791,23 @@ def graphlore_build(
     err = _path_escapes_project(path)
     if err:
         return err
+    requested = engine.requested()
+    engine_note = ""
+    if requested != "graphify":
+        choice, engine_note = engine.choose(
+            requested=requested,
+            native_found=engine.available(),
+            graphify_found=shutil.which(GRAPHIFY_BIN) is not None,
+            mode=mode, update=update, cluster_only=cluster_only,
+            existing=_existing_engine(path) if update or cluster_only else None,
+        )
+        if choice == "error":
+            return _err(engine_note, False, code="engine")
+        if choice == "native" and cluster_only:
+            return _cluster_native(path, note=engine_note)
+        if choice == "native":
+            return _build_native(path, code_only=code_only, verbose=verbose, note=engine_note,
+                                 update=update)
     offline_note = ""
     if config.offline():
         if mode:
@@ -1806,9 +1858,25 @@ def graphlore_build(
         return result  # a failed build is returned whole, never condensed
     if not verbose:
         result = _condense_build_log(result)
+    notes = _build_notes(path)
+    if offline_note:
+        notes.append(offline_note)
+    if engine_note:
+        notes.append(engine_note)
+    return _cli_reply(result + ("\n\n" + "\n".join(notes) if notes else ""))
 
+
+def _build_target(path: str) -> Path:
     p = Path(path)
-    target = (p if p.is_absolute() else config.PROJECT_DIR / p).resolve()
+    return (p if p.is_absolute() else config.PROJECT_DIR / p).resolve()
+
+
+def _build_notes(path: str) -> list[str]:
+    """After a build of ``path``, by either engine: where graph.json went (and
+    whether this server reads it), vendored files in it, and git's view of the
+    output directory."""
+    target = _build_target(path)
+    gp = _graph_path()
     written = target / config.OUT_DIR_NAME / "graph.json"
     notes: list[str] = []
     if written.exists() and written != gp.resolve():
@@ -1833,9 +1901,69 @@ def graphlore_build(
         git_note = _out_dir_git_note()
     if git_note:
         notes.append(git_note)
-    if offline_note:
-        notes.append(offline_note)
-    return _cli_reply(result + ("\n\n" + "\n".join(notes) if notes else ""))
+    return notes
+
+
+def _existing_engine(path: str) -> str | None:
+    """The engine that built the graph a build of ``path`` would replace, when
+    that is the graph this server reads."""
+    if _build_target(path) / config.OUT_DIR_NAME / "graph.json" != _graph_path().resolve():
+        return None
+    graph = _load_graph()
+    return engine.graph_engine(graph) if isinstance(graph, dict) else None
+
+
+def _build_native(
+    path: str, *, code_only: bool, verbose: bool, note: str, update: bool = False,
+) -> str:
+    """graphlore_build with the native engine (GRAPHLORE_ENGINE=native / auto).
+    ``update`` reuses the facts of the files unchanged since the last build."""
+    target = _build_target(path)
+    if not target.is_dir():
+        return _err(f"ERROR: not a directory: {target}", False)
+    report = engine.build(
+        target, documents=not code_only, commit=_git(["rev-parse", "HEAD"], target),
+        timeout=CLI_TIMEOUT, incremental=update,
+    )
+    _GRAPH_CACHE.pop(str(_graph_path()), None)
+    if isinstance(report, str):
+        return _err(report, False)
+    text = engine.render_report(report, verbose, update=update)
+    notes = _build_notes(path)
+    if code_only:
+        notes.append("code_only=True: Markdown / reStructuredText headings were not read.")
+    if note:
+        notes.append(note)
+    if notes:
+        text += "\n\n" + "\n".join(notes)
+    return _fmt({"output": text, "engine": "native", "report": report}, False, text)
+
+
+def _cluster_native(path: str, *, note: str) -> str:
+    """graphlore_build(cluster_only=True) on a native graph: the engine detects
+    the communities of the graph on disk again."""
+    target = _build_target(path)
+    gp = target / config.OUT_DIR_NAME / "graph.json"
+    if not gp.is_file():
+        return _err(f"ERROR: no graph to cluster at {gp}; run graphlore_build() first.", False)
+    report = engine.cluster(gp, timeout=CLI_TIMEOUT)
+    _GRAPH_CACHE.pop(str(_graph_path()), None)
+    if isinstance(report, str):
+        return _err(report, False)
+    text = "native engine: " + engine.render_communities(report)
+    if note:
+        text += "\n\n" + note
+    return _fmt({"output": text, "engine": "native", "communities": report}, False, text)
+
+
+def _no_communities_msg(graph: object) -> str:
+    if engine.graph_engine(graph) == "native":
+        return (
+            "Nodes carry no community info: this native graph was built by an engine "
+            "that did not detect communities. graphlore_build(cluster_only=True) "
+            "detects them with a current graphlore-engine."
+        )
+    return "Nodes carry no community info. Try graphlore_build(cluster_only=True)."
 
 
 @_tool(annotations=ToolAnnotations(title="Query graph", read_only_hint=True))
@@ -1852,10 +1980,15 @@ def graphlore_query(question: str, dfs: bool = False, budget: int = 0) -> str:
         args.append("--dfs")
     if budget > 0:
         args += ["--budget", str(budget)]
-    gp = _graph_path()
-    if gp.exists():
-        args += ["--graph", str(gp)]
+    args += _graph_arg()
     return _cli_reply(_run_cli(args), repo_text=True)
+
+
+def _graph_arg() -> list[str]:
+    """``--graph <path>`` for the CLI's read commands, so they read the graph the
+    analysis tools read (``GRAPHLORE_OUT_DIR``), not the CLI's own default."""
+    gp = _graph_path()
+    return ["--graph", str(gp)] if gp.exists() else []
 
 
 @_tool(annotations=ToolAnnotations(title="Path between nodes", read_only_hint=True))
@@ -1867,7 +2000,7 @@ def graphlore_path(node_a: str, node_b: str) -> str:
     was used.
     """
     (a, note_a), (b, note_b) = _cli_node_key(node_a), _cli_node_key(node_b)
-    return _cli_node_reply(_run_cli(["path", a, b]), [note_a, note_b])
+    return _cli_node_reply(_run_cli(["path", a, b, *_graph_arg()]), [note_a, note_b])
 
 
 @_tool(annotations=ToolAnnotations(title="Explain node", read_only_hint=True))
@@ -1879,7 +2012,7 @@ def graphlore_explain(node: str) -> str:
     was used.
     """
     key, note = _cli_node_key(node)
-    return _cli_node_reply(_run_cli(["explain", key]), [note])
+    return _cli_node_reply(_run_cli(["explain", key, *_graph_arg()]), [note])
 
 
 def _cli_node_key(name: str) -> tuple[str, str]:
@@ -2076,6 +2209,46 @@ def graphlore_god_nodes(top_n: int = 10, as_json: bool = False, scope: str = "")
     return _fmt(payload, as_json, _with_note("\n".join(text), view))
 
 
+def _linked_files(nodes: list[dict], edges: list[dict]) -> set[tuple[str, str]]:
+    """Pairs of files (sorted) that some edge of the graph joins, either way."""
+    byid = {_node_id(n): n for n in nodes}
+    out: set[tuple[str, str]] = set()
+    for e in edges:
+        if _rel(e) in _NON_DEPENDENCY_RELATIONS:
+            continue
+        s, t = _edge_ends(e)
+        a = _norm_relpath(_node_file(byid[s])) if s in byid else ""
+        b = _norm_relpath(_node_file(byid[t])) if t in byid else ""
+        if a and b and a != b:
+            out.add((a, b) if a < b else (b, a))
+    return out
+
+
+def _hidden_co_change(
+    nodes: list[dict], edges: list[dict], view: ScopeView, hist: History,
+) -> list[dict[str, Any]]:
+    """Source files that change together in the git history with no edge of the
+    graph between them, strongest first. Tests are left out: a test changes
+    with the code it tests by design."""
+    files = {_norm_relpath(_node_file(n)) for n in nodes} - {""}
+
+    def counts(f: str) -> bool:
+        dot = f.rfind(".")
+        return (f in files and dot >= 0 and f[dot:].lower() in _SOURCE_EXTS
+                and not _is_test_path(f) and view.keeps_file(f))
+
+    linked = _linked_files(nodes, edges)
+    out: list[dict[str, Any]] = []
+    for a, b, n, d in hist.coupled_pairs():
+        if not (counts(a) and counts(b)) or (a, b) in linked:
+            continue
+        why = ["no edge of the graph joins them"]
+        if _top_dir(a) != _top_dir(b):
+            why.append("different top-level directories")
+        out.append({"files": [a, b], "commits": n, "degree": round(d, 2), "why": why})
+    return out
+
+
 @_tool(annotations=ToolAnnotations(title="Surprise edges", read_only_hint=True))
 def graphlore_surprises(limit: int = 20, as_json: bool = False, scope: str = "") -> str:
     """List unexpected cross-file/cross-domain connections (surprise edges).
@@ -2094,8 +2267,25 @@ def graphlore_surprises(limit: int = 20, as_json: bool = False, scope: str = "")
       - ``none``     — nothing was scorable; the reason is named explicitly
         instead of printing an empty list under a promising header.
 
+    ``shared_state`` lists, apart from the edges, the variables, fields and
+    resources that code in one file writes and code in another reads or writes
+    (the native engine's ``reads`` / ``writes``): coupling with no call between
+    the two. Scored like the edges: files that do not import each other,
+    different top-level directories, different communities; test code is left
+    out unless the state is test code. Each row's ``pairs`` say, per writer and
+    other definition touching the state, whether a call path joins them
+    (``call_path``) and whether their files change together in the git history
+    (``co_change``); a hidden pair (no call path) and a hidden pair whose files
+    change together each raise the score.
+
+    ``co_change`` lists source files that keep changing in the same commits
+    (code-maat's degree, from the last 1000 commits; a commit of more than 30
+    files is skipped) with no edge of the graph between them: coupling the code
+    does not show. ``history`` says how much history was read; a shallow clone
+    or a short history is named, not taken for "nothing changes together".
+
     Args:
-        limit: Cap on listed edges.
+        limit: Cap on listed edges, on listed shared state and on co-change pairs.
         scope: Which part of the graph to score (see graphlore_god_nodes): path
             prefixes / globs, ``!pattern``, ``-tests``, ``+vendored``, ``all``.
             Vendored and minified files are left out by default.
@@ -2109,6 +2299,61 @@ def graphlore_surprises(limit: int = 20, as_json: bool = False, scope: str = "")
         return view
     nodes, edges = view.nodes, view.edges
     labels = _display_labels(all_nodes)
+    # resources (an environment variable, a table) have no file and count as
+    # external to the code: the shared state is read with them in
+    with_resources = _scope_view(all_nodes, all_edges, f"{scope} +external".strip(), as_json)
+    shared_view = view if isinstance(with_resources, str) else with_resources
+    hist = history()
+    coupled = hist.coupled if hist.usable else None
+    # call paths are looked for on the resolved edges, and only where there is
+    # state to share (resolving a graphify graph parses its sources)
+    has_state = any(_rel(e) in _STATE_RELATIONS for e in all_edges)
+    call_edges = _resolved(all_nodes, all_edges).edges if has_state else all_edges
+    shared = _shared_state(shared_view.nodes, shared_view.edges, labels,
+                           call_edges=call_edges, coupled=coupled)
+    shared_rows = shared[:max(0, limit)]
+    co_change = _hidden_co_change(all_nodes, all_edges, view, hist) if hist.usable else []
+    co_rows = co_change[:max(0, limit)]
+
+    def with_shared(payload: dict[str, Any], text: list[str]) -> None:
+        payload["shared_state"] = shared_rows
+        payload["shared_state_total"] = len(shared)
+        if len(shared) > len(shared_rows):
+            payload["truncated"] = True
+            payload["shared_state_left_out"] = len(shared) - len(shared_rows)
+        payload["co_change"] = co_rows
+        payload["co_change_total"] = len(co_change)
+        if len(co_change) > len(co_rows):
+            payload["truncated"] = True
+            payload["co_change_left_out"] = len(co_change) - len(co_rows)
+        payload["history"] = hist.payload()
+        if co_rows:
+            text.append(f"\nChanging together: {len(co_change)} pair(s) of files that "
+                        f"change in the same commits ({hist.commits} read) with nothing "
+                        "in the graph joining them:")
+            for r in co_rows:
+                text.append(f"  [{r['commits']} commits, degree {r['degree']}] "
+                            f"{r['files'][0]} <-> {r['files'][1]}")
+        elif hist.note():
+            text.append(f"\n({hist.note()}.)")
+        if not shared_rows:
+            return
+        text.append(f"\nShared state: {len(shared)} variable(s)/field(s) written in one "
+                    "file and read or written in another (no call between them needed):")
+        for r in shared_rows:
+            text.append(
+                f"  [{r['strength']} {r['score']}] {r['state']} ({r['kind']}, "
+                f"{r['file'] or 'outside the code'}): written by "
+                f"{', '.join(r['writers'][:3])}{'…' if len(r['writers']) > 3 else ''}"
+                + (f"; read by {', '.join(r['readers'][:3])}"
+                   f"{'…' if len(r['readers']) > 3 else ''}" if r["readers"] else "")
+                + (f" — {r['hidden_pairs']} pair(s) with no call path"
+                   + (f", {r['co_changing_pairs']} of them changing together"
+                      if r["co_changing_pairs"] else "")
+                   if r["hidden_pairs"] else "")
+            )
+            if r["why"]:
+                text.append(f"      {'; '.join(r['why'])}")
 
     flagged = [e for e in edges if _is_surprise_edge(e)]
     if flagged:
@@ -2125,7 +2370,10 @@ def graphlore_surprises(limit: int = 20, as_json: bool = False, scope: str = "")
             "total": len(flagged), "truncated": len(flagged) > len(items),
             "scope": view.payload(),
         }
-        _cut_hint(payload, "Raise limit for more of the `total` edges, or narrow with scope=.")
+        with_shared(payload, text)
+        _cut_hint(payload, "Raise limit for more of the `total` edges, "
+                  "`shared_state_total` state and `co_change_total` pairs, or narrow "
+                  "with scope=.")
         return _fmt(payload, as_json, _with_note("\n".join(text), view))
 
     checker = ImportChecker()
@@ -2155,6 +2403,9 @@ def graphlore_surprises(limit: int = 20, as_json: bool = False, scope: str = "")
             "surprises": [], "basis": "none", "diagnostics": diag, "fallback": True,
             "scope": view.payload(),
         }
+        with_shared(payload, text)
+        _cut_hint(payload, "Raise limit for more of the `shared_state_total` state and "
+                  "`co_change_total` pairs.")
         return _fmt(payload, as_json, _with_note("\n".join(text), view))
 
     text = [
@@ -2185,7 +2436,10 @@ def graphlore_surprises(limit: int = 20, as_json: bool = False, scope: str = "")
         "total": len(computed), "truncated": len(computed) > len(items),
         "scope": view.payload(),
     }
-    _cut_hint(payload, "Raise limit for more of the `total` edges, or narrow with scope=.")
+    with_shared(payload, text)
+    _cut_hint(payload, "Raise limit for more of the `total` edges, "
+              "`shared_state_total` state and `co_change_total` pairs, or narrow "
+              "with scope=.")
     return _fmt(payload, as_json, _with_note("\n".join(text), view))
 
 
@@ -2216,7 +2470,7 @@ def graphlore_communities(limit: int = 30, members: int = 15, as_json: bool = Fa
             if n.get("community_name"):
                 built_names.setdefault(c, str(n["community_name"]))
     if not comms:
-        msg = "Nodes carry no community info. Try graphlore_build(cluster_only=True)."
+        msg = _no_communities_msg(graph)
         return _fmt({"communities": [], "note": msg}, as_json, msg)
     saved = _read_labels()
     labels = _display_labels(nodes)
@@ -2316,7 +2570,7 @@ def _communities_for_naming(limit: int) -> tuple[list[tuple[Any, list[str]]], in
         if c is not None:
             comms.setdefault(c, []).append(_node_label(n))
     if not comms:
-        return "Nodes carry no community info. Try graphlore_build(cluster_only=True)."
+        return _no_communities_msg(graph)
     return sorted(comms.items(), key=lambda kv: -len(kv[1]))[:max(0, limit)], len(comms)
 
 
@@ -2652,18 +2906,23 @@ def graphlore_search(pattern: str, limit: int = 25, as_json: bool = False) -> st
 
 
 @_tool(annotations=ToolAnnotations(title="Node neighbors", read_only_hint=True))
-def graphlore_neighbors(node: str, as_json: bool = False, scope: str = "") -> str:
+def graphlore_neighbors(
+    node: str, as_json: bool = False, scope: str = "", limit: int = 200,
+) -> str:
     """List the direct (1-hop) neighbors of a node, with relations.
 
     Production code is listed before tests, most connected first. Includes the
     calls and imports graphlore resolves from the source (a call through an
     imported module, ``mod.func()``), which graph.json alone does not carry.
+    A hub has more neighbors than fit a reply: past ``limit`` the result says
+    how many there are (``total``) and how they split by relation (``counts``).
 
     Args:
         node: The node (id, label or bare name). When several nodes match, the
             result says which one was used and lists the others with their ids.
         scope: Which neighbors to list — path prefixes / globs, ``!pattern``,
             ``-tests``, ``-external``, ``-vendored``. Empty leaves nothing out.
+        limit: Cap on listed neighbors.
     """
     graph = _load_graph()
     if isinstance(graph, str):
@@ -2692,33 +2951,69 @@ def graphlore_neighbors(node: str, as_json: bool = False, scope: str = "") -> st
     neigh = []
     listed: set[tuple[str, str, bool]] = set()
     for t, rel in ranked:
-        out = (nid, t, rel) in es
-        if (t, rel, out) in listed:
-            continue  # a self-loop sits in the undirected adjacency twice
+        # A pair linked both ways by one relation (A references B, B references A)
+        # sits in the undirected adjacency twice, once per edge: list each
+        # direction once. A self-loop also sits there twice, and is one row.
+        ways = [True] if t == nid else [
+            d for d, present in ((True, (nid, t, rel) in es), (False, (t, nid, rel) in es))
+            if present
+        ]
+        out = next((d for d in ways if (t, rel, d) not in listed), None)
+        if out is None:
+            continue
         listed.add((t, rel, out))
         row = {"node": labels.get(t, t), "relation": rel, "direction": "out" if out else "in"}
         row.update(flags.get((nid, t, rel) if out else (t, nid, rel), {}))
         neigh.append(row)
     matched, matched_text = _matched(node, picked)
+    total = len(neigh)
+    shown = neigh[:max(0, limit)]
     payload: dict[str, Any] = {
-        "node": _node_label(n), "neighbors": neigh,
+        "node": _node_label(n), "neighbors": shown, "total": total,
+        "truncated": total > len(shown),
         "scope": view.payload(), "resolved_edges": resolved.payload(),
     }
     if matched:
         payload["matched"] = matched
-    text = [f"{_node_label(n)} has {len(neigh)} neighbors:"]
+    text = [
+        f"{_node_label(n)} has {total} neighbors"
+        + (f", showing {len(shown)}" if total > len(shown) else "") + ":"
+    ]
     text += [
         (f"  —{x['relation']}→ {x['node']}" if x["direction"] == "out"
          else f"  ←{x['relation']}— {x['node']}")
         + (f"  [{_flag_suffix(x)[2:]}]" if _flag_suffix(x) else "")
-        for x in neigh
+        for x in shown
     ]
+    if total > len(shown):
+        # what the cut left out, by kind: the rows shown are the most connected
+        tally: dict[str, int] = {}
+        for x in neigh:
+            key = f"{x['relation']} {x['direction']}"
+            tally[key] = tally.get(key, 0) + 1
+        payload["counts"] = dict(sorted(tally.items(), key=lambda kv: (-kv[1], kv[0])))
+        _cut_hint(payload, "Raise limit for the rest, narrow with scope= (-tests, a path), "
+                           "or follow one kind of edge with graphlore_impact(relations=…).")
+        text.append(
+            f"  … {total - len(shown)} more ("
+            + ", ".join(f"{v} {k}" for k, v in payload["counts"].items()) + " in all). "
+            + payload["hint"]
+        )
     if not neigh:
         payload["note"] = _EMPTY_NOTE
         text.append(_EMPTY_NOTE)
     if matched_text:
         text.append("\n" + matched_text)
     return _fmt(payload, as_json, _with_note("\n".join(text), view))
+
+
+def _carried_span(n: dict, line: int) -> tuple[int, int] | None:
+    """The lines a native-engine node carries (``region_start``..``end_line``),
+    for a definition the span engine does not make: a property or a constant."""
+    lo, hi = n.get("region_start"), n.get("end_line")
+    if isinstance(lo, int) and isinstance(hi, int) and lo <= line <= hi:
+        return lo, hi
+    return None
 
 
 @_tool(annotations=ToolAnnotations(title="Token-budgeted subgraph", read_only_hint=True))
@@ -2832,7 +3127,7 @@ _IMPACT_CODE_RELATIONS = frozenset({
     # graphify >= 0.9: an interface method to its implementations, a class
     # constant, a static property
     "dispatches_to", "references_constant", "uses_static_prop",
-})
+}) | _HTTP_RELATIONS
 IMPACT_RELATION_PRESETS: dict[str, frozenset[str] | None] = {
     "all": None,  # no filter — walk every edge type
     "code": _IMPACT_CODE_RELATIONS,
@@ -2841,6 +3136,10 @@ IMPACT_RELATION_PRESETS: dict[str, frozenset[str] | None] = {
                           "re_exports", "requires"}),
     "types": frozenset({"inherits", "extends", "implements", "mixes_in",
                         "embeds", "uses"}),
+    # a definition reading or writing a variable, field, constant or resource
+    "state": _STATE_RELATIONS | {"written_by"},
+    # a handler, the routes it serves and the clients that request them
+    "http": _HTTP_RELATIONS,
 }
 # Structural containment: never a dependency, but walked one hop out from the
 # seed so a class's own members stay reachable when containment is filtered out.
@@ -2888,6 +3187,7 @@ def graphlore_impact(
     relations: str = "",
     scope: str = "",
     strict: bool = False,
+    shared_state: bool = False,
 ) -> str:
     """Reverse-dependency / blast-radius analysis: what's affected if `node` changes.
 
@@ -2915,6 +3215,15 @@ def graphlore_impact(
     not depend on it: they are left out of the blast radius and counted in
     ``rationale_nodes_skipped``. Name the relation in ``relations`` to walk them.
 
+    Shared state (``reads`` / ``writes`` of a variable, field, constant or
+    resource, from the native engine) is not walked by default, so a call graph
+    stays a call graph: the variables passed by are counted in
+    ``state_nodes_skipped``. On a variable itself its readers and writers are
+    its dependents. ``shared_state=True`` follows it: what ``node`` writes leads
+    to what reads it (a ``written_by`` step), so the dependents of a writer
+    include the code that reads what it writes, and the dependencies of a reader
+    the code that writes what it reads.
+
     Each row also reports the traversed edge's own recorded position as `site`.
     `site_kind="reference"` means the graph recorded where the reference occurs;
     `site_kind="definition"` means it did not, and the row falls back to where the
@@ -2937,6 +3246,9 @@ def graphlore_impact(
             nothing out.
         strict: True -> walk only edges the extractor resolved (confidence
             EXTRACTED), never an inferred one.
+        shared_state: True -> also walk from a writer through what it writes to
+            its readers (and back): code that affects other code through a
+            variable, a field or a resource without calling it.
     """
     graph = _load_graph()
     if isinstance(graph, str):
@@ -2950,7 +3262,7 @@ def graphlore_impact(
     if isinstance(nav, str):
         return nav
     view, resolved = nav
-    edges = view.edges
+    edges = _with_written_by(view.edges) if shared_state else view.edges
     direction = direction.strip().lower()
     if direction not in ("dependents", "dependencies", "both"):
         return _err(
@@ -2979,6 +3291,14 @@ def graphlore_impact(
         frozenset() if rel_filter is not None and "rationale_for" in rel_filter
         else _IMPACT_SKIPPED_RELATIONS
     )
+    # Shared state is walked when asked for, by name or with shared_state=True,
+    # and from a variable itself (its readers and writers are its dependents).
+    walk_state = (
+        shared_state or _is_state_node(start)
+        or (rel_filter is not None and bool(rel_filter & _STATE_RELATIONS))
+    )
+    state_skip = frozenset() if walk_state else _STATE_RELATIONS
+    skip = skip | state_skip
     edge_ok = _is_extracted_edge if strict else None
     if direction == "dependents":
         recs = _hop_records(reverse, sid, hops, rel_filter, seeds, skip, edge_ok)
@@ -3009,7 +3329,25 @@ def graphlore_impact(
                     nb for nb, e in adj_side.get(nid, [])
                     if _rel(e) in skip and nb not in recs
                 )
-        rationale_skipped = len(passed)
+        rationale_skipped = len({
+            nid for nid in passed
+            if not (byid.get(nid) and _is_state_node(byid[nid]))
+        }) if state_skip else len(passed)
+    # The variables and fields the walk passed by without following them.
+    state_skipped = 0
+    if state_skip:
+        sides = {"dependents": (reverse,), "dependencies": (forward,)}.get(
+            direction, (reverse, forward)
+        )
+        touched: set[str] = set()
+        for adj_side in sides:
+            for nid, (d, _via, _edge) in recs.items():
+                if d < hops:
+                    touched.update(
+                        nb for nb, e in adj_side.get(nid, [])
+                        if _rel(e) in state_skip and nb not in recs
+                    )
+        state_skipped = len(touched)
 
     hits: list[tuple[str, int, str, dict]] = []
     for nid, (d, via, edge) in recs.items():
@@ -3088,6 +3426,8 @@ def graphlore_impact(
         "count": len(impacted),
         "impacted": impacted,
         "rationale_nodes_skipped": rationale_skipped,
+        "state_nodes_skipped": state_skipped,
+        "shared_state": shared_state,
         "truncated": truncated,
         "dropped": dropped,
         "dropped_tests": dropped_tests,
@@ -3105,7 +3445,9 @@ def graphlore_impact(
     hint = (
         ("Raise budget_tokens or narrow with relations=/scope= for the rows not "
          "shown. " if truncated else "")
-        + (f"hops={hops + 1} would add {beyond_hops} node(s)." if beyond_hops else "")
+        + (f"hops={hops + 1} would add {beyond_hops} node(s). " if beyond_hops else "")
+        + (f"shared_state=True follows the {state_skipped} variable(s)/field(s) "
+           "passed by to the code that reads or writes them." if state_skipped else "")
     ).strip()
     if hint:
         payload["hint"] = hint
@@ -3113,6 +3455,11 @@ def graphlore_impact(
         f"\n({rationale_skipped} docstring/rationale node(s) left out — they describe "
         "code, they do not depend on it.)" if rationale_skipped else ""
     )
+    if state_skipped:
+        rationale_note += (
+            f"\n({state_skipped} variable(s)/field(s) read or written along the way not "
+            "followed; shared_state=True follows them to the code they couple.)"
+        )
     if resolved_rows:
         rationale_note += (
             f"\n({resolved_rows} row(s) rest on a call or import graphlore resolved from "
@@ -3985,11 +4332,18 @@ def graphlore_duplication_scan(
 
 @_tool(annotations=ToolAnnotations(title="Node details", read_only_hint=True))
 def graphlore_node_details(node: str, as_json: bool = False) -> str:
-    """Show a node's full metadata: type, source file/line, docstring, community."""
+    """Show a node's full metadata: type, source file/line, docstring, community.
+
+    On a native graph, ``state`` says what the node reads and writes (variables,
+    fields, constants, resources) and ``shared_with`` the other definitions that
+    touch the same state, each with how: the code this one affects, or is
+    affected by, without a call between them. For a variable or field it lists
+    its readers and writers instead.
+    """
     graph = _load_graph()
     if isinstance(graph, str):
         return _err(graph, as_json)
-    nodes, _ = _nodes_edges(graph)
+    nodes, edges = _nodes_edges(graph)
     picked = _pick_node(nodes, node)
     n = picked.node
     if n is None:
@@ -4012,6 +4366,15 @@ def graphlore_node_details(node: str, as_json: bool = False) -> str:
     }}
     if extra:
         detail["extra"] = extra
+    state, state_text = _state_of(nodes, edges, _node_id(n))
+    if state:
+        detail["state"] = state
+    http, http_text = _http_of(nodes, edges, _node_id(n))
+    if http:
+        detail["http"] = http
+    co, co_text = _co_change_of(nodes, edges, _norm_relpath(_node_file(n)))
+    if co:
+        detail["co_change"] = co
     detail["content_trust"] = _CONTENT_TRUST
     detail["untrusted_fields"] = ["doc", "extra"]
     loc = f"{detail['file']}:{detail['line']}" if detail["file"] else "(no source location)"
@@ -4024,11 +4387,141 @@ def graphlore_node_details(node: str, as_json: bool = False) -> str:
     ]
     if extra:
         text.append(f"  other    : {', '.join(extra.keys())}")
+    text += state_text + http_text + co_text
     matched, matched_text = _matched(node, picked)
     if matched:
         detail["matched"] = matched
         text.append(matched_text)
     return _fmt(detail, as_json, "\n".join(text))
+
+
+_CO_CHANGE_PARTNERS = 5
+
+
+def _co_change_of(
+    nodes: list[dict], edges: list[dict], f: str,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """The files `f` changes together with most in the git history, and whether
+    the graph joins them; empty without a usable history."""
+    if not f:
+        return [], []
+    hist = history()
+    if not hist.usable:
+        return [], []
+    partners = hist.partners(f)
+    if not partners:
+        return [], []
+    linked = _linked_files(nodes, edges)
+    rows = [{"file": o, "commits": c, "degree": round(d, 2),
+             "linked": ((f, o) if f < o else (o, f)) in linked}
+            for o, c, d in partners[:_CO_CHANGE_PARTNERS]]
+    shown = ", ".join(f"{r['file']} ({r['commits']}{'' if r['linked'] else ', not in the graph'})"
+                      for r in rows)
+    return rows, [f"  changes with: {shown}"]
+
+
+def _http_of(nodes: list[dict], edges: list[dict], nid: str) -> tuple[dict[str, Any], list[str]]:
+    """The routes a handler serves and who requests them; for a route, its
+    handlers and callers; for client code, the routes it requests. Empty on a
+    graph with no `handles` / `http_calls` edges."""
+    labels = _display_labels(nodes)
+    handlers: dict[str, list[str]] = {}   # route -> handlers
+    callers: dict[str, list[str]] = {}    # route -> requesting definitions
+    for e in edges:
+        rel = _rel(e)
+        if rel not in _HTTP_RELATIONS:
+            continue
+        s, t = _edge_ends(e)
+        if rel == "handles":
+            handlers.setdefault(s, []).append(t)
+        else:
+            callers.setdefault(t, []).append(s)
+    if not handlers and not callers:
+        return {}, []
+    name = lambda i: labels.get(i, i)  # noqa: E731
+    if nid in handlers or nid in callers:
+        route = {"handlers": sorted({name(h) for h in handlers.get(nid, [])}),
+                 "called_by": sorted({name(c) for c in callers.get(nid, [])})}
+        return route, [
+            f"  handled by: {', '.join(route['handlers']) or '(nothing)'}",
+            f"  requested by: {', '.join(route['called_by']) or '(nothing in the graph)'}"]
+    serves = sorted(r for r, hs in handlers.items() if nid in hs)
+    requests = sorted(r for r, cs in callers.items() if nid in cs)
+    if not serves and not requests:
+        return {}, []
+    out: dict[str, Any] = {}
+    text: list[str] = []
+    if serves:
+        out["routes"] = [name(r) for r in serves]
+        out["called_by"] = sorted({name(c) for r in serves for c in callers.get(r, [])})
+        text.append(f"  serves    : {', '.join(out['routes'])}")
+        text.append(f"  requested by: {', '.join(out['called_by']) or '(nothing in the graph)'}")
+    if requests:
+        out["requests"] = [name(r) for r in requests]
+        text.append(f"  requests  : {', '.join(out['requests'])}")
+    return out, text
+
+
+_STATE_SHARED_LIMIT = 15
+
+
+def _state_of(nodes: list[dict], edges: list[dict], nid: str) -> tuple[dict[str, Any], list[str]]:
+    """What a definition reads and writes, and who else touches the same state;
+    for a state node, its readers and writers. Empty on a graph with no
+    ``reads`` / ``writes`` edges."""
+    labels = _display_labels(nodes)
+    byid = {_node_id(n): n for n in nodes}
+    touches: dict[str, dict[str, set[str]]] = {}   # state -> relation -> definitions
+    for e in edges:
+        rel = _rel(e)
+        if rel in _STATE_RELATIONS:
+            s, t = _edge_ends(e)
+            touches.setdefault(t, {}).setdefault(rel, set()).add(s)
+    if nid in touches:
+        got = touches[nid]
+        rows = {rel: sorted(labels.get(i, i) for i in got.get(rel, ()))
+                for rel in ("writes", "reads")}
+        out: dict[str, Any] = {"written_by": rows["writes"], "read_by": rows["reads"]}
+        text = [f"  written by: {', '.join(rows['writes']) or '(nothing)'}",
+                f"  read by   : {', '.join(rows['reads']) or '(nothing)'}"]
+        return out, text
+    mine = {rel: sorted(t for t, by in touches.items() if nid in by.get(rel, ()))
+            for rel in ("reads", "writes")}
+    if not (mine["reads"] or mine["writes"]):
+        return {}, []
+    shared: list[dict[str, Any]] = []
+    for t in sorted(set(mine["reads"]) | set(mine["writes"])):
+        i_write = t in mine["writes"]
+        for rel in ("writes", "reads"):
+            for other in sorted(touches[t].get(rel, ())):
+                if other == nid or (rel == "reads" and other in touches[t].get("writes", ())):
+                    continue
+                if not i_write and rel == "reads":
+                    continue  # two readers of one variable do not affect each other
+                shared.append({
+                    "node": labels.get(other, other), "state": labels.get(t, t),
+                    "relation": rel,
+                    "effect": "affected by this" if i_write and rel == "reads"
+                              else "affects this" if not i_write else "both write it",
+                })
+    out = {"reads": [labels.get(t, t) for t in mine["reads"]],
+           "writes": [labels.get(t, t) for t in mine["writes"]],
+           "shared_with": shared[:_STATE_SHARED_LIMIT], "shared_total": len(shared)}
+    if len(shared) > _STATE_SHARED_LIMIT:
+        out["truncated"] = True
+        out["hint"] = ("graphlore_impact(node, shared_state=True) walks every one of them, "
+                       "with distances.")
+    text = [f"  reads    : {', '.join(out['reads']) or '(nothing)'}",
+            f"  writes   : {', '.join(out['writes']) or '(nothing)'}"]
+    if shared:
+        text.append(f"  shared with ({len(shared)}):")
+        text += [f"    {r['node']} — {r['relation']} {r['state']} ({r['effect']})"
+                 for r in shared[:_STATE_SHARED_LIMIT]]
+        if len(shared) > _STATE_SHARED_LIMIT:
+            text.append(f"    … {len(shared) - _STATE_SHARED_LIMIT} more: "
+                        "graphlore_impact(node, shared_state=True)")
+    _ = byid
+    return out, text
 
 
 @_tool(annotations=ToolAnnotations(title="Fetch node source", read_only_hint=True))
@@ -4048,7 +4541,10 @@ def graphlore_fetch(
     return exactly those lines (± ``context_lines``). One budget is shared across all
     nodes — once it's hit the remaining nodes are named in ``not_fetched`` and
     ``truncated`` is set (the first code block is always included, so the result is
-    never empty). A name resolves like graphlore_neighbors: an ambiguous or
+    never empty). One definition longer than 8,000 tokens (or the budget, when
+    that is larger) is cut at a line: its entry carries ``cut`` (``lines_shown``,
+    ``lines_total``, ``tokens_total``) and the hint names the budget that returns
+    all of it. A name resolves like graphlore_neighbors: an ambiguous or
     substring match carries ``matched``, a miss lands in ``not_found`` with
     ``did_you_mean`` candidates. Each entry says ``file_changed_since_build``
     (null when the graph records no build commit) and sets ``span_mismatch`` when
@@ -4107,6 +4603,8 @@ def graphlore_fetch(
             if own:
                 region_start, end, _def_line, qual = own
                 lo, hi, spanned = region_start, end, True
+            elif (carried := _carried_span(n, line)) and not _file_changed(drift, f):
+                lo, hi, spanned = carried[0], carried[1], True
 
         block = _read_source_lines(f, lo - context_lines, hi + context_lines) if (
             f and lo > 0
@@ -4137,6 +4635,19 @@ def graphlore_fetch(
         lines, clo, chi = block
         code = "\n".join(lines)
         toks = _count_tokens(code)
+        # One definition can be thousands of lines (a 3,000-line class): past
+        # the larger of the budget and _FETCH_BLOCK_CAP it is cut at a line
+        # and says so; its members are what to ask for next.
+        cap = max(budget_tokens, _FETCH_BLOCK_CAP)
+        cut: dict[str, Any] | None = None
+        if toks > cap and len(lines) > 1:
+            keep = max(1, len(lines) * cap // toks)
+            code = "\n".join(lines[:keep])
+            cut = {
+                "lines_shown": f"{clo}-{clo + keep - 1}", "lines_total": f"{clo}-{chi}",
+                "tokens_total": toks,
+            }
+            toks = _count_tokens(code)
         # The first code block always goes in (so output is never empty); after that,
         # stop at the shared budget — same truncate-at-boundary contract as subgraph.
         if code_blocks and running + toks > budget_tokens:
@@ -4145,26 +4656,46 @@ def graphlore_fetch(
             continue
         running += toks
         code_blocks += 1
-        fetched.append({
+        entry: dict[str, Any] = {
             "node": _node_label(n),
             "qualname": qual if qual and qual != _node_label(n) else None,
-            "file": f, "line": line or None, "lines": f"{clo}-{chi}",
+            "file": f, "line": line or None,
+            "lines": cut["lines_shown"] if cut else f"{clo}-{chi}",
             "code": code, "tokens": toks, "spanned": spanned,
             **provenance,
-        })
+        }
+        if cut:
+            entry["cut"] = cut
+        fetched.append(entry)
 
+    cuts = [it for it in fetched if it.get("cut")]
     payload: dict[str, Any] = {
         "fetched": fetched,
         "not_found": not_found,
-        "truncated": truncated,
+        "truncated": truncated or bool(cuts),
         "approx_tokens": running,
     }
+    hints = []
     if truncated:
         payload["not_fetched"] = not_fetched
-        payload["hint"] = (
-            "Call graphlore_fetch again with the names in not_fetched, or raise "
-            "budget_tokens."
+        hints.append("Call graphlore_fetch again with the names in not_fetched, or raise "
+                     "budget_tokens.")
+    cut_hint = ""
+    if cuts:
+        payload["lines_left_out"] = sum(
+            int(it["cut"]["lines_total"].split("-")[1])
+            - int(it["cut"]["lines_shown"].split("-")[1]) for it in cuts)
+        biggest = max(it["cut"]["tokens_total"] for it in cuts)
+        members = _tool_hint(
+            "graphlore_skeleton", "list its members with graphlore_skeleton(file) and ")
+        cut_hint = (
+            f"A definition over {max(budget_tokens, _FETCH_BLOCK_CAP)} tokens was cut "
+            f"(see its `cut`): {members}fetch the member you need, or pass "
+            f"budget_tokens={biggest} for all of it."
         )
+        hints.append(cut_hint)
+    if hints:
+        payload["hint"] = " ".join(hints)
     if not_found:
         payload["did_you_mean"] = {q: _suggestions(all_nodes, q) for q in not_found}
     payload["build_drift"], _ = _drift_note(drift, (it["file"] for it in fetched if it["file"]))
@@ -4189,6 +4720,10 @@ def graphlore_fetch(
             m = it["matched"]
             how = "by substring" if m["by"] == "substring" else f"{m['count']} nodes"
             head += f"  [asked '{it['requested']}': matched {how}; pass an id to pick another]"
+        if it.get("cut"):
+            c = it["cut"]
+            head += (f"  [cut: lines {c['lines_shown']} of {c['lines_total']}, "
+                     f"~{c['tokens_total']} tokens in all]")
         if it["code"] is None:
             parts.append(f"# {head}  ({loc}) — {it.get('note', 'source unavailable')}")
         else:
@@ -4204,6 +4739,8 @@ def graphlore_fetch(
            "(call again with these names or raise budget_tokens)" if truncated else "")
         + (f"; {len(not_found)} not found: {missing}" if not_found else "")
     )
+    if cut_hint:
+        summary += "\n" + cut_hint
     text = summary + ("\n\n" + _frame_repo_text("\n\n".join(parts)) if parts else "")
     # Every requested name missing is a failure; a partial miss is not.
     return _fmt(payload, as_json, text, is_error=bool(not_found) and not fetched)
@@ -4958,7 +5495,9 @@ _IMPORT_HOP_ARROWS = {
 }
 # Relations that never close a dependency cycle on their own: containment points
 # from a file or class down to its members, and a docstring node at its subject.
-_CYCLE_IGNORED_RELATIONS = _NON_DEPENDENCY_RELATIONS
+# Reading or writing a variable is no dependency cycle: two functions sharing a
+# counter do not import or call each other.
+_CYCLE_IGNORED_RELATIONS = _NON_DEPENDENCY_RELATIONS | _STATE_RELATIONS
 
 
 @_tool(annotations=ToolAnnotations(title="Dependency cycles", read_only_hint=True))
@@ -5491,17 +6030,33 @@ def graphlore_same_names(
         across_languages,
     )
     shown = groups[:max(0, limit)]
+    cut_groups = 0
     for g in shown:
         for d in g["definitions"]:
             d.pop("id", None)
+        # a name a whole test suite repeats (`TEST`, `setUp`) has hundreds of
+        # definitions: list the first, count the rest
+        if len(g["definitions"]) > _SAME_NAME_DEFS:
+            g["definitions_total"] = len(g["definitions"])
+            g["definitions"] = g["definitions"][:_SAME_NAME_DEFS]
+            cut_groups += 1
     payload = {
         "name_count": len(groups),
         "names": shown,
-        "truncated": len(groups) > len(shown),
+        "truncated": len(groups) > len(shown) or bool(cut_groups),
         "scope": view.payload(),
     }
-    _cut_hint(payload, "Raise limit for the rest of the name_count names, or narrow with "
-                       "scope= / kinds=.")
+    hints = []
+    if len(groups) > len(shown):
+        hints.append("Raise limit for the rest of the name_count names, or narrow with "
+                     "scope= / kinds=.")
+    if cut_groups:
+        payload["names_cut"] = cut_groups
+        hints.append(
+            f"{cut_groups} name(s) list their first {_SAME_NAME_DEFS} definitions "
+            "(definitions_total says how many there are): narrow with scope= to see the "
+            "others.")
+    _cut_hint(payload, " ".join(hints))
     if not groups:
         return _fmt(
             payload, as_json,
@@ -5521,6 +6076,10 @@ def graphlore_same_names(
                 f"referenced by {d['referenced_by']}, used in its own file: "
                 + ("yes" if d["used_in_own_file"] else "no")
             )
+        if "definitions_total" in g:
+            lines.append(
+                f"      … {g['definitions_total'] - len(g['definitions'])} more definitions "
+                "(narrow with scope= to see them)")
     return _fmt(payload, as_json, _with_note("\n".join(lines), view))
 
 
@@ -5863,13 +6422,38 @@ def _project_imports_js_server(files: Iterable[str]) -> bool:
     """Whether some JS/TS file of the graph imports a server framework (express,
     fastify, koa-router, ...): the condition for keeping a route registered in a
     file that imports none itself, such as an Express app's `config/routes.js`
-    (`module.exports = function (app) { app.get('/x', h) }`)."""
+    (`module.exports = function (app) { app.get('/x', h) }`).
+
+    The framework's own repository counts too: there a file takes it by a relative
+    path (`require('../../')` in express's examples), which names the directory
+    whose `package.json` is the framework's."""
+    own: dict[str, bool] = {}
+
+    def is_framework_dir(rel: str) -> bool:
+        if rel not in own:
+            name = None
+            path = _resolve_in_project(posixpath.join(rel, "package.json"))
+            try:
+                if path is not None and path.is_file():
+                    name = json.loads(
+                        path.read_text(encoding="utf-8", errors="replace")).get("name")
+            except (OSError, ValueError, AttributeError):
+                name = None
+            own[rel] = name in _JS_SERVER_FRAMEWORKS
+        return own[rel]
+
     for f in files:
         js = _js_for_file(f)
-        if js is not None and any(
-                i.specifier == fw or i.specifier.startswith(fw + "/")
-                for i in js.imports for fw in _JS_SERVER_FRAMEWORKS):
-            return True
+        if js is None:
+            continue
+        for i in js.imports:
+            spec = i.specifier
+            if any(spec == fw or spec.startswith(fw + "/") for fw in _JS_SERVER_FRAMEWORKS):
+                return True
+            if spec.startswith("."):
+                target = posixpath.normpath(posixpath.join(posixpath.dirname(f), spec))
+                if not target.startswith("..") and is_framework_dir(target):
+                    return True
     return False
 
 
@@ -5878,6 +6462,58 @@ _ROUTES_NOTE = (
     "another file and gorilla .Methods() are invisible; zero routes means no "
     "visibility, not no routes"
 )
+
+
+_ROUTES_NATIVE_NOTE = (
+    "from the native graph: full paths, prefixes joined across files; non-literal "
+    "patterns, dynamic registration and prefixes set in configuration are invisible"
+)
+
+
+def _graph_routes(nodes: list[dict], edges: list[dict], view: ScopeView) -> list[dict[str, Any]]:
+    """Route rows from a native graph's route nodes: the full pattern, the handler
+    (`handles`) and who requests it (`http_calls`)."""
+    labels = _display_labels(nodes)
+    byid = {_node_id(n): n for n in nodes}
+    handlers: dict[str, list[str]] = {}
+    callers: dict[str, list[str]] = {}
+    for e in edges:
+        rel = _rel(e)
+        s, t = _edge_ends(e)
+        if rel == "handles":
+            handlers.setdefault(s, []).append(t)
+        elif rel == "http_calls":
+            callers.setdefault(t, []).append(s)
+    rows: list[dict[str, Any]] = []
+    for n in nodes:
+        if not _is_route_node(n):
+            continue
+        f = _norm_relpath(_node_file(n))
+        if not view.keeps_file(f):
+            continue
+        rid = _node_id(n)
+        hs = handlers.get(rid, [])
+        first = byid.get(hs[0]) if hs else None
+        cs = sorted({labels.get(c, c) for c in callers.get(rid, [])})
+        row: dict[str, Any] = {
+            "framework": str(n.get("framework", "")),
+            "method": str(n.get("method", "")),
+            "pattern": str(n.get("pattern", "")),
+            "handler": labels.get(hs[0], hs[0]) if hs else "",
+            "line": _node_line(n),
+            "file": f,
+            "node": _node_label(first) if first is not None else "",
+            "qualname": str(first.get("qualname", "")) if first is not None else "",
+            "called_by": len(cs),
+        }
+        if len(hs) > 1:
+            row["handlers"] = [labels.get(h, h) for h in hs]
+        if cs:
+            row["callers"] = cs[:3]
+        if n.get("prefix_unresolved"):
+            row["prefix_unresolved"] = True
+        rows.append(row)
+    return rows
 
 
 def _route_candidate_files(graph_files: set[str]) -> set[str]:
@@ -5942,10 +6578,18 @@ def graphlore_routes(
     optional [treesitter] extra. Source files in a language with no route
     reader are counted in ``not_read``.
 
+    On a graph the native engine built (schema 5 on) the rows are its route
+    nodes instead (``source: "graph"``): the full path, prefixes joined across
+    files (FastAPI ``include_router``, Express ``app.use``, gin groups passed to
+    a function, Laravel's ``routes/api.php`` prefix, …), the handler, and
+    ``called_by`` / ``callers``: the code in the repository whose requests
+    reach the route (``http_calls``).
+
     The result is a LOWER BOUND: non-literal patterns, dynamic registration,
-    prefixes applied in another file and gorilla ``.Methods()`` are invisible;
-    gorilla chains surface as method ``ANY``. Zero routes reads "no
-    visibility", not "no routes".
+    prefixes set in configuration and gorilla ``.Methods()`` are invisible
+    (on a graphify graph, prefixes applied in another file too); gorilla chains
+    surface as method ``ANY``. Zero routes reads "no visibility", not "no
+    routes".
 
     Args:
         framework: Keep only this framework label (exact, case-insensitive) —
@@ -5974,9 +6618,11 @@ def graphlore_routes(
         f for f in _route_candidate_files(graph_files) if view.keeps_file(f)
     })
 
-    rows: list[dict[str, Any]] = []
+    native = _native_routes(nodes)
+    rows: list[dict[str, Any]] = (
+        _graph_routes(nodes, edges, view) if native else [])
     server_import: bool | None = None  # does any JS/TS file import a server framework
-    for f in files:
+    for f in files if not native else []:
         for r in _routes_for_file(f):
             if r.get("needs_server_import"):
                 if server_import is None:
@@ -6001,12 +6647,14 @@ def graphlore_routes(
 
     rows.sort(key=lambda r: (r["file"], r["line"]))
     shown = rows[:max(0, limit)]
+    note = _ROUTES_NATIVE_NOTE if native else _ROUTES_NOTE
     payload: dict[str, Any] = {
         "files_scanned": len(files),
         "routes": shown,
         "count": len(rows),
         "truncated": len(rows) > len(shown),
-        "note": _ROUTES_NOTE,
+        "source": "graph" if native else "source",
+        "note": note,
         "scope": view.payload(),
     }
     _cut_hint(payload, "Raise limit for the rest of the `count` routes, or filter with "
@@ -6019,14 +6667,15 @@ def graphlore_routes(
             payload, as_json,
             _with_note(
                 f"No framework routes visible in {len(files)} scanned file(s) "
-                f"({_ROUTES_NOTE})."
+                f"({note})."
                 + (f"\n{_not_read_text(not_read)}" if not_read else ""), view),
         )
-    lines = [f"{len(rows)} route(s) across {len(files)} scanned file(s) ({_ROUTES_NOTE}):"]
+    lines = [f"{len(rows)} route(s) across {len(files)} scanned file(s) ({note}):"]
     for r in shown:
+        called = f"  requested by {r['called_by']}" if r.get("called_by") else ""
         lines.append(
             f"  {r['method']} {r['pattern']} -> {r['handler']}  "
-            f"({r['file']}:{r['line']})  [{r['framework']}]"
+            f"({r['file']}:{r['line']})  [{r['framework']}]{called}"
         )
     if payload["truncated"]:
         lines.append(f"  … +{len(rows) - len(shown)} more route(s); raise `limit`.")
@@ -6136,7 +6785,8 @@ def onboard() -> str:
             (("graphlore_subgraph", "For the top 2-3 god nodes, call graphlore_subgraph to "
               "see how they connect."),),
             (("graphlore_surprises", "Call graphlore_surprises and flag anything that looks "
-              "like a hidden coupling."),),
+              "like a hidden coupling: state shared with no call path, files that change "
+              "together with nothing in the graph joining them."),),
         ],
         "Then write me a concise architecture summary: subsystems, key types, and risks.",
     )

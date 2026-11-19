@@ -37,3 +37,53 @@ jobs:
           name: coverage-${{ matrix.python-version }}
           path: coverage.xml
           if-no-files-found: ignore
+
+  # The native engine (engine/, the graphlore-engine wheel): Rust checks, then
+  # graphlore's suite with the engine installed, so tests/test_engine.py runs
+  # instead of skipping and the native span fallback is exercised.
+  engine:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up Rust
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt,clippy
+          rustup default stable
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            engine/target
+          key: cargo-${{ runner.os }}-${{ hashFiles('engine/Cargo.lock') }}
+      - name: Format (cargo fmt)
+        run: cargo fmt --manifest-path engine/Cargo.toml --check
+      - name: Lint (clippy)
+        run: |
+          cargo clippy --manifest-path engine/Cargo.toml --all-targets -- -D warnings
+          cargo clippy --manifest-path engine/Cargo.toml --all-targets --features python -- -D warnings
+      - name: Test (cargo test)
+        run: cargo test --manifest-path engine/Cargo.toml
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Build the wheel (maturin)
+        run: |
+          python -m pip install --upgrade pip maturin
+          maturin build -m engine/Cargo.toml --release --out dist-engine
+          ls -l dist-engine
+      - name: Test graphlore with the engine
+        run: |
+          pip install -e ".[dev,treesitter]" dist-engine/*.whl
+          pytest -q
+          python benchmarks/compare_engines.py tests/fixtures/polyglot \
+            --graphify-graph tests/fixtures/polyglot/graph.json --fail-under 95
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.10"
+      - name: The abi3 wheel on Python 3.10
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]" dist-engine/*.whl
+          pytest -q tests/test_engine.py

@@ -50,6 +50,224 @@ All notable changes to this project are documented here. The format is based on
   Python reference when installed (`GRAPHLORE_SEARCH_KERNEL=python` forces the
   reference), and `tests/fixtures/search_golden.json` holds the terms and
   bit-exact scores it must reproduce.
+- **What the native engine leaves without an edge, by reason.** `python -m
+  graphlore_engine build ROOT --unresolved PATH` (engine 0.5.15) also writes
+  every call that got no edge although its name is the one callable of that
+  name in the project, with the reason the walk stopped (`untyped local or
+  parameter`, `closure parameter outside any definition`, `type: no such
+  member`, …); graph.json is the same with or without it.
+  `benchmarks/unresolved.py` counts them by reason and language for one
+  repository or a directory of them, leaves vendored and minified files out,
+  prints samples and compares with an earlier run. On the 31 audit
+  repositories: 6,796 calls, more than a third of them in the file-level
+  callbacks of JavaScript, TypeScript and Ruby test DSLs
+  ([native-engine.md](docs/native-engine.md#what-is-left-without-an-edge)).
+- **Files that change together.** graphlore reads the project's git history
+  (one local `git log`: the last 1000 commits that are not merges, renames
+  followed, commits of more than 30 files skipped) and measures, per pair of
+  files, code-maat's degree of change coupling; cached on `HEAD`, for graphify
+  and native graphs alike, nothing written to `graph.json`.
+  `graphlore_surprises` lists in `co_change` the source files that change
+  together with no edge of the graph between them (tests left out), and
+  `graphlore_node_details` the files a node's file changes with most and
+  whether the graph joins them (`linked`). Both say how much history was read
+  (`history`), and a shallow clone or a history under 10 commits is named
+  rather than shown as an empty list. On nine audit repositories deepened to
+  their last 1000 commits, 239 such pairs, read by hand all real: a websocket
+  client and its server, Rails routes and models with `schema.rb`, parallel
+  implementations kept in step; `git log` took at most 230 ms.
+- **Shared state, pair by pair.** Each `shared_state` row of
+  `graphlore_surprises` lists its `pairs` (a writer and another definition
+  touching the state), whether a call path joins them (`call_path`, either
+  way, over calls, dispatch and HTTP, within 6 hops) and whether their files
+  change together (`co_change`). The score counts hidden pairs (no call path)
+  instead of files that import neither the other, and a hidden pair whose
+  files change together raises it again; a row whose pairs are all joined by
+  calls says so (`every pair is joined by a call path as well`).
+- **Routes and HTTP requests in the native engine** (graph schema 5, engine
+  0.5.0), in Python, JS/TS, Java, Kotlin, C#, Go, Rust, Ruby and PHP: every
+  route is a `type: route` node with its
+  `method`, its full `pattern` and a normalized `key` (`GET /api/v1/users/{}`),
+  joined to its handler by a `handles` edge. The full path is composed across
+  files, which `graphlore_routes` cannot do: FastAPI `APIRouter(prefix=…)` and
+  `include_router(…, prefix=settings.API_V1_STR)` (a constant's value is
+  read), Flask blueprints, Express `app.use('/api', router)` and
+  `app.use('/x', require('./x'))`, Fastify `register(…, { prefix })`, NestJS
+  `setGlobalPrefix`; within a file, Spring and JAX-RS class prefixes, Ktor's
+  nested `route("p") { … }` and ASP.NET `[Route]` controllers and `MapGroup`
+  groups (kept per method, so two `var group = …` do not mix), chi `Route`
+  lambdas, actix scopes, the Rails `routes.draw` DSL (`resources`,
+  `namespace`, `scope`) and Laravel `prefix()->group()`; across files, gin /
+  echo groups (`v1 := router.Group("/v1")`) and the router passed to a
+  function (`addUserRoutes(v1)`), axum `.nest("/api", users::router())` /
+  `.merge(…)` and actix `.configure(routes)`, and Laravel's route-file prefix
+  (`Route::prefix('api')->group(base_path('routes/api.php'))`, Laravel 11's
+  `withRouting(api: …)`). A Rails `"articles#index"` or Laravel
+  `[UserController::class, 'store']` handler is the controller's method (a
+  singular `resource :user` is `UsersController`'s). A handler
+  written as a lambda that makes one call (`post { users.register(ctx) }`,
+  `(req, res) => ctrl.show(req, res)`) is the method it calls. A prefix whose value is unknown is written as a parameter
+  (`/{API_PREFIX}/users`) and the node says `prefix_unresolved`. Requests the
+  code makes (`fetch`, `axios` and clients made by `axios.create({ baseURL })`,
+  generated SDKs such as `client.get({ url: '/api/v1/items/' })`, jQuery,
+  Angular `HttpClient`, `EventSource`, `requests`, `httpx`, `aiohttp`, Feign
+  `@RequestLine`, the mappings of a `@FeignClient` / `@HttpExchange` /
+  `@RegisterRestClient` interface and Retrofit's `@GET` (requests, not
+  routes, unlike `graphlore_routes`), `RestTemplate`, `WebClient` /
+  `RestClient`, MockMvc, RestAssured, the Ktor client, C# `HttpClient` with
+  a relative URL such as `$"todos/{id}"`, Go `http.Get` / `http.NewRequest`,
+  reqwest / ureq, HTTParty / Faraday, Guzzle and Laravel `Http::`, and in
+  tests rack-test and Laravel's `$this->getJson(…)`) are
+  linked to the route they reach by `http_calls`: `EXTRACTED` when the method
+  is known and every segment matches (a parameter or a template hole against
+  a parameter), `INFERRED` for a value against a parameter, an unknown method
+  or base, or several candidates. A path several routes take goes to the
+  nearest. Only production code is linked: requests in tests are counted
+  (`report.http.test_calls`), as are those to another host and those whose URL
+  the source does not spell out. `graphlore_impact` follows both relations, so
+  a handler's dependents reach the client code that requests it, and
+  `relations="http"` names them. In fastapi-template all 23 requests of the
+  generated SDK reach their 23 handlers, in kotlin-spring-realworld the 6
+  Feign requests theirs, and in todoapi 7 of the 9 `HttpClient` requests (the
+  other two go to routes `MapIdentityApi` adds at run time), and in
+  gin-examples a browser `EventSource('/stream/' + id)` the Go handler of
+  `GET /stream/:roomid`. Across the 31 audit repositories, 2375 of
+  `graphlore_routes`' 2376 rows are routes of the native graph (69 with a
+  longer path; 60 with a closure kept in a variable for a handler, which the
+  native graph names by the function around it). Builds take 7% longer
+  (median of ten repositories against engine 0.4.0).
+- On a native graph (schema 5), `graphlore_routes` lists the graph's route
+  nodes (`source: "graph"`): the full path, the handler, and `called_by` /
+  `callers`, the code whose requests reach the route; on a graphify graph it
+  reads the source as before (`source: "source"`). `graphlore_node_details`
+  has an `http` section: the routes a handler serves and who requests them,
+  the routes a client definition requests, or a route's handlers and callers.
+- **Shared state in the native engine**: variables, constants and class-level
+  fields are nodes in all 14 languages (`kind: variable | constant |
+  property`), and the definitions that read or write them are linked by
+  `reads` / `writes` edges: assignments, `+=`, `x[k] = v`, `del`, `++`, and a
+  mutating method (`append`, `set`, `clear`, …) on a collection or a builder,
+  `INFERRED` since only its name says so. Locals, parameters and Python names
+  assigned without `global` are left out; a constructor setting its own
+  object's fields builds it and couples nothing. Two definitions touching one
+  such node affect each other without either calling the other. Member reads
+  of a property or constant that were `references` are `reads` now. Fields of
+  instances count too (`self.x`, `this.x`, `@x`, declared fields), and so do
+  **resources**, by a literal key: environment variables (`os.getenv`,
+  `process.env.X`, `ENV[...]`, …), files (`open(p, "w")`, `fs.writeFileSync`,
+  …), tables named in SQL strings or reached through an ORM model
+  (`User.objects.filter`, `Post.create`, `db.Items.Add`; the model's table
+  from `__tablename__`, `Meta.db_table`, `@Table`, `$table`, `DbSet<T>`, …),
+  events a project both emits and listens for, and cache keys
+  (`localStorage`, Redis-like stores). A resource is a `type: resource` node
+  only when two definitions touch it. On the 31 audit repositories this adds
+  16% edges; builds take 15% longer (median). Schema 4, engine 0.4.0.
+- **`graphlore_impact(shared_state=True)`** walks shared state: the
+  dependents of a writer include the code that reads what it writes, the
+  dependencies of a reader the code that writes what it reads (a `written_by`
+  step). By default reads and writes are not walked and are counted in
+  `state_nodes_skipped`; `relations="state"` names them.
+- **`graphlore_surprises` lists shared state** (`shared_state`): variables,
+  fields and resources written in one file and read or written in another,
+  scored by whether the files import each other, their top-level directories
+  and their communities.
+- **`graphlore_node_details` says what a definition reads and writes**, and
+  which other definitions share that state with it, and how.
+- **A native extraction engine, `engine/`** (experimental, opt-in): graphlore's
+  own extractor, written in Rust and built with maturin + PyO3 into a separate
+  package, `graphlore-engine`, with tree-sitter grammars for Python,
+  JavaScript, TypeScript, TSX, Go, Java, Kotlin, Scala, C#, Rust, Swift, C, C++,
+  Ruby and PHP compiled in — nothing is downloaded and nothing reaches the
+  network. It writes a graphify-compatible `graph.json` with a node per file,
+  per definition and per Markdown / reStructuredText heading, and the
+  `contains` / `method` / `case_of` edges between them. Each definition node
+  carries its real span (`region_start`, `end_line`, `source_location` as
+  `L13-L15`), `kind`, `qualname` and `language`; Rust `#[cfg(test)]` and
+  `#[test]` items are marked `test`. Ids and labels follow graphify's scheme
+  (25 of the 26 code definitions in the polyglot fixture get the same id and
+  parent from both engines). The definition rule is a port of `spans.py`'s: on
+  ~95,000 definitions in real Go, JS, TS, Rust, Ruby, Java, C#, PHP, Kotlin,
+  Swift, Scala and C/C++ files it returns the same spans as `spans.py`, apart
+  from 2.5% of C/C++ headers where the grammar versions differ, and on 30,000
+  Python definitions the same spans as the stdlib `ast`. Per language, a module
+  overrides only what its grammar does differently. No communities yet; every
+  native build says so.
+- **Imports, calls, bases and type references in the native engine**, in all
+  14 languages. The engine reads import statements, calls and constructions,
+  base lists, types in signatures, fields, variables and type arguments,
+  decorators and attribute reads, and resolves them the way each language
+  does: module paths per language (Python's root rules, JS/TS relative paths
+  with `tsconfig.json` paths and workspace packages, `go.mod`, JVM / C# / PHP
+  packages and namespaces, Cargo crates and the module tree, Ruby
+  `require_relative`, SwiftPM targets, C/C++ includes), names through the
+  enclosing scopes, the file, its imports and re-exports, its package or
+  namespace, and receivers through typed parameters, fields, assigned
+  constructions and declared return types (builder chains included). What that
+  finds is `EXTRACTED`; a unique name across the project, with import
+  evidence for a method, is `INFERRED`; anything else gets no edge and is
+  counted in the build reply. Import edges carry `runs` (module-level,
+  deferred, type-checking); external modules and bases are `type: external`
+  nodes with an `ecosystem`. Properties (C#, Swift, Kotlin, TS/JS class
+  fields) and module-level constants are nodes. graph.json schema 2. Compared
+  with graphify on the 31 audit repositories, the native graph has 77% of
+  graphify's call edges, 75% of its file-level imports, 96% of its bases and
+  85% of its type references, while 15% of its calls are inferred against
+  47% of graphify's; most of the rest is graphify's name guesses and artefacts
+  (`docs/native-engine.md` has the per-language table and samples). Builds stay
+  3–6 times faster than graphify's.
+- **Communities in the native engine** (`engine/src/community/`): Leiden on the
+  internal nodes, with edges weighted by what they say (containment and calls
+  1.0, bases 1.5, imports 0.7 / 0.4, type references 0.5), by confidence
+  (`INFERRED` × 0.5) and by where their ends live (same directory × 1.25, other
+  top-level directory × 0.6, test to production × 0.1), plus a weak tie between
+  the files of a directory; external nodes join their neighbours' community.
+  Then graphify's rules (isolated nodes alone, oversized and sparse
+  communities split, ids by size) and names after the most connected member,
+  prefixed with the directory most members share. Nodes are visited in the
+  order of a hash of their id and a build starts from the previous graph's
+  communities and settles, so after a one-file change 99.8–100% of nodes keep
+  their community; ids are kept by overlap, and a name saved for a community
+  stays while its members mostly do (stale ones are dropped from
+  `.graphify_labels.json`, and the build says how many). On the 31 audit
+  repositories there are as many communities as graphify finds (90.5 against
+  90.6 per repository), with 87% of a community's members in one directory
+  (graphify: 83%) and 8% of test nodes in a production community (21%).
+  graph.json schema 3: `community` / `community_name` on every node and
+  `graph.communities` in the header. `python -m graphlore_engine cluster GRAPH`
+  detects them again.
+- **Incremental native updates**: every native build writes a facts cache
+  (`graphify-out/cache/graphlore-native.bin`), and `graphlore_build(update=True)`
+  reuses the facts of the files whose size and modification time, or content,
+  are unchanged, and parses the rest; resolution and communities run over the
+  whole project, so an update writes the graph a full build writes. retrofit:
+  2.6 s for a full build, 1.0 s for an update after one file changed. The build
+  reply says how many files were parsed and reused; `verbose=True` adds the
+  time per phase.
+- **`benchmarks/compare_engines.py --communities`** compares the two engines'
+  communities: count, sizes, modularity, directory purity, test mixing and
+  their agreement (NMI).
+- **`graphlore_build` on a native graph trusts its edges**: `ImportChecker`
+  takes an edge's `runs` as when the import runs and rejects nothing, and the
+  calls and imports `resolve.py` adds to graphify's graphs are not added to a
+  native schema-2 graph (`graph._engine_resolved`).
+- **`benchmarks/compare_engines.py` compares edges** (imports as file pairs;
+  calls, bases and type references over the definitions both engines have),
+  and **`benchmarks/polyglot.py --engine native`** runs the whole audit on
+  native graphs (built into `graphlore-native/`). On the 31 repositories it
+  raises no high finding (7 on graphify's graphs) and no `FETCH-NO-SPAN` (94),
+  and every tool but the community ones answers as on graphify's graphs.
+- **`GRAPHLORE_ENGINE`** picks the extractor `graphlore_build` uses: `graphify`
+  (the default, unchanged), `native` (an error naming the install command when
+  the engine is missing; `mode` and `cluster_only` refused; `update` rebuilds
+  the whole graph) or `auto` (native when installed, graphify for what native
+  cannot do and for updates of a graph graphify built). The native build runs
+  in a child process bounded by `GRAPHLORE_TIMEOUT`, and records
+  `built_at_commit` for freshness. With the native engine chosen, a file whose
+  Python tree-sitter grammar is missing (no `[treesitter]` extra, or offline)
+  gets its spans from the engine's compiled-in grammars.
+- **`benchmarks/compare_engines.py`**: the native graph of a repository against
+  graphify's, per language — exact, near and same-file matches, what only one
+  engine has, and whether matched definitions share a parent and relation.
 
 ### Changed
 - **The tree-sitter span walk is 3–5× faster, with the same spans.** It caches
@@ -68,6 +286,688 @@ All notable changes to this project are documented here. The format is based on
   `GRAPHLORE_SEMANTIC_BACKEND` names a backend that is not available.
 - The Hugging Face offline flags are set by `config.export_offline_env()`, shared
   by semble and the built-in dense tier.
+- **Three replies that could run past 90 KB are cut, and say what they left
+  out** (the polyglot audit's `REPLY-TOO-LARGE` on native graphs, five to
+  none). `graphlore_neighbors` takes `limit` (200): past it the result carries
+  `total`, `truncated` and `counts` by relation and direction (retrofit's
+  `Call`, 752 neighbors: 99 KB to 25 KB as JSON). `graphlore_fetch` returns one
+  definition whole up to 8,000 tokens or `budget_tokens`, whichever is larger;
+  a longer one is cut at a line with `cut` (`lines_shown`, `lines_total`,
+  `tokens_total`), `lines_left_out` and a hint naming `graphlore_skeleton` and the budget that
+  returns all of it (guzzle's 3,100-line `CurlFactory`: 124 KB to 29 KB).
+  `graphlore_same_names` lists the first 25 definitions of a name and counts
+  them all in `definitions_total` (cpr's 647 definitions named `TEST`: 134 KB to 6 KB).
+- With the native engine, `graphlore_build(cluster_only=True)` detects the
+  communities of the graph on disk again (it was refused), and `update=True`
+  is incremental (it rebuilt everything); under `GRAPHLORE_ENGINE=auto` both
+  still go to graphify when the graph on disk is graphify's.
+- On a native graph built before the engine detected communities,
+  `graphlore_communities` says so and names `graphlore_build(cluster_only=True)`.
+- `graphlore_fetch` returns the lines a native property or constant node
+  carries (`region_start`..`end_line`) when the span engine has no span for it
+  and the file is unchanged since the build, instead of a line window.
+- **A call of an overloaded name that the arguments do not decide is an
+  `INFERRED` edge to each overload that fits** (native engine 0.5.5; Java,
+  Kotlin, Scala, C#, Swift, C++), where it was an `EXTRACTED` edge to the
+  first. `baseUrl(server.url("/"))` may be `baseUrl(String)`, `baseUrl(URL)`
+  or `baseUrl(HttpUrl)`: all three are callers' targets now, so
+  `graphlore_impact` on any of them lists the call, and `strict=True` (only
+  extracted edges) leaves it out. 999 calls of the 31 audit repositories
+  changed this way; the share of `INFERRED` calls goes from 20% to 29%.
+
+### Fixed
+- **Native engine 0.5.37: JavaScript's unresolved rows say why they are no
+  gap.** New marks: a call of the caller's own local or parameter (a
+  callback it was handed), a candidate in vendored or minified code, a
+  member that is a field assigned a value, a property defined at run time
+  (`Object.defineProperty`), a receiver holding a library's value (`const
+  app = express()`), a property middleware attaches to a request, the
+  request a framework hands a function. The document a Mongoose model's
+  static hands its callback is typed (`INFERRED`). JavaScript's unmarked
+  rows 18 → 0; all languages 926 → 801.
+- **Native engine 0.5.36: JavaScript receivers the source states.** `this`
+  in a function expression is what it is attached to (`app[method] =
+  function`, a callback a Mongoose schema is handed); in an ES5 constructor,
+  its prototype's functions; a Mongoose document has its schema's
+  `methods`; express's own `req` / `res` objects
+  (`Object.create(http.IncomingMessage.prototype)`) type a handler's untyped
+  `req` / `res`. express: 158 calls, the Mongoose demo 49 (`INFERRED` where
+  a convention, not the source, says what the receiver is). JavaScript's
+  unmarked unresolved rows 55 → 18. The facts cache is rebuilt once.
+- **Native engine 0.5.35: C function-pointer slots dispatch to the functions
+  put in them.** An initializer (`.close = redisNetClose`, or by position)
+  or an assignment (`ac->ev.addRead = redisLibuvAddRead;`) gives a
+  `dispatches_to` edge from the slot to the function, so `impact` and call
+  paths go from `r->fn->createString(…)` on to `createStringObject`. A field
+  of an anonymous struct type answers for its body's members. hiredis: 88
+  `dispatches_to` edges, 81 reads and writes. The facts cache is rebuilt
+  once (`FileFacts::slots`, `Def::inline_body`).
+- **Native engine 0.5.34: a C `typedef struct X { … } X;` is its struct.**
+  A local typed by such an alias reaches the struct's members (the target
+  0.5.32 wrote for it was the first type in the body, now the struct's own
+  name). A function returning a pointer types its parameters; `extern T x;`
+  declares the variable defined elsewhere (no node); a file-level variable
+  inside an `#if` group or `extern "C" { … }` is a variable. hiredis: 34
+  calls through function-pointer fields (`r->fn->createString(…)`), 836
+  reads, 324 writes, 312 uses; C's unmarked unresolved rows 33 → 0. The
+  facts cache is rebuilt once.
+- **Native engine 0.5.33 and `spans.py`: a C/C++ `#if` written once per
+  configuration is parsed once.** When every branch of an `#if … #else …
+  #endif` leaves the same number of braces open, the parser is given the
+  first branch (the rest and the directives are blanked in place); it used
+  to read the rest of the file into the function around (cpr's
+  `multiperform.cpp`: 25 methods nested in `DoMultiPerform`). C++ `using X
+  = …;` is a span of `spans.py`'s rule too (`fetch` on an alias returned the
+  namespace around it). C++'s unmarked unresolved rows 6 → 0. 10 calls on a
+  structured binding (`for (auto& [session, method] : sessions_)`) had an
+  edge only by accident and are gone.
+- **Native engine 0.5.32: C++ type aliases and template specializations.**
+  `using X = T<…>;` is a definition (graphify has these nodes too) and an
+  alias or `typedef` is followed to the type it names; its arguments pick a
+  template's specialization (`<Response, true>` fits `<T, true>`). A bare
+  template name with several specializations is `INFERRED`, and a member
+  several of them declare gets no edge. Deduction guides declare no
+  function. `std::vector`, `std::map` and the other standard containers
+  are collections. cpr: 50 calls, 23 reads, 98 references, 34 alias nodes;
+  C++ definitions shared with graphify 97.8% → 98.7%; C++'s unmarked
+  unresolved rows 12 → 6. The facts cache is rebuilt once
+  (`Def::alias_args`).
+- **Native engine 0.5.31: a C++ namespace is every block that opens it.**
+  `cpr::File(…)` is looked up in each `namespace cpr { }` of the project,
+  not only in the block the caller's file opens; a method defined for a
+  type inside such a block is the type's, not the namespace's; a name called
+  is the function of that name and a name with `::` after it the class
+  (`cpr::async(…)` beside `class async`). cpr: 273 `EXTRACTED` calls, none
+  gone; C++'s unmarked unresolved rows 28 → 12.
+- **Native engine 0.5.30: C++ locals declared without a value, and the
+  constructions the grammar reads as declarations.** `Session session;` is a
+  local of its type, and `cpr::ThreadPool pool(context);` beside a local
+  `context` a variable constructed from it (not a function `pool`: it keeps
+  its span, gets no node and answers no name). cpr: 538 `EXTRACTED` and 140
+  `INFERRED` calls (overloads the arguments do not decide), 13 nodes of
+  misread declarations gone; hiredis: 10 reads and writes of struct fields.
+  The unresolved rows mark calls on `std` (`std::async`, a member of a
+  field or local declared with a `std::` type), even where the project
+  opens `namespace std`. C++'s unmarked rows: 50 → 28. The facts cache is
+  rebuilt once (`Def::misread`, `Def::written_head`, `Local::written_head`).
+- **Native engine 0.5.29: a library interface's one implementation is
+  marked in the unresolved rows.** A call left without an edge whose one
+  candidate is a member of a type implementing a library type
+  (`implements RequestInterface`, `extends Writable`), on a receiver the
+  source gives no type, is `library_like` ("the one definition implements a
+  library type's member"): the receiver may be any implementation. Marker
+  bases (`Sendable`, `JsonSerializable`, `Closeable`, exception roots), Ruby
+  and member extension functions are left out. 477 of the 31 repositories'
+  6,166 rows (got 191, guzzle 253); 1,009 are left unmarked, from 1,486
+  (PHP 393 → 137, TypeScript 315 → 124). graph.json is unchanged.
+- **Native engine 0.5.28: RSpec `let` and `subject` are definitions.**
+  `let(:conn) { … }`, `let!`, `subject(:request) { … }` and a nameless
+  `subject { … }` are methods of the `describe` / `context` block they are
+  written in: the innermost of several of one name answers a use, and a use
+  outside every such block names nothing. What the block's last expression
+  gives is the method's result (`conn.get` reaches `Faraday::Connection#get`
+  through `let(:conn) { Faraday::Connection.new }`). A module that
+  `RSpec.configure`'s `config.include M` puts in every example answers a
+  bare name a spec calls that nothing else answers to. faraday: 374 new
+  definitions, 484 calls (442 `EXTRACTED`); 9 `INFERRED` guesses on a block
+  parameter inside a `let` are gone. Calls left without an edge: 6,206 →
+  6,166, Ruby's unmarked rows 298 → 239. The facts cache is rebuilt once
+  (new `Def::scope_lines`, `FileFacts::spec_includes`).
+- Native engine 0.5.27, the small cases the diagnostics left. On the 31
+  audit repositories: 264 calls (183 `EXTRACTED`) and 302 reads and writes
+  gained, 252 calls gone (227 of them kotlinpoet's, moved to another
+  overload).
+  - **Swift implicit members are typed by more places**: a property's
+    initializing closure, a memberwise initializer's label, a library
+    type's static member a project extension adds, and the `headers`
+    extensions add to `URLRequest` (alamofire: 30 calls, the untyped ones
+    from 39 to 7).
+  - **Lombok accessors read and write their fields** (`filter.getTags()` on
+    a `@Data` class; quarkus-realworld: 301 reads and writes).
+  - **Laravel's `auth()->user()` is the class that extends
+    `Authenticatable`** (`INFERRED`).
+  - **A Rust `Err(e)` binds an untyped local**, and a star-imported module
+    passes on what its `pub use` names (actix-realworld: 18 calls of
+    `e.error_response()`, `INFERRED`).
+  - **An enum case is a value of its enum**: kotlinpoet's
+    `addModifiers(KModifier.EXTERNAL)` goes to the `vararg` overload.
+  - **A project type named like a language one is the project's** (`enum
+    Type`): retrofit's `new PhoneNumber(…, Type.MOBILE)` keeps its
+    constructor.
+  - **A guess by name never takes Rust's or C++'s own method names**
+    (`lock`, `c_str`): 22 wrong `INFERRED` calls gone.
+- Native engine 0.5.26, two more kinds of library names in the
+  diagnostics (graph.json is unchanged): a capital head that names nothing
+  of the project and no local (`Date.now()`, `Assert.NotNull(…)`), and the
+  methods of Rust's and C++'s standard types (`lock`, `clone`, `c_str`).
+  Of 6,237 unresolved rows, 1,610 are left unmarked (2,066 before).
+- Native engine 0.5.25, five readings the 0.5.24 diagnostics pointed to.
+  On the 31 audit repositories: 83 calls (60 `EXTRACTED`) and 157 reads,
+  writes, uses and references gained, 8 edges gone.
+  - **C# primary constructor parameters are typed names of the class**
+    (`class QueryHandler(ConduitContext context)`, then
+    `context.SaveChangesAsync()`): aspnetcore-realworld's handlers had no
+    edge for what they use.
+  - **A cast types a local** (C# / Java `(Box)o`, `o as Box`, TypeScript
+    `<Cup>o`, Kotlin `o as? Jar`), `EXTRACTED`.
+  - **A name taken out of the object a function returns is the function it
+    names** (`const { showSuccessToast } = useCustomToast()` beside `return
+    { showSuccessToast, … }`), `INFERRED`.
+  - **A Python `@property` with more read after it is what it returns**
+    (`self.cookies.extract_cookies(…)`).
+  - **A C# top-level variable that names nothing in sight, called by an
+    extension's name, is its receiver** (`builder.Services.AddJwt()` in
+    `Program.cs`), `INFERRED`; never for a capital head, which is a
+    library's static call.
+- Native engine 0.5.24, the diagnostics tell a library's name from a
+  missing edge (graph.json is unchanged). Each row of `build --unresolved`
+  carries `library_like`: why it is most likely a library's name the
+  project happens to define once (a name the language's own types answer
+  to, a library's receiver, `self` in a type with a base the project does
+  not define, a definition that is test code for a call that is not), or
+  null. `benchmarks/unresolved.py` prints both totals and takes `--real`:
+  of 6,285 rows on the 31 audit repositories, 2,114 are not marked.
+- Native engine 0.5.23, **the type arguments a call writes say which
+  overload it is of** (C#, Java): `client.Get<User>(id)` is the callable
+  that declares one type parameter, and a call that writes none, between a
+  callable and its generic twin of the same parameters, is the plain one.
+  In restsharp 81 tied targets are gone and 27 calls left with one target
+  are `EXTRACTED`; overloads that take different things stay tied.
+- Native engine 0.5.22, declared types and three lookups. On the 31 audit
+  repositories: 249 calls and 150 reads and writes gained, 513 calls
+  `INFERRED` → `EXTRACTED`, 9 calls gone; the share of `INFERRED` calls
+  goes from 30% to 28%.
+  - **The type a declaration writes comes before what is assigned**: Go
+    `var rooms *Manager`, Kotlin `val kind: Kind = builder.kind` (no type at
+    all before), and C++ `static HttpServer* server = new HttpServer();`,
+    whose 509 calls in cpr's tests were a guess by its value.
+  - **Of several callables of one name in the middle of a chain, the one
+    whose result has what is asked next**: `result.response().isSuccessful()`
+    beside a static `response(Response)` (46 calls in retrofit).
+  - **A field before a function of its name when a member is asked of it**
+    (Kotlin constructor parameters beside `fun builder(…)`, Swift
+    `eventMonitor?.request(…)`).
+  - **C# names are looked up in every namespace around the file's**; four
+    bases written `: Interceptors.Interceptor` are the project's class,
+    where they were an external name.
+  - With more arguments typed, 9 calls that tied between overloads are one
+    (`producerOf(ANY.copy(…))`).
+- Native engine 0.5.21, **names bound with a type the source states are
+  locals**: a loop variable written with its type (Java `for (Pet pet :
+  pets)`, C# `foreach (Pet pet in pets)`), a type pattern (`o instanceof
+  Pet p`, `o is Pet p`), and what a wrapper holds (Rust `if let Some(p) =
+  e`, `while let`, a `match` arm's `Some(p)` / `Ok(p)` or the fields of an
+  enum variant; Swift `if let p = e`, `guard let q = e`). A local assigned a
+  field or a variable is typed by what that holds. On the 31 audit
+  repositories: 29 calls and 27 reads, uses and writes gained; 24 edges of
+  alamofire gone that read such a name as the class's method or property
+  of the same name (`task` after `guard let task = …`).
+- Native engine 0.5.20, two wrong readings. On the 31 audit repositories:
+  21 edges gained, 38 calls gone.
+  - **`parent`, `base` and `cls` are the object's base or class only in the
+    language that says so**. A Go variable named `parent` was read as a
+    base class (`parent.SetProxy(…)` had no edge), and so were a Python
+    parameter `base` and a Java parameter `cls`.
+  - **C# `base.X()` is the base class's `X`**, where it was read as
+    `this.X()`: 13 `EXTRACTED` calls from an override to itself are gone
+    (`base.Dispose(disposing)`), and a base the project defines is reached.
+  - **A guess by name alone never links a definition to itself**:
+    `inner.evaluate()` inside `evaluate()` is a wrapper handing on to what
+    it wraps. 25 `INFERRED` self-calls are gone, 4 of them a real recursion
+    on another object.
+- Native engine 0.5.19, C# extensions and partial types. On the 31 audit
+  repositories: 618 calls gained (197 `EXTRACTED`), 51 `INFERRED` ones now
+  `EXTRACTED`, 7 gone; restsharp, whose extensions are C# 14 blocks, gets
+  570.
+  - **The members of an `extension(T x) { … }` block are extensions written
+    for `T`**: `client.BuildUri(request)`, `request.AddHeader(…)`. They had
+    no edge.
+  - **A receiver has the extensions of its bases** (`RestClient` those
+    written for `IRestClient`), `EXTRACTED`; several overloads written for
+    the receiver's type are one extension, chosen by their arguments.
+  - **A C# partial type is all its declarations**: a member, field or base
+    one of them writes is found from any (restsharp: 121 more reads, uses
+    and references).
+  - **A field or property of a library type is answered by the extension
+    written for that type** (`string Name` then `request.Name.IsNotEmpty()`,
+    `WireMockServer _server`), a local by the type its value constructs,
+    and a C# namespace sees the extensions of the namespaces around it.
+  - **A name .NET's own strings, lists and types answer to is no evidence**
+    on a receiver that is no type of the project (`ForEach`, `Split`,
+    `GetProperties`): two wrong edges gone, three right ones with them.
+  - A call that names nothing no longer leaves a `references` edge to the
+    type it started from when it now resolves (91 in restsharp and
+    kotlinpoet).
+- Native engine 0.5.18, CommonJS modules and the receivers of a test file.
+  On the 31 audit repositories: 329 calls gained, 12 gone; a test of express
+  now reaches the method of `lib/` it exercises (`graphlore_tests_for`).
+  - **A CommonJS module is what it assigns to `module.exports`**: `const Foo
+    = require('./foo'); new Foo()`, `make()` and `Foo.create()` resolve to the
+    class or function `foo.js` assigns there (`exports = module.exports =
+    createApplication` too). They had no edge.
+  - **`module.exports = require('./lib/app')` is that module** (a
+    `re_exports` edge), and `exports.name = bound` passes a name on: in
+    express-mongoose-demo the OAuth routes are handled by `users.login`
+    (`exports.authCallback = login`), not by the routes file's function.
+  - **A closure's parameter and a module variable at file level are unknown
+    receivers**, as an untyped local is: `res.sendFile(…)` in an `it(…)`
+    callback and `app.listen()` after `var app = express()` get an
+    `INFERRED` edge by a distinctive method name. A function assigned to an
+    object (`res.sendFile = function sendFile() {}`) counts as its method;
+    never on a variable holding a library's value, and a name of three
+    letters (`app.use`) is still no evidence.
+  - **In sight includes what an imported module passes on**: a file that
+    requires a package's entry has the files that entry re-exports.
+  - **Names JavaScript's own types and Node's emitters and streams answer to
+    are no evidence** (`once`, `pipe`, `concat`, `abort`): 12 `INFERRED`
+    calls of got's own `pipe` / `unpipe` / `abort` on untyped receivers are
+    gone.
+- Native engine 0.5.17, Swift's implicit members and the overloads an
+  extension adds. In alamofire: 158 calls that had no edge, and 783 that go
+  to another definition of the same name than before (none to nothing).
+  - **`.status(301)` is typed by its place**: the parameter the argument is
+    for, the type a declaration writes (`let e: Endpoint = .made(1)`), or the
+    result of the function it is returned from. No type, no edge.
+  - **It says which overload a call is of**: an argument `.status(…)` fits a
+    parameter whose type has a static `status` and not one whose type has
+    none.
+  - **A Swift method's overloads include the ones an extension of its type
+    adds**: `session.request(.get)` in alamofire's tests is the
+    `request(_ endpoint: Endpoint)` the test helpers add to `Session`, where
+    it was the library's `request(_: any URLConvertible)`.
+  - The parameter's very type scores over one of its bases, and a trailing
+    closure goes to the parameter that asks for no label (a function type,
+    or a type alias) before a labelled one.
+- Native engine 0.5.16: **the calls in a Rust macro's arguments are read**.
+  The grammar gives them as tokens, so `assert_eq!(handle_count(&pool), 2)`,
+  `assert!(pool.count() > 0)`, `vec![make_pool()]` and `format!("{}",
+  c.name())` named nothing; the arguments are parsed again as an expression
+  and their calls placed where they stand, a macro inside a macro too. What
+  is no expression (a `{ … }` body, `a => b` arms, the pattern of
+  `matches!`) is left out. 171 more edges on the 31 audit repositories, none
+  gone, nearly all a test's assertions: the share of graphify's Rust calls
+  the native graph has goes from 81% to 86%.
+- Native engine 0.5.15: the import edges a Swift file gets from the files it
+  uses were written in an order that differed from run to run (the same
+  edges; a set's own order). They are in file order now.
+- Native engine 0.5.14, the rest of collections and tuples. On the 31 audit
+  repositories one edge comes back (`copy(id)` in fastapi-template, lost in
+  0.5.11); the rest does not occur there with project types:
+  - **A map's keys**: `m.keys` / `keySet()` is a collection of the key type,
+    and the first of a pair taken apart is a key (`for ((k, v) in m)`,
+    `m.forEach((k, v) -> …)`); of a list's pair, the element.
+  - **`partition`** taken apart gives two collections of the elements,
+    **`zip`** taken apart one of each (`for ((x, y) in xs.zip(ys))`, Python
+    `zip(xs, ys)`), **`fold(init)`** / `Aggregate(seed, …)` / `inject(init)`
+    / JS `reduce(f, init)` is what `init` is (the accumulator too), and
+    **`associateWith`** is a map whose values are what its lambda gives.
+  - **A part a callable returns as a literal of names** (`return
+    [copiedText, copy]`) is the definition of that name inside it when its
+    type names no class; a local holding it calls it (`INFERRED`).
+- Native engine 0.5.13, generics through values, nested arguments and
+  generic bases. On the 31 audit repositories three undecided overload edges
+  become the one overload that fits; the other patterns do not occur there
+  with project types on both sides:
+  - **A local typed by its value keeps the value's bindings**: `val r =
+    call.execute()` on a `Call<Contact>` makes `r.body()` a `Contact`.
+  - **A collection type argument binds its element**: `Call<List<Contributor>>`
+    makes `call.execute().body().get(0)` a `Contributor`.
+  - **A member a generic base declares takes the base's type arguments**:
+    `class People : Store<Person>` makes `people.find()` a `Person`, through
+    intermediate bases too (Java, Kotlin, C#, TypeScript, Swift).
+  - **A loop over a local assigned a call that returns a collection** (`val
+    xs = repo.all(); for (x in xs)`) has the element; the element step did
+    not look through the callable the local's path ends at.
+- Native engine 0.5.12, numbered fields. On the 31 audit repositories 28 of
+  ureq's calls change, none is lost: 14 guesses by name are `EXTRACTED`, 13
+  move to the trait or type the field holds.
+  - **A Rust tuple struct's fields** (`struct Script(Arc<Mutex<State>>)`,
+    `struct Tunnel(Box<dyn Transport>)`) are its numbered parts:
+    `self.0.lock().unwrap().bump()` calls `State.bump`, `self.0.buffers()`
+    calls `Transport::buffers`. `self.0.lock()` named a `lock` of another
+    file by its name.
+  - **A part of the tuple a local holds**: `let pair = setup(); pair.0.go()`,
+    Swift `both.1`, C# `pair.Item2`, Kotlin `p.second` on a `Pair`.
+- Native engine 0.5.11, tuples taken apart. On the 31 audit repositories 38
+  more edges and 18 gone (14 of them in minified bootstrap bundles):
+  - **A declaration that takes a tuple apart types each name by its part**:
+    `let (agent, clock) = setup()`, `var (client, probe) = Setup()`, `val
+    (l, r) = two()`, `let (t, b) = split()`, `const [door, lock] = parts()`,
+    `a, b = two()`, Go `a, b := both()`, for results written as `(A, B)`,
+    `[A, B]`, `Pair<A, B>`, `Triple`, `tuple[A, B]` or Go's result list.
+  - **The first name of such a declaration was the whole result**, and a
+    tuple-returning function's result was one of its parts; a tuple now names
+    no one type (Go's `v, err := f()` still takes `f`'s first result).
+  - Kotlin and Python declarations that take a value apart are locals: they
+    hid nothing, and the names fell through to outer ones.
+- Native engine 0.5.10, what a mapping's function gives, and lists of lists.
+  On the 31 audit repositories 5 more edges, none gone:
+  - **A lambda of several statements** gives its last expression (Kotlin,
+    Ruby, Rust, Swift) or what its `return`s give when they agree, and a local
+    it declares is what it is assigned (`xs.map { x -> val o = x.owner; o }`).
+  - **A function given by reference maps**: `map(Item::owner)`,
+    `map(Item::getBoss)`, `map(::Item)`, `map(Item::new)`, Rust
+    `map(Part::head)`, Swift `map(\.pilot)`.
+  - **Lists of lists and groups**: `chunked`, `windowed`, `chunks`,
+    `each_slice` give lists of the elements, `groupBy` a map of them,
+    `flatten` / `SelectMany` takes one level off; `associateBy` /
+    `ToDictionary` key the elements, `reduce` / `Aggregate` give one.
+  - **A closure inside another** names the outer closure's parameter as the
+    outer closure's: the inner parameter's type, and a local assigned inside
+    a closure from its parameter, were looked up under the bare name.
+- Native engine 0.5.9, what a declaration's type arguments bind. On the 31
+  audit repositories 19 more edges, none gone, and 12 of retrofit's calls
+  that were guesses by name are `EXTRACTED`:
+  - **`Response<Contact> r` makes `Response`'s `T` a `Contact`**: `r.body()`
+    with `fun body(): T`, `r.value` with `T value`, an element of `r.all()`
+    with `List<T> all()` and a constructor's `val item: T` are `Contact`s.
+    A result written with the class's own parameter passes it on:
+    `call.execute().body().getName()` on a `Call<Contact>` reaches
+    `Contact.getName` through `Response<T> execute()`. Locals, parameters,
+    fields and declared results all carry their type arguments (`targs`).
+  - **A parameter's own declaration** is read for what it holds, whether it
+    is a map and its type arguments (`Optional<User> u`, `Map<K, V> m`):
+    parameters missed what 0.5.7 and 0.5.8 read for other locals.
+  - **A method of a generic Rust impl or C++ template** (`impl<T>
+    Holder<T>`, `CurlContainer<T>::Add`) finds its type; the owner was
+    looked up with its type parameters in the name.
+- Native engine 0.5.8, maps and pairs. On the 31 audit repositories 10 edges
+  change, most to the definition the call is of:
+  - **A map's values.** `Map<K, V>`, `HashMap`, `Dictionary`, `dict[K, V]`,
+    `Record`, Go `map[K]V` and Swift `[K: V]` have their values' type as
+    their element: `m[k]`, `m.get(k)`, `getValue`, `getOrDefault`,
+    `getOrPut` give a value, `m.values` is a collection of them. Kotlinpoet's
+    `constructorProperties[param.name].emit(…)` calls `PropertySpec.emit`
+    (a guess by name had linked `ParameterSpec`'s).
+  - **Iterating a map gives entries, not values** (Python: keys): one loop
+    variable over a map, a lambda's one parameter and `m.first()` name
+    nothing; a pair taken apart is its key and value (`for ((k, v) in m)`,
+    `for k, v in d.items()`, `for (k, v) in &m`, `for (const [k, v] of m)`,
+    `foreach (var (k, v) in m)`, `m.forEach { (k, v) -> … }`), and beside an
+    index it is the element (`withIndex()`, `enumerate()`, `enumerated()`).
+  - **A loop variable taken apart is a local** (it was not recorded, and the
+    name fell through to an outer one: two edges of got named a function of
+    another loop).
+  - Rust `for x in &xs` reads `xs` (a reference was no path).
+  - A local assigned an opened wrapper (`let pool =
+    self.pool.lock().unwrap();`) is typed by what it holds; the library's
+    method at the end of the value stopped it.
+- Native engine 0.5.7, what a wrapper holds. On the 31 audit repositories:
+  191 more edges, 2 gone (one a guess by name, one moved to the definition
+  the call is of):
+  - **A closed wrapper is opened before it is used.** `Option`, `Optional`,
+    `Mutex`, `RwLock`, `RefCell`, `Promise`, `Future`, `CompletableFuture`,
+    `Deferred`, Rust `Result` and C# `Task` / `ValueTask` are the wrapper
+    until `await`, `?`, an unwrapper (`unwrap()`, `get()`, `orElseThrow()`,
+    `lock()`, `borrow()`, `.Result`, `.Value`) or a lambda given to them
+    (`opt.ifPresent { it.run() }`) opens them: `self.pool.lock().unwrap()
+    .get()` on an `Arc<Mutex<Pool>>` calls `Pool.get`, `open()?.stop()`
+    calls `Conn.stop`, `(await fetchDoc()).load()` calls `Doc.load`. What
+    is called on a closed wrapper (`is_some()`, `isPresent()`, `then()`,
+    `Wait()`) is the wrapper's own method: no edge to the type it holds.
+  - **A declared result is read through a wrapper**: `-> Option<Foo>`,
+    `Promise<Foo>`, `Task<Foo>`, `Box<dyn Foo>` return a `Foo` (they returned
+    nothing the walk could use).
+  - **C# `var x = await f()` is typed** (a C# declarator names its value with
+    no field, and only a plain call was looked for): 141 more `reads` in
+    restsharp's tests.
+  - **A generic class whose base is the plain class of its name**
+    (`RestResponse<T> : RestResponse`) has that class as its base; the base
+    resolved to the class itself and was dropped, so no member of the
+    hierarchy was found from it.
+- Native engine 0.5.6, chains of calls on a collection. On the 31 audit
+  repositories: 144 more calls, 479 more `reads` and 46 more `writes`, and 12
+  edges gone (ten of them a closure's parameter taken for a method or
+  property of its name):
+  - **A chain keeps what it is a collection of.** After a name declared as a
+    collection, a method that keeps it (`filter`, `sortedBy`, `toList`,
+    `stream()`, `iter()`, `Where`, `ToList`) leaves a collection of the same
+    elements, one that takes an element (`first()`, `get(i)`, `find`,
+    `FirstOrDefault()`, Swift `xs.first`) gives the element, and unwrapping
+    an optional (`unwrap()`, `orElseThrow()`, `.get()` after `findFirst()`)
+    changes nothing: `xs.filter { it.ok }.first().a()` calls `Foo.a`.
+  - **A mapping is the collection of what its function gives**, when that is
+    one expression: `xs.map { it.owner }`, `xs.map(x => x.owner)`,
+    `items.stream().map(i -> i.boss())`, `dishes.Select(d => d.Chef)`,
+    `planes.map { $0.pilot }`, Ruby `xs.map(&:owner)`, Python
+    `[j.chief for j in jobs]`; `flatMap { it.kids() }` the elements of what
+    each gives. A local assigned such a chain is a collection to the loop
+    over it. A mapping the walk cannot name is a collection of nothing known,
+    never of the same elements.
+  - **Closure parameters in Swift and C#** (`{ p in … }`, `$0`, `d => …`) are
+    names of the closure, as in the other languages: they no longer resolve to
+    an outer method or property of the same name, and an iteration method
+    types them. The element is the second parameter of Kotlin's
+    `forEachIndexed` / `mapIndexed`.
+  - **Lambda parameters were read in reverse**: with two or more,
+    `tasks.forEach((t, i) => t.exec())` typed `i` as the element and left `t`
+    untyped (since 0.5.5).
+  - A property with more after it is typed where it is declared when its
+    class says nothing more (`chief: Chief` in a Python class body, a C++
+    member, `appRule.http.createArticle()`).
+  - C# `List<Dish>` and the like give their element type (the grammar's
+    `type_argument_list` was not read).
+  - The overloads of one extension function (`asAFError(or:)` /
+    `asAFError(orFailWith:)`, Kotlin `Collection<CodeBlock>.joinToCode`) are
+    told apart by the arguments instead of resolving to nothing; a method of
+    a Swift `extension` of a type the project does not define answers an
+    untyped receiver as a Rust `impl Trait for` one does. A Kotlin extension
+    is never the target of a Java `x.name()` (`latch.await()` named
+    retrofit's `Call<T>.await()` while this was being written).
+  - `xs.first()` as the thing called is the library's method: no edge to the
+    element's type.
+
+  The audit on graphs rebuilt by 0.5.6 raises nothing but its note on orphan
+  nodes; the 31 builds take 16.8 to 17.8 s (16.1 to 16.6 s with 0.5.5). A
+  first version read the callee of every call twice and took minutes on a
+  long builder chain (ureq); the timing run caught it.
+- Native engine 0.5.5, what 0.5.4 could not decide. 759 more edges on the 31
+  audit repositories and 32 gone (most of those a loop variable taken for a
+  function of its name: `for (const hook of hooks) hook(x)`):
+  - **Untyped receivers, by what is asked of them.** A parameter or local
+    with no type is the one type of the project that answers every member
+    used on it in its definition, when two names or more that are not the
+    language's own are used: Ruby `def call(env)` with `env.status`,
+    `env.body` and `env.parallel?` is an `Env`, where `env.status` alone named
+    a struct and a class. Python, JavaScript and PHP parameters, and locals
+    the walk cannot type in any language, are typed the same way.
+  - **More arguments typed for the choice among overloads**: a field,
+    property or constant by its declared type or its value's; a lambda
+    against a function-typed parameter; a class literal against `Class` /
+    `KClass`; a concatenation, a comparison, `x.toString()`, a cast. An
+    overload that takes exactly the arguments passed comes before one that
+    needs a default; overloads a base class adds compete.
+  - **Elements of typed collections.** The variable of a loop over a
+    `List<Foo>`, `Foo[]`, `[]Foo` or `list[Foo]` (or over a call that
+    declares it returns one), the parameter of a lambda given to `forEach` /
+    `map` / `filter` (Kotlin's `it`), `xs[0]` and `xs.first()` are `Foo`.
+  - **Type parameters bound by an argument**: `fun <T> pick(x: T): T` gives
+    the argument's type, `fun <T> head(xs: List<T>): T` its element's.
+  - Go `resp, err := client.Get(url)` takes the first of the function's
+    results (it took the last, `error`): 235 calls in resty. Java `var x =
+    …` and `for (var x : xs)` are typed by the value; `var` was read as the
+    name of a type.
+  - A local that holds a value and is called (`handler(x)`, `builder::add`)
+    is no longer a construction of its type.
+  - A local assigned a call of its own name whose arguments name another
+    local (`let session = session(using: c)`) no longer sends the resolver
+    round in circles (a crash on four files of alamofire while this was
+    being written, caught by the comparison run; a golden holds it).
+
+  The audit on graphs rebuilt by 0.5.5 raises nothing but its note on orphan
+  nodes; the 31 builds take 16.1 to 16.6 s (14.6 to 15 s with 0.5.4).
+- Native engine 0.5.4, the three things 0.5.3 still named as missing. 1,088
+  more edges on the 31 audit repositories and 71 gone, and 1,175 calls moved
+  from one overload to another of the same name:
+  - **Overloads** (Java, Kotlin, Scala, C#, Swift, C++). A call was linked to
+    the first definition of a name; it is now the one that can take the call:
+    by the count of arguments (defaults and varargs counted), the name an
+    argument is passed under (`named(b = "x")`, `retries: 3`, Swift's labels),
+    and the type of each argument the site shows — a literal against `String`
+    / `Int` / `Boolean`, a typed local or a construction against a parameter
+    typed by a class of the project. `addParameter("value", String::class)`
+    no longer lands on `addParameter(parameterSpec)`. Constructors are chosen
+    the same way: Swift `View(frame: f)` and `View(name: "x")` are two
+    constructors (462 calls in alamofire, where the site decided nothing
+    before); a Kotlin primary constructor competes with the secondary ones;
+    an overload marked `@Deprecated` / `[Obsolete]` gives way to one that is
+    not. Kotlin annotations with arguments (`@Deprecated("old")`) are read as
+    the decorators they are (303 references).
+  - **The receiver or the class around.** Where a lambda's receiver and the
+    class around both have a method of the name, the arguments' types decide
+    (`buildCodeString { emit(this) }` passes a `CodeWriter`, which only the
+    outer `emit` takes); the guess remains for the calls they do not.
+  - **Results that are type parameters.** A method returning the type
+    parameter its type binds to itself (`tag(x): T` in `Taggable<T :
+    Taggable<T>>`) returns the type it was called on. A local assigned a call
+    handed a type (`retrofit.create(Service::class.java)`, `mock<Foo>()`,
+    `sp.GetRequiredService<IFoo>()`) is that type, when the function returns
+    its own type parameter or is a library's and not named like a wrapper
+    (`listOf<Foo>()`).
+  - **Kotlin `expect` / `actual`**: of the declarations of one extension, one
+    per source set, the nearest to the caller, where several candidates used
+    to mean none.
+  - **Untyped receivers in Ruby and Swift.** A method named on a parameter or
+    untyped local is linked (`INFERRED`) when no other type answers to the
+    name: no property or field of it, no `attr_reader` / `Struct.new` member /
+    delegator, and not a name of the core library (`shift`, `gsub`,
+    `sorted`). `env.needs_body?` is found; `env.status`, which a struct and a
+    class both answer, is not guessed.
+
+  The audit on graphs rebuilt by 0.5.4 raises nothing but its note on orphan
+  nodes; the 31 builds take 14.6 to 15 s (14.2 s with 0.5.3).
+- Native engine 0.5.3, what 0.5.2 still lacked. 1,859 more edges on the 31
+  audit repositories (calls 41,063 to 42,408), 121 gone, most of those a
+  local taken for a function of its name:
+  - **Kotlin locals were typed only when the declaration wrote a type.** In
+    `val c = Writer(out)` the value sits beside the declaration, where the
+    walk did not look: `c.close()` reached nothing, or a method of that name
+    elsewhere. kotlinpoet gains 747 calls, such as `spec.toString()` to the
+    right class's `toString`.
+  - **A local keeps the chain it is assigned** (`val b = builder(x).tag(y)`,
+    Go `res := c.R().SetBody(b)`): it was dropped as untypeable, and is now
+    typed by following what each call returns (528 calls in resty). Inside
+    its own initializer a name is still the outer one (`val builder =
+    builder(x)`, Rust `let tls = tls::Config::builder()`).
+  - **Results read from the body.** A function that declares no result
+    returns what its `return`s and expression body construct, when they agree
+    (`fun builder(n) = Builder(n)`, Python `return Conn()` beside `return
+    None`, `return self`, the last expression of a Ruby method); a closure's
+    `return` is not the function's. Calls through such a result are
+    `INFERRED`. In Ruby a name called without parentheses is followed the same
+    way (`stubs.match(env)`, `s = stubs; s.match(env)`), and a local, typed or
+    not, is no longer read as a call of the type it holds.
+  - **Kotlin lambdas with a receiver.** In `x.apply { … }`, `x.run { … }`,
+    `with(x) { … }` and a lambda passed to a parameter typed `T.() -> R`
+    (`buildCodeBlock { indent() }`), a bare name is the receiver's member
+    before it is the class's around. `out.apply { emit("x") }` inside an
+    `emit` was a call of itself. Where both have the name the receiver's is
+    taken as a guess, unless it takes fewer parameters than the call passes or
+    the call hands over `this` (`buildCodeString { emit(this) }`).
+  - **Constructions typed by their declaration**: C# `Box b = new(1, 2)` and
+    C++ `Buf b(3)` / `Buf b{3}` call the type and its constructor (98 calls in
+    cpr, 28 in the C# repositories).
+  - **A parameter or local of no known type is an unknown receiver**: a method
+    only one type of the project has, near the caller, is `INFERRED` (as it
+    already was on the result of an unknown call). Not in Ruby and Swift,
+    which have no import to say which type is meant. In Rust, a method of an
+    `impl Trait for` a type of another crate is found on a local of that type
+    (38 calls in ureq).
+  - **Routes in a framework's own repository.** A file that takes the
+    framework by a relative path (`require('../../')` in express's examples)
+    imports it: the directory's `package.json` names it. Both `graphlore_routes`
+    and the native engine read such files now (express: no route to 53, and
+    139 route nodes with its tests' in the native graph).
+- `benchmarks/polyglot.py --engine native` read whatever native graph was on
+  disk: after an engine change it audited the previous engine's graphs, and
+  the rerun reported for engine 0.5.2 had read 0.5.1's. It now rebuilds a
+  graph built by another version of the engine and says so. It also no longer
+  reports `[Test],` (an element of a list) or `#[cfg(test)]` on a `let` as a
+  test the path rules miss, nor Ruby's `class ActiveSupport::TestCase` as a
+  span of another symbol. On graphs built by 0.5.3 the audit raises nothing
+  but its note on orphan nodes.
+- Native engine 0.5.2, the gaps the 0.5.1 comparison left (`calls` recall
+  against graphify 82% to 84% on the 31 audit repositories; C# 80% to 93%,
+  Ruby 60% to 66%, Kotlin 64% to 70%, Java 81% to 85%):
+  - **Extension functions and methods** are members to their callers: Kotlin
+    `property.toPropertySpec()` (`fun KmProperty.toPropertySpec()`), C#
+    `realm.IsBlank()` (`static bool IsBlank(this string s)`, from a file that
+    uses its namespace), and `self.userinfo()` in a Rust `impl Trait for` a
+    type of another crate. `EXTRACTED` when the receiver's type is the one the
+    extension is written for, `INFERRED` when one visible extension has the
+    name.
+  - **A closure's parameters are scoped to the closure.** They were locals of
+    the whole function: in Go, `r` of `func(w http.ResponseWriter, r
+    *http.Request)` hid the `r := chi.NewRouter()` around it, and an untyped
+    block parameter could name a function elsewhere (`done` in a test, linked
+    to a library's `done()`).
+  - **Ruby.** A bare name passed as an argument or as a pair's value
+    (`Article.new(article_params)`, `status: status_code`) and the receiver of
+    a call (`current_user.follow(@user)`) are calls of the method, no longer an
+    `indirect_call` or nothing; `self.class.from(x)` is the class's method. A
+    module or class reopened in another file is one scope
+    (`Utils::Headers.new`, `Faraday::ParsingError.new` and `class Far::Compact`
+    resolve). A method at the top level of a file the caller does not require
+    is no longer in scope, and the name in `def headers=(hash)` is no call.
+  - **Anonymous classes.** `new Callback<String>() { … }` (Java) and `object :
+    Listener<T> { … }` (Kotlin): the method around constructs the type, the
+    anonymous class `implements` / `inherits` it (also when the type is
+    external), and no name lookup lands on the anonymous class itself.
+  - **Constructors.** A construction is a call of the constructor the type
+    declares as well as of the type (`new RestRequest(url)` → `RestRequest`
+    and its `.RestRequest()`; Python `__init__`, JS/TS `constructor`, Ruby
+    `initialize`, PHP `__construct`, Swift `init`), so `graphlore_impact` on a
+    constructor lists the code that builds the type. Of several overloads the
+    one taking as many arguments as the site passes is named; when that picks
+    none or several, only the type is.
+- Native engine 0.5.1, from comparing its graphs with graphify's edge by
+  edge on the 31 audit repositories:
+  - A call in a field assignment inside a method (`self._uri = urlparse(url)`
+    in `__init__`, `this.x = make()` in a constructor) was recorded as the
+    class's call, not the method's, so `graphlore_impact` on the method missed
+    it. Python's `calls` recall against graphify goes from 92% to 94%.
+  - PHP variables were never typed: `$factory = new CurlFactory();
+    $factory->create()` and a typed parameter's `$given->release()` now reach
+    the class's method (PHP 81% to 90%; `$x` stays a variable and is never
+    resolved as a function or class named `x`).
+  - A name bound to a required module or one of its members (`var parse =
+    require('./utils').parse`, `const mongoose = require('mongoose')`) is an
+    import, not a variable or constant node: `parse(v)` is a call of the
+    function again, and the binding is no longer listed as state.
+  - A local whose value the walk cannot type hid nothing: `let mut pool =
+    self.pool.lock().unwrap(); pool.get(…)` was an `EXTRACTED` call of an
+    unrelated top-level `get`, and a parameter named like a function elsewhere
+    (`token_headers: dict`, a minified bundle's `t`) was that function passed
+    as a value. Such a local now hides the outer name (1,079 `indirect_call`
+    edges gone, nearly all in minified bundles); a bare call beside a typed
+    local (`baseUrl(…)` beside `String baseUrl`), a local assigned from the
+    function of its own name (`let agent = agent();`) and a field assigned in
+    a method keep the outer meaning.
+  - In Rust, `use super::*` inside `mod tests { … }` was read as an import of
+    the parent module's file, which put that file's names in scope and added
+    an import edge to it.
+  - In Swift, an `extension Session { … }` in a module that only extends the
+    type hid the type it imports: `Session()` and everything typed through it
+    was unresolved in such a module (666 calls gained in alamofire's tests).
+- `benchmarks/compare_engines.py` compares an edge from a definition only the
+  native graph has (a function nested in a method, the setter beside a
+  getter) as an edge from the paired definition it belongs to; TypeScript's
+  `calls` recall read 78% where 96% of graphify's calls were in the graph.
+- `graphlore_unreferenced` and `graphlore_same_names` no longer take a native
+  module-level constant for a class (it hangs off its file by `contains`, as a
+  class does); the native `kind` decides.
+- `graphlore_neighbors` lists both directions when two nodes link each other
+  by the same relation (A references B and B references A); it dropped one.
+- `graphlore_path` and `graphlore_explain` pass `--graph` to the CLI, as
+  `graphlore_query` did, so with `GRAPHLORE_OUT_DIR` set they read the graph
+  the other tools read instead of the CLI's default `graphify-out/`.
+- Ambiguous `.name()` labels of functions bound to an object key
+  (`{ filter: () => … }` in six test callbacks) are qualified by `file:line`
+  in member and neighbor lists; the bare `filter()` they got from their span
+  told them apart no better than the label did.
+- A Go function type written inside a map type (`map[string]func() hash.Hash`)
+  is no longer taken for a function named `string`, in `spans.py` and in the
+  native engine.
 
 ## [0.6.0] - 2026-11-15
 

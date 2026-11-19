@@ -489,6 +489,11 @@ class ImportChecker:
         not read, source missing or unparseable) are kept as ``UNCLASSIFIED``.
         """
         importer, imported = _norm_relpath(importer), _norm_relpath(imported)
+        carried = edge.get("runs")
+        if carried in (MODULE_LEVEL, DEFERRED, TYPE_CHECKING):
+            # the native engine read this statement and resolved its module by
+            # path, not by name: nothing for the source check to correct
+            return str(carried)
         if _rel(edge) == "dynamic_import":
             return DEFERRED
         low = importer.lower()
