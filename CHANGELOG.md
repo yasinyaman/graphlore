@@ -316,6 +316,26 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- **Native engine 0.5.48: Ruby block locals, reopened classes, Struct
+  classes, fewer guesses.**
+  - A local assigned in a block outside any method (an RSpec `it … do`) is
+    that block's: `uri.port` after `uri = conn.build_exclusive_url` is no
+    longer read as a call of a `let(:uri)` of another `describe`.
+  - A class opened in several files is one class: `extend
+    MiddlewareRegistry` in one opening of `Faraday::Response` serves
+    `Faraday::Response.register_middleware(…)` written under another.
+  - `Request = Struct.new(:path) do extend MiddlewareRegistry end` inherits
+    `Struct` and mixes in its block's modules; `Env = Options.new(:status)`
+    inherits `Options`.
+  - `Faraday.new(…)` resolves to the module's own `def new` (`class <<
+    self`), and `params.dup` keeps the type of `params`.
+  - Ruby and Swift no longer guess a receiver of no type by a name an
+    `attr_reader`, a Struct member or a core method also answers to, on any
+    path (52 `INFERRED` guesses, such as `env.status` to `Response#status`).
+  - New `build --unresolved` marks: an RSpec `let` of another block, a name
+    a type answers to without a `def`, a path through such an attribute.
+    Ruby's unmarked rows on the 31 audit repositories go from 239 to 0;
+    314 → 75 in all.
 - **Native engine 0.5.47: PHP docblock types, namespace-relative names,
   library values.**
   - `/** @var \App\Entity\Post $post */` over an assignment declares the

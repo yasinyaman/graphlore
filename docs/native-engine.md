@@ -783,11 +783,11 @@ that the native graph has too:
 | Scala | 100% | 2 / 0 | 46 / 20 (45%) | 21 / 22 (95%) | 75 / 32 (100%) |
 | C# | 92.7% | 342 / 280 (30%)³ | 3,073 / 2,463 (97%) | 87 / 86 (98%) | 1,242 / 807 (99%) |
 | Rust | 93.3% | 324 / 370 (79%) | 2,175 / 853 (87%) | 53 / 41 (93%) | 1,218 / 895 (81%) |
-| Swift | 95.9% | 166 / 166 (–)³ | 5,496 / 2,141 (83%) | 190 / 164 (100%) | 1,089 / 580 (62%) |
+| Swift | 95.9% | 166 / 166 (–)³ | 5,492 / 2,141 (83%) | 190 / 164 (100%) | 1,089 / 580 (62%) |
 | C | 100% | 89 / 77 (99%) | 864 / 791 (100%) | – | 253 / 130 (97%) |
 | C++ | 98.7% | 215 / 228 (93%) | 765 / 281 (29%)⁴ | 30 / 5 (100%) | 350 / 234 (88%) |
 | C/C++ headers | 91.4% | 164 / 172 (95%) | 372 / 348 (84%) | 12 / 12 (92%) | 563 / 312 (90%) |
-| Ruby | 99.7% | 42 / 0 | 441 / 375 (69%) | 46 / 15 (93%) | 28 / 0 |
+| Ruby | 99.7% | 42 / 0 | 440 / 375 (69%) | 53 / 15 (93%) | 28 / 0 |
 | PHP | 80.6% | 429 / 505 (84%) | 8,871 / 6,140 (90%) | 65 / 60 (98%) | 657 / 213 (95%) |
 | **All** | **94.4%** | **4,967 / 5,565 (75%)** | **45,160 / 27,845 (85%)** | **1,152 / 726 (97%)** | **12,600 / 6,815 (89%)** |
 
@@ -1203,6 +1203,43 @@ guzzle loses 9 `INFERRED` edges to its `UnvalidatedUriRequest` test double,
 guesses on PSR-7 responses, which are rows now (marked). PHP's calls: 8,871
 (90% of graphify's). Unmarked rows in all: 451 → 314 (Ruby 239, Swift 59,
 Python 9, Scala 4, TSX 3); rows in all 5,838.
+
+Engine 0.5.48 (Ruby) takes Ruby's 239 unmarked rows, all of them faraday's,
+to none:
+
+- **Locals of a block outside any method.** `uri = conn.build_exclusive_url`
+  in an RSpec `it 'x' do … end` is a name of that block (`uri@byte`, as JS
+  callbacks' are since 0.5.36), no longer the call of a `let(:uri)` written
+  in another `describe`; such a local is typed like any other.
+- **A class reopened in several files is one class.** `extend
+  MiddlewareRegistry` in `lib/faraday/response.rb` serves
+  `Faraday::Response.register_middleware(…)` written under the `class
+  Response` that `response/json.rb` opens (`partials`: its bases and, when
+  its own block has none of the name, its members). Two scripts' `class
+  Client` keep their own methods.
+- **`X = Struct.new(:a) do … end`.** The class inherits `Struct`, or what
+  `new` was called on when every argument is a symbol (`Env =
+  Options.new(:status, …)` is an `Options`; `Class.new(Base)` a `Base`;
+  `Hash.new { … }` is no base), and mixes in what its block `extend`s:
+  `ConnectionOptions.from(…)` and `memoized` are `Options`' (`EXTRACTED`).
+- **`Faraday.new(…)` is the module's own `new`** (`class << self; def new`),
+  not a construction of the module; what it returns (`Faraday::Connection.new`)
+  types the spec's `conn`. `params.dup` keeps `params`' type, as `clone`,
+  `freeze`, `itself` and `tap` do.
+- **No guess by a name another type answers to.** The Ruby and Swift rule
+  that a receiver of no type is guessed only for a name no other type
+  answers to (`sole_holder`: no `attr_reader`, no Struct member, no core
+  name) now holds on every path that guesses (`unknown_receiver`), not only
+  for an untyped local: 46 faraday guesses (`env.status` to
+  `Response#status`, a Struct member of `Env`) and 6 of alamofire's
+  (`.sorted()` to `HTTPHeaders.sorted`) are rows now.
+- **Marks.** The one definition is an RSpec `let` of a block the call is not
+  in (77); a type answers to the name without a `def`, an `attr_reader` or
+  a Struct member (171); a step of the path is such an attribute, which says
+  nothing of what it holds (8); `dup` is a core name.
+
+Unmarked rows in all: 314 → 75 (Swift 59, Python 9, Scala 4, TSX 3); rows
+in all 5,897.
 Engine 0.5.35 (C function-pointer slots) reads a struct of function pointers
 as an interface and what is put in its slots as the implementations: an
 initializer of a variable, by name (`.async_read = redisAsyncRead`) or by
@@ -1663,7 +1700,7 @@ implicit members since 0.5.17: 39 whose place gives no type are rows now
 closure parameters and variables of express's tests. What is left at file
 level there is `app.use` and `app.set` (842 rows of express), names too
 short and too common to guess by. Engine 0.5.19 takes 123 more off (6,362;
-C# 349 from 470; 6,360 with 0.5.20, 6,348 with 0.5.21, 6,285 with 0.5.22, 6,237 with 0.5.25, 6,206 with 0.5.27, 6,166 with 0.5.28, 6,156 with 0.5.30, 6,140 with 0.5.31, 6,132 with 0.5.32, 6,126 with 0.5.33, 6,093 with 0.5.34, 6,047 with 0.5.36, 6,046 with 0.5.37, 6,017 with 0.5.38, 6,005 with 0.5.40, 5,947 with 0.5.42, 5,930 with 0.5.43, 5,950 with 0.5.44, 5,903 with 0.5.45, 5,829 with 0.5.46, 5,838 with 0.5.47). Most of what C# has left is not the project's: `Assert.
+C# 349 from 470; 6,360 with 0.5.20, 6,348 with 0.5.21, 6,285 with 0.5.22, 6,237 with 0.5.25, 6,206 with 0.5.27, 6,166 with 0.5.28, 6,156 with 0.5.30, 6,140 with 0.5.31, 6,132 with 0.5.32, 6,126 with 0.5.33, 6,093 with 0.5.34, 6,047 with 0.5.36, 6,046 with 0.5.37, 6,017 with 0.5.38, 6,005 with 0.5.40, 5,947 with 0.5.42, 5,930 with 0.5.43, 5,950 with 0.5.44, 5,903 with 0.5.45, 5,829 with 0.5.46, 5,838 with 0.5.47, 5,897 with 0.5.48). Most of what C# has left is not the project's: `Assert.
 NotNull` beside its own `Ensure.NotNull` (77), `WireMockServer.Start` (23).
 
 By then most rows were of that kind: a library's name the project happens

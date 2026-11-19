@@ -2930,6 +2930,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
     // JS / TS: the functions that are no definitions (callbacks), whose
     // variables are names of their own (before `bind_closure_params`)
     let mut callbacks: Vec<(usize, usize)> = Vec::new();
+    let ruby_lang = facts.lang == Some(crate::lang::Lang::Ruby);
     let ecma = matches!(
         facts.lang,
         Some(
@@ -2976,7 +2977,9 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                 }
             }
         }
-        if ecma && is_closure(n.kind()) && !by_node.contains_key(&n.id()) {
+        // (Ruby: a block outside any method, an RSpec `it 'x' do … end`)
+        let closure = is_closure(n.kind()) || (ruby_lang && n.kind() == "block");
+        if (ecma || ruby_lang) && closure && !by_node.contains_key(&n.id()) {
             callbacks.push((n.start_byte(), n.end_byte()));
         }
         if let Some(&di) = by_node.get(&n.id()) {
@@ -4063,7 +4066,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
     // `test('…', async t => { const server = createServer(); … })`: a
     // variable of a callback no definition holds is a name of that callback
     // (`server@byte`, as its parameters are), not one the whole file shares
-    if ecma && !callbacks.is_empty() {
+    if (ecma || ruby_lang) && !callbacks.is_empty() {
         let bytes: Vec<usize> = locals.iter().map(|l| l.byte).collect();
         for (l, home) in locals.iter_mut().zip(homes(&facts.defs, &bytes)) {
             if home.is_some() || l.field || l.name.contains('@') {

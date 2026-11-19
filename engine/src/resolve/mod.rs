@@ -335,6 +335,7 @@ const RUBY_CORE_METHODS: &[&str] = &[
     "merge!",
     "fetch",
     "freeze",
+    "dup",
     "inspect",
     "pretty_inspect",
     "to_s",
@@ -1700,8 +1701,10 @@ impl<'a> Project<'a> {
                     // require('supertest')`, nor one with no value the walk
                     // reads, which would only hide what other rules find:
                     // `const EventHandler = { trigger() {} }`)
+                    // (Ruby: a local of a block outside any method, `uri@byte`)
                     None if l.field
-                        || self.family[fi] != Some(Family::Ecma)
+                        || (self.family[fi] != Some(Family::Ecma)
+                            && !(self.family[fi] == Some(Family::Ruby) && l.name.contains('@')))
                         // (a top-level definition of the name is what it
                         // means; a member of an object literal is no such name)
                         || self.top[fi]
@@ -4386,6 +4389,23 @@ impl<'a> Project<'a> {
     /// beside `RestResponse` is another type).
     fn partials(&self, c: DefRef) -> Vec<DefRef> {
         let def = self.def(c);
+        // Ruby: every `class Response` that opens the class is the class
+        // (`extend MiddlewareRegistry` in one, `class Json` nested in another)
+        if self.family[c.0] == Some(Family::Ruby) && def.kind.is_class_like() {
+            let key = qual_key(Family::Ruby, &def.qualname);
+            return self
+                .by_qual
+                .get(&key)
+                .into_iter()
+                .flatten()
+                .copied()
+                .filter(|r| {
+                    *r != c
+                        && self.family[r.0] == Some(Family::Ruby)
+                        && self.def(*r).kind == def.kind
+                })
+                .collect();
+        }
         if self.family[c.0] != Some(Family::CSharp) || !def.kind.is_class_like() {
             return Vec::new();
         }
@@ -4602,7 +4622,12 @@ impl<'a> Project<'a> {
                 }
             }
         }
-        // a C# partial type: what its other declarations hold
+        // a C# partial type: what its other declarations hold (a Ruby class
+        // reopened elsewhere: only when its own block holds none, so two
+        // scripts' `class Client` each keep their own methods)
+        if self.family[c.0] == Some(Family::Ruby) && !out.is_empty() {
+            return out;
+        }
         for p in self.partials(c) {
             let more = self.children[p.0].get(&p.1).and_then(|m| m.get(name));
             out.extend(more.into_iter().flatten().map(|&d| (p.0, d)));
@@ -4840,7 +4865,13 @@ impl<'a> Project<'a> {
                     return self.best(self.namespace_members(*c, name)).map(Target::Def);
                 }
                 if name == "new" && self.family[c.0] == Some(Family::Ruby) {
-                    return Some(Target::Def(*c)); // `Klass.new` constructs Klass
+                    // `Klass.new` constructs Klass, unless it defines `new`
+                    // itself (`module Faraday; class << self; def new(…)`)
+                    let own = self
+                        .class_member(*c, name, 0)
+                        .or_else(|| self.reopened_member(*c, name))
+                        .filter(|m| self.def(*m).kind.is_callable());
+                    return Some(Target::Def(own.unwrap_or(*c)));
                 }
                 self.class_member(*c, name, 4)
                     .or_else(|| self.reopened_member(*c, name))
@@ -6279,10 +6310,15 @@ impl<'a> Project<'a> {
             // wrapper's opening (`pool.upgrade()`, `lock().unwrap()`) on what
             // the wrapper was typed as (a value being typed only: as the call
             // linked, it is the library's)
+            // (Ruby `params.dup.merge_query(…)`: `Object#dup` and its kin
+            // give a copy of the same class)
+            let ruby_copy = fam == Family::Ruby
+                && matches!(seg.as_str(), "dup" | "clone" | "freeze" | "itself" | "tap");
             if found.is_none()
-                && fam == Family::Rust
-                && (matches!(seg.as_str(), "clone" | "to_owned")
-                    || UNWRAPPERS.contains(&seg.as_str()))
+                && (ruby_copy
+                    || (fam == Family::Rust
+                        && (matches!(seg.as_str(), "clone" | "to_owned")
+                            || UNWRAPPERS.contains(&seg.as_str()))))
                 && !(i + 1 == rest.len() && self.linking_call())
             {
                 if let Target::Def(c) = t {
@@ -7214,6 +7250,24 @@ impl<'a> Project<'a> {
         } else if c.0 != f && test(c.0, cd) && !crate::community::is_test_path(&self.files[f].path)
         {
             Some("the one definition is test code, the call is not")
+        } else if fam == Family::Ruby
+            && cd.scope_lines.is_some_and(|(a, b)| c.0 != f || r.line < a || b < r.line)
+        {
+            // (`let(:ssl)` of one spec's `describe` block is no name of
+            // another: the call is a method the project makes at run time or
+            // an attribute, `attr_reader :ssl`)
+            Some("the one definition is an RSpec let of a block the call is not in")
+        } else if fam == Family::Ruby && self.attrs.contains(&(fam, name.to_string())) {
+            // (`env.status` beside `Response#status`: `Env = Options.new(:status,
+            // …)` answers to it too, and so does `attr_reader :ssl`)
+            Some("a type answers to the name without a def (attr_reader, a Struct member)")
+        } else if fam == Family::Ruby
+            && r.path.len() >= 3
+            && r.path[1..r.path.len() - 1].iter().any(|s| self.attrs.contains(&(fam, s.clone())))
+        {
+            // (`subject.ssl.verify?`: `attr_reader :ssl` says nothing of what
+            // it holds)
+            Some("a step of the path is an attribute the walk cannot type")
         } else if fam == Family::Php
             && r.path.len() == 1
             && !head.starts_with('$')
@@ -7691,6 +7745,13 @@ impl<'a> Project<'a> {
         name: &str,
         on: Option<&str>,
     ) -> Option<(Target, Confidence)> {
+        // (Ruby, Swift: every type of the module is in scope with no import to
+        // say which, so a guess by the name alone only for a name no other
+        // type answers to, `attr_reader :status` and Struct members included)
+        let open_world = matches!(self.family[f], Some(Family::Ruby | Family::Swift));
+        if open_world && self.family[f].is_some_and(|fam| !self.sole_holder(fam, name)) {
+            return self.extension_method(f, name, on);
+        }
         self.extension_method(f, name, on).or_else(|| {
             self.fallback_method(f, name).map(|r| (Target::Def(r), Confidence::Inferred))
         })

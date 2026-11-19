@@ -504,3 +504,45 @@ fn php_rows_on_library_values_functions_and_library_bases_say_so() {
     assert_eq!(why("storeIt"), "the local holds what a library's call gives", "{rows:#?}");
     assert_eq!(why("withBodyIt"), "the receiver is a library's", "{rows:#?}");
 }
+
+#[test]
+fn ruby_rows_on_other_blocks_lets_and_attributes_say_so() {
+    let dir = project(
+        "rubymarks",
+        &[
+            // `ssl` and `secret_it` are `let`s of one spec's block; `status_it`
+            // is a Struct member of `Env` beside `Response#status_it`;
+            // `verify_it` is asked of an attribute
+            ("spec/a_spec.rb", "RSpec.describe 'a' do\n  let(:ssl_it) { 1 }\nend\n"),
+            ("lib/far/env.rb", "module Far\n  Env = Struct.new(:status_it, :ssl_it) do\n  end\n  class Response\n    def status_it; end\n  end\n  class Ssl\n    def verify_it; end\n  end\nend\n"),
+            ("spec/b_spec.rb", "RSpec.describe 'b' do\n  it 'x' do\n    stubs.get('/') do |env|\n      env.status_it\n    end\n    conn.ssl_it\n    conn.ssl_it.verify_it\n  end\nend\n"),
+        ],
+    );
+    let out = dir.join("unresolved.json");
+    let mut opts = BuildOptions::new(&dir);
+    opts.unresolved = Some(out.clone());
+    build_graph(&opts).unwrap();
+    let rows: Vec<Value> = serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+    let why = |path: &str| {
+        rows.iter()
+            .find(|r| r["path"] == path)
+            .map(|r| r["library_like"].clone())
+            .unwrap_or_else(|| panic!("no row {path}: {rows:#?}"))
+    };
+    assert_eq!(
+        why("conn.ssl_it"),
+        "the one definition is an RSpec let of a block the call is not in",
+        "{rows:#?}"
+    );
+    assert_eq!(
+        why("env@53.status_it"),
+        "a type answers to the name without a def (attr_reader, a Struct member)",
+        "{rows:#?}"
+    );
+    assert_eq!(
+        why("conn.ssl_it.().verify_it"),
+        "a step of the path is an attribute the walk cannot type",
+        "{rows:#?}"
+    );
+}

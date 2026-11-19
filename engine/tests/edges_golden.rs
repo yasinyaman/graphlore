@@ -523,6 +523,43 @@ fn a_ruby_module_is_every_file_that_opens_it() {
 }
 
 #[test]
+fn ruby_reopened_classes_struct_blocks_and_block_locals() {
+    // `extend Registry` in one opening of `class Response` serves a call
+    // written in another; `Request = Struct.new(…) do extend Registry end`
+    // mixes in what its block does and `Env = Options.new(:status) do … end`
+    // inherits `Options`; `Far.new` is the module's own `new`; a local of a
+    // spec's `it` block hides the `let` of its name; `params.dup` keeps the
+    // type; two scripts' `class Client` keep their own `hello`
+    let got = calls_conf("ruby-reopen", &[
+        ("lib/far/registry.rb", "module Far\n  module Registry\n    def register_it(**m); end\n  end\nend\n"),
+        ("lib/far/options.rb", "module Far\n  class Options < Struct\n    def self.from(v); end\n  end\n  Env = Options.new(:status) do\n    def go; Env.from(1); end\n  end\nend\n"),
+        ("lib/far/response.rb", "module Far\n  class Response\n    extend Registry\n  end\n  Request = Struct.new(:path) do\n    extend Registry\n  end\nend\n"),
+        ("lib/far/response/json.rb", "module Far\n  class Response\n    class Json; end\n  end\nend\nFar::Response.register_it(json: Far::Response::Json)\nFar::Request.register_it(json: 1)\n"),
+        ("lib/far.rb", "module Far\n  class << self\n    def new(url = nil)\n      Far::Conn.new(url)\n    end\n  end\n  class Hash2\n    def merge_query(q); end\n  end\n  class Conn\n    attr_reader :params\n    def initialize(url)\n      @params = Hash2.new\n    end\n    def port; end\n    def build_url\n      params.dup.merge_query(1)\n    end\n  end\n  class Other\n    def port; end\n  end\nend\n"),
+        ("spec/conn_spec.rb", "RSpec.describe Far::Conn do\n  let(:uri) { 1 }\n  let(:conn) { Far.new('x') }\n  it 'works' do\n    uri = Far::Conn.new(1)\n    uri.port\n  end\nend\n"),
+        ("examples/a.rb", "class Client\n  def hello; end\n  def run; hello; end\nend\n"),
+        ("examples/b.rb", "class Client\n  def hello; end\n  def run; hello; end\nend\n"),
+    ]);
+    let to = |from: &str| -> Vec<String> {
+        got.iter().filter(|(s, ..)| s == from).map(|(_, t, _)| t.clone()).collect()
+    };
+    assert!(
+        to("json.rb").contains(&"lib_far_registry_far_registry_register_it".to_string()),
+        "{got:#?}"
+    );
+    assert!(to(".go()").contains(&"lib_far_options_far_options_from".to_string()), "{got:#?}");
+    assert!(to("conn()").contains(&"lib_far_far_new".to_string()), "{got:#?}");
+    assert!(to(".build_url()").contains(&"lib_far_far_hash2_merge_query".to_string()), "{got:#?}");
+    // the block's `uri` is a `Conn`, never the `let`
+    let spec = to("conn_spec.rb");
+    assert!(spec.contains(&"lib_far_far_conn_port".to_string()), "{got:#?}");
+    assert!(!spec.contains(&"spec_conn_spec_uri".to_string()), "{got:#?}");
+    let runs: Vec<String> =
+        got.iter().filter(|(s, ..)| s == ".run()").map(|(_, t, _)| t.clone()).collect();
+    assert_eq!(runs, ["examples_a_client_hello", "examples_b_client_hello"], "{got:#?}");
+}
+
+#[test]
 fn an_anonymous_class_is_built_by_the_method_around_it() {
     let got = edges("anonymous", &[
         ("A.java", "interface Callback<T> { void onResponse(T body); }\nclass Helper {\n  Helper(String name) {}\n  void run() {}\n}\n\nclass Client {\n  void enqueue(Callback<String> cb) {}\n\n  void go() {\n    final Helper helper = new Helper(\"a\");\n    enqueue(new Callback<String>() {\n      @Override public void onResponse(String body) {\n        helper.run();\n        finish();\n      }\n    });\n    Runnable r = new Runnable() { public void run() { finish(); } };\n  }\n  void finish() {}\n}\n"),

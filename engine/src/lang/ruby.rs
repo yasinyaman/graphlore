@@ -106,6 +106,54 @@ impl LanguageModule for Ruby {
     }
 
     fn heritage_of(&self, n: Node, src: &[u8]) -> Vec<(RefKind, Vec<String>)> {
+        // `Request = Struct.new(:path) do extend MiddlewareRegistry end`: the
+        // class the constant names inherits what `new` was called on (`Struct`,
+        // a project `Options`) and mixes in what its block does
+        if n.kind() == "assignment" {
+            let mut out = Vec::new();
+            let left = n.child_by_field_name("left").filter(|l| l.kind() == "constant");
+            let right = n.child_by_field_name("right").filter(|r| r.kind() == "call");
+            let (Some(_), Some(call)) = (left, right) else { return out };
+            if call.child_by_field_name("method").map(|m| text(m, src)).as_deref() != Some("new") {
+                return out;
+            }
+            let Some(block) = call.child_by_field_name("block") else { return out };
+            // (`Struct.new(:a)`, `Class.new(Base)`, a Struct subclass's
+            // `Options.new(:a, :b)`; never `Hash.new { |h, k| … }`)
+            let receiver = call.child_by_field_name("receiver").and_then(|r| path_of(r, src));
+            let args: Vec<Node> =
+                call.child_by_field_name("arguments").map(kids).unwrap_or_default();
+            let symbols = !args.is_empty() && args.iter().all(|a| a.kind() == "simple_symbol");
+            match receiver.as_deref() {
+                Some([c]) if c == "Class" => {
+                    if let Some(p) = args.first().and_then(|a| path_of(*a, src)) {
+                        out.push((RefKind::Inherits, p));
+                    }
+                }
+                Some(p) if (p.len() == 1 && p[0] == "Struct") || symbols => {
+                    out.push((RefKind::Inherits, p.to_vec()));
+                }
+                _ => {}
+            }
+            let body = kids(block)
+                .into_iter()
+                .find(|c| matches!(c.kind(), "body_statement" | "block_body"));
+            for stmt in body.map(kids).unwrap_or_default() {
+                let Some(m) = method_name(stmt, src) else { continue };
+                if !matches!(m.as_str(), "include" | "extend" | "prepend") {
+                    continue;
+                }
+                if let Some(args) = stmt.child_by_field_name("arguments") {
+                    out.extend(
+                        kids(args)
+                            .into_iter()
+                            .filter_map(|a| path_of(a, src))
+                            .map(|p| (RefKind::MixesIn, p)),
+                    );
+                }
+            }
+            return out;
+        }
         if !matches!(n.kind(), "class" | "module" | "singleton_class") {
             return Vec::new();
         }
