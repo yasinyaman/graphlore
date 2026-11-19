@@ -2721,6 +2721,20 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                 } else {
                     n
                 };
+                // JS: a function passed to a call, with its parameters in order
+                if matches!(n.kind(), "function_expression" | "arrow_function" | "function")
+                    && anc.last().is_some_and(|a| a.kind() == "arguments")
+                {
+                    let call = anc.len().checked_sub(2).and_then(|i| anc.get(i));
+                    if let Some(callee) = call
+                        .filter(|c| c.kind() == "call_expression")
+                        .and_then(|c| c.child_by_field_name("function"))
+                        .and_then(|c| path_of(c, src))
+                    {
+                        let names = params.iter().map(|(name, ..)| name.clone()).collect();
+                        facts.callbacks.push((body.start_byte(), callee, names));
+                    }
+                }
                 closures.push((body.start_byte(), body.end_byte(), params));
             }
             // `for (x in xs)`, `for x in xs`, `for _, x := range xs`
@@ -3014,6 +3028,75 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
         {
             if let Some(of) = this_attached(&anc, src) {
                 this_at.insert(n.start_byte(), of);
+            }
+        }
+        // JS `Object.defineProperty(this, 'router', …)`, `Object.create(p, {
+        // app: … })`: properties defined at run time
+        if n.kind() == "call_expression"
+            && matches!(
+                facts.lang,
+                Some(crate::lang::Lang::JavaScript | crate::lang::Lang::TypeScript)
+            )
+        {
+            let callee = n.child_by_field_name("function").and_then(|c| path_of(c, src));
+            let args: Vec<Node> = n
+                .child_by_field_name("arguments")
+                .map(|a| kids(a).into_iter().filter(|c| !is_comment(c)).collect())
+                .unwrap_or_default();
+            match (callee.as_deref(), args.as_slice()) {
+                (Some([o, d]), [_, name, ..]) if o == "Object" && d == "defineProperty" => {
+                    facts.runtime_props.extend(string_arg(*name, src));
+                }
+                (Some([o, c]), [_, props, ..])
+                    if o == "Object" && c == "create" && props.kind() == "object" =>
+                {
+                    for pair in kids(*props).into_iter().filter(|p| p.kind() == "pair") {
+                        if let Some(k) = pair.child_by_field_name("key") {
+                            facts
+                                .runtime_props
+                                .push(text(k, src).trim_matches(['\'', '"']).to_string());
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        // JS `const article = req.article`: a name given a request's property
+        if n.kind() == "variable_declarator"
+            && matches!(
+                facts.lang,
+                Some(crate::lang::Lang::JavaScript | crate::lang::Lang::TypeScript)
+            )
+        {
+            let name = n.child_by_field_name("name").filter(|x| x.kind() == "identifier");
+            let value = n.child_by_field_name("value").filter(|v| v.kind() == "member_expression");
+            if let (Some(name), Some(v)) = (name, value) {
+                let object = v.child_by_field_name("object").filter(|o| o.kind() == "identifier");
+                if let (Some(o), Some(p)) = (object, v.child_by_field_name("property")) {
+                    if matches!(text(o, src).as_str(), "req" | "request") {
+                        facts.request_aliases.push((text(name, src), text(p, src)));
+                    }
+                }
+            }
+        }
+        // JS `req.article = …`: a property put on a request
+        if n.kind() == "assignment_expression"
+            && matches!(
+                facts.lang,
+                Some(crate::lang::Lang::JavaScript | crate::lang::Lang::TypeScript)
+            )
+        {
+            if let Some(left) =
+                n.child_by_field_name("left").filter(|l| l.kind() == "member_expression")
+            {
+                let object =
+                    left.child_by_field_name("object").filter(|o| o.kind() == "identifier");
+                let prop = left.child_by_field_name("property");
+                if let (Some(o), Some(p)) = (object, prop) {
+                    if matches!(text(o, src).as_str(), "req" | "request") {
+                        facts.request_props.push(text(p, src));
+                    }
+                }
             }
         }
         // JS `mongoose.model('Article', ArticleSchema)`: a model registered

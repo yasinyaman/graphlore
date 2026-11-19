@@ -2970,20 +2970,80 @@ impl<'a> Project<'a> {
             }
             return self.best(cands);
         }
+        // the document a Mongoose model's static hands its callback (`User.
+        // load(options, function (err, user) {…})`: the second parameter)
+        if let Some((bare, at)) = head.split_once('@') {
+            let at: usize = at.parse().ok()?;
+            let (_, callee, params) = self.files[f].callbacks.iter().find(|(b, ..)| *b == at)?;
+            if params.iter().position(|p| p == bare) != Some(1) || callee.len() != 2 {
+                return None;
+            }
+            let Some(Target::Def(v)) = self.resolve_name(f, d, &callee[0]) else { return None };
+            let model = self.def(v).model_name.clone()?;
+            return self.model_method(&model, name);
+        }
         // a document of a Mongoose model
         let path = self.local_path(f, d, head)?;
         let [model] = path.as_slice() else { return None };
         let Some(Target::Def(v)) = self.resolve_name(f, d, model) else { return None };
-        let registered = self.def(v).model_name.as_ref()?;
+        let registered = self.def(v).model_name.clone()?;
+        self.model_method(&registered, name)
+    }
+
+    /// A function of the `methods` of the schema the Mongoose model
+    /// `model` is registered with (`mongoose.model('Article', ArticleSchema)`).
+    fn model_method(&self, model: &str, name: &str) -> Option<DefRef> {
         let mut cands: Vec<DefRef> = Vec::new();
         for (g, facts) in self.files.iter().enumerate() {
-            if facts.models.iter().any(|(n, _)| n == registered) {
+            if facts.models.iter().any(|(n, _)| n == model) {
                 cands.extend(facts.defs.iter().enumerate().filter_map(|(i, y)| {
                     (y.name == name && y.object.as_deref() == Some("methods")).then_some((g, i))
                 }));
             }
         }
         self.best(cands)
+    }
+
+    /// Whether the project builds a framework's request or response object
+    /// itself (`Object.create(http.IncomingMessage.prototype)`).
+    fn builds_framework_object(&self) -> bool {
+        self.files.iter().any(|facts| {
+            facts.defs.iter().any(|x| {
+                x.created_from.as_deref().is_some_and(|p| {
+                    p.len() >= 2
+                        && p[p.len() - 1] == "prototype"
+                        && matches!(p[p.len() - 2].as_str(), "IncomingMessage" | "ServerResponse")
+                })
+            })
+        })
+    }
+
+    /// JS `req.article.removeComment()`, `const article = req.article`: the
+    /// receiver is a property of the request that project code assigns
+    /// (`req.article = yield Article.load(id)` in a middleware).
+    fn attached_to_request(&self, f: usize, d: Option<usize>, path: &[String]) -> bool {
+        let is_req = |h: &str| matches!(h.split('@').next().unwrap_or(h), "req" | "request");
+        let prop = match path {
+            [h, p, ..] if is_req(h) && path.len() >= 3 => Some(p.clone()),
+            [h, ..] => self
+                .local_path(f, d, h)
+                .and_then(|lp| match lp.as_slice() {
+                    [r, p] if is_req(r) => Some(p.clone()),
+                    _ => None,
+                })
+                .or_else(|| {
+                    // (`const article = req.article`, which makes no typed
+                    // local)
+                    self.files[f]
+                        .request_aliases
+                        .iter()
+                        .find(|(n, _)| n == h)
+                        .map(|(_, p)| p.clone())
+                }),
+            _ => None,
+        };
+        let Some(prop) = prop else { return false };
+        self.files.iter().any(|facts| facts.request_props.contains(&prop))
     }
 
     /// The path a local's declaration gives it (its type as written).
@@ -5447,6 +5507,21 @@ impl<'a> Project<'a> {
         let test = |i: usize, def: &Def| {
             def.is_test || crate::community::is_test_path(&self.files[i].path)
         };
+        let self_field_assigned = self.files[f].refs.iter().any(|x| {
+            x.kind == RefKind::Write
+                && x.path.len() == 2
+                && x.path[0] == "self"
+                && x.path[1] == *name
+        });
+        let holds_library_value = || match self.resolve_path(f, d, &r.path[..1], true) {
+            Some((Target::Def(v), _)) if self.def(v).kind.is_state() => {
+                let x = self.def(v);
+                x.value_path.as_ref().and_then(|p| p.first()).is_some_and(|h| {
+                    matches!(self.resolve_name(v.0, x.parent, h), Some(Target::Ext(..)))
+                })
+            }
+            _ => false,
+        };
         let library_like = if reason == "library name"
             || reason == "local of a library type"
             || std_held
@@ -5479,6 +5554,39 @@ impl<'a> Project<'a> {
             // one `getUri` is a `RequestInterface` implementation, and the
             // receiver may be any other)
             Some("the one definition implements a library type's member")
+        } else if r.path.len() == 1
+            && self.is_local_name(f, d, head)
+            // (not the function the local is itself: `const updateTheme =
+            // useCallback(…)` declared in the caller is the candidate)
+            && !(c.0 == f && cd.parent.is_some() && cd.parent == d)
+        {
+            // (`done(err)`: what the caller was handed, a callback)
+            Some("the name is a local or parameter of the caller")
+        } else if vendored_path(&self.files[c.0].path) {
+            Some("the one definition is in vendored or minified code")
+        } else if fam == Family::Ecma && head == "self" && r.path.len() == 2 && self_field_assigned
+        {
+            // (`this.engine(…)` after `this.engine = opts.engines[ext]`)
+            Some("the member is a field assigned a value, not a method")
+        } else if fam == Family::Ecma
+            && head == "self"
+            && r.path.len() >= 3
+            && self.files.iter().any(|g| g.runtime_props.contains(&r.path[1]))
+        {
+            // (`this.router.route()`, `router` from `Object.defineProperty`)
+            Some("the receiver is a property defined at run time")
+        } else if fam == Family::Ecma && holds_library_value() {
+            // (`const app = express(); app.listen(…)`)
+            Some("the receiver holds a library's value")
+        } else if fam == Family::Ecma && self.attached_to_request(f, d, &r.path) {
+            Some("the receiver is a property middleware attaches to a request")
+        } else if fam == Family::Ecma
+            && matches!(bare_head, "req" | "request" | "res" | "response")
+            && (head.contains('@') || self.is_untyped_local(f, d, head))
+            && !self.builds_framework_object()
+        {
+            // (`req.logout()`: passport's, on the framework's request)
+            Some("the receiver is what a framework hands the function")
         } else {
             None
         };
@@ -7304,4 +7412,18 @@ fn specialization_args(name: &str) -> Vec<String> {
 fn literal_arg(a: &str) -> bool {
     matches!(a, "true" | "false" | "nullptr")
         || a.chars().next().is_some_and(|c| c.is_ascii_digit() || c == '\'' || c == '-')
+}
+
+/// A path in someone else's code or minified (`benchmarks/unresolved.py`'s
+/// and the analysis scope's rule, by the path alone).
+fn vendored_path(path: &str) -> bool {
+    let parts: Vec<&str> = path.split('/').collect();
+    let name = parts.last().copied().unwrap_or("");
+    name.contains(".min.")
+        || parts[..parts.len().saturating_sub(1)].iter().any(|p| {
+            matches!(
+                *p,
+                "vendor" | "node_modules" | "wwwroot" | "third_party" | "dist" | "bower_components"
+            )
+        })
 }

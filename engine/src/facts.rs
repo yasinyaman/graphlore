@@ -611,6 +611,23 @@ pub struct FileFacts {
     /// registers, with the schema each is made of.
     #[serde(default)]
     pub models: Vec<(String, String)>,
+    /// JS: a function passed to a call (`User.load(options, function (err,
+    /// user) {…})`): the byte it starts at (what its parameters are renamed
+    /// with, `user@483`), the call's path and its parameters in order.
+    #[serde(default)]
+    pub callbacks: Vec<(usize, Vec<String>, Vec<String>)>,
+    /// JS: names of properties defined at run time
+    /// (`Object.defineProperty(this, 'router', …)`, the keys of `Object.create(p,
+    /// { app: … })`).
+    #[serde(default)]
+    pub runtime_props: Vec<String>,
+    /// JS `req.article = …`: properties project code puts on a request.
+    #[serde(default)]
+    pub request_props: Vec<String>,
+    /// JS `const article = req.article`: a name given a request's property
+    /// (the name, the property).
+    #[serde(default)]
+    pub request_aliases: Vec<(String, String)>,
     /// Lambdas with a receiver (Kotlin `x.apply { … }`, `withIndent { … }`).
     #[serde(default)]
     pub receivers: Vec<ReceiverScope>,
@@ -642,6 +659,10 @@ impl FileFacts {
             spec_includes: Vec::new(),
             slots: Vec::new(),
             models: Vec::new(),
+            callbacks: Vec::new(),
+            runtime_props: Vec::new(),
+            request_props: Vec::new(),
+            request_aliases: Vec::new(),
             receivers: Vec::new(),
             resources: Vec::new(),
             http: Default::default(),
