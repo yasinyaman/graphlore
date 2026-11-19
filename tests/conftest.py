@@ -60,6 +60,14 @@ def _full_toolset(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _default_engine(monkeypatch):
+    """Every test starts on the default engine (graphify), whatever the shell
+    running pytest exports; tests of the native engine set it themselves."""
+    for name in ("GRAPHLORE_ENGINE", "GRAPHIFY_ENGINE"):
+        monkeypatch.delenv(name, raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _builtin_search_offline_model(monkeypatch):
     """The built-in search's dense tier off, and no vector cache on disk, unless a
     test asks for them: a real embedding model would make the suite depend on a

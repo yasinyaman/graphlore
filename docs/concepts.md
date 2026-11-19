@@ -56,6 +56,12 @@ linked to a first-party `yaml.py`, or a bare JS specifier (`'yaml'`) linked to
 `lib/yaml.js`. A tsconfig path alias cannot be told from a scoped package
 without the config, so those edges are kept.
 
+A graph the native engine built (`GRAPHLORE_ENGINE=native`) needs none of this:
+it resolves each import by path when it reads the statement, and records when it
+runs on the edge (`runs`), so the check takes that and rejects nothing. The calls
+and imports through a module object that graphlore adds to graphify's graphs
+(above) are in such a graph already, and nothing is added to it.
+
 An import through a re-exporting entry file is kept too. graphify links
 `import { CreateDto } from './dto'` to the file that defines `CreateDto`, not to
 `dto/index.ts`; the statement still loads that file, so the edge holds. Only
@@ -238,6 +244,111 @@ C/C++, …) is handled by an optional **tree-sitter** backend —
 non-Python files fall back to nearest-line matching. A `.h` file that reads as
 C++ (a `class`, a `namespace`, a `template<`) is parsed as C++.
 [What was measured per language](benchmark-polyglot.md), on real repositories.
+
+## Shared state and resources
+
+Two functions can affect each other without either calling the other: one
+writes a module variable, a field, an environment variable, a file or a table
+row, and the other reads it. A call graph does not show that. On a native
+graph each such piece of state is a node — a variable, field or constant
+(`kind: variable | property | constant`), or a resource outside the program
+(`type: resource`, `resource: env | file | table | event | key`) — and the
+definitions that touch it are linked to it by `reads` / `writes`. Writing is
+read from the syntax (an assignment, `+=`, `x[k] = v`, `del`, `++`) and is
+`EXTRACTED`; a mutating method on a collection (`cache.clear()`) or a call
+through an ORM (`User.objects.create()`) is `INFERRED`, since only a name says
+so. A resource becomes a node only when two definitions touch it.
+
+The tools use it in four places:
+- `graphlore_neighbors` and `graphlore_subgraph` show the edges as they are:
+  a variable's neighbours are its readers and writers.
+- `graphlore_impact` leaves them out by default, so a blast radius stays a
+  call and import graph, and counts what it passed by in
+  `state_nodes_skipped`; `shared_state=True` follows them from a writer through
+  what it writes to its readers.
+- `graphlore_surprises` lists, beside the edges, the state written in one file
+  and read or written in another (`shared_state`), strongest first. Each row's
+  `pairs` say, per writer and other definition touching the state, whether a
+  call path joins them (`call_path`: either way, over calls, dispatch and HTTP,
+  within 6 hops) and whether their files change together (`co_change`, below).
+  A hidden pair, one with no call path, is what a call graph cannot show; it
+  raises the score, and more when the two files also change together.
+- `graphlore_node_details` says what a definition reads and writes and which
+  other definitions share that state with it.
+
+`graphlore_cycles` ignores reads and writes: two functions sharing a counter
+do not depend on each other in a cycle.
+
+## Files that change together
+
+Two files that keep changing in the same commits are coupled whether or not the
+code says so: a websocket client and its server, a model and the schema it
+maps to, two implementations of one interface kept in step. graphlore reads
+this from the project's git history when a tool asks, with one local
+`git log` (no network): the last 1000 commits that are not merges, renames
+followed to the file's current name, and no commit of more than 30 files (a
+reformat or a mass rename says nothing about which files belong together).
+The measure is code-maat's: a pair's `degree` is the commits it shares over the
+mean of the two files' commits, and a pair counts from 3 shared commits and a
+degree of 0.3. The result is cached on `HEAD`; it works on graphify and native
+graphs alike, and nothing is written to `graph.json`.
+
+- `graphlore_surprises` lists in `co_change` the source files that change
+  together with no edge of the graph between them (tests left out: a test
+  changes with the code it tests by design), and raises the score of a
+  shared-state pair whose files change together.
+- `graphlore_node_details` names the files a node's file changes with most,
+  and whether the graph joins them (`linked`).
+
+`history` in the reply says how much was read. A shallow clone (CI checkouts
+often are: `git fetch --deepen=1000` fetches more) or fewer than 10 commits is
+named as such, so an empty list is never taken for "nothing changes together".
+
+## HTTP routes and requests
+
+A browser's `fetch('/api/v1/users/42')` and the handler that serves it are in
+one repository but joined by nothing a parser sees. On a native graph every
+route is a node (`type: route`, with its `method`, its full `pattern` and a
+normalized `key` such as `GET /api/v1/users/{}`), a `handles` edge leads from
+it to its handler, and an `http_calls` edge leads to it from each definition
+whose request reaches it. The full pattern is joined across files: a FastAPI
+router's prefix and the `include_router` prefix above it, an Express
+`app.use('/api', …)`, a gin group passed to a function, Laravel's
+`routes/api.php` prefix. Requests are matched segment by segment, parameters of
+every syntax (`{id}`, `:id`, `<int:id>`, `${id}`) as one wildcard; an exact
+match with a known method is `EXTRACTED`, a value against a parameter or a
+guess between candidates `INFERRED`. Requests in test code are counted in the
+build report, never linked: a test's client calls the routes it sets up
+itself. [What is read, per language](native-engine.md#http-routes-and-requests).
+
+The tools use it in three places:
+- `graphlore_routes` lists the route nodes, with each route's handler and the
+  code that requests it (`called_by`, `callers`); on a graphify graph it reads
+  the source instead, file by file.
+- `graphlore_impact` walks both relations like calls, so a handler's
+  dependents reach the client code that requests it, across languages;
+  `relations="http"` keeps only them.
+- `graphlore_node_details` says which routes a handler serves and who requests
+  them, which routes a client definition requests, and a route's handlers and
+  callers.
+
+## Communities
+
+A community is a group of nodes that belong together: `graphlore_communities`
+lists them, `graphlore_skeleton(community=…)` shows one's code, and
+`graphlore_surprises` counts an edge between two of them as a reason to look.
+graphify finds them with Leiden on the graph as it is. The native engine runs
+Leiden too, but on edges weighted by what they say (a containment or a call binds
+tighter than a type named in passing, a base class tighter still), by how sure
+they are (a guess by name counts half) and by where their ends live (the same
+directory binds tighter, other top-level directories and test-to-production
+edges looser), plus a weak tie between the files of a directory. Its
+communities sit more in one directory and keep tests apart from the code they
+test; [native-engine.md](native-engine.md#communities) has the rules and the
+measurements. A native rebuild starts from the previous graph's communities:
+a one-file change leaves almost every node where it was, the ids stay, and so
+do the names saved for them, which are dropped only when their community
+changed beyond recognition (the build says how many).
 
 ## Naming communities without an API key (MCP sampling)
 

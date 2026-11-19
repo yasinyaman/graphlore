@@ -120,7 +120,8 @@ search index's BM25 tier. These are the exceptions:
 | Semantic search (`[semble]`: `graphlore_locate`, `graphlore_duplication_scan`) | First use: semble downloads its embedding model from the Hugging Face Hub, then caches it | `HF_HUB_OFFLINE=1` / `TRANSFORMERS_OFFLINE=1` are set before semble is imported, so only a cached model loads; otherwise the built-in index answers (backend unset), or the error says how to prefetch it (`GRAPHLORE_SEMANTIC_BACKEND=semble`) |
 | Built-in search, dense tier (`[embed]`: the same two tools) | First use: model2vec downloads `GRAPHLORE_EMBED_MODEL` (default `minishlab/potion-code-16M-v2`) from the Hugging Face Hub, then caches it | The same flags are set before model2vec is imported, so only a cached model loads; otherwise the index answers with BM25 alone and `backend.dense_unavailable` says why |
 | `GRAPHLORE_TOKENIZER=tiktoken` | First use: tiktoken fetches its encoding file unless cached | Not loaded; the chars/3.5 estimate is used |
-| tree-sitter grammars (`[treesitter]`) | First use of a language: the grammar is downloaded from GitHub releases and cached | Only grammars already in the cache are used; other files get no spans |
+| tree-sitter grammars (`[treesitter]`) | First use of a language: the grammar is downloaded from GitHub releases and cached | Only grammars already in the cache are used; other files get no spans (with `GRAPHLORE_ENGINE=native` or `auto`, the native engine's compiled-in grammars answer instead) |
+| Native engine (`graphlore-engine`, `GRAPHLORE_ENGINE=native`) | Never: its grammars are compiled into the wheel and a build reads local files only | Unchanged |
 | A custom `GRAPHLORE_SEMANTIC_BACKEND` | Whatever that code does | **Not constrained** — graphlore cannot see inside it |
 | HTTP transports | Inbound only (the server listens) | Unchanged |
 
@@ -132,6 +133,47 @@ custom backend does beyond that is theirs. For a guarantee, pair the switch with
 a network policy (an egress firewall, a container without a route out). The
 boot banner on stderr prints `egress=offline` or `egress=on-demand`.
 
+## The native engine
+
+`engine/` in this repository is graphlore's own extractor, written in Rust and
+shipped as a separate package, `graphlore-engine`, whose wheels carry the
+tree-sitter grammars for Python, JavaScript, TypeScript/TSX, Go, Java, Kotlin,
+Scala, C#, Rust, Swift, C, C++, Ruby and PHP. It is experimental. A native graph
+has a node per file, per definition (with its `start..end` span, `kind` and
+`qualname`), property, module-level constant and Markdown / reStructuredText
+heading; containment; and the imports (with when each runs), calls, bases and
+type references it resolves from the source, each `EXTRACTED` or, when found
+by name alone, `INFERRED`. It is written in graphify's id and label conventions,
+so every tool reads it. It also has shared state: variables, fields and
+constants, and environment variables, files, tables, events and cache keys,
+linked by `reads` / `writes` to the definitions that touch them
+([native-engine.md](native-engine.md#shared-state-and-resources)). Its communities are its own (Leiden on edges weighted
+by kind, confidence and directory, see
+[native-engine.md](native-engine.md#communities)), not graphify's, and stay put
+across rebuilds, so names saved for them stay attached; every native build says
+so.
+
+It is not on PyPI yet. From a checkout:
+
+```bash
+pip install maturin
+maturin build -m engine/Cargo.toml --release --out dist-engine
+pip install dist-engine/*.whl
+GRAPHLORE_ENGINE=native GRAPHLORE_PROJECT_DIR=/path/to/repo python -m graphlore
+```
+
+With the native engine, `graphlore_build`'s `update` parses only the files that
+changed since the last native build (a facts cache in
+`graphify-out/cache/graphlore-native.bin`; resolution and communities still run
+over the whole project, so the graph is the one a full build writes, and the
+nodes of deleted files go), `cluster_only` detects the communities of the graph
+on disk again, `code_only` skips the document headings, `no_viz` has no effect,
+and `mode` is refused (`auto` sends it to graphify, and so it does `update` /
+`cluster_only` on a graph graphify built). The build runs in a child process bounded by
+`GRAPHLORE_TIMEOUT`. `benchmarks/compare_engines.py REPO` compares its graph of
+a repository with graphify's, per language; [native-engine.md](native-engine.md)
+has the results on 31 repositories and the roadmap.
+
 ## Environment variables
 
 | Variable | Default | Description |
@@ -139,7 +181,8 @@ boot banner on stderr prints `egress=offline` or `egress=on-demand`.
 | `GRAPHLORE_PROJECT_DIR` | `.` | Project root to extract the graph from |
 | `GRAPHLORE_OUT_DIR` | `graphify-out` | Output folder name |
 | `GRAPHLORE_BIN` | `graphify` | CLI path |
-| `GRAPHLORE_TIMEOUT` | `600` | CLI timeout (seconds) |
+| `GRAPHLORE_ENGINE` | `graphify` | What `graphlore_build` extracts with: `graphify` (the CLI), `native` (graphlore's experimental Rust engine, the `graphlore-engine` package; an error when it is not installed) or `auto` (native when installed, graphify for `mode`, `cluster_only` and updates of a graphify-built graph). See [The native engine](#the-native-engine) |
+| `GRAPHLORE_TIMEOUT` | `600` | CLI and native build timeout (seconds) |
 | `GRAPHLORE_RESTRICT_PATHS` | `0` | Confine `graphlore_build`'s `path` to the project dir (auto-on for HTTP) |
 | `GRAPHLORE_TRANSPORT` | `stdio` | `stdio` \| `streamable-http` \| `sse` |
 | `GRAPHLORE_HOST` | `127.0.0.1` | Bind host for HTTP transports |

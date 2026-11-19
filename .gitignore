@@ -30,3 +30,8 @@ graphify-out/
 
 # Local MCP client config (machine-specific absolute paths)
 .mcp.json
+
+# Native engine (engine/): cargo's build output and the module maturin develop drops in
+engine/target/
+engine/python/graphlore_engine/*.so
+engine/python/graphlore_engine/*.pyd

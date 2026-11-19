@@ -28,6 +28,11 @@ def _graph_path() -> Path:
 # multi-MB graph on every tool call; keyed on path (not just mtime) so distinct
 # graphs in tests can't collide on a coarse-resolution mtime.
 _GRAPH_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+# id(nodes list) -> (nodes, the graph's `graph` header): lets helpers that get
+# only the node list (resolve.py) ask which engine wrote it. Identity-guarded
+# like the other id-keyed caches.
+_GRAPH_META: dict[int, tuple[list, dict[str, Any]]] = {}
+_GRAPH_META_MAX = 8
 
 
 def _load_graph() -> dict[str, Any] | str:
@@ -51,6 +56,7 @@ def _load_graph() -> dict[str, Any] | str:
             # string here — not leak through and AttributeError inside every tool.
             return f"ERROR: graph.json must be a JSON object, not {type(data).__name__}"
         _GRAPH_CACHE[key] = (mtime, data)
+        _remember_meta(data)
         return data
     except json.JSONDecodeError as e:
         return f"ERROR: failed to parse graph.json: {e}"
@@ -58,6 +64,42 @@ def _load_graph() -> dict[str, Any] | str:
         # stat/read can fail mid-rebuild (file swapped between exists() and stat)
         # or on undecodable bytes; both are "graph unavailable", not a crash.
         return f"ERROR: failed to read graph.json: {e}"
+
+
+def _remember_meta(data: dict[str, Any]) -> None:
+    nodes = data.get("nodes") or data.get("vertices")
+    meta = data.get("graph")
+    if not isinstance(nodes, list) or not isinstance(meta, dict):
+        return
+    if id(nodes) not in _GRAPH_META and len(_GRAPH_META) >= _GRAPH_META_MAX:
+        _GRAPH_META.pop(next(iter(_GRAPH_META)), None)  # FIFO
+    _GRAPH_META[id(nodes)] = (nodes, meta)
+
+
+def _graph_meta(nodes: list) -> dict[str, Any]:
+    """The `graph` header of the loaded graph these nodes came from ({} if none)."""
+    entry = _GRAPH_META.get(id(nodes))
+    return entry[1] if entry is not None and entry[0] is nodes else {}
+
+
+def _engine_resolved(nodes: list) -> bool:
+    """Whether graphlore's native engine wrote this graph with its own import and
+    call resolution (schema 2 on): its edges need no correcting at read time."""
+    meta = _graph_meta(nodes)
+    try:
+        return meta.get("engine") == "graphlore" and int(meta.get("schema_version", 0)) >= 2
+    except (TypeError, ValueError):
+        return False
+
+
+def _native_routes(nodes: list) -> bool:
+    """Whether the native engine wrote this graph's routes (schema 5 on): route
+    nodes with their full paths, `handles` and `http_calls` edges."""
+    meta = _graph_meta(nodes)
+    try:
+        return meta.get("engine") == "graphlore" and int(meta.get("schema_version", 0)) >= 5
+    except (TypeError, ValueError):
+        return False
 
 
 def _nodes_edges(graph: dict[str, Any]) -> tuple[list[dict], list[dict]]:
@@ -168,6 +210,139 @@ def _is_surprise_edge(e: dict) -> bool:
     )
 
 
+# --- shared state ------------------------------------------------------------
+
+
+# How far a call path between two definitions sharing state is looked for.
+_CALL_PATH_HOPS = 6
+# Pairs listed per shared state row.
+_SHARED_PAIRS_LIMIT = 10
+
+
+def _shared_state(
+    nodes: list[dict], edges: list[dict], labels: Any = None,
+    call_edges: list[dict] | None = None,
+    coupled: Callable[[str, str], tuple[int, float] | None] | None = None,
+) -> list[dict]:
+    """Variables, fields and resources that code in one file writes and code in
+    another file reads or writes: implicit coupling, strongest first.
+
+    Each pair of a writer and another definition touching the state says
+    whether a call path joins them (`call_path`, either way, over calls,
+    dispatch and HTTP, within 6 hops, on `call_edges` — the graph's edges by
+    default) and whether their files change together (`co_change`, from
+    `coupled(file_a, file_b)`, the git history). A score per state node: +2 when
+    some pair has no call path between them (a hidden pair), +2 when the
+    touching files sit in different top-level directories, +1 when they are in
+    different communities, +2 when the files of a hidden pair change together.
+    Test code is left out (a test setting a global is how tests work) unless
+    the state itself is test code.
+    """
+    byid = {_node_id(n): n for n in nodes}
+    name = (lambda i: labels.get(i, i)) if labels is not None else (
+        lambda i: _node_label(byid[i]) if i in byid else i)
+    readers: dict[str, set[str]] = {}
+    writers: dict[str, set[str]] = {}
+    for e in edges:
+        rel = _rel(e)
+        if rel not in _STATE_RELATIONS:
+            continue
+        s, t = _edge_ends(e)
+        (writers if rel == "writes" else readers).setdefault(t, set()).add(s)
+    call_rels = _CALL_RELATIONS | {"dispatches_to"} | _HTTP_RELATIONS
+    adj = _relation_adjacency(call_edges if call_edges is not None else edges, call_rels)
+    reach: dict[str, dict[str, int]] = {}
+
+    def hops(a: str, b: str) -> int | None:
+        if a not in reach:
+            reach[a] = _hop_distances(adj, a, _CALL_PATH_HOPS)
+        return reach[a].get(b)
+
+    out: list[dict] = []
+    for sid, ws in writers.items():
+        state = byid.get(sid)
+        if state is None:
+            continue
+        test_state = bool(_node_file(state)) and _is_test_path(_node_file(state))
+
+        def keep(i: str, test_state: bool = test_state) -> bool:
+            n = byid.get(i)
+            f = _node_file(n) if n else ""
+            return bool(f) and (test_state or not _is_test_path(f))
+
+        ws_kept = sorted(i for i in ws if keep(i))
+        rs_kept = sorted(i for i in readers.get(sid, set()) - ws if keep(i))
+        touch = ws_kept + rs_kept
+        if not ws_kept or len(touch) < 2:
+            continue
+        file_of = {i: _node_file(byid[i]) for i in touch}
+        files = sorted(set(file_of.values()))
+        if len(files) < 2:
+            continue
+        why: list[str] = []
+        score = 1
+        file_pairs = [(file_of[w], file_of[o]) for w in ws_kept for o in touch
+                      if file_of[o] != file_of[w]]
+        pairs: list[dict] = []
+        seen: set[frozenset[str]] = set()
+        for w in ws_kept:
+            for o in touch:
+                if o == w or frozenset((w, o)) in seen:
+                    continue
+                seen.add(frozenset((w, o)))
+                ab, ba = hops(w, o), hops(o, w)
+                path = ({"direction": "a→b", "hops": ab} if ab is not None
+                        else {"direction": "b→a", "hops": ba} if ba is not None else None)
+                cc = (coupled(file_of[w], file_of[o])
+                      if coupled is not None and file_of[w] != file_of[o] else None)
+                pairs.append({
+                    "writer": name(w), "other": name(o),
+                    "effect": "both write it" if o in ws else "the other reads what it writes",
+                    "call_path": path,
+                    "co_change": {"commits": cc[0], "degree": round(cc[1], 2)} if cc else None,
+                })
+        hidden = [p for p in pairs if p["call_path"] is None]
+        co_hidden = [p for p in hidden if p["co_change"]]
+        if hidden:
+            score += 2
+            why.append(f"{len(hidden)} of {len(pairs)} pair(s) share it with no call "
+                       "path between them")
+        elif pairs:
+            why.append("every pair is joined by a call path as well")
+        if any(_top_dir(a) != _top_dir(b) for a, b in file_pairs):
+            score += 2
+            why.append("crosses top-level directories")
+        comm = {i: byid[i].get("community", byid[i].get("cluster")) for i in touch}
+        if len({c for c in comm.values() if c is not None}) > 1:
+            score += 1
+            why.append("touched from more than one community")
+        if co_hidden:
+            score += 2
+            why.append(f"{len(co_hidden)} hidden pair(s) whose files change together")
+        pairs.sort(key=lambda p: (p["call_path"] is not None, p["co_change"] is None))
+        row_pairs = pairs[:_SHARED_PAIRS_LIMIT]
+        extra: dict[str, Any] = {}
+        if len(pairs) > len(row_pairs):
+            extra["pairs_left_out"] = len(pairs) - len(row_pairs)
+        out.append({
+            "state": name(sid),
+            "kind": str(state.get("kind") or state.get("resource") or _node_type(state) or ""),
+            "file": _node_file(state) or None,
+            "writers": [name(i) for i in ws_kept],
+            "readers": [name(i) for i in rs_kept],
+            "files": len(files),
+            "score": score,
+            "strength": "strong" if score >= 5 else "medium" if score >= 3 else "weak",
+            "why": why,
+            "pairs": row_pairs,
+            "hidden_pairs": len(hidden),
+            "co_changing_pairs": len(co_hidden),
+            **extra,
+        })
+    out.sort(key=lambda r: (-r["score"], -r["files"], -len(r["writers"]), r["state"]))
+    return out
+
+
 # --- computed surprises -----------------------------------------------------
 # A graph built by local AST extraction carries no surprise flag and often no
 # community info, so the flag check above returns nothing on it. Rather than
@@ -186,6 +361,56 @@ _CONTAINMENT_RELATIONS = frozenset({"contains", "method", "defines", "case_of"})
 # Edges that say nothing about one piece of code depending on another: structural
 # containment, and a docstring/comment node pointing at the code it describes.
 _NON_DEPENDENCY_RELATIONS = _CONTAINMENT_RELATIONS | {"rationale_for"}
+# A definition reading or writing a variable, a field, a constant or a resource
+# (the native engine). Two definitions touching one such node affect each other
+# without either calling the other: shared state.
+_STATE_RELATIONS = frozenset({"reads", "writes"})
+# A web route and the code on either side of it (the native engine): `handles`
+# from a route node to its handler, `http_calls` from a client's definition to
+# the route its request reaches. Each is a real dependency across the wire.
+_HTTP_RELATIONS = frozenset({"handles", "http_calls"})
+# Node kinds that hold state (the native engine's `kind`).
+_STATE_KINDS = frozenset({"variable", "property", "constant"})
+
+
+def _is_state_node(n: dict) -> bool:
+    """A variable, field or constant, or a resource node (env, file, table, …)."""
+    return str(n.get("kind", "")).lower() in _STATE_KINDS or _is_resource_node(n)
+
+
+def _is_resource_node(n: dict) -> bool:
+    """Something outside the program's memory that code reads or writes: an
+    environment variable, a file, a table, an event (`type: resource`)."""
+    return str(n.get("type", "")).lower() == "resource"
+
+
+def _is_route_node(n: dict) -> bool:
+    """A web route the native engine found (`type: route`): its method, full
+    pattern and framework, at the line that registers it."""
+    return str(n.get("type", "")).lower() == "route"
+
+
+_SHARED_STATE_CACHE: dict[int, tuple[list[dict], list[dict]]] = {}
+
+
+def _with_written_by(edges: list[dict]) -> list[dict]:
+    """``edges`` plus, for each ``writes`` edge W → R, a ``written_by`` edge
+    R → W, so a walk can go from a writer through what it writes to its
+    readers. Cached on the identity of ``edges``, like the adjacency."""
+    cached = _SHARED_STATE_CACHE.get(id(edges))
+    if cached is not None and cached[0] is edges:
+        return cached[1]
+    out = list(edges)
+    for e in edges:
+        if _rel(e) == "writes":
+            s, t = _edge_ends(e)
+            v = {k: e[k] for k in ("confidence", "source_file", "source_location") if k in e}
+            out.append({"source": t, "target": s, "relation": "written_by",
+                        "context": "shared_state", **v})
+    if len(_SHARED_STATE_CACHE) >= 4:
+        _SHARED_STATE_CACHE.pop(next(iter(_SHARED_STATE_CACHE)), None)
+    _SHARED_STATE_CACHE[id(edges)] = (edges, out)
+    return out
 _FILE_KEYS = ("file", "path", "source_file")
 
 
@@ -322,6 +547,9 @@ IMPORT_MODULE_LEVEL = "module-level"
 IMPORT_DEFERRED = "deferred"            # inside a function body
 IMPORT_TYPE_CHECKING = "type-checking"  # under `if TYPE_CHECKING:`
 IMPORT_UNCLASSIFIED = "unclassified"
+# The values an edge's `runs` field may carry (native engine): every kind but
+# unclassified.
+_IMPORT_RUNS = frozenset({IMPORT_MODULE_LEVEL, IMPORT_DEFERRED, IMPORT_TYPE_CHECKING})
 _IMPORT_RUNS_AT_IMPORT = frozenset({IMPORT_MODULE_LEVEL, IMPORT_UNCLASSIFIED})
 # (importing file, imported file, edge) -> one of the kinds above, or None when
 # the import statement cannot mean that file at all (the resolver matched a name).
@@ -354,7 +582,12 @@ def _file_import_edges(
         sf, tf = _node_file(src), _node_file(dst)
         if not (sf and tf) or sf == tf:
             continue
-        kind = IMPORT_UNCLASSIFIED if kind_of is None else kind_of(sf, tf, e)
+        if kind_of is not None:
+            kind = kind_of(sf, tf, e)
+        else:
+            # an extractor that read the statement says when it runs
+            carried = e.get("runs")
+            kind = carried if carried in _IMPORT_RUNS else IMPORT_UNCLASSIFIED
         if kind is None:
             continue
         if kind == IMPORT_UNCLASSIFIED and kind_of is not None and not _is_file_hub_node(src) \

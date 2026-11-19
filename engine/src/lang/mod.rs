@@ -1,0 +1,402 @@
+//! The language registry and the interface a language module implements.
+//!
+//! Every language goes through the same generic walk (`generic.rs`, a port of
+//! graphlore's `spans.py`): a node is a definition when its type carries a hint
+//! word and it names itself. A module overrides only what its grammar does
+//! differently. Adding a language is: a grammar crate in `Cargo.toml`, a variant
+//! of [`Lang`], a row in [`SPECS`], and a module here when the defaults are not
+//! enough.
+
+use serde::{Deserialize, Serialize};
+use tree_sitter::{Language, Node};
+
+use crate::facts::{DefKind, ImportFact, RefKind};
+use crate::generic;
+
+mod c_family;
+mod csharp;
+mod ecma;
+mod go;
+mod java;
+mod kotlin;
+mod php;
+mod python;
+mod ruby;
+mod rust;
+mod scala;
+mod swift;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Lang {
+    Python,
+    JavaScript,
+    TypeScript,
+    Tsx,
+    Go,
+    Java,
+    Kotlin,
+    Scala,
+    CSharp,
+    Rust,
+    Swift,
+    C,
+    Cpp,
+    Ruby,
+    Php,
+}
+
+pub struct LangSpec {
+    pub lang: Lang,
+    /// The name graphlore and tree-sitter-language-pack use for it.
+    pub name: &'static str,
+    pub extensions: &'static [&'static str],
+    pub grammar: fn() -> Language,
+}
+
+macro_rules! grammar {
+    ($e:expr) => {{
+        fn load() -> Language {
+            $e.into()
+        }
+        load
+    }};
+}
+
+pub static SPECS: &[LangSpec] = &[
+    LangSpec {
+        lang: Lang::Python,
+        name: "python",
+        extensions: &["py", "pyi"],
+        grammar: grammar!(tree_sitter_python::LANGUAGE),
+    },
+    LangSpec {
+        lang: Lang::JavaScript,
+        name: "javascript",
+        extensions: &["js", "mjs", "cjs", "jsx"],
+        grammar: grammar!(tree_sitter_javascript::LANGUAGE),
+    },
+    LangSpec {
+        lang: Lang::TypeScript,
+        name: "typescript",
+        extensions: &["ts", "mts", "cts"],
+        grammar: grammar!(tree_sitter_typescript::LANGUAGE_TYPESCRIPT),
+    },
+    LangSpec {
+        lang: Lang::Tsx,
+        name: "tsx",
+        extensions: &["tsx"],
+        grammar: grammar!(tree_sitter_typescript::LANGUAGE_TSX),
+    },
+    LangSpec {
+        lang: Lang::Go,
+        name: "go",
+        extensions: &["go"],
+        grammar: grammar!(tree_sitter_go::LANGUAGE),
+    },
+    LangSpec {
+        lang: Lang::Java,
+        name: "java",
+        extensions: &["java"],
+        grammar: grammar!(tree_sitter_java::LANGUAGE),
+    },
+    LangSpec {
+        lang: Lang::Kotlin,
+        name: "kotlin",
+        extensions: &["kt", "kts"],
+        grammar: grammar!(tree_sitter_kotlin_sg::LANGUAGE),
+    },
+    LangSpec {
+        lang: Lang::Scala,
+        name: "scala",
+        extensions: &["scala", "sc"],
+        grammar: grammar!(tree_sitter_scala::LANGUAGE),
+    },
+    LangSpec {
+        lang: Lang::CSharp,
+        name: "csharp",
+        extensions: &["cs"],
+        grammar: grammar!(tree_sitter_c_sharp::LANGUAGE),
+    },
+    LangSpec {
+        lang: Lang::Rust,
+        name: "rust",
+        extensions: &["rs"],
+        grammar: grammar!(tree_sitter_rust::LANGUAGE),
+    },
+    LangSpec {
+        lang: Lang::Swift,
+        name: "swift",
+        extensions: &["swift"],
+        grammar: grammar!(tree_sitter_swift::LANGUAGE),
+    },
+    LangSpec {
+        lang: Lang::C,
+        name: "c",
+        extensions: &["c", "h"],
+        grammar: grammar!(tree_sitter_c::LANGUAGE),
+    },
+    LangSpec {
+        lang: Lang::Cpp,
+        name: "cpp",
+        extensions: &["cc", "cpp", "cxx", "c++", "hpp", "hxx", "hh", "h++", "ipp", "tpp"],
+        grammar: grammar!(tree_sitter_cpp::LANGUAGE),
+    },
+    LangSpec {
+        lang: Lang::Ruby,
+        name: "ruby",
+        extensions: &["rb", "rake", "gemspec"],
+        grammar: grammar!(tree_sitter_ruby::LANGUAGE),
+    },
+    LangSpec {
+        lang: Lang::Php,
+        name: "php",
+        extensions: &["php"],
+        grammar: grammar!(tree_sitter_php::LANGUAGE_PHP),
+    },
+];
+
+impl Lang {
+    pub fn spec(self) -> &'static LangSpec {
+        SPECS.iter().find(|s| s.lang == self).expect("every Lang has a spec")
+    }
+
+    pub fn name(self) -> &'static str {
+        self.spec().name
+    }
+
+    pub fn module(self) -> &'static dyn LanguageModule {
+        match self {
+            Lang::Python => &python::Python,
+            Lang::JavaScript | Lang::TypeScript | Lang::Tsx => &ecma::Ecma,
+            Lang::Go => &go::Go,
+            Lang::Java => &java::Java,
+            Lang::Kotlin => &kotlin::Kotlin,
+            Lang::Scala => &scala::Scala,
+            Lang::CSharp => &csharp::CSharp,
+            Lang::Rust => &rust::Rust,
+            Lang::Swift => &swift::Swift,
+            Lang::C | Lang::Cpp => &c_family::CFamily,
+            Lang::Ruby => &ruby::Ruby,
+            Lang::Php => &php::Php,
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Lang> {
+        SPECS.iter().find(|s| s.name == name).map(|s| s.lang)
+    }
+}
+
+fn extension(rel: &str) -> Option<String> {
+    let base = rel.rsplit('/').next().unwrap_or(rel);
+    let dot = base.rfind('.')?;
+    if dot == 0 {
+        return None; // `.bashrc`
+    }
+    Some(base[dot + 1..].to_ascii_lowercase())
+}
+
+/// The language of a file, from its extension; `src` refines it (a `.h` that
+/// reads as C++). `None` for anything no module reads.
+pub fn detect(rel: &str, src: Option<&[u8]>) -> Option<Lang> {
+    let ext = extension(rel)?;
+    let lang = SPECS.iter().find(|s| s.extensions.contains(&ext.as_str()))?.lang;
+    if let Some(src) = src {
+        if let Some(refined) = lang.module().refine(lang, rel, src) {
+            return Some(refined);
+        }
+    }
+    Some(lang)
+}
+
+/// What the generic walk makes of one node.
+pub enum Step<'t> {
+    /// A definition. Its children are walked under `qualname.`.
+    Def {
+        /// Possibly qualified (`Session.Get`, `Foo::Bar`): split into owner and
+        /// bare name by the walk.
+        name: String,
+        /// The node the span and kind come from.
+        node: Node<'t>,
+        /// The node whose children are walked next (a bound function's value).
+        descend: Node<'t>,
+        /// A region start other than the generic one (bound functions use their
+        /// own line).
+        region_start: Option<u32>,
+        /// A non-lexical owner found by the classifier (Go receiver).
+        owner: Option<String>,
+        /// A kind the classifier already knows (an anonymous class, a bound
+        /// function, a C prototype); otherwise [`LanguageModule::kind_of`] decides.
+        kind: Option<DefKind>,
+    },
+    /// No definition of its own, but a prefix for the names inside (Rust `impl`).
+    Scope { prefix: String, owner: Option<String>, descend: Node<'t> },
+    /// Neither a definition nor walked into (Rust `mod foo;`).
+    Skip,
+    /// Not a definition: walk its children under the same prefix.
+    Descend,
+}
+
+/// What a language does differently from the generic walk. Every method has a
+/// default; a module overrides what its grammar needs.
+pub trait LanguageModule: Send + Sync {
+    /// A better language for this file than its extension says (`.h` as C++).
+    fn refine(&self, _lang: Lang, _rel: &str, _src: &[u8]) -> Option<Lang> {
+        None
+    }
+
+    /// Classify one node. The default is the `spans.py` rule.
+    fn classify<'t>(&self, node: Node<'t>, src: &[u8]) -> Step<'t> {
+        generic::classify(self, node, src)
+    }
+
+    /// Whether a node type can be a definition at all.
+    fn is_symbol(&self, kind: &str) -> bool {
+        generic::is_symbol(kind)
+    }
+
+    /// Whether an anonymous function bound to a name (`const f = () => …`) is a
+    /// definition.
+    fn bound_functions(&self) -> bool {
+        true
+    }
+
+    /// The first line of a definition's region (doc comments, decorators).
+    fn region_start(&self, node: Node, def_line: u32) -> u32 {
+        generic::region_start(node, def_line)
+    }
+
+    /// The last line of a definition.
+    fn end_line(&self, node: Node) -> u32 {
+        generic::end_line(node)
+    }
+
+    /// What a definition is.
+    fn kind_of(&self, node: Node, _src: &[u8]) -> DefKind {
+        generic::kind_of(node.kind())
+    }
+
+    /// Whether a definition becomes a graph node.
+    fn emits_node(&self, kind: DefKind) -> bool {
+        !matches!(kind, DefKind::Namespace | DefKind::Extension)
+    }
+
+    /// Line ranges that are test code although the file is not a test file.
+    fn test_regions(&self, _root: Node, _src: &[u8]) -> Vec<(u32, u32)> {
+        Vec::new()
+    }
+
+    /// The import facts of an import statement, or `None` when `node` is not
+    /// one (the walk then goes on into it).
+    fn imports_of(&self, _node: Node, _src: &[u8]) -> Option<Vec<ImportFact>> {
+        None
+    }
+
+    /// The bases a definition names: `(Inherits | Implements | Base | MixesIn
+    /// | Embeds, path)`. Called for every definition node.
+    fn heritage_of(&self, _node: Node, _src: &[u8]) -> Vec<(RefKind, Vec<String>)> {
+        Vec::new()
+    }
+
+    /// The type that the bases a non-definition node names belong to (Rust
+    /// `impl Trait for Type`).
+    fn heritage_owner(&self, _node: Node, _src: &[u8]) -> Option<String> {
+        None
+    }
+
+    /// A node that defines a property or a constant (`Def::extra`): its name
+    /// node and kind. Only asked of nodes that are not definitions already.
+    fn extra_def<'t>(&self, _node: Node<'t>, _src: &[u8]) -> Option<(Node<'t>, DefKind)> {
+        None
+    }
+
+    /// The modules a test configuration mixes into every test (RSpec
+    /// `config.include M`).
+    fn spec_includes(&self, _node: Node, _src: &[u8]) -> Vec<Vec<String>> {
+        Vec::new()
+    }
+
+    /// Variables, constants and class-level fields a node declares (`Def::extra`):
+    /// `(span node, name node, kind)` for each name, with `DefKind::Variable` for
+    /// module or package state, `Constant` for what cannot change, `Property`
+    /// for a class-level field. Asked of every node that is not a definition;
+    /// `extra_def` covers the properties and constants found before.
+    fn state_defs<'t>(&self, _node: Node<'t>, _src: &[u8]) -> Vec<(Node<'t>, Node<'t>, DefKind)> {
+        Vec::new()
+    }
+
+    /// The object a definition is assigned to as a property (see `Def::object`).
+    fn object_of(&self, _node: Node, _src: &[u8]) -> Option<String> {
+        None
+    }
+
+    /// `(local, exported)` names a node exports under another name.
+    fn exports_of(&self, _node: Node, _src: &[u8]) -> Vec<(String, String)> {
+        Vec::new()
+    }
+
+    /// The package or file-scoped namespace a node declares.
+    fn package_of(&self, _node: Node, _src: &[u8]) -> Option<String> {
+        None
+    }
+
+    /// The type a definition node extends when it is an extension function or
+    /// method: Kotlin `fun T.name()`, C# `static R Name(this T x)`.
+    fn receiver_of(&self, _node: Node, _src: &[u8]) -> Option<String> {
+        None
+    }
+
+    /// Whether a node is a field or property declaration whose `type` field is
+    /// a type reference of the enclosing type.
+    fn is_field(&self, node: Node) -> bool {
+        matches!(
+            node.kind(),
+            "field_declaration"
+                | "property_declaration"
+                | "public_field_definition"
+                | "field_definition"
+        )
+    }
+
+    /// Whether assigning a bare name inside a function declares a local of it
+    /// (Python, Ruby: `x = 1` is a new local unless `global x`), rather than
+    /// writing a name from an outer scope.
+    fn assignment_declares(&self) -> bool {
+        false
+    }
+
+    /// Whether a name from another file has to be imported to be used here, so
+    /// a bare name is state only when it is the file's own or imported (false
+    /// for languages whose packages, namespaces or classes share names
+    /// without imports: Go, the JVM, C#, Swift, C/C++, Ruby, PHP).
+    fn needs_import(&self) -> bool {
+        false
+    }
+
+    /// References a node makes, in place of the generic call rule: `None`
+    /// keeps the generic one.
+    fn refs_of(
+        &self,
+        _node: Node,
+        _src: &[u8],
+    ) -> Option<Vec<(RefKind, Vec<String>, &'static str)>> {
+        None
+    }
+
+    /// Names the language provides, never resolved to a project definition
+    /// by name alone (`len`, `print`, `make`).
+    fn builtins(&self) -> &'static [&'static str] {
+        &[]
+    }
+}
+
+/// Paths of the children of a list node (a base list, a type list).
+pub fn paths_in(list: Node, src: &[u8]) -> Vec<Vec<String>> {
+    generic::kids(list).into_iter().filter_map(|c| crate::refs::path_of(c, src)).collect()
+}
+
+/// A module-level name is a constant when written in capitals (`MAX_SIZE`).
+pub fn capitals(name: &str) -> bool {
+    name.chars().any(|c| c.is_ascii_uppercase())
+        && name.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+}

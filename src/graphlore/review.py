@@ -114,6 +114,10 @@ class _Definitions:
         if str(n.get("file_type") or "code").lower() != "code":
             return ""
         label = _node_label(n)
+        # the native engine says what a node is: a variable, a field or a
+        # constant is no class, however it hangs off its file
+        if str(n.get("kind", "")).lower() in ("variable", "property", "constant", "heading"):
+            return ""
         if n.get("_callable_class"):
             return "class"
         if label.endswith("()"):
