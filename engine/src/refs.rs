@@ -278,6 +278,14 @@ pub fn path_of(n: Node, src: &[u8]) -> Option<Vec<String>> {
                 }
                 p.extend(path_of(c, src)?);
             }
+            // Swift `Foo.Type`, `Foo.Protocol`: the metatype of `Foo`
+            if k == "user_type"
+                && p.len() > 1
+                && p.last().is_some_and(|s| s == "Type" || s == "Protocol")
+                && crate::parse::current() == Some(crate::lang::Lang::Swift)
+            {
+                p.pop();
+            }
             (!p.is_empty()).then_some(p)
         }
         "qualified_name" => {
@@ -3245,6 +3253,35 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                 }
             } else if let Some(p) = referenced(n, src) {
                 push(&mut refs, n, RefKind::Indirect, p, "argument", None);
+            }
+        }
+        // Swift `case option(ParsedArgument)`: the types a case carries
+        if n.kind() == "enum_type_parameters" {
+            let mut types = Vec::new();
+            types_in(n, src, "field", &mut types);
+            for (p, ctx) in types {
+                push(&mut refs, n, RefKind::Type, p, ctx, None);
+            }
+        }
+        // Python `except Exit as e:`, `except (A, m.B):`: the types caught
+        if n.kind() == "except_clause" {
+            let mut caught = n
+                .child_by_field_name("value")
+                .or_else(|| kids(n).into_iter().find(|c| c.kind() != "block" && !is_comment(c)));
+            if let Some(c) = caught.filter(|c| c.kind() == "as_pattern") {
+                caught = kids(c).into_iter().next();
+            }
+            let each: Vec<Node> = match caught {
+                Some(c) if matches!(c.kind(), "tuple" | "parenthesized_expression") => kids(c),
+                Some(c) => vec![c],
+                None => Vec::new(),
+            };
+            for c in each {
+                if matches!(c.kind(), "identifier" | "attribute") {
+                    if let Some(p) = path_of(c, src) {
+                        push(&mut refs, c, RefKind::Type, p, "except", None);
+                    }
+                }
             }
         }
         // (Kotlin's grammar reads `Repo::class` outside an argument list as a

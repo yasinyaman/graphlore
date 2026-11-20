@@ -904,6 +904,10 @@ case("python", "pytest-fixture", "pytest hands a test the result of the fixture 
       "tests/conftest.py": "import pytest\n\nfrom app import Runner\n\n\n@pytest.fixture\ndef runner():\n    return Runner()\n",
       "tests/test_app.py": "def test_run(runner):\n    assert runner.invoke() == 1\n"},
      [("test_run", "calls", "Runner.invoke")], [("test_run", "calls", "Context.invoke")])
+case("python", "except-clause", "`except E as e:` and `except (A, B):` name the types caught",
+     PY, {"a.py": "class Exit(Exception):\n    pass\n\n\nclass Abort(Exception):\n    pass\n\n\n"
+                  "def run():\n    try:\n        pass\n    except Exit as e:\n        raise\n    except (Abort, ValueError):\n        pass\n"},
+     [("run", "references", "Exit"), ("run", "references", "Abort")])
 case("python", "mro-first-base", "of two bases with the method, the first listed wins",
      PY, {"a.py": "class Left:\n    def m(self):\n        return 1\n\n\nclass Right:\n    def m(self):\n        return 2\n\n\n"
                   "class A(Left, Right):\n    def run(self):\n        return self.m()\n"},
@@ -1122,6 +1126,11 @@ case("java", "explicit-constructor-call", "`super(…)` / `this(…)` in a const
                           "class Name extends Token {\n    Name(String text) {\n        super(1, text);\n    }\n\n"
                           "    Name() {\n        this(\"x\");\n    }\n}\n"},
      [("Name.Name", "calls", "Token.Token"), ("Name.Name", "calls", "Name.Name")])
+case("java", "module-info", "an import of `p.C` names the class of package p, whatever module-info.java declares a module `p`",
+     JAVA, {"src/main/java/module-info.java": "module com.acme {\n  exports com.acme;\n}\n",
+            "src/main/java/com/acme/Gson.java": "package com.acme;\n\npublic class Gson {\n    public int go() {\n        return 1;\n    }\n}\n",
+            "src/test/java/com/acme/fn/T.java": "package com.acme.fn;\n\nimport com.acme.Gson;\n\npublic class T {\n    int run(Gson g) {\n        return g.go();\n    }\n}\n"},
+     [("T.java", "imports", "Gson"), ("T.run", "calls", "Gson.go")])
 case("java", "nested-static-class", "a nested class is named through the class around it",
      JAVA, {"app/A.java": "package app;\n\nclass Outer {\n    static class Inner {\n        int find() {\n            return 1;\n        }\n    }\n}\n\n"
                           "public class A {\n    int run(Outer.Inner i) {\n        return i.find();\n    }\n}\n"},
@@ -1177,6 +1186,12 @@ case("kotlin", "return-type", "a function's declared result gives the members of
      KT, kt("fun make(): Repo = Repo()\n\nfun run(): Int = make().find()\n"), *KT_BOTH)
 case("kotlin", "typealias", "a typealias names the type it is written for",
      KT, kt("typealias Store = Repo\n\nfun run(s: Store): Int = s.find()\n"), *KT_BOTH)
+case("kotlin", "apply-also", "`x.apply { … }` and `x.also { … }` give x back",
+     KT, {"src/app/A.kt": "package app\n\nclass Builder {\n    fun build(): Int = 1\n}\n\nclass Other {\n    fun build(): Int = 2\n}\n\n"
+                          "fun make(b: Builder, action: Builder.() -> Unit): Int = b.apply(action).build()\n\n"
+                          "fun log(b: Builder): Int = b.also { println(it) }.build()\n"},
+     [("make", "calls", "Builder.build"), ("log", "calls", "Builder.build")],
+     [("make", "calls", "Other.build"), ("log", "calls", "Other.build")])
 case("kotlin", "constructor", "`C(…)` calls C's constructor",
      KT, {"src/app/A.kt": "package app\n\nclass Repo(val size: Int)\n\nfun run(): Repo = Repo(1)\n"},
      [("run", "calls", "Repo")])
@@ -1422,6 +1437,15 @@ case("swift", "computed-property", "a computed property's declared type gives it
 case("swift", "static-property", "`T.shared.m()` goes through a static property's type",
      SW, {"a.swift": "class Repo {\n  static let shared = Repo()\n\n  func find() -> Int {\n    return 1\n  }\n}\n\nfunc run() -> Int {\n  return Repo.shared.find()\n}\n"},
      [("run", "calls", "Repo.find")])
+case("swift", "enum-payload", "the types an enum case carries are types the enum names",
+     SW, {"a.swift": "struct InputKey {\n}\n\nenum ValidationResult {\n  case missing([InputKey])\n  case plain\n}\n"},
+     [("missing", "references", "InputKey")])
+case("swift", "enum-case-built", "building a case with what it carries (`E.c(x)`) is a use of the enum",
+     SW, {"a.swift": "enum ParserError: Error {\n  case noValue(String)\n}\n\nfunc run() throws {\n  throw ParserError.noValue(\"x\")\n}\n"},
+     [("run", "references", "ParserError")])
+case("swift", "metatype", "`T.Type` names T",
+     SW, {"a.swift": "protocol Command {\n}\n\nfunc run(root: Command.Type) {\n}\n"},
+     [("run", "references", "Command")])
 case("swift", "typealias", "a typealias names the type it is written for",
      SW, {"a.swift": SW2 + "typealias Store = Repo\n\nfunc run(s: Store) -> Int {\n  return s.find()\n}\n"}, *SW_BOTH)
 case("swift", "generic-argument", "`Page<Item>`'s `head: T` is an Item",

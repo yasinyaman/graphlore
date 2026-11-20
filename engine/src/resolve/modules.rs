@@ -4,7 +4,7 @@
 use std::collections::{HashMap, HashSet};
 
 use super::{dir_of, normalize, Bind, Family, ModRes, Project, Target};
-use crate::facts::{ImportFact, ImportForm};
+use crate::facts::{DefKind, ImportFact, ImportForm};
 use crate::lang::Lang;
 
 /// Directories Python puts on `sys.path` by convention (graphlore's
@@ -601,12 +601,17 @@ fn go_resolve(p: &Project, path: &str) -> ModRes {
 
 fn ns_target(p: &Project, fam: Family, name: &str) -> Option<Target> {
     let dotted = name.replace('\\', ".").trim_start_matches('.').to_string();
-    if let Some(d) = p.best(
-        p.fqn.get(&dotted).into_iter().flatten().copied().filter(|r| p.family[r.0] == Some(fam)),
-    ) {
+    let is_package = p.namespaces.contains(&(fam, dotted.clone()));
+    // (a Java `module com.acme { … }` in module-info.java declares no type:
+    // where a package has the name, the import means the package)
+    let found = p.best(p.fqn.get(&dotted).into_iter().flatten().copied().filter(|r| {
+        p.family[r.0] == Some(fam)
+            && !(is_package && matches!(p.def(*r).kind, DefKind::Module | DefKind::Namespace))
+    }));
+    if let Some(d) = found {
         return Some(Target::Def(d));
     }
-    p.namespaces.contains(&(fam, dotted.clone())).then_some(Target::Ns(dotted))
+    is_package.then_some(Target::Ns(dotted))
 }
 
 // ---- Rust -----------------------------------------------------------------

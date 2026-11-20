@@ -5314,6 +5314,19 @@ impl<'a> Project<'a> {
                     }
                 }
             }
+            // Kotlin `x.apply { … }.build()`, `x.also(f).done()`: the scope
+            // functions that give the receiver back
+            if matches!(seg.as_str(), "apply" | "also")
+                && i + 1 < rest.len()
+                && self.files[f].lang == Some(crate::lang::Lang::Kotlin)
+            {
+                if let Target::Def(c) = t {
+                    if self.def(c).kind.is_class_like() && self.class_member(c, seg, 4).is_none() {
+                        skip = usize::from(rest.get(i + 1).is_some_and(|s| s == "()"));
+                        continue;
+                    }
+                }
+            }
             if seg == "()" {
                 // the result of a call: constructing a type gives one of it;
                 // anything else returns what the walk cannot know
@@ -7421,9 +7434,20 @@ pub fn resolve(
                 };
                 let (target, relation, conf) = match found {
                     Some((Target::Def(t), conf)) => {
+                        // `throw ParserError.noValue("x")`: a case built with
+                        // what it carries is a use of its enum
+                        let made = (matches!(r.kind, RefKind::Call | RefKind::New)
+                            && p.def(t).kind == DefKind::EnumMember)
+                            .then(|| p.def(t).parent.map(|e| (t.0, e)))
+                            .flatten()
+                            .filter(|e| p.def(*e).kind.is_class_like());
+                        let (t, kind) = match made {
+                            Some(e) => (e, RefKind::Type),
+                            None => (t, r.kind),
+                        };
                         let Some(id) = p.node_id(t) else { continue };
                         let tk = p.def(t).kind;
-                        let rel = match r.kind {
+                        let rel = match kind {
                             RefKind::Call | RefKind::New => {
                                 // a Lombok accessor called: the field it reads
                                 // or writes
