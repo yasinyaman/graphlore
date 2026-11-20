@@ -2485,3 +2485,18 @@ fn a_projects_own_box_is_no_wrapper_outside_rust() {
     has(&got, &[("A.run", "calls", "Box.lead"), ("A.run", "calls", "Item.size")]);
     lacks(&got, &[("A.run", "calls", "Other.size")]);
 }
+
+#[test]
+fn cpp_a_macro_between_class_and_its_name_leaves_a_class() {
+    // `class LEVELDB_EXPORT Env { … }`: the grammar reads `Env { … }` as a
+    // function otherwise, and its members belong to no class
+    let got = quals("cpp-export-macro", &[
+        ("env.h", "#define EXPORT\n\nnamespace db {\nclass EXPORT Env {\n public:\n  virtual int NowMicros() = 0;\n};\n\nclass EXPORT Wrapper : public Env {\n public:\n  int NowMicros() override {\n    return 1;\n  }\n};\n}  // namespace db\n"),
+        ("a.cc", "#include \"env.h\"\n\nnamespace db {\nclass Impl {\n public:\n  int Work();\n\n private:\n  Env* const env_;\n};\n\nint Impl::Work() {\n  return env_->NowMicros();\n}\n}  // namespace db\n"),
+    ]);
+    has(
+        &got,
+        &[("db.Impl.Work", "calls", "db.Env.NowMicros"), ("db.Wrapper", "inherits", "db.Env")],
+    );
+    lacks(&got, &[("db.Impl.Work", "calls", "db.Wrapper.NowMicros")]);
+}

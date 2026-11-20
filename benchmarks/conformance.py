@@ -1490,6 +1490,11 @@ case("cpp", "out-of-class-static", "a static member defined out of its class is 
      CPP, {"repo.h": "class Repo {\n public:\n  static Repo Make();\n};\n", "repo.cc": "#include \"repo.h\"\n\nRepo Repo::Make() {\n  return Repo();\n}\n",
            "a.cc": "#include \"repo.h\"\n\nRepo run() {\n  return Repo::Make();\n}\n"},
      [("run", "calls", "Repo.Make")])
+case("cpp", "export-macro", "a macro between `class` and the name (`class API Env {`) leaves the class a class",
+     CPP, {"env.h": "#define API\n\nclass API Env {\n public:\n  virtual int NowMicros() = 0;\n};\n\n"
+                    "class API Clock {\n public:\n  virtual int NowMicros() = 0;\n};\n",
+           "a.cc": "#include \"env.h\"\n\nint run(Env* env) {\n  return env->NowMicros();\n}\n"},
+     [("run", "calls", "Env.NowMicros")], [("run", "calls", "Clock.NowMicros")])
 case("cpp", "constructor-arguments", "`T x(1);` constructs a T",
      CPP, {"a.cc": "class Repo {\n public:\n  explicit Repo(int size) {}\n  int Find() {\n    return 1;\n  }\n};\n\nint run() {\n  Repo r(1);\n  return r.Find();\n}\n"},
      [("run", "calls", "Repo"), ("run", "calls", "Repo.Find")])

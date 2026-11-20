@@ -1111,6 +1111,25 @@ def test_cpp_branches_written_once_per_configuration_are_blanked():
         assert blank(keep) is keep
 
 
+def test_cpp_macro_between_class_and_its_name_is_blanked():
+    """`class EXPORT Name {` is read without the macro: the parser takes it for
+    the type's name and the class for a function otherwise."""
+    from graphlore.spans import _blank_class_macros as blank
+
+    src = (b"class LEVELDB_EXPORT Env {\n public:\n  virtual int NowMicros() = 0;\n};\n"
+           b"struct API_EXPORT Options : Base {\n};\nclass DLL_PUBLIC Last final {\n};\n")
+    out = blank(src)
+    assert len(out) == len(src) and out.count(b"\n") == src.count(b"\n")
+    assert b"EXPORT" not in out and b"DLL_PUBLIC" not in out
+    assert b"Env {" in out and b"Options : Base" in out and b"Last final" in out
+    # a plain class, a forward declaration, a variable of a struct type, a
+    # short or mixed-case name before the class's: untouched
+    for keep in (b"class Env {\n};\n", b"struct FOO_API Bar;\n",
+                 b"class My Other {\n};\n",
+                 b"class Foo final {\n};\n", b"class NS_API Scope::Name {\n};\n"):
+        assert blank(keep) is keep
+
+
 def test_csharp_branches_inside_an_expression_are_blanked():
     """A C# `#if` that opens in the middle of an expression is read once: the
     first branch stays, the rest and the directives are blanked in place."""
