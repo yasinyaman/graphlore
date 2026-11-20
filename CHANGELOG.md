@@ -15,7 +15,8 @@ All notable changes to this project are documented here. The format is based on
   arity; the other 221 are the places a type is written outside a
   declaration (a cast, a pattern, a loop variable, an alias, a wrapper, a
   declared result) and what each language has of its own. Engine 0.5.45
-  followed 356 of them; 0.5.46 follows all 406 (see Fixed).
+  followed 356 of them; 0.5.46 follows all 406 (see Fixed), and the list has
+  414 with the rules 0.5.47 found on repositories.
   `--baseline benchmarks/results-conformance.json` says what a change fixed
   and exits 1 on what it broke.
 - **A built-in code search index**, so `graphlore_locate` and the duplication
@@ -327,6 +328,31 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- **Native engine 0.5.47: the lowest cells of the comparison with graphify,
+  read.** 0.5.46's 50 rules did not move the share of graphify's calls the
+  native graph has (84.7% on the first set, before and after): they were edges
+  neither engine had. Reading the edges only graphify had on the second set
+  did — calls 84.9% → 90.1%, bases 79.9% → 97.4%, type references 80.3% →
+  84.5% — and each was one rule:
+  **`class EXPORT_MACRO Name {`** is a function to the C++ grammar, so the
+  members belonged to no class; the macro is blanked before parsing, in the
+  engine and in `spans.py` (leveldb: 1,173 more calls, 1,128 more references).
+  A test's untyped parameter is what the **pytest fixture** of its name returns
+  (click: 306 calls, `INFERRED`). C# **`: base(…)` / `: this(…)`** and Java
+  **`super(…)` / `this(…)`** are constructor calls (no edge before). C#
+  `Maybe.Nothing<T>()` is a member of the static class beside the generic
+  `Maybe<T>`, and a **`using N;` of a namespace written as a block** brings its
+  extension methods into sight from another directory (commandline: 82% of
+  graphify's calls from 68%). **`$` is a sigil only in PHP and Ruby** (and
+  Swift's `$0`): it was stripped from JS / TS names, so zod's `$ZodType`
+  family named something else (bases 44% → 97%); a TypeScript name that is an
+  interface and a constant is the type where a type is written, the value
+  elsewhere.
+  `benchmarks/compare_engines.py` now counts an edge of a C++ definition
+  written out of its class as an edge of the declaration graphify hangs it
+  on (C++ header calls on leveldb read 9% for that reason alone).
+  Not all of what only graphify has is a gap: 265 of click's are
+  `runner.invoke(cli)` linked to the `cli` nested in another test.
 - **Native engine 0.5.46: the 50 name-resolution rules the checklist found
   missing.** `benchmarks/conformance.py` had 356 of its 406 cases passing;
   all pass now, and each change was read on the 45 audit repositories (edges

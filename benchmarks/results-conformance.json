@@ -1,6 +1,6 @@
 {
- "passed": 406,
- "total": 406,
+ "passed": 414,
+ "total": 414,
  "cases": [
   {
    "id": "python/module-function",
@@ -1173,6 +1173,12 @@
    "unwanted": []
   },
   {
+   "id": "python/pytest-fixture",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
    "id": "python/mro-first-base",
    "ok": true,
    "missing": [],
@@ -1300,6 +1306,18 @@
   },
   {
    "id": "javascript/for-of-new",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/dollar-name",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/type-and-value",
    "ok": true,
    "missing": [],
    "unwanted": []
@@ -1534,6 +1552,12 @@
   },
   {
    "id": "java/overload-by-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/explicit-constructor-call",
    "ok": true,
    "missing": [],
    "unwanted": []
@@ -1828,6 +1852,24 @@
   },
   {
    "id": "csharp/inherited",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/constructor-initializer",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/using-block-namespace",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/generic-namesake",
    "ok": true,
    "missing": [],
    "unwanted": []
@@ -2230,6 +2272,12 @@
   },
   {
    "id": "cpp/out-of-class-static",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "cpp/export-macro",
    "ok": true,
    "missing": [],
    "unwanted": []

@@ -767,34 +767,37 @@ file pairs). The native graph has definitions graphify folds into the one
 around them (a function nested in a method, the setter beside a getter of the
 same name); an edge from one of those is compared as an edge from the paired
 definition it belongs to, as graphify records it. On the 31 repositories of the
-[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.42,
+[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.47,
 measured 2026-11-20), as native / graphify edges and the share of graphify's
 that the native graph has too:
 
 | Language | same definition | imports (file pairs) | calls | bases | type references |
 |---|--:|--:|--:|--:|--:|
-| Python | 100% | 212 / 219 (96%) | 2,970 / 834 (94%) | 73 / 62 (100%) | 440 / 494 (68%) |
-| JavaScript | 93.5%⁵ | 190 / 305 (59%) | 1,274 / 2,058 (41%)¹ | 1 / 1 | 3 / 0 |
-| TypeScript | 99.4% | 527 / 634 (83%) | 804 / 687 (98%) | 25 / 20 (100%) | 740 / 156 (88%) |
+| Python | 100% | 212 / 219 (96%) | 2,986 / 834 (94%) | 73 / 62 (100%) | 440 / 494 (68%) |
+| JavaScript | 93.5%⁵ | 190 / 305 (59%) | 1,289 / 2,058 (42%)¹ | 1 / 1 (100%) | 3 / 0 |
+| TypeScript | 99.4% | 527 / 634 (83%) | 804 / 687 (98%) | 25 / 20 (100%) | 742 / 156 (88%) |
 | TSX | 99.7% | 253 / 316 (80%) | 435 / 456 (95%) | – | 42 / 4 |
-| Go | 100% | 538 / 950 (47%)² | 6,723 / 3,167 (99%) | 19 / 14 (100%) | 679 / 355 (99%) |
-| Java | 100% | 1,105 / 1,010 (100%) | 5,718 / 5,123 (85%) | 415 / 168 (94%) | 3,989 / 1,930 (98%) |
-| Kotlin | 99.4% | 368 / 333 (95%) | 4,819 / 2,108 (71%) | 96 / 56 (93%) | 1,079 / 673 (91%) |
-| Scala | 100% | 2 / 0 | 46 / 20 (45%) | 21 / 22 (95%) | 75 / 32 (100%) |
-| C# | 92.8% | 347 / 280 (30%)³ | 3,287 / 2,460 (96%) | 91 / 86 (98%) | 1,330 / 928 (99%) |
+| Go | 100% | 538 / 950 (47%)² | 6,730 / 3,167 (99%) | 19 / 14 (100%) | 681 / 355 (99%) |
+| Java | 100% | 1,105 / 1,010 (100%) | 5,782 / 5,123 (85%) | 415 / 168 (94%) | 3,996 / 1,930 (98%) |
+| Kotlin | 99.4% | 368 / 333 (95%) | 4,668 / 2,108 (71%) | 96 / 56 (93%) | 1,232 / 673 (92%) |
+| Scala | 100% | 2 / 0 | 78 / 20 (50%) | 21 / 22 (95%) | 45 / 32 (100%) |
+| C# | 92.8% | 343 / 280 (29%)³ | 3,329 / 2,460 (97%) | 91 / 86 (98%) | 1,334 / 928 (99%) |
 | Rust | 93.3% | 314 / 370 (75%) | 2,065 / 853 (86%) | 53 / 41 (93%) | 1,245 / 895 (81%) |
-| Swift | 95.9% | 167 / 166 (–)³ | 5,502 / 2,141 (83%) | 190 / 164 (100%) | 1,529 / 580 (78%)⁶ |
-| C | 100% | 89 / 77 (99%) | 864 / 791 (100%) | – | 253 / 130 (97%) |
-| C++ | 98.7% | 215 / 228 (93%) | 765 / 281 (29%)⁴ | 30 / 5 (100%) | 350 / 234 (88%) |
-| C/C++ headers | 91.4% | 164 / 172 (95%) | 372 / 348 (84%) | 12 / 12 (92%) | 563 / 312 (90%) |
-| Ruby | 99.7% | 42 / 0 | 443 / 375 (69%) | 47 / 15 (93%) | 28 / 0 |
-| PHP | 80.6% | 429 / 505 (84%) | 8,873 / 6,140 (90%) | 65 / 60 (98%) | 648 / 213 (95%) |
-| **All** | **94.4%** | **4,962 / 5,565 (75%)** | **44,960 / 27,842 (85%)** | **1,138 / 726 (97%)** | **12,993 / 6,936 (90%)** |
+| Swift | 95.9% | 167 / 166 (–)³ | 5,505 / 2,141 (83%) | 190 / 164 (100%) | 1,527 / 580 (78%)⁶ |
+| C | 100% | 89 / 77 (99%) | 864 / 791 (100%) | – | 257 / 130 (100%) |
+| C++ | 98.7% | 215 / 228 (93%) | 876 / 281 (57%)⁴ | 30 / 5 (100%) | 410 / 234 (90%) |
+| C/C++ headers | 91.4% | 164 / 172 (95%) | 423 / 348 (87%) | 12 / 12 (92%) | 576 / 312 (90%) |
+| Ruby | 99.7% | 42 / 0 | 455 / 375 (69%) | 47 / 15 (93%) | 28 / 0 |
+| PHP | 80.6% | 429 / 505 (84%) | 8,926 / 6,140 (90%) | 65 / 60 (98%) | 1,350 / 213 (95%) |
+| **All** | **94.4%** | **4,958 / 5,565 (75%)** | **45,215 / 27,842 (85%)** | **1,138 / 726 (97%)** | **13,908 / 6,936 (91%)** |
 
 ⁶ Swift's type references are engine 0.5.44's, which reads the type of a
 stored property (62% before; see [the second set](#a-second-set-of-repositories)).
 
-Of the native calls, 13,117 (29%) are `INFERRED`, against 47% of graphify's.
+Of the native calls, 13,143 (29%) are `INFERRED`, against 47% of graphify's.
+(Engine 0.5.42 had 44,960 calls in this table and the same 85% of graphify's;
+the C++ row was 29% before the comparison folded a definition written out of
+its class into the declaration graphify hangs its calls on, footnote ⁴.)
 (Engine 0.5.37 had 44,556 calls in this table; the 404 more are C# 427,
 Rust 49, Kotlin 33, Swift 8 and JavaScript 112 fewer, the last in the
 vendored bundles whose one-letter names 0.5.40's scopes no longer take for
@@ -1322,6 +1325,8 @@ Reading a sample of each side's edges the other lacks, per language:
   helper, Ruby's `@article.destroy` linked to the controller's own `destroy`.
   ⁴ C++ calls: graphify links a call to the declaration in the header; the
   native graph to the definition, whose body is what `fetch` and `impact` read.
+  The comparison counts an edge of the definition as an edge of the one
+  declaration with its qualified name (the row was 29% before it did).
   A call by name alone to a method of the same file is most of the rest:
   `funSpec.toString()` linked to a test's own `toString()` (262 of Kotlin's 716
   in kotlinpoet), `Truth.assertThat()` to a project `assertThat` (653 in
@@ -1432,42 +1437,59 @@ the table above:
 
 | Repository | same definition | imports (file pairs) | calls | bases | type references |
 |---|--:|--:|--:|--:|--:|
-| click | 100% | 174 / 159 (100%) | 2,623 / 1,473 (53%) | 77 / 30 (100%) | 1,196 / 592 (57%) |
+| click | 100% | 174 / 159 (100%) | 2,929 / 1,473 (74%) | 77 / 30 (100%) | 1,196 / 592 (57%) |
 | commander.js | 97.0% | 264 / 185 (98%) | 348 / 197 (97%) | 17 / 3 (100%) | 66 / 0 |
-| zod | 98.9% | 705 / 1,008 (69%) | 2,102 / 1,998 (85%) | 420 / 609 (44%) | 1,415 / 122 (84%) |
-| cobra | 100% | 159 / 285 (56%) | 1,820 / 1,339 (100%) | – | 136 / 94 (97%) |
-| gson | 100% | 456 / 1,079 (42%) | 9,978 / 7,293 (97%) | 516 / 199 (95%) | 3,350 / 1,288 (96%) |
-| clikt | 99.2% | 592 / 480 (98%) | 1,949 / 1,181 (92%) | 477 / 110 (98%) | 682 / 478 (87%) |
-| scopt | 100% | 6 / 8 | 401 / 213 (84%) | 25 / 25 (100%) | 188 / 87 (92%) |
-| commandline | 96.3% | 0 / 148 | 1,758 / 1,894 (68%) | 49 / 49 (92%) | 1,118 / 823 (87%) |
-| ripgrep | 97.2% | 173 / 250 (61%) | 5,456 / 2,952 (81%) | 121 / 117 (96%) | 2,380 / 1,362 (85%) |
-| swift-argument-parser | 94.9% | 263 / 212 | 1,764 / 957 (90%) | 599 / 438 (100%) | 826 / 677 (66%) |
-| cJSON | 48.7% | 90 / 170 (52%) | 1,082 / 1,059 (100%) | – | 203 / 89 (100%) |
-| leveldb | 94.2% | 499 / 499 (100%) | 2,056 / 2,064 (54%) | 48 / 15 (80%) | 740 / 746 (49%) |
-| thor | 100% | 61 / 0 | 670 / 533 (83%) | 43 / 4 (100%) | 20 / 0 |
-| monolog | 93.6% | 438 / 439 (100%) | 3,798 / 2,207 (90%) | 242 / 239 (97%) | 530 / 392 (98%) |
-| **All** | **95.5%** | **3,880 / 4,922 (67%)** | **35,805 / 25,360 (85%)** | **2,634 / 1,838 (80%)** | **12,850 / 6,750 (80%)** |
+| zod | 99.1% | 705 / 1,008 (69%) | 2,130 / 2,006 (85%) | 678 / 609 (97%) | 2,869 / 122 (86%) |
+| cobra | 100% | 159 / 285 (56%) | 1,833 / 1,339 (100%) | – | 136 / 94 (97%) |
+| gson | 100% | 456 / 1,079 (42%) | 10,111 / 7,293 (97%) | 516 / 199 (95%) | 3,350 / 1,288 (96%) |
+| clikt | 99.2% | 592 / 480 (98%) | 2,014 / 1,181 (92%) | 477 / 110 (98%) | 682 / 478 (87%) |
+| scopt | 100% | 6 / 8 | 418 / 213 (84%) | 25 / 25 (100%) | 171 / 87 (92%) |
+| commandline | 96.3% | 0 / 148 | 2,166 / 1,894 (82%) | 49 / 49 (92%) | 1,135 / 823 (87%) |
+| ripgrep | 97.2% | 173 / 250 (61%) | 5,469 / 2,952 (81%) | 121 / 117 (96%) | 2,380 / 1,362 (85%) |
+| swift-argument-parser | 94.9% | 268 / 212 | 1,765 / 957 (90%) | 599 / 438 (100%) | 828 / 677 (66%) |
+| cJSON | 48.7% | 90 / 170 (52%) | 1,083 / 1,059 (100%) | – | 203 / 89 (100%) |
+| leveldb | 95.6% | 499 / 499 (100%) | 3,396 / 2,064 (91%) | 70 / 17 (100%) | 1,894 / 748 (86%) |
+| thor | 100% | 61 / 0 | 687 / 533 (83%) | 43 / 4 (100%) | 20 / 0 |
+| monolog | 93.6% | 438 / 439 (100%) | 3,820 / 2,207 (90%) | 242 / 239 (97%) | 563 / 392 (98%) |
+| **All** | **95.7%** | **3,885 / 4,922 (67%)** | **38,169 / 25,368 (90%)** | **2,914 / 1,840 (97%)** | **15,493 / 6,752 (84%)** |
 
-(swift-argument-parser's type references were 32% of graphify's before the
-property types were read.) The share of graphify's
-calls found is the first set's, 85%, and 22% of the native calls are
-`INFERRED`. What the low cells are, as far as they were read:
+(Engine 0.5.47; with 0.5.44 the table's last row was 67% / 85% / 80% / 80%.)
+21% of the native calls are `INFERRED`. The low cells of the first
+measurement were read one by one, and most of them were one rule each:
 
+- **leveldb, 54% of the calls and 49% of the type references.** Its classes
+  are written `class LEVELDB_EXPORT Env { … }`: the grammar takes the macro
+  for the type's name and `Env { … }` for a function, so the members
+  belonged to no class. The macro is blanked before parsing, in the engine
+  and in `spans.py` (`blank_class_macros`): 1,173 more calls and 1,128 more
+  references on leveldb alone, 91% and 86% now. The rest of the C++ gap was
+  the comparison's: graphify hangs the calls of `void DBImpl::Work() { … }`
+  on the declaration in the header, the native graph on the definition, and
+  the two were counted as different edges (header calls 9% → 93%).
+- **click, 53% of the calls.** Of the 693 edges only graphify had, 301 were
+  `runner.invoke(…)` on a pytest fixture: a test's parameter is what the
+  fixture of its name returns (`conftest.py`), which the engine now reads
+  (306 calls, 74%). Another 265 are graphify linking `runner.invoke(cli)`
+  to the `cli` nested in *another* test of the file; the engine links the
+  one written in the calling test. Those stay "only graphify".
+- **zod, 44% of the bases.** `$` was read as PHP's sigil in every language,
+  so `interface $ZodULID extends $ZodType` named `ZodType`. Kept as part of
+  the name outside PHP, Ruby and Swift: 97% of the bases. A TypeScript name
+  that is an interface and a constant at once is the type where a type is
+  written and the value elsewhere.
+- **commandline, 68% of the calls.** Three rules: `: base(…)` / `: this(…)`
+  (and Java's `super(…)` / `this(…)`) call a constructor; `Maybe.Nothing<T>()`
+  is a member of the static class `Maybe` beside the generic `Maybe<T>`; and a
+  `using N;` of a namespace written as a block did not bring its extension
+  methods into sight from another directory. 82% now. Its **imports** are
+  graphify's namespace nodes (footnote ³).
 - **cJSON, 48.7% of the definitions.** Its `.gitignore` has a line `test`,
   and `tests/unity/test/` is committed all the same: the engine does not
   walk into what the ignore files name, graphify reads the 581 definitions
   there. A tracked file an ignore rule matches is not read; nothing says so
-  in the build report.
-- **click, 53% of the calls.** The one sample followed
-  (`_get_windows_console_stream`, imported under `if WIN:` and defined under
-  `else:`) is linked by both, to different definitions: graphify to the
-  imported one, the engine to the one the file defines.
-- **zod, 44% of the bases.** An interface and a constant of one name
-  (`interface ZodBigInt` beside `const ZodBigInt`) pair differently in the
-  two graphs: `ZodBigIntFormat -> ZodBigInt` is in both lists of
-  one-sided edges.
-- **commandline's imports** are graphify's namespace nodes (footnote ³).
-  **leveldb's** calls and references were not read.
+  in the build report. Still open.
+- **Not read yet:** gson's and cobra's imports (42% and 56%), click's and
+  swift-argument-parser's type references (57%, 66%), ripgrep's calls (81%).
 
 ### The rules themselves
 
@@ -1476,7 +1498,7 @@ is the other half: the name-resolution rules each language defines, one
 small project a rule (`benchmarks/conformance.py`). A gap found on a
 repository becomes a case there first, so that it is found once.
 
-Engine 0.5.45 followed 356 of the 406 (176 of the 185 about scopes, imports
+Engine 0.5.45 followed 356 of the first 406 (176 of the 185 about scopes, imports
 and member lookup; 180 of the 221 about types written in an expression, a
 pattern or an alias). The 50 it did not were few rules in many languages —
 a cast used at once, a null-safe call, a binding that opens an optional, a
@@ -1514,6 +1536,14 @@ and `Comparator` was linked to a test's struct of that name.
 
 What passing every case does not say: the list is the rules written so far,
 not every rule of each language, and it has no type inference in it.
+
+The comparison with graphify did not move with them: the share of graphify's
+calls the native graph has was 84.7% on the first set before 0.5.46 and after
+it. Those 50 rules were edges neither engine had. What moved it was reading
+the edges only graphify had in the lowest cells of the second set (0.5.47,
+[above](#a-second-set-of-repositories)): 84.9% to 90.1% of the calls there,
+79.9% to 97.4% of the bases. Each rule found that way became a case of the
+list too, which now has 414.
 
 ### What is left without an edge
 
