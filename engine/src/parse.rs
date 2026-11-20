@@ -83,8 +83,12 @@ pub fn file_facts(
     let Some(lang) = lang else { return facts };
     // C, C++: the branches of an `#if` that each leave a brace open are one
     // piece of code written twice; the parser is given the first
-    let blanked =
-        matches!(lang, Lang::C | Lang::Cpp).then(|| blank_duplicate_branches(src)).flatten();
+    // (C#: an `#if` in the middle of an expression is parsed once)
+    let blanked = match lang {
+        Lang::C | Lang::Cpp => blank_duplicate_branches(src),
+        Lang::CSharp => blank_expression_branches(src),
+        _ => None,
+    };
     let src = blanked.as_deref().unwrap_or(src);
     match parse(lang, src, deadline) {
         Ok(tree) => {
@@ -113,6 +117,85 @@ pub fn facts_for_source(rel: &str, src: &[u8], deadline: Option<Duration>) -> Fi
         return file_facts(rel, src, None, Some(kind), deadline);
     }
     file_facts(rel, src, lang::detect(rel, Some(src)), None, deadline)
+}
+
+/// C#: an `#if` … `#else` … `#endif` that opens in the middle of an expression
+/// or a declaration (the code line before it ends none: `? null` before
+/// `#if NET` / `: new A(x)` / `#else` / `: new A()`) is one piece of code
+/// written once per configuration; the parser, seeing every branch, loses the
+/// type around. The source with the directive lines and every branch but the
+/// first blanked, or `None` when no group is like that; a group with one
+/// branch is left alone. `spans.py`'s `_blank_expression_branches` is the
+/// same rule.
+pub fn blank_expression_branches(src: &[u8]) -> Option<Vec<u8>> {
+    if !src.windows(3).any(|w| w == b"#if") {
+        return None;
+    }
+    let lines: Vec<&[u8]> = src.split(|b| *b == b'\n').collect();
+    let trim = |l: &[u8]| -> (usize, usize) {
+        let lo = l.iter().position(|c| !c.is_ascii_whitespace()).unwrap_or(l.len());
+        let hi = l.iter().rposition(|c| !c.is_ascii_whitespace()).map_or(lo, |i| i + 1);
+        (lo, hi)
+    };
+    let mut blank: Vec<(usize, usize)> = Vec::new(); // line ranges, inclusive
+    let mut stack: Vec<(bool, Vec<usize>)> = Vec::new();
+    let mut last: Option<u8> = None; // how the last line of code ends
+    for (li, line) in lines.iter().enumerate() {
+        let (lo, hi) = trim(line);
+        let t = &line[lo..hi];
+        if t.first() == Some(&b'#') {
+            let rest = &t[1..];
+            let i = rest.iter().position(|c| !c.is_ascii_whitespace()).unwrap_or(rest.len());
+            let word: Vec<u8> =
+                rest[i..].iter().take_while(|c| c.is_ascii_alphabetic()).copied().collect();
+            match word.as_slice() {
+                b"if" => {
+                    let inside = last.is_some_and(|c| !b";{}],)".contains(&c));
+                    stack.push((inside, vec![li]));
+                }
+                b"elif" | b"else" => {
+                    if let Some(g) = stack.last_mut() {
+                        g.1.push(li);
+                    }
+                }
+                b"endif" => {
+                    if let Some((inside, directives)) = stack.pop() {
+                        if inside && directives.len() >= 2 {
+                            blank.push((directives[0], directives[0]));
+                            blank.push((directives[1], li));
+                        }
+                    }
+                }
+                _ => {}
+            }
+            continue;
+        }
+        let cut = t.windows(2).position(|w| w == b"//").unwrap_or(t.len());
+        let (_, end) = trim(&t[..cut]);
+        if end > 0 {
+            last = Some(t[end - 1]);
+        }
+    }
+    if blank.is_empty() {
+        return None;
+    }
+    let mut out = src.to_vec();
+    let mut starts = Vec::with_capacity(lines.len());
+    let mut at = 0;
+    for l in &lines {
+        starts.push(at);
+        at += l.len() + 1;
+    }
+    for (lo, hi) in blank {
+        for li in lo..=hi {
+            for b in &mut out[starts[li]..starts[li] + lines[li].len()] {
+                if *b != b'\r' {
+                    *b = b' ';
+                }
+            }
+        }
+    }
+    Some(out)
 }
 
 /// C, C++: an `#if` … `#elif`/`#else` … `#endif` whose every branch leaves the

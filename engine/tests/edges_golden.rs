@@ -2047,3 +2047,19 @@ fn rust_field_beside_a_method_of_its_name() {
     ]);
     has(&got, &[(".ensure()", "calls", ".fill()")]);
 }
+
+#[test]
+fn an_extension_for_a_library_type_on_a_receiver_the_walk_cannot_type() {
+    // the receiver is a library's member, or a chain of them: the one
+    // extension in sight written for a type the project does not define
+    let cs = edges("cs-lib-ext", &[
+        ("Shop/Text.cs", "namespace Shop.Extensions;\n\npublic static class Text {\n    public static string Squash(this string s) => s.Replace(\"_\", \"\");\n}\n"),
+        ("Shop/Reader.cs", "using System.Xml.Linq;\nusing Shop.Extensions;\n\nnamespace Shop;\n\npublic class Reader {\n    public bool Same(XElement e, string name) {\n        return e.Name.LocalName.Squash() == name;\n    }\n}\n"),
+    ]);
+    has(&cs, &[(".Same()", "calls", ".Squash()")]);
+    let kt = edges("kt-lib-ext", &[
+        ("src/main/kotlin/app/ext/Strings.kt", "package app.ext\n\nfun String.isEmailValid(): Boolean = this.contains(\"@\")\n"),
+        ("src/main/kotlin/app/domain/User.kt", "package app.domain\n\nimport app.ext.isEmailValid\nimport lib.Account\n\nclass Check(val account: Account) {\n    fun ok(): Boolean {\n        return account.owner.email.isEmailValid()\n    }\n}\n"),
+    ]);
+    has(&kt, &[(".ok()", "calls", "isEmailValid()")]);
+}

@@ -316,6 +316,27 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- **Native engine 0.5.39: extensions for a library's type on a receiver the
+  walk cannot type, and a C# `#if` inside an expression.** A call the walk
+  could not follow, whose name is the one extension in sight written for a
+  type the project does not define, is that extension's (`INFERRED`):
+  `e.Name.LocalName.RemoveUnderscoresAndDashes()` beside an extension for
+  `string`, Kotlin `user.email.isEmailValid()` beside `fun
+  String.isEmailValid()`, Swift `NotificationCenter.default.postNotification(…)`,
+  Rust `request.headers().has_content_type()` beside `impl HeaderMapExt for
+  HeaderMap`. Never when the receiver is a local whose type the source names
+  (that type was already asked), when the walk gives the receiver a project
+  type, when the name is also a member of a type of the project, for a static
+  call on a library's type (`HttpUtility.UrlEncode(s)`), or from the extension
+  to itself. 79 calls on the 31 audit repositories, each read at its site
+  (kotlinpoet 30, restsharp 23, alamofire 13, ureq 7). A C# `#if` … `#else` …
+  `#endif` that opens in the middle of an expression or declaration is parsed
+  with its first branch only (`parse::blank_expression_branches`, and
+  `spans._blank_expression_branches` for the Python span engine): seeing both
+  branches the parser lost the class around, so RestSharp's
+  `HttpResponseExtensions` had no node and its extension methods were local
+  functions. Unmarked unresolved rows: 576 → 509 (C# 75 → 40, Kotlin 42 → 22,
+  Swift 61 → 49).
 - **Native engine 0.5.38: a field beside a method of its name, and more of
   the unresolved rows say why they are no gap.** A member read without a call,
   with more after it, is the field when its type has a method of the same name

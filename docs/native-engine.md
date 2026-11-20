@@ -834,6 +834,29 @@ two edges of got are gone that named a function defined in another loop
 for a destructured loop variable of the same name. The maps of these
 repositories that hold project types are mostly looked up by key once, or
 not walked at all.
+Engine 0.5.39 asks one more thing of a call the walk could not follow: the
+one extension in sight written for a type the project does not define
+(`library_extension_call`, `INFERRED`). The receiver of such a call is a
+library's member or a chain of them, which the walk cannot type:
+`e.Name.LocalName.RemoveUnderscoresAndDashes()` (an `XElement`'s name, an
+extension for `string`), `user.email.isEmailValid()`,
+`NotificationCenter.default.postNotification(…)`,
+`request.headers().has_content_type()` (`impl HeaderMapExt for HeaderMap`).
+It adds 79 calls (kotlinpoet 30, restsharp 23, alamofire 13, ureq 7,
+aspnetcore-realworld 3, ktor-realworld 3), each read at its site. The first
+version of the rule added 96, and the 17 wrong ones made the rule what it
+is: a local whose type the source names was already asked with that type
+(`call.is_chunked()` on a `ureq_proto` `Call` is not `HeaderMap`'s), a name
+that is also a member of a project type says nothing of an unknown receiver
+(`self.0.connect()` beside `impl Connector for ()`), a static call on a
+library's type is the library's (`HttpUtility.UrlEncode(s)`), and an
+extension that wraps the library's method of its own name does not call
+itself (`FileManager.default.createDirectory(…)` inside
+`createDirectory`). The same version parses a C# `#if` written inside an
+expression once (its first branch): with both branches in the tree the
+grammar lost the class around, and RestSharp's `HttpResponseExtensions` was
+no node (13 node ids of restsharp change; its three extension methods are
+methods again, called `EXTRACTED`).
 Engine 0.5.38 fixes one walk: a member read without a call, with more after
 it, is the field when the type also has a method of that name. ureq's
 `LazyBuffers` holds `input: ConsumeBuf` and implements a trait's `fn
@@ -1338,7 +1361,7 @@ implicit members since 0.5.17: 39 whose place gives no type are rows now
 closure parameters and variables of express's tests. What is left at file
 level there is `app.use` and `app.set` (842 rows of express), names too
 short and too common to guess by. Engine 0.5.19 takes 123 more off (6,362;
-C# 349 from 470; 6,360 with 0.5.20, 6,348 with 0.5.21, 6,285 with 0.5.22, 6,237 with 0.5.25, 6,206 with 0.5.27, 6,166 with 0.5.28, 6,156 with 0.5.30, 6,140 with 0.5.31, 6,132 with 0.5.32, 6,126 with 0.5.33, 6,093 with 0.5.34, 6,047 with 0.5.36, 6,046 with 0.5.37, 6,012 with 0.5.38). Most of what C# has left is not the project's: `Assert.
+C# 349 from 470; 6,360 with 0.5.20, 6,348 with 0.5.21, 6,285 with 0.5.22, 6,237 with 0.5.25, 6,206 with 0.5.27, 6,166 with 0.5.28, 6,156 with 0.5.30, 6,140 with 0.5.31, 6,132 with 0.5.32, 6,126 with 0.5.33, 6,093 with 0.5.34, 6,047 with 0.5.36, 6,046 with 0.5.37, 6,012 with 0.5.38, 5,928 with 0.5.39). Most of what C# has left is not the project's: `Assert.
 NotNull` beside its own `Ensure.NotNull` (77), `WireMockServer.Start` (23).
 
 By then most rows were of that kind: a library's name the project happens
@@ -1402,7 +1425,10 @@ Kotlin, Swift), locals of a file-level callback (`test('…', () => { const
 request = … })`), the members of a Ruby `Struct`, and a library's generic
 holding a project type (`http::Response<Body>`). One of the C# rows is a
 parse: an `#if` inside an expression costs
-`HttpResponseExtensions` its class.) The 2,114 by language: PHP 445, TypeScript 405, Ruby 304, C# 196, Rust 192,
+`HttpResponseExtensions` its class. 0.5.39 fixes that parse and links
+the extensions for a library's type: 509 are left unmarked — Ruby 175,
+TypeScript 87, Rust 64, Swift 49, C# 40, PHP 29, Kotlin 22, Go 14, Java 12,
+Python 9, TSX 4, Scala 4.) The 2,114 by language: PHP 445, TypeScript 405, Ruby 304, C# 196, Rust 192,
 C++ 169, Swift 94, Kotlin 79, JavaScript 71, Java 49, Go 34, C 33, Python
 20, TSX 19, Scala 4. They are still an upper bound: the marks are
 conservative, and PHP's and TypeScript's rows are mostly PSR-7 and Node

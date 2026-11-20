@@ -1111,6 +1111,40 @@ def test_cpp_branches_written_once_per_configuration_are_blanked():
         assert blank(keep) is keep
 
 
+def test_csharp_branches_inside_an_expression_are_blanked():
+    """A C# `#if` that opens in the middle of an expression is read once: the
+    first branch stays, the rest and the directives are blanked in place."""
+    from graphlore.spans import _blank_expression_branches as blank
+
+    src = (b"static class Ext {\n    static int F(bool a)\n        => a\n            ? 1\n"
+           b"#if NET\n            : 2;\n#else\n            : 3;\n#endif\n"
+           b"    static int G() => 4;\n}\n")
+    out = blank(src)
+    assert len(out) == len(src) and out.count(b"\n") == src.count(b"\n")
+    assert b": 2;" in out and b": 3;" not in out and b"#" not in out
+    # after a statement, a block or an attribute, and a one-branch guard: untouched
+    for keep in (b"class A {\n    int x;\n#if NET\n    void a() {}\n#else\n"
+                 b"    void b() {}\n#endif\n}\n",
+                 b"class A {\n    int x =\n#if NET\n        1 +\n#endif\n        2;\n}\n",
+                 b"[Fact]\n#if NET\nvoid a() {}\n#else\nvoid b() {}\n#endif\n"):
+        assert blank(keep) is keep
+
+
+def test_csharp_type_keeps_its_methods_past_an_if_in_an_expression(tmp_path):
+    """The class around an `#if` written inside an expression is still a span,
+    and its methods are its own."""
+    import pytest
+
+    pytest.importorskip("tree_sitter_language_pack")
+    from graphlore.spans import _spans_treesitter
+
+    src = (b"static class Ext {\n    static int F(bool a)\n        => a\n            ? 1\n"
+           b"#if NET\n            : 2;\n#else\n            : 3;\n#endif\n"
+           b"    static int G() => 4;\n}\n")
+    names = [s[3] for s in _spans_treesitter(src, "Ext.cs")]
+    assert names == ["Ext", "Ext.F", "Ext.G"]
+
+
 def test_engine_version_pins_stay_in_sync():
     """engine/Cargo.toml's version is the engine's only copy; the schema graphlore
     reads must be the one the engine writes."""
