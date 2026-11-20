@@ -2536,3 +2536,32 @@ fn python_a_test_parameter_is_what_the_fixture_of_its_name_returns() {
     has(&got, &[("test_run", "calls", "Runner.invoke")]);
     lacks(&got, &[("test_run", "calls", "Context.invoke")]);
 }
+
+#[test]
+fn csharp_a_using_of_a_block_namespace_brings_its_extensions_into_sight() {
+    let got = quals("cs-using-block", &[
+        ("Infra/Ext.cs", "using System.Collections.Generic;\n\nnamespace App.Infra\n{\n    static class EnumerableExtensions\n    {\n        public static bool Empty<T>(this IEnumerable<T> source) { return true; }\n    }\n}\n"),
+        ("Core/A.cs", "using System.Collections.Generic;\nusing App.Infra;\n\nnamespace App.Core\n{\n    public class A\n    {\n        public bool Run(IEnumerable<string> values)\n        {\n            return values.Empty();\n        }\n    }\n}\n"),
+    ]);
+    has(&got, &[("App.Core.A.Run", "calls", "App.Infra.EnumerableExtensions.Empty")]);
+}
+
+#[test]
+fn typescript_a_dollar_is_part_of_a_name_and_a_name_is_a_type_or_a_value() {
+    // `$Base` (the `$` is PHP's and Ruby's sigil only); `Kind` the interface
+    // where a type is written, the constant where a value is used
+    let got = quals("ts-dollar", &[(
+        "a.ts",
+        "export interface $Base {\n  x: number\n}\n\nexport interface $Sub extends $Base {\n  y: number\n}\n\nexport const $limit = { max: 1 }\n\nexport interface Kind {\n  tag: string\n}\n\nexport const Kind = {\n  make(): number {\n    return 1\n  },\n}\n\nexport function run(b: $Base, k: Kind): number {\n  return $limit.max + Kind.make()\n}\n",
+    )]);
+    has(
+        &got,
+        &[
+            ("$Sub", "inherits", "$Base"),
+            ("run", "references", "$Base"),
+            ("run", "reads", "$limit"),
+            ("run", "references", "Kind"),
+            ("run", "calls", "make"),
+        ],
+    );
+}

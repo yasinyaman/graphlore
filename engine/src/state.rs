@@ -594,7 +594,16 @@ impl State {
 /// A bare name as the definitions spell it (`$hits` is `hits`, as
 /// `add_extras` strips the sigil).
 fn bare_name(n: Node, src: &[u8]) -> String {
-    text(n, src).trim_start_matches('$').to_string()
+    let written = text(n, src);
+    // (the sigil is PHP's: a JS / TS `$name` is spelled with it)
+    if matches!(
+        crate::parse::current(),
+        Some(crate::lang::Lang::Php | crate::lang::Lang::Ruby | crate::lang::Lang::Swift)
+    ) {
+        written.trim_start_matches('$').to_string()
+    } else {
+        written
+    }
 }
 
 /// `path_of`, and PHP `self::$total` (whose `$total` `path_of` cannot name).
