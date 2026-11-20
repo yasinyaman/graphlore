@@ -353,6 +353,15 @@ All notable changes to this project are documented here. The format is based on
   on (C++ header calls on leveldb read 9% for that reason alone).
   Not all of what only graphify has is a gap: 265 of click's are
   `runner.invoke(cli)` linked to the `cli` nested in another test.
+- **Native engine 0.5.48: six more rules from the same reading.** A Java
+  import of `p.C` named nothing when `module-info.java` declared a module
+  `p` (gson: its imports of `com.google.gson.*` had no edge at all). Python
+  `except E as e:` / `except (A, B):` are references to the types caught.
+  Swift: the types an enum case carries (`case option(ParsedArgument)`), a
+  metatype (`Command.Type`), and a case built with what it carries
+  (`throw ParserError.noValue("x")`: a reference to the enum, no edge
+  before). Kotlin `x.apply { … }` / `x.also { … }` give the receiver back in a
+  chain (`CodeBlock.builder().apply(action).build()`).
 - **Native engine 0.5.46: the 50 name-resolution rules the checklist found
   missing.** `benchmarks/conformance.py` had 356 of its 406 cases passing;
   all pass now, and each change was read on the 45 audit repositories (edges

@@ -2565,3 +2565,45 @@ fn typescript_a_dollar_is_part_of_a_name_and_a_name_is_a_type_or_a_value() {
         ],
     );
 }
+
+#[test]
+fn types_named_where_no_declaration_writes_them() {
+    // Python `except Exit as e:`; Swift enum payloads, a case built, `T.Type`
+    let got = quals("py-except", &[(
+        "a.py",
+        "class Exit(Exception):\n    pass\n\n\nclass Abort(Exception):\n    pass\n\n\ndef run():\n    try:\n        pass\n    except Exit as e:\n        raise\n    except (Abort, ValueError):\n        pass\n",
+    )]);
+    has(&got, &[("run", "references", "Exit"), ("run", "references", "Abort")]);
+    let got = quals("swift-enum-types", &[(
+        "a.swift",
+        "struct InputKey {\n}\n\nprotocol Command {\n}\n\nenum ValidationResult {\n  case missing([InputKey])\n  case plain\n}\n\nenum ParserError: Error {\n  case noValue(String)\n}\n\nfunc run(root: Command.Type) throws {\n  throw ParserError.noValue(\"x\")\n}\n",
+    )]);
+    has(
+        &got,
+        &[
+            ("ValidationResult.missing", "references", "InputKey"),
+            ("run", "references", "ParserError"),
+            ("run", "references", "Command"),
+        ],
+    );
+}
+
+#[test]
+fn java_an_import_names_the_package_beside_a_module_of_its_name() {
+    let got = quals("java-module-info", &[
+        ("src/main/java/module-info.java", "module com.acme {\n  exports com.acme;\n}\n"),
+        ("src/main/java/com/acme/Gson.java", "package com.acme;\n\npublic class Gson {\n    public int go() {\n        return 1;\n    }\n}\n"),
+        ("src/test/java/com/acme/fn/T.java", "package com.acme.fn;\n\nimport com.acme.Gson;\n\npublic class T {\n    int run(Gson g) {\n        return g.go();\n    }\n}\n"),
+    ]);
+    has(&got, &[("T.java", "imports", "Gson"), ("T.run", "calls", "Gson.go")]);
+}
+
+#[test]
+fn kotlin_apply_and_also_give_the_receiver_back() {
+    let got = quals("kt-apply", &[(
+        "A.kt",
+        "package app\n\nclass Builder {\n    fun build(): Int = 1\n}\n\nclass Other {\n    fun build(): Int = 2\n}\n\nfun make(b: Builder, action: Builder.() -> Unit): Int = b.apply(action).build()\n\nfun log(b: Builder): Int = b.also { println(it) }.build()\n",
+    )]);
+    has(&got, &[("make", "calls", "Builder.build"), ("log", "calls", "Builder.build")]);
+    lacks(&got, &[("make", "calls", "Other.build"), ("log", "calls", "Other.build")]);
+}
