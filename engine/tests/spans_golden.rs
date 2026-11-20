@@ -65,7 +65,8 @@ fn rust_test_regions_and_modules() {
     let src = "pub fn acquire() -> i32 {\n    1\n}\nmod helpers;\n#[cfg(not(test))]\nmod real {\n    \
         pub fn used() { super::acquire(); }\n}\n#[cfg(test)]\nmod tests {\n    use super::*;\n    \
         fn setup() -> i32 { acquire() }\n    #[test]\n    fn it_acquires() {\n        \
-        assert_eq!(setup(), 1);\n    }\n}\n#[tokio::test]\nasync fn top_level_test() { acquire(); }\n";
+        assert_eq!(setup(), 1);\n    }\n}\n#[tokio::test]\nasync fn top_level_test() { acquire(); }\n\
+        #[cfg(test)]\npub fn only_for_tests() -> i32 { 2 }\n";
     let got = quals("src/pool.rs", src);
     has_all(
         &got,
@@ -81,10 +82,14 @@ fn rust_test_regions_and_modules() {
     );
     assert!(!got.contains("helpers"));
     let facts = file_facts(src.as_bytes(), "src/pool.rs");
-    assert_eq!(facts.test_regions, vec![(10, 17), (19, 19)]);
+    // (`#[cfg(test)] fn`: a helper only the tests are compiled with)
+    assert_eq!(facts.test_regions, vec![(10, 17), (19, 19), (21, 21)]);
     let tests: BTreeSet<_> =
         facts.defs.iter().filter(|d| d.is_test).map(|d| d.qualname.as_str()).collect();
-    assert_eq!(tests, ["tests", "tests.it_acquires", "tests.setup", "top_level_test"].into());
+    assert_eq!(
+        tests,
+        ["only_for_tests", "tests", "tests.it_acquires", "tests.setup", "top_level_test"].into()
+    );
     assert!(facts.defs.iter().all(|d| d.name != "tests" || d.kind == DefKind::Namespace));
 }
 

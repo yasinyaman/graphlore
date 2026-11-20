@@ -1321,7 +1321,7 @@ def _read_source_lines(
 _SIG_CONT_MAX = 40
 # How many lines below the first line of a definition its name may sit (stacked
 # annotations / attributes above the declaration).
-_SIG_NAME_MAX = 12
+_SIG_NAME_MAX = 40
 
 
 def _skeleton_lines(file_path: str, prefix: str | None = None) -> list[tuple[str, list[str]]]:

@@ -792,7 +792,9 @@ def _test_regions_rust(src: bytes, rel: str) -> list[tuple[int, int]]:
                     regions.append(span)
                     continue
             elif child.type == "function_item" and any(
-                    _RUST_TEST_ATTR.match(a) for a in _rust_attributes(child)):
+                    # (`#[cfg(test)] fn helper()`: compiled only with the tests)
+                    _RUST_TEST_ATTR.match(a) or _is_cfg_test(a)
+                    for a in _rust_attributes(child)):
                 regions.append(span)
                 continue
             walk(child)

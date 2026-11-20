@@ -7821,7 +7821,9 @@ def test_rust_tests_inside_a_source_file_are_tests(tmp_path, monkeypatch):
         "    }\n"                            # 16
         "}\n"                                # 17
         "#[tokio::test]\n"                   # 18
-        "async fn top_level_test() { acquire(); }\n",   # 19
+        "async fn top_level_test() { acquire(); }\n"   # 19
+        "#[cfg(test)]\n"                     # 20
+        "pub fn only_for_tests() -> i32 { 2 }\n",   # 21  a helper the tests are compiled with
         encoding="utf-8")
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     server._SPAN_CACHE.clear()
@@ -7831,7 +7833,7 @@ def test_rust_tests_inside_a_source_file_are_tests(tmp_path, monkeypatch):
     assert "helpers" not in quals
     from graphlore import spans
     # the regions are the items themselves, not their attributes
-    assert spans._test_regions("src/pool.rs") == [(10, 17), (19, 19)]
+    assert spans._test_regions("src/pool.rs") == [(10, 17), (19, 19), (21, 21)]
 
     def node(nid, label, line):
         return {"id": nid, "label": label, "source_file": "src/pool.rs",
