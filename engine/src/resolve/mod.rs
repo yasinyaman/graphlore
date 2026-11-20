@@ -1735,7 +1735,9 @@ impl<'a> Project<'a> {
                 // C, C++ `using AsyncResponseC = AsyncWrapper<Response, true>;`,
                 // `typedef struct conn conn_t;`: the type the alias names, and of
                 // a template's specializations the one its arguments fit
-                let c_alias = k == DefKind::TypeAlias && self.family[r.0] == Some(Family::C);
+                // (and Kotlin / Swift `typealias Store = Repo`)
+                let c_alias = k == DefKind::TypeAlias
+                    && matches!(self.family[r.0], Some(Family::C | Family::Jvm | Family::Swift));
                 // `typedef struct reader { … } reader;`: the struct written
                 // inside the alias, which holds the members
                 let inside = c_alias
@@ -3181,7 +3183,17 @@ impl<'a> Project<'a> {
         while let Some(x) = cur {
             if let Some(&li) = self.locals.get(&(f, x, name.to_string())) {
                 let l = &self.files[f].locals[li];
+                // (a use written before the local is declared is no use of
+                // it: `stream(…)` above `val stream = response.body()`)
+                // (where a declaration is what makes a local: an assignment
+                // can be one of several, a comprehension binds after its use)
+                let declares =
+                    !matches!(self.family[f], Some(Family::Python | Family::Ruby | Family::Php));
+                let before = declares
+                    && (*self.cur.borrow())
+                        .is_some_and(|(cf, ci)| cf == f && self.files[cf].refs[ci].byte < l.byte);
                 return l.assigned
+                    || before
                     || (called && (l.declared || l.path.first().is_some_and(|h| h == name)));
             }
             cur = defs[x].parent;
@@ -3708,6 +3720,18 @@ impl<'a> Project<'a> {
                 let d = self.def(*c);
                 if d.kind == DefKind::Namespace {
                     return self.best(self.namespace_members(*c, name)).map(Target::Def);
+                }
+                // `Color.RED.label()`: an enum's value has the enum's members
+                // (after what the value declares itself: Java `DEFAULT { … }`)
+                if d.kind == DefKind::EnumMember {
+                    if let Some(own) = self.class_member(*c, name, 4) {
+                        return Some(Target::Def(own));
+                    }
+                    let of =
+                        d.parent.map(|p| (c.0, p)).filter(|e| self.def(*e).kind.is_class_like());
+                    if let Some(e) = of {
+                        return self.member(&Target::Def(e), name, depth);
+                    }
                 }
                 if name == "new" && self.family[c.0] == Some(Family::Ruby) {
                     return Some(Target::Def(*c)); // `Klass.new` constructs Klass

@@ -2160,7 +2160,16 @@ fn locals_of(n: Node, src: &[u8], in_params: bool) -> Vec<(String, Vec<String>, 
             }
         }
         // `const x = new Foo()`, `let x = Foo::new()`, `let x: Foo = …`
-        "variable_declarator" | "let_declaration" | "init_declarator" => {
+        // (Scala `val r = new Repo` in a method: one of a class or an object
+        // is a definition, `Scala::state_defs`)
+        "val_definition" | "var_definition"
+            if n.parent()
+                .is_some_and(|p| matches!(p.kind(), "compilation_unit" | "template_body")) => {}
+        "variable_declarator"
+        | "let_declaration"
+        | "init_declarator"
+        | "val_definition"
+        | "var_definition" => {
             // `const { show, hide: close } = useToast()`: each name is that
             // member of what the value is
             let pattern = n.child_by_field_name("name").filter(|x| x.kind() == "object_pattern");
@@ -3297,6 +3306,28 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
         }
         // C, C++ `typedef struct conn conn_t;`, C++ `using Header = …;`: what
         // the alias names
+        // Kotlin / Swift `typealias Store = Repo`: another name for one type
+        // (a function type, a tuple or a union names no type of its own)
+        if matches!(n.kind(), "type_alias" | "typealias_declaration")
+            && matches!(facts.lang, Some(crate::lang::Lang::Kotlin | crate::lang::Lang::Swift))
+        {
+            let named = n
+                .child_by_field_name("value")
+                .or_else(|| kids(n).into_iter().rev().find(|c| !is_comment(c)))
+                .filter(|t| matches!(t.kind(), "user_type" | "type_identifier"));
+            if let Some(ty) = named.and_then(|t| path_of(t, src)) {
+                let (lo, hi) = (n.start_byte(), n.end_byte());
+                for d in facts.defs.iter_mut() {
+                    if d.kind == crate::facts::DefKind::TypeAlias
+                        && lo <= d.start_byte
+                        && d.end_byte <= hi
+                        && d.declared_type.is_none()
+                    {
+                        d.declared_type = Some(ty.clone());
+                    }
+                }
+            }
+        }
         if matches!(facts.lang, Some(crate::lang::Lang::C | crate::lang::Lang::Cpp))
             && matches!(n.kind(), "type_definition" | "alias_declaration")
         {
