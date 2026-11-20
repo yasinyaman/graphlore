@@ -834,6 +834,12 @@ two edges of got are gone that named a function defined in another loop
 for a destructured loop variable of the same name. The maps of these
 repositories that hold project types are mostly looked up by key once, or
 not walked at all.
+Engine 0.5.41 is Ruby's: a class opened in several files has, in each of
+them, what any opening mixes in or extends (`reopened_base_member`), and a
+class written as a constant assigned `Struct.new(…) do … end` mixes in what
+the block says. faraday gets its eight `Faraday::Request.register_middleware(…)`
+/ `Faraday::Response.…` calls (`EXTRACTED`, through `extend
+MiddlewareRegistry`) and three `mixes_in` edges; nothing else changes.
 Engine 0.5.40 gives a closure no definition holds a scope of its own
 (`Def::block`: no node, no name). A test file is mostly such closures —
 `test('…', async t => { const request = … })`, `it '…' do conn = … end` —
@@ -1384,7 +1390,7 @@ implicit members since 0.5.17: 39 whose place gives no type are rows now
 closure parameters and variables of express's tests. What is left at file
 level there is `app.use` and `app.set` (842 rows of express), names too
 short and too common to guess by. Engine 0.5.19 takes 123 more off (6,362;
-C# 349 from 470; 6,360 with 0.5.20, 6,348 with 0.5.21, 6,285 with 0.5.22, 6,237 with 0.5.25, 6,206 with 0.5.27, 6,166 with 0.5.28, 6,156 with 0.5.30, 6,140 with 0.5.31, 6,132 with 0.5.32, 6,126 with 0.5.33, 6,093 with 0.5.34, 6,047 with 0.5.36, 6,046 with 0.5.37, 6,012 with 0.5.38, 5,928 with 0.5.39, 5,908 with 0.5.40). Most of what C# has left is not the project's: `Assert.
+C# 349 from 470; 6,360 with 0.5.20, 6,348 with 0.5.21, 6,285 with 0.5.22, 6,237 with 0.5.25, 6,206 with 0.5.27, 6,166 with 0.5.28, 6,156 with 0.5.30, 6,140 with 0.5.31, 6,132 with 0.5.32, 6,126 with 0.5.33, 6,093 with 0.5.34, 6,047 with 0.5.36, 6,046 with 0.5.37, 6,012 with 0.5.38, 5,928 with 0.5.39, 5,908 with 0.5.40, 5,898 with 0.5.41). Most of what C# has left is not the project's: `Assert.
 NotNull` beside its own `Ensure.NotNull` (77), `WireMockServer.Start` (23).
 
 By then most rows were of that kind: a library's name the project happens
@@ -1454,7 +1460,16 @@ TypeScript 87, Rust 64, Swift 49, C# 40, PHP 29, Kotlin 22, Go 14, Java 12,
 Python 9, TSX 4, Scala 4. 0.5.40's block scopes leave 501: TypeScript 39
 from 87, and Ruby 215 from 175 — a receiver that was no name at all
 (`head name not found`) is an untyped local of its block now, and the
-members of faraday's `Struct` options asked of it are the rows.) The 2,114 by language: PHP 445, TypeScript 405, Ruby 304, C# 196, Rust 192,
+members of faraday's `Struct` options asked of it are the rows. 0.5.41
+marks those: a member an untyped receiver is asked, of a name a type
+declares with no `def` (a `Struct` member, `attr_accessor`,
+`def_delegators`), may be that type's as well as the one `def`'s — 131
+rows, all Ruby (`adapter` 26, `response_headers` 23, `response_body` 22,
+`headers` 15, `status` 14). 383 are left unmarked: Ruby 97, Rust 64, Swift
+49, C# 40, TypeScript 39, PHP 29, Kotlin 22, Go 14, Java 12, Python 9, TSX
+4, Scala 4. Ruby's largest group left is a `let` shared through
+`shared_examples` (`request_stub`, 20 rows of faraday's adapter examples),
+which nothing reads yet.) The 2,114 by language: PHP 445, TypeScript 405, Ruby 304, C# 196, Rust 192,
 C++ 169, Swift 94, Kotlin 79, JavaScript 71, Java 49, Go 34, C 33, Python
 20, TSX 19, Scala 4. They are still an upper bound: the marks are
 conservative, and PHP's and TypeScript's rows are mostly PSR-7 and Node

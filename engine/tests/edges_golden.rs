@@ -2094,3 +2094,27 @@ fn a_callback_no_definition_holds_has_locals_of_its_own() {
     assert!(rb.iter().any(|(_, t, _)| t == "lib_conn_conn_build_url"), "{rb:#?}");
     assert!(rb.iter().any(|(_, t, _)| t == "lib_conn_pool_build_url"), "{rb:#?}");
 }
+
+#[test]
+fn ruby_a_reopened_class_has_what_its_other_opening_extends() {
+    // `Shop::Order.register(…)` in a file that opens `class Order` again:
+    // `extend Registry` is written where the class is declared
+    let got = calls_conf("rb-reopened-extend", &[
+        ("lib/shop/registry.rb", "module Shop\n  module Registry\n    def register(x)\n      x\n    end\n  end\nend\n"),
+        ("lib/shop/order.rb", "require_relative 'registry'\n\nmodule Shop\n  class Order\n    extend Registry\n  end\nend\n"),
+        ("lib/shop/order/json.rb", "require_relative '../order'\n\nmodule Shop\n  class Order\n    class Json\n    end\n  end\nend\n\nShop::Order.register(json: Shop::Order::Json)\n"),
+        // a class written as a constant assigned `Struct.new(…) do … end`
+        ("lib/shop/line.rb", "require_relative 'registry'\n\nmodule Shop\n  Line = Struct.new(:sku, :count) do\n    extend Registry\n  end\nend\n"),
+        ("lib/shop/line/csv.rb", "require_relative '../line'\n\nShop::Line.register(csv: 1)\n"),
+    ]);
+    assert!(
+        got.iter()
+            .any(|(f, t, _)| f == "csv.rb" && t == "lib_shop_registry_shop_registry_register"),
+        "{got:#?}"
+    );
+    assert!(
+        got.iter()
+            .any(|(f, t, _)| f == "json.rb" && t == "lib_shop_registry_shop_registry_register"),
+        "{got:#?}"
+    );
+}
