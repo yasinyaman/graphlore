@@ -2,7 +2,8 @@
 
 `benchmark.md` measures one tool, `graphlore_locate`, on six HTTP-client
 libraries. This is the other half: **all 33 tools, the resources and the
-prompts**, run on 31 real repositories in 14 languages, to find
+prompts**, run on 31 real repositories in 14 languages (and since on
+[14 more](#a-second-set-14-more-repositories)), to find
 what breaks, what answers wrongly and what stays silent — and what was fixed as
 a result.
 
@@ -423,6 +424,55 @@ The first version of this report ended with ten open items. All ten are closed:
 - **A graph built by graphify 0.9** is in the test suite
   (`tests/fixtures/polyglot/`): five languages, `file_type`, `community_name`,
   `case_of`, closures, a Rust test module and a JS barrel.
+
+## A second set: 14 more repositories
+
+The 31 repositories above are the ones the span rules, the import checker
+and the native engine were corrected against. `benchmarks/polyglot.py` has a
+second set to say what holds elsewhere (`--set 2`; `--set 1` is the first):
+one more repository per language, none of them an HTTP client or a web
+application — click, commander.js, zod, cobra, gson, clikt, scopt,
+commandline, ripgrep, swift-argument-parser, cJSON, leveldb, thor and
+monolog, at commits pinned on 2026-11-20.
+
+Run on 2026-11-20 with graphlore 0.6.0, graphify 0.9.111, graphlore-engine
+0.5.44 and tree-sitter-language-pack 1.25.2, without semble (the semantic
+tools were skipped):
+
+| | first set (31) | second set (14) |
+|---|--:|--:|
+| findings on graphify's graphs | 58 (the baseline's 60, two gone) | 38 |
+| of them the `GRAPH-ORPHAN-NODES` note | 26 | 14 |
+| findings on the native engine's graphs | 19 | 17 |
+| of them the `GRAPH-ORPHAN-NODES` note | 19 | 12 |
+| tool calls that answered / answered empty | – | 408 / 26 (native: 411 / 23) |
+
+No tool crashed on a repository it had never seen. What the second set
+raised that is not the orphan-node note:
+
+- **On graphify's graphs, 24 findings**, of kinds the first set has too:
+  `FETCH-NO-SPAN` and `SKELETON-EMPTY` for files that hold only constants and
+  variables (commander.js's examples, zod's `.mts` / `.cts` fixtures), which
+  graphify makes nodes of and no span covers; `IMPORTS-REJECTED` for
+  commander.js, whose tests `require('../')`; `FETCH-ENCLOSING-SPAN` in
+  commandline and leveldb; `SLOW` for gson and zod.
+- **On the native graphs, 5**, the same on graphify's. Two are fixed:
+  - `TEST-PATH-MISSED`, ripgrep: `#[cfg(test)] pub(crate) fn get_limited(&self)`
+    in a source file, a helper compiled only with the tests. A function under
+    `#[cfg(test)]` is a test region now, as a module under it was (`spans.py`
+    and the engine).
+  - `SKELETON-HEADER-NO-NAME`, commandline: a test method under twenty
+    `[InlineData(…)]` lines. `graphlore_skeleton` looked twelve lines below
+    the first line of a definition for its name; it looks forty.
+- **Three are left.** `REPLY-TOO-LARGE`: `graphlore_package_apis(package="zod")`
+  in zod's own repository is 136 KB, every use of the package in 520 files,
+  with no cut. `TEST-PATH-MISSED` for swift-argument-parser
+  (`Sources/ArgumentParserTestHelpers/`, a library of test helpers no path
+  rule names) and for zod (`packages/bench/memory/`, where `.describe()` is
+  zod's own method and the audit's marker for a test: the audit's mistake).
+
+What the second set found in the native engine itself — its spans, its
+namespaces, its macros — is in [native-engine.md](native-engine.md#a-second-set-of-repositories).
 
 ## What is still missing
 

@@ -351,6 +351,17 @@ All notable changes to this project are documented here. The format is based on
     alamofire, of the first set: 592.
   On the first 31 repositories nothing else changes but four redundant
   `using` edges of todoapi. Unmarked rows on the second set: 1,387 → 1,041.
+  The audit of every tool on the 14 (`docs/benchmark-polyglot.md`): no tool
+  crashes; 38 findings on graphify's graphs and 17 on the native ones, 14 and
+  12 of them the orphan-node note.
+- **A Rust function under `#[cfg(test)]` is test code**, as a module under it
+  was (`spans._test_regions` and the engine's `test_regions`): ripgrep's
+  `#[cfg(test)] pub(crate) fn get_limited(&self)` in a source file was listed
+  as production code by `graphlore_tests_for`.
+- **`graphlore_skeleton` finds a name under more attributes.** It looked
+  twelve lines below the first line of a definition for its name, and showed
+  `[Theory]` as the header of a C# test under twenty `[InlineData(…)]` lines;
+  it looks forty.
 - **Native engine 0.5.43: the comparison with graphify measured again, and
   attribute names marked on any receiver.** The diagnostics mark a member of a
   name a type declares with no `def` whatever the receiver (0.5.41 did on an

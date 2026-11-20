@@ -269,7 +269,9 @@ impl LanguageModule for Rust {
                         continue;
                     }
                 } else if child.kind() == "function_item"
-                    && attributes(child, src).iter().any(|a| TEST_ATTR.is_match(a))
+                    // (`#[cfg(test)] fn get_limited(&self)`: a helper only
+                    // the tests are compiled with)
+                    && attributes(child, src).iter().any(|a| TEST_ATTR.is_match(a) || is_cfg_test(a))
                 {
                     regions.push(span);
                     continue;
