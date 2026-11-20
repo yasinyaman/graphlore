@@ -3534,6 +3534,29 @@ def test_package_apis_single_package_detail(tmp_path, monkeypatch):
     assert "Depends: app.py, worker.py" in text
 
 
+def test_package_apis_detail_cuts_long_file_lists_and_says_so(tmp_path, monkeypatch):
+    """A package used in hundreds of files: each symbol's list is cut at `limit`
+    and the counts say what was left out (a 136 KB reply on zod's own name)."""
+    nodes = []
+    for i in range(40):
+        (tmp_path / f"m{i:02}.py").write_text("from fastapi import Depends\n", encoding="utf-8")
+        nodes.append({"id": f"n{i}", "label": f"n{i}", "file": f"m{i:02}.py", "line": 1})
+    _write_graph(tmp_path, {"nodes": nodes, "edges": []})
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    server._API_CACHE.clear()
+    server._GRAPH_CACHE.clear()
+    data = json.loads(server.graphlore_package_apis(package="fastapi", limit=3, as_json=True))
+    assert data["symbol_files"]["Depends"] == ["m00.py", "m01.py", "m02.py"]
+    assert data["symbol_file_counts"] == {"Depends": 40}
+    assert data["truncated"] is True and data["file_count"] == 40
+    assert len(data["files"]) == 30 and data["files_left_out"] == 10
+    assert "limit" in data["hint"]
+    assert "(+37 more)" in server.graphlore_package_apis(package="fastapi", limit=3)
+    # under the cap nothing is marked
+    whole = json.loads(server.graphlore_package_apis(package="fastapi", limit=50, as_json=True))
+    assert "truncated" not in whole and len(whole["symbol_files"]["Depends"]) == 40
+
+
 def test_package_apis_unknown_package_lists_known(tmp_path, monkeypatch):
     _api_project(tmp_path, monkeypatch)
     out = server.graphlore_package_apis(package="django")
