@@ -192,6 +192,10 @@ pub fn path_of(n: Node, src: &[u8]) -> Option<Vec<String>> {
     }
     for (obj, member) in MEMBER_FIELDS {
         if let (Some(o), Some(m)) = (n.child_by_field_name(obj), n.child_by_field_name(member)) {
+            // Rust `self::f`: `f` of the module the path is written in
+            if k == "scoped_identifier" && o.kind() == "self" {
+                return member_path(m, src);
+            }
             let mut p = path_of(o, src).unwrap_or_else(|| vec![UNKNOWN.into()]);
             p.extend(member_path(m, src)?);
             return Some(p);
@@ -246,6 +250,7 @@ pub fn path_of(n: Node, src: &[u8]) -> Option<Vec<String>> {
         | "stable_identifier"
         | "dotted_name"
         | "nested_identifier"
+        | "nested_type_identifier"
         | "named_type"
         | "class_constant_access_expression" => {
             let mut p = Vec::new();
@@ -2672,7 +2677,9 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                                     | "optional_parameter"
                                     | "splat_parameter"
                                     | "hash_splat_parameter"
-                            ) {
+                            ) && !(c.kind() == "optional_parameter"
+                                && c.child_by_field_name("type").is_some())
+                            {
                                 let name = c
                                     .child_by_field_name("name")
                                     .or_else(|| c.child_by_field_name("left"))

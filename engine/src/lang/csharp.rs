@@ -98,6 +98,8 @@ impl LanguageModule for CSharp {
             None => import(n, ImportForm::Wildcard, module),
         };
         f.is_static = is_static;
+        // `global using N;`: every file of the project sees it
+        f.public = all_kids(n).iter().any(|c| c.kind() == "global");
         Some(vec![f])
     }
 
