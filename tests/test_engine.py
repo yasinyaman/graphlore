@@ -142,6 +142,9 @@ _SNIPPETS = {
     # a callback no definition holds is a scope to the resolver, never a span
     "a.test.js": "describe('x', () => {\n  const a = 1\n  it('y', () => {\n    a\n  })\n})\n"
                  "function f() {\n  return 1\n}\n",
+    # a macro between `class` and the name is blanked: a class, not a function
+    "env.h": "class LEVELDB_EXPORT Env {\n public:\n  Env();\n"
+             "  virtual int NowMicros() = 0;\n  int Twice() {\n    return 2;\n  }\n};\n",
     # an `#if` inside an expression is parsed once: the class keeps its methods
     "Ext.cs": "static class Ext {\n    static int F(bool a)\n        => a\n            ? 1\n"
               "#if NET\n            : 2;\n#else\n            : 3;\n#endif\n"

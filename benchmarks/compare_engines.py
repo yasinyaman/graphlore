@@ -66,6 +66,7 @@ EXT_LANG = {
     ".c": "c", ".h": "c/c++ header", ".cc": "cpp", ".cpp": "cpp", ".cxx": "cpp",
     ".hpp": "cpp", ".hxx": "cpp", ".rb": "ruby", ".php": "php",
 }
+C_FAMILY = {"c", "cpp", "c/c++ header"}
 CONTAINMENT = {"contains", "method", "case_of", "defines"}
 NEAR = 3
 SAMPLES = 5
@@ -261,6 +262,18 @@ def compare_edges(theirs_graph: dict, ours_graph: dict, paired: dict[str, str]) 
         return (_node_file(n), str(n.get("qualname") or _node_label(n)))
 
     twins = {name_key(ours_by[i]): i for i in common if i in ours_by}
+    # C, C++: graphify has one node for a member function, the declaration in
+    # the class (usually a header), and hangs the calls of the body on it; the
+    # native graph has the declaration and the definition written out of the
+    # class (`void DBImpl::Work() { … }` in the .cc), and the calls leave from
+    # the definition. An edge of that definition is compared as an edge of the
+    # one paired declaration with its qualified name.
+    declared: dict[str, str | None] = {}
+    for i in common:
+        n = ours_by.get(i)
+        if n is not None and language(_node_file(n) or "") in C_FAMILY and n.get("qualname"):
+            q = str(n["qualname"])
+            declared[q] = None if q in declared else i
 
     def lifted(i: str, climb: bool) -> str | None:
         for _ in range(8):
@@ -272,6 +285,10 @@ def compare_edges(theirs_graph: dict, ours_graph: dict, paired: dict[str, str]) 
             twin = twins.get(name_key(n))
             if twin is not None:
                 return twin
+            if language(_node_file(n) or "") in C_FAMILY and n.get("qualname"):
+                twin = declared.get(str(n["qualname"]))
+                if twin is not None:
+                    return twin
             if not climb or i not in parent:
                 return None
             i = parent[i]
@@ -306,6 +323,9 @@ def compare_edges(theirs_graph: dict, ours_graph: dict, paired: dict[str, str]) 
                     if s2 is None or t2 is None:
                         continue
                     key = (s2, t2)
+                    # (the edge is counted where the definition it is compared
+                    # as is written: the header of a C++ declaration)
+                    lang = language(_node_file(ours_by[s2]) or "") or lang
             sets.setdefault((g, lang, name), set()).add(key)
             if name == "native" and str(e.get("confidence", "")).upper() == "INFERRED":
                 inferred[(g, lang)] = inferred.get((g, lang), 0) + 1

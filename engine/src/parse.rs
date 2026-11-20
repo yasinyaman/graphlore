@@ -84,6 +84,12 @@ pub fn file_facts(
     // C, C++: the branches of an `#if` that each leave a brace open are one
     // piece of code written twice; the parser is given the first
     // (C#: an `#if` in the middle of an expression is parsed once)
+    // (C, C++: `class EXPORT_MACRO Name {` is read without the macro)
+    let unmarked = match lang {
+        Lang::C | Lang::Cpp => blank_class_macros(src),
+        _ => None,
+    };
+    let src = unmarked.as_deref().unwrap_or(src);
     let blanked = match lang {
         Lang::C | Lang::Cpp => blank_duplicate_branches(src),
         Lang::CSharp => blank_expression_branches(src),
@@ -196,6 +202,34 @@ pub fn blank_expression_branches(src: &[u8]) -> Option<Vec<u8>> {
         }
     }
     Some(out)
+}
+
+/// C, C++: `class LEVELDB_EXPORT Env {`, `struct API_EXPORT Options : Base {`.
+/// A macro between the keyword and the name is nothing to the language once
+/// expanded (an attribute, or nothing), but the parser, which sees no
+/// expansion, takes it for the type's name and the rest for a function
+/// (`Env { … }`), so the members belong to no class. The source with such a
+/// macro blanked (each byte a space: bytes and lines stay where they were), or
+/// `None` when there is none. A macro is a name in capitals of three
+/// characters at least, with another name after it and then `{`, a base list
+/// or `final`. `spans.py`'s `_blank_class_macros` is the same rule.
+pub fn blank_class_macros(src: &[u8]) -> Option<Vec<u8>> {
+    static PATTERN: std::sync::OnceLock<regex::bytes::Regex> = std::sync::OnceLock::new();
+    let pattern = PATTERN.get_or_init(|| {
+        regex::bytes::Regex::new(
+            r"\b(?:class|struct|union)[ \t]+([A-Z][A-Z0-9_]{2,})[ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t\r\n]*(?:\{|:[^:]|final\b)",
+        )
+        .expect("a valid pattern")
+    });
+    let mut out: Option<Vec<u8>> = None;
+    for found in pattern.captures_iter(src) {
+        let Some(m) = found.get(1) else { continue };
+        let buf = out.get_or_insert_with(|| src.to_vec());
+        for b in &mut buf[m.start()..m.end()] {
+            *b = b' ';
+        }
+    }
+    out
 }
 
 /// C, C++: an `#if` … `#elif`/`#else` … `#endif` whose every branch leaves the

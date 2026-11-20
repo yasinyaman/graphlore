@@ -520,6 +520,28 @@ def _blank_expression_branches(src: bytes) -> bytes:
 
 
 
+_CLASS_MACRO = re.compile(
+    rb"\b(?:class|struct|union)[ \t]+([A-Z][A-Z0-9_]{2,})[ \t]+[A-Za-z_][A-Za-z0-9_]*"
+    rb"[ \t\r\n]*(?:\{|:[^:]|final\b)")
+
+
+def _blank_class_macros(src: bytes) -> bytes:
+    """C, C++: `class LEVELDB_EXPORT Env {` with the macro blanked.
+
+    A macro between the keyword and the name is nothing to the language once
+    expanded, but the parser takes it for the type's name and the rest for a
+    function, so the members belong to no class. Each byte of the macro becomes
+    a space (bytes and lines stay where they were). The engine's
+    `parse::blank_class_macros` is the same rule.
+    """
+    out: bytearray | None = None
+    for m in _CLASS_MACRO.finditer(src):
+        if out is None:
+            out = bytearray(src)
+        out[m.start(1):m.end(1)] = b" " * (m.end(1) - m.start(1))
+    return bytes(out) if out is not None else src
+
+
 def _blank_duplicate_branches(src: bytes) -> bytes:
     """C, C++: an ``#if`` … ``#elif``/``#else`` … ``#endif`` whose every branch
     leaves the same number of braces open (not none) is one piece of code
@@ -636,7 +658,8 @@ def _spans_treesitter(src: bytes, rel: str) -> list[tuple[int, int, int, str]]:
         # (C, C++: an `#if` written once per configuration is parsed once)
         parsed = src
         if lang in ("c", "cpp"):
-            parsed = _blank_duplicate_branches(src)
+            # (and `class EXPORT_MACRO Name {` without the macro)
+            parsed = _blank_duplicate_branches(_blank_class_macros(src))
         elif lang == "csharp":
             # (C#: an `#if` in the middle of an expression is parsed once)
             parsed = _blank_expression_branches(src)
