@@ -7,6 +7,19 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **The name-resolution rules of each language as a list**
+  (`docs/resolution-rules.md`, `benchmarks/conformance.py`): 185 rules in 14
+  languages — scopes and shadowing, imports, member lookup through bases,
+  mix-ins and extensions, overloads by arity, the types the source writes —
+  each a small project with the edge the rule says is there and the edge that
+  must not be. The native engine (0.5.45) follows 176. The nine it does not
+  are named there: Rust `super::f()` in an inline module and a second `let`
+  of a name, Ruby's bare `super` and an instance variable typed in
+  `initialize`, TypeScript's optional parameter and a type through a
+  namespace import, a JavaScript prototype method on a local, Scala `new C`
+  without parentheses, and a generic Java class named `Box`.
+  `--baseline benchmarks/results-conformance.json` says what a change fixed
+  and exits 1 on what it broke.
 - **A built-in code search index**, so `graphlore_locate` and the duplication
   scan's similarity tier work without the `[semble]` extra (`search.py`). Chunks
   are the span engine's definitions (a class holds only its own lines), so every

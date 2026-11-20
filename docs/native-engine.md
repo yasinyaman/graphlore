@@ -1469,6 +1469,14 @@ calls found is the first set's, 85%, and 22% of the native calls are
 - **commandline's imports** are graphify's namespace nodes (footnote ³).
   **leveldb's** calls and references were not read.
 
+### The rules themselves
+
+Both sets measure the engine on code. [resolution-rules.md](resolution-rules.md)
+is the other half: the name-resolution rules each language defines, one
+small project a rule (`benchmarks/conformance.py`), 176 of 185 followed by
+engine 0.5.45. A gap found on a repository becomes a case there first, so
+that it is found once.
+
 ### What is left without an edge
 
 The comparison above measures the native graph against graphify's. What the
