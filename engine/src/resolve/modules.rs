@@ -866,6 +866,16 @@ pub fn bindings(
                 }
             }
         }
+        // `const m = await import('./m.js')`, `const { f } = await import(…)`
+        ImportForm::Dynamic => {
+            if let Some(a) = &imp.alias {
+                out.push((a.clone(), Bind::T(t.clone())));
+            }
+            for (name, alias) in &imp.names {
+                let local = alias.clone().unwrap_or_else(|| name.clone());
+                out.push((local, Bind::Member(t.clone(), name.clone())));
+            }
+        }
         _ => {}
     }
     out

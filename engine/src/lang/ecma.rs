@@ -115,7 +115,40 @@ fn call_import(n: Node, src: &[u8]) -> Option<Vec<ImportFact>> {
     }
     let module = string_value(first, src);
     if f.kind() == "import" {
-        return Some(vec![import(n, ImportForm::Dynamic, module)]);
+        // `const m = await import('./m.js')`, `const { f } = await import(…)`:
+        // the names the declaration binds to the module
+        let mut fact = import(n, ImportForm::Dynamic, module);
+        let mut holder = n.parent();
+        while holder
+            .is_some_and(|h| matches!(h.kind(), "await_expression" | "parenthesized_expression"))
+        {
+            holder = holder.and_then(|h| h.parent());
+        }
+        let target = holder
+            .filter(|h| h.kind() == "variable_declarator")
+            .and_then(|h| h.child_by_field_name("name"));
+        match target {
+            Some(t) if t.kind() == "identifier" => fact.alias = Some(text(t, src)),
+            Some(t) if t.kind() == "object_pattern" => {
+                for p in kids(t) {
+                    match p.kind() {
+                        "shorthand_property_identifier_pattern" => {
+                            fact.names.push((text(p, src), None))
+                        }
+                        "pair_pattern" => {
+                            let k = p.child_by_field_name("key").map(|x| text(x, src));
+                            let v = p.child_by_field_name("value").map(|x| text(x, src));
+                            if let Some(k) = k {
+                                fact.names.push((k, v));
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+        return Some(vec![fact]);
     }
     if f.kind() != "identifier" || text(f, src) != "require" {
         return None;

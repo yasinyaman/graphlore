@@ -145,6 +145,11 @@ impl LanguageModule for Ruby {
     /// A bare identifier that is no local: a method of `self` called without
     /// parentheses or arguments (`current_user`, `raise_if_locked`).
     fn refs_of(&self, n: Node, src: &[u8]) -> Option<Vec<(RefKind, Vec<String>, &'static str)>> {
+        // a bare `super` calls the method of the same name further up (with
+        // arguments it is a `call`, read by the generic rule)
+        if n.kind() == "super" && n.parent().is_some_and(|p| p.kind() != "call") {
+            return Some(vec![(RefKind::Call, vec!["super".into()], "implicit_call")]);
+        }
         if n.kind() != "identifier" {
             return None;
         }

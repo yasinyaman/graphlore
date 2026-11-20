@@ -785,6 +785,10 @@ fn is_collection_step(seg: &str) -> bool {
         || MAP_VIEWS.contains(&seg)
 }
 
+/// What a JavaScript function has of its own: a method read with one of
+/// these after it is the function, not a getter's value.
+const FUNCTION_MEMBERS: &[&str] = &["bind", "call", "apply", "name", "length", "prototype"];
+
 /// `[]`, `[*]`, `[v]`: one of what precedes (see `refs::ELEMENT`).
 fn is_element_marker(seg: &str) -> bool {
     seg == crate::refs::ELEMENT
@@ -1475,6 +1479,40 @@ impl<'a> Project<'a> {
         // passes on with `pub use crate::error::Error;`. Only a star import:
         // a crate root re-exports most of the crate, and a file that names
         // one thing out of it does not see the rest
+        // C# `global using N;`: a namespace every file under the directory
+        // of the file that writes it has open (the project it is compiled in)
+        let mut global: Vec<(String, Target)> = Vec::new();
+        for g in 0..files.len() {
+            if p.family[g] != Some(Family::CSharp) {
+                continue;
+            }
+            let dir = match files[g].path.rfind('/') {
+                Some(i) => files[g].path[..=i].to_string(),
+                None => String::new(),
+            };
+            for (star, i) in &p.scopes[g].stars {
+                let written = files[g].imports.get(*i).is_some_and(|imp| imp.public);
+                if written && !matches!(star, Target::Ext(..)) {
+                    global.push((dir.clone(), star.clone()));
+                }
+            }
+        }
+        if !global.is_empty() {
+            for f in 0..files.len() {
+                if p.family[f] != Some(Family::CSharp) {
+                    continue;
+                }
+                for (dir, star) in &global {
+                    if files[f].path.starts_with(dir.as_str()) {
+                        if let Target::Module(fs) = star {
+                            p.scopes[f].imported.extend(fs.iter().copied());
+                        }
+                        // (no import of this file's to count the use on)
+                        p.scopes[f].stars.push((star.clone(), usize::MAX));
+                    }
+                }
+            }
+        }
         let public: Vec<Vec<usize>> = (0..files.len()).map(|g| p.rust_public(g)).collect();
         for f in 0..files.len() {
             if p.family[f] != Some(Family::Rust) {
@@ -1761,6 +1799,13 @@ impl<'a> Project<'a> {
                 if let Some(t) = aliased {
                     Some((self.specialization_for(t, &def.alias_args), conf))
                 } else if k.is_class_like() || k == DefKind::TypeAlias {
+                    Some((r, conf))
+                } else if k.is_callable()
+                    && self.family[r.0] == Some(Family::Ecma)
+                    && self.has_prototype_members(r)
+                {
+                    // `function Widget() {}` with `Widget.prototype.render =
+                    // function …`: what `new Widget()` makes has those
                     Some((r, conf))
                 } else if let Some((t, declared)) =
                     k.is_callable().then(|| self.return_type(r)).flatten()
@@ -2119,6 +2164,17 @@ impl<'a> Project<'a> {
         } else {
             exact
         }
+    }
+
+    /// Whether functions are assigned to the function `c` as its members in
+    /// its file (an ES5 constructor's `prototype`, see `assigned_member`).
+    fn has_prototype_members(&self, c: DefRef) -> bool {
+        let name = self.def(c).name.as_str();
+        self.def(c).object.is_none()
+            && self.files[c.0]
+                .defs
+                .iter()
+                .any(|x| x.kind.is_callable() && x.object.as_deref() == Some(name))
     }
 
     /// Whether a Python method is a `@property` (or `@cached_property`).
@@ -4300,13 +4356,49 @@ impl<'a> Project<'a> {
             }
             // Rust `super::x`: the parent module
             "super" if fam == Family::Rust => {
-                let t = modules::rust_parent(self, f)?;
+                // inside an inline `mod inner { … }` the parent is the module
+                // the block is written in: the one around it, else the file's
+                let defs = &self.files[f].defs;
+                let inline = |from: Option<usize>| {
+                    let mut cur = from;
+                    while let Some(x) = cur {
+                        if defs[x].kind == DefKind::Namespace {
+                            return Some(x);
+                        }
+                        cur = defs[x].parent;
+                    }
+                    None
+                };
+                let t = match inline(d) {
+                    Some(x) => match inline(defs[x].parent) {
+                        Some(outer) => Target::Def((f, outer)),
+                        None => Target::Module(vec![f]),
+                    },
+                    None => modules::rust_parent(self, f)?,
+                };
                 return self.walk(t, rest, conf);
             }
             "super" => {
                 let c = self.class_of(f, d)?;
                 // Python `super().m`: the call adds nothing
                 let rest = if rest.first().is_some_and(|s| s == "()") { &rest[1..] } else { rest };
+                // Ruby `super` / `super(x)`: the method of the same name
+                // further up
+                if rest.is_empty() && fam == Family::Ruby {
+                    let defs = &self.files[f].defs;
+                    let mut cur = d;
+                    while let Some(x) = cur {
+                        if defs[x].kind.is_callable() && !defs[x].block {
+                            let m = self
+                                .bases(c)
+                                .into_iter()
+                                .find_map(|b| self.class_member(b, &defs[x].name, 4))?;
+                            return Some((Target::Def(m), conf));
+                        }
+                        cur = defs[x].parent;
+                    }
+                    return None;
+                }
                 let name = rest.first()?;
                 let m = self.bases(c).into_iter().find_map(|b| self.class_member(b, name, 4))?;
                 return self.walk(Target::Def(m), &rest[1..], conf);
@@ -4619,6 +4711,23 @@ impl<'a> Project<'a> {
                         {
                             if let Some(found) = self.extension_on_member(f, p, &rest[0]) {
                                 return Some(found);
+                            }
+                        }
+                        // `const api = { load() { … } }; api.load()`: a
+                        // function written in the object the constant holds
+                        if bound.is_none() && fam == Family::Ecma {
+                            let name = &self.def(p).name;
+                            let own: Vec<DefRef> = self.files[p.0]
+                                .defs
+                                .iter()
+                                .enumerate()
+                                .filter(|(_, x)| {
+                                    x.name == rest[0] && x.object.as_deref() == Some(name.as_str())
+                                })
+                                .map(|(i, _)| (p.0, i))
+                                .collect();
+                            if let Some(m) = self.best(own) {
+                                return self.walk(Target::Def(m), &rest[1..], conf);
                             }
                         }
                         let (b, imp) = bound?;
@@ -5109,10 +5218,16 @@ impl<'a> Project<'a> {
             if let Some(Target::Def(m)) = &found {
                 let m = *m;
                 let next = rest.get(i + 1);
-                if fam == Family::Python
+                // (a JS / TS method read so is a getter: a function has no
+                // members of the project's)
+                let property = match fam {
+                    Family::Python => self.is_property(m),
+                    Family::Ecma => next.is_some_and(|s| !FUNCTION_MEMBERS.contains(&s.as_str())),
+                    _ => false,
+                };
+                if property
                     && self.def(m).kind.is_callable()
                     && next.is_some_and(|s| s != "()" && !s.starts_with('['))
-                    && self.is_property(m)
                 {
                     if let Some((r, declared)) = self.return_type(m) {
                         if !declared {
