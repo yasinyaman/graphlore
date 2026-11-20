@@ -316,6 +316,41 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- **Native engine 0.5.44: fourteen more repositories, and what they found.**
+  `benchmarks/polyglot.py` has a second set (`--set 2`): one more repository
+  per language, none an HTTP client or a web application — click,
+  commander.js, zod, cobra, gson, clikt, scopt, commandline, ripgrep,
+  swift-argument-parser, cJSON, leveldb, thor, monolog. The first 31 had
+  314 unresolved rows left unmarked; these 14 had 1,387 on the same engine,
+  and reading them found what the first set could not:
+  - `file_spans` (the span fallback when Python tree-sitter is missing)
+    returned 0.5.40's block scopes as unnamed spans; they are no spans. The
+    parity snippets had no closure at file level, so nothing compared them.
+  - C#: `namespace Shop.Core { … }` written as a block did not see `Shop`'s
+    names (only a file-scoped `namespace Shop.Core;` did), and `using
+    Shop.Text;` reached one of the files that open the namespace, not all of
+    them. commandline: 1,295 edges added, 52 removed (guesses by name to a
+    namesake in the tests, now the type the source names).
+  - C#: one branch of an `#if` in the middle of an expression (`() =>` /
+    `#if X` / `a ? b :` / `#endif` / `c;`) cost the class around; the two
+    directive lines are blanked, in the engine and in `spans.py`.
+  - Rust: a closure in a macro's arguments has its typed parameters and its
+    `let`s (`rgtest!(name, |dir: Dir, mut cmd: TestCommand| { cmd.arg(…) })`),
+    and a macro outside any definition is a scope. ripgrep: 69 calls.
+  - C++: `Random rnd(test::RandomSeed());` is a variable, not the declaration
+    of a function `rnd` (a call where a parameter's type would be). leveldb:
+    71 edges added, 23 removed, the removed ones from the functions that were
+    none.
+  - Kotlin: the grammar drops some comments from the tree (a KDoc block before
+    a declaration with modifiers); a definition's region is read from the
+    source where the tree has no comment. clikt: 8 files' spans now equal
+    `spans.py`'s.
+  - Swift: the type of a stored property (`var fav: ColorOptions`, with or
+    without a property wrapper) was no reference at all: the annotation is a
+    child with no field name. swift-argument-parser: 429 `references`;
+    alamofire, of the first set: 592.
+  On the first 31 repositories nothing else changes but four redundant
+  `using` edges of todoapi. Unmarked rows on the second set: 1,387 → 1,041.
 - **Native engine 0.5.43: the comparison with graphify measured again, and
   attribute names marked on any receiver.** The diagnostics mark a member of a
   name a type declares with no `def` whatever the receiver (0.5.41 did on an

@@ -132,13 +132,22 @@ _SNIPPETS = {
     "Api.java": "class Api {\n    int fetch(String u) {\n        return get(u);\n    }\n}\n",
     "Greeter.kt": "package demo\n\nclass Greeter(val name: String) {\n  @JvmStatic\n"
                   "  fun greet(): String {\n    return name\n  }\n}\n\nobject Registry {\n}\n",
+    # a KDoc block before a declaration with modifiers, and a `//` line after it
+    "Doc.kt": "package a\n\n/**\n * Doc.\n */\nabstract class C(\n    val x: Int,\n) {\n}\n\n"
+              "/**\n * Doc.\n */\n// note\ninterface O<A> : D<A> {\n}\n\n"
+              "val y = 1 // trailing\nclass E\n",
     "Model.scala": "class ResponseBlob(val bytes: Array[Byte]) {\n  def size = bytes.length\n}\n",
     "Parameter.cs": "namespace Shop {\npublic record Parameter(string Name) {\n"
                     "  public int Size() {\n    return 1;\n  }\n}\n}\n",
+    # a callback no definition holds is a scope to the resolver, never a span
+    "a.test.js": "describe('x', () => {\n  const a = 1\n  it('y', () => {\n    a\n  })\n})\n"
+                 "function f() {\n  return 1\n}\n",
     # an `#if` inside an expression is parsed once: the class keeps its methods
     "Ext.cs": "static class Ext {\n    static int F(bool a)\n        => a\n            ? 1\n"
               "#if NET\n            : 2;\n#else\n            : 3;\n#endif\n"
-              "    static int G() => 4;\n}\n",
+              "    static int G() => 4;\n    static int H(bool a) =>\n#if NET\n"
+              "        a ? 5 :\n#endif\n"
+              "        6;\n    static int I() => 7;\n}\n",
     "lib.rs": (FIXTURES / "polyglot" / "core" / "src" / "lib.rs").read_text(encoding="utf-8"),
     "Retrier.swift": "protocol DataDecoder {\n  func decode(_ data: Data) -> Value\n}\n"
                      "class OfflineRetrier {\n  init(monitor: Monitor) {\n  }\n}\n",

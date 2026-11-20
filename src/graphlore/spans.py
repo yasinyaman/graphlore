@@ -475,7 +475,8 @@ def _blank_expression_branches(src: bytes) -> bytes:
     piece of code written once per configuration; the parser, seeing every
     branch, loses the type around. The source with the directive lines and
     every branch but the first blanked (each byte but a newline or carriage
-    return a space), else ``src``. A group with one branch is left alone.
+    return a space), else ``src``. Of a group with one branch only the two
+    directive lines go: its lines are part of the expression.
 
     The native engine's ``parse::blank_expression_branches`` is the same rule.
     """
@@ -502,9 +503,9 @@ def _blank_expression_branches(src: bytes) -> bytes:
             elif word == b"endif":
                 if stack:
                     inside, directives = stack.pop()
-                    if inside and len(directives) >= 2:
+                    if inside:
                         blank.append((directives[0], directives[0]))
-                        blank.append((directives[1], li))
+                        blank.append((directives[1] if len(directives) >= 2 else li, li))
             continue
         cut = t.find(b"//")
         code = (t if cut < 0 else t[:cut]).rstrip(_PP_SPACE)

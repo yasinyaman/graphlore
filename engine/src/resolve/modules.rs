@@ -950,6 +950,17 @@ pub fn scope_lookup(
             while let Some(x) = cur {
                 if defs[x].kind == crate::facts::DefKind::Namespace {
                     spaces.push(defs[x].qualname.clone());
+                    // C# `namespace Shop.Core { … }`: `Shop`'s names too, as
+                    // for a file-scoped `namespace Shop.Core;` below
+                    if fam == Family::CSharp {
+                        let q = defs[x].qualname.replace("::", ".");
+                        let mut parts: Vec<&str> = q.split('.').collect();
+                        parts.pop();
+                        while !parts.is_empty() {
+                            spaces.push(parts.join("."));
+                            parts.pop();
+                        }
+                    }
                 }
                 cur = defs[x].parent;
             }

@@ -783,13 +783,16 @@ that the native graph has too:
 | Scala | 100% | 2 / 0 | 46 / 20 (45%) | 21 / 22 (95%) | 75 / 32 (100%) |
 | C# | 92.8% | 347 / 280 (30%)³ | 3,287 / 2,460 (96%) | 91 / 86 (98%) | 1,330 / 928 (99%) |
 | Rust | 93.3% | 314 / 370 (75%) | 2,065 / 853 (86%) | 53 / 41 (93%) | 1,245 / 895 (81%) |
-| Swift | 95.9% | 167 / 166 (–)³ | 5,502 / 2,141 (83%) | 190 / 164 (100%) | 1,091 / 580 (62%) |
+| Swift | 95.9% | 167 / 166 (–)³ | 5,502 / 2,141 (83%) | 190 / 164 (100%) | 1,529 / 580 (78%)⁶ |
 | C | 100% | 89 / 77 (99%) | 864 / 791 (100%) | – | 253 / 130 (97%) |
 | C++ | 98.7% | 215 / 228 (93%) | 765 / 281 (29%)⁴ | 30 / 5 (100%) | 350 / 234 (88%) |
 | C/C++ headers | 91.4% | 164 / 172 (95%) | 372 / 348 (84%) | 12 / 12 (92%) | 563 / 312 (90%) |
 | Ruby | 99.7% | 42 / 0 | 443 / 375 (69%) | 47 / 15 (93%) | 28 / 0 |
 | PHP | 80.6% | 429 / 505 (84%) | 8,873 / 6,140 (90%) | 65 / 60 (98%) | 648 / 213 (95%) |
-| **All** | **94.4%** | **4,962 / 5,565 (75%)** | **44,960 / 27,842 (85%)** | **1,138 / 726 (97%)** | **12,555 / 6,936 (89%)** |
+| **All** | **94.4%** | **4,962 / 5,565 (75%)** | **44,960 / 27,842 (85%)** | **1,138 / 726 (97%)** | **12,993 / 6,936 (90%)** |
+
+⁶ Swift's type references are engine 0.5.44's, which reads the type of a
+stored property (62% before; see [the second set](#a-second-set-of-repositories)).
 
 Of the native calls, 13,117 (29%) are `INFERRED`, against 47% of graphify's.
 (Engine 0.5.37 had 44,556 calls in this table; the 404 more are C# 427,
@@ -1378,6 +1381,93 @@ times; retrofit 2.9 s against 13.1 s, guzzle 0.9 s / 6.1 s, alamofire 1.2 s /
 5.4 s, got 0.9 s / 4.7 s (engine 0.5.1; with all that 0.5.27 resolves the same
 31 builds take 16.3 to 18.9 s through Python, 15.8 to 18.1 s in the engine alone, retrofit 3.7 to 4.1 s). An update after a one-file change takes a third of
 a build ([above](#incremental-updates)).
+
+### A second set of repositories
+
+Every number above is of the 31 repositories the resolver was written
+against, and by engine 0.5.43 they had 314 calls left that an edge was still
+plausible for. `benchmarks/polyglot.py` has a second set (`--set 2`) to say
+what that is worth elsewhere: one more repository per language, none of them
+an HTTP client or a web application — click, commander.js, zod, cobra, gson,
+clikt, scopt, commandline, ripgrep, swift-argument-parser, cJSON, leveldb,
+thor, monolog (pinned commits, 2026-11-20). The same engine left 1,387 such
+calls in these 14, four times as many in half as many repositories, and the
+builds and the comparisons found what the first set had no code to show:
+
+- **`file_spans` returned 0.5.40's block scopes as unnamed spans.** The
+  comparison with `spans.py` on a snippet per language passed: no snippet
+  had a closure at file level. On these repositories 513 of 2,288 files
+  differed (zod 310, commander 128). A block is no span; a snippet with one
+  is in `tests/test_engine.py` now.
+- **C#, namespaces written as blocks.** `namespace Shop.Core { … }` did not
+  see `Shop`'s names (a file-scoped `namespace Shop.Core;` did), and `using
+  Shop.Text;` reached the one file a lookup landed on instead of every file
+  that opens the namespace. commandline, which writes every namespace as a
+  block: 1,295 edges added, 52 removed (a guess by name to a namesake in the
+  tests, now the type the source names).
+- **C#, one branch of an `#if` inside an expression** (`() =>` / `#if X` /
+  `a ? b :` / `#endif` / `c;`): the class around was lost. The two directive
+  lines are blanked.
+- **Rust, a closure in a macro's arguments.** ripgrep's tests are `rgtest!(name,
+  |dir: Dir, mut cmd: TestCommand| { … })`: the typed parameters and the
+  `let`s of that closure were dropped with the macro. 69 calls.
+- **C++, `Random rnd(test::RandomSeed());`**, which the grammar reads as the
+  declaration of a function `rnd`: a call where a parameter's type would be
+  is a variable's argument. leveldb: 71 edges added, and the 23 removed left
+  from functions that were none.
+- **Kotlin regions.** The grammar drops some comments from the tree (a KDoc
+  block before a declaration with modifiers), so the region started at the
+  declaration; it is read from the source where the tree has no comment.
+- **Swift, the type of a stored property** (`var fav: ColorOptions`) was no
+  reference: 429 `references` in swift-argument-parser, and 592 in
+  alamofire, where the first set's 62% of graphify's type references had
+  been put down to the two models.
+
+After these (engine 0.5.44) the 14 repositories have 1,041 such calls —
+C# 327, Rust 182, Kotlin 98, Swift 88, Ruby 85, Java 73, C++ 45, Python 41,
+PHP 29, Scala 28, Go 23, TypeScript 19, JavaScript 3 — and the first 31
+still 314, with no edge of theirs changed but four redundant `using` edges
+of todoapi and alamofire's property types. Against graphify 0.9.111, as in
+the table above:
+
+| Repository | same definition | imports (file pairs) | calls | bases | type references |
+|---|--:|--:|--:|--:|--:|
+| click | 100% | 174 / 159 (100%) | 2,623 / 1,473 (53%) | 77 / 30 (100%) | 1,196 / 592 (57%) |
+| commander.js | 97.0% | 264 / 185 (98%) | 348 / 197 (97%) | 17 / 3 (100%) | 66 / 0 |
+| zod | 98.9% | 705 / 1,008 (69%) | 2,102 / 1,998 (85%) | 420 / 609 (44%) | 1,415 / 122 (84%) |
+| cobra | 100% | 159 / 285 (56%) | 1,820 / 1,339 (100%) | – | 136 / 94 (97%) |
+| gson | 100% | 456 / 1,079 (42%) | 9,978 / 7,293 (97%) | 516 / 199 (95%) | 3,350 / 1,288 (96%) |
+| clikt | 99.2% | 592 / 480 (98%) | 1,949 / 1,181 (92%) | 477 / 110 (98%) | 682 / 478 (87%) |
+| scopt | 100% | 6 / 8 | 401 / 213 (84%) | 25 / 25 (100%) | 188 / 87 (92%) |
+| commandline | 96.3% | 0 / 148 | 1,758 / 1,894 (68%) | 49 / 49 (92%) | 1,118 / 823 (87%) |
+| ripgrep | 97.2% | 173 / 250 (61%) | 5,456 / 2,952 (81%) | 121 / 117 (96%) | 2,380 / 1,362 (85%) |
+| swift-argument-parser | 94.9% | 263 / 212 | 1,764 / 957 (90%) | 599 / 438 (100%) | 826 / 677 (66%) |
+| cJSON | 48.7% | 90 / 170 (52%) | 1,082 / 1,059 (100%) | – | 203 / 89 (100%) |
+| leveldb | 94.2% | 499 / 499 (100%) | 2,056 / 2,064 (54%) | 48 / 15 (80%) | 740 / 746 (49%) |
+| thor | 100% | 61 / 0 | 670 / 533 (83%) | 43 / 4 (100%) | 20 / 0 |
+| monolog | 93.6% | 438 / 439 (100%) | 3,798 / 2,207 (90%) | 242 / 239 (97%) | 530 / 392 (98%) |
+| **All** | **95.5%** | **3,880 / 4,922 (67%)** | **35,805 / 25,360 (85%)** | **2,634 / 1,838 (80%)** | **12,850 / 6,750 (80%)** |
+
+(swift-argument-parser's type references were 32% of graphify's before the
+property types were read.) The share of graphify's
+calls found is the first set's, 85%, and 22% of the native calls are
+`INFERRED`. What the low cells are, as far as they were read:
+
+- **cJSON, 48.7% of the definitions.** Its `.gitignore` has a line `test`,
+  and `tests/unity/test/` is committed all the same: the engine does not
+  walk into what the ignore files name, graphify reads the 581 definitions
+  there. A tracked file an ignore rule matches is not read; nothing says so
+  in the build report.
+- **click, 53% of the calls.** The one sample followed
+  (`_get_windows_console_stream`, imported under `if WIN:` and defined under
+  `else:`) is linked by both, to different definitions: graphify to the
+  imported one, the engine to the one the file defines.
+- **zod, 44% of the bases.** An interface and a constant of one name
+  (`interface ZodBigInt` beside `const ZodBigInt`) pair differently in the
+  two graphs: `ZodBigIntFormat -> ZodBigInt` is in both lists of
+  one-sided edges.
+- **commandline's imports** are graphify's namespace nodes (footnote ³).
+  **leveldb's** calls and references were not read.
 
 ### What is left without an edge
 

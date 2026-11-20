@@ -266,6 +266,12 @@ pub trait LanguageModule: Send + Sync {
         generic::region_start(node, def_line)
     }
 
+    /// `region_start`, with the source at hand: for a grammar whose tree
+    /// does not hold every comment.
+    fn region_start_in(&self, node: Node, def_line: u32, _src: &[u8]) -> u32 {
+        self.region_start(node, def_line)
+    }
+
     /// The last line of a definition.
     fn end_line(&self, node: Node) -> u32 {
         generic::end_line(node)

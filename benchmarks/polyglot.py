@@ -22,6 +22,7 @@ Run:
   python benchmarks/polyglot.py --root /tmp/polyglot --json benchmarks/results-polyglot.json
   python benchmarks/polyglot.py --root /tmp/polyglot --only go,rust --tools routes,fetch
   python benchmarks/polyglot.py --root /tmp/polyglot --baseline benchmarks/results-polyglot.json
+  python benchmarks/polyglot.py --root /tmp/polyglot --set 2      # only the second 14 repositories
 
 The read-only battery runs against the clone itself and is checked to leave
 graph.json and the working tree untouched. Everything that writes (edits for
@@ -146,6 +147,40 @@ REPOS: list[dict[str, Any]] = [
      "sha": "1f482bfe92e0419ab5b9bb7c4c01b9e776c020b1", "routes": ["laravel"]},
     {"key": "symfony-demo", "langs": ["php"], "url": "https://github.com/symfony/demo",
      "sha": "f42980c690b4bf335fa41bbafdb075bb67b719c2", "routes": ["symfony"]},
+    # The second set (`"set": 2`, `--set 2`): one more repository per language,
+    # none of them an HTTP client or a web application — command-line parsers,
+    # serialization, storage, logging. The numbers the docs give for "the 31
+    # repositories" are the first set's (`--set 1`).
+    {"key": "click", "langs": ["python"], "url": "https://github.com/pallets/click",
+     "sha": "08b803cf32ceb2ae6a772c62d5da42757a897d44", "apis": True, "set": 2},
+    {"key": "commander", "langs": ["javascript"], "url": "https://github.com/tj/commander.js",
+     "sha": "a5a7dc084d4d2b7932e85ca049c5204e50a2c721", "apis": True, "set": 2},
+    {"key": "zod", "langs": ["typescript"], "url": "https://github.com/colinhacks/zod",
+     "sha": "e32e08836e451e26f53f5ff6efe4fb92b07a47ad", "apis": True, "set": 2},
+    {"key": "cobra", "langs": ["go"], "url": "https://github.com/spf13/cobra",
+     "sha": "adbc8813901bba65827259daa8e22ff94ec1f30e", "apis": True, "set": 2},
+    {"key": "gson", "langs": ["java"], "url": "https://github.com/google/gson",
+     "sha": "e5f02ab6c24567d3ca5200afc4076337746b3349", "apis": True, "set": 2},
+    {"key": "clikt", "langs": ["kotlin"], "url": "https://github.com/ajalt/clikt",
+     "sha": "2abee8970c351100a07a7ea5f627fda56088b115", "set": 2},
+    {"key": "scopt", "langs": ["scala"], "url": "https://github.com/scopt/scopt",
+     "sha": "270222e9ba8f32d2d71509fd9ceeaa9c35054347", "set": 2},
+    {"key": "commandline", "langs": ["csharp"],
+     "url": "https://github.com/commandlineparser/commandline",
+     "sha": "1e3607b97af6141743edb3c434c06d5b492f6fb3", "set": 2},
+    {"key": "ripgrep", "langs": ["rust"], "url": "https://github.com/BurntSushi/ripgrep",
+     "sha": "48242a714bcd711e9f7dc0450d339e3aaf4a9c0a", "set": 2},
+    {"key": "swift-argument-parser", "langs": ["swift"],
+     "url": "https://github.com/apple/swift-argument-parser",
+     "sha": "d7b6cebecb27311771a3249275259edaccf61972", "set": 2},
+    {"key": "cjson", "langs": ["c"], "url": "https://github.com/DaveGamble/cJSON",
+     "sha": "6d9f2443ab071f86e5d9b43025a40929ec41c46c", "set": 2},
+    {"key": "leveldb", "langs": ["cpp"], "url": "https://github.com/google/leveldb",
+     "sha": "29465588d3dfdc80fba5e198037582b8fdb5dd60", "set": 2},
+    {"key": "thor", "langs": ["ruby"], "url": "https://github.com/rails/thor",
+     "sha": "cb11e8e87b3cfe6bc9f6d4b092897f0dfda2476d", "set": 2},
+    {"key": "monolog", "langs": ["php"], "url": "https://github.com/Seldaek/monolog",
+     "sha": "6d4cf3a1199b8fa9e38fdb540569579354242fc7", "set": 2},
 ]
 
 # Extension -> the language name used in the report.
@@ -1470,6 +1505,8 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--root", default="/tmp/polyglot", help="where the clones live")
     parser.add_argument("--setup", action="store_true", help="clone and build, then exit")
     parser.add_argument("--only", default="", help="comma-separated repo keys or languages")
+    parser.add_argument("--set", type=int, choices=(1, 2), default=None, dest="repo_set",
+                        help="1: the first 31 repositories; 2: the second 14 (default: both)")
     parser.add_argument("--tools", default="", help="comma-separated tool names to run")
     parser.add_argument("--sample", type=int, default=60,
                         help="definitions fetched per extension and repo")
@@ -1490,6 +1527,8 @@ def main(argv: list[str] | None = None) -> None:
 
     only = {x for x in opts.only.split(",") if x}
     repos = [r for r in REPOS if not only or r["key"] in only or only & set(r["langs"])]
+    if opts.repo_set:
+        repos = [r for r in repos if r.get("set", 1) == opts.repo_set]
     root = Path(opts.root)
     if opts.setup:
         setup(root, repos)
