@@ -2231,3 +2231,257 @@ fn swift_a_stored_propertys_type_is_a_reference() {
     )]);
     has(&got, &[("Color", "references", "ColorOptions"), ("Color", "references", "Shade")]);
 }
+
+// --- the name-resolution rules `benchmarks/conformance.py` found missing ----
+// Two types answer to the one method name in each: only the type says which.
+
+/// `(source qualname, relation, target qualname)` of every non-containment
+/// edge (a file's label where it has no qualname).
+fn quals(name: &str, files: &[(&str, &str)]) -> BTreeSet<(String, String, String)> {
+    let dir = project(name, files);
+    let (g, _) = build_graph(&BuildOptions::new(&dir)).unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+    let named = |id: &str| {
+        g["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|n| n["id"] == id)
+            .map(|n| n["qualname"].as_str().or(n["label"].as_str()).unwrap_or("").to_string())
+            .unwrap_or_default()
+    };
+    g["links"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|e| {
+            !matches!(e["relation"].as_str(), Some("contains" | "method" | "case_of" | "defines"))
+        })
+        .map(|e: &Value| {
+            (
+                named(e["source"].as_str().unwrap()),
+                e["relation"].as_str().unwrap().to_string(),
+                named(e["target"].as_str().unwrap()),
+            )
+        })
+        .collect()
+}
+
+#[track_caller]
+fn lacks(got: &BTreeSet<(String, String, String)>, unwanted: &[(&str, &str, &str)]) {
+    for (s, r, t) in unwanted {
+        assert!(
+            !got.contains(&(s.to_string(), r.to_string(), t.to_string())),
+            "unwanted {s} -{r}-> {t} in {got:#?}"
+        );
+    }
+}
+
+const JAVA_TWO: &str = "package app;\n\nclass Repo {\n    int find() {\n        return 1;\n    }\n}\n\nclass Other {\n    int find() {\n        return 2;\n    }\n}\n\n";
+
+#[test]
+fn a_cast_used_where_it_is_written_is_a_value_of_its_type() {
+    // Java `((Repo) o).find()`, a resource variable, Go `x.(*Repo).Find()`
+    let java = format!(
+        "{JAVA_TWO}public class A {{\n    int run(Object o) {{\n        return ((Repo) o).find();\n    }}\n\n    int res() throws Exception {{\n        try (Repo r = open()) {{\n            return r.find();\n        }}\n    }}\n\n    Repo open() {{\n        return new Repo();\n    }}\n}}\n"
+    );
+    let got = quals("cast-java", &[("app/A.java", &java)]);
+    has(&got, &[("A.run", "calls", "Repo.find"), ("A.res", "calls", "Repo.find")]);
+    lacks(&got, &[("A.run", "calls", "Other.find"), ("A.res", "calls", "Other.find")]);
+    let got = quals("cast-go", &[
+        ("go.mod", "module example.com/app\n\ngo 1.21\n"),
+        ("a.go", "package app\n\ntype Repo struct{}\n\nfunc (r *Repo) Find() int {\n\treturn 1\n}\n\ntype Other struct{}\n\nfunc (o *Other) Find() int {\n\treturn 2\n}\n\nvar store = &Repo{}\n\nfunc Run(x interface{}) int {\n\treturn x.(*Repo).Find()\n}\n\nfunc Stored() int {\n\treturn store.Find()\n}\n"),
+    ]);
+    has(&got, &[("Run", "calls", "Repo.Find"), ("Stored", "calls", "Repo.Find")]);
+    lacks(&got, &[("Run", "calls", "Other.Find"), ("Stored", "calls", "Other.Find")]);
+}
+
+#[test]
+fn a_null_safe_call_and_a_nullable_parameter_keep_the_type() {
+    // C# `r?.Find()`, `(o as Repo).Find()`; Kotlin `r: Repo?`, `r.let { it.find() }`
+    let got = quals("nullsafe-cs", &[(
+        "A.cs",
+        "namespace App\n{\n    public class Repo\n    {\n        public int Find() { return 1; }\n    }\n\n    public class Other\n    {\n        public int Find() { return 2; }\n    }\n\n    public class A\n    {\n        public int? Run(Repo r)\n        {\n            return r?.Find();\n        }\n\n        public int As(object o)\n        {\n            return (o as Repo).Find();\n        }\n    }\n}\n",
+    )]);
+    has(&got, &[("App.A.Run", "calls", "App.Repo.Find"), ("App.A.As", "calls", "App.Repo.Find")]);
+    lacks(&got, &[("App.A.Run", "calls", "App.Other.Find")]);
+    let got = quals("nullsafe-kt", &[(
+        "A.kt",
+        "package app\n\nclass Repo {\n    fun find(): Int = 1\n}\n\nclass Other {\n    fun find(): Int = 2\n}\n\ntypealias Store = Repo\n\nval kept = Repo()\n\nfun run(r: Repo?): Int? = r?.find()\n\nfun scoped(r: Repo): Int = r.let { it.find() }\n\nfun aliased(s: Store): Int = s.find()\n\nfun top(): Int = kept.find()\n",
+    )]);
+    has(
+        &got,
+        &[
+            ("run", "calls", "Repo.find"),
+            ("scoped", "calls", "Repo.find"),
+            ("aliased", "calls", "Repo.find"),
+            ("top", "calls", "Repo.find"),
+        ],
+    );
+    lacks(&got, &[("run", "calls", "Other.find"), ("scoped", "calls", "Other.find")]);
+}
+
+#[test]
+fn a_binding_that_opens_an_optional_is_what_it_holds() {
+    // Rust `if let Some(r) = opt` on a parameter; a second `let` of a name
+    let got = quals("iflet-rs", &[
+        ("Cargo.toml", "[package]\nname = \"demo\"\nversion = \"0.1.0\"\n"),
+        ("src/lib.rs", "pub struct Repo;\n\nimpl Repo {\n    pub fn new() -> Repo {\n        Repo\n    }\n    pub fn find(&self) -> i32 {\n        1\n    }\n}\n\npub struct Other;\n\nimpl Other {\n    pub fn new() -> Other {\n        Other\n    }\n    pub fn find(&self) -> i32 {\n        2\n    }\n}\n\npub fn run(opt: Option<Repo>) -> i32 {\n    if let Some(r) = opt {\n        return r.find();\n    }\n    0\n}\n\npub fn again() -> i32 {\n    let r = Other::new();\n    let r = Repo::new();\n    r.find()\n}\n\nfn f() -> i32 {\n    1\n}\n\npub fn own() -> i32 {\n    self::f()\n}\n\nmod inner {\n    pub fn up() -> i32 {\n        super::f()\n    }\n}\n"),
+    ]);
+    has(
+        &got,
+        &[
+            ("run", "calls", "Repo.find"),
+            ("again", "calls", "Repo.find"),
+            ("own", "calls", "f"),
+            ("inner.up", "calls", "f"),
+        ],
+    );
+    lacks(&got, &[("run", "calls", "Other.find"), ("again", "calls", "Other.find")]);
+    // Swift `if let r = opt`, `(x as! Repo)`, an enum case's method
+    let got = quals("iflet-swift", &[(
+        "a.swift",
+        "class Repo {\n  func find() -> Int {\n    return 1\n  }\n}\n\nclass Other {\n  func find() -> Int {\n    return 2\n  }\n}\n\nenum Shape {\n  case circle\n\n  func area() -> Int {\n    return 1\n  }\n}\n\nfunc run(opt: Repo?) -> Int {\n  if let r = opt {\n    return r.find()\n  }\n  return 0\n}\n\nfunc cast(x: Any) -> Int {\n  return (x as! Repo).find()\n}\n\nfunc side() -> Int {\n  return Shape.circle.area()\n}\n",
+    )]);
+    has(
+        &got,
+        &[
+            ("run", "calls", "Repo.find"),
+            ("cast", "calls", "Repo.find"),
+            ("side", "calls", "Shape.area"),
+        ],
+    );
+    lacks(&got, &[("run", "calls", "Other.find"), ("cast", "calls", "Other.find")]);
+}
+
+#[test]
+fn a_function_named_without_a_call_is_an_indirect_use() {
+    // Java `this::helper`, Kotlin `::handle` (no call), PHP `[$this, 'handle']`,
+    // `Repo::class`, `new static()`
+    let got = quals("named-java", &[(
+        "app/A.java",
+        "package app;\n\nimport java.util.List;\n\npublic class A {\n    int helper(int x) {\n        return x;\n    }\n\n    void run(List<Integer> xs) {\n        xs.forEach(this::helper);\n    }\n}\n",
+    )]);
+    has(&got, &[("A.run", "indirect_call", "A.helper")]);
+    let got = quals("named-kt", &[(
+        "A.kt",
+        "package app\n\nclass Repo\n\nfun handle(x: Int): Int = x\n\nfun run(xs: List<Int>): List<Int> = xs.map(::handle)\n\nfun literal(): Any = Repo::class\n",
+    )]);
+    has(&got, &[("run", "indirect_call", "handle"), ("literal", "references", "Repo")]);
+    lacks(&got, &[("run", "calls", "handle"), ("literal", "calls", "Repo")]);
+    let got = quals("named-php", &[(
+        "a.php",
+        "<?php\nclass Repo\n{\n    public static function make(): static\n    {\n        return new static();\n    }\n\n    public function handle(int $x): int\n    {\n        return $x;\n    }\n\n    public function run(array $xs): array\n    {\n        return array_map([$this, 'handle'], $xs);\n    }\n}\n\nfunction name(): string\n{\n    return Repo::class;\n}\n",
+    )]);
+    has(
+        &got,
+        &[
+            ("Repo.run", "indirect_call", "Repo.handle"),
+            ("Repo.make", "calls", "Repo"),
+            ("name", "references", "Repo"),
+        ],
+    );
+}
+
+#[test]
+fn ruby_super_fields_and_constants() {
+    // `super`, `super(x)`, `@repo.find`, `Store = Repo`
+    let got = quals("rb-super", &[(
+        "a.rb",
+        "class Repo\n  def find\n    1\n  end\nend\n\nclass Other\n  def find\n    2\n  end\nend\n\nStore = Repo\n\nclass Base\n  def m(x)\n    x\n  end\n\n  def n\n    1\n  end\nend\n\nclass A < Base\n  def initialize\n    @repo = Repo.new\n  end\n\n  def m(x)\n    super(x)\n  end\n\n  def n\n    super\n  end\n\n  def go\n    @repo.find\n  end\n\n  def named\n    Store.new.find\n  end\nend\n",
+    )]);
+    has(
+        &got,
+        &[
+            ("A.m", "calls", "Base.m"),
+            ("A.n", "calls", "Base.n"),
+            ("A.go", "calls", "Repo.find"),
+            ("A.named", "calls", "Repo.find"),
+        ],
+    );
+    lacks(&got, &[("A.go", "calls", "Other.find"), ("A.named", "calls", "Other.find")]);
+}
+
+#[test]
+fn ecma_objects_getters_and_dynamic_imports() {
+    // an object literal's method, a prototype method on `new F()`,
+    // `await import()`; TS `r?: Repo`, `m.Repo`, a getter
+    let got = quals("js-objects", &[
+        ("m.js", "export function f() {\n  return 1\n}\n"),
+        ("a.js", "const api = {\n  fetchAll() {\n    return 1\n  },\n}\n\nfunction Widget() {}\n\nWidget.prototype.render = function () {\n  return 1\n}\n\nexport function run() {\n  return api.fetchAll()\n}\n\nexport function draw() {\n  const w = new Widget()\n  return w.render()\n}\n\nexport async function late() {\n  const m = await import('./m.js')\n  return m.f()\n}\n"),
+    ]);
+    has(&got, &[("run", "calls", "fetchAll"), ("draw", "calls", "render"), ("late", "calls", "f")]);
+    let got = quals("ts-types", &[
+        ("m.ts", "export class Repo {\n  find(): number {\n    return 1\n  }\n}\n\nexport class Other {\n  find(): number {\n    return 2\n  }\n}\n"),
+        ("a.ts", "import * as m from './m'\nimport { Repo } from './m'\n\nexport function opt(r?: Repo): number {\n  return r.find()\n}\n\nexport function ns(r: m.Repo): number {\n  return r.find()\n}\n\nexport function cast(x: unknown): number {\n  return (x as Repo).find()\n}\n\nexport class Svc {\n  get repo(): Repo {\n    return new Repo()\n  }\n\n  run(): number {\n    return this.repo.find()\n  }\n}\n"),
+    ]);
+    has(
+        &got,
+        &[
+            ("opt", "calls", "Repo.find"),
+            ("ns", "calls", "Repo.find"),
+            ("cast", "calls", "Repo.find"),
+            ("Svc.run", "calls", "Repo.find"),
+        ],
+    );
+    lacks(&got, &[("opt", "calls", "Other.find"), ("Svc.run", "calls", "Other.find")]);
+}
+
+#[test]
+fn csharp_global_using_and_scala_locals() {
+    let got = quals("cs-global", &[
+        ("Usings.cs", "global using Lib;\n"),
+        ("Lib/Repo.cs", "namespace Lib\n{\n    public class Repo\n    {\n        public int Find() { return 1; }\n    }\n}\n"),
+        ("App/A.cs", "namespace App\n{\n    public class A\n    {\n        public int Run(Repo r)\n        {\n            return r.Find();\n        }\n    }\n}\n"),
+    ]);
+    has(&got, &[("App.A.Run", "calls", "Lib.Repo.Find")]);
+    // Scala: a `val` in a method, `case r: Repo`, a method named with no
+    // parentheses, a call above a local of its name
+    let got = quals("scala-locals", &[(
+        "A.scala",
+        "package app\n\nclass Repo {\n  def find(): Int = 1\n  def size: Int = 1\n}\n\nclass Other {\n  def find(): Int = 2\n}\n\nobject Main {\n  def stream(): Int = 1\n\n  def run(): Int = {\n    val r = new Repo\n    r.find()\n  }\n\n  def pick(x: Any): Int = x match {\n    case r: Repo => r.find()\n    case _ => 0\n  }\n\n  def count(r: Repo): Int = r.size\n\n  def early(): Int = {\n    val n = stream()\n    val stream = n\n    stream\n  }\n}\n",
+    )]);
+    has(
+        &got,
+        &[
+            ("Main.run", "calls", "Repo.find"),
+            ("Main.pick", "calls", "Repo.find"),
+            ("Main.count", "calls", "Repo.size"),
+            ("Main.early", "calls", "Main.stream"),
+        ],
+    );
+    lacks(&got, &[("Main.run", "calls", "Other.find"), ("Main.pick", "calls", "Other.find")]);
+}
+
+#[test]
+fn cpp_qualified_types_aliases_and_range_for() {
+    let got = quals("cpp-scopes", &[(
+        "a.cc",
+        "#include <vector>\n\nnamespace util {\nint twice(int x) {\n  return 2 * x;\n}\n}  // namespace util\n\nnamespace u = util;\n\nclass Repo {\n public:\n  int Find() {\n    return 1;\n  }\n};\n\nclass Other {\n public:\n  int Find() {\n    return 2;\n  }\n};\n\nclass Outer {\n public:\n  class Inner {\n   public:\n    int Fetch() {\n      return 1;\n    }\n  };\n};\n\nint alias() {\n  return u::twice(2);\n}\n\nint nested(Outer::Inner& i) {\n  return i.Fetch();\n}\n\nvoid loop(std::vector<Repo>& repos) {\n  for (auto& r : repos) {\n    r.Find();\n  }\n}\n",
+    )]);
+    has(
+        &got,
+        &[
+            ("alias", "calls", "util.twice"),
+            ("nested", "calls", "Outer.Inner.Fetch"),
+            ("loop", "calls", "Repo.Find"),
+        ],
+    );
+    lacks(&got, &[("loop", "calls", "Other.Find")]);
+    // C: a parameter hides a function of its name
+    let got = quals("c-param", &[(
+        "a.c",
+        "int handler(void) {\n    return 0;\n}\n\ntypedef int (*fn)(void);\n\nint run(fn handler) {\n    return handler();\n}\n",
+    )]);
+    lacks(&got, &[("run", "calls", "handler")]);
+}
+
+#[test]
+fn a_projects_own_box_is_no_wrapper_outside_rust() {
+    let got = quals("java-box", &[(
+        "app/A.java",
+        "package app;\n\nclass Item {\n    int size() {\n        return 1;\n    }\n}\n\nclass Other {\n    int size() {\n        return 2;\n    }\n}\n\nclass Box<T> {\n    T held;\n\n    T lead() {\n        return held;\n    }\n}\n\npublic class A {\n    int run(Box<Item> b) {\n        return b.lead().size();\n    }\n}\n",
+    )]);
+    has(&got, &[("A.run", "calls", "Box.lead"), ("A.run", "calls", "Item.size")]);
+    lacks(&got, &[("A.run", "calls", "Other.size")]);
+}

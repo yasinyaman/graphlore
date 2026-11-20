@@ -1,5 +1,5 @@
 {
- "passed": 356,
+ "passed": 406,
  "total": 406,
  "cases": [
   {
@@ -184,14 +184,8 @@
   },
   {
    "id": "javascript/prototype-method",
-   "ok": false,
-   "missing": [
-    [
-     "run",
-     "calls",
-     "render"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -250,14 +244,8 @@
   },
   {
    "id": "typescript/optional-parameter",
-   "ok": false,
-   "missing": [
-    [
-     "run",
-     "calls",
-     "Repo.find"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -274,14 +262,8 @@
   },
   {
    "id": "typescript/namespace-import-type",
-   "ok": false,
-   "missing": [
-    [
-     "run",
-     "calls",
-     "Repo.find"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -448,19 +430,8 @@
   },
   {
    "id": "java/class-named-like-a-wrapper",
-   "ok": false,
-   "missing": [
-    [
-     "A.run",
-     "calls",
-     "Box.lead"
-    ],
-    [
-     "A.run",
-     "calls",
-     "Item.size"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -591,14 +562,8 @@
   },
   {
    "id": "scala/local-typed-by-value",
-   "ok": false,
-   "missing": [
-    [
-     "Main.run",
-     "calls",
-     "Repo.find"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -723,14 +688,8 @@
   },
   {
    "id": "rust/super",
-   "ok": false,
-   "missing": [
-    [
-     "inner.run",
-     "calls",
-     "f"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -777,21 +736,9 @@
   },
   {
    "id": "rust/shadowing",
-   "ok": false,
-   "missing": [
-    [
-     "run",
-     "calls",
-     "Repo.find"
-    ]
-   ],
-   "unwanted": [
-    [
-     "run",
-     "calls",
-     "Other.find"
-    ]
-   ]
+   "ok": true,
+   "missing": [],
+   "unwanted": []
   },
   {
    "id": "rust/macro-arguments",
@@ -1053,14 +1000,8 @@
   },
   {
    "id": "ruby/super",
-   "ok": false,
-   "missing": [
-    [
-     "A.m",
-     "calls",
-     "Base.m"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -1083,14 +1024,8 @@
   },
   {
    "id": "ruby/instance-variable-typed",
-   "ok": false,
-   "missing": [
-    [
-     "Svc.run",
-     "calls",
-     "Repo.find"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -1293,14 +1228,8 @@
   },
   {
    "id": "javascript/object-literal-method",
-   "ok": false,
-   "missing": [
-    [
-     "run",
-     "calls",
-     "fetchAll"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -1359,14 +1288,8 @@
   },
   {
    "id": "javascript/dynamic-import",
-   "ok": false,
-   "missing": [
-    [
-     "run",
-     "calls",
-     "f"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -1401,26 +1324,14 @@
   },
   {
    "id": "typescript/getter",
-   "ok": false,
-   "missing": [
-    [
-     "Svc.run",
-     "calls",
-     "Repo.find"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
    "id": "typescript/as-cast",
-   "ok": false,
-   "missing": [
-    [
-     "run",
-     "calls",
-     "Repo.find"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -1503,26 +1414,14 @@
   },
   {
    "id": "go/package-variable",
-   "ok": false,
-   "missing": [
-    [
-     "Run",
-     "calls",
-     "Repo.Find"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
    "id": "go/type-assertion",
-   "ok": false,
-   "missing": [
-    [
-     "Run",
-     "calls",
-     "Repo.Find"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -1593,14 +1492,8 @@
   },
   {
    "id": "java/cast",
-   "ok": false,
-   "missing": [
-    [
-     "A.run",
-     "calls",
-     "Repo.find"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -1611,14 +1504,8 @@
   },
   {
    "id": "java/try-with-resources",
-   "ok": false,
-   "missing": [
-    [
-     "A.run",
-     "calls",
-     "Repo.find"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -1641,14 +1528,8 @@
   },
   {
    "id": "java/method-reference",
-   "ok": false,
-   "missing": [
-    [
-     "A.run",
-     "indirect_call",
-     "A.helper"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -1665,14 +1546,8 @@
   },
   {
    "id": "java/enum-method",
-   "ok": false,
-   "missing": [
-    [
-     "A.run",
-     "calls",
-     "Color.label"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -1707,14 +1582,8 @@
   },
   {
    "id": "kotlin/safe-call",
-   "ok": false,
-   "missing": [
-    [
-     "run",
-     "calls",
-     "Repo.find"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -1725,26 +1594,14 @@
   },
   {
    "id": "kotlin/let",
-   "ok": false,
-   "missing": [
-    [
-     "run",
-     "calls",
-     "Repo.find"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
    "id": "kotlin/top-level-property",
-   "ok": false,
-   "missing": [
-    [
-     "run",
-     "calls",
-     "Repo.find"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -1761,14 +1618,8 @@
   },
   {
    "id": "kotlin/cast",
-   "ok": false,
-   "missing": [
-    [
-     "run",
-     "calls",
-     "Repo.find"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -1779,14 +1630,8 @@
   },
   {
    "id": "kotlin/typealias",
-   "ok": false,
-   "missing": [
-    [
-     "run",
-     "calls",
-     "Repo.find"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -1815,14 +1660,8 @@
   },
   {
    "id": "kotlin/function-reference",
-   "ok": false,
-   "missing": [
-    [
-     "run",
-     "indirect_call",
-     "handle"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -1833,26 +1672,14 @@
   },
   {
    "id": "kotlin/enum-entry",
-   "ok": false,
-   "missing": [
-    [
-     "run",
-     "calls",
-     "Color.label"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
    "id": "scala/new-with-parentheses",
-   "ok": false,
-   "missing": [
-    [
-     "Main.run",
-     "calls",
-     "Repo.find"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -1869,26 +1696,14 @@
   },
   {
    "id": "scala/pattern-typed",
-   "ok": false,
-   "missing": [
-    [
-     "Main.run",
-     "calls",
-     "Repo.find"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
    "id": "scala/no-parentheses",
-   "ok": false,
-   "missing": [
-    [
-     "Main.run",
-     "calls",
-     "Repo.size"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -1953,38 +1768,20 @@
   },
   {
    "id": "csharp/cast",
-   "ok": false,
-   "missing": [
-    [
-     "A.Run",
-     "calls",
-     "Repo.Find"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
    "id": "csharp/as-cast",
-   "ok": false,
-   "missing": [
-    [
-     "A.Run",
-     "calls",
-     "Repo.Find"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
    "id": "csharp/null-conditional",
-   "ok": false,
-   "missing": [
-    [
-     "A.Run",
-     "calls",
-     "Repo.Find"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -2043,14 +1840,8 @@
   },
   {
    "id": "csharp/global-using",
-   "ok": false,
-   "missing": [
-    [
-     "A.Run",
-     "calls",
-     "Repo.Find"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -2085,14 +1876,8 @@
   },
   {
    "id": "rust/if-let-some",
-   "ok": false,
-   "missing": [
-    [
-     "run",
-     "calls",
-     "Repo.find"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -2151,14 +1936,8 @@
   },
   {
    "id": "rust/self-path",
-   "ok": false,
-   "missing": [
-    [
-     "run",
-     "calls",
-     "f"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -2217,26 +1996,14 @@
   },
   {
    "id": "swift/if-let",
-   "ok": false,
-   "missing": [
-    [
-     "run",
-     "calls",
-     "Repo.find"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
    "id": "swift/guard-let",
-   "ok": false,
-   "missing": [
-    [
-     "run",
-     "calls",
-     "Repo.find"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -2253,14 +2020,8 @@
   },
   {
    "id": "swift/as-cast",
-   "ok": false,
-   "missing": [
-    [
-     "run",
-     "calls",
-     "Repo.find"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -2283,14 +2044,8 @@
   },
   {
    "id": "swift/typealias",
-   "ok": false,
-   "missing": [
-    [
-     "run",
-     "calls",
-     "Repo.find"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -2307,14 +2062,8 @@
   },
   {
    "id": "swift/enum-method",
-   "ok": false,
-   "missing": [
-    [
-     "run",
-     "calls",
-     "Shape.area"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -2385,15 +2134,9 @@
   },
   {
    "id": "c/typedef-function-pointer",
-   "ok": false,
+   "ok": true,
    "missing": [],
-   "unwanted": [
-    [
-     "run",
-     "calls",
-     "a.c:handler"
-    ]
-   ]
+   "unwanted": []
   },
   {
    "id": "cpp/auto-from-construction",
@@ -2427,14 +2170,8 @@
   },
   {
    "id": "cpp/range-for",
-   "ok": false,
-   "missing": [
-    [
-     "run",
-     "calls",
-     "Repo.Find"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -2451,14 +2188,8 @@
   },
   {
    "id": "cpp/namespace-alias",
-   "ok": false,
-   "missing": [
-    [
-     "run",
-     "calls",
-     "util.twice"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -2469,14 +2200,8 @@
   },
   {
    "id": "cpp/nested-class",
-   "ok": false,
-   "missing": [
-    [
-     "run",
-     "calls",
-     "Outer.Inner.Find"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -2547,14 +2272,8 @@
   },
   {
    "id": "ruby/constant-alias",
-   "ok": false,
-   "missing": [
-    [
-     "run",
-     "calls",
-     "Repo.find"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -2565,14 +2284,8 @@
   },
   {
    "id": "ruby/super-with-arguments",
-   "ok": false,
-   "missing": [
-    [
-     "A.m",
-     "calls",
-     "Base.m"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -2673,14 +2386,8 @@
   },
   {
    "id": "php/class-constant-fetch",
-   "ok": false,
-   "missing": [
-    [
-     "run",
-     "references",
-     "Repo"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -2703,26 +2410,14 @@
   },
   {
    "id": "php/enum-method",
-   "ok": false,
-   "missing": [
-    [
-     "run",
-     "calls",
-     "Status.label"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
    "id": "php/static-return",
-   "ok": false,
-   "missing": [
-    [
-     "Repo.make",
-     "calls",
-     "Repo"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -2739,14 +2434,8 @@
   },
   {
    "id": "php/callable-string",
-   "ok": false,
-   "missing": [
-    [
-     "A.run",
-     "indirect_call",
-     "A.handle"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   }
  ]

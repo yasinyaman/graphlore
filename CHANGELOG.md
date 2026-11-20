@@ -12,14 +12,10 @@ All notable changes to this project are documented here. The format is based on
   languages, each a small project with the edge the rule says is there and
   the edge that must not be. The first 185 are scopes and shadowing, imports,
   member lookup through bases, mix-ins and extensions, and overloads by
-  arity; the native engine (0.5.45) follows 176 of them. The other 221 are
-  the places a type is written outside a declaration (a cast, a pattern, a
-  loop variable, an alias, a wrapper, a declared result) and what each
-  language has of its own; it follows 180. The 50 it does not are listed
-  there by rule: a cast used at once, Kotlin's and C#'s `?.`, `if let` on a
-  parameter, a member of an enum's value, type aliases, a variable outside a
-  function typed by its value, method references, `self::` / `super::`
-  paths, Ruby's `super`, a few more.
+  arity; the other 221 are the places a type is written outside a
+  declaration (a cast, a pattern, a loop variable, an alias, a wrapper, a
+  declared result) and what each language has of its own. Engine 0.5.45
+  followed 356 of them; 0.5.46 follows all 406 (see Fixed).
   `--baseline benchmarks/results-conformance.json` says what a change fixed
   and exits 1 on what it broke.
 - **A built-in code search index**, so `graphlore_locate` and the duplication
@@ -331,6 +327,39 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- **Native engine 0.5.46: the 50 name-resolution rules the checklist found
+  missing.** `benchmarks/conformance.py` had 356 of its 406 cases passing;
+  all pass now, and each change was read on the 45 audit repositories (edges
+  added and removed, at their source lines). By rule:
+  a **cast used where it is written** is a value of its type (Java, C#,
+  TypeScript, Kotlin, Swift `as!`, Go `x.(*T)`); C# **`a?.b`** and a Kotlin
+  parameter typed **`T?`** keep the type; **`if let Some(r) = opt`** /
+  Swift `if let` / `guard let` on a parameter, Scala `case r: T`, a Java
+  resource variable and the `it` of Kotlin `r.let { … }` are typed; a member
+  asked of an **enum's value** is the enum's; a Kotlin / Swift
+  **`typealias`**, a Ruby constant assigned a class and C++
+  `namespace u = util;` name what they alias; a Go `var`, a Kotlin top-level
+  `val` and a Ruby `@field` are **typed by their value**, and a Scala `val`
+  in a method is a local; Java `this::m`, Kotlin `::f` and PHP
+  `[$this, 'm']` are an **`indirect_call`**, Kotlin and PHP `Foo::class` a
+  `references` edge (Kotlin's two were `calls` before); Rust **`self::f`**
+  and `super::f` in an inline module, a C# **`global using`**, a TypeScript
+  type through `import * as m`, optional parameter and getter, a JavaScript
+  object literal's method, `F.prototype.m` and `await import()` resolve;
+  Ruby **`super`**, bare or with arguments, calls the method further up; of
+  several Rust `let`s of one name **the last before a use** is meant; a C
+  variable hides a function of its name; a use above a local's declaration
+  keeps the outer name; C++ range-`for`, `Outer::Inner` and `ns::Type` are
+  read with their qualifier, the asking file's own definition first; `Box`,
+  `Arc`, `Rc`, `Cell`, `RefCell`, `Pin`, `Cow` are wrappers only in Rust.
+  On the 45 repositories: `calls` 121,235 → 121,691, `references` 41,711 →
+  43,396, `indirect_call` 4,137 → 4,229, `reads` 32,219 → 32,475; unresolved
+  rows left unmarked 314 → 305 on the first set, 1,041 → 953 on the second.
+  Edges that went away were read too: Kotlin class literals that were
+  `calls`, a function linked through a parameter or a later local of its
+  name, leveldb's `Comparator` and `log::Writer` linked to a namesake in
+  another file. A local's and a reference's position are now kept in the
+  facts cache (`update=True` read them as 0).
 - **Native engine 0.5.44: fourteen more repositories, and what they found.**
   `benchmarks/polyglot.py` has a second set (`--set 2`): one more repository
   per language, none an HTTP client or a web application — click,

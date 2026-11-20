@@ -1473,10 +1473,47 @@ calls found is the first set's, 85%, and 22% of the native calls are
 
 Both sets measure the engine on code. [resolution-rules.md](resolution-rules.md)
 is the other half: the name-resolution rules each language defines, one
-small project a rule (`benchmarks/conformance.py`), 356 of 406 followed by
-engine 0.5.45 (176 of the 185 about scopes, imports and member lookup; 180
-of the 221 about types written in an expression, a pattern or an alias). A gap found on a repository becomes a case there first, so
-that it is found once.
+small project a rule (`benchmarks/conformance.py`). A gap found on a
+repository becomes a case there first, so that it is found once.
+
+Engine 0.5.45 followed 356 of the 406 (176 of the 185 about scopes, imports
+and member lookup; 180 of the 221 about types written in an expression, a
+pattern or an alias). The 50 it did not were few rules in many languages —
+a cast used at once, a null-safe call, a binding that opens an optional, a
+member of an enum's value, type aliases, a variable typed by its value, a
+function named without a call, `self::` / `super::`, a second `let` of a
+name — and 0.5.46 closes them all; the page lists them by rule. Each was
+written as a change to the reader or the walk, then measured on the 45
+repositories by reading the edges it added and removed:
+
+| On the 45 repositories | 0.5.45 | 0.5.46 |
+|---|---:|---:|
+| `calls` | 121,235 | 121,691 |
+| `indirect_call` | 4,137 | 4,229 |
+| `references` | 41,711 | 43,396 |
+| `uses` | 5,291 | 5,384 |
+| `reads` | 32,219 | 32,475 |
+| `inherits` | 3,913 | 3,990 |
+| unresolved rows left unmarked, first set | 314 | 305 |
+| unresolved rows left unmarked, second set | 1,041 | 953 |
+
+`calls` grows by less than was added: about 350 Kotlin class literals
+(`Foo::class`) were `calls` edges to the class and are `references` now, and
+a callable reference (`::handle`) is an `indirect_call` as in the other
+languages. Three things the cases did not ask for came out of reading the
+edges. A local hid a call written *above* its declaration (requests-scala's
+`stream(…)` above `val stream = response.body()`): a use before a
+declaration now keeps the outer name, where a declaration is what makes a
+local (not Python, Ruby or PHP, where an assignment can be one of several).
+Rust keeps every `let` of a name, so the walk — which has no blocks — falls
+back to an earlier declaration it can type when the one in force is made
+from it (`let timings = mem::take(timings);`). And a C++ name written with
+its namespace is looked up in the asking file first, then in the files it
+includes: leveldb's three benchmark files each define `leveldb::Benchmark`,
+and `Comparator` was linked to a test's struct of that name.
+
+What passing every case does not say: the list is the rules written so far,
+not every rule of each language, and it has no type inference in it.
 
 ### What is left without an edge
 

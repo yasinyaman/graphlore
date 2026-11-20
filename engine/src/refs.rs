@@ -3235,6 +3235,20 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                 push(&mut refs, n, RefKind::Indirect, p, "argument", None);
             }
         }
+        // (Kotlin's grammar reads `Repo::class` outside an argument list as a
+        // navigation with nothing after the `::class`)
+        if n.kind() == "navigation_expression" && facts.lang == Some(crate::lang::Lang::Kotlin) {
+            let ks = kids(n);
+            let bare = ks.len() == 2
+                && ks[1].kind() == "navigation_suffix"
+                && kids(ks[1]).is_empty()
+                && text(ks[1], src) == "::class";
+            if bare {
+                if let Some(p) = path_of(ks[0], src) {
+                    push(&mut refs, n, RefKind::Type, p, "class_literal", None);
+                }
+            }
+        }
         // PHP `Repo::class`: the class named
         if n.kind() == "class_constant_access_expression" {
             let ks = kids(n);
