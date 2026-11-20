@@ -1567,6 +1567,11 @@ case("cpp", "out-of-class-static", "a static member defined out of its class is 
      CPP, {"repo.h": "class Repo {\n public:\n  static Repo Make();\n};\n", "repo.cc": "#include \"repo.h\"\n\nRepo Repo::Make() {\n  return Repo();\n}\n",
            "a.cc": "#include \"repo.h\"\n\nRepo run() {\n  return Repo::Make();\n}\n"},
      [("run", "calls", "Repo.Make")])
+case("cpp", "template-argument", "`Page<Item>`'s member typed `T` is an Item",
+     CPP, {"a.cc": "class Item {\n public:\n  int size() {\n    return 1;\n  }\n};\n\nclass Spare {\n public:\n  int size() {\n    return 2;\n  }\n};\n\n"
+                   "template <typename T>\nclass Page {\n public:\n  T lead() {\n    return held;\n  }\n  T held;\n};\n\n"
+                   "int run(Page<Item>& p) {\n  return p.lead().size();\n}\n"},
+     [("run", "calls", "Page.lead"), ("run", "calls", "Item.size")], [("run", "calls", "Spare.size")])
 case("cpp", "export-macro", "a macro between `class` and the name (`class API Env {`) leaves the class a class",
      CPP, {"env.h": "#define API\n\nclass API Env {\n public:\n  virtual int NowMicros() = 0;\n};\n\n"
                     "class API Clock {\n public:\n  virtual int NowMicros() = 0;\n};\n",

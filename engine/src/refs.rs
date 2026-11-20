@@ -1371,6 +1371,24 @@ fn ruby_attrs(n: Node, src: &[u8]) -> Vec<String> {
 
 /// The names of the type parameters a declaration writes: `<T, R>`.
 fn type_params(n: Node, src: &[u8]) -> Vec<String> {
+    // C++ writes them on the `template <typename T>` around the declaration
+    let template = n.parent().filter(|p| p.kind() == "template_declaration");
+    let lists: Vec<Node> = match template {
+        Some(t) => kids(t).into_iter().filter(|c| c.kind() == "template_parameter_list").collect(),
+        None => Vec::new(),
+    };
+    if !lists.is_empty() {
+        return lists
+            .into_iter()
+            .flat_map(kids)
+            .filter(|tp| tp.kind().contains("type_parameter"))
+            .filter_map(|tp| {
+                tp.child_by_field_name("name")
+                    .or_else(|| kids(tp).into_iter().find(|c| c.kind() == "type_identifier"))
+                    .map(|c| text(c, src))
+            })
+            .collect();
+    }
     kids(n)
         .into_iter()
         .filter(|c| matches!(c.kind(), "type_parameters" | "type_parameter_list"))

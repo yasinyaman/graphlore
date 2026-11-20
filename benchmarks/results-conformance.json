@@ -1,6 +1,6 @@
 {
- "passed": 424,
- "total": 424,
+ "passed": 425,
+ "total": 425,
  "cases": [
   {
    "id": "python/module-function",
@@ -2332,6 +2332,12 @@
   },
   {
    "id": "cpp/out-of-class-static",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "cpp/template-argument",
    "ok": true,
    "missing": [],
    "unwanted": []

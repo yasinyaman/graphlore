@@ -1607,9 +1607,10 @@ own definition is what the source names, so a difference is a leak.
 None of the 45 audit repositories has an edge changed by this: none defines
 a type named like a wrapper where it matters. The one row left is a Python
 function named `super`. What the script does not see: a rule keyed on a
-node kind or on a punctuation the fixtures do not write, and the script's
-own control fails for a C++ template's member (`T lead()` of `Zorp<Item>`
-is not bound to `Item`), which is a gap of its own.
+node kind or on a punctuation the fixtures do not write. (Its control
+failed for a C++ template's member, `T lead()` of `Zorp<Item>`: the type
+parameters sit on the `template <typename T>` around the class, where the
+reader did not look. Read since 0.5.51, and the C++ rows are clean too.)
 
 ### What is left without an edge
 

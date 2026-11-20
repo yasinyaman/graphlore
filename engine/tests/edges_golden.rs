@@ -2643,3 +2643,21 @@ fn csharp_new_names_a_type_beside_a_method_of_its_name() {
     has(&got, &[("App.Token.Name", "calls", "App.Name")]);
     lacks(&got, &[("App.Token.Name", "calls", "App.Token.Name")]);
 }
+
+#[test]
+fn cpp_a_templates_member_is_typed_by_the_argument_written() {
+    // `template <typename T> class Page { T lead(); T held; }`, `Page<Item>& p`
+    let got = quals("cpp-template-arg", &[(
+        "a.cc",
+        "class Item {\n public:\n  int size() {\n    return 1;\n  }\n};\n\nclass Spare {\n public:\n  int size() {\n    return 2;\n  }\n};\n\ntemplate <typename T>\nclass Page {\n public:\n  T lead() {\n    return held;\n  }\n  T held;\n};\n\nint run(Page<Item>& p) {\n  return p.lead().size();\n}\n\nint field(Page<Item>& p) {\n  return p.held.size();\n}\n",
+    )]);
+    has(
+        &got,
+        &[
+            ("run", "calls", "Page.lead"),
+            ("run", "calls", "Item.size"),
+            ("field", "calls", "Item.size"),
+        ],
+    );
+    lacks(&got, &[("run", "calls", "Spare.size"), ("field", "calls", "Spare.size")]);
+}

@@ -25,7 +25,7 @@ python benchmarks/conformance.py --baseline benchmarks/results-conformance.json 
 python benchmarks/conformance.py --markdown      # the tables below
 ```
 
-Measured 2026-11-20 with graphlore-engine 0.5.50: **424 of 424 rules hold**
+Measured 2026-11-20 with graphlore-engine 0.5.51: **425 of 425 rules hold**
 (356 of the first 406 with 0.5.45).
 
 ## What this list is, and is not
@@ -519,7 +519,7 @@ ISO C, 6.2.1 'Scopes of identifiers', 6.2.2 'Linkages of identifiers'.
 | `a->b->c` reads the field of the struct the field points to | `struct-field-chain` | yes |
 | a call through a parameter is no call of a function of its name | `typedef-function-pointer` | yes |
 
-### cpp (31 of 31)
+### cpp (32 of 32)
 
 ISO C++, [basic.lookup] (unqualified, qualified and argument-dependent lookup), [class.member.lookup], [dcl.ambig.res].
 
@@ -554,6 +554,7 @@ ISO C++, [basic.lookup] (unqualified, qualified and argument-dependent lookup), 
 | a call in a lambda's body is the enclosing function's | `lambda-body` | yes |
 | a function passed by name is a use of it | `function-as-value` | yes |
 | a static member defined out of its class is the class's | `out-of-class-static` | yes |
+| `Page<Item>`'s member typed `T` is an Item | `template-argument` | yes |
 | a macro between `class` and the name (`class API Env {`) leaves the class a class | `export-macro` | yes |
 | `T x(1);` constructs a T | `constructor-arguments` | yes |
 

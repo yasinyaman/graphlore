@@ -328,6 +328,10 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- **Native engine 0.5.51: a C++ template's member is typed by the argument
+  written.** The type parameters of `template <typename T> class Page` sit on
+  the declaration around the class, where the reader did not look, so
+  `Page<Item>& p; p.lead().size()` stopped at `lead`.
 - **`graphlore_package_apis(package=…)` cut nothing**: a package used in
   hundreds of files (zod's own name across its workspace) returned every
   file under every symbol, 136 KB. Each symbol's list is now cut at `limit`
