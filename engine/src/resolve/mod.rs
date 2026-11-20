@@ -1482,28 +1482,28 @@ impl<'a> Project<'a> {
         // C# `global using N;`: a namespace every file under the directory
         // of the file that writes it has open (the project it is compiled in)
         let mut global: Vec<(String, Target)> = Vec::new();
-        for g in 0..files.len() {
+        for (g, file) in files.iter().enumerate() {
             if p.family[g] != Some(Family::CSharp) {
                 continue;
             }
-            let dir = match files[g].path.rfind('/') {
-                Some(i) => files[g].path[..=i].to_string(),
+            let dir = match file.path.rfind('/') {
+                Some(i) => file.path[..=i].to_string(),
                 None => String::new(),
             };
             for (star, i) in &p.scopes[g].stars {
-                let written = files[g].imports.get(*i).is_some_and(|imp| imp.public);
+                let written = file.imports.get(*i).is_some_and(|imp| imp.public);
                 if written && !matches!(star, Target::Ext(..)) {
                     global.push((dir.clone(), star.clone()));
                 }
             }
         }
         if !global.is_empty() {
-            for f in 0..files.len() {
+            for (f, file) in files.iter().enumerate() {
                 if p.family[f] != Some(Family::CSharp) {
                     continue;
                 }
                 for (dir, star) in &global {
-                    if files[f].path.starts_with(dir.as_str()) {
+                    if file.path.starts_with(dir.as_str()) {
                         if let Target::Module(fs) = star {
                             p.scopes[f].imported.extend(fs.iter().copied());
                         }
