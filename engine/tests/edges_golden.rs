@@ -593,6 +593,37 @@ fn swift_protocol_members_library_singletons_closures_and_given_types() {
 }
 
 #[test]
+fn scala_companions_react_callbacks_and_python_rebinds() {
+    // Scala: `trait Session` and its companion `object Session` answer for
+    // each other. TSX: `const f = useCallback(() => …)` called is the arrow
+    // it wraps. Python: `r = await c.get()` is what `get` declares; a union
+    // parameter rebound from itself (`h = Headers(h)`) is the value; a
+    // package's `__init__.py` star import passes the module on. `Other.buildIt`,
+    // `Plain.keysIt` and `x.y = …` are decoys
+    let got = calls_conf("companions", &[
+        ("src/S.scala", "package app\ntrait Session {\n  def close(): Unit = { Session.closeIt(1) }\n}\nobject Session {\n  def closeIt(c: Int): Unit = ()\n}\nobject Other { def closeIt(c: Int): Unit = () }\n"),
+        ("web/theme.tsx", "import { useCallback } from \"react\"\nexport function Provider() {\n  const resolveIt = useCallback((t: string) => t, [])\n  const after = useCallback(() => 1, [])\n  return resolveIt(\"x\")\n}\nexport function resolveIt2() {}\n"),
+        ("pkg/__init__.py", "from ._models import *\n"),
+        ("pkg/_models.py", "class Headers:\n    def __init__(self, h=None):\n        pass\n\n    def keysIt(self):\n        return []\n\n\nclass Response:\n    def raiseIt(self):\n        return self\n\n\nclass Client:\n    async def get(self) -> Response:\n        return Response()\n\n\nclass Plain:\n    def keysIt(self):\n        return []\n"),
+        ("pkg/use.py", "from ._models import Headers, Client\n\n\ndef update(h: Headers | None = None):\n    h = Headers(h)\n    for k in h.keysIt():\n        pass\n\n\nasync def fetch(c: Client):\n    r = await c.get()\n    r.raiseIt()\n"),
+        ("tests/test_hook.py", "import pkg\n\n\ndef test_hook():\n    def hook(response):\n        response.raiseIt()\n    return hook\n"),
+    ]);
+    let to = |from: &str| -> Vec<String> {
+        got.iter().filter(|(s, ..)| s == from).map(|(_, t, _)| t.clone()).collect()
+    };
+    assert!(to(".close()").contains(&"src_s_session_closeit".to_string()), "{got:#?}");
+    assert!(!to(".close()").contains(&"src_s_other_closeit".to_string()), "{got:#?}");
+    assert!(to("Provider()").contains(&"web_theme_provider_resolveit".to_string()), "{got:#?}");
+    assert!(!to("Provider()").contains(&"web_theme_resolveit2".to_string()), "{got:#?}");
+    assert!(to("update()").contains(&"pkg_models_headers_keysit".to_string()), "{got:#?}");
+    assert!(!to("update()").contains(&"pkg_models_plain_keysit".to_string()), "{got:#?}");
+    assert!(to("fetch()").contains(&"pkg_models_response_raiseit".to_string()), "{got:#?}");
+    // (an untyped parameter, a distinctive name in a module `import pkg`
+    // passes on)
+    assert!(to("hook()").contains(&"pkg_models_response_raiseit".to_string()), "{got:#?}");
+}
+
+#[test]
 fn an_anonymous_class_is_built_by_the_method_around_it() {
     let got = edges("anonymous", &[
         ("A.java", "interface Callback<T> { void onResponse(T body); }\nclass Helper {\n  Helper(String name) {}\n  void run() {}\n}\n\nclass Client {\n  void enqueue(Callback<String> cb) {}\n\n  void go() {\n    final Helper helper = new Helper(\"a\");\n    enqueue(new Callback<String>() {\n      @Override public void onResponse(String body) {\n        helper.run();\n        finish();\n      }\n    });\n    Runnable r = new Runnable() { public void run() { finish(); } };\n  }\n  void finish() {}\n}\n"),

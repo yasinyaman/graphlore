@@ -316,6 +316,18 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- **Native engine 0.5.50: Scala companions, React callbacks, Python values.**
+  - A Scala `trait` / `class` and its companion `object` answer for each
+    other (`BaseSession.buildHttpClient(…)`).
+  - `const f = useCallback(() => …)` called is the function it wraps.
+  - Python: `r = await c.get()` is what `get` declares; a conditional
+    expression is the branch that builds; a union-typed parameter rebound
+    from itself (`h = Headers(h)`) is the new value; a package
+    `__init__.py`'s star import passes the module on; a parameter declared
+    with a builtin type is never guessed by a method's name.
+  - `build --unresolved` marks `super()` calls under a library base and
+    Python receivers of a builtin or library type. No row on the 31 audit
+    repositories is left unmarked (16 → 0).
 - **Native engine 0.5.49: Swift results, protocol properties, extended
   library types, closures.**
   - A Swift function's written result type (`-> Request?`) is read, and

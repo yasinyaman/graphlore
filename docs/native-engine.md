@@ -773,14 +773,14 @@ that the native graph has too:
 
 | Language | same definition | imports (file pairs) | calls | bases | type references |
 |---|--:|--:|--:|--:|--:|
-| Python | 100% | 212 / 219 (96%) | 2,970 / 834 (94%) | 73 / 62 (100%) | 440 / 494 (68%) |
+| Python | 100% | 212 / 219 (96%) | 3,000 / 834 (94%) | 73 / 62 (100%) | 452 / 494 (68%) |
 | JavaScript | 93.5%⁵ | 190 / 305 (59%) | 1,335 / 2,058 (43%)¹ | 1 / 1 | 3 / 0 |
 | TypeScript | 99.4% | 527 / 634 (83%) | 806 / 687 (98%) | 39 / 20 (100%) | 770 / 156 (88%) |
 | TSX | 99.7% | 253 / 316 (80%) | 435 / 456 (95%) | 1 / 0 | 42 / 4 |
 | Go | 100% | 538 / 950 (47%)² | 6,776 / 3,167 (99%) | 19 / 14 (100%) | 689 / 355 (99%) |
 | Java | 100% | 1,105 / 1,010 (100%) | 5,703 / 5,123 (85%) | 415 / 168 (94%) | 3,989 / 1,930 (98%) |
 | Kotlin | 99.4% | 368 / 333 (95%) | 5,030 / 2,108 (71%) | 96 / 56 (93%) | 1,201 / 673 (92%) |
-| Scala | 100% | 2 / 0 | 46 / 20 (45%) | 21 / 22 (95%) | 75 / 32 (100%) |
+| Scala | 100% | 2 / 0 | 51 / 20 (50%) | 21 / 22 (95%) | 76 / 32 (100%) |
 | C# | 92.7% | 342 / 280 (30%)³ | 3,073 / 2,463 (97%) | 87 / 86 (98%) | 1,242 / 807 (99%) |
 | Rust | 93.3% | 324 / 370 (79%) | 2,175 / 853 (87%) | 53 / 41 (93%) | 1,218 / 895 (81%) |
 | Swift | 95.9% | 168 / 166 (–)³ | 5,607 / 2,141 (84%) | 190 / 164 (100%) | 1,071 / 580 (62%) |
@@ -1293,6 +1293,33 @@ is `extension Session { func request(_ endpoint: Endpoint) }`, typed through
 `stored(_:) -> Session`); `EXTRACTED` calls 39 more (41 new, 2 gone). Swift's calls: 5,607
 (84% of graphify's). Unmarked rows in all: 75 → 16 (Python 9, Scala 4, TSX 3);
 rows in all 5,853.
+
+Engine 0.5.50 takes the last 16 unmarked rows (httpx 9, requests-scala 4,
+fastapi-template's `theme-provider.tsx` 3) to none: every row
+`build --unresolved` writes on the 31 repositories now says why it is most
+likely a library's name.
+
+- **Scala companions.** `trait BaseSession` and the `object BaseSession` of
+  the same file are one name: `BaseSession.buildHttpClient(…)` is the
+  object's (`partials`, its own members first).
+- **React callbacks.** `const getResolvedTheme = useCallback((theme) => …, [])`
+  called is the arrow it wraps (`local_function`: a definition of the name
+  that starts as the initializer's first argument; `INFERRED`).
+- **Python values.** `r = await client.get(…)` is what the `async def`
+  declares; `t = (self.timeout if c else Timeout(t))` is the branch that builds;
+  a parameter written with a union (`timeout: TimeoutTypes | UseClientDefault`)
+  rebound from itself (`headers = Headers(headers)`) is the value it is given;
+  a package's `__init__.py` passes on what it star-imports, so `import httpx`
+  sees `httpx/_models.py` (an event hook's untyped `response.raise_for_status()`
+  is `INFERRED`). A parameter declared with a builtin (`output: str`) is a
+  library's value, never a guess by a method's name.
+- **Marks.** `super().serve()` under a library base (`uvicorn.Server`);
+  `self.jar.extract_cookies(…)` on `self.jar = CookieJar()` and
+  `output.splitlines()`, a library's receiver.
+
+httpx gains 30 `INFERRED` calls and 12 references (`headers.keys()` after
+`headers = Headers(headers)`, `request.url.host`), requests-scala 6 calls
+in place of 3 references to the trait. Rows in all: 5,817, none unmarked.
 Engine 0.5.35 (C function-pointer slots) reads a struct of function pointers
 as an interface and what is put in its slots as the implementations: an
 initializer of a variable, by name (`.async_read = redisAsyncRead`) or by
@@ -1753,7 +1780,7 @@ implicit members since 0.5.17: 39 whose place gives no type are rows now
 closure parameters and variables of express's tests. What is left at file
 level there is `app.use` and `app.set` (842 rows of express), names too
 short and too common to guess by. Engine 0.5.19 takes 123 more off (6,362;
-C# 349 from 470; 6,360 with 0.5.20, 6,348 with 0.5.21, 6,285 with 0.5.22, 6,237 with 0.5.25, 6,206 with 0.5.27, 6,166 with 0.5.28, 6,156 with 0.5.30, 6,140 with 0.5.31, 6,132 with 0.5.32, 6,126 with 0.5.33, 6,093 with 0.5.34, 6,047 with 0.5.36, 6,046 with 0.5.37, 6,017 with 0.5.38, 6,005 with 0.5.40, 5,947 with 0.5.42, 5,930 with 0.5.43, 5,950 with 0.5.44, 5,903 with 0.5.45, 5,829 with 0.5.46, 5,838 with 0.5.47, 5,897 with 0.5.48, 5,853 with 0.5.49). Most of what C# has left is not the project's: `Assert.
+C# 349 from 470; 6,360 with 0.5.20, 6,348 with 0.5.21, 6,285 with 0.5.22, 6,237 with 0.5.25, 6,206 with 0.5.27, 6,166 with 0.5.28, 6,156 with 0.5.30, 6,140 with 0.5.31, 6,132 with 0.5.32, 6,126 with 0.5.33, 6,093 with 0.5.34, 6,047 with 0.5.36, 6,046 with 0.5.37, 6,017 with 0.5.38, 6,005 with 0.5.40, 5,947 with 0.5.42, 5,930 with 0.5.43, 5,950 with 0.5.44, 5,903 with 0.5.45, 5,829 with 0.5.46, 5,838 with 0.5.47, 5,897 with 0.5.48, 5,853 with 0.5.49, 5,817 with 0.5.50). Most of what C# has left is not the project's: `Assert.
 NotNull` beside its own `Ensure.NotNull` (77), `WireMockServer.Start` (23).
 
 By then most rows were of that kind: a library's name the project happens

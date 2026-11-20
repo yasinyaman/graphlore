@@ -854,6 +854,24 @@ fn value_type(v: Node, src: &[u8]) -> Option<Vec<String>> {
         "field_expression" if crate::parse::current() == Some(crate::lang::Lang::Rust) => {
             path_of(v, src).filter(|p| p.first().is_some_and(|s| s != UNKNOWN))
         }
+        // Python `r = await client.get(…)`: an `async def` declares what
+        // awaiting it gives
+        "await" if crate::parse::current() == Some(crate::lang::Lang::Python) => {
+            kids(v).into_iter().find_map(|c| value_type(c, src))
+        }
+        // Python `t = (self.timeout if c else Timeout(t))`: the branch that
+        // builds or calls, else the one that names something
+        "conditional_expression" if crate::parse::current() == Some(crate::lang::Lang::Python) => {
+            let ks: Vec<Node> =
+                kids(v).into_iter().filter(|c| c.is_named() && !is_comment(c)).collect();
+            let branches = [ks.first().copied(), ks.get(2).copied()];
+            branches
+                .iter()
+                .flatten()
+                .find(|b| is_call_kind(b.kind()))
+                .and_then(|b| value_type(*b, src))
+                .or_else(|| branches.iter().flatten().find_map(|b| value_type(*b, src)))
+        }
         // `let x = load()?`, `val u = await find()`: what the wrapper holds
         "await_expression" | "try_expression" => {
             let mut p = kids(v).into_iter().find_map(|c| value_type(c, src))?;
@@ -2999,6 +3017,9 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
     // the type handed to the call a Kotlin `let` / `also` lambda's receiver
     // is, by the lambda's first byte
     let mut closure_given: HashMap<usize, Vec<String>> = HashMap::new();
+    // Python: `timeout = Timeout(timeout)`, an assignment whose value uses
+    // the name it rebinds (the name, the statement's byte)
+    let mut rebinds: Vec<(String, usize)> = Vec::new();
     // Go: variables holding a slice of an anonymous struct, and the loops over
     // one (`(start, end, name, fields)`)
     let mut anon_vars: Vec<AnonRows> = Vec::new();
@@ -3720,6 +3741,29 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                     byte: n.start_byte(),
                 });
             }
+            if facts.lang == Some(crate::lang::Lang::Python) && n.kind() == "assignment" {
+                if let (Some(l), Some(r)) =
+                    (n.child_by_field_name("left"), n.child_by_field_name("right"))
+                {
+                    if l.kind() == "identifier" {
+                        let name = text(l, src);
+                        let mut stack = vec![(r, 0usize)];
+                        let mut uses = false;
+                        while let Some((x, depth)) = stack.pop() {
+                            if x.kind() == "identifier" && text(x, src) == name {
+                                uses = true;
+                                break;
+                            }
+                            if depth < 8 {
+                                stack.extend(kids(x).into_iter().map(|c| (c, depth + 1)));
+                            }
+                        }
+                        if uses {
+                            rebinds.push((name, n.start_byte()));
+                        }
+                    }
+                }
+            }
             let taken_apart = parts.is_some();
             for (name, mut path, declared, field) in
                 locals_of(n, src, false).into_iter().filter(|_| !taken_apart)
@@ -4283,6 +4327,37 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                 l.path.extend(steps.iter().cloned());
             }
         }
+    }
+    // Python `def f(timeout: TimeoutTypes | UseClientDefault)` reassigned
+    // `timeout = Timeout(timeout)`: the union written for the parameter says
+    // less than the value it is given
+    if facts.lang == Some(crate::lang::Lang::Python) {
+        let union = |d: Option<usize>, name: &str| {
+            d.and_then(|d| facts.defs.get(d)).is_some_and(|def| {
+                def.plist.iter().any(|p| {
+                    p.name == name
+                        && (p.written.contains('|')
+                            || p.written.starts_with("Union[")
+                            || p.written.starts_with("Optional["))
+                })
+            })
+        };
+        let assigned: Vec<(Option<usize>, String)> = locals
+            .iter()
+            .filter(|l| {
+                !l.declared
+                    && !l.field
+                    && !l.path.is_empty()
+                    && rebinds.iter().any(|(n, b)| *n == l.name && *b == l.byte)
+            })
+            .map(|l| (l.from_def, l.name.clone()))
+            .collect();
+        locals.retain(|l| {
+            !(l.declared
+                && !l.field
+                && assigned.iter().any(|(d, n)| *d == l.from_def && *n == l.name)
+                && union(l.from_def, &l.name))
+        });
     }
     // Swift `var urlRequest = try urlRequest.asURLRequest()`: the variable
     // takes the parameter's name for the rest of the function; the parameter

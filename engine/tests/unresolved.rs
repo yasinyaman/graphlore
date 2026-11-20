@@ -575,3 +575,35 @@ fn swift_rows_on_library_values_and_type_parameters_say_so() {
     assert_eq!(why("iterateIt"), "the receiver is a library's", "{rows:#?}");
     assert_eq!(why("stateIt"), "the receiver is of a type parameter", "{rows:#?}");
 }
+
+#[test]
+fn python_rows_on_builtins_library_fields_and_library_bases_say_so() {
+    let dir = project(
+        "pymarks",
+        &[
+            // each name defined once in the project, each call made on a
+            // builtin, a library's object or under a library base
+            ("app/lib.py", "class Mine:\n    def splitIt(self):\n        return []\n\n    def extractIt(self):\n        return 1\n\n    def serveIt(self):\n        return 1\n"),
+            ("app/use.py", "from http.cookiejar import CookieJar\nfrom uvicorn import Server\n\n\ndef lines(output: str):\n    return output.splitIt()\n\n\nclass Jar:\n    def __init__(self):\n        self.jar = CookieJar()\n\n    def go(self):\n        self.jar.extractIt()\n\n\nclass TestServer(Server):\n    def run(self):\n        super().serveIt()\n"),
+        ],
+    );
+    let out = dir.join("unresolved.json");
+    let mut opts = BuildOptions::new(&dir);
+    opts.unresolved = Some(out.clone());
+    build_graph(&opts).unwrap();
+    let rows: Vec<Value> = serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+    let why = |name: &str| {
+        rows.iter()
+            .find(|r| r["name"] == name)
+            .map(|r| r["library_like"].clone())
+            .unwrap_or_else(|| panic!("no row {name}: {rows:#?}"))
+    };
+    assert_eq!(why("splitIt"), "the receiver is a library's", "{rows:#?}");
+    assert_eq!(why("extractIt"), "the receiver is a library's", "{rows:#?}");
+    assert_eq!(
+        why("serveIt"),
+        "the type around has a base the project does not define",
+        "{rows:#?}"
+    );
+}

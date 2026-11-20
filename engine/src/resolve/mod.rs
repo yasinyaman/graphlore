@@ -956,6 +956,21 @@ const KEEPING_METHODS: &[&str] = &[
     "copy",
 ];
 
+/// Python's builtin types: a receiver declared with one is the language's.
+const PYTHON_BUILTIN_TYPES: &[&str] = &[
+    "str",
+    "bytes",
+    "bytearray",
+    "int",
+    "float",
+    "bool",
+    "list",
+    "dict",
+    "set",
+    "frozenset",
+    "tuple",
+];
+
 /// Swift: the static properties by which a library type hands out its shared
 /// instance (`NotificationCenter.default`, `DispatchQueue.main`).
 const SWIFT_SINGLETONS: &[&str] = &["default", "main", "shared", "current", "standard"];
@@ -1583,8 +1598,14 @@ impl<'a> Project<'a> {
     fn passes_on(&self, g: usize) -> Vec<usize> {
         let mut out = Vec::new();
         let s = &self.scopes[g];
+        // (Python: a package's `__init__.py` passes on what it star-imports,
+        // `from ._models import *` in `httpx/__init__.py`)
+        let package_init = self.family[g] == Some(Family::Python)
+            && self.files[g].path.rsplit('/').next() == Some("__init__.py");
         for (i, imp) in self.files[g].imports.iter().enumerate() {
-            if imp.form == ImportForm::ReExport {
+            if imp.form == ImportForm::ReExport
+                || (package_init && imp.form == ImportForm::Wildcard)
+            {
                 if let Some(ModRes::Target(Target::Module(fs))) = s.modules.get(i) {
                     out.extend(fs.iter().copied());
                 }
@@ -3577,6 +3598,15 @@ impl<'a> Project<'a> {
                 if matches!(self.resolve_name(f, scope(x), head), Some(Target::Ext(_, _))) {
                     return true;
                 }
+                // (Python `output: str`: a builtin the project does not define)
+                if l.declared
+                    && self.family[f] == Some(Family::Python)
+                    && l.path.len() == 1
+                    && PYTHON_BUILTIN_TYPES.contains(&l.path[0].as_str())
+                    && self.type_named(f, &l.path[0]).is_none()
+                {
+                    return true;
+                }
                 // (C# `string value`, `int n`: the language's own types)
                 if l.declared
                     && self.family[f] == Some(Family::CSharp)
@@ -4182,6 +4212,10 @@ impl<'a> Project<'a> {
             let calling = self.calling.replace(true);
             let found = self.resolve_path(g, l.from_def, &l.path, true);
             *self.calling.borrow_mut() = calling;
+            // (Python `self.jar = CookieJar()`, of `http.cookiejar`)
+            if matches!(found, Some((Target::Ext(..), _))) {
+                return Some(true);
+            }
             let Some((Target::Def(c), _)) = found else { return None };
             if !self.def(c).kind.is_callable() {
                 return None;
@@ -4200,6 +4234,21 @@ impl<'a> Project<'a> {
         }
         if l.elem.is_some() || l.keyed {
             return Some(true);
+        }
+        // (Python `output: str`: a builtin type the project does not define)
+        if self.family[g] == Some(Family::Python) {
+            if let [t] = l.path.as_slice() {
+                if PYTHON_BUILTIN_TYPES.contains(&t.as_str())
+                    && !self.by_name.get(t.as_str()).is_some_and(|ds| {
+                        ds.iter().any(|x| {
+                            self.family[x.0] == Some(Family::Python)
+                                && self.def(*x).kind.is_class_like()
+                        })
+                    })
+                {
+                    return Some(true);
+                }
+            }
         }
         // a type parameter of the type around or of the callable
         let mut cur = l.from_def;
@@ -4227,7 +4276,7 @@ impl<'a> Project<'a> {
     /// or field declared with such a type or a collection, or a field along
     /// the path that is (`session.configuration.urlCache`).
     fn swift_library_receiver(&self, f: usize, d: Option<usize>, path: &[String]) -> Option<bool> {
-        if self.family[f] != Some(Family::Swift) || path.len() < 2 {
+        if !matches!(self.family[f], Some(Family::Swift | Family::Python)) || path.len() < 2 {
             return None;
         }
         let _guard = DepthGuard::enter(&LIBRARY_DEPTH, 2)?;
@@ -4805,6 +4854,18 @@ impl<'a> Project<'a> {
     /// beside `RestResponse` is another type).
     fn partials(&self, c: DefRef) -> Vec<DefRef> {
         let def = self.def(c);
+        // Scala: a type and its companion `object` (same name, same file)
+        // answer for each other: `BaseSession.buildHttpClient(…)` is the
+        // object's, beside `trait BaseSession`
+        if self.files[c.0].lang == Some(crate::lang::Lang::Scala) && def.kind.is_class_like() {
+            return self.files[c.0]
+                .defs
+                .iter()
+                .enumerate()
+                .filter(|(i, x)| *i != c.1 && x.qualname == def.qualname && x.kind.is_class_like())
+                .map(|(i, _)| (c.0, i))
+                .collect();
+        }
         // Ruby: every `class Response` that opens the class is the class
         // (`extend MiddlewareRegistry` in one, `class Json` nested in another)
         if self.family[c.0] == Some(Family::Ruby) && def.kind.is_class_like() {
@@ -5057,7 +5118,10 @@ impl<'a> Project<'a> {
         // a C# partial type: what its other declarations hold (a Ruby class
         // reopened elsewhere: only when its own block holds none, so two
         // scripts' `class Client` each keep their own methods)
-        if self.family[c.0] == Some(Family::Ruby) && !out.is_empty() {
+        if (self.family[c.0] == Some(Family::Ruby)
+            || self.files[c.0].lang == Some(crate::lang::Lang::Scala))
+            && !out.is_empty()
+        {
             return out;
         }
         for p in self.partials(c) {
@@ -5957,6 +6021,12 @@ impl<'a> Project<'a> {
                     && matches!(fam, Family::Jvm | Family::CSharp)
                     && self.local_keeps_outer(f, d, head, *self.calling.borrow())) =>
             {
+                // (`const f = useCallback(() => …)`, called: the function)
+                if rest.is_empty() && !bases && *self.calling.borrow() {
+                    if let Some(fun) = self.local_function(f, d, head) {
+                        return Some((Target::Def(fun), Confidence::Inferred));
+                    }
+                }
                 if rest.len() == 1 && !bases && *self.calling.borrow() {
                     // (`var message = new HttpRequestMessage()`: the type it
                     // constructs is the one an extension is written for)
@@ -7817,7 +7887,8 @@ impl<'a> Project<'a> {
             // (`UserResponse.serializer()` of a `@Serializable` class)
             Some("the member is one a compiler plugin generates")
         } else if matches!(head, "self" | "super")
-            && r.path.len() == 2
+            // (Python `super().serve()`: `super`, `()`, the name)
+            && (r.path.len() == 2 || (head == "super" && r.path.len() == 3 && r.path[1] == "()"))
             && (self.class_of(f, d).is_some_and(|t| self.has_outside_base(t))
                 || self.anonymous_outside_base(f, d))
         {
@@ -8007,6 +8078,24 @@ impl<'a> Project<'a> {
             cur = self.up(f, x);
         };
         let l = &self.files[f].locals[li];
+        // (`const getResolvedTheme = useCallback((theme) => …, [])`: the
+        // function the declaration wraps, named after it, is what is called)
+        if self.family[f] == Some(Family::Ecma) && x != FILE_SCOPE {
+            let defs = &self.files[f].defs;
+            // (the function is the initializer call's first argument:
+            // `name = callee(` and what little space may stand between)
+            let reach = l.byte + name.len() + l.path.iter().map(|p| p.len() + 1).sum::<usize>() + 8;
+            let wrapped = self.children[f].get(&x).and_then(|m| m.get(name)).and_then(|ds| {
+                ds.iter().copied().find(|&i| {
+                    defs[i].kind.is_callable()
+                        && defs[i].start_byte > l.byte
+                        && defs[i].start_byte <= reach
+                })
+            });
+            if let Some(i) = wrapped {
+                return Some((f, i));
+            }
+        }
         // (`const [text, copy] = useCopy()`, `const { show } = useToast()`)
         let part = l.path.last().is_some_and(|s| crate::refs::tuple_index(s).is_some());
         let member = l.path.len() >= 3 && l.path[l.path.len() - 2] == "()";
