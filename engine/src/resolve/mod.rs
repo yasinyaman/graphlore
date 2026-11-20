@@ -3562,6 +3562,31 @@ impl<'a> Project<'a> {
         )
     }
 
+    /// A member a Ruby class has through what another opening of it mixes in
+    /// or extends: `Faraday::Response.register_middleware` in a file that
+    /// opens `class Response` again, beside `extend MiddlewareRegistry` in
+    /// the file that declares it.
+    fn reopened_base_member(&self, c: DefRef, name: &str) -> Option<DefRef> {
+        if self.family[c.0] != Some(Family::Ruby) {
+            return None;
+        }
+        let key = qual_key(Family::Ruby, &self.def(c).qualname);
+        let mut openings: Vec<DefRef> = self
+            .by_qual
+            .get(&key)
+            .into_iter()
+            .flatten()
+            .copied()
+            .filter(|r| {
+                *r != c
+                    && self.family[r.0] == Some(Family::Ruby)
+                    && self.def(*r).kind.is_class_like()
+            })
+            .collect();
+        openings.sort();
+        openings.into_iter().find_map(|r| self.class_member(r, name, 4))
+    }
+
     /// What a JS/TS module is when it is used as a value (`const Foo =
     /// require('./foo'); new Foo()`): the definition it assigns to
     /// `module.exports` or exports as its default, through modules that pass
@@ -3590,6 +3615,7 @@ impl<'a> Project<'a> {
                 }
                 self.class_member(*c, name, 4)
                     .or_else(|| self.reopened_member(*c, name))
+                    .or_else(|| self.reopened_base_member(*c, name))
                     .map(Target::Def)
             }
             Target::Module(files) => {
@@ -5709,6 +5735,14 @@ impl<'a> Project<'a> {
             || library_step()
         {
             Some("the receiver is a library's")
+        } else if r.path.len() >= 2
+            && self.attrs.contains(&(fam, name.to_string()))
+            && UNTYPED_RECEIVER_REASONS.contains(&reason.as_str())
+        {
+            // (`env.status` beside `Env = Options.new(:status, …)`, `conn.adapter`
+            // beside `def_delegators :builder, :adapter`: the receiver may be
+            // the type that declares it with no `def`)
+            Some("a type declares an attribute of the name")
         } else if bare_is_no_method {
             Some("a bare name is no method here")
         } else if let_elsewhere {

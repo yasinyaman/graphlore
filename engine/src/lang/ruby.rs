@@ -106,7 +106,16 @@ impl LanguageModule for Ruby {
     }
 
     fn heritage_of(&self, n: Node, src: &[u8]) -> Vec<(RefKind, Vec<String>)> {
-        if !matches!(n.kind(), "class" | "module" | "singleton_class") {
+        // `Request = Struct.new(:path) do extend Registry … end`: the class
+        // named after the constant mixes in what its block says
+        let struct_block = (n.kind() == "assignment"
+            && n.child_by_field_name("left").is_some_and(|l| l.kind() == "constant"))
+        .then(|| n.child_by_field_name("right"))
+        .flatten()
+        .filter(|r| r.kind() == "call")
+        .and_then(|c| c.child_by_field_name("block"))
+        .filter(|b| b.kind() == "do_block");
+        if struct_block.is_none() && !matches!(n.kind(), "class" | "module" | "singleton_class") {
             return Vec::new();
         }
         let mut out = Vec::new();
@@ -115,7 +124,7 @@ impl LanguageModule for Ruby {
                 out.push((RefKind::Inherits, p));
             }
         }
-        if let Some(body) = n.child_by_field_name("body") {
+        if let Some(body) = struct_block.unwrap_or(n).child_by_field_name("body") {
             for stmt in kids(body) {
                 let Some(m) = method_name(stmt, src) else { continue };
                 if !matches!(m.as_str(), "include" | "extend" | "prepend") {

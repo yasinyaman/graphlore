@@ -316,6 +316,19 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- **Native engine 0.5.41: what a reopened Ruby class extends, and attributes
+  in the diagnostics.** A member a Ruby class has through what another opening
+  of it mixes in or extends is found from every opening
+  (`Faraday::Response.register_middleware(…)` in a file that opens `class
+  Response` again, `extend MiddlewareRegistry` where it is declared), and a
+  class written `Request = Struct.new(…) do extend Registry … end` mixes in
+  what its block says: faraday's eight `register_middleware` calls,
+  `EXTRACTED`, and three `mixes_in` edges. The diagnostics mark a member an
+  untyped receiver is asked when a type declares that name with no `def` (a
+  `Struct` member, `attr_accessor`, `def_delegators`: `env.status` beside
+  `Env = Options.new(:status, …)`): the one `def` of the name is one of
+  several things the receiver may be. Unmarked unresolved rows: 501 → 383
+  (Ruby 215 → 97).
 - **Native engine 0.5.40: a closure no definition holds is a scope.** The
   callback of `test('…', () => { … })`, an RSpec `it '…' do … end`, a module
   wrapped in a function: each is a definition with no node and no name

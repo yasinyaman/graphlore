@@ -269,3 +269,33 @@ fn rows_a_librarys_type_or_another_scope_explains_say_so() {
     // `conn.uri`: the `let(:uri)` is no member of `conn`, so no candidate
     assert!(rows.iter().all(|r| r["path"] != "conn.uri"), "{rows:#?}");
 }
+
+#[test]
+fn a_name_a_type_declares_as_an_attribute_is_no_gap_on_an_untyped_receiver() {
+    let dir = project(
+        "attribute",
+        &[
+            // `status` is a member of the struct `Env` and a method of
+            // `Reply`: an untyped `env` may be either
+            ("lib/env.rb", "Env = Struct.new(:status, :body)\n"),
+            (
+                "lib/reply.rb",
+                "class Reply\n  def status\n    200\n  end\n\n  def finish\n    1\n  end\nend\n",
+            ),
+            ("app/use.rb", "def show(env, reply)\n  env.status\n  reply.finish\nend\n"),
+        ],
+    );
+    let out = dir.join("unresolved.json");
+    let mut opts = BuildOptions::new(&dir);
+    opts.unresolved = Some(out.clone());
+    build_graph(&opts).unwrap();
+    let rows: Vec<Value> = serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+    let row = |path: &str| rows.iter().find(|r| r["path"] == path).cloned();
+    let status = row("env.status").expect("env.status is a row");
+    assert_eq!(status["library_like"], "a type declares an attribute of the name", "{status:#?}");
+    // a name only a `def` declares stays a gap
+    if let Some(finish) = row("reply.finish") {
+        assert_eq!(finish["library_like"], Value::Null, "{finish:#?}");
+    }
+}
