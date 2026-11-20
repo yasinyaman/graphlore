@@ -131,6 +131,10 @@ pub fn path_of(n: Node, src: &[u8]) -> Option<Vec<String>> {
     }
     if NAME_KINDS.contains(&k) {
         let t = text(n, src);
+        // PHP `new static()`, `static::make()`: the class around
+        if t == "static" && crate::parse::current() == Some(crate::lang::Lang::Php) {
+            return Some(vec!["self".into()]);
+        }
         return match receiver_word(&t) {
             Some(word) => Some(vec![word.into()]),
             None => Some(vec![t.trim_start_matches('$').to_string()]),
@@ -318,6 +322,8 @@ pub fn is_call_kind(k: &str) -> bool {
         && !k.contains("macro")
         && k != "call_signature"
         && k != "constructor_invocation"
+        // (Kotlin `::handle`: a function named, not called)
+        && k != "callable_reference"
 }
 
 /// The callee of a call node, and whether it constructs (`new`).
@@ -3168,6 +3174,13 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                             "argument",
                             None,
                         ),
+                        // PHP `[$this, 'handle']`, `[Foo::class, 'handle']`: a
+                        // method named by the object and its name
+                        "array_creation_expression" => {
+                            if let Some(p) = php_callable(a, src) {
+                                push(&mut refs, a, RefKind::Indirect, p, "argument", None);
+                            }
+                        }
                         "argument" | "value_argument" | "value_arguments" | "list" | "array"
                         | "tuple" | "keyword_argument" | "pair" | "dictionary" | "object"
                         | "array_literal" | "collection_literal" => {
@@ -3187,6 +3200,28 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
             push(&mut refs, n, RefKind::New, path, "constructor", None);
             if let Some(r) = refs.get_mut(at) {
                 r.args = args;
+            }
+        }
+        // `this::helper`, `Util::twice`, `::handle`: the function the
+        // reference names; Kotlin `Foo::class`: the class
+        if matches!(n.kind(), "callable_reference" | "method_reference") {
+            let ks: Vec<Node> = kids(n).into_iter().filter(|c| !is_comment(c)).collect();
+            // (the grammar keeps `class` out of the tree)
+            if text(n, src).ends_with("::class") {
+                if let Some(p) = ks.first().and_then(|c| path_of(*c, src)) {
+                    push(&mut refs, n, RefKind::Type, p, "class_literal", None);
+                }
+            } else if let Some(p) = referenced(n, src) {
+                push(&mut refs, n, RefKind::Indirect, p, "argument", None);
+            }
+        }
+        // PHP `Repo::class`: the class named
+        if n.kind() == "class_constant_access_expression" {
+            let ks = kids(n);
+            if ks.len() == 2 && text(ks[1], src) == "class" {
+                if let Some(p) = path_of(ks[0], src).filter(|p| p[0] != "self" && p[0] != "super") {
+                    push(&mut refs, n, RefKind::Type, p, "class_literal", None);
+                }
             }
         }
         // JS `this` in a function expression no definition holds
@@ -3784,6 +3819,32 @@ fn mapped(of: &[String], var: &str, each: Vec<String>) -> Option<Vec<String>> {
     };
     out.push(MANY.into());
     Some(out)
+}
+
+/// PHP's callable written as an array: `[$this, 'handle']` is the method
+/// `handle` of the object, `[Foo::class, 'handle']` of `Foo`.
+fn php_callable(a: Node, src: &[u8]) -> Option<Vec<String>> {
+    let items: Vec<Node> =
+        kids(a).into_iter().filter(|c| c.kind() == "array_element_initializer").collect();
+    let [of, name] = items.as_slice() else { return None };
+    let (of, name) = (kids(*of).into_iter().next()?, kids(*name).into_iter().next()?);
+    if !matches!(name.kind(), "string" | "encapsed_string") {
+        return None;
+    }
+    let name = string_value(name, src);
+    let mut p = match of.kind() {
+        "variable_name" if text(of, src) == "$this" => vec!["self".to_string()],
+        "class_constant_access_expression" => {
+            let ks = kids(of);
+            (ks.len() == 2 && text(ks[1], src) == "class").then(|| path_of(ks[0], src)).flatten()?
+        }
+        _ => return None,
+    };
+    let plain = !name.is_empty() && name.chars().all(|c| c.is_alphanumeric() || c == '_');
+    plain.then(|| {
+        p.push(name);
+        p
+    })
 }
 
 /// A function given by reference: `Item::owner` (Kotlin, Java, Rust) and

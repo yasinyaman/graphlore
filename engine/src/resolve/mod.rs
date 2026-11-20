@@ -4329,7 +4329,14 @@ impl<'a> Project<'a> {
             }
             "self" => {
                 if rest.is_empty() {
-                    return None;
+                    // PHP `new static()` / `new self()`: the class around
+                    let constructs = fam == Family::Php
+                        && (*self.cur.borrow())
+                            .is_some_and(|(cf, ci)| self.files[cf].refs[ci].kind == RefKind::New);
+                    return constructs
+                        .then(|| self.class_of(f, d))
+                        .flatten()
+                        .map(|c| (Target::Def(c), conf));
                 }
                 // Ruby `self.class.from(x)`: a method of the class itself
                 if fam == Family::Ruby && rest.len() > 1 && rest[0] == "class" {
@@ -7141,7 +7148,14 @@ pub fn resolve(
                                 if !tk.is_callable() {
                                     continue;
                                 }
-                                "references"
+                                // Scala `r.size`: a method that takes nothing
+                                // is called by naming it
+                                let scala = p.files[f].lang == Some(crate::lang::Lang::Scala);
+                                if scala && p.def(t).params.is_none_or(|n| n == 0) {
+                                    "calls"
+                                } else {
+                                    "references"
+                                }
                             }
                             RefKind::Read | RefKind::Write => {
                                 if !tk.is_state() {
