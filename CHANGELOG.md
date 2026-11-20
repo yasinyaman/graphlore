@@ -328,6 +328,24 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- **Native engine 0.5.50: a file git tracks is read whatever an ignore rule
+  says of its name.** The engine honoured `.gitignore` for every file; git
+  itself ignores only what is untracked. cJSON commits `tests/unity/test/`
+  under a rule `test` (581 definitions were not read), and zod commits each
+  package's `package.json` under `**/package.json`, so the engine never
+  learned that `packages/zod` is the package `zod` and every workspace import
+  of it was an external module (2,042 calls). The engine now asks git
+  (`git ls-files`; nothing changes without git or outside a repository) and
+  reads the tracked files an ignore rule matched — not hidden paths,
+  `node_modules`, or what `.graphloreignore` / `.graphifyignore` name. A
+  repository that commits its build output gets it read as well; the analysis
+  scope leaves it out as vendored. Also: C# / Java / JS / PHP / C++ `new
+  Name(…)` names the type, never a method of the class around called `Name`
+  (commandline: 22 edges from a factory method to itself).
+  `compare_engines.py` counts a type reference as found when the native graph
+  states it from the method (graphify writes it on the class) or as a `calls`
+  edge to the class (graphify: `uses`): type references 91% → 94% on the first
+  set, 85% → 90% on the second.
 - **Native engine 0.5.49: a language's names are read only where the language
   means them.** The reader and the resolver are shared by the 14 languages,
   and two rules of one language had been found applied to the others by

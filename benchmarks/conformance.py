@@ -1329,6 +1329,10 @@ case("csharp", "using-block-namespace", "`using N;` brings the extensions of a n
           "Core/A.cs": "using System.Collections.Generic;\nusing App.Infra;\n\nnamespace App.Core\n{\n    public class A\n    {\n"
                        "        public bool Run(IEnumerable<string> values)\n        {\n            return values.Empty();\n        }\n    }\n}\n"},
      [("A.Run", "calls", "EnumerableExtensions.Empty")])
+case("csharp", "new-names-a-type", "`new Name(…)` names the type, whatever method of the class around is called `Name`",
+     CS, {"A.cs": "namespace App\n{\n    public class Name : Token\n    {\n        public Name(string text) { }\n    }\n\n"
+                  "    public class Token\n    {\n        public static Token Name(string text)\n        {\n            return new Name(text);\n        }\n    }\n}\n"},
+     [("Token.Name", "calls", "A.cs:App.Name")])
 case("csharp", "generic-namesake", "`Maybe.Nothing<T>()` is a member of the static class `Maybe` beside the generic `Maybe<T>`",
      CS, {"A.cs": "namespace App\n{\n    public abstract class Maybe<T>\n    {\n    }\n\n"
                   "    public static class Maybe\n    {\n        public static Maybe<T> Nothing<T>() { return null; }\n    }\n\n"

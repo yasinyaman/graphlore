@@ -1,6 +1,6 @@
 {
- "passed": 423,
- "total": 423,
+ "passed": 424,
+ "total": 424,
  "cases": [
   {
    "id": "python/module-function",
@@ -1900,6 +1900,12 @@
   },
   {
    "id": "csharp/using-block-namespace",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/new-names-a-type",
    "ok": true,
    "missing": [],
    "unwanted": []

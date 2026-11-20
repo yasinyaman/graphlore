@@ -67,6 +67,7 @@ EXT_LANG = {
     ".hpp": "cpp", ".hxx": "cpp", ".rb": "ruby", ".php": "php",
 }
 C_FAMILY = {"c", "cpp", "c/c++ header"}
+TYPE_KINDS = {"class", "struct", "interface", "enum", "type_alias", "module"}
 CONTAINMENT = {"contains", "method", "case_of", "defines"}
 NEAR = 3
 SAMPLES = 5
@@ -294,6 +295,7 @@ def compare_edges(theirs_graph: dict, ours_graph: dict, paired: dict[str, str]) 
             i = parent[i]
         return None
     sets: dict[tuple[str, str, str], set] = {}
+    stated: dict[tuple[str, str], set] = {}
     inferred = {}
     for name, (byid, edges) in sides.items():
         for e in edges:
@@ -329,6 +331,20 @@ def compare_edges(theirs_graph: dict, ours_graph: dict, paired: dict[str, str]) 
             sets.setdefault((g, lang, name), set()).add(key)
             if name == "native" and str(e.get("confidence", "")).upper() == "INFERRED":
                 inferred[(g, lang)] = inferred.get((g, lang), 0) + 1
+            # graphify writes a type a method uses on the method's class, and
+            # a construction as a `uses` edge. The native graph says the same
+            # with an edge from the method, and a `calls` edge to the class:
+            # such an edge states graphify's reference without being it.
+            if name == "native" and g in ("references", "calls"):
+                to_type = str(tn.get("kind") or "") in TYPE_KINDS
+                if g == "references" or to_type:
+                    up, seen = s, 0
+                    while up is not None and seen < 4:
+                        at = lifted(up, False)
+                        if at is not None and (at != key[0] or g == "calls"):
+                            where = language(_node_file(ours_by[at]) or "") or lang
+                            stated.setdefault(("references", where), set()).add((at, key[1]))
+                        up, seen = parent.get(up), seen + 1
     labels = {
         name: {i: _node_label(n) for i, n in byid.items()} for name, (byid, _) in sides.items()
     }
@@ -347,11 +363,13 @@ def compare_edges(theirs_graph: dict, ours_graph: dict, paired: dict[str, str]) 
                     rows.append(f"{la} -> {lb}")
             return rows
 
+        said = stated.get((g, lang), set()) - ours
         out.setdefault(g, {})[lang] = {
-            "graphify": len(theirs), "native": len(ours), "both": len(theirs & ours),
-            "only_graphify": len(theirs - ours), "only_native": len(ours - theirs),
+            "graphify": len(theirs), "native": len(ours),
+            "both": len(theirs & (ours | said)), "stated_otherwise": len(theirs & said),
+            "only_graphify": len(theirs - ours - said), "only_native": len(ours - theirs),
             "native_inferred": inferred.get((g, lang), 0),
-            "samples_only_graphify": show(theirs - ours, "graphify"),
+            "samples_only_graphify": show(theirs - ours - said, "graphify"),
             "samples_only_native": show(ours - theirs, "native"),
         }
     return out

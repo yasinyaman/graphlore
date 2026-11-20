@@ -2632,3 +2632,14 @@ fn a_wrappers_name_is_the_projects_type_where_the_project_defines_it() {
     ]);
     has(&got, &[("A.run", "calls", "Item.size")]);
 }
+
+#[test]
+fn csharp_new_names_a_type_beside_a_method_of_its_name() {
+    // `return new Name(text);` inside `static Token Name(string text)`
+    let got = quals("cs-new-type", &[(
+        "A.cs",
+        "namespace App\n{\n    public class Name : Token\n    {\n        public Name(string text) { }\n    }\n\n    public class Token\n    {\n        public static Token Name(string text)\n        {\n            return new Name(text);\n        }\n    }\n}\n",
+    )]);
+    has(&got, &[("App.Token.Name", "calls", "App.Name")]);
+    lacks(&got, &[("App.Token.Name", "calls", "App.Token.Name")]);
+}

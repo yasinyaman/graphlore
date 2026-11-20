@@ -11,7 +11,9 @@ what is left before it can be the default.
 ## What it extracts
 
 - **Files.** It reads everything under the project root that git would not
-  ignore (and `.graphifyignore` / `.graphloreignore`), skipping the output
+  ignore, and what git tracks even where an ignore rule matches its name
+  (`.graphifyignore` / `.graphloreignore` are the engine's own and always
+  hold), skipping the output
   directory, `node_modules`, virtualenvs and files over 2 MB. Source files with
   an extension no module reads (`.lua`, `.zig`, `.ex`, …) are counted in the
   build reply, not dropped silently.
@@ -767,34 +769,39 @@ file pairs). The native graph has definitions graphify folds into the one
 around them (a function nested in a method, the setter beside a getter of the
 same name); an edge from one of those is compared as an edge from the paired
 definition it belongs to, as graphify records it. On the 31 repositories of the
-[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.47,
+[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.50,
 measured 2026-11-20), as native / graphify edges and the share of graphify's
 that the native graph has too:
 
 | Language | same definition | imports (file pairs) | calls | bases | type references |
 |---|--:|--:|--:|--:|--:|
-| Python | 100% | 212 / 219 (96%) | 2,986 / 834 (94%) | 73 / 62 (100%) | 440 / 494 (68%) |
-| JavaScript | 93.5%⁵ | 190 / 305 (59%) | 1,289 / 2,058 (42%)¹ | 1 / 1 (100%) | 3 / 0 |
+| Python | 100% | 212 / 219 (96%) | 2,986 / 834 (94%) | 73 / 62 (100%) | 445 / 494 (90%) |
+| JavaScript | 93.5%⁵ | 250 / 305 (59%) | 1,289 / 2,058 (41%)¹ | 1 / 1 (100%) | 3 / 0 |
 | TypeScript | 99.4% | 527 / 634 (83%) | 804 / 687 (98%) | 25 / 20 (100%) | 742 / 156 (88%) |
 | TSX | 99.7% | 253 / 316 (80%) | 435 / 456 (95%) | – | 42 / 4 |
-| Go | 100% | 538 / 950 (47%)² | 6,730 / 3,167 (99%) | 19 / 14 (100%) | 681 / 355 (99%) |
+| Go | 100% | 538 / 950 (47%)² | 6,730 / 3,167 (99%) | 19 / 14 (100%) | 681 / 355 (100%) |
 | Java | 100% | 1,105 / 1,010 (100%) | 5,782 / 5,123 (85%) | 415 / 168 (94%) | 3,996 / 1,930 (98%) |
-| Kotlin | 99.4% | 368 / 333 (95%) | 4,668 / 2,108 (71%) | 96 / 56 (93%) | 1,232 / 673 (92%) |
+| Kotlin | 99.4% | 368 / 333 (95%) | 4,682 / 2,108 (71%) | 96 / 56 (93%) | 1,232 / 673 (94%) |
 | Scala | 100% | 2 / 0 | 78 / 20 (50%) | 21 / 22 (95%) | 45 / 32 (100%) |
 | C# | 92.8% | 343 / 280 (29%)³ | 3,329 / 2,460 (97%) | 91 / 86 (98%) | 1,334 / 928 (99%) |
-| Rust | 93.3% | 314 / 370 (75%) | 2,065 / 853 (86%) | 53 / 41 (93%) | 1,245 / 895 (81%) |
-| Swift | 95.9% | 167 / 166 (–)³ | 5,505 / 2,141 (83%) | 190 / 164 (100%) | 1,527 / 580 (78%)⁶ |
+| Rust | 93.3% | 314 / 370 (75%) | 2,065 / 853 (86%) | 53 / 41 (93%) | 1,325 / 895 (87%) |
+| Swift | 95.9% | 167 / 166 (–)³ | 5,506 / 2,141 (83%) | 190 / 164 (100%) | 1,648 / 580 (79%)⁶ |
 | C | 100% | 89 / 77 (99%) | 864 / 791 (100%) | – | 257 / 130 (100%) |
-| C++ | 98.7% | 215 / 228 (93%) | 876 / 281 (57%)⁴ | 30 / 5 (100%) | 410 / 234 (90%) |
-| C/C++ headers | 91.4% | 164 / 172 (95%) | 423 / 348 (87%) | 12 / 12 (92%) | 576 / 312 (90%) |
+| C++ | 98.7% | 215 / 228 (93%) | 877 / 281 (57%)⁴ | 30 / 5 (100%) | 410 / 234 (91%) |
+| C/C++ headers | 91.4% | 164 / 172 (95%) | 423 / 348 (87%) | 12 / 12 (92%) | 576 / 312 (88%) |
 | Ruby | 99.7% | 42 / 0 | 455 / 375 (69%) | 47 / 15 (93%) | 28 / 0 |
-| PHP | 80.6% | 429 / 505 (84%) | 8,926 / 6,140 (90%) | 65 / 60 (98%) | 1,350 / 213 (95%) |
-| **All** | **94.4%** | **4,958 / 5,565 (75%)** | **45,215 / 27,842 (85%)** | **1,138 / 726 (97%)** | **13,908 / 6,936 (91%)** |
+| PHP | 80.6% | 509 / 505 (100%) | 8,927 / 6,140 (90%) | 65 / 60 (98%) | 1,350 / 213 (100%) |
+| **All** | **94.4%** | **5,098 / 5,565 (76%)** | **45,232 / 27,842 (85%)** | **1,138 / 726 (97%)** | **14,114 / 6,936 (93%)** |
 
 ⁶ Swift's type references are engine 0.5.44's, which reads the type of a
 stored property (62% before; see [the second set](#a-second-set-of-repositories)).
 
-Of the native calls, 13,143 (29%) are `INFERRED`, against 47% of graphify's.
+Of the native calls, 13,134 (29%) are `INFERRED`, against 47% of graphify's.
+A type reference counts as found when the native graph states it another way:
+graphify writes a type a method uses on the method's *class* and a
+construction as a `uses` edge, the native graph an edge from the method and a
+`calls` edge to the class (the references column was 90% before the
+comparison read those as the same statement).
 (Engine 0.5.42 had 44,960 calls in this table and the same 85% of graphify's;
 the C++ row was 29% before the comparison folded a definition written out of
 its class into the declaration graphify hangs its calls on, footnote ⁴.)
@@ -1437,24 +1444,24 @@ the table above:
 
 | Repository | same definition | imports (file pairs) | calls | bases | type references |
 |---|--:|--:|--:|--:|--:|
-| click | 100% | 174 / 159 (100%) | 2,929 / 1,473 (74%) | 77 / 30 (100%) | 1,196 / 592 (57%) |
+| click | 100% | 174 / 159 (100%) | 2,929 / 1,473 (74%) | 77 / 30 (100%) | 1,205 / 592 (97%) |
 | commander.js | 97.0% | 264 / 185 (98%) | 348 / 197 (97%) | 17 / 3 (100%) | 66 / 0 |
-| zod | 99.1% | 705 / 1,008 (69%) | 2,130 / 2,006 (85%) | 678 / 609 (97%) | 2,869 / 122 (86%) |
+| zod | 99.1% | 1,001 / 1,008 (73%) | 2,323 / 2,006 (87%) | 678 / 609 (97%) | 3,091 / 122 (86%) |
 | cobra | 100% | 159 / 285 (56%) | 1,833 / 1,339 (100%) | – | 136 / 94 (97%) |
-| gson | 100% | 456 / 1,079 (42%) | 10,111 / 7,293 (97%) | 516 / 199 (95%) | 3,350 / 1,288 (96%) |
-| clikt | 99.2% | 592 / 480 (98%) | 2,014 / 1,181 (92%) | 477 / 110 (98%) | 682 / 478 (87%) |
-| scopt | 100% | 6 / 8 | 418 / 213 (84%) | 25 / 25 (100%) | 171 / 87 (92%) |
-| commandline | 96.3% | 0 / 148 | 2,166 / 1,894 (82%) | 49 / 49 (92%) | 1,135 / 823 (87%) |
-| ripgrep | 97.2% | 173 / 250 (61%) | 5,469 / 2,952 (81%) | 121 / 117 (96%) | 2,380 / 1,362 (85%) |
-| swift-argument-parser | 94.9% | 268 / 212 | 1,765 / 957 (90%) | 599 / 438 (100%) | 828 / 677 (66%) |
-| cJSON | 48.7% | 90 / 170 (52%) | 1,083 / 1,059 (100%) | – | 203 / 89 (100%) |
-| leveldb | 95.6% | 499 / 499 (100%) | 3,396 / 2,064 (91%) | 70 / 17 (100%) | 1,894 / 748 (86%) |
+| gson | 100% | 1,048 / 1,079 (97%) | 10,121 / 7,293 (97%) | 516 / 199 (95%) | 3,350 / 1,288 (96%) |
+| clikt | 99.2% | 592 / 480 (98%) | 2,017 / 1,181 (92%) | 477 / 110 (98%) | 682 / 478 (90%) |
+| scopt | 100% | 6 / 8 | 418 / 213 (84%) | 25 / 25 (100%) | 171 / 87 (97%) |
+| commandline | 96.3% | 248 / 148 (8%) | 2,183 / 1,894 (84%) | 49 / 49 (92%) | 1,135 / 823 (88%) |
+| ripgrep | 97.2% | 173 / 250 (61%) | 5,469 / 2,952 (81%) | 121 / 117 (96%) | 2,476 / 1,362 (86%) |
+| swift-argument-parser | 94.9% | 268 / 212 | 1,784 / 957 (90%) | 599 / 438 (100%) | 982 / 677 (78%) |
+| cJSON | 97.3% | 171 / 170 (99%) | 1,242 / 1,228 (99%) | – | 203 / 89 (100%) |
+| leveldb | 95.6% | 499 / 499 (100%) | 3,399 / 2,064 (91%) | 70 / 17 (100%) | 1,894 / 748 (87%) |
 | thor | 100% | 61 / 0 | 687 / 533 (83%) | 43 / 4 (100%) | 20 / 0 |
-| monolog | 93.6% | 438 / 439 (100%) | 3,820 / 2,207 (90%) | 242 / 239 (97%) | 563 / 392 (98%) |
-| **All** | **95.7%** | **3,885 / 4,922 (67%)** | **38,169 / 25,368 (90%)** | **2,914 / 1,840 (97%)** | **15,493 / 6,752 (84%)** |
+| monolog | 93.6% | 438 / 439 (100%) | 3,820 / 2,207 (90%) | 242 / 239 (97%) | 563 / 392 (100%) |
+| **All** | **97.7%** | **5,102 / 4,922 (82%)** | **38,573 / 25,537 (90%)** | **2,914 / 1,840 (97%)** | **15,974 / 6,752 (90%)** |
 
-(Engine 0.5.47; with 0.5.44 the table's last row was 67% / 85% / 80% / 80%.)
-21% of the native calls are `INFERRED`. The low cells of the first
+(Engine 0.5.50; with 0.5.44 the table's last row was 95.5% of the definitions
+and 67% / 85% / 80% / 80% of the edges.) 20% of the native calls are `INFERRED`. The low cells of the first
 measurement were read one by one, and most of them were one rule each:
 
 - **leveldb, 54% of the calls and 49% of the type references.** Its classes
@@ -1483,13 +1490,24 @@ measurement were read one by one, and most of them were one rule each:
   `using N;` of a namespace written as a block did not bring its extension
   methods into sight from another directory. 82% now. Its **imports** are
   graphify's namespace nodes (footnote ³).
-- **cJSON, 48.7% of the definitions.** Its `.gitignore` has a line `test`,
-  and `tests/unity/test/` is committed all the same: the engine does not
-  walk into what the ignore files name, graphify reads the 581 definitions
-  there. A tracked file an ignore rule matches is not read; nothing says so
-  in the build report. Still open.
-- **Not read yet:** gson's and cobra's imports (42% and 56%), click's and
-  swift-argument-parser's type references (57%, 66%), ripgrep's calls (81%).
+- **cJSON, 48.7% of the definitions; zod's workspace imports.** One cause.
+  cJSON's `.gitignore` has a line `test` and `tests/unity/test/` is committed
+  all the same; zod's `packages/zod/.gitignore` has `**/package.json`, and
+  the package's own `package.json` is committed, so the engine never learned
+  that the directory is the package `zod`, and every `import … from "zod"`
+  in the workspace was an external module. Git ignores only what is
+  untracked: the engine now asks git which files it tracks and reads those
+  an ignore rule matched (not hidden paths, `node_modules`, or what
+  `.graphloreignore` names). cJSON: 97.3% of the definitions; zod: 2,042 more
+  calls. A repository that commits its build output (`dist/` in
+  nestjs-realworld) gets it read too; the analysis scope leaves it out as
+  vendored, as it does for graphify's graph.
+- **click's and httpx's type references (57%, 64%)** were the comparison's:
+  graphify writes them on the class, the engine on the method (see above).
+  96% and 90% once read as the same statement.
+- **Not read yet:** cobra's and chi's imports (footnote ²), ripgrep's calls
+  (81%: most of the sample is graphify linking `line.is_empty()` to a project
+  method of that name), kotlinpoet's (72%, footnote ⁴).
 
 ### The rules themselves
 

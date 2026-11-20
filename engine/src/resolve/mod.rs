@@ -4312,6 +4312,38 @@ impl<'a> Project<'a> {
         bases: bool,
     ) -> Option<(Target, Confidence)> {
         let found = self.resolve_path_inner(f, d, path, bases, false);
+        // `new Name(text)` inside a class with a method `Name`: `new` names a
+        // type, never the method of that name
+        let found = match found {
+            Some((Target::Def(m), _))
+                if *self.ref_kind.borrow() == Some(RefKind::New)
+                    && self.def(m).kind.is_callable()
+                    && self.def(m).kind != DefKind::Constructor
+                    && self.files[f].lang.is_some_and(|l| {
+                        matches!(
+                            l,
+                            Lang::CSharp
+                                | Lang::Java
+                                | Lang::JavaScript
+                                | Lang::TypeScript
+                                | Lang::Tsx
+                                | Lang::Php
+                                | Lang::Cpp
+                        )
+                    }) =>
+            {
+                let before = self.types_only.replace(true);
+                let typed = self.resolve_path_inner(f, d, path, bases, false);
+                *self.types_only.borrow_mut() = before;
+                match typed {
+                    Some((Target::Def(c), conf)) if self.def(c).kind.is_class_like() => {
+                        Some((Target::Def(c), conf))
+                    }
+                    _ => found,
+                }
+            }
+            other => other,
+        };
         // a module called, constructed or named as a type is what it exports
         // as itself (`const express = require('../'); express()`)
         if let Some((Target::Module(fs), conf)) = &found {
