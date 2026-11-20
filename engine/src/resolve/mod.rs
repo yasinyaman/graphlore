@@ -2370,7 +2370,10 @@ impl<'a> Project<'a> {
                 // value's path is what is called there (`x = f()` -> `f`),
                 // a written type is not
                 let value = !self.files[f].locals[li].declared;
-                let calling = self.calling.replace(value);
+                // (`if let Some(r) = opt` beside the parameter `opt`: the
+                // value is that parameter, which nothing calls)
+                let held = value && self.holds_declared_local(f, x, li);
+                let calling = self.calling.replace(value && !held);
                 let typing_value = self.typing_value.replace(value);
                 let recv = self.recv.replace(None);
                 let out = self.local_type_of(f, x, li, name);
@@ -2386,6 +2389,25 @@ impl<'a> Project<'a> {
             cur = defs[x].parent;
         }
         None
+    }
+
+    /// Whether local `li` is what a binding opens out of another local that
+    /// is declared with its type (`[opt, "[?]"]`, `opt: Option<Repo>`).
+    fn holds_declared_local(&self, f: usize, x: usize, li: usize) -> bool {
+        let l = &self.files[f].locals[li];
+        let [head, mark] = l.path.as_slice() else { return false };
+        if mark != crate::refs::OPENED || *head == l.name {
+            return false;
+        }
+        let defs = &self.files[f].defs;
+        let mut cur = Some(x);
+        while let Some(y) = cur {
+            if let Some(&other) = self.locals.get(&(f, y, head.clone())) {
+                return other != li && self.files[f].locals[other].declared;
+            }
+            cur = defs[y].parent;
+        }
+        false
     }
 
     /// The type of local `li` of definition `x` (see `local_type`).
@@ -2525,7 +2547,12 @@ impl<'a> Project<'a> {
                         && !l.path.is_empty()
                         && l.path[0] != *name
                         && !l.path.is_empty();
-                    return if alias {
+                    // (`if let Some(r) = opt`: what an optional gives once
+                    // opened is the value, no collection of it)
+                    let opened_optional = matches!(l.path.as_slice(),
+                        [of, mark] if mark == crate::refs::OPENED
+                            && self.local_sealed(f, Some(x), of));
+                    return if alias && !opened_optional {
                         self.elem_of_as(f, Some(x), &l.path, how)
                             .map(|(t, _)| (t, Confidence::Inferred))
                     } else {

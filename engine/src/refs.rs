@@ -79,6 +79,9 @@ const DECORATOR_KINDS: &[&str] =
     &["decorator", "marker_annotation", "annotation", "attribute", "attribute_item"];
 
 pub const UNKNOWN: &str = "()";
+/// The head of a C# member binding (`?.b`) until the access around it puts
+/// the object in its place.
+const BOUND: &str = "[?.]";
 
 /// The dotted path a node names, as far as the walk can tell.
 /// Whether a plain name is the language's word for the object a method is
@@ -194,7 +197,37 @@ pub fn path_of(n: Node, src: &[u8]) -> Option<Vec<String>> {
             return Some(p);
         }
     }
+    // a cast used where it is written (`((Foo) x).m()`, `(x as Foo).m()`, Go
+    // `x.(*Foo).m()`): a value of the type it names
+    if is_cast(n) {
+        let mut p = value_type(n, src).filter(|p| !p.is_empty())?;
+        p.push(UNKNOWN.into());
+        return Some(p);
+    }
     match k {
+        // C# `a?.b`: `b` of `a` (the member is a `member_binding_expression`,
+        // and what follows it hangs off that)
+        "conditional_access_expression" => {
+            let ks = kids(n);
+            let mut p = path_of(*ks.first()?, src)?;
+            let rest = path_of(*ks.get(1)?, src)?;
+            if rest.first().is_some_and(|s| s == BOUND) {
+                p.extend(rest.into_iter().skip(1));
+                Some(p)
+            } else {
+                None
+            }
+        }
+        "member_binding_expression" => {
+            let mut p = vec![BOUND.to_string()];
+            p.extend(path_of(n.child_by_field_name("name")?, src)?);
+            Some(p)
+        }
+        // Swift `(x as! Foo)`: a tuple of one value is the value
+        "tuple_expression" if kids(n).len() == 1 => {
+            let only = kids(n)[0];
+            path_of(only.child_by_field_name("value").unwrap_or(only), src)
+        }
         // Kotlin / Swift: `a.b` with no fields, or Swift `target`/`suffix`
         "navigation_expression" => {
             let ks = kids(n);
@@ -691,7 +724,10 @@ fn first_type(n: Node, src: &[u8]) -> Option<Vec<String>> {
 /// when it names a type.
 /// A cast: what the value is, written at the site.
 fn is_cast(n: Node) -> bool {
-    matches!(n.kind(), "cast_expression" | "as_expression" | "type_assertion")
+    matches!(
+        n.kind(),
+        "cast_expression" | "as_expression" | "type_assertion" | "type_assertion_expression"
+    )
 }
 
 fn value_type(v: Node, src: &[u8]) -> Option<Vec<String>> {
@@ -711,6 +747,10 @@ fn value_type(v: Node, src: &[u8]) -> Option<Vec<String>> {
                 })
             })
             .and_then(|t| first_type(t, src)),
+        // Go `x.(*Foo)`
+        "type_assertion_expression" => {
+            v.child_by_field_name("type").and_then(|t| first_type(t, src))
+        }
         "type_assertion" => kids(v)
             .into_iter()
             .find(|c| c.kind() == "type_arguments")
@@ -1899,6 +1939,11 @@ fn bound_by_pattern(n: Node, src: &[u8]) -> Vec<(String, Vec<String>, bool)> {
         }
     };
     match n.kind() {
+        // Scala `case r: Repo =>`, Java `try (Repo r = open())`
+        "typed_pattern" => {
+            typed(n.child_by_field_name("type"), n.child_by_field_name("pattern"), &mut out)
+        }
+        "resource" => typed(n.child_by_field_name("type"), n.child_by_field_name("name"), &mut out),
         "enhanced_for_statement" | "foreach_statement" => {
             let name = n.child_by_field_name("name").or_else(|| n.child_by_field_name("left"));
             typed(n.child_by_field_name("type"), name, &mut out);
@@ -2042,7 +2087,10 @@ fn locals_of(n: Node, src: &[u8], in_params: bool) -> Vec<(String, Vec<String>, 
             kids(n)
                 .into_iter()
                 .find(|c| {
-                    matches!(c.kind(), "user_type" | "type_annotation" | "named_type" | "type")
+                    matches!(
+                        c.kind(),
+                        "user_type" | "nullable_type" | "type_annotation" | "named_type" | "type"
+                    )
                 })
                 .and_then(|t| first_type(t, src))
         });
@@ -3607,6 +3655,21 @@ fn value_node<'t>(node: Node<'t>) -> Option<Node<'t>> {
                 c.child_by_field_name("value")
                     .or_else(|| (c.kind() == "expression_list").then(|| c.named_child(0)).flatten())
             })
+        })
+        .or_else(|| {
+            // Kotlin `val store = Repo()`: what follows the `=`, with no field
+            if node.kind() != "property_declaration" {
+                return None;
+            }
+            let mut cursor = node.walk();
+            let all: Vec<Node> = node.children(&mut cursor).collect();
+            let eq = all.iter().position(|c| c.kind() == "=")?;
+            all.get(eq + 1).copied().filter(|c| c.is_named())
+        })
+        // Go `var store = &Repo{}`: the first of the values
+        .map(|v| match v.kind() {
+            "expression_list" => v.named_child(0).unwrap_or(v),
+            _ => v,
         })
 }
 
