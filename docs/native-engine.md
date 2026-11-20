@@ -1545,6 +1545,54 @@ the edges only graphify had in the lowest cells of the second set (0.5.47,
 79.9% to 97.4% of the bases. Each rule found that way became a case of the
 list too, which now has 414.
 
+### One language's rule, read in another
+
+The reader and the resolver are shared by the 14 languages, and their tables
+of names — wrappers, methods of collections, unwrappers, core methods,
+receiver words — each belong to some of them. Twice a rule of one language
+was found applied to the others by accident: `Box`, `Arc` and `Rc` were
+wrappers in Java, and a leading `$` was dropped from every name because PHP
+writes variables with one (zod's `$ZodType`). Neither was found by looking
+for it.
+
+`benchmarks/neutrality.py` looks for it. For every name of every table, and
+a list of name shapes (`$x`, `_x`, `Zorp`, `__x__`) and other languages'
+keywords, in every language, it builds a small project that *defines* the
+name itself — a method on a typed receiver, a method called on `self`, a
+bare function, a generic type — beside the same project with a neutral name,
+and compares the edges. Whatever a library means by the name, the project's
+own definition is what the source names, so a difference is a leak.
+
+| | projects | differ from the control |
+|---|---:|---:|
+| engine 0.5.48 | 38,317 | 199 (42 names) |
+| engine 0.5.49 | 39,657 | 1 |
+
+- **161: the wrapper tables.** A project's own generic class named
+  `Optional`, `Future`, `Lazy`, `Promise`, `Provider`, `Mutex`, `Ref`,
+  `Result`, `Task` … (23 names) was the library's wrapper in TypeScript, Java,
+  Kotlin, Scala, C#, Rust and Swift alike: `run(b: Optional<Item>)` typed `b`
+  as an `Item`, and `b.lead()` named nothing. The reader works a file at a
+  time and cannot know what the project defines, so the files that see a
+  project type of such a name are read a second time with the name as an
+  ordinary type. A file sees it when it defines it, shares its directory, or
+  imports it from where it is defined: `java.util.Optional` imported in one
+  file stays the library's beside a project `Optional` in another package.
+- **About 20: `self` and `super`** taken for the receiver where the language
+  has no such word (a Java method `self()`, a Go or C function `super()`).
+- **The rest** were names the language reserves (`await`, `static`, `default`),
+  which the script now skips.
+- **No method table leaked.** A typed project receiver's own `map`, `get`,
+  `unwrap`, `first` or `toString` was the project's in every language: those
+  tables are consulted only where the walk has no project type to ask.
+
+None of the 45 audit repositories has an edge changed by this: none defines
+a type named like a wrapper where it matters. The one row left is a Python
+function named `super`. What the script does not see: a rule keyed on a
+node kind or on a punctuation the fixtures do not write, and the script's
+own control fails for a C++ template's member (`T lead()` of `Zorp<Item>`
+is not bound to `Item`), which is a gap of its own.
+
 ### What is left without an edge
 
 The comparison above measures the native graph against graphify's. What the

@@ -1,6 +1,6 @@
 {
- "passed": 420,
- "total": 420,
+ "passed": 423,
+ "total": 423,
  "cases": [
   {
    "id": "python/module-function",
@@ -1570,6 +1570,24 @@
   },
   {
    "id": "java/module-info",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/own-optional",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/library-optional-beside-own",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/method-named-self",
    "ok": true,
    "missing": [],
    "unwanted": []

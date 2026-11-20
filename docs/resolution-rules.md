@@ -25,7 +25,7 @@ python benchmarks/conformance.py --baseline benchmarks/results-conformance.json 
 python benchmarks/conformance.py --markdown      # the tables below
 ```
 
-Measured 2026-11-20 with graphlore-engine 0.5.47: **414 of 414 rules hold**
+Measured 2026-11-20 with graphlore-engine 0.5.49: **423 of 423 rules hold**
 (356 of the first 406 with 0.5.45).
 
 ## What this list is, and is not
@@ -109,7 +109,7 @@ name to the engine, so the case names it `fetchAll`.
 
 ## The rules
 
-### python (35 of 35)
+### python (36 of 36)
 
 The Python Language Reference, 'Naming and binding' (4.2) and 'The import system'.
 
@@ -143,6 +143,7 @@ The Python Language Reference, 'Naming and binding' (4.2) and 'The import system
 | a name the package's __init__ imports is a name of the package | `package-reexport` | yes |
 | an import inside a function binds the name in that function | `function-local-import` | yes |
 | pytest hands a test the result of the fixture its parameter names (conftest.py) | `pytest-fixture` | yes |
+| `except E as e:` and `except (A, B):` name the types caught | `except-clause` | yes |
 | of two bases with the method, the first listed wins | `mro-first-base` | yes |
 | a method only the second base has is found there | `mro-second-base` | yes |
 | a class nested in a class is reached through it | `nested-class` | yes |
@@ -254,7 +255,7 @@ The Go Programming Language Specification, 'Declarations and scope', 'Selectors'
 | a method with a value receiver is called on a value | `value-receiver` | yes |
 | a function literal sees the functions of the package | `closure` | yes |
 
-### java (37 of 37)
+### java (41 of 41)
 
 The Java Language Specification, 6.4 'Shadowing and Obscuring', 15.12 'Method Invocation Expressions'.
 
@@ -290,6 +291,10 @@ The Java Language Specification, 6.4 'Shadowing and Obscuring', 15.12 'Method In
 | `this::m` and `C::m` are uses of m | `method-reference` | yes |
 | overloads of one arity are told apart by the argument's type | `overload-by-type` | yes |
 | `super(…)` / `this(…)` in a constructor call the constructor of the base, or another of the class | `explicit-constructor-call` | yes |
+| an import of `p.C` names the class of package p, whatever module-info.java declares a module `p` | `module-info` | yes |
+| a generic class the project names `Optional` is the project's class where it is in scope | `own-optional` | yes |
+| `java.util.Optional` imported by a file stays the library's beside a project class of that name elsewhere | `library-optional-beside-own` | yes |
+| `self` is a name like any other where the language has no such word | `method-named-self` | yes |
 | a nested class is named through the class around it | `nested-static-class` | yes |
 | an enum constant has the enum's methods | `enum-method` | yes |
 | a call through an interface type is the interface's method | `interface-typed` | yes |
@@ -298,7 +303,7 @@ The Java Language Specification, 6.4 'Shadowing and Obscuring', 15.12 'Method In
 | `new R(…)` constructs a record | `record` | yes |
 | a method of an anonymous class sees the methods of the class around it | `anonymous-class` | yes |
 
-### kotlin (30 of 30)
+### kotlin (31 of 31)
 
 Kotlin Language Specification, 'Scopes and identifiers', 'Overload resolution' (receivers).
 
@@ -327,6 +332,7 @@ Kotlin Language Specification, 'Scopes and identifiers', 'Overload resolution' (
 | `x as T` is a T | `cast` | yes |
 | a function's declared result gives the members of what it returns | `return-type` | yes |
 | a typealias names the type it is written for | `typealias` | yes |
+| `x.apply { … }` and `x.also { … }` give x back | `apply-also` | yes |
 | `C(…)` calls C's constructor | `constructor` | yes |
 | `super.m()` is the supertype's m | `super` | yes |
 | a method an interface defines is inherited | `interface-default` | yes |
@@ -451,7 +457,7 @@ The Rust Reference, 'Names' (name resolution, scopes, paths), 'Method call expre
 | a method of an enum's impl is called on its values | `enum-method` | yes |
 | `T { … }` constructs a T | `struct-literal` | yes |
 
-### swift (30 of 30)
+### swift (33 of 33)
 
 The Swift Programming Language, 'Declarations', 'Extensions', 'Protocols' (member lookup is the compiler's).
 
@@ -479,6 +485,9 @@ The Swift Programming Language, 'Declarations', 'Extensions', 'Protocols' (membe
 | a function's declared result gives the members of what it returns | `return-type` | yes |
 | a computed property's declared type gives its members | `computed-property` | yes |
 | `T.shared.m()` goes through a static property's type | `static-property` | yes |
+| the types an enum case carries are types the enum names | `enum-payload` | yes |
+| building a case with what it carries (`E.c(x)`) is a use of the enum | `enum-case-built` | yes |
+| `T.Type` names T | `metatype` | yes |
 | a typealias names the type it is written for | `typealias` | yes |
 | `Page<Item>`'s `head: T` is an Item | `generic-argument` | yes |
 | a method an extension adds with a conformance is a member of the type | `conformance-in-extension` | yes |

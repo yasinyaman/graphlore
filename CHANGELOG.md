@@ -328,6 +328,31 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- **Native engine 0.5.49: a language's names are read only where the language
+  means them.** The reader and the resolver are shared by the 14 languages,
+  and two rules of one language had been found applied to the others by
+  accident (`Box` a wrapper in Java, `$` a sigil in TypeScript).
+  `benchmarks/neutrality.py` looks for the rest by differential testing: for
+  every name of every table in `engine/src/` (wrappers, collection methods,
+  unwrappers, core methods, receiver words, built-ins) and a list of name
+  shapes and other languages' keywords, in every language, it builds a small
+  project that *defines* the name itself, beside the same project with a
+  neutral name, and compares the edges. 39,657 projects; 199 differed:
+  **161 were the wrapper tables** — a project's own generic class named
+  `Optional`, `Future`, `Lazy`, `Promise`, `Provider`, `Mutex`, `Ref`,
+  `Result`, `Task`, … (23 names, in TypeScript, Java, Kotlin, Scala, C#, Rust
+  and Swift) was the library's wrapper, so its members named nothing. A file
+  that sees a project type of such a name (it defines it, shares its
+  directory, or imports it from where it is defined) is now read with the
+  name as an ordinary type; `java.util.Optional` imported beside a project
+  `Optional` elsewhere stays the library's. **About 20 were `self` / `super`**
+  taken for the receiver in languages that have no such word (a Java method
+  `self()`, a Go function `super()`): a name like any other there when the
+  scope has one. The rest were names the language reserves. No method table
+  leaked: a typed project receiver's own `map`, `get`, `unwrap` or `first`
+  was already the project's. One row is left (a Python function named
+  `super`, which shadows the built-in), in `benchmarks/results-neutrality.json`.
+  No edge of the 45 audit repositories changed.
 - **Native engine 0.5.47: the lowest cells of the comparison with graphify,
   read.** 0.5.46's 50 rules did not move the share of graphify's calls the
   native graph has (84.7% on the first set, before and after): they were edges

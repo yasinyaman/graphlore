@@ -714,7 +714,18 @@ fn language_wrapper(name: &str, n: Node) -> bool {
 /// any other (a Java project's own `Box<T>`).
 const RUST_WRAPPERS: &[&str] = &["Box", "Arc", "Rc", "Cell", "RefCell", "Pin", "Cow"];
 
+/// Whether `name` is in one of the wrapper tables, whatever the language.
+pub fn wrapper_name(name: &str) -> bool {
+    WRAPPERS.contains(&name)
+        || SEALED.contains(&name)
+        || matches!(name, "Result" | "Task" | "ValueTask")
+}
+
 fn is_wrapper(name: &str, n: Node) -> bool {
+    // (the project's own `Optional<T>`, `Future<T>`, in a file that sees it)
+    if crate::parse::shadowed(name) {
+        return false;
+    }
     if RUST_WRAPPERS.contains(&name) {
         return n.language().name() == Some("rust");
     }
