@@ -860,6 +860,755 @@ case("php", "use-function", "`use function N\\f;` binds f",
      [("A.run", "calls", "twice")])
 
 
+# === the second round: types the source writes, more import forms, nesting, ===
+# === functions passed as values, and what each language has of its own      ===
+
+# Two types with a method of one name: only the type says which is called.
+PY2 = "class Repo:\n    def find(self):\n        return 1\n\n\nclass Other:\n    def find(self):\n        return 2\n\n\n"
+PY_BOTH = ([("run", "calls", "Repo.find")], [("run", "calls", "Other.find")])
+case("python", "return-annotation", "a call's annotated result gives the methods of what it returns",
+     PY, {"a.py": PY2 + "def make() -> Repo:\n    return Repo()\n\n\ndef run():\n    return make().find()\n"}, *PY_BOTH)
+case("python", "class-attribute-annotation", "an attribute annotated in the class body has that type",
+     PY, {"a.py": PY2 + "class Svc:\n    repo: Repo\n\n    def run(self):\n        return self.repo.find()\n"},
+     [("Svc.run", "calls", "Repo.find")], [("Svc.run", "calls", "Other.find")])
+case("python", "property", "a property read is what its getter returns",
+     PY, {"a.py": PY2 + "class Svc:\n    @property\n    def repo(self) -> Repo:\n        return Repo()\n\n"
+                        "    def run(self):\n        return self.repo.find()\n"},
+     [("Svc.run", "calls", "Repo.find")], [("Svc.run", "calls", "Other.find")])
+case("python", "with-as", "`with f() as x` binds x to what f returns",
+     PY, {"a.py": PY2 + "def open_repo() -> Repo:\n    return Repo()\n\n\ndef run():\n    with open_repo() as r:\n        return r.find()\n"},
+     *PY_BOTH)
+case("python", "for-over-annotated-list", "a loop variable over `list[T]` is a T",
+     PY, {"a.py": PY2 + "def run(repos: list[Repo]):\n    for r in repos:\n        r.find()\n"}, *PY_BOTH)
+case("python", "comprehension", "a comprehension's variable over `list[T]` is a T",
+     PY, {"a.py": PY2 + "def run(repos: list[Repo]):\n    return [r.find() for r in repos]\n"}, *PY_BOTH)
+case("python", "module-alias", "`import pkg.m as mm` binds mm to the module",
+     PY, {"pkg/__init__.py": "", "pkg/m.py": "def f():\n    return 1\n",
+          "app.py": "import pkg.m as mm\n\n\ndef run():\n    return mm.f()\n"},
+     [("run", "calls", "f")])
+case("python", "submodule-import", "`from pkg import m` binds the submodule m",
+     PY, {"pkg/__init__.py": "", "pkg/m.py": "def f():\n    return 1\n",
+          "app.py": "from pkg import m\n\n\ndef run():\n    return m.f()\n"},
+     [("run", "calls", "f")])
+case("python", "package-reexport", "a name the package's __init__ imports is a name of the package",
+     PY, {"pkg/__init__.py": "from .m import f\n", "pkg/m.py": "def f():\n    return 1\n",
+          "app.py": "from pkg import f\n\n\ndef run():\n    return f()\n"},
+     [("run", "calls", "f")])
+case("python", "function-local-import", "an import inside a function binds the name in that function",
+     PY, {"pkg/__init__.py": "", "pkg/m.py": "def f():\n    return 1\n",
+          "app.py": "def run():\n    from pkg.m import f\n    return f()\n"},
+     [("run", "calls", "f")])
+case("python", "mro-first-base", "of two bases with the method, the first listed wins",
+     PY, {"a.py": "class Left:\n    def m(self):\n        return 1\n\n\nclass Right:\n    def m(self):\n        return 2\n\n\n"
+                  "class A(Left, Right):\n    def run(self):\n        return self.m()\n"},
+     [("A.run", "calls", "Left.m")], [("A.run", "calls", "Right.m")])
+case("python", "mro-second-base", "a method only the second base has is found there",
+     PY, {"a.py": "class Left:\n    pass\n\n\nclass Right:\n    def m(self):\n        return 2\n\n\n"
+                  "class A(Left, Right):\n    def run(self):\n        return self.m()\n"},
+     [("A.run", "calls", "Right.m")])
+case("python", "nested-class", "a class nested in a class is reached through it",
+     PY, {"a.py": "class Outer:\n    class Inner:\n        def find(self):\n            return 1\n\n\ndef run():\n    return Outer.Inner().find()\n"},
+     [("run", "calls", "Outer.Inner.find")])
+case("python", "staticmethod-via-self", "a static method is found on the instance too",
+     PY, {"a.py": "class A:\n    @staticmethod\n    def helper():\n        return 1\n\n    def run(self):\n        return self.helper()\n"},
+     [("A.run", "calls", "A.helper")])
+case("python", "class-body-call", "a call in a class body is the class's",
+     PY, {"a.py": "def make():\n    return 1\n\n\nclass A:\n    limit = make()\n"},
+     [("A", "calls", "make")])
+case("python", "function-as-value", "a function passed by name is a use of it",
+     PY, {"a.py": "def handle(x):\n    return x\n\n\ndef run(items):\n    return list(map(handle, items))\n"},
+     [("run", "indirect_call", "handle")])
+case("python", "inherited-from-aliased-import", "a base imported under another name is still the base",
+     PY, {"base.py": "class Base:\n    def m(self):\n        return 1\n",
+          "a.py": "from base import Base as Parent\n\n\nclass A(Parent):\n    def run(self):\n        return self.m()\n"},
+     [("A.run", "calls", "Base.m")])
+
+JS2 = "class Repo {\n  find() {\n    return 1\n  }\n}\n\nclass Other {\n  find() {\n    return 2\n  }\n}\n\n"
+case("javascript", "arrow-const", "a `const` assigned an arrow function is a function of its scope",
+     JS, {"a.js": "const helper = () => 1\n\nfunction run() {\n  return helper()\n}\n"},
+     [("run", "calls", "helper")])
+case("javascript", "function-expression", "a `const` assigned a function expression is a function",
+     JS, {"a.js": "const helper = function () {\n  return 1\n}\n\nfunction run() {\n  return helper()\n}\n"},
+     [("run", "calls", "helper")])
+case("javascript", "object-literal-method", "a method of an object literal is called through the object",
+     JS, {"a.js": "const api = {\n  fetchAll() {\n    return 1\n  },\n}\n\nfunction run() {\n  return api.fetchAll()\n}\n"},
+     [("run", "calls", "fetchAll")])
+case("javascript", "object-literal-this", "`this` in an object literal's method is the object",
+     JS, {"a.js": "const api = {\n  load() {\n    return 1\n  },\n  run() {\n    return this.load()\n  },\n}\n"},
+     [("run", "calls", "load")])
+case("javascript", "commonjs-default", "`module.exports = f` is what `require` gives",
+     JS, {"m.js": "function make() {\n  return 1\n}\n\nmodule.exports = make\n",
+          "a.js": "const build = require('./m')\n\nfunction run() {\n  return build()\n}\n\nmodule.exports = run\n"},
+     [("run", "calls", "make")])
+case("javascript", "commonjs-member", "`exports.f = …` is a member of what `require` gives",
+     JS, {"m.js": "exports.f = function f() {\n  return 1\n}\n",
+          "a.js": "const m = require('./m')\n\nfunction run() {\n  return m.f()\n}\n\nmodule.exports = run\n"},
+     [("run", "calls", "f")])
+case("javascript", "static-method", "`C.m()` is C's static method",
+     JS, {"a.js": "class Repo {\n  static make() {\n    return new Repo()\n  }\n}\n\nfunction run() {\n  return Repo.make()\n}\n"},
+     [("run", "calls", "Repo.make")])
+case("javascript", "default-export-class", "a default-exported class is what a default import names",
+     JS, {"m.js": "export default class Repo {\n  find() {\n    return 1\n  }\n}\n",
+          "a.js": "import Store from './m.js'\n\nexport function run() {\n  const s = new Store()\n  return s.find()\n}\n"},
+     [("run", "calls", "Repo.find")])
+case("javascript", "exported-arrow", "an exported `const` arrow function is importable by its name",
+     JS, {"m.js": "export const f = () => 1\n",
+          "a.js": "import { f } from './m.js'\n\nexport function run() {\n  return f()\n}\n"},
+     [("run", "calls", "f")])
+case("javascript", "function-as-value", "a function passed by name is a use of it",
+     JS, {"a.js": "function handle(x) {\n  return x\n}\n\nfunction run(items) {\n  return items.map(handle)\n}\n"},
+     [("run", "indirect_call", "handle")])
+case("javascript", "parameter-hides-import", "a parameter hides an import of its name",
+     JS, {"m.js": "export function f() {\n  return 1\n}\n",
+          "a.js": "import { f } from './m.js'\n\nexport function run(f) {\n  return f()\n}\n\nexport function other() {\n  return f()\n}\n"},
+     [("other", "calls", "f")], [("run", "calls", "f")])
+case("javascript", "module-pattern", "`var X = (function () { function X() {} return X })()` names the function written in it",
+     JS, {"a.js": "var Dataset = (function () {\n  function Dataset() {}\n  return Dataset\n})()\n\nfunction run() {\n  return new Dataset()\n}\n"},
+     [("run", "calls", "Dataset")])
+case("javascript", "dynamic-import", "`await import('./m.js')` is the module",
+     JS, {"m.js": "export function f() {\n  return 1\n}\n",
+          "a.js": "export async function run() {\n  const m = await import('./m.js')\n  return m.f()\n}\n"},
+     [("run", "calls", "f")])
+case("javascript", "class-field-arrow", "an arrow function in a class field sees the class's `this`",
+     JS, {"a.js": "class A {\n  m() {\n    return 1\n  }\n  handle = () => {\n    return this.m()\n  }\n}\n"},
+     [("A.handle", "calls", "A.m")])
+case("javascript", "for-of-new", "a local assigned `new C()` keeps its type in a nested callback",
+     JS, {"a.js": JS2 + "function run(items) {\n  const r = new Repo()\n  return items.map(() => r.find())\n}\n"},
+     [("run", "calls", "Repo.find")], [("run", "calls", "Other.find")])
+
+TS2 = ("export class Repo {\n  find(): number {\n    return 1\n  }\n}\n\nexport class Other {\n"
+       "  find(): number {\n    return 2\n  }\n}\n\n")
+TS_BOTH = ([("run", "calls", "Repo.find")], [("run", "calls", "Other.find")])
+case("typescript", "array-element", "an element of `T[]` is a T",
+     TS, {"a.ts": TS2 + "export function run(repos: Repo[]): number {\n  return repos[0].find()\n}\n"}, *TS_BOTH)
+case("typescript", "for-of", "a `for … of` variable over `T[]` is a T",
+     TS, {"a.ts": TS2 + "export function run(repos: Repo[]): void {\n  for (const r of repos) {\n    r.find()\n  }\n}\n"}, *TS_BOTH)
+case("typescript", "await-promise", "`await` of a `Promise<T>` is a T",
+     TS, {"a.ts": TS2 + "export async function load(): Promise<Repo> {\n  return new Repo()\n}\n\n"
+                        "export async function run(): Promise<number> {\n  const r = await load()\n  return r.find()\n}\n"}, *TS_BOTH)
+case("typescript", "getter", "a getter's declared type gives the members of what is read",
+     TS, {"a.ts": TS2 + "export class Svc {\n  get repo(): Repo {\n    return new Repo()\n  }\n  run(): number {\n    return this.repo.find()\n  }\n}\n"},
+     [("Svc.run", "calls", "Repo.find")], [("Svc.run", "calls", "Other.find")])
+case("typescript", "as-cast", "`x as T` is a T",
+     TS, {"a.ts": TS2 + "export function run(x: unknown): number {\n  return (x as Repo).find()\n}\n"}, *TS_BOTH)
+case("typescript", "non-null", "`x!` keeps x's type",
+     TS, {"a.ts": TS2 + "export function run(r: Repo | null): number {\n  return r!.find()\n}\n"}, *TS_BOTH)
+case("typescript", "readonly-field", "a `readonly` field's declared type gives its members",
+     TS, {"a.ts": TS2 + "export class Svc {\n  readonly repo: Repo = new Repo()\n  run(): number {\n    return this.repo.find()\n  }\n}\n"},
+     [("Svc.run", "calls", "Repo.find")], [("Svc.run", "calls", "Other.find")])
+case("typescript", "interface-extends", "an interface that extends another is its subtype",
+     TS, {"a.ts": "export interface Named {\n  label(): string\n}\n\nexport interface Titled extends Named {\n  title(): string\n}\n\n"
+                  "export function run(t: Titled): string {\n  return t.label()\n}\n"},
+     [("Titled", "inherits", "Named"), ("run", "calls", "Named.label")])
+case("typescript", "implements", "a class that implements an interface names it",
+     TS, {"a.ts": "export interface Named {\n  label(): string\n}\n\nexport class A implements Named {\n  label(): string {\n    return ''\n  }\n}\n"},
+     [("A", "implements", "Named")])
+case("typescript", "abstract-base", "a call through an abstract class is the abstract class's method",
+     TS, {"a.ts": "export abstract class Shape {\n  abstract area(): number\n}\n\nexport function run(s: Shape): number {\n  return s.area()\n}\n"},
+     [("run", "calls", "Shape.area")])
+case("typescript", "type-alias", "a type alias is a type of its own, referenced where it is written",
+     TS, {"a.ts": "export type Id = string\n\nexport function run(id: Id): Id {\n  return id\n}\n"},
+     [("run", "references", "Id")])
+case("typescript", "namespace", "`N.f()` is a function a namespace exports",
+     TS, {"a.ts": "export namespace Util {\n  export function twice(x: number): number {\n    return 2 * x\n  }\n}\n\n"
+                  "export function run(): number {\n  return Util.twice(2)\n}\n"},
+     [("run", "calls", "Util.twice")])
+case("typescript", "default-reexport", "`export { default as X } from './x'` passes the default on",
+     TS, {"lib/x.ts": "export default function make(): number {\n  return 1\n}\n",
+          "lib/index.ts": "export { default as build } from './x'\n",
+          "a.ts": "import { build } from './lib'\n\nexport function run(): number {\n  return build()\n}\n"},
+     [("run", "calls", "make")])
+case("typescript", "local-typed-by-declaration", "`const r: T = …` is a T whatever it is assigned",
+     TS, {"a.ts": TS2 + "declare function load(): unknown\n\nexport function run(): number {\n  const r: Repo = load() as Repo\n  return r.find()\n}\n"}, *TS_BOTH)
+case("typescript", "map-value", "a value of `Map<K, V>` is a V",
+     TS, {"a.ts": TS2 + "export function run(m: Map<string, Repo>): number {\n  return m.get('a')!.find()\n}\n"}, *TS_BOTH)
+
+GO2 = ("type Repo struct{}\n\nfunc (r *Repo) Find() int {\n\treturn 1\n}\n\n"
+       "type Other struct{}\n\nfunc (o *Other) Find() int {\n\treturn 2\n}\n\n")
+GO_BOTH = ([("Run", "calls", "Repo.Find")], [("Run", "calls", "Other.Find")])
+case("go", "range-slice", "a `range` value over `[]*T` is a *T",
+     GO, {"go.mod": GOMOD, "a.go": "package app\n\n" + GO2 + "func Run(repos []*Repo) {\n\tfor _, r := range repos {\n\t\tr.Find()\n\t}\n}\n"}, *GO_BOTH)
+case("go", "slice-index", "an element of `[]*T` is a *T",
+     GO, {"go.mod": GOMOD, "a.go": "package app\n\n" + GO2 + "func Run(repos []*Repo) int {\n\treturn repos[0].Find()\n}\n"}, *GO_BOTH)
+case("go", "map-value", "a value of `map[K]*T` is a *T",
+     GO, {"go.mod": GOMOD, "a.go": "package app\n\n" + GO2 + "func Run(m map[string]*Repo) int {\n\treturn m[\"a\"].Find()\n}\n"}, *GO_BOTH)
+case("go", "package-variable", "a package-level variable's value gives its type",
+     GO, {"go.mod": GOMOD, "a.go": "package app\n\n" + GO2 + "var store = &Repo{}\n\nfunc Run() int {\n\treturn store.Find()\n}\n"}, *GO_BOTH)
+case("go", "type-assertion", "`x.(*T)` is a *T",
+     GO, {"go.mod": GOMOD, "a.go": "package app\n\n" + GO2 + "func Run(x interface{}) int {\n\treturn x.(*Repo).Find()\n}\n"}, *GO_BOTH)
+case("go", "go-and-defer", "`go f()` and `defer g()` are calls",
+     GO, {"go.mod": GOMOD, "a.go": "package app\n\nfunc worker() {}\n\nfunc cleanup() {}\n\nfunc Run() {\n\tdefer cleanup()\n\tgo worker()\n}\n"},
+     [("Run", "calls", "worker"), ("Run", "calls", "cleanup")])
+case("go", "function-as-value", "a function passed by name is a use of it",
+     GO, {"go.mod": GOMOD, "a.go": "package app\n\nfunc handler(x int) int {\n\treturn x\n}\n\nfunc apply(f func(int) int) int {\n\treturn f(1)\n}\n\n"
+                                  "func Run() int {\n\treturn apply(handler)\n}\n"},
+     [("Run", "indirect_call", "handler")])
+case("go", "named-slice-type", "a method declared on a named slice type",
+     GO, {"go.mod": GOMOD, "a.go": "package app\n\ntype Names []string\n\nfunc (n Names) Count() int {\n\treturn len(n)\n}\n\n"
+                                  "func Run(n Names) int {\n\treturn n.Count()\n}\n"},
+     [("Run", "calls", "Names.Count")])
+case("go", "embedded-interface", "the methods of an interface embedded in an interface are its own",
+     GO, {"go.mod": GOMOD, "a.go": "package app\n\ntype Reader interface {\n\tRead() int\n}\n\ntype ReadCloser interface {\n\tReader\n\tClose() int\n}\n\n"
+                                  "func Run(rc ReadCloser) int {\n\treturn rc.Read()\n}\n"},
+     [("Run", "calls", "Reader.Read")])
+case("go", "imported-type", "a method call on a value of an imported package's type",
+     GO, {"go.mod": GOMOD, "store/s.go": "package store\n\ntype Repo struct{}\n\nfunc (r *Repo) Find() int {\n\treturn 1\n}\n",
+          "a.go": "package app\n\nimport \"example.com/app/store\"\n\nfunc Run(r *store.Repo) int {\n\treturn r.Find()\n}\n"},
+     [("Run", "calls", "Repo.Find")])
+case("go", "test-file", "a test file of the package sees the package's functions",
+     GO, {"go.mod": GOMOD, "a.go": "package app\n\nfunc helper() int {\n\treturn 1\n}\n",
+          "a_test.go": "package app\n\nimport \"testing\"\n\nfunc TestHelper(t *testing.T) {\n\tif helper() != 1 {\n\t\tt.Fail()\n\t}\n}\n"},
+     [("TestHelper", "calls", "helper")])
+case("go", "value-receiver", "a method with a value receiver is called on a value",
+     GO, {"go.mod": GOMOD, "a.go": "package app\n\ntype Point struct{}\n\nfunc (p Point) Norm() int {\n\treturn 1\n}\n\n"
+                                  "func Run() int {\n\tp := Point{}\n\treturn p.Norm()\n}\n"},
+     [("Run", "calls", "Point.Norm")])
+case("go", "closure", "a function literal sees the functions of the package",
+     GO, {"go.mod": GOMOD, "a.go": "package app\n\nfunc helper() int {\n\treturn 1\n}\n\nfunc Run() int {\n\tf := func() int {\n\t\treturn helper()\n\t}\n\treturn f()\n}\n"},
+     [("Run", "calls", "helper")])
+
+JAVA2 = ("class Repo {\n    int find() {\n        return 1;\n    }\n}\n\n"
+         "class Other {\n    int find() {\n        return 2;\n    }\n}\n\n")
+JAVA_BOTH = ([("A.run", "calls", "Repo.find")], [("A.run", "calls", "Other.find")])
+
+
+def java(body: str) -> dict[str, str]:
+    return {"app/A.java": "package app;\n\nimport java.util.List;\n\n" + JAVA2 + "public class A {\n" + body + "}\n"}
+
+
+case("java", "for-each", "an enhanced `for` variable is declared with its type",
+     JAVA, java("    void run(List<Repo> repos) {\n        for (Repo r : repos) {\n            r.find();\n        }\n    }\n"), *JAVA_BOTH)
+case("java", "list-element", "`List<T>.get(i)` is a T",
+     JAVA, java("    int run(List<Repo> repos) {\n        return repos.get(0).find();\n    }\n"), *JAVA_BOTH)
+case("java", "var", "`var r = new C();` has type C",
+     JAVA, java("    int run() {\n        var r = new Repo();\n        return r.find();\n    }\n"), *JAVA_BOTH)
+case("java", "cast", "`(T) x` is a T",
+     JAVA, java("    int run(Object o) {\n        return ((Repo) o).find();\n    }\n"), *JAVA_BOTH)
+case("java", "instanceof-pattern", "`o instanceof T r` binds r as a T",
+     JAVA, java("    int run(Object o) {\n        if (o instanceof Repo r) {\n            return r.find();\n        }\n        return 0;\n    }\n"), *JAVA_BOTH)
+case("java", "try-with-resources", "a resource variable is declared with its type",
+     JAVA, java("    int run() throws Exception {\n        try (Repo r = open()) {\n            return r.find();\n        }\n    }\n\n"
+                "    Repo open() {\n        return new Repo();\n    }\n"), *JAVA_BOTH)
+case("java", "this-field", "`this.f.m()` is a member of the field's type",
+     JAVA, java("    private Repo repo;\n\n    int run() {\n        return this.repo.find();\n    }\n"), *JAVA_BOTH)
+case("java", "static-field", "a static field's declared type gives its members",
+     JAVA, java("    static final Repo DEFAULT = new Repo();\n\n    int run() {\n        return DEFAULT.find();\n    }\n"), *JAVA_BOTH)
+case("java", "lambda-body", "a call in a lambda's body is the enclosing method's",
+     JAVA, java("    int helper(int x) {\n        return x;\n    }\n\n    void run(List<Integer> xs) {\n        xs.forEach(x -> helper(x));\n    }\n"),
+     [("A.run", "calls", "A.helper")])
+case("java", "method-reference", "`this::m` and `C::m` are uses of m",
+     JAVA, java("    int helper(int x) {\n        return x;\n    }\n\n    void run(List<Integer> xs) {\n        xs.forEach(this::helper);\n    }\n"),
+     [("A.run", "indirect_call", "A.helper")])
+case("java", "overload-by-type", "overloads of one arity are told apart by the argument's type",
+     JAVA, {"app/A.java": "package app;\n\npublic class A {\n    int send(String s) {\n        return 1;\n    }\n\n"
+                          "    int send(int n) {\n        return 2;\n    }\n\n    int run() {\n        return send(\"x\");\n    }\n}\n"},
+     [("A.run", "calls", "A.send")])
+case("java", "nested-static-class", "a nested class is named through the class around it",
+     JAVA, {"app/A.java": "package app;\n\nclass Outer {\n    static class Inner {\n        int find() {\n            return 1;\n        }\n    }\n}\n\n"
+                          "public class A {\n    int run(Outer.Inner i) {\n        return i.find();\n    }\n}\n"},
+     [("A.run", "calls", "Outer.Inner.find")])
+case("java", "enum-method", "an enum constant has the enum's methods",
+     JAVA, {"app/A.java": "package app;\n\nenum Color {\n    RED;\n\n    String label() {\n        return \"r\";\n    }\n}\n\n"
+                          "public class A {\n    String run() {\n        return Color.RED.label();\n    }\n}\n"},
+     [("A.run", "calls", "Color.label")])
+case("java", "interface-typed", "a call through an interface type is the interface's method",
+     JAVA, {"app/A.java": "package app;\n\ninterface Store {\n    int find();\n}\n\npublic class A {\n    int run(Store s) {\n        return s.find();\n    }\n}\n"},
+     [("A.run", "calls", "Store.find")])
+case("java", "fully-qualified", "`p.C.m()` names C by its package",
+     JAVA, {"lib/Util.java": "package lib;\n\npublic class Util {\n    public static int twice(int x) {\n        return 2 * x;\n    }\n}\n",
+            "app/A.java": "package app;\n\npublic class A {\n    int run() {\n        return lib.Util.twice(2);\n    }\n}\n"},
+     [("A.run", "calls", "Util.twice")])
+case("java", "interface-static", "`I.m()` is a static method of the interface",
+     JAVA, {"app/A.java": "package app;\n\ninterface Named {\n    static Named of() {\n        return null;\n    }\n}\n\n"
+                          "public class A {\n    Named run() {\n        return Named.of();\n    }\n}\n"},
+     [("A.run", "calls", "Named.of")])
+case("java", "record", "`new R(…)` constructs a record",
+     JAVA, {"app/A.java": "package app;\n\nrecord Point(int x, int y) {\n    int norm() {\n        return x + y;\n    }\n}\n\n"
+                          "public class A {\n    int run() {\n        Point p = new Point(1, 2);\n        return p.norm();\n    }\n}\n"},
+     [("A.run", "calls", "Point"), ("A.run", "calls", "Point.norm")])
+case("java", "anonymous-class", "a method of an anonymous class sees the methods of the class around it",
+     JAVA, {"app/A.java": "package app;\n\npublic class A {\n    int helper() {\n        return 1;\n    }\n\n"
+                          "    Runnable run() {\n        return new Runnable() {\n            public void run() {\n                helper();\n            }\n        };\n    }\n}\n"},
+     [("run", "calls", "A.helper")])
+
+KT2 = "class Repo {\n    fun find(): Int = 1\n}\n\nclass Other {\n    fun find(): Int = 2\n}\n\n"
+KT_BOTH = ([("run", "calls", "Repo.find")], [("run", "calls", "Other.find")])
+
+
+def kt(body: str) -> dict[str, str]:
+    return {"src/app/A.kt": "package app\n\n" + KT2 + body}
+
+
+case("kotlin", "safe-call", "`r?.m()` is r's m",
+     KT, kt("fun run(r: Repo?): Int? = r?.find()\n"), *KT_BOTH)
+case("kotlin", "with", "inside `with(x) { … }` an unqualified name is x's member",
+     KT, kt("fun run(r: Repo): Int = with(r) {\n    find()\n}\n"), *KT_BOTH)
+case("kotlin", "let", "`x.let { it.m() }`: `it` is x",
+     KT, kt("fun run(r: Repo): Int = r.let { it.find() }\n"), *KT_BOTH)
+case("kotlin", "top-level-property", "a top-level `val` assigned a construction has that type",
+     KT, kt("val store = Repo()\n\nfun run(): Int = store.find()\n"), *KT_BOTH)
+case("kotlin", "lateinit", "a `lateinit var`'s declared type gives its members",
+     KT, kt("class Svc {\n    lateinit var repo: Repo\n\n    fun run(): Int = repo.find()\n}\n"),
+     [("Svc.run", "calls", "Repo.find")], [("Svc.run", "calls", "Other.find")])
+case("kotlin", "for-loop", "a `for` variable over `List<T>` is a T",
+     KT, kt("fun run(rs: List<Repo>) {\n    for (r in rs) {\n        r.find()\n    }\n}\n"), *KT_BOTH)
+case("kotlin", "cast", "`x as T` is a T",
+     KT, kt("fun run(x: Any): Int = (x as Repo).find()\n"), *KT_BOTH)
+case("kotlin", "return-type", "a function's declared result gives the members of what it returns",
+     KT, kt("fun make(): Repo = Repo()\n\nfun run(): Int = make().find()\n"), *KT_BOTH)
+case("kotlin", "typealias", "a typealias names the type it is written for",
+     KT, kt("typealias Store = Repo\n\nfun run(s: Store): Int = s.find()\n"), *KT_BOTH)
+case("kotlin", "constructor", "`C(…)` calls C's constructor",
+     KT, {"src/app/A.kt": "package app\n\nclass Repo(val size: Int)\n\nfun run(): Repo = Repo(1)\n"},
+     [("run", "calls", "Repo")])
+case("kotlin", "super", "`super.m()` is the supertype's m",
+     KT, {"src/app/A.kt": "package app\n\nopen class Base {\n    open fun m(): Int = 1\n}\n\nclass A : Base() {\n    override fun m(): Int = super.m()\n}\n"},
+     [("A.m", "calls", "Base.m")])
+case("kotlin", "interface-default", "a method an interface defines is inherited",
+     KT, {"src/app/A.kt": "package app\n\ninterface Named {\n    fun label(): String = \"x\"\n}\n\nclass A : Named {\n    fun run(): String = label()\n}\n"},
+     [("A.run", "calls", "Named.label")])
+case("kotlin", "interface-typed", "a call through an interface type is the interface's member",
+     KT, {"src/app/A.kt": "package app\n\ninterface Store {\n    fun find(): Int\n}\n\nfun run(s: Store): Int = s.find()\n"},
+     [("run", "calls", "Store.find")])
+case("kotlin", "function-reference", "`::f` is a use of f",
+     KT, {"src/app/A.kt": "package app\n\nfun handle(x: Int): Int = x\n\nfun run(xs: List<Int>): List<Int> = xs.map(::handle)\n"},
+     [("run", "indirect_call", "handle")])
+case("kotlin", "nested-class", "a nested class is named through the class around it",
+     KT, {"src/app/A.kt": "package app\n\nclass Outer {\n    class Inner {\n        fun find(): Int = 1\n    }\n}\n\nfun run(): Int = Outer.Inner().find()\n"},
+     [("run", "calls", "Outer.Inner.find")])
+case("kotlin", "enum-entry", "an enum entry has the enum's members",
+     KT, {"src/app/A.kt": "package app\n\nenum class Color {\n    RED;\n\n    fun label(): String = \"r\"\n}\n\nfun run(): String = Color.RED.label()\n"},
+     [("run", "calls", "Color.label")])
+
+SC2 = "class Repo {\n  def find(): Int = 1\n}\n\nclass Other {\n  def find(): Int = 2\n}\n\n"
+SC_BOTH = ([("Main.run", "calls", "Repo.find")], [("Main.run", "calls", "Other.find")])
+
+
+def sc(body: str) -> dict[str, str]:
+    return {"src/app/A.scala": "package app\n\n" + SC2 + "object Main {\n" + body + "}\n"}
+
+
+case("scala", "new-with-parentheses", "a `val` assigned `new C()` has that type",
+     SC, sc("  def run(): Int = {\n    val r = new Repo()\n    r.find()\n  }\n"), *SC_BOTH)
+case("scala", "typed-val", "a `val` with a declared type has that type",
+     SC, sc("  val repo: Repo = new Repo()\n\n  def run(): Int = repo.find()\n"), *SC_BOTH)
+case("scala", "return-type", "a method's declared result gives the members of what it returns",
+     SC, sc("  def make(): Repo = new Repo()\n\n  def run(): Int = make().find()\n"), *SC_BOTH)
+case("scala", "pattern-typed", "`case r: T` binds r as a T",
+     SC, sc("  def run(x: Any): Int = x match {\n    case r: Repo => r.find()\n    case _ => 0\n  }\n"), *SC_BOTH)
+case("scala", "no-parentheses", "a method called without parentheses is still called",
+     SC, {"src/app/A.scala": "package app\n\nclass Repo {\n  def size: Int = 1\n}\n\nobject Main {\n  def run(r: Repo): Int = r.size\n}\n"},
+     [("Main.run", "calls", "Repo.size")])
+case("scala", "trait-typed", "a call through a trait type is the trait's member",
+     SC, {"src/app/A.scala": "package app\n\ntrait Store {\n  def find(): Int\n}\n\nobject Main {\n  def run(s: Store): Int = s.find()\n}\n"},
+     [("Main.run", "calls", "Store.find")])
+case("scala", "member-import", "`import p.Obj.f` binds f",
+     SC, {"src/lib/Util.scala": "package lib\n\nobject Util {\n  def twice(x: Int): Int = 2 * x\n}\n",
+          "src/app/A.scala": "package app\n\nimport lib.Util.twice\n\nobject Main {\n  def run(): Int = twice(2)\n}\n"},
+     [("Main.run", "calls", "Util.twice")])
+case("scala", "super", "`super.m()` is the parent's m",
+     SC, {"src/app/A.scala": "package app\n\nclass Base {\n  def m(): Int = 1\n}\n\nclass A extends Base {\n  override def m(): Int = super.m()\n}\n"},
+     [("A.m", "calls", "Base.m")])
+case("scala", "companion-apply", "`C(…)` is the companion object's `apply`",
+     SC, {"src/app/A.scala": "package app\n\nclass Repo(val size: Int)\n\nobject Repo {\n  def apply(size: Int): Repo = new Repo(size)\n}\n\n"
+                             "object Main {\n  def run(): Repo = Repo(1)\n}\n"},
+     [("Main.run", "calls", "Repo")])
+case("scala", "generic-argument", "`Page[Item]`'s `head: T` is an Item",
+     SC, {"src/app/A.scala": "package app\n\nclass Item {\n  def size(): Int = 1\n}\n\nclass Other {\n  def size(): Int = 2\n}\n\n"
+                             "class Page[T](val head: T)\n\nobject Main {\n  def run(p: Page[Item]): Int = p.head.size()\n}\n"},
+     [("Main.run", "calls", "Item.size")], [("Main.run", "calls", "Other.size")])
+case("scala", "extends", "`class A extends B` names its parent",
+     SC, {"src/app/A.scala": "package app\n\nclass Base\n\nclass A extends Base\n"},
+     [("A", "inherits", "Base")])
+case("scala", "same-package", "a class of the same package in another file needs no import",
+     SC, {"src/app/Repo.scala": "package app\n\nclass Repo {\n  def find(): Int = 1\n}\n",
+          "src/app/A.scala": "package app\n\nobject Main {\n  def run(r: Repo): Int = r.find()\n}\n"},
+     [("Main.run", "calls", "Repo.find")])
+
+CS2 = ("    public class Repo\n    {\n        public int Find() { return 1; }\n    }\n\n"
+       "    public class Other\n    {\n        public int Find() { return 2; }\n    }\n\n")
+CS_BOTH = ([("A.Run", "calls", "Repo.Find")], [("A.Run", "calls", "Other.Find")])
+
+
+def cs(body: str, head: str = "") -> dict[str, str]:
+    return {"A.cs": "using System.Collections.Generic;\nusing System.Threading.Tasks;\n" + head + "\nnamespace App\n{\n" + CS2
+            + "    public class A\n    {\n" + body + "    }\n}\n"}
+
+
+case("csharp", "foreach-typed", "a `foreach` variable declared with a type has it",
+     CS, cs("        public void Run(List<Repo> repos)\n        {\n            foreach (Repo r in repos)\n            {\n                r.Find();\n            }\n        }\n"), *CS_BOTH)
+case("csharp", "foreach-var", "a `foreach (var r in xs)` variable over `List<T>` is a T",
+     CS, cs("        public void Run(List<Repo> repos)\n        {\n            foreach (var r in repos)\n            {\n                r.Find();\n            }\n        }\n"), *CS_BOTH)
+case("csharp", "is-pattern", "`o is T r` binds r as a T",
+     CS, cs("        public int Run(object o)\n        {\n            if (o is Repo r)\n            {\n                return r.Find();\n            }\n            return 0;\n        }\n"), *CS_BOTH)
+case("csharp", "cast", "`(T)x` is a T",
+     CS, cs("        public int Run(object o)\n        {\n            return ((Repo)o).Find();\n        }\n"), *CS_BOTH)
+case("csharp", "as-cast", "`x as T` is a T",
+     CS, cs("        public int Run(object o)\n        {\n            return (o as Repo).Find();\n        }\n"), *CS_BOTH)
+case("csharp", "null-conditional", "`r?.M()` is r's M",
+     CS, cs("        public int? Run(Repo r)\n        {\n            return r?.Find();\n        }\n"), *CS_BOTH)
+case("csharp", "target-typed-new", "`T r = new();` constructs a T",
+     CS, cs("        public int Run()\n        {\n            Repo r = new();\n            return r.Find();\n        }\n"), *CS_BOTH)
+case("csharp", "await-task", "`await` of a `Task<T>` is a T",
+     CS, cs("        public Task<Repo> LoadAsync()\n        {\n            return Task.FromResult(new Repo());\n        }\n\n"
+            "        public async Task<int> Run()\n        {\n            var r = await LoadAsync();\n            return r.Find();\n        }\n"), *CS_BOTH)
+case("csharp", "static-property", "a static property's declared type gives its members",
+     CS, cs("        public static Repo Default { get; } = new Repo();\n\n        public int Run()\n        {\n            return A.Default.Find();\n        }\n"), *CS_BOTH)
+case("csharp", "lambda-body", "a call in a lambda's body is the enclosing method's",
+     CS, cs("        int Map(int x) { return x; }\n\n        public void Run(List<int> xs)\n        {\n            xs.ForEach(x => Map(x));\n        }\n"),
+     [("A.Run", "calls", "A.Map")])
+case("csharp", "method-group", "a method passed by name is a use of it",
+     CS, cs("        void Handle(int x) { }\n\n        public void Run(List<int> xs)\n        {\n            xs.ForEach(Handle);\n        }\n"),
+     [("A.Run", "indirect_call", "A.Handle")])
+case("csharp", "local-function", "a local function is called by its name in the method",
+     CS, cs("        public int Run()\n        {\n            int Local() { return 1; }\n            return Local();\n        }\n"),
+     [("A.Run", "calls", "Local")])
+case("csharp", "this", "`this.M()` is the class's M",
+     CS, cs("        int Helper() { return 1; }\n\n        public int Run()\n        {\n            return this.Helper();\n        }\n"),
+     [("A.Run", "calls", "A.Helper")])
+case("csharp", "inherited", "an unqualified name in a class is also searched in its base",
+     CS, {"A.cs": "namespace App\n{\n    public class Base\n    {\n        protected int Helper() { return 1; }\n    }\n\n"
+                  "    public class A : Base\n    {\n        public int Run()\n        {\n            return Helper();\n        }\n    }\n}\n"},
+     [("A.Run", "calls", "Base.Helper")])
+case("csharp", "primary-constructor", "a class's primary constructor parameter is a typed name of the class",
+     CS, {"A.cs": "namespace App\n{\n" + CS2 + "    public class A(Repo repo)\n    {\n        public int Run()\n        {\n            return repo.Find();\n        }\n    }\n}\n"},
+     *CS_BOTH)
+case("csharp", "global-using", "`global using N;` in one file holds for every file",
+     CS, {"Usings.cs": "global using Lib;\n",
+          "Lib/Repo.cs": "namespace Lib\n{\n    public class Repo\n    {\n        public int Find() { return 1; }\n    }\n}\n",
+          "App/A.cs": "namespace App\n{\n    public class A\n    {\n        public int Run(Repo r)\n        {\n            return r.Find();\n        }\n    }\n}\n"},
+     [("A.Run", "calls", "Repo.Find")])
+case("csharp", "extension-on-interface", "an extension written for an interface is a member of the classes that implement it",
+     CS, {"A.cs": "namespace App\n{\n    public interface IStore\n    {\n    }\n\n    public class Repo : IStore\n    {\n    }\n\n"
+                  "    public static class StoreExt\n    {\n        public static int Size(this IStore s) { return 1; }\n    }\n\n"
+                  "    public class A\n    {\n        public int Run(Repo r)\n        {\n            return r.Size();\n        }\n    }\n}\n"},
+     [("A.Run", "calls", "StoreExt.Size")])
+case("csharp", "enum-member", "an enum member is a member of its enum",
+     CS, {"A.cs": "namespace App\n{\n    public enum Color\n    {\n        Red,\n        Green,\n    }\n\n    public class A\n    {\n"
+                  "        public Color Run()\n        {\n            return Color.Red;\n        }\n    }\n}\n"},
+     [("A.Run", "references", "Color")])
+case("csharp", "record", "`new R(…)` constructs a record, which has methods like a class",
+     CS, {"A.cs": "namespace App\n{\n    public record Point(int X, int Y)\n    {\n        public int Norm() { return X + Y; }\n    }\n\n"
+                  "    public class A\n    {\n        public int Run()\n        {\n            var p = new Point(1, 2);\n            return p.Norm();\n        }\n    }\n}\n"},
+     [("A.Run", "calls", "Point"), ("A.Run", "calls", "Point.Norm")])
+
+RS2 = ("pub struct Repo;\n\nimpl Repo {\n    pub fn new() -> Repo {\n        Repo\n    }\n    pub fn find(&self) -> i32 {\n        1\n    }\n}\n\n"
+       "pub struct Other;\n\nimpl Other {\n    pub fn find(&self) -> i32 {\n        2\n    }\n}\n\n")
+RS_BOTH = ([("run", "calls", "Repo.find")], [("run", "calls", "Other.find")])
+
+
+def rs(body: str, head: str = "") -> dict[str, str]:
+    return {"Cargo.toml": CARGO, "src/lib.rs": head + RS2 + body}
+
+
+case("rust", "question-mark", "`f()?` of a `Result<T, E>` is a T",
+     RS, rs("pub fn open() -> Result<Repo, String> {\n    Ok(Repo::new())\n}\n\npub fn run() -> Result<i32, String> {\n    let r = open()?;\n    Ok(r.find())\n}\n"), *RS_BOTH)
+case("rust", "option-unwrap", "`opt.unwrap()` of an `Option<T>` is a T",
+     RS, rs("pub fn run(opt: Option<Repo>) -> i32 {\n    opt.unwrap().find()\n}\n"), *RS_BOTH)
+case("rust", "if-let-some", "`if let Some(r) = opt` binds r as the option's T",
+     RS, rs("pub fn run(opt: Option<Repo>) -> i32 {\n    if let Some(r) = opt {\n        return r.find();\n    }\n    0\n}\n"), *RS_BOTH)
+case("rust", "smart-pointer", "a method call goes through `Arc<T>` / `Box<T>` to T",
+     RS, rs("pub fn run(r: Arc<Repo>) -> i32 {\n    r.find()\n}\n", "use std::sync::Arc;\n\n"), *RS_BOTH)
+case("rust", "vec-iteration", "a `for` variable over `&Vec<T>` is a T",
+     RS, rs("pub fn run(repos: &Vec<Repo>) {\n    for r in repos {\n        r.find();\n    }\n}\n"), *RS_BOTH)
+case("rust", "tuple-struct-field", "`w.0` of `struct W(T)` is a T",
+     RS, rs("pub struct Wrap(Repo);\n\npub fn run(w: &Wrap) -> i32 {\n    w.0.find()\n}\n"), *RS_BOTH)
+case("rust", "static-item", "a `static`'s declared type gives its methods",
+     RS, rs("static STORE: Repo = Repo;\n\npub fn run() -> i32 {\n    STORE.find()\n}\n"), *RS_BOTH)
+case("rust", "reference-parameter", "a `&T` / `&mut T` parameter is a T",
+     RS, rs("pub fn run(r: &mut Repo) -> i32 {\n    r.find()\n}\n"), *RS_BOTH)
+case("rust", "dyn-trait", "a call through `&dyn Trait` is the trait's method",
+     RS, {"Cargo.toml": CARGO, "src/lib.rs": "pub trait Named {\n    fn label(&self) -> i32;\n}\n\npub fn run(n: &dyn Named) -> i32 {\n    n.label()\n}\n"},
+     [("run", "calls", "Named.label")])
+case("rust", "generic-bound", "a call on a `T: Trait` value is the trait's method",
+     RS, {"Cargo.toml": CARGO, "src/lib.rs": "pub trait Named {\n    fn label(&self) -> i32;\n}\n\npub fn run<T: Named>(n: &T) -> i32 {\n    n.label()\n}\n"},
+     [("run", "calls", "Named.label")])
+case("rust", "trait-default-method", "a trait's default method is a method of every implementor",
+     RS, {"Cargo.toml": CARGO, "src/lib.rs": "pub trait Named {\n    fn label(&self) -> i32 {\n        1\n    }\n}\n\npub struct Repo;\n\n"
+                                            "impl Named for Repo {}\n\npub fn run(r: &Repo) -> i32 {\n    r.label()\n}\n"},
+     [("run", "calls", "Named.label")])
+case("rust", "nested-module-path", "`a::b::f()` walks nested modules",
+     RS, {"Cargo.toml": CARGO, "src/lib.rs": "pub mod a {\n    pub mod b {\n        pub fn f() -> i32 {\n            1\n        }\n    }\n}\n\n"
+                                            "pub fn run() -> i32 {\n    a::b::f()\n}\n"},
+     [("run", "calls", "a.b.f")])
+case("rust", "self-path", "`self::f()` is f of the current module",
+     RS, {"Cargo.toml": CARGO, "src/lib.rs": "fn f() -> i32 {\n    1\n}\n\npub fn run() -> i32 {\n    self::f()\n}\n"},
+     [("run", "calls", "f")])
+case("rust", "use-super-glob", "`use super::*;` in a test module binds the parent's names",
+     RS, {"Cargo.toml": CARGO, "src/lib.rs": "pub fn f() -> i32 {\n    1\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n\n"
+                                            "    #[test]\n    fn works() {\n        assert_eq!(f(), 1);\n    }\n}\n"},
+     [("tests.works", "calls", "f")])
+case("rust", "mod-rs", "`mod x;` can be the file `x/mod.rs`",
+     RS, {"Cargo.toml": CARGO, "src/lib.rs": "pub mod x;\n\npub fn run() -> i32 {\n    x::f()\n}\n",
+          "src/x/mod.rs": "pub fn f() -> i32 {\n    1\n}\n"},
+     [("run", "calls", "f")])
+case("rust", "use-self-in-braces", "`use a::{self, f};` binds the module and the name",
+     RS, {"Cargo.toml": CARGO, "src/lib.rs": "pub mod m;\npub mod a;\n", "src/m.rs": "pub fn f() -> i32 {\n    1\n}\n\npub fn g() -> i32 {\n    2\n}\n",
+          "src/a.rs": "use crate::m::{self, f};\n\npub fn run() -> i32 {\n    f() + m::g()\n}\n"},
+     [("run", "calls", "f"), ("run", "calls", "g")])
+case("rust", "function-as-value", "a function passed by name is a use of it",
+     RS, {"Cargo.toml": CARGO, "src/lib.rs": "fn handle(x: i32) -> i32 {\n    x\n}\n\npub fn run(xs: Vec<i32>) -> Vec<i32> {\n    xs.into_iter().map(handle).collect()\n}\n"},
+     [("run", "indirect_call", "handle")])
+case("rust", "closure-body", "a call in a closure's body is the enclosing function's",
+     RS, {"Cargo.toml": CARGO, "src/lib.rs": "fn helper() -> i32 {\n    1\n}\n\npub fn run() -> i32 {\n    let f = || helper();\n    f()\n}\n"},
+     [("run", "calls", "helper")])
+case("rust", "builder-chain", "a method returning `Self` keeps the type through a chain",
+     RS, {"Cargo.toml": CARGO, "src/lib.rs": "pub struct Builder;\n\nimpl Builder {\n    pub fn new() -> Self {\n        Builder\n    }\n"
+                                            "    pub fn name(self, _n: &str) -> Self {\n        self\n    }\n    pub fn build(self) -> i32 {\n        1\n    }\n}\n\n"
+                                            "pub fn run() -> i32 {\n    Builder::new().name(\"x\").build()\n}\n"},
+     [("run", "calls", "Builder.name"), ("run", "calls", "Builder.build")])
+case("rust", "enum-method", "a method of an enum's impl is called on its values",
+     RS, {"Cargo.toml": CARGO, "src/lib.rs": "pub enum Shape {\n    Circle,\n}\n\nimpl Shape {\n    pub fn area(&self) -> i32 {\n        1\n    }\n}\n\n"
+                                            "pub fn run(s: &Shape) -> i32 {\n    s.area()\n}\n"},
+     [("run", "calls", "Shape.area")])
+case("rust", "struct-literal", "`T { … }` constructs a T",
+     RS, {"Cargo.toml": CARGO, "src/lib.rs": "pub struct Point {\n    pub x: i32,\n}\n\npub fn run() -> Point {\n    Point { x: 1 }\n}\n"},
+     [("run", "references", "Point")])
+
+SW2 = "class Repo {\n  func find() -> Int {\n    return 1\n  }\n}\n\nclass Other {\n  func find() -> Int {\n    return 2\n  }\n}\n\n"
+SW_BOTH = ([("run", "calls", "Repo.find")], [("run", "calls", "Other.find")])
+case("swift", "optional-chaining", "`r?.m()` is r's m",
+     SW, {"a.swift": SW2 + "func run(r: Repo?) -> Int? {\n  return r?.find()\n}\n"}, *SW_BOTH)
+case("swift", "if-let", "`if let r = opt` binds r as the optional's type",
+     SW, {"a.swift": SW2 + "func run(opt: Repo?) -> Int {\n  if let r = opt {\n    return r.find()\n  }\n  return 0\n}\n"}, *SW_BOTH)
+case("swift", "guard-let", "`guard let r = opt` binds r for the rest of the scope",
+     SW, {"a.swift": SW2 + "func run(opt: Repo?) -> Int {\n  guard let r = opt else {\n    return 0\n  }\n  return r.find()\n}\n"}, *SW_BOTH)
+case("swift", "for-in", "a `for` variable over `[T]` is a T",
+     SW, {"a.swift": SW2 + "func run(repos: [Repo]) {\n  for r in repos {\n    _ = r.find()\n  }\n}\n"}, *SW_BOTH)
+case("swift", "subscript", "an element of `[T]` is a T",
+     SW, {"a.swift": SW2 + "func run(repos: [Repo]) -> Int {\n  return repos[0].find()\n}\n"}, *SW_BOTH)
+case("swift", "as-cast", "`x as! T` is a T",
+     SW, {"a.swift": SW2 + "func run(x: Any) -> Int {\n  return (x as! Repo).find()\n}\n"}, *SW_BOTH)
+case("swift", "return-type", "a function's declared result gives the members of what it returns",
+     SW, {"a.swift": SW2 + "func make() -> Repo {\n  return Repo()\n}\n\nfunc run() -> Int {\n  return make().find()\n}\n"}, *SW_BOTH)
+case("swift", "computed-property", "a computed property's declared type gives its members",
+     SW, {"a.swift": SW2 + "class Svc {\n  var repo: Repo {\n    return Repo()\n  }\n\n  func run() -> Int {\n    return repo.find()\n  }\n}\n"},
+     [("Svc.run", "calls", "Repo.find")], [("Svc.run", "calls", "Other.find")])
+case("swift", "static-property", "`T.shared.m()` goes through a static property's type",
+     SW, {"a.swift": "class Repo {\n  static let shared = Repo()\n\n  func find() -> Int {\n    return 1\n  }\n}\n\nfunc run() -> Int {\n  return Repo.shared.find()\n}\n"},
+     [("run", "calls", "Repo.find")])
+case("swift", "typealias", "a typealias names the type it is written for",
+     SW, {"a.swift": SW2 + "typealias Store = Repo\n\nfunc run(s: Store) -> Int {\n  return s.find()\n}\n"}, *SW_BOTH)
+case("swift", "generic-argument", "`Page<Item>`'s `head: T` is an Item",
+     SW, {"a.swift": "class Item {\n  func size() -> Int {\n    return 1\n  }\n}\n\nclass Other {\n  func size() -> Int {\n    return 2\n  }\n}\n\n"
+                     "struct Page<T> {\n  let head: T\n}\n\nfunc run(p: Page<Item>) -> Int {\n  return p.head.size()\n}\n"},
+     [("run", "calls", "Item.size")], [("run", "calls", "Other.size")])
+case("swift", "conformance-in-extension", "a method an extension adds with a conformance is a member of the type",
+     SW, {"a.swift": "protocol Named {\n  func label() -> String\n}\n\nstruct Repo {\n}\n\nextension Repo: Named {\n  func label() -> String {\n    return \"x\"\n  }\n}\n\n"
+                     "func run(r: Repo) -> String {\n  return r.label()\n}\n"},
+     [("run", "calls", "label")])
+case("swift", "enum-method", "an enum case has the enum's methods",
+     SW, {"a.swift": "enum Shape {\n  case circle\n\n  func area() -> Int {\n    return 1\n  }\n}\n\nfunc run() -> Int {\n  return Shape.circle.area()\n}\n"},
+     [("run", "calls", "Shape.area")])
+case("swift", "class-func", "`T.make()` is a `class func` of T",
+     SW, {"a.swift": "class Repo {\n  class func make() -> Repo {\n    return Repo()\n  }\n}\n\nfunc run() -> Repo {\n  return Repo.make()\n}\n"},
+     [("run", "calls", "Repo.make")])
+case("swift", "nested-function", "a function nested in a function is called by its name there",
+     SW, {"a.swift": "func run() -> Int {\n  func helper() -> Int {\n    return 1\n  }\n  return helper()\n}\n"},
+     [("run", "calls", "run.helper")])
+case("swift", "closure-body", "a call in a closure's body is the enclosing function's",
+     SW, {"a.swift": "func helper(_ x: Int) -> Int {\n  return x\n}\n\nfunc run(xs: [Int]) -> [Int] {\n  return xs.map { helper($0) }\n}\n"},
+     [("run", "calls", "helper")])
+case("swift", "function-as-value", "a function passed by name is a use of it",
+     SW, {"a.swift": "func handle(_ x: Int) -> Int {\n  return x\n}\n\nfunc run(xs: [Int]) -> [Int] {\n  return xs.map(handle)\n}\n"},
+     [("run", "indirect_call", "handle")])
+
+case("c", "forward-declaration", "a call before the definition, after a prototype, is of the definition",
+     CC, {"a.c": "static int helper(void);\n\nint run(void) {\n    return helper();\n}\n\nstatic int helper(void) {\n    return 1;\n}\n"},
+     [("run", "calls", "helper")])
+case("c", "callback-argument", "a function passed by name is a use of it",
+     CC, {"a.c": "static int cmp(const void *a, const void *b) {\n    return 0;\n}\n\nvoid sort(void *base, int (*f)(const void *, const void *));\n\n"
+                 "void run(void *base) {\n    sort(base, cmp);\n}\n"},
+     [("run", "indirect_call", "cmp")])
+case("c", "slot-assignment", "`x.f = func;` puts func in the slot f",
+     CC, {"a.c": "struct ops {\n    int (*read)(void);\n};\n\nstatic int net_read(void) {\n    return 1;\n}\n\n"
+                 "void setup(struct ops *o) {\n    o->read = net_read;\n}\n"},
+     [("ops.read", "dispatches_to", "net_read")])
+case("c", "global-variable", "a file-level variable is read and written by the functions that name it",
+     CC, {"a.c": "static int counter;\n\nvoid bump(void) {\n    counter++;\n}\n\nint peek(void) {\n    return counter;\n}\n"},
+     [("bump", "writes", "counter"), ("peek", "reads", "counter")])
+case("c", "extern-variable", "`extern T x;` is the variable another file defines",
+     CC, {"state.c": "int counter;\n", "a.c": "extern int counter;\n\nint peek(void) {\n    return counter;\n}\n"},
+     [("peek", "reads", "state.c:counter")])
+case("c", "header-inline", "a `static inline` function of an included header is called",
+     CC, {"util.h": "static inline int twice(int x) {\n    return 2 * x;\n}\n",
+          "a.c": "#include \"util.h\"\n\nint run(void) {\n    return twice(2);\n}\n"},
+     [("run", "calls", "twice")])
+case("c", "struct-field-chain", "`a->b->c` reads the field of the struct the field points to",
+     CC, {"a.c": "struct inner {\n    int value;\n};\n\nstruct outer {\n    struct inner *in;\n};\n\nint run(struct outer *o) {\n    return o->in->value;\n}\n"},
+     [("run", "reads", "inner.value")])
+case("c", "typedef-function-pointer", "a call through a parameter is no call of a function of its name",
+     CC, {"a.c": "int handler(void) {\n    return 0;\n}\n\ntypedef int (*fn)(void);\n\nint run(fn handler) {\n    return handler();\n}\n"},
+     [], [("run", "calls", "a.c:handler")])
+
+CPP2 = ("class Repo {\n public:\n  int Find() {\n    return 1;\n  }\n};\n\nclass Other {\n public:\n  int Find() {\n    return 2;\n  }\n};\n\n")
+CPP_BOTH = ([("run", "calls", "Repo.Find")], [("run", "calls", "Other.Find")])
+case("cpp", "auto-from-construction", "`auto r = T();` is a T",
+     CPP, {"a.cc": CPP2 + "int run() {\n  auto r = Repo();\n  return r.Find();\n}\n"}, *CPP_BOTH)
+case("cpp", "auto-from-result", "`auto r = f();` has f's declared result type",
+     CPP, {"a.cc": CPP2 + "Repo make() {\n  return Repo();\n}\n\nint run() {\n  auto r = make();\n  return r.Find();\n}\n"}, *CPP_BOTH)
+case("cpp", "unique-ptr", "`p->m()` goes through `std::unique_ptr<T>` to T",
+     CPP, {"a.cc": "#include <memory>\n\n" + CPP2 + "int run(std::unique_ptr<Repo> p) {\n  return p->Find();\n}\n"}, *CPP_BOTH)
+case("cpp", "new-expression", "`new T()` constructs a T",
+     CPP, {"a.cc": CPP2 + "int run() {\n  Repo* r = new Repo();\n  return r->Find();\n}\n"},
+     [("run", "calls", "Repo"), ("run", "calls", "Repo.Find")], [("run", "calls", "Other.Find")])
+case("cpp", "const-reference", "a `const T&` parameter is a T",
+     CPP, {"a.cc": "class Repo {\n public:\n  int Find() const {\n    return 1;\n  }\n};\n\nclass Other {\n public:\n  int Find() const {\n    return 2;\n  }\n};\n\n"
+                   "int run(const Repo& r) {\n  return r.Find();\n}\n"}, *CPP_BOTH)
+case("cpp", "range-for", "a range-`for` variable over `std::vector<T>` is a T",
+     CPP, {"a.cc": "#include <vector>\n\n" + CPP2 + "void run(std::vector<Repo>& repos) {\n  for (auto& r : repos) {\n    r.Find();\n  }\n}\n"}, *CPP_BOTH)
+case("cpp", "this-member", "`this->f_.m()` is a member of the data member's type",
+     CPP, {"a.cc": CPP2 + "class Svc {\n public:\n  int Run() {\n    return this->repo_.Find();\n  }\n\n private:\n  Repo repo_;\n};\n"},
+     [("Svc.Run", "calls", "Repo.Find")], [("Svc.Run", "calls", "Other.Find")])
+case("cpp", "virtual-base", "a call through a base pointer is the base's member",
+     CPP, {"a.cc": "class Shape {\n public:\n  virtual int Area() {\n    return 0;\n  }\n};\n\nint run(Shape* s) {\n  return s->Area();\n}\n"},
+     [("run", "calls", "Shape.Area")])
+case("cpp", "namespace-alias", "`namespace u = util;` names util",
+     CPP, {"a.cc": "namespace util {\nint twice(int x) {\n  return 2 * x;\n}\n}  // namespace util\n\nnamespace u = util;\n\nint run() {\n  return u::twice(2);\n}\n"},
+     [("run", "calls", "util.twice")])
+case("cpp", "using-declaration", "`using ns::f;` makes f available unqualified",
+     CPP, {"a.cc": "namespace util {\nint twice(int x) {\n  return 2 * x;\n}\n}  // namespace util\n\nusing util::twice;\n\nint run() {\n  return twice(2);\n}\n"},
+     [("run", "calls", "util.twice")])
+case("cpp", "nested-class", "a nested class is a member of the class around it",
+     CPP, {"a.cc": "class Outer {\n public:\n  class Inner {\n   public:\n    int Find() {\n      return 1;\n    }\n  };\n};\n\nint run(Outer::Inner& i) {\n  return i.Find();\n}\n"},
+     [("run", "calls", "Outer.Inner.Find")])
+case("cpp", "anonymous-namespace", "a function of the file's unnamed namespace wins over another file's",
+     CPP, {"other.cc": "int helper() {\n  return 0;\n}\n",
+           "a.cc": "namespace {\nint helper() {\n  return 1;\n}\n}  // namespace\n\nint run() {\n  return helper();\n}\n"},
+     [("run", "calls", "a.cc:helper")], [("run", "calls", "other.cc:helper")])
+case("cpp", "argument-dependent-lookup", "an unqualified call finds a function in the namespace of its argument's type",
+     CPP, {"a.cc": "namespace shop {\nclass Order {};\n\nint total(const Order& o) {\n  return 1;\n}\n}  // namespace shop\n\n"
+                   "int run(const shop::Order& o) {\n  return total(o);\n}\n"},
+     [("run", "calls", "shop.total")])
+case("cpp", "lambda-body", "a call in a lambda's body is the enclosing function's",
+     CPP, {"a.cc": "int helper() {\n  return 1;\n}\n\nint run() {\n  auto f = []() { return helper(); };\n  return f();\n}\n"},
+     [("run", "calls", "helper")])
+case("cpp", "function-as-value", "a function passed by name is a use of it",
+     CPP, {"a.cc": "int handle(int x) {\n  return x;\n}\n\nint apply(int (*f)(int)) {\n  return f(1);\n}\n\nint run() {\n  return apply(handle);\n}\n"},
+     [("run", "indirect_call", "handle")])
+case("cpp", "out-of-class-static", "a static member defined out of its class is the class's",
+     CPP, {"repo.h": "class Repo {\n public:\n  static Repo Make();\n};\n", "repo.cc": "#include \"repo.h\"\n\nRepo Repo::Make() {\n  return Repo();\n}\n",
+           "a.cc": "#include \"repo.h\"\n\nRepo run() {\n  return Repo::Make();\n}\n"},
+     [("run", "calls", "Repo.Make")])
+case("cpp", "constructor-arguments", "`T x(1);` constructs a T",
+     CPP, {"a.cc": "class Repo {\n public:\n  explicit Repo(int size) {}\n  int Find() {\n    return 1;\n  }\n};\n\nint run() {\n  Repo r(1);\n  return r.Find();\n}\n"},
+     [("run", "calls", "Repo"), ("run", "calls", "Repo.Find")])
+
+RB2 = "class Repo\n  def find\n    1\n  end\nend\n\nclass Other\n  def find\n    2\n  end\nend\n\n"
+case("ruby", "prepend", "the methods of a prepended module come before the class's",
+     RB, {"a.rb": "module Traced\n  def label\n    'x'\n  end\nend\n\nclass A\n  prepend Traced\n\n  def run\n    label\n  end\nend\n"},
+     [("A.run", "calls", "Traced.label")])
+case("ruby", "module-function", "`def self.f` in a module is called through the module",
+     RB, {"a.rb": "module Util\n  def self.twice(x)\n    2 * x\n  end\nend\n\ndef run\n  Util.twice(2)\nend\n"},
+     [("run", "calls", "Util.twice")])
+case("ruby", "singleton-class", "a method under `class << self` is a class method",
+     RB, {"a.rb": "class Repo\n  class << self\n    def make\n      new\n    end\n  end\nend\n\ndef run\n  Repo.make\nend\n"},
+     [("run", "calls", "make")])
+case("ruby", "attr-reader-typed", "an `attr_reader` gives what its instance variable holds",
+     RB, {"a.rb": RB2 + "class Svc\n  attr_reader :repo\n\n  def initialize\n    @repo = Repo.new\n  end\n\n  def run\n    repo.find\n  end\nend\n"},
+     [("Svc.run", "calls", "Repo.find")], [("Svc.run", "calls", "Other.find")])
+case("ruby", "struct-with-block", "a class written `X = Struct.new(…) do … end` has the methods of its block",
+     RB, {"a.rb": "Point = Struct.new(:x) do\n  def norm\n    x\n  end\nend\n\ndef run\n  Point.new(1).norm\nend\n"},
+     [("run", "calls", "Point.norm")])
+case("ruby", "constant-alias", "a constant assigned a class names that class",
+     RB, {"a.rb": RB2 + "Store = Repo\n\ndef run\n  Store.new.find\nend\n"},
+     [("run", "calls", "Repo.find")], [("run", "calls", "Other.find")])
+case("ruby", "self-class", "`self.class.m` is a class method",
+     RB, {"a.rb": "class Repo\n  def self.limit\n    1\n  end\n\n  def run\n    self.class.limit\n  end\nend\n"},
+     [("Repo.run", "calls", "Repo.limit")])
+case("ruby", "super-with-arguments", "`super(x)` is the method of the same name further up",
+     RB, {"a.rb": "class Base\n  def m(x)\n    x\n  end\nend\n\nclass A < Base\n  def m(x)\n    super(x)\n  end\nend\n"},
+     [("A.m", "calls", "Base.m")])
+case("ruby", "safe-navigation", "`r&.m` is r's m",
+     RB, {"a.rb": RB2 + "def run\n  r = Repo.new\n  r&.find\nend\n"},
+     [("run", "calls", "Repo.find")], [("run", "calls", "Other.find")])
+case("ruby", "predicate-name", "a method named with `?` is called like any other",
+     RB, {"a.rb": "class A\n  def valid?\n    true\n  end\n\n  def run\n    valid?\n  end\nend\n"},
+     [("A.run", "calls", "A.valid?")])
+case("ruby", "namespaced-superclass", "`class A < Shop::Base` inherits from the namespaced class",
+     RB, {"base.rb": "module Shop\n  class Base\n    def helper\n      1\n    end\n  end\nend\n",
+          "a.rb": "require_relative 'base'\n\nclass A < Shop::Base\n  def run\n    helper\n  end\nend\n"},
+     [("A.run", "calls", "Shop.Base.helper")])
+case("ruby", "include-across-files", "a module of a required file can be included",
+     RB, {"named.rb": "module Named\n  def label\n    'x'\n  end\nend\n",
+          "a.rb": "require_relative 'named'\n\nclass A\n  include Named\n\n  def run\n    label\n  end\nend\n"},
+     [("A.run", "calls", "Named.label")])
+case("ruby", "new-with-arguments", "`C.new(…)` constructs C",
+     RB, {"a.rb": "class Repo\n  def initialize(size)\n    @size = size\n  end\nend\n\ndef run\n  Repo.new(1)\nend\n"},
+     [("run", "calls", "Repo")])
+case("ruby", "top-level-method", "a top-level method of a required file is in scope",
+     RB, {"util.rb": "def twice(x)\n  2 * x\nend\n", "a.rb": "require_relative 'util'\n\nclass A\n  def run\n    twice(2)\n  end\nend\n"},
+     [("A.run", "calls", "twice")])
+case("ruby", "block-body", "a call in a block is the enclosing method's",
+     RB, {"a.rb": "class A\n  def helper(x)\n    x\n  end\n\n  def run(xs)\n    xs.map { |x| helper(x) }\n  end\nend\n"},
+     [("A.run", "calls", "A.helper")])
+case("ruby", "private-method", "a private method is called with an implicit receiver",
+     RB, {"a.rb": "class A\n  def run\n    helper\n  end\n\n  private\n\n  def helper\n    1\n  end\nend\n"},
+     [("A.run", "calls", "A.helper")])
+
+PHP2 = ("class Repo\n{\n    public function find(): int\n    {\n        return 1;\n    }\n}\n\nclass Other\n{\n"
+        "    public function find(): int\n    {\n        return 2;\n    }\n}\n\n")
+PHP_BOTH = ([("run", "calls", "Repo.find")], [("run", "calls", "Other.find")])
+case("php", "constructor-promotion", "a promoted constructor parameter is a typed property",
+     PHP, {"a.php": "<?php\n" + PHP2 + "class Svc\n{\n    public function __construct(private Repo $repo)\n    {\n    }\n\n"
+                    "    public function run(): int\n    {\n        return $this->repo->find();\n    }\n}\n"},
+     [("Svc.run", "calls", "Repo.find")], [("Svc.run", "calls", "Other.find")])
+case("php", "return-type", "a method's declared result gives the members of what it returns",
+     PHP, {"a.php": "<?php\n" + PHP2 + "class Svc\n{\n    public function make(): Repo\n    {\n        return new Repo();\n    }\n\n"
+                    "    public function run(): int\n    {\n        return $this->make()->find();\n    }\n}\n"},
+     [("Svc.run", "calls", "Repo.find")], [("Svc.run", "calls", "Other.find")])
+case("php", "nullable-parameter", "a `?T` parameter is a T",
+     PHP, {"a.php": "<?php\n" + PHP2 + "function run(?Repo $r): int\n{\n    return $r->find();\n}\n"}, *PHP_BOTH)
+case("php", "nullsafe", "`$r?->m()` is $r's m",
+     PHP, {"a.php": "<?php\n" + PHP2 + "function run(?Repo $r): ?int\n{\n    return $r?->find();\n}\n"}, *PHP_BOTH)
+case("php", "closure-use", "a closure's `use ($x)` variable keeps its type",
+     PHP, {"a.php": "<?php\n" + PHP2 + "function run(Repo $r): int\n{\n    $f = function () use ($r) {\n        return $r->find();\n    };\n    return $f();\n}\n"}, *PHP_BOTH)
+case("php", "arrow-function-parameter", "an arrow function's typed parameter has that type",
+     PHP, {"a.php": "<?php\n" + PHP2 + "function run(array $repos): array\n{\n    return array_map(fn(Repo $r) => $r->find(), $repos);\n}\n"}, *PHP_BOTH)
+case("php", "interface-typed", "a call through an interface type is the interface's method",
+     PHP, {"a.php": "<?php\ninterface Store\n{\n    public function find(): int;\n}\n\nfunction run(Store $s): int\n{\n    return $s->find();\n}\n"},
+     [("run", "calls", "Store.find")])
+case("php", "group-use", "`use N\\{A, B};` binds both",
+     PHP, {"lib/Repo.php": "<?php\nnamespace Lib;\n\nclass Repo\n{\n    public function find(): int\n    {\n        return 1;\n    }\n}\n",
+           "lib/Cache.php": "<?php\nnamespace Lib;\n\nclass Cache\n{\n    public function get(): int\n    {\n        return 1;\n    }\n}\n",
+           "app/A.php": "<?php\nnamespace App;\n\nuse Lib\\{Repo, Cache};\n\nclass A\n{\n    public function run(Repo $r, Cache $c): int\n    {\n"
+                        "        return $r->find() + $c->get();\n    }\n}\n"},
+     [("A.run", "calls", "Repo.find"), ("A.run", "calls", "Cache.get")])
+case("php", "class-constant-fetch", "`C::class` is a reference to C",
+     PHP, {"a.php": "<?php\nclass Repo\n{\n}\n\nfunction run(): string\n{\n    return Repo::class;\n}\n"},
+     [("run", "references", "Repo")])
+case("php", "new", "`new C(…)` constructs C",
+     PHP, {"a.php": "<?php\nclass Repo\n{\n    public function __construct(int $size)\n    {\n    }\n}\n\nfunction run(): Repo\n{\n    return new Repo(1);\n}\n"},
+     [("run", "calls", "Repo")])
+case("php", "parent-constructor", "`parent::__construct()` is the parent's constructor",
+     PHP, {"a.php": "<?php\nclass Base\n{\n    public function __construct()\n    {\n    }\n}\n\nclass A extends Base\n{\n"
+                    "    public function __construct()\n    {\n        parent::__construct();\n    }\n}\n"},
+     [("A.__construct", "calls", "Base.__construct")])
+case("php", "namespaced-function", "an unqualified function call is first a function of the current namespace",
+     PHP, {"lib/util.php": "<?php\nfunction twice(int $x): int\n{\n    return 0;\n}\n",
+           "app/util.php": "<?php\nnamespace App;\n\nfunction twice(int $x): int\n{\n    return 2 * $x;\n}\n",
+           "app/A.php": "<?php\nnamespace App;\n\nclass A\n{\n    public function run(): int\n    {\n        return twice(2);\n    }\n}\n"},
+     [("A.run", "calls", "app/util.php:twice")], [("A.run", "calls", "lib/util.php:twice")])
+case("php", "enum-method", "an enum case has the enum's methods",
+     PHP, {"a.php": "<?php\nenum Status\n{\n    case Active;\n\n    public function label(): string\n    {\n        return 'a';\n    }\n}\n\n"
+                    "function run(): string\n{\n    return Status::Active->label();\n}\n"},
+     [("run", "calls", "Status.label")])
+case("php", "static-return", "`new static()` / `new self()` construct the class",
+     PHP, {"a.php": "<?php\nclass Repo\n{\n    public static function make(): static\n    {\n        return new static();\n    }\n}\n"},
+     [("Repo.make", "calls", "Repo")])
+case("php", "abstract-method", "a call of an abstract method through `$this` is the declaring class's",
+     PHP, {"a.php": "<?php\nabstract class Shape\n{\n    abstract public function area(): int;\n\n    public function run(): int\n    {\n"
+                    "        return $this->area();\n    }\n}\n"},
+     [("Shape.run", "calls", "Shape.area")])
+case("php", "static-method-via-class", "`C::m()` is C's static method",
+     PHP, {"a.php": "<?php\nclass Util\n{\n    public static function twice(int $x): int\n    {\n        return 2 * $x;\n    }\n}\n\n"
+                    "function run(): int\n{\n    return Util::twice(2);\n}\n"},
+     [("run", "calls", "Util.twice")])
+case("php", "callable-string", "a method passed as `[$this, 'm']` is a use of m",
+     PHP, {"a.php": "<?php\nclass A\n{\n    public function handle(int $x): int\n    {\n        return $x;\n    }\n\n"
+                    "    public function run(array $xs): array\n    {\n        return array_map([$this, 'handle'], $xs);\n    }\n}\n"},
+     [("A.run", "indirect_call", "A.handle")])
+
 # --- running ------------------------------------------------------------------
 
 def _matches(node: dict[str, Any], want: str) -> bool:
