@@ -233,11 +233,11 @@ fn rows_a_librarys_type_or_another_scope_explains_say_so() {
                 "<?php\nnamespace App\\Jobs;\nfunction run($sink, \\App\\Stream $s) {\n    \\rewind($sink);\n    $p = new \\ReflectionProperty($s, 'x');\n    $p->getValue();\n    return $s->response->getBody();\n}\n",
             ),
             // a `let` is a bare name of its block: no member of anything, and
-            // in another block of its file the name is a local of that block
+            // no name of another block of its file
             ("lib/conn.rb", "class Conn\nend\n"),
             (
                 "spec/conn_spec.rb",
-                "RSpec.describe Conn do\n  describe 'a' do\n    let(:uri) { 1 }\n  end\n\n  it 'b' do\n    uri = build\n    expect(uri.to_s).to eq('x')\n    expect(conn.uri).to eq(1)\n  end\nend\n",
+                "RSpec.describe Conn do\n  describe 'a' do\n    let(:uri) { 1 }\n  end\n\n  it 'b' do\n    expect(uri.to_s).to eq('x')\n    expect(conn.uri).to eq(1)\n  end\nend\n",
             ),
         ],
     );

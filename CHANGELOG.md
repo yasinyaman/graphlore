@@ -316,6 +316,27 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- **Native engine 0.5.40: a closure no definition holds is a scope.** The
+  callback of `test('…', () => { … })`, an RSpec `it '…' do … end`, a module
+  wrapped in a function: each is a definition with no node and no name
+  (`Def::block`) whose locals are its own, as a function's are, and one inside
+  another sees the outer one's. Until now a local declared there was no local
+  at all: `const request = …` in one test was the `request` function of
+  another file (`EXTRACTED`), and the same name in the next test was the same
+  thing. A definition written in such a closure is a name of it and of the
+  closures inside, not of the file. On the 31 audit repositories, in the
+  projects' own code: 210 edges added (got 96, faraday 59, express 41, most of
+  them a test's call through its own local or to its own helper) and 140
+  removed, nearly all a local or a callback parameter linked to a definition
+  of its name elsewhere (`assert.strictEqual(body, 'ok')` to another file's
+  `body`, `.expect(200, cb)` to another test's `cb`). In vendored and minified
+  bundles, which the analysis scope leaves out, 1,347 added and 2,587 removed
+  (retrofit's generated Dokka bundle). Unmarked unresolved rows: TypeScript 87
+  → 39; Ruby 175 → 215, where a receiver that was no name at all is now an
+  untyped local of its block and is reported as one. Known cost: an older
+  JavaScript module written `var Dataset = (function () { function Dataset()
+  {} return Dataset })()` no longer answers to `new Dataset()` outside that
+  function (the variable holds what a call returns).
 - **Native engine 0.5.39: extensions for a library's type on a receiver the
   walk cannot type, and a C# `#if` inside an expression.** A call the walk
   could not follow, whose name is the one extension in sight written for a
