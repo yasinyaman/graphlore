@@ -296,6 +296,7 @@ def compare_edges(theirs_graph: dict, ours_graph: dict, paired: dict[str, str]) 
         return None
     sets: dict[tuple[str, str, str], set] = {}
     stated: dict[tuple[str, str], set] = {}
+    sure: dict[tuple[str, str], set] = {}
     inferred = {}
     for name, (byid, edges) in sides.items():
         for e in edges:
@@ -329,6 +330,9 @@ def compare_edges(theirs_graph: dict, ours_graph: dict, paired: dict[str, str]) 
                     # as is written: the header of a C++ declaration)
                     lang = language(_node_file(ours_by[s2]) or "") or lang
             sets.setdefault((g, lang, name), set()).add(key)
+            # what graphify itself calls EXTRACTED, as opposed to its guesses
+            if name == "graphify" and str(e.get("confidence", "")).upper() == "EXTRACTED":
+                sure.setdefault((g, lang), set()).add(key)
             if name == "native" and str(e.get("confidence", "")).upper() == "INFERRED":
                 inferred[(g, lang)] = inferred.get((g, lang), 0) + 1
             # graphify writes a type a method uses on the method's class, and
@@ -367,6 +371,8 @@ def compare_edges(theirs_graph: dict, ours_graph: dict, paired: dict[str, str]) 
         out.setdefault(g, {})[lang] = {
             "graphify": len(theirs), "native": len(ours),
             "both": len(theirs & (ours | said)), "stated_otherwise": len(theirs & said),
+            "graphify_extracted": len(sure.get((g, lang), set())),
+            "both_extracted": len(sure.get((g, lang), set()) & (ours | said)),
             "only_graphify": len(theirs - ours - said), "only_native": len(ours - theirs),
             "native_inferred": inferred.get((g, lang), 0),
             "samples_only_graphify": show(theirs - ours - said, "graphify"),
