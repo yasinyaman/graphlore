@@ -8,16 +8,18 @@ All notable changes to this project are documented here. The format is based on
 
 ### Added
 - **The name-resolution rules of each language as a list**
-  (`docs/resolution-rules.md`, `benchmarks/conformance.py`): 185 rules in 14
-  languages — scopes and shadowing, imports, member lookup through bases,
-  mix-ins and extensions, overloads by arity, the types the source writes —
-  each a small project with the edge the rule says is there and the edge that
-  must not be. The native engine (0.5.45) follows 176. The nine it does not
-  are named there: Rust `super::f()` in an inline module and a second `let`
-  of a name, Ruby's bare `super` and an instance variable typed in
-  `initialize`, TypeScript's optional parameter and a type through a
-  namespace import, a JavaScript prototype method on a local, Scala `new C`
-  without parentheses, and a generic Java class named `Box`.
+  (`docs/resolution-rules.md`, `benchmarks/conformance.py`): 406 rules in 14
+  languages, each a small project with the edge the rule says is there and
+  the edge that must not be. The first 185 are scopes and shadowing, imports,
+  member lookup through bases, mix-ins and extensions, and overloads by
+  arity; the native engine (0.5.45) follows 176 of them. The other 221 are
+  the places a type is written outside a declaration (a cast, a pattern, a
+  loop variable, an alias, a wrapper, a declared result) and what each
+  language has of its own; it follows 180. The 50 it does not are listed
+  there by rule: a cast used at once, Kotlin's and C#'s `?.`, `if let` on a
+  parameter, a member of an enum's value, type aliases, a variable outside a
+  function typed by its value, method references, `self::` / `super::`
+  paths, Ruby's `super`, a few more.
   `--baseline benchmarks/results-conformance.json` says what a change fixed
   and exits 1 on what it broke.
 - **A built-in code search index**, so `graphlore_locate` and the duplication

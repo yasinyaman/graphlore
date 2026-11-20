@@ -1473,8 +1473,9 @@ calls found is the first set's, 85%, and 22% of the native calls are
 
 Both sets measure the engine on code. [resolution-rules.md](resolution-rules.md)
 is the other half: the name-resolution rules each language defines, one
-small project a rule (`benchmarks/conformance.py`), 176 of 185 followed by
-engine 0.5.45. A gap found on a repository becomes a case there first, so
+small project a rule (`benchmarks/conformance.py`), 356 of 406 followed by
+engine 0.5.45 (176 of the 185 about scopes, imports and member lookup; 180
+of the 221 about types written in an expression, a pattern or an alias). A gap found on a repository becomes a case there first, so
 that it is found once.
 
 ### What is left without an edge
