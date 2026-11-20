@@ -465,6 +465,58 @@ def _ts_child_name(node: Any) -> str | None:
 
 
 _PP_SPACE = b" \t\n\x0c\r"  # what Rust's `is_ascii_whitespace` strips
+_PP_ENDS = b";{}],)"  # what ends a statement, a block, an attribute or an item of a list
+
+
+def _blank_expression_branches(src: bytes) -> bytes:
+    """C#: an ``#if`` … ``#else`` … ``#endif`` that opens in the middle of an
+    expression or a declaration (the code line before it ends none: ``? null``
+    before ``#if NET`` / ``: new A(x)`` / ``#else`` / ``: new A()``) is one
+    piece of code written once per configuration; the parser, seeing every
+    branch, loses the type around. The source with the directive lines and
+    every branch but the first blanked (each byte but a newline or carriage
+    return a space), else ``src``. A group with one branch is left alone.
+
+    The native engine's ``parse::blank_expression_branches`` is the same rule.
+    """
+    if b"#if" not in src:
+        return src
+    lines = src.split(b"\n")
+    blank: list[tuple[int, int]] = []
+    stack: list[tuple[bool, list[int]]] = []
+    last = b""  # the last line of code, without its comment
+    for li, line in enumerate(lines):
+        t = line.strip(_PP_SPACE)
+        if t.startswith(b"#"):
+            word = t[1:].lstrip(_PP_SPACE)
+            n = 0
+            while n < len(word) and word[n:n + 1].isalpha():
+                n += 1
+            word = word[:n]
+            if word == b"if":
+                inside = bool(last) and last[-1:] not in _PP_ENDS
+                stack.append((inside, [li]))
+            elif word in (b"elif", b"else"):
+                if stack:
+                    stack[-1][1].append(li)
+            elif word == b"endif":
+                if stack:
+                    inside, directives = stack.pop()
+                    if inside and len(directives) >= 2:
+                        blank.append((directives[0], directives[0]))
+                        blank.append((directives[1], li))
+            continue
+        cut = t.find(b"//")
+        code = (t if cut < 0 else t[:cut]).rstrip(_PP_SPACE)
+        if code:
+            last = code
+    if not blank:
+        return src
+    for lo, hi in blank:
+        for i in range(lo, hi + 1):
+            lines[i] = bytes(c if c == 0x0D else 0x20 for c in lines[i])
+    return b"\n".join(lines)
+
 
 
 def _blank_duplicate_branches(src: bytes) -> bytes:
@@ -581,7 +633,12 @@ def _spans_treesitter(src: bytes, rel: str) -> list[tuple[int, int, int, str]]:
         return []
     try:
         # (C, C++: an `#if` written once per configuration is parsed once)
-        parsed = _blank_duplicate_branches(src) if lang in ("c", "cpp") else src
+        parsed = src
+        if lang in ("c", "cpp"):
+            parsed = _blank_duplicate_branches(src)
+        elif lang == "csharp":
+            # (C#: an `#if` in the middle of an expression is parsed once)
+            parsed = _blank_expression_branches(src)
         root = parser.parse(parsed).root_node
     except Exception:
         return []

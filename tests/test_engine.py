@@ -135,6 +135,10 @@ _SNIPPETS = {
     "Model.scala": "class ResponseBlob(val bytes: Array[Byte]) {\n  def size = bytes.length\n}\n",
     "Parameter.cs": "namespace Shop {\npublic record Parameter(string Name) {\n"
                     "  public int Size() {\n    return 1;\n  }\n}\n}\n",
+    # an `#if` inside an expression is parsed once: the class keeps its methods
+    "Ext.cs": "static class Ext {\n    static int F(bool a)\n        => a\n            ? 1\n"
+              "#if NET\n            : 2;\n#else\n            : 3;\n#endif\n"
+              "    static int G() => 4;\n}\n",
     "lib.rs": (FIXTURES / "polyglot" / "core" / "src" / "lib.rs").read_text(encoding="utf-8"),
     "Retrier.swift": "protocol DataDecoder {\n  func decode(_ data: Data) -> Value\n}\n"
                      "class OfflineRetrier {\n  init(monitor: Monitor) {\n  }\n}\n",

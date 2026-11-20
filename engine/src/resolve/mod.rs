@@ -3935,6 +3935,9 @@ impl<'a> Project<'a> {
                     return Some(found);
                 }
             }
+            if let Some(found) = self.library_extension_call(f, d, path, bases) {
+                return Some(found);
+            }
             // `let request = request.with_agent(a)`: the name before the
             // declaration is one the facts no longer hold (a parameter it
             // shadows); only the method's name says what is called
@@ -3945,6 +3948,83 @@ impl<'a> Project<'a> {
             .then(|| self.unknown_receiver(f, &path[1], None))
             .flatten()
         })
+    }
+
+    /// A call the walk could not follow, by the name of the one extension in
+    /// sight written for a type the project does not define
+    /// (`e.Name.LocalName.Squash()` beside `Squash(this string s)`,
+    /// `user.email.isEmailValid()` beside `fun String.isEmailValid()`):
+    /// `INFERRED`. The receiver is something the walk gives no project type
+    /// (a library's member, a chain of them); one it does type has the
+    /// extensions written for that type, asked where the walk ends.
+    fn library_extension_call(
+        &self,
+        f: usize,
+        d: Option<usize>,
+        path: &[String],
+        bases: bool,
+    ) -> Option<(Target, Confidence)> {
+        let (name, of) = path.split_last()?;
+        if bases
+            || !*self.calling.borrow()
+            || of.is_empty()
+            || name == "()"
+            || name.starts_with('[')
+            // (`self.name()` is a member of the type around, or nothing)
+            || (of.len() == 1 && matches!(of[0].as_str(), "self" | "super"))
+            // (`HttpUtility.UrlEncode(s)`: a static call on a library's type)
+            || (of.len() == 1
+                && of[0].chars().next().is_some_and(|c| c.is_uppercase())
+                && !self.is_local_name(f, d, &of[0]))
+        {
+            return None;
+        }
+        let guessed = self.guessed.get();
+        let (Target::Def(c), _) = self.extension_method(f, name, None)? else {
+            self.guessed.set(guessed);
+            return None;
+        };
+        let written = self.def(c).receiver.clone().or_else(|| self.extended_type(c));
+        let outside = written.is_some_and(|w| {
+            let plain = w.split('<').next().unwrap_or(&w).trim_end_matches('?').trim();
+            let bare = plain.rsplit(['.', ':']).next().unwrap_or(plain);
+            !bare.is_empty() && self.type_named(c.0, bare).is_none()
+        });
+        // a local whose type the source names was asked where the walk
+        // stopped, with that type: another library's is not this one
+        let named_local = of.len() == 1
+            && (self.is_external_local(f, d, &of[0])
+                || self.local_written_type(f, d, &of[0]).is_some());
+        // a name that is also a member of a type of the project says nothing
+        // of an unknown receiver (`self.0.connect()` beside `impl Connector
+        // for ()`)
+        let fam = self.family[f];
+        let only_extensions = self.by_name.get(name.as_str()).into_iter().flatten().all(|r| {
+            let x = self.def(*r);
+            self.family[r.0] != fam
+                || !x.kind.is_callable()
+                || x.decl_only
+                || x.receiver.is_some()
+                || self.extended_type(*r).is_some()
+                // (the declaration in the trait such an impl is of:
+                // `trait UriExt { fn host_bare(&self); }`)
+                || (x.parent.is_some_and(|p| self.def((r.0, p)).kind == DefKind::Interface)
+                    && self.by_name.get(name.as_str()).into_iter().flatten().any(|o| {
+                        o.0 == r.0 && self.extended_type(*o).is_some()
+                    }))
+        });
+        if !outside
+            || named_local
+            || !only_extensions
+            || self.type_of_path(f, d, of, false).is_some()
+        {
+            self.guessed.set(guessed);
+            return None;
+        }
+        // (by a name alone: never from the extension to itself, a wrapper
+        // calling the library's method of its own name)
+        self.guessed.set(true);
+        Some((Target::Def(c), Confidence::Inferred))
     }
 
     /// `want_many`: the path is asked what it is a collection of (`elem_of`):
