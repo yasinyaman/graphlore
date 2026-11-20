@@ -218,3 +218,54 @@ fn js_rows_that_are_no_gap_say_why() {
         "{rows:#?}"
     );
 }
+
+#[test]
+fn rows_a_librarys_type_or_another_scope_explains_say_so() {
+    let dir = project(
+        "library-step",
+        &[
+            (
+                "src/Stream.php",
+                "<?php\nnamespace App;\nuse Psr\\Http\\Message\\ResponseInterface;\nclass Stream {\n    public ?ResponseInterface $response = null;\n    public function rewind(): void {}\n    public function getValue(): int { return 1; }\n    public function getBody(): int { return 1; }\n}\n",
+            ),
+            (
+                "app/use.php",
+                "<?php\nnamespace App\\Jobs;\nfunction run($sink, \\App\\Stream $s) {\n    \\rewind($sink);\n    $p = new \\ReflectionProperty($s, 'x');\n    $p->getValue();\n    return $s->response->getBody();\n}\n",
+            ),
+            // a `let` is a bare name of its block: no member of anything, and
+            // in another block of its file the name is a local of that block
+            ("lib/conn.rb", "class Conn\nend\n"),
+            (
+                "spec/conn_spec.rb",
+                "RSpec.describe Conn do\n  describe 'a' do\n    let(:uri) { 1 }\n  end\n\n  it 'b' do\n    uri = build\n    expect(uri.to_s).to eq('x')\n    expect(conn.uri).to eq(1)\n  end\nend\n",
+            ),
+        ],
+    );
+    let out = dir.join("unresolved.json");
+    let mut opts = BuildOptions::new(&dir);
+    opts.unresolved = Some(out.clone());
+    build_graph(&opts).unwrap();
+    let rows: Vec<Value> = serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+    let row = |file: &str, path: &str| {
+        rows.iter()
+            .find(|r| r["file"] == file && r["path"] == path)
+            .cloned()
+            .unwrap_or_else(|| panic!("no row {file} {path} in {rows:#?}"))
+    };
+    // PHP: a method is not in scope by its bare name
+    assert_eq!(row("app/use.php", "rewind")["library_like"], "a bare name is no method here");
+    // a local constructed from a type the project does not define
+    assert_eq!(row("app/use.php", "$p.getValue")["library_like"], "the receiver is a library's");
+    // a field written with a library's type: what hangs off it is the library's
+    assert_eq!(
+        row("app/use.php", "$s.response.getBody")["library_like"],
+        "the receiver is a library's"
+    );
+    assert_eq!(
+        row("spec/conn_spec.rb", "uri")["library_like"],
+        "the one definition is a let of another block"
+    );
+    // `conn.uri`: the `let(:uri)` is no member of `conn`, so no candidate
+    assert!(rows.iter().all(|r| r["path"] != "conn.uri"), "{rows:#?}");
+}

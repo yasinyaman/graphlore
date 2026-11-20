@@ -321,6 +321,8 @@ fn is_core_member(fam: Family, name: &str) -> bool {
 /// Methods of Ruby's core objects (String, Array, Hash, Object): a project
 /// method of one of these names is not what an untyped receiver is asked.
 const RUBY_CORE_METHODS: &[&str] = &[
+    "dup",
+    "clone",
     "shift",
     "unshift",
     "gsub",
@@ -3090,6 +3092,41 @@ impl<'a> Project<'a> {
         false
     }
 
+    /// A local written with a type whose capital head names nothing of the
+    /// project (`$p = new \ReflectionProperty(…)`, `let a: SocketAddr`): a
+    /// library's type the file imports by no name the engine reads.
+    fn is_outside_local(&self, f: usize, d: Option<usize>, name: &str) -> bool {
+        let defs = &self.files[f].defs;
+        let mut cur = d;
+        while let Some(x) = cur {
+            if let Some(&li) = self.locals.get(&(f, x, name.to_string())) {
+                let l = &self.files[f].locals[li];
+                let head = l.path.first().map(String::as_str).unwrap_or("");
+                return head.chars().next().is_some_and(|c| c.is_uppercase())
+                    && !self.by_name.contains_key(head)
+                    && !self.is_local_name(f, Some(x), head)
+                    && self.resolve_name(f, Some(x), head).is_none();
+            }
+            cur = defs[x].parent;
+        }
+        false
+    }
+
+    /// Whether what a field or variable holds, or a function returns, is
+    /// written as a type the project does not define.
+    fn library_typed(&self, x: DefRef) -> bool {
+        let def = self.def(x);
+        let written = if def.kind.is_callable() {
+            self.return_path(x)
+        } else if def.kind.is_state() {
+            def.declared_type.as_ref()
+        } else {
+            None
+        };
+        let Some(head) = written.and_then(|p| p.first()) else { return false };
+        matches!(self.resolve_name(x.0, def.parent, head), Some(Target::Ext(..)))
+    }
+
     /// A local that does not hide the outer name: a plain assignment where
     /// assigning declares nothing, or, for a bare call (`called`), a local
     /// with a written type (`baseUrl(…)` beside `String baseUrl` calls the
@@ -4771,6 +4808,19 @@ impl<'a> Project<'a> {
                 }
             }
             let mut found = self.member(&t, seg, 3);
+            // a field beside a method of its name (Rust `input: ConsumeBuf`
+            // and a trait's `fn input()`, Java, PHP): read without a call,
+            // with more after it, the name is the field
+            if let (Target::Def(c), Some(Target::Def(m))) = (&t, &found) {
+                let read = rest.get(i + 1).is_some_and(|s| s != "()");
+                if read && fam != Family::Ruby && self.def(*m).kind.is_callable() {
+                    let field =
+                        self.members(*c, seg).into_iter().find(|x| self.def(*x).kind.is_state());
+                    if let Some(field) = field {
+                        found = Some(Target::Def(field));
+                    }
+                }
+            }
             // C++ `cpr::async(…)` beside `class async`: the name called is the
             // function, a name with `::` after it the type
             if let Target::Def(ns) = t {
@@ -5420,15 +5470,21 @@ impl<'a> Project<'a> {
     fn explain_unresolved(&self, f: usize, d: Option<usize>, r: &RefFact) -> Option<Value> {
         let name = r.path.last().filter(|s| !s.starts_with('[') && *s != "()")?;
         let fam = self.family[f]?;
+        // (an RSpec `let` is a bare name of its block: no member of anything)
+        let member_call = r.path.len() >= 2;
         let mut cands = self.by_name.get(name.as_str())?.iter().copied().filter(|c| {
             self.def(*c).kind.is_callable()
                 && self.family[c.0] == Some(fam)
                 && self.node_id(*c).is_some()
+                && !(member_call && self.def(*c).scope_lines.is_some())
         });
         let (c, None) = (cands.next()?, cands.next()) else { return None };
         let marker = r.path.iter().any(|s| s.starts_with('['));
         let head = r.path[0].as_str();
         let bare = head.split('@').next().unwrap_or(head);
+        // (a PHP `$x` is a local under its bare name)
+        let lhead = head.trim_start_matches('$');
+        let lbare = bare.trim_start_matches('$');
         let reason = if r.path.len() == 1 {
             "bare name: not in scope".to_string()
         } else if head == "self" {
@@ -5439,13 +5495,13 @@ impl<'a> Project<'a> {
             "implicit member: its place gives no type".to_string()
         } else if head == "()" {
             "receiver the walk cannot name".to_string()
-        } else if self.is_local_name(f, d, head) || self.is_local_name(f, d, bare) {
-            if self.is_untyped_local(f, d, head) {
+        } else if self.is_local_name(f, d, lhead) || self.is_local_name(f, d, lbare) {
+            if self.is_untyped_local(f, d, lhead) {
                 "untyped local or parameter".to_string()
-            } else if self.is_external_local(f, d, head) {
+            } else if self.is_external_local(f, d, lhead) {
                 "local of a library type".to_string()
             } else {
-                match self.local_type(f, d, head) {
+                match self.local_type(f, d, lhead) {
                     Some((t, _)) if r.path.len() == 2 => {
                         format!("typed local: no such member on its type ({:?})", self.def(t).kind)
                     }
@@ -5522,11 +5578,60 @@ impl<'a> Project<'a> {
             }
             _ => false,
         };
+        // the longest start of the path that names something: a library's
+        // name, or a field, variable or function whose written type is one
+        // (`$this->request->getBody()`, `RequestInterface $request`). What
+        // hangs off it is the library's, unless the one definition is an
+        // extension written for such a type.
+        // (a C# method with no type around is one a `#if` inside an
+        // expression cost its class: it may be an extension all the same)
+        let extension = cd.receiver.is_some()
+            || self.extended_type(c).is_some()
+            || (fam == Family::CSharp && cd.parent.is_none());
+        // a name of the project between the head and the name called: the
+        // path may come back into the project (`trust.af.evaluate()`)
+        let comes_back = r.path.len() > 2
+            && r.path[1..r.path.len() - 1].iter().any(|s| self.by_name.contains_key(s.as_str()));
+        let library_step = || {
+            if r.path.len() < 2 || extension {
+                return false;
+            }
+            if self.is_outside_local(f, d, lhead) && self.local_type(f, d, lhead).is_none() {
+                return !comes_back;
+            }
+            for k in (1..r.path.len()).rev() {
+                let last = r.path[k - 1].as_str();
+                if last == "()" || last.starts_with('[') {
+                    continue;
+                }
+                match self.resolve_path(f, d, &r.path[..k], true) {
+                    Some((Target::Ext(..), _)) => return true,
+                    Some((Target::Def(x), _)) => return self.library_typed(x),
+                    Some(_) => return false,
+                    None => {}
+                }
+            }
+            false
+        };
+        // where a method is not in scope by its bare name, a bare call is a
+        // function's (PHP `\rewind($h)` beside a `rewind()` method, a Go
+        // `h := func…` beside a method `h`)
+        let bare_is_no_method = r.path.len() == 1
+            && !fam.implicit_this()
+            && cd.parent.is_some_and(|p| self.def((c.0, p)).kind.is_class_like());
+        // a `let` of another block of this file: the name here is a local of
+        // the block it is used in
+        let let_elsewhere = r.path.len() == 1 && c.0 == f && cd.scope_lines.is_some();
         let library_like = if reason == "library name"
             || reason == "local of a library type"
             || std_held
+            || library_step()
         {
             Some("the receiver is a library's")
+        } else if bare_is_no_method {
+            Some("a bare name is no method here")
+        } else if let_elsewhere {
+            Some("the one definition is a let of another block")
         } else if outside_head || std_head {
             Some("the head is a library's type or global")
         } else if core.contains(&name.as_str())
