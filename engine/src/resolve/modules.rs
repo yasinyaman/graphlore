@@ -487,6 +487,12 @@ impl ModuleSystems {
         m
     }
 
+    /// The Swift module (SwiftPM target) a file belongs to; files outside
+    /// every target share the empty one.
+    pub fn swift_module_of(&self, f: usize) -> Option<&str> {
+        self.swift_module.get(&f).map(String::as_str)
+    }
+
     pub fn crate_of(&self, f: usize) -> Option<&str> {
         self.rs_mod.get(&f).map(|(k, _)| k.as_str())
     }

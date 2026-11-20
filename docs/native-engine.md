@@ -783,7 +783,7 @@ that the native graph has too:
 | Scala | 100% | 2 / 0 | 46 / 20 (45%) | 21 / 22 (95%) | 75 / 32 (100%) |
 | C# | 92.7% | 342 / 280 (30%)³ | 3,073 / 2,463 (97%) | 87 / 86 (98%) | 1,242 / 807 (99%) |
 | Rust | 93.3% | 324 / 370 (79%) | 2,175 / 853 (87%) | 53 / 41 (93%) | 1,218 / 895 (81%) |
-| Swift | 95.9% | 166 / 166 (–)³ | 5,492 / 2,141 (83%) | 190 / 164 (100%) | 1,089 / 580 (62%) |
+| Swift | 95.9% | 168 / 166 (–)³ | 5,607 / 2,141 (84%) | 190 / 164 (100%) | 1,071 / 580 (62%) |
 | C | 100% | 89 / 77 (99%) | 864 / 791 (100%) | – | 253 / 130 (97%) |
 | C++ | 98.7% | 215 / 228 (93%) | 765 / 281 (29%)⁴ | 30 / 5 (100%) | 350 / 234 (88%) |
 | C/C++ headers | 91.4% | 164 / 172 (95%) | 372 / 348 (84%) | 12 / 12 (92%) | 563 / 312 (90%) |
@@ -1240,6 +1240,59 @@ to none:
 
 Unmarked rows in all: 314 → 75 (Swift 59, Python 9, Scala 4, TSX 3); rows
 in all 5,897.
+
+Engine 0.5.49 (Swift) takes Swift's 59 unmarked rows, all alamofire's, to
+none. Most were real gaps:
+
+- **Results.** A Swift function's written result (`-> Request?`, filed by the
+  grammar under `name` beside the function's name) was never read: callers
+  saw only what the body returns. It is a `return_type` now, and `-> Self`
+  is the type the method is called on (`streamRequest(…).redirect(using:)`
+  is a `DataStreamRequest`).
+- **Protocol properties.** `var serverTrustManager: ServerTrustManager? {
+  get }` in a protocol was a protocol named `var serverTrustManager`
+  (`protocol_property_declaration` carries the hint word; it is now among
+  the span rule's non-definitions, in `generic.rs` and `spans.py` alike), and
+  is a typed property: `stateProvider?.serverTrustManager?.serverTrustEvaluator(…)`.
+- **Library types the project extends.** `NotificationCenter.default`,
+  `DispatchQueue.main` (`default`, `main`, `shared`, `current`, `standard`)
+  are values of the type, so the project's extension is what is called
+  (`postNotification`), unless none of its overloads takes the arguments
+  written or it is `static` (`FileManager.default.createDirectory(atPath:withIntermediateDirectories:attributes:)`
+  and `.removeItem(atPath:)` are the library's, beside the tests' `static
+  func removeItem(atPath:)`; `Def::is_static`). A library type the project makes conform to a protocol
+  (`extension SecTrust: AlamofireExtended {}`) has the protocol's members and
+  its extensions' properties: `trust.af.performValidation(…)`,
+  `SecPolicy.af.revocation(…)` (the extension's `where ExtendedType ==` is
+  not read; a name several such extensions declare is a tie). Every file of
+  a module (SwiftPM target) sees the others' extensions:
+  `self.rootQueue.after(…)`. An extension in another module is no overload
+  where that module is not imported: `Example/`'s `AF.request("…")` is not the
+  tests' `request(_ endpoint: Endpoint)`.
+- **Closures and given types.** A trailing or argument closure's parameter is
+  the type the method's function parameter takes, a type parameter of its
+  class bound by the receiver (`mutableState.write { mutableState in … }` on a
+  `Protected<MutableState>`, declared or built `Protected(MutableState())`, a
+  field of a base included). `guard let request = request(for: task, as:
+  DownloadRequest.self)` is a local (a call of the name it binds), a
+  `DownloadRequest` (`X.self` is a given type).
+- **Smaller.** `var host = Host.localhost` is a `Host`; a property over a
+  method of its name, up the bases (`request.response`); `var urlRequest =
+  try urlRequest.asURLRequest()` takes the parameter's name after its own
+  line; `` `protocol` `` is the name `protocol` (labelled as written).
+- **Marks.** A receiver of a library's type: a type the project only
+  extends as the head (`String(…)`, `Bundle.test`), a local, field or a field
+  along the path declared with one or with a collection (`urlCache:
+  URLCache!`, `session.configuration.urlCache`, `[HTTPHeader]`), a local a
+  project callable declared to give one; and a receiver of a type parameter
+  (`value: Value` in `Protected<Value>`).
+
+alamofire's calls: 393 `INFERRED` guesses or ties are replaced by 443
+others, most now the test helpers the tests call (`session.request(.get)`
+is `extension Session { func request(_ endpoint: Endpoint) }`, typed through
+`stored(_:) -> Session`); `EXTRACTED` calls 39 more (41 new, 2 gone). Swift's calls: 5,607
+(84% of graphify's). Unmarked rows in all: 75 → 16 (Python 9, Scala 4, TSX 3);
+rows in all 5,853.
 Engine 0.5.35 (C function-pointer slots) reads a struct of function pointers
 as an interface and what is put in its slots as the implementations: an
 initializer of a variable, by name (`.async_read = redisAsyncRead`) or by
@@ -1700,7 +1753,7 @@ implicit members since 0.5.17: 39 whose place gives no type are rows now
 closure parameters and variables of express's tests. What is left at file
 level there is `app.use` and `app.set` (842 rows of express), names too
 short and too common to guess by. Engine 0.5.19 takes 123 more off (6,362;
-C# 349 from 470; 6,360 with 0.5.20, 6,348 with 0.5.21, 6,285 with 0.5.22, 6,237 with 0.5.25, 6,206 with 0.5.27, 6,166 with 0.5.28, 6,156 with 0.5.30, 6,140 with 0.5.31, 6,132 with 0.5.32, 6,126 with 0.5.33, 6,093 with 0.5.34, 6,047 with 0.5.36, 6,046 with 0.5.37, 6,017 with 0.5.38, 6,005 with 0.5.40, 5,947 with 0.5.42, 5,930 with 0.5.43, 5,950 with 0.5.44, 5,903 with 0.5.45, 5,829 with 0.5.46, 5,838 with 0.5.47, 5,897 with 0.5.48). Most of what C# has left is not the project's: `Assert.
+C# 349 from 470; 6,360 with 0.5.20, 6,348 with 0.5.21, 6,285 with 0.5.22, 6,237 with 0.5.25, 6,206 with 0.5.27, 6,166 with 0.5.28, 6,156 with 0.5.30, 6,140 with 0.5.31, 6,132 with 0.5.32, 6,126 with 0.5.33, 6,093 with 0.5.34, 6,047 with 0.5.36, 6,046 with 0.5.37, 6,017 with 0.5.38, 6,005 with 0.5.40, 5,947 with 0.5.42, 5,930 with 0.5.43, 5,950 with 0.5.44, 5,903 with 0.5.45, 5,829 with 0.5.46, 5,838 with 0.5.47, 5,897 with 0.5.48, 5,853 with 0.5.49). Most of what C# has left is not the project's: `Assert.
 NotNull` beside its own `Ensure.NotNull` (77), `WireMockServer.Start` (23).
 
 By then most rows were of that kind: a library's name the project happens

@@ -560,6 +560,39 @@ fn ruby_reopened_classes_struct_blocks_and_block_locals() {
 }
 
 #[test]
+fn swift_protocol_members_library_singletons_closures_and_given_types() {
+    // a protocol's `var x: T { get }` is a typed property; `T.default` of a
+    // library type is a `T` (but a static extension method taking other
+    // arguments is not the library's own); a library type the project makes
+    // conform to a protocol has the protocol's members (`trust.af`); a
+    // closure parameter is the receiver's type argument; `request(for:as:
+    // X.self)` gives an `X`; `-> Self` is the type called on; `` `protocol` ``
+    // is the name `protocol`. `Other.bumpIt`, `Base.finishIt` are decoys
+    let got = calls_conf("swiftmore", &[
+        ("Sources/App/Ext.swift", "import Foundation\npublic struct Wrap<Base> {\n    public var base: Base\n    public init(_ base: Base) { self.base = base }\n}\npublic protocol Wrappable {}\nextension Wrappable {\n    public var af: Wrap<Self> { Wrap(self) }\n}\nextension SecTrust: Wrappable {}\nextension Wrap where Base == SecTrust {\n    public func validateIt(host: String) {}\n}\nextension NotificationCenter {\n    func postIt(named name: String) {}\n}\nextension FileManager {\n    static func makeDirIt(atPath path: String) -> Bool { true }\n    static func dropIt(atPath path: String) -> Bool { true }\n}\n"),
+        ("Sources/App/Core.swift", "import Foundation\nprotocol Provider: AnyObject {\n    var manager: Manager? { get }\n}\nfinal class Manager {\n    func evaluatorIt(host: String) -> Int? { 1 }\n}\nclass Request {\n    func redirectIt(using h: Int) -> Self { self }\n    func finishIt() {}\n}\nfinal class StreamRequest: Request {\n    func decodeIt() {}\n}\nfinal class Config {\n    static func `protocol`(_ p: String) -> Config { Config() }\n}\nfinal class Protected<Value> {\n    private var value: Value\n    init(_ value: Value) { self.value = value }\n    func write<U>(_ closure: (inout Value) throws -> U) rethrows -> U { try closure(&value) }\n}\nstruct State { var counter = Counter() }\nstruct Counter { func bumpIt() -> Bool { true } }\nstruct Other { func bumpIt() -> Bool { false } }\nfinal class Delegate {\n    weak var provider: (any Provider)?\n    let state = Protected(State())\n    func request<R: Request>(for task: Int, as type: R.Type) -> R? { nil }\n    func stream() -> StreamRequest { StreamRequest() }\n    func configure(_ c: Config) {}\n    func go(_ trust: SecTrust) {\n        trust.af.validateIt(host: \"x\")\n        NotificationCenter.default.postIt(named: \"x\")\n        _ = try? FileManager.default.makeDirIt(atPath: \"x\", withIntermediateDirectories: true, attributes: nil)\n        _ = try? FileManager.default.dropIt(atPath: \"x\")\n        _ = provider?.manager?.evaluatorIt(host: \"x\")\n        guard let r = request(for: 1, as: StreamRequest.self) else { return }\n        r.decodeIt()\n        stream().redirectIt(using: 1).decodeIt()\n        state.write { s in s.counter.bumpIt() }\n        configure(.protocol(\"p\"))\n    }\n}\n"),
+    ]);
+    let to: Vec<&str> =
+        got.iter().filter(|(s, ..)| s == ".go()").map(|(_, t, _)| t.as_str()).collect();
+    for want in [
+        "sources_app_ext_wrap_validateit",
+        "sources_app_ext_postit",
+        "sources_app_core_manager_evaluatorit",
+        "sources_app_core_streamrequest_decodeit",
+        "sources_app_core_counter_bumpit",
+        "sources_app_core_config_protocol",
+    ] {
+        assert!(to.contains(&want), "missing {want} in {to:#?}");
+    }
+    // the library's own `createDirectory(atPath:withIntermediateDirectories:
+    // attributes:)`, and never the decoys
+    assert!(!to.iter().any(|t| t.contains("makedirit")), "{to:#?}");
+    // (a static member is the type's, not the shared instance's)
+    assert!(!to.iter().any(|t| t.contains("dropit")), "{to:#?}");
+    assert!(!to.contains(&"sources_app_core_other_bumpit"), "{to:#?}");
+}
+
+#[test]
 fn an_anonymous_class_is_built_by_the_method_around_it() {
     let got = edges("anonymous", &[
         ("A.java", "interface Callback<T> { void onResponse(T body); }\nclass Helper {\n  Helper(String name) {}\n  void run() {}\n}\n\nclass Client {\n  void enqueue(Callback<String> cb) {}\n\n  void go() {\n    final Helper helper = new Helper(\"a\");\n    enqueue(new Callback<String>() {\n      @Override public void onResponse(String body) {\n        helper.run();\n        finish();\n      }\n    });\n    Runnable r = new Runnable() { public void run() { finish(); } };\n  }\n  void finish() {}\n}\n"),

@@ -55,6 +55,9 @@ const CALL_TYPES: &[&str] = &[
     "tuple_type_item",
     "struct_expression",
     "macro_type_specifier",
+    // Swift `var x: T { get }` in a protocol: a property requirement (a
+    // property of the language module's), not a protocol
+    "protocol_property_declaration",
 ];
 /// Definitions whose grammar gives them a keyword, not a name.
 const KEYWORD_NAMES: &[(&str, &str)] = &[
@@ -520,6 +523,7 @@ pub fn walk_defs(m: &dyn LanguageModule, root: Node, src: &[u8]) -> Vec<Def> {
                     rets: Vec::new(),
                     part_sealed: Vec::new(),
                     sealed: false,
+                    is_static: false,
                     elem: None,
                     receiver: None,
                     anonymous: false,

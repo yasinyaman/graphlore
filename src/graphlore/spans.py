@@ -128,6 +128,8 @@ _TS_CALL_TYPES = frozenset({
     "optional_type_parameter", "type_argument", "type_arguments",
     "type_parameter_declaration", "type_predicate", "tuple_type_item",
     "struct_expression", "macro_type_specifier",
+    # Swift `var x: T { get }` in a protocol: a property requirement
+    "protocol_property_declaration",
 })
 # Definitions whose grammar gives them a keyword, not a name.
 _TS_KEYWORD_NAMES = {

@@ -437,6 +437,9 @@ fn signature_types(def: Node, src: &[u8], out: &mut Vec<(Vec<String>, &'static s
             Some("return_type") | Some("result") | Some("returns") => {
                 types_in(child, src, "return_type", out)
             }
+            // Swift `func f() -> Foo?`: the grammar files the result under
+            // `name` too, beside the function's own name
+            Some("name") if is_swift_type(child.kind()) => types_in(child, src, "return_type", out),
             // Java / C / C++ method and function: `type` is the result
             Some("type") if !def.kind().contains("field") && !def.kind().contains("property") => {
                 types_in(child, src, "return_type", out)
@@ -465,6 +468,23 @@ fn signature_types(def: Node, src: &[u8], out: &mut Vec<(Vec<String>, &'static s
             },
         }
     }
+}
+
+/// The node kinds of a type written in Swift.
+fn is_swift_type(kind: &str) -> bool {
+    matches!(
+        kind,
+        "user_type"
+            | "optional_type"
+            | "implicitly_unwrapped_type"
+            | "array_type"
+            | "dictionary_type"
+            | "tuple_type"
+            | "function_type"
+            | "opaque_type"
+            | "existential_type"
+            | "metatype"
+    )
 }
 
 fn param_types(params: Node, src: &[u8], out: &mut Vec<(Vec<String>, &'static str)>) {
@@ -787,6 +807,17 @@ fn is_cast(n: Node) -> bool {
 }
 
 fn value_type(v: Node, src: &[u8]) -> Option<Vec<String>> {
+    // Swift `var host = Host.localhost`: a type's case or static member, which
+    // the walk takes for a value of the type
+    if v.kind() == "navigation_expression"
+        && crate::parse::current() == Some(crate::lang::Lang::Swift)
+    {
+        if let Some(p) = path_of(v, src) {
+            if p.len() == 2 && p[0].chars().next().is_some_and(char::is_uppercase) {
+                return Some(p);
+            }
+        }
+    }
     match v.kind() {
         // a cast says what the value is: C# / Java `(Foo)x`, C# `x as Foo`
         // (`right`), TS `x as Foo` and Kotlin `x as Foo` / `as?` (the type
@@ -1613,6 +1644,10 @@ fn given_type(call: Node, src: &[u8]) -> Option<Vec<String>> {
                 || t.ends_with("::class")
                 || t.ends_with("::class.java")
                 || t.ends_with("::class.javaObjectType")
+                // Swift `WebSocketRequest.self`
+                || (v.kind() == "navigation_expression"
+                    && t.ends_with(".self")
+                    && t.chars().next().is_some_and(char::is_uppercase))
         })
         .collect();
     let [one] = literals.as_slice() else { return None };
@@ -1829,6 +1864,18 @@ fn fn_trait_type(n: Node) -> Option<Node> {
 fn fn_args_of(t: Node, src: &[u8]) -> Option<Vec<Vec<String>>> {
     let mut stack = vec![(t, 0)];
     while let Some((n, depth)) = stack.pop() {
+        // Swift `(inout Value, Int) throws -> U`: the tuple of what it takes
+        if n.kind() == "function_type" {
+            if let Some(ps) = n.child_by_field_name("params") {
+                return Some(
+                    kids(ps)
+                        .into_iter()
+                        .filter(|c| c.kind() == "tuple_type_item")
+                        .map(|c| first_type(c, src).unwrap_or_default())
+                        .collect(),
+                );
+            }
+        }
         if n.kind() == "function_type" {
             let named = n.child_by_field_name("trait").map(|x| text(x, src));
             if !named.as_deref().is_some_and(|x| matches!(x, "Fn" | "FnMut" | "FnOnce")) {
@@ -1962,8 +2009,11 @@ fn params_in(holder: Node, only_parameters: bool, src: &[u8]) -> Vec<crate::fact
                 .child_by_field_name("type")
                 .map(|ty| text(ty, src).split_whitespace().collect())
                 .unwrap_or_default(),
+            // (Swift files a parameter's type under `name`: `_ closure:
+            // (inout Value) throws -> U`)
             fn_args: c
                 .child_by_field_name("type")
+                .or_else(|| kids(c).into_iter().find(|x| x.kind() == "function_type"))
                 .and_then(|t| fn_args_of(t, src))
                 .unwrap_or_default(),
         });
@@ -2214,13 +2264,17 @@ fn call_targs(n: Node) -> u8 {
 /// `let Some(p) = e else { … }`, a `match` arm's `Some(p)` / `Ok(p)` or the
 /// fields of an enum variant, Swift `if let p = e` / `guard let p = e`. A
 /// pattern that writes no name (`x is Foo`) binds none.
-fn bound_by_pattern(n: Node, src: &[u8]) -> Vec<(String, Vec<String>, bool)> {
+/// A name a pattern binds: its name, path, whether the type is written, and
+/// the type its call is handed (`request(for: t, as: R.self)`).
+type Bound = (String, Vec<String>, bool, Option<Vec<String>>);
+
+fn bound_by_pattern(n: Node, src: &[u8]) -> Vec<Bound> {
     let mut out = Vec::new();
     let typed = |ty: Option<Node>, name: Option<Node>, out: &mut Vec<_>| {
         let ty = ty.and_then(|t| first_type(t, src));
         let name = name.filter(|x| x.kind() == "identifier").map(|x| text(x, src));
         if let (Some(ty), Some(name)) = (ty, name) {
-            out.push((name, ty, true));
+            out.push((name, ty, true, None));
         }
     };
     match n.kind() {
@@ -2238,7 +2292,11 @@ fn bound_by_pattern(n: Node, src: &[u8]) -> Vec<(String, Vec<String>, bool)> {
             let pattern = n.child_by_field_name("pattern");
             let value = n.child_by_field_name("value").and_then(|v| held_path(v, src));
             if let Some(p) = pattern {
-                out.extend(held_by_pattern(p, value.as_deref(), src));
+                out.extend(
+                    held_by_pattern(p, value.as_deref(), src)
+                        .into_iter()
+                        .map(|(a, b, c)| (a, b, c, None)),
+                );
             }
         }
         // (Rust: each arm is a scope of its own, `arm_scopes`)
@@ -2250,7 +2308,11 @@ fn bound_by_pattern(n: Node, src: &[u8]) -> Vec<(String, Vec<String>, bool)> {
                 let pattern =
                     arm.child_by_field_name("pattern").and_then(|p| kids(p).into_iter().next());
                 if let Some(p) = pattern {
-                    out.extend(held_by_pattern(p, value.as_deref(), src));
+                    out.extend(
+                        held_by_pattern(p, value.as_deref(), src)
+                            .into_iter()
+                            .map(|(a, b, c)| (a, b, c, None)),
+                    );
                 }
             }
         }
@@ -2268,15 +2330,20 @@ fn bound_by_pattern(n: Node, src: &[u8]) -> Vec<(String, Vec<String>, bool)> {
                 }
                 let name = text(*c, src);
                 let eq = all.get(i + 1).is_some_and(|(_, x)| x.kind() == "=");
-                let value = all.get(i + 2).filter(|_| eq).and_then(|(_, v)| held_path(*v, src));
+                let node = all.get(i + 2).filter(|_| eq).map(|(_, v)| *v);
+                let value = node.and_then(|v| held_path(v, src));
                 // `if let pet {`, `if let pet = pet`, `guard let self`: the
-                // name goes on meaning what it meant
+                // name goes on meaning what it meant (not `guard let request
+                // = request(for: task)`, a call of that name)
                 let Some(mut path) = value else { continue };
-                if path[0] == UNKNOWN || path == [name.clone()] || name == "self" {
+                let called = node.is_some_and(|v| is_call_kind(v.kind()));
+                if path[0] == UNKNOWN || (path == [name.clone()] && !called) || name == "self" {
                     continue;
                 }
                 path.push(OPENED.into());
-                out.push((name, path, false));
+                let given =
+                    node.filter(|v| is_call_kind(v.kind())).and_then(|v| given_type(v, src));
+                out.push((name, path, false, given));
             }
         }
         _ => {}
@@ -2529,21 +2596,25 @@ fn locals_of(n: Node, src: &[u8], in_params: bool) -> Vec<(String, Vec<String>, 
         | "variable_declaration"
         | "declaration"
         | "property_declaration"
+        | "protocol_property_declaration"
         | "public_field_definition" => {
             // a field only when declared in a type's body (Swift / Kotlin use
-            // property_declaration for locals too)
-            let field = matches!(k, "field_declaration" | "public_field_definition")
-                || (k == "property_declaration"
-                    && n.parent().is_some_and(|p| {
-                        matches!(
-                            p.kind(),
-                            "class_body"
-                                | "declaration_list"
-                                | "protocol_body"
-                                | "enum_class_body"
-                                | "field_declaration_list"
-                        )
-                    }));
+            // property_declaration for locals too; a Swift protocol's `var x:
+            // T { get }` is always one)
+            let field = matches!(
+                k,
+                "field_declaration" | "public_field_definition" | "protocol_property_declaration"
+            ) || (k == "property_declaration"
+                && n.parent().is_some_and(|p| {
+                    matches!(
+                        p.kind(),
+                        "class_body"
+                            | "declaration_list"
+                            | "protocol_body"
+                            | "enum_class_body"
+                            | "field_declaration_list"
+                    )
+                }));
             let declared =
                 n.child_by_field_name("type").and_then(|t| first_type(t, src)).or_else(|| {
                     kids(n)
@@ -2592,7 +2663,12 @@ fn locals_of(n: Node, src: &[u8], in_params: bool) -> Vec<(String, Vec<String>, 
                         continue;
                     }
                     let name = if x.id() == n.id() {
-                        n.child_by_field_name("name").and_then(|nm| bound_name(nm, src))
+                        // (Swift `var x: T { get }`: `var` sits in the pattern)
+                        n.child_by_field_name("name").and_then(|nm| {
+                            nm.child_by_field_name("bound_identifier")
+                                .map(|b| text(b, src))
+                                .or_else(|| bound_name(nm, src))
+                        })
                     } else {
                         bound_name(x, src)
                     };
@@ -3059,6 +3135,14 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                 }
                 facts.defs[di].plist = param_list(n, src);
                 facts.defs[di].params = u8::try_from(facts.defs[di].plist.len()).ok();
+                if facts.lang == Some(crate::lang::Lang::Swift) {
+                    facts.defs[di].is_static = kids(n).iter().any(|c| {
+                        c.kind() == "modifiers"
+                            && text(*c, src)
+                                .split_whitespace()
+                                .any(|w| w == "static" || w == "class")
+                    });
+                }
                 if let Some(v) = body_value(n) {
                     if let Some(path) = returned_path(v, src) {
                         note_return(&mut facts.defs[di], path);
@@ -3446,6 +3530,52 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                         }
                     }
                 }
+                // Swift `m.write { state in … }` (a trailing closure, after the
+                // arguments) and `m.write({ s in … })`: its place among them
+                if n.kind() == "lambda_literal" && anc.len() >= 2 {
+                    let up = |k: usize| anc.len().checked_sub(k).and_then(|i| anc.get(i)).copied();
+                    let (call, place) = match up(1).map(|x| x.kind()) {
+                        // trailing: the lambda sits in the call_suffix, after
+                        // the arguments in parentheses
+                        Some("call_suffix") => {
+                            let before = up(1)
+                                .into_iter()
+                                .flat_map(kids)
+                                .find(|c| c.kind() == "value_arguments")
+                                .map(|a| {
+                                    kids(a)
+                                        .into_iter()
+                                        .filter(|c| c.kind() == "value_argument")
+                                        .count()
+                                })
+                                .unwrap_or(0);
+                            (up(2), Some(before))
+                        }
+                        // an argument: value_argument, value_arguments, call_suffix
+                        Some("value_argument") => {
+                            let place = up(2).and_then(|a| {
+                                kids(a)
+                                    .into_iter()
+                                    .filter(|c| c.kind() == "value_argument")
+                                    .position(|c| up(1).is_some_and(|v| v.id() == c.id()))
+                            });
+                            (up(4), place)
+                        }
+                        _ => (None, None),
+                    };
+                    let callee = call
+                        .filter(|c| c.kind() == "call_expression")
+                        .and_then(|c| kids(c).into_iter().next())
+                        .and_then(|c| path_of(c, src));
+                    if let (Some(place), Some(callee)) = (place, callee) {
+                        facts.closure_args.push((
+                            body.start_byte(),
+                            callee,
+                            place as u8,
+                            all_params.clone(),
+                        ));
+                    }
+                }
                 // Kotlin `request.tag(Invocation::class.java)?.let { invocation
                 // -> … }`: the type the receiver's call is handed, which
                 // `given_result` checks before it types the parameter
@@ -3570,14 +3700,14 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                 }
             }
             // `for (Pet pet : pets)`, `o is Pet p`, `if let Some(p) = e`
-            for (name, path, declared) in bound_by_pattern(n, src) {
+            for (name, path, declared, given) in bound_by_pattern(n, src) {
                 locals.push(Local {
                     name,
                     path,
                     declared,
                     field: false,
                     assigned: false,
-                    given: None,
+                    given,
                     elem: None,
                     value_args: Vec::new(),
                     sealed: false,
@@ -4151,6 +4281,42 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                 // (`let state = setup().1; let state = state.lock().unwrap();`:
                 // the value with what opened it)
                 l.path.extend(steps.iter().cloned());
+            }
+        }
+    }
+    // Swift `var urlRequest = try urlRequest.asURLRequest()`: the variable
+    // takes the parameter's name for the rest of the function; the parameter
+    // goes on under a name of its own (`urlRequest@byte`), which the
+    // initializer's uses take
+    if facts.lang == Some(crate::lang::Lang::Swift) {
+        let mut moved: Vec<(Option<usize>, String, String, usize)> = Vec::new();
+        for i in 0..locals.len() {
+            let l = &locals[i];
+            if l.declared || l.field || l.path.len() < 2 || l.path[0] != l.name {
+                continue;
+            }
+            let param = locals.iter().position(|p| {
+                p.declared
+                    && !p.field
+                    && p.from_def == l.from_def
+                    && p.name == l.name
+                    && p.byte < l.byte
+            });
+            let Some(pi) = param else { continue };
+            let hidden = format!("{}@{}", l.name, locals[pi].byte);
+            // (the line it is declared on: its initializer)
+            let line =
+                src[..l.byte.min(src.len())].iter().filter(|&&b| b == b'\n').count() as u32 + 1;
+            moved.push((l.from_def, l.name.clone(), hidden.clone(), line as usize));
+            locals[pi].name = hidden.clone();
+            locals[i].path[0] = hidden;
+        }
+        for r in refs.iter_mut() {
+            let hit = moved.iter().find(|(_, name, _, line)| {
+                r.line as usize == *line && r.path.first() == Some(name)
+            });
+            if let Some((_, _, hidden, _)) = hit {
+                r.path[0] = hidden.clone();
             }
         }
     }
@@ -6395,6 +6561,7 @@ fn add_extras(
             alias_args: Vec::new(),
             wraps: written_sealed(*node, src).then(|| written_type(*node, src)).flatten(),
             sealed: written_sealed(*node, src),
+            is_static: false,
             elem: written_elem(*node, src),
             keyed: written_keyed(*node, src),
             key: written_key(*node, src),

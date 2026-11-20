@@ -270,6 +270,11 @@ pub struct Def {
     /// until it is opened (`unwrap()`, `get()`, `await`, `?`, `.Result`).
     #[serde(default)]
     pub sealed: bool,
+    /// Swift: a `static` / `class` member, asked of the type, never of an
+    /// instance (`FileManager.default.removeItem(atPath:)` is not the
+    /// project's `static func removeItem(atPath:)`).
+    #[serde(default)]
+    pub is_static: bool,
     /// The tree-sitter node the definition came from, and its byte range:
     /// for attaching references, never serialised.
     #[serde(skip)]

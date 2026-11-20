@@ -546,3 +546,32 @@ fn ruby_rows_on_other_blocks_lets_and_attributes_say_so() {
         "{rows:#?}"
     );
 }
+
+#[test]
+fn swift_rows_on_library_values_and_type_parameters_say_so() {
+    let dir = project(
+        "swiftmarks",
+        &[
+            // `cachedIt`, `stateIt` and `iterateIt` are each defined once, on
+            // project types; the calls are made on a library's cache, a
+            // collection and a value of a type parameter
+            ("Sources/App/Lib.swift", "final class Store {\n    func cachedIt(for r: Int) -> Int { 1 }\n    func iterateIt() {}\n}\nstruct Flag { func stateIt() {} }\n"),
+            ("Sources/App/Use.swift", "import Foundation\nfinal class Box<Value> {\n    private var value: Value\n    private var items: [Int] = []\n    var cache: URLCache!\n    init(_ value: Value) { self.value = value }\n    func go() {\n        _ = cache.cachedIt(for: 1)\n        items.iterateIt()\n        value.stateIt()\n    }\n}\n"),
+        ],
+    );
+    let out = dir.join("unresolved.json");
+    let mut opts = BuildOptions::new(&dir);
+    opts.unresolved = Some(out.clone());
+    build_graph(&opts).unwrap();
+    let rows: Vec<Value> = serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+    let why = |name: &str| {
+        rows.iter()
+            .find(|r| r["name"] == name)
+            .map(|r| r["library_like"].clone())
+            .unwrap_or_else(|| panic!("no row {name}: {rows:#?}"))
+    };
+    assert_eq!(why("cachedIt"), "the receiver is a library's", "{rows:#?}");
+    assert_eq!(why("iterateIt"), "the receiver is a library's", "{rows:#?}");
+    assert_eq!(why("stateIt"), "the receiver is of a type parameter", "{rows:#?}");
+}

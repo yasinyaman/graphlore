@@ -316,6 +316,28 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- **Native engine 0.5.49: Swift results, protocol properties, extended
+  library types, closures.**
+  - A Swift function's written result type (`-> Request?`) is read, and
+    `-> Self` is the type the method is called on.
+  - A protocol's `var x: T { get }` is a property of type `T`, no longer a
+    protocol named `var x` (the span rule, `spans.py` and the engine alike).
+  - `NotificationCenter.default` / `DispatchQueue.main` and the like are
+    values of their type, so the project's extensions on it are called;
+    a library type the project makes conform to a protocol (`extension
+    SecTrust: AlamofireExtended {}`) has its members (`trust.af.…`); every
+    file of a SwiftPM target sees the others' extensions; an extension in
+    a module the caller does not import is no overload.
+  - A closure's parameter is the type the method's function parameter
+    takes, bound by the receiver's type arguments (`Protected<T>.write { t
+    in … }`); `guard let r = request(for: t, as: X.self)` is an `X`.
+  - `var host = Host.localhost` is a `Host`; a property beats a method of
+    its name read without a call; a `var` that shadows its parameter
+    (`var r = try r.asURLRequest()`) is the variable after its own line;
+    `` `protocol` `` resolves as `protocol`.
+  - New `build --unresolved` marks for receivers of a library type and of a
+    type parameter. Swift's unmarked rows on the 31 audit repositories go
+    from 59 to 0; 75 → 16 in all.
 - **Native engine 0.5.48: Ruby block locals, reopened classes, Struct
   classes, fewer guesses.**
   - A local assigned in a block outside any method (an RSpec `it … do`) is

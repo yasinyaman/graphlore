@@ -956,6 +956,10 @@ const KEEPING_METHODS: &[&str] = &[
     "copy",
 ];
 
+/// Swift: the static properties by which a library type hands out its shared
+/// instance (`NotificationCenter.default`, `DispatchQueue.main`).
+const SWIFT_SINGLETONS: &[&str] = &["default", "main", "shared", "current", "standard"];
+
 /// Methods of an optional that give what it holds.
 const UNWRAPPERS: &[&str] = &[
     "get",
@@ -1329,6 +1333,9 @@ pub struct Project<'a> {
     exts: RefCell<Vec<ExtNode>>,
     ext_index: RefCell<HashMap<(&'static str, String), usize>>,
     bases_memo: RefCell<HashMap<DefRef, Vec<DefRef>>>,
+    /// Swift: the project protocols each library type is made to conform to
+    /// (`conformed_member`; the key `None` is every such type's).
+    conformances: RefCell<HashMap<Option<String>, Vec<DefRef>>>,
     /// `(file, definition, name)` -> typed local / parameter.
     locals: HashMap<(usize, usize, String), usize>,
     /// type -> field name -> the field's local (its declared or assigned type).
@@ -1456,6 +1463,7 @@ impl<'a> Project<'a> {
             exts: RefCell::new(Vec::new()),
             ext_index: RefCell::new(HashMap::new()),
             bases_memo: RefCell::new(HashMap::new()),
+            conformances: RefCell::new(HashMap::new()),
             locals: HashMap::new(),
             fields: HashMap::new(),
             depth: RefCell::new(0),
@@ -2363,9 +2371,24 @@ impl<'a> Project<'a> {
         if !self.family[m.0].is_some_and(Family::overloads) {
             return vec![m];
         }
-        let all = self.overloads(m);
+        let mut all = self.overloads(m);
+        // (Swift: what an extension in another module adds is no overload
+        // there: `extension Session { func request(_ endpoint: Endpoint) }`
+        // in the tests is not what `Example/`'s `AF.request("…")` calls)
+        if self.family[f] == Some(Family::Swift) {
+            all.retain(|c| {
+                let in_extension = self
+                    .def(*c)
+                    .parent
+                    .is_some_and(|p| self.def((c.0, p)).kind == DefKind::Extension);
+                !in_extension || self.extension_visible(f, *c)
+            });
+            if all.is_empty() {
+                return vec![m];
+            }
+        }
         if all.len() < 2 {
-            return vec![m];
+            return vec![all.first().copied().unwrap_or(m)];
         }
         let fits: Vec<(DefRef, i32)> =
             all.iter().filter_map(|c| self.fit(f, d, *c, r).map(|s| (*c, s))).collect();
@@ -2620,6 +2643,88 @@ impl<'a> Project<'a> {
         (!ty.is_empty()).then(|| (ty.clone(), c.0, Some(c.1), conf))
     }
 
+    /// Swift: the type a closure's parameter `name@byte` is handed by the
+    /// method it is passed to (`func write<U>(_ closure: (inout Value) throws
+    /// -> U)`), with a type parameter of the method's class bound by what the
+    /// receiver was declared or built with (`let mutableState:
+    /// Protected<MutableState>`, `let mutableState = Protected(MutableState())`).
+    fn swift_closure_param(&self, f: usize, x: usize, name: &str) -> Option<(DefRef, Confidence)> {
+        if self.family[f] != Some(Family::Swift) {
+            return None;
+        }
+        let (param, byte) = name.split_once('@')?;
+        let byte: usize = byte.parse().ok()?;
+        let (_, callee, place, names) =
+            self.files[f].closure_args.iter().find(|(b, ..)| *b == byte)?;
+        let k = names.iter().position(|n| n == param)?;
+        let _guard = DepthGuard::enter(&LIBRARY_DEPTH, 2)?;
+        let calling = self.calling.replace(true);
+        let found = self.resolve_path(f, scope(x), callee, true);
+        *self.calling.borrow_mut() = calling;
+        let Some((Target::Def(c), conf)) = found else { return None };
+        let def = self.def(c);
+        if !def.kind.is_callable() {
+            return None;
+        }
+        let ty = def.plist.get(usize::from(*place))?.fn_args.get(k)?.clone();
+        let [one] = ty.as_slice() else {
+            return self
+                .type_of_path(c.0, Some(c.1), &ty, true)
+                .filter(|t| self.def(*t).kind.is_class_like())
+                .map(|t| (t, conf));
+        };
+        // a type parameter of the method's class: what the receiver binds it to
+        let class = self.class_of(c.0, Some(c.1))?;
+        let Some(i) = self.def(class).type_params.iter().position(|p| p == one) else {
+            if def.type_params.contains(one) {
+                return None; // the method's own: nothing says what it is
+            }
+            return self
+                .type_of_path(c.0, Some(c.1), &ty, true)
+                .filter(|t| self.def(*t).kind.is_class_like())
+                .map(|t| (t, conf));
+        };
+        let receiver = &callee[..callee.len().checked_sub(1)?];
+        let (g, li) = match receiver {
+            [r] => {
+                let mut cur = local_start(scope(x));
+                let mut hit = None;
+                while let Some(y) = cur {
+                    if let Some(&li) = self.locals.get(&(f, y, r.clone())) {
+                        hit = Some((f, li));
+                        break;
+                    }
+                    cur = self.up(f, y);
+                }
+                hit.or_else(|| self.field_up(self.class_of(f, Some(x))?, r))?
+            }
+            [s, r] if s == "self" => self.field_up(self.class_of(f, Some(x))?, r)?,
+            _ => return None,
+        };
+        let l = &self.files[g].locals[li];
+        let from = l.from_def;
+        // declared with the type's arguments
+        if let Some(arg) = l.targs.get(i).filter(|a| !a.is_empty()) {
+            return self
+                .type_of_path(g, from, arg, true)
+                .filter(|t| self.def(*t).kind.is_class_like())
+                .map(|t| (t, conf));
+        }
+        // built with them: the argument handed to the initializer's parameter
+        // of that type (`Protected(MutableState())`)
+        let built = self.type_of_path(g, from, &l.path, l.declared)?;
+        if built != class {
+            return None;
+        }
+        let init =
+            self.members(class, "init").into_iter().find(|m| self.def(*m).kind.is_callable())?;
+        let at = self.def(init).plist.iter().position(|p| p.ty.len() == 1 && p.ty[0] == *one)?;
+        let crate::facts::Arg::Path(q) = &l.value_args.get(at)?.kind else { return None };
+        self.value_type_of(g, from, q)
+            .filter(|t| self.def(*t).kind.is_class_like())
+            .map(|t| (t, conf.max(Confidence::Inferred)))
+    }
+
     /// The type of local `li` of definition `x` (see `local_type`).
     fn local_type_of(
         &self,
@@ -2637,6 +2742,9 @@ impl<'a> Project<'a> {
                     .type_of_path(g, scope, &ty, true)
                     .filter(|t| self.def(*t).kind.is_class_like())
                     .map(|t| (t, conf));
+            }
+            if let Some(found) = self.swift_closure_param(f, x, name) {
+                return Some(found);
             }
             // no type written, nothing typeable assigned: the one
             // type that answers everything asked of it here
@@ -2672,9 +2780,15 @@ impl<'a> Project<'a> {
     /// named like something that wraps what it is given (`listOf<Foo>()`).
     fn given_result(&self, f: usize, d: usize, l: &crate::facts::Local) -> Option<DefRef> {
         let given = l.given.as_ref()?;
-        let name = l.path.last()?;
+        // (Swift `guard let r = request(for: t, as: R.self)`: the optional
+        // the call gives, opened)
+        let path: &[String] = match l.path.split_last() {
+            Some((last, rest)) if last == crate::refs::OPENED => rest,
+            _ => &l.path,
+        };
+        let name = path.last()?;
         let before = self.recv.replace(None);
-        let callee = self.resolve_path(f, scope(d), &l.path, true);
+        let callee = self.resolve_path(f, scope(d), path, true);
         *self.recv.borrow_mut() = before;
         match callee {
             Some((Target::Def(c), _)) if self.def(c).kind.is_callable() => {
@@ -2883,6 +2997,11 @@ impl<'a> Project<'a> {
             x.from_def == Some(c.1) && x.kind == RefKind::Type && x.context == "return_type"
         });
         let Some(ret) = ret.filter(|r| r.path.len() == 1) else { return false };
+        // (Swift `func redirect(using:) -> Self`: the type it is called on, a
+        // `DataStreamRequest` as much as the `Request` that declares it)
+        if self.family[c.0] == Some(Family::Swift) && ret.path[0] == "self" {
+            return true;
+        }
         self.class_of(c.0, Some(c.1))
             .is_some_and(|o| self.def(o).self_params.contains(&ret.path[0]))
     }
@@ -3540,6 +3659,195 @@ impl<'a> Project<'a> {
     /// `user.email.isEmailValid()`). The receiver's written type, where the
     /// source states it, must be the extension's or a type parameter of it;
     /// a name Kotlin's own types answer to is theirs.
+    /// Swift: a member of a project protocol that the project makes a
+    /// library type conform to (`extension SecTrust: AlamofireExtended {}`),
+    /// asked of a value of that type (`on`, or of a library type the walk
+    /// cannot name when `on` is `None`): the protocol's or its extensions'
+    /// member of the name, and on through what it holds when more follows
+    /// (`trust.af.performValidation(…)`: `af` holds an `AlamofireExtension`).
+    /// `EXTRACTED` only when `on` is written and conforms.
+    fn conformed_member(
+        &self,
+        f: usize,
+        on: Option<&str>,
+        rest: &[String],
+        bases: bool,
+        conf: Confidence,
+    ) -> Option<(Target, Confidence)> {
+        if self.family[f] != Some(Family::Swift) || bases {
+            return None;
+        }
+        rest.first().filter(|s| !s.starts_with('[') && *s != "()")?;
+        let on_bare = on.map(|o| o.rsplit('.').next().unwrap_or(o));
+        let key = on_bare.map(str::to_string);
+        if let Some(known) = self.conformances.borrow().get(&key).cloned() {
+            return self.conformed_through(&known, on, rest, conf);
+        }
+        // the protocols the project makes the library type conform to
+        let mut protocols: Vec<DefRef> = Vec::new();
+        for (fi, file) in self.files.iter().enumerate() {
+            if self.family[fi] != Some(Family::Swift) {
+                continue;
+            }
+            for (di, e) in file.defs.iter().enumerate() {
+                if e.kind != DefKind::Extension
+                    || on_bare.is_some_and(|o| e.name != o)
+                    || self.type_named(fi, &e.name).is_some()
+                {
+                    continue;
+                }
+                for b in self.bases((fi, di)) {
+                    if self.def(b).kind == DefKind::Interface && !protocols.contains(&b) {
+                        protocols.push(b);
+                    }
+                }
+            }
+        }
+        self.conformances.borrow_mut().insert(key, protocols.clone());
+        self.conformed_through(&protocols, on, rest, conf)
+    }
+
+    /// `conformed_member` once the protocols are known.
+    fn conformed_through(
+        &self,
+        protocols: &[DefRef],
+        on: Option<&str>,
+        rest: &[String],
+        conf: Confidence,
+    ) -> Option<(Target, Confidence)> {
+        if protocols.is_empty() {
+            return None;
+        }
+        let name = rest.first()?;
+        let mut found: Vec<DefRef> = Vec::new();
+        for &p in protocols {
+            for m in self.members(p, name) {
+                if !found.contains(&m) {
+                    found.push(m);
+                }
+            }
+            if let Some(m) = self.reopened_member(p, name).or_else(|| self.class_member(p, name, 0))
+            {
+                if !found.contains(&m) {
+                    found.push(m);
+                }
+            }
+            // (a property an extension of the protocol adds is the extension's
+            // child: `extension Wrappable { var af: Wrap<Self> { … } }`)
+            let pname = &self.def(p).name;
+            for &m in self.by_name.get(name.as_str()).into_iter().flatten() {
+                let in_ext = self.family[m.0] == Some(Family::Swift)
+                    && self.def(m).parent.is_some_and(|x| {
+                        let e = self.def((m.0, x));
+                        e.kind == DefKind::Extension && &e.name == pname
+                    });
+                if in_ext && !found.contains(&m) {
+                    found.push(m);
+                }
+            }
+        }
+        // (the protocol's requirement and its extension's implementation are
+        // one member: what they hold decides)
+        let conf = if on.is_some() { conf } else { conf.max(Confidence::Inferred) };
+        if rest.len() == 1 {
+            let m = self.best(found.iter().copied())?;
+            return Some((Target::Def(m), conf));
+        }
+        let mut held: Option<DefRef> = None;
+        for m in &found {
+            let t = if self.def(*m).kind.is_state() {
+                self.held_type(*m)
+            } else {
+                self.return_type(*m).map(|(t, _)| t)
+            };
+            let Some(t) = t else { continue };
+            if held.is_some_and(|h| h != t) {
+                return None;
+            }
+            held = Some(t);
+        }
+        let skip = usize::from(rest.get(1).is_some_and(|s| s == "()"));
+        self.walk(Target::Def(held?), &rest[1 + skip..], conf)
+    }
+
+    /// Swift: `T.default` / `.main` / `.shared` / `.current` / `.standard`
+    /// of a type the project does not define is an instance of `T` (Cocoa's
+    /// shared instances), and what follows is an extension the project
+    /// writes for `T` (`NotificationCenter.default.postNotification(…)`,
+    /// `DispatchQueue.main.after(…)`), through what it gives when more follows.
+    fn library_singleton(
+        &self,
+        f: usize,
+        d: Option<usize>,
+        path: &[String],
+        bases: bool,
+    ) -> Option<(Target, Confidence)> {
+        if self.family[f] != Some(Family::Swift)
+            || bases
+            || path.len() < 2
+            || !path[0].chars().next().is_some_and(char::is_uppercase)
+            || *self.types_only.borrow()
+        {
+            return None;
+        }
+        let _guard = DepthGuard::enter(&LIBRARY_DEPTH, 2)?;
+        let types = self.types_only.replace(true);
+        let head = self.resolve_path(f, d, &path[..1], true);
+        *self.types_only.borrow_mut() = types;
+        // (the project's `extension NotificationCenter` defines no type)
+        if matches!(head, Some((Target::Def(x), _)) if self.def(x).kind != DefKind::Extension) {
+            return None;
+        }
+        let on = path[0].as_str();
+        // (`SecPolicy.af.revocation(…)`: a static member of a protocol the
+        // project makes the type conform to)
+        if let Some(found) =
+            self.conformed_member(f, Some(on), &path[1..], bases, Confidence::Extracted)
+        {
+            return Some(found);
+        }
+        if path.len() < 3 || !SWIFT_SINGLETONS.contains(&path[1].as_str()) {
+            return None;
+        }
+        // (an extension none of whose overloads takes the arguments written is
+        // not what is called: `FileManager.default.createDirectory(atPath:
+        // withIntermediateDirectories: attributes:)` is the library's own,
+        // beside the project's `createDirectory(atPath:)`)
+        let written = (*self.args.borrow()).filter(|_| path.len() == 3);
+        let takes = |c: DefRef| {
+            // (the shared instance is an instance: a static member is the type's)
+            if self.def(c).is_static {
+                return false;
+            }
+            let Some(n) = written else { return true };
+            let n = usize::from(n);
+            let p = &self.def(c).plist;
+            let required = p.iter().filter(|q| !q.optional && !q.variadic).count();
+            n >= required && (p.iter().any(|q| q.variadic) || n <= p.len())
+        };
+        if path.len() == 3 {
+            let found = self.extension_method(f, &path[2], Some(on))?;
+            if let (Target::Def(x), _) = found {
+                let mut all = self.overloads(x);
+                all.push(x);
+                if !all.into_iter().any(takes) {
+                    return None;
+                }
+            }
+            return Some(found);
+        }
+        if path[3] != "()" {
+            return None;
+        }
+        let calling = self.calling.replace(true);
+        let ext = self.extension_method(f, &path[2], Some(on));
+        *self.calling.borrow_mut() = calling;
+        let (Target::Def(x), cf) = ext? else { return None };
+        let (r, declared) = self.return_type(x)?;
+        let conf = if declared { cf } else { cf.max(Confidence::Inferred) };
+        self.walk(Target::Def(r), &path[4..], conf)
+    }
+
     fn visible_extension(
         &self,
         f: usize,
@@ -3857,6 +4165,114 @@ impl<'a> Project<'a> {
             }
         }
         false
+    }
+
+    /// Swift: what a local or field `l` (of file `g`) holds, as far as its
+    /// declaration says: `Some(true)` a library's value (a type the project
+    /// does not define, only extends; a collection `[T]` / `[K: V]`),
+    /// `Some(false)` a value of a type parameter (`var value: Value` in
+    /// `Protected<Value>`), `None` a project type or nothing known.
+    fn swift_holds(&self, g: usize, l: &crate::facts::Local) -> Option<bool> {
+        if l.path.is_empty() {
+            return None;
+        }
+        // (`let request = try encoding.encode(…)`: what a project callable
+        // is declared to give, `-> URLRequest`)
+        if !l.declared {
+            let calling = self.calling.replace(true);
+            let found = self.resolve_path(g, l.from_def, &l.path, true);
+            *self.calling.borrow_mut() = calling;
+            let Some((Target::Def(c), _)) = found else { return None };
+            if !self.def(c).kind.is_callable() {
+                return None;
+            }
+            let ret = self.files[c.0].refs.iter().find(|x| {
+                x.from_def == Some(c.1) && x.kind == RefKind::Type && x.context == "return_type"
+            })?;
+            let written = crate::facts::Local {
+                name: String::new(),
+                path: ret.path.clone(),
+                declared: true,
+                from_def: Some(c.1),
+                ..l.clone()
+            };
+            return self.swift_holds(c.0, &written).filter(|known| *known);
+        }
+        if l.elem.is_some() || l.keyed {
+            return Some(true);
+        }
+        // a type parameter of the type around or of the callable
+        let mut cur = l.from_def;
+        while let Some(x) = cur {
+            let def = &self.files[g].defs[x];
+            if l.path.len() == 1 && def.type_params.contains(&l.path[0]) {
+                return Some(false);
+            }
+            cur = def.parent;
+        }
+        let types = self.types_only.replace(true);
+        let found = self.resolve_path(g, l.from_def, &l.path, true);
+        *self.types_only.borrow_mut() = types;
+        match found {
+            Some((Target::Def(t), _)) if self.def(t).kind != DefKind::Extension => None,
+            Some((Target::Def(_), _)) | Some((Target::Ext(..), _)) => Some(true),
+            None => l.path[0].chars().next().is_some_and(char::is_uppercase).then_some(true),
+            _ => None,
+        }
+    }
+
+    /// Swift: whether what a call's path is made on is a library's value
+    /// (`Some(true)`) or of a type parameter (`Some(false)`): a type the
+    /// project only extends as the head (`String(…)`, `Bundle.test`), a local
+    /// or field declared with such a type or a collection, or a field along
+    /// the path that is (`session.configuration.urlCache`).
+    fn swift_library_receiver(&self, f: usize, d: Option<usize>, path: &[String]) -> Option<bool> {
+        if self.family[f] != Some(Family::Swift) || path.len() < 2 {
+            return None;
+        }
+        let _guard = DepthGuard::enter(&LIBRARY_DEPTH, 2)?;
+        let head = path[0].as_str();
+        let local = |name: &str| -> Option<(usize, usize)> {
+            let mut cur = local_start(d);
+            while let Some(x) = cur {
+                if let Some(&li) = self.locals.get(&(f, x, name.to_string())) {
+                    return Some((f, li));
+                }
+                cur = self.up(f, x);
+            }
+            self.class_of(f, d).and_then(|c| self.field_up(c, name))
+        };
+        let (start, at) = if head == "self" {
+            let c = self.class_of(f, d)?;
+            (self.field_up(c, &path[1])?, 2)
+        } else if head.chars().next().is_some_and(char::is_uppercase) && local(head).is_none() {
+            let types = self.types_only.replace(true);
+            let found = self.resolve_path(f, d, &path[..1], true);
+            *self.types_only.borrow_mut() = types;
+            return match found {
+                Some((Target::Def(t), _)) if self.def(t).kind != DefKind::Extension => None,
+                _ => Some(true),
+            };
+        } else {
+            (local(head)?, 1)
+        };
+        let (mut g, mut li) = start;
+        let mut i = at;
+        loop {
+            let l = &self.files[g].locals[li];
+            if let Some(known) = self.swift_holds(g, l) {
+                return Some(known);
+            }
+            // on through a field of the project type it holds
+            if i + 1 >= path.len() || path[i] == "()" || path[i].starts_with('[') {
+                return None;
+            }
+            let t = self.type_of_path(g, l.from_def, &l.path, l.declared)?;
+            let next = self.field_up(t, &path[i])?;
+            g = next.0;
+            li = next.1;
+            i += 1;
+        }
     }
 
     /// Java: whether a written type is a library's: one an import names,
@@ -4430,6 +4846,22 @@ impl<'a> Project<'a> {
     fn field_of(&self, c: DefRef, name: &str) -> Option<(usize, usize)> {
         let own = |t: &DefRef| self.fields.get(t).and_then(|m| m.get(name)).copied();
         own(&c).or_else(|| self.partials(c).iter().find_map(own))
+    }
+
+    /// The field `name` of type `c` or of one of its bases (three levels).
+    fn field_up(&self, c: DefRef, name: &str) -> Option<(usize, usize)> {
+        let mut frontier = vec![c];
+        for _ in 0..4 {
+            let mut next = Vec::new();
+            for t in frontier {
+                if let Some(found) = self.field_of(t, name) {
+                    return Some(found);
+                }
+                next.extend(self.bases(t));
+            }
+            frontier = next;
+        }
+        None
     }
 
     /// The type of a field of a type (through its bases).
@@ -5191,6 +5623,11 @@ impl<'a> Project<'a> {
             if let Some(found) = self.visible_extension(f, d, path, bases) {
                 return Some(found);
             }
+            // Swift `NotificationCenter.default.post…`: a library type's
+            // shared instance is a value of the type
+            if let Some(found) = self.library_singleton(f, d, path, bases) {
+                return Some(found);
+            }
             // an element (`xs[0].run()`) or a mapping (`xs.map { … }`) the
             // walk could not type is a receiver it cannot name: what is
             // called on it is found by a distinctive name alone
@@ -5574,6 +6011,16 @@ impl<'a> Project<'a> {
                         }
                     }
                 }
+                // (Swift `trust.af.performValidation(…)`: a member of a
+                // project protocol the project makes the library type conform
+                // to, `extension SecTrust: AlamofireExtended {}`)
+                if fam == Family::Swift && self.is_external_local(f, d, head) {
+                    let on = self.local_written_type(f, d, head);
+                    if let Some(found) = self.conformed_member(f, on.as_deref(), rest, bases, conf)
+                    {
+                        return Some(found);
+                    }
+                }
                 return self.extension_property_hop(f, rest, bases, conf);
             }
             // a local assigned something the walk cannot type (`let pool =
@@ -5602,7 +6049,22 @@ impl<'a> Project<'a> {
                         .local_written_type(f, d, head)
                         .or_else(|| self.local_built_type(f, d, head))
                         .filter(|_| rest.len() == 1);
+                    // (Swift `trust.af.m()` where `trust: SecTrust`: a member of a
+                    // protocol the project makes the type conform to first)
+                    if let (Family::Swift, 1, Some(on)) = (fam, rest.len(), on.as_deref()) {
+                        if let Some(found) = self.conformed_member(f, Some(on), rest, bases, conf) {
+                            return Some(found);
+                        }
+                    }
                     return self.unknown_receiver(f, rest.last()?, on.as_deref());
+                }
+                if fam == Family::Swift {
+                    if let Some(on) = self.local_written_type(f, d, head) {
+                        if let Some(found) = self.conformed_member(f, Some(&on), rest, bases, conf)
+                        {
+                            return Some(found);
+                        }
+                    }
                 }
                 return self.extension_property_hop(f, rest, bases, conf);
             }
@@ -6221,6 +6683,13 @@ impl<'a> Project<'a> {
                         }
                         None => c,
                     };
+                    // (Swift `-> Self`: the type the method is called on)
+                    if fam == Family::Swift && self.def(c).kind.is_callable() {
+                        if let Some(on) = on.filter(|_| self.returns_self_param(c)) {
+                            t = Target::Def(on);
+                            continue;
+                        }
+                    }
                     // a method that declares its result: `builder().a().b()`
                     if self.def(c).kind.is_callable() {
                         if let Some((r, declared)) = self.return_type(c) {
@@ -6305,6 +6774,18 @@ impl<'a> Project<'a> {
                 }
             }
             let mut found = self.member(&t, seg, 3);
+            // (Swift: a value of a library type the project extends,
+            // `trust: SecTrust` beside `extension SecTrust: AlamofireExtended
+            // {}`, has the members of the protocols it is made to conform to)
+            if found.is_none() && fam == Family::Swift {
+                if let Target::Def(x) = t {
+                    let e = self.def(x);
+                    if e.kind == DefKind::Extension && self.type_named(x.0, &e.name).is_none() {
+                        let name = e.name.clone();
+                        return self.conformed_member(f, Some(&name), &rest[i..], bases, conf);
+                    }
+                }
+            }
             // Rust `x.clone()`, `x.to_owned()` on a type that defines no such
             // method: the std trait's, which gives the same type; and a
             // wrapper's opening (`pool.upgrade()`, `lock().unwrap()`) on what
@@ -6342,6 +6823,37 @@ impl<'a> Project<'a> {
                 {
                     let field =
                         self.members(*c, seg).into_iter().find(|x| self.def(*x).kind.is_state());
+                    if let Some(x) = field {
+                        found = Some(Target::Def(x));
+                    }
+                }
+            }
+            // Swift: a property may share its name with a method, up the bases
+            // too (`request.response` of a `DownloadRequest`: `Request`'s `var
+            // response`, not `DownloadRequest.response(queue:…)`)
+            if let (Some(Target::Def(m)), Target::Def(c)) = (&found, &t) {
+                let called = rest.get(i + 1).is_some_and(|s| s == "()")
+                    || (i + 1 == rest.len() && *self.calling.borrow());
+                if !called
+                    && fam == Family::Swift
+                    && self.def(*m).kind.is_callable()
+                    && self.def(*c).kind.is_class_like()
+                {
+                    let mut up = vec![*c];
+                    let mut k = 0;
+                    let mut field = None;
+                    while k < up.len() && k < 8 && field.is_none() {
+                        field = self
+                            .members(up[k], seg)
+                            .into_iter()
+                            .find(|x| self.def(*x).kind.is_state());
+                        for b in self.bases(up[k]) {
+                            if !up.contains(&b) {
+                                up.push(b);
+                            }
+                        }
+                        k += 1;
+                    }
                     if let Some(x) = field {
                         found = Some(Target::Def(x));
                     }
@@ -7233,8 +7745,12 @@ impl<'a> Project<'a> {
             || self.java_library_receiver(f, d, &r.path)
             || self.php_library_receiver(f, d, &r.path)
             || self.php_library_step(f, d, &r.path)
+            || self.swift_library_receiver(f, d, &r.path) == Some(true)
         {
             Some("the receiver is a library's")
+        } else if self.swift_library_receiver(f, d, &r.path) == Some(false) {
+            // (`value.state` of `var value: Value` in `Protected<Value>`)
+            Some("the receiver is of a type parameter")
         } else if fam == Family::Php
             && reason == "local the walk cannot type"
             && self.php_library_value(f, d, bare)
@@ -7593,10 +8109,30 @@ impl<'a> Project<'a> {
     }
 
     fn walk_target(&self, mut t: Target, rest: &[String]) -> Option<Target> {
-        for seg in rest {
-            t = self.member(&t, seg, 3)?;
+        for (i, seg) in rest.iter().enumerate() {
+            match self.member(&t, seg, 3) {
+                Some(next) => t = next,
+                None => return self.conformed_step(&t, &rest[i..]),
+            }
         }
         Some(t)
+    }
+
+    /// Swift: what a walk that stops at an extension of a library type
+    /// (`extension SecTrust: AlamofireExtended {}`: the type a `trust:
+    /// SecTrust` names) goes on to, through the protocols the type is made to
+    /// conform to (`conformed_member`).
+    fn conformed_step(&self, t: &Target, rest: &[String]) -> Option<Target> {
+        let Target::Def(x) = *t else { return None };
+        let e = self.def(x);
+        if self.family[x.0] != Some(Family::Swift)
+            || e.kind != DefKind::Extension
+            || self.type_named(x.0, &e.name).is_some()
+        {
+            return None;
+        }
+        let name = e.name.clone();
+        self.conformed_member(x.0, Some(&name), rest, false, Confidence::Extracted).map(|(t, _)| t)
     }
 
     /// A fully qualified path written out: `a.b.C.m` (JVM, C#), `ns::f` (C++),
@@ -7920,6 +8456,12 @@ impl<'a> Project<'a> {
         mine.strip_prefix(its).is_some_and(|rest| rest.starts_with('.'))
         }))
         || self.uses_namespace_of(f, r.0)
+        // Swift: every file of a module sees the others' extensions
+        // (`rootQueue.after(…)` in `Core/Session.swift`, written in
+        // `Extensions/DispatchQueue+Alamofire.swift` of the same target)
+        || (fam == Some(Family::Swift)
+        && self.modsys.swift_module_of(f).is_some()
+        && self.modsys.swift_module_of(f) == self.modsys.swift_module_of(r.0))
         // C#: the global namespace, seen by every file of the
         // project (`public static class OpenApiOptionsExtensions`
         // with no namespace, called from `Program.cs`)

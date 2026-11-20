@@ -76,14 +76,26 @@ pub fn resolve_parents(defs: &[Def], emitted: &[bool]) -> Vec<Option<usize>> {
 }
 
 fn def_label(d: &Def, method: bool) -> String {
+    // (a Swift `` `protocol` `` is resolved as `protocol` and labelled as
+    // written, as graphify labels it)
+    let written = d.qualname.rsplit('.').next().unwrap_or(&d.name);
+    let name = if written.len() == d.name.len() + 2
+        && written.starts_with('`')
+        && written.ends_with('`')
+        && written[1..written.len() - 1] == d.name
+    {
+        written
+    } else {
+        d.name.as_str()
+    };
     if d.kind.is_callable() {
         if method {
-            format!(".{}()", d.name)
+            format!(".{name}()")
         } else {
-            format!("{}()", d.name)
+            format!("{name}()")
         }
     } else {
-        d.name.clone()
+        name.to_string()
     }
 }
 

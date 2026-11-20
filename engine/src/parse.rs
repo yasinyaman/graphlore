@@ -117,10 +117,37 @@ pub fn file_facts(
                     .iter()
                     .any(|(lo, hi)| *lo <= d.def_line && d.def_line <= *hi);
             }
+            // Swift `` `protocol` ``: a keyword used as a name is that name
+            // (`.protocol(…)`, `configuration.protocol`); the span's qualname
+            // keeps what is written. (Kotlin's backquoted names are test
+            // names with spaces, written as graphify labels them.)
+            if lang == Lang::Swift {
+                unquote_names(&mut facts);
+            }
         }
         Err(timed_out) => facts.parse.timed_out = timed_out,
     }
     facts
+}
+
+/// Swift's backquoted names as the names they are, in definitions,
+/// locals and the paths of references.
+fn unquote_names(facts: &mut FileFacts) {
+    let strip = |s: &mut String| {
+        if s.len() > 2 && s.starts_with('`') && s.ends_with('`') {
+            *s = s[1..s.len() - 1].to_string();
+        }
+    };
+    for d in facts.defs.iter_mut() {
+        strip(&mut d.name);
+    }
+    for l in facts.locals.iter_mut() {
+        strip(&mut l.name);
+        l.path.iter_mut().for_each(strip);
+    }
+    for r in facts.refs.iter_mut() {
+        r.path.iter_mut().for_each(strip);
+    }
 }
 
 /// The facts of a file given only its path and contents (detects the language).
