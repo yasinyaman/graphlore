@@ -25,7 +25,7 @@ python benchmarks/conformance.py --baseline benchmarks/results-conformance.json 
 python benchmarks/conformance.py --markdown      # the tables below
 ```
 
-Measured 2026-11-20 with graphlore-engine 0.5.49: **423 of 423 rules hold**
+Measured 2026-11-20 with graphlore-engine 0.5.50: **424 of 424 rules hold**
 (356 of the first 406 with 0.5.45).
 
 ## What this list is, and is not
@@ -368,7 +368,7 @@ Scala Language Specification, chapter 2 'Identifiers, Names and Scopes', 4.7 'Im
 | `class A extends B` names its parent | `extends` | yes |
 | a class of the same package in another file needs no import | `same-package` | yes |
 
-### csharp (38 of 38)
+### csharp (39 of 39)
 
 C# Language Specification, 'Namespace and type names', 'Member lookup', 'Extension method invocations'.
 
@@ -406,6 +406,7 @@ C# Language Specification, 'Namespace and type names', 'Member lookup', 'Extensi
 | an unqualified name in a class is also searched in its base | `inherited` | yes |
 | `: base(…)` / `: this(…)` call the constructor of the base, or another of the class | `constructor-initializer` | yes |
 | `using N;` brings the extensions of a namespace written as a block in another directory into sight | `using-block-namespace` | yes |
+| `new Name(…)` names the type, whatever method of the class around is called `Name` | `new-names-a-type` | yes |
 | `Maybe.Nothing<T>()` is a member of the static class `Maybe` beside the generic `Maybe<T>` | `generic-namesake` | yes |
 | a class's primary constructor parameter is a typed name of the class | `primary-constructor` | yes |
 | `global using N;` in one file holds for every file | `global-using` | yes |
@@ -629,3 +630,4 @@ PHP Manual, 'Namespaces: Name resolution rules', 'Classes and Objects' (inherita
 | a call of an abstract method through `$this` is the declaring class's | `abstract-method` | yes |
 | `C::m()` is C's static method | `static-method-via-class` | yes |
 | a method passed as `[$this, 'm']` is a use of m | `callable-string` | yes |
+

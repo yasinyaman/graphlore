@@ -64,6 +64,54 @@ fn rel_path(root: &Path, path: &Path) -> Option<String> {
     Some(parts.join("/"))
 }
 
+/// The files git tracks under `root` that the walk left out because an
+/// ignore rule matched them. Hidden paths, the directories never walked into
+/// and what `.graphloreignore` / `.graphifyignore` at the root name stay out:
+/// those are the engine's own rules, not git's.
+fn tracked_but_ignored(
+    root: &Path,
+    out_dir: &str,
+    seen: &std::collections::HashSet<String>,
+) -> Vec<String> {
+    let listed = std::process::Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["ls-files", "-z"])
+        .stderr(std::process::Stdio::null())
+        .output();
+    let Ok(out) = listed else { return Vec::new() };
+    if !out.status.success() {
+        return Vec::new();
+    }
+    let mut own = ignore::gitignore::GitignoreBuilder::new(root);
+    for name in [".graphloreignore", ".graphifyignore"] {
+        let file = root.join(name);
+        if file.is_file() {
+            let _ = own.add(file);
+        }
+    }
+    let own = own.build().ok();
+    let mut more = Vec::new();
+    for raw in out.stdout.split(|b| *b == 0) {
+        let Ok(rel) = std::str::from_utf8(raw) else { continue };
+        if rel.is_empty() || seen.contains(rel) {
+            continue;
+        }
+        let parts: Vec<&str> = rel.split('/').collect();
+        let dirs = &parts[..parts.len() - 1];
+        if parts.iter().any(|p| p.starts_with('.'))
+            || dirs.iter().any(|d| *d == out_dir || SKIP_DIRS.contains(d))
+        {
+            continue;
+        }
+        if own.as_ref().is_some_and(|g| g.matched_path_or_any_parents(rel, false).is_ignore()) {
+            continue;
+        }
+        more.push(rel.to_string());
+    }
+    more
+}
+
 pub fn discover(root: &Path, out_dir_name: &str, documents: bool, max_bytes: u64) -> WalkResult {
     let mut result = WalkResult::default();
     let out_dir = out_dir_name.to_string();
@@ -93,6 +141,8 @@ pub fn discover(root: &Path, out_dir_name: &str, documents: bool, max_bytes: u64
             true
         })
         .build();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut found: Vec<(String, PathBuf, u64)> = Vec::new();
     for entry in walker.flatten() {
         if !entry.file_type().is_some_and(|t| t.is_file()) {
             continue;
@@ -102,6 +152,24 @@ pub fn discover(root: &Path, out_dir_name: &str, documents: bool, max_bytes: u64
             result.non_utf8_paths += 1;
             continue;
         };
+        let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+        seen.insert(rel.clone());
+        found.push((rel, path.to_path_buf(), size));
+    }
+    // A file git tracks is part of the repository whatever an ignore rule
+    // says of its name: git itself ignores only what is untracked
+    // (`**/package.json` in a package's `.gitignore`, a line `test` beside a
+    // committed `tests/unity/test/`). The walker cannot know what is tracked,
+    // so git is asked; without git, or outside a repository, nothing is added.
+    for rel in tracked_but_ignored(root, out_dir_name, &seen) {
+        let path = root.join(&rel);
+        let Ok(meta) = std::fs::symlink_metadata(&path) else { continue };
+        if meta.is_file() {
+            found.push((rel, path, meta.len()));
+        }
+    }
+    for (rel, path, size) in found {
+        let path = path.as_path();
         let base = rel.rsplit('/').next().unwrap_or(&rel);
         if MANIFESTS.contains(&base) {
             result.manifests.push((rel.clone(), path.to_path_buf()));
@@ -123,7 +191,6 @@ pub fn discover(root: &Path, out_dir_name: &str, documents: bool, max_bytes: u64
             }
             continue;
         };
-        let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
         if size > max_bytes {
             result.too_large.push(rel);
             continue;
