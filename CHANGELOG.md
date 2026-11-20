@@ -328,6 +328,11 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- **`graphlore_package_apis(package=…)` cut nothing**: a package used in
+  hundreds of files (zod's own name across its workspace) returned every
+  file under every symbol, 136 KB. Each symbol's list is now cut at `limit`
+  and the file list at ten times that, with `symbol_file_counts`,
+  `file_count`, `files_left_out`, `truncated` and a `hint`.
 - **Native engine 0.5.50: a file git tracks is read whatever an ignore rule
   says of its name.** The engine honoured `.gitignore` for every file; git
   itself ignores only what is untracked. cJSON commits `tests/unity/test/`
