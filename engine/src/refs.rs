@@ -124,6 +124,10 @@ pub fn path_of(n: Node, src: &[u8]) -> Option<Vec<String>> {
         let t = text(n, src);
         return Some(vec![if t == "$this" || t == "this" { "self".into() } else { t }]);
     }
+    if k == "instance_variable" {
+        // Ruby `@repo`: a field of the object
+        return Some(vec!["self".into(), text(n, src).trim_start_matches('@').to_string()]);
+    }
     if k == "relative_scope" {
         // PHP `self::`, `static::`, `parent::`
         let t = text(n, src);
@@ -408,7 +412,14 @@ fn types_in(
             }
             continue;
         }
-        if TYPE_KINDS.contains(&k) || k == "identifier" {
+        // C++ `Outer::Inner`, `ns::Type` (one written with arguments,
+        // `std::vector<Foo>`, is read through its name below)
+        let qualified_type = k == "qualified_identifier"
+            && node.child_by_field_name("name").is_some_and(|c| c.kind() == "type_identifier")
+            && node
+                .child_by_field_name("scope")
+                .is_some_and(|c| matches!(c.kind(), "namespace_identifier" | "type_identifier"));
+        if TYPE_KINDS.contains(&k) || k == "identifier" || qualified_type {
             if let Some(p) = path_of(node, src) {
                 out.push((p, ctx));
             }
@@ -679,7 +690,14 @@ fn language_wrapper(name: &str, n: Node) -> bool {
     }
 }
 
+/// Wrappers of Rust's standard library: elsewhere the name is a type like
+/// any other (a Java project's own `Box<T>`).
+const RUST_WRAPPERS: &[&str] = &["Box", "Arc", "Rc", "Cell", "RefCell", "Pin", "Cow"];
+
 fn is_wrapper(name: &str, n: Node) -> bool {
+    if RUST_WRAPPERS.contains(&name) {
+        return n.language().name() == Some("rust");
+    }
     WRAPPERS.contains(&name) || language_wrapper(name, n)
 }
 
@@ -702,9 +720,7 @@ fn sealed_type(t: Node, src: &[u8]) -> bool {
     if v.len() < 2 {
         return false;
     }
-    let sealed = |name: &str| {
-        SEALED.contains(&name) && (WRAPPERS.contains(&name) || language_wrapper(name, t))
-    };
+    let sealed = |name: &str| SEALED.contains(&name) && is_wrapper(name, t);
     v[..v.len() - 1].iter().any(|(p, _)| sealed(&last(p)))
 }
 
@@ -2986,6 +3002,10 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                 });
             }
             let taken_apart = parts.is_some();
+            // (a Rust `let` is in force once it has ended: its own value
+            // still sees the declaration before it, `let r = r.clone();`)
+            let declared_at =
+                if n.kind() == "let_declaration" { n.end_byte() } else { n.start_byte() };
             for (name, mut path, declared, field) in
                 locals_of(n, src, false).into_iter().filter(|_| !taken_apart)
             {
@@ -3035,7 +3055,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                     .then(|| written_head(n, src))
                     .flatten(),
                     from_def: None,
-                    byte: n.start_byte(),
+                    byte: declared_at,
                 });
             }
         }
@@ -3370,6 +3390,17 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                 }
             }
         }
+        // C++ `namespace u = util;`
+        if n.kind() == "namespace_alias_definition" {
+            let name = n.child_by_field_name("name").map(|c| text(c, src));
+            let of =
+                kids(n).into_iter().rev().find(|c| !is_comment(c)).and_then(|c| path_of(c, src));
+            if let (Some(name), Some(of)) = (name, of) {
+                if of != [name.clone()] {
+                    facts.ns_aliases.push((name, of));
+                }
+            }
+        }
         if matches!(facts.lang, Some(crate::lang::Lang::C | crate::lang::Lang::Cpp))
             && matches!(n.kind(), "type_definition" | "alias_declaration")
         {
@@ -3530,7 +3561,13 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
             !b.declared,
         ))
     });
-    locals.dedup_by(|b, a| a.from_def == b.from_def && a.name == b.name);
+    // (Rust declares a name again in the scope it is in, `let r = a(); let r
+    // = b();`, and in each arm of a `match`: every one is kept, and a use
+    // has the one declared last before it, `Project::local_in_force`)
+    let redeclares = facts.lang == Some(crate::lang::Lang::Rust);
+    locals.dedup_by(|b, a| {
+        a.from_def == b.from_def && a.name == b.name && !(redeclares && !a.field && !b.field)
+    });
     for imp in imports.iter_mut() {
         if imp.runs == Runs::ModuleLevel && inside_callable(&facts.defs, imp.byte) {
             imp.runs = Runs::Deferred;
@@ -5297,12 +5334,13 @@ fn loop_vars(n: Node, src: &[u8]) -> Option<Vec<(String, Vec<String>)>> {
         | "for_in_statement"
         | "for_expression"
         | "for_in_clause"
+        | "for_range_loop"
         | "for" => {
             // a type written for the variable types it already
             if n.child_by_field_name("type").is_some_and(|t| first_type(t, src).is_some()) {
                 return None;
             }
-            let var = ["left", "name", "pattern", "item"]
+            let var = ["left", "name", "pattern", "item", "declarator"]
                 .iter()
                 .find_map(|f| n.child_by_field_name(f))
                 .or_else(|| {
@@ -5358,6 +5396,11 @@ fn loop_vars(n: Node, src: &[u8]) -> Option<Vec<(String, Vec<String>)>> {
     // one name, not a pattern of several
     let name = match var.kind() {
         "identifier" | "simple_identifier" | "variable_name" => bound_name(var, src)?,
+        // C++ `auto& r`, `auto* r`
+        "reference_declarator" | "pointer_declarator" => {
+            let inner = kids(var).into_iter().find(|c| c.kind() == "identifier")?;
+            bound_name(inner, src)?
+        }
         "variable_declaration" | "pattern" | "value_binding_pattern" => {
             let ks = kids(var);
             let ids: Vec<&Node> = ks
@@ -5512,6 +5555,10 @@ fn state_value_path(node: Node, src: &[u8]) -> Option<Vec<String>> {
     // `var app = module.exports = express()`: what the last one assigns
     while v.kind() == "assignment_expression" {
         v = v.child_by_field_name("right")?;
+    }
+    // Ruby `Store = Repo`, `Store = Shop::Repo`: another name for the class
+    if matches!(v.kind(), "constant" | "scope_resolution") {
+        return path_of(v, src);
     }
     value_type(v, src)
 }
