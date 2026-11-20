@@ -767,31 +767,35 @@ file pairs). The native graph has definitions graphify folds into the one
 around them (a function nested in a method, the setter beside a getter of the
 same name); an edge from one of those is compared as an edge from the paired
 definition it belongs to, as graphify records it. On the 31 repositories of the
-[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.37,
-measured 2026-11-18), as native / graphify edges and the share of graphify's
+[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.42,
+measured 2026-11-20), as native / graphify edges and the share of graphify's
 that the native graph has too:
 
 | Language | same definition | imports (file pairs) | calls | bases | type references |
 |---|--:|--:|--:|--:|--:|
 | Python | 100% | 212 / 219 (96%) | 2,970 / 834 (94%) | 73 / 62 (100%) | 440 / 494 (68%) |
-| JavaScript | 93.5%⁵ | 190 / 305 (59%) | 1,386 / 2,058 (43%)¹ | 1 / 1 | 3 / 0 |
-| TypeScript | 99.4% | 527 / 634 (83%) | 805 / 687 (98%) | 25 / 20 (100%) | 740 / 156 (88%) |
+| JavaScript | 93.5%⁵ | 190 / 305 (59%) | 1,274 / 2,058 (41%)¹ | 1 / 1 | 3 / 0 |
+| TypeScript | 99.4% | 527 / 634 (83%) | 804 / 687 (98%) | 25 / 20 (100%) | 740 / 156 (88%) |
 | TSX | 99.7% | 253 / 316 (80%) | 435 / 456 (95%) | – | 42 / 4 |
 | Go | 100% | 538 / 950 (47%)² | 6,723 / 3,167 (99%) | 19 / 14 (100%) | 679 / 355 (99%) |
 | Java | 100% | 1,105 / 1,010 (100%) | 5,718 / 5,123 (85%) | 415 / 168 (94%) | 3,989 / 1,930 (98%) |
-| Kotlin | 99.4% | 368 / 333 (95%) | 4,786 / 2,108 (71%) | 96 / 56 (93%) | 1,079 / 673 (91%) |
+| Kotlin | 99.4% | 368 / 333 (95%) | 4,819 / 2,108 (71%) | 96 / 56 (93%) | 1,079 / 673 (91%) |
 | Scala | 100% | 2 / 0 | 46 / 20 (45%) | 21 / 22 (95%) | 75 / 32 (100%) |
-| C# | 92.7% | 347 / 280 (30%)³ | 2,860 / 2,450 (96%) | 87 / 86 (98%) | 1,248 / 806 (99%) |
-| Rust | 93.3% | 314 / 370 (75%) | 2,016 / 853 (86%) | 53 / 41 (93%) | 1,245 / 895 (81%) |
-| Swift | 95.9% | 166 / 166 (–)³ | 5,494 / 2,141 (83%) | 190 / 164 (100%) | 1,091 / 580 (62%) |
+| C# | 92.8% | 347 / 280 (30%)³ | 3,287 / 2,460 (96%) | 91 / 86 (98%) | 1,330 / 928 (99%) |
+| Rust | 93.3% | 314 / 370 (75%) | 2,065 / 853 (86%) | 53 / 41 (93%) | 1,245 / 895 (81%) |
+| Swift | 95.9% | 167 / 166 (–)³ | 5,502 / 2,141 (83%) | 190 / 164 (100%) | 1,091 / 580 (62%) |
 | C | 100% | 89 / 77 (99%) | 864 / 791 (100%) | – | 253 / 130 (97%) |
 | C++ | 98.7% | 215 / 228 (93%) | 765 / 281 (29%)⁴ | 30 / 5 (100%) | 350 / 234 (88%) |
 | C/C++ headers | 91.4% | 164 / 172 (95%) | 372 / 348 (84%) | 12 / 12 (92%) | 563 / 312 (90%) |
-| Ruby | 99.7% | 42 / 0 | 443 / 375 (69%) | 46 / 15 (93%) | 28 / 0 |
+| Ruby | 99.7% | 42 / 0 | 443 / 375 (69%) | 47 / 15 (93%) | 28 / 0 |
 | PHP | 80.6% | 429 / 505 (84%) | 8,873 / 6,140 (90%) | 65 / 60 (98%) | 648 / 213 (95%) |
-| **All** | **94.4%** | **4,962 / 5,565 (75%)** | **44,556 / 27,832 (85%)** | **1,137 / 726 (97%)** | **12,473 / 6,814 (89%)** |
+| **All** | **94.4%** | **4,962 / 5,565 (75%)** | **44,960 / 27,842 (85%)** | **1,138 / 726 (97%)** | **12,555 / 6,936 (89%)** |
 
-Of the native calls, 12,772 (29%) are `INFERRED`, against 47% of graphify's.
+Of the native calls, 13,117 (29%) are `INFERRED`, against 47% of graphify's.
+(Engine 0.5.37 had 44,556 calls in this table; the 404 more are C# 427,
+Rust 49, Kotlin 33, Swift 8 and JavaScript 112 fewer, the last in the
+vendored bundles whose one-letter names 0.5.40's scopes no longer take for
+file-wide: 41% of graphify's JavaScript calls from 43%.)
 That share was 20% before engine 0.5.5: a call of an overloaded name that the
 arguments do not decide used to be an `EXTRACTED` edge to the first overload,
 and is now an `INFERRED` edge to each overload that fits (999 calls, with
@@ -1419,7 +1423,7 @@ implicit members since 0.5.17: 39 whose place gives no type are rows now
 closure parameters and variables of express's tests. What is left at file
 level there is `app.use` and `app.set` (842 rows of express), names too
 short and too common to guess by. Engine 0.5.19 takes 123 more off (6,362;
-C# 349 from 470; 6,360 with 0.5.20, 6,348 with 0.5.21, 6,285 with 0.5.22, 6,237 with 0.5.25, 6,206 with 0.5.27, 6,166 with 0.5.28, 6,156 with 0.5.30, 6,140 with 0.5.31, 6,132 with 0.5.32, 6,126 with 0.5.33, 6,093 with 0.5.34, 6,047 with 0.5.36, 6,046 with 0.5.37, 6,012 with 0.5.38, 5,928 with 0.5.39, 5,908 with 0.5.40, 5,898 with 0.5.41, 5,882 with 0.5.42). Most of what C# has left is not the project's: `Assert.
+C# 349 from 470; 6,360 with 0.5.20, 6,348 with 0.5.21, 6,285 with 0.5.22, 6,237 with 0.5.25, 6,206 with 0.5.27, 6,166 with 0.5.28, 6,156 with 0.5.30, 6,140 with 0.5.31, 6,132 with 0.5.32, 6,126 with 0.5.33, 6,093 with 0.5.34, 6,047 with 0.5.36, 6,046 with 0.5.37, 6,012 with 0.5.38, 5,928 with 0.5.39, 5,908 with 0.5.40, 5,898 with 0.5.41, 5,882 with 0.5.42 and 0.5.43). Most of what C# has left is not the project's: `Assert.
 NotNull` beside its own `Ensure.NotNull` (77), `WireMockServer.Start` (23).
 
 By then most rows were of that kind: a library's name the project happens
@@ -1498,7 +1502,14 @@ rows, all Ruby (`adapter` 26, `response_headers` 23, `response_body` 22,
 49, C# 40, TypeScript 39, PHP 29, Kotlin 22, Go 14, Java 12, Python 9, TSX
 4, Scala 4. Ruby's largest group left was a `let` shared through
 `shared_examples` (`request_stub`, 20 rows of faraday's adapter examples),
-which 0.5.42 reads: 367 unmarked, Ruby 81.) The 2,114 by language: PHP 445, TypeScript 405, Ruby 304, C# 196, Rust 192,
+which 0.5.42 reads: 367 unmarked, Ruby 81. 0.5.43 marks an attribute's
+name on a typed receiver too (one that lacks the `def` has the attribute or
+nothing): 314 unmarked — Rust 64, Swift 49, C# 40, TypeScript 39, PHP 29,
+Ruby 28, Kotlin 22, Go 14, Java 12, Python 9, TSX 4, Scala 4. No group of
+them is larger than 13 rows, and each is its own mechanism in one
+repository: what a library's generic holds (`http::Response<Body>`,
+`Protected<T>`'s closure parameter), a promise's methods added at run time
+(got's `promise.buffer()`), a parameter no source types.) The 2,114 by language: PHP 445, TypeScript 405, Ruby 304, C# 196, Rust 192,
 C++ 169, Swift 94, Kotlin 79, JavaScript 71, Java 49, Go 34, C 33, Python
 20, TSX 19, Scala 4. They are still an upper bound: the marks are
 conservative, and PHP's and TypeScript's rows are mostly PSR-7 and Node
@@ -1548,8 +1559,9 @@ but one convention finding, fixed since: `graphlore_surprises(limit=0)` cut its
 `shared_state` list without saying how much (`shared_state_left_out` does now).
 `SKELETON-EMPTY` went from 5 to 0, and the tool time stayed at 131 s.
 
-Rerun on graphs built by engine 0.5.3, and again by 0.5.4 through 0.5.27
-(2026-11-18), the audit raises nothing on the native graphs but its
+Rerun on graphs built by engine 0.5.3, again by 0.5.4 through 0.5.27
+(2026-11-18) and by 0.5.42 (2026-11-20, 279 s for the whole run), the audit
+raises nothing on the native graphs but its
 `GRAPH-ORPHAN-NODES` note on 19 of them; 115 to 172 s of tool time (on the 0.5.7 run, retrofit's build through `graphlore_build` took 5.1 s and was reported `SLOW` for crossing 5 s). What the table above still listed is
 gone:
 

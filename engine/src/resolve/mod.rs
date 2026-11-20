@@ -5809,13 +5809,11 @@ impl<'a> Project<'a> {
             || library_step()
         {
             Some("the receiver is a library's")
-        } else if r.path.len() >= 2
-            && self.attrs.contains(&(fam, name.to_string()))
-            && UNTYPED_RECEIVER_REASONS.contains(&reason.as_str())
-        {
+        } else if r.path.len() >= 2 && self.attrs.contains(&(fam, name.to_string())) {
             // (`env.status` beside `Env = Options.new(:status, …)`, `conn.adapter`
             // beside `def_delegators :builder, :adapter`: the receiver may be
-            // the type that declares it with no `def`)
+            // the type that declares it with no `def`, typed or not — a
+            // typed one that lacks the `def` has the attribute, or nothing)
             Some("a type declares an attribute of the name")
         } else if bare_is_no_method {
             Some("a bare name is no method here")

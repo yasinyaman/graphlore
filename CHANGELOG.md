@@ -316,6 +316,15 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- **Native engine 0.5.43: the comparison with graphify measured again, and
+  attribute names marked on any receiver.** The diagnostics mark a member of a
+  name a type declares with no `def` whatever the receiver (0.5.41 did on an
+  untyped one): a typed receiver that lacks the `def` has the attribute or
+  nothing. Graph unchanged; unmarked unresolved rows 367 → 314 (Ruby 81 → 28).
+  `docs/native-engine.md`'s table against graphify 0.9.111 is measured on
+  engine 0.5.42: 44,960 native calls for graphify's 27,842, 85% of them found
+  as before (JavaScript 41% from 43%: the vendored bundles), and the polyglot
+  audit on native graphs raises nothing but its orphan-node note.
 - **Native engine 0.5.42: module patterns, typed function declarations, RSpec
   shared examples.** Three things 0.5.40's scopes left open. A JavaScript
   module written `var Dataset = (function () { function Dataset() {} return
