@@ -785,6 +785,15 @@ fn is_collection_step(seg: &str) -> bool {
         || MAP_VIEWS.contains(&seg)
 }
 
+/// Puts back the file a walk was asked from when the walk ends.
+struct Asking<'a>(&'a RefCell<Option<usize>>, Option<usize>);
+
+impl Drop for Asking<'_> {
+    fn drop(&mut self) {
+        *self.0.borrow_mut() = self.1;
+    }
+}
+
 /// What a JavaScript function has of its own: a method read with one of
 /// these after it is the function, not a getter's value.
 const FUNCTION_MEMBERS: &[&str] = &["bind", "call", "apply", "name", "length", "prototype"];
@@ -1311,6 +1320,9 @@ pub struct Project<'a> {
     bases_memo: RefCell<HashMap<DefRef, Vec<DefRef>>>,
     /// `(file, definition, name)` -> typed local / parameter.
     locals: HashMap<(usize, usize, String), usize>,
+    /// The locals of one name in one definition, in the order they are
+    /// declared, where there are several (Rust `let r = a(); let r = b();`).
+    shadows: HashMap<(usize, usize, String), Vec<usize>>,
     /// type -> field name -> the field's local (its declared or assigned type).
     fields: HashMap<DefRef, HashMap<String, (usize, usize)>>,
     depth: RefCell<usize>,
@@ -1355,6 +1367,11 @@ pub struct Project<'a> {
     typing: RefCell<HashSet<(usize, usize)>>,
     /// The use being resolved, when it is a call: `(file, index of the use)`.
     cur: RefCell<Option<(usize, usize)>>,
+    /// What the reference being resolved is (a type written, a call, …).
+    ref_kind: RefCell<Option<RefKind>>,
+    /// The file the path being walked is written in: of several blocks of
+    /// one namespace, its own and those it includes come first.
+    asking: RefCell<Option<usize>>,
     /// How many arguments the call being resolved passes.
     args: RefCell<Option<u8>>,
     /// One of them is `this`.
@@ -1437,6 +1454,7 @@ impl<'a> Project<'a> {
             ext_index: RefCell::new(HashMap::new()),
             bases_memo: RefCell::new(HashMap::new()),
             locals: HashMap::new(),
+            shadows: HashMap::new(),
             fields: HashMap::new(),
             depth: RefCell::new(0),
             types_only: RefCell::new(false),
@@ -1456,6 +1474,8 @@ impl<'a> Project<'a> {
             typing_value: RefCell::new(false),
             typing: RefCell::new(HashSet::new()),
             cur: RefCell::new(None),
+            ref_kind: RefCell::new(None),
+            asking: RefCell::new(None),
             args: RefCell::new(None),
             self_arg: RefCell::new(false),
             recv_types: RefCell::new(HashMap::new()),
@@ -1709,6 +1729,7 @@ impl<'a> Project<'a> {
 
     fn index_locals(&mut self) {
         let mut locals = HashMap::new();
+        let mut shadows: HashMap<(usize, usize, String), Vec<usize>> = HashMap::new();
         let mut fields: HashMap<DefRef, HashMap<String, (usize, usize)>> = HashMap::new();
         for (fi, f) in self.files.iter().enumerate() {
             for (li, l) in f.locals.iter().enumerate() {
@@ -1718,10 +1739,17 @@ impl<'a> Project<'a> {
                         fields.entry(c).or_default().entry(l.name.clone()).or_insert((fi, li));
                     }
                 } else {
-                    locals.insert((fi, d, l.name.clone()), li);
+                    // (of several, the first is the one the index names)
+                    locals.entry((fi, d, l.name.clone())).or_insert(li);
+                    shadows.entry((fi, d, l.name.clone())).or_default().push(li);
                 }
             }
         }
+        shadows.retain(|_, v| v.len() > 1);
+        for (key, v) in shadows.iter_mut() {
+            v.sort_by_key(|&li| (self.files[key.0].locals[li].byte, li));
+        }
+        self.shadows = shadows;
         self.locals = locals;
         self.fields = fields;
     }
@@ -2412,35 +2440,28 @@ impl<'a> Project<'a> {
         let mut cur = d;
         while let Some(x) = cur {
             if let Some(&li) = self.locals.get(&(f, x, name.to_string())) {
-                // typing a local can come back to it (`let session =
-                // session(using: x)`: the value names the local): the second
-                // time round it has no type
-                if let Some(known) = self.local_types.borrow().get(&(f, li)) {
-                    return *known;
+                let mut li = self.local_in_force(f, x, name, li);
+                // a redeclaration's own value names the declaration before
+                // it (`let agent = agent.clone();`)
+                while self.typing.borrow().contains(&(f, li)) {
+                    match self.declared_before(f, x, name, li) {
+                        Some(prev) => li = prev,
+                        None => break,
+                    }
                 }
-                // worked out from the top, the answer is the local's own and
-                // is kept; inside another typing it may be cut short
-                let whole = self.typing.borrow().is_empty() && *self.depth.borrow() == 0;
-                if !self.typing.borrow_mut().insert((f, li)) {
-                    return None;
-                }
-                // a local's type is the same whatever use asks for it: its
-                // value's path is what is called there (`x = f()` -> `f`),
-                // a written type is not
-                let value = !self.files[f].locals[li].declared;
-                // (`if let Some(r) = opt` beside the parameter `opt`: the
-                // value is that parameter, which nothing calls)
-                let held = value && self.holds_declared_local(f, x, li);
-                let calling = self.calling.replace(value && !held);
-                let typing_value = self.typing_value.replace(value);
-                let recv = self.recv.replace(None);
-                let out = self.local_type_of(f, x, li, name);
-                *self.recv.borrow_mut() = recv;
-                *self.typing_value.borrow_mut() = typing_value;
-                *self.calling.borrow_mut() = calling;
-                self.typing.borrow_mut().remove(&(f, li));
-                if whole {
-                    self.local_types.borrow_mut().insert((f, li), out);
+                let out = self.local_type_at(f, x, li, name);
+                // … and one the walk cannot type gives way to the declaration
+                // before it that it can: most often its value is made from
+                // that one (`let timings = mem::take(timings);`), and the
+                // walk has no blocks to say the earlier one is out of scope
+                if out.is_none() {
+                    let mut at = li;
+                    while let Some(prev) = self.declared_before(f, x, name, at) {
+                        if let Some((t, _)) = self.local_type_at(f, x, prev, name) {
+                            return Some((t, Confidence::Inferred));
+                        }
+                        at = prev;
+                    }
                 }
                 return out;
             }
@@ -2449,12 +2470,95 @@ impl<'a> Project<'a> {
         None
     }
 
+    /// The declaration of the name before local `li` in the definition.
+    fn declared_before(&self, f: usize, x: usize, name: &str, li: usize) -> Option<usize> {
+        let all = self.shadows.get(&(f, x, name.to_string()))?;
+        let at = all.iter().position(|&i| i == li)?;
+        at.checked_sub(1).map(|i| all[i])
+    }
+
+    /// The type of local `li` of definition `x`, worked out once.
+    fn local_type_at(
+        &self,
+        f: usize,
+        x: usize,
+        li: usize,
+        name: &str,
+    ) -> Option<(DefRef, Confidence)> {
+        // typing a local can come back to it (`let session =
+        // session(using: x)`: the value names the local): the second
+        // time round it has no type
+        if let Some(known) = self.local_types.borrow().get(&(f, li)) {
+            return *known;
+        }
+        // worked out from the top, the answer is the local's own and
+        // is kept; inside another typing it may be cut short
+        let whole = self.typing.borrow().is_empty() && *self.depth.borrow() == 0;
+        if !self.typing.borrow_mut().insert((f, li)) {
+            return None;
+        }
+        // a local's type is the same whatever use asks for it: its
+        // value's path is what is called there (`x = f()` -> `f`),
+        // a written type is not
+        let value = !self.files[f].locals[li].declared;
+        // (`if let Some(r) = opt` beside the parameter `opt`: the
+        // value is that parameter, which nothing calls)
+        let held = value && self.holds_declared_local(f, x, li);
+        let calling = self.calling.replace(value && !held);
+        let typing_value = self.typing_value.replace(value);
+        let recv = self.recv.replace(None);
+        let out = self.local_type_of(f, x, li, name);
+        *self.recv.borrow_mut() = recv;
+        *self.typing_value.borrow_mut() = typing_value;
+        *self.calling.borrow_mut() = calling;
+        self.typing.borrow_mut().remove(&(f, li));
+        if whole {
+            self.local_types.borrow_mut().insert((f, li), out);
+        }
+        out
+    }
+
+    /// Of several locals of one name in a definition, the one in force where
+    /// the reference being resolved is written: the last declared before it
+    /// (the first, for a use above them all). `li` is the one the index holds.
+    fn local_in_force(&self, f: usize, x: usize, name: &str, li: usize) -> usize {
+        if self.shadows.is_empty() {
+            return li;
+        }
+        let Some(all) = self.shadows.get(&(f, x, name.to_string())) else { return li };
+        let Some(at) = (*self.cur.borrow())
+            .filter(|(cf, _)| *cf == f)
+            .map(|(cf, ci)| self.files[cf].refs[ci].byte)
+        else {
+            return li;
+        };
+        let locals = &self.files[f].locals;
+        // (the arms of one `match` are declared at the same place: the first)
+        let Some(last) = all.iter().rev().copied().find(|&i| locals[i].byte <= at) else {
+            return all[0];
+        };
+        all.iter().copied().find(|&i| locals[i].byte == locals[last].byte).unwrap_or(last)
+    }
+
+    /// Where the first local of the name is declared in the definition.
+    fn first_declared(&self, f: usize, x: usize, name: &str, li: usize) -> usize {
+        match self.shadows.get(&(f, x, name.to_string())) {
+            Some(all) => self.files[f].locals[all[0]].byte,
+            None => self.files[f].locals[li].byte,
+        }
+    }
+
     /// Whether local `li` is what a binding opens out of another local that
     /// is declared with its type (`[opt, "[?]"]`, `opt: Option<Repo>`).
     fn holds_declared_local(&self, f: usize, x: usize, li: usize) -> bool {
         let l = &self.files[f].locals[li];
-        let [head, mark] = l.path.as_slice() else { return false };
-        if mark != crate::refs::OPENED || *head == l.name {
+        // (or is that local under another name: the `it` of `r.let { … }`)
+        let head = match l.path.as_slice() {
+            [head] => head,
+            [head, mark] if mark == crate::refs::OPENED => head,
+            _ => return false,
+        };
+        if *head == l.name {
             return false;
         }
         let defs = &self.files[f].defs;
@@ -3245,9 +3349,23 @@ impl<'a> Project<'a> {
                 // can be one of several, a comprehension binds after its use)
                 let declares =
                     !matches!(self.family[f], Some(Family::Python | Family::Ruby | Family::Php));
+                let first = self.first_declared(f, x, name, li);
                 let before = declares
                     && (*self.cur.borrow())
-                        .is_some_and(|(cf, ci)| cf == f && self.files[cf].refs[ci].byte < l.byte);
+                        .is_some_and(|(cf, ci)| cf == f && self.files[cf].refs[ci].byte < first);
+                // C, C++: a variable hides a function of its name (they share
+                // one scope), unless it is of a project type, where the walk
+                // has no call operator to name
+                if called
+                    && !before
+                    && l.declared
+                    && self.family[f] == Some(Family::C)
+                    && self
+                        .local_type(f, d, name)
+                        .is_none_or(|(t, _)| !self.def(t).kind.is_class_like())
+                {
+                    return false;
+                }
                 return l.assigned
                     || before
                     || (called && (l.declared || l.path.first().is_some_and(|h| h == name)));
@@ -3775,7 +3893,26 @@ impl<'a> Project<'a> {
             Target::Def(c) => {
                 let d = self.def(*c);
                 if d.kind == DefKind::Namespace {
-                    return self.best(self.namespace_members(*c, name)).map(Target::Def);
+                    let all = self.namespace_members(*c, name);
+                    // (two files can each define the name in the namespace:
+                    // `leveldb::Benchmark` of each benchmark's own file)
+                    if let Some(f) = *self.asking.borrow() {
+                        let own: Vec<DefRef> = all.iter().copied().filter(|m| m.0 == f).collect();
+                        if !own.is_empty() {
+                            return self.best(own).map(Target::Def);
+                        }
+                        let seen: Vec<DefRef> = all
+                            .iter()
+                            .copied()
+                            .filter(|m| {
+                                self.scopes.get(f).is_some_and(|s| s.imported.contains(&m.0))
+                            })
+                            .collect();
+                        if !seen.is_empty() {
+                            return self.best(seen).map(Target::Def);
+                        }
+                    }
+                    return self.best(all).map(Target::Def);
                 }
                 // `Color.RED.label()`: an enum's value has the enum's members
                 // (after what the value declares itself: Java `DEFAULT { … }`)
@@ -4101,6 +4238,35 @@ impl<'a> Project<'a> {
             }
         }
         found.or_else(|| {
+            // C++ `port::CondVar cv;`, `typename SkipList<K, C>::Node*`: a
+            // type written with a qualifier the walk could not follow is
+            // looked up by its own name, as one written bare
+            let as_type = self.naming_type();
+            if self.family[f] == Some(Family::C)
+                && as_type
+                && path.len() >= 2
+                && !path.iter().any(|s| s == "()" || s.starts_with('['))
+            {
+                if let Some(t) =
+                    self.resolve_path_inner(f, d, &path[path.len() - 1..], bases, false)
+                {
+                    return Some(t);
+                }
+            }
+            // Ruby `@pki.issue(…)`: a field the walk cannot type is a
+            // receiver it cannot name
+            if self.family[f] == Some(Family::Ruby) && !bases && *self.calling.borrow() {
+                if let [head, field, method] = path {
+                    // (not a method of the class called on the way)
+                    let is_field = head == "self"
+                        && self
+                            .class_of(f, d)
+                            .is_none_or(|c| self.class_member(c, field, 4).is_none());
+                    if is_field {
+                        return self.unknown_receiver(f, method, None);
+                    }
+                }
+            }
             // an element (`xs[0].run()`) or a mapping (`xs.map { … }`) the
             // walk could not type is a receiver it cannot name: what is
             // called on it is found by a distinctive name alone
@@ -4248,6 +4414,7 @@ impl<'a> Project<'a> {
         want_many: bool,
     ) -> Option<(Target, Confidence)> {
         let fam = self.family[f]?;
+        let _asking = Asking(&self.asking, self.asking.replace(Some(f)));
         // `let p = setup(); p.0.go()`: a part of the tuple a local holds is
         // that part of its value
         if let Some(whole) = self.tuple_local_path(f, d, path) {
@@ -4277,6 +4444,29 @@ impl<'a> Project<'a> {
         };
         let opened_after = |i: usize| opened.get(i).copied().unwrap_or(false);
         let (head, rest) = path.split_first()?;
+        // C++ `log::Writer log(file);`: where a type is written, a name
+        // before `::` is a namespace or a type, never the variable of that name
+        if fam == Family::C
+            && !rest.is_empty()
+            && self.naming_type()
+            && self.is_local_name(f, d, head)
+        {
+            let named = self
+                .resolve_name(f, d, head)
+                .and_then(|t| self.walk(t, rest, Confidence::Extracted));
+            if named.is_some() {
+                return named;
+            }
+        }
+        // C++ `namespace u = util; u::twice()`: the namespace the alias names
+        if fam == Family::C && !rest.is_empty() && !self.files[f].ns_aliases.is_empty() {
+            let named = self.files[f].ns_aliases.iter().find(|(a, _)| a == head);
+            if let Some((_, of)) = named.filter(|_| !self.is_local_name(f, d, head)) {
+                let mut whole = of.clone();
+                whole.extend(rest.iter().cloned());
+                return self.resolve_path_inner(f, d, &whole, bases, want_many);
+            }
+        }
         let mut conf = Confidence::Extracted;
         // Whether `t` is what a sealed wrapper holds, not opened yet: after a
         // name, field or call declared as one (`Optional<Foo>`, `-> Result<Foo,
@@ -6077,6 +6267,22 @@ impl<'a> Project<'a> {
         }))
     }
 
+    /// Whether the path being resolved is written where a type is: a
+    /// declaration's type, a construction, a base.
+    fn naming_type(&self) -> bool {
+        *self.types_only.borrow()
+            || matches!(
+                *self.ref_kind.borrow(),
+                Some(
+                    RefKind::Type
+                        | RefKind::New
+                        | RefKind::Inherits
+                        | RefKind::Implements
+                        | RefKind::Base
+                )
+            )
+    }
+
     /// Whether the path being walked is a call to link (not a local's value
     /// being typed).
     fn linking_call(&self) -> bool {
@@ -6297,6 +6503,22 @@ impl<'a> Project<'a> {
                             || !self.def(*r).kind.is_callable()
                             || self.scopes[f].imported.contains(&r.0)
                     });
+                // (C, C++: of the definitions of one qualified name, the
+                // file's own, then those of the files it includes)
+                let mut found: Vec<DefRef> = found.collect();
+                if fam == Family::C && found.len() > 1 {
+                    let own: Vec<DefRef> = found.iter().copied().filter(|r| r.0 == f).collect();
+                    let seen: Vec<DefRef> = found
+                        .iter()
+                        .copied()
+                        .filter(|r| self.scopes[f].imported.contains(&r.0))
+                        .collect();
+                    if !own.is_empty() {
+                        found = own;
+                    } else if !seen.is_empty() {
+                        found = seen;
+                    }
+                }
                 if let Some(r) = self.best(found) {
                     let t = self.walk_target(Target::Def(r), &path[k..])?;
                     return Some((t, Confidence::Extracted));
@@ -7033,6 +7255,7 @@ pub fn resolve(
                 *p.self_arg.borrow_mut() = r.self_arg;
                 let is_call = matches!(r.kind, RefKind::Call | RefKind::New);
                 *p.cur.borrow_mut() = is_call.then_some((f, ri));
+                *p.ref_kind.borrow_mut() = Some(r.kind);
                 p.guessed.set(false);
                 let found = if let Some(place) = &r.implicit {
                     // Swift `.status(301)`: a static member of the type the
@@ -7070,6 +7293,7 @@ pub fn resolve(
                 *p.args.borrow_mut() = None;
                 *p.self_arg.borrow_mut() = false;
                 *p.cur.borrow_mut() = None;
+                *p.ref_kind.borrow_mut() = None;
                 // a guess by name alone on another object never links a
                 // definition to itself: `base.evaluate()` inside `evaluate()`
                 // is a wrapper handing on to what it wraps
@@ -7144,6 +7368,19 @@ pub fn resolve(
                             // a member read on its own: state is read, a method
                             // taken as a value is referred to
                             RefKind::Attr if tk.is_state() => "reads",
+                            // C++ `port::CondVar cv;`: a type named through
+                            // its namespace (an enumerator is a value: no edge,
+                            // as for the other languages' enum members)
+                            RefKind::Attr
+                                if tk.is_class_like()
+                                    && p.family[f] == Some(Family::C)
+                                    && !p
+                                        .def(t)
+                                        .parent
+                                        .is_some_and(|e| p.def((t.0, e)).kind == DefKind::Enum) =>
+                            {
+                                "references"
+                            }
                             RefKind::Attr => {
                                 if !tk.is_callable() {
                                     continue;

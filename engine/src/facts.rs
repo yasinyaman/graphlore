@@ -439,7 +439,9 @@ pub struct Local {
     #[serde(default)]
     pub written_head: Option<String>,
     pub from_def: Option<usize>,
-    #[serde(skip)]
+    /// Where it is declared: a use written before it is no use of it, and of
+    /// two of one name the one declared last before a use is meant.
+    #[serde(default)]
     pub byte: usize,
 }
 
@@ -493,7 +495,7 @@ pub struct RefFact {
     /// `UserSchema.path('name').validate(function () {…})`.
     #[serde(default)]
     pub this_of: Option<Vec<String>>,
-    #[serde(skip)]
+    #[serde(default)]
     pub byte: usize,
 }
 
@@ -608,6 +610,9 @@ pub struct FileFacts {
     /// name or as its default (JS/TS `export { a as b }`, `export default X`,
     /// `module.exports = X`).
     pub exports: Vec<(String, String)>,
+    /// C++ `namespace u = util;`: the alias and the namespace it names.
+    #[serde(default)]
+    pub ns_aliases: Vec<(String, Vec<String>)>,
     pub refs: Vec<RefFact>,
     pub locals: Vec<Local>,
     /// Names a type answers to without a definition of that name: Ruby
@@ -676,6 +681,7 @@ impl FileFacts {
             test_regions: Vec::new(),
             imports: Vec::new(),
             exports: Vec::new(),
+            ns_aliases: Vec::new(),
             refs: Vec::new(),
             locals: Vec::new(),
             attrs: Vec::new(),
