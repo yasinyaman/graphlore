@@ -328,6 +328,8 @@ pub fn is_call_kind(k: &str) -> bool {
         && k != "constructor_invocation"
         // (Kotlin `::handle`: a function named, not called)
         && k != "callable_reference"
+        // (Java `super(…)` / `this(…)`: a construction, read where it is)
+        && k != "explicit_constructor_invocation"
 }
 
 /// The callee of a call node, and whether it constructs (`new`).
@@ -3247,6 +3249,27 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                 if let Some(p) = path_of(ks[0], src) {
                     push(&mut refs, n, RefKind::Type, p, "class_literal", None);
                 }
+            }
+        }
+        // C# `: base(1, text)` / `: this("x")`: the constructor of the base
+        // class, or another of the class itself
+        // (Java `super(1, text);` / `this("x");` in a constructor)
+        if matches!(n.kind(), "constructor_initializer" | "explicit_constructor_invocation") {
+            let written = text(n, src);
+            let word = written.trim_start_matches(':').trim_start();
+            let head = if word.starts_with("base") || word.starts_with("super") {
+                "super"
+            } else {
+                "self"
+            };
+            let passed = kids(n)
+                .into_iter()
+                .find(|c| c.kind() == "argument_list")
+                .map(|l| kids(l).iter().filter(|c| !is_comment(c)).count());
+            let at = refs.len();
+            push(&mut refs, n, RefKind::New, vec![head.to_string()], "constructor", None);
+            if let Some(r) = refs.get_mut(at) {
+                r.args = passed.and_then(|n| u8::try_from(n).ok());
             }
         }
         // PHP `Repo::class`: the class named

@@ -898,6 +898,12 @@ case("python", "function-local-import", "an import inside a function binds the n
      PY, {"pkg/__init__.py": "", "pkg/m.py": "def f():\n    return 1\n",
           "app.py": "def run():\n    from pkg.m import f\n    return f()\n"},
      [("run", "calls", "f")])
+case("python", "pytest-fixture", "pytest hands a test the result of the fixture its parameter names (conftest.py)",
+     "pytest documentation, 'How to use fixtures' (requesting a fixture by its name; conftest.py)",
+     {"app.py": "class Runner:\n    def invoke(self):\n        return 1\n\n\nclass Context:\n    def invoke(self):\n        return 2\n",
+      "tests/conftest.py": "import pytest\n\nfrom app import Runner\n\n\n@pytest.fixture\ndef runner():\n    return Runner()\n",
+      "tests/test_app.py": "def test_run(runner):\n    assert runner.invoke() == 1\n"},
+     [("test_run", "calls", "Runner.invoke")], [("test_run", "calls", "Context.invoke")])
 case("python", "mro-first-base", "of two bases with the method, the first listed wins",
      PY, {"a.py": "class Left:\n    def m(self):\n        return 1\n\n\nclass Right:\n    def m(self):\n        return 2\n\n\n"
                   "class A(Left, Right):\n    def run(self):\n        return self.m()\n"},
@@ -1103,6 +1109,11 @@ case("java", "overload-by-type", "overloads of one arity are told apart by the a
      JAVA, {"app/A.java": "package app;\n\npublic class A {\n    int send(String s) {\n        return 1;\n    }\n\n"
                           "    int send(int n) {\n        return 2;\n    }\n\n    int run() {\n        return send(\"x\");\n    }\n}\n"},
      [("A.run", "calls", "A.send")])
+case("java", "explicit-constructor-call", "`super(…)` / `this(…)` in a constructor call the constructor of the base, or another of the class",
+     JAVA, {"app/A.java": "package app;\n\nclass Token {\n    Token(int tag, String text) {\n    }\n}\n\n"
+                          "class Name extends Token {\n    Name(String text) {\n        super(1, text);\n    }\n\n"
+                          "    Name() {\n        this(\"x\");\n    }\n}\n"},
+     [("Name.Name", "calls", "Token.Token"), ("Name.Name", "calls", "Name.Name")])
 case("java", "nested-static-class", "a nested class is named through the class around it",
      JAVA, {"app/A.java": "package app;\n\nclass Outer {\n    static class Inner {\n        int find() {\n            return 1;\n        }\n    }\n}\n\n"
                           "public class A {\n    int run(Outer.Inner i) {\n        return i.find();\n    }\n}\n"},
@@ -1270,6 +1281,16 @@ case("csharp", "inherited", "an unqualified name in a class is also searched in 
      CS, {"A.cs": "namespace App\n{\n    public class Base\n    {\n        protected int Helper() { return 1; }\n    }\n\n"
                   "    public class A : Base\n    {\n        public int Run()\n        {\n            return Helper();\n        }\n    }\n}\n"},
      [("A.Run", "calls", "Base.Helper")])
+case("csharp", "constructor-initializer", "`: base(…)` / `: this(…)` call the constructor of the base, or another of the class",
+     CS, {"A.cs": "namespace App\n{\n    public class Token\n    {\n        public Token(int tag, string text) { }\n    }\n\n"
+                  "    public class Name : Token\n    {\n        public Name(string text) : base(1, text) { }\n"
+                  "        public Name() : this(\"x\") { }\n    }\n}\n"},
+     [("Name.Name", "calls", "Token.Token"), ("Name.Name", "calls", "Name.Name")])
+case("csharp", "generic-namesake", "`Maybe.Nothing<T>()` is a member of the static class `Maybe` beside the generic `Maybe<T>`",
+     CS, {"A.cs": "namespace App\n{\n    public abstract class Maybe<T>\n    {\n    }\n\n"
+                  "    public static class Maybe\n    {\n        public static Maybe<T> Nothing<T>() { return null; }\n    }\n\n"
+                  "    public class A\n    {\n        public object Run()\n        {\n            return Maybe.Nothing<object>();\n        }\n    }\n}\n"},
+     [("A.Run", "calls", "Maybe.Nothing")])
 case("csharp", "primary-constructor", "a class's primary constructor parameter is a typed name of the class",
      CS, {"A.cs": "namespace App\n{\n" + CS2 + "    public class A(Repo repo)\n    {\n        public int Run()\n        {\n            return repo.Find();\n        }\n    }\n}\n"},
      *CS_BOTH)

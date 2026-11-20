@@ -2582,6 +2582,11 @@ impl<'a> Project<'a> {
     ) -> Option<(DefRef, Confidence)> {
         let l = &self.files[f].locals[li];
         if l.path.is_empty() {
+            // pytest hands a test the result of the fixture its parameter
+            // names (`def test_x(runner):` beside `@pytest.fixture def runner()`)
+            if let Some(t) = self.fixture_type(f, x, name) {
+                return Some((t, Confidence::Inferred));
+            }
             // no type written, nothing typeable assigned: the one
             // type that answers everything asked of it here
             return self.structural_type(f, x, name).map(|t| (t, Confidence::Inferred));
@@ -2606,6 +2611,48 @@ impl<'a> Project<'a> {
         };
         let conf = if l.declared { Confidence::Extracted } else { Confidence::Inferred };
         Some((t, conf))
+    }
+
+    /// What a pytest fixture named `name` returns, for a parameter of that
+    /// name of a function in test code: the fixture of the file itself, else
+    /// of the nearest `conftest.py` in its directory or one above. A fixture
+    /// is a top-level function under `@pytest.fixture` / `@fixture`.
+    fn fixture_type(&self, f: usize, x: usize, name: &str) -> Option<DefRef> {
+        if self.family[f] != Some(Family::Python) || !self.files[f].defs[x].kind.is_callable() {
+            return None;
+        }
+        let is_fixture = |c: DefRef| {
+            let d = self.def(c);
+            d.kind.is_callable()
+                && d.parent.is_none()
+                && self.files[c.0].refs.iter().any(|r| {
+                    r.from_def == Some(c.1)
+                        && r.kind == RefKind::Decorator
+                        && r.path.last().is_some_and(|n| n == "fixture")
+                })
+        };
+        let dir = |p: &str| p.rfind('/').map(|i| p[..=i].to_string()).unwrap_or_default();
+        let here = dir(&self.files[f].path);
+        let mut best: Option<(usize, DefRef)> = None;
+        for &c in self.by_name.get(name).into_iter().flatten() {
+            if self.family[c.0] != Some(Family::Python) || !is_fixture(c) {
+                continue;
+            }
+            let path = &self.files[c.0].path;
+            // the file's own fixture wins over any conftest's
+            let rank = if c.0 == f {
+                usize::MAX
+            } else if path.ends_with("conftest.py") && here.starts_with(dir(path).as_str()) {
+                dir(path).len()
+            } else {
+                continue;
+            };
+            if best.is_none_or(|(r, _)| rank > r) {
+                best = Some((rank, c));
+            }
+        }
+        let (_, fixture) = best?;
+        self.return_type(fixture).map(|(t, _)| t)
     }
 
     /// The type of a local assigned a generic call that is handed a type
@@ -3446,6 +3493,31 @@ impl<'a> Project<'a> {
             .collect()
     }
 
+    /// C#: a member the type named does not have, of another type of the
+    /// same fully qualified name with another number of type parameters
+    /// (`Maybe.Nothing<T>()` beside `class Maybe<T>` and `static class Maybe`:
+    /// the name written without arguments is either).
+    fn namesake_member(&self, c: DefRef, name: &str) -> Option<DefRef> {
+        let def = self.def(c);
+        if self.family[c.0] != Some(Family::CSharp) || !def.kind.is_class_like() {
+            return None;
+        }
+        let fq = self.fqn_of(c.0, c.1)?;
+        self.fqn
+            .get(&fq)
+            .into_iter()
+            .flatten()
+            .copied()
+            .filter(|r| {
+                let other = self.def(*r);
+                *r != c
+                    && self.family[r.0] == Some(Family::CSharp)
+                    && other.kind.is_class_like()
+                    && other.type_params.len() != def.type_params.len()
+            })
+            .find_map(|r| self.class_member(r, name, 4))
+    }
+
     /// The field `name` of type `c`, declared on it or on another declaration
     /// of a partial type.
     fn field_of(&self, c: DefRef, name: &str) -> Option<(usize, usize)> {
@@ -3930,6 +4002,7 @@ impl<'a> Project<'a> {
                     return Some(Target::Def(*c)); // `Klass.new` constructs Klass
                 }
                 self.class_member(*c, name, 4)
+                    .or_else(|| self.namesake_member(*c, name))
                     .or_else(|| self.reopened_member(*c, name))
                     .or_else(|| self.reopened_base_member(*c, name))
                     .or_else(|| self.assigned_member(*c, name))
@@ -4519,10 +4592,10 @@ impl<'a> Project<'a> {
             }
             "self" => {
                 if rest.is_empty() {
-                    // PHP `new static()` / `new self()`: the class around
-                    let constructs = fam == Family::Php
-                        && (*self.cur.borrow())
-                            .is_some_and(|(cf, ci)| self.files[cf].refs[ci].kind == RefKind::New);
+                    // PHP `new static()` / `new self()`, C# `: this(…)`, Java
+                    // `this(…)`: the class around
+                    let constructs = matches!(fam, Family::Php | Family::CSharp | Family::Jvm)
+                        && *self.ref_kind.borrow() == Some(RefKind::New);
                     return constructs
                         .then(|| self.class_of(f, d))
                         .flatten()
@@ -4579,6 +4652,18 @@ impl<'a> Project<'a> {
                 let c = self.class_of(f, d)?;
                 // Python `super().m`: the call adds nothing
                 let rest = if rest.first().is_some_and(|s| s == "()") { &rest[1..] } else { rest };
+                // C# `: base(…)`, Java `super(…)`: the class the constructor's
+                // class extends
+                if rest.is_empty()
+                    && matches!(fam, Family::CSharp | Family::Jvm)
+                    && *self.ref_kind.borrow() == Some(RefKind::New)
+                {
+                    let base = self
+                        .bases(c)
+                        .into_iter()
+                        .find(|b| matches!(self.def(*b).kind, DefKind::Class | DefKind::Struct))?;
+                    return Some((Target::Def(base), conf));
+                }
                 // Ruby `super` / `super(x)`: the method of the same name
                 // further up
                 if rest.is_empty() && fam == Family::Ruby {

@@ -2500,3 +2500,39 @@ fn cpp_a_macro_between_class_and_its_name_leaves_a_class() {
     );
     lacks(&got, &[("db.Impl.Work", "calls", "db.Wrapper.NowMicros")]);
 }
+
+#[test]
+fn a_constructor_calls_the_one_it_names_in_its_head() {
+    // C# `: base(1, text)` / `: this("x")`, Java `super(1, text);` / `this("x");`
+    let got = quals("ctor-cs", &[(
+        "A.cs",
+        "namespace App\n{\n    public abstract class Maybe<T>\n    {\n    }\n\n    public static class Maybe\n    {\n        public static Maybe<T> Nothing<T>() { return null; }\n    }\n\n    public class Token\n    {\n        public Token(int tag, string text) { }\n    }\n\n    public class Name : Token\n    {\n        public Name(string text) : base(1, text) { }\n        public Name() : this(\"x\") { }\n\n        public object None()\n        {\n            return Maybe.Nothing<object>();\n        }\n    }\n}\n",
+    )]);
+    has(
+        &got,
+        &[
+            ("App.Name.Name", "calls", "App.Token.Token"),
+            ("App.Name.Name", "calls", "App.Name.Name"),
+            // a static class beside its generic namesake
+            ("App.Name.None", "calls", "App.Maybe.Nothing"),
+        ],
+    );
+    let got = quals("ctor-java", &[(
+        "app/A.java",
+        "package app;\n\nclass Token {\n    Token(int tag, String text) {\n    }\n}\n\nclass Name extends Token {\n    Name(String text) {\n        super(1, text);\n    }\n\n    Name() {\n        this(\"x\");\n    }\n}\n",
+    )]);
+    has(&got, &[("Name.Name", "calls", "Token.Token"), ("Name.Name", "calls", "Name.Name")]);
+}
+
+#[test]
+fn python_a_test_parameter_is_what_the_fixture_of_its_name_returns() {
+    let got = quals("py-fixture", &[
+        ("app.py", "class Runner:\n    def invoke(self):\n        return 1\n\n\nclass Context:\n    def invoke(self):\n        return 2\n"),
+        ("tests/conftest.py", "import pytest\n\nfrom app import Runner\n\n\n@pytest.fixture\ndef runner():\n    return Runner()\n"),
+        ("tests/test_app.py", "def test_run(runner):\n    assert runner.invoke() == 1\n"),
+        // a conftest beside another directory's tests says nothing here
+        ("other/conftest.py", "import pytest\n\nfrom app import Context\n\n\n@pytest.fixture\ndef runner():\n    return Context()\n"),
+    ]);
+    has(&got, &[("test_run", "calls", "Runner.invoke")]);
+    lacks(&got, &[("test_run", "calls", "Context.invoke")]);
+}
