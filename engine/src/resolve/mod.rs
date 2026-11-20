@@ -1605,6 +1605,19 @@ impl<'a> Project<'a> {
                         top.entry(b.to_string()).or_default().push(di);
                     }
                 }
+                // (what a module pattern's function returns is a name of
+                // the scope its declaration is written in)
+                if d.returned_out {
+                    match d.parent.and_then(|b| f.defs[b].parent) {
+                        Some(outer) => children
+                            .entry(outer)
+                            .or_default()
+                            .entry(d.name.clone())
+                            .or_default()
+                            .push(di),
+                        None => top.entry(d.name.clone()).or_default().push(di),
+                    }
+                }
                 if let Some(par) = d.parent {
                     children.entry(par).or_default().entry(d.name.clone()).or_default().push(di);
                     if let Some(b) = bare {
@@ -3562,6 +3575,63 @@ impl<'a> Project<'a> {
         )
     }
 
+    /// JS: a function assigned to a function as its member (`Dataset.extractData
+    /// = function () { … }` beside `function Dataset() { … }`), in its file.
+    fn assigned_member(&self, c: DefRef, name: &str) -> Option<DefRef> {
+        if self.family[c.0] != Some(Family::Ecma) || !self.def(c).kind.is_callable() {
+            return None;
+        }
+        let owner = self.def(c).name.as_str();
+        let found = self.files[c.0].defs.iter().enumerate().filter(|(_, d)| {
+            d.name == name && d.kind.is_callable() && d.object.as_deref() == Some(owner)
+        });
+        self.best(found.map(|(i, _)| (c.0, i)))
+    }
+
+    /// RSpec: a bare name in `shared_examples 'x' do … end` that no block
+    /// around it declares is a `let` of the place the examples are included
+    /// (`it_behaves_like 'x'`): the innermost one around that line, when
+    /// every place that includes them gives the same.
+    fn shared_example_let(&self, f: usize, d: Option<usize>, name: &str) -> Option<DefRef> {
+        if self.family[f] != Some(Family::Ruby) || self.files[f].shared_examples.is_empty() {
+            return None;
+        }
+        let line = (*self.cur.borrow())
+            .filter(|(cf, _)| *cf == f)
+            .map(|(cf, ri)| self.files[cf].refs[ri].line)
+            .or_else(|| d.map(|x| self.files[f].defs[x].def_line))?;
+        let shared = self.files[f]
+            .shared_examples
+            .iter()
+            .filter(|(_, a, b)| *a <= line && line <= *b)
+            .min_by_key(|(_, a, b)| b - a)?;
+        let mut found: Vec<DefRef> = Vec::new();
+        for (g, file) in self.files.iter().enumerate() {
+            if self.family[g] != Some(Family::Ruby) {
+                continue;
+            }
+            for (_, at) in file.example_includes.iter().filter(|(n, _)| *n == shared.0) {
+                let inner = self.top[g]
+                    .get(name)
+                    .into_iter()
+                    .flatten()
+                    .copied()
+                    .filter(|&i| {
+                        file.defs[i].scope_lines.is_some_and(|(a, b)| a <= *at && *at <= b)
+                    })
+                    .min_by_key(|&i| file.defs[i].scope_lines.map(|(a, b)| b - a));
+                match inner {
+                    Some(i) if !found.contains(&(g, i)) => found.push((g, i)),
+                    _ => {}
+                }
+            }
+        }
+        match found.as_slice() {
+            [one] => Some(*one),
+            _ => None,
+        }
+    }
+
     /// A member a Ruby class has through what another opening of it mixes in
     /// or extends: `Faraday::Response.register_middleware` in a file that
     /// opens `class Response` again, beside `extend MiddlewareRegistry` in
@@ -3616,6 +3686,7 @@ impl<'a> Project<'a> {
                 self.class_member(*c, name, 4)
                     .or_else(|| self.reopened_member(*c, name))
                     .or_else(|| self.reopened_base_member(*c, name))
+                    .or_else(|| self.assigned_member(*c, name))
                     .map(Target::Def)
             }
             Target::Module(files) => {
@@ -3820,6 +3891,9 @@ impl<'a> Project<'a> {
             if let Some(i) = inner {
                 return Some(Target::Def((f, i)));
             }
+        }
+        if let Some(found) = self.shared_example_let(f, d, name) {
+            return Some(Target::Def(found));
         }
         if let Some(r) = self.top_in(&[f], name) {
             if self.acceptable(&Target::Def(r)) {

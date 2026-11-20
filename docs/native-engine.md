@@ -834,6 +834,35 @@ two edges of got are gone that named a function defined in another loop
 for a destructured loop variable of the same name. The maps of these
 repositories that hold project types are mostly looked up by key once, or
 not walked at all.
+Engine 0.5.42 closes what 0.5.40's scopes left open. The module pattern
+`var Dataset = (function () { function Dataset() {} return Dataset })()`:
+the function written in the closure is what the declaration names, so the
+scope around knows it by that name (`Def::returned_out`) and the
+declaration is no local; with it, a function assigned to a function as a
+member (`Dataset.extractData = function () {}`, `assigned_member`).
+typeahead.js in alamofire's documentation assets has its `new Dataset()` /
+`new Input()` and `Input.normalizeQuery()` again, in each of its two
+copies, where 0.5.40 had linked one copy to the other. A function declared
+with a type (`const firstLookup: LookupFunction = () => {}`) makes no local
+that hides the function where it is passed as a value (got, 3 edges). And
+RSpec: a bare name in `shared_examples 'a request method' do … end` that no
+block around it declares is the `let` of the block that includes the
+examples (`it_behaves_like 'a request method'`), when every including place
+gives the same `let` — faraday's adapter examples reach `request_stub`,
+`conn_options`, `conn` and `remote` (5 edges; 2 guesses by a method's name on
+what is now a `let` whose result is not typed are gone). The vendored
+bundles gain 423 edges from members assigned to functions.
+One change was measured and not kept: when a receiver has a project type
+and no member of the name asked, the engine links the one extension of that
+name in sight, `INFERRED`, whatever type it is written for. Refusing it
+unless the extension's type is the receiver's, a base of it, or a library's
+type the receiver could implement removed 207 edges on the audit
+repositories, and the sampled ones were all right
+(`client.BuildUri(request)` on a `RestClient`, written for `IRestClient`;
+`FunSpec.getterBuilder().strictfp()`, written for `FunSpec.Builder`;
+`Properties::class.toTypeSpecWithTestHandler()`, written for `KClass<*>`):
+the type the walk gives a receiver is the declared or constructed one, not
+exact enough to refuse by.
 Engine 0.5.41 is Ruby's: a class opened in several files has, in each of
 them, what any opening mixes in or extends (`reopened_base_member`), and a
 class written as a constant assigned `Struct.new(…) do … end` mixes in what
@@ -1390,7 +1419,7 @@ implicit members since 0.5.17: 39 whose place gives no type are rows now
 closure parameters and variables of express's tests. What is left at file
 level there is `app.use` and `app.set` (842 rows of express), names too
 short and too common to guess by. Engine 0.5.19 takes 123 more off (6,362;
-C# 349 from 470; 6,360 with 0.5.20, 6,348 with 0.5.21, 6,285 with 0.5.22, 6,237 with 0.5.25, 6,206 with 0.5.27, 6,166 with 0.5.28, 6,156 with 0.5.30, 6,140 with 0.5.31, 6,132 with 0.5.32, 6,126 with 0.5.33, 6,093 with 0.5.34, 6,047 with 0.5.36, 6,046 with 0.5.37, 6,012 with 0.5.38, 5,928 with 0.5.39, 5,908 with 0.5.40, 5,898 with 0.5.41). Most of what C# has left is not the project's: `Assert.
+C# 349 from 470; 6,360 with 0.5.20, 6,348 with 0.5.21, 6,285 with 0.5.22, 6,237 with 0.5.25, 6,206 with 0.5.27, 6,166 with 0.5.28, 6,156 with 0.5.30, 6,140 with 0.5.31, 6,132 with 0.5.32, 6,126 with 0.5.33, 6,093 with 0.5.34, 6,047 with 0.5.36, 6,046 with 0.5.37, 6,012 with 0.5.38, 5,928 with 0.5.39, 5,908 with 0.5.40, 5,898 with 0.5.41, 5,882 with 0.5.42). Most of what C# has left is not the project's: `Assert.
 NotNull` beside its own `Ensure.NotNull` (77), `WireMockServer.Start` (23).
 
 By then most rows were of that kind: a library's name the project happens
@@ -1467,9 +1496,9 @@ declares with no `def` (a `Struct` member, `attr_accessor`,
 rows, all Ruby (`adapter` 26, `response_headers` 23, `response_body` 22,
 `headers` 15, `status` 14). 383 are left unmarked: Ruby 97, Rust 64, Swift
 49, C# 40, TypeScript 39, PHP 29, Kotlin 22, Go 14, Java 12, Python 9, TSX
-4, Scala 4. Ruby's largest group left is a `let` shared through
+4, Scala 4. Ruby's largest group left was a `let` shared through
 `shared_examples` (`request_stub`, 20 rows of faraday's adapter examples),
-which nothing reads yet.) The 2,114 by language: PHP 445, TypeScript 405, Ruby 304, C# 196, Rust 192,
+which 0.5.42 reads: 367 unmarked, Ruby 81.) The 2,114 by language: PHP 445, TypeScript 405, Ruby 304, C# 196, Rust 192,
 C++ 169, Swift 94, Kotlin 79, JavaScript 71, Java 49, Go 34, C 33, Python
 20, TSX 19, Scala 4. They are still an upper bound: the marks are
 conservative, and PHP's and TypeScript's rows are mostly PSR-7 and Node

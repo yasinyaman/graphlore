@@ -119,6 +119,12 @@ pub struct Def {
     /// declared in it. Its parent is the block around it, if any.
     #[serde(default)]
     pub block: bool,
+    /// Written in a closure that is called where it is written, as the value
+    /// of a declaration of this name (`var Dataset = (function () { function
+    /// Dataset() {} return Dataset })()`): the scope around that closure
+    /// knows it by its name too.
+    #[serde(default)]
+    pub returned_out: bool,
     /// C, C++: a field declared with an anonymous struct type (`struct {
     /// void *data; void (*addRead)(void *); } ev;`): the bytes of that body,
     /// whose members the grammar gives to the struct around.
@@ -608,6 +614,14 @@ pub struct FileFacts {
     /// methods of.
     #[serde(default)]
     pub spec_includes: Vec<Vec<String>>,
+    /// RSpec `shared_examples 'an adapter' do … end`: its name and the lines
+    /// of its block.
+    #[serde(default)]
+    pub shared_examples: Vec<(String, u32, u32)>,
+    /// RSpec `it_behaves_like 'an adapter'`, `include_examples '…'`: the name
+    /// and the line, where the examples run with the names in scope there.
+    #[serde(default)]
+    pub example_includes: Vec<(String, u32)>,
     /// C, C++: a function put in a slot of a struct (`.close = netClose` in
     /// an initializer, `c->funcs->read = netRead`).
     #[serde(default)]
@@ -662,6 +676,8 @@ impl FileFacts {
             locals: Vec::new(),
             attrs: Vec::new(),
             spec_includes: Vec::new(),
+            shared_examples: Vec::new(),
+            example_includes: Vec::new(),
             slots: Vec::new(),
             models: Vec::new(),
             callbacks: Vec::new(),
