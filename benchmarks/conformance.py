@@ -1131,6 +1131,20 @@ case("java", "module-info", "an import of `p.C` names the class of package p, wh
             "src/main/java/com/acme/Gson.java": "package com.acme;\n\npublic class Gson {\n    public int go() {\n        return 1;\n    }\n}\n",
             "src/test/java/com/acme/fn/T.java": "package com.acme.fn;\n\nimport com.acme.Gson;\n\npublic class T {\n    int run(Gson g) {\n        return g.go();\n    }\n}\n"},
      [("T.java", "imports", "Gson"), ("T.run", "calls", "Gson.go")])
+case("java", "own-optional", "a generic class the project names `Optional` is the project's class where it is in scope",
+     JAVA, {"app/A.java": "package app;\n\nclass Item {\n    int size() {\n        return 1;\n    }\n}\n\n"
+                          "class Other {\n    int size() {\n        return 2;\n    }\n}\n\n"
+                          "class Optional<T> {\n    T held;\n\n    T lead() {\n        return held;\n    }\n}\n\n"
+                          "public class A {\n    int run(Optional<Item> b) {\n        return b.lead().size();\n    }\n}\n"},
+     [("A.run", "calls", "Optional.lead"), ("A.run", "calls", "Item.size")], [("A.run", "calls", "Other.size")])
+case("java", "library-optional-beside-own", "`java.util.Optional` imported by a file stays the library's beside a project class of that name elsewhere",
+     JAVA, {"lib/Optional.java": "package lib;\n\npublic class Optional<T> {\n    public T lead() {\n        return null;\n    }\n}\n",
+            "app/A.java": "package app;\n\nimport java.util.Optional;\n\nclass Item {\n    int size() {\n        return 1;\n    }\n}\n\n"
+                          "public class A {\n    int run(Optional<Item> b) {\n        return b.get().size();\n    }\n}\n"},
+     [("A.run", "calls", "Item.size")], [("A.run", "references", "lib/Optional.java:lib.Optional")])
+case("java", "method-named-self", "`self` is a name like any other where the language has no such word",
+     JAVA, {"app/A.java": "package app;\n\npublic class A {\n    int self() {\n        return 1;\n    }\n\n    int run() {\n        return self();\n    }\n}\n"},
+     [("A.run", "calls", "A.self")])
 case("java", "nested-static-class", "a nested class is named through the class around it",
      JAVA, {"app/A.java": "package app;\n\nclass Outer {\n    static class Inner {\n        int find() {\n            return 1;\n        }\n    }\n}\n\n"
                           "public class A {\n    int run(Outer.Inner i) {\n        return i.find();\n    }\n}\n"},

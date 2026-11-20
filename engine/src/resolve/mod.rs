@@ -4592,6 +4592,23 @@ impl<'a> Project<'a> {
                 return self.walk(Target::Def(m), &rest[1..], Confidence::Inferred);
             }
         }
+        // `self` / `super` where the language has no such word (Go, C, C++,
+        // Java's `self`, C#'s `super`): a name like any other when the scope
+        // has one. (`this` reaches here as `self` too, so the word is the
+        // receiver unless something is named that.)
+        let lang = self.files[f].lang;
+        let has_word = match head.as_str() {
+            "self" => matches!(
+                lang,
+                Some(Lang::Python | Lang::Rust | Lang::Swift | Lang::Ruby | Lang::Php)
+            ),
+            "super" => {
+                !matches!(lang, Some(Lang::Go | Lang::C | Lang::Cpp | Lang::CSharp | Lang::Php))
+            }
+            _ => true,
+        };
+        let plain_word = !has_word
+            && (self.is_local_name(f, d, head) || self.resolve_name(f, d, head).is_some());
         let mut t = match head.as_str() {
             _ if head_many.is_some() => {
                 let (elem, c) = head_many?;
@@ -4601,7 +4618,7 @@ impl<'a> Project<'a> {
                 keys = keyed.then(|| self.local_key(f, d, head)).flatten();
                 Target::Def(elem)
             }
-            "self" => {
+            "self" if !plain_word => {
                 if rest.is_empty() {
                     // PHP `new static()` / `new self()`, C# `: this(…)`, Java
                     // `this(…)`: the class around
@@ -4659,7 +4676,7 @@ impl<'a> Project<'a> {
                 };
                 return self.walk(t, rest, conf);
             }
-            "super" => {
+            "super" if !plain_word => {
                 let c = self.class_of(f, d)?;
                 // Python `super().m`: the call adds nothing
                 let rest = if rest.first().is_some_and(|s| s == "()") { &rest[1..] } else { rest };

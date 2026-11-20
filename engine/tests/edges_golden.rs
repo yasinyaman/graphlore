@@ -2607,3 +2607,28 @@ fn kotlin_apply_and_also_give_the_receiver_back() {
     has(&got, &[("make", "calls", "Builder.build"), ("log", "calls", "Builder.build")]);
     lacks(&got, &[("make", "calls", "Other.build"), ("log", "calls", "Other.build")]);
 }
+
+#[test]
+fn a_wrappers_name_is_the_projects_type_where_the_project_defines_it() {
+    // `Optional<T>` of the project's own, in the file that uses it …
+    let got = quals("own-optional", &[(
+        "app/A.java",
+        "package app;\n\nclass Item {\n    int size() {\n        return 1;\n    }\n}\n\nclass Other {\n    int size() {\n        return 2;\n    }\n}\n\nclass Optional<T> {\n    T held;\n\n    T lead() {\n        return held;\n    }\n}\n\npublic class A {\n    int run(Optional<Item> b) {\n        return b.lead().size();\n    }\n\n    int self() {\n        return 1;\n    }\n\n    int own() {\n        return self();\n    }\n}\n",
+    )]);
+    has(
+        &got,
+        &[
+            ("A.run", "calls", "Optional.lead"),
+            ("A.run", "calls", "Item.size"),
+            // `self` is no word of Java's: the method of that name
+            ("A.own", "calls", "A.self"),
+        ],
+    );
+    lacks(&got, &[("A.run", "calls", "Other.size")]);
+    // … and the library's, in a file that imports `java.util.Optional`
+    let got = quals("library-optional", &[
+        ("lib/Optional.java", "package lib;\n\npublic class Optional<T> {\n    public T lead() {\n        return null;\n    }\n}\n"),
+        ("app/A.java", "package app;\n\nimport java.util.Optional;\n\nclass Item {\n    int size() {\n        return 1;\n    }\n}\n\npublic class A {\n    int run(Optional<Item> b) {\n        return b.get().size();\n    }\n}\n"),
+    ]);
+    has(&got, &[("A.run", "calls", "Item.size")]);
+}

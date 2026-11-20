@@ -20,6 +20,30 @@ thread_local! {
     static CURRENT: Cell<Option<Lang>> = const { Cell::new(None) };
 }
 
+thread_local! {
+    /// Names of library wrappers (`Optional`, `Future`, `Box`) that the file
+    /// being read means as the project's own type of that name.
+    static SHADOWED: RefCell<Option<std::sync::Arc<std::collections::HashSet<String>>>> =
+        const { RefCell::new(None) };
+}
+
+/// Whether `name`, a library wrapper's, is the project's own type in the file
+/// this thread is reading (`lib::reread_shadowed` says so).
+pub fn shadowed(name: &str) -> bool {
+    SHADOWED.with(|s| s.borrow().as_ref().is_some_and(|set| set.contains(name)))
+}
+
+/// Run `read` with `names` taken as the project's own types.
+pub fn with_shadowed<T>(
+    names: std::sync::Arc<std::collections::HashSet<String>>,
+    read: impl FnOnce() -> T,
+) -> T {
+    SHADOWED.with(|s| *s.borrow_mut() = Some(names));
+    let out = read();
+    SHADOWED.with(|s| *s.borrow_mut() = None);
+    out
+}
+
 /// The language of the tree this thread is reading (the last one it parsed).
 /// A node does not say it: several grammars report no name.
 pub fn current() -> Option<Lang> {
