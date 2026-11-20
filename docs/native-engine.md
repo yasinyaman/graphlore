@@ -834,6 +834,29 @@ two edges of got are gone that named a function defined in another loop
 for a destructured loop variable of the same name. The maps of these
 repositories that hold project types are mostly looked up by key once, or
 not walked at all.
+Engine 0.5.40 gives a closure no definition holds a scope of its own
+(`Def::block`: no node, no name). A test file is mostly such closures —
+`test('…', async t => { const request = … })`, `it '…' do conn = … end` —
+and a local declared in one was no local at all: the name went on to the
+file, the imports and the project, so `request` in one test was a `request`
+function of another file, `EXTRACTED`, and `assert.strictEqual(body, 'ok')`
+passed another test file's `body`. Each closure is now a definition to the
+resolver (its parent the closure around it), its locals are typed like a
+function's, and a definition written in it is its child. In the 31
+repositories' own code that adds 210 edges (got 96, faraday 59, express 41,
+alamofire 13, nestjs-realworld 1) and removes 140 (got 95, express 22,
+faraday 13, alamofire 9, express-mongoose-demo 1). Read at their sites, the
+removed ones are a local or a callback's parameter taken for a definition of
+its name somewhere else, but for two kinds: ten guesses by a method's name
+on what is now an untyped local of a block in faraday's specs, four of them
+right (`b.adapter :test`, `options.each_key`; an untyped local is asked only
+a name no other type answers to), and typeahead.js in alamofire's
+documentation assets, a module written `var Dataset = (function () {
+function Dataset() {} return Dataset })()`, whose `new Dataset()` outside
+that function no longer resolves (5 edges). The vendored and minified bundles (jQuery, Bootstrap,
+retrofit's generated Dokka `main.js`), which the analysis scope leaves out,
+lose 2,587 edges and gain 1,347: their one-letter names were file-wide.
+The 31 builds take as long as before (15.5 s).
 Engine 0.5.39 asks one more thing of a call the walk could not follow: the
 one extension in sight written for a type the project does not define
 (`library_extension_call`, `INFERRED`). The receiver of such a call is a
@@ -1361,7 +1384,7 @@ implicit members since 0.5.17: 39 whose place gives no type are rows now
 closure parameters and variables of express's tests. What is left at file
 level there is `app.use` and `app.set` (842 rows of express), names too
 short and too common to guess by. Engine 0.5.19 takes 123 more off (6,362;
-C# 349 from 470; 6,360 with 0.5.20, 6,348 with 0.5.21, 6,285 with 0.5.22, 6,237 with 0.5.25, 6,206 with 0.5.27, 6,166 with 0.5.28, 6,156 with 0.5.30, 6,140 with 0.5.31, 6,132 with 0.5.32, 6,126 with 0.5.33, 6,093 with 0.5.34, 6,047 with 0.5.36, 6,046 with 0.5.37, 6,012 with 0.5.38, 5,928 with 0.5.39). Most of what C# has left is not the project's: `Assert.
+C# 349 from 470; 6,360 with 0.5.20, 6,348 with 0.5.21, 6,285 with 0.5.22, 6,237 with 0.5.25, 6,206 with 0.5.27, 6,166 with 0.5.28, 6,156 with 0.5.30, 6,140 with 0.5.31, 6,132 with 0.5.32, 6,126 with 0.5.33, 6,093 with 0.5.34, 6,047 with 0.5.36, 6,046 with 0.5.37, 6,012 with 0.5.38, 5,928 with 0.5.39, 5,908 with 0.5.40). Most of what C# has left is not the project's: `Assert.
 NotNull` beside its own `Ensure.NotNull` (77), `WireMockServer.Start` (23).
 
 By then most rows were of that kind: a library's name the project happens
@@ -1428,7 +1451,10 @@ parse: an `#if` inside an expression costs
 `HttpResponseExtensions` its class. 0.5.39 fixes that parse and links
 the extensions for a library's type: 509 are left unmarked — Ruby 175,
 TypeScript 87, Rust 64, Swift 49, C# 40, PHP 29, Kotlin 22, Go 14, Java 12,
-Python 9, TSX 4, Scala 4.) The 2,114 by language: PHP 445, TypeScript 405, Ruby 304, C# 196, Rust 192,
+Python 9, TSX 4, Scala 4. 0.5.40's block scopes leave 501: TypeScript 39
+from 87, and Ruby 215 from 175 — a receiver that was no name at all
+(`head name not found`) is an untyped local of its block now, and the
+members of faraday's `Struct` options asked of it are the rows.) The 2,114 by language: PHP 445, TypeScript 405, Ruby 304, C# 196, Rust 192,
 C++ 169, Swift 94, Kotlin 79, JavaScript 71, Java 49, Go 34, C 33, Python
 20, TSX 19, Scala 4. They are still an upper bound: the marks are
 conservative, and PHP's and TypeScript's rows are mostly PSR-7 and Node

@@ -2340,6 +2340,8 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
     let mut anc: Vec<Node> = Vec::new();
     // closures that are no definitions: (start, end, the names they bind)
     let mut closures: Vec<ClosureScope> = Vec::new();
+    // every closure: (start, end, first line, last line, node id)
+    let mut blocks: Vec<(usize, usize, u32, u32, usize)> = Vec::new();
     // lambdas with a receiver: (start, end, where the receiver comes from)
     let mut receivers: Vec<(usize, usize, crate::facts::ReceiverOf)> = Vec::new();
     let mut steps = 0usize;
@@ -2351,6 +2353,18 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
         }
         if rust && n.kind() == "macro_invocation" {
             macros.push(n);
+        }
+        // (Ruby's `{ … }` block is a `block` under its call)
+        if is_closure(n.kind())
+            || (n.kind() == "block" && anc.last().is_some_and(|a| a.kind() == "call"))
+        {
+            blocks.push((
+                n.start_byte(),
+                n.end_byte(),
+                n.start_position().row as u32 + 1,
+                n.end_position().row as u32 + 1,
+                n.id(),
+            ));
         }
         if facts.package.is_none() {
             if let Some(p) = m.package_of(n, src) {
@@ -3228,6 +3242,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
         }
     }
     add_extras(&mut facts.defs, &extras, m, src);
+    add_blocks(&mut facts.defs, blocks);
     let defs = &facts.defs;
     // `subject { conn }`, `let(:conn) { … }`: the call that declares a
     // callable is no use of a name
@@ -5243,6 +5258,95 @@ fn innermost_where(
     out
 }
 
+/// The closures no definition holds, as definitions of their own (see
+/// `Def::block`): a test file's `it('…', () => { … })` has locals like a
+/// function's, and each such callback its own. One inside another has it as
+/// its parent, so the inner one sees the outer one's locals; so has a
+/// definition written in one (`const helper = () => …` in a `describe`).
+fn add_blocks(defs: &mut Vec<Def>, mut blocks: Vec<(usize, usize, u32, u32, usize)>) {
+    if blocks.is_empty() {
+        return;
+    }
+    blocks.sort_by_key(|b| (b.0, std::cmp::Reverse(b.1)));
+    let starts: Vec<usize> = blocks.iter().map(|b| b.0).collect();
+    let inside = innermost_where(defs, &starts, |d| !d.misread);
+    // the blocks open around the one being added: (index in `defs`, end)
+    let mut open: Vec<(usize, usize)> = Vec::new();
+    for (b, held) in blocks.into_iter().zip(inside) {
+        if held.is_some() {
+            continue;
+        }
+        let (start, end, first, last, node_id) = b;
+        while open.last().is_some_and(|&(_, e)| e <= start) {
+            open.pop();
+        }
+        let parent = open.last().map(|&(i, _)| i);
+        defs.push(Def {
+            name: String::new(),
+            qualname: String::new(),
+            kind: crate::facts::DefKind::Other,
+            region_start: first,
+            def_line: first,
+            end_line: last,
+            parent,
+            owner: None,
+            is_test: false,
+            object: None,
+            extra: false,
+            decl_only: false,
+            container: false,
+            table: None,
+            value: None,
+            value_path: None,
+            declared_type: None,
+            written_head: None,
+            alias_args: Vec::new(),
+            wraps: None,
+            keyed: false,
+            key: None,
+            returned_parts: Vec::new(),
+            returned_members: Vec::new(),
+            scope_lines: None,
+            targs: Vec::new(),
+            targ_elems: Vec::new(),
+            base_targs: Vec::new(),
+            rets: Vec::new(),
+            part_sealed: Vec::new(),
+            sealed: false,
+            elem: None,
+            receiver: None,
+            anonymous: false,
+            misread: false,
+            block: true,
+            inline_body: None,
+            created_from: None,
+            model_name: None,
+            params: None,
+            plist: Vec::new(),
+            returns: Vec::new(),
+            lambda_receiver: None,
+            self_params: Vec::new(),
+            attrs: Vec::new(),
+            type_params: Vec::new(),
+            node_id,
+            start_byte: start,
+            end_byte: end,
+        });
+        open.push((defs.len() - 1, end));
+    }
+    // a definition written in such a closure is a name of it, as one
+    // written in a function is the function's: not the file's
+    // (an RSpec `let` keeps its own scope, `Def::scope_lines`)
+    let orphans: Vec<usize> = (0..defs.len())
+        .filter(|&i| !defs[i].block && !defs[i].extra && defs[i].parent.is_none())
+        .collect();
+    let starts: Vec<usize> = orphans.iter().map(|&i| defs[i].start_byte).collect();
+    let around = innermost_where(defs, &starts, |d| d.block);
+    for (i, block) in orphans.into_iter().zip(around) {
+        defs[i].parent = block;
+    }
+}
+
 fn assign_defs(defs: &[Def], refs: &mut [RefFact]) {
     let idx: Vec<usize> = (0..refs.len())
         .filter(|&i| refs[i].from_def.is_none() && refs[i].from_owner.is_none())
@@ -5372,6 +5476,7 @@ fn add_extras(
             receiver: None,
             anonymous: false,
             misread: false,
+            block: false,
             inline_body: inline,
             created_from: kind.is_state().then(|| created_from(*node, src)).flatten(),
             model_name: kind.is_state().then(|| model_named(*node, src)).flatten(),

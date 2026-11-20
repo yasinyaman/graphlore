@@ -1589,7 +1589,7 @@ impl<'a> Project<'a> {
                 }
                 // a class with no name of its own answers to none, nor a
                 // variable the grammar took for a declaration
-                if d.anonymous || d.misread {
+                if d.anonymous || d.misread || d.block {
                     continue;
                 }
                 // a method declared for a type (Go receiver, Rust impl, C++
@@ -3741,7 +3741,8 @@ impl<'a> Project<'a> {
         let mut cur = d;
         while let Some(x) = cur {
             if let Some(k) = self.children[f].get(&x).and_then(|m| m.get(name)) {
-                let callable_scope = defs[x].kind.is_callable();
+                // (a closure no definition holds is a scope like a function)
+                let callable_scope = defs[x].kind.is_callable() || defs[x].block;
                 let member_scope = fam.implicit_this() && defs[x].kind.is_class_like();
                 if callable_scope || member_scope || defs[x].kind == DefKind::Namespace {
                     if let Some(r) = self.best(k.iter().map(|&i| (f, i))) {
@@ -5781,7 +5782,7 @@ impl<'a> Project<'a> {
             "language": self.files[f].lang.map(|l| l.name()),
             "path": r.path.join("."),
             "name": name,
-            "in_definition": d.is_some(),
+            "in_definition": d.is_some_and(|x| !self.files[f].defs[x].block),
             "markers": marker,
             "reason": reason,
             "candidate": {

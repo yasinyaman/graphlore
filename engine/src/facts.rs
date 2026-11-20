@@ -114,6 +114,11 @@ pub struct Def {
     /// for the spans, no node and no name.
     #[serde(default)]
     pub misread: bool,
+    /// A closure no definition holds (`test('…', () => { … })`, an RSpec
+    /// `it '…' do … end`): no node and no name, only the scope of the locals
+    /// declared in it. Its parent is the block around it, if any.
+    #[serde(default)]
+    pub block: bool,
     /// C, C++: a field declared with an anonymous struct type (`struct {
     /// void *data; void (*addRead)(void *); } ev;`): the bytes of that body,
     /// whose members the grammar gives to the struct around.

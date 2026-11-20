@@ -2063,3 +2063,34 @@ fn an_extension_for_a_library_type_on_a_receiver_the_walk_cannot_type() {
     ]);
     has(&kt, &[(".ok()", "calls", "isEmailValid()")]);
 }
+
+#[test]
+fn a_callback_no_definition_holds_has_locals_of_its_own() {
+    // `test('…', () => { const client = new Client() })`: each callback is a
+    // scope; `client` in one is not `client` in the next (both types have a
+    // `run`, so only the local's type says which), and a callback inside
+    // another sees the outer one's locals
+    let ts = calls_conf("block-locals", &[
+        ("src/client.ts", "export class Client {\n  run(): number {\n    return 1\n  }\n}\n\nexport class Server {\n  run(): number {\n    return 2\n  }\n  stop(): number {\n    return 3\n  }\n}\n"),
+        ("test/client.test.ts", "import { Client, Server } from '../src/client'\n\ntest('sends', () => {\n  const client = new Client()\n  client.run()\n})\n\ntest('listens', () => {\n  const client = new Server()\n  client.run()\n})\n\ndescribe('outer', () => {\n  const shared = new Server()\n  it('inner', () => {\n    shared.stop()\n  })\n})\n"),
+    ]);
+    let has = |to: &str| ts.iter().any(|(from, t, _)| from == "client.test.ts" && t == to);
+    assert!(has("src_client_client_run"), "{ts:#?}");
+    assert!(has("src_client_server_run"), "{ts:#?}");
+    assert!(has("src_client_server_stop"), "{ts:#?}");
+    // a function written in a callback is a name of that callback and of
+    // the ones inside it; a module wrapped in a function still calls its own
+    let js = calls_conf("block-defs", &[
+        ("test/helper.test.js", "describe('outer', () => {\n  const make = () => 1\n  it('inner', () => {\n    make()\n  })\n})\n"),
+        ("lib/wrapped.js", "(function () {\n  function helper() {\n    return 1\n  }\n  function run() {\n    return helper()\n  }\n  run()\n})()\n"),
+    ]);
+    assert!(js.iter().any(|(_, t, _)| t == "test_helper_test_make"), "{js:#?}");
+    assert!(js.iter().any(|(f, t, _)| f == "run()" && t == "lib_wrapped_helper"), "{js:#?}");
+    assert!(js.iter().any(|(f, t, _)| f == "wrapped.js" && t == "lib_wrapped_run"), "{js:#?}");
+    let rb = calls_conf("block-locals-rb", &[
+        ("lib/conn.rb", "class Conn\n  def build_url\n    1\n  end\nend\n\nclass Pool\n  def build_url\n    2\n  end\nend\n"),
+        ("spec/conn_spec.rb", "require_relative '../lib/conn'\n\nRSpec.describe Conn do\n  it 'builds' do\n    conn = Conn.new\n    conn.build_url\n  end\n\n  it 'pools' do\n    conn = Pool.new\n    conn.build_url\n  end\nend\n"),
+    ]);
+    assert!(rb.iter().any(|(_, t, _)| t == "lib_conn_conn_build_url"), "{rb:#?}");
+    assert!(rb.iter().any(|(_, t, _)| t == "lib_conn_pool_build_url"), "{rb:#?}");
+}
