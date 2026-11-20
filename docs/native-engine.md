@@ -834,6 +834,12 @@ two edges of got are gone that named a function defined in another loop
 for a destructured loop variable of the same name. The maps of these
 repositories that hold project types are mostly looked up by key once, or
 not walked at all.
+Engine 0.5.38 fixes one walk: a member read without a call, with more after
+it, is the field when the type also has a method of that name. ureq's
+`LazyBuffers` holds `input: ConsumeBuf` and implements a trait's `fn
+input()`, so `self.input.unconsumed()` took the method and named nothing;
+the same for `self.current_time.now()` and `self.der.as_ref()`. ureq gets 42
+calls (`EXTRACTED` but one), and no other edge of the 31 graphs changes.
 Engine 0.5.36 (JavaScript receivers) reads four things the source states. A
 `this` in a function expression no definition holds is what the function
 is attached to (`RefFact::this_of`): `app[method] = function () {
@@ -1332,7 +1338,7 @@ implicit members since 0.5.17: 39 whose place gives no type are rows now
 closure parameters and variables of express's tests. What is left at file
 level there is `app.use` and `app.set` (842 rows of express), names too
 short and too common to guess by. Engine 0.5.19 takes 123 more off (6,362;
-C# 349 from 470; 6,360 with 0.5.20, 6,348 with 0.5.21, 6,285 with 0.5.22, 6,237 with 0.5.25, 6,206 with 0.5.27, 6,166 with 0.5.28, 6,156 with 0.5.30, 6,140 with 0.5.31, 6,132 with 0.5.32, 6,126 with 0.5.33, 6,093 with 0.5.34, 6,047 with 0.5.36, 6,046 with 0.5.37). Most of what C# has left is not the project's: `Assert.
+C# 349 from 470; 6,360 with 0.5.20, 6,348 with 0.5.21, 6,285 with 0.5.22, 6,237 with 0.5.25, 6,206 with 0.5.27, 6,166 with 0.5.28, 6,156 with 0.5.30, 6,140 with 0.5.31, 6,132 with 0.5.32, 6,126 with 0.5.33, 6,093 with 0.5.34, 6,047 with 0.5.36, 6,046 with 0.5.37, 6,012 with 0.5.38). Most of what C# has left is not the project's: `Assert.
 NotNull` beside its own `Ensure.NotNull` (77), `WireMockServer.Start` (23).
 
 By then most rows were of that kind: a library's name the project happens
@@ -1377,7 +1383,26 @@ type declares: symfony-demo's `$user->getFullName()` is marked beside the
 on `std` (`std::async(…)`, and a member of a field or local declared with a
 `std::` type, as written, `Def::written_head` / `Local::written_head`: the
 readers of types drop a C++ namespace), and reads C++ locals; C++ is left
-with 28 unmarked rows, from 50, with 12 after 0.5.31's namespaces 6 after 0.5.32's aliases and none after 0.5.33's preprocessor branches.) The 2,114 by language: PHP 445, TypeScript 405, Ruby 304, C# 196, Rust 192,
+with 28 unmarked rows, from 50, with 12 after 0.5.31's namespaces 6 after 0.5.32's aliases and none after 0.5.33's preprocessor branches.
+Engine 0.5.38 marks four more kinds, found by reading the 801 rows 0.5.37
+left unmarked: the path reaches a field, variable or function written with a
+library's type, or a local constructed from a type the project does not
+define (`$easy->response->getHeaderLine()` with `?ResponseInterface
+$response`, `self.builder.header()` on an `http::request::Builder`, `new
+\ReflectionProperty(…)`; never when the one definition is an extension, which
+may be written for that very type); a bare call where a method is not in
+scope by its bare name (PHP `\rewind($h)`, `\getenv(…)`); a bare name whose
+one definition is an RSpec `let` of another block of the file (`uri =
+conn.build_exclusive_url(…)` in an `it` beside a `let(:uri)`); and Ruby's
+`dup`. A `let` is no candidate for a member call either. 576 are left
+unmarked — Ruby 175, TypeScript 87, C# 75, Rust 64, Swift 61, Kotlin 42, PHP
+29, Go 14, Java 12, Python 9, TSX 4, Scala 4. Read by hand, what is left is
+mostly four things: extension methods called on a library's type (C#,
+Kotlin, Swift), locals of a file-level callback (`test('…', () => { const
+request = … })`), the members of a Ruby `Struct`, and a library's generic
+holding a project type (`http::Response<Body>`). One of the C# rows is a
+parse: an `#if` inside an expression costs
+`HttpResponseExtensions` its class.) The 2,114 by language: PHP 445, TypeScript 405, Ruby 304, C# 196, Rust 192,
 C++ 169, Swift 94, Kotlin 79, JavaScript 71, Java 49, Go 34, C 33, Python
 20, TSX 19, Scala 4. They are still an upper bound: the marks are
 conservative, and PHP's and TypeScript's rows are mostly PSR-7 and Node

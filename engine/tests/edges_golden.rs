@@ -2034,3 +2034,16 @@ fn js_a_mongoose_document_has_its_schemas_methods() {
     );
     assert!(!got.iter().any(|(f, t, _)| f == "other.js" && t.starts_with("app_")), "{got:#?}");
 }
+
+#[test]
+fn rust_field_beside_a_method_of_its_name() {
+    // `self.input.fill()`: read without a call, `input` is the field, not
+    // the trait method of the same name beside it
+    let got = edges("rs-field-method", &[
+        ("Cargo.toml", "[package]\nname = \"demo\"\nversion = \"0.1.0\"\n"),
+        ("src/lib.rs", "mod buf;\nmod util;\n"),
+        ("src/util.rs", "pub struct ConsumeBuf {\n    filled: usize,\n}\n\nimpl ConsumeBuf {\n    pub fn fill(&mut self) {\n        self.filled += 1;\n    }\n}\n"),
+        ("src/buf.rs", "use crate::util::ConsumeBuf;\n\npub trait Buffers {\n    fn input(&self) -> &[u8];\n}\n\npub struct LazyBuffers {\n    input: ConsumeBuf,\n}\n\nimpl Buffers for LazyBuffers {\n    fn input(&self) -> &[u8] {\n        &[]\n    }\n}\n\nimpl LazyBuffers {\n    fn ensure(&mut self) {\n        self.input.fill();\n    }\n}\n"),
+    ]);
+    has(&got, &[(".ensure()", "calls", ".fill()")]);
+}

@@ -316,6 +316,24 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- **Native engine 0.5.38: a field beside a method of its name, and more of
+  the unresolved rows say why they are no gap.** A member read without a call,
+  with more after it, is the field when its type has a method of the same name
+  (Rust `input: ConsumeBuf` beside a trait's `fn input()`, `self.input.fill()`):
+  the walk took the method and stopped. ureq gets 42 calls, nothing else in the
+  31 audit graphs changes. The diagnostics (graph unchanged) mark four more
+  kinds of row: a receiver whose path reaches a field, variable or function
+  written with a library's type (`$this->request->getBody()` with
+  `RequestInterface $request`, Rust `self.builder.header()` on an
+  `http::request::Builder`) or a local constructed from a type the project does
+  not define (`new \ReflectionProperty(…)`), unless the one definition is an
+  extension; a bare call where a method is not in scope by its bare name (PHP
+  `\rewind($h)` beside a `rewind()` method, a Go closure `h` beside a method
+  `h`); and a bare name whose one definition is an RSpec `let` of another block
+  of the file. An RSpec `let` is no candidate for a member call
+  (`conn.ssl` beside `let(:ssl)`), a PHP `$x` is looked up as the local it is,
+  and Ruby's `dup` / `clone` are core names. Unmarked rows on the 31
+  repositories: 801 → 576 (PHP 137 → 29, Ruby 239 → 175, Rust 96 → 64).
 - **Native engine 0.5.37: JavaScript's unresolved rows say why they are no
   gap.** New marks: a call of the caller's own local or parameter (a
   callback it was handed), a candidate in vendored or minified code, a
