@@ -141,7 +141,17 @@ pub fn path_of(n: Node, src: &[u8]) -> Option<Vec<String>> {
         }
         return match receiver_word(&t) {
             Some(word) => Some(vec![word.into()]),
-            None => Some(vec![t.trim_start_matches('$').to_string()]),
+            // (`$` is a sigil in PHP and Ruby, and Swift's `$0` / `$wrapped`
+            // name `0` / `wrapped`: JS / TS `$ZodType`, `$scope` are names
+            // like any other)
+            None if matches!(
+                crate::parse::current(),
+                Some(crate::lang::Lang::Php | crate::lang::Lang::Ruby | crate::lang::Lang::Swift)
+            ) =>
+            {
+                Some(vec![t.trim_start_matches('$').to_string()])
+            }
+            None => Some(vec![t]),
         };
     }
     // `x!`, `x!!`: the value itself
@@ -5825,7 +5835,18 @@ fn add_extras(
             }
         }
         // (`$x`, PHP; `:conn`, the symbol that names an RSpec `let`)
-        let name = text(*name_node, src).trim_start_matches(['$', ':']).to_string();
+        // (PHP `$hits`, Ruby `$stdout` and the symbol `:conn` that names an
+        // RSpec `let`; a JS / TS `$name` is spelled with its `$`)
+        let written = text(*name_node, src);
+        let sigils = matches!(
+            crate::parse::current(),
+            Some(crate::lang::Lang::Php | crate::lang::Lang::Ruby | crate::lang::Lang::Swift)
+        );
+        let name = if sigils {
+            written.trim_start_matches(['$', ':']).to_string()
+        } else {
+            written.trim_start_matches(':').to_string()
+        };
         if name == "_" {
             continue; // Go `var _ I = (*T)(nil)`: a compile-time check, no variable
         }

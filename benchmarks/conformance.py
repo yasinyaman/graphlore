@@ -985,6 +985,14 @@ case("javascript", "for-of-new", "a local assigned `new C()` keeps its type in a
 TS2 = ("export class Repo {\n  find(): number {\n    return 1\n  }\n}\n\nexport class Other {\n"
        "  find(): number {\n    return 2\n  }\n}\n\n")
 TS_BOTH = ([("run", "calls", "Repo.find")], [("run", "calls", "Other.find")])
+case("typescript", "dollar-name", "`$` is part of a name (`$Base`), not a sigil",
+     TS, {"a.ts": "export interface $Base {\n  x: number\n}\n\nexport interface $Sub extends $Base {\n  y: number\n}\n\n"
+                  "export function run(b: $Base): number {\n  return b.x\n}\n"},
+     [("$Sub", "inherits", "$Base"), ("run", "references", "$Base")])
+case("typescript", "type-and-value", "a name declared as a type and as a value is the value where a value is used",
+     TS, {"a.ts": "export interface Kind {\n  tag: string\n}\n\nexport const Kind = {\n  make(): number {\n    return 1\n  },\n}\n\n"
+                  "export function run(k: Kind): number {\n  return Kind.make()\n}\n"},
+     [("run", "references", "Kind"), ("run", "calls", "make")])
 case("typescript", "array-element", "an element of `T[]` is a T",
      TS, {"a.ts": TS2 + "export function run(repos: Repo[]): number {\n  return repos[0].find()\n}\n"}, *TS_BOTH)
 case("typescript", "for-of", "a `for … of` variable over `T[]` is a T",
@@ -1286,6 +1294,12 @@ case("csharp", "constructor-initializer", "`: base(…)` / `: this(…)` call th
                   "    public class Name : Token\n    {\n        public Name(string text) : base(1, text) { }\n"
                   "        public Name() : this(\"x\") { }\n    }\n}\n"},
      [("Name.Name", "calls", "Token.Token"), ("Name.Name", "calls", "Name.Name")])
+case("csharp", "using-block-namespace", "`using N;` brings the extensions of a namespace written as a block in another directory into sight",
+     CS, {"Infra/Ext.cs": "using System.Collections.Generic;\n\nnamespace App.Infra\n{\n    static class EnumerableExtensions\n    {\n"
+                          "        public static bool Empty<T>(this IEnumerable<T> source) { return true; }\n    }\n}\n",
+          "Core/A.cs": "using System.Collections.Generic;\nusing App.Infra;\n\nnamespace App.Core\n{\n    public class A\n    {\n"
+                       "        public bool Run(IEnumerable<string> values)\n        {\n            return values.Empty();\n        }\n    }\n}\n"},
+     [("A.Run", "calls", "EnumerableExtensions.Empty")])
 case("csharp", "generic-namesake", "`Maybe.Nothing<T>()` is a member of the static class `Maybe` beside the generic `Maybe<T>`",
      CS, {"A.cs": "namespace App\n{\n    public abstract class Maybe<T>\n    {\n    }\n\n"
                   "    public static class Maybe\n    {\n        public static Maybe<T> Nothing<T>() { return null; }\n    }\n\n"

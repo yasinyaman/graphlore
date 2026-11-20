@@ -3636,15 +3636,26 @@ impl<'a> Project<'a> {
     fn top_in(&self, files: &[usize], name: &str) -> Option<DefRef> {
         // an `extension Session { … }` adds to a type, it does not declare the
         // name: in a module that only extends it, the name is still the type's
-        self.best(
-            files
-                .iter()
-                .flat_map(|&f| self.top[f].get(name).into_iter().flatten().map(move |&d| (f, d)))
-                // (an RSpec `let` is a name of its block only)
-                .filter(|r| {
-                    self.def(*r).kind != DefKind::Extension && self.def(*r).scope_lines.is_none()
-                }),
-        )
+        let mut found: Vec<DefRef> = files
+            .iter()
+            .flat_map(|&f| self.top[f].get(name).into_iter().flatten().map(move |&d| (f, d)))
+            // (an RSpec `let` is a name of its block only)
+            .filter(|r| {
+                self.def(*r).kind != DefKind::Extension && self.def(*r).scope_lines.is_none()
+            })
+            .collect();
+        // TS: a name can be a type and a value at once (`export interface
+        // $ZodString` beside `export const $ZodString`): where a type is
+        // written it is the type, anywhere else the value
+        if found.len() > 1 && found.iter().all(|r| self.family[r.0] == Some(Family::Ecma)) {
+            let is_type =
+                |r: &DefRef| matches!(self.def(*r).kind, DefKind::Interface | DefKind::TypeAlias);
+            let wanted = self.naming_type();
+            if found.iter().any(|r| is_type(r) == wanted) {
+                found.retain(|r| is_type(r) == wanted);
+            }
+        }
+        self.best(found)
     }
 
     /// The members of a type: its lexical children, and the methods attached
@@ -4695,7 +4706,7 @@ impl<'a> Project<'a> {
             }
             // PHP `$x`: a variable. Its declared or assigned type, else only
             // a distinctive method name
-            v if v.starts_with('$') => match self.local_type(f, d, &v[1..]) {
+            v if v.starts_with('$') && fam == Family::Php => match self.local_type(f, d, &v[1..]) {
                 Some((t, c)) => {
                     conf = c;
                     Target::Def(t)
@@ -6976,6 +6987,12 @@ impl<'a> Project<'a> {
                 self.pkg_files.get(&(fam, ns.clone())).is_some_and(|fs| fs.contains(&g))
             }
             Target::Module(fs) => fs.contains(&g),
+            // (a namespace written as a block, `namespace N { … }`: every
+            // file that opens it)
+            Target::Def(c) if self.def(*c).kind == DefKind::Namespace => {
+                let ns = self.def(*c).qualname.replace("::", ".");
+                c.0 == g || self.pkg_files.get(&(fam, ns)).is_some_and(|fs| fs.contains(&g))
+            }
             _ => false,
         })
     }
