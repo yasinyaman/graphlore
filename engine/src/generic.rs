@@ -524,6 +524,7 @@ pub fn walk_defs(m: &dyn LanguageModule, root: Node, src: &[u8]) -> Vec<Def> {
                     anonymous: false,
                     misread: false,
                     block: false,
+                    returned_out: false,
                     inline_body: None,
                     created_from: None,
                     model_name: None,

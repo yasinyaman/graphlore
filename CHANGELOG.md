@@ -316,6 +316,25 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- **Native engine 0.5.42: module patterns, typed function declarations, RSpec
+  shared examples.** Three things 0.5.40's scopes left open. A JavaScript
+  module written `var Dataset = (function () { function Dataset() {} return
+  Dataset })()` names, outside that function, the function written in it
+  (`Def::returned_out`; the declaration is no local), and a function assigned
+  to a function as its member (`Dataset.extractData = function () {}`) is
+  found through it. A function declared with a type (`const first: Lookup =
+  () => {}`) is no local that hides itself where it is passed as a value. A
+  bare name in RSpec `shared_examples 'x' do … end` that no block around it
+  declares is the `let` of the block that says `it_behaves_like 'x'`, when
+  every place that includes the examples gives the same one. On the 31 audit
+  repositories' own code: 15 edges added, 7 removed (5 of them a call linked
+  to the other copy of a file, 2 a guess by name on what is now a `let`); 423
+  added in vendored and minified bundles, members assigned to functions.
+  Unmarked unresolved rows: 383 → 367. Tried and not kept: refusing the one
+  extension in sight on a receiver of a project type it is not written for;
+  on the audit repositories it removed 207 edges, the sampled ones all right
+  (`client.BuildUri(request)`, `FunSpec.getterBuilder().strictfp()`), because
+  the walk's type for a receiver is not exact enough to refuse by.
 - **Native engine 0.5.41: what a reopened Ruby class extends, and attributes
   in the diagnostics.** A member a Ruby class has through what another opening
   of it mixes in or extends is found from every opening

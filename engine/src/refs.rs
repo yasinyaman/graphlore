@@ -1190,6 +1190,29 @@ fn passes_self(n: Node, src: &[u8]) -> bool {
     })
 }
 
+/// RSpec `shared_examples 'name' do … end` (true) or `it_behaves_like 'name'`
+/// / `include_examples 'name'` (false), with the name.
+fn shared_examples_call(n: Node, src: &[u8]) -> Option<(String, bool)> {
+    if n.kind() != "call" || n.child_by_field_name("receiver").is_some() {
+        return None;
+    }
+    let method = text(n.child_by_field_name("method")?, src);
+    let declares = match method.as_str() {
+        "shared_examples" | "shared_examples_for" | "shared_context" => true,
+        "it_behaves_like" | "it_should_behave_like" | "include_examples" | "include_context" => {
+            false
+        }
+        _ => return None,
+    };
+    let first = kids(n.child_by_field_name("arguments")?).into_iter().next()?;
+    let name = match first.kind() {
+        "string" => string_value(first, src),
+        "simple_symbol" => text(first, src).trim_start_matches(':').to_string(),
+        _ => return None,
+    };
+    Some((name, declares))
+}
+
 /// The names a Ruby call declares on a type without a `def`: `attr_accessor
 /// :a`, `def_delegators :@x, :a, :b`, `Struct.new(:a, :b)` (and any `X.new`
 /// given only symbols, such as a struct-like base class).
@@ -2340,6 +2363,11 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
     let mut anc: Vec<Node> = Vec::new();
     // closures that are no definitions: (start, end, the names they bind)
     let mut closures: Vec<ClosureScope> = Vec::new();
+    // a closure called where it is written as a declaration's value: its
+    // first byte -> (the declared name, the declaration's first byte)
+    let mut invoked: HashMap<usize, (String, usize)> = HashMap::new();
+    // where a declaration whose value is a function starts
+    let mut function_decls: std::collections::HashSet<usize> = std::collections::HashSet::new();
     // every closure: (start, end, first line, last line, node id)
     let mut blocks: Vec<(usize, usize, u32, u32, usize)> = Vec::new();
     // lambdas with a receiver: (start, end, where the receiver comes from)
@@ -2353,6 +2381,30 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
         }
         if rust && n.kind() == "macro_invocation" {
             macros.push(n);
+        }
+        // a declaration whose value is a function: `const f: T = () => …`
+        if n.child_by_field_name("value").is_some_and(|v| is_closure(v.kind())) {
+            function_decls.insert(n.start_byte());
+        }
+        // `var Dataset = (function () { function Dataset() {} … return
+        // Dataset })()`: the function called where it is written, as the
+        // value of a declaration; the declared name is what it returns
+        if is_closure(n.kind()) {
+            let mut up = anc.iter().rev().filter(|a| a.kind() != "parenthesized_expression");
+            let call = up.next().filter(|c| {
+                c.kind() == "call_expression"
+                    && c.child_by_field_name("function").is_some_and(|f| {
+                        f.start_byte() <= n.start_byte() && n.end_byte() <= f.end_byte()
+                    })
+            });
+            let decl = call.and(up.next()).filter(|d| d.kind() == "variable_declarator");
+            if let Some(d) = decl {
+                if let Some(name) =
+                    d.child_by_field_name("name").filter(|x| x.kind() == "identifier")
+                {
+                    invoked.insert(n.start_byte(), (text(name, src), d.start_byte()));
+                }
+            }
         }
         // (Ruby's `{ … }` block is a `block` under its call)
         if is_closure(n.kind())
@@ -2905,6 +2957,14 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
             receivers.push(found);
         }
         if facts.lang == Some(crate::lang::Lang::Ruby) {
+            if let Some((name, declares)) = shared_examples_call(n, src) {
+                let line = n.start_position().row as u32 + 1;
+                if declares {
+                    facts.shared_examples.push((name, line, n.end_position().row as u32 + 1));
+                } else {
+                    facts.example_includes.push((name, line));
+                }
+            }
             let found = ruby_attrs(n, src);
             if !found.is_empty() {
                 // the class or module the declaration is written in
@@ -3242,7 +3302,8 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
         }
     }
     add_extras(&mut facts.defs, &extras, m, src);
-    add_blocks(&mut facts.defs, blocks);
+    let hoisted = add_blocks(&mut facts.defs, blocks, &invoked);
+    locals.retain(|l| !hoisted.iter().any(|(name, at)| *at == l.byte && *name == l.name));
     let defs = &facts.defs;
     // `subject { conn }`, `let(:conn) { … }`: the call that declares a
     // callable is no use of a name
@@ -3276,6 +3337,23 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
     let bytes: Vec<usize> = facts.slots.iter().map(|s| s.byte).collect();
     for (s, d) in facts.slots.iter_mut().zip(homes(&facts.defs, &bytes)) {
         s.from_def = d;
+    }
+    // `const pick: Picker = () => …`: the name is the function it declares,
+    // a definition of the scope; the type written beside it makes no local
+    // that would hide it where it is passed as a value
+    {
+        let defs = &facts.defs;
+        locals.retain(|l| {
+            l.field
+                || !function_decls.contains(&l.byte)
+                || !defs.iter().any(|d| {
+                    d.kind.is_callable()
+                        && !d.block
+                        && !d.misread
+                        && d.name == l.name
+                        && d.parent == l.from_def
+                })
+        });
     }
     // one per (definition, name, field): a declared type over a guessed one
     locals.retain(|l| !matches!(l.path.as_slice(), [t] if t == "var" || t == "auto" || t == "let"));
@@ -5263,9 +5341,20 @@ fn innermost_where(
 /// function's, and each such callback its own. One inside another has it as
 /// its parent, so the inner one sees the outer one's locals; so has a
 /// definition written in one (`const helper = () => …` in a `describe`).
-fn add_blocks(defs: &mut Vec<Def>, mut blocks: Vec<(usize, usize, u32, u32, usize)>) {
+///
+/// `invoked`: the closures called where they are written as the value of a
+/// declaration (`var Dataset = (function () { function Dataset() {} return
+/// Dataset })()`). The definition of the declared name written in one is
+/// what the declaration names (`Def::returned_out`: the scope of the
+/// declaration knows it too), and the (name, first byte) of each such
+/// declaration is returned, which is then no local.
+fn add_blocks(
+    defs: &mut Vec<Def>,
+    mut blocks: Vec<(usize, usize, u32, u32, usize)>,
+    invoked: &HashMap<usize, (String, usize)>,
+) -> Vec<(String, usize)> {
     if blocks.is_empty() {
-        return;
+        return Vec::new();
     }
     blocks.sort_by_key(|b| (b.0, std::cmp::Reverse(b.1)));
     let starts: Vec<usize> = blocks.iter().map(|b| b.0).collect();
@@ -5318,6 +5407,7 @@ fn add_blocks(defs: &mut Vec<Def>, mut blocks: Vec<(usize, usize, u32, u32, usiz
             anonymous: false,
             misread: false,
             block: true,
+            returned_out: false,
             inline_body: None,
             created_from: None,
             model_name: None,
@@ -5342,9 +5432,19 @@ fn add_blocks(defs: &mut Vec<Def>, mut blocks: Vec<(usize, usize, u32, u32, usiz
         .collect();
     let starts: Vec<usize> = orphans.iter().map(|&i| defs[i].start_byte).collect();
     let around = innermost_where(defs, &starts, |d| d.block);
+    let mut hoisted = Vec::new();
     for (i, block) in orphans.into_iter().zip(around) {
         defs[i].parent = block;
+        let Some(b) = block else { continue };
+        if let Some((name, at)) = invoked.get(&defs[b].start_byte) {
+            if defs[i].name == *name && (defs[i].kind.is_callable() || defs[i].kind.is_class_like())
+            {
+                defs[i].returned_out = true;
+                hoisted.push((name.clone(), *at));
+            }
+        }
     }
+    hoisted
 }
 
 fn assign_defs(defs: &[Def], refs: &mut [RefFact]) {
@@ -5477,6 +5577,7 @@ fn add_extras(
             anonymous: false,
             misread: false,
             block: false,
+            returned_out: false,
             inline_body: inline,
             created_from: kind.is_state().then(|| created_from(*node, src)).flatten(),
             model_name: kind.is_state().then(|| model_named(*node, src)).flatten(),

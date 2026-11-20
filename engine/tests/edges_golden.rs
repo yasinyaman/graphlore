@@ -2118,3 +2118,48 @@ fn ruby_a_reopened_class_has_what_its_other_opening_extends() {
         "{got:#?}"
     );
 }
+
+#[test]
+fn a_function_declared_with_a_type_is_still_the_function_where_it_is_passed() {
+    // `const first: Lookup = () => {}`: `first` is a definition; its written
+    // type makes no local that hides it as a value
+    let got = edges("ts-typed-fn-local", &[(
+        "a.ts",
+        "type Lookup = () => void\ndeclare const agent: any\n\nexport function run() {\n  const first: Lookup = () => {}\n  agent.normalize({ lookup: first })\n  first()\n}\n",
+    )]);
+    has(&got, &[("run()", "indirect_call", "first()"), ("run()", "calls", "first()")]);
+}
+
+#[test]
+fn a_module_pattern_names_what_its_function_returns() {
+    // `var Dataset = (function () { function Dataset() {} return Dataset })()`:
+    // outside that function, `Dataset` is the function written in it
+    let got = edges("js-module-pattern", &[(
+        "lib/typeahead.js",
+        "(function () {\n  var Dataset = (function () {\n    function Dataset(o) {\n      this.o = o\n    }\n    Dataset.extract = function extract(el) {\n      return el\n    }\n    return Dataset\n  })()\n  var Menu = (function () {\n    function Menu() {\n      this.dataset = new Dataset(1)\n      Dataset.extract(this)\n    }\n    return Menu\n  })()\n  return new Menu()\n})()\n",
+    )]);
+    has(
+        &got,
+        &[
+            ("Menu()", "calls", "Dataset()"),
+            ("Menu()", "calls", "extract()"),
+            ("typeahead.js", "calls", "Menu()"),
+        ],
+    );
+}
+
+#[test]
+fn rspec_shared_examples_see_the_lets_of_where_they_are_included() {
+    // `request_stub` in `shared_examples 'a request'` is the `let` of the
+    // block that says `it_behaves_like 'a request'`
+    let got = calls_conf("rspec-shared", &[
+        ("lib/stub.rb", "class Stub\n  def hit\n    1\n  end\nend\n"),
+        ("spec/support/request.rb", "shared_examples 'a request' do\n  it 'hits' do\n    request_stub.hit\n  end\nend\n"),
+        ("spec/adapter_spec.rb", "require_relative '../lib/stub'\n\ndescribe 'adapter' do\n  let(:request_stub) { Stub.new }\n\n  it_behaves_like 'a request'\nend\n"),
+    ]);
+    assert!(
+        got.iter().any(|(f, t, _)| f == "request.rb" && t == "spec_adapter_spec_request_stub"),
+        "{got:#?}"
+    );
+    assert!(got.iter().any(|(f, t, _)| f == "request.rb" && t == "lib_stub_stub_hit"), "{got:#?}");
+}
