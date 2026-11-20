@@ -2755,16 +2755,18 @@ impl<'a> Project<'a> {
 
     /// A local assigned something external (`ts := httptest.NewServer()`):
     /// its methods are the external type's, never a project namesake's.
-    /// The members named `name` of a namespace: its block's, and in C and
-    /// C++ those of every block that opens the same namespace
+    /// The members named `name` of a namespace: its block's, and in C, C++
+    /// and C# those of every block that opens the same namespace
     /// (`namespace cpr { … }` in each header), its own first.
     fn namespace_members(&self, c: DefRef, name: &str) -> Vec<DefRef> {
         let own = self.children[c.0].get(&c.1).and_then(|m| m.get(name));
         let mut out: Vec<DefRef> = own.into_iter().flatten().map(|&k| (c.0, k)).collect();
-        if self.family[c.0] != Some(Family::C) {
+        // (C# `namespace Shop.Text { … }` is opened by every file that puts a
+        // type in it, as a C++ namespace is by every header)
+        let Some(fam @ (Family::C | Family::CSharp)) = self.family[c.0] else {
             return out;
-        }
-        let key = qual_key(Family::C, &self.def(c).qualname);
+        };
+        let key = qual_key(fam, &self.def(c).qualname);
         for &other in self.by_qual.get(&key).into_iter().flatten() {
             if other == c || self.def(other).kind != DefKind::Namespace {
                 continue;

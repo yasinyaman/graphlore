@@ -1122,10 +1122,12 @@ def test_csharp_branches_inside_an_expression_are_blanked():
     out = blank(src)
     assert len(out) == len(src) and out.count(b"\n") == src.count(b"\n")
     assert b": 2;" in out and b": 3;" not in out and b"#" not in out
-    # after a statement, a block or an attribute, and a one-branch guard: untouched
+    # one branch inside an expression: only the directive lines go
+    one = blank(b"class A {\n    int x =\n#if NET\n        1 +\n#endif\n        2;\n}\n")
+    assert b"1 +" in one and b"#" not in one
+    # after a statement, a block or an attribute: untouched
     for keep in (b"class A {\n    int x;\n#if NET\n    void a() {}\n#else\n"
                  b"    void b() {}\n#endif\n}\n",
-                 b"class A {\n    int x =\n#if NET\n        1 +\n#endif\n        2;\n}\n",
                  b"[Fact]\n#if NET\nvoid a() {}\n#else\nvoid b() {}\n#endif\n"):
         assert blank(keep) is keep
 

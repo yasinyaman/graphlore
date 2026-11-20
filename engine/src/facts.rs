@@ -114,6 +114,10 @@ pub struct Def {
     /// for the spans, no node and no name.
     #[serde(default)]
     pub misread: bool,
+    /// A misread declaration `spans.py`'s grammar reads as the variable it
+    /// is (`Random rnd(seed());`): no span either.
+    #[serde(default)]
+    pub unspanned: bool,
     /// A closure no definition holds (`test('…', () => { … })`, an RSpec
     /// `it '…' do … end`): no node and no name, only the scope of the locals
     /// declared in it. Its parent is the block around it, if any.

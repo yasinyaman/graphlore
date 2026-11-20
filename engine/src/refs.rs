@@ -851,16 +851,20 @@ fn template_args(t: Node, src: &[u8]) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// A C++ variable the grammar took for a function's declaration: its name,
+/// its type's path, the names passed and the calls passed.
+type Misread<'t> = (String, Vec<String>, Vec<Node<'t>>, Vec<Node<'t>>);
+
 /// C++ `Pool pool(context);` where every "parameter type" is a name the
-/// function has as a local or parameter: a variable constructed from them,
-/// which the grammar reads as the declaration of a function. The name, its
-/// type and the arguments.
+/// function has as a local or parameter, or `Random rnd(seed());` with a
+/// call where a type would be: a variable constructed from them, which the
+/// grammar reads as the declaration of a function.
 fn misread_variable<'t>(
     n: Node<'t>,
     src: &[u8],
     anc: &[Node],
     locals: &[Local],
-) -> Option<(String, Vec<String>, Vec<Node<'t>>)> {
+) -> Option<Misread<'t>> {
     if n.kind() != "declaration" || anc.last()?.kind() != "compound_statement" {
         return None;
     }
@@ -868,10 +872,26 @@ fn misread_variable<'t>(
     let name = decl.child_by_field_name("declarator").filter(|d| d.kind() == "identifier")?;
     let params = decl.child_by_field_name("parameters")?;
     let mut args = Vec::new();
+    // `Random rnd(test::RandomSeed());`: a call where a parameter's type
+    // would be written, which only a variable's arguments have
+    let mut calls = Vec::new();
     for p in kids(params).into_iter().filter(|c| !is_comment(c)) {
-        // a bare name and nothing else: no declarator, no qualifier
-        if p.kind() != "parameter_declaration" || p.child_by_field_name("declarator").is_some() {
+        if p.kind() != "parameter_declaration" {
             return None;
+        }
+        match p.child_by_field_name("declarator") {
+            Some(d)
+                if d.kind() == "abstract_function_declarator"
+                    && d.child_by_field_name("declarator").is_none()
+                    && d.child_by_field_name("parameters")
+                        .is_some_and(|ps| kids(ps).is_empty()) =>
+            {
+                calls.push(p.child_by_field_name("type")?);
+                continue;
+            }
+            // a bare name and nothing else: no declarator, no qualifier
+            Some(_) => return None,
+            None => {}
         }
         let ty = p.child_by_field_name("type").filter(|t| t.kind() == "type_identifier")?;
         if p.named_child_count() != 1 {
@@ -879,7 +899,7 @@ fn misread_variable<'t>(
         }
         args.push(ty);
     }
-    if args.is_empty() {
+    if args.is_empty() && calls.is_empty() {
         return None; // `Pool pool();` declares a function
     }
     let func = anc
@@ -917,7 +937,7 @@ fn misread_variable<'t>(
     }
     // (as a declared local's type is written: `first_type`)
     let ty = first_type(n.child_by_field_name("type")?, src)?;
-    Some((text(name, src), ty, args))
+    Some((text(name, src), ty, args, calls))
 }
 
 /// A construction whose type is written on the declaration and not at the
@@ -2381,6 +2401,17 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
         }
         if rust && n.kind() == "macro_invocation" {
             macros.push(n);
+            // (outside any definition, its arguments are a scope: `rgtest!(name,
+            // |dir: Dir, mut cmd: TestCommand| { … })`)
+            if let Some(tt) = kids(n).into_iter().find(|c| c.kind() == "token_tree") {
+                blocks.push((
+                    tt.start_byte(),
+                    tt.end_byte(),
+                    tt.start_position().row as u32 + 1,
+                    tt.end_position().row as u32 + 1,
+                    tt.id(),
+                ));
+            }
         }
         // a declaration whose value is a function: `const f: T = () => …`
         if n.child_by_field_name("value").is_some_and(|v| is_closure(v.kind())) {
@@ -2697,12 +2728,17 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                 }
             }
         } else if m.is_field(n) {
-            let declared = n.child_by_field_name("type").or_else(|| {
-                kids(n)
-                    .into_iter()
-                    .find(|c| c.kind() == "variable_declaration")
-                    .and_then(|v| v.child_by_field_name("type"))
-            });
+            let declared = n
+                .child_by_field_name("type")
+                .or_else(|| {
+                    kids(n)
+                        .into_iter()
+                        .find(|c| c.kind() == "variable_declaration")
+                        .and_then(|v| v.child_by_field_name("type"))
+                })
+                // (Swift `var fav: ColorOptions`: the annotation is a child
+                // with no field name)
+                .or_else(|| kids(n).into_iter().find(|c| c.kind() == "type_annotation"));
             if let Some(t) = declared {
                 let mut types = Vec::new();
                 types_in(t, src, "field", &mut types);
@@ -3247,21 +3283,27 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
         // reads a declaration of a function `pool`, the language a variable
         // (a local hides a type of its name)
         if facts.lang == Some(crate::lang::Lang::Cpp) {
-            if let Some((name, ty, args)) = misread_variable(n, src, &anc, &locals) {
+            if let Some((name, ty, args, calls)) = misread_variable(n, src, &anc, &locals) {
                 let (lo, hi) = (n.start_byte(), n.end_byte());
                 for d in facts.defs.iter_mut() {
                     if d.name == name && lo <= d.start_byte && d.end_byte <= hi {
                         d.misread = true;
+                        d.unspanned = !calls.is_empty();
                     }
                 }
                 misread.push((lo, hi));
                 let at = refs.len();
                 push(&mut refs, n, RefKind::New, ty.clone(), "constructor", None);
                 if let Some(r) = refs.get_mut(at) {
-                    r.args = u8::try_from(args.len()).ok();
+                    r.args = u8::try_from(args.len() + calls.len()).ok();
                 }
                 for a in args {
                     push(&mut refs, a, RefKind::Indirect, vec![text(a, src)], "argument", None);
+                }
+                for c in calls {
+                    if let Some(path) = path_of(c, src) {
+                        push(&mut refs, c, RefKind::Call, path, "call", None);
+                    }
                 }
                 locals.push(Local {
                     name,
@@ -3321,7 +3363,9 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
     // `assert_eq!(handle_count(&pool), 2)`: the grammar gives a macro's
     // arguments as tokens; read as expressions they are calls like any other
     for mac in macros {
-        refs.extend(macro_refs(m, mac, src, macro_depth));
+        let (found, bound) = macro_refs(m, mac, src, macro_depth);
+        refs.extend(found);
+        locals.extend(bound);
     }
     bind_closure_params(&closures, &mut refs, &mut locals);
     facts.receivers = bind_receivers(&receivers, &mut refs);
@@ -3450,17 +3494,23 @@ fn implicit_place(anc: &[Node], src: &[u8]) -> Option<Implicit> {
 /// placed where it stands in the file. Arguments that are no expressions (a
 /// `{ … }` body, a pattern, `a => b` arms) parse with an error and are left
 /// out, and so is the pattern after the first argument of `matches!`.
-fn macro_refs(m: &dyn LanguageModule, mac: Node, src: &[u8], depth: usize) -> Vec<RefFact> {
+fn macro_refs(
+    m: &dyn LanguageModule,
+    mac: Node,
+    src: &[u8],
+    depth: usize,
+) -> (Vec<RefFact>, Vec<Local>) {
     const PREFIX: &[u8] = b"fn __m(){";
+    let none = || (Vec::new(), Vec::new());
     if depth >= 3 {
-        return Vec::new();
+        return none();
     }
     let Some(tt) = kids(mac).into_iter().find(|c| c.kind() == "token_tree") else {
-        return Vec::new();
+        return none();
     };
     let tokens = &src[tt.start_byte()..tt.end_byte()];
     if !matches!(tokens.first(), Some(b'(' | b'[')) || tokens.len() > 20_000 {
-        return Vec::new();
+        return none();
     }
     let name = mac
         .child_by_field_name("macro")
@@ -3493,29 +3543,56 @@ fn macro_refs(m: &dyn LanguageModule, mac: Node, src: &[u8], depth: usize) -> Ve
     };
     let wrapped = [PREFIX, tokens.as_slice(), b";}".as_slice()].concat();
     let Ok(tree) = crate::parse::parse(crate::lang::Lang::Rust, &wrapped, None) else {
-        return Vec::new();
+        return none();
     };
     if tree.root_node().has_error() {
-        return Vec::new();
+        return none();
     }
     let mut scratch = FileFacts::new(String::new(), Some(crate::lang::Lang::Rust), false, &wrapped);
     read_at(m, tree.root_node(), &wrapped, &mut scratch, depth + 1);
     let row = tt.start_position().row as u32;
-    scratch
+    let moved = |byte: usize| tt.start_byte() + byte.saturating_sub(PREFIX.len());
+    // a closure parameter's `name@byte` names the closure where it is in the
+    // file, as one read outside a macro does
+    let renamed = |seg: &str| -> String {
+        match seg.rsplit_once('@') {
+            Some((name, at)) => match at.parse::<usize>() {
+                Ok(b) => format!("{name}@{}", moved(b)),
+                Err(_) => seg.to_string(),
+            },
+            None => seg.to_string(),
+        }
+    };
+    // the names the arguments bind — a closure's typed parameters, a `let`
+    // in its body — are locals of the definition (or the block) around
+    let locals: Vec<Local> = scratch
+        .locals
+        .into_iter()
+        .filter(|l| !l.field && l.byte >= PREFIX.len())
+        .map(|mut l| {
+            l.name = renamed(&l.name);
+            l.path = l.path.iter().map(|s| renamed(s)).collect();
+            l.byte = moved(l.byte);
+            l.from_def = None;
+            l
+        })
+        .collect();
+    let refs = scratch
         .refs
         .into_iter()
         .filter(|r| matches!(r.kind, RefKind::Call | RefKind::New))
-        // (a closure's parameter inside the arguments is a local nothing here keeps)
-        .filter(|r| r.byte >= PREFIX.len() && !r.path.iter().any(|s| s.contains('@')))
+        .filter(|r| r.byte >= PREFIX.len())
         .filter(|r| r.implicit.is_none())
         .map(|mut r| {
-            r.byte = tt.start_byte() + (r.byte - PREFIX.len());
+            r.path = r.path.iter().map(|s| renamed(s)).collect();
+            r.byte = moved(r.byte);
             r.line += row;
             r.from_def = None;
             r.recv = None;
             r
         })
-        .collect()
+        .collect();
+    (refs, locals)
 }
 
 /// The value node of a declaration: `= …` of an assignment, a declarator, a
@@ -5408,6 +5485,7 @@ fn add_blocks(
             misread: false,
             block: true,
             returned_out: false,
+            unspanned: false,
             inline_body: None,
             created_from: None,
             model_name: None,
@@ -5578,6 +5656,7 @@ fn add_extras(
             misread: false,
             block: false,
             returned_out: false,
+            unspanned: false,
             inline_body: inline,
             created_from: kind.is_state().then(|| created_from(*node, src)).flatten(),
             model_name: kind.is_state().then(|| model_named(*node, src)).flatten(),

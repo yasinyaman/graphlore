@@ -124,9 +124,9 @@ pub fn facts_for_source(rel: &str, src: &[u8], deadline: Option<Duration>) -> Fi
 /// `#if NET` / `: new A(x)` / `#else` / `: new A()`) is one piece of code
 /// written once per configuration; the parser, seeing every branch, loses the
 /// type around. The source with the directive lines and every branch but the
-/// first blanked, or `None` when no group is like that; a group with one
-/// branch is left alone. `spans.py`'s `_blank_expression_branches` is the
-/// same rule.
+/// first blanked, or `None` when no group is like that; of a group with one
+/// branch only the two directive lines go, its lines being part of the
+/// expression. `spans.py`'s `_blank_expression_branches` is the same rule.
 pub fn blank_expression_branches(src: &[u8]) -> Option<Vec<u8>> {
     if !src.windows(3).any(|w| w == b"#if") {
         return None;
@@ -160,9 +160,9 @@ pub fn blank_expression_branches(src: &[u8]) -> Option<Vec<u8>> {
                 }
                 b"endif" => {
                     if let Some((inside, directives)) = stack.pop() {
-                        if inside && directives.len() >= 2 {
+                        if inside {
                             blank.push((directives[0], directives[0]));
-                            blank.push((directives[1], li));
+                            blank.push((directives.get(1).copied().unwrap_or(li), li));
                         }
                     }
                 }

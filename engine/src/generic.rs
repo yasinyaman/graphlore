@@ -491,7 +491,8 @@ pub fn walk_defs(m: &dyn LanguageModule, root: Node, src: &[u8]) -> Vec<Def> {
                     name: bare,
                     qualname: qualname.clone(),
                     kind,
-                    region_start: region_start.unwrap_or_else(|| m.region_start(node, def_line)),
+                    region_start: region_start
+                        .unwrap_or_else(|| m.region_start_in(node, def_line, src)),
                     def_line,
                     end_line: m.end_line(node),
                     parent: item.parent,
@@ -524,6 +525,7 @@ pub fn walk_defs(m: &dyn LanguageModule, root: Node, src: &[u8]) -> Vec<Def> {
                     anonymous: false,
                     misread: false,
                     block: false,
+                    unspanned: false,
                     returned_out: false,
                     inline_body: None,
                     created_from: None,

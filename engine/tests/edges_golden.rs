@@ -2163,3 +2163,71 @@ fn rspec_shared_examples_see_the_lets_of_where_they_are_included() {
     );
     assert!(got.iter().any(|(f, t, _)| f == "request.rb" && t == "lib_stub_stub_hit"), "{got:#?}");
 }
+
+#[test]
+fn cpp_a_variable_constructed_from_a_call_is_no_function() {
+    // `Random rnd(seed());`: the grammar reads a function `rnd` taking a
+    // function; a call where a type would be is a variable's argument
+    let got = edges("cpp-call-arg-variable", &[(
+        "a.cc",
+        "class Random {\n public:\n  explicit Random(int s) {}\n  int Next() { return 1; }\n};\n\nint seed() { return 3; }\n\nint run() {\n  Random rnd(seed());\n  return rnd.Next();\n}\n",
+    )]);
+    has(&got, &[("run()", "calls", "seed()"), ("run()", "calls", ".Next()")]);
+    assert!(!got.iter().any(|(_, _, t)| t == "rnd()"), "{got:#?}");
+}
+
+#[test]
+fn csharp_a_block_namespace_sees_the_namespaces_around_it() {
+    // `namespace Shop.Core { … new NameInfo(…) }`: `NameInfo` is `Shop`'s
+    let got = edges("cs-outer-namespace", &[
+        ("NameInfo.cs", "namespace Shop\n{\n    public sealed class NameInfo\n    {\n        internal NameInfo(string a, string b)\n        {\n        }\n    }\n}\n"),
+        ("Core/Ext.cs", "namespace Shop.Core\n{\n    static class Ext\n    {\n        public static NameInfo F()\n        {\n            return new NameInfo(\"a\", \"b\");\n        }\n    }\n}\n"),
+    ]);
+    has(&got, &[(".F()", "calls", "NameInfo"), (".F()", "references", "NameInfo")]);
+    // `using Shop.Text;`: the namespace is every block that opens it, not
+    // the one file a lookup happens to land on
+    let got = edges("cs-namespace-blocks", &[
+        ("Text/Sentence.cs", "namespace Shop.Text\n{\n    public class Sentence\n    {\n    }\n}\n"),
+        ("Text/Wrapper.cs", "namespace Shop.Text\n{\n    public class Wrapper\n    {\n        public string Wrap() { return \"\"; }\n    }\n}\n"),
+        ("Text/Usage.cs", "namespace Shop.Text\n{\n    public class Usage\n    {\n    }\n}\n"),
+        ("Tests/T.cs", "using Shop.Text;\n\nnamespace Shop.Tests.Unit\n{\n    public class T\n    {\n        public void Run()\n        {\n            var w = new Wrapper();\n            w.Wrap();\n            var s = new Sentence();\n            var u = new Usage();\n        }\n    }\n}\n"),
+    ]);
+    has(
+        &got,
+        &[
+            (".Run()", "calls", "Wrapper"),
+            (".Run()", "calls", ".Wrap()"),
+            (".Run()", "calls", "Sentence"),
+            (".Run()", "calls", "Usage"),
+        ],
+    );
+}
+
+#[test]
+fn rust_a_closure_in_a_macros_arguments_has_its_parameters_and_locals() {
+    // `rgtest!(name, |mut cmd: TestCommand| { cmd.arg("x"); let d = Dir::new(); d.path() })`
+    let got = edges("rs-macro-closure", &[
+        ("Cargo.toml", "[package]\nname = \"demo\"\nversion = \"0.1.0\"\n"),
+        ("src/lib.rs", "pub mod util;\n"),
+        ("src/util.rs", "pub struct TestCommand;\n\nimpl TestCommand {\n    pub fn arg(&mut self, a: &str) -> &mut TestCommand {\n        self\n    }\n    pub fn run(&mut self) {}\n}\n\npub struct Dir;\n\nimpl Dir {\n    pub fn new() -> Dir {\n        Dir\n    }\n    pub fn path(&self) {}\n}\n"),
+        ("tests/regression.rs", "use demo::util::{Dir, TestCommand};\n\nmacro_rules! rgtest {\n    ($name:ident, $fun:expr) => {\n        #[test]\n        fn $name() {}\n    };\n}\n\nrgtest!(first, |mut cmd: TestCommand| {\n    cmd.arg(\"a\").run();\n    let d = Dir::new();\n    d.path();\n});\n"),
+    ]);
+    has(
+        &got,
+        &[
+            ("regression.rs", "calls", ".arg()"),
+            ("regression.rs", "calls", ".run()"),
+            ("regression.rs", "calls", ".path()"),
+        ],
+    );
+}
+
+#[test]
+fn swift_a_stored_propertys_type_is_a_reference() {
+    // `@Option var fav: ColorOptions`, `var second: ColorOptions?`
+    let got = edges("swift-property-type", &[(
+        "a.swift",
+        "enum ColorOptions: String {\n  case red\n}\n\nstruct Shade {\n}\n\nstruct Color {\n  @Option(help: \"x\")\n  var fav: ColorOptions\n  var second: Shade?\n}\n",
+    )]);
+    has(&got, &[("Color", "references", "ColorOptions"), ("Color", "references", "Shade")]);
+}

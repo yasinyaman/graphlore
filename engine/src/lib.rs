@@ -402,7 +402,9 @@ pub fn file_spans(src: &[u8], rel: &str) -> Vec<(u32, u32, u32, String)> {
     file_facts(src, rel)
         .defs
         .into_iter()
-        .filter(|d| !d.extra)
+        // (a block is a scope of the resolver's, no definition; nor is a
+        // variable only this grammar took for a function's declaration)
+        .filter(|d| !d.extra && !d.block && !d.unspanned)
         .map(|d| (d.region_start, d.end_line, d.def_line, d.qualname))
         .collect()
 }
