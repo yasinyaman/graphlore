@@ -25,8 +25,8 @@ python benchmarks/conformance.py --baseline benchmarks/results-conformance.json 
 python benchmarks/conformance.py --markdown      # the tables below
 ```
 
-Measured 2026-11-20 with graphlore-engine 0.5.46: **406 of 406 rules hold**
-(356 with 0.5.45).
+Measured 2026-11-20 with graphlore-engine 0.5.47: **414 of 414 rules hold**
+(356 of the first 406 with 0.5.45).
 
 ## What this list is, and is not
 
@@ -86,6 +86,14 @@ many languages. What 0.5.46 closed, by rule:
   C++ nested class written `Outer::Inner&`, PHP `C::class` and
   `new static()`, and a generic Java class the project names `Box`.
 
+Eight cases were added with 0.5.47, each a rule found by reading the edges
+only graphify had on a repository: a pytest fixture as the type of a test's
+parameter, `super(…)` / `this(…)` and `: base(…)` / `: this(…)` as constructor
+calls, a C# static class beside its generic namesake, a `using` of a
+namespace written as a block, `$` as part of a TypeScript name, a TypeScript
+name that is a type and a value, and a C++ class written with an export macro
+(`class API Env {`).
+
 Each change was measured on the 45 audit repositories as well, by reading
 the edges it added and removed at their source lines; the page on the
 [native engine](native-engine.md#the-rules-themselves) has the numbers.
@@ -101,7 +109,7 @@ name to the engine, so the case names it `fetchAll`.
 
 ## The rules
 
-### python (34 of 34)
+### python (35 of 35)
 
 The Python Language Reference, 'Naming and binding' (4.2) and 'The import system'.
 
@@ -134,6 +142,7 @@ The Python Language Reference, 'Naming and binding' (4.2) and 'The import system
 | `from pkg import m` binds the submodule m | `submodule-import` | yes |
 | a name the package's __init__ imports is a name of the package | `package-reexport` | yes |
 | an import inside a function binds the name in that function | `function-local-import` | yes |
+| pytest hands a test the result of the fixture its parameter names (conftest.py) | `pytest-fixture` | yes |
 | of two bases with the method, the first listed wins | `mro-first-base` | yes |
 | a method only the second base has is found there | `mro-second-base` | yes |
 | a class nested in a class is reached through it | `nested-class` | yes |
@@ -178,7 +187,7 @@ ECMAScript Language Specification, 'Executable Code and Execution Contexts' (sco
 | an arrow function in a class field sees the class's `this` | `class-field-arrow` | yes |
 | a local assigned `new C()` keeps its type in a nested callback | `for-of-new` | yes |
 
-### typescript (28 of 28)
+### typescript (30 of 30)
 
 TypeScript Handbook, 'Modules', 'Classes', 'Generics' (types are the compiler's, tsc).
 
@@ -197,6 +206,8 @@ TypeScript Handbook, 'Modules', 'Classes', 'Generics' (types are the compiler's,
 | an enum member is a member of its enum | `enum-member` | yes |
 | `Cls.make()` is the class's static method | `static-method` | yes |
 | `import * as m` then `m.Repo` as a type | `namespace-import-type` | yes |
+| `$` is part of a name (`$Base`), not a sigil | `dollar-name` | yes |
+| a name declared as a type and as a value is the value where a value is used | `type-and-value` | yes |
 | an element of `T[]` is a T | `array-element` | yes |
 | a `for … of` variable over `T[]` is a T | `for-of` | yes |
 | `await` of a `Promise<T>` is a T | `await-promise` | yes |
@@ -243,7 +254,7 @@ The Go Programming Language Specification, 'Declarations and scope', 'Selectors'
 | a method with a value receiver is called on a value | `value-receiver` | yes |
 | a function literal sees the functions of the package | `closure` | yes |
 
-### java (36 of 36)
+### java (37 of 37)
 
 The Java Language Specification, 6.4 'Shadowing and Obscuring', 15.12 'Method Invocation Expressions'.
 
@@ -278,6 +289,7 @@ The Java Language Specification, 6.4 'Shadowing and Obscuring', 15.12 'Method In
 | a call in a lambda's body is the enclosing method's | `lambda-body` | yes |
 | `this::m` and `C::m` are uses of m | `method-reference` | yes |
 | overloads of one arity are told apart by the argument's type | `overload-by-type` | yes |
+| `super(…)` / `this(…)` in a constructor call the constructor of the base, or another of the class | `explicit-constructor-call` | yes |
 | a nested class is named through the class around it | `nested-static-class` | yes |
 | an enum constant has the enum's methods | `enum-method` | yes |
 | a call through an interface type is the interface's method | `interface-typed` | yes |
@@ -350,7 +362,7 @@ Scala Language Specification, chapter 2 'Identifiers, Names and Scopes', 4.7 'Im
 | `class A extends B` names its parent | `extends` | yes |
 | a class of the same package in another file needs no import | `same-package` | yes |
 
-### csharp (35 of 35)
+### csharp (38 of 38)
 
 C# Language Specification, 'Namespace and type names', 'Member lookup', 'Extension method invocations'.
 
@@ -386,6 +398,9 @@ C# Language Specification, 'Namespace and type names', 'Member lookup', 'Extensi
 | a local function is called by its name in the method | `local-function` | yes |
 | `this.M()` is the class's M | `this` | yes |
 | an unqualified name in a class is also searched in its base | `inherited` | yes |
+| `: base(…)` / `: this(…)` call the constructor of the base, or another of the class | `constructor-initializer` | yes |
+| `using N;` brings the extensions of a namespace written as a block in another directory into sight | `using-block-namespace` | yes |
+| `Maybe.Nothing<T>()` is a member of the static class `Maybe` beside the generic `Maybe<T>` | `generic-namesake` | yes |
 | a class's primary constructor parameter is a typed name of the class | `primary-constructor` | yes |
 | `global using N;` in one file holds for every file | `global-using` | yes |
 | an extension written for an interface is a member of the classes that implement it | `extension-on-interface` | yes |
@@ -494,7 +509,7 @@ ISO C, 6.2.1 'Scopes of identifiers', 6.2.2 'Linkages of identifiers'.
 | `a->b->c` reads the field of the struct the field points to | `struct-field-chain` | yes |
 | a call through a parameter is no call of a function of its name | `typedef-function-pointer` | yes |
 
-### cpp (30 of 30)
+### cpp (31 of 31)
 
 ISO C++, [basic.lookup] (unqualified, qualified and argument-dependent lookup), [class.member.lookup], [dcl.ambig.res].
 
@@ -529,6 +544,7 @@ ISO C++, [basic.lookup] (unqualified, qualified and argument-dependent lookup), 
 | a call in a lambda's body is the enclosing function's | `lambda-body` | yes |
 | a function passed by name is a use of it | `function-as-value` | yes |
 | a static member defined out of its class is the class's | `out-of-class-static` | yes |
+| a macro between `class` and the name (`class API Env {`) leaves the class a class | `export-macro` | yes |
 | `T x(1);` constructs a T | `constructor-arguments` | yes |
 
 ### ruby (29 of 29)
