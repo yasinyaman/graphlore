@@ -3068,3 +3068,33 @@ fn positions_a_type_is_written_at() {
         ],
     );
 }
+
+#[test]
+fn more_positions_a_type_is_written_at() {
+    let got = quals("positions2", &[
+        (
+            "a.cpp",
+            "struct Auth {\n    const char* user;\n};\n\nstruct Slice {\n};\n\nclass Pool {\n};\n\nclass Guard {\n};\n\nclass Cache {\n    friend class Guard;\n\n public:\n    static Pool* Get(Slice& s);\n};\n\ntemplate <class T>\nint setup(Pool& p) {\n    return sizeof(T) > 0;\n}\n\nint send(Auth a) {\n    return a.user != 0;\n}\n\nint run(Pool& p) {\n    return send(Auth{\"user\"}) + setup<Slice>(p);\n}\n",
+        ),
+        (
+            "src/scopt/A.scala",
+            "package scopt\n\nclass Config\n\nclass OptionParser[C](name: String)\n\nobject Main {\n  def run(): Any = new scopt.OptionParser[Config](\"scopt\")\n}\n",
+        ),
+        (
+            "a.ts",
+            "export interface Ctx {\n  id: number;\n}\n\nexport interface Hooks {\n  preprocess: (arg: unknown, ctx: Ctx) => unknown;\n}\n\nexport const ctx = 1;\n",
+        ),
+    ]);
+    has(
+        &got,
+        &[
+            ("run", "calls", "Auth"),
+            ("run", "references", "Slice"),
+            ("Cache.Get", "references", "Pool"),
+            ("Cache", "references", "Guard"),
+            ("Main.run", "calls", "OptionParser"),
+            ("Hooks", "references", "Ctx"),
+        ],
+    );
+    lacks(&got, &[("Hooks", "references", "ctx")]);
+}

@@ -364,9 +364,19 @@ pub fn callee(n: Node, src: &[u8]) -> Option<(RefKind, Vec<String>)> {
             // (Swift `Res<Cred>(value: 1)`: a construction written with its
             // type arguments)
             | "constructor_expression"
+            // (C++ `Pool{}`, C `(item){ 0 }`)
+            | "compound_literal_expression"
     ) {
-        // Scala `new Outer.Inner(…)`: the type named through what holds it
-        if let Some(st) = kids(n).into_iter().find(|c| c.kind() == "stable_type_identifier") {
+        // Scala `new Outer.Inner(…)`, `new scopt.OptionParser[Config](…)`:
+        // the type named through what holds it
+        let stable = kids(n).into_iter().find_map(|c| match c.kind() {
+            "stable_type_identifier" => Some(c),
+            "generic_type" => {
+                c.child_by_field_name("type").filter(|t| t.kind() == "stable_type_identifier")
+            }
+            _ => None,
+        });
+        if let Some(st) = stable {
             return Some((RefKind::New, stable_path(st, src)));
         }
         let t = n
@@ -478,6 +488,14 @@ fn types_in(
         } else {
             ctx
         };
+        // a parameter of a function type (`(ctx: RefinementCtx) => void`):
+        // its type is a type, its name is not
+        if matches!(k, "required_parameter" | "optional_parameter" | "rest_parameter") {
+            if let Some(t) = node.child_by_field_name("type") {
+                stack.push((t, "parameter_type"));
+            }
+            continue;
+        }
         stack.extend(kids(node).into_iter().map(|c| (c, sub)));
     }
 }
@@ -3507,6 +3525,28 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                 "declaration" => {
                     if let Some(t) = n.child_by_field_name("type") {
                         types_in(t, src, "variable_type", &mut types);
+                    }
+                }
+                // a member function declared in its class: `static Pool*
+                // Get(Slice& s);`, `virtual Handle* Lookup(…) = 0;`
+                "field_declaration" => {
+                    if let Some(t) = n.child_by_field_name("type") {
+                        types_in(t, src, "field", &mut types);
+                    }
+                }
+                // `friend class Wrap<Pool, true>;`, `auto make() -> Pool`,
+                // `setup<Slice>(p)`: a type named as a friend, as a trailing
+                // result, as an explicit template argument of a call
+                "friend_declaration" | "trailing_return_type" => {
+                    for t in kids(n) {
+                        types_in(t, src, "type", &mut types);
+                    }
+                }
+                "template_function" | "template_method" => {
+                    if let Some(a) = n.child_by_field_name("arguments") {
+                        for t in kids(a) {
+                            types_in(t, src, "generic_arg", &mut types);
+                        }
                     }
                 }
                 // `typedef item *item_ptr;`: what the name stands for (a

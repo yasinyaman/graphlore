@@ -77,6 +77,8 @@ LEAVES = {"python": {"identifier"}, "csharp": {"identifier"}, "php": {"name"}}
 # Places the reader leaves out on purpose: "language: holder.field" -> why.
 DECIDED: dict[str, str] = {
     "go: method_declaration.receiver": "the type a method is declared for owns it; it is not a use of the type",
+    "kotlin: receiver_type.-": "the type an extension is written for owns it (`Def::receiver`), as a Go method's receiver does",
+    "kotlin: this_expression.-": "`this@Outer` is a label, not a use of the type",
     "rust: impl_item.type": "the type an `impl` is of owns what the block declares; it is not a use of the type",
     "kotlin: class_declaration.-": "the declaration's own name (the grammar gives it no `name` field)",
     "kotlin: object_declaration.-": "the declaration's own name",
@@ -138,7 +140,7 @@ def measure(lang: str, src: bytes, rel: str, facts: dict[str, Any], own: set[str
     read: dict[int, set[str]] = collections.defaultdict(set)
     for r in facts.get("refs", []):
         for seg in r.get("path", []):
-            read[r["line"]].add(seg.split("<")[0].lstrip("$"))
+            read[r["line"]].add(seg.split("<")[0])
     for imp in facts.get("imports", []):
         line = imp.get("line") or 0
         for key in ("module", "name", "alias"):

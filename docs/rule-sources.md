@@ -195,7 +195,7 @@ Phase 0 is done (engine 0.5.61; no rule changed, and the 45 audit graphs
 have the same edges as before):
 
 - **The cases say how they were found**: 425 from the specification, 71
-  shown by a compiler, 14 by comparison (and, since, 20 from the grammar). None has a `source` yet: that
+  shown by a compiler, 14 by comparison (and, since, 26 from the grammar). None has a `source` yet: that
   number is what phase 2 raises.
 - **Every case is compiled by its own language**: 510 of 510, Scala's 28
   included now that a Scala compiler runs here.
@@ -237,31 +237,31 @@ have the same edges as before):
   file of another name (RestSharp), the second framework of a multi-target
   project, and a version set on the command line.
 
-Phase 1 is under way. `benchmarks/positions.py` parses the audit's
-repositories with each grammar, takes every name of a type the repository
-itself defines written where a type is, names the place by the node that
-holds it (`type_spec.type`, `const_spec.type`, `throws.-`) and asks the engine
-whether it read a use there. Over 13 languages (JavaScript and Ruby write no
-types) the first run found 88.9% of the names read and 55 places read less
-than nine times in ten. Engine 0.5.62 reads the first half of that list:
-97.0% of 48,286 names, 26 places left.
+Phase 1 is done for the places a type is written. `benchmarks/positions.py`
+parses the audit's repositories with each grammar, takes every name of a type
+the repository itself defines written where a type is, names the place by the
+node that holds it (`type_spec.type`, `const_spec.type`, `throws.-`) and asks
+the engine whether it read a use there. Over 13 languages (JavaScript and Ruby
+write no types) the first run found 88.9% of the names read and 55 places read
+less than nine times in ten. Engine 0.5.62 reads 99.6% of 47,906 names, and
+five places are left under nine in ten.
 
 | Language | places | names of the repository's own types | read with 0.5.61 | read with 0.5.62 |
 |---|--:|--:|--:|--:|
 | c | 6 | 108 | 49.1% | 108 (100.0%) |
-| c/c++ header | 26 | 2,547 | 82.3% | 2,245 (88.1%) |
-| cpp | 16 | 948 | 77.2% | 872 (92.0%) |
+| c/c++ header | 26 | 2,547 | 82.3% | 2,526 (99.2%) |
+| cpp | 16 | 948 | 77.2% | 939 (99.1%) |
 | csharp | 22 | 4,830 | 98.4% | 4,814 (99.7%) |
 | go | 16 | 3,163 | 61.8% | 3,163 (100.0%) |
 | java | 20 | 15,701 | 91.3% | 15,700 (100.0%) |
-| kotlin | 19 | 4,123 | 93.9% | 3,873 (93.9%) |
+| kotlin | 19 | 3,743 | 93.9% | 3,701 (98.9%) |
 | php | 10 | 1,205 | 90.3% | 1,205 (100.0%) |
 | python | 4 | 704 | 100.0% | 704 (100.0%) |
 | rust | 18 | 4,737 | 99.5% | 4,734 (99.9%) |
-| scala | 18 | 676 | 78.3% | 586 (86.7%) |
+| scala | 18 | 676 | 78.3% | 668 (98.8%) |
 | swift | 11 | 3,326 | 87.5% | 3,303 (99.3%) |
 | tsx | 6 | 98 | 100.0% | 98 (100.0%) |
-| typescript | 31 | 6,120 | 86.6% | 5,411 (88.4%) |
+| typescript | 31 | 6,120 | 86.6% | 6,070 (99.2%) |
 
 What 0.5.62 reads, none of which a repository comparison had pointed at
 (twenty cases of the checklist, marked `grammar`):
@@ -278,23 +278,38 @@ What 0.5.62 reads, none of which a repository comparison had pointed at
   varargs parameter and of an interface's constant;
 - Swift: `throws(E)`, a protocol property's type, `(any P).self`, and
   `Box<T>(…)` as a construction of `Box`;
-- C#: `new T[n]`; Scala: a `val`'s declared type and `new Outer.Inner(…)`;
-  Rust: the struct a pattern takes apart.
+- C#: `new T[n]`; Scala: a `val`'s declared type, `new Outer.Inner(…)` and
+  `new p.T[A](…)`; Rust: the struct a pattern takes apart;
+- C++: `T{…}` as a construction (cpr's whole request API is written that
+  way: 660 calls), the result type of a member function declared in its
+  class, explicit template arguments of a call, a trailing result type, a
+  `friend`;
+- TypeScript: the parameters of a function type name their types and no
+  longer their names (`(err: Err) => void` was read as a type `err`).
 
-On the 45 audit repositories that is 4,050 more reference edges and 200 more
-calls, and the compilers agree with them: Go 12,273 of 12,278 edges where
-`go/types` has an answer (five wrong, as before), rust-analyzer 98.5%, Roslyn
-97.9%, the Scala compiler's files 97.3% (96.7%), TypeScript's 99.5%; the
-floor of graphify's confirmed edges holds.
+On the 45 audit repositories that is 4,300 more reference edges and
+950 more calls, and the compilers agree with them: Go 12,273 of
+12,278 edges where `go/types` has an answer (five wrong, as before),
+rust-analyzer 98.5%, Roslyn 97.9%, the Scala compiler's files 97.3% (96.7%),
+TypeScript's 99.5%; the floor of graphify's confirmed edges holds, and the
+audit of every tool on the native graphs has no new finding. (C and C++ have no compiler to
+ask yet: their part, cpr's brace constructions above all, is checked by the
+cases and by reading samples only.)
 
-Left (`python benchmarks/positions.py --root …` prints each with an
-example): TypeScript's multi-line signatures and type parameter defaults,
-C++ explicit template arguments and member declarations in headers, a Kotlin
-extension's receiver type, Scala `new p.T[A](…)`. Some of these are the
-measure's and not the reader's (a declaration that runs over several lines is
-matched by line). Eight places are left out on purpose and say why
-(`DECIDED` in the script: the type an `impl` is of, a Go method's receiver, a
-declaration's own name).
+Ten places are left out on purpose and say why (`DECIDED` in the script: the
+type an `impl` is of, a Go method's receiver, a Kotlin extension's receiver,
+a declaration's own name). What is left under nine in ten is small: a C++
+specialization that inherits from its own template, a Kotlin type annotation
+inside a function type, two Swift shapes.
+
+Twenty-six cases of the checklist are marked `grammar`. One mistake of the
+measure was found on the way: it compared `$`-prefixed TypeScript names
+without their `$`, and reported zod's `$ZodType` family as unread.
+
+What this phase does not cover: the places a *value* name is written (a
+call's callee, a member read). Those are read by other rules and are
+measured by the compilers' "missed" lists; the same listing for them is the
+next use of this script.
 
 One thing the cases showed that is not a position: a Swift protocol's
 property requirement is a definition of its own named `var handler`, of kind
