@@ -29,6 +29,15 @@ reason, and is not listed again. `--grammar DIR` (the cargo registry's
 type can be written that the corpus never showed.
 
 JavaScript and Ruby write no types and are not measured.
+
+`--values` measures the other half: every name of the repository's own
+functions, methods, constants, variables, properties and enum members written
+where a value is (a call's callee, a member read, an argument), named the same
+way (`call_expression.function`, `arguments.-`), with `[member]` when the name
+is not the head of the path it is in (`a.b` for `b`). Names that are also a
+local or a parameter somewhere in the file are left out (the measure cannot
+tell which is meant), and so are a definition's own name and import lines.
+All 15 report languages are measured, JavaScript and Ruby included.
 """
 from __future__ import annotations
 
@@ -76,6 +85,24 @@ LEAVES = {"python": {"identifier"}, "csharp": {"identifier"}, "php": {"name"}}
 
 # Places the reader leaves out on purpose: "language: holder.field" -> why.
 DECIDED: dict[str, str] = {
+    # (value names, `--values`)
+    "typescript: pair.key": "a key of an object literal names a property of the object being made, whose type the literal does not say",
+    "tsx: pair.key": "a key of an object literal (see typescript)",
+    "javascript: pair.key": "a key of an object literal (see typescript)",
+    "go: keyed_element.key": "a struct literal's field names: the value being made, read with its type, not as uses",
+    "rust: field_initializer.field": "a struct literal's field names (see go)",
+    "swift: value_argument_label.-": "an argument's label names the parameter it is for",
+    "swift: parameter.external_name": "a parameter's external label",
+    "swift: modifiers.-[member]": "the arguments of an attribute (`@available(*, deprecated, message: …)`)",
+    "php: argument.name": "a named argument's label names the parameter it is for",
+    "rust: macro_invocation.macro": "a macro is no function of the project, whatever its name",
+    "rust: macro_invocation.macro[member]": "a macro named through its crate (`log::debug!`)",
+    "cpp: field_initializer.-": "a constructor setting its own fields couples nothing (the state rule)",
+    "c/c++ header: field_initializer.-": "a constructor setting its own fields couples nothing (the state rule)",
+    "tsx: export_specifier.name": "an export list names what the file declares; it is read as the file's exports",
+    "typescript: export_specifier.name": "an export list names what the file declares; it is read as the file's exports",
+    "javascript: export_specifier.name": "an export list names what the file declares; it is read as the file's exports",
+    "c: function_declarator.declarator": "a macro called at file level, which the grammar reads as a declaration",
     "go: method_declaration.receiver": "the type a method is declared for owns it; it is not a use of the type",
     "kotlin: receiver_type.-": "the type an extension is written for owns it (`Def::receiver`), as a Go method's receiver does",
     "kotlin: this_expression.-": "`this@Outer` is a label, not a use of the type",
@@ -184,6 +211,128 @@ def measure(lang: str, src: bytes, rel: str, facts: dict[str, Any], own: set[str
             samples[key] = f"{rel}:{node.start_point[0] + 1}  {text}"
 
 
+# --- value names ------------------------------------------------------------
+
+VALUE_LEAVES = {"identifier", "field_identifier", "property_identifier", "simple_identifier", "name",
+                "constant", "shorthand_property_identifier", "private_property_identifier",
+                "instance_variable"}
+# Names the language's own prelude gives, which a project enum may also have as a
+# case (`None`, `Ok`): written alone they are the prelude's.
+PRELUDE = {"rust": {"None", "Some", "Ok", "Err", "Default"}, "swift": {"none", "some"},
+           "scala": {"None", "Some"}}
+VALUE_KINDS = {"function", "method", "constant", "variable", "property", "enum_member"}
+
+# Nodes that only build a path out of names: the place is what holds them.
+VALUE_BUILDERS = {
+    "member_expression", "selector_expression", "field_expression", "field_access", "attribute",
+    "navigation_expression", "navigation_suffix", "member_access_expression", "scoped_identifier",
+    "qualified_identifier", "class_constant_access_expression", "nullsafe_member_access_expression",
+    "conditional_access_expression", "member_binding_expression", "stable_identifier",
+    "parenthesized_expression", "await_expression", "non_null_expression", "scope_resolution",
+    "directly_assignable_expression", "qualified_name", "namespace_name", "relative_scope",
+    "postfix_expression", "force_unwrap_expression", "optional_chaining_expression", "generic_name",
+    "simple_name", "dynamic_variable_name", "variable_name",
+}
+DECLARES = ("_declaration", "_definition", "_declarator", "_item", "_spec", "_signature",
+            "parameter", "method", "function", "class", "module", "singleton_method", "enum_variant",
+            "enum_entry", "enum_case", "pair_pattern")
+SKIP_ABOVE = ("import", "use_declaration", "using_directive", "package", "include", "comment",
+              "preproc", "decorator", "annotation", "attribute_item", "attribute_list",
+              "use_as_clause", "extern_crate")
+
+
+def value_position(leaf: Any) -> tuple[str, Any] | None:
+    """The place a value name is written, as `holder.field` (`[member]` when it
+    is not the head of the path it is in), and the holder."""
+    up = leaf.parent
+    while up is not None:
+        if any(w in up.type for w in SKIP_ABOVE):
+            return None
+        up = up.parent
+    node, child, member = leaf.parent, leaf, False
+    depth = 0
+    while node is not None and depth < 30:
+        field = next((node.field_name_for_child(i) for i in range(node.child_count)
+                      if node.child(i).id == child.id), None)
+        if node.type in VALUE_BUILDERS:
+            first = next((c for c in node.children if c.is_named), None)
+            if first is not None and first.id != child.id:
+                member = True
+            child, node, depth = node, node.parent, depth + 1
+            continue
+        # a declaration's own name, a parameter's
+        if field == "name" and not member and node.type.endswith(DECLARES):
+            return None
+        if field in ("pattern", "name") and "parameter" in node.type:
+            return None
+        # (a Go keyed literal's key names a field of the value being made)
+        if node.type == "literal_element" and node.parent is not None \
+                and node.parent.type == "keyed_element" and node.parent.named_children \
+                and node.parent.named_children[0].id == node.id:
+            return "keyed_element.key", node
+        key = f"{node.type}.{field or '-'}"
+        return (key + "[member]" if member else key), node
+    return None
+
+
+def measure_values(lang: str, src: bytes, rel: str, facts: dict[str, Any], own: set[str], parser: Any,
+                   seen: dict[str, list[int]], samples: dict[str, str]) -> None:
+    # (the engine records a use once per definition it is written in: a name
+    # is read when a use of it is recorded in the innermost definition around)
+    where: dict[str, list[int]] = collections.defaultdict(list)
+    for r in facts.get("refs", []):
+        for seg in r.get("path", []):
+            where[seg.split("<")[0].split("@")[0].lstrip("$@")].append(r["line"])
+    spans = sorted(((d.get("region_start") or d["def_line"], d.get("end_line") or d["def_line"])
+                    for d in facts.get("defs", []) if d.get("kind") not in ("constant", "variable", "property",
+                                                                              "enum_member")),
+                   key=lambda s: s[1] - s[0])
+
+    def around(line: int) -> tuple[int, int]:
+        return next(((a, b) for a, b in spans if a <= line <= b), (line, line))
+
+    local = {lc["name"].split("@")[0].lstrip("$") for lc in facts.get("locals", [])}
+    # (a closure's parameters are renamed `name@byte` in the uses)
+    local.update(seg.split("@")[0] for r in facts.get("refs", []) for seg in r.get("path", []) if "@" in seg)
+    declared = {(d["name"].removeprefix("var ").removeprefix("let "), d.get("def_line"))
+                for d in facts.get("defs", [])}
+    tree = parser.parse(src)
+    lines_of = src.splitlines()
+    stack = [tree.root_node]
+    while stack:
+        node = stack.pop()
+        if node.child_count:
+            stack.extend(node.children)
+            continue
+        if node.type not in VALUE_LEAVES:
+            continue
+        name = node.text.decode("utf-8", "replace").lstrip("$@")
+        if name not in own or name in local or name in PRELUDE.get(lang, ()):
+            continue
+        # (a PHP `$x` written alone is a local: only `$this->x` is a member)
+        if lang == "php" and node.parent is not None and node.parent.type == "variable_name" \
+                and (node.parent.parent is None or "member" not in node.parent.parent.type):
+            continue
+        line = node.start_point[0] + 1
+        if (name, line) in declared:
+            continue
+        # (a type place is the other measure's)
+        if position(node, lang) is not None:
+            continue
+        found = value_position(node)
+        if found is None:
+            continue
+        key, holder = found
+        lo, hi = around(line)
+        hit = any(lo <= ln <= hi or abs(ln - line) <= 2 for ln in where.get(name, ()))
+        row = seen.setdefault(key, [0, 0])
+        row[0] += 1
+        row[1] += int(hit)
+        if not hit and key not in samples:
+            text = lines_of[line - 1].decode("utf-8", "replace").strip()[:100]
+            samples[key] = f"{rel}:{line}  {text}"
+
+
 def grammar_positions(registry: Path, lang: str) -> set[str]:
     """`holder.field` for every field of the grammar that can hold a type."""
     crate = {"csharp": "c-sharp", "c/c++ header": "cpp", "tsx": "typescript", "kotlin": "kotlin-sg"}.get(lang, lang)
@@ -212,26 +361,34 @@ def main() -> int:
     ap.add_argument("--grammar", help="the cargo registry's sources: also list the places the corpus never showed")
     ap.add_argument("--json", help="write every place's counts here")
     ap.add_argument("--baseline", help="an earlier --json: exit 1 when a place is read less than it was")
+    ap.add_argument("--values", action="store_true",
+                    help="measure the places a name of the repository's own functions and values is written")
     args = ap.parse_args()
     import graphlore_engine as engine
     from tree_sitter_language_pack import get_parser
 
-    wanted = set(args.only.split(",")) if args.only else set(PACK)
+    pack = dict(PACK, javascript="javascript", ruby="ruby") if args.values else PACK
+    kinds = VALUE_KINDS if args.values else TYPE_KINDS
+    measurer = measure_values if args.values else measure
+    wanted = set(args.only.split(",")) if args.only else set(pack)
     by_lang: dict[str, dict[str, list[tuple[Path, str]]]] = collections.defaultdict(dict)
     root = Path(args.root).resolve()
     for repo in sorted(p for p in root.iterdir() if p.is_dir()):
         for path in sorted(repo.rglob("*")):
             lang = EXT_LANG.get(path.suffix)
             parts = path.relative_to(repo).parts
-            if (lang in wanted and lang in PACK and path.is_file()
+            if (lang in wanted and lang in pack and path.is_file()
                     and not any(p.startswith(".") or p in ("node_modules", "vendor", "graphify-out",
-                                                           "graphlore-native", "target", "build") for p in parts)):
+                                                           "graphlore-native", "target", "build", "docs",
+                                                           "docsets", "website", "third_party", "dist")
+                                for p in parts)
+                    and ".min." not in path.name):
                 by_lang[lang].setdefault(repo.name, []).append((path, str(path.relative_to(repo))))
     out: dict[str, dict[str, Any]] = {}
     for lang in sorted(by_lang):
         seen: dict[str, list[int]] = {}
         samples: dict[str, str] = {}
-        parser = get_parser(PACK[lang])
+        parser = get_parser(pack[lang])
         each = max(1, args.files // len(by_lang[lang]))
         for _repo, files in sorted(by_lang[lang].items()):
             # the types the repository defines, then each file against them
@@ -245,17 +402,19 @@ def main() -> int:
                     facts = json.loads(engine.file_facts(src, rel))
                 except Exception:  # noqa: BLE001 (a file the engine cannot read is not a position)
                     continue
-                own.update(d["name"] for d in facts.get("defs", []) if d.get("kind") in TYPE_KINDS)
+                own.update(d["name"].removeprefix("var ").removeprefix("let ")
+                           for d in facts.get("defs", []) if d.get("kind") in kinds)
                 read_files.append((src, rel, facts))
             step = max(1, len(read_files) // each)
             for src, rel, facts in read_files[::step][:each]:
-                measure(lang, src, rel, facts, own, parser, seen, samples)
+                measurer(lang, src, rel, facts, own, parser, seen, samples)
         out[lang] = {key: {"seen": n, "read": r, "example": samples.get(key, "")}
                      for key, (n, r) in sorted(seen.items())}
         counted = [v for k, v in seen.items() if f"{lang}: {k}" not in DECIDED]
+        what = "value" if args.values else "type"
         total = sum(n for n, _ in counted)
         read = sum(r for _, r in counted)
-        print(f"\n== {lang}: {len(seen)} places, {total:,} type names, {read:,} read ({100 * read / max(total, 1):.1f}%)")
+        print(f"\n== {lang}: {len(seen)} places, {total:,} {what} names, {read:,} read ({100 * read / max(total, 1):.1f}%)")
         for key, (n, r) in sorted(seen.items(), key=lambda kv: kv[1][1] - kv[1][0]):
             if f"{lang}: {key}" in DECIDED or (not args.all and (n < 3 or r >= 0.9 * n)):
                 continue

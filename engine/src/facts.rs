@@ -533,6 +533,10 @@ pub enum Implicit {
     Typed(Vec<String>),
     /// The value a function returns: its declared result.
     Return,
+    /// Beside a value whose type it takes: the other side of `==`, the target
+    /// of an assignment, the subject of a `switch` (`b == .body`, `case
+    /// .body:`). The value's path.
+    Value(Vec<String>),
 }
 
 /// A parameter of a callable.

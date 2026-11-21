@@ -3098,3 +3098,35 @@ fn more_positions_a_type_is_written_at() {
     );
     lacks(&got, &[("Hooks", "references", "ctx")]);
 }
+
+#[test]
+fn value_places_the_reader_did_not_record() {
+    let got = quals("values", &[
+        (
+            "a.ts",
+            "export class Request {\n  retryCount = 0;\n  headers: string[] = [];\n}\n\nexport function make(first: Request): number {\n  const request = first;\n  request.retryCount = 1;\n  return first.headers.length;\n}\n",
+        ),
+        (
+            "a.swift",
+            "enum Section {\n    case body\n    case header\n}\n\nstruct Holder {\n    var section: Section\n}\n\nfunc compare(h: Holder) -> Bool {\n    return h.section == .header\n}\n",
+        ),
+        (
+            "src/lib.rs",
+            "pub struct Args {\n    pub crlf: bool,\n}\n\npub fn check(args: &Args) {\n    assert_eq!(false, args.crlf);\n}\n",
+        ),
+        (
+            "src/app/A.scala",
+            "package app\n\nclass Parser {\n  def opt[A](name: String): Int = 1\n\n  def run(): Int = opt[String](\"foo\")\n}\n",
+        ),
+    ]);
+    has(
+        &got,
+        &[
+            ("make", "writes", "Request.retryCount"),
+            ("make", "reads", "Request.headers"),
+            ("compare", "references", "Section"),
+            ("check", "reads", "Args.crlf"),
+            ("Parser.run", "calls", "Parser.opt"),
+        ],
+    );
+}

@@ -1,6 +1,6 @@
 {
- "passed": 536,
- "total": 536,
+ "passed": 541,
+ "total": 541,
  "cases": [
   {
    "id": "python/module-function",
@@ -3214,6 +3214,36 @@
   },
   {
    "id": "typescript/function-type-parameter-types",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/member-of-a-local",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "python/member-of-a-parameter",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/implicit-member-beside-a-value",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/macro-argument-member-read",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "scala/generic-call",
    "ok": true,
    "missing": [],
    "unwanted": []

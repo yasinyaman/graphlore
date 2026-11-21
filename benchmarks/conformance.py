@@ -2137,6 +2137,26 @@ case("typescript", "function-type-parameter-types", "the parameters of a functio
      TS, {"a.ts": "export interface Ctx {\n  id: number;\n}\n\nexport interface Err {\n  message: string;\n}\n\nexport interface Hooks {\n  preprocess: (arg: unknown, ctx: Ctx) => unknown;\n}\n\nexport function run(cb: (err: Err) => void): void {\n  cb({ message: \"x\" });\n}\n\nexport const err = 1;\n"},
      [("Hooks", "references", "Ctx"), ("run", "references", "Err")], [("run", "references", "a.ts:err")])
 
+# The places a value name is written that the reader did not record
+# (`positions.py --values`, engine 0.5.63).
+found_by("grammar")
+case("typescript", "member-of-a-local", "a member read or written through a local or a parameter is the member of the object it holds",
+     TS, {"a.ts": "export class Request {\n  retryCount = 0;\n  headers: string[] = [];\n}\n\nexport function make(first: Request): number {\n  const request = first;\n  request.retryCount = 1;\n  return first.headers.length;\n}\n"},
+     [("make", "writes", "Request.retryCount"), ("make", "reads", "Request.headers")])
+case("python", "member-of-a-parameter", "a member read through a typed parameter is the member of its type",
+     PY, {"a.py": "class Ctx:\n    command_path = \"\"\n\n\ndef run(ctx: Ctx) -> str:\n    return \" \".join([ctx.command_path])\n"},
+     [("run", "reads", "Ctx.command_path")])
+case("swift", "implicit-member-beside-a-value", "`.case` compared with, assigned to or switched on a value is a case of that value's type",
+     SW, {"a.swift": "enum Section {\n    case body\n    case header\n}\n\nenum Other {\n    case body\n}\n\nstruct Holder {\n    var section: Section\n}\n\nfunc compare(h: Holder) -> Bool {\n    return h.section == .header\n}\n\nfunc branch(h: Holder) -> Int {\n    switch h.section {\n    case .body:\n        return 1\n    default:\n        return 0\n    }\n}\n"},
+     [("compare", "references", "Section"), ("branch", "references", "Section")],
+     [("compare", "references", "Other"), ("branch", "references", "Other")])
+case("rust", "macro-argument-member-read", "a field read in a macro's arguments is a read of the field",
+     RS, {"Cargo.toml": CARGO, "src/lib.rs": "pub struct Args {\n    pub crlf: bool,\n}\n\npub fn check(args: &Args) {\n    assert_eq!(false, args.crlf);\n}\n"},
+     [("check", "reads", "Args.crlf")])
+case("scala", "generic-call", "`f[T](…)` calls f",
+     SC, {"src/app/A.scala": "package app\n\nclass Parser {\n  def opt[A](name: String): Int = 1\n\n  def run(): Int = opt[String](\"foo\")\n}\n"},
+     [("Parser.run", "calls", "Parser.opt")])
+
 # --- running ------------------------------------------------------------------
 
 def _matches(node: dict[str, Any], want: str) -> bool:

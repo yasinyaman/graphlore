@@ -1,0 +1,3954 @@
+{
+ "c": {
+  "ERROR.-": {
+   "example": "tests/unity/test/tests/testunity.c:2315  TEST_ASSERT_EACH_EQUAL_PTR(&B, p0, 4);",
+   "read": 15,
+   "seen": 19
+  },
+  "argument_list.-": {
+   "example": "tests/unity/extras/fixture/test/unity_fixture_Test.c:307  TEST_ASSERT_EQUAL(saved, Unity.NumberOfTests);",
+   "read": 325,
+   "seen": 347
+  },
+  "argument_list.-[member]": {
+   "example": "tests/unity/extras/fixture/test/unity_fixture_Test.c:307  TEST_ASSERT_EQUAL(saved, Unity.NumberOfTests);",
+   "read": 225,
+   "seen": 226
+  },
+  "assignment_expression.left": {
+   "example": "tests/unity/examples/example_2/test/TestProductionCode.c:49  Counter = 0x1234;",
+   "read": 37,
+   "seen": 38
+  },
+  "assignment_expression.left[member]": {
+   "example": "",
+   "read": 223,
+   "seen": 223
+  },
+  "assignment_expression.right": {
+   "example": "",
+   "read": 32,
+   "seen": 32
+  },
+  "assignment_expression.right[member]": {
+   "example": "",
+   "read": 10,
+   "seen": 10
+  },
+  "binary_expression.left": {
+   "example": "",
+   "read": 12,
+   "seen": 12
+  },
+  "binary_expression.left[member]": {
+   "example": "",
+   "read": 70,
+   "seen": 70
+  },
+  "binary_expression.right": {
+   "example": "",
+   "read": 4,
+   "seen": 4
+  },
+  "binary_expression.right[member]": {
+   "example": "",
+   "read": 20,
+   "seen": 20
+  },
+  "call_expression.function": {
+   "example": "",
+   "read": 4159,
+   "seen": 4159
+  },
+  "call_expression.function[member]": {
+   "example": "",
+   "read": 28,
+   "seen": 28
+  },
+  "cast_expression.value": {
+   "example": "",
+   "read": 3,
+   "seen": 3
+  },
+  "cast_expression.value[member]": {
+   "example": "",
+   "read": 3,
+   "seen": 3
+  },
+  "conditional_expression.condition[member]": {
+   "example": "",
+   "read": 8,
+   "seen": 8
+  },
+  "conditional_expression.consequence[member]": {
+   "example": "",
+   "read": 10,
+   "seen": 10
+  },
+  "declaration.declarator": {
+   "example": "tests/unity/test/tests/testunity.c:58  static int SetToOneMeanWeAlreadyCheckedThisGuy;",
+   "read": 0,
+   "seen": 2
+  },
+  "field_declaration.declarator": {
+   "example": "test.c:66  } ssl;",
+   "read": 0,
+   "seen": 4
+  },
+  "field_designator.-": {
+   "example": "",
+   "read": 5,
+   "seen": 5
+  },
+  "function_declarator.declarator": {
+   "example": "tests/unity/test/tests/testparameterized.c:108  TEST_ASSERT_TRUE(0);",
+   "read": 31,
+   "seen": 152
+  },
+  "if_statement.condition": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "if_statement.condition[member]": {
+   "example": "",
+   "read": 31,
+   "seen": 31
+  },
+  "init_declarator.value": {
+   "example": "",
+   "read": 4,
+   "seen": 4
+  },
+  "init_declarator.value[member]": {
+   "example": "",
+   "read": 5,
+   "seen": 5
+  },
+  "initializer_list.-": {
+   "example": "",
+   "read": 17,
+   "seen": 17
+  },
+  "initializer_pair.value": {
+   "example": "test.c:1010  .reallocFn = hi_realloc_fail,",
+   "read": 11,
+   "seen": 14
+  },
+  "macro_type_specifier.name": {
+   "example": "tests/unity/test/tests/testunity.c:2689  TEST_ASSERT_EQUAL_HEX32_ARRAY(p0, p3, 1);",
+   "read": 13,
+   "seen": 14
+  },
+  "parenthesized_declarator.-": {
+   "example": "tests/unity/extras/fixture/test/unity_fixture_Test.c:19  TEST_TEAR_DOWN(UnityFixture)",
+   "read": 2,
+   "seen": 3
+  },
+  "pointer_declarator.declarator": {
+   "example": "test.c:60  const char *host;",
+   "read": 0,
+   "seen": 1
+  },
+  "pointer_expression.argument": {
+   "example": "tests/misc_tests.c:519  printbuffer buffer = {NULL, 10, 0, 0, false, false, {&malloc, &free, &failing_realloc}};",
+   "read": 5,
+   "seen": 10
+  },
+  "pointer_expression.argument[member]": {
+   "example": "",
+   "read": 7,
+   "seen": 7
+  },
+  "sizeof_expression.value": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "sizeof_expression.value[member]": {
+   "example": "",
+   "read": 6,
+   "seen": 6
+  },
+  "subscript_expression.argument[member]": {
+   "example": "",
+   "read": 2,
+   "seen": 2
+  },
+  "subscript_expression.index[member]": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "unary_expression.argument": {
+   "example": "",
+   "read": 2,
+   "seen": 2
+  },
+  "unary_expression.argument[member]": {
+   "example": "",
+   "read": 4,
+   "seen": 4
+  },
+  "update_expression.argument": {
+   "example": "",
+   "read": 10,
+   "seen": 10
+  },
+  "update_expression.argument[member]": {
+   "example": "",
+   "read": 31,
+   "seen": 31
+  }
+ },
+ "c/c++ header": {
+  "argument_list.-": {
+   "example": "",
+   "read": 7,
+   "seen": 7
+  },
+  "argument_list.-[member]": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "assignment_expression.left[member]": {
+   "example": "",
+   "read": 11,
+   "seen": 11
+  },
+  "assignment_expression.right": {
+   "example": "",
+   "read": 6,
+   "seen": 6
+  },
+  "binary_expression.left[member]": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "call_expression.function": {
+   "example": "",
+   "read": 10,
+   "seen": 10
+  },
+  "cast_expression.value[member]": {
+   "example": "",
+   "read": 4,
+   "seen": 4
+  },
+  "condition_clause.value[member]": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "declaration.declarator": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "destructor_name.-": {
+   "example": "",
+   "read": 2,
+   "seen": 2
+  },
+  "function_declarator.declarator": {
+   "example": "adapters/libuv.h:108  static void redisLibuvTimeout(uv_timer_t *timer) {",
+   "read": 0,
+   "seen": 1
+  },
+  "unary_expression.argument[member]": {
+   "example": "",
+   "read": 3,
+   "seen": 3
+  }
+ },
+ "cpp": {
+  "ERROR.-": {
+   "example": "",
+   "read": 5,
+   "seen": 5
+  },
+  "argument_list.-": {
+   "example": "test/httpServer.cpp:125  mg_send(static_cast<mg_connection*>(connection), response.c_str(), response.length());",
+   "read": 327,
+   "seen": 331
+  },
+  "argument_list.-[member]": {
+   "example": "db/version_set.cc:196  EncodeFixed64(value_buf_ + 8, (*flist_)[index_]->file_size);",
+   "read": 131,
+   "seen": 132
+  },
+  "array_declarator.declarator": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "array_declarator.size": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "assignment_expression.left": {
+   "example": "",
+   "read": 138,
+   "seen": 138
+  },
+  "assignment_expression.left[member]": {
+   "example": "db/db_impl.cc:849  compact->current_output()->file_size = current_bytes;",
+   "read": 104,
+   "seen": 105
+  },
+  "assignment_expression.right": {
+   "example": "db/corruption_test.cc:142  offset = file_size;",
+   "read": 18,
+   "seen": 22
+  },
+  "assignment_expression.right[member]": {
+   "example": "",
+   "read": 17,
+   "seen": 17
+  },
+  "binary_expression.left": {
+   "example": "db/corruption_test.cc:145  bytes_to_corrupt = file_size - offset;",
+   "read": 73,
+   "seen": 97
+  },
+  "binary_expression.left[member]": {
+   "example": "",
+   "read": 39,
+   "seen": 39
+  },
+  "binary_expression.right": {
+   "example": "db/corruption_test.cc:144  if (offset + bytes_to_corrupt > file_size) {",
+   "read": 81,
+   "seen": 95
+  },
+  "binary_expression.right[member]": {
+   "example": "",
+   "read": 19,
+   "seen": 19
+  },
+  "call_expression.function": {
+   "example": "",
+   "read": 3138,
+   "seen": 3138
+  },
+  "call_expression.function[member]": {
+   "example": "",
+   "read": 4370,
+   "seen": 4370
+  },
+  "cast_expression.value": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "cast_expression.value[member]": {
+   "example": "",
+   "read": 3,
+   "seen": 3
+  },
+  "condition_clause.value": {
+   "example": "",
+   "read": 16,
+   "seen": 16
+  },
+  "condition_clause.value[member]": {
+   "example": "",
+   "read": 8,
+   "seen": 8
+  },
+  "conditional_expression.alternative": {
+   "example": "db/fault_injection_test.cc:360  int64_t sync_pos = pos_at_last_sync_ == -1 ? 0 : pos_at_last_sync_;",
+   "read": 2,
+   "seen": 3
+  },
+  "conditional_expression.alternative[member]": {
+   "example": "",
+   "read": 2,
+   "seen": 2
+  },
+  "conditional_expression.condition": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "conditional_expression.condition[member]": {
+   "example": "",
+   "read": 3,
+   "seen": 3
+  },
+  "conditional_expression.consequence": {
+   "example": "cpr/session.cpp:1101  const CURLcode result = curl_mime_data_cb(mimePart, stream->read.size, ReadMultipartStream, stream->",
+   "read": 0,
+   "seen": 1
+  },
+  "declaration.declarator": {
+   "example": "db/corruption_test.cc:161  int result;",
+   "read": 15,
+   "seen": 23
+  },
+  "declaration.declarator[member]": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "delete_expression.-": {
+   "example": "",
+   "read": 11,
+   "seen": 11
+  },
+  "destructor_name.-": {
+   "example": "db/fault_injection_test.cc:112  ~TestWritableFile() override;",
+   "read": 70,
+   "seen": 73
+  },
+  "expression_statement.-[member]": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "field_initializer.-": {
+   "example": "cpr/threadpool.cpp:38  Impl(boost::asio::io_context& context, size_t minimum, size_t maximum) : backend(MakeThreadPoolBacke",
+   "read": 25,
+   "seen": 127
+  },
+  "for_range_loop.right": {
+   "example": "",
+   "read": 2,
+   "seen": 2
+  },
+  "function_declarator.declarator": {
+   "example": "db/db_test.cc:55  void Reset() LOCKS_EXCLUDED(mu_) {",
+   "read": 2,
+   "seen": 4
+  },
+  "init_declarator.value": {
+   "example": "table/table_builder.cc:271  Rep* r = rep_;",
+   "read": 2,
+   "seen": 8
+  },
+  "init_declarator.value[member]": {
+   "example": "db/db_impl.cc:837  const uint64_t output_number = compact->current_output()->number;",
+   "read": 4,
+   "seen": 5
+  },
+  "initializer_list.-": {
+   "example": "",
+   "read": 25,
+   "seen": 25
+  },
+  "initializer_list.-[member]": {
+   "example": "",
+   "read": 14,
+   "seen": 14
+  },
+  "new_declarator.length": {
+   "example": "helpers/memenv/memenv.cc:122  blocks_.push_back(new char[kBlockSize]);",
+   "read": 1,
+   "seen": 2
+  },
+  "parameter_declaration.declarator": {
+   "example": "test/asio_context_tests.cpp:44  auto result = pool.Submit([](std::unique_ptr<int> value) { return *value; }, std::make_unique<int>(4",
+   "read": 0,
+   "seen": 1
+  },
+  "pointer_declarator.declarator": {
+   "example": "test/httpServer.cpp:123  [](void* connection) {",
+   "read": 0,
+   "seen": 1
+  },
+  "pointer_expression.argument": {
+   "example": "test/asio_context_tests.cpp:44  auto result = pool.Submit([](std::unique_ptr<int> value) { return *value; }, std::make_unique<int>(4",
+   "read": 121,
+   "seen": 184
+  },
+  "pointer_expression.argument[member]": {
+   "example": "",
+   "read": 67,
+   "seen": 67
+  },
+  "reference_declarator.-": {
+   "example": "",
+   "read": 2,
+   "seen": 2
+  },
+  "return_statement.-": {
+   "example": "db/corruption_test.cc:164  return result;",
+   "read": 10,
+   "seen": 11
+  },
+  "return_statement.-[member]": {
+   "example": "",
+   "read": 10,
+   "seen": 10
+  },
+  "sizeof_expression.value": {
+   "example": "",
+   "read": 6,
+   "seen": 6
+  },
+  "static_assert_declaration.condition[member]": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "subscript_argument_list.-[member]": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "subscript_expression.argument": {
+   "example": "db/version_set.cc:550  const std::vector<FileMetaData*>& files = files_[level];",
+   "read": 59,
+   "seen": 60
+  },
+  "subscript_expression.argument[member]": {
+   "example": "",
+   "read": 36,
+   "seen": 36
+  },
+  "template_argument_list.-": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "unary_expression.argument": {
+   "example": "",
+   "read": 4,
+   "seen": 4
+  },
+  "unary_expression.argument[member]": {
+   "example": "",
+   "read": 12,
+   "seen": 12
+  },
+  "update_expression.argument": {
+   "example": "db/repair.cc:299  std::string copy = TableFileName(dbname_, next_file_number_++);",
+   "read": 15,
+   "seen": 16
+  },
+  "update_expression.argument[member]": {
+   "example": "",
+   "read": 15,
+   "seen": 15
+  },
+  "using_declaration.-[member]": {
+   "example": "",
+   "read": 7,
+   "seen": 7
+  }
+ },
+ "csharp": {
+  "ERROR.-": {
+   "example": "src/RestSharp/RestClient.Extensions.cs:157  public async IAsyncEnumerable<T> StreamJsonAsync<T>(",
+   "read": 0,
+   "seen": 1
+  },
+  "anonymous_object_creation_expression.-": {
+   "example": "",
+   "read": 88,
+   "seen": 88
+  },
+  "anonymous_object_creation_expression.-[member]": {
+   "example": "",
+   "read": 30,
+   "seen": 30
+  },
+  "argument.-": {
+   "example": "",
+   "read": 205,
+   "seen": 205
+  },
+  "argument.-[member]": {
+   "example": "src/Conduit/Program.cs:69  builder.Services.AddJwt(builder.Configuration);",
+   "read": 801,
+   "seen": 830
+  },
+  "argument.name": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "arrow_expression_clause.-": {
+   "example": "",
+   "read": 2,
+   "seen": 2
+  },
+  "arrow_expression_clause.-[member]": {
+   "example": "src/RestSharp/Options/RestClientOptions.cs:119  get => RedirectOptions.MaxRedirects;",
+   "read": 8,
+   "seen": 9
+  },
+  "as_expression.left[member]": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "as_expression.right": {
+   "example": "",
+   "read": 26,
+   "seen": 26
+  },
+  "assignment_expression.left": {
+   "example": "",
+   "read": 339,
+   "seen": 339
+  },
+  "assignment_expression.left[member]": {
+   "example": "src/RestSharp/Options/RestClientOptions.cs:121  if (value.HasValue) RedirectOptions.MaxRedirects = value.Value;",
+   "read": 128,
+   "seen": 129
+  },
+  "assignment_expression.right": {
+   "example": "",
+   "read": 40,
+   "seen": 40
+  },
+  "assignment_expression.right[member]": {
+   "example": "src/CommandLine/Text/HelpText.cs:351  errors = ((NotParsed<T>)parserResult).Errors;",
+   "read": 132,
+   "seen": 137
+  },
+  "binary_expression.left": {
+   "example": "",
+   "read": 30,
+   "seen": 30
+  },
+  "binary_expression.left[member]": {
+   "example": "src/Conduit/Features/Articles/Delete.cs:32  if (article.Author?.PersonId != currentUserAccessor.GetCurrentPersonId())",
+   "read": 271,
+   "seen": 279
+  },
+  "binary_expression.right": {
+   "example": "",
+   "read": 18,
+   "seen": 18
+  },
+  "binary_expression.right[member]": {
+   "example": "src/CommandLine/Core/OptionMapper.cs:39  bool isFlag = pt.Specification.Tag == SpecificationType.Option && ((OptionSpecification)pt.Specifica",
+   "read": 185,
+   "seen": 189
+  },
+  "cast_expression.value": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "cast_expression.value[member]": {
+   "example": "gen/SourceGenerator/InheritedCloneGenerator.cs:43  var methodName    = (string)attributeData.NamedArguments.FirstOrDefault(arg => arg.Key == \"Name\").Va",
+   "read": 170,
+   "seen": 172
+  },
+  "conditional_expression.alternative": {
+   "example": "",
+   "read": 7,
+   "seen": 7
+  },
+  "conditional_expression.alternative[member]": {
+   "example": "",
+   "read": 18,
+   "seen": 18
+  },
+  "conditional_expression.condition": {
+   "example": "",
+   "read": 3,
+   "seen": 3
+  },
+  "conditional_expression.condition[member]": {
+   "example": "",
+   "read": 19,
+   "seen": 19
+  },
+  "conditional_expression.consequence": {
+   "example": "",
+   "read": 12,
+   "seen": 12
+  },
+  "conditional_expression.consequence[member]": {
+   "example": "",
+   "read": 22,
+   "seen": 22
+  },
+  "constant_pattern.-": {
+   "example": "",
+   "read": 28,
+   "seen": 28
+  },
+  "constant_pattern.-[member]": {
+   "example": "src/RestSharp/RestClient.Async.cs:414  Method.Merge  => new(\"MERGE\"),",
+   "read": 97,
+   "seen": 98
+  },
+  "declaration_expression.name": {
+   "example": "",
+   "read": 3,
+   "seen": 3
+  },
+  "element_access_expression.expression": {
+   "example": "",
+   "read": 2,
+   "seen": 2
+  },
+  "element_access_expression.expression[member]": {
+   "example": "",
+   "read": 6,
+   "seen": 6
+  },
+  "expression_element.-[member]": {
+   "example": "",
+   "read": 3,
+   "seen": 3
+  },
+  "file_scoped_namespace_declaration.name[member]": {
+   "example": "src/RestSharp/Serializers/Json/RestClientExtensions.cs:17  namespace RestSharp.Serializers.Json;",
+   "read": 0,
+   "seen": 18
+  },
+  "foreach_statement.right[member]": {
+   "example": "",
+   "read": 12,
+   "seen": 12
+  },
+  "from_clause.-[member]": {
+   "example": "",
+   "read": 4,
+   "seen": 4
+  },
+  "from_clause.name": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "group_clause.-[member]": {
+   "example": "",
+   "read": 6,
+   "seen": 6
+  },
+  "if_statement.condition": {
+   "example": "",
+   "read": 2,
+   "seen": 2
+  },
+  "if_statement.condition[member]": {
+   "example": "",
+   "read": 17,
+   "seen": 17
+  },
+  "initializer_expression.-": {
+   "example": "",
+   "read": 4,
+   "seen": 4
+  },
+  "initializer_expression.-[member]": {
+   "example": "src/RestSharp/Response/RestResponse.cs:79  Version             = httpResponse.RequestMessage?.Version",
+   "read": 3,
+   "seen": 4
+  },
+  "interpolation.-": {
+   "example": "",
+   "read": 4,
+   "seen": 4
+  },
+  "interpolation.-[member]": {
+   "example": "test/RestSharp.InteractiveTests/TwitterClient.cs:95  return $\"{response!.TokenType} {response!.AccessToken}\";",
+   "read": 33,
+   "seen": 35
+  },
+  "invocation_expression.function": {
+   "example": "",
+   "read": 686,
+   "seen": 686
+  },
+  "invocation_expression.function[member]": {
+   "example": "src/RestSharp/Ensure.cs:21  var s = value as string ?? value?.ToString();",
+   "read": 2483,
+   "seen": 2485
+  },
+  "is_pattern_expression.expression[member]": {
+   "example": "",
+   "read": 147,
+   "seen": 147
+  },
+  "join_clause.-[member]": {
+   "example": "",
+   "read": 4,
+   "seen": 4
+  },
+  "lambda_expression.body[member]": {
+   "example": "",
+   "read": 107,
+   "seen": 107
+  },
+  "local_function_statement.name": {
+   "example": "src/RestSharp/RestClient.cs:260  void ConfigureSerializers(ConfigureSerialization? configureSerialization) {",
+   "read": 0,
+   "seen": 1
+  },
+  "method_declaration.returns": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "object_creation_expression.type": {
+   "example": "",
+   "read": 89,
+   "seen": 89
+  },
+  "object_creation_expression.type[member]": {
+   "example": "",
+   "read": 12,
+   "seen": 12
+  },
+  "order_by_clause.-[member]": {
+   "example": "src/CommandLine/Core/InstanceBuilder.cs:96  (from pt in specProps where pt.Specification.IsValue() orderby ((ValueSpecification)pt.Specification",
+   "read": 1,
+   "seen": 2
+  },
+  "parameter.-[member]": {
+   "example": "",
+   "read": 8,
+   "seen": 8
+  },
+  "parameter.type": {
+   "example": "",
+   "read": 8,
+   "seen": 8
+  },
+  "postfix_unary_expression.-": {
+   "example": "",
+   "read": 2,
+   "seen": 2
+  },
+  "postfix_unary_expression.-[member]": {
+   "example": "src/RestSharp/BuildUriExtensions.cs:84  client.Options.EncodeQuery(parameter.Name!, client.Options.Encoding),",
+   "read": 29,
+   "seen": 46
+  },
+  "prefix_unary_expression.-[member]": {
+   "example": "src/CommandLine/ErrorExtensions.cs:22  .Where(e => !e.StopsProcessing)",
+   "read": 1,
+   "seen": 13
+  },
+  "property_declaration.value[member]": {
+   "example": "",
+   "read": 8,
+   "seen": 8
+  },
+  "recursive_pattern.name": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "return_statement.-": {
+   "example": "",
+   "read": 3,
+   "seen": 3
+  },
+  "return_statement.-[member]": {
+   "example": "src/CommandLine/Infrastructure/ReflectionHelper.cs:70  return assembly.GetName().Name;",
+   "read": 11,
+   "seen": 24
+  },
+  "select_clause.-[member]": {
+   "example": "",
+   "read": 8,
+   "seen": 8
+  },
+  "subpattern.-": {
+   "example": "",
+   "read": 8,
+   "seen": 8
+  },
+  "subpattern.-[member]": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "switch_expression.-[member]": {
+   "example": "",
+   "read": 8,
+   "seen": 8
+  },
+  "switch_expression_arm.-": {
+   "example": "",
+   "read": 2,
+   "seen": 2
+  },
+  "switch_expression_arm.-[member]": {
+   "example": "",
+   "read": 8,
+   "seen": 8
+  },
+  "switch_statement.value[member]": {
+   "example": "",
+   "read": 10,
+   "seen": 10
+  },
+  "type_argument_list.-": {
+   "example": "",
+   "read": 13,
+   "seen": 13
+  },
+  "type_argument_list.-[member]": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "variable_declarator.-": {
+   "example": "",
+   "read": 4,
+   "seen": 4
+  },
+  "variable_declarator.-[member]": {
+   "example": "src/CommandLine/Text/HelpText.cs:424  var errors = ((NotParsed<T>)parserResult).Errors;",
+   "read": 24,
+   "seen": 32
+  },
+  "where_clause.-[member]": {
+   "example": "",
+   "read": 8,
+   "seen": 8
+  },
+  "with_initializer.-": {
+   "example": "",
+   "read": 3,
+   "seen": 3
+  },
+  "yield_statement.-[member]": {
+   "example": "",
+   "read": 4,
+   "seen": 4
+  }
+ },
+ "go": {
+  "argument_list.-": {
+   "example": "",
+   "read": 996,
+   "seen": 996
+  },
+  "argument_list.-[member]": {
+   "example": "",
+   "read": 1015,
+   "seen": 1015
+  },
+  "binary_expression.left": {
+   "example": "hedging.go:248  if idx != i {",
+   "read": 30,
+   "seen": 34
+  },
+  "binary_expression.left[member]": {
+   "example": "",
+   "read": 557,
+   "seen": 557
+  },
+  "binary_expression.right": {
+   "example": "flag_groups.go:282  if fName != flagName {",
+   "read": 126,
+   "seen": 127
+  },
+  "binary_expression.right[member]": {
+   "example": "",
+   "read": 53,
+   "seen": 53
+  },
+  "call_expression.function": {
+   "example": "",
+   "read": 5734,
+   "seen": 5734
+  },
+  "call_expression.function[member]": {
+   "example": "",
+   "read": 8833,
+   "seen": 8833
+  },
+  "expression_list.-": {
+   "example": "completions.go:196  return completionFunc, exists",
+   "read": 266,
+   "seen": 284
+  },
+  "expression_list.-[member]": {
+   "example": "mux.go:229  hFn = Chain(mx.middlewares...).HandlerFunc(hFn).ServeHTTP",
+   "read": 480,
+   "seen": 484
+  },
+  "expression_switch_statement.value[member]": {
+   "example": "",
+   "read": 9,
+   "seen": 9
+  },
+  "if_statement.condition": {
+   "example": "completions.go:178  if _, exists := flagCompletionFunctions[flag]; exists {",
+   "read": 2,
+   "seen": 5
+  },
+  "if_statement.condition[member]": {
+   "example": "completions.go:330  if c.Root().TraverseChildren {",
+   "read": 18,
+   "seen": 19
+  },
+  "index_expression.index": {
+   "example": "client_test.go:1833  errs[idx] = c.Close()",
+   "read": 21,
+   "seen": 23
+  },
+  "index_expression.index[member]": {
+   "example": "",
+   "read": 5,
+   "seen": 5
+  },
+  "index_expression.operand": {
+   "example": "curl.go:94  return strings.Compare(a[0], b[0])",
+   "read": 10,
+   "seen": 12
+  },
+  "index_expression.operand[member]": {
+   "example": "",
+   "read": 100,
+   "seen": 100
+  },
+  "keyed_element.key": {
+   "example": "_examples/graceful/main.go:19  server := &http.Server{Addr: \"0.0.0.0:3333\", Handler: service()}",
+   "read": 184,
+   "seen": 1789
+  },
+  "literal_element.-": {
+   "example": "middleware/wrap_writer_test.go:40  return &http2FancyWriter{basicWriter{ResponseWriter: w}}",
+   "read": 500,
+   "seen": 504
+  },
+  "literal_element.-[member]": {
+   "example": "",
+   "read": 38,
+   "seen": 38
+  },
+  "range_clause.right": {
+   "example": "bash_completions.go:539  for flag := range flagCompletionFunctions {",
+   "read": 0,
+   "seen": 3
+  },
+  "range_clause.right[member]": {
+   "example": "",
+   "read": 29,
+   "seen": 29
+  },
+  "send_statement.channel[member]": {
+   "example": "",
+   "read": 7,
+   "seen": 7
+  },
+  "send_statement.value[member]": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "slice_expression.operand[member]": {
+   "example": "",
+   "read": 20,
+   "seen": 20
+  },
+  "type_assertion_expression.operand": {
+   "example": "sse_test.go:69  messages = append(messages, value.(*SSE).Data)",
+   "read": 0,
+   "seen": 1
+  },
+  "type_assertion_expression.operand[member]": {
+   "example": "mux.go:513  subMux, ok := r.SubRoutes.(*Mux)",
+   "read": 21,
+   "seen": 25
+  },
+  "type_conversion_expression.operand": {
+   "example": "digest_test.go:715  h := func(s string) string { return fmt.Sprintf(\"%x\", sha256.Sum256([]byte(s))) }",
+   "read": 0,
+   "seen": 2
+  },
+  "type_conversion_expression.operand[member]": {
+   "example": "pattern_test.go:54  w.Write([]byte(r.Pattern))",
+   "read": 0,
+   "seen": 3
+  },
+  "type_switch_statement.value[member]": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "unary_expression.operand": {
+   "example": "benchmark_test.go:239  if !ok {",
+   "read": 5,
+   "seen": 8
+  },
+  "unary_expression.operand[member]": {
+   "example": "bash_completions.go:576  if localNonPersistentFlags.Lookup(flag.Name) != nil && !cmd.Root().TraverseChildren {",
+   "read": 31,
+   "seen": 33
+  },
+  "variadic_argument.-[member]": {
+   "example": "",
+   "read": 6,
+   "seen": 6
+  }
+ },
+ "java": {
+  "argument_list.-": {
+   "example": "",
+   "read": 165,
+   "seen": 165
+  },
+  "argument_list.-[member]": {
+   "example": "gson/src/test/java/com/google/gson/functional/Java17RecordTest.java:77  .b)",
+   "read": 281,
+   "seen": 286
+  },
+  "array_initializer.-[member]": {
+   "example": "",
+   "read": 8,
+   "seen": 8
+  },
+  "assignment_expression.left[member]": {
+   "example": "",
+   "read": 3,
+   "seen": 3
+  },
+  "assignment_expression.right": {
+   "example": "extras/src/main/java/com/google/gson/typeadapters/UtcDateTypeAdapter.java:227  fail = e;",
+   "read": 0,
+   "seen": 1
+  },
+  "assignment_expression.right[member]": {
+   "example": "",
+   "read": 5,
+   "seen": 5
+  },
+  "binary_expression.left[member]": {
+   "example": "gson/src/main/java/com/google/gson/internal/ConstructorConstructor.java:386  if (rawType.getDeclaredConstructors().length == 0) {",
+   "read": 3,
+   "seen": 4
+  },
+  "binary_expression.right": {
+   "example": "",
+   "read": 5,
+   "seen": 5
+  },
+  "binary_expression.right[member]": {
+   "example": "",
+   "read": 67,
+   "seen": 67
+  },
+  "dimensions_expr.-[member]": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "enum_constant.name": {
+   "example": "gson/src/test/java/com/google/gson/functional/EnumWithObfuscatedTest.java:45  FEMALE",
+   "read": 0,
+   "seen": 2
+  },
+  "inferred_parameters.-": {
+   "example": "gson/src/test/java/com/google/gson/GsonBuilderTest.java:95  (src, typeOfSrc, context) -> new JsonPrimitive(\"custom-hierarchy-adapter\"));",
+   "read": 0,
+   "seen": 6
+  },
+  "lambda_expression.body[member]": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "method_invocation.name": {
+   "example": "",
+   "read": 8082,
+   "seen": 8082
+  },
+  "method_invocation.object": {
+   "example": "",
+   "read": 12,
+   "seen": 12
+  },
+  "method_invocation.object[member]": {
+   "example": "",
+   "read": 28,
+   "seen": 28
+  },
+  "method_reference.-": {
+   "example": "",
+   "read": 24,
+   "seen": 24
+  },
+  "return_statement.-": {
+   "example": "",
+   "read": 2,
+   "seen": 2
+  },
+  "return_statement.-[member]": {
+   "example": "",
+   "read": 4,
+   "seen": 4
+  },
+  "switch_label.-": {
+   "example": "gson/src/main/java/com/google/gson/internal/bind/JsonElementTypeAdapter.java:67  case NULL:",
+   "read": 2,
+   "seen": 52
+  },
+  "switch_label.-[member]": {
+   "example": "",
+   "read": 4,
+   "seen": 4
+  },
+  "ternary_expression.alternative[member]": {
+   "example": "",
+   "read": 6,
+   "seen": 6
+  },
+  "ternary_expression.consequence[member]": {
+   "example": "",
+   "read": 8,
+   "seen": 8
+  },
+  "throw_statement.-": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "variable_declarator.value[member]": {
+   "example": "",
+   "read": 11,
+   "seen": 11
+  }
+ },
+ "javascript": {
+  "arguments.-": {
+   "example": "examples/hook.js:58  setTimeout(resolve, parseInt(options.delay) * 1000),",
+   "read": 48,
+   "seen": 51
+  },
+  "arguments.-[member]": {
+   "example": "examples/hook.js:58  setTimeout(resolve, parseInt(options.delay) * 1000),",
+   "read": 169,
+   "seen": 181
+  },
+  "array.-": {
+   "example": "",
+   "read": 21,
+   "seen": 21
+  },
+  "array.-[member]": {
+   "example": "",
+   "read": 5,
+   "seen": 5
+  },
+  "arrow_function.body[member]": {
+   "example": "",
+   "read": 2,
+   "seen": 2
+  },
+  "arrow_function.parameter": {
+   "example": "documentation/examples/h2c.js:35  options => {",
+   "read": 1,
+   "seen": 2
+  },
+  "assignment_expression.left": {
+   "example": "examples/mvc/controllers/pet/index.js:26  exports.update = function(req, res, next){",
+   "read": 9,
+   "seen": 60
+  },
+  "assignment_expression.left[member]": {
+   "example": "examples/hook.js:43  process.env.PORT = 80;",
+   "read": 32,
+   "seen": 66
+  },
+  "assignment_expression.right": {
+   "example": "lib/utils.js:145  fn = exports.etag;",
+   "read": 6,
+   "seen": 9
+  },
+  "assignment_expression.right[member]": {
+   "example": "",
+   "read": 9,
+   "seen": 9
+  },
+  "binary_expression.left": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "binary_expression.left[member]": {
+   "example": "lib/command.js:1405  [this._getHelpOption()?.long ?? this._getHelpOption()?.short ?? '--help'],",
+   "read": 62,
+   "seen": 71
+  },
+  "binary_expression.right[member]": {
+   "example": "",
+   "read": 34,
+   "seen": 34
+  },
+  "call_expression.function": {
+   "example": "",
+   "read": 295,
+   "seen": 295
+  },
+  "call_expression.function[member]": {
+   "example": "examples/alias.cjs:24  .action((file) => {",
+   "read": 2394,
+   "seen": 2476
+  },
+  "formal_parameters.-": {
+   "example": "examples/hook.js:55  .action(async (script, options) => {",
+   "read": 0,
+   "seen": 3
+  },
+  "if_statement.condition": {
+   "example": "examples/hook.js:56  if (options.delay) {",
+   "read": 0,
+   "seen": 1
+  },
+  "if_statement.condition[member]": {
+   "example": "examples/hook.js:56  if (options.delay) {",
+   "read": 20,
+   "seen": 23
+  },
+  "new_expression.constructor[member]": {
+   "example": "",
+   "read": 18,
+   "seen": 18
+  },
+  "object.-": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "pair.key": {
+   "example": "examples/configure-help.js:10  sortSubcommands: true,",
+   "read": 4,
+   "seen": 62
+  },
+  "pair.value": {
+   "example": "",
+   "read": 8,
+   "seen": 8
+  },
+  "pair.value[member]": {
+   "example": "config/env/development.js:28  clientSecret: process.env.GOOGLE_SECRET,",
+   "read": 3,
+   "seen": 31
+  },
+  "return_statement.-[member]": {
+   "example": "",
+   "read": 8,
+   "seen": 8
+  },
+  "spread_element.-[member]": {
+   "example": "",
+   "read": 6,
+   "seen": 6
+  },
+  "subscript_expression.index[member]": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "subscript_expression.object[member]": {
+   "example": "test/req.signedCookies.js:27  var cookie = res.header['set-cookie'];",
+   "read": 56,
+   "seen": 57
+  },
+  "template_substitution.-": {
+   "example": "examples/hook.js:61  console.log(`Starting ${script} on port ${options.port}`);",
+   "read": 0,
+   "seen": 2
+  },
+  "template_substitution.-[member]": {
+   "example": "examples/hook.js:42  console.log(`Reading ${thisCommand.opts().env}...`);",
+   "read": 4,
+   "seen": 5
+  },
+  "ternary_expression.condition[member]": {
+   "example": "",
+   "read": 6,
+   "seen": 6
+  },
+  "ternary_expression.consequence[member]": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "unary_expression.argument[member]": {
+   "example": "",
+   "read": 23,
+   "seen": 23
+  },
+  "variable_declarator.value[member]": {
+   "example": "lib/application.js:24  var resolve = require('node:path').resolve;",
+   "read": 23,
+   "seen": 29
+  }
+ },
+ "kotlin": {
+  "additive_expression.-": {
+   "example": "",
+   "read": 14,
+   "seen": 14
+  },
+  "additive_expression.-[member]": {
+   "example": "kotlinpoet/src/jvmTest/kotlin/com/squareup/kotlinpoet/AnnotatedTypeNameTest.kt:146  TypeUseAnnotation::class.java.canonicalName +",
+   "read": 21,
+   "seen": 23
+  },
+  "as_expression.-": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "as_expression.-[member]": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "assignment.-": {
+   "example": "clikt/src/commonMain/kotlin/com/github/ajalt/clikt/core/BaseCliktCommand.kt:348  _contextConfig = {",
+   "read": 113,
+   "seen": 115
+  },
+  "assignment.-[member]": {
+   "example": "samples/plugins/src/main/kotlin/com/github/ajalt/clikt/samples/plugins/setuser.kt:31  repo.config[\"password\"] = \"*\".repeat(password.length)",
+   "read": 42,
+   "seen": 47
+  },
+  "call_expression.-": {
+   "example": "",
+   "read": 2130,
+   "seen": 2130
+  },
+  "call_expression.-[member]": {
+   "example": "",
+   "read": 9566,
+   "seen": 9566
+  },
+  "callable_reference.-": {
+   "example": "",
+   "read": 44,
+   "seen": 44
+  },
+  "catch_block.-": {
+   "example": "",
+   "read": 8,
+   "seen": 8
+  },
+  "check_expression.-": {
+   "example": "interop/kotlin-metadata/src/main/kotlin/com/squareup/kotlinpoet/metadata/classinspectors/ElementsClassInspector.kt:459  if (isCompanionObject && JvmFieldModifier.STATIC in modifiers) {",
+   "read": 41,
+   "seen": 42
+  },
+  "check_expression.-[member]": {
+   "example": "kotlinpoet/src/jvmMain/kotlin/com/squareup/kotlinpoet/TypeName.kt:166  enclosingType.kind != TypeKind.NONE && Modifier.STATIC !in t.asElement().modifiers",
+   "read": 36,
+   "seen": 37
+  },
+  "class_parameter.-": {
+   "example": "kotlinpoet/src/jvmMain/kotlin/com/squareup/kotlinpoet/LambdaTypeName.kt:32  public val returnType: TypeName = UNIT,",
+   "read": 1,
+   "seen": 2
+  },
+  "class_parameter.-[member]": {
+   "example": "",
+   "read": 2,
+   "seen": 2
+  },
+  "collection_literal.-[member]": {
+   "example": "",
+   "read": 3,
+   "seen": 3
+  },
+  "comparison_expression.-": {
+   "example": "",
+   "read": 7,
+   "seen": 7
+  },
+  "comparison_expression.-[member]": {
+   "example": "src/test/kotlin/io/realworld/app/web/controllers/ArticleControllerTest.kt:93  assertTrue(response.body.articles.first().favoritesCount > 0)",
+   "read": 16,
+   "seen": 17
+  },
+  "conjunction_expression.-": {
+   "example": "",
+   "read": 8,
+   "seen": 8
+  },
+  "conjunction_expression.-[member]": {
+   "example": "",
+   "read": 14,
+   "seen": 14
+  },
+  "control_structure_body.-": {
+   "example": "clikt/src/commonMain/kotlin/com/github/ajalt/clikt/parameters/groups/CoOccurringOptionGroup.kt:80  if (occurred == true) g",
+   "read": 12,
+   "seen": 14
+  },
+  "control_structure_body.-[member]": {
+   "example": "",
+   "read": 74,
+   "seen": 74
+  },
+  "disjunction_expression.-": {
+   "example": "",
+   "read": 13,
+   "seen": 13
+  },
+  "disjunction_expression.-[member]": {
+   "example": "",
+   "read": 8,
+   "seen": 8
+  },
+  "elvis_expression.-": {
+   "example": "",
+   "read": 17,
+   "seen": 17
+  },
+  "elvis_expression.-[member]": {
+   "example": "clikt/src/commonMain/kotlin/com/github/ajalt/clikt/parameters/options/Option.kt:70  ?: (this as? GroupableOption)?.parameterGroup?.groupName,",
+   "read": 41,
+   "seen": 44
+  },
+  "enum_entry.-": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "equality_expression.-": {
+   "example": "clikt/src/commonMain/kotlin/com/github/ajalt/clikt/parameters/groups/CoOccurringOptionGroup.kt:80  if (occurred == true) g",
+   "read": 54,
+   "seen": 60
+  },
+  "equality_expression.-[member]": {
+   "example": "interop/kotlin-metadata/src/main/kotlin/com/squareup/kotlinpoet/metadata/classinspectors/ElementsClassInspector.kt:130  return lookupTypeElement(className)?.kind == INTERFACE",
+   "read": 112,
+   "seen": 113
+  },
+  "for_statement.-": {
+   "example": "samples/copy/src/main/kotlin/com/github/ajalt/clikt/samples/copy/main.kt:25  for (file in source) {",
+   "read": 1,
+   "seen": 6
+  },
+  "for_statement.-[member]": {
+   "example": "",
+   "read": 8,
+   "seen": 8
+  },
+  "function_body.-": {
+   "example": "",
+   "read": 2,
+   "seen": 2
+  },
+  "function_body.-[member]": {
+   "example": "clikt/src/commonMain/kotlin/com/github/ajalt/clikt/internal/Util.kt:9  internal val Option.group: ParameterGroup? get() = (this as? GroupableOption)?.parameterGroup",
+   "read": 5,
+   "seen": 6
+  },
+  "function_declaration.-": {
+   "example": "",
+   "read": 1449,
+   "seen": 1449
+  },
+  "if_expression.condition": {
+   "example": "",
+   "read": 28,
+   "seen": 28
+  },
+  "if_expression.condition[member]": {
+   "example": "",
+   "read": 23,
+   "seen": 23
+  },
+  "indexing_expression.-": {
+   "example": "",
+   "read": 3,
+   "seen": 3
+  },
+  "indexing_expression.-[member]": {
+   "example": "",
+   "read": 23,
+   "seen": 23
+  },
+  "indexing_suffix.-": {
+   "example": "kotlinpoet/src/commonMain/kotlin/com/squareup/kotlinpoet/LineWrapper.kt:147  out.append(segments[i])",
+   "read": 7,
+   "seen": 8
+  },
+  "indexing_suffix.-[member]": {
+   "example": "",
+   "read": 3,
+   "seen": 3
+  },
+  "infix_expression.-": {
+   "example": "test/src/commonTest/kotlin/com/github/ajalt/clikt/completion/EnvvarCompletionTest.kt:33  }.message shouldContain shell",
+   "read": 105,
+   "seen": 107
+  },
+  "infix_expression.-[member]": {
+   "example": "test/src/commonTest/kotlin/com/github/ajalt/clikt/command/ChainedCliktCommandTest.kt:63  C().test(\"10\", 1).output shouldBe \"11\\n\"",
+   "read": 102,
+   "seen": 171
+  },
+  "interpolated_expression.-": {
+   "example": "",
+   "read": 4,
+   "seen": 4
+  },
+  "interpolated_expression.-[member]": {
+   "example": "kotlinpoet/src/jvmTest/kotlin/com/squareup/kotlinpoet/TaggableTest.kt:106  else -> TODO(\"Unsupported type ${this::class.simpleName}\")",
+   "read": 36,
+   "seen": 37
+  },
+  "jump_expression.-": {
+   "example": "test/src/commonTest/kotlin/com/github/ajalt/clikt/core/ExceptionsTest.kt:29  throw err",
+   "read": 6,
+   "seen": 7
+  },
+  "jump_expression.-[member]": {
+   "example": "interop/kotlin-metadata/src/main/kotlin/com/squareup/kotlinpoet/metadata/classinspectors/ElementsClassInspector.kt:163  .nullableValue",
+   "read": 9,
+   "seen": 15
+  },
+  "parameter.-": {
+   "example": "clikt/src/commonMain/kotlin/com/github/ajalt/clikt/core/Context.kt:324  var argumentFileReader: ((filename: String) -> String)?",
+   "read": 0,
+   "seen": 5
+  },
+  "prefix_expression.-": {
+   "example": "interop/ksp/src/main/kotlin/com/squareup/kotlinpoet/ksp/utils.kt:82  require(!isError) { \"Error type '$this' is not resolvable in the current round of processing.\" }",
+   "read": 5,
+   "seen": 16
+  },
+  "prefix_expression.-[member]": {
+   "example": "clikt/src/commonMain/kotlin/com/github/ajalt/clikt/completion/BashCompletionGenerator.kt:188  if (!command.currentContext.allowInterspersedArgs) {",
+   "read": 12,
+   "seen": 32
+  },
+  "property_declaration.-": {
+   "example": "clikt/src/commonMain/kotlin/com/github/ajalt/clikt/core/BaseCliktCommand.kt:347  val c = _contextConfig",
+   "read": 4,
+   "seen": 18
+  },
+  "property_declaration.-[member]": {
+   "example": "clikt-mordant/src/commonMain/kotlin/com/github/ajalt/clikt/parameters/options/PromptOptions.kt:64  val validator = (option as? OptionWithValues<T, T, T>)?.transformValidator",
+   "read": 21,
+   "seen": 31
+  },
+  "range_expression.-": {
+   "example": "",
+   "read": 2,
+   "seen": 2
+  },
+  "range_expression.-[member]": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "spread_expression.-": {
+   "example": "test/src/commonTest/kotlin/com/github/ajalt/clikt/parameters/EnvvarInferTest.kt:22  val o by option(*names)",
+   "read": 0,
+   "seen": 1
+  },
+  "statements.-": {
+   "example": "",
+   "read": 3,
+   "seen": 3
+  },
+  "statements.-[member]": {
+   "example": "interop/kotlin-metadata/src/main/kotlin/com/squareup/kotlinpoet/metadata/classinspectors/ReflectiveClassInspector.kt:135  .nullableValue",
+   "read": 52,
+   "seen": 53
+  },
+  "value_argument.-": {
+   "example": "samples/plugins/src/main/kotlin/com/github/ajalt/clikt/samples/plugins/setuser.kt:13  class SetUser : CliktCommand(name = \"setuser\") {",
+   "read": 1238,
+   "seen": 1277
+  },
+  "value_argument.-[member]": {
+   "example": "src/main/kotlin/io/realworld/service/UserService.kt:54  userRepository.findByEmail(login.email!!)?.let {",
+   "read": 749,
+   "seen": 781
+  },
+  "variable_declaration.-": {
+   "example": "clikt/src/commonMain/kotlin/com/github/ajalt/clikt/core/Context.kt:388  var envvarReader: (key: String) -> String?",
+   "read": 11,
+   "seen": 37
+  },
+  "when_condition.-": {
+   "example": "",
+   "read": 47,
+   "seen": 47
+  },
+  "when_condition.-[member]": {
+   "example": "",
+   "read": 50,
+   "seen": 50
+  },
+  "when_subject.-": {
+   "example": "",
+   "read": 7,
+   "seen": 7
+  },
+  "when_subject.-[member]": {
+   "example": "clikt/src/commonMain/kotlin/com/github/ajalt/clikt/core/BaseCliktCommand.kt:166  return when ((option as? GroupableOption)?.parameterGroup) {",
+   "read": 4,
+   "seen": 5
+  }
+ },
+ "php": {
+  "argument.-[member]": {
+   "example": "tests/Monolog/Attribute/WithMonologChannelTest.php:28  $this->assertSame('fixture', $attributes[0]->newInstance()->channel);",
+   "read": 471,
+   "seen": 472
+  },
+  "argument.name": {
+   "example": "src/Monolog/Handler/ChromePHPHandler.php:152  channel: 'monolog',",
+   "read": 2,
+   "seen": 119
+  },
+  "array_element_initializer.-[member]": {
+   "example": "",
+   "read": 473,
+   "seen": 473
+  },
+  "assignment_expression.left[member]": {
+   "example": "",
+   "read": 238,
+   "seen": 238
+  },
+  "assignment_expression.right[member]": {
+   "example": "",
+   "read": 44,
+   "seen": 44
+  },
+  "augmented_assignment_expression.left[member]": {
+   "example": "",
+   "read": 10,
+   "seen": 10
+  },
+  "augmented_assignment_expression.right[member]": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "binary_expression.left[member]": {
+   "example": "app/Http/Requests/Article/DestroyRequest.php:11  return $this->route('article')->user->id === auth()->id();",
+   "read": 130,
+   "seen": 133
+  },
+  "binary_expression.right[member]": {
+   "example": "",
+   "read": 133,
+   "seen": 133
+  },
+  "clone_expression.-[member]": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "conditional_expression.alternative[member]": {
+   "example": "",
+   "read": 11,
+   "seen": 11
+  },
+  "conditional_expression.body[member]": {
+   "example": "",
+   "read": 9,
+   "seen": 9
+  },
+  "conditional_expression.condition[member]": {
+   "example": "",
+   "read": 3,
+   "seen": 3
+  },
+  "encapsed_string.-[member]": {
+   "example": "",
+   "read": 5,
+   "seen": 5
+  },
+  "expression_statement.-[member]": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "foreach_statement.-[member]": {
+   "example": "",
+   "read": 27,
+   "seen": 27
+  },
+  "function_call_expression.function": {
+   "example": "",
+   "read": 141,
+   "seen": 141
+  },
+  "function_call_expression.function[member]": {
+   "example": "",
+   "read": 3,
+   "seen": 3
+  },
+  "if_statement.condition[member]": {
+   "example": "",
+   "read": 35,
+   "seen": 35
+  },
+  "list_literal.-[member]": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "match_condition_list.-[member]": {
+   "example": "",
+   "read": 97,
+   "seen": 97
+  },
+  "match_conditional_expression.return_expression[member]": {
+   "example": "",
+   "read": 36,
+   "seen": 36
+  },
+  "member_call_expression.name": {
+   "example": "",
+   "read": 4932,
+   "seen": 4932
+  },
+  "member_call_expression.object": {
+   "example": "",
+   "read": 12,
+   "seen": 12
+  },
+  "member_call_expression.object[member]": {
+   "example": "",
+   "read": 74,
+   "seen": 74
+  },
+  "nullsafe_member_call_expression.name": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "object_creation_expression.-": {
+   "example": "",
+   "read": 7,
+   "seen": 7
+  },
+  "property_element.default_value[member]": {
+   "example": "",
+   "read": 4,
+   "seen": 4
+  },
+  "property_promotion_parameter.default_value[member]": {
+   "example": "",
+   "read": 2,
+   "seen": 2
+  },
+  "return_statement.-[member]": {
+   "example": "",
+   "read": 45,
+   "seen": 45
+  },
+  "scoped_call_expression.name": {
+   "example": "",
+   "read": 2687,
+   "seen": 2687
+  },
+  "simple_parameter.default_value[member]": {
+   "example": "",
+   "read": 68,
+   "seen": 68
+  },
+  "subscript_expression.-[member]": {
+   "example": "",
+   "read": 245,
+   "seen": 245
+  },
+  "unary_op_expression.argument[member]": {
+   "example": "",
+   "read": 30,
+   "seen": 30
+  },
+  "unset_statement.-[member]": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "update_expression.argument[member]": {
+   "example": "",
+   "read": 17,
+   "seen": 17
+  }
+ },
+ "python": {
+  "argument_list.-": {
+   "example": "",
+   "read": 496,
+   "seen": 496
+  },
+  "argument_list.-[member]": {
+   "example": "",
+   "read": 318,
+   "seen": 318
+  },
+  "assert_statement.-": {
+   "example": "",
+   "read": 2,
+   "seen": 2
+  },
+  "assert_statement.-[member]": {
+   "example": "",
+   "read": 46,
+   "seen": 46
+  },
+  "assignment.left": {
+   "example": "",
+   "read": 2,
+   "seen": 2
+  },
+  "assignment.left[member]": {
+   "example": "",
+   "read": 101,
+   "seen": 101
+  },
+  "assignment.right": {
+   "example": "src/click/termui.py:34  visible_prompt_func: t.Callable[[str], str] = input",
+   "read": 26,
+   "seen": 28
+  },
+  "assignment.right[member]": {
+   "example": "src/click/decorators.py:504  prog_name = ctx.find_root().info_name",
+   "read": 66,
+   "seen": 71
+  },
+  "augmented_assignment.left[member]": {
+   "example": "",
+   "read": 30,
+   "seen": 30
+  },
+  "binary_operator.left": {
+   "example": "",
+   "read": 3,
+   "seen": 3
+  },
+  "binary_operator.left[member]": {
+   "example": "",
+   "read": 14,
+   "seen": 14
+  },
+  "binary_operator.right": {
+   "example": "",
+   "read": 5,
+   "seen": 5
+  },
+  "binary_operator.right[member]": {
+   "example": "",
+   "read": 11,
+   "seen": 11
+  },
+  "block.-[member]": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "boolean_operator.left": {
+   "example": "",
+   "read": 4,
+   "seen": 4
+  },
+  "boolean_operator.left[member]": {
+   "example": "",
+   "read": 18,
+   "seen": 18
+  },
+  "boolean_operator.right": {
+   "example": "",
+   "read": 2,
+   "seen": 2
+  },
+  "boolean_operator.right[member]": {
+   "example": "",
+   "read": 9,
+   "seen": 9
+  },
+  "call.function": {
+   "example": "",
+   "read": 884,
+   "seen": 884
+  },
+  "call.function[member]": {
+   "example": "",
+   "read": 3282,
+   "seen": 3282
+  },
+  "comparison_operator.-": {
+   "example": "tests/client/test_async_client.py:122  if 400 <= status_code < 600:",
+   "read": 50,
+   "seen": 52
+  },
+  "comparison_operator.-[member]": {
+   "example": "tests/test_commands.py:599  assert \"sub help (DEPRECATED: REASON)\" in runner.invoke(cli, [\"--help\"]).output",
+   "read": 1055,
+   "seen": 1068
+  },
+  "conditional_expression.-": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "conditional_expression.-[member]": {
+   "example": "",
+   "read": 9,
+   "seen": 9
+  },
+  "elif_clause.condition": {
+   "example": "",
+   "read": 3,
+   "seen": 3
+  },
+  "elif_clause.condition[member]": {
+   "example": "",
+   "read": 2,
+   "seen": 2
+  },
+  "expression_list.-[member]": {
+   "example": "",
+   "read": 9,
+   "seen": 9
+  },
+  "for_in_clause.right": {
+   "example": "",
+   "read": 6,
+   "seen": 6
+  },
+  "for_in_clause.right[member]": {
+   "example": "",
+   "read": 32,
+   "seen": 32
+  },
+  "for_statement.left": {
+   "example": "tests/client/test_async_client.py:117  for status_code in (200, 400, 404, 500, 505):",
+   "read": 3,
+   "seen": 5
+  },
+  "for_statement.right[member]": {
+   "example": "",
+   "read": 4,
+   "seen": 4
+  },
+  "format_expression.expression[member]": {
+   "example": "",
+   "read": 3,
+   "seen": 3
+  },
+  "if_statement.condition": {
+   "example": "",
+   "read": 9,
+   "seen": 9
+  },
+  "if_statement.condition[member]": {
+   "example": "",
+   "read": 29,
+   "seen": 29
+  },
+  "interpolation.expression": {
+   "example": "tests/client/test_async_client.py:119  \"GET\", server.url.copy_with(path=f\"/status/{status_code}\")",
+   "read": 60,
+   "seen": 63
+  },
+  "interpolation.expression[member]": {
+   "example": "",
+   "read": 100,
+   "seen": 100
+  },
+  "keyword_argument.name": {
+   "example": "",
+   "read": 846,
+   "seen": 846
+  },
+  "keyword_argument.value": {
+   "example": "",
+   "read": 48,
+   "seen": 48
+  },
+  "keyword_argument.value[member]": {
+   "example": "",
+   "read": 143,
+   "seen": 143
+  },
+  "lambda.body": {
+   "example": "tests/test_basic.py:975  cli = click.Command(\"cli\", params=[param], callback=lambda a: a)",
+   "read": 0,
+   "seen": 1
+  },
+  "lambda.body[member]": {
+   "example": "",
+   "read": 3,
+   "seen": 3
+  },
+  "lambda_parameters.-": {
+   "example": "tests/test_basic.py:975  cli = click.Command(\"cli\", params=[param], callback=lambda a: a)",
+   "read": 0,
+   "seen": 2
+  },
+  "list.-": {
+   "example": "",
+   "read": 14,
+   "seen": 14
+  },
+  "list.-[member]": {
+   "example": "",
+   "read": 11,
+   "seen": 11
+  },
+  "list_comprehension.body[member]": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "list_splat.-[member]": {
+   "example": "",
+   "read": 2,
+   "seen": 2
+  },
+  "not_operator.argument": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "not_operator.argument[member]": {
+   "example": "tests/test_custom_classes.py:44  assert not runner.invoke(first).exception",
+   "read": 179,
+   "seen": 180
+  },
+  "pair.value": {
+   "example": "",
+   "read": 28,
+   "seen": 28
+  },
+  "pair.value[member]": {
+   "example": "",
+   "read": 34,
+   "seen": 34
+  },
+  "pattern_list.-": {
+   "example": "",
+   "read": 2,
+   "seen": 2
+  },
+  "pattern_list.-[member]": {
+   "example": "",
+   "read": 2,
+   "seen": 2
+  },
+  "return_statement.-": {
+   "example": "",
+   "read": 15,
+   "seen": 15
+  },
+  "return_statement.-[member]": {
+   "example": "",
+   "read": 22,
+   "seen": 22
+  },
+  "slice.-[member]": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "subscript.subscript": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "subscript.subscript[member]": {
+   "example": "",
+   "read": 2,
+   "seen": 2
+  },
+  "subscript.value": {
+   "example": "src/click/testing.py:29  ExceptionInfo: t.TypeAlias = tuple[type[BaseException], BaseException, TracebackType]",
+   "read": 17,
+   "seen": 18
+  },
+  "subscript.value[member]": {
+   "example": "tests/test_context.py:147  click.get_current_context().meta[LANG_KEY] = value",
+   "read": 52,
+   "seen": 56
+  },
+  "tuple.-": {
+   "example": "",
+   "read": 8,
+   "seen": 8
+  },
+  "tuple.-[member]": {
+   "example": "tests/test_info_dict.py:8  BOOL_PARAM_TYPE = (click.BOOL, {\"param_type\": \"Bool\", \"name\": \"boolean\"})",
+   "read": 17,
+   "seen": 20
+  },
+  "type.-": {
+   "example": "",
+   "read": 2,
+   "seen": 2
+  },
+  "typed_default_parameter.value": {
+   "example": "httpx/_api.py:414  timeout: TimeoutTypes = DEFAULT_TIMEOUT_CONFIG,",
+   "read": 2,
+   "seen": 25
+  }
+ },
+ "ruby": {
+  "ERROR.-": {
+   "example": "spec/fixtures/doc/config.rb:1  class <%= @klass %>; end",
+   "read": 0,
+   "seen": 1
+  },
+  "alias.alias": {
+   "example": "lib/faraday/options.rb:133  alias has_value? value?",
+   "read": 6,
+   "seen": 14
+  },
+  "alias.name": {
+   "example": "lib/faraday/utils/params_hash.rb:33  alias merge! update",
+   "read": 2,
+   "seen": 4
+  },
+  "argument_list.-": {
+   "example": "lib/faraday/request/instrumentation.rb:50  @instrumenter.instrument(@name, env) do",
+   "read": 490,
+   "seen": 500
+  },
+  "argument_list.-[member]": {
+   "example": "",
+   "read": 19,
+   "seen": 19
+  },
+  "array.-": {
+   "example": "",
+   "read": 6,
+   "seen": 6
+  },
+  "assignment.left": {
+   "example": "tests/unity/auto/stylize_as_junit.rb:73  @report = ''",
+   "read": 4,
+   "seen": 27
+  },
+  "assignment.right": {
+   "example": "",
+   "read": 46,
+   "seen": 46
+  },
+  "begin.-": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "binary.left": {
+   "example": "lib/thor/parser/option.rb:152  elsif @check_default_type == nil",
+   "read": 40,
+   "seen": 42
+  },
+  "binary.left[member]": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "binary.right": {
+   "example": "lib/thor/shell/table_printer.rb:114  \" \" * @indent",
+   "read": 29,
+   "seen": 35
+  },
+  "binary.right[member]": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "block_argument.-": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "block_body.-": {
+   "example": "",
+   "read": 37,
+   "seen": 37
+  },
+  "block_body.-[member]": {
+   "example": "",
+   "read": 4,
+   "seen": 4
+  },
+  "block_parameters.-": {
+   "example": "lib/faraday/request.rb:40  new(request_method).tap do |request|",
+   "read": 0,
+   "seen": 1
+  },
+  "body_statement.-": {
+   "example": "lib/thor/base.rb:310  @class_options",
+   "read": 29,
+   "seen": 33
+  },
+  "call.method": {
+   "example": "spec/faraday/adapter/test_spec.rb:415  subject(:request) do",
+   "read": 5916,
+   "seen": 5943
+  },
+  "call.receiver": {
+   "example": "",
+   "read": 1080,
+   "seen": 1080
+  },
+  "call.receiver[member]": {
+   "example": "",
+   "read": 6,
+   "seen": 6
+  },
+  "case.value": {
+   "example": "",
+   "read": 3,
+   "seen": 3
+  },
+  "conditional.alternative": {
+   "example": "",
+   "read": 3,
+   "seen": 3
+  },
+  "conditional.consequence": {
+   "example": "",
+   "read": 6,
+   "seen": 6
+  },
+  "element_reference.-": {
+   "example": "",
+   "read": 11,
+   "seen": 11
+  },
+  "element_reference.-[member]": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "element_reference.object": {
+   "example": "lib/thor.rb:114  @map[key] = value",
+   "read": 119,
+   "seen": 121
+  },
+  "element_reference.object[member]": {
+   "example": "lib/faraday/base_options.rb:199  coercion = self.class::COERCIONS[key]",
+   "read": 2,
+   "seen": 3
+  },
+  "else.-": {
+   "example": "",
+   "read": 5,
+   "seen": 5
+  },
+  "ensure.-": {
+   "example": "",
+   "read": 2,
+   "seen": 2
+  },
+  "hash_splat_argument.-": {
+   "example": "",
+   "read": 2,
+   "seen": 2
+  },
+  "if.condition": {
+   "example": "lib/thor/parser/option.rb:150  if @check_default_type",
+   "read": 1,
+   "seen": 2
+  },
+  "if_modifier.body": {
+   "example": "",
+   "read": 3,
+   "seen": 3
+  },
+  "if_modifier.condition": {
+   "example": "",
+   "read": 3,
+   "seen": 3
+  },
+  "if_modifier.condition[member]": {
+   "example": "",
+   "read": 2,
+   "seen": 2
+  },
+  "interpolation.-": {
+   "example": "lib/thor.rb:296  shell.say \"#{@package_name} commands:\"",
+   "read": 42,
+   "seen": 43
+  },
+  "interpolation.-[member]": {
+   "example": "",
+   "read": 2,
+   "seen": 2
+  },
+  "left_assignment_list.-": {
+   "example": "lib/faraday/request/instrumentation.rb:44  @name, @instrumenter = Options.from(options)",
+   "read": 11,
+   "seen": 13
+  },
+  "operator_assignment.left": {
+   "example": "tests/unity/auto/unity_test_summary.rb:70  @report += \"\\n\"",
+   "read": 7,
+   "seen": 79
+  },
+  "operator_assignment.right": {
+   "example": "",
+   "read": 6,
+   "seen": 6
+  },
+  "operator_assignment.right[member]": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "optional_parameter.value": {
+   "example": "",
+   "read": 4,
+   "seen": 4
+  },
+  "pair.key": {
+   "example": "spec/support/shared_examples/request_method.rb:207  .with({ query_or_body => @payload2 })",
+   "read": 2,
+   "seen": 7
+  },
+  "pair.value": {
+   "example": "",
+   "read": 68,
+   "seen": 68
+  },
+  "parenthesized_statements.-": {
+   "example": "lib/thor.rb:295  if defined?(@package_name) && @package_name",
+   "read": 0,
+   "seen": 1
+  },
+  "parenthesized_statements.-[member]": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "pattern.-": {
+   "example": "",
+   "read": 19,
+   "seen": 19
+  },
+  "setter.name": {
+   "example": "lib/faraday/options/env.rb:122  def body=(value)",
+   "read": 1,
+   "seen": 7
+  },
+  "splat_argument.-": {
+   "example": "",
+   "read": 4,
+   "seen": 4
+  },
+  "then.-": {
+   "example": "",
+   "read": 8,
+   "seen": 8
+  },
+  "unary.operand": {
+   "example": "",
+   "read": 4,
+   "seen": 4
+  },
+  "unless_modifier.condition": {
+   "example": "lib/thor/shell/table_printer.rb:104  return string unless @truncate",
+   "read": 2,
+   "seen": 3
+  },
+  "while.condition": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "while_modifier.condition": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  }
+ },
+ "rust": {
+  "ERROR.-": {
+   "example": "",
+   "read": 12,
+   "seen": 12
+  },
+  "arguments.-": {
+   "example": "src/app/mod.rs:113  .route(web::get().to_async(tags::get))",
+   "read": 292,
+   "seen": 305
+  },
+  "arguments.-[member]": {
+   "example": "src/app/mod.rs:109  .route(web::delete().to_async(articles::comments::delete))",
+   "read": 389,
+   "seen": 420
+  },
+  "array_expression.-": {
+   "example": "crates/matcher/src/lib.rs:316  ByteSet(BitSet([u64::MAX; 4]))",
+   "read": 88,
+   "seen": 90
+  },
+  "array_expression.-[member]": {
+   "example": "",
+   "read": 37,
+   "seen": 37
+  },
+  "array_expression.length": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "array_expression.length[member]": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "assignment_expression.left[member]": {
+   "example": "src/config.rs:737  self.config().allow_non_standard_methods = v;",
+   "read": 206,
+   "seen": 222
+  },
+  "assignment_expression.right": {
+   "example": "",
+   "read": 2,
+   "seen": 2
+  },
+  "assignment_expression.right[member]": {
+   "example": "",
+   "read": 20,
+   "seen": 20
+  },
+  "binary_expression.left": {
+   "example": "crates/cli/src/hostname.rs:68  let Some(zeropos) = buf.iter().position(|&b| b == 0) else {",
+   "read": 10,
+   "seen": 20
+  },
+  "binary_expression.left[member]": {
+   "example": "src/tls/native_tls.rs:48  if details.config.tls_config().provider != TlsProvider::NativeTls {",
+   "read": 69,
+   "seen": 70
+  },
+  "binary_expression.right": {
+   "example": "crates/globset/src/glob.rs:553  .any(|&(start, end)| start <= '/' && '/' <= end);",
+   "read": 26,
+   "seen": 27
+  },
+  "binary_expression.right[member]": {
+   "example": "",
+   "read": 68,
+   "seen": 68
+  },
+  "block.-": {
+   "example": "crates/ignore/examples/walk.rs:34  Continue",
+   "read": 6,
+   "seen": 7
+  },
+  "block.-[member]": {
+   "example": "",
+   "read": 212,
+   "seen": 212
+  },
+  "call_expression.function": {
+   "example": "",
+   "read": 2462,
+   "seen": 2462
+  },
+  "call_expression.function[member]": {
+   "example": "src/query.rs:37  .add(b'}');",
+   "read": 9170,
+   "seen": 9193
+  },
+  "closure_expression.body": {
+   "example": "crates/ignore/src/dir.rs:403  .filter(|&(_, &matched)| matched)",
+   "read": 0,
+   "seen": 1
+  },
+  "closure_expression.body[member]": {
+   "example": "",
+   "read": 10,
+   "seen": 10
+  },
+  "closure_parameters.-": {
+   "example": "crates/core/search.rs:314  let result = self.search_reader(path, &mut rdr).map_err(|err| {",
+   "read": 3,
+   "seen": 13
+  },
+  "compound_assignment_expr.left[member]": {
+   "example": "src/io_timeout_tests.rs:28  self.0.lock().unwrap().connections += 1;",
+   "read": 33,
+   "seen": 34
+  },
+  "compound_assignment_expr.right[member]": {
+   "example": "",
+   "read": 10,
+   "seen": 10
+  },
+  "field_initializer.field": {
+   "example": "src/db/articles.rs:374  articles_count: article_list.len(),",
+   "read": 126,
+   "seen": 347
+  },
+  "field_initializer.value": {
+   "example": "",
+   "read": 8,
+   "seen": 8
+  },
+  "field_initializer.value[member]": {
+   "example": "",
+   "read": 105,
+   "seen": 105
+  },
+  "for_expression.pattern": {
+   "example": "src/unversioned/transport/socks.rs:763  for protocol in [\"socks4\", \"socks4a\", \"socks5\", \"socks5h\"] {",
+   "read": 15,
+   "seen": 16
+  },
+  "for_expression.value": {
+   "example": "crates/ignore/src/types.rs:489  for name in names {",
+   "read": 1,
+   "seen": 2
+  },
+  "generic_function.function[member]": {
+   "example": "",
+   "read": 25,
+   "seen": 25
+  },
+  "if_expression.condition": {
+   "example": "src/tls/mod.rs:549  let reason = if fail_read {",
+   "read": 0,
+   "seen": 1
+  },
+  "if_expression.condition[member]": {
+   "example": "crates/printer/src/standard.rs:1667  if self.config().heading {",
+   "read": 59,
+   "seen": 70
+  },
+  "index_expression.-": {
+   "example": "crates/ignore/src/default_types.rs:354  let mut names = DEFAULT_TYPES.iter().map(|(aliases, _)| aliases[0]);",
+   "read": 2,
+   "seen": 3
+  },
+  "index_expression.-[member]": {
+   "example": "",
+   "read": 3,
+   "seen": 3
+  },
+  "let_condition.pattern[member]": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "let_condition.value[member]": {
+   "example": "",
+   "read": 4,
+   "seen": 4
+  },
+  "let_declaration.value": {
+   "example": "",
+   "read": 4,
+   "seen": 4
+  },
+  "let_declaration.value[member]": {
+   "example": "",
+   "read": 10,
+   "seen": 10
+  },
+  "lifetime.-": {
+   "example": "",
+   "read": 19,
+   "seen": 19
+  },
+  "macro_invocation.macro": {
+   "example": "crates/cli/src/decompress.rs:504  log::debug!(\"{}\", err);",
+   "read": 69,
+   "seen": 544
+  },
+  "macro_invocation.macro[member]": {
+   "example": "crates/cli/src/decompress.rs:504  log::debug!(\"{}\", err);",
+   "read": 0,
+   "seen": 56
+  },
+  "match_arm.value": {
+   "example": "crates/ignore/src/dir.rs:1124  Some(Ok(line)) => line,",
+   "read": 3,
+   "seen": 6
+  },
+  "match_arm.value[member]": {
+   "example": "",
+   "read": 66,
+   "seen": 66
+  },
+  "match_expression.value": {
+   "example": "crates/printer/src/hyperlink/mod.rs:495  let is_valid_scheme_char = |byte| match byte {",
+   "read": 1,
+   "seen": 3
+  },
+  "match_expression.value[member]": {
+   "example": "",
+   "read": 5,
+   "seen": 5
+  },
+  "match_pattern.-": {
+   "example": "crates/ignore/src/incremental.rs:399  std::path::Component::CurDir => continue,",
+   "read": 74,
+   "seen": 77
+  },
+  "match_pattern.-[member]": {
+   "example": "",
+   "read": 253,
+   "seen": 253
+  },
+  "match_pattern.condition[member]": {
+   "example": "",
+   "read": 2,
+   "seen": 2
+  },
+  "or_pattern.-": {
+   "example": "crates/ignore/src/incremental.rs:395  | std::path::Component::RootDir",
+   "read": 26,
+   "seen": 29
+  },
+  "or_pattern.-[member]": {
+   "example": "",
+   "read": 44,
+   "seen": 44
+  },
+  "range_expression.-": {
+   "example": "crates/globset/src/glob.rs:450  for t in &self.tokens[0..end] {",
+   "read": 2,
+   "seen": 3
+  },
+  "range_expression.-[member]": {
+   "example": "",
+   "read": 13,
+   "seen": 13
+  },
+  "ref_pattern.-": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "reference_expression.value": {
+   "example": "",
+   "read": 23,
+   "seen": 23
+  },
+  "reference_expression.value[member]": {
+   "example": "crates/regex/src/ast.rs:124  self.from_ast_class_set(&x.kind);",
+   "read": 60,
+   "seen": 64
+  },
+  "reference_pattern.-": {
+   "example": "crates/cli/src/hostname.rs:68  let Some(zeropos) = buf.iter().position(|&b| b == 0) else {",
+   "read": 5,
+   "seen": 12
+  },
+  "return_expression.-": {
+   "example": "",
+   "read": 6,
+   "seen": 6
+  },
+  "return_expression.-[member]": {
+   "example": "",
+   "read": 8,
+   "seen": 8
+  },
+  "scoped_type_identifier.path": {
+   "example": "src/util.rs:82  impl<T> IoResultExt for io::Result<T> {",
+   "read": 555,
+   "seen": 556
+  },
+  "scoped_type_identifier.path[member]": {
+   "example": "",
+   "read": 85,
+   "seen": 85
+  },
+  "shorthand_field_initializer.-": {
+   "example": "src/db/articles.rs:352  following,",
+   "read": 0,
+   "seen": 6
+  },
+  "token_tree.-": {
+   "example": "src/schema.rs:75  comments,",
+   "read": 5939,
+   "seen": 6252
+  },
+  "tuple_expression.-": {
+   "example": "",
+   "read": 57,
+   "seen": 57
+  },
+  "tuple_expression.-[member]": {
+   "example": "",
+   "read": 17,
+   "seen": 17
+  },
+  "tuple_pattern.-": {
+   "example": "src/db/articles.rs:328  let (favorited, following) = match user_id {",
+   "read": 11,
+   "seen": 25
+  },
+  "tuple_pattern.-[member]": {
+   "example": "",
+   "read": 41,
+   "seen": 41
+  },
+  "tuple_struct_pattern.-": {
+   "example": "src/http/articles/comments.rs:124  Path(slug): Path<String>,",
+   "read": 6,
+   "seen": 10
+  },
+  "tuple_struct_pattern.-[member]": {
+   "example": "",
+   "read": 9,
+   "seen": 9
+  },
+  "tuple_struct_pattern.type": {
+   "example": "crates/ignore/src/incremental.rs:400  std::path::Component::Normal(_) => {}",
+   "read": 40,
+   "seen": 43
+  },
+  "tuple_struct_pattern.type[member]": {
+   "example": "",
+   "read": 8,
+   "seen": 8
+  },
+  "type_cast_expression.value": {
+   "example": "",
+   "read": 4,
+   "seen": 4
+  },
+  "unary_expression.-": {
+   "example": "",
+   "read": 5,
+   "seen": 5
+  },
+  "unary_expression.-[member]": {
+   "example": "crates/printer/src/standard.rs:1710  if !self.config().byte_offset {",
+   "read": 53,
+   "seen": 57
+  }
+ },
+ "scala": {
+  "access_qualifier.-": {
+   "example": "",
+   "read": 3,
+   "seen": 3
+  },
+  "arguments.-": {
+   "example": "",
+   "read": 45,
+   "seen": 45
+  },
+  "arguments.-[member]": {
+   "example": "shared/src/main/scala/scopt/OParser.scala:229  val (withParent, withoutParent) = options.partition(_.hasParent)",
+   "read": 45,
+   "seen": 57
+  },
+  "assignment_expression.left": {
+   "example": "requests/test/src/requests/RequestTests.scala:288  verifySslCerts = false,",
+   "read": 0,
+   "seen": 18
+  },
+  "assignment_expression.right": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "assignment_expression.right[member]": {
+   "example": "",
+   "read": 2,
+   "seen": 2
+  },
+  "block.-": {
+   "example": "",
+   "read": 6,
+   "seen": 6
+  },
+  "block.-[member]": {
+   "example": "shared/src/main/scala/scopt/ORunner.scala:385  _.fullName",
+   "read": 6,
+   "seen": 12
+  },
+  "call_expression.function": {
+   "example": "shared/src/main/scala/scopt/OptionDef.scala:64  this(kind, name, OptionDefCallback.nullCallback[C])",
+   "read": 825,
+   "seen": 827
+  },
+  "call_expression.function[member]": {
+   "example": "",
+   "read": 866,
+   "seen": 866
+  },
+  "case_clause.body": {
+   "example": "",
+   "read": 3,
+   "seen": 3
+  },
+  "class_parameter.default_value[member]": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "enumerator.-": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "enumerator.-[member]": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "function_definition.body": {
+   "example": "",
+   "read": 7,
+   "seen": 7
+  },
+  "generic_function.function": {
+   "example": "",
+   "read": 192,
+   "seen": 192
+  },
+  "generic_function.function[member]": {
+   "example": "",
+   "read": 6,
+   "seen": 6
+  },
+  "guard.condition": {
+   "example": "",
+   "read": 2,
+   "seen": 2
+  },
+  "if_expression.alternative": {
+   "example": "",
+   "read": 4,
+   "seen": 4
+  },
+  "if_expression.condition": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "if_expression.condition[member]": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "if_expression.consequence": {
+   "example": "",
+   "read": 10,
+   "seen": 10
+  },
+  "if_expression.consequence[member]": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "indented_block.-": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "indented_block.-[member]": {
+   "example": "shared/src/main/scala/scopt/Read.scala:156  s.split(sep).map(implicitly[Read[(K, V)]].reads).toList",
+   "read": 2,
+   "seen": 4
+  },
+  "infix_expression.left": {
+   "example": "",
+   "read": 37,
+   "seen": 37
+  },
+  "infix_expression.left[member]": {
+   "example": "shared/src/main/scala/scopt/ORunner.scala:343  pendingCommands.exists(_.name == args(j)) ||",
+   "read": 63,
+   "seen": 74
+  },
+  "infix_expression.operator": {
+   "example": "",
+   "read": 39,
+   "seen": 39
+  },
+  "infix_expression.right": {
+   "example": "",
+   "read": 52,
+   "seen": 52
+  },
+  "infix_expression.right[member]": {
+   "example": "requests/src/requests/Model.scala:98  \"Content-Length\" -> java.nio.file.Files.size(x).toString,",
+   "read": 30,
+   "seen": 38
+  },
+  "interpolated_string_expression.interpolator": {
+   "example": "",
+   "read": 17,
+   "seen": 17
+  },
+  "interpolation.-": {
+   "example": "",
+   "read": 44,
+   "seen": 44
+  },
+  "match_expression.value": {
+   "example": "",
+   "read": 3,
+   "seen": 3
+  },
+  "match_expression.value[member]": {
+   "example": "",
+   "read": 6,
+   "seen": 6
+  },
+  "parameter.default_value": {
+   "example": "",
+   "read": 16,
+   "seen": 16
+  },
+  "prefix_expression.-": {
+   "example": "shared/src/main/scala/scopt/OptionDef.scala:288  if (i >= args.length || !isOptLike) None",
+   "read": 0,
+   "seen": 3
+  },
+  "prefix_expression.-[member]": {
+   "example": "shared/src/main/scala/scopt/ORunner.scala:174  c.getParentId == parentId && !c.isHidden",
+   "read": 0,
+   "seen": 2
+  },
+  "stable_type_identifier.-[member]": {
+   "example": "",
+   "read": 2,
+   "seen": 2
+  },
+  "tuple_expression.-[member]": {
+   "example": "",
+   "read": 6,
+   "seen": 6
+  },
+  "tuple_pattern.-": {
+   "example": "",
+   "read": 4,
+   "seen": 4
+  },
+  "val_definition.pattern": {
+   "example": "requests/src/requests/Util.scala:42  private[requests] val noVerifySocketFactory =",
+   "read": 7,
+   "seen": 15
+  },
+  "val_definition.value": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "val_definition.value[member]": {
+   "example": "requests/src/requests/Model.scala:114  val boundary = UUID.randomUUID().toString",
+   "read": 8,
+   "seen": 12
+  },
+  "var_definition.value[member]": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  }
+ },
+ "swift": {
+  "ERROR.-": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "additive_expression.lhs": {
+   "example": "Tests/ParameterEncoderTests.swift:630  \"\\(key).\\(index + 1)\"",
+   "read": 3,
+   "seen": 5
+  },
+  "additive_expression.lhs[member]": {
+   "example": "Source/Features/AuthenticationInterceptor.swift:412  let refreshWindowMin = Instant().value - refreshWindow.interval",
+   "read": 15,
+   "seen": 16
+  },
+  "additive_expression.rhs": {
+   "example": "",
+   "read": 4,
+   "seen": 4
+  },
+  "additive_expression.rhs[member]": {
+   "example": "",
+   "read": 7,
+   "seen": 7
+  },
+  "array_literal.element": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "array_literal.element[member]": {
+   "example": "",
+   "read": 25,
+   "seen": 25
+  },
+  "as_expression.expr": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "as_expression.expr[member]": {
+   "example": "Tests/AuthenticationInterceptorTests.swift:1451  XCTAssertEqual(responses[index]?.result.failure?.asAFError?.underlyingError as? AuthenticationError,",
+   "read": 136,
+   "seen": 146
+  },
+  "assignment.result": {
+   "example": "",
+   "read": 5,
+   "seen": 5
+  },
+  "assignment.result[member]": {
+   "example": "",
+   "read": 39,
+   "seen": 39
+  },
+  "assignment.target": {
+   "example": "",
+   "read": 25,
+   "seen": 25
+  },
+  "assignment.target[member]": {
+   "example": "",
+   "read": 243,
+   "seen": 243
+  },
+  "call_expression.-": {
+   "example": "",
+   "read": 2112,
+   "seen": 2112
+  },
+  "call_expression.-[member]": {
+   "example": "",
+   "read": 4551,
+   "seen": 4551
+  },
+  "call_suffix.name": {
+   "example": "Tests/RequestTests.swift:1583  } retrier: { @Sendable _, _, _, completion in",
+   "read": 7,
+   "seen": 10
+  },
+  "check_expression.target[member]": {
+   "example": "",
+   "read": 8,
+   "seen": 8
+  },
+  "comparison_expression.lhs": {
+   "example": "",
+   "read": 2,
+   "seen": 2
+  },
+  "comparison_expression.lhs[member]": {
+   "example": "Tests/RequestTests.swift:1657  #expect(sessionRetrier.retries[0].date < instanceRetrier.retries[0].date)",
+   "read": 16,
+   "seen": 23
+  },
+  "comparison_expression.rhs": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "comparison_expression.rhs[member]": {
+   "example": "Tests/RequestTests.swift:1657  #expect(sessionRetrier.retries[0].date < instanceRetrier.retries[0].date)",
+   "read": 15,
+   "seen": 22
+  },
+  "conjunction_expression.lhs": {
+   "example": "",
+   "read": 3,
+   "seen": 3
+  },
+  "conjunction_expression.lhs[member]": {
+   "example": "",
+   "read": 10,
+   "seen": 10
+  },
+  "conjunction_expression.rhs[member]": {
+   "example": "",
+   "read": 6,
+   "seen": 6
+  },
+  "control_transfer_statement.-": {
+   "example": "",
+   "read": 5,
+   "seen": 5
+  },
+  "control_transfer_statement.-[member]": {
+   "example": "",
+   "read": 37,
+   "seen": 37
+  },
+  "control_transfer_statement.result": {
+   "example": "",
+   "read": 17,
+   "seen": 17
+  },
+  "control_transfer_statement.result[member]": {
+   "example": "Sources/ArgumentParser/Completions/CompletionsGenerator.swift:131  return ToolInfoV0(commandStack: [command]).fishCompletionScript",
+   "read": 10,
+   "seen": 13
+  },
+  "dictionary_literal.key": {
+   "example": "Tests/TLSEvaluationTests.swift:552  let evaluators = [expiredHost: DisabledTrustEvaluator()]",
+   "read": 0,
+   "seen": 14
+  },
+  "dictionary_literal.key[member]": {
+   "example": "",
+   "read": 7,
+   "seen": 7
+  },
+  "dictionary_literal.value[member]": {
+   "example": "",
+   "read": 6,
+   "seen": 6
+  },
+  "directive.-": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "disjunction_expression.lhs": {
+   "example": "",
+   "read": 2,
+   "seen": 2
+  },
+  "disjunction_expression.lhs[member]": {
+   "example": "",
+   "read": 12,
+   "seen": 12
+  },
+  "disjunction_expression.rhs": {
+   "example": "",
+   "read": 2,
+   "seen": 2
+  },
+  "disjunction_expression.rhs[member]": {
+   "example": "",
+   "read": 4,
+   "seen": 4
+  },
+  "enum_type_parameters.-": {
+   "example": "Source/Core/AFError.swift:229  case urlRequestValidationFailed(reason: URLRequestValidationFailureReason)",
+   "read": 3,
+   "seen": 50
+  },
+  "equality_expression.lhs": {
+   "example": "",
+   "read": 7,
+   "seen": 7
+  },
+  "equality_expression.lhs[member]": {
+   "example": "Tests/MIMETypeTests.swift:62  #expect(Request.MIMEType(\"text/plain\")?.isWildcard == false)",
+   "read": 513,
+   "seen": 524
+  },
+  "equality_expression.rhs": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "equality_expression.rhs[member]": {
+   "example": "Tests/ArgumentParserUnitTests/HelpGenerationTests.swift:804  == opts[5].help.allValueStrings)",
+   "read": 28,
+   "seen": 34
+  },
+  "for_statement.collection": {
+   "example": "",
+   "read": 2,
+   "seen": 2
+  },
+  "for_statement.collection[member]": {
+   "example": "Tests/ArgumentParserUnitTests/MirrorTests.swift:47  for child in Mirror(reflecting: fooChild).children {",
+   "read": 11,
+   "seen": 12
+  },
+  "function_declaration.default_value[member]": {
+   "example": "",
+   "read": 44,
+   "seen": 44
+  },
+  "guard_statement.bound_identifier": {
+   "example": "",
+   "read": 4,
+   "seen": 4
+  },
+  "guard_statement.condition": {
+   "example": "",
+   "read": 46,
+   "seen": 46
+  },
+  "guard_statement.condition[member]": {
+   "example": "",
+   "read": 43,
+   "seen": 43
+  },
+  "identifier.-": {
+   "example": "",
+   "read": 5,
+   "seen": 5
+  },
+  "if_statement.bound_identifier": {
+   "example": "",
+   "read": 3,
+   "seen": 3
+  },
+  "if_statement.condition": {
+   "example": "",
+   "read": 174,
+   "seen": 174
+  },
+  "if_statement.condition[member]": {
+   "example": "Sources/ArgumentParser/Utilities/Foundation.swift:20  if let description = (self as? LocalizedError)?.errorDescription {",
+   "read": 92,
+   "seen": 93
+  },
+  "infix_expression.lhs": {
+   "example": "Tests/ValidationTests.swift:762  guard data != nil else { return .failure(ValidationError.missingData) }",
+   "read": 2,
+   "seen": 4
+  },
+  "infix_expression.lhs[member]": {
+   "example": "",
+   "read": 27,
+   "seen": 27
+  },
+  "infix_expression.rhs": {
+   "example": "",
+   "read": 2,
+   "seen": 2
+  },
+  "infix_expression.rhs[member]": {
+   "example": "",
+   "read": 6,
+   "seen": 6
+  },
+  "init_declaration.default_value[member]": {
+   "example": "",
+   "read": 3,
+   "seen": 3
+  },
+  "interpolated_expression.value": {
+   "example": "Example/Source/MasterViewController.swift:98  print(\"Reachability Status Changed: \\(status)\")",
+   "read": 92,
+   "seen": 94
+  },
+  "interpolated_expression.value[member]": {
+   "example": "Source/Core/Response.swift:399  let requestSummary = \"\\(request.httpMethod!) \\(request)\"",
+   "read": 93,
+   "seen": 96
+  },
+  "modifiers.-[member]": {
+   "example": "Source/Core/DataRequest.swift:413  @available(*, deprecated, message: \"responseJSON deprecated and will be removed in Alamofire 6. Use ",
+   "read": 6,
+   "seen": 729
+  },
+  "multiplicative_expression.lhs[member]": {
+   "example": "",
+   "read": 4,
+   "seen": 4
+  },
+  "nil_coalescing_expression.if_nil": {
+   "example": "",
+   "read": 4,
+   "seen": 4
+  },
+  "nil_coalescing_expression.if_nil[member]": {
+   "example": "Sources/ArgumentParser/Validators/AsyncCompletionsValidator.swift:82  .content",
+   "read": 14,
+   "seen": 15
+  },
+  "nil_coalescing_expression.value": {
+   "example": "",
+   "read": 20,
+   "seen": 20
+  },
+  "nil_coalescing_expression.value[member]": {
+   "example": "",
+   "read": 57,
+   "seen": 57
+  },
+  "parameter.external_name": {
+   "example": "Source/Core/DataRequest.swift:200  perform handler: @escaping @Sendable (HTTPURLResponse) -> Void) -> Self {",
+   "read": 2,
+   "seen": 147
+  },
+  "pattern.-": {
+   "example": "",
+   "read": 937,
+   "seen": 937
+  },
+  "pattern.-[member]": {
+   "example": "",
+   "read": 3,
+   "seen": 3
+  },
+  "pattern.bound_identifier": {
+   "example": "Examples/math/Math.swift:40  var hexadecimalOutput = false",
+   "read": 114,
+   "seen": 127
+  },
+  "prefix_expression.target": {
+   "example": "Source/Core/DataRequest.swift:450  emptyRequestMethods: Set<HTTPMethod> = DecodableResponseSerializer<Value>.defaultEmptyRequestMethods",
+   "read": 1534,
+   "seen": 2294
+  },
+  "prefix_expression.target[member]": {
+   "example": "Source/Core/DataRequest.swift:272  guard !self.isCancelled, let serializerError = result.failure, let delegate = self.delegate else {",
+   "read": 32,
+   "seen": 131
+  },
+  "property_declaration.value": {
+   "example": "",
+   "read": 13,
+   "seen": 13
+  },
+  "property_declaration.value[member]": {
+   "example": "Tests/ParameterEncoderTests.swift:184  let request = Endpoint().urlRequest",
+   "read": 100,
+   "seen": 155
+  },
+  "range_expression.end[member]": {
+   "example": "",
+   "read": 6,
+   "seen": 6
+  },
+  "range_expression.start[member]": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "repeat_while_statement.condition[member]": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "statements.-": {
+   "example": "Examples/math/Math.swift:149  .map { k, _ in k }",
+   "read": 14,
+   "seen": 15
+  },
+  "statements.-[member]": {
+   "example": "Source/Core/Session.swift:1429  return mutableState.read { $0.requestTaskMap[task]?.credential } ??",
+   "read": 54,
+   "seen": 64
+  },
+  "switch_entry.-[member]": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "switch_statement.expr": {
+   "example": "Source/Core/WebSocketRequest.swift:357  switch result {",
+   "read": 16,
+   "seen": 21
+  },
+  "switch_statement.expr[member]": {
+   "example": "Plugins/GenerateCommon/PackagePlugin+Helpers.swift:21  switch self.extractOption(named: \"configuration\").first {",
+   "read": 86,
+   "seen": 87
+  },
+  "ternary_expression.condition": {
+   "example": "",
+   "read": 8,
+   "seen": 8
+  },
+  "ternary_expression.condition[member]": {
+   "example": "",
+   "read": 30,
+   "seen": 30
+  },
+  "ternary_expression.if_false": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "ternary_expression.if_false[member]": {
+   "example": "",
+   "read": 3,
+   "seen": 3
+  },
+  "ternary_expression.if_true[member]": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "tuple_expression.name": {
+   "example": "",
+   "read": 4,
+   "seen": 4
+  },
+  "tuple_expression.value": {
+   "example": "",
+   "read": 4,
+   "seen": 4
+  },
+  "tuple_expression.value[member]": {
+   "example": "",
+   "read": 95,
+   "seen": 95
+  },
+  "value_argument.value": {
+   "example": "",
+   "read": 667,
+   "seen": 667
+  },
+  "value_argument.value[member]": {
+   "example": "Source/Features/AuthenticationInterceptor.swift:391  mutableState.refreshTimestamps.append(Instant().value)",
+   "read": 1747,
+   "seen": 1841
+  },
+  "value_argument_label.-": {
+   "example": "Example/Source/DetailViewController.swift:208  if Sections(rawValue: section) == .body, let elapsedTime {",
+   "read": 596,
+   "seen": 3166
+  },
+  "where_clause.-[member]": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "while_statement.bound_identifier": {
+   "example": "",
+   "read": 2,
+   "seen": 2
+  },
+  "while_statement.condition[member]": {
+   "example": "Sources/ArgumentParser/Utilities/Tree.swift:55  while let current = toVisit[currentIndex...].first {",
+   "read": 0,
+   "seen": 1
+  }
+ },
+ "tsx": {
+  "arguments.-": {
+   "example": "",
+   "read": 18,
+   "seen": 18
+  },
+  "call_expression.function": {
+   "example": "",
+   "read": 24,
+   "seen": 24
+  },
+  "call_expression.function[member]": {
+   "example": "",
+   "read": 3,
+   "seen": 3
+  },
+  "export_specifier.name": {
+   "example": "frontend/src/components/ui/alert.tsx:66  export { Alert, AlertTitle, AlertDescription }",
+   "read": 0,
+   "seen": 122
+  },
+  "export_statement.value": {
+   "example": "",
+   "read": 15,
+   "seen": 15
+  },
+  "jsx_attribute.-": {
+   "example": "frontend/src/components/Admin/UserActionsMenu.tsx:36  <DeleteUser id={user.id} onSuccess={() => setOpen(false)} />",
+   "read": 15,
+   "seen": 19
+  },
+  "jsx_closing_element.name": {
+   "example": "frontend/src/components/ui/password-input.tsx:43  </Button>",
+   "read": 318,
+   "seen": 321
+  },
+  "jsx_expression.-": {
+   "example": "",
+   "read": 7,
+   "seen": 7
+  },
+  "jsx_opening_element.name": {
+   "example": "frontend/src/routes/_layout.tsx:28  <header className=\"sticky top-0 z-10 flex h-16 shrink-0 items-center gap-2 border-b bg-background px",
+   "read": 320,
+   "seen": 321
+  },
+  "jsx_self_closing_element.name": {
+   "example": "",
+   "read": 145,
+   "seen": 145
+  },
+  "jsx_self_closing_element.name[member]": {
+   "example": "",
+   "read": 5,
+   "seen": 5
+  },
+  "pair.key": {
+   "example": "frontend/src/components/Admin/DeleteUser.tsx:38  mutationFn: deleteUser,",
+   "read": 0,
+   "seen": 23
+  },
+  "pair.value": {
+   "example": "",
+   "read": 17,
+   "seen": 17
+  },
+  "type_query.-": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  }
+ },
+ "typescript": {
+  "arguments.-": {
+   "example": "",
+   "read": 835,
+   "seen": 835
+  },
+  "arguments.-[member]": {
+   "example": "source/core/index.ts:323  const hasResponse = (request: ClientRequest): boolean => Boolean((request as ClientRequest & {res?: ",
+   "read": 1448,
+   "seen": 1807
+  },
+  "array.-": {
+   "example": "",
+   "read": 30,
+   "seen": 30
+  },
+  "array.-[member]": {
+   "example": "test/diagnostics-channel.ts:860  assert.deepStrictEqual(messages.filter(message => message.channel === 'got:response:start').map(mess",
+   "read": 29,
+   "seen": 33
+  },
+  "array_pattern.-": {
+   "example": "test/error.ts:968  for (const [name, responseType, expected] of [",
+   "read": 7,
+   "seen": 18
+  },
+  "arrow_function.body": {
+   "example": "test/pagination.ts:418  const hooksCount = [init, beforeRequest, beforeRedirect, beforeRetry, afterResponse, beforeError].ma",
+   "read": 2,
+   "seen": 3
+  },
+  "arrow_function.body[member]": {
+   "example": "test/https.ts:419  await waitForCondition(() => (response as IncomingMessage & {stream: http2.ClientHttp2Stream}).strea",
+   "read": 23,
+   "seen": 33
+  },
+  "arrow_function.parameter": {
+   "example": "source/core/timed-out.ts:121  request.once('error', error => {",
+   "read": 3,
+   "seen": 12
+  },
+  "as_expression.-": {
+   "example": "test/encoding.ts:109  const promise = got('', {encoding: encoding as BufferEncoding});",
+   "read": 12,
+   "seen": 18
+  },
+  "as_expression.-[member]": {
+   "example": "",
+   "read": 23,
+   "seen": 23
+  },
+  "assignment_expression.left": {
+   "example": "test/request-timeout.ts:476  options.timeout.request = 30_000;",
+   "read": 4,
+   "seen": 10
+  },
+  "assignment_expression.left[member]": {
+   "example": "test/arguments.ts:1331  response.statusMessage = 'Custom status';",
+   "read": 364,
+   "seen": 427
+  },
+  "assignment_expression.right": {
+   "example": "test/helpers/rejects.ts:20  rejection = error;",
+   "read": 9,
+   "seen": 12
+  },
+  "assignment_expression.right[member]": {
+   "example": "test/hooks.ts:871  capturedPrefixUrl = options.prefixUrl;",
+   "read": 60,
+   "seen": 62
+  },
+  "augmented_assignment_expression.left[member]": {
+   "example": "",
+   "read": 9,
+   "seen": 9
+  },
+  "augmented_assignment_expression.right[member]": {
+   "example": "",
+   "read": 2,
+   "seen": 2
+  },
+  "binary_expression.left": {
+   "example": "source/core/timed-out.ts:177  if (error === null) {",
+   "read": 20,
+   "seen": 44
+  },
+  "binary_expression.left[member]": {
+   "example": "test/dns-cache-integration.ts:81  assert.strictEqual(options.dnsCache instanceof DnsCache, true);",
+   "read": 269,
+   "seen": 281
+  },
+  "binary_expression.right": {
+   "example": "test/redirects.ts:5092  if (step <= maxRedirects) {",
+   "read": 40,
+   "seen": 42
+  },
+  "binary_expression.right[member]": {
+   "example": "source/core/utils/http2-client.ts:1513  if (this.res && stream.rstCode === NGHTTP2_NO_ERROR && (this.res as unknown as Http2IncomingMessage)",
+   "read": 85,
+   "seen": 93
+  },
+  "call_expression.function": {
+   "example": "",
+   "read": 8237,
+   "seen": 8237
+  },
+  "call_expression.function[member]": {
+   "example": "test/https.ts:4115  ].filter(Boolean);",
+   "read": 13266,
+   "seen": 13341
+  },
+  "catch_clause.parameter": {
+   "example": "test/helpers/rejects.ts:18  } catch (error) {",
+   "read": 4,
+   "seen": 16
+  },
+  "computed_property_name.-": {
+   "example": "test/pagination.ts:362  pagination: {[callback]: true},",
+   "read": 46,
+   "seen": 47
+  },
+  "computed_property_name.-[member]": {
+   "example": "",
+   "read": 4,
+   "seen": 4
+  },
+  "export_specifier.alias": {
+   "example": "source/index.ts:30  export {default as parseLinkHeader} from './core/parse-link-header.js';",
+   "read": 0,
+   "seen": 6
+  },
+  "export_specifier.name": {
+   "example": "frontend/src/client/client/index.ts:23  export { createConfig } from './utils.gen';",
+   "read": 2,
+   "seen": 22
+  },
+  "export_statement.-": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "export_statement.value": {
+   "example": "",
+   "read": 13,
+   "seen": 13
+  },
+  "expression_statement.-[member]": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "extends_clause.value": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "for_in_statement.left": {
+   "example": "test/cookies.ts:907  for (const statusCode of [302, 307]) {",
+   "read": 24,
+   "seen": 62
+  },
+  "for_in_statement.right": {
+   "example": "packages/zod/src/v4/core/tests/locales/ru.test.ts:10  for (const { count, expected } of cases) {",
+   "read": 3,
+   "seen": 4
+  },
+  "for_in_statement.right[member]": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "if_statement.condition": {
+   "example": "test/create.ts:1030  if (resolveBodyOnly) {",
+   "read": 3,
+   "seen": 5
+  },
+  "if_statement.condition[member]": {
+   "example": "",
+   "read": 91,
+   "seen": 91
+  },
+  "namespace_export.-": {
+   "example": "packages/zod/src/v4/core/index.ts:11  export * as locales from \"../locales/index.js\";",
+   "read": 0,
+   "seen": 1
+  },
+  "nested_identifier.object": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "nested_type_identifier.module": {
+   "example": "",
+   "read": 452,
+   "seen": 452
+  },
+  "new_expression.constructor": {
+   "example": "",
+   "read": 42,
+   "seen": 42
+  },
+  "new_expression.constructor[member]": {
+   "example": "",
+   "read": 6,
+   "seen": 6
+  },
+  "object.-": {
+   "example": "frontend/src/client/client/client.gen.ts:147  setConfig,",
+   "read": 15,
+   "seen": 63
+  },
+  "object_assignment_pattern.right": {
+   "example": "source/core/utils/dns-cache.ts:242  lookup = dnsLookup,",
+   "read": 0,
+   "seen": 1
+  },
+  "pair.key": {
+   "example": "typings/index.test-d.ts:577  helper.prepareContext({ helpWidth: 120, error: true, outputHasColors: false });",
+   "read": 594,
+   "seen": 4186
+  },
+  "pair.value": {
+   "example": "",
+   "read": 36,
+   "seen": 36
+  },
+  "pair.value[member]": {
+   "example": "source/core/options.ts:3532  buf: entry.buffer,",
+   "read": 157,
+   "seen": 161
+  },
+  "pair_pattern.key": {
+   "example": "source/core/options.ts:3605  const {request: customRequest} = this.#internals;",
+   "read": 1,
+   "seen": 7
+  },
+  "return_statement.-": {
+   "example": "",
+   "read": 7,
+   "seen": 7
+  },
+  "return_statement.-[member]": {
+   "example": "packages/zod/src/v4/classic/tests/string.test.ts:241  return emailSchema.safeParse(email).success;",
+   "read": 46,
+   "seen": 47
+  },
+  "satisfies_expression.-[member]": {
+   "example": "packages/zod/src/v4/classic/tests/index.test.ts:942  z.file().def.type satisfies \"file\";",
+   "read": 0,
+   "seen": 37
+  },
+  "spread_element.-": {
+   "example": "",
+   "read": 5,
+   "seen": 5
+  },
+  "spread_element.-[member]": {
+   "example": "",
+   "read": 20,
+   "seen": 20
+  },
+  "subscript_expression.index": {
+   "example": "test/response-parse.ts:1249  const error = await rejects(promise[shortcut](), ParseError);",
+   "read": 2,
+   "seen": 3
+  },
+  "subscript_expression.object": {
+   "example": "packages/bench/memory/prop-arrays.ts:54  .sort((a, b) => Number(b[\"bytes/schema\"]) - Number(a[\"bytes/schema\"]));",
+   "read": 0,
+   "seen": 4
+  },
+  "subscript_expression.object[member]": {
+   "example": "test/arguments.ts:1329  response.headers['x-cached'] = 'yes';",
+   "read": 284,
+   "seen": 312
+  },
+  "template_substitution.-": {
+   "example": "test/create.ts:1021  test(`dynamic defaults return ${responseType} with body-only ${resolveBodyOnly}`, withServer, async ",
+   "read": 31,
+   "seen": 78
+  },
+  "template_substitution.-[member]": {
+   "example": "test/timeout.ts:3251  events.push(`${error.code} ${(error as TimeoutError).event}`);",
+   "read": 54,
+   "seen": 62
+  },
+  "ternary_expression.alternative": {
+   "example": "packages/zod/src/v4/classic/tests/default.test.ts:78  .transform((_) => (Math.random() > 0 ? undefined : _))",
+   "read": 4,
+   "seen": 5
+  },
+  "ternary_expression.alternative[member]": {
+   "example": "",
+   "read": 3,
+   "seen": 3
+  },
+  "ternary_expression.condition": {
+   "example": "test/error.ts:824  const response = throwHttpErrors",
+   "read": 4,
+   "seen": 9
+  },
+  "ternary_expression.condition[member]": {
+   "example": "",
+   "read": 11,
+   "seen": 11
+  },
+  "ternary_expression.consequence": {
+   "example": "",
+   "read": 3,
+   "seen": 3
+  },
+  "ternary_expression.consequence[member]": {
+   "example": "",
+   "read": 10,
+   "seen": 10
+  },
+  "throw_statement.-": {
+   "example": "source/core/timed-out.ts:127  throw error;",
+   "read": 2,
+   "seen": 3
+  },
+  "type_query.-": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "type_query.-[member]": {
+   "example": "",
+   "read": 37,
+   "seen": 37
+  },
+  "unary_expression.argument": {
+   "example": "test/error.ts:830  if (!throwHttpErrors) {",
+   "read": 1,
+   "seen": 3
+  },
+  "unary_expression.argument[member]": {
+   "example": "source/core/utils/http2-client.ts:817  && !session.closed",
+   "read": 193,
+   "seen": 196
+  },
+  "update_expression.argument[member]": {
+   "example": "",
+   "read": 10,
+   "seen": 10
+  },
+  "variable_declarator.value": {
+   "example": "",
+   "read": 6,
+   "seen": 6
+  },
+  "variable_declarator.value[member]": {
+   "example": "test/error.ts:504  const ErrorCaptureStackTrace = Error.captureStackTrace;",
+   "read": 44,
+   "seen": 56
+  }
+ }
+}
