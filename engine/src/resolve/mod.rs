@@ -4081,6 +4081,23 @@ impl<'a> Project<'a> {
         if depth == 0 {
             return None;
         }
+        // Go: the member at the shallowest depth of embedding, level by
+        // level (the spec's Selectors; go/types lookupFieldOrMethodImpl)
+        if self.family[c.0] == Some(Family::Go) {
+            let mut level = self.bases(c);
+            let mut seen: HashSet<DefRef> = HashSet::from([c]);
+            for _ in 0..depth {
+                level.retain(|b| seen.insert(*b));
+                if level.is_empty() {
+                    return None;
+                }
+                if let Some(m) = level.iter().find_map(|b| self.best(self.members(*b, name))) {
+                    return Some(m);
+                }
+                level = level.iter().flat_map(|b| self.bases(*b)).collect();
+            }
+            return None;
+        }
         self.bases(c).into_iter().find_map(|b| self.class_member(b, name, depth - 1))
     }
 

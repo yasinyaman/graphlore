@@ -2318,6 +2318,76 @@ case("rust", "match-arm-binding", "a binding of a `match` arm is a name of the a
      [("pick", "calls", "size")], [("shadowed", "calls", "size"), ("shadowed", "references", "size")],
      source=REF_RS + "names/scopes.md r[names.scopes.pattern-bindings.match-arm]")
 
+# Phase 2 for Go: the Go specification (golang/go, `doc/go_spec.html`: 'Blocks',
+# 'Declarations and scope', 'Selectors', 'Import declarations', 'Method expressions')
+# and go/types (`src/go/types/lookup.go` LookupFieldOrMethod, `scope.go`
+# LookupParent, `resolver.go` collectObjects).
+found_by("source")
+SPEC_GO = "golang/go@2dbf8b413af3:doc/go_spec.html#"
+GT_GO = "golang/go@2dbf8b413af3:src/go/types/"
+case("go", "dot-import", "`import . \"p\"` declares p's exported names in the file block: they are used bare",
+     GO, {"go.mod": GOMOD, "util/u.go": "package util\n\nfunc Sin() int {\n\treturn 1\n}\n",
+          "a.go": "package app\n\nimport . \"example.com/app/util\"\n\nfunc Run() int {\n\treturn Sin()\n}\n"},
+     [("Run", "calls", "util/u.go:Sin")],
+     source=SPEC_GO + "Import_declarations; " + GT_GO + "resolver.go collectObjects (dot-imports)")
+case("go", "package-name-from-the-clause", "an import is named by the imported package's clause, not by its directory",
+     GO, {"go.mod": GOMOD, "internal/v2/s.go": "package store\n\nfunc Get() int {\n\treturn 1\n}\n",
+          "a.go": "package app\n\nimport \"example.com/app/internal/v2\"\n\nfunc Run() int {\n\treturn store.Get()\n}\n"},
+     [("Run", "calls", "internal/v2/s.go:Get")],
+     source=SPEC_GO + "Import_declarations (if the PackageName is omitted, it defaults to the identifier in the package clause)")
+case("go", "shallowest-depth", "a selector is the field or method at the shallowest depth: a type's own method before an embedded type's",
+     GO, {"go.mod": GOMOD, "a.go": "package app\n\ntype Base struct{}\n\nfunc (b *Base) Close() int {\n\treturn 1\n}\n\ntype File struct {\n\tBase\n}\n\nfunc (f *File) Close() int {\n\treturn 2\n}\n\nfunc Run(f *File) int {\n\treturn f.Close()\n}\n"},
+     [("Run", "calls", "File.Close")], [("Run", "calls", "Base.Close")],
+     source=SPEC_GO + "Selectors (the field or method at the shallowest depth); " + GT_GO + "lookup.go LookupFieldOrMethod")
+case("go", "shallower-embedding-wins", "of two embedded types, the method found at the lesser depth",
+     GO, {"go.mod": GOMOD, "a.go": "package app\n\ntype Inner struct{}\n\nfunc (Inner) Name() string {\n\treturn \"inner\"\n}\n\ntype Middle struct {\n\tInner\n}\n\ntype Named struct{}\n\nfunc (Named) Name() string {\n\treturn \"named\"\n}\n\ntype Outer struct {\n\tMiddle\n\tNamed\n}\n\nfunc Run(o Outer) string {\n\treturn o.Name()\n}\n"},
+     [("Run", "calls", "Named.Name")], [("Run", "calls", "Inner.Name")],
+     source=SPEC_GO + "Selectors (depth of f in T); " + GT_GO + "lookup.go lookupFieldOrMethodImpl")
+case("go", "promoted-field", "a field of an embedded struct is a field of the outer one",
+     GO, {"go.mod": GOMOD, "a.go": "package app\n\ntype Meta struct {\n\tVersion int\n}\n\ntype Doc struct {\n\tMeta\n}\n\nfunc Version(d Doc) int {\n\treturn d.Version\n}\n"},
+     [("Version", "reads", "Meta.Version")],
+     source=SPEC_GO + "Selectors (t.y is t.T1.y)")
+case("go", "block-redeclaration-ends-with-the-block", "a name declared in a block hides a package name only inside that block",
+     GO, {"go.mod": GOMOD, "a.go": "package app\n\nfunc helper() int {\n\treturn 1\n}\n\nfunc Run(ok bool) int {\n\tif ok {\n\t\thelper := 2\n\t\treturn helper\n\t}\n\treturn helper()\n}\n\nfunc Hidden() int {\n\thelper := 2\n\treturn helper\n}\n"},
+     [("Run", "calls", "helper")], [("Hidden", "calls", "helper"), ("Hidden", "references", "helper")],
+     source=SPEC_GO + "Declarations_and_scope (redeclared in an inner block)")
+case("go", "switch-clause-is-a-block", "each clause of a `switch` is a block of its own: a name of one clause is none of the next",
+     GO, {"go.mod": GOMOD, "a.go": "package app\n\nfunc helper() int {\n\treturn 1\n}\n\nfunc Run(n int) int {\n\tswitch n {\n\tcase 1:\n\t\thelper := 2\n\t\treturn helper\n\tdefault:\n\t\treturn helper()\n\t}\n}\n"},
+     [("Run", "calls", "helper")],
+     source=SPEC_GO + "Blocks (each clause in a switch or select statement acts as an implicit block)")
+case("go", "short-var-scope-starts-after", "a name declared by `:=` is in scope after the declaration: its own value names the outer one",
+     GO, {"go.mod": GOMOD, "a.go": "package app\n\nfunc helper() int {\n\treturn 1\n}\n\nfunc Run() int {\n\thelper := helper()\n\treturn helper\n}\n"},
+     [("Run", "calls", "helper")],
+     source=SPEC_GO + "Declarations_and_scope (begins at the end of the ShortVarDecl); " + GT_GO + "scope.go LookupParent (pos)")
+case("go", "parameter-hides-a-function", "a parameter is a name of the function body: it hides a package function of its name",
+     GO, {"go.mod": GOMOD, "a.go": "package app\n\nfunc helper() int {\n\treturn 1\n}\n\nfunc Run(helper func() int) int {\n\treturn helper()\n}\n"},
+     [], [("Run", "calls", "helper")],
+     source=SPEC_GO + "Declarations_and_scope (a function parameter's scope is the function body)")
+case("go", "local-type-hides-a-type", "a type declared in a function hides a package type of its name inside the function",
+     GO, {"go.mod": GOMOD, "a.go": "package app\n\ntype Config struct {\n\tName string\n}\n\nfunc Run() string {\n\ttype Config struct {\n\t\tName string\n\t}\n\tc := Config{Name: \"x\"}\n\treturn c.Name\n}\n\nfunc Other() string {\n\tc := Config{Name: \"y\"}\n\treturn c.Name\n}\n"},
+     [("Other", "calls", "a.go:Config")], [("Run", "calls", "a.go:Config"), ("Run", "reads", "a.go:Config.Name")],
+     source=SPEC_GO + "Declarations_and_scope (a type identifier declared inside a function)")
+case("go", "method-is-no-package-name", "a method is no name of the package block: a bare call in a method is the package function",
+     GO, {"go.mod": GOMOD, "a.go": "package app\n\nfunc Stop() int {\n\treturn 1\n}\n\ntype Job struct{}\n\nfunc (j Job) Stop() int {\n\treturn 2\n}\n\nfunc (j Job) Run() int {\n\treturn Stop()\n}\n"},
+     [("Job.Run", "calls", "a.go:Stop@3")], [("Job.Run", "calls", "Job.Stop")],
+     source=SPEC_GO + "Declarations_and_scope (constant, type, variable or function (but not method) declared at top level)")
+case("go", "type-parameter-hides-a-type", "a type parameter of a function hides a package type of its name in the function",
+     GO, {"go.mod": GOMOD, "a.go": "package app\n\ntype Config struct{}\n\nfunc Keep[Config any](c Config) Config {\n\treturn c\n}\n\nfunc Plain(c Config) Config {\n\treturn c\n}\n"},
+     [("Plain", "references", "Config")], [("Keep", "references", "Config")],
+     source=SPEC_GO + "Declarations_and_scope (a type parameter of a function)")
+case("go", "method-expression", "`T.M` is a method expression: a use of T's method",
+     GO, {"go.mod": GOMOD, "a.go": "package app\n\ntype Counter struct{ n int }\n\nfunc (c Counter) Value() int {\n\treturn c.n\n}\n\nfunc Values(cs []Counter) []int {\n\tf := Counter.Value\n\tout := []int{}\n\tfor _, c := range cs {\n\t\tout = append(out, f(c))\n\t}\n\treturn out\n}\n"},
+     [("Values", "references", "Counter.Value")],
+     source=SPEC_GO + "Method_expressions")
+case("go", "method-value", "`x.M` without a call is a method value: a use of the method",
+     GO, {"go.mod": GOMOD, "a.go": "package app\n\ntype Counter struct{ n int }\n\nfunc (c Counter) Value() int {\n\treturn c.n\n}\n\nfunc Later(c Counter) func() int {\n\treturn c.Value\n}\n"},
+     [("Later", "references", "Counter.Value")],
+     source=SPEC_GO + "Method_values")
+case("go", "pointer-method-on-a-value", "a method of `*T` is called on an addressable `T`",
+     GO, {"go.mod": GOMOD, "a.go": "package app\n\ntype Counter struct{ n int }\n\nfunc (c *Counter) Inc() {\n\tc.n++\n}\n\nfunc Run() int {\n\tvar c Counter\n\tc.Inc()\n\treturn c.n\n}\n"},
+     [("Run", "calls", "Counter.Inc")],
+     source=SPEC_GO + "Calls (if x is addressable and &x's method set contains m, x.m() is shorthand for (&x).m())")
+
 # --- running ------------------------------------------------------------------
 
 def _matches(node: dict[str, Any], want: str) -> bool:

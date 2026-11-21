@@ -541,6 +541,61 @@ where two crates of the workspace define one.
 
 Measured with engine 0.5.65: rust-analyzer's precision on the four Rust audit repositories is 98.5% (12,612 of 12,802), recall 83.4%, as before; `verify_graphify.py` lacks 44 confirmed edges, as before. On the 45 audit repositories 13 edges change, all in ripgrep and ureq: the `use` in a function picks the type it imports (`Separator::new` is `FieldContextSeparator::new` there), `std::os::unix::fs::symlink` imported in a test is no longer a call of the test's own `symlink`, and a `match` arm's `v` is no longer read as the parameter `v`.
 
+### Phase 2: Go
+
+The Go specification (`doc/go_spec.html`: Blocks, Declarations and scope,
+Selectors, Import declarations, Method expressions and values) and go/types
+(`lookup.go` `LookupFieldOrMethod`, `scope.go` `LookupParent`, `resolver.go`).
+`benchmarks/rule_inventory.py` lists every rule (29 rules, 23 held by a case, 6 not followed; 15 of 53 cases found in the language's own tools).
+
+| Source | Rule | Held by / why not |
+|---|---|---|
+| spec Declarations_and_scope | a top-level constant, type, variable or function is a name of the package block, in every file | `package-scope`, `test-file` |
+| spec Declarations_and_scope | a method is no name of the package block | `method-is-no-package-name` |
+| spec Declarations_and_scope | an imported package's name is a name of the file block of the importing file | `imported-package`, `import-alias` |
+| spec Declarations_and_scope | a receiver, parameter or result is a name of the function body | `parameter-hides-a-function`, `value-receiver` |
+| spec Declarations_and_scope | a type parameter of a function is a name from its name to the end of its body | `type-parameter-hides-a-type`, `generic-constraint` |
+| spec Declarations_and_scope | a variable or constant of a function is a name from the end of its declaration to the end of the block | `short-var-scope-starts-after`, `local-hides-function`, `short-var-hides-package-name` |
+| spec Declarations_and_scope | a type of a function is a name from its identifier to the end of the block | `local-type-hides-a-type` |
+| spec Declarations_and_scope | a name redeclared in an inner block denotes the inner one only there | `block-redeclaration-ends-with-the-block` |
+| spec Blocks | `if`, `for`, `switch` and each clause of a `switch` or `select` are blocks | `switch-clause-is-a-block` |
+| spec Label_scopes | labels are function-wide and not block scoped | not followed: labels name no definition of the graph |
+| spec Predeclared_identifiers | the universe block: `len`, `append`, `error`, … | not followed: predeclared names are no project definitions; a project's own `len` shadows them as any package name does |
+| spec Exported_identifiers | only an exported name of another package is reachable | not followed: code that compiles uses only exported names: the engine does not check |
+| spec Import_declarations | an import's name defaults to the imported package's clause | `package-name-from-the-clause` |
+| spec Import_declarations | `import . "p"` declares p's exported names in the file block | `dot-import` |
+| spec Import_declarations | `import _ "p"` binds nothing | not followed: it binds no name to resolve |
+| spec Selectors; go/types LookupFieldOrMethod | `x.f` is the field or method at the shallowest depth | `shallowest-depth`, `shallower-embedding-wins` |
+| spec Selectors | an embedded type's fields and methods are promoted | `embedded-struct`, `promoted-field`, `embedded-interface` |
+| spec Selectors | a method of an interface value is the interface's method | `interface-method` |
+| spec Calls | a `*T` method is called on an addressable `T` | `pointer-method-on-a-value` |
+| spec Method_expressions | `T.M` is a use of the method | `method-expression` |
+| spec Method_values | `x.M` without a call is a use of the method | `method-value`, `method-value-argument` |
+| spec Selectors | two fields or methods at the same shallowest depth make the selector illegal | not followed: an error is no binding |
+| spec Short_variable_declarations | `x, err := f()` gives each name its result's type | `multiple-results`, `every-result-type` |
+| spec For_range | a `range` value is the element type | `range-slice` |
+| spec Index_expressions | an element of a slice or map | `slice-index`, `map-value` |
+| spec Type_assertions | `x.(T)` is a T; a type switch's `case T` names T | `type-assertion`, `type-assertion-and-switch` |
+| spec Type_declarations | a defined type's methods, and what it is defined as | `named-slice-type`, `defined-type-names-its-type` |
+| spec Function_literals | a function literal sees the package and names its signature's types | `closure`, `function-literal-signature` |
+| go/types infer.go | a function argument's type inferred for a generic call | not followed: phase 3: type inference is not modelled |
+
+15 cases were written from this reading, all accepted by the Go compiler.
+Two did not hold, and engine 0.5.66 follows them:
+
+- **The shallowest depth** (Selectors): of two embedded types with a method
+  of one name, the one embedded less deep is meant; the lookup went depth
+  first and found the deeper one. It now goes level by level, as
+  `lookupFieldOrMethodImpl` does.
+- **Each `switch` clause is a block** (Blocks): `helper := 2` in one `case`
+  hid the function `helper` in the next.
+
+Measured with engine 0.5.66: `go/types` gives 12,279 of 12,284 (as before),
+recall 84.0%; `verify_graphify.py` lacks 44 confirmed edges, as before; the
+45 audit repositories' own-code edges do not change. Go was already the
+closest to whole: the reading found two rules missing, and neither occurs in
+the four Go audit repositories.
+
 One thing the cases showed that is not a position: a Swift protocol's
 property requirement is a definition of its own named `var handler`, of kind
 interface (the span rule takes `protocol_property_declaration` for a
@@ -581,7 +636,7 @@ say is left and by how directly the compiler can check the result:
    by a case, 7 not followed with the reason)
 2. **Rust** (editions change path resolution; rust-analyzer runs here): read (engine 0.5.65, 38 rules, 31 held by a case, 7 not followed)
 3. **Go** (smallest binder, already whole on the floor: the cheapest full
-   reading, and the template for the others)
+   reading, and the template for the others): read (engine 0.5.66, 29 rules, 23 held by a case, 6 not followed)
 4. **TypeScript / JavaScript** (module resolution modes)
 5. **Java**, then **Kotlin** (one platform; `--release` and
    `-language-version` give every version from one compiler)
