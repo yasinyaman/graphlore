@@ -19,6 +19,9 @@ where one is installed, and reports the ones it rejects:
     C, C++      gcc / g++ -fsyntax-only
     Ruby        ruby -c, then the files are loaded
     PHP         php -l
+    Kotlin      kotlinc
+    Swift       swiftc -typecheck
+    C#          dotnet build (a library of every source)
 
 A language with no toolchain on this machine is listed as not checked. It
 compiles; it does not say which definition a call reaches: see `--binding` in
@@ -116,6 +119,19 @@ def check(lang: str, root: Path) -> tuple[int, str]:
             if code:
                 return code, out
         return 0, ""
+    if lang == "kotlin":
+        return sh(["kotlinc", "-nowarn", "-d", "out", *files(root, ".kt")], root)
+    if lang == "swift":
+        return sh(["swiftc", "-typecheck", "-suppress-warnings", *files(root, ".swift")], root)
+    if lang == "csharp":
+        # one library project of every source; no restore from the network
+        (root / "case.csproj").write_text(
+            '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net8.0</TargetFramework>'
+            "<OutputType>Library</OutputType><Nullable>disable</Nullable><ImplicitUsings>disable</ImplicitUsings>"
+            "<TreatWarningsAsErrors>false</TreatWarningsAsErrors><NoWarn>CS0169;CS0649;CS0219;CS8321;CS0414;CS0168</NoWarn>"
+            "<LangVersion>preview</LangVersion></PropertyGroup></Project>\n")
+        return sh(["dotnet", "build", "--nologo", "-v", "q", "-clp:NoSummary"], root,
+                  {"DOTNET_CLI_TELEMETRY_OPTOUT": "1", "DOTNET_NOLOGO": "1"})
     return -1, "no check written for this language"
 
 

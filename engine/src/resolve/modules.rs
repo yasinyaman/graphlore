@@ -35,7 +35,7 @@ pub struct ModuleSystems {
     // Rust: file -> (root key, module path); (root key, module path) -> files
     rs_mod: HashMap<usize, (String, Vec<String>)>,
     rs_files: HashMap<(String, Vec<String>), Vec<usize>>,
-    rs_crates: HashMap<String, String>,
+    pub(super) rs_crates: HashMap<String, String>,
     // Swift: file -> module; module -> files
     swift_module: HashMap<usize, String>,
     swift_files: HashMap<String, Vec<usize>>,

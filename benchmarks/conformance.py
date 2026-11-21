@@ -1899,6 +1899,53 @@ case("rust", "alias-and-where", "what a type alias names and what a `where` clau
           "src/lib.rs": "pub struct Wide;\n\npub trait Lim {}\n\npub type Id = Wide;\n\npub fn lim<T>(x: T) -> T\nwhere\n    T: Lim,\n{\n    x\n}\n"},
      [("Id", "references", "Wide"), ("lim", "references", "Lim")])
 
+# What the compilers themselves showed on whole repositories (`oracle_go.py`: go/types;
+# `oracle_rust.py`: rust-analyzer; engine 0.5.56).
+case("go", "short-var-hides-package-name", "a name declared with `:=` is a local, whatever it is assigned",
+     GO, {"go.mod": GOMOD,
+          "a.go": "package app\n\nfunc endpoint() string {\n\treturn \"/pkg\"\n}\n\nfunc take(s interface{}) {}\n\nfunc local() {\n\tendpoint := \"/secure\"\n\ttake(endpoint)\n}\n\nfunc outer() {\n\ttake(endpoint)\n}\n"},
+     [("outer", "indirect_call", "endpoint")], [("local", "references", "endpoint"), ("local", "indirect_call", "endpoint")])
+case("go", "multi-name-var", "`var a, b T` declares every name",
+     GO, {"go.mod": GOMOD,
+          "a.go": "package app\n\nvar expected = \"pkg\"\n\nfunc local() string {\n\tvar body, expected string\n\texpected = \"x\"\n\treturn body + expected\n}\n\nfunc pkg() string {\n\treturn expected\n}\n"},
+     [("pkg", "reads", "expected")], [("local", "writes", "expected"), ("local", "reads", "expected")])
+case("go", "struct-field-is-no-package-name", "a field of a struct, named or not, is no name of the package",
+     GO, {"go.mod": GOMOD,
+          "a.go": "package app\n\ntype Client struct{}\n\nfunc table() int {\n\tcases := []struct {\n\t\twanted int\n\t\tcmd    *Client\n\t}{}\n\treturn len(cases)\n}\n",
+          "b.go": "package app\n\nfunc other() int {\n\twanted := 1\n\twanted = 2\n\treturn wanted\n}\n"},
+     [], [("other", "writes", "wanted"), ("other", "reads", "wanted")])
+case("go", "member-read-types-a-local", "a local assigned a field is of the field's type",
+     GO, {"go.mod": GOMOD,
+          "a.go": "package app\n\ntype Inner struct {\n\tSize int\n}\n\nfunc (i *Inner) Dump() {}\n\ntype Other struct{}\n\nfunc (o *Other) Dump() {}\n\ntype Outer struct {\n\tIn *Inner\n}\n\nfunc use(o *Outer) int {\n\tin := o.In\n\tin.Dump()\n\treturn in.Size\n}\n"},
+     [("use", "calls", "Inner.Dump"), ("use", "reads", "Inner.Size")], [("use", "calls", "Other.Dump")])
+case("go", "library-receiver-is-no-guess", "a method called on a value the source types as a library's is the library's",
+     GO, {"go.mod": GOMOD,
+          "a.go": "package app\n\nimport (\n\t\"bytes\"\n\t\"net/http/cookiejar\"\n\t\"net/url\"\n)\n\ntype Client struct{}\n\nfunc (c *Client) SetCookies(u *url.URL, n int) {}\n\nfunc (c *Client) Bytes() []byte {\n\treturn nil\n}\n\nfunc newJar() *cookiejar.Jar {\n\tjar, _ := cookiejar.New(nil)\n\treturn jar\n}\n\nfunc use() []byte {\n\tjar := newJar()\n\tjar.SetCookies(nil, nil)\n\tvar buf bytes.Buffer\n\treturn buf.Bytes()\n}\n"},
+     [("use", "calls", "newJar")], [("use", "calls", "Client.SetCookies"), ("use", "calls", "Client.Bytes")])
+case("rust", "field-beside-a-method", "`self.x` with no call is the field, beside a method of its name",
+     RS, {"Cargo.toml": CARGO,
+          "src/lib.rs": "pub struct Config {\n    proxy: u8,\n}\n\nimpl Config {\n    pub fn proxy(mut self, p: u8) -> Self {\n        self.proxy = p;\n        self\n    }\n\n    pub fn show(&self) -> u8 {\n        self.proxy\n    }\n}\n"},
+     [("Config.show", "reads", "src/lib.rs:Config.proxy")], [("Config.show", "references", "Config.proxy")])
+case("rust", "result-of-self", "`-> Result<Self, E>` gives the type the method is declared for",
+     RS, {"Cargo.toml": CARGO,
+          "src/lib.rs": "pub struct Error;\n\npub struct Authority;\n\nimpl Authority {\n    pub fn username(&self) -> u8 {\n        1\n    }\n}\n\npub struct Proxy;\n\nimpl Proxy {\n    pub fn new(_s: &str) -> Result<Self, Error> {\n        Err(Error)\n    }\n\n    pub fn username(&self) -> u8 {\n        2\n    }\n}\n\npub fn t() -> u8 {\n    let proxy = Proxy::new(\"x\").ok().unwrap();\n    proxy.username()\n}\n\npub fn direct() -> u8 {\n    let proxy = match Proxy::new(\"x\") {\n        Ok(p) => p,\n        Err(_) => return 0,\n    };\n    proxy.username()\n}\n\npub fn plain() -> u8 {\n    let proxy = Proxy::new(\"x\").unwrap_or(Proxy);\n    proxy.username()\n}\n"},
+     [("plain", "calls", "Proxy.username")], [("plain", "calls", "Authority.username")])
+case("rust", "untyped-let-hides-a-function", "a `let` of any value is a local where it is passed on",
+     RS, {"Cargo.toml": CARGO,
+          "src/lib.rs": "pub fn hostname() -> u8 {\n    1\n}\n\npub fn take(_x: u8) {}\n\npub fn user() {\n    let hostname = 3u8;\n    take(hostname);\n}\n\npub fn caller() {\n    take(hostname());\n}\n"},
+     [("caller", "calls", "hostname")], [("user", "indirect_call", "hostname"), ("user", "references", "hostname")])
+case("rust", "another-crates-name", "a name of another crate is in reach only through a `use`",
+     RS, {"Cargo.toml": "[workspace]\nmembers = [\"a\", \"b\"]\nresolver = \"2\"\n",
+          "a/Cargo.toml": "[package]\nname = \"a\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+          "a/src/lib.rs": "pub fn run() -> Result<u8, String> {\n    Ok(1)\n}\n",
+          "b/Cargo.toml": "[package]\nname = \"b\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+          "b/src/lib.rs": "pub type Result<T> = std::result::Result<T, String>;\n\npub fn local() -> Result<u8> {\n    Ok(1)\n}\n"},
+     [("local", "references", "Result")], [("run", "references", "Result")])
+case("typescript", "destructured-closure-parameter", "every name a closure's parameter pattern binds is the closure's",
+     TS, {"bench.ts": "export function value(): number {\n  return 1;\n}\n\nexport function take(x: unknown): unknown {\n  return x;\n}\n",
+          "a.ts": "import { value, take } from \"./bench\";\n\nexport function run(pairs: [string, number][]) {\n  return pairs.map(([key, value], index) => take([key, value, index]));\n}\n\nexport function outer() {\n  return take(value);\n}\n"},
+     [("outer", "indirect_call", "value")], [("run", "indirect_call", "value"), ("run", "references", "value")])
+
 # --- running ------------------------------------------------------------------
 
 def _matches(node: dict[str, Any], want: str) -> bool:

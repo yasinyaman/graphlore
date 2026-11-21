@@ -29,6 +29,18 @@ All notable changes to this project are documented here. The format is based on
   here. Of the edges each has an answer for, 99.7% (Kotlin, 612 edges) and
   92.7% (Swift, 55) were right with engine 0.5.54: the resolver's rules for
   both held. What the lists showed was what the reader never read, below.
+- **The Go type checker and rust-analyzer as judges, on whole repositories**
+  (`benchmarks/oracle_go.py`, `benchmarks/oracle_rust.py`). Not a test
+  suite this time: `go/types` and `rust-analyzer lsif` resolve every name of
+  a real repository, and the scripts compare the native graph of the same
+  repository with them. On cobra, chi, resty and gin-examples the type
+  checker has an answer for 11,961 edges; 99.7% went where it says with
+  engine 0.5.55 and all but 4 with 0.5.56. On ureq, ripgrep, axum-realworld
+  and actix-realworld rust-analyzer has one for 11,924; 97.5% before, 98.5%
+  now.
+- **`benchmarks/verify_cases.py` checks Kotlin, Swift and C# too** (kotlinc,
+  swiftc, `dotnet build`): every case of the checklist but Scala's has now
+  been compiled by its own language, and all are accepted.
 - **`benchmarks/verify_cases.py`** gives each case of the rule checklist to
   the language's own compiler or interpreter (10 of the 14 languages have
   one here): a case the language rejects says nothing about the rule.
@@ -353,6 +365,29 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- **Native engine 0.5.56: what the Go type checker and rust-analyzer showed
+  on whole repositories** (489 cases in the checklist, all hold):
+  - **Every declaration is a local**, whatever it is assigned. `endpoint :=
+    "/secure"`, `let hostname = 3`, `var body, expected string` were known
+    only to the state reader: a call, a value passed on or a type named
+    `endpoint` still went to the package's `endpoint`. A local assigned a
+    member read (`req := dl.Request`) is typed by what the member holds.
+  - **A method on a receiver the source types as a library's is the
+    library's**: `jar := newJar()` with `func newJar() *cookiejar.Jar`, `var
+    buf bytes.Buffer`, `value.toUpperCase()` on a `String`. The guess by a
+    method's name linked them to a project method of that name (`INFERRED`).
+    An extension, or a method a project trait gives a library type, still
+    answers.
+  - **Go**: a field of a struct was a package-level name (the fields of an
+    anonymous struct a test table is made of, from any file of the package).
+  - **Rust**: `self.proxy` with no call is the field beside a method of its
+    name (300 `reads` on ripgrep that were `references` to a method); `->
+    Result<Self, E>` gives the type the method is declared for; a name of
+    another crate is in reach only through a `use` (every std `Result<…>`
+    of ripgrep went to a `type Result` in another crate's tests).
+  - **JS / TS**: every name a closure's parameter pattern binds is the
+    closure's (`([key, value]) => …`); a block scope ended at the parameter
+    list (`formal_parameters` was read as a `for`).
 - **Native engine 0.5.55: a type named to test, convert or catch a value is
   a use of it**, in every language. The Kotlin compiler binds 1,771 names of
   its own tests to definitions the graph has; 62% had an edge, 88.5% now

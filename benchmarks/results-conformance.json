@@ -1,6 +1,6 @@
 {
- "passed": 479,
- "total": 479,
+ "passed": 489,
+ "total": 489,
  "cases": [
   {
    "id": "python/module-function",
@@ -2872,6 +2872,66 @@
   },
   {
    "id": "rust/alias-and-where",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/short-var-hides-package-name",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/multi-name-var",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/struct-field-is-no-package-name",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/member-read-types-a-local",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/library-receiver-is-no-guess",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/field-beside-a-method",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/result-of-self",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/untyped-let-hides-a-function",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/another-crates-name",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/destructured-closure-parameter",
    "ok": true,
    "missing": [],
    "unwanted": []

@@ -885,7 +885,26 @@ fn value_type(v: Node, src: &[u8]) -> Option<Vec<String>> {
             ) {
                 return path_of(v, src).filter(|p| p.first().is_some_and(|s| s != UNKNOWN));
             }
-            let called = callee(v, src).map(|(_, p)| p)?;
+            // (a member read with no call is what the member holds: `req :=
+            // dl.Request`)
+            let read = || {
+                matches!(
+                    v.kind(),
+                    "selector_expression"
+                        | "member_expression"
+                        | "field_expression"
+                        | "navigation_expression"
+                        | "member_access_expression"
+                        | "field_access"
+                        | "attribute"
+                )
+                .then(|| path_of(v, src))
+                .flatten()
+                .filter(|p| p.len() >= 2 && !p.iter().any(|s| s == "()" || s.starts_with('[')))
+            };
+            let Some(called) = callee(v, src).map(|(_, p)| p) else {
+                return read().filter(|p| p.first().is_some_and(|s| s != UNKNOWN));
+            };
             let mapped = if is_call_kind(v.kind()) { mapped_call(v, src, &called) } else { None };
             Some(mapped.unwrap_or(called)).filter(|p| p.first().is_some_and(|s| s != UNKNOWN))
         }
@@ -2088,7 +2107,33 @@ fn closure_params(n: Node, src: &[u8]) -> Vec<Param> {
             }
             continue;
         }
-        if k.contains("type") || depth > 3 {
+        if k.contains("type") || depth > 5 {
+            continue;
+        }
+        // JS / TS `([key, value], index) => …`, `({ a, b: c }) => …`: every
+        // name the pattern binds is the closure's
+        if k == "shorthand_property_identifier_pattern" {
+            out.push((p.start_byte(), (text(p, src), Vec::new(), false)));
+            continue;
+        }
+        if k == "pair_pattern" {
+            stack.extend(p.child_by_field_name("value").map(|v| (v, depth + 1)));
+            continue;
+        }
+        if matches!(k, "array_pattern" | "object_pattern" | "rest_pattern" | "assignment_pattern") {
+            let inner = if k == "assignment_pattern" {
+                p.child_by_field_name("left").into_iter().collect()
+            } else {
+                kids(p)
+            };
+            stack.extend(inner.into_iter().map(|c| (c, depth + 1)));
+            continue;
+        }
+        if let Some(pattern) = p
+            .child_by_field_name("pattern")
+            .filter(|x| matches!(x.kind(), "array_pattern" | "object_pattern"))
+        {
+            stack.push((pattern, depth + 1));
             continue;
         }
         let typed = locals_of(p, src, true);
@@ -2441,7 +2486,19 @@ fn locals_of(n: Node, src: &[u8], in_params: bool) -> Vec<(String, Vec<String>, 
                 match (declared, valued) {
                     (Some(t), _) => out.push((name, t, true, false)),
                     (None, Some(t)) => out.push((name, t, cast, false)),
-                    _ => {}
+                    // (a local all the same: `let hostname = 3;` hides a
+                    // function `hostname` where the value is passed on)
+                    // (not one a module is bound to: `const m = await
+                    // import('./m.js')`, `const x = require('m')`)
+                    _ => {
+                        let bound = value.is_some_and(|v| {
+                            let t = text(v, src);
+                            t.contains("import(") || t.contains("require(")
+                        });
+                        if !bound {
+                            out.push((name, Vec::new(), false, false));
+                        }
+                    }
                 }
             }
         }
@@ -2567,6 +2624,25 @@ fn locals_of(n: Node, src: &[u8], in_params: bool) -> Vec<(String, Vec<String>, 
                 }
             }
         }
+        // Go `var buf bytes.Buffer`, `var a, b = f(), g()`: every name
+        "var_spec" => {
+            let ty = n.child_by_field_name("type").and_then(|t| first_type(t, src));
+            let values = n.child_by_field_name("value").map(kids).unwrap_or_default();
+            let mut cursor = n.walk();
+            let names: Vec<Node> = n.children_by_field_name("name", &mut cursor).collect();
+            for (i, name) in names.into_iter().enumerate() {
+                if text(name, src) == "_" {
+                    continue;
+                }
+                match &ty {
+                    Some(t) => out.push((text(name, src), t.clone(), true, false)),
+                    None => {
+                        let t = values.get(i).and_then(|v| value_type(*v, src)).unwrap_or_default();
+                        out.push((text(name, src), t, false, false));
+                    }
+                }
+            }
+        }
         // Go `x := Foo{}`, `a, b := …`
         "short_var_declaration" => {
             let (Some(l), Some(r)) =
@@ -2574,10 +2650,15 @@ fn locals_of(n: Node, src: &[u8], in_params: bool) -> Vec<(String, Vec<String>, 
             else {
                 return out;
             };
-            for (name, value) in kids(l).into_iter().zip(kids(r)) {
-                if let Some(t) = value_type(value, src) {
-                    out.push((text(name, src), t, false, false));
+            // (every name it declares is a local, typed or not: `endpoint :=
+            // "/secure"` hides a package's `endpoint`)
+            let values = kids(r);
+            for (i, name) in kids(l).into_iter().enumerate() {
+                if name.kind() != "identifier" || text(name, src) == "_" {
+                    continue;
                 }
+                let t = values.get(i).and_then(|v| value_type(*v, src)).unwrap_or_default();
+                out.push((text(name, src), t, false, false));
             }
         }
         _ => {}
@@ -6107,7 +6188,10 @@ fn params_field<'t>(n: Node<'t>) -> Option<Node<'t>> {
 pub(crate) fn is_scope(kind: &str) -> bool {
     kind.ends_with("block")
         || kind.ends_with("_body")
-        || kind.starts_with("for")
+        // (`for_statement`, `for_in_statement`, `foreach_statement`,
+        // `enhanced_for_statement`: not `formal_parameters`)
+        || kind.starts_with("for_")
+        || kind.starts_with("foreach")
         || kind.contains("_for_")
         || kind.contains("catch")
         || is_closure(kind)

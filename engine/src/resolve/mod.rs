@@ -1671,7 +1671,10 @@ impl<'a> Project<'a> {
                 // (nor is a type an `impl` gives its trait: `type Output = …`)
                 let of_owner =
                     d.owner.is_some() && (d.kind.is_callable() || d.kind == DefKind::TypeAlias);
-                if is_top(&f.defs, di) && !of_owner {
+                // (nor a Go struct's field, whatever holds the struct: a field
+                // of the anonymous struct a test table is made of)
+                let go_field = fam == Some(Family::Go) && d.kind == DefKind::Property;
+                if is_top(&f.defs, di) && !of_owner && !go_field {
                     top.entry(d.name.clone()).or_default().push(di);
                     if let Some(b) = bare {
                         top.entry(b.to_string()).or_default().push(di);
@@ -2419,7 +2422,13 @@ impl<'a> Project<'a> {
         // `-> Option<Foo>`, `Promise<Foo>`: what the wrapper holds (whether
         // it has to be opened first is the walk's `sealed`)
         if let Some(inner) = self.def(r).wraps.as_ref().filter(|_| self.def(r).kind.is_callable()) {
-            let t = self.type_of_path(r.0, self.def(r).parent, inner, true)?;
+            // (`-> Result<Self, Error>`: the type the method is declared for)
+            let own = matches!(inner.as_slice(), [one] if one == "self" || one == "Self");
+            let t = if own {
+                self.class_of(r.0, Some(r.1))?
+            } else {
+                self.type_of_path(r.0, self.def(r).parent, inner, true)?
+            };
             return self.def(t).kind.is_class_like().then_some((t, true));
         }
         let declared = self.files[r.0].refs.iter().find(|x| {
@@ -3384,6 +3393,61 @@ impl<'a> Project<'a> {
         false
     }
 
+    /// Whether `recv` (a path with its last name taken off) is something the
+    /// source writes with a library's type: the result of a project function
+    /// declared to return one, a field or variable declared as one, or a local
+    /// assigned such a thing.
+    fn receiver_is_library(&self, f: usize, d: Option<usize>, recv: &[String]) -> bool {
+        let held: Vec<String>;
+        let mut recv = recv;
+        if let [name] = recv {
+            let defs = &self.files[f].defs;
+            let mut cur = d;
+            let mut local = None;
+            while let Some(x) = cur {
+                if let Some(&li) = self.locals.get(&(f, x, name.clone())) {
+                    local = Some(self.local_in_force(f, x, name, li));
+                    break;
+                }
+                cur = defs[x].parent;
+            }
+            match local {
+                Some(li) if !self.files[f].locals[li].declared => {
+                    held = self.files[f].locals[li].path.clone();
+                    recv = &held;
+                }
+                // (`var buf bytes.Buffer`: declared with a library's type)
+                Some(li) => {
+                    let head = self.files[f].locals[li].path.first();
+                    // (written through an import, or a name the project has
+                    // nothing of: `bytes.Buffer`, `Buffer`)
+                    return head.is_some_and(|h| {
+                        !self.is_local_name(f, d, h)
+                            && match self.resolve_name(f, d, h) {
+                                Some(Target::Ext(..)) => true,
+                                None => !self.by_name.contains_key(h.as_str()),
+                                _ => false,
+                            }
+                    });
+                }
+                None => {}
+            }
+        }
+        let callee = match recv.split_last() {
+            Some((last, before)) if last == "()" => before,
+            _ => recv,
+        };
+        if callee.is_empty() || callee.iter().any(|s| s.starts_with('[')) {
+            return false;
+        }
+        let guessed = self.guessed.get();
+        let calling = self.calling.replace(false);
+        let at = self.resolve_path_inner(f, d, callee, false, false);
+        *self.calling.borrow_mut() = calling;
+        self.guessed.set(guessed);
+        matches!(at, Some((Target::Def(x), Confidence::Extracted)) if self.library_typed(x))
+    }
+
     /// Whether what a field or variable holds, or a function returns, is
     /// written as a type the project does not define.
     fn library_typed(&self, x: DefRef) -> bool {
@@ -3531,9 +3595,18 @@ impl<'a> Project<'a> {
     fn is_local_name(&self, f: usize, d: Option<usize>, name: &str) -> bool {
         let defs = &self.files[f].defs;
         let mut cur = d;
+        // (one declared in a block is a local inside the block: `{ let count
+        // = 5 } return count` names the outer `count`)
+        let at = (*self.site.borrow()).filter(|(sf, _)| *sf == f).map(|(_, at)| at);
         while let Some(x) = cur {
-            if self.locals.contains_key(&(f, x, name.to_string())) {
-                return true;
+            let key = (f, x, name.to_string());
+            if let Some(&li) = self.locals.get(&key) {
+                let all = self.shadows.get(&key);
+                let mut each = all.into_iter().flatten().copied().chain(std::iter::once(li));
+                let locals = &self.files[f].locals;
+                if at.is_none_or(|at| each.any(|i| locals[i].until == 0 || at < locals[i].until)) {
+                    return true;
+                }
             }
             cur = defs[x].parent;
         }
@@ -4449,7 +4522,7 @@ impl<'a> Project<'a> {
                 }
             }
         }
-        found.or_else(|| {
+        let found = found.or_else(|| {
             // C++ `port::CondVar cv;`, `typename SkipList<K, C>::Node*`: a
             // type written with a qualifier the walk could not follow is
             // looked up by its own name, as one written bare
@@ -4535,7 +4608,27 @@ impl<'a> Project<'a> {
                 && self.own_initializer(f, d, path))
             .then(|| self.unknown_receiver(f, &path[1], None))
             .flatten()
-        })
+        });
+        // a guess by a method's name on a receiver the source says is a
+        // library's (`jar := newJar()` with `func newJar() *cookiejar.Jar`,
+        // `c.Flags().HasFlags()`): the method is the library's
+        match found {
+            // (an extension written for a library's type is what such a
+            // receiver can be asked)
+            Some((Target::Def(t), Confidence::Inferred))
+                if path.len() >= 2
+                    && self.def(t).receiver.is_none()
+                    // (nor a method a project trait gives a library's type:
+                    // `impl UriExt for Uri`)
+                    && self
+                        .class_of(t.0, Some(t.1))
+                        .is_some_and(|c| self.def(c).kind != DefKind::Interface)
+                    && self.receiver_is_library(f, d, &path[..path.len() - 1]) =>
+            {
+                None
+            }
+            other => other,
+        }
     }
 
     /// A call the walk could not follow, by the name of the one extension in
@@ -4921,8 +5014,16 @@ impl<'a> Project<'a> {
             },
             // a parameter or local of no known type, or of a type the project
             // does not define: only an extension written for it can be meant
+            // (where the use is in the local's block, and after its declaration)
             _ if !own_init
                 && (self.is_untyped_local(f, d, head) || self.is_external_local(f, d, head))
+                && self.is_local_name(f, d, head)
+                && !self.local_keeps_outer(
+                    f,
+                    d,
+                    head,
+                    rest.is_empty() && *self.calling.borrow(),
+                )
                 && (*self.types_only.borrow() || self.local_type(f, d, head).is_none()) =>
             {
                 if rest.len() == 1 && !bases && *self.calling.borrow() {
@@ -6802,6 +6903,15 @@ impl<'a> Project<'a> {
                     .flatten()
                     .copied()
                     .filter(|r| self.family[r.0] == Some(fam))
+                    // (Rust: a crate's names are its own)
+                    // (… or what the file imports by that name from a crate
+                    // the engine cannot follow: `use grep::printer::ColorSpecs`
+                    // through a facade crate)
+                    .filter(|r| {
+                        fam != Family::Rust
+                            || self.crate_of(r.0) == self.crate_of(f)
+                            || self.imports_name(f, &path[0])
+                    })
                     // Ruby: a method at another file's top level is there
                     // only for the files that require it
                     .filter(|r| {
@@ -6883,10 +6993,38 @@ impl<'a> Project<'a> {
         self.files[f].lang.is_some_and(|l| l.module().builtins().contains(&name))
     }
 
+    /// Whether an import of file `f` binds `name`, resolved or not.
+    fn imports_name(&self, f: usize, name: &str) -> bool {
+        self.scopes[f].bindings.contains_key(name)
+            || self.files[f].imports.iter().any(|imp| {
+                imp.alias.as_deref() == Some(name)
+                    || imp.names.iter().any(|(n, a)| a.as_deref().unwrap_or(n) == name)
+                    || imp.module.rsplit("::").next() == Some(name)
+            })
+    }
+
+    /// The directory of the Cargo package file `f` belongs to: the deepest
+    /// one above it that a manifest names (empty: none, or the root's).
+    fn crate_of(&self, f: usize) -> &str {
+        let path = self.files[f].path.as_str();
+        self.modsys
+            .rs_crates
+            .values()
+            .map(|src| src.strip_suffix("src").unwrap_or(src).trim_end_matches('/'))
+            .filter(|dir| dir.is_empty() || path.starts_with(&format!("{dir}/")))
+            .max_by_key(|dir| dir.len())
+            .unwrap_or("")
+    }
+
     /// Whether a guess by name alone may name `r` from file `f`: where names
     /// live in packages (JVM, PHP), only one of the file's own package or of
     /// none, and no type nested in a type of another file.
     fn in_reach_by_name(&self, f: usize, r: DefRef) -> bool {
+        // (Rust: a name of another crate is in reach only through a `use`)
+        if self.family[f] == Some(Family::Rust) {
+            return self.crate_of(f) == self.crate_of(r.0)
+                || self.imports_name(f, &self.def(r).name);
+        }
         if !matches!(self.family[f], Some(Family::Jvm | Family::Php)) {
             return true;
         }
@@ -7651,6 +7789,25 @@ pub fn resolve(
                     Some((Target::Def(t), _)) if p.def(*t).kind.is_class_like() => Some(*t),
                     _ => None,
                 };
+                // Rust: `self.proxy` with no call is the field, beside a
+                // method of its name (a method is never read without a call)
+                let found = match found {
+                    Some((Target::Def(t), conf))
+                        if matches!(r.kind, RefKind::Attr | RefKind::Read | RefKind::Write)
+                            && r.path.len() >= 2
+                            && fam == Family::Rust
+                            && p.def(t).kind.is_callable() =>
+                    {
+                        let name = p.def(t).name.clone();
+                        let field = p.class_of(t.0, Some(t.1)).and_then(|c| {
+                            p.members(c, &name)
+                                .into_iter()
+                                .find(|m| p.def(*m).kind == DefKind::Property)
+                        });
+                        Some((Target::Def(field.unwrap_or(t)), conf))
+                    }
+                    other => other,
+                };
                 let (target, relation, conf) = match found {
                     Some((Target::Def(t), conf)) => {
                         // `throw ParserError.noValue("x")`: a case built with
@@ -7977,7 +8134,12 @@ pub fn resolve(
                 .filter(|e| {
                     matches!(
                         e.relation,
-                        "calls" | "inherits" | "implements" | "mixes_in" | "embeds"
+                        "calls"
+                            | "indirect_call"
+                            | "inherits"
+                            | "implements"
+                            | "mixes_in"
+                            | "embeds"
                     )
                 })
                 .map(|e| (e.source.clone(), e.target.clone()))
