@@ -47,8 +47,8 @@ All notable changes to this project are documented here. The format is based on
   graph has 82% of graphify's Rust calls and 99% of the ones rust-analyzer
   confirms; 481 of graphify's are refuted. `--baseline
   benchmarks/results-verify-graphify.json` exits 1 when a build lacks more
-  of the confirmed edges, per repository and kind, than the baseline: 115 of
-  14,400 with engine 0.5.59, 346 with 0.5.58.
+  of the confirmed edges, per repository and kind, than the baseline: 45 of
+  14,400 with engine 0.5.60, 115 with 0.5.59, 346 with 0.5.58.
   `compare_engines.compare_edges(..., pairs=True)` returns every pair only
   graphify has; `oracle_go.py` and `oracle_csharp.py` expose their bindings
   (`uses_of`, `setup`), and Roslyn also says which constructor a `new`
@@ -387,6 +387,34 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- **Native engine 0.5.60: the rest of graphify's confirmed edges, in Rust
+  and Go** (510 cases in the checklist, all hold). Of the 115 confirmed
+  edges the native graph lacked 45 are left, none in Go:
+  - **Rust: the types of a tuple struct's and a tuple variant's fields**
+    (`struct Override(Gitignore);`, `Loaded(Ignore)`) are references; they
+    were never read.
+  - **Rust: a `const` / `static` item is the source of its own uses**, its
+    type and what its value names (they left from the file).
+  - **Rust: `crate::` starts at the file a manifest names** (`[[bin]] path =
+    "crates/core/main.rs"`). A crate with no `src` directory resolved none
+    of its `crate::…` paths: 88 imports and 57 calls on ripgrep.
+  - **Rust: an `impl` is of the type its own file names.** Where two
+    modules of a crate each declare a private type of one name, a member of
+    one was taken from the other's `impl` (`Config::default()` in
+    `standard.rs` linked to `json.rs`, `EXTRACTED`).
+  - **Rust: `io::Error::error_message(m)`** is the method a trait of the
+    project gives the library's type, and the types a trait is written with
+    in an `impl` (`impl From<Config> for Agent`) are the implementing
+    type's references.
+  - **Go: every result of a function names its type** (`([]Completion,
+    ShellCompDirective)`: only the first was read), and a method value
+    handed to a call (`time.AfterFunc(d, cb.onTimeout)`,
+    `r.Use(middleware.Logger)`) is an `indirect_call`, as a bare function
+    handed over already was (it was a `references` edge).
+- **`compare_engines.py` gives the same numbers on every run.** Of two
+  native definitions with one name in a file, which one stood for both
+  depended on the order of a set: the C/C++ header references of cpr came
+  out as 88% or 91%. A C# partial type is compared as one type.
 - **Native engine 0.5.59: the confirmed edges of graphify's the native graph
   lacked** (502 cases in the checklist, all hold). All C#, from
   `verify_graphify.py`; 260 confirmed calls were missing, 28 are:

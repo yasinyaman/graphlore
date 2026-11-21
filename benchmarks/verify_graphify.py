@@ -160,7 +160,7 @@ def verdicts(graph: dict[str, Any], uses: list[dict[str, Any]], lang: str, imple
         key = (s, t, g)
         if key not in out or rank[verdict] > rank[out[key]]:
             out[key] = verdict
-        row = {"group": g, "verdict": verdict, "confidence": str(e.get("confidence", "")).upper(),
+        row = {"source": s, "target": t, "group": g, "verdict": verdict, "confidence": str(e.get("confidence", "")).upper(),
                "file": sites[0][0], "line": sites[0][1],
                "from": defs[s]["label"], "to": f"{target['label']} ({target['file']}:{target['line']})"}
         if verdict == "refuted":
@@ -188,10 +188,17 @@ def judge(root: Path, lang: str, uses: list[dict[str, Any]], native: Path | None
     up = {child: parent for child, (parent, _) in ce.parents(ours).items()}
     linked = {ce._edge_ends(e) for e in our_edges if ce._group(ce._edge_rel(e).strip().lower()) in GROUPS}
 
+    referenced = {ce._edge_ends(e) for e in our_edges
+                  if ce._group(ce._edge_rel(e).strip().lower()) == "references"}
+
     def to_enum(pair: tuple[str, str]) -> bool:
         """The native graph has the edge to the enum the member is a case of,
         from the definition or from one written inside it."""
         a, b = pair
+        # (a base of graphify's that is a type argument of the trait, `impl
+        # From<Config> for Agent`: the native graph has it as a reference)
+        if (a, b) in referenced:
+            return True
         if str(by_id.get(b, {}).get("kind") or "") != "enum_member" or b not in up:
             return False
         for s, t in linked:
@@ -207,6 +214,10 @@ def judge(root: Path, lang: str, uses: list[dict[str, Any]], native: Path | None
 
     exact, loose, _ = ce.match(ce.definitions(theirs), ce.definitions(ours))
     paired = {**exact, **loose}
+    # where graphify saw each of its edges, by the native ids of its ends
+    seen_at = {(paired.get(r["source"]), paired.get(r["target"]), r["group"]): f"{r['file']}:{r['line']}"
+               for r in rows}
+
     name = {"go": "go", "rust": "rust", "csharp": "csharp"}[lang]
 
     def of(verdict: str | None) -> dict[str, dict[str, int]]:
@@ -222,10 +233,11 @@ def judge(root: Path, lang: str, uses: list[dict[str, Any]], native: Path | None
         for g in GROUPS:
             row = cmp.get(g, {}).get(name, {})
             only = [tuple(p) for p in row.get("only_graphify_pairs", [])]
-            as_enum = [p for p in only if to_enum(p)]
+            as_enum = [p for p in only if (g != "references" or p not in referenced) and to_enum(p)
+                       and (g == "bases" or str(by_id.get(p[1], {}).get("kind") or "") == "enum_member")]
             out[g] = {"graphify": row.get("graphify", 0), "both": row.get("both", 0),
                       "as_enum": len(as_enum),
-                      "only_graphify": [f"{label[a]} -> {label[b]} ({where[b]})"
+                      "only_graphify": [f"{label[a]} -> {label[b]} ({where[b]}), at {seen_at.get((a, b, g), '?')}"
                                         for a, b in only if (a, b) not in set(as_enum)]}
         return out
 
@@ -286,7 +298,7 @@ def render(results: list[dict[str, Any]], markdown: bool, samples: int) -> str:
                 continue
             out.append(f"  {g}: graphify {n:,} edges between definitions both graphs have; native has {both:,} ({pct(both, n)})")
             out.append(f"     confirmed  {cn:>6,}  native has {cb:>6,} ({pct(cb, cn)})"
-                       + (f", {ce_:,} more as the enum ({pct(cb + ce_, cn)})" if ce_ else ""))
+                       + (f", {ce_:,} more written otherwise ({pct(cb + ce_, cn)})" if ce_ else ""))
             out.append(f"     refuted    {rn:>6,}  native has {rb:>6,} ({pct(rb, rn)})")
             out.append(f"     dispatch   {dn:>6,}  native has {db:>6,} ({pct(db, dn)})")
             out.append(f"     unanswered {un:>6,}  native has {ub:>6,} ({pct(ub, un)})")

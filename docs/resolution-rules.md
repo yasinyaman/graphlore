@@ -25,7 +25,7 @@ python benchmarks/conformance.py --baseline benchmarks/results-conformance.json 
 python benchmarks/conformance.py --markdown      # the tables below
 ```
 
-Measured 2026-11-21 with graphlore-engine 0.5.59: **502 of 502 rules hold**
+Measured 2026-11-21 with graphlore-engine 0.5.60: **510 of 510 rules hold**
 (356 of the first 406 with 0.5.45). Ten came from the Go type checker and
 rust-analyzer run on whole repositories; fifteen from the Kotlin and Swift
 compilers' tests (type checks, casts, `catch`, aliases); thirty-nine from two
@@ -104,7 +104,7 @@ Each change was measured on the 45 audit repositories as well, by reading
 the edges it added and removed at their source lines; the page on the
 [native engine](native-engine.md#the-rules-themselves) has the numbers.
 Every case but Scala's has been compiled by its own language
-(`benchmarks/verify_cases.py`: 474 of 474 accepted; no Scala compiler runs
+(`benchmarks/verify_cases.py`: 482 of 482 accepted; no Scala compiler runs
 where this was measured).
 
 Passing every case says the engine follows the rules written here, not
@@ -255,7 +255,7 @@ TypeScript Handbook, 'Modules', 'Classes', 'Generics' (types are the compiler's,
 | `x as T` and `x instanceof T` are uses of T | `as-and-instanceof` | yes |
 | every name a closure's parameter pattern binds is the closure's | `destructured-closure-parameter` | yes |
 
-### go (31 of 31)
+### go (33 of 33)
 
 The Go Programming Language Specification, 'Declarations and scope', 'Selectors', 'Method sets'.
 
@@ -292,6 +292,8 @@ The Go Programming Language Specification, 'Declarations and scope', 'Selectors'
 | a field of a struct, named or not, is no name of the package | `struct-field-is-no-package-name` | yes |
 | a local assigned a field is of the field's type | `member-read-types-a-local` | yes |
 | a method called on a value the source types as a library's is the library's | `library-receiver-is-no-guess` | yes |
+| each result of a function names its type | `every-result-type` | yes |
+| a method value handed to a call is a function handed over | `method-value-argument` | yes |
 
 ### java (44 of 44)
 
@@ -484,7 +486,7 @@ C# Language Specification, 'Namespace and type names', 'Member lookup', 'Extensi
 | `new T { … }` with no argument list calls the constructor that takes none | `initializer-without-arguments` | yes |
 | a partial type's constructors are those of every file that declares it | `partial-type-constructor` | yes |
 
-### rust (47 of 47)
+### rust (53 of 53)
 
 The Rust Reference, 'Names' (name resolution, scopes, paths), 'Method call expressions', 'Field access expressions'.
 
@@ -537,6 +539,12 @@ The Rust Reference, 'Names' (name resolution, scopes, paths), 'Method call expre
 | `-> Result<Self, E>` gives the type the method is declared for | `result-of-self` | yes |
 | a `let` of any value is a local where it is passed on | `untyped-let-hides-a-function` | yes |
 | a name of another crate is in reach only through a `use` | `another-crates-name` | yes |
+| the types of a tuple struct's and a tuple variant's fields are uses of them | `tuple-field-types` | yes |
+| the type a `const` or `static` item is written with is the item's use | `item-type-is-the-items` | yes |
+| `crate::` starts at the file a `[[bin]] path` names | `crate-root-named-by-the-manifest` | yes |
+| an `impl` is of the type its own file names, where two modules each have a type of the name | `impl-of-the-files-own-type` | yes |
+| `io::Error::message(m)` is the method a trait of the project gives the library's type | `trait-method-through-a-library-type` | yes |
+| the types a trait is written with in an `impl` are uses of the implementing type | `impl-trait-type-arguments` | yes |
 
 ### swift (38 of 38)
 
@@ -719,4 +727,4 @@ PHP Manual, 'Namespaces: Name resolution rules', 'Classes and Objects' (inherita
 | `\Name` is the global class, never one a namespace of the project declares | `global-class-is-not-a-namespaced-one` | yes |
 | `$x instanceof T` and `catch (T $e)` are uses of T | `instanceof-and-catch` | yes |
 
-502 of 502 rules hold
+510 of 510 rules hold

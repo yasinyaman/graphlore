@@ -1,6 +1,6 @@
 {
- "passed": 502,
- "total": 502,
+ "passed": 510,
+ "total": 510,
  "cases": [
   {
    "id": "python/module-function",
@@ -3010,6 +3010,54 @@
   },
   {
    "id": "csharp/partial-type-constructor",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/tuple-field-types",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/item-type-is-the-items",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/crate-root-named-by-the-manifest",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/impl-of-the-files-own-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/trait-method-through-a-library-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/impl-trait-type-arguments",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/every-result-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/method-value-argument",
    "ok": true,
    "missing": [],
    "unwanted": []

@@ -1997,6 +1997,44 @@ case("csharp", "partial-type-constructor", "a partial type's constructors are th
           "T.cs": "namespace App.Tests\n{\n    public class Tests\n    {\n        public Client Make()\n        {\n            return new Client();\n        }\n    }\n}\n"},
      [("Tests.Make", "calls", "Client.Client")])
 
+# The rest of the confirmed edges of graphify's (`verify_graphify.py`, engine 0.5.60): Rust and Go.
+case("rust", "tuple-field-types", "the types of a tuple struct's and a tuple variant's fields are uses of them",
+     RS, {"Cargo.toml": CARGO, "src/lib.rs": "pub struct Agent {\n    pub n: u32,\n}\n\npub struct Timeout;\n\npub struct Call<T> {\n    pub t: T,\n}\n\npub struct AgentInstance(pub(crate) Agent);\n\npub enum Error {\n    Timeout(Timeout),\n    Redirect(Call<Agent>, Agent),\n}\n"},
+     [("AgentInstance", "references", "Agent"), ("Error.Timeout", "references", "src/lib.rs:Timeout"),
+      ("Error.Redirect", "references", "Call"), ("Error.Redirect", "references", "Agent")])
+case("rust", "item-type-is-the-items", "the type a `const` or `static` item is written with is the item's use",
+     RS, {"Cargo.toml": CARGO, "src/lib.rs": "pub struct Options {\n    pub casei: bool,\n}\n\npub trait Flag {\n    fn name(&self) -> &str;\n}\n\npub const CASEI: Options = Options { casei: true };\n\npub const FLAGS: &[&dyn Flag] = &[];\n\npub static COUNT: Options = Options { casei: false };\n"},
+     [("CASEI", "references", "Options"), ("FLAGS", "references", "Flag"), ("COUNT", "references", "Options")])
+case("rust", "crate-root-named-by-the-manifest", "`crate::` starts at the file a `[[bin]] path` names",
+     RS, {"Cargo.toml": "[package]\nname = \"tool\"\nversion = \"0.1.0\"\n\n[[bin]]\nbench = false\npath = \"crates/core/main.rs\"\nname = \"tl\"\n",
+          "crates/core/main.rs": "mod flags;\nmod messages;\n\nfn main() {\n    flags::parse::run();\n}\n",
+          "crates/core/messages.rs": "pub fn set_messages(_on: bool) {}\n",
+          "crates/core/flags/mod.rs": "pub mod doc;\npub mod parse;\n",
+          "crates/core/flags/parse.rs": "pub fn lookup(_name: &str) -> Option<u8> {\n    None\n}\n\npub fn run() {\n    crate::messages::set_messages(true);\n}\n",
+          "crates/core/flags/doc/mod.rs": "pub mod help;\npub mod version;\n",
+          "crates/core/flags/doc/version.rs": "pub fn generate_digits() -> String {\n    String::new()\n}\n",
+          "crates/core/flags/doc/help.rs": "use crate::flags::doc::version;\n\npub fn generate() -> String {\n    let _ = crate::flags::parse::lookup(\"x\");\n    version::generate_digits()\n}\n"},
+     [("run", "calls", "set_messages"), ("generate", "calls", "lookup"), ("generate", "calls", "generate_digits"),
+      ("main", "calls", "run")])
+case("rust", "impl-of-the-files-own-type", "an `impl` is of the type its own file names, where two modules each have a type of the name",
+     RS, {"Cargo.toml": CARGO, "src/lib.rs": "mod json;\nmod standard;\n",
+          "src/json.rs": "struct Config {\n    pretty: bool,\n}\n\nimpl Default for Config {\n    fn default() -> Config {\n        Config { pretty: false }\n    }\n}\n\npub struct JsonBuilder {\n    config: Config,\n}\n\nimpl JsonBuilder {\n    pub fn new() -> JsonBuilder {\n        JsonBuilder { config: Config::default() }\n    }\n}\n",
+          "src/standard.rs": "struct Config {\n    stats: bool,\n}\n\nimpl Default for Config {\n    fn default() -> Config {\n        Config { stats: false }\n    }\n}\n\npub struct StandardBuilder {\n    config: Config,\n}\n\nimpl StandardBuilder {\n    pub fn new() -> StandardBuilder {\n        StandardBuilder { config: Config::default() }\n    }\n}\n"},
+     [("StandardBuilder.new", "calls", "src/standard.rs:Config.default"), ("JsonBuilder.new", "calls", "src/json.rs:Config.default")],
+     [("StandardBuilder.new", "calls", "src/json.rs:Config.default"), ("JsonBuilder.new", "calls", "src/standard.rs:Config.default")])
+case("rust", "trait-method-through-a-library-type", "`io::Error::message(m)` is the method a trait of the project gives the library's type",
+     RS, {"Cargo.toml": CARGO, "src/lib.rs": "use std::io;\n\npub trait SinkError: Sized {\n    fn error_message(message: String) -> Self;\n}\n\nimpl SinkError for io::Error {\n    fn error_message(message: String) -> io::Error {\n        io::Error::new(io::ErrorKind::Other, message)\n    }\n}\n\npub fn fail(msg: &str) -> Result<(), io::Error> {\n    Err(io::Error::error_message(msg.to_string()))\n}\n"},
+     [("fail", "calls", "error_message")])
+case("rust", "impl-trait-type-arguments", "the types a trait is written with in an `impl` are uses of the implementing type",
+     RS, {"Cargo.toml": CARGO, "src/lib.rs": "pub struct Config {\n    pub n: u32,\n}\n\npub struct Agent {\n    pub n: u32,\n}\n\nimpl From<Config> for Agent {\n    fn from(c: Config) -> Agent {\n        Agent { n: c.n }\n    }\n}\n"},
+     [("Agent", "references", "Config")])
+case("go", "every-result-type", "each result of a function names its type",
+     GO, {"go.mod": GOMOD, "a.go": "package app\n\ntype Directive int\n\ntype Completion string\n\nfunc NoFile(args []string) ([]Completion, Directive) {\n\treturn nil, 0\n}\n"},
+     [("NoFile", "references", "Completion"), ("NoFile", "references", "Directive")])
+case("go", "method-value-argument", "a method value handed to a call is a function handed over",
+     GO, {"go.mod": GOMOD, "a.go": "package app\n\nimport \"time\"\n\ntype Breaker struct {\n\ttimer *time.Timer\n}\n\nfunc (b *Breaker) onReset() {}\n\nfunc (b *Breaker) open() {\n\tb.timer = time.AfterFunc(time.Second, b.onReset)\n}\n"},
+     [("Breaker.open", "indirect_call", "Breaker.onReset")])
+
 # --- running ------------------------------------------------------------------
 
 def _matches(node: dict[str, Any], want: str) -> bool:
