@@ -106,19 +106,33 @@ def bindings(root: Path, tool: Path) -> list[dict[str, Any]]:
     return rows
 
 
+def uses_of(root: Path, tool: Path) -> list[dict[str, Any]]:
+    """Roslyn's bindings in the shape `oracle.compare` reads."""
+    uses = []
+    for u in bindings(root, tool):
+        decls = [(u["to_file"], u["to_line"])] if u.get("to_file") else []
+        uses.append({"file": u["file"], "line": u["line"], "expr": u["expr"], "symbol": u["expr"],
+                     "decls": decls, "lib": not decls, "alias": False,
+                     "declares": (u["file"], u["line"]) in decls})
+    return uses
+
+
+def setup(tmp: Path) -> Path:
+    """Write the dumping project under `tmp` and return its directory."""
+    tool = tmp / "oracle"
+    tool.mkdir()
+    (tool / "oracle.csproj").write_text(PROJECT, encoding="utf-8")
+    (tool / "Program.cs").write_text(DUMP, encoding="utf-8")
+    return tool
+
+
 def judge(root: Path, tool: Path) -> dict[str, Any] | None:
-    raw = bindings(root, tool)
+    uses = uses_of(root, tool)
     files: dict[str, list[str]] = {}
     for p in sorted(root.rglob("*.cs")):
         rel = str(p.relative_to(root))
         if not any(part in ("bin", "obj", "node_modules") or part.startswith(".") for part in p.relative_to(root).parts):
             files[rel] = p.read_text(encoding="utf-8-sig", errors="replace").splitlines()
-    uses = []
-    for u in raw:
-        decls = [(u["to_file"], u["to_line"])] if u.get("to_file") else []
-        uses.append({"file": u["file"], "line": u["line"], "expr": u["expr"], "symbol": u["expr"],
-                     "decls": decls, "lib": not decls, "alias": False,
-                     "declares": (u["file"], u["line"]) in decls})
     result = oracle.compare(root.name, files, uses, slack=(-4, 4))
     if result:
         for row in result["wrong"] + result["missed"]:
@@ -133,10 +147,7 @@ def main() -> int:
     ap.add_argument("--json", help="write every wrong and missed row here")
     args = ap.parse_args()
     with tempfile.TemporaryDirectory() as tmp:
-        tool = Path(tmp) / "oracle"
-        tool.mkdir()
-        (tool / "oracle.csproj").write_text(PROJECT, encoding="utf-8")
-        (tool / "Program.cs").write_text(DUMP, encoding="utf-8")
+        tool = setup(Path(tmp))
         results = [r for r in (judge(Path(repo).resolve(), tool) for repo in args.repos) if r]
     oracle.report(results, len(args.repos), args.samples, args.json)
     return 0

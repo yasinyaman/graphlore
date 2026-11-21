@@ -237,9 +237,11 @@ def _group(rel: str) -> str | None:
     return next((g for g, rels in EDGE_GROUPS.items() if rel in rels), None)
 
 
-def compare_edges(theirs_graph: dict, ours_graph: dict, paired: dict[str, str]) -> dict[str, Any]:
+def compare_edges(theirs_graph: dict, ours_graph: dict, paired: dict[str, str],
+                  pairs: bool = False) -> dict[str, Any]:
     """Edges per group and language: imports as (file, file) pairs, the rest as
-    (definition, definition) pairs over the definitions both engines have."""
+    (definition, definition) pairs over the definitions both engines have.
+    `pairs` adds every pair only graphify has, as native ids (`only_graphify_pairs`)."""
     out: dict[str, dict[str, Any]] = {}
     sides = {}
     for name, graph in (("graphify", theirs_graph), ("native", ours_graph)):
@@ -378,6 +380,8 @@ def compare_edges(theirs_graph: dict, ours_graph: dict, paired: dict[str, str]) 
             "samples_only_graphify": show(theirs - ours - said, "graphify"),
             "samples_only_native": show(ours - theirs, "native"),
         }
+        if pairs:
+            out[g][lang]["only_graphify_pairs"] = sorted(theirs - ours - said)
     return out
 
 
