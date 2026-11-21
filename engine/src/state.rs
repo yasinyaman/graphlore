@@ -440,6 +440,7 @@ impl State {
             hints: Vec::new(),
             implicit: None,
             targs: 0,
+            arity: None,
             this_of: None,
             recv: None,
             byte: n.start_byte(),
@@ -504,6 +505,13 @@ impl State {
         }
         let Some(p) = up(anc, 0) else { return };
         let pk = p.kind();
+        // Kotlin `Command(name = "x")`: the name of an argument, no variable
+        if pk == "value_argument"
+            && p.child(0).is_some_and(|c| c.id() == n.id())
+            && p.child(1).is_some_and(|c| c.kind() == "=")
+        {
+            return;
+        }
         // (a parameter's name; its default value is read like any other)
         let default_value = ["value", "default_value"]
             .iter()
@@ -531,16 +539,10 @@ impl State {
         {
             return;
         }
-        // C# `Maybe.Nothing<T>()`, `Parse<T>(x)`: the name of a generic
-        // member or callee, written inside a `generic_name`
+        // C# `Maybe.Nothing<T>()`, `List<string>`: the name inside a
+        // `generic_name` is a generic method's or a type's, no value read
         if pk == "generic_name" {
-            let Some(g) = up(anc, 1) else { return };
-            let named = ["name", "function"]
-                .iter()
-                .any(|f| g.child_by_field_name(f).is_some_and(|x| x.id() == p.id()));
-            if named {
-                return;
-            }
+            return;
         }
         if pk.contains("import")
             || pk.contains("type")
@@ -565,6 +567,9 @@ impl State {
             "declarator",
             "pattern",
             "suffix",
+            // (`new Foo { … }`: the type built, no value read; a JS `new`
+            // takes a value, which is read)
+            "type",
         ] {
             if p.child_by_field_name(field).is_some_and(|x| x.id() == n.id()) {
                 return;

@@ -399,6 +399,10 @@ pub fn callee(n: Node, src: &[u8]) -> Option<(RefKind, Vec<String>)> {
     if f.kind() == "import" {
         return None; // JS `import()`: an import, read by the module
     }
+    // Swift `Self()`: a construction of the type around
+    if text(f, src) == "Self" && crate::parse::current() == Some(crate::lang::Lang::Swift) {
+        return Some((RefKind::New, vec!["self".into()]));
+    }
     Some((RefKind::Call, path_of(f, src)?))
 }
 
@@ -2717,10 +2721,14 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
     let mut misread: Vec<(usize, usize)> = Vec::new();
     // JS: what a `this` at each byte belongs to (`RefFact::this_of`)
     let mut this_at: HashMap<usize, Vec<String>> = HashMap::new();
+    let csharp = facts.lang == Some(crate::lang::Lang::CSharp);
     let push = |refs: &mut Vec<RefFact>, n: Node, kind, path: Vec<String>, context, def| {
         if path.is_empty() || path.last().is_some_and(|s| s == UNKNOWN || s.is_empty()) {
             return;
         }
+        let arity = (csharp && matches!(kind, RefKind::Type | RefKind::New))
+            .then(|| path.last().and_then(|name| written_arity(n, name, src)))
+            .flatten();
         refs.push(RefFact {
             line: line(n),
             kind,
@@ -2733,6 +2741,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
             hints: Vec::new(),
             implicit: None,
             targs: 0,
+            arity,
             this_of: None,
             recv: None,
             byte: n.start_byte(),
@@ -3277,16 +3286,17 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                 | "type_case"
                 | "declaration_pattern"
                 | "type_pattern"
+                | "typeof_expression"
                 | "variable_declaration"
         ) {
             let kotlin = facts.lang == Some(crate::lang::Lang::Kotlin);
             let ks = kids(n);
             let written: Vec<Node> = if n.kind() == "variable_declaration" {
-                // (the other grammars give a declaration's type a field)
+                // (C# gives a declaration's type a field: `Foo<T> x = …`)
                 if kotlin {
                     ks.into_iter().skip(1).collect()
                 } else {
-                    Vec::new()
+                    n.child_by_field_name("type").into_iter().collect()
                 }
             } else if let Some(t) =
                 n.child_by_field_name("type").or_else(|| n.child_by_field_name("right"))
@@ -3296,8 +3306,10 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                 Vec::new() // (JS: it names no type)
             } else {
                 // (after the value tested: what is left that writes a type)
-                let tested =
-                    usize::from(!(n.kind().starts_with("catch") || n.kind() == "type_test"));
+                let tested = usize::from(
+                    !(n.kind().starts_with("catch")
+                        || matches!(n.kind(), "type_test" | "typeof_expression")),
+                );
                 ks.into_iter()
                     .skip(tested)
                     .filter(|c| c.kind().contains("type") || c.kind().contains("pattern"))
@@ -6164,6 +6176,32 @@ fn state_value_path(node: Node, src: &[u8]) -> Option<Vec<String>> {
         return path_of(v, src);
     }
     value_type(v, src)
+}
+
+/// C#: how many type arguments the type named `name` is written with in
+/// `n` (the first place it is written there): `Some(0)` for the bare name.
+fn written_arity(n: Node, name: &str, src: &[u8]) -> Option<u8> {
+    let mut stack = vec![n];
+    let mut seen = 0usize;
+    while let Some(x) = stack.pop() {
+        seen += 1;
+        if seen > 600 {
+            return None;
+        }
+        match x.kind() {
+            "generic_name" => {
+                let ks = kids(x);
+                if ks.first().is_some_and(|c| text(*c, src) == name) {
+                    let args = ks.iter().find(|c| c.kind() == "type_argument_list")?;
+                    return u8::try_from(kids(*args).len()).ok();
+                }
+            }
+            "identifier" if text(x, src) == name => return Some(0),
+            _ => {}
+        }
+        stack.extend(kids(x).into_iter().rev());
+    }
+    None
 }
 
 /// The parameter list of a declaration. (Scala gives a generic method's type

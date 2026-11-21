@@ -1946,6 +1946,31 @@ case("typescript", "destructured-closure-parameter", "every name a closure's par
           "a.ts": "import { value, take } from \"./bench\";\n\nexport function run(pairs: [string, number][]) {\n  return pairs.map(([key, value], index) => take([key, value, index]));\n}\n\nexport function outer() {\n  return take(value);\n}\n"},
      [("outer", "indirect_call", "value")], [("run", "indirect_call", "value"), ("run", "references", "value")])
 
+# What Roslyn showed on whole repositories (`oracle_csharp.py`), and what was left of the
+# Kotlin and Swift lists (engine 0.5.58).
+case("csharp", "type-by-arity", "a type is told from its generic namesake by the type arguments written",
+     CS, {"A.cs": "namespace App\n{\n    public class RestResponse\n    {\n        public int Code;\n    }\n\n    public class RestResponse<T> : RestResponse\n    {\n        public T Data;\n    }\n\n    public class C\n    {\n        public RestResponse Plain(int x)\n        {\n            return new RestResponse();\n        }\n\n        public RestResponse<string> Gen(int x)\n        {\n            return new RestResponse<string>();\n        }\n    }\n}\n"},
+     [("C.Plain", "references", "A.cs:App.RestResponse")], [])
+case("csharp", "generic-use-is-no-plain-type", "`List<string>` is never a project class `List` that takes no type argument",
+     CS, {"A.cs": "using System.Collections.Generic;\n\nnamespace App\n{\n    public class List\n    {\n        public int N;\n    }\n\n    public class C\n    {\n        public List<string> Tags()\n        {\n            return new List<string>();\n        }\n\n        public List Own()\n        {\n            return new List();\n        }\n    }\n}\n"},
+     [("C.Own", "references", "List")], [("C.Tags", "references", "List"), ("C.Tags", "calls", "List")])
+case("csharp", "extension-by-type-arguments", "a call written with more type arguments than any method of the type takes is the extension's",
+     CS, {"A.cs": "namespace App\n{\n    public class Parser\n    {\n        public int Parse<T>(string[] args)\n        {\n            return 1;\n        }\n    }\n\n    public static class ParserExtensions\n    {\n        public static int Parse<T1, T2>(this Parser parser, string[] args)\n        {\n            return 2;\n        }\n    }\n\n    public class Use\n    {\n        public int Two(Parser p, string[] args)\n        {\n            return p.Parse<int, string>(args);\n        }\n\n        public int One(Parser p, string[] args)\n        {\n            return p.Parse<int>(args);\n        }\n    }\n}\n"},
+     [("Use.Two", "calls", "ParserExtensions.Parse"), ("Use.One", "calls", "Parser.Parse")],
+     [("Use.Two", "calls", "Parser.Parse")])
+case("csharp", "local-declared-type", "the type a local is declared with, and `typeof(T)`, are uses of the type",
+     CS, {"A.cs": "namespace App\n{\n    public class Result<T>\n    {\n        public T Value;\n    }\n\n    public class Marker\n    {\n    }\n\n    public class C\n    {\n        public object M()\n        {\n            Result<int> r = null;\n            var t = typeof(Marker);\n            return r ?? (object)t;\n        }\n    }\n}\n"},
+     [("C.M", "references", "Result"), ("C.M", "references", "Marker")])
+case("kotlin", "constructor-property-read", "a constructor parameter written `val` is a property of the class",
+     KT, {"a.kt": "package app\n\nclass Holder(val parameters: List<String>, other: Int) {\n    val size = other\n\n    fun count(): Int {\n        return parameters.size\n    }\n}\n\nfun use(h: Holder): List<String> = h.parameters\n"},
+     [("Holder.count", "reads", "Holder.parameters"), ("use", "reads", "Holder.parameters")])
+case("kotlin", "named-argument-label", "the name of an argument given by name reads no property of that name",
+     KT, {"a.kt": "package app\n\nopen class Command(val name: String)\n\nclass Tool {\n    val name = \"tool\"\n\n    fun make(): Command {\n        return Command(name = \"x\")\n    }\n\n    fun own(): String {\n        return name\n    }\n}\n"},
+     [("Tool.own", "reads", "Tool.name")], [("Tool.make", "reads", "Tool.name"), ("Tool.make", "reads", "Command.name")])
+case("swift", "self-constructs", "`Self()` constructs the type around",
+     SW, {"a.swift": "struct Point {\n    var x = 0\n\n    init() {}\n\n    static func origin() -> Point {\n        Self()\n    }\n}\n"},
+     [("Point.origin", "calls", "Point")])
+
 # --- running ------------------------------------------------------------------
 
 def _matches(node: dict[str, Any], want: str) -> bool:

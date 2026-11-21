@@ -502,6 +502,11 @@ pub struct RefFact {
     /// (`client.Get<User>(id)`: 1); 0 when it writes none.
     #[serde(default)]
     pub targs: u8,
+    /// C#, for a type written: how many type arguments it is written with
+    /// (`RestResponse` is 0, `RestResponse<T>` 1). C# tells types of one
+    /// name apart by it.
+    #[serde(default)]
+    pub arity: Option<u8>,
     /// JS `this.x` in a function expression no definition holds: what the
     /// function is attached to, `app` of `app[method] = function () {…}`, or
     /// the call it is passed to, `UserSchema.path.().validate` of

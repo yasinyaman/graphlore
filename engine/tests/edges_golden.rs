@@ -2907,3 +2907,40 @@ fn what_the_go_type_checker_and_rust_analyzer_showed() {
         ],
     );
 }
+
+#[test]
+fn csharp_types_by_arity_kotlin_constructor_properties_and_swift_self() {
+    let got = quals("arity", &[
+        (
+            "A.cs",
+            "using System.Collections.Generic;\n\nnamespace App\n{\n    public class RestResponse\n    {\n        public int Code;\n    }\n\n    public class RestResponse<T> : RestResponse\n    {\n        public T Data;\n    }\n\n    public class List\n    {\n        public int N;\n    }\n\n    public class Parser\n    {\n        public int Parse<T>(string[] args)\n        {\n            return 1;\n        }\n    }\n\n    public static class ParserExtensions\n    {\n        public static int Parse<T1, T2>(this Parser parser, string[] args)\n        {\n            return 2;\n        }\n    }\n\n    public class C\n    {\n        public List<string> Tags()\n        {\n            return new List<string>();\n        }\n\n        public List Own()\n        {\n            return new List();\n        }\n\n        public int Two(Parser p, string[] args)\n        {\n            RestResponse<int> r = null;\n            return p.Parse<int, string>(args);\n        }\n    }\n}\n",
+        ),
+        (
+            "a.kt",
+            "package app\n\nopen class Command(val name: String)\n\nclass Holder(val parameters: List<String>) {\n    val name = \"tool\"\n\n    fun count(): Int {\n        return parameters.size\n    }\n\n    fun make(): Command {\n        return Command(name = \"x\")\n    }\n}\n",
+        ),
+        (
+            "a.swift",
+            "struct Point {\n    var x = 0\n\n    init() {}\n\n    static func origin() -> Point {\n        Self()\n    }\n}\n",
+        ),
+    ]);
+    has(
+        &got,
+        &[
+            ("App.C.Own", "references", "App.List"),
+            ("App.C.Two", "calls", "App.ParserExtensions.Parse"),
+            ("App.C.Two", "references", "App.RestResponse"),
+            ("Holder.count", "reads", "Holder.parameters"),
+            ("Point.origin", "calls", "Point"),
+        ],
+    );
+    lacks(
+        &got,
+        &[
+            ("App.C.Tags", "references", "App.List"),
+            ("App.C.Tags", "calls", "App.List"),
+            ("App.C.Two", "calls", "App.Parser.Parse"),
+            ("Holder.make", "reads", "Holder.name"),
+        ],
+    );
+}
