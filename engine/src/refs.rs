@@ -416,7 +416,12 @@ fn types_in(
         if matches!(k, "generic_type" | "generic_name" | "parameterized_type" | "template_type")
             || (k == "user_type" && kids(node).iter().any(|c| c.kind() == "type_arguments"))
         {
-            if let Some(p) = path_of(node, src) {
+            // (Scala `a.b.C[Int]`: the type is written with its package)
+            let stable = node
+                .child_by_field_name("type")
+                .filter(|t| t.kind() == "stable_type_identifier")
+                .map(|t| stable_path(t, src));
+            if let Some(p) = stable.or_else(|| path_of(node, src)) {
                 out.push((p, ctx));
             }
             for c in kids(node) {
@@ -430,6 +435,11 @@ fn types_in(
                     stack.extend(kids(c).into_iter().map(|a| (a, "generic_arg")));
                 }
             }
+            continue;
+        }
+        // Scala `scopt.RenderingMode`: one type, named through its package
+        if k == "stable_type_identifier" {
+            out.push((stable_path(node, src), ctx));
             continue;
         }
         // C++ `Outer::Inner`, `ns::Type` (one written with arguments,
@@ -458,6 +468,20 @@ fn types_in(
         };
         stack.extend(kids(node).into_iter().map(|c| (c, sub)));
     }
+}
+
+/// The names of a Scala `stable_type_identifier`, in the order written.
+fn stable_path(n: Node, src: &[u8]) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut stack = vec![n];
+    while let Some(x) = stack.pop() {
+        let ks = kids(x);
+        if ks.is_empty() {
+            out.push(text(x, src));
+        }
+        stack.extend(ks.into_iter().rev());
+    }
+    out
 }
 
 /// Type references in the signature of a callable or a field: parameters,
@@ -1442,6 +1466,14 @@ fn type_params_bounds(n: Node, src: &[u8]) -> (Vec<String>, Vec<Option<Vec<Strin
             let written = &src[id.end_byte().min(tp.end_byte())..tp.end_byte()];
             bounds.push(bound_path(&String::from_utf8_lossy(written)));
         }
+    }
+    // Scala 3 `extension [A, B](x: F[A]) def m(…)`: the extension's are the
+    // method's too
+    let around = n.parent().into_iter().chain(n.parent().and_then(|p| p.parent()));
+    if let Some(ext) = around.into_iter().find(|a| a.kind() == "extension_definition") {
+        let (more, their) = type_params_bounds(ext, src);
+        names.extend(more);
+        bounds.extend(their);
     }
     // `where T: Foo`, `where T : Foo`
     let clauses = kids(n).into_iter().filter(|c| {
@@ -2806,6 +2838,10 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                     facts.defs[di].params = u8::try_from(facts.defs[di].plist.len()).ok();
                 }
             }
+            // `type Either<L, A> = …`: its parameters are names of its own
+            if facts.defs[di].kind == crate::facts::DefKind::TypeAlias {
+                facts.defs[di].type_params = type_params(n, src);
+            }
             if facts.defs[di].kind.is_callable() {
                 facts.defs[di].lambda_receiver = lambda_receiver(n, src);
                 facts.defs[di].type_params = type_params(n, src);
@@ -3062,6 +3098,82 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                 for (p, ctx) in types {
                     push(&mut refs, n, RefKind::Type, p, ctx, None);
                 }
+            }
+        }
+        // TypeScript: the types a type alias is written with, and those of an
+        // interface's property, call, construct and index signatures
+        if ecma
+            && matches!(
+                n.kind(),
+                "type_alias_declaration"
+                    | "property_signature"
+                    | "call_signature"
+                    | "construct_signature"
+                    | "index_signature"
+            )
+        {
+            let mut types = Vec::new();
+            match n.kind() {
+                "type_alias_declaration" => {
+                    if let Some(t) = n.child_by_field_name("value") {
+                        types_in(t, src, "alias", &mut types);
+                        // (`infer A` declares `A` for the type it is written in)
+                        let mut inferred = Vec::new();
+                        let mut stack = vec![t];
+                        while let Some(x) = stack.pop() {
+                            if x.kind() == "infer_type" {
+                                inferred.extend(kids(x).into_iter().next().map(|c| text(c, src)));
+                            }
+                            stack.extend(kids(x));
+                        }
+                        types.retain(|(p, _)| !(p.len() == 1 && inferred.contains(&p[0])));
+                    }
+                }
+                // (a parameter written without a type is a name, not a type)
+                "call_signature" | "construct_signature" => signature_types(n, src, &mut types),
+                _ => {
+                    for f in ["type", "index_type"] {
+                        if let Some(t) = n.child_by_field_name(f) {
+                            types_in(t, src, "field", &mut types);
+                        }
+                    }
+                }
+            }
+            for (p, ctx) in types {
+                push(&mut refs, n, RefKind::Type, p, ctx, None);
+            }
+        }
+        // the types a type parameter is bound by: `[T <: Txn[T]]`, `[T: Show]`,
+        // `<T extends Foo>`, `<S: Sink>`
+        if matches!(n.kind(), "type_parameters" | "type_parameter_list") {
+            let mut types = Vec::new();
+            for tp in kids(n) {
+                if tp.kind().ends_with("bound") {
+                    types_in(tp, src, "bound", &mut types);
+                } else if !tp.kind().contains("identifier") {
+                    for c in kids(tp).into_iter().skip(1) {
+                        types_in(c, src, "bound", &mut types);
+                    }
+                }
+            }
+            for (p, ctx) in types {
+                push(&mut refs, n, RefKind::Type, p, ctx, None);
+            }
+        }
+        // Scala patterns that name a type: `case Succ(p)`, `case o: Obj[In]`
+        if matches!(n.kind(), "case_class_pattern" | "typed_pattern") {
+            if let Some(t) = n.child_by_field_name("type") {
+                let mut types = Vec::new();
+                types_in(t, src, "pattern", &mut types);
+                for (p, ctx) in types {
+                    push(&mut refs, n, RefKind::Type, p, ctx, None);
+                }
+            }
+        }
+        // `typeof Backbone.Model`: the value whose type is meant
+        if n.kind() == "type_query" {
+            if let Some(p) = kids(n).into_iter().next().and_then(|v| path_of(v, src)) {
+                push(&mut refs, n, RefKind::Type, p, "type_query", None);
             }
         }
         if !by_node.contains_key(&n.id()) {

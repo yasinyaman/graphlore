@@ -307,6 +307,11 @@ impl State {
                 self.push(node, RefKind::Write, path.clone(), ctx);
                 self.push(node, RefKind::Read, path, "read");
             }
+        } else if k == "assignment_expression"
+            && up(anc, 0).is_some_and(|p| p.kind() == "arguments")
+            && crate::parse::current() == Some(crate::lang::Lang::Scala)
+        {
+            // Scala `Local(a = 1)`: an argument given by name writes nothing
         } else if ASSIGNMENTS.contains(&k) {
             let target = n
                 .child_by_field_name("left")
@@ -421,6 +426,16 @@ impl State {
 
     /// A bare name in an expression.
     fn bare<'t>(&mut self, n: Node<'t>, src: &[u8], anc: &[Node<'t>]) {
+        // Scala `Local(a = 1)`: the name of an argument, no variable
+        if crate::parse::current() == Some(crate::lang::Lang::Scala)
+            && up(anc, 1).is_some_and(|g| g.kind() == "arguments")
+            && up(anc, 0).is_some_and(|p| {
+                p.kind() == "assignment_expression"
+                    && p.child_by_field_name("left").is_some_and(|l| l.id() == n.id())
+            })
+        {
+            return;
+        }
         let Some(p) = up(anc, 0) else { return };
         let pk = p.kind();
         if pk.contains("parameter") {

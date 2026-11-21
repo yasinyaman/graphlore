@@ -15,6 +15,12 @@ All notable changes to this project are documented here. The format is based on
   answer for, 98.9% went where it says with engine 0.5.51 and 99.1% with
   0.5.52; what was wrong is the list under Fixed. No rule in it was written
   from memory of the language.
+- **The Scala compiler as a second judge** (`benchmarks/oracle_scala.py`):
+  the Scala 3 compiler's SemanticDB expect files carry, after every name of
+  73 programs, the symbol the compiler bound it to. No Scala compiler runs
+  here, so this is the first check of the Scala rules by Scala itself: 73.3%
+  of the edges it has an answer for were right with engine 0.5.52, 96.7% with
+  0.5.53.
 - **`benchmarks/verify_cases.py`** gives each case of the rule checklist to
   the language's own compiler or interpreter (10 of the 14 languages have
   one here): a case the language rejects says nothing about the rule.
@@ -339,6 +345,33 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- **Native engine 0.5.53: what the Scala compiler showed, and the rest of
+  TypeScript's list** (456 cases in the checklist, all hold):
+  - **A name of another package is not in reach without an import** (JVM
+    languages and PHP). A type or function that was the only one of its name
+    in the project was linked from any file, as `EXTRACTED` when it sat at
+    the top of its file and as an `INFERRED` guess otherwise: `List[Int]` to
+    a `List` nested in an unrelated class, PHP `\DateTimeImmutable` to a
+    test's own class, Kotlin `apply { }` to a test rule's `apply`. Now only
+    one of the file's own package. C# keeps the guess: a project file can
+    import a namespace for every source (`<Using Include="…"/>`), which the
+    engine does not read.
+  - **An enum member named as a value is a use of its enum**: `return
+    Color.Red`, `Mode::Fast`, `Kind.A`, `Level::Debug`. It was an edge only
+    where the member was called. TypeScript's enum members were no
+    definitions at all.
+  - **TypeScript**: the types a type alias is written with, those of an
+    interface's property, call, construct and index signatures, and `typeof
+    ns.Class` are references; a type alias's own parameters and an `infer`
+    name are not.
+  - **The types a type parameter is bound by** are references in every
+    language (`[In <: Txn[In]]`, `<T extends Foo>`, `<S: Sink>`).
+  - **Scala**: `Local(a = 1)` is an argument given by name, not a write of a
+    variable `a`; `pkg.Type` is one type path; `case Succ(p)` and `case o:
+    Obj` name their types; the type parameters of an `extension` are its
+    methods'.
+  On the 45 audit repositories: about 4,200 new `references` edges and about
+  460 wrong edges gone.
 - **Native engine 0.5.52: the rules the TypeScript compiler showed missing**,
   each also where the other languages have it (440 cases in the checklist,
   all hold):

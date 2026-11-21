@@ -1633,13 +1633,13 @@ python benchmarks/oracle_typescript.py ts/tsc/testdata/baselines/reference/compi
 (The paths are those of the repository on 2026-11-20, commit `6417c48`; the
 tests' sources are looked for beside the baselines, or where `--cases` says.)
 
-| | 0.5.51 | 0.5.52 |
-|---|---:|---:|
-| programs (those with a definition and a use) | 3,169 | 3,169 |
-| edges whose site the compiler has an answer for | 7,806 | 7,935 |
-| of them, to the declaration the compiler names | 7,721 (98.9%) | 7,864 (99.1%) |
-| uses the compiler binds to a definition the graph has | 19,430 | 19,526 |
-| of them, with an edge from the definition around | 14,237 (73.3%) | 14,426 (73.9%) |
+| | 0.5.51 | 0.5.52 | 0.5.53 |
+|---|---:|---:|---:|
+| programs (those with a definition and a use) | 3,169 | 3,169 | 3,169 |
+| edges whose site the compiler has an answer for | 7,806 | 7,935 | 8,822 |
+| of them, to the declaration the compiler names | 7,721 (98.9%) | 7,864 (99.1%) | 8,747 (99.1%) |
+| uses the compiler binds to a definition the graph has | 19,430 | 19,526 | 19,760 |
+| of them, with an edge from the definition around | 14,237 (73.3%) | 14,426 (73.9%) | 15,691 (79.4%) |
 
 The first number is the one that matters: an edge that goes somewhere else
 than the compiler says is a wrong edge, and all but two of the 85 were
@@ -1658,11 +1658,46 @@ values with no written type whose members only inference names (about 1,500
 of the 5,100), uses at the top of a file. It is a list to read, not a score:
 `--json` writes every row.
 
-What this is not: the other thirteen languages. The same kind of file exists
-for several (Scala's SemanticDB `expect` files, Swift's index tests, Kotlin's
-resolved-call dumps, rust-analyzer's fixtures), each in its own format; none
-is read yet. And a compiler's tests are small programs: they find a rule
-read wrong, not a framework's convention.
+0.5.53 read the second list where it named something concrete: the types of
+a type alias and of an interface's signatures, `typeof ns.Class`, enum
+members.
+
+**Scala.** No Scala compiler runs where the engine is built, so its rules
+had only ever been checked against memory. The Scala 3 compiler's test suite
+has 73 programs under `tests/semanticdb/expect`, each with the symbol the
+compiler bound after every name (`class Access/*<-example::Access#*/`,
+`List/*->scala::package.List#*/`). `benchmarks/oracle_scala.py` takes the
+annotations out, builds the directory as one project and compares the same
+way:
+
+```bash
+git clone --depth 1 --filter=blob:none --sparse https://github.com/scala/scala3
+git -C scala3 sparse-checkout set tests/semanticdb/expect
+python benchmarks/oracle_scala.py scala3/tests/semanticdb/expect --samples 20
+```
+
+| | 0.5.52 | 0.5.53 |
+|---|---:|---:|
+| edges whose site the compiler has an answer for | 262 | 212 |
+| of them, to the declaration the compiler names | 192 (73.3%) | 205 (96.7%) |
+| uses the compiler binds to a definition the graph has, with an edge | 292 of 434 (67.3%) | 313 of 439 (71.3%) |
+
+(Commit `1615177` of 2026-11-20. A few of the first 70 wrong rows were the
+judge's own: a case class's companion and locals numbered per file.) One in
+four edges was wrong, and the largest cause was no rule of Scala's at all: a
+type that was the only one of its name in the project was linked from any
+file, whatever its package, so `List[Int]` went to a `List` nested in
+another program's class. That lookup is shared with Java, Kotlin and PHP,
+and the 45 repositories lost about 400 such edges with it. The rest were
+Scala's: a named argument read as an assignment, the type parameters of an
+`extension`, a type written through its package. The seven left are a
+structural type's member, `p.x.type`, and guesses marked `INFERRED`.
+
+What this is not: the other twelve languages. The same kind of file exists
+for several (Swift's index tests, Kotlin's resolved-call dumps,
+rust-analyzer's fixtures, gopls's markers), each in its own format; none is
+read yet. And a compiler's tests are small programs: they find a rule read
+wrong, not a framework's convention.
 
 ### What is left without an edge
 

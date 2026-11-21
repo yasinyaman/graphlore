@@ -2728,3 +2728,66 @@ fn typescript_names_of_a_namespace_a_parameter_and_a_parameter_property() {
     has(&got, &[("Square", "inherits", "Shape"), ("Greeter.greet", "reads", "Greeter.greeting")]);
     lacks(&got, &[("Square", "inherits", "Types.Shape"), ("call", "calls", "cb")]);
 }
+
+#[test]
+fn an_enum_member_named_and_the_types_typescript_writes_outside_signatures() {
+    let got = quals("enum-members", &[
+        (
+            "a.ts",
+            "export enum Color {\n  Red,\n  Green = 2,\n}\n\nexport function pick() {\n  return Color.Red;\n}\n\nexport function two() {\n  return Color.Green;\n}\n\nexport class Left {\n  l = 1;\n}\n\nexport class Right {\n  r = 2;\n}\n\nexport type Either = Left | Right;\n\nexport interface Maker {\n  (o: Left): number;\n  new (n: number): Right;\n  held: typeof Color;\n}\n",
+        ),
+        ("src/lib.rs", "pub enum Mode {\n    Fast,\n    Slow,\n}\n\npub fn pick_mode() -> u8 {\n    let _m = Mode::Fast;\n    1\n}\n"),
+        ("Cargo.toml", "[package]\nname = \"demo\"\nversion = \"0.1.0\"\n"),
+    ]);
+    has(
+        &got,
+        &[
+            ("pick", "references", "Color"),
+            ("two", "references", "Color"),
+            ("Either", "references", "Left"),
+            ("Either", "references", "Right"),
+            ("Maker", "references", "Left"),
+            ("Maker", "references", "Right"),
+            ("Maker", "references", "Color"),
+            ("pick_mode", "references", "Mode"),
+        ],
+    );
+}
+
+#[test]
+fn a_name_of_another_package_is_not_in_reach_and_what_scala_writes_beside() {
+    let got = quals("packages", &[
+        ("other/List.scala", "package other\n\nclass List[A] {\n  def x = 2\n}\n"),
+        ("ext/Use.scala", "package ext\n\nclass Use {\n  def held: List[Int] = Nil\n}\n"),
+        (
+            "ext/Seen.scala",
+            "package ext\n\nimport other.List\n\nclass Seen {\n  def held: List[Int] = new List[Int]\n  def far: other.List[Int] = held\n}\n",
+        ),
+        (
+            "app/a.scala",
+            "package app\n\ntrait Txn[T]\ncase class Succ(p: Int)\nclass Local(a: Int, b: Int)\nclass A\n\ntrait Copy[In <: Txn[In]] {\n  def k = 1\n}\n\nobject Use {\n  var a = 0\n  def bump(): Unit = { a = 1 }\n  def make = new Local(a = 1, b = 2)\n  def f(n: Any): Int = n match {\n    case Succ(p) => p\n    case _ => 0\n  }\n  extension [A](opt: Option[A]) def unwrap: A = opt.get\n  def plain: A = new A\n}\n",
+        ),
+        ("a/Lists.java", "package a;\n\npublic class Lists {\n    public static int of() {\n        return 1;\n    }\n}\n"),
+        ("c/Blind.java", "package c;\n\nclass Blind {\n    Object f() {\n        return Lists.of();\n    }\n}\n"),
+    ]);
+    has(
+        &got,
+        &[
+            ("Seen.held", "references", "List"),
+            ("Seen.far", "references", "List"),
+            ("Copy", "references", "Txn"),
+            ("Use.bump", "writes", "Use.a"),
+            ("Use.f", "references", "Succ"),
+            ("Use.plain", "references", "A"),
+        ],
+    );
+    lacks(
+        &got,
+        &[
+            ("Use.held", "references", "List"),
+            ("Use.make", "writes", "Use.a"),
+            ("Use.unwrap", "references", "A"),
+            ("Blind.f", "calls", "Lists.of"),
+        ],
+    );
+}
