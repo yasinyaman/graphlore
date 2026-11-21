@@ -25,7 +25,7 @@ python benchmarks/conformance.py --baseline benchmarks/results-conformance.json 
 python benchmarks/conformance.py --markdown      # the tables below
 ```
 
-Measured 2026-11-21 with graphlore-engine 0.5.63: **541 of 541 rules hold**
+Measured 2026-11-21 with graphlore-engine 0.5.64: **559 of 559 rules hold**
 (356 of the first 406 with 0.5.45). Ten came from the Go type checker and
 rust-analyzer run on whole repositories; fifteen from the Kotlin and Swift
 compilers' tests (type checks, casts, `catch`, aliases); thirty-nine from two
@@ -104,7 +104,7 @@ Each change was measured on the 45 audit repositories as well, by reading
 the edges it added and removed at their source lines; the page on the
 [native engine](native-engine.md#the-rules-themselves) has the numbers.
 Every case has been compiled by its own language
-(`benchmarks/verify_cases.py`: 541 of 541 accepted). The Versions column is
+(`benchmarks/verify_cases.py`: 559 of 559 accepted). The Versions column is
 the oldest version of the language whose compiler accepts the case, where the
 compiler can be asked (`verify_cases.py --min-version`: Java, Kotlin, Scala,
 C#, Swift, C, C++); `all` is the oldest version asked, `–` a language with no
@@ -128,7 +128,7 @@ name to the engine, so the case names it `fetchAll`.
 
 The Python Language Reference, 'Naming and binding' (4.2) and 'The import system'.
 
-Found by: the specification 36, a compiler 1, comparison 0, the grammar 1. With the place it was read in the language's own tools: 0.
+Found by: the specification 36, a compiler 1, comparison 0, the grammar 1, the language's own tools 0. With the place it was read in the language's own tools: 0.
 
 | Rule | Case | Versions | Engine |
 |---|---|---|---|
@@ -175,7 +175,7 @@ Found by: the specification 36, a compiler 1, comparison 0, the grammar 1. With 
 
 ECMAScript Language Specification, 'Executable Code and Execution Contexts' (scopes), 'Modules'.
 
-Found by: the specification 29, a compiler 0, comparison 0, the grammar 0. With the place it was read in the language's own tools: 0.
+Found by: the specification 29, a compiler 0, comparison 0, the grammar 0, the language's own tools 0. With the place it was read in the language's own tools: 0.
 
 | Rule | Case | Versions | Engine |
 |---|---|---|---|
@@ -213,7 +213,7 @@ Found by: the specification 29, a compiler 0, comparison 0, the grammar 0. With 
 
 TypeScript Handbook, 'Modules', 'Classes', 'Generics' (types are the compiler's, tsc).
 
-Found by: the specification 30, a compiler 19, comparison 0, the grammar 2. With the place it was read in the language's own tools: 0.
+Found by: the specification 30, a compiler 19, comparison 0, the grammar 2, the language's own tools 0. With the place it was read in the language's own tools: 0.
 
 | Rule | Case | Versions | Engine |
 |---|---|---|---|
@@ -273,7 +273,7 @@ Found by: the specification 30, a compiler 19, comparison 0, the grammar 2. With
 
 The Go Programming Language Specification, 'Declarations and scope', 'Selectors', 'Method sets'.
 
-Found by: the specification 23, a compiler 8, comparison 2, the grammar 5. With the place it was read in the language's own tools: 0.
+Found by: the specification 23, a compiler 8, comparison 2, the grammar 5, the language's own tools 0. With the place it was read in the language's own tools: 0.
 
 | Rule | Case | Versions | Engine |
 |---|---|---|---|
@@ -320,7 +320,7 @@ Found by: the specification 23, a compiler 8, comparison 2, the grammar 5. With 
 
 The Java Language Specification, 6.4 'Shadowing and Obscuring', 15.12 'Method Invocation Expressions'.
 
-Found by: the specification 41, a compiler 3, comparison 0, the grammar 4. With the place it was read in the language's own tools: 0.
+Found by: the specification 41, a compiler 3, comparison 0, the grammar 4, the language's own tools 0. With the place it was read in the language's own tools: 0.
 
 | Rule | Case | Versions | Engine |
 |---|---|---|---|
@@ -377,7 +377,7 @@ Found by: the specification 41, a compiler 3, comparison 0, the grammar 4. With 
 
 Kotlin Language Specification, 'Scopes and identifiers', 'Overload resolution' (receivers).
 
-Found by: the specification 31, a compiler 9, comparison 0, the grammar 0. With the place it was read in the language's own tools: 0.
+Found by: the specification 31, a compiler 9, comparison 0, the grammar 0, the language's own tools 0. With the place it was read in the language's own tools: 0.
 
 | Rule | Case | Versions | Engine |
 |---|---|---|---|
@@ -426,7 +426,7 @@ Found by: the specification 31, a compiler 9, comparison 0, the grammar 0. With 
 
 Scala Language Specification, chapter 2 'Identifiers, Names and Scopes', 4.7 'Import Clauses'.
 
-Found by: the specification 20, a compiler 8, comparison 0, the grammar 4. With the place it was read in the language's own tools: 0.
+Found by: the specification 20, a compiler 8, comparison 0, the grammar 4, the language's own tools 0. With the place it was read in the language's own tools: 0.
 
 | Rule | Case | Versions | Engine |
 |---|---|---|---|
@@ -463,11 +463,11 @@ Found by: the specification 20, a compiler 8, comparison 0, the grammar 4. With 
 | `new p.T[A](…)` constructs T | `new-generic-through-package` | – | yes |
 | `f[T](…)` calls f | `generic-call` | – | yes |
 
-### csharp (52 of 52)
+### csharp (70 of 70)
 
 C# Language Specification, 'Namespace and type names', 'Member lookup', 'Extension method invocations'.
 
-Found by: the specification 39, a compiler 6, comparison 6, the grammar 1. With the place it was read in the language's own tools: 0.
+Found by: the specification 39, a compiler 6, comparison 6, the grammar 1, the language's own tools 18. With the place it was read in the language's own tools: 18.
 
 | Rule | Case | Versions | Engine |
 |---|---|---|---|
@@ -523,12 +523,30 @@ Found by: the specification 39, a compiler 6, comparison 6, the grammar 1. With 
 | `new T { … }` with no argument list calls the constructor that takes none | `initializer-without-arguments` | all | yes |
 | a partial type's constructors are those of every file that declares it | `partial-type-constructor` | all | yes |
 | `new T[n]` is a use of T | `array-creation-type` | – | yes |
+| in a generic method a name of its type parameters is that parameter, not a type of the namespace | `method-type-parameter-first` | – | yes |
+| a nested type of a base class is named without its outer type in the derived class | `nested-type-of-a-base` | – | yes |
+| a type of the namespace the use is in comes before one a `using` imports | `namespace-type-before-using` | – | yes |
+| an alias a `using` declares comes before a type of the same name another `using` imports | `using-alias-before-using-namespace` | – | yes |
+| a `using` written inside a namespace block holds only inside it | `using-inside-a-namespace-block` | – | yes |
+| a local or a parameter of a name hides the member of that name | `local-hides-member` | – | yes |
+| a member of the derived class hides one of its name in the base | `derived-member-hides-base` | – | yes |
+| `Color.White` where a property `Color Color` is in scope is the type's static member | `color-color` | – | yes |
+| an instance method that fits comes before an extension method of its name | `instance-method-before-extension` | – | yes |
+| of extensions in sight, those of the closest enclosing namespace are the candidates | `closest-extension-namespace` | – | yes |
+| an extension of a namespace neither around the use nor imported is not in sight | `extension-needs-its-namespace` | – | yes |
+| of two overloads that take the argument, the one whose parameter is its type is called | `overload-exact-type` | – | yes |
+| an overload all of whose parameters have arguments is better than one that needs a default | `overload-without-defaults` | – | yes |
+| an overload applicable in its normal form is better than a `params` one in its expanded form | `overload-normal-before-params` | – | yes |
+| a named argument picks the overload that has a parameter of that name | `overload-by-argument-name` | – | yes |
+| of two candidates with the same parameter types, the one that is not generic is better | `overload-non-generic-first` | – | yes |
+| a member of a base of the base class is a member of the class | `inherited-from-a-grandparent` | – | yes |
+| `Outer.Inner` names the nested type | `qualified-nested-type` | – | yes |
 
 ### rust (55 of 55)
 
 The Rust Reference, 'Names' (name resolution, scopes, paths), 'Method call expressions', 'Field access expressions'.
 
-Found by: the specification 37, a compiler 10, comparison 6, the grammar 2. With the place it was read in the language's own tools: 0.
+Found by: the specification 37, a compiler 10, comparison 6, the grammar 2, the language's own tools 0. With the place it was read in the language's own tools: 0.
 
 | Rule | Case | Versions | Engine |
 |---|---|---|---|
@@ -592,7 +610,7 @@ Found by: the specification 37, a compiler 10, comparison 6, the grammar 2. With
 
 The Swift Programming Language, 'Declarations', 'Extensions', 'Protocols' (member lookup is the compiler's).
 
-Found by: the specification 33, a compiler 5, comparison 0, the grammar 5. With the place it was read in the language's own tools: 0.
+Found by: the specification 33, a compiler 5, comparison 0, the grammar 5, the language's own tools 0. With the place it was read in the language's own tools: 0.
 
 | Rule | Case | Versions | Engine |
 |---|---|---|---|
@@ -644,7 +662,7 @@ Found by: the specification 33, a compiler 5, comparison 0, the grammar 5. With 
 
 ISO C, 6.2.1 'Scopes of identifiers', 6.2.2 'Linkages of identifiers'.
 
-Found by: the specification 14, a compiler 0, comparison 0, the grammar 2. With the place it was read in the language's own tools: 0.
+Found by: the specification 14, a compiler 0, comparison 0, the grammar 2, the language's own tools 0. With the place it was read in the language's own tools: 0.
 
 | Rule | Case | Versions | Engine |
 |---|---|---|---|
@@ -669,7 +687,7 @@ Found by: the specification 14, a compiler 0, comparison 0, the grammar 2. With 
 
 ISO C++, [basic.lookup] (unqualified, qualified and argument-dependent lookup), [class.member.lookup], [dcl.ambig.res].
 
-Found by: the specification 32, a compiler 0, comparison 0, the grammar 4. With the place it was read in the language's own tools: 0.
+Found by: the specification 32, a compiler 0, comparison 0, the grammar 4, the language's own tools 0. With the place it was read in the language's own tools: 0.
 
 | Rule | Case | Versions | Engine |
 |---|---|---|---|
@@ -714,7 +732,7 @@ Found by: the specification 32, a compiler 0, comparison 0, the grammar 4. With 
 
 Ruby documentation, 'Calling Methods' and Module#ancestors (method lookup), 'Modules and Classes' (constant lookup).
 
-Found by: the specification 29, a compiler 0, comparison 0, the grammar 0. With the place it was read in the language's own tools: 0.
+Found by: the specification 29, a compiler 0, comparison 0, the grammar 0, the language's own tools 0. With the place it was read in the language's own tools: 0.
 
 | Rule | Case | Versions | Engine |
 |---|---|---|---|
@@ -752,7 +770,7 @@ Found by: the specification 29, a compiler 0, comparison 0, the grammar 0. With 
 
 PHP Manual, 'Namespaces: Name resolution rules', 'Classes and Objects' (inheritance, traits, static).
 
-Found by: the specification 31, a compiler 2, comparison 0, the grammar 1. With the place it was read in the language's own tools: 0.
+Found by: the specification 31, a compiler 2, comparison 0, the grammar 1, the language's own tools 0. With the place it was read in the language's own tools: 0.
 
 | Rule | Case | Versions | Engine |
 |---|---|---|---|
@@ -791,4 +809,4 @@ Found by: the specification 31, a compiler 2, comparison 0, the grammar 1. With 
 | `$x instanceof T` and `catch (T $e)` are uses of T | `instanceof-and-catch` | – | yes |
 | an anonymous function's parameters and result name their types | `closure-signature` | – | yes |
 
-541 of 541 rules hold
+559 of 559 rules hold

@@ -369,6 +369,98 @@ guess, and it is wrong where a library type the project does not define has
 the same members (got's `response.body` is read as `Options.body`).
 
 
+### Phase 2: C#
+
+The C# standard (`dotnet/csharpstandard`, `standard/`) and Roslyn's binder
+(`src/Compilers/CSharp/Portable/Binder/`) read section by section: §7.8.1
+namespace and type names (`LookupSymbolsSimpleName`, `InContainerBinder`,
+`WithUsingNamespacesAndTypesBinder`, `WithExternAndUsingAliasesBinder`,
+`BindQualifiedName`), §12.8.4 simple names, §12.5 member lookup
+(`LookupMembersInClass`), §12.8.7 member access and the `Color Color` rule
+(`BindLeftOfPotentialColorColorMemberAccess`), §12.8.10.3 extension methods
+(`LookupAllExtensions`), §12.6.4 overload resolution (`BetterFunctionMember`)
+and §14.5 using directives. `benchmarks/rule_inventory.py` holds the list:
+every rule with the cases that hold it, or why the engine does not follow it
+(54 rules, 47 held by a case, 7 not followed; 18 of 70 cases found in the language's own tools).
+
+| Source | Rule | Held by / why not |
+|---|---|---|
+| csharpstandard §7.8.1; Roslyn LookupSymbolsSimpleName | a method's type parameter is the name first | `method-type-parameter-first` |
+| csharpstandard §7.8.1 | then a nested type of the type around, its own or a base's | `nested-type`, `nested-type-of-a-base` |
+| csharpstandard §7.8.1; Roslyn InContainerBinder | then a type of each namespace around, innermost first | `enclosing-namespace` |
+| csharpstandard §7.8.1 | a type of the namespace comes before one a `using` imports | `namespace-type-before-using` |
+| csharpstandard §7.8.1; Roslyn WithExternAndUsingAliasesBinder | a using alias comes before the namespaces `using` imports | `using-alias-before-using-namespace`, `using-alias` |
+| csharpstandard §7.8.1; Roslyn WithUsingNamespacesAndTypesBinder | a `using` namespace imports its types, not its nested namespaces | `using` |
+| csharpstandard §14.5.1 | a `using` holds in the namespace body (or file) that writes it | `using-inside-a-namespace-block` |
+| csharpstandard §14.5.1 | `global using` holds in every file of the compilation | `global-using` |
+| csharpstandard §14.5.4 | `using static` imports a type's static members and nested types | `using-static` |
+| csharpstandard §14.2 | a file-scoped namespace is the namespace of the whole file | `file-scoped-namespace` |
+| csharpstandard §7.8.1; Roslyn BindQualifiedName | `N.T`, `T.Nested`: qualified names | `qualified-nested-type` |
+| csharpstandard §7.8.1 | a generic name is looked up by its number of type arguments | `type-by-arity`, `generic-namesake`, `generic-use-is-no-plain-type` |
+| csharpstandard §7.8.1 | two `using` namespaces giving the same name is an ambiguity error | not followed: an error is no binding; a graph of code that compiles never has one |
+| csharpstandard §14.4 extern alias | `extern alias` names an assembly's root namespace | not followed: assemblies are not read: an aliased name is external |
+| csharpstandard §12.8.4 | a local or a parameter hides a member of its name | `local-hides-member` |
+| csharpstandard §12.8.4 | a member of the class or a base by its bare name (implicit `this`) | `implicit-this`, `inherited`, `inherited-from-a-grandparent` |
+| csharpstandard §12.8.4 | a local function is a name of its block | `local-function` |
+| csharpstandard §12.8.4 | a primary constructor's parameter is a name in the type's body | `primary-constructor` |
+| csharpstandard §12.8.4 | a name declared later in the block is an error before its declaration | not followed: an error is no binding |
+| csharpstandard §12.5; Roslyn LookupMembersInClass | a member declared in a derived type hides the base's of its name | `derived-member-hides-base` |
+| csharpstandard §12.5 | a member of a base is a member of the type | `base`, `inherited` |
+| csharpstandard §12.5 | an interface's members are members of a value typed by it | `interface-typed` |
+| csharpstandard §15.2.7 | a partial type is every declaration of it | `partial`, `partial-type-constructor` |
+| csharpstandard §12.5 | an inaccessible member is no candidate (`private` in another type) | not followed: accessibility is not modelled; code that compiles uses only what it can reach, so it seldom decides |
+| csharpstandard §12.8.7.2; Roslyn BindLeftOfPotentialColorColorMemberAccess | `Color Color`: a member named like its type is the value or the type, by what follows | `color-color` |
+| csharpstandard §12.8.7 | a static member through the type's name | `static-via-class`, `static-property` |
+| csharpstandard §12.8.7 | an enum member through its enum | `enum-member`, `enum-member-value` |
+| csharpstandard §12.8.8 | `a?.b` is a member of `a` | `null-conditional` |
+| csharpstandard §12.8.14 | `this.m` and `base.m` | `this`, `base` |
+| csharpstandard §12.8.10.3 | an instance method comes before an extension of the name | `instance-method-before-extension` |
+| csharpstandard §12.8.10.3; Roslyn LookupAllExtensions | extensions are searched namespace by namespace, closest first | `closest-extension-namespace` |
+| csharpstandard §12.8.10.3 | an extension is in sight only from a namespace around or one a `using` imports | `extension-needs-its-namespace`, `extension`, `block-namespace-sees-outer-extension`, `using-block-namespace` |
+| csharpstandard §12.8.10.3 | an extension of an interface applies to its implementations | `extension-on-interface` |
+| csharpstandard §12.8.10.3 | an extension's type arguments are inferred or written | `extension-by-type-arguments` |
+| csharpstandard §12.6.4.2 | a candidate takes the call's number of arguments | `overload-arity` |
+| csharpstandard §12.6.4.2 | a named argument picks the overload with a parameter of that name | `overload-by-argument-name` |
+| csharpstandard §12.6.4.3; Roslyn BetterFunctionMember | a better conversion wins: an exact type over `object` | `overload-exact-type` |
+| csharpstandard §12.6.4.3 | a candidate needing no default arguments wins | `overload-without-defaults` |
+| csharpstandard §12.6.4.3 | a `params` candidate in normal form wins over its expanded form | `overload-normal-before-params` |
+| csharpstandard §12.6.4.5 | better conversion between numeric types (`int` → `long` over `double`) | not followed: literal kinds only: the walk does not know an expression's numeric type |
+| csharpstandard §12.6.4.3 | a non-generic candidate wins over a generic one alike | `overload-non-generic-first` |
+| csharpstandard §13.6.2 | `var x = new T()`: x is a T | `var-new` |
+| csharpstandard §13.6.2 | a declared local's type | `local-declared-type` |
+| csharpstandard §12.8.17.2 | target-typed `new()` is a construction of the declared type | `target-typed-new` |
+| csharpstandard §13.9.5 | `foreach` gives the element type | `foreach-typed`, `foreach-var` |
+| csharpstandard §12.12.12 | `is T x` and `as T` bind and convert | `is-pattern`, `as-cast`, `is-as-catch` |
+| csharpstandard §12.9.7 | a cast is a value of its type | `cast` |
+| csharpstandard §12.9.8 | `await` gives what a `Task<T>` holds | `await-task` |
+| csharpstandard §15.7 | a property's type, and the members its body uses | `property-type`, `property-body-is-the-property` |
+| csharpstandard §12.8.4 | a method group passed as a value | `method-group` |
+| csharpstandard §15.11.2 | `: base(…)` / `: this(…)` call a constructor | `constructor-initializer` |
+| csharpstandard §15.16 | a record is a class | `record` |
+| csharpstandard §12.8.4 | `dynamic` binds at run time | not followed: no static answer: a member of a `dynamic` value names nothing |
+| csharpstandard §12.20 | a lambda's parameter typed by the delegate it is converted to | not followed: phase 3: inference from the target type |
+
+18 cases were written from this reading (`found_by("source")`, each with the
+section and the Roslyn function it was read from), all accepted by the C#
+compiler. Four did not hold, and engine 0.5.64 follows them:
+
+- **Overloads by a predefined type.** A parameter written `int`, `string` or
+  `object` had no type path, so every overload of `Write("x")` scored alike
+  and each was an `INFERRED` edge. The written type is the type now, for a
+  literal argument (a value of a project type can still convert through an
+  `implicit operator`, so a path argument is not ruled out by it).
+- **`params` in normal form first** (§12.6.4.3): a candidate applicable only
+  with its `params` expanded ranks below one that takes the arguments as
+  written. This holds for Java's and Kotlin's varargs too: Kotlin's
+  `ClassName("p", "A", "B")` is the `(String, String, vararg String)`
+  constructor, not `(String, vararg String)`.
+- **The closest namespace's extensions** (§12.8.10.3): of extensions written
+  for the type, those of the innermost namespace around the use.
+- **A `using` inside a namespace block** (§14.5.1): a type of another
+  namespace block of the same file is not a name of the block that uses it.
+
+Measured with engine 0.5.64: Roslyn's precision on the four C# audit repositories is 98.0% (10,706 of 10,930 edges it has an answer for; 10,543 of 10,767 with 0.5.63: 163 edges more, none more wrong), its recall 79.9%; the Kotlin and Swift compilers' tests give 99.4% and 94.0% as before, and `verify_graphify.py` lacks 44 confirmed edges, as before. On the 45 audit repositories about 190 calls change: an `INFERRED` tie among overloads becomes the one overload (Retrofit's `buildRequest(…)`, kotlinpoet's `ClassName(…)`, RestSharp's `AddHeader(…)`), and a construction whose constructors all tied is linked to the one it calls (RestSharp's `new RestRequest("…")`, 160 sites).
+
 One thing the cases showed that is not a position: a Swift protocol's
 property requirement is a definition of its own named `var handler`, of kind
 interface (the span rule takes `protocol_property_declaration` for a
@@ -405,7 +497,8 @@ oracle and `verify_graphify.py` as the test. Order, by what the measurements
 say is left and by how directly the compiler can check the result:
 
 1. **C#** (28 confirmed edges still missing; Roslyn runs here; the feature
-   table is the largest)
+   table is the largest): read (engine 0.5.64, `rule_inventory.py`: 54 rules, 47 held
+   by a case, 7 not followed with the reason)
 2. **Rust** (editions change path resolution; rust-analyzer runs here)
 3. **Go** (smallest binder, already whole on the floor: the cheapest full
    reading, and the template for the others)

@@ -426,6 +426,19 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- **Native engine 0.5.64: C#'s binding rules, read from the C# standard and
+  Roslyn's binder** (phase 2 of `docs/rule-sources.md`). 18 cases written
+  from the reading, each citing the section and the binder function:
+  - an overload is chosen by a parameter written as a predefined type
+    (`Write(string)` over `Write(object)` for `Write("x")`), where every
+    overload was an `INFERRED` edge before;
+  - a `params` / `vararg` candidate that needs its expanded form ranks below
+    one that does not (C#, Java, Kotlin);
+  - of extensions in sight, those of the closest namespace around the use;
+  - a type of another namespace block of the same file is not in sight.
+- **`benchmarks/rule_inventory.py`**: every rule a language's specification
+  and binder state, with the case that holds it or why the engine does not
+  follow it (C# first: 54 rules, 47 held).
 - **Native engine 0.5.63: places a value is written that were not
   recorded**, listed by `benchmarks/positions.py --values` (541 cases in the
   checklist, all hold). 97.7% of 162,839 names of the audit
