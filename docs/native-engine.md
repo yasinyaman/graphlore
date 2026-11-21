@@ -769,34 +769,34 @@ file pairs). The native graph has definitions graphify folds into the one
 around them (a function nested in a method, the setter beside a getter of the
 same name); an edge from one of those is compared as an edge from the paired
 definition it belongs to, as graphify records it. On the 31 repositories of the
-[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.50,
-measured 2026-11-20), as native / graphify edges and the share of graphify's
+[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.58,
+measured 2026-11-21), as native / graphify edges and the share of graphify's
 that the native graph has too:
 
 | Language | same definition | imports (file pairs) | calls | bases | type references |
 |---|--:|--:|--:|--:|--:|
-| Python | 100% | 212 / 219 (96%) | 2,986 / 834 (94%) | 73 / 62 (100%) | 445 / 494 (90%) |
-| JavaScript | 93.5%⁵ | 250 / 305 (59%) | 1,289 / 2,058 (41%)¹ | 1 / 1 (100%) | 3 / 0 |
-| TypeScript | 99.4% | 527 / 634 (83%) | 804 / 687 (98%) | 25 / 20 (100%) | 742 / 156 (88%) |
-| TSX | 99.7% | 253 / 316 (80%) | 435 / 456 (95%) | – | 42 / 4 |
-| Go | 100% | 538 / 950 (47%)² | 6,730 / 3,167 (99%) | 19 / 14 (100%) | 681 / 355 (100%) |
-| Java | 100% | 1,105 / 1,010 (100%) | 5,782 / 5,123 (85%) | 415 / 168 (94%) | 3,996 / 1,930 (98%) |
-| Kotlin | 99.4% | 368 / 333 (95%) | 4,682 / 2,108 (71%) | 96 / 56 (93%) | 1,232 / 673 (94%) |
-| Scala | 100% | 2 / 0 | 78 / 20 (50%) | 21 / 22 (95%) | 45 / 32 (100%) |
-| C# | 92.8% | 343 / 280 (29%)³ | 3,329 / 2,460 (97%) | 91 / 86 (98%) | 1,334 / 928 (99%) |
-| Rust | 93.3% | 314 / 370 (75%) | 2,065 / 853 (86%) | 53 / 41 (93%) | 1,325 / 895 (87%) |
-| Swift | 95.9% | 167 / 166 (–)³ | 5,506 / 2,141 (83%) | 190 / 164 (100%) | 1,648 / 580 (79%)⁶ |
-| C | 100% | 89 / 77 (99%) | 864 / 791 (100%) | – | 257 / 130 (100%) |
-| C++ | 98.7% | 215 / 228 (93%) | 877 / 281 (57%)⁴ | 30 / 5 (100%) | 410 / 234 (91%) |
-| C/C++ headers | 91.4% | 164 / 172 (95%) | 423 / 348 (87%) | 12 / 12 (92%) | 576 / 312 (88%) |
-| Ruby | 99.7% | 42 / 0 | 455 / 375 (69%) | 47 / 15 (93%) | 28 / 0 |
-| PHP | 80.6% | 509 / 505 (100%) | 8,927 / 6,140 (90%) | 65 / 60 (98%) | 1,350 / 213 (100%) |
-| **All** | **94.4%** | **5,098 / 5,565 (76%)** | **45,232 / 27,842 (85%)** | **1,138 / 726 (97%)** | **14,114 / 6,936 (93%)** |
+| Python | 100% | 212 / 219 (96%) | 2,976 / 834 (94%) | 73 / 62 (100%) | 546 / 494 (93%) |
+| JavaScript | 93.5% | 250 / 305 (59%) | 1,047 / 2,058 (37%) | 1 / 1 (100%) | 99 / 0 |
+| TypeScript | 99.4% | 527 / 634 (83%) | 793 / 687 (98%) | 25 / 20 (100%) | 1,081 / 156 (94%) |
+| TSX | 99.7% | 253 / 316 (80%) | 435 / 456 (95%) | – | 50 / 4 (100%) |
+| Go | 100% | 538 / 950 (47%) | 6,733 / 3,167 (100%) | 19 / 14 (100%) | 761 / 355 (100%) |
+| Java | 100% | 1,105 / 1,010 (100%) | 5,760 / 5,123 (85%) | 415 / 168 (94%) | 4,049 / 1,930 (98%) |
+| Kotlin | 99.4% | 368 / 333 (95%) | 4,616 / 2,108 (68%) | 96 / 56 (93%) | 1,466 / 673 (94%) |
+| Scala | 100% | 2 / 0 | 78 / 20 (50%) | 21 / 22 (95%) | 47 / 32 (100%) |
+| C# | 92.8% | 343 / 280 (29%) | 3,325 / 2,460 (97%) | 91 / 86 (98%) | 1,660 / 928 (96%) |
+| Rust | 93.3% | 314 / 370 (75%) | 2,100 / 853 (86%) | 53 / 41 (93%) | 1,568 / 895 (87%) |
+| Swift | 95.9% | 171 / 166 (0%) | 5,494 / 2,141 (83%) | 190 / 164 (100%) | 1,748 / 580 (79%) |
+| C | 100% | 89 / 77 (99%) | 864 / 791 (100%) | – | 263 / 130 (100%) |
+| C++ | 98.7% | 215 / 228 (93%) | 881 / 281 (57%) | 30 / 5 (100%) | 606 / 234 (91%) |
+| C/C++ headers | 91.4% | 164 / 172 (95%) | 422 / 348 (87%) | 12 / 12 (92%) | 701 / 312 (88%) |
+| Ruby | 99.7% | 42 / 0 | 455 / 375 (69%) | 47 / 15 (93%) | 71 / 0 |
+| PHP | 80.6% | 509 / 505 (100%) | 8,920 / 6,140 (90%) | 65 / 60 (98%) | 1,572 / 213 (100%) |
+| **All** | **94.4%** | **5,102 / 5,565 (76%)** | **44,899 / 27,842 (85%)** | **1,138 / 726 (97%)** | **16,288 / 6,936 (93%)** |
 
 ⁶ Swift's type references are engine 0.5.44's, which reads the type of a
 stored property (62% before; see [the second set](#a-second-set-of-repositories)).
 
-Of the native calls, 13,134 (29%) are `INFERRED`, against 47% of graphify's.
+Of the native calls, 12,949 (29%) are `INFERRED`, against 47% of graphify's.
 A type reference counts as found when the native graph states it another way:
 graphify writes a type a method uses on the method's *class* and a
 construction as a `uses` edge, the native graph an edge from the method and a
@@ -1444,23 +1444,23 @@ the table above:
 
 | Repository | same definition | imports (file pairs) | calls | bases | type references |
 |---|--:|--:|--:|--:|--:|
-| click | 100% | 174 / 159 (100%) | 2,929 / 1,473 (74%) | 77 / 30 (100%) | 1,205 / 592 (97%) |
-| commander.js | 97.0% | 264 / 185 (98%) | 348 / 197 (97%) | 17 / 3 (100%) | 66 / 0 |
-| zod | 99.1% | 1,001 / 1,008 (73%) | 2,323 / 2,006 (87%) | 678 / 609 (97%) | 3,091 / 122 (86%) |
-| cobra | 100% | 159 / 285 (56%) | 1,833 / 1,339 (100%) | – | 136 / 94 (97%) |
-| gson | 100% | 1,048 / 1,079 (97%) | 10,121 / 7,293 (97%) | 516 / 199 (95%) | 3,350 / 1,288 (96%) |
-| clikt | 99.2% | 592 / 480 (98%) | 2,017 / 1,181 (92%) | 477 / 110 (98%) | 682 / 478 (90%) |
-| scopt | 100% | 6 / 8 | 418 / 213 (84%) | 25 / 25 (100%) | 171 / 87 (97%) |
-| commandline | 96.3% | 248 / 148 (8%) | 2,183 / 1,894 (84%) | 49 / 49 (92%) | 1,135 / 823 (88%) |
-| ripgrep | 97.2% | 173 / 250 (61%) | 5,469 / 2,952 (81%) | 121 / 117 (96%) | 2,476 / 1,362 (86%) |
-| swift-argument-parser | 94.9% | 268 / 212 | 1,784 / 957 (90%) | 599 / 438 (100%) | 982 / 677 (78%) |
-| cJSON | 97.3% | 171 / 170 (99%) | 1,242 / 1,228 (99%) | – | 203 / 89 (100%) |
-| leveldb | 95.6% | 499 / 499 (100%) | 3,399 / 2,064 (91%) | 70 / 17 (100%) | 1,894 / 748 (87%) |
-| thor | 100% | 61 / 0 | 687 / 533 (83%) | 43 / 4 (100%) | 20 / 0 |
-| monolog | 93.6% | 438 / 439 (100%) | 3,820 / 2,207 (90%) | 242 / 239 (97%) | 563 / 392 (100%) |
-| **All** | **97.7%** | **5,102 / 4,922 (82%)** | **38,573 / 25,537 (90%)** | **2,914 / 1,840 (97%)** | **15,974 / 6,752 (90%)** |
+| click | 100% | 174 / 159 (100%) | 2,924 / 1,473 (74%) | 77 / 30 (100%) | 1,308 / 592 (97%) |
+| commander.js | 97% | 264 / 185 (98%) | 349 / 197 (97%) | 17 / 3 (100%) | 74 / 0 |
+| zod | 99.1% | 1,001 / 1,008 (73%) | 2,308 / 2,006 (87%) | 684 / 609 (97%) | 5,399 / 122 (99%) |
+| cobra | 100% | 159 / 285 (56%) | 1,823 / 1,339 (100%) | – | 369 / 94 (97%) |
+| gson | 100% | 1,048 / 1,079 (97%) | 10,102 / 7,293 (97%) | 516 / 199 (95%) | 3,707 / 1,288 (96%) |
+| clikt | 99.2% | 597 / 480 (98%) | 1,975 / 1,181 (91%) | 477 / 110 (98%) | 851 / 478 (95%) |
+| scopt | 100% | 6 / 8 (0%) | 401 / 213 (83%) | 25 / 25 (100%) | 176 / 87 (89%) |
+| commandline | 96.3% | 256 / 148 (8%) | 2,184 / 1,894 (83%) | 49 / 49 (92%) | 1,535 / 823 (88%) |
+| ripgrep | 97.2% | 173 / 250 (61%) | 5,488 / 2,952 (81%) | 124 / 117 (98%) | 2,496 / 1,362 (87%) |
+| swift-argument-parser | 94.9% | 271 / 212 (0%) | 1,803 / 957 (90%) | 599 / 438 (100%) | 1,065 / 677 (77%) |
+| cJSON | 97.3% | 171 / 170 (99%) | 1,241 / 1,228 (99%) | – | 203 / 89 (100%) |
+| leveldb | 95.6% | 499 / 499 (100%) | 3,401 / 2,064 (91%) | 70 / 17 (100%) | 1,874 / 748 (87%) |
+| thor | 100% | 61 / 0 | 687 / 533 (83%) | 43 / 4 (100%) | 61 / 0 |
+| monolog | 93.6% | 438 / 439 (100%) | 3,755 / 2,207 (88%) | 241 / 239 (96%) | 912 / 392 (98%) |
+| **All** | **97.7%** | **5,118 / 4,922 (82%)** | **38,441 / 25,537 (90%)** | **2,922 / 1,840 (98%)** | **20,030 / 6,752 (91%)** |
 
-(Engine 0.5.50; with 0.5.44 the table's last row was 95.5% of the definitions
+(Engine 0.5.58; with 0.5.44 the table's last row was 95.5% of the definitions
 and 67% / 85% / 80% / 80% of the edges.) 20% of the native calls are `INFERRED`. The low cells of the first
 measurement were read one by one, and most of them were one rule each:
 
@@ -1771,10 +1771,10 @@ python benchmarks/oracle_swift.py swift/test/Index --samples 20
 authors chose to, and most of their symbols are another module's. The four
 edges called wrong are a test that imports a module declaring the same names
 as the file, an Objective-C protocol's method and a property wrapper's `$y`.
-What it added was a type alias's composition (`typealias Both = Base & P1`)
-and a `where` clause's bounds. Left: `Self()` and `.init()` as calls of the
-initializer, `type(of: x).m()`, an associated type through its bound
-(`Bar.Assoc`). SourceKit's own indexing tests are larger but have their
+What it added was a type alias's composition (`typealias Both = Base & P1`),
+a `where` clause's bounds and, with 0.5.58, `Self()` as a construction (63 of
+67 edges, 94.0%). Left: `type(of: x).m()` and an associated type through its
+bound (`Bar.Assoc`). SourceKit's own indexing tests are larger but have their
 symbols scrubbed (`key.usr: <usr>`), so they say which names are uses, not of
 what.
 
@@ -1827,23 +1827,23 @@ has no answer and is left out):
 python benchmarks/oracle_csharp.py /tmp/polyglot/todoapi /tmp/polyglot/restsharp /tmp/polyglot/commandline /tmp/polyglot/aspnetcore-realworld
 ```
 
-| | 0.5.56 | 0.5.57 |
-|---|---:|---:|
-| edges whose site the compiler has an answer for | 10,308 | 10,251 |
-| of them, to the declaration it names | 9,863 (95.7%) | 9,863 (96.2%) |
-| uses it binds to a definition the graph has, with an edge | 77.1% | 77.1% |
+| | 0.5.56 | 0.5.57 | 0.5.58 |
+|---|---:|---:|---:|
+| edges whose site the compiler has an answer for | 10,308 | 10,251 | 10,344 |
+| of them, to the declaration it names | 9,863 (95.7%) | 9,863 (96.2%) | 10,143 (98.1%) |
+| uses it binds to a definition the graph has, with an edge | 77.1% | 77.1% | 78.9% |
 
-The 388 edges left are not spread evenly. About 150 are one rule the engine
-does not have: C# tells `RestResponse` from `RestResponse<T>` by the number
-of type arguments written, and the reader does not keep that number for a
-type written in a signature, so one of the two gets the other's references
-(and `List<string>` goes to a project class `List`). 55 are
-`parser.ParseArguments<T>(…)`, where an extension overload fits and the
-instance method of the name does not. The rest are guesses and
-`ContentType.Xml` read as the property `ContentType` where the compiler
-means the type of that name. The uses with no edge are, by count, an object
-initializer's property names (left out on purpose, as a Go struct literal's
-are), the types of a lambda's parameters, and `typeof(T)` / `nameof(T)`.
+The 388 edges 0.5.57 left were not spread evenly, and 0.5.58 took the two
+clusters. About 150 were one rule: C# tells `RestResponse` from
+`RestResponse<T>` by the number of type arguments written, which the reader
+did not keep for a type (`RefFact::arity` now; `List<string>` went to a
+project class `List`). 55 were `parser.ParseArguments<A, B>(…)`, where no
+method of the type takes two type arguments and an extension does. The 201
+left are guesses marked `INFERRED` (115), `ContentType.Xml` read as the
+property `ContentType` where the compiler means the type of that name, and
+single cases. The uses with no edge are, by count, an object initializer's
+property names (left out on purpose, as a Go struct literal's are) and the
+types of a lambda's parameters.
 
 What this is not: Java, C, C++, Ruby, PHP, Python. javac and clang could be
 asked the same way; neither is yet. And a compiler finds a rule read wrong

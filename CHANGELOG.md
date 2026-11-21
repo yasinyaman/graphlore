@@ -372,6 +372,28 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- **Native engine 0.5.58: the gaps the compilers had left open** (496 cases
+  in the checklist, all hold):
+  - **C#: a type is told from its generic namesake by the type arguments
+    written** (`RefFact::arity`): `RestResponse` beside `RestResponse<T>`
+    each get their own references and constructions, and `List<string>` is
+    never a project class `List` that takes none. A call written with more
+    type arguments than any method of the type takes is the extension's
+    (`parser.ParseArguments<A, B>(args)`). The type a local is declared
+    with and `typeof(T)` are references. With Roslyn as the judge, 98.1% of
+    10,344 edges go where it says (96.2% with 0.5.57).
+  - **Kotlin: a constructor parameter written `val` / `var` is a property
+    of the class**, a node like any other: reads and writes of it had no
+    edge at all (586 `reads` and 551 `defines` gained on the audit's
+    Kotlin sources). The name of an argument given by name reads nothing.
+  - **Swift: `Self()` constructs the type around.**
+  - A name read where a type is built (`new Foo { … }`) or inside a
+    `generic_name` is no value: C# properties named like their type
+    (`HttpClient HttpClient`) were read by every `new HttpClient()`.
+- **The comparison with graphify is measured again** on engine 0.5.58
+  (`docs/native-engine.md`): the shares of graphify's edges the native graph
+  has are what they were (calls 85% and 90% on the two sets), with 16,288
+  and 20,030 type references where 0.5.50 had 14,114 and 15,974.
 - **Native engine 0.5.57**: a type named as a value through something is a
   reference only when that something is what declares it (or a module):
   C# `Maybe.Nothing<T>()` beside a class `Nothing<T>` was a reference to the

@@ -25,7 +25,7 @@ python benchmarks/conformance.py --baseline benchmarks/results-conformance.json 
 python benchmarks/conformance.py --markdown      # the tables below
 ```
 
-Measured 2026-11-21 with graphlore-engine 0.5.57: **489 of 489 rules hold**
+Measured 2026-11-21 with graphlore-engine 0.5.58: **496 of 496 rules hold**
 (356 of the first 406 with 0.5.45). Ten came from the Go type checker and
 rust-analyzer run on whole repositories; fifteen from the Kotlin and Swift
 compilers' tests (type checks, casts, `catch`, aliases); thirty-nine from two
@@ -104,7 +104,7 @@ Each change was measured on the 45 audit repositories as well, by reading
 the edges it added and removed at their source lines; the page on the
 [native engine](native-engine.md#the-rules-themselves) has the numbers.
 Every case but Scala's has been compiled by its own language
-(`benchmarks/verify_cases.py`: 461 of 461 accepted; no Scala compiler runs
+(`benchmarks/verify_cases.py`: 468 of 468 accepted; no Scala compiler runs
 where this was measured).
 
 Passing every case says the engine follows the rules written here, not
@@ -344,7 +344,7 @@ The Java Language Specification, 6.4 'Shadowing and Obscuring', 15.12 'Method In
 | a class of another package is not in reach without an import | `other-package-not-in-reach` | yes |
 | `instanceof T`, `(T) x` and `catch (T e)` are uses of T | `instanceof-cast-catch` | yes |
 
-### kotlin (38 of 38)
+### kotlin (40 of 40)
 
 Kotlin Language Specification, 'Scopes and identifiers', 'Overload resolution' (receivers).
 
@@ -388,6 +388,8 @@ Kotlin Language Specification, 'Scopes and identifiers', 'Overload resolution' (
 | the type a `catch` names is a use of it | `catch-type` | yes |
 | an object named as a value is a use of it | `object-as-value` | yes |
 | the type a typealias names is a use of it | `typealias-body` | yes |
+| a constructor parameter written `val` is a property of the class | `constructor-property-read` | yes |
+| the name of an argument given by name reads no property of that name | `named-argument-label` | yes |
 
 ### scala (28 of 28)
 
@@ -424,7 +426,7 @@ Scala Language Specification, chapter 2 'Identifiers, Names and Scopes', 4.7 'Im
 | a constructor pattern and a typed pattern are uses of the type they name | `pattern-types` | yes |
 | the types a type parameter is bound by are uses of them | `bound-types` | yes |
 
-### csharp (41 of 41)
+### csharp (45 of 45)
 
 C# Language Specification, 'Namespace and type names', 'Member lookup', 'Extension method invocations'.
 
@@ -471,6 +473,10 @@ C# Language Specification, 'Namespace and type names', 'Member lookup', 'Extensi
 | `new R(…)` constructs a record, which has methods like a class | `record` | yes |
 | an enum member named as a value is a use of its enum | `enum-member-value` | yes |
 | `x is T`, `x as T` and `catch (T e)` are uses of T | `is-as-catch` | yes |
+| a type is told from its generic namesake by the type arguments written | `type-by-arity` | yes |
+| `List<string>` is never a project class `List` that takes no type argument | `generic-use-is-no-plain-type` | yes |
+| a call written with more type arguments than any method of the type takes is the extension's | `extension-by-type-arguments` | yes |
+| the type a local is declared with, and `typeof(T)`, are uses of the type | `local-declared-type` | yes |
 
 ### rust (47 of 47)
 
@@ -526,7 +532,7 @@ The Rust Reference, 'Names' (name resolution, scopes, paths), 'Method call expre
 | a `let` of any value is a local where it is passed on | `untyped-let-hides-a-function` | yes |
 | a name of another crate is in reach only through a `use` | `another-crates-name` | yes |
 
-### swift (37 of 37)
+### swift (38 of 38)
 
 The Swift Programming Language, 'Declarations', 'Extensions', 'Protocols' (member lookup is the compiler's).
 
@@ -569,6 +575,7 @@ The Swift Programming Language, 'Declarations', 'Extensions', 'Protocols' (membe
 | inside the value a `let` is declared with, its name is still the outer one | `own-value-is-outer` | yes |
 | `x is T`, `x as? T` and `catch let e as T` are uses of T | `is-and-as` | yes |
 | what a typealias composes and what a `where` clause bounds by are uses of those types | `typealias-and-where` | yes |
+| `Self()` constructs the type around | `self-constructs` | yes |
 
 ### c (14 of 14)
 
@@ -706,4 +713,4 @@ PHP Manual, 'Namespaces: Name resolution rules', 'Classes and Objects' (inherita
 | `\Name` is the global class, never one a namespace of the project declares | `global-class-is-not-a-namespaced-one` | yes |
 | `$x instanceof T` and `catch (T $e)` are uses of T | `instanceof-and-catch` | yes |
 
-489 of 489 rules hold
+496 of 496 rules hold

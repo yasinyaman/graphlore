@@ -91,6 +91,16 @@ impl LanguageModule for Kotlin {
     /// Top-level `var` / `val` (class and companion properties are
     /// `extra_def`'s).
     fn state_defs<'t>(&self, n: Node<'t>, src: &[u8]) -> Vec<(Node<'t>, Node<'t>, DefKind)> {
+        // `class Holder(val parameters: List<String>)`: a constructor
+        // parameter written `val` / `var` declares a property of the class
+        if n.kind() == "class_parameter" {
+            let property = kids(n).iter().any(|c| c.kind() == "binding_pattern_kind");
+            let name = kids(n).into_iter().find(|c| c.kind() == "simple_identifier");
+            return match name {
+                Some(name) if property => vec![(n, name, DefKind::Property)],
+                _ => Vec::new(),
+            };
+        }
         if n.kind() != "property_declaration"
             || !n.parent().is_some_and(|p| p.kind() == "source_file")
         {

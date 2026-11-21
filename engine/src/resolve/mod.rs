@@ -2317,14 +2317,48 @@ impl<'a> Project<'a> {
         if !self.family[m.0].is_some_and(Family::overloads) {
             return vec![m];
         }
+        // C#: no method of the type takes as many type arguments as the call
+        // writes; an extension of the name that does is what is called
+        // (`parser.ParseArguments<A, B>(args)` beside `ParseArguments<T>`)
+        let wider = || -> Vec<DefRef> {
+            if r.targs == 0 || self.family[m.0] != Some(Family::CSharp) {
+                return Vec::new();
+            }
+            let found: Vec<DefRef> = self
+                .extensions
+                .get(&self.def(m).name)
+                .into_iter()
+                .flatten()
+                .copied()
+                .filter(|e| {
+                    self.family[e.0] == Some(Family::CSharp)
+                        && self.def(*e).type_params.len() == usize::from(r.targs)
+                })
+                .collect();
+            if found.len() <= 4 {
+                found
+            } else {
+                Vec::new()
+            }
+        };
         let all = self.overloads(m);
         if all.len() < 2 {
+            if self.def(m).type_params.len() != usize::from(r.targs) {
+                let wider = wider();
+                if !wider.is_empty() {
+                    return wider;
+                }
+            }
             return vec![m];
         }
         let fits: Vec<(DefRef, i32)> =
             all.iter().filter_map(|c| self.fit(f, d, *c, r).map(|s| (*c, s))).collect();
         let mut best = self.exact_first(self.top_fits(&fits), r);
         if best.is_empty() {
+            let wider = wider();
+            if !wider.is_empty() {
+                return wider;
+            }
             return vec![m];
         }
         // a call that writes no type arguments, between a callable and its
@@ -4892,8 +4926,10 @@ impl<'a> Project<'a> {
                 if rest.is_empty() {
                     // PHP `new static()` / `new self()`, C# `: this(…)`, Java
                     // `this(…)`: the class around
-                    let constructs = matches!(fam, Family::Php | Family::CSharp | Family::Jvm)
-                        && *self.ref_kind.borrow() == Some(RefKind::New);
+                    // (and Swift `Self()`)
+                    let constructs =
+                        matches!(fam, Family::Php | Family::CSharp | Family::Jvm | Family::Swift)
+                            && *self.ref_kind.borrow() == Some(RefKind::New);
                     return constructs
                         .then(|| self.class_of(f, d))
                         .flatten()
@@ -7789,6 +7825,35 @@ pub fn resolve(
                     Some((Target::Def(t), _)) if p.def(*t).kind.is_class_like() => Some(*t),
                     _ => None,
                 };
+                // C#: a type is told from its namesakes by the number of type
+                // arguments it is written with (`RestResponse` beside
+                // `RestResponse<T>`); one written with arguments is never a
+                // type that takes none (`List<string>` beside a class `List`)
+                let found = match (found, r.arity) {
+                    (Some((Target::Def(t), conf)), Some(want))
+                        if fam == Family::CSharp && p.def(t).kind.is_class_like() =>
+                    {
+                        let want = usize::from(want);
+                        let has = p.def(t).type_params.len();
+                        let other = || {
+                            let fq = p.fqn_of(t.0, t.1)?;
+                            p.fqn.get(&fq)?.iter().copied().find(|o| {
+                                p.def(*o).kind.is_class_like()
+                                    && p.def(*o).type_params.len() == want
+                            })
+                        };
+                        if has == want {
+                            Some((Target::Def(t), conf))
+                        } else if let Some(o) = other() {
+                            Some((Target::Def(o), conf))
+                        } else if want > 0 && has == 0 {
+                            None
+                        } else {
+                            Some((Target::Def(t), conf))
+                        }
+                    }
+                    (found, _) => found,
+                };
                 // Rust: `self.proxy` with no call is the field, beside a
                 // method of its name (a method is never read without a call)
                 let found = match found {
@@ -8206,6 +8271,7 @@ pub fn resolve(
                     hints: Vec::new(),
                     implicit: None,
                     targs: 0,
+                    arity: None,
                     this_of: None,
                     recv: None,
                     byte: u.byte,

@@ -1,6 +1,6 @@
 {
- "passed": 489,
- "total": 489,
+ "passed": 496,
+ "total": 496,
  "cases": [
   {
    "id": "python/module-function",
@@ -2932,6 +2932,48 @@
   },
   {
    "id": "typescript/destructured-closure-parameter",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/type-by-arity",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/generic-use-is-no-plain-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/extension-by-type-arguments",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/local-declared-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/constructor-property-read",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/named-argument-label",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/self-constructs",
    "ok": true,
    "missing": [],
    "unwanted": []
