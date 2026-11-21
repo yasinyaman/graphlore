@@ -517,6 +517,17 @@ impl State {
         {
             return;
         }
+        // (a base named where a type is declared is its base, no value read)
+        if pk.contains("heritage")
+            || pk.contains("extends")
+            || pk.contains("implements")
+            || pk.contains("superclass")
+            || pk.contains("delegation_specifier")
+            || matches!(pk, "base_list" | "base_class_clause" | "super_interfaces")
+            || (pk == "argument_list" && up(anc, 1).is_some_and(|c| c.kind() == "class_definition"))
+        {
+            return;
+        }
         if pk.contains("import")
             || pk.contains("type")
             || pk.contains("label")

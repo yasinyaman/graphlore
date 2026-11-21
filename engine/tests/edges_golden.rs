@@ -2826,3 +2826,48 @@ fn typescript_import_equals_namespace_aliases_and_functions_as_values() {
     );
     lacks(&got, &[("inner", "writes", "count")]);
 }
+
+#[test]
+fn a_type_named_to_test_convert_or_catch_a_value_is_a_use_of_it() {
+    let got = quals("type-checks", &[
+        (
+            "a.kt",
+            "package app\n\nopen class Shape {\n    object Unit : Shape()\n}\nclass Circle : Shape()\nclass Square : Shape()\nclass Boom : Exception()\n\ntypealias Round = Circle\n\nclass Holder {\n    val held: Shape = Circle()\n}\n\nfun take(s: Shape): Shape = s\n\nfun kind(s: Any): Int {\n    if (s is Circle) return 1\n    val q = s as? Square\n    try {\n        take(Shape.Unit)\n    } catch (e: Boom) {\n        return 2\n    }\n    return if (q == null) 0 else 3\n}\n",
+        ),
+        (
+            "A.java",
+            "class Foo {\n}\n\nclass Bar extends Foo {\n}\n\nclass Baz extends Foo {\n}\n\nclass Err extends RuntimeException {\n}\n\nclass J {\n    int f(Object s) {\n        if (s instanceof Bar) {\n            return 1;\n        }\n        Object c = (Baz) s;\n        try {\n            return c.hashCode();\n        } catch (Err e) {\n            return 2;\n        }\n    }\n}\n",
+        ),
+        (
+            "b.swift",
+            "protocol P1 {}\nclass SBase {}\nclass SBar: SBase {}\n\ntypealias Both = SBase & P1\n\nfunc skind(_ s: Any) -> Int {\n    if s is SBar { return 1 }\n    return 0\n}\n\nfunc gen<T>(x: T) where T: P1 {}\n",
+        ),
+        (
+            "c.go",
+            "package app\n\ntype GFoo struct{}\n\ntype GBar struct{}\n\nfunc gkind(s interface{}) int {\n\tif _, ok := s.(GBar); ok {\n\t\treturn 1\n\t}\n\tswitch s.(type) {\n\tcase GFoo:\n\t\treturn 2\n\t}\n\treturn 0\n}\n",
+        ),
+        ("go.mod", "module example.com/app\n\ngo 1.22\n"),
+    ]);
+    has(
+        &got,
+        &[
+            ("Holder", "references", "Shape"),
+            ("Round", "references", "Circle"),
+            ("kind", "references", "Circle"),
+            ("kind", "references", "Square"),
+            ("kind", "references", "Boom"),
+            ("kind", "references", "Shape.Unit"),
+            ("J.f", "references", "Bar"),
+            ("J.f", "references", "Baz"),
+            ("J.f", "references", "Err"),
+            ("Both", "references", "SBase"),
+            ("Both", "references", "P1"),
+            ("skind", "references", "SBar"),
+            ("gen", "references", "P1"),
+            ("gkind", "references", "GBar"),
+            ("gkind", "references", "GFoo"),
+        ],
+    );
+    // a base is the class's base, once
+    lacks(&got, &[("Circle", "references", "Shape"), ("Bar", "references", "Foo")]);
+}
