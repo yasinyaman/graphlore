@@ -42,7 +42,20 @@ pub const MANIFESTS: &[&str] = &[
     "pyproject.toml",
     "setup.py",
     "setup.cfg",
+    // (read for the language version a project states: `versions.rs`)
+    "pom.xml",
+    "build.gradle",
+    "build.gradle.kts",
+    "build.sbt",
+    "composer.json",
+    "CMakeLists.txt",
+    "Directory.Build.props",
+    "libs.versions.toml",
+    "Gemfile",
 ];
+
+/// Manifests named by their extension (`App.csproj`, `tool.gemspec`).
+pub const MANIFEST_SUFFIXES: &[&str] = &[".csproj", ".gemspec"];
 
 #[derive(Default)]
 pub struct WalkResult {
@@ -171,7 +184,7 @@ pub fn discover(root: &Path, out_dir_name: &str, documents: bool, max_bytes: u64
     for (rel, path, size) in found {
         let path = path.as_path();
         let base = rel.rsplit('/').next().unwrap_or(&rel);
-        if MANIFESTS.contains(&base) {
+        if MANIFESTS.contains(&base) || MANIFEST_SUFFIXES.iter().any(|x| base.ends_with(x)) {
             result.manifests.push((rel.clone(), path.to_path_buf()));
         }
         let kind = if let Some(lang) = lang::detect(&rel, None) {

@@ -7,6 +7,7 @@
 //! graphlore's readers — and graphify's own `query`/`path`/`explain` — accept
 //! (`graph`). Nothing here reaches the network.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -27,6 +28,7 @@ pub mod report;
 pub mod resolve;
 pub mod resources;
 pub mod state;
+pub mod versions;
 pub mod walk;
 
 #[cfg(feature = "python")]
@@ -327,6 +329,19 @@ pub fn build_graph(opts: &BuildOptions) -> Result<(Value, BuildReport), String> 
 
     let mut assembled = graph::assemble::assemble(&facts);
     lap("assemble", &mut phases);
+    // the language version each file's project states, per language
+    let declared = versions::read(&root, &found.manifests);
+    let mut language_versions: BTreeMap<String, BTreeMap<String, usize>> = BTreeMap::new();
+    for f in &facts {
+        let Some(lang) = f.lang else { continue };
+        if let Some(v) = versions::of_file(&declared, &f.path, lang.name()) {
+            *language_versions
+                .entry(lang.name().to_string())
+                .or_default()
+                .entry(v.to_string())
+                .or_default() += 1;
+        }
+    }
     let (ext_nodes, edges, resolution, unresolved) =
         resolve::resolve(&root, &facts, &mut assembled, found.manifests, opts.unresolved.is_some());
     if let Some(path) = &opts.unresolved {
@@ -402,6 +417,7 @@ pub fn build_graph(opts: &BuildOptions) -> Result<(Value, BuildReport), String> 
             "engine_version": VERSION,
             "schema_version": SCHEMA_VERSION,
             "languages": languages,
+            "language_versions": language_versions,
             "documents": report.documents,
             "resolution": report.resolution,
             "communities": communities.header,

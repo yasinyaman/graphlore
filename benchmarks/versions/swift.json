@@ -1,0 +1,1080 @@
+{
+ "language": "swift",
+ "source": "swiftlang/swift@1176ade30d65:include/swift/Basic/Features.def",
+ "features": [
+  {
+   "name": "AsyncAwait",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "EffectfulProp",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "MarkerProtocol",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "Actors",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "ConcurrentFunctions",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "RethrowsProtocol",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "GlobalActors",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "BuiltinJob",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "Sendable",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "BuiltinExecutor",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "BuiltinContinuation",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "BuiltinHopToActor",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "BuiltinTaskGroupWithArgument",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "InheritActorContext",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "ImplicitSelfCapture",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "BuiltinBuildTaskExecutorRef",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "BuiltinBuildExecutor",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "BuiltinBuildComplexEqualityExecutor",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "BuiltinBuildMainExecutor",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "BuiltinCreateAsyncTaskOwnedTaskExecutor",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "BuiltinCreateAsyncTaskName",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "BuiltinCreateAsyncTaskInGroup",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "BuiltinCreateAsyncTaskInGroupWithExecutor",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "BuiltinCreateAsyncDiscardingTaskInGroup",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "BuiltinCreateAsyncTaskWithExecutor",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "BuiltinCreateAsyncDiscardingTaskInGroupWithExecutor",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "BuiltinStackAlloc",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "BuiltinUnprotectedStackAlloc",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "BuiltinTaskRunInline",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "BuiltinUnprotectedAddressOf",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "BuiltinUnprotectedGepProjection",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "NewCxxMethodSafetyHeuristics",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "SpecializeAttributeWithAvailability",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "BuiltinAssumeAlignment",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "BuiltinCreateTaskGroupWithFlags",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "UnsafeInheritExecutor",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "PrimaryAssociatedTypes2",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "UnavailableFromAsync",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "NoAsyncAvailability",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "AssociatedTypeAvailability",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "AsyncSequenceFailure",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "BuiltinIntLiteralAccessors",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "Macros",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "FreestandingExpressionMacros",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "AttachedMacros",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "ExtensionMacros",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "MoveOnly",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "MoveOnlyResilientTypes",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "ParameterPacks",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "LexicalLifetimes",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "FreestandingMacros",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "RetroactiveAttribute",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "ExtensionMacroAttr",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "TypedThrows",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "OptionalIsolatedParameters",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "ExpressionMacroDefaultArguments",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "BuiltinStoreRaw",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "BuiltinCreateTask",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "AssociatedTypeImplements",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "BuiltinAddressOfRawLayout",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "MoveOnlyPartialConsumption",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "BitwiseCopyable",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "NoncopyableGenerics",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "NoncopyableGenerics2",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "ConformanceSuppression",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "BitwiseCopyable2",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "BodyMacros",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "SendingArgsAndResults",
+   "kind": "language_feature"
+  },
+  {
+   "name": "BorrowingSwitch",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "IsolatedAny",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "IsolatedAny2",
+   "kind": "language_feature"
+  },
+  {
+   "name": "ObjCImplementation",
+   "kind": "language_feature"
+  },
+  {
+   "name": "NonescapableTypes",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "BuiltinEmplaceTypedThrows",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "BuiltinApplyIsolatedUnchecked",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "MemorySafetyAttributes",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "ValueGenerics",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "RawIdentifiers",
+   "kind": "language_feature"
+  },
+  {
+   "name": "SendableCompletionHandlers",
+   "kind": "language_feature"
+  },
+  {
+   "name": "AsyncExecutionBehaviorAttributes",
+   "kind": "language_feature"
+  },
+  {
+   "name": "IsolatedConformances",
+   "kind": "language_feature"
+  },
+  {
+   "name": "ValueGenericsNameLookup",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "GeneralizedIsSameMetaTypeBuiltin",
+   "kind": "language_feature"
+  },
+  {
+   "name": "ABIAttributeSE0479",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "AlwaysInheritActorContext",
+   "kind": "language_feature"
+  },
+  {
+   "name": "BuiltinSelect",
+   "kind": "language_feature"
+  },
+  {
+   "name": "BuiltinInterleave",
+   "kind": "language_feature"
+  },
+  {
+   "name": "BuiltinVectorsExternC",
+   "kind": "language_feature"
+  },
+  {
+   "name": "AddressOfProperty2",
+   "kind": "language_feature"
+  },
+  {
+   "name": "NonescapableAccessorOnTrivial",
+   "kind": "language_feature"
+  },
+  {
+   "name": "LayoutPrespecialization",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "IsolatedDeinit",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "InlineArrayTypeSugar",
+   "kind": "language_feature"
+  },
+  {
+   "name": "LifetimeDependenceMutableAccessors",
+   "kind": "language_feature"
+  },
+  {
+   "name": "InoutLifetimeDependence",
+   "kind": "language_feature"
+  },
+  {
+   "name": "NonexhaustiveAttribute",
+   "kind": "suppressible_language_feature"
+  },
+  {
+   "name": "ModuleSelector",
+   "kind": "language_feature"
+  },
+  {
+   "name": "SymbolLinkageMarkers",
+   "kind": "language_feature"
+  },
+  {
+   "name": "BuiltinConcurrencyStackNesting",
+   "kind": "language_feature"
+  },
+  {
+   "name": "BuiltinTaskCancellationShield",
+   "kind": "language_feature"
+  },
+  {
+   "name": "BuiltinTaskCancellationScope",
+   "kind": "language_feature"
+  },
+  {
+   "name": "BuiltinTaskDeadline",
+   "kind": "language_feature"
+  },
+  {
+   "name": "BuiltinCancellationHandlerWithReason",
+   "kind": "language_feature"
+  },
+  {
+   "name": "ClosureLifetimes",
+   "kind": "language_feature"
+  },
+  {
+   "name": "ExcludePrivateFromMemberwiseInit",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "BuiltinMarkDependence",
+   "kind": "language_feature"
+  },
+  {
+   "name": "BuiltinGepProjection",
+   "kind": "language_feature"
+  },
+  {
+   "name": "BuiltinDereferenceable",
+   "kind": "language_feature"
+  },
+  {
+   "name": "BuiltinAddTaskLocalValue",
+   "kind": "language_feature"
+  },
+  {
+   "name": "BuiltinContinuationNonCopyableSuccess",
+   "kind": "language_feature"
+  },
+  {
+   "name": "BuiltinSplitContinuations",
+   "kind": "language_feature"
+  },
+  {
+   "name": "TildeSendable",
+   "kind": "suppressible_language_feature"
+  },
+  {
+   "name": "AvailabilityOSVersionQueryKind",
+   "kind": "suppressible_language_feature"
+  },
+  {
+   "name": "SuppressedAssociatedTypesWithDefaults",
+   "kind": "language_feature"
+  },
+  {
+   "name": "SourceWarningControl",
+   "kind": "language_feature"
+  },
+  {
+   "name": "BorrowInout",
+   "kind": "language_feature"
+  },
+  {
+   "name": "BuiltinAllocRawTyped",
+   "kind": "language_feature"
+  },
+  {
+   "name": "BuiltinTypedAllocationID",
+   "kind": "language_feature"
+  },
+  {
+   "name": "CAttribute",
+   "kind": "suppressible_language_feature"
+  },
+  {
+   "name": "AnyAppleOSAvailability",
+   "kind": "baseline_language_feature"
+  },
+  {
+   "name": "ConciseMagicFile",
+   "kind": "upcoming_feature",
+   "since": "6"
+  },
+  {
+   "name": "ForwardTrailingClosures",
+   "kind": "upcoming_feature",
+   "since": "6"
+  },
+  {
+   "name": "StrictConcurrency",
+   "kind": "upcoming_feature",
+   "since": "6"
+  },
+  {
+   "name": "BareSlashRegexLiterals",
+   "kind": "upcoming_feature",
+   "since": "6"
+  },
+  {
+   "name": "DeprecateApplicationMain",
+   "kind": "upcoming_feature",
+   "since": "6"
+  },
+  {
+   "name": "ImportObjcForwardDeclarations",
+   "kind": "upcoming_feature",
+   "since": "6"
+  },
+  {
+   "name": "DisableOutwardActorInference",
+   "kind": "upcoming_feature",
+   "since": "6"
+  },
+  {
+   "name": "IsolatedDefaultValues",
+   "kind": "upcoming_feature",
+   "since": "6"
+  },
+  {
+   "name": "GlobalConcurrency",
+   "kind": "upcoming_feature",
+   "since": "6"
+  },
+  {
+   "name": "InferSendableFromCaptures",
+   "kind": "upcoming_feature",
+   "since": "6"
+  },
+  {
+   "name": "ImplicitOpenExistentials",
+   "kind": "upcoming_feature",
+   "since": "6"
+  },
+  {
+   "name": "RegionBasedIsolation",
+   "kind": "upcoming_feature",
+   "since": "6"
+  },
+  {
+   "name": "DynamicActorIsolation",
+   "kind": "upcoming_feature",
+   "since": "6"
+  },
+  {
+   "name": "NonfrozenEnumExhaustivity",
+   "kind": "upcoming_feature",
+   "since": "6"
+  },
+  {
+   "name": "GlobalActorIsolatedTypesUsability",
+   "kind": "upcoming_feature",
+   "since": "6"
+  },
+  {
+   "name": "ExistentialAny",
+   "kind": "migratable_upcoming_feature"
+  },
+  {
+   "name": "InternalImportsByDefault",
+   "kind": "upcoming_feature"
+  },
+  {
+   "name": "MemberImportVisibility",
+   "kind": "migratable_upcoming_feature"
+  },
+  {
+   "name": "InferIsolatedConformances",
+   "kind": "migratable_upcoming_feature"
+  },
+  {
+   "name": "NonisolatedNonsendingByDefault",
+   "kind": "migratable_upcoming_feature"
+  },
+  {
+   "name": "ImmutableWeakCaptures",
+   "kind": "upcoming_feature"
+  },
+  {
+   "name": "StrictMemorySafety",
+   "kind": "migratable_optional_language_feature"
+  },
+  {
+   "name": "LibraryEvolution",
+   "kind": "optional_language_feature"
+  },
+  {
+   "name": "StaticAssert",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "NamedOpaqueTypes",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "FlowSensitiveConcurrencyCaptures",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "CodeItemMacros",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "PreambleMacros",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "MacrosOnImports",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "TupleConformances",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "FullTypedThrows",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "SameElementRequirements",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "KeyPathWithMethodMembers",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "LazyImmediate",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "MoveOnlyClasses",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "NoImplicitCopy",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "OldOwnershipOperatorSpellings",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "MoveOnlyEnumDeinits",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "MoveOnlyTuples",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "MoveOnlyPartialReinitialization",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "ConsumeSelfInDeinit",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "NoncopyableCasting",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "AccessLevelOnImport",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "NoExplicitNonIsolated",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "AllowNonResilientAccessInPackage",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "ClientBypassResilientAccessInPackage",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "PackageCMO",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "LayoutStringValueWitnesses",
+   "kind": "experimental_feature_excluded_from_module_interface"
+  },
+  {
+   "name": "LayoutStringValueWitnessesInstantiation",
+   "kind": "experimental_feature_excluded_from_module_interface"
+  },
+  {
+   "name": "DifferentiableProgramming",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "ForwardModeDifferentiation",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "AdditiveArithmeticDerivedConformances",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "OpaqueTypeErasure",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "ParserRoundTrip",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "ParserValidation",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "UnqualifiedLookupValidation",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "ImplicitSome",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "ParserASTGen",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "BuiltinMacros",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "GenerateBindingsForThrowingFunctionsInCXX",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "ReferenceBindings",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "BuiltinModule",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "PlaygroundExtendedCallbacks",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "ThenStatements",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "DoExpressions",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "ForExpressions",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "ImplicitLastExprResults",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "RawLayout",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "Embedded",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "Volatile",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "SuppressedAssociatedTypes",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "StructLetDestructuring",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "LifetimeDependence",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "StaticExclusiveOnly",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "ManualOwnership",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "ExtractConstantsFromMembers",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "ClosureIsolation",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "ObjCImplementationWithResilientStorage",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "Sensitive",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "DebugDescriptionMacro",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "ReinitializeConsumeInMultiBlockDefer",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "Extern",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "TrailingComma",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "SafeInteropWrappers",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "SafeInteropWrappersNullAsEmptySpan",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "AssumeResilientCxxTypes",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "ImportNonPublicCxxMembers",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "ImportCxxMembersLazily",
+   "kind": "language_feature"
+  },
+  {
+   "name": "ForeignReferenceTypeInheritance",
+   "kind": "language_feature"
+  },
+  {
+   "name": "CxxImplementation",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "GenerateBindingsForNoncopyableTypesInCXX",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "ForeignReferenceTypeSubclassing",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "CoroutineAccessors",
+   "kind": "suppressible_experimental_feature"
+  },
+  {
+   "name": "CoroutineAccessorsUnwindOnCallerError",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "CoroutineFunctions",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "AddressableParameters",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "AddressableTypes",
+   "kind": "suppressible_experimental_feature"
+  },
+  {
+   "name": "CustomAvailability",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "ConcurrencySyntaxSugar",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "CompileTimeValues",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "CompileTimeValuesPreview",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "LiteralExpressions",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "ClosureBodyMacro",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "AllowRuntimeSymbolDeclarations",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "Lifetimes",
+   "kind": "suppressible_experimental_feature"
+  },
+  {
+   "name": "PreInverseGenericsExcept",
+   "kind": "suppressible_experimental_feature"
+  },
+  {
+   "name": "DeprecateCompatMemberwiseInit",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "ImportMacroAliases",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "BorrowAndMutateAccessors",
+   "kind": "language_feature"
+  },
+  {
+   "name": "BorrowingForLoop",
+   "kind": "language_feature"
+  },
+  {
+   "name": "InlineAlways",
+   "kind": "suppressible_language_feature"
+  },
+  {
+   "name": "AlwaysUnsafeAttribute",
+   "kind": "suppressible_experimental_feature"
+  },
+  {
+   "name": "DeinitableProtocol",
+   "kind": "suppressible_language_feature"
+  },
+  {
+   "name": "SwiftRuntimeAvailability",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "StandaloneSwiftAvailability",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "EmbeddedDynamicExclusivity",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "SubscriptParametersWithOwnership",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "TypedAllocation",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "CheckImplementationOnly",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "CheckImplementationOnlyStrict",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "SerializeAbstractTypeLayoutForHiddenTypes",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "EnforceSPIOperatorGroup",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "Reparenting",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "UnderscoreOwned",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "BorrowingSequence",
+   "kind": "language_feature"
+  },
+  {
+   "name": "StrictAccessControl",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "DeriveConformancesViaMacros",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "OnceFunctions",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "NondeinitableTypes",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "MutateAndConsumeInDeinit",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "ImportUnsafeCxxMethodsAsAlwaysUnsafe",
+   "kind": "language_feature"
+  },
+  {
+   "name": "BuiltinExtendVectorLanes",
+   "kind": "language_feature"
+  },
+  {
+   "name": "LibkernOwnershipConventions",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "DistributedActorResignRemoteID",
+   "kind": "language_feature"
+  },
+  {
+   "name": "TargetAttribute",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "TailAllocatedAttribute",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "ScopeRestrictions",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "BuiltinRelaxedFP",
+   "kind": "language_feature"
+  },
+  {
+   "name": "Cells",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "ExtendedSpecializedAttribute",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "BuiltinCreateSynchronousDiscardingTask",
+   "kind": "language_feature"
+  },
+  {
+   "name": "BackDeployFrozenValueTypes",
+   "kind": "suppressible_experimental_feature"
+  },
+  {
+   "name": "ModernImportedCArrays",
+   "kind": "experimental_feature"
+  },
+  {
+   "name": "ModernImportedCArraysOnly",
+   "kind": "experimental_feature"
+  }
+ ],
+ "versions": [
+  "6"
+ ]
+}

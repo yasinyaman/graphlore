@@ -1,0 +1,636 @@
+{
+ "language": "c-cpp",
+ "source": "llvm/llvm-project@87764a902a9b:clang/include/clang/Basic/LangStandards.def",
+ "versions": [
+  "c89",
+  "iso9899:199409",
+  "gnu89",
+  "c99",
+  "gnu99",
+  "c11",
+  "gnu11",
+  "c17",
+  "gnu17",
+  "c23",
+  "gnu23",
+  "c2y",
+  "gnu2y",
+  "c++98",
+  "gnu++98",
+  "c++11",
+  "gnu++11",
+  "c++14",
+  "gnu++14",
+  "c++17",
+  "gnu++17",
+  "c++20",
+  "gnu++20",
+  "c++23",
+  "gnu++23",
+  "c++2c",
+  "gnu++2c",
+  "c++2d",
+  "gnu++2d",
+  "cl1.0",
+  "cl1.1",
+  "cl1.2",
+  "cl2.0",
+  "cl3.0",
+  "cl3.1",
+  "clc++1.0",
+  "clc++2021",
+  "hlsl",
+  "hlsl2015",
+  "hlsl2016",
+  "hlsl2017",
+  "hlsl2018",
+  "hlsl2021",
+  "hlsl202x",
+  "hlsl202y"
+ ],
+ "features": [
+  {
+   "name": "c89",
+   "language": "C",
+   "title": "ISO C 1990",
+   "turns_on": []
+  },
+  {
+   "name": "iso9899:199409",
+   "language": "C",
+   "title": "ISO C 1990 with amendment 1",
+   "turns_on": [
+    "Digraphs"
+   ]
+  },
+  {
+   "name": "gnu89",
+   "language": "C",
+   "title": "ISO C 1990 with GNU extensions",
+   "turns_on": [
+    "LineComment",
+    "Digraphs",
+    "GNUMode"
+   ]
+  },
+  {
+   "name": "c99",
+   "language": "C",
+   "title": "ISO C 1999",
+   "turns_on": [
+    "LineComment",
+    "C99",
+    "Digraphs",
+    "HexFloat"
+   ]
+  },
+  {
+   "name": "gnu99",
+   "language": "C",
+   "title": "ISO C 1999 with GNU extensions",
+   "turns_on": [
+    "LineComment",
+    "C99",
+    "Digraphs",
+    "GNUMode",
+    "HexFloat"
+   ]
+  },
+  {
+   "name": "c11",
+   "language": "C",
+   "title": "ISO C 2011",
+   "turns_on": [
+    "LineComment",
+    "C99",
+    "C11",
+    "Digraphs",
+    "HexFloat"
+   ]
+  },
+  {
+   "name": "gnu11",
+   "language": "C",
+   "title": "ISO C 2011 with GNU extensions",
+   "turns_on": [
+    "LineComment",
+    "C99",
+    "C11",
+    "Digraphs",
+    "GNUMode",
+    "HexFloat"
+   ]
+  },
+  {
+   "name": "c17",
+   "language": "C",
+   "title": "ISO C 2017",
+   "turns_on": [
+    "LineComment",
+    "C99",
+    "C11",
+    "C17",
+    "Digraphs",
+    "HexFloat"
+   ]
+  },
+  {
+   "name": "gnu17",
+   "language": "C",
+   "title": "ISO C 2017 with GNU extensions",
+   "turns_on": [
+    "LineComment",
+    "C99",
+    "C11",
+    "C17",
+    "Digraphs",
+    "GNUMode",
+    "HexFloat"
+   ]
+  },
+  {
+   "name": "c23",
+   "language": "C",
+   "title": "ISO C 2023",
+   "turns_on": [
+    "LineComment",
+    "C99",
+    "C11",
+    "C17",
+    "C23",
+    "Digraphs",
+    "HexFloat"
+   ]
+  },
+  {
+   "name": "gnu23",
+   "language": "C",
+   "title": "ISO C 2023 with GNU extensions",
+   "turns_on": [
+    "LineComment",
+    "C99",
+    "C11",
+    "C17",
+    "C23",
+    "Digraphs",
+    "GNUMode",
+    "HexFloat"
+   ]
+  },
+  {
+   "name": "c2y",
+   "language": "C",
+   "title": "Working Draft for ISO C2y",
+   "turns_on": [
+    "LineComment",
+    "C99",
+    "C11",
+    "C17",
+    "C23",
+    "C2y",
+    "Digraphs",
+    "HexFloat"
+   ]
+  },
+  {
+   "name": "gnu2y",
+   "language": "C",
+   "title": "Working Draft for ISO C2y with GNU extensions",
+   "turns_on": [
+    "LineComment",
+    "C99",
+    "C11",
+    "C17",
+    "C23",
+    "C2y",
+    "Digraphs",
+    "GNUMode",
+    "HexFloat"
+   ]
+  },
+  {
+   "name": "c++98",
+   "language": "CXX",
+   "title": "ISO C++ 1998 with amendments",
+   "turns_on": [
+    "LineComment",
+    "CPlusPlus",
+    "Digraphs"
+   ]
+  },
+  {
+   "name": "gnu++98",
+   "language": "CXX",
+   "title": "ISO C++ 1998 with amendments and GNU extensions",
+   "turns_on": [
+    "LineComment",
+    "CPlusPlus",
+    "Digraphs",
+    "GNUMode"
+   ]
+  },
+  {
+   "name": "c++11",
+   "language": "CXX",
+   "title": "ISO C++ 2011 with amendments",
+   "turns_on": [
+    "LineComment",
+    "CPlusPlus",
+    "CPlusPlus11",
+    "Digraphs"
+   ]
+  },
+  {
+   "name": "gnu++11",
+   "language": "CXX",
+   "title": "ISO C++ 2011 with amendments and GNU extensions",
+   "turns_on": [
+    "LineComment",
+    "CPlusPlus",
+    "CPlusPlus11",
+    "Digraphs",
+    "GNUMode"
+   ]
+  },
+  {
+   "name": "c++14",
+   "language": "CXX",
+   "title": "ISO C++ 2014 with amendments",
+   "turns_on": [
+    "LineComment",
+    "CPlusPlus",
+    "CPlusPlus11",
+    "CPlusPlus14",
+    "Digraphs"
+   ]
+  },
+  {
+   "name": "gnu++14",
+   "language": "CXX",
+   "title": "ISO C++ 2014 with amendments and GNU extensions",
+   "turns_on": [
+    "LineComment",
+    "CPlusPlus",
+    "CPlusPlus11",
+    "CPlusPlus14",
+    "Digraphs",
+    "GNUMode"
+   ]
+  },
+  {
+   "name": "c++17",
+   "language": "CXX",
+   "title": "ISO C++ 2017 with amendments",
+   "turns_on": [
+    "LineComment",
+    "CPlusPlus",
+    "CPlusPlus11",
+    "CPlusPlus14",
+    "CPlusPlus17",
+    "Digraphs",
+    "HexFloat"
+   ]
+  },
+  {
+   "name": "gnu++17",
+   "language": "CXX",
+   "title": "ISO C++ 2017 with amendments and GNU extensions",
+   "turns_on": [
+    "LineComment",
+    "CPlusPlus",
+    "CPlusPlus11",
+    "CPlusPlus14",
+    "CPlusPlus17",
+    "Digraphs",
+    "HexFloat",
+    "GNUMode"
+   ]
+  },
+  {
+   "name": "c++20",
+   "language": "CXX",
+   "title": "ISO C++ 2020 DIS",
+   "turns_on": [
+    "LineComment",
+    "CPlusPlus",
+    "CPlusPlus11",
+    "CPlusPlus14",
+    "CPlusPlus17",
+    "CPlusPlus20",
+    "Digraphs",
+    "HexFloat"
+   ]
+  },
+  {
+   "name": "gnu++20",
+   "language": "CXX",
+   "title": "ISO C++ 2020 DIS with GNU extensions",
+   "turns_on": [
+    "LineComment",
+    "CPlusPlus",
+    "CPlusPlus11",
+    "CPlusPlus14",
+    "CPlusPlus17",
+    "CPlusPlus20",
+    "Digraphs",
+    "HexFloat",
+    "GNUMode"
+   ]
+  },
+  {
+   "name": "c++23",
+   "language": "CXX",
+   "title": "ISO C++ 2023 DIS",
+   "turns_on": [
+    "LineComment",
+    "CPlusPlus",
+    "CPlusPlus11",
+    "CPlusPlus14",
+    "CPlusPlus17",
+    "CPlusPlus20",
+    "CPlusPlus23",
+    "Digraphs",
+    "HexFloat"
+   ]
+  },
+  {
+   "name": "gnu++23",
+   "language": "CXX",
+   "title": "ISO C++ 2023 DIS with GNU extensions",
+   "turns_on": [
+    "LineComment",
+    "CPlusPlus",
+    "CPlusPlus11",
+    "CPlusPlus14",
+    "CPlusPlus17",
+    "CPlusPlus20",
+    "CPlusPlus23",
+    "Digraphs",
+    "HexFloat",
+    "GNUMode"
+   ]
+  },
+  {
+   "name": "c++2c",
+   "language": "CXX",
+   "title": "Working draft for C++2c",
+   "turns_on": [
+    "LineComment",
+    "CPlusPlus",
+    "CPlusPlus11",
+    "CPlusPlus14",
+    "CPlusPlus17",
+    "CPlusPlus20",
+    "CPlusPlus23",
+    "CPlusPlus26",
+    "Digraphs",
+    "HexFloat"
+   ]
+  },
+  {
+   "name": "gnu++2c",
+   "language": "CXX",
+   "title": "Working draft for C++2c with GNU extensions",
+   "turns_on": [
+    "LineComment",
+    "CPlusPlus",
+    "CPlusPlus11",
+    "CPlusPlus14",
+    "CPlusPlus17",
+    "CPlusPlus20",
+    "CPlusPlus23",
+    "CPlusPlus26",
+    "Digraphs",
+    "HexFloat",
+    "GNUMode"
+   ]
+  },
+  {
+   "name": "c++2d",
+   "language": "CXX",
+   "title": "Working draft for C++2d",
+   "turns_on": [
+    "LineComment",
+    "CPlusPlus",
+    "CPlusPlus11",
+    "CPlusPlus14",
+    "CPlusPlus17",
+    "CPlusPlus20",
+    "CPlusPlus23",
+    "CPlusPlus26",
+    "CPlusPlus29",
+    "Digraphs",
+    "HexFloat"
+   ]
+  },
+  {
+   "name": "gnu++2d",
+   "language": "CXX",
+   "title": "Working draft for C++2d with GNU extensions",
+   "turns_on": [
+    "LineComment",
+    "CPlusPlus",
+    "CPlusPlus11",
+    "CPlusPlus14",
+    "CPlusPlus17",
+    "CPlusPlus20",
+    "CPlusPlus23",
+    "CPlusPlus26",
+    "CPlusPlus29",
+    "Digraphs",
+    "HexFloat",
+    "GNUMode"
+   ]
+  },
+  {
+   "name": "cl1.0",
+   "language": "OpenCL",
+   "title": "OpenCL 1.0",
+   "turns_on": [
+    "LineComment",
+    "C99",
+    "Digraphs",
+    "HexFloat",
+    "OpenCL"
+   ]
+  },
+  {
+   "name": "cl1.1",
+   "language": "OpenCL",
+   "title": "OpenCL 1.1",
+   "turns_on": [
+    "LineComment",
+    "C99",
+    "Digraphs",
+    "HexFloat",
+    "OpenCL"
+   ]
+  },
+  {
+   "name": "cl1.2",
+   "language": "OpenCL",
+   "title": "OpenCL 1.2",
+   "turns_on": [
+    "LineComment",
+    "C99",
+    "Digraphs",
+    "HexFloat",
+    "OpenCL"
+   ]
+  },
+  {
+   "name": "cl2.0",
+   "language": "OpenCL",
+   "title": "OpenCL 2.0",
+   "turns_on": [
+    "LineComment",
+    "C99",
+    "Digraphs",
+    "HexFloat",
+    "OpenCL"
+   ]
+  },
+  {
+   "name": "cl3.0",
+   "language": "OpenCL",
+   "title": "OpenCL 3.0",
+   "turns_on": [
+    "LineComment",
+    "C99",
+    "Digraphs",
+    "HexFloat",
+    "OpenCL"
+   ]
+  },
+  {
+   "name": "cl3.1",
+   "language": "OpenCL",
+   "title": "OpenCL 3.1",
+   "turns_on": [
+    "LineComment",
+    "C99",
+    "Digraphs",
+    "HexFloat",
+    "OpenCL"
+   ]
+  },
+  {
+   "name": "clc++1.0",
+   "language": "OpenCL",
+   "title": "C++ for OpenCL 1.0",
+   "turns_on": [
+    "LineComment",
+    "CPlusPlus",
+    "CPlusPlus11",
+    "CPlusPlus14",
+    "CPlusPlus17",
+    "Digraphs",
+    "HexFloat",
+    "OpenCL"
+   ]
+  },
+  {
+   "name": "clc++2021",
+   "language": "OpenCL",
+   "title": "C++ for OpenCL 2021",
+   "turns_on": [
+    "LineComment",
+    "CPlusPlus",
+    "CPlusPlus11",
+    "CPlusPlus14",
+    "CPlusPlus17",
+    "Digraphs",
+    "HexFloat",
+    "OpenCL"
+   ]
+  },
+  {
+   "name": "hlsl",
+   "language": "HLSL",
+   "title": "High Level Shader Language",
+   "turns_on": [
+    "LineComment",
+    "HLSL",
+    "CPlusPlus",
+    "CPlusPlus11"
+   ]
+  },
+  {
+   "name": "hlsl2015",
+   "language": "HLSL",
+   "title": "High Level Shader Language 2015",
+   "turns_on": [
+    "LineComment",
+    "HLSL",
+    "CPlusPlus",
+    "CPlusPlus11"
+   ]
+  },
+  {
+   "name": "hlsl2016",
+   "language": "HLSL",
+   "title": "High Level Shader Language 2016",
+   "turns_on": [
+    "LineComment",
+    "HLSL",
+    "CPlusPlus",
+    "CPlusPlus11"
+   ]
+  },
+  {
+   "name": "hlsl2017",
+   "language": "HLSL",
+   "title": "High Level Shader Language 2017",
+   "turns_on": [
+    "LineComment",
+    "HLSL",
+    "CPlusPlus",
+    "CPlusPlus11"
+   ]
+  },
+  {
+   "name": "hlsl2018",
+   "language": "HLSL",
+   "title": "High Level Shader Language 2018",
+   "turns_on": [
+    "LineComment",
+    "HLSL",
+    "CPlusPlus",
+    "CPlusPlus11"
+   ]
+  },
+  {
+   "name": "hlsl2021",
+   "language": "HLSL",
+   "title": "High Level Shader Language 2021",
+   "turns_on": [
+    "LineComment",
+    "HLSL",
+    "CPlusPlus",
+    "CPlusPlus11"
+   ]
+  },
+  {
+   "name": "hlsl202x",
+   "language": "HLSL",
+   "title": "High Level Shader Language 202x",
+   "turns_on": [
+    "LineComment",
+    "HLSL",
+    "CPlusPlus",
+    "CPlusPlus11"
+   ]
+  },
+  {
+   "name": "hlsl202y",
+   "language": "HLSL",
+   "title": "High Level Shader Language 202y",
+   "turns_on": [
+    "LineComment",
+    "HLSL",
+    "CPlusPlus",
+    "CPlusPlus11"
+   ]
+  }
+ ]
+}

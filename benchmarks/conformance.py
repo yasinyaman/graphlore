@@ -43,10 +43,26 @@ Edge = tuple[str, str, str]
 CASES: list[dict[str, Any]] = []
 
 
+# How the cases that follow were found (docs/rule-sources.md): written from the
+# language's `specification`; shown missing by a `compiler` (its test suite, or
+# its answers on whole repositories); or by `comparison` with graphify's graph.
+_FOUND = ["specification"]
+
+
+def found_by(how: str) -> None:
+    _FOUND[0] = how
+
+
 def case(lang: str, cid: str, rule: str, where: str, files: dict[str, str],
-         expect: list[Edge] | None = None, absent: list[Edge] | None = None) -> None:
+         expect: list[Edge] | None = None, absent: list[Edge] | None = None, *,
+         source: str | None = None, since: str | None = None, until: str | None = None) -> None:
+    """`source`: where in the language's own tools the rule was read, as
+    `repository@commit:path` and the function, or a section of the
+    specification (`where` is the specification as a whole). `since` /
+    `until`: the versions of the language the rule holds for; none, all."""
     CASES.append({"lang": lang, "id": f"{lang}/{cid}", "rule": rule, "where": where,
-                  "files": files, "expect": expect or [], "absent": absent or []})
+                  "files": files, "expect": expect or [], "absent": absent or [],
+                  "source": source, "since": since, "until": until, "found": _FOUND[0]})
 
 
 # --- Python -------------------------------------------------------------------
@@ -1701,6 +1717,7 @@ case("php", "callable-string", "a method passed as `[$this, 'm']` is a use of m"
 
 # What the TypeScript compiler's own test suite showed missing (`oracle_typescript.py`)
 # and the same rules where the other languages have them.
+found_by("compiler")
 case("typescript", "block-scope", "a `const` of a block is a name of that block: beside it the outer one stands",
      "ECMAScript Language Specification, 'Block' (14.2) and 'Let and Const Declarations' (14.3.1)",
      {"a.ts": "class A { run() {} }\nclass B { go() {} }\n\nexport function f(x: A) {\n  {\n    const x = new B();\n    x.go();\n  }\n  x.run();\n}\n"},
@@ -1972,6 +1989,7 @@ case("swift", "self-constructs", "`Self()` constructs the type around",
      [("Point.origin", "calls", "Point")])
 
 # The confirmed edges of graphify's the native graph lacked (`verify_graphify.py`, engine 0.5.59).
+found_by("comparison")
 case("csharp", "property-body-is-the-property", "what a property's accessor calls is the property's call, not its class's",
      CS, {"A.cs": "namespace App\n{\n    public static class Setter\n    {\n        public static void Set(ref bool f, bool v) { f = v; }\n    }\n\n    public static class Helper\n    {\n        public static int Size() { return 1; }\n    }\n\n    public class Settings\n    {\n        private bool mode;\n\n        public bool Mode\n        {\n            get => mode;\n            set => Setter.Set(ref mode, value);\n        }\n\n        public int Count => Helper.Size();\n    }\n}\n"},
      [("Settings.Mode", "calls", "Setter.Set"), ("Settings.Count", "calls", "Helper.Size")],
@@ -2089,6 +2107,9 @@ def main() -> int:
     cases = [c for c in CASES if not only or c["lang"] in only or c["id"] in only]
     results = {c["id"]: run_case(c) for c in cases}
 
+    versions_path = Path(__file__).resolve().parent / "results-case-versions.json"
+    measured: dict[str, Any] = json.loads(versions_path.read_text(encoding="utf-8")) \
+        if versions_path.exists() else {}
     langs: list[str] = []
     for c in cases:
         if c["lang"] not in langs:
@@ -2097,8 +2118,13 @@ def main() -> int:
         mine = [c for c in cases if c["lang"] == lang]
         passed = sum(1 for c in mine if results[c["id"]]["ok"])
         if args.markdown:
+            how = {h: sum(1 for c in mine if c["found"] == h) for h in ("specification", "compiler", "comparison")}
+            read = sum(1 for c in mine if c["source"])
             print(f"\n### {lang} ({passed} of {len(mine)})\n\n{mine[0]['where']}.\n")
-            print("| Rule | Case | Engine |\n|---|---|---|")
+            print(f"Found by: the specification {how['specification']}, a compiler {how['compiler']}, "
+                  f"comparison {how['comparison']}. With the place it was read in the language's own "
+                  f"tools: {read}.\n")
+            print("| Rule | Case | Versions | Engine |\n|---|---|---|---|")
         else:
             print(f"\n{lang}: {passed} of {len(mine)}   [{mine[0]['where']}]")
         for c in mine:
@@ -2116,7 +2142,18 @@ def main() -> int:
             if args.markdown:
                 rule = c["rule"].replace("|", "\\|")
                 state = "yes" if r["ok"] else f"**no**: {why}".replace("|", "\\|")
-                print(f"| {rule} | `{c['id'].split('/', 1)[1]}` | {state} |")
+                # what the case states, else the oldest version its compiler
+                # accepts it in (`verify_cases.py --min-version`)
+                asked = measured.get(c["id"]) or {}
+                if c["since"] or c["until"]:
+                    versions = f"{c['since'] or ''}–{c['until'] or ''}"
+                elif asked.get("until"):
+                    versions = f"up to {asked['until']}"
+                elif asked.get("since") and not asked.get("at_least"):
+                    versions = f"{asked['since']}+"
+                else:
+                    versions = "all" if asked else "–"
+                print(f"| {rule} | `{c['id'].split('/', 1)[1]}` | {versions} | {state} |")
             else:
                 print(f"  {'ok  ' if r['ok'] else 'FAIL'} {c['id']:38} {c['rule']}")
                 if why:

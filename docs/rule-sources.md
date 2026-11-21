@@ -83,12 +83,12 @@ are read into one table per language (phase 0), not re-derived:
 
 | Language | The table | What it holds (checked in the checkout) | A project says its version in |
 |---|---|---|---|
-| C# | `roslyn` `Errors/MessageID.cs` | 374 `IDS_Feature…` entries, each mapped to a `LanguageVersion` (`CSharp12`, `CSharp14`, …) | `<LangVersion>`, else the `<TargetFramework>`'s default (`.csproj`, `Directory.Build.props`) |
+| C# | `roslyn` `Errors/MessageID.cs` | 191 `IDS_Feature…` entries, each mapped to a `LanguageVersion` (`CSharp12`, `CSharp14`, …) | `<LangVersion>`, else the `<TargetFramework>`'s default (`.csproj`, `Directory.Build.props`) |
 | Java | `jdk` `javac/code/Source.java` | the `Feature` enum: 31 features with the release each arrived in (`MODULES(JDK9, …)`) | `maven.compiler.release` / `source` (`pom.xml`), `sourceCompatibility`, `toolchain` (Gradle) |
 | Kotlin | `kotlin` `LanguageVersionSettings.kt` | the `LanguageFeature` enum with `sinceVersion` (`ContextParameters(sinceVersion = KOTLIN_2_4)`) | `languageVersion`, else the Kotlin plugin's version (Gradle, Maven) |
-| Swift | `swift` `include/swift/Basic/Features.def` | 75 language, upcoming and experimental features with the language mode that turns each on | `// swift-tools-version:` and `swiftLanguageModes` (`Package.swift`) |
-| Rust | `rust` `rustc_span/src/edition.rs`; uses in `rustc_resolve` | editions 2015, 2018, 2021, 2024, and the resolver asking for them (`is_rust_2015()` in `ident.rs`) | `edition`, `rust-version` (`Cargo.toml`) |
-| Go | `go` `src/go/types/version.go` | `go1_9` … constants, asked at 17 places of the checker | the `go` line of `go.mod`, a file's `//go:build go1.N` |
+| Swift | `swift` `include/swift/Basic/Features.def` | 264 entries (baseline, language, upcoming, experimental); an upcoming one names the language mode that turns it on | `// swift-tools-version:` and `swiftLanguageModes` (`Package.swift`) |
+| Rust | `rust` `rustc_span/src/edition.rs`; uses in `rustc_resolve` | editions 2015, 2018, 2021, 2024, asked at 30 places of the resolver (`is_rust_2015()` in `ident.rs`); `rustc_feature/src/accepted.rs` has the 213 stabilised features with their release | `edition`, `rust-version` (`Cargo.toml`) |
+| Go | `go` `src/go/types/version.go` | 13 `go1_N` constants, asked at 48 places of the checker | the `go` line of `go.mod`, a file's `//go:build go1.N` |
 | C, C++ | `llvm-project` `clang/Basic/LangStandards.def`, `LangOptions.def` | 45 standards and what each turns on | `-std=` in `compile_commands.json`, `CMAKE_CXX_STANDARD` |
 | Scala | `scala3` `config/SourceVersion.scala`, `Feature.scala` | source versions `3.0` … with their `-migration` twins | `scalaVersion` (`build.sbt`), `-source` |
 | TypeScript | `tsc/internal/core/compileroptions.go` | no feature-by-version table; `module` / `moduleResolution` / `target` decide how an import is resolved | `tsconfig.json`, the `typescript` version in `package.json` |
@@ -136,9 +136,10 @@ must and must not exist. It gains three fields:
   LookupAllExtensions`, or `csharpstandard §12.8.10.3`). Today's `where`
   is one string per language.
 - `since` / `until`: the language versions it holds for (absent: all).
-- `found`: `source` (read from the tools first) or `repository` (found by
-  measurement, source looked up afterwards). The share of `source` is how
-  far this plan has got.
+- `found`: how the case came to be written: from the `specification`, shown
+  missing by a `compiler` (its test suite, or its answers on repositories),
+  or by `comparison` with graphify's graph. The number of cases with a
+  `source` is how far this plan has got.
 
 `docs/resolution-rules.md` is generated from the cases and shows them.
 
@@ -172,7 +173,7 @@ What a session has, and what it needs (measured in the cloud environment
 
 | | In the image | Installed by hand each session | Missing |
 |---|---|---|---|
-| Compilers | Go 1.24, Rust 1.97 (rustup), Node 22 + `tsc` 6.0, Python 3.13 (uv), Java 21 (javac), GCC 13, Ruby 3.3, PHP 8.3 | .NET SDK 8 (`apt`), rust-analyzer (`rustup component`), kotlinc (83 MB), Swift 6.1 (2.8 GB) | Scala 3, clang (only the one inside the Swift toolchain) |
+| Compilers | Go 1.24, Rust 1.97 (rustup), Node 22 + `tsc` 6.0, Python 3.13 (uv), Java 21 (javac), GCC 13, Ruby 3.3, PHP 8.3 | Swift 6.1 (2.8 GB); by the environment's setup script: .NET SDK 8, rust-analyzer, kotlinc 2.2, Scala 3.3 | clang (only the one inside the Swift toolchain) |
 | Sources | – | `rule_sources.py` (300 MB, under a minute) | – |
 | Corpus | – | the 45 audit repositories (1.8 GB), graphify's graphs | – |
 
@@ -180,16 +181,63 @@ What a session has, and what it needs (measured in the cloud environment
   ran out at 9.5 GB of scratch (45 graph sets of 167 MB each were the cause).
   The sources are small; the Swift toolchain is not. Graph sets are kept two
   at a time from now on.
-- **A setup script** on the environment installs the two small tools every
-  session needs (`dotnet-sdk-8.0`, `rust-analyzer`). kotlinc and Swift stay
-  on demand: they are large, and only `verify_cases.py` and the two oracles
-  use them.
-- **Scala** has no compiler here: installing one through its launcher was
-  refused by the session's safety check, and that is the owner's decision
-  to make (a release archive from `scala/scala3`, as kotlinc was installed,
-  is the alternative).
+- **A setup script** on the environment installs what every session needs
+  and is small: `dotnet-sdk-8.0`, `rust-analyzer`, and the Kotlin and Scala
+  compilers from their release archives on GitHub (120 MB, under
+  `/opt/langtools`). Swift stays on demand: 2.8 GB, and only
+  `verify_cases.py` and one oracle use it.
 - **Network**: github.com for the sources; `download.swift.org` is already
   allowed. Nothing else is needed for phases 0 to 2.
+
+## Where the work stands
+
+Phase 0 is done (engine 0.5.61; no rule changed, and the 45 audit graphs
+have the same edges as before):
+
+- **The cases say how they were found**: 425 from the specification, 71
+  shown by a compiler, 14 by comparison. None has a `source` yet: that
+  number is what phase 2 raises.
+- **Every case is compiled by its own language**: 510 of 510, Scala's 28
+  included now that a Scala compiler runs here.
+- **The compilers say which version each case needs.**
+  `verify_cases.py --min-version` asks, for the seven languages whose
+  compiler takes a version as a flag, for the oldest version that accepts
+  each case, and records it (`benchmarks/results-case-versions.json`, shown
+  in the Versions column of `docs/resolution-rules.md`). Of 247 cases 18
+  need more than the oldest version asked (Java 9, 10 and 16; C# 9, 10 and
+  12; C++11; C99), and one is accepted up to a version only: a mutable
+  `static var` is an error in Swift 6.
+- **The version tables are read out of the compilers**
+  (`benchmarks/versions.py` writes `benchmarks/versions/<language>.json`):
+
+| Language | versions | features | places the resolver asks | read from |
+|---|--:|--:|--:|---|
+| csharp | 19 | 191 | 49 | `dotnet/roslyn@da9878a16b49:src/Compilers/CSharp/Portable/Errors/MessageID.cs` |
+| java | 15 | 31 | 31 | `openjdk/jdk@78bf06f425a9:src/jdk.compiler/share/classes/com/sun/tools/javac/code/Source.java` |
+| kotlin | 16 | 464 | 80 | `JetBrains/kotlin@04f3c969a5c6:core/language.version-settings/src/org/jetbrains/kotlin/config/LanguageVersionSettings.kt` |
+| swift | 1 | 264 | – | `swiftlang/swift@1176ade30d65:include/swift/Basic/Features.def` |
+| rust | 4 | 213 | 30 | `rust-lang/rust@c7d5ba59d8e1:compiler/rustc_feature/src/accepted.rs` |
+| go | 13 | 0 | 48 | `golang/go@2dbf8b413af3:src/go/types/version.go` |
+| c-cpp | 45 | 45 | – | `llvm/llvm-project@87764a902a9b:clang/include/clang/Basic/LangStandards.def` |
+| scala | 14 | 0 | 35 | `scala/scala3@1615177b58f6:compiler/src/dotty/tools/dotc/config/SourceVersion.scala` |
+
+  "Places the resolver asks" are the lines of the name binder that test the
+  language version (file, line and text are in the JSON): the reading list
+  of phase 2 for the rules where one source has two meanings.
+- **The engine reads the version a project states** (`engine/src/versions.rs`,
+  from `go.mod`, `Cargo.toml`, `.csproj` and `Directory.Build.props`,
+  `pyproject.toml`, `package.json`, `pom.xml`, Gradle builds and version
+  catalogs, `Package.swift`, `build.sbt`, `composer.json`, a Gemfile or
+  gemspec, `CMakeLists.txt`) and writes it to the graph's header
+  (`graph.language_versions`: language, version, files). On the 45 audit
+  repositories 4,349 of the 4,610 source files that are not JavaScript have
+  one; the six gaps are named by the audit (two Scala builds without a
+  literal `scalaVersion`, a Kotlin and a Ruby project, cJSON). No rule reads
+  it yet. Not followed: a C# `<LangVersion>` set in an imported `.props`
+  file of another name (RestSharp), the second framework of a multi-target
+  project, and a version set on the command line.
+
+Next is phase 1.
 
 ## Phases
 
@@ -200,8 +248,9 @@ that have one into `benchmarks/versions/<language>.json`, with the script
 that regenerates each from the checkout. `lang_version` read from manifests
 into the facts (unused by any rule yet), with a golden per manifest kind.
 `verify_cases.py` passing a case's version to the compiler.
-*Done when*: every existing case has a `source`, and the audit repositories
-each report a version per language.
+*Done when*: every existing case says how it was found, and the audit
+repositories each report a version per language. (Done: see above. A
+`source` per case is phase 2's work, language by language.)
 
 **Phase 1: positions, from the grammars.**
 `benchmarks/positions.py`: for each of the 14 grammars, every node kind of

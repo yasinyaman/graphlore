@@ -1,0 +1,1016 @@
+{
+ "language": "rust",
+ "source": "rust-lang/rust@c7d5ba59d8e1:compiler/rustc_feature/src/accepted.rs",
+ "versions": [
+  "2015",
+  "2018",
+  "2021",
+  "2024"
+ ],
+ "features": [
+  {
+   "name": "aarch64_target_feature",
+   "since": "1.61.0"
+  },
+  {
+   "name": "abi_custom",
+   "since": "1.100.0"
+  },
+  {
+   "name": "abi_efiapi",
+   "since": "1.68.0"
+  },
+  {
+   "name": "abi_sysv64",
+   "since": "1.24.0"
+  },
+  {
+   "name": "abi_thiscall",
+   "since": "1.73.0"
+  },
+  {
+   "name": "adx_target_feature",
+   "since": "1.61.0"
+  },
+  {
+   "name": "arbitrary_enum_discriminant",
+   "since": "1.66.0"
+  },
+  {
+   "name": "asm_cfg",
+   "since": "1.93.0"
+  },
+  {
+   "name": "asm_const",
+   "since": "1.82.0"
+  },
+  {
+   "name": "asm_goto",
+   "since": "1.87.0"
+  },
+  {
+   "name": "asm_sym",
+   "since": "1.66.0"
+  },
+  {
+   "name": "associated_consts",
+   "since": "1.20.0"
+  },
+  {
+   "name": "associated_type_bounds",
+   "since": "1.79.0"
+  },
+  {
+   "name": "associated_types",
+   "since": "1.0.0"
+  },
+  {
+   "name": "async_await",
+   "since": "1.39.0"
+  },
+  {
+   "name": "async_closure",
+   "since": "1.85.0"
+  },
+  {
+   "name": "async_fn_in_trait",
+   "since": "1.75.0"
+  },
+  {
+   "name": "attr_literals",
+   "since": "1.30.0"
+  },
+  {
+   "name": "augmented_assignments",
+   "since": "1.8.0"
+  },
+  {
+   "name": "avx512_target_feature",
+   "since": "1.89.0"
+  },
+  {
+   "name": "bind_by_move_pattern_guards",
+   "since": "1.39.0"
+  },
+  {
+   "name": "bindings_after_at",
+   "since": "1.56.0"
+  },
+  {
+   "name": "braced_empty_structs",
+   "since": "1.8.0"
+  },
+  {
+   "name": "c_str_literals",
+   "since": "1.77.0"
+  },
+  {
+   "name": "c_unwind",
+   "since": "1.81.0"
+  },
+  {
+   "name": "c_variadic",
+   "since": "1.99.0"
+  },
+  {
+   "name": "c_variadic_naked_functions",
+   "since": "1.99.0"
+  },
+  {
+   "name": "cfg_attr_multi",
+   "since": "1.33.0"
+  },
+  {
+   "name": "cfg_boolean_literals",
+   "since": "1.88.0"
+  },
+  {
+   "name": "cfg_doctest",
+   "since": "1.40.0"
+  },
+  {
+   "name": "cfg_panic",
+   "since": "1.60.0"
+  },
+  {
+   "name": "cfg_select",
+   "since": "1.95.0"
+  },
+  {
+   "name": "cfg_target_abi",
+   "since": "1.78.0"
+  },
+  {
+   "name": "cfg_target_feature",
+   "since": "1.27.0"
+  },
+  {
+   "name": "cfg_target_has_atomic_equal_alignment",
+   "since": "1.97.0"
+  },
+  {
+   "name": "cfg_target_vendor",
+   "since": "1.33.0"
+  },
+  {
+   "name": "clone_closures",
+   "since": "1.26.0"
+  },
+  {
+   "name": "closure_to_fn_coercion",
+   "since": "1.19.0"
+  },
+  {
+   "name": "cmpxchg16b_target_feature",
+   "since": "1.69.0"
+  },
+  {
+   "name": "collapse_debuginfo",
+   "since": "1.79.0"
+  },
+  {
+   "name": "compile_error",
+   "since": "1.20.0"
+  },
+  {
+   "name": "conservative_impl_trait",
+   "since": "1.26.0"
+  },
+  {
+   "name": "const_constructor",
+   "since": "1.40.0"
+  },
+  {
+   "name": "const_extern_fn",
+   "since": "1.83.0"
+  },
+  {
+   "name": "const_fn_floating_point_arithmetic",
+   "since": "1.82.0"
+  },
+  {
+   "name": "const_fn_fn_ptr_basics",
+   "since": "1.61.0"
+  },
+  {
+   "name": "const_fn_trait_bound",
+   "since": "1.61.0"
+  },
+  {
+   "name": "const_fn_transmute",
+   "since": "1.56.0"
+  },
+  {
+   "name": "const_fn_union",
+   "since": "1.56.0"
+  },
+  {
+   "name": "const_fn_unsize",
+   "since": "1.54.0"
+  },
+  {
+   "name": "const_generics_defaults",
+   "since": "1.59.0"
+  },
+  {
+   "name": "const_if_match",
+   "since": "1.46.0"
+  },
+  {
+   "name": "const_impl_trait",
+   "since": "1.61.0"
+  },
+  {
+   "name": "const_indexing",
+   "since": "1.26.0"
+  },
+  {
+   "name": "const_let",
+   "since": "1.33.0"
+  },
+  {
+   "name": "const_loop",
+   "since": "1.46.0"
+  },
+  {
+   "name": "const_mut_refs",
+   "since": "1.83.0"
+  },
+  {
+   "name": "const_panic",
+   "since": "1.57.0"
+  },
+  {
+   "name": "const_raw_ptr_deref",
+   "since": "1.58.0"
+  },
+  {
+   "name": "const_refs_to_cell",
+   "since": "1.83.0"
+  },
+  {
+   "name": "const_refs_to_static",
+   "since": "1.83.0"
+  },
+  {
+   "name": "copy_closures",
+   "since": "1.26.0"
+  },
+  {
+   "name": "crate_in_paths",
+   "since": "1.30.0"
+  },
+  {
+   "name": "custom_code_classes_in_docs",
+   "since": "1.80.0"
+  },
+  {
+   "name": "debugger_visualizer",
+   "since": "1.71.0"
+  },
+  {
+   "name": "default_alloc_error_handler",
+   "since": "1.68.0"
+  },
+  {
+   "name": "default_type_params",
+   "since": "1.0.0"
+  },
+  {
+   "name": "deprecated",
+   "since": "1.9.0"
+  },
+  {
+   "name": "derive_default_enum",
+   "since": "1.62.0"
+  },
+  {
+   "name": "destructuring_assignment",
+   "since": "1.59.0"
+  },
+  {
+   "name": "diagnostic_namespace",
+   "since": "1.78.0"
+  },
+  {
+   "name": "do_not_recommend",
+   "since": "1.85.0"
+  },
+  {
+   "name": "doc_alias",
+   "since": "1.48.0"
+  },
+  {
+   "name": "dotdot_in_tuple_patterns",
+   "since": "1.14.0"
+  },
+  {
+   "name": "dotdoteq_in_patterns",
+   "since": "1.26.0"
+  },
+  {
+   "name": "drop_types_in_const",
+   "since": "1.22.0"
+  },
+  {
+   "name": "dyn_trait",
+   "since": "1.27.0"
+  },
+  {
+   "name": "exclusive_range_pattern",
+   "since": "1.80.0"
+  },
+  {
+   "name": "exhaustive_integer_patterns",
+   "since": "1.33.0"
+  },
+  {
+   "name": "explicit_generic_args_with_impl_trait",
+   "since": "1.63.0"
+  },
+  {
+   "name": "expr_fragment_specifier_2024",
+   "since": "1.83.0"
+  },
+  {
+   "name": "extended_key_value_attributes",
+   "since": "1.54.0"
+  },
+  {
+   "name": "extended_varargs_abi_support",
+   "since": "1.91.0"
+  },
+  {
+   "name": "extern_absolute_paths",
+   "since": "1.30.0"
+  },
+  {
+   "name": "extern_crate_item_prelude",
+   "since": "1.31.0"
+  },
+  {
+   "name": "extern_crate_self",
+   "since": "1.34.0"
+  },
+  {
+   "name": "extern_prelude",
+   "since": "1.30.0"
+  },
+  {
+   "name": "extern_system_varargs",
+   "since": "1.93.0"
+  },
+  {
+   "name": "f16c_target_feature",
+   "since": "1.68.0"
+  },
+  {
+   "name": "field_init_shorthand",
+   "since": "1.17.0"
+  },
+  {
+   "name": "fn_must_use",
+   "since": "1.27.0"
+  },
+  {
+   "name": "format_args_capture",
+   "since": "1.58.0"
+  },
+  {
+   "name": "generic_arg_infer",
+   "since": "1.89.0"
+  },
+  {
+   "name": "generic_associated_types",
+   "since": "1.65.0"
+  },
+  {
+   "name": "generic_param_attrs",
+   "since": "1.27.0"
+  },
+  {
+   "name": "global_allocator",
+   "since": "1.28.0"
+  },
+  {
+   "name": "globs",
+   "since": "1.0.0"
+  },
+  {
+   "name": "half_open_range_patterns",
+   "since": "1.66.0"
+  },
+  {
+   "name": "i128_type",
+   "since": "1.26.0"
+  },
+  {
+   "name": "if_let",
+   "since": "1.0.0"
+  },
+  {
+   "name": "if_let_guard",
+   "since": "1.95.0"
+  },
+  {
+   "name": "if_let_rescope",
+   "since": "1.84.0"
+  },
+  {
+   "name": "if_while_or_patterns",
+   "since": "1.33.0"
+  },
+  {
+   "name": "impl_header_lifetime_elision",
+   "since": "1.31.0"
+  },
+  {
+   "name": "impl_trait_projections",
+   "since": "1.74.0"
+  },
+  {
+   "name": "imported_main",
+   "since": "1.79.0"
+  },
+  {
+   "name": "inclusive_range_syntax",
+   "since": "1.26.0"
+  },
+  {
+   "name": "infer_outlives_requirements",
+   "since": "1.30.0"
+  },
+  {
+   "name": "inline_const",
+   "since": "1.79.0"
+  },
+  {
+   "name": "irrefutable_let_patterns",
+   "since": "1.33.0"
+  },
+  {
+   "name": "isa_attribute",
+   "since": "1.67.0"
+  },
+  {
+   "name": "item_like_imports",
+   "since": "1.15.0"
+  },
+  {
+   "name": "keylocker_x86",
+   "since": "1.89.0"
+  },
+  {
+   "name": "label_break_value",
+   "since": "1.65.0"
+  },
+  {
+   "name": "let_chains",
+   "since": "1.88.0"
+  },
+  {
+   "name": "let_else",
+   "since": "1.65.0"
+  },
+  {
+   "name": "lint_reasons",
+   "since": "1.81.0"
+  },
+  {
+   "name": "loop_break_value",
+   "since": "1.19.0"
+  },
+  {
+   "name": "macro_at_most_once_rep",
+   "since": "1.32.0"
+  },
+  {
+   "name": "macro_attributes_in_derive_output",
+   "since": "1.57.0"
+  },
+  {
+   "name": "macro_lifetime_matcher",
+   "since": "1.27.0"
+  },
+  {
+   "name": "macro_literal_matcher",
+   "since": "1.32.0"
+  },
+  {
+   "name": "macro_rules",
+   "since": "1.0.0"
+  },
+  {
+   "name": "macro_vis_matcher",
+   "since": "1.30.0"
+  },
+  {
+   "name": "macros_in_extern",
+   "since": "1.40.0"
+  },
+  {
+   "name": "match_beginning_vert",
+   "since": "1.25.0"
+  },
+  {
+   "name": "match_default_bindings",
+   "since": "1.26.0"
+  },
+  {
+   "name": "member_constraints",
+   "since": "1.54.0"
+  },
+  {
+   "name": "min_const_fn",
+   "since": "1.31.0"
+  },
+  {
+   "name": "min_const_generics",
+   "since": "1.51.0"
+  },
+  {
+   "name": "min_const_unsafe_fn",
+   "since": "1.33.0"
+  },
+  {
+   "name": "min_exhaustive_patterns",
+   "since": "1.82.0"
+  },
+  {
+   "name": "more_struct_aliases",
+   "since": "1.16.0"
+  },
+  {
+   "name": "movbe_target_feature",
+   "since": "1.70.0"
+  },
+  {
+   "name": "move_ref_pattern",
+   "since": "1.49.0"
+  },
+  {
+   "name": "naked_functions",
+   "since": "1.88.0"
+  },
+  {
+   "name": "native_link_modifiers",
+   "since": "1.61.0"
+  },
+  {
+   "name": "native_link_modifiers_bundle",
+   "since": "1.63.0"
+  },
+  {
+   "name": "native_link_modifiers_verbatim",
+   "since": "1.67.0"
+  },
+  {
+   "name": "native_link_modifiers_whole_archive",
+   "since": "1.61.0"
+  },
+  {
+   "name": "never_type",
+   "since": "1.100.0"
+  },
+  {
+   "name": "nll",
+   "since": "1.63.0"
+  },
+  {
+   "name": "no_std",
+   "since": "1.6.0"
+  },
+  {
+   "name": "non_ascii_idents",
+   "since": "1.53.0"
+  },
+  {
+   "name": "non_exhaustive",
+   "since": "1.40.0"
+  },
+  {
+   "name": "non_modrs_mods",
+   "since": "1.30.0"
+  },
+  {
+   "name": "offset_of_nested",
+   "since": "1.82.0"
+  },
+  {
+   "name": "optimize_attribute",
+   "since": "1.101.0"
+  },
+  {
+   "name": "or_patterns",
+   "since": "1.53.0"
+  },
+  {
+   "name": "packed_bundled_libs",
+   "since": "1.74.0"
+  },
+  {
+   "name": "panic_handler",
+   "since": "1.30.0"
+  },
+  {
+   "name": "param_attrs",
+   "since": "1.39.0"
+  },
+  {
+   "name": "pattern_parentheses",
+   "since": "1.31.0"
+  },
+  {
+   "name": "precise_capturing",
+   "since": "1.82.0"
+  },
+  {
+   "name": "precise_capturing_in_traits",
+   "since": "1.87.0"
+  },
+  {
+   "name": "proc_macro",
+   "since": "1.29.0"
+  },
+  {
+   "name": "proc_macro_path_invoc",
+   "since": "1.30.0"
+  },
+  {
+   "name": "pub_restricted",
+   "since": "1.18.0"
+  },
+  {
+   "name": "question_mark",
+   "since": "1.13.0"
+  },
+  {
+   "name": "raw_dylib",
+   "since": "1.71.0"
+  },
+  {
+   "name": "raw_identifiers",
+   "since": "1.30.0"
+  },
+  {
+   "name": "raw_ref_op",
+   "since": "1.82.0"
+  },
+  {
+   "name": "re_rebalance_coherence",
+   "since": "1.41.0"
+  },
+  {
+   "name": "relaxed_adts",
+   "since": "1.19.0"
+  },
+  {
+   "name": "relaxed_struct_unsize",
+   "since": "1.58.0"
+  },
+  {
+   "name": "repr128",
+   "since": "1.89.0"
+  },
+  {
+   "name": "repr_align",
+   "since": "1.25.0"
+  },
+  {
+   "name": "repr_align_enum",
+   "since": "1.37.0"
+  },
+  {
+   "name": "repr_packed",
+   "since": "1.33.0"
+  },
+  {
+   "name": "repr_transparent",
+   "since": "1.28.0"
+  },
+  {
+   "name": "result_ffi_guarantees",
+   "since": "1.84.0"
+  },
+  {
+   "name": "return_position_impl_trait_in_trait",
+   "since": "1.75.0"
+  },
+  {
+   "name": "rvalue_static_promotion",
+   "since": "1.21.0"
+  },
+  {
+   "name": "s390x_target_feature_vector",
+   "since": "1.93.0"
+  },
+  {
+   "name": "self_in_typedefs",
+   "since": "1.32.0"
+  },
+  {
+   "name": "self_struct_ctor",
+   "since": "1.32.0"
+  },
+  {
+   "name": "sha512_sm_x86",
+   "since": "1.89.0"
+  },
+  {
+   "name": "shorter_tail_lifetimes",
+   "since": "1.84.0"
+  },
+  {
+   "name": "slice_patterns",
+   "since": "1.42.0"
+  },
+  {
+   "name": "slicing_syntax",
+   "since": "1.0.0"
+  },
+  {
+   "name": "sse4a_target_feature",
+   "since": "1.91.0"
+  },
+  {
+   "name": "static_in_const",
+   "since": "1.17.0"
+  },
+  {
+   "name": "static_recursion",
+   "since": "1.17.0"
+  },
+  {
+   "name": "struct_field_attributes",
+   "since": "1.20.0"
+  },
+  {
+   "name": "struct_variant",
+   "since": "1.0.0"
+  },
+  {
+   "name": "target_feature",
+   "since": "1.27.0"
+  },
+  {
+   "name": "target_feature_11",
+   "since": "1.86.0"
+  },
+  {
+   "name": "tbm_target_feature",
+   "since": "1.91.0"
+  },
+  {
+   "name": "termination_trait",
+   "since": "1.26.0"
+  },
+  {
+   "name": "termination_trait_test",
+   "since": "1.27.0"
+  },
+  {
+   "name": "tool_attributes",
+   "since": "1.30.0"
+  },
+  {
+   "name": "tool_lints",
+   "since": "1.31.0"
+  },
+  {
+   "name": "track_caller",
+   "since": "1.46.0"
+  },
+  {
+   "name": "trait_upcasting",
+   "since": "1.86.0"
+  },
+  {
+   "name": "transparent_enums",
+   "since": "1.42.0"
+  },
+  {
+   "name": "tuple_indexing",
+   "since": "1.0.0"
+  },
+  {
+   "name": "type_alias_enum_variants",
+   "since": "1.37.0"
+  },
+  {
+   "name": "type_macros",
+   "since": "1.13.0"
+  },
+  {
+   "name": "type_privacy_lints",
+   "since": "1.79.0"
+  },
+  {
+   "name": "underscore_const_names",
+   "since": "1.37.0"
+  },
+  {
+   "name": "underscore_imports",
+   "since": "1.33.0"
+  },
+  {
+   "name": "underscore_lifetimes",
+   "since": "1.26.0"
+  },
+  {
+   "name": "uniform_paths",
+   "since": "1.32.0"
+  },
+  {
+   "name": "universal_impl_trait",
+   "since": "1.26.0"
+  },
+  {
+   "name": "unrestricted_attribute_tokens",
+   "since": "1.34.0"
+  },
+  {
+   "name": "unsafe_attributes",
+   "since": "1.82.0"
+  },
+  {
+   "name": "unsafe_block_in_unsafe_fn",
+   "since": "1.52.0"
+  },
+  {
+   "name": "unsafe_extern_blocks",
+   "since": "1.82.0"
+  },
+  {
+   "name": "use_extern_macros",
+   "since": "1.30.0"
+  },
+  {
+   "name": "use_nested_groups",
+   "since": "1.25.0"
+  },
+  {
+   "name": "used",
+   "since": "1.30.0"
+  },
+  {
+   "name": "while_let",
+   "since": "1.0.0"
+  },
+  {
+   "name": "windows_subsystem",
+   "since": "1.18.0"
+  }
+ ],
+ "asked": [
+  {
+   "file": "compiler/rustc_resolve/src/build_reduced_graph.rs",
+   "line": 259,
+   "text": "} else if ident.span.is_rust_2015() {"
+  },
+  {
+   "file": "compiler/rustc_resolve/src/build_reduced_graph.rs",
+   "line": 626,
+   "text": "Some(seg) if !seg.ident.is_path_segment_keyword() && seg.ident.span.is_rust_2015() => {"
+  },
+  {
+   "file": "compiler/rustc_resolve/src/build_reduced_graph.rs",
+   "line": 630,
+   "text": "&& span.is_rust_2015() =>"
+  },
+  {
+   "file": "compiler/rustc_resolve/src/check_unused.rs",
+   "line": 184,
+   "text": "if !tcx.sess.at_least_rust_2018() {"
+  },
+  {
+   "file": "compiler/rustc_resolve/src/def_collector.rs",
+   "line": 171,
+   "text": "let edition = i.span.edition();"
+  },
+  {
+   "file": "compiler/rustc_resolve/src/diagnostics/impls.rs",
+   "line": 706,
+   "text": "Some(seg) if seg.ident.span.is_rust_2015() && self.tcx.sess.is_rust_2015() => {"
+  },
+  {
+   "file": "compiler/rustc_resolve/src/diagnostics/impls.rs",
+   "line": 1518,
+   "text": "self.tcx.sess.edition(),"
+  },
+  {
+   "file": "compiler/rustc_resolve/src/diagnostics/impls.rs",
+   "line": 1520,
+   "text": "(true, true, Edition::Edition2015) => String::new(),"
+  },
+  {
+   "file": "compiler/rustc_resolve/src/diagnostics/impls.rs",
+   "line": 1749,
+   "text": "let mut segms = if lookup_ident.span.at_least_rust_2018() {"
+  },
+  {
+   "file": "compiler/rustc_resolve/src/diagnostics/impls.rs",
+   "line": 1883,
+   "text": "name_binding.is_extern_crate() && lookup_ident.span.at_least_rust_2018();"
+  },
+  {
+   "file": "compiler/rustc_resolve/src/diagnostics/impls.rs",
+   "line": 1959,
+   "text": "if lookup_ident.span.at_least_rust_2018() {"
+  },
+  {
+   "file": "compiler/rustc_resolve/src/diagnostics/impls.rs",
+   "line": 2489,
+   "text": "if b.is_extern_crate() && ident.span.at_least_rust_2018() && !extern_prelude_ambiguity()"
+  },
+  {
+   "file": "compiler/rustc_resolve/src/diagnostics/impls.rs",
+   "line": 2609,
+   "text": ".filter(|seg| seg.ident.name != kw::PathRoot || seg.ident.span.at_least_rust_2018())"
+  },
+  {
+   "file": "compiler/rustc_resolve/src/diagnostics/impls.rs",
+   "line": 3126,
+   "text": "if prev.ident.name == kw::PathRoot && self.tcx.sess.edition() > Edition::Edition2015"
+  },
+  {
+   "file": "compiler/rustc_resolve/src/diagnostics/impls.rs",
+   "line": 3229,
+   "text": "} else if self.tcx.sess.is_rust_2015() {"
+  },
+  {
+   "file": "compiler/rustc_resolve/src/diagnostics/impls.rs",
+   "line": 3284,
+   "text": "kw::PathRoot if self.tcx.sess.edition() > Edition::Edition2015 => {"
+  },
+  {
+   "file": "compiler/rustc_resolve/src/diagnostics/impls.rs",
+   "line": 3545,
+   "text": "if first.ident.span.at_least_rust_2018()"
+  },
+  {
+   "file": "compiler/rustc_resolve/src/diagnostics/impls.rs",
+   "line": 3648,
+   "text": "if path[1].ident.span.is_rust_2015() {"
+  },
+  {
+   "file": "compiler/rustc_resolve/src/ident.rs",
+   "line": 159,
+   "text": "Scope::MacroUsePrelude => use_prelude || orig_ident_span.is_rust_2015(),"
+  },
+  {
+   "file": "compiler/rustc_resolve/src/ident.rs",
+   "line": 931,
+   "text": "let is_issue_147319_hack = orig_ident_span.edition() <= Edition::Edition2024"
+  },
+  {
+   "file": "compiler/rustc_resolve/src/ident.rs",
+   "line": 991,
+   "text": "ident.name == kw::PathRoot && ident.span.is_rust_2015() && self.tcx.sess.is_rust_2015()"
+  },
+  {
+   "file": "compiler/rustc_resolve/src/ident.rs",
+   "line": 1970,
+   "text": "if name == kw::PathRoot && ident.span.at_least_rust_2018() {"
+  },
+  {
+   "file": "compiler/rustc_resolve/src/ident.rs",
+   "line": 1975,
+   "text": "&& ident.span.is_rust_2015()"
+  },
+  {
+   "file": "compiler/rustc_resolve/src/ident.rs",
+   "line": 1976,
+   "text": "&& self.tcx.sess.at_least_rust_2018()"
+  },
+  {
+   "file": "compiler/rustc_resolve/src/late/diagnostics.rs",
+   "line": 504,
+   "text": "if self.r.tcx.sess.edition() > Edition::Edition2015 {"
+  },
+  {
+   "file": "compiler/rustc_resolve/src/late/diagnostics.rs",
+   "line": 2826,
+   "text": "if path_str == \"try\" && span.is_rust_2015() {"
+  },
+  {
+   "file": "compiler/rustc_resolve/src/late.rs",
+   "line": 2941,
+   "text": "if ident.is_path_segment_keyword() || ident.span.is_rust_2015() {"
+  },
+  {
+   "file": "compiler/rustc_resolve/src/lib.rs",
+   "line": 1867,
+   "text": "let edition = tcx.sess.edition();"
+  },
+  {
+   "file": "compiler/rustc_resolve/src/macros.rs",
+   "line": 243,
+   "text": "self.tcx.sess.edition(),"
+  },
+  {
+   "file": "compiler/rustc_resolve/src/macros.rs",
+   "line": 891,
+   "text": "let edition = self.tcx.sess.edition();"
+  }
+ ]
+}

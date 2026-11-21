@@ -1,0 +1,1038 @@
+{
+ "language": "csharp",
+ "source": "dotnet/roslyn@da9878a16b49:src/Compilers/CSharp/Portable/Errors/MessageID.cs",
+ "features": [
+  {
+   "name": "FeatureUnsafeEvolution",
+   "since": "Preview"
+  },
+  {
+   "name": "FeatureTypeParameterInferenceFromConstraints",
+   "since": "Preview"
+  },
+  {
+   "name": "FeatureCollectionExpressionArguments",
+   "since": "15"
+  },
+  {
+   "name": "FeatureUnions",
+   "since": "15"
+  },
+  {
+   "name": "FeatureStaticMembersInInterfaces",
+   "since": "15"
+  },
+  {
+   "name": "FeatureClosedClasses",
+   "since": "15"
+  },
+  {
+   "name": "FeatureLabeledBreakContinue",
+   "since": "15"
+  },
+  {
+   "name": "FeatureExtensionIndexers",
+   "since": "15"
+  },
+  {
+   "name": "FeatureFieldKeyword",
+   "since": "14"
+  },
+  {
+   "name": "FeatureFirstClassSpan",
+   "since": "14"
+  },
+  {
+   "name": "FeatureUnboundGenericTypesInNameof",
+   "since": "14"
+  },
+  {
+   "name": "FeatureSimpleLambdaParameterModifiers",
+   "since": "14"
+  },
+  {
+   "name": "FeaturePartialEventsAndConstructors",
+   "since": "14"
+  },
+  {
+   "name": "FeatureExtensions",
+   "since": "14"
+  },
+  {
+   "name": "FeatureNullConditionalAssignment",
+   "since": "14"
+  },
+  {
+   "name": "FeatureExpressionOptionalAndNamedArguments",
+   "since": "14"
+  },
+  {
+   "name": "FeatureUserDefinedCompoundAssignmentOperators",
+   "since": "14"
+  },
+  {
+   "name": "FeatureStringEscapeCharacter",
+   "since": "13"
+  },
+  {
+   "name": "FeatureImplicitIndexerInitializer",
+   "since": "13"
+  },
+  {
+   "name": "FeatureLockObject",
+   "since": "13"
+  },
+  {
+   "name": "FeatureParamsCollections",
+   "since": "13"
+  },
+  {
+   "name": "FeatureRefUnsafeInIteratorAsync",
+   "since": "13"
+  },
+  {
+   "name": "FeatureRefStructInterfaces",
+   "since": "13"
+  },
+  {
+   "name": "FeatureAllowsRefStructConstraint",
+   "since": "13"
+  },
+  {
+   "name": "FeaturePartialProperties",
+   "since": "13"
+  },
+  {
+   "name": "FeatureOverloadResolutionPriority",
+   "since": "13"
+  },
+  {
+   "name": "FeatureLambdaOptionalParameters",
+   "since": "12"
+  },
+  {
+   "name": "FeatureLambdaParamsArray",
+   "since": "12"
+  },
+  {
+   "name": "FeaturePrimaryConstructors",
+   "since": "12"
+  },
+  {
+   "name": "FeatureUsingTypeAlias",
+   "since": "12"
+  },
+  {
+   "name": "FeatureInstanceMemberInNameof",
+   "since": "12"
+  },
+  {
+   "name": "FeatureInlineArrays",
+   "since": "12"
+  },
+  {
+   "name": "FeatureCollectionExpressions",
+   "since": "12"
+  },
+  {
+   "name": "FeatureRefReadonlyParameters",
+   "since": "12"
+  },
+  {
+   "name": "FeatureRawStringLiterals",
+   "since": "11"
+  },
+  {
+   "name": "FeatureStaticAbstractMembersInInterfaces",
+   "since": "11"
+  },
+  {
+   "name": "FeatureNewLinesInInterpolations",
+   "since": "11"
+  },
+  {
+   "name": "FeatureListPattern",
+   "since": "11"
+  },
+  {
+   "name": "FeatureRequiredMembers",
+   "since": "11"
+  },
+  {
+   "name": "FeatureCacheStaticMethodGroupConversion",
+   "since": "11"
+  },
+  {
+   "name": "FeatureSpanCharConstantPattern",
+   "since": "11"
+  },
+  {
+   "name": "FeatureAutoDefaultStructs",
+   "since": "11"
+  },
+  {
+   "name": "FeatureCheckedUserDefinedOperators",
+   "since": "11"
+  },
+  {
+   "name": "FeatureUtf8StringLiterals",
+   "since": "11"
+  },
+  {
+   "name": "FeatureUnsignedRightShift",
+   "since": "11"
+  },
+  {
+   "name": "FeatureRelaxedShiftOperator",
+   "since": "11"
+  },
+  {
+   "name": "FeatureRefFields",
+   "since": "11"
+  },
+  {
+   "name": "FeatureFileTypes",
+   "since": "11"
+  },
+  {
+   "name": "FeatureGenericAttributes",
+   "since": "11"
+  },
+  {
+   "name": "FeatureMixedDeclarationsAndExpressionsInDeconstruction",
+   "since": "10"
+  },
+  {
+   "name": "FeatureSealedToStringInRecord",
+   "since": "10"
+  },
+  {
+   "name": "FeatureImprovedInterpolatedStrings",
+   "since": "10"
+  },
+  {
+   "name": "FeatureRecordStructs",
+   "since": "10"
+  },
+  {
+   "name": "FeatureWithOnStructs",
+   "since": "10"
+  },
+  {
+   "name": "FeatureWithOnAnonymousTypes",
+   "since": "10"
+  },
+  {
+   "name": "FeaturePositionalFieldsInRecords",
+   "since": "10"
+  },
+  {
+   "name": "FeatureGlobalUsing",
+   "since": "10"
+  },
+  {
+   "name": "FeatureInferredDelegateType",
+   "since": "10"
+  },
+  {
+   "name": "FeatureLambdaAttributes",
+   "since": "10"
+  },
+  {
+   "name": "FeatureExtendedPropertyPatterns",
+   "since": "10"
+  },
+  {
+   "name": "FeatureLambdaReturnType",
+   "since": "10"
+  },
+  {
+   "name": "AsyncMethodBuilderOverride",
+   "since": "10"
+  },
+  {
+   "name": "FeatureConstantInterpolatedStrings",
+   "since": "10"
+  },
+  {
+   "name": "FeatureImplicitImplementationOfNonPublicMembers",
+   "since": "10"
+  },
+  {
+   "name": "FeatureFileScopedNamespace",
+   "since": "10"
+  },
+  {
+   "name": "FeatureParameterlessStructConstructors",
+   "since": "10"
+  },
+  {
+   "name": "FeatureStructFieldInitializers",
+   "since": "10"
+  },
+  {
+   "name": "FeatureLambdaDiscardParameters",
+   "since": "9"
+  },
+  {
+   "name": "FeatureFunctionPointers",
+   "since": "9"
+  },
+  {
+   "name": "FeatureLocalFunctionAttributes",
+   "since": "9"
+  },
+  {
+   "name": "FeatureExternLocalFunctions",
+   "since": "9"
+  },
+  {
+   "name": "FeatureImplicitObjectCreation",
+   "since": "9"
+  },
+  {
+   "name": "FeatureMemberNotNull",
+   "since": "9"
+  },
+  {
+   "name": "FeatureAndPattern",
+   "since": "9"
+  },
+  {
+   "name": "FeatureNotPattern",
+   "since": "9"
+  },
+  {
+   "name": "FeatureOrPattern",
+   "since": "9"
+  },
+  {
+   "name": "FeatureParenthesizedPattern",
+   "since": "9"
+  },
+  {
+   "name": "FeatureTypePattern",
+   "since": "9"
+  },
+  {
+   "name": "FeatureRelationalPattern",
+   "since": "9"
+  },
+  {
+   "name": "FeatureExtensionGetEnumerator",
+   "since": "9"
+  },
+  {
+   "name": "FeatureExtensionGetAsyncEnumerator",
+   "since": "9"
+  },
+  {
+   "name": "FeatureNativeInt",
+   "since": "9"
+  },
+  {
+   "name": "FeatureExtendedPartialMethods",
+   "since": "9"
+  },
+  {
+   "name": "TopLevelStatements",
+   "since": "9"
+  },
+  {
+   "name": "FeatureInitOnlySetters",
+   "since": "9"
+  },
+  {
+   "name": "FeatureRecords",
+   "since": "9"
+  },
+  {
+   "name": "FeatureTargetTypedConditional",
+   "since": "9"
+  },
+  {
+   "name": "FeatureCovariantReturnsForOverrides",
+   "since": "9"
+  },
+  {
+   "name": "FeatureStaticAnonymousFunction",
+   "since": "9"
+  },
+  {
+   "name": "FeatureModuleInitializers",
+   "since": "9"
+  },
+  {
+   "name": "FeatureDefaultTypeParameterConstraint",
+   "since": "9"
+  },
+  {
+   "name": "FeatureVarianceSafetyForStaticInterfaceMembers",
+   "since": "9"
+  },
+  {
+   "name": "FeatureAltInterpolatedVerbatimStrings",
+   "since": "8"
+  },
+  {
+   "name": "FeatureCoalesceAssignmentExpression",
+   "since": "8"
+  },
+  {
+   "name": "FeatureUnconstrainedTypeParameterInNullCoalescingOperator",
+   "since": "8"
+  },
+  {
+   "name": "FeatureNullableReferenceTypes",
+   "since": "8"
+  },
+  {
+   "name": "FeatureIndexOperator",
+   "since": "8"
+  },
+  {
+   "name": "FeatureRangeOperator",
+   "since": "8"
+  },
+  {
+   "name": "FeatureAsyncStreams",
+   "since": "8"
+  },
+  {
+   "name": "FeatureRecursivePatterns",
+   "since": "8"
+  },
+  {
+   "name": "FeatureUsingDeclarations",
+   "since": "8"
+  },
+  {
+   "name": "FeatureDisposalPattern",
+   "since": "8"
+  },
+  {
+   "name": "FeatureStaticLocalFunctions",
+   "since": "8"
+  },
+  {
+   "name": "FeatureNameShadowingInNestedFunctions",
+   "since": "8"
+  },
+  {
+   "name": "FeatureUnmanagedConstructedTypes",
+   "since": "8"
+  },
+  {
+   "name": "FeatureObsoleteOnPropertyAccessor",
+   "since": "8"
+  },
+  {
+   "name": "FeatureReadOnlyMembers",
+   "since": "8"
+  },
+  {
+   "name": "DefaultInterfaceImplementation",
+   "since": "8"
+  },
+  {
+   "name": "OverrideWithConstraints",
+   "since": "8"
+  },
+  {
+   "name": "FeatureNestedStackalloc",
+   "since": "8"
+  },
+  {
+   "name": "FeatureNotNullGenericTypeConstraint",
+   "since": "8"
+  },
+  {
+   "name": "FeatureSwitchExpression",
+   "since": "8"
+  },
+  {
+   "name": "FeatureAsyncUsing",
+   "since": "8"
+  },
+  {
+   "name": "FeatureNullPointerConstantPattern",
+   "since": "8"
+  },
+  {
+   "name": "FeatureAttributesOnBackingFields",
+   "since": "7.3"
+  },
+  {
+   "name": "FeatureImprovedOverloadCandidates",
+   "since": "7.3"
+  },
+  {
+   "name": "FeatureTupleEquality",
+   "since": "7.3"
+  },
+  {
+   "name": "FeatureRefReassignment",
+   "since": "7.3"
+  },
+  {
+   "name": "FeatureRefFor",
+   "since": "7.3"
+  },
+  {
+   "name": "FeatureRefForEach",
+   "since": "7.3"
+  },
+  {
+   "name": "FeatureEnumGenericTypeConstraint",
+   "since": "7.3"
+  },
+  {
+   "name": "FeatureDelegateGenericTypeConstraint",
+   "since": "7.3"
+  },
+  {
+   "name": "FeatureUnmanagedGenericTypeConstraint",
+   "since": "7.3"
+  },
+  {
+   "name": "FeatureStackAllocInitializer",
+   "since": "7.3"
+  },
+  {
+   "name": "FeatureExpressionVariablesInQueriesAndInitializers",
+   "since": "7.3"
+  },
+  {
+   "name": "FeatureExtensibleFixedStatement",
+   "since": "7.3"
+  },
+  {
+   "name": "FeatureIndexingMovableFixedBuffers",
+   "since": "7.3"
+  },
+  {
+   "name": "FeatureNonTrailingNamedArguments",
+   "since": "7.2"
+  },
+  {
+   "name": "FeatureLeadingDigitSeparator",
+   "since": "7.2"
+  },
+  {
+   "name": "FeaturePrivateProtected",
+   "since": "7.2"
+  },
+  {
+   "name": "FeatureReadOnlyReferences",
+   "since": "7.2"
+  },
+  {
+   "name": "FeatureRefStructs",
+   "since": "7.2"
+  },
+  {
+   "name": "FeatureReadOnlyStructs",
+   "since": "7.2"
+  },
+  {
+   "name": "FeatureRefExtensionMethods",
+   "since": "7.2"
+  },
+  {
+   "name": "FeatureRefConditional",
+   "since": "7.2"
+  },
+  {
+   "name": "FeatureAsyncMain",
+   "since": "7.1"
+  },
+  {
+   "name": "FeatureDefaultLiteral",
+   "since": "7.1"
+  },
+  {
+   "name": "FeatureInferredTupleNames",
+   "since": "7.1"
+  },
+  {
+   "name": "FeatureGenericPatternMatching",
+   "since": "7.1"
+  },
+  {
+   "name": "FeatureBinaryLiteral",
+   "since": "7"
+  },
+  {
+   "name": "FeatureDigitSeparator",
+   "since": "7"
+  },
+  {
+   "name": "FeatureLocalFunctions",
+   "since": "7"
+  },
+  {
+   "name": "FeatureRefLocalsReturns",
+   "since": "7"
+  },
+  {
+   "name": "FeaturePatternMatching",
+   "since": "7"
+  },
+  {
+   "name": "FeatureThrowExpression",
+   "since": "7"
+  },
+  {
+   "name": "FeatureTuples",
+   "since": "7"
+  },
+  {
+   "name": "FeatureOutVar",
+   "since": "7"
+  },
+  {
+   "name": "FeatureExpressionBodiedAccessor",
+   "since": "7"
+  },
+  {
+   "name": "FeatureExpressionBodiedDeOrConstructor",
+   "since": "7"
+  },
+  {
+   "name": "FeatureDiscards",
+   "since": "7"
+  },
+  {
+   "name": "FeatureExceptionFilter",
+   "since": "6"
+  },
+  {
+   "name": "FeatureAutoPropertyInitializer",
+   "since": "6"
+  },
+  {
+   "name": "FeatureNullPropagatingOperator",
+   "since": "6"
+  },
+  {
+   "name": "FeatureExpressionBodiedMethod",
+   "since": "6"
+  },
+  {
+   "name": "FeatureExpressionBodiedProperty",
+   "since": "6"
+  },
+  {
+   "name": "FeatureExpressionBodiedIndexer",
+   "since": "6"
+  },
+  {
+   "name": "FeatureNameof",
+   "since": "6"
+  },
+  {
+   "name": "FeatureDictionaryInitializer",
+   "since": "6"
+  },
+  {
+   "name": "FeatureUsingStatic",
+   "since": "6"
+  },
+  {
+   "name": "FeatureInterpolatedStrings",
+   "since": "6"
+  },
+  {
+   "name": "AwaitInCatchAndFinally",
+   "since": "6"
+  },
+  {
+   "name": "FeatureReadonlyAutoImplementedProperties",
+   "since": "6"
+  },
+  {
+   "name": "FeatureAsync",
+   "since": "5"
+  },
+  {
+   "name": "FeatureDynamic",
+   "since": "4"
+  },
+  {
+   "name": "FeatureTypeVariance",
+   "since": "4"
+  },
+  {
+   "name": "FeatureNamedArgument",
+   "since": "4"
+  },
+  {
+   "name": "FeatureOptionalParameter",
+   "since": "4"
+  },
+  {
+   "name": "FeatureImplicitArray",
+   "since": "3"
+  },
+  {
+   "name": "FeatureAnonymousTypes",
+   "since": "3"
+  },
+  {
+   "name": "FeatureObjectInitializer",
+   "since": "3"
+  },
+  {
+   "name": "FeatureCollectionInitializer",
+   "since": "3"
+  },
+  {
+   "name": "FeatureLambda",
+   "since": "3"
+  },
+  {
+   "name": "FeatureQueryExpression",
+   "since": "3"
+  },
+  {
+   "name": "FeatureExtensionMethod",
+   "since": "3"
+  },
+  {
+   "name": "FeaturePartialMethod",
+   "since": "3"
+  },
+  {
+   "name": "FeatureImplicitLocal",
+   "since": "3"
+  },
+  {
+   "name": "FeatureAutoImplementedProperties",
+   "since": "3"
+  },
+  {
+   "name": "FeatureGenerics",
+   "since": "2"
+  },
+  {
+   "name": "FeatureAnonDelegates",
+   "since": "2"
+  },
+  {
+   "name": "FeatureGlobalNamespace",
+   "since": "2"
+  },
+  {
+   "name": "FeatureFixedBuffer",
+   "since": "2"
+  },
+  {
+   "name": "FeatureStaticClasses",
+   "since": "2"
+  },
+  {
+   "name": "FeaturePartialTypes",
+   "since": "2"
+  },
+  {
+   "name": "FeaturePropertyAccessorMods",
+   "since": "2"
+  },
+  {
+   "name": "FeatureExternAlias",
+   "since": "2"
+  },
+  {
+   "name": "FeatureIterators",
+   "since": "2"
+  },
+  {
+   "name": "FeatureDefault",
+   "since": "2"
+  },
+  {
+   "name": "FeatureNullable",
+   "since": "2"
+  },
+  {
+   "name": "FeaturePragma",
+   "since": "2"
+  },
+  {
+   "name": "FeatureSwitchOnBool",
+   "since": "2"
+  },
+  {
+   "name": "FeatureModuleAttrLoc",
+   "since": "1"
+  }
+ ],
+ "asked": [
+  {
+   "file": "src/Compilers/CSharp/Portable/Binder/Binder.ValueChecks.cs",
+   "line": 1290,
+   "text": "else if (this.IsDirectlyInIterator && Compilation.IsFeatureEnabled(MessageID.IDS_FeatureRefUnsafeInIteratorAsync))"
+  },
+  {
+   "file": "src/Compilers/CSharp/Portable/Binder/Binder_Await.cs",
+   "line": 245,
+   "text": "(nodeOrToken.SyntaxTree as CSharpSyntaxTree)?.Options?.IsFeatureEnabled(MessageID.IDS_AwaitInCatchAndFinally) == false)"
+  },
+  {
+   "file": "src/Compilers/CSharp/Portable/Binder/Binder_Await.cs",
+   "line": 251,
+   "text": "(nodeOrToken.SyntaxTree as CSharpSyntaxTree)?.Options?.IsFeatureEnabled(MessageID.IDS_AwaitInCatchAndFinally) == false)"
+  },
+  {
+   "file": "src/Compilers/CSharp/Portable/Binder/Binder_Conversions.cs",
+   "line": 2499,
+   "text": "if (targetTyped && !destination.IsErrorType() && !Compilation.IsFeatureEnabled(MessageID.IDS_FeatureTargetTypedConditional))"
+  },
+  {
+   "file": "src/Compilers/CSharp/Portable/Binder/Binder_Conversions.cs",
+   "line": 2870,
+   "text": "Debug.Assert(syntax.IsFeatureEnabled(MessageID.IDS_FeatureInferredDelegateType));"
+  },
+  {
+   "file": "src/Compilers/CSharp/Portable/Binder/Binder_Conversions.cs",
+   "line": 3449,
+   "text": "else if (WasImplicitReceiver(receiverOpt) && !(IsInsideNameof && Compilation.IsFeatureEnabled(MessageID.IDS_FeatureInstanceMemberInNameof)))"
+  },
+  {
+   "file": "src/Compilers/CSharp/Portable/Binder/Binder_Expressions.cs",
+   "line": 38,
+   "text": "if (!isExplicit && IsInsideNameof && Compilation.IsFeatureEnabled(MessageID.IDS_FeatureInstanceMemberInNameof))"
+  },
+  {
+   "file": "src/Compilers/CSharp/Portable/Binder/Binder_Expressions.cs",
+   "line": 1573,
+   "text": "if (Compilation.LanguageVersion >= requiredVersion)"
+  },
+  {
+   "file": "src/Compilers/CSharp/Portable/Binder/Binder_Expressions.cs",
+   "line": 2389,
+   "text": "if (!IsInsideNameof || (EnclosingNameofArgument != node && !node.IsFeatureEnabled(MessageID.IDS_FeatureInstanceMemberInNameof)))"
+  },
+  {
+   "file": "src/Compilers/CSharp/Portable/Binder/Binder_Expressions.cs",
+   "line": 3988,
+   "text": "if (!Compilation.IsFeatureEnabled(MessageID.IDS_FeatureRefReadonlyParameters))"
+  },
+  {
+   "file": "src/Compilers/CSharp/Portable/Binder/Binder_Expressions.cs",
+   "line": 8198,
+   "text": "Compilation.LanguageVersion < MessageID.IDS_FeatureNullableReferenceTypes.RequiredVersion())"
+  },
+  {
+   "file": "src/Compilers/CSharp/Portable/Binder/Binder_Expressions.cs",
+   "line": 12011,
+   "text": "if (Compilation.LanguageVersion < LanguageVersion.CSharp13)"
+  },
+  {
+   "file": "src/Compilers/CSharp/Portable/Binder/Binder_Flags.cs",
+   "line": 119,
+   "text": "return isIteratorBody && compilation.IsFeatureEnabled(MessageID.IDS_FeatureRefUnsafeInIteratorAsync);"
+  },
+  {
+   "file": "src/Compilers/CSharp/Portable/Binder/Binder_InterpolatedString.cs",
+   "line": 32,
+   "text": "if (startText.StartsWith(\"@$\\\"\") && !Compilation.IsFeatureEnabled(MessageID.IDS_FeatureAltInterpolatedVerbatimStrings))"
+  },
+  {
+   "file": "src/Compilers/CSharp/Portable/Binder/Binder_InterpolatedString.cs",
+   "line": 53,
+   "text": "var newLinesInInterpolationsAllowed = this.Compilation.IsFeatureEnabled(MessageID.IDS_FeatureNewLinesInInterpolations);"
+  },
+  {
+   "file": "src/Compilers/CSharp/Portable/Binder/Binder_InterpolatedString.cs",
+   "line": 664,
+   "text": "else if (!Compilation.IsFeatureEnabled(MessageID.IDS_FeatureImprovedInterpolatedStrings) && diagnostics.AccumulatesDiagnostics)"
+  },
+  {
+   "file": "src/Compilers/CSharp/Portable/Binder/Binder_Lambda.cs",
+   "line": 379,
+   "text": "bool allowShadowingNames = binder.Compilation.IsFeatureEnabled(MessageID.IDS_FeatureNameShadowingInNestedFunctions);"
+  },
+  {
+   "file": "src/Compilers/CSharp/Portable/Binder/Binder_NameConflicts.cs",
+   "line": 121,
+   "text": "bool allowShadowing = Compilation.IsFeatureEnabled(MessageID.IDS_FeatureNameShadowingInNestedFunctions);"
+  },
+  {
+   "file": "src/Compilers/CSharp/Portable/Binder/Binder_Operators.cs",
+   "line": 348,
+   "text": "!node.IsFeatureEnabled(MessageID.IDS_FeatureUserDefinedCompoundAssignmentOperators))"
+  },
+  {
+   "file": "src/Compilers/CSharp/Portable/Binder/Binder_Operators.cs",
+   "line": 3461,
+   "text": "!node.IsFeatureEnabled(MessageID.IDS_FeatureUserDefinedCompoundAssignmentOperators))"
+  },
+  {
+   "file": "src/Compilers/CSharp/Portable/Binder/Binder_Operators.cs",
+   "line": 4179,
+   "text": "Compilation.IsFeatureEnabled(MessageID.IDS_FeatureUnsafeEvolution) &&"
+  },
+  {
+   "file": "src/Compilers/CSharp/Portable/Binder/Binder_Operators.cs",
+   "line": 4835,
+   "text": "((CSharpParseOptions)node.SyntaxTree.Options).IsFeatureEnabled(MessageID.IDS_FeaturePatternMatching))"
+  },
+  {
+   "file": "src/Compilers/CSharp/Portable/Binder/Binder_Operators.cs",
+   "line": 4853,
+   "text": "if (((CSharpParseOptions)node.SyntaxTree.Options).IsFeatureEnabled(MessageID.IDS_FeaturePatternMatching) &&"
+  },
+  {
+   "file": "src/Compilers/CSharp/Portable/Binder/Binder_Operators.cs",
+   "line": 4884,
+   "text": "if (wasUnderscore && ((CSharpParseOptions)node.SyntaxTree.Options).IsFeatureEnabled(MessageID.IDS_FeatureRecursivePatterns))"
+  },
+  {
+   "file": "src/Compilers/CSharp/Portable/Binder/Binder_Patterns.cs",
+   "line": 725,
+   "text": "if (Compilation.LanguageVersion < requiredVersion && !patternExpressionConversion.IsImplicit)"
+  },
+  {
+   "file": "src/Compilers/CSharp/Portable/Binder/Binder_Patterns.cs",
+   "line": 1463,
+   "text": "if (Compilation.LanguageVersion < MessageID.IDS_FeatureRecursivePatterns.RequiredVersion())"
+  },
+  {
+   "file": "src/Compilers/CSharp/Portable/Binder/Binder_Patterns.cs",
+   "line": 1546,
+   "text": "|| (inputType.IsPointerType() && Compilation.LanguageVersion < MessageID.IDS_FeatureRecursivePatterns.RequiredVersion()))"
+  },
+  {
+   "file": "src/Compilers/CSharp/Portable/Binder/Binder_Statements.cs",
+   "line": 270,
+   "text": "else if (InUnsafeRegion && Compilation.IsFeatureEnabled(MessageID.IDS_FeatureRefUnsafeInIteratorAsync))"
+  },
+  {
+   "file": "src/Compilers/CSharp/Portable/Binder/Binder_Statements.cs",
+   "line": 396,
+   "text": "if (Compilation.LanguageVersion < MessageID.IDS_FeatureSwitchExpression.RequiredVersion())"
+  },
+  {
+   "file": "src/Compilers/CSharp/Portable/Binder/Binder_Statements.cs",
+   "line": 1294,
+   "text": "bool extensibleFixedEnabled = ((CSharpParseOptions)initializerOpt.SyntaxTree.Options)?.IsFeatureEnabled(MessageID.IDS_FeatureExtensibleFixedStatement) != false;"
+  },
+  {
+   "file": "src/Compilers/CSharp/Portable/Binder/Binder_Statements.cs",
+   "line": 2535,
+   "text": "syntax.IsFeatureEnabled(MessageID.IDS_FeatureInferredDelegateType))"
+  },
+  {
+   "file": "src/Compilers/CSharp/Portable/Binder/Binder_Symbols.cs",
+   "line": 754,
+   "text": "bool includeNullability = Compilation.IsFeatureEnabled(MessageID.IDS_FeatureNullableReferenceTypes);"
+  },
+  {
+   "file": "src/Compilers/CSharp/Portable/Binder/Binder_Symbols.cs",
+   "line": 952,
+   "text": "if (Compilation.LanguageVersion < MessageID.IDS_FeatureDynamic.RequiredVersion())"
+  },
+  {
+   "file": "src/Compilers/CSharp/Portable/Binder/Binder_Symbols.cs",
+   "line": 1390,
+   "text": "var binder = !Compilation.IsFeatureEnabled(MessageID.IDS_FeatureUsingTypeAlias)"
+  },
+  {
+   "file": "src/Compilers/CSharp/Portable/Binder/Binder_Symbols.cs",
+   "line": 1653,
+   "text": "bool includeNullability = Compilation.IsFeatureEnabled(MessageID.IDS_FeatureNullableReferenceTypes);"
+  },
+  {
+   "file": "src/Compilers/CSharp/Portable/Binder/DecisionDagBuilder_CheckOrReachability.cs",
+   "line": 90,
+   "text": "return compilation.LanguageVersion >= LanguageVersion.CSharp14;"
+  },
+  {
+   "file": "src/Compilers/CSharp/Portable/Binder/Semantics/Conversions/ConversionsBase.cs",
+   "line": 3969,
+   "text": "return Compilation?.IsFeatureEnabled(MessageID.IDS_FeatureFirstClassSpan) != false;"
+  },
+  {
+   "file": "src/Compilers/CSharp/Portable/Binder/Semantics/OverloadResolution/MethodTypeInference.cs",
+   "line": 1827,
+   "text": "return _compilation?.IsFeatureEnabled(MessageID.IDS_FeatureFirstClassSpan) != false;"
+  },
+  {
+   "file": "src/Compilers/CSharp/Portable/Binder/Semantics/OverloadResolution/MethodTypeInference.cs",
+   "line": 1836,
+   "text": "return _compilation?.IsFeatureEnabled(MessageID.IDS_FeatureTypeParameterInferenceFromConstraints) != false;"
+  },
+  {
+   "file": "src/Compilers/CSharp/Portable/Binder/Semantics/OverloadResolution/OverloadResolution.cs",
+   "line": 1323,
+   "text": "(binder.Compilation.LanguageVersion > LanguageVersion.CSharp12 || member.ContainingModule == binder.Compilation.SourceModule)))"
+  },
+  {
+   "file": "src/Compilers/CSharp/Portable/Binder/Semantics/OverloadResolution/OverloadResolution.cs",
+   "line": 1862,
+   "text": "if (!Compilation.IsFeatureEnabled(MessageID.IDS_FeatureOverloadResolutionPriority))"
+  },
+  {
+   "file": "src/Compilers/CSharp/Portable/Binder/Semantics/OverloadResolution/OverloadResolution.cs",
+   "line": 2976,
+   "text": "if (_binder.Compilation.IsFeatureEnabled(MessageID.IDS_FeatureImprovedInterpolatedStrings) &&"
+  },
+  {
+   "file": "src/Compilers/CSharp/Portable/Binder/Semantics/OverloadResolution/OverloadResolution.cs",
+   "line": 3058,
+   "text": "if (Compilation.LanguageVersion < LanguageVersion.CSharp13)"
+  },
+  {
+   "file": "src/Compilers/CSharp/Portable/Binder/Semantics/OverloadResolution/OverloadResolution.cs",
+   "line": 3499,
+   "text": "if (Compilation.IsFeatureEnabled(MessageID.IDS_FeatureFirstClassSpan))"
+  },
+  {
+   "file": "src/Compilers/CSharp/Portable/Binder/Semantics/OverloadResolution/OverloadResolution.cs",
+   "line": 3985,
+   "text": "if (argRefKind == RefKind.Ref && binder.Compilation.IsFeatureEnabled(MessageID.IDS_FeatureRefReadonlyParameters))"
+  },
+  {
+   "file": "src/Compilers/CSharp/Portable/Binder/Semantics/OverloadResolution/OverloadResolution.cs",
+   "line": 4032,
+   "text": "if (compilation.IsFeatureEnabled(MessageID.IDS_FeatureRefReadonlyParameters) &&"
+  },
+  {
+   "file": "src/Compilers/CSharp/Portable/Binder/Semantics/OverloadResolution/OverloadResolutionResult.cs",
+   "line": 1295,
+   "text": "!(refArg == RefKind.Ref && refParameter == RefKind.In && binder.Compilation.IsFeatureEnabled(MessageID.IDS_FeatureRefReadonlyParameters)) &&"
+  },
+  {
+   "file": "src/Compilers/CSharp/Portable/Binder/Semantics/OverloadResolution/OverloadResolutionResult.cs",
+   "line": 1306,
+   "text": "else if (refArg == RefKind.Ref && refParameter == RefKind.In && !binder.Compilation.IsFeatureEnabled(MessageID.IDS_FeatureRefReadonlyParameters))"
+  },
+  {
+   "file": "src/Compilers/CSharp/Portable/Binder/SwitchBinder.cs",
+   "line": 39,
+   "text": "((CSharpParseOptions)SwitchSyntax.SyntaxTree.Options)?.IsFeatureEnabled(MessageID.IDS_FeaturePatternMatching) != false;"
+  }
+ ],
+ "versions": [
+  "Preview",
+  "1",
+  "2",
+  "3",
+  "4",
+  "5",
+  "6",
+  "7",
+  "7.1",
+  "7.2",
+  "7.3",
+  "8",
+  "9",
+  "10",
+  "11",
+  "12",
+  "13",
+  "14",
+  "15"
+ ]
+}
