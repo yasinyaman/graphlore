@@ -1,0 +1,1140 @@
+{
+ "c": {
+  "cast_expression.type": {
+   "example": "",
+   "read": 5,
+   "seen": 5
+  },
+  "declaration.type": {
+   "example": "cJSON.c:1350  printbuffer p = { 0, 0, 0, 0, 0, 0, { 0, 0, 0 } };",
+   "read": 5,
+   "seen": 60
+  },
+  "field_declaration.type": {
+   "example": "",
+   "read": 3,
+   "seen": 3
+  },
+  "function_definition.type": {
+   "example": "",
+   "read": 4,
+   "seen": 4
+  },
+  "parameter_declaration.type": {
+   "example": "",
+   "read": 36,
+   "seen": 36
+  },
+  "type_definition.declarator": {
+   "example": "cJSON.c:487  } printbuffer;",
+   "read": 0,
+   "seen": 10
+  }
+ },
+ "c/c++ header": {
+  "alias_declaration.type": {
+   "example": "",
+   "read": 23,
+   "seen": 23
+  },
+  "alignof_expression.type": {
+   "example": "util/no_destructor.h:29  alignof(NoDestructor<InstanceType>) % alignof(InstanceType) == 0,",
+   "read": 0,
+   "seen": 1
+  },
+  "base_class_clause.-": {
+   "example": "include/cpr/async_wrapper.h:81  class AsyncWrapper<T, true> : public AsyncWrapper<T, false> {",
+   "read": 18,
+   "seen": 27
+  },
+  "cast_expression.type": {
+   "example": "",
+   "read": 98,
+   "seen": 98
+  },
+  "compound_literal_expression.type": {
+   "example": "include/cpr/api.h:96  return Response{};",
+   "read": 1,
+   "seen": 6
+  },
+  "declaration.type": {
+   "example": "include/cpr/api.h:336  MultiPerform multiperform;",
+   "read": 248,
+   "seen": 409
+  },
+  "dependent_type.-": {
+   "example": "",
+   "read": 4,
+   "seen": 4
+  },
+  "field_declaration.type": {
+   "example": "include/cpr/async.h:36  static GlobalThreadPool* GetInstance(boost::asio::io_context& context);",
+   "read": 195,
+   "seen": 321
+  },
+  "for_range_loop.type": {
+   "example": "include/cpr/range.h:32  for (Range const range : ranges) {",
+   "read": 0,
+   "seen": 1
+  },
+  "friend_declaration.-": {
+   "example": "include/cpr/async_wrapper.h:23  friend class AsyncWrapper<T, true>;",
+   "read": 2,
+   "seen": 18
+  },
+  "function_declarator.declarator": {
+   "example": "tests/unity/extras/fixture/src/unity_fixture_internals.h:25  typedef void unityfunction(void);",
+   "read": 0,
+   "seen": 2
+  },
+  "function_definition.type": {
+   "example": "",
+   "read": 150,
+   "seen": 150
+  },
+  "new_expression.type": {
+   "example": "",
+   "read": 2,
+   "seen": 2
+  },
+  "offsetof_expression.type": {
+   "example": "util/no_destructor.h:26  offsetof(NoDestructor, instance_storage_) % alignof(InstanceType) == 0,",
+   "read": 0,
+   "seen": 1
+  },
+  "optional_parameter_declaration.type": {
+   "example": "",
+   "read": 8,
+   "seen": 8
+  },
+  "optional_type_parameter_declaration.default_type": {
+   "example": "include/cpr/util.h:26  template <typename T = ProgressCallback>",
+   "read": 0,
+   "seen": 1
+  },
+  "parameter_declaration.type": {
+   "example": "include/cpr/api.h:106  template <session_action_t SessionAction, typename T, typename... Ts>",
+   "read": 1283,
+   "seen": 1291
+  },
+  "parameter_pack_expansion.pattern": {
+   "example": "include/cpr/api.h:337  priv::setup_multiperform<Ts...>(multiperform, std::forward<Ts>(ts)...);",
+   "read": 1,
+   "seen": 16
+  },
+  "parenthesized_declarator.-": {
+   "example": "tests/unity/src/unity_internals.h:319  typedef void (*UnityTestFunction)(void);",
+   "read": 0,
+   "seen": 1
+  },
+  "template_function.arguments": {
+   "example": "include/cpr/api.h:385  priv::setup_multiasync<&cpr::Session::Put>(ret, std::forward<Ts>(ts)...);",
+   "read": 3,
+   "seen": 61
+  },
+  "template_method.arguments": {
+   "example": "include/cpr/body.h:24  Body(const Buffer& buffer) : StringHolder<Body>(reinterpret_cast<const char*>(buffer.data), static_c",
+   "read": 2,
+   "seen": 25
+  },
+  "trailing_return_type.-": {
+   "example": "include/cpr/threadpool.h:223  const auto task = std::make_shared<std::packaged_task<RetType()>>([fn = std::forward<Fn>(fn), argume",
+   "read": 2,
+   "seen": 3
+  },
+  "type_definition.declarator": {
+   "example": "cJSON.h:132  typedef int cJSON_bool;",
+   "read": 0,
+   "seen": 103
+  },
+  "type_definition.type": {
+   "example": "tests/unity/src/unity_internals.h:220  typedef UNITY_FLOAT UNITY_DOUBLE;",
+   "read": 0,
+   "seen": 7
+  },
+  "variadic_parameter_declaration.type": {
+   "example": "include/cpr/api.h:276  [](fs::path local_path_, Ts... ts_) {",
+   "read": 56,
+   "seen": 71
+  },
+  "variadic_type_parameter_declaration.-": {
+   "example": "include/cpr/api.h:382  template <typename... Ts>",
+   "read": 0,
+   "seen": 56
+  }
+ },
+ "cpp": {
+  "alias_declaration.type": {
+   "example": "",
+   "read": 7,
+   "seen": 7
+  },
+  "alignof_expression.type": {
+   "example": "util/env_posix.cc:881  static_assert(alignof(SingletonEnv<EnvType>) % alignof(EnvType) == 0,",
+   "read": 0,
+   "seen": 2
+  },
+  "base_class_clause.-": {
+   "example": "cpr/threadpool_boost_context.cpp:23  class BoostContextThreadPool final : public ThreadPoolBackend, public std::enable_shared_from_this<B",
+   "read": 17,
+   "seen": 18
+  },
+  "compound_literal_expression.type": {
+   "example": "test/post_tests.cpp:112  auto state = std::make_shared<StreamState>(StreamState{\"owned data\"});",
+   "read": 0,
+   "seen": 2
+  },
+  "declaration.type": {
+   "example": "cpr/threadpool_builtin.cpp:141  Worker& worker = workers.back();",
+   "read": 94,
+   "seen": 215
+  },
+  "field_declaration.type": {
+   "example": "db/skiplist_test.cc:326  ReaderState state_ GUARDED_BY(mu_);",
+   "read": 78,
+   "seen": 83
+  },
+  "for_range_loop.type": {
+   "example": "test/multiasync_tests.cpp:114  for (AsyncResponseC& resp : resps) {",
+   "read": 0,
+   "seen": 1
+  },
+  "function_definition.type": {
+   "example": "",
+   "read": 33,
+   "seen": 33
+  },
+  "new_expression.type": {
+   "example": "",
+   "read": 103,
+   "seen": 103
+  },
+  "offsetof_expression.type": {
+   "example": "util/env_posix.cc:879  offsetof(SingletonEnv<EnvType>, env_storage_) % alignof(EnvType) == 0,",
+   "read": 0,
+   "seen": 2
+  },
+  "parameter_declaration.type": {
+   "example": "",
+   "read": 399,
+   "seen": 399
+  },
+  "parenthesized_declarator.-": {
+   "example": "table/two_level_iterator.cc:16  typedef Iterator* (*BlockFunction)(void*, const ReadOptions&, const Slice&);",
+   "read": 0,
+   "seen": 1
+  },
+  "pointer_type_declarator.declarator": {
+   "example": "benchmarks/db_bench.cc:711  void (Benchmark::*method)(ThreadState*)) {",
+   "read": 0,
+   "seen": 2
+  },
+  "template_function.arguments": {
+   "example": "cpr/threadpool.cpp:59  ThreadPool::ThreadPool(boost::asio::io_context& context, size_t minThreadCount, size_t maxThreadCoun",
+   "read": 1,
+   "seen": 77
+  },
+  "type_definition.declarator": {
+   "example": "db/db_test.cc:2105  typedef std::map<std::string, std::string> KVMap;",
+   "read": 0,
+   "seen": 5
+  },
+  "type_definition.type": {
+   "example": "db/version_set.cc:586  typedef std::set<FileMetaData*, BySmallestKey> FileSet;",
+   "read": 0,
+   "seen": 3
+  }
+ },
+ "csharp": {
+  "array_creation_expression.type": {
+   "example": "src/CommandLine/Core/PreprocessorGuards.cs:36  ? new Error[] { new VersionRequestedError() }",
+   "read": 0,
+   "seen": 30
+  },
+  "as_expression.right": {
+   "example": "",
+   "read": 4,
+   "seen": 4
+  },
+  "base_list.-": {
+   "example": "",
+   "read": 255,
+   "seen": 255
+  },
+  "cast_expression.type": {
+   "example": "",
+   "read": 330,
+   "seen": 330
+  },
+  "conversion_operator_declaration.type": {
+   "example": "",
+   "read": 2,
+   "seen": 2
+  },
+  "declaration_pattern.type": {
+   "example": "",
+   "read": 21,
+   "seen": 21
+  },
+  "default_expression.type": {
+   "example": "",
+   "read": 2,
+   "seen": 2
+  },
+  "delegate_declaration.type": {
+   "example": "src/RestSharp/Response/RestResponse.cs:100  public delegate ResponseStatus CalculateResponseStatus(HttpResponseMessage httpResponse);",
+   "read": 0,
+   "seen": 1
+  },
+  "foreach_statement.type": {
+   "example": "tests/CommandLine.Tests/Unit/Issue6Tests.cs:71  foreach (Error e in errors)",
+   "read": 0,
+   "seen": 2
+  },
+  "indexer_declaration.type": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "invocation_expression.function": {
+   "example": "",
+   "read": 78,
+   "seen": 78
+  },
+  "lambda_expression.type": {
+   "example": "",
+   "read": 2,
+   "seen": 2
+  },
+  "local_function_statement.type": {
+   "example": "",
+   "read": 8,
+   "seen": 8
+  },
+  "method_declaration.returns": {
+   "example": "",
+   "read": 529,
+   "seen": 529
+  },
+  "object_creation_expression.type": {
+   "example": "",
+   "read": 1913,
+   "seen": 1913
+  },
+  "parameter.type": {
+   "example": "demo/ReadText.Demo/Program.cs:46  (TailOptions opts) => Tuple.Create(header(opts), reader(opts)),",
+   "read": 927,
+   "seen": 972
+  },
+  "parameter_list.type": {
+   "example": "",
+   "read": 3,
+   "seen": 3
+  },
+  "property_declaration.type": {
+   "example": "",
+   "read": 291,
+   "seen": 291
+  },
+  "receiver_parameter.type": {
+   "example": "src/RestSharp/Response/ResponseThrowExtension.cs:26  extension<T>(RestResponse<T> response) {",
+   "read": 25,
+   "seen": 26
+  },
+  "type_parameter_constraint.type": {
+   "example": "",
+   "read": 2,
+   "seen": 2
+  },
+  "typeof_expression.type": {
+   "example": "",
+   "read": 194,
+   "seen": 194
+  },
+  "variable_declaration.type": {
+   "example": "",
+   "read": 164,
+   "seen": 164
+  }
+ },
+ "go": {
+  "argument_list.-": {
+   "example": "middleware/compress.go:99  encoders:         make(map[string]EncoderFunc),",
+   "read": 1,
+   "seen": 40
+  },
+  "composite_literal.type": {
+   "example": "_examples/rest/main.go:464  var users = []*User{",
+   "read": 1007,
+   "seen": 1058
+  },
+  "const_spec.type": {
+   "example": "middleware/request_id.go:21  const RequestIDKey ctxKeyRequestID = 0",
+   "read": 0,
+   "seen": 7
+  },
+  "field_declaration.type": {
+   "example": "",
+   "read": 134,
+   "seen": 134
+  },
+  "func_literal.result": {
+   "example": "middleware/deprecation_test.go:96  h := serve(t, func(next http.Handler) http.Handler {",
+   "read": 24,
+   "seen": 81
+  },
+  "function_declaration.result": {
+   "example": "",
+   "read": 112,
+   "seen": 112
+  },
+  "method_declaration.result": {
+   "example": "",
+   "read": 249,
+   "seen": 249
+  },
+  "method_elem.result": {
+   "example": "",
+   "read": 8,
+   "seen": 8
+  },
+  "parameter_declaration.type": {
+   "example": "_examples/custom-handler/main.go:12  func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {",
+   "read": 692,
+   "seen": 2041
+  },
+  "type_assertion_expression.type": {
+   "example": "",
+   "read": 113,
+   "seen": 113
+  },
+  "type_constraint.-": {
+   "example": "",
+   "read": 2,
+   "seen": 2
+  },
+  "type_elem.-": {
+   "example": "",
+   "read": 4,
+   "seen": 4
+  },
+  "type_spec.type": {
+   "example": "chi.go:140  type Middlewares []func(http.Handler) http.Handler",
+   "read": 0,
+   "seen": 8
+  },
+  "var_spec.type": {
+   "example": "",
+   "read": 73,
+   "seen": 73
+  },
+  "variadic_parameter_declaration.type": {
+   "example": "_examples/router-walk/main.go:28  walkFunc := func(method string, route string, handler http.Handler, middlewares ...func(http.Handler",
+   "read": 37,
+   "seen": 44
+  }
+ },
+ "java": {
+  "annotation_type_element_declaration.type": {
+   "example": "src/main/java/org/example/realworldapi/infrastructure/web/security/annotation/Secured.java:14  Role[] value() default {};",
+   "read": 1,
+   "seen": 2
+  },
+  "array_creation_expression.type": {
+   "example": "gson/src/test/java/com/google/gson/JsonArrayAsListTest.java:357  array = new JsonElement[] {null, new JsonPrimitive(2)};",
+   "read": 13,
+   "seen": 48
+  },
+  "cast_expression.type": {
+   "example": "",
+   "read": 315,
+   "seen": 315
+  },
+  "catch_type.-": {
+   "example": "",
+   "read": 18,
+   "seen": 18
+  },
+  "class_literal.-": {
+   "example": "extras/src/test/java/com/google/gson/interceptors/InterceptorTest.java:179  @Intercept(postDeserialize = AddressValidator.class)",
+   "read": 405,
+   "seen": 1609
+  },
+  "constant_declaration.type": {
+   "example": "gson/src/main/java/com/google/gson/ReflectionAccessFilter.java:206  ReflectionAccessFilter BLOCK_ALL_PLATFORM =",
+   "read": 0,
+   "seen": 4
+  },
+  "enhanced_for_statement.type": {
+   "example": "extras/src/main/java/com/google/gson/typeadapters/RuntimeTypeAdapterFactory.java:324  for (Map.Entry<String, JsonElement> e : jsonObject.entrySet()) {",
+   "read": 14,
+   "seen": 72
+  },
+  "extends_interfaces.-": {
+   "example": "",
+   "read": 6,
+   "seen": 6
+  },
+  "field_declaration.type": {
+   "example": "",
+   "read": 956,
+   "seen": 956
+  },
+  "formal_parameter.type": {
+   "example": "",
+   "read": 2013,
+   "seen": 2013
+  },
+  "instanceof_expression.right": {
+   "example": "",
+   "read": 121,
+   "seen": 121
+  },
+  "local_variable_declaration.type": {
+   "example": "",
+   "read": 4107,
+   "seen": 4107
+  },
+  "method_declaration.type": {
+   "example": "",
+   "read": 1475,
+   "seen": 1475
+  },
+  "method_invocation.type_arguments": {
+   "example": "",
+   "read": 6,
+   "seen": 6
+  },
+  "object_creation_expression.type": {
+   "example": "",
+   "read": 4304,
+   "seen": 4304
+  },
+  "spread_parameter.-": {
+   "example": "gson/src/main/java/com/google/gson/GsonBuilder.java:489  public GsonBuilder setExclusionStrategies(ExclusionStrategy... strategies) {",
+   "read": 2,
+   "seen": 12
+  },
+  "super_interfaces.-": {
+   "example": "",
+   "read": 287,
+   "seen": 287
+  },
+  "superclass.-": {
+   "example": "",
+   "read": 281,
+   "seen": 281
+  },
+  "throws.-": {
+   "example": "gson/src/main/java/com/google/gson/Gson.java:1212  public <T> T fromJson(JsonElement json, TypeToken<T> typeOfT) throws JsonSyntaxException {",
+   "read": 1,
+   "seen": 62
+  },
+  "type_bound.-": {
+   "example": "",
+   "read": 3,
+   "seen": 3
+  }
+ },
+ "kotlin": {
+  "annotation.-": {
+   "example": "interop/kotlin-metadata/src/test/kotlin/com/squareup/kotlinpoet/metadata/specs/KotlinPoetMetadataSpecsTest.kt:2000  input2: @TypeAnnotation (@TypeAnnotation Int) -> @TypeAnnotation String,",
+   "read": 47,
+   "seen": 61
+  },
+  "as_expression.-": {
+   "example": "",
+   "read": 40,
+   "seen": 40
+  },
+  "call_suffix.-": {
+   "example": "",
+   "read": 288,
+   "seen": 288
+  },
+  "callable_reference.-": {
+   "example": "",
+   "read": 187,
+   "seen": 187
+  },
+  "catch_block.-": {
+   "example": "",
+   "read": 11,
+   "seen": 11
+  },
+  "check_expression.-": {
+   "example": "",
+   "read": 36,
+   "seen": 36
+  },
+  "class_declaration.-": {
+   "example": "clikt/src/commonMain/kotlin/com/github/ajalt/clikt/command/CoreChainedCliktCommand.kt:12  abstract class CoreChainedCliktCommand<T>(",
+   "read": 27,
+   "seen": 955
+  },
+  "class_parameter.-": {
+   "example": "",
+   "read": 213,
+   "seen": 213
+  },
+  "constructor_invocation.-": {
+   "example": "interop/kotlin-metadata/src/test/kotlin/com/squareup/kotlinpoet/metadata/specs/FacadeFile.kt:17  @file:FileAnnotation(\"file annotations!\")",
+   "read": 590,
+   "seen": 591
+  },
+  "delegation_specifier.-": {
+   "example": "",
+   "read": 202,
+   "seen": 202
+  },
+  "explicit_delegation.-": {
+   "example": "",
+   "read": 20,
+   "seen": 20
+  },
+  "function_declaration.-": {
+   "example": "clikt/src/commonMain/kotlin/com/github/ajalt/clikt/sources/ValueSource.kt:86  fun envvarKey(): (Context, Option) -> String = { context, option ->",
+   "read": 851,
+   "seen": 855
+  },
+  "object_declaration.-": {
+   "example": "clikt/src/commonMain/kotlin/com/github/ajalt/clikt/completion/BashCompletionGenerator.kt:7  internal object BashCompletionGenerator {",
+   "read": 0,
+   "seen": 34
+  },
+  "parameter.-": {
+   "example": "",
+   "read": 828,
+   "seen": 828
+  },
+  "receiver_type.-": {
+   "example": "clikt/src/commonMain/kotlin/com/github/ajalt/clikt/command/CoreChainedCliktCommand.kt:74  fun <T> CoreChainedCliktCommand<T>.parse(argv: List<String>, initial: T): T {",
+   "read": 172,
+   "seen": 373
+  },
+  "this_expression.-": {
+   "example": "clikt/src/commonMain/kotlin/com/github/ajalt/clikt/core/BaseCliktCommand.kt:355  append(\"<${this@BaseCliktCommand.classSimpleName()} name=$commandName\")",
+   "read": 0,
+   "seen": 7
+  },
+  "type_alias.-": {
+   "example": "clikt/src/commonMain/kotlin/com/github/ajalt/clikt/core/Context.kt:12  typealias MessageEchoer = (context: Context, message: Any?, trailingNewline: Boolean, err: Boolean) ",
+   "read": 8,
+   "seen": 31
+  },
+  "type_test.-": {
+   "example": "",
+   "read": 77,
+   "seen": 77
+  },
+  "variable_declaration.-": {
+   "example": "",
+   "read": 303,
+   "seen": 303
+  }
+ },
+ "php": {
+  "anonymous_function.return_type": {
+   "example": "src/Middleware.php:298  return static function (callable $handler): PrepareBodyMiddleware {",
+   "read": 0,
+   "seen": 12
+  },
+  "base_clause.-": {
+   "example": "",
+   "read": 218,
+   "seen": 218
+  },
+  "catch_clause.type": {
+   "example": "",
+   "read": 155,
+   "seen": 155
+  },
+  "class_interface_clause.-": {
+   "example": "",
+   "read": 67,
+   "seen": 67
+  },
+  "function_definition.return_type": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "method_declaration.return_type": {
+   "example": "",
+   "read": 140,
+   "seen": 140
+  },
+  "property_declaration.type": {
+   "example": "",
+   "read": 62,
+   "seen": 62
+  },
+  "property_promotion_parameter.type": {
+   "example": "",
+   "read": 17,
+   "seen": 17
+  },
+  "simple_parameter.type": {
+   "example": "src/Cookie/CookieJar.php:444  static function (SetCookie $stored) use ($cookie): bool {",
+   "read": 427,
+   "seen": 532
+  },
+  "variadic_parameter.type": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  }
+ },
+ "python": {
+  "assignment.type": {
+   "example": "",
+   "read": 40,
+   "seen": 40
+  },
+  "function_definition.return_type": {
+   "example": "",
+   "read": 207,
+   "seen": 207
+  },
+  "typed_default_parameter.type": {
+   "example": "",
+   "read": 116,
+   "seen": 116
+  },
+  "typed_parameter.type": {
+   "example": "",
+   "read": 341,
+   "seen": 341
+  }
+ },
+ "rust": {
+  "closure_expression.return_type": {
+   "example": "src/http/users.rs:234  Ok(tokio::task::spawn_blocking(move || -> Result<()> {",
+   "read": 1,
+   "seen": 3
+  },
+  "const_item.type": {
+   "example": "",
+   "read": 15,
+   "seen": 15
+  },
+  "field_declaration.type": {
+   "example": "",
+   "read": 463,
+   "seen": 463
+  },
+  "function_item.return_type": {
+   "example": "",
+   "read": 2147,
+   "seen": 2147
+  },
+  "function_signature_item.return_type": {
+   "example": "",
+   "read": 34,
+   "seen": 34
+  },
+  "generic_function.type_arguments": {
+   "example": "",
+   "read": 64,
+   "seen": 64
+  },
+  "impl_item.trait": {
+   "example": "",
+   "read": 297,
+   "seen": 297
+  },
+  "impl_item.type": {
+   "example": "src/app/users.rs:126  impl UserResponse {",
+   "read": 31,
+   "seen": 754
+  },
+  "let_declaration.type": {
+   "example": "",
+   "read": 53,
+   "seen": 53
+  },
+  "ordered_field_declaration_list.type": {
+   "example": "",
+   "read": 128,
+   "seen": 128
+  },
+  "parameter.type": {
+   "example": "crates/matcher/src/lib.rs:785  .map(|r: Result<(), ()>| r.unwrap())",
+   "read": 1087,
+   "seen": 1091
+  },
+  "parameters.-": {
+   "example": "src/unversioned/transport/mod.rs:242  dyn Fn(&ConnectionDetails) -> Result<Box<dyn Transport>, Error> + Send + Sync;",
+   "read": 40,
+   "seen": 41
+  },
+  "static_item.type": {
+   "example": "",
+   "read": 2,
+   "seen": 2
+  },
+  "struct_pattern.type": {
+   "example": "crates/core/flags/lowargs.rs:409  ContextMode::Limited(ContextModeLimited {",
+   "read": 0,
+   "seen": 14
+  },
+  "trait_bounds.-": {
+   "example": "crates/matcher/src/lib.rs:551  type Captures: Captures;",
+   "read": 198,
+   "seen": 200
+  },
+  "type_cast_expression.type": {
+   "example": "",
+   "read": 2,
+   "seen": 2
+  },
+  "type_item.type": {
+   "example": "",
+   "read": 159,
+   "seen": 159
+  },
+  "where_predicate.left": {
+   "example": "",
+   "read": 24,
+   "seen": 24
+  }
+ },
+ "scala": {
+  "ascription_expression.type": {
+   "example": "requests/test/src/requests/ResourceLeakTests.scala:67  requests.post(url, data = (s\"request\": requests.RequestBlob), connectTimeout = 31337)",
+   "read": 0,
+   "seen": 1
+  },
+  "binding.type": {
+   "example": "shared/src/test/scala/scopttest/MonadicParserSpec.scala:221  opt[Unit]('f', \"foo\").action((x, c: Config) => c.copy(flag = true))",
+   "read": 0,
+   "seen": 2
+  },
+  "case_class_pattern.type": {
+   "example": "",
+   "read": 23,
+   "seen": 23
+  },
+  "class_parameter.type": {
+   "example": "",
+   "read": 29,
+   "seen": 29
+  },
+  "context_bound.type": {
+   "example": "",
+   "read": 26,
+   "seen": 26
+  },
+  "extends_clause.type": {
+   "example": "requests/src/requests/Model.scala:161  case class MultiPart(items: MultiItem*) extends RequestBlob.MultipartFormRequestBlob(items)",
+   "read": 48,
+   "seen": 51
+  },
+  "function_declaration.return_type": {
+   "example": "",
+   "read": 4,
+   "seen": 4
+  },
+  "function_definition.return_type": {
+   "example": "",
+   "read": 112,
+   "seen": 112
+  },
+  "generic_function.type_arguments": {
+   "example": "",
+   "read": 57,
+   "seen": 57
+  },
+  "instance_expression.-": {
+   "example": "requests/test/src/requests/RequestTests.scala:314  data = new RequestBlob.ByteSourceRequestBlob(str),",
+   "read": 91,
+   "seen": 185
+  },
+  "parameter.type": {
+   "example": "",
+   "read": 75,
+   "seen": 75
+  },
+  "parameter_types.-": {
+   "example": "",
+   "read": 4,
+   "seen": 4
+  },
+  "repeated_parameter_type.type": {
+   "example": "",
+   "read": 4,
+   "seen": 4
+  },
+  "type_definition.type": {
+   "example": "js/src/main/scala/PlatformReadInstances.scala:20  type ParseException = scopt.ParseException",
+   "read": 0,
+   "seen": 2
+  },
+  "typed_pattern.type": {
+   "example": "",
+   "read": 6,
+   "seen": 6
+  },
+  "upper_bound.type": {
+   "example": "",
+   "read": 2,
+   "seen": 2
+  },
+  "val_definition.type": {
+   "example": "requests/test/src/requests/ServerUtils.scala:32  val c: Compress =",
+   "read": 47,
+   "seen": 91
+  },
+  "var_definition.type": {
+   "example": "requests/src/requests/Requester.scala:216  var streamHeaders: StreamHeaders = null",
+   "read": 1,
+   "seen": 2
+  }
+ },
+ "swift": {
+  "class_declaration.-": {
+   "example": "",
+   "read": 853,
+   "seen": 853
+  },
+  "constructor_expression.constructed_type": {
+   "example": "Source/Core/DataRequest.swift:223  let result = AFResult<Data?>(value: self.data, error: self.error)",
+   "read": 131,
+   "seen": 247
+  },
+  "guard_statement.condition": {
+   "example": "Source/Features/AuthenticationInterceptor.swift:339  guard let (credential, credentialVersion): (Credential, Int) = mutableState.read({ mutableState in",
+   "read": 0,
+   "seen": 3
+  },
+  "if_statement.condition": {
+   "example": "Sources/ArgumentParser/Parsable Types/ParsableArguments.swift:282  if case Optional<Any>.none = value {",
+   "read": 0,
+   "seen": 1
+  },
+  "navigation_expression.element": {
+   "example": "Sources/ArgumentParserTestHelpers/TestHelpers+SwiftTesting.swift:546  let error = try #require(throws: (any Error).self) {",
+   "read": 0,
+   "seen": 248
+  },
+  "navigation_expression.target": {
+   "example": "Tests/ServerTrustEvaluatorTests.swift:1286  let keys = [TestCertificates.rootCA].af.publicKeys",
+   "read": 13,
+   "seen": 32
+  },
+  "pattern.-": {
+   "example": "",
+   "read": 6,
+   "seen": 6
+  },
+  "property_declaration.-": {
+   "example": "",
+   "read": 1880,
+   "seen": 1880
+  },
+  "protocol_declaration.-": {
+   "example": "",
+   "read": 21,
+   "seen": 21
+  },
+  "protocol_property_declaration.-": {
+   "example": "Source/Core/SessionDelegate.swift:62  var cachedResponseHandler: (any CachedResponseHandler)? { get }",
+   "read": 5,
+   "seen": 24
+  },
+  "throws_clause.type": {
+   "example": "Sources/ArgumentParser/Parsing/CommandParser.swift:602  ) throws(ParserError) -> ([String], Int, String) {",
+   "read": 0,
+   "seen": 11
+  }
+ },
+ "tsx": {
+  "as_expression.-": {
+   "example": "",
+   "read": 4,
+   "seen": 4
+  },
+  "call_expression.type_arguments": {
+   "example": "",
+   "read": 18,
+   "seen": 18
+  },
+  "constraint.-": {
+   "example": "",
+   "read": 2,
+   "seen": 2
+  },
+  "property_signature.type": {
+   "example": "",
+   "read": 9,
+   "seen": 9
+  },
+  "required_parameter.type": {
+   "example": "",
+   "read": 47,
+   "seen": 47
+  },
+  "variable_declarator.type": {
+   "example": "",
+   "read": 18,
+   "seen": 18
+  }
+ },
+ "typescript": {
+  "abstract_method_signature.return_type": {
+   "example": "",
+   "read": 2,
+   "seen": 2
+  },
+  "arrow_function.return_type": {
+   "example": "source/as-promise/index.ts:139  response = await requestOptions.trackStateMutations(async changedState => hook(responseSnapshot, asy",
+   "read": 122,
+   "seen": 126
+  },
+  "as_expression.-": {
+   "example": "packages/bench/error-construction-breakdown.ts:15  const raw = () => ({ code: \"invalid_type\", expected: \"string\", input: 42, inst }) as unknown as core",
+   "read": 272,
+   "seen": 307
+  },
+  "call_expression.type_arguments": {
+   "example": "packages/zod/src/v4/classic/tests/assignability.test.ts:373  expectTypeOf<z.ZodType extends z.core.$ZodType ? true : false>().toEqualTypeOf<true>();",
+   "read": 869,
+   "seen": 879
+  },
+  "call_signature.return_type": {
+   "example": "",
+   "read": 44,
+   "seen": 44
+  },
+  "constraint.-": {
+   "example": "packages/zod/src/v4/classic/compat.ts:71  Internals extends core.$ZodTypeInternals<Output, Input> = core.$ZodTypeInternals<Output, Input>,",
+   "read": 299,
+   "seen": 360
+  },
+  "constructor_type.type": {
+   "example": "",
+   "read": 3,
+   "seen": 3
+  },
+  "default_type.-": {
+   "example": "packages/zod/src/v4/classic/compat.ts:71  Internals extends core.$ZodTypeInternals<Output, Input> = core.$ZodTypeInternals<Output, Input>,",
+   "read": 76,
+   "seen": 131
+  },
+  "extends_clause.type_arguments": {
+   "example": "",
+   "read": 75,
+   "seen": 75
+  },
+  "extends_type_clause.type": {
+   "example": "frontend/src/client/client/types.gen.ts:62  ServerSentEventsOptions<TData>,",
+   "read": 180,
+   "seen": 264
+  },
+  "function_declaration.return_type": {
+   "example": "packages/zod/src/v4/classic/compat.ts:51  export function getErrorMap(): core.$ZodErrorMap<core.$ZodIssue> | undefined {",
+   "read": 160,
+   "seen": 173
+  },
+  "function_signature.return_type": {
+   "example": "packages/zod/src/v4/classic/schemas.ts:2769  }): ZodFunction<core.$ZodFunctionIn, Out>;",
+   "read": 30,
+   "seen": 34
+  },
+  "implements_clause.-": {
+   "example": "",
+   "read": 4,
+   "seen": 4
+  },
+  "index_signature.type": {
+   "example": "",
+   "read": 71,
+   "seen": 71
+  },
+  "infer_type.-": {
+   "example": "packages/zod/src/v3/tests/firstpartyschematypes.test.ts:8  type ZodFirstPartySchemaForType<T extends ZodFirstPartyTypeKind> = ZodFirstPartySchemaTypes extends ",
+   "read": 20,
+   "seen": 21
+  },
+  "instantiation_expression.type_arguments": {
+   "example": "packages/zod/src/v4/classic/tests/assignability.test.ts:150  z.preprocess((v) => v, z.number()) satisfies z.core.$ZodPipe<z.core.$ZodTransform, z.ZodNumber>;",
+   "read": 1,
+   "seen": 2
+  },
+  "mapped_type_clause.alias": {
+   "example": "",
+   "read": 4,
+   "seen": 4
+  },
+  "mapped_type_clause.type": {
+   "example": "frontend/src/client/core/types.gen.ts:32  [K in HttpMethod]: MethodFn;",
+   "read": 28,
+   "seen": 29
+  },
+  "method_definition.return_type": {
+   "example": "packages/zod/src/v4/classic/schemas.ts:354  get _def(): core.$ZodTypeDef {",
+   "read": 211,
+   "seen": 212
+  },
+  "method_signature.return_type": {
+   "example": "packages/zod/src/v4/classic/errors.ts:15  flatten<U>(mapper: (issue: core.$ZodIssue) => U): core.$ZodFlattenedError<T, U>;",
+   "read": 169,
+   "seen": 182
+  },
+  "new_expression.type_arguments": {
+   "example": "",
+   "read": 28,
+   "seen": 28
+  },
+  "opting_type_annotation.-": {
+   "example": "packages/zod/src/v4/classic/schemas.ts:2848  properties<Shape extends { [k in keyof T as T[k] extends Function ? never : k]?: core.$ZodType<unkno",
+   "read": 3,
+   "seen": 4
+  },
+  "optional_parameter.type": {
+   "example": "source/core/index.ts:2981  request.write(chunk, encoding as any, (error?: Error | null) => { // eslint-disable-line @typescript",
+   "read": 255,
+   "seen": 470
+  },
+  "property_signature.type": {
+   "example": "packages/zod/src/v4/classic/from-json-schema.ts:28  registry: $ZodRegistry<any>;",
+   "read": 422,
+   "seen": 476
+  },
+  "public_field_definition.type": {
+   "example": "",
+   "read": 56,
+   "seen": 56
+  },
+  "required_parameter.type": {
+   "example": "typings/index.d.ts:1088  text: (context: AddHelpTextContext) => string,",
+   "read": 816,
+   "seen": 976
+  },
+  "satisfies_expression.-": {
+   "example": "packages/zod/src/v4/classic/tests/assignability.test.ts:151  z.preprocess((v) => v, z.number()) satisfies z.ZodPipe<z.core.$ZodTransform, z.ZodNumber>;",
+   "read": 61,
+   "seen": 62
+  },
+  "template_literal_type.-": {
+   "example": "",
+   "read": 1,
+   "seen": 1
+  },
+  "type_alias_declaration.value": {
+   "example": "packages/zod/src/v3/tests/firstpartyschematypes.test.ts:10  ? Schema",
+   "read": 625,
+   "seen": 637
+  },
+  "type_predicate.type": {
+   "example": "packages/zod/src/v3/tests/refine.test.ts:228  .refine((arg): arg is thirdRefinement => {",
+   "read": 15,
+   "seen": 19
+  },
+  "variable_declarator.type": {
+   "example": "packages/zod/src/v4/classic/errors.ts:77  export const ZodRealError: core.$constructor<ZodError> = /*@__PURE__*/ core.$constructor(",
+   "read": 378,
+   "seen": 468
+  }
+ }
+}
