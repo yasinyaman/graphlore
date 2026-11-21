@@ -1849,6 +1849,69 @@ What this is not: Java, C, C++, Ruby, PHP, Python. javac and clang could be
 asked the same way; neither is yet. And a compiler finds a rule read wrong
 and a position never read, not a framework's convention.
 
+### graphify's edges, checked before they count
+
+The tables at the top of this comparison take every edge of graphify's as a
+fact and ask whether the native graph has it. graphify is no judge: it
+resolves by name, and an edge only it has can be a gap of the native graph or
+an edge that should not exist. Where a compiler can be asked about a whole
+repository the question is settled per edge. `benchmarks/verify_graphify.py`
+gives each of graphify's call, base and reference edges to the same bindings
+the oracles above read (`go/types`, rust-analyzer, Roslyn): **confirmed** when
+the compiler binds the target's name, on a line the edge is seen at, to the
+declaration the edge points to (a constructor is confirmed by its class);
+**refuted** when it binds that name there to something else; **to an
+implementation** when it names a trait's method and the edge points to one
+implementation of it, which the call can run and the compiler does not pick;
+and **no answer** when it has no binding of that name there (a name only the
+repository's packages would bind, a macro's argument). Then the comparison is
+made again for each kind:
+
+```bash
+python benchmarks/verify_graphify.py /tmp/polyglot/cobra /tmp/polyglot/ripgrep /tmp/polyglot/restsharp   # Go, Rust, C# repositories
+```
+
+On the twelve repositories of the three oracles (engine 0.5.58, graphify
+0.9.111, measured 2026-11-21), over the edges between definitions both graphs
+have:
+
+| Language | edges | graphify's, compared | confirmed | refuted | to an implementation | no answer | native has, of all | of the confirmed | with an enum for its member | of the refuted |
+|---|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|
+| Go | calls | 4,506 | 4,435 | 0 | 0 | 71 | 4,492 (100%) | 4,432 (100%) | 4,432 (100%) | 0 (–) |
+| Go | bases | 14 | 12 | 0 | 0 | 2 | 14 (100%) | 12 (100%) | 12 (100%) | 0 (–) |
+| Go | references | 449 | 412 | 0 | 0 | 37 | 445 (99%) | 408 (99%) | 408 (99%) | 0 (–) |
+| Rust | calls | 3,804 | 2,609 | 481 | 53 | 661 | 3,131 (82%) | 2,579 (99%) | 2,579 (99%) | 25 (5%) |
+| Rust | bases | 158 | 147 | 0 | 0 | 11 | 153 (97%) | 142 (97%) | 142 (97%) | 0 (–) |
+| Rust | references | 2,257 | 1,575 | 54 | 0 | 628 | 1,963 (87%) | 1,396 (89%) | 1,536 (98%) | 2 (4%) |
+| C# | calls | 4,354 | 3,714 | 110 | 0 | 530 | 3,948 (91%) | 3,454 (93%) | 3,454 (93%) | 9 (8%) |
+| C# | bases | 135 | 106 | 3 | 0 | 26 | 129 (96%) | 105 (99%) | 105 (99%) | 2 (67%) |
+| C# | references | 1,751 | 1,383 | 109 | 0 | 259 | 1,612 (92%) | 1,379 (100%) | 1,379 (100%) | 16 (15%) |
+
+Read with only the confirmed edges, the picture changes where it looked
+worst. Rust calls: the native graph has 82% of graphify's, and 99% of the
+ones the compiler confirms; of the 673 it lacks, 456 are edges the compiler
+refutes (a method of the same name on another type, mostly: a call of a
+connection's `is_open()` linked to a test transport's `is_open`) and 49 point to one implementation of
+a trait's method. Rust references are 89% of the confirmed, and 98% once an
+edge to an enum's member is counted with the edge to the enum the native
+graph writes for it (its rule; 140 edges). Go was already whole. What is left
+is real and is C#'s: 260 confirmed calls the native graph does not have, 207
+of them in commandline (extension methods chained on a library's value in the
+tests, `text.ToNotEmptyLines().TrimStringArray()`, 62 edges, and edges that
+leave from a property, `Examples`) and 51 in RestSharp (`Dispose()` and
+constructors, mostly).
+
+graphify itself, by the same judge: every Go edge the compiler answers is
+confirmed; 84% of its Rust calls and 97% of its Rust references; 97% of its
+C# calls and 93% of its C# references (most of the 109 refuted are `RestResponse`
+linked to `RestResponse<T>`, the namesake 0.5.58 tells apart). Its `INFERRED`
+calls are not the weak ones: in Rust 94% of them are confirmed against 83% of
+the `EXTRACTED`.
+
+This covers three of the fourteen languages. For the others no compiler is
+asked about whole repositories yet, and their rows in the tables above still
+count every edge of graphify's.
+
 ### What is left without an edge
 
 The comparison above measures the native graph against graphify's. What the

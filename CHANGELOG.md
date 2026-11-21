@@ -38,6 +38,18 @@ All notable changes to this project are documented here. The format is based on
   engine 0.5.55 and all but 4 with 0.5.56. On ureq, ripgrep, axum-realworld
   and actix-realworld rust-analyzer has one for 11,924; 97.5% before, 98.5%
   now.
+- **graphify's edges are checked before they count**
+  (`benchmarks/verify_graphify.py`). The comparison with graphify took each
+  of its edges as a fact. For Go, Rust and C# repositories the compiler is
+  now asked about each one first (confirmed, refuted, one implementation of
+  a trait's method, no answer), and the share the native graph has is given
+  per kind. On twelve repositories the native graph has 82% of graphify's
+  Rust calls and 99% of the ones rust-analyzer confirms; 481 of graphify's
+  are refuted. The gap that stays real is C# calls: 93% of the confirmed
+  (260 edges, named in `docs/native-engine.md`).
+  `compare_engines.compare_edges(..., pairs=True)` returns every pair only
+  graphify has; `oracle_go.py` and `oracle_csharp.py` expose their bindings
+  (`uses_of`, `setup`).
 - **Roslyn as the judge of the C# edges** (`benchmarks/oracle_csharp.py`):
   the C# compiler's semantic model, on one compilation of every source of
   a repository. On todoapi, RestSharp, commandline and aspnetcore-realworld

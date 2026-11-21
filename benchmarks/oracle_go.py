@@ -118,19 +118,34 @@ def bindings(root: Path, tool: Path) -> list[dict[str, Any]]:
     return [json.loads(line) for line in done.stdout.splitlines() if line.startswith("{")]
 
 
+def uses_of(root: Path, tool: Path) -> list[dict[str, Any]]:
+    """The type checker's bindings in the shape `oracle.compare` reads."""
+    uses = []
+    for u in bindings(root, tool):
+        decls = [(u["to_file"], u["to_line"])] if u.get("to_file") else []
+        uses.append({"file": u["file"], "line": u["line"], "expr": u["expr"], "symbol": u["expr"],
+                     "decls": decls, "lib": not decls, "alias": False,
+                     "declares": (u["file"], u["line"]) in decls})
+    return uses
+
+
+def setup(tool: Path) -> str | None:
+    """Write the dumping program into `tool`; an error message when its one
+    dependency cannot be fetched."""
+    (tool / "main.go").write_text(DUMP, encoding="utf-8")
+    (tool / "go.mod").write_text("module graphlore.dev/oracle\n\ngo 1.22\n", encoding="utf-8")
+    got = subprocess.run(["go", "get", "golang.org/x/tools/go/packages@latest"], cwd=tool,
+                         capture_output=True, text=True)
+    return None if got.returncode == 0 else f"golang.org/x/tools is not reachable: {got.stderr[-300:]}"
+
+
 def judge(root: Path, tool: Path) -> dict[str, Any] | None:
-    raw = bindings(root, tool)
+    uses = uses_of(root, tool)
     files: dict[str, list[str]] = {}
     for p in sorted(root.rglob("*")):
         rel = str(p.relative_to(root))
         if p.is_file() and (p.suffix == ".go" or p.name in ("go.mod", "go.sum")) and "/." not in "/" + rel:
             files[rel] = p.read_text(encoding="utf-8", errors="replace").splitlines()
-    uses = []
-    for u in raw:
-        decls = [(u["to_file"], u["to_line"])] if u.get("to_file") else []
-        uses.append({"file": u["file"], "line": u["line"], "expr": u["expr"], "symbol": u["expr"],
-                     "decls": decls, "lib": not decls, "alias": False,
-                     "declares": (u["file"], u["line"]) in decls})
     result = oracle.compare(root.name, files, uses, slack=(-3, 3))
     if result:
         for row in result["wrong"] + result["missed"]:
@@ -146,12 +161,9 @@ def main() -> int:
     args = ap.parse_args()
     with tempfile.TemporaryDirectory() as tmp:
         tool = Path(tmp)
-        (tool / "main.go").write_text(DUMP, encoding="utf-8")
-        (tool / "go.mod").write_text("module graphlore.dev/oracle\n\ngo 1.22\n", encoding="utf-8")
-        got = subprocess.run(["go", "get", "golang.org/x/tools/go/packages@latest"], cwd=tool,
-                             capture_output=True, text=True)
-        if got.returncode != 0:
-            print(f"golang.org/x/tools is not reachable: {got.stderr[-300:]}", file=sys.stderr)
+        failed = setup(tool)
+        if failed:
+            print(failed, file=sys.stderr)
             return 1
         results = [r for r in (judge(Path(repo).resolve(), tool) for repo in args.repos) if r]
     oracle.report(results, len(args.repos), args.samples, args.json)
