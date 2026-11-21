@@ -207,6 +207,8 @@ pub(super) fn compose(p: &Project, files: &[FileFacts]) -> Vec<RouteNode> {
                         system: false,
                         public: false,
                         byte: 0,
+                        scope: None,
+                        within: Vec::new(),
                     };
                     let fam = p.family[f].unwrap_or(Family::Ecma);
                     match modules::resolve_import(p, fam, f, &imp) {

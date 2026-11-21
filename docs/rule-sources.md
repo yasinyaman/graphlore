@@ -461,6 +461,86 @@ compiler. Four did not hold, and engine 0.5.64 follows them:
 
 Measured with engine 0.5.64: Roslyn's precision on the four C# audit repositories is 98.0% (10,706 of 10,930 edges it has an answer for; 10,543 of 10,767 with 0.5.63: 163 edges more, none more wrong), its recall 79.9%; the Kotlin and Swift compilers' tests give 99.4% and 94.0% as before, and `verify_graphify.py` lacks 44 confirmed edges, as before. On the 45 audit repositories about 190 calls change: an `INFERRED` tie among overloads becomes the one overload (Retrofit's `buildRequest(…)`, kotlinpoet's `ClassName(…)`, RestSharp's `AddHeader(…)`), and a construction whose constructors all tied is linked to the one it calls (RestSharp's `new RestRequest("…")`, 160 sites).
 
+### Phase 2: Rust
+
+The Rust Reference (`rust-lang/reference`, `src/names/`, `src/paths.md`,
+`src/items/use-declarations.md`, `src/expressions/method-call-expr.md`) states
+its rules with identifiers (`r[names.scopes.items.nested-modules]`), which the
+cases cite. It leaves primary and type-relative resolution as placeholders:
+for those the source is rustc's resolver (`compiler/rustc_resolve`) and its
+method probe (`compiler/rustc_hir_typeck/src/method/probe.rs`, inherent
+candidates before trait candidates). `benchmarks/rule_inventory.py` lists
+every rule (38 rules, 31 held by a case, 7 not followed; 15 of 70 cases found in the language's own tools).
+
+| Source | Rule | Held by / why not |
+|---|---|---|
+| r[names.scopes.items.module] | an item of a module is a name in the whole module | `use-path`, `nested-module-path` |
+| r[names.scopes.items.statement] | an item declared in a block is a name of the block | `item-in-a-block` |
+| r[names.scopes.items.nested-modules] | the items of a module around are no names of a nested module | `outer-module-items-not-in-scope` |
+| r[names.scopes.associated-items.scope] | associated items are named by a path from their type or trait, never bare | `associated-items-are-not-scoped`, `associated-function`, `self-type` |
+| r[names.scopes.pattern-bindings.let] | a `let` binding is a name from after it to the end of its block | `let-shadows-from-where-it-is`, `block-scope`, `shadowing` |
+| r[names.scopes.pattern-bindings.parameter] | a parameter is a name of the function's body | `reference-parameter`, `method-on-local` |
+| r[names.scopes.pattern-bindings.closure] | a closure's parameter is a name of the closure's body | `closure-body` |
+| r[names.scopes.pattern-bindings.loop] | a `for` binding is a name of the loop body | `vec-iteration` |
+| r[names.scopes.pattern-bindings.let-chains] | an `if let` / `while let` binding is a name of the conditions after it and the block | `if-let-some` |
+| r[names.scopes.pattern-bindings.match-arm] | a `match` arm's binding is a name of that arm | `match-arm-binding` |
+| r[names.scopes.pattern-bindings.shadow] | a binding shadows a function of its name | `untyped-let-hides-a-function`, `let-shadows-from-where-it-is` |
+| r[names.scopes.generic-parameters.param-list] | a generic parameter is a name in the item it is declared on | `generic-parameter-hides-a-type`, `generic-bound`, `generic-bound-where` |
+| r[names.scopes.lifetimes] | lifetimes and loop labels | not followed: they name no definition of the graph |
+| r[names.scopes.prelude.layers] | the preludes, which a module's own names shadow | `option-unwrap`, `question-mark`, `smart-pointer` |
+| r[names.scopes.macro_rules] | `macro_rules!` textual and path scopes | not followed: macros are not expanded: a macro's arguments are read as expressions (`rust/macro-arguments`), its definition names nothing |
+| r[names.scopes.derive] | derive helper attributes | not followed: attributes are macro input: a name in `#[derive(…)]` is no value read |
+| r[names.scopes.self.def-scope] | `Self` in a struct, enum, trait or impl is the type | `self-type-in-a-struct`, `self-in-a-trait`, `result-of-self` |
+| r[names.scopes.self.impl-scope] | `Self(…)` / `Self { … }` constructs the implementing type | `self-type` |
+| r[names.namespaces.kinds] | types, values and macros are separate namespaces: `mod log` beside `fn log` | `module-and-function-namespaces`, `tuple-struct-constructor`, `enum-variant` |
+| r[names.namespaces.without.fields] | a field is named only by a field expression on its type | `field-not-method`, `field-beside-a-method`, `field-type` |
+| r[names.resolution.expansion.imports.shadowing] | a `use` of an inner scope shadows one of an outer scope | `inner-use-shadows-outer` |
+| r[items.use.glob.shadowing] | an item or a named import shadows what a glob import brings | `glob-shadowed-by-an-item`, `named-import-shadows-a-glob` |
+| r[items.use.forms-glob] | `use m::*;` brings m's public names | `glob-import`, `use-super-glob` |
+| r[items.use.forms-as] | `use m::f as g;` binds g | `use-alias` |
+| r[items.use.self] | `use a::{self, f};` binds the module and the name | `use-self-in-braces` |
+| r[items.use.visibility] | `pub use` re-exports | `re-export` |
+| r[items.use.path.edition2018] | since 2018 a `use` path starts at a name in scope, or a crate | `uniform-paths`, `another-crates-name` |
+| r[names.resolution.expansion.imports.ambiguity] | ambiguous glob imports are errors | not followed: an error is no binding |
+| r[paths.qualifiers] | `crate::`, `self::`, `super::` paths | `qualified-path`, `super`, `self-path`, `crate-root-named-by-the-manifest` |
+| r[paths.qualified] | `<T as Trait>::f` qualified paths | not followed: not read yet: the trait named in the path is not taken as the receiver's |
+| r[expr.method.candidate-search] | a method of the type's own `impl` before a trait's | `inherent-method-first` |
+| r[expr.method.candidate-search] | a value of a type parameter has the methods of the traits that bound it | `generic-bound`, `generic-bound-where`, `dyn-trait` |
+| r[expr.method.candidate-receivers] | the receiver is dereferenced: `&T`, `Box<T>`, `Arc<T>` find T's methods | `smart-pointer`, `reference-parameter` |
+| r[expr.method.candidate-search] | a trait's method is found only when the trait is in scope | not followed: code that compiles has the trait in scope; the engine takes it as given |
+| r[expr.method.candidate-search] | a trait's default method is a method of every implementor | `trait-default-method`, `trait-method` |
+| r[items.impl.inherent] | an `impl` may be written in another module than its type | `impl-in-another-file`, `impl-of-the-files-own-type` |
+| r[expr.field] | `x.0` of a tuple struct | `tuple-struct-field`, `tuple-field-types` |
+| r[type.closure] / typeck | a closure's parameter typed by the iterator or option it is called on | not followed: phase 3: inference from the call it is passed to |
+
+15 cases were written from this reading, all accepted by rustc. Six did not
+hold, and engine 0.5.65 follows them:
+
+- **A `match` arm's binding is the arm's**
+  (`r[names.scopes.pattern-bindings.match-arm]`): it was a local of the whole
+  block, so `Some(size) => size, None => size()` hid the function in the
+  other arm.
+- **`Self` in a struct's own fields** (`next: Option<Box<Self>>`) is the
+  struct.
+- **A module and a function of one name** are in two namespaces: `log::write()`
+  is the module's, `log()` the function.
+- **A `use` in a block holds in the block** and shadows the module's `use` of
+  the name; the files it names count as imported.
+- **A glob import brings names the file never writes**: a capitalized name
+  of a file with a `use m::*;` is kept for resolution (it was dropped as
+  undeclared), and the module's own item still shadows the glob's.
+- **2018 paths**: `use m::f;` inside `mod a { … }` is `a`'s own `m` first;
+  an item of an inline module is no name outside it (an `impl`'s type is
+  looked up from where the `impl` is written).
+
+Reading the audit repositories' changes found two more things, fixed with
+them: a name in `#[derive(…)]` is macro input, never a value read (`Debug`
+was linked to a project struct named `Debug`), and the `use` inside a test
+function (`use grep_regex::RegexMatcherBuilder;`) picks that crate's type
+where two crates of the workspace define one.
+
+Measured with engine 0.5.65: rust-analyzer's precision on the four Rust audit repositories is 98.5% (12,612 of 12,802), recall 83.4%, as before; `verify_graphify.py` lacks 44 confirmed edges, as before. On the 45 audit repositories 13 edges change, all in ripgrep and ureq: the `use` in a function picks the type it imports (`Separator::new` is `FieldContextSeparator::new` there), `std::os::unix::fs::symlink` imported in a test is no longer a call of the test's own `symlink`, and a `match` arm's `v` is no longer read as the parameter `v`.
+
 One thing the cases showed that is not a position: a Swift protocol's
 property requirement is a definition of its own named `var handler`, of kind
 interface (the span rule takes `protocol_property_declaration` for a
@@ -499,7 +579,7 @@ say is left and by how directly the compiler can check the result:
 1. **C#** (28 confirmed edges still missing; Roslyn runs here; the feature
    table is the largest): read (engine 0.5.64, `rule_inventory.py`: 54 rules, 47 held
    by a case, 7 not followed with the reason)
-2. **Rust** (editions change path resolution; rust-analyzer runs here)
+2. **Rust** (editions change path resolution; rust-analyzer runs here): read (engine 0.5.65, 38 rules, 31 held by a case, 7 not followed)
 3. **Go** (smallest binder, already whole on the floor: the cheapest full
    reading, and the template for the others)
 4. **TypeScript / JavaScript** (module resolution modes)

@@ -105,6 +105,20 @@ fn inline_mods(n: Node, src: &[u8]) -> Vec<String> {
     out
 }
 
+/// The block a `use` is written in, when that is inside a function (`fn f()
+/// { use m::g; }`) rather than in a module: its names are the block's.
+fn use_block(n: Node) -> Option<(usize, usize)> {
+    let mut cur = n.parent();
+    while let Some(p) = cur {
+        match p.kind() {
+            "block" => return Some((p.start_byte(), p.end_byte())),
+            "mod_item" | "source_file" => return None,
+            _ => cur = p.parent(),
+        }
+    }
+    None
+}
+
 /// A `use` path written inside inline modules, as the file's module sees it:
 /// `super::x` in `mod tests` is `self::x`, `self::x` is `self::tests::x`.
 /// `None` when it only names the file's own module or one of its items, which
@@ -203,8 +217,18 @@ impl LanguageModule for Rust {
                         out.push(f);
                     }
                 }
+                let block = use_block(n);
                 for f in &mut out {
                     f.public = public;
+                    f.scope = block;
+                    // (a plain first name: since 2018 a name in scope where
+                    // the `use` is, a child of the inline module first)
+                    let first = f.module.split("::").next().unwrap_or("");
+                    let plain = !first.is_empty()
+                        && !matches!(first, "crate" | "self" | "super" | "std" | "core" | "alloc");
+                    if plain && !inline.is_empty() {
+                        f.within = inline.clone();
+                    }
                 }
                 Some(out)
             }

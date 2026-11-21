@@ -25,7 +25,7 @@ python benchmarks/conformance.py --baseline benchmarks/results-conformance.json 
 python benchmarks/conformance.py --markdown      # the tables below
 ```
 
-Measured 2026-11-21 with graphlore-engine 0.5.64: **559 of 559 rules hold**
+Measured 2026-11-21 with graphlore-engine 0.5.65: **574 of 574 rules hold**
 (356 of the first 406 with 0.5.45). Ten came from the Go type checker and
 rust-analyzer run on whole repositories; fifteen from the Kotlin and Swift
 compilers' tests (type checks, casts, `catch`, aliases); thirty-nine from two
@@ -104,7 +104,7 @@ Each change was measured on the 45 audit repositories as well, by reading
 the edges it added and removed at their source lines; the page on the
 [native engine](native-engine.md#the-rules-themselves) has the numbers.
 Every case has been compiled by its own language
-(`benchmarks/verify_cases.py`: 559 of 559 accepted). The Versions column is
+(`benchmarks/verify_cases.py`: 574 of 574 accepted). The Versions column is
 the oldest version of the language whose compiler accepts the case, where the
 compiler can be asked (`verify_cases.py --min-version`: Java, Kotlin, Scala,
 C#, Swift, C, C++); `all` is the oldest version asked, `–` a language with no
@@ -542,11 +542,11 @@ Found by: the specification 39, a compiler 6, comparison 6, the grammar 1, the l
 | a member of a base of the base class is a member of the class | `inherited-from-a-grandparent` | – | yes |
 | `Outer.Inner` names the nested type | `qualified-nested-type` | – | yes |
 
-### rust (55 of 55)
+### rust (70 of 70)
 
 The Rust Reference, 'Names' (name resolution, scopes, paths), 'Method call expressions', 'Field access expressions'.
 
-Found by: the specification 37, a compiler 10, comparison 6, the grammar 2, the language's own tools 0. With the place it was read in the language's own tools: 0.
+Found by: the specification 37, a compiler 10, comparison 6, the grammar 2, the language's own tools 15. With the place it was read in the language's own tools: 15.
 
 | Rule | Case | Versions | Engine |
 |---|---|---|---|
@@ -605,6 +605,21 @@ Found by: the specification 37, a compiler 10, comparison 6, the grammar 2, the 
 | the types a trait is written with in an `impl` are uses of the implementing type | `impl-trait-type-arguments` | – | yes |
 | the struct a pattern takes apart is a use of it | `struct-pattern-type` | – | yes |
 | a field read in a macro's arguments is a read of the field | `macro-argument-member-read` | – | yes |
+| a function declared in a block is a name of that block, before the module's of its name | `item-in-a-block` | – | yes |
+| the items of a module around are no names of a nested module: only its own and what it imports are | `outer-module-items-not-in-scope` | – | yes |
+| a `let` binding shadows a function of its name only after it: a call before it is the function | `let-shadows-from-where-it-is` | – | yes |
+| in an `impl`, a bare name is never an associated function of the type: that takes `Self::` | `associated-items-are-not-scoped` | – | yes |
+| a generic type parameter is the name in the item it is declared on, before a type of the module | `generic-parameter-hides-a-type` | – | yes |
+| a name the module declares shadows the one a glob import brings; the glob still brings the others | `glob-shadowed-by-an-item` | – | yes |
+| a name imported by name shadows the one a glob import brings | `named-import-shadows-a-glob` | – | yes |
+| a `use` in a block shadows a `use` of the module of the same name | `inner-use-shadows-outer` | – | yes |
+| a module and a function of one name live in different namespaces: `log::f()` is the module's, `log()` the function | `module-and-function-namespaces` | – | yes |
+| since 2018 a `use` path starts at a name in scope: a child module of the module that writes it before one of the crate root | `uniform-paths` | 2018– | yes |
+| a method of the type's own `impl` is found before a trait's method of the name | `inherent-method-first` | – | yes |
+| `Self::f()` in a trait's default method is the trait's associated function | `self-in-a-trait` | – | yes |
+| `Self` in a struct's own fields is the struct | `self-type-in-a-struct` | – | yes |
+| a tuple struct's name called is its constructor, in the value namespace | `tuple-struct-constructor` | – | yes |
+| a binding of a `match` arm is a name of the arm: it hides a function of its name there only | `match-arm-binding` | – | yes |
 
 ### swift (43 of 43)
 
@@ -809,4 +824,4 @@ Found by: the specification 31, a compiler 2, comparison 0, the grammar 1, the l
 | `$x instanceof T` and `catch (T $e)` are uses of T | `instanceof-and-catch` | – | yes |
 | an anonymous function's parameters and result name their types | `closure-signature` | – | yes |
 
-559 of 559 rules hold
+574 of 574 rules hold

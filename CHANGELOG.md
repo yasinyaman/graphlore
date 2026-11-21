@@ -426,6 +426,20 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- **Native engine 0.5.65: Rust's rules, read from the Rust Reference and
+  rustc** (phase 2 of `docs/rule-sources.md`; 15 cases citing the
+  Reference's rule identifiers):
+  - a `match` arm's binding is a name of that arm only;
+  - `Self` in a struct's own fields is the struct;
+  - a module and a function of one name are told apart (`log::write()`,
+    `log()`);
+  - a `use` written in a block holds in the block and shadows the module's;
+  - a glob import's names are kept for resolution, and an item of the module
+    shadows them;
+  - `use m::f;` in an inline module starts at that module's `m` (2018), and an
+    inline module's items are no names outside it;
+  - a name in `#[derive(…)]` is no value read.
+- **`benchmarks/rule_inventory.py`** covers Rust (38 rules, 31 held).
 - **Native engine 0.5.64: C#'s binding rules, read from the C# standard and
   Roslyn's binder** (phase 2 of `docs/rule-sources.md`). 18 cases written
   from the reading, each citing the section and the binder function:

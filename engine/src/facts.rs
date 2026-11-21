@@ -362,6 +362,14 @@ pub struct ImportFact {
     pub public: bool,
     #[serde(skip)]
     pub byte: usize,
+    /// Rust: the block a `use` is written in (`fn f() { use m::g; … }`), whose
+    /// names only it sees; `None` for a `use` of the module.
+    #[serde(default)]
+    pub scope: Option<(usize, usize)>,
+    /// Rust 2018 paths: the inline modules around a `use` whose path starts at
+    /// a plain name, which is looked up in the innermost of them first.
+    #[serde(default)]
+    pub within: Vec<String>,
 }
 
 /// What a reference is.
