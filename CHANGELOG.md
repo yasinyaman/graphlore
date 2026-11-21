@@ -426,6 +426,12 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- **Native engine 0.5.68: Java's rules, read from the JLS and javac**
+  (phase 2 of `docs/rule-sources.md`; 14 cases): `Outer.this.m()` is the
+  outer class's method; a field an interface declares is a constant of it
+  (read in implementing classes); a number literal picks a primitive overload
+  before a boxed one, and an integer literal the narrowest primitive.
+  `benchmarks/rule_inventory.py` covers Java (30 rules, 26 held).
 - **Native engine 0.5.67: TypeScript's rules, read from the compiler's name
   resolver** (phase 2 of `docs/rule-sources.md`; 10 cases): where a type is
   written, a value of the name does not hide the type (`const Repo = 1`

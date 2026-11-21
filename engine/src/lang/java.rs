@@ -28,6 +28,16 @@ impl LanguageModule for Java {
     /// `static` fields: one value the whole program shares (`final` ones are
     /// constants).
     fn state_defs<'t>(&self, n: Node<'t>, src: &[u8]) -> Vec<(Node<'t>, Node<'t>, DefKind)> {
+        // (a field an interface declares is a constant: implicitly `public
+        // static final`, JLS 9.3)
+        if n.kind() == "constant_declaration" {
+            let mut cursor = n.walk();
+            return n
+                .children_by_field_name("declarator", &mut cursor)
+                .filter_map(|d| d.child_by_field_name("name"))
+                .map(|name| (n, name, DefKind::Constant))
+                .collect();
+        }
         if n.kind() != "field_declaration" {
             return Vec::new();
         }

@@ -1775,7 +1775,18 @@ fn arg_kind(v: Node, src: &[u8]) -> crate::facts::Arg {
         || k.contains("decimal")
         || matches!(k, "real_literal" | "long_literal" | "hex_literal" | "int_literal")
     {
-        Arg::Num
+        let t = text(v, src);
+        let hex = t.starts_with("0x") || t.starts_with("0X");
+        let int = !t.is_empty()
+            && !t.contains('.')
+            && (hex || !t.contains(['e', 'E', 'f', 'F', 'd', 'D']))
+            && !t.ends_with(['l', 'L'])
+            && t.trim_start_matches('-').chars().next().is_some_and(|c| c.is_ascii_digit());
+        if int {
+            Arg::Int
+        } else {
+            Arg::Num
+        }
     } else if matches!(k, "true" | "false" | "boolean_literal" | "boolean" | "bool_literal") {
         Arg::Bool
     } else if matches!(k, "null" | "nil" | "none" | "null_literal" | "nullptr" | "undefined") {
@@ -1816,7 +1827,7 @@ fn arg_kind(v: Node, src: &[u8]) -> crate::facts::Arg {
             Arg::Bool
         } else if has(Arg::Str) {
             Arg::Str
-        } else if has(Arg::Num) {
+        } else if has(Arg::Num) || has(Arg::Int) {
             Arg::Num
         } else {
             Arg::Unknown

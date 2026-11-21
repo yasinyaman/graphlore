@@ -579,6 +579,9 @@ pub enum Arg {
     Unknown,
     Str,
     Num,
+    /// A number written as an integer literal (`3`, `0x1F`; not `3L`, `1.5`,
+    /// `2f`): Java ranks `int` over `long`, `float`, `double` for it.
+    Int,
     Bool,
     Null,
     /// A lambda or function literal.
