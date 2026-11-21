@@ -25,8 +25,10 @@ python benchmarks/conformance.py --baseline benchmarks/results-conformance.json 
 python benchmarks/conformance.py --markdown      # the tables below
 ```
 
-Measured 2026-11-20 with graphlore-engine 0.5.51: **425 of 425 rules hold**
-(356 of the first 406 with 0.5.45).
+Measured 2026-11-21 with graphlore-engine 0.5.52: **440 of 440 rules hold**
+(356 of the first 406 with 0.5.45). The last fifteen came from the TypeScript
+compiler's own test suite ([native-engine.md](native-engine.md#the-compiler-as-the-judge)):
+block scopes, type parameters and their bounds, parameter properties.
 
 ## What this list is, and is not
 
@@ -188,7 +190,7 @@ ECMAScript Language Specification, 'Executable Code and Execution Contexts' (sco
 | an arrow function in a class field sees the class's `this` | `class-field-arrow` | yes |
 | a local assigned `new C()` keeps its type in a nested callback | `for-of-new` | yes |
 
-### typescript (30 of 30)
+### typescript (37 of 37)
 
 TypeScript Handbook, 'Modules', 'Classes', 'Generics' (types are the compiler's, tsc).
 
@@ -224,8 +226,15 @@ TypeScript Handbook, 'Modules', 'Classes', 'Generics' (types are the compiler's,
 | `export { default as X } from './x'` passes the default on | `default-reexport` | yes |
 | `const r: T = …` is a T whatever it is assigned | `local-typed-by-declaration` | yes |
 | a value of `Map<K, V>` is a V | `map-value` | yes |
+| a `const` of a block is a name of that block: beside it the outer one stands | `block-scope` | yes |
+| the same name declared in two branches is two variables | `block-scope-branches` | yes |
+| a type parameter hides a type of its name declared outside | `type-parameter-hides` | yes |
+| a value typed by a type parameter has the members of its constraint | `type-parameter-bound` | yes |
+| what a namespace declares is a name inside it, not beside it | `namespace-member-inside` | yes |
+| a constructor parameter with a modifier declares a property of the class | `parameter-property-read` | yes |
+| a call of a parameter is no call of a function of its name outside | `parameter-called` | yes |
 
-### go (23 of 23)
+### go (24 of 24)
 
 The Go Programming Language Specification, 'Declarations and scope', 'Selectors', 'Method sets'.
 
@@ -254,6 +263,7 @@ The Go Programming Language Specification, 'Declarations and scope', 'Selectors'
 | a test file of the package sees the package's functions | `test-file` | yes |
 | a method with a value receiver is called on a value | `value-receiver` | yes |
 | a function literal sees the functions of the package | `closure` | yes |
+| a value of a type parameter has the methods of its constraint | `generic-constraint` | yes |
 
 ### java (41 of 41)
 
@@ -303,7 +313,7 @@ The Java Language Specification, 6.4 'Shadowing and Obscuring', 15.12 'Method In
 | `new R(…)` constructs a record | `record` | yes |
 | a method of an anonymous class sees the methods of the class around it | `anonymous-class` | yes |
 
-### kotlin (31 of 31)
+### kotlin (32 of 32)
 
 Kotlin Language Specification, 'Scopes and identifiers', 'Overload resolution' (receivers).
 
@@ -340,8 +350,9 @@ Kotlin Language Specification, 'Scopes and identifiers', 'Overload resolution' (
 | `::f` is a use of f | `function-reference` | yes |
 | a nested class is named through the class around it | `nested-class` | yes |
 | an enum entry has the enum's members | `enum-entry` | yes |
+| a call names the function beside a parameter of its name that cannot be called | `function-beside-parameter` | yes |
 
-### scala (20 of 20)
+### scala (21 of 21)
 
 Scala Language Specification, chapter 2 'Identifiers, Names and Scopes', 4.7 'Import Clauses'.
 
@@ -367,6 +378,7 @@ Scala Language Specification, chapter 2 'Identifiers, Names and Scopes', 4.7 'Im
 | `Page[Item]`'s `head: T` is an Item | `generic-argument` | yes |
 | `class A extends B` names its parent | `extends` | yes |
 | a class of the same package in another file needs no import | `same-package` | yes |
+| a generic method's parameters are its names, typed through an upper bound | `generic-method-parameters` | yes |
 
 ### csharp (39 of 39)
 
@@ -414,7 +426,7 @@ C# Language Specification, 'Namespace and type names', 'Member lookup', 'Extensi
 | an enum member is a member of its enum | `enum-member` | yes |
 | `new R(…)` constructs a record, which has methods like a class | `record` | yes |
 
-### rust (37 of 37)
+### rust (40 of 40)
 
 The Rust Reference, 'Names' (name resolution, scopes, paths), 'Method call expressions', 'Field access expressions'.
 
@@ -457,8 +469,11 @@ The Rust Reference, 'Names' (name resolution, scopes, paths), 'Method call expre
 | a method returning `Self` keeps the type through a chain | `builder-chain` | yes |
 | a method of an enum's impl is called on its values | `enum-method` | yes |
 | `T { … }` constructs a T | `struct-literal` | yes |
+| a `let` in a block ends with the block | `block-scope` | yes |
+| a value of a type parameter has the methods of the trait that bounds it | `generic-bound-where` | yes |
+| `Option<Space<M>>` holds a `Space`, whatever `M` is bound by | `wrapper-holds-first-argument` | yes |
 
-### swift (33 of 33)
+### swift (35 of 35)
 
 The Swift Programming Language, 'Declarations', 'Extensions', 'Protocols' (member lookup is the compiler's).
 
@@ -497,6 +512,8 @@ The Swift Programming Language, 'Declarations', 'Extensions', 'Protocols' (membe
 | a function nested in a function is called by its name there | `nested-function` | yes |
 | a call in a closure's body is the enclosing function's | `closure-body` | yes |
 | a function passed by name is a use of it | `function-as-value` | yes |
+| a member asked of a type parameter is a member of the protocol that constrains it | `generic-bound` | yes |
+| inside the value a `let` is declared with, its name is still the outer one | `own-value-is-outer` | yes |
 
 ### c (14 of 14)
 
@@ -632,3 +649,4 @@ PHP Manual, 'Namespaces: Name resolution rules', 'Classes and Objects' (inherita
 | `C::m()` is C's static method | `static-method-via-class` | yes |
 | a method passed as `[$this, 'm']` is a use of m | `callable-string` | yes |
 
+440 of 440 rules hold

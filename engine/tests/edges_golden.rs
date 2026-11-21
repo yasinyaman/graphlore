@@ -2661,3 +2661,70 @@ fn cpp_a_templates_member_is_typed_by_the_argument_written() {
     );
     lacks(&got, &[("run", "calls", "Spare.size"), ("field", "calls", "Spare.size")]);
 }
+
+#[test]
+fn a_name_declared_in_a_block_is_that_blocks() {
+    // TS `const`, Rust `let`: beside the block the outer one stands; and in
+    // the value a `let` is declared with, the name is still the outer one
+    let got = quals("block-scopes", &[
+        (
+            "a.ts",
+            "class A { run() {} }\nclass B { go() {} }\n\nexport function f(x: A) {\n  {\n    const x = new B();\n    x.go();\n  }\n  x.run();\n}\n\nexport function g(c: boolean) {\n  if (c) {\n    const y = new A();\n    return y;\n  } else {\n    const y = new B();\n    y.go();\n  }\n}\n",
+        ),
+        (
+            "b.swift",
+            "protocol Convertible {\n    func asURL()\n}\n\nclass Wrap {\n    init(url: Convertible) {}\n}\n\nfunc use(_ convertible: Convertible) -> Wrap {\n    let convertible = Wrap(url: convertible)\n    return convertible\n}\n",
+        ),
+    ]);
+    has(
+        &got,
+        &[
+            ("f", "calls", "A.run"),
+            ("f", "calls", "B.go"),
+            ("g", "calls", "B.go"),
+            ("use", "uses", "Convertible"),
+        ],
+    );
+    lacks(&got, &[("f", "calls", "B.run"), ("g", "calls", "A.go")]);
+}
+
+#[test]
+fn a_type_parameter_is_no_type_of_the_project_but_has_its_bounds_members() {
+    let got = quals("type-parameters", &[
+        (
+            "a.ts",
+            "export type T = string;\n\nexport interface Box<T> {\n  held: T;\n}\n\nexport function plain(v: T): T {\n  return v;\n}\n\nexport interface Foo {\n  run(): void;\n}\n\nexport function f<U extends Foo>(x: U) {\n  x.run();\n}\n",
+        ),
+        (
+            "src/lib.rs",
+            "pub trait Sink {\n    fn begin(&self);\n}\n\npub struct Match;\n\npub fn run<S: Sink + Send, F: FnMut(Match) -> bool>(s: S, f: F) {\n    s.begin();\n}\n\npub fn later<T>(s: T)\nwhere\n    T: Sink,\n{\n    s.begin();\n}\n\npub trait Matcher {\n    fn find(&self);\n}\n\npub struct Space<M: Matcher> {\n    pub inner: M,\n    pub dst: Vec<u8>,\n}\n\npub struct Replacer<M: Matcher> {\n    space: Option<Space<M>>,\n}\n\nimpl<M: Matcher> Replacer<M> {\n    pub fn clear(&mut self) {\n        if let Some(ref mut space) = self.space {\n            space.dst.clear();\n        }\n    }\n}\n",
+        ),
+        ("Cargo.toml", "[package]\nname = \"demo\"\nversion = \"0.1.0\"\n"),
+        (
+            "c.scala",
+            "trait Read[A] {\n  def reads(s: String): A\n}\n\ntrait Base {\n  def id(): Int\n}\n\nobject O {\n  def opt[A: Read, B <: Base](name: String, b: B): Int = b.id()\n}\n",
+        ),
+    ]);
+    has(
+        &got,
+        &[
+            ("plain", "references", "T"),
+            ("f", "calls", "Foo.run"),
+            ("run", "calls", "Sink.begin"),
+            ("later", "calls", "Sink.begin"),
+            ("Replacer.clear", "reads", "Space.dst"),
+            ("O.opt", "calls", "Base.id"),
+        ],
+    );
+    lacks(&got, &[("Box", "references", "T")]);
+}
+
+#[test]
+fn typescript_names_of_a_namespace_a_parameter_and_a_parameter_property() {
+    let got = quals("ts-oracle", &[(
+        "a.ts",
+        "export namespace Types {\n  export interface Shape {\n    side: number;\n  }\n}\n\nexport interface Shape {\n  area: number;\n}\n\nexport interface Square extends Shape {\n  w: number;\n}\n\nexport class Greeter {\n  constructor(public greeting: string) {}\n\n  greet() {\n    return this.greeting;\n  }\n}\n\nexport function cb(n: number): number {\n  return n;\n}\n\nexport function call(cb: (x: string) => number) {\n  return cb('hi');\n}\n",
+    )]);
+    has(&got, &[("Square", "inherits", "Shape"), ("Greeter.greet", "reads", "Greeter.greeting")]);
+    lacks(&got, &[("Square", "inherits", "Types.Shape"), ("call", "calls", "cb")]);
+}

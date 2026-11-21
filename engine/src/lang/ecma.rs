@@ -233,6 +233,22 @@ impl LanguageModule for Ecma {
                 _ => Vec::new(),
             };
         }
+        // `constructor(public greeting: string)`: a parameter that declares
+        // a property of the class
+        if matches!(n.kind(), "required_parameter" | "optional_parameter") {
+            let property = all_kids(n).iter().any(|c| {
+                matches!(c.kind(), "accessibility_modifier" | "readonly" | "override_modifier")
+            });
+            let of_class = n
+                .parent()
+                .and_then(|ps| ps.parent())
+                .filter(|m| m.kind() == "method_definition")
+                .is_some_and(|m| m.parent().is_some_and(|b| b.kind() == "class_body"));
+            return match n.child_by_field_name("pattern").filter(|x| x.kind() == "identifier") {
+                Some(name) if property && of_class => vec![(n, name, DefKind::Property)],
+                _ => Vec::new(),
+            };
+        }
         if n.kind() != "variable_declarator" {
             return Vec::new();
         }

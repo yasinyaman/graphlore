@@ -1699,6 +1699,61 @@ case("php", "callable-string", "a method passed as `[$this, 'm']` is a use of m"
                     "    public function run(array $xs): array\n    {\n        return array_map([$this, 'handle'], $xs);\n    }\n}\n"},
      [("A.run", "indirect_call", "A.handle")])
 
+# What the TypeScript compiler's own test suite showed missing (`oracle_typescript.py`)
+# and the same rules where the other languages have them.
+case("typescript", "block-scope", "a `const` of a block is a name of that block: beside it the outer one stands",
+     "ECMAScript Language Specification, 'Block' (14.2) and 'Let and Const Declarations' (14.3.1)",
+     {"a.ts": "class A { run() {} }\nclass B { go() {} }\n\nexport function f(x: A) {\n  {\n    const x = new B();\n    x.go();\n  }\n  x.run();\n}\n"},
+     [("f", "calls", "A.run"), ("f", "calls", "B.go")])
+case("typescript", "block-scope-branches", "the same name declared in two branches is two variables",
+     "ECMAScript Language Specification, 'Block' (14.2)",
+     {"a.ts": "class A { run() {} }\nclass B { run() {} }\n\nexport function f(c: boolean) {\n  if (c) {\n    const x = new A();\n    x.run();\n  }\n}\n\nexport function g(c: boolean) {\n  if (c) {\n    const x = new A();\n    return x;\n  } else {\n    const x = new B();\n    x.run();\n  }\n}\n"},
+     [("f", "calls", "A.run"), ("g", "calls", "B.run")], [("g", "calls", "A.run")])
+case("typescript", "type-parameter-hides", "a type parameter hides a type of its name declared outside",
+     TS, {"a.ts": "export type T = string;\n\nexport interface Box<T> {\n  held: T;\n}\n\nexport function plain(v: T): T {\n  return v;\n}\n"},
+     [("plain", "references", "T")], [("Box", "references", "T")])
+case("typescript", "type-parameter-bound", "a value typed by a type parameter has the members of its constraint",
+     TS, {"a.ts": "export interface Foo {\n  run(): void;\n}\n\nexport function f<T extends Foo>(x: T) {\n  x.run();\n}\n"},
+     [("f", "calls", "Foo.run")])
+case("typescript", "namespace-member-inside", "what a namespace declares is a name inside it, not beside it",
+     TS, {"a.ts": "export namespace Types {\n  export interface Shape {\n    side: number;\n  }\n}\n\nexport interface Shape {\n  area: number;\n}\n\nexport interface Square extends Shape {\n  w: number;\n}\n"},
+     [("Square", "inherits", "a.ts:Shape")], [("Square", "inherits", "Types.Shape")])
+case("typescript", "parameter-property-read", "a constructor parameter with a modifier declares a property of the class",
+     TS, {"a.ts": "export class Greeter {\n  constructor(public greeting: string) {}\n\n  greet() {\n    return this.greeting;\n  }\n}\n"},
+     [("Greeter.greet", "reads", "Greeter.greeting")])
+case("typescript", "parameter-called", "a call of a parameter is no call of a function of its name outside",
+     TS, {"a.ts": "export function cb(n: number): number {\n  return n;\n}\n\nexport function run(cb: (x: string) => number) {\n  return cb('hi');\n}\n"},
+     [], [("run", "calls", "cb")])
+case("rust", "block-scope", "a `let` in a block ends with the block",
+     RS, {"Cargo.toml": CARGO,
+          "src/lib.rs": "pub struct A;\nimpl A {\n    pub fn run(&self) {}\n}\npub struct B {}\nimpl B {\n    pub fn go(&self) {}\n}\n\npub fn f(x: A) {\n    {\n        let x = B {};\n        x.go();\n    }\n    x.run();\n}\n"},
+     [("f", "calls", "A.run"), ("f", "calls", "B.go")])
+case("rust", "generic-bound-where", "a value of a type parameter has the methods of the trait that bounds it",
+     RS, {"Cargo.toml": CARGO,
+          "src/lib.rs": "pub trait Sink {\n    fn begin(&self);\n}\n\npub fn run<S: Sink>(s: S) {\n    s.begin();\n}\n\npub fn later<T>(s: T)\nwhere\n    T: Sink,\n{\n    s.begin();\n}\n"},
+     [("run", "calls", "Sink.begin"), ("later", "calls", "Sink.begin")])
+case("rust", "wrapper-holds-first-argument", "`Option<Space<M>>` holds a `Space`, whatever `M` is bound by",
+     RS, {"Cargo.toml": CARGO,
+          "src/lib.rs": "pub trait Matcher {\n    fn find(&self);\n}\n\npub struct Space<M: Matcher> {\n    pub inner: M,\n    pub dst: Vec<u8>,\n}\n\npub struct Replacer<M: Matcher> {\n    space: Option<Space<M>>,\n}\n\nimpl<M: Matcher> Replacer<M> {\n    pub fn clear(&mut self) {\n        if let Some(ref mut space) = self.space {\n            space.dst.clear();\n        }\n    }\n}\n"},
+     [("Replacer.clear", "reads", "Space.dst")])
+case("swift", "generic-bound", "a member asked of a type parameter is a member of the protocol that constrains it",
+     SW, {"a.swift": "protocol Parsable {\n    static func parse()\n    func go()\n}\n\nfunc run<A>(_ v: A) where A: Parsable {\n    A.parse()\n    v.go()\n}\n\nfunc other<B: Parsable>(_ v: B) {\n    v.go()\n}\n"},
+     [("run", "calls", "Parsable.parse"), ("run", "calls", "Parsable.go"), ("other", "calls", "Parsable.go")])
+case("swift", "own-value-is-outer", "inside the value a `let` is declared with, its name is still the outer one",
+     SW, {"a.swift": "protocol Convertible {\n    func asURL()\n}\n\nclass Wrap {\n    init(url: Convertible) {}\n}\n\nfunc use(_ convertible: Convertible) -> Wrap {\n    let convertible = Wrap(url: convertible)\n    return convertible\n}\n"},
+     [("use", "uses", "Convertible")])
+case("scala", "generic-method-parameters", "a generic method's parameters are its names, typed through an upper bound",
+     SC, {"a.scala": "trait Base {\n  def id(): Int\n}\n\nobject O {\n  def opt[B <: Base](b: B): Int = b.id()\n}\n"},
+     [("O.opt", "calls", "Base.id")])
+case("go", "generic-constraint", "a value of a type parameter has the methods of its constraint",
+     GO, {"go.mod": GOMOD,
+          "a.go": "package app\n\ntype Runner interface {\n\tRun()\n}\n\nfunc Each[T Runner](x T) {\n\tx.Run()\n}\n"},
+     [("Each", "calls", "Runner.Run")])
+case("kotlin", "function-beside-parameter", "a call names the function beside a parameter of its name that cannot be called",
+     KT, {"a.kt": "package app\n\nfun help(block: () -> String): String = block()\n\nfun describe(help: String): String {\n    return help { help }\n}\n"},
+     [("describe", "calls", "help")])
+
+
 # --- running ------------------------------------------------------------------
 
 def _matches(node: dict[str, Any], want: str) -> bool:

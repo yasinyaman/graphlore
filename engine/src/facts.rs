@@ -155,6 +155,10 @@ pub struct Def {
     /// The names of the type parameters a callable declares (`<T>`).
     #[serde(default)]
     pub type_params: Vec<String>,
+    /// For each of `type_params`, the first type it is bound by (`<S: Sink>`,
+    /// `where T : Foo`): what a member asked of the parameter is a member of.
+    #[serde(default)]
+    pub type_bounds: Vec<Option<Vec<String>>>,
     /// The type parameters of a type that are bound by the type itself
     /// (`interface Builder<T : Builder<T>>`): a method that returns one
     /// returns the type it was called on.
@@ -443,6 +447,15 @@ pub struct Local {
     /// two of one name the one declared last before a use is meant.
     #[serde(default)]
     pub byte: usize,
+    /// Where the block it is declared in ends (0: the whole definition, or a
+    /// language without block scopes): of two of one name, a use has the one
+    /// whose block it is written in.
+    #[serde(default)]
+    pub until: usize,
+    /// Where its declaration ends, for one declared with a value (0: none):
+    /// inside its own value the name is still the outer one.
+    #[serde(default)]
+    pub after: usize,
 }
 
 /// A reference's context. An alias, not `&'static str` written out, so that

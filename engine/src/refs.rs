@@ -487,7 +487,7 @@ fn signature_types(def: Node, src: &[u8], out: &mut Vec<(Vec<String>, &'static s
             Some("declarator") => {
                 let mut stack = vec![child];
                 while let Some(d) = stack.pop() {
-                    if let Some(ps) = d.child_by_field_name("parameters") {
+                    if let Some(ps) = params_field(d) {
                         param_types(ps, src, out);
                         break;
                     }
@@ -769,12 +769,39 @@ fn first_type(n: Node, src: &[u8]) -> Option<Vec<String>> {
     let first = it.next()?;
     let wrapper = first.last().is_some_and(|l| is_wrapper(l, n));
     if wrapper {
+        // what it holds is its first type argument (`Option<Space<M>>` holds
+        // a `Space`, not the `M` written deepest)
+        // (only where that argument is written with arguments of its own:
+        // any other is the last the walk gives, as before)
+        let held = first_type_argument(n).filter(|a| first_type_argument(*a).is_some());
+        if let Some(inner) = held.and_then(|a| first_type(a, src)) {
+            return Some(inner);
+        }
         let rest: Vec<Vec<String>> = it.collect();
         if let Some(inner) = rest.into_iter().last() {
             return Some(inner);
         }
     }
     Some(first)
+}
+
+/// The first type argument written in `n`, of the outermost type that has any.
+fn first_type_argument(n: Node) -> Option<Node> {
+    let mut level = vec![n];
+    for _ in 0..6 {
+        let mut next = Vec::new();
+        for x in level {
+            if matches!(
+                x.kind(),
+                "type_arguments" | "type_argument_list" | "template_argument_list"
+            ) {
+                return kids(x).into_iter().find(|c| c.kind() != "lifetime" && !is_comment(c));
+            }
+            next.extend(kids(x));
+        }
+        level = next;
+    }
+    None
 }
 
 /// What a value constructs: `Foo()`, `new Foo()`, `Foo::new()`, `Foo{}`,
@@ -968,7 +995,7 @@ fn misread_variable<'t>(
     }
     let decl = n.child_by_field_name("declarator").filter(|d| d.kind() == "function_declarator")?;
     let name = decl.child_by_field_name("declarator").filter(|d| d.kind() == "identifier")?;
-    let params = decl.child_by_field_name("parameters")?;
+    let params = params_field(decl)?;
     let mut args = Vec::new();
     // `Random rnd(test::RandomSeed());`: a call where a parameter's type
     // would be written, which only a variable's arguments have
@@ -981,8 +1008,7 @@ fn misread_variable<'t>(
             Some(d)
                 if d.kind() == "abstract_function_declarator"
                     && d.child_by_field_name("declarator").is_none()
-                    && d.child_by_field_name("parameters")
-                        .is_some_and(|ps| kids(ps).is_empty()) =>
+                    && params_field(d).is_some_and(|ps| kids(ps).is_empty()) =>
             {
                 calls.push(p.child_by_field_name("type")?);
                 continue;
@@ -1010,7 +1036,7 @@ fn misread_variable<'t>(
         .and_then(|d| {
             let mut cur = d;
             for _ in 0..4 {
-                if let Some(p) = cur.child_by_field_name("parameters") {
+                if let Some(p) = params_field(cur) {
                     return Some(p);
                 }
                 cur = cur.child_by_field_name("declarator")?;
@@ -1389,17 +1415,107 @@ fn type_params(n: Node, src: &[u8]) -> Vec<String> {
             })
             .collect();
     }
-    kids(n)
+    type_params_bounds(n, src).0
+}
+
+/// The type parameters a declaration writes, and the first type each is
+/// bound by (`<T extends Foo>`, `<S: Sink>`, `where T : Foo`, `[A <: Base]`).
+fn type_params_bounds(n: Node, src: &[u8]) -> (Vec<String>, Vec<Option<Vec<String>>>) {
+    let mut names: Vec<String> = Vec::new();
+    let mut bounds: Vec<Option<Vec<String>>> = Vec::new();
+    let lists = kids(n)
         .into_iter()
-        .filter(|c| matches!(c.kind(), "type_parameters" | "type_parameter_list"))
-        .flat_map(kids)
-        .filter_map(|tp| {
-            if tp.kind().contains("identifier") {
-                return Some(text(tp, src));
+        .filter(|c| matches!(c.kind(), "type_parameters" | "type_parameter_list"));
+    for tp in lists.flat_map(kids) {
+        // (Scala writes the names and their bounds side by side)
+        if tp.kind().contains("identifier") {
+            names.push(text(tp, src));
+            bounds.push(None);
+        } else if tp.kind() == "upper_bound" {
+            // (`[A: Read]` asks for a `Read[A]`: it says nothing of `A`)
+            if let Some(last) = bounds.last_mut().filter(|b| b.is_none()) {
+                *last = bound_path(&text(tp, src));
             }
-            kids(tp).into_iter().find(|c| c.kind().contains("identifier")).map(|c| text(c, src))
-        })
-        .collect()
+        } else if tp.kind().ends_with("bound") {
+        } else if let Some(id) = kids(tp).into_iter().find(|c| c.kind().contains("identifier")) {
+            names.push(text(id, src));
+            let written = &src[id.end_byte().min(tp.end_byte())..tp.end_byte()];
+            bounds.push(bound_path(&String::from_utf8_lossy(written)));
+        }
+    }
+    // `where T: Foo`, `where T : Foo`
+    let clauses = kids(n).into_iter().filter(|c| {
+        matches!(
+            c.kind(),
+            "where_clause" | "type_constraints" | "type_parameter_constraints_clause"
+        )
+    });
+    for clause in clauses {
+        let rows = if clause.kind() == "type_parameter_constraints_clause" {
+            vec![clause]
+        } else {
+            kids(clause)
+        };
+        for row in rows {
+            let row = match kids(row).as_slice() {
+                [only] if only.kind().ends_with("constraint") => *only,
+                _ => row,
+            };
+            let ks = kids(row);
+            let Some((left, rest)) = ks.split_first() else { continue };
+            let name = text(*left, src);
+            let Some(i) = names.iter().position(|x| *x == name) else { continue };
+            if let (None, Some(last)) = (&bounds[i], rest.last()) {
+                let written = &src[left.end_byte().min(last.end_byte())..last.end_byte()];
+                bounds[i] = bound_path(&String::from_utf8_lossy(written));
+            }
+        }
+    }
+    // (a bound that is the parameter itself, or another parameter, says nothing)
+    for b in bounds.iter_mut() {
+        if b.as_ref().is_some_and(|p| p.len() == 1 && names.contains(&p[0])) {
+            *b = None;
+        }
+    }
+    (names, bounds)
+}
+
+/// The type a bound names, from its text: `: Sink + Send`, `extends Foo<T>`,
+/// `<: Base`. One named type, alone or the first of several; anything else
+/// (`FnMut(Match) -> bool`, `keyof T`, `[A, B]`, `~int | ~string`, a default
+/// `= Foo`) is no type whose members the parameter has.
+fn bound_path(written: &str) -> Option<Vec<String>> {
+    let mut t = written.trim();
+    for lead in ["<:", ":", "extends ", "any ", "some "] {
+        if let Some(rest) = t.strip_prefix(lead) {
+            t = rest.trim_start();
+        }
+    }
+    let name_end = t
+        .char_indices()
+        .find(|(_, c)| !(c.is_alphanumeric() || matches!(c, '_' | '.' | ':')))
+        .map_or(t.len(), |(i, _)| i);
+    let (name, mut rest) = (&t[..name_end], t[name_end..].trim_start());
+    if rest.starts_with('<') {
+        let mut depth = 0usize;
+        let close = rest.char_indices().find(|(_, c)| {
+            match c {
+                '<' => depth += 1,
+                '>' => depth -= 1,
+                _ => {}
+            }
+            depth == 0
+        })?;
+        rest = rest[close.0 + 1..].trim_start();
+    }
+    if !(rest.is_empty() || rest.starts_with(['+', '&', ','])) {
+        return None;
+    }
+    let path: Vec<String> =
+        name.split(['.', ':']).filter(|p| !p.is_empty()).map(str::to_string).collect();
+    let named = !path.is_empty()
+        && path.iter().all(|p| p.chars().next().is_some_and(|c| c.is_alphabetic() || c == '_'));
+    named.then_some(path)
 }
 
 /// The type parameters of a type declaration whose bound names the type
@@ -1667,7 +1783,7 @@ fn arg_facts(n: Node, src: &[u8]) -> Vec<crate::facts::ArgFact> {
 fn declarator_params(n: Node) -> Option<Node> {
     let mut d = n.child_by_field_name("declarator")?;
     for _ in 0..6 {
-        if let Some(ps) = d.child_by_field_name("parameters") {
+        if let Some(ps) = params_field(d) {
             return Some(ps);
         }
         d = d.child_by_field_name("declarator").or_else(|| {
@@ -1680,7 +1796,7 @@ fn declarator_params(n: Node) -> Option<Node> {
 
 /// The parameters a callable declares (`self` / `cls` apart).
 fn param_list(n: Node, src: &[u8]) -> Vec<crate::facts::ParamFact> {
-    let list = n.child_by_field_name("parameters").or_else(|| declarator_params(n)).or_else(|| {
+    let list = params_field(n).or_else(|| declarator_params(n)).or_else(|| {
         kids(n).into_iter().find(|c| {
             matches!(c.kind(), "function_value_parameters" | "parameter_list" | "formal_parameters")
         })
@@ -1852,6 +1968,8 @@ fn bind_closure_params(closures: &[ClosureScope], refs: &mut [RefFact], locals: 
                 written_head: None,
                 from_def: None,
                 byte: *start,
+                until: 0,
+                after: 0,
             });
         }
     }
@@ -2526,8 +2644,47 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
     // lambdas with a receiver: (start, end, where the receiver comes from)
     let mut receivers: Vec<(usize, usize, crate::facts::ReceiverOf)> = Vec::new();
     let mut steps = 0usize;
+    // block scopes: a local declared while a node was read lives until the
+    // block around that node ends
+    let scoped = !matches!(
+        facts.lang,
+        Some(crate::lang::Lang::Python | crate::lang::Lang::Ruby | crate::lang::Lang::Php) | None
+    );
+    let ecma = matches!(
+        facts.lang,
+        Some(
+            crate::lang::Lang::JavaScript | crate::lang::Lang::TypeScript | crate::lang::Lang::Tsx
+        )
+    );
+    let mut stamped = 0usize;
+    let mut until = 0usize;
+    let mut declared: Option<(usize, usize)> = None;
     while let Some((n, depth)) = stack.pop() {
+        for l in locals[stamped..].iter_mut().filter(|l| !l.field && l.until == 0) {
+            l.until = until;
+            if let Some((_, end)) = declared.filter(|(value, _)| l.byte < *value && scoped) {
+                l.after = end;
+            }
+        }
+        stamped = locals.len();
         anc.truncate(depth);
+        until = 0;
+        // (the declaration the node is, or is the name of)
+        declared = std::iter::once(&n)
+            .chain(anc.iter().rev().take(2))
+            .find_map(|a| value_node(*a).map(|v| (v.start_byte(), a.end_byte())));
+        // (JS `var` is the function's, whatever block it is written in)
+        let hoisted = ecma
+            && (n.kind() == "variable_declaration"
+                || anc.last().is_some_and(|a| a.kind() == "variable_declaration"));
+        if scoped && !hoisted {
+            // (what a definition's own node declares, its parameters, is its)
+            let around = std::iter::once(&n).chain(anc.iter().rev());
+            until = around
+                .into_iter()
+                .find(|a| is_scope(a.kind()) || by_node.contains_key(&a.id()))
+                .map_or(0, |a| a.end_byte());
+        }
         steps += 1;
         if steps > 2_000_000 {
             break;
@@ -2625,6 +2782,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                 facts.defs[di].self_params = self_params(n, src, &name);
                 // `class Response<T>`: what a declaration's type arguments bind
                 facts.defs[di].type_params = type_params(n, src);
+                facts.defs[di].type_bounds = type_params_bounds(n, src).1;
                 // `class UserRepo : Repo<User>`: what it binds its bases' to
                 facts.defs[di].base_targs = base_targs(n, src);
                 // Rust `struct Script(Arc<Mutex<State>>)`: its numbered fields
@@ -2651,6 +2809,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
             if facts.defs[di].kind.is_callable() {
                 facts.defs[di].lambda_receiver = lambda_receiver(n, src);
                 facts.defs[di].type_params = type_params(n, src);
+                facts.defs[di].type_bounds = type_params_bounds(n, src).1;
                 facts.defs[di].elem = return_elem(n, src);
                 facts.defs[di].keyed = return_keyed(n, src);
                 facts.defs[di].key = return_key(n, src);
@@ -2691,11 +2850,8 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                     push(&mut refs, n, RefKind::Type, p, ctx, Some(di));
                 }
                 let mut pstack: Vec<Node> = Vec::new();
-                for f in ["parameters", "receiver"] {
-                    if let Some(ps) = n.child_by_field_name(f) {
-                        pstack.push(ps);
-                    }
-                }
+                pstack.extend(params_field(n));
+                pstack.extend(n.child_by_field_name("receiver"));
                 pstack.extend(kids(n).into_iter().filter(|c| {
                     matches!(
                         c.kind(),
@@ -2736,6 +2892,8 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                                         written_head: None,
                                         from_def: Some(di),
                                         byte: c.start_byte(),
+                                        until: 0,
+                                        after: 0,
                                     });
                                 }
                             } else if matches!(
@@ -2776,6 +2934,8 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                                         written_head: None,
                                         from_def: Some(di),
                                         byte: c.start_byte(),
+                                        until: 0,
+                                        after: 0,
                                     });
                                 }
                             } else {
@@ -2804,6 +2964,8 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                             written_head: None,
                             from_def: Some(di),
                             byte: ps.start_byte(),
+                            until: 0,
+                            after: 0,
                         });
                     }
                 }
@@ -2856,6 +3018,8 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                                     written_head: None,
                                     from_def: Some(di),
                                     byte: x.start_byte(),
+                                    until: 0,
+                                    after: 0,
                                 });
                             }
                         }
@@ -2993,6 +3157,8 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                     written_head: None,
                     from_def: None,
                     byte: n.start_byte(),
+                    until: 0,
+                    after: 0,
                 });
             }
         }
@@ -3025,6 +3191,8 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                             written_head: None,
                             from_def: None,
                             byte: n.start_byte(),
+                            until: 0,
+                            after: 0,
                         });
                     }
                 }
@@ -3048,6 +3216,8 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                     written_head: None,
                     from_def: None,
                     byte: n.start_byte(),
+                    until: 0,
+                    after: 0,
                 });
             }
             let taken_apart = parts.is_some();
@@ -3105,6 +3275,8 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                     .flatten(),
                     from_def: None,
                     byte: declared_at,
+                    until: 0,
+                    after: 0,
                 });
             }
         }
@@ -3587,6 +3759,8 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                     written_head: written_head(n, src),
                     from_def: None,
                     byte: n.start_byte(),
+                    until: 0,
+                    after: 0,
                 });
             }
         }
@@ -3594,6 +3768,12 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
         let children: Vec<Node> = n.children(&mut cursor).filter(|c| c.is_named()).collect();
         anc.push(n);
         stack.extend(children.into_iter().rev().map(|c| (c, depth + 1)));
+    }
+    for l in locals[stamped..].iter_mut().filter(|l| !l.field && l.until == 0) {
+        l.until = until;
+        if let Some((_, end)) = declared.filter(|(value, _)| l.byte < *value && scoped) {
+            l.after = end;
+        }
     }
     // (what the signature of a misread declaration wrote is no use: its
     // "parameter types" are the arguments, read above)
@@ -3667,19 +3847,27 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
     // one per (definition, name, field): a declared type over a guessed one
     locals.retain(|l| !matches!(l.path.as_slice(), [t] if t == "var" || t == "auto" || t == "let"));
     locals.sort_by(|a, b| {
-        (a.from_def, &a.name, !a.field, !a.declared).cmp(&(
+        (a.from_def, &a.name, !a.field, a.assigned, a.until, !a.declared).cmp(&(
             b.from_def,
             &b.name,
             !b.field,
+            b.assigned,
+            b.until,
             !b.declared,
         ))
     });
     // (Rust declares a name again in the scope it is in, `let r = a(); let r
     // = b();`, and in each arm of a `match`: every one is kept, and a use
     // has the one declared last before it, `Project::local_in_force`)
+    // (and a name declared in two blocks is two locals: `if (a) { const x =
+    // new A() } else { const x = new B() }`; an assignment's hint is never
+    // one beside a declaration)
     let redeclares = facts.lang == Some(crate::lang::Lang::Rust);
     locals.dedup_by(|b, a| {
-        a.from_def == b.from_def && a.name == b.name && !(redeclares && !a.field && !b.field)
+        a.from_def == b.from_def
+            && a.name == b.name
+            && !(redeclares && !a.field && !b.field)
+            && (a.field || b.field || b.assigned || a.until == b.until)
     });
     for imp in imports.iter_mut() {
         if imp.runs == Runs::ModuleLevel && inside_callable(&facts.defs, imp.byte) {
@@ -4252,14 +4440,11 @@ fn mapped_path(n: Node, src: &[u8], of: &[String]) -> Result<Option<Vec<String>>
     if !(is_closure(f.kind()) || f.kind() == "block") {
         return Err(());
     }
-    let params = f
-        .child_by_field_name("parameters")
-        .or_else(|| f.child_by_field_name("parameter"))
-        .or_else(|| {
-            kids(*f).into_iter().find(|c| {
-                matches!(c.kind(), "lambda_parameters" | "block_parameters" | "closure_parameters")
-            })
-        });
+    let params = params_field(*f).or_else(|| f.child_by_field_name("parameter")).or_else(|| {
+        kids(*f).into_iter().find(|c| {
+            matches!(c.kind(), "lambda_parameters" | "block_parameters" | "closure_parameters")
+        })
+    });
     let names = match params.map(|ps| closure_params(ps, src)) {
         Some(names) if !names.is_empty() => names,
         _ => closure_params(*f, src),
@@ -5676,6 +5861,45 @@ fn state_value_path(node: Node, src: &[u8]) -> Option<Vec<String>> {
     value_type(v, src)
 }
 
+/// The parameter list of a declaration. (Scala gives a generic method's type
+/// parameters the same field name: `def opt[B <: Base](b: B)`.)
+fn params_field<'t>(n: Node<'t>) -> Option<Node<'t>> {
+    let mut c = n.walk();
+    if !c.goto_first_child() {
+        return None;
+    }
+    loop {
+        if c.field_name() == Some("parameters") && !c.node().kind().starts_with("type_parameter") {
+            return Some(c.node());
+        }
+        if !c.goto_next_sibling() {
+            return None;
+        }
+    }
+}
+
+/// Whether a node of this kind is a scope of its own for what is declared
+/// in it: a block, a loop, a `catch`, a closure, one arm of a match.
+fn is_scope(kind: &str) -> bool {
+    kind.ends_with("block")
+        || kind.ends_with("_body")
+        || kind.starts_with("for")
+        || kind.contains("_for_")
+        || kind.contains("catch")
+        || is_closure(kind)
+        || matches!(
+            kind,
+            "compound_statement"
+                | "statements"
+                | "while_statement"
+                | "using_statement"
+                | "match_arm"
+                | "case_clause"
+                | "switch_entry"
+                | "when_entry"
+        )
+}
+
 fn inside_callable(defs: &[Def], byte: usize) -> bool {
     defs.iter().any(|d| d.kind.is_callable() && d.start_byte <= byte && byte < d.end_byte)
 }
@@ -5818,6 +6042,7 @@ fn add_blocks(
             self_params: Vec::new(),
             attrs: Vec::new(),
             type_params: Vec::new(),
+            type_bounds: Vec::new(),
             node_id,
             start_byte: start,
             end_byte: end,
@@ -6000,6 +6225,7 @@ fn add_extras(
             self_params: Vec::new(),
             attrs: Vec::new(),
             type_params: Vec::new(),
+            type_bounds: Vec::new(),
             node_id: node.id(),
             start_byte: node.start_byte(),
             end_byte: node.end_byte(),

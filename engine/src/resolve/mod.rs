@@ -1392,6 +1392,12 @@ fn qual_key(fam: Family, qualname: &str) -> String {
     }
 }
 
+/// The definition around definition `x` of file `f`: where what its
+/// signature writes is looked up.
+fn defs_parent(files: &[FileFacts], f: usize, x: usize) -> Option<usize> {
+    files[f].defs[x].parent
+}
+
 fn is_top(defs: &[Def], d: usize) -> bool {
     let mut p = defs[d].parent;
     while let Some(x) = p {
@@ -1748,6 +1754,8 @@ impl<'a> Project<'a> {
         shadows.retain(|_, v| v.len() > 1);
         for (key, v) in shadows.iter_mut() {
             v.sort_by_key(|&li| (self.files[key.0].locals[li].byte, li));
+            // (the one the index names is the first declared)
+            locals.insert(key.clone(), v[0]);
         }
         self.shadows = shadows;
         self.locals = locals;
@@ -2533,9 +2541,17 @@ impl<'a> Project<'a> {
             return li;
         };
         let locals = &self.files[f].locals;
+        // the one whose block the use is written in, the innermost of them
+        // (declared last); else the last declared before the use
         // (the arms of one `match` are declared at the same place: the first)
-        let Some(last) = all.iter().rev().copied().find(|&i| locals[i].byte <= at) else {
-            return all[0];
+        // (and not in its own value: `let convertible = Wrap(convertible)`)
+        let inside = |i: &usize| {
+            (locals[*i].until == 0 || at < locals[*i].until)
+                && (locals[*i].after == 0 || locals[*i].after <= at || at < locals[*i].byte)
+        };
+        let before = || all.iter().rev().copied().filter(|&i| locals[i].byte <= at);
+        let Some(last) = before().find(inside).or_else(|| before().next()) else {
+            return all.iter().copied().find(inside).unwrap_or(all[0]);
         };
         all.iter().copied().find(|&i| locals[i].byte == locals[last].byte).unwrap_or(last)
     }
@@ -3413,13 +3429,38 @@ impl<'a> Project<'a> {
                 {
                     return false;
                 }
+                // (`baseUrl(…)` beside `String baseUrl`: only where methods
+                // and variables are names of two kinds; anywhere else the
+                // call is of the local, whatever its type says)
+                let two_kinds = matches!(self.files[f].lang, Some(Lang::Java | Lang::Kotlin));
                 return l.assigned
                     || before
-                    || (called && (l.declared || l.path.first().is_some_and(|h| h == name)));
+                    || (called
+                        && ((l.declared && two_kinds)
+                            || l.path.first().is_some_and(|h| h == name)));
             }
             cur = defs[x].parent;
         }
         false
+    }
+
+    /// The definition around `d` (or `d` itself) that declares a type
+    /// parameter `name`, and the type that bounds it.
+    fn type_param_around(
+        &self,
+        f: usize,
+        d: Option<usize>,
+        name: &str,
+    ) -> Option<(usize, Option<Vec<String>>)> {
+        let defs = &self.files[f].defs;
+        let mut cur = d;
+        while let Some(x) = cur {
+            if let Some(i) = defs[x].type_params.iter().position(|p| p == name) {
+                return Some((x, defs[x].type_bounds.get(i).cloned().flatten()));
+            }
+            cur = defs[x].parent;
+        }
+        None
     }
 
     /// Whether `path` is the value a local named like its head is declared
@@ -3437,6 +3478,20 @@ impl<'a> Project<'a> {
                 return l.path.len() > 1
                     && l.path[0] == *name
                     && (path.starts_with(&l.path) || (path.len() > 1 && l.path.starts_with(path)));
+            }
+            cur = defs[x].parent;
+        }
+        false
+    }
+
+    /// Whether the name is a local or parameter declared with its type.
+    fn declared_local(&self, f: usize, d: Option<usize>, name: &str) -> bool {
+        let defs = &self.files[f].defs;
+        let mut cur = d;
+        while let Some(x) = cur {
+            if let Some(&li) = self.locals.get(&(f, x, name.to_string())) {
+                let l = &self.files[f].locals[self.local_in_force(f, x, name, li)];
+                return l.declared && !l.assigned;
             }
             cur = defs[x].parent;
         }
@@ -3653,6 +3708,14 @@ impl<'a> Project<'a> {
             let wanted = self.naming_type();
             if found.iter().any(|r| is_type(r) == wanted) {
                 found.retain(|r| is_type(r) == wanted);
+            }
+        }
+        // TS: what a `namespace` holds is a name inside it (the walk up the
+        // definitions around finds it there), not beside one the file declares
+        if found.len() > 1 && found.iter().all(|r| self.family[r.0] == Some(Family::Ecma)) {
+            let outer = |r: &DefRef| self.def(*r).parent.is_none();
+            if found.iter().any(outer) {
+                found.retain(outer);
             }
         }
         self.best(found)
@@ -4560,6 +4623,42 @@ impl<'a> Project<'a> {
         };
         let opened_after = |i: usize| opened.get(i).copied().unwrap_or(false);
         let (head, rest) = path.split_first()?;
+        // a type parameter of a definition around (`interface Box<T> { v: T }`
+        // beside a `type T`) is no name of the project; where types and
+        // values are names of two kinds, only where a type is written
+        // (a member asked of it, or of a value typed by it, is a member of
+        // the type that bounds it: `fn run<S: Sink>(s: S) { s.begin() }`)
+        if fam != Family::Ecma || self.naming_type() {
+            if let Some((x, bound)) =
+                self.type_param_around(f, d, head).filter(|_| !self.is_local_name(f, d, head))
+            {
+                // (a type's parameter bound by the type itself is the type it
+                // is used on, which `Binds` and `self_params` know)
+                let own = &self.files[f].defs[x];
+                let bound = bound.filter(|_| !own.self_params.iter().any(|p| p == head))?;
+                let before = self.types_only.replace(true);
+                let named =
+                    self.resolve_path_inner(f, defs_parent(self.files, f, x), &bound, false, false);
+                *self.types_only.borrow_mut() = before;
+                let (t, _) = named?;
+                return if rest.is_empty() {
+                    Some((t, Confidence::Extracted))
+                } else {
+                    self.walk(t, rest, Confidence::Extracted)
+                };
+            }
+        }
+        // a local declared with a type, called: the call is of what it holds,
+        // which is no definition (`cb('hi')` with `cb: (x: string) => number`)
+        if rest.is_empty()
+            && !bases
+            && *self.calling.borrow()
+            && !*self.types_only.borrow()
+            && self.declared_local(f, d, head)
+            && !self.local_keeps_outer(f, d, head, true)
+        {
+            return None;
+        }
         // C++ `log::Writer log(file);`: where a type is written, a name
         // before `::` is a namespace or a type, never the variable of that name
         if fam == Family::C
