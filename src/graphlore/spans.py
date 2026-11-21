@@ -476,7 +476,11 @@ def _blank_expression_branches(src: bytes) -> bytes:
     branch, loses the type around. The source with the directive lines and
     every branch but the first blanked (each byte but a newline or carriage
     return a space), else ``src``. Of a group with one branch only the two
-    directive lines go: its lines are part of the expression.
+    directive lines go: its lines are part of the expression. A group whose
+    first branch leaves a brace open, or closes one it did not open (``#if
+    NET`` / ``if (!OperatingSystem.IsBrowser()) {`` / ``#endif``, closed by a
+    ``}`` in a later group), is treated the same: the parser, pairing the
+    brace inside the group, loses the members after it.
 
     The native engine's ``parse::blank_expression_branches`` is the same rule.
     """
@@ -484,7 +488,9 @@ def _blank_expression_branches(src: bytes) -> bytes:
         return src
     lines = src.split(b"\n")
     blank: list[tuple[int, int]] = []
-    stack: list[tuple[bool, list[int]]] = []
+    # (opened inside an expression, its directive lines, the braces its first
+    # branch leaves open)
+    stack: list[list[Any]] = []
     last = b""  # the last line of code, without its comment
     for li, line in enumerate(lines):
         t = line.strip(_PP_SPACE)
@@ -496,14 +502,14 @@ def _blank_expression_branches(src: bytes) -> bytes:
             word = word[:n]
             if word == b"if":
                 inside = bool(last) and last[-1:] not in _PP_ENDS
-                stack.append((inside, [li]))
+                stack.append([inside, [li], 0])
             elif word in (b"elif", b"else"):
                 if stack:
                     stack[-1][1].append(li)
             elif word == b"endif":
                 if stack:
-                    inside, directives = stack.pop()
-                    if inside:
+                    inside, directives, opened = stack.pop()
+                    if inside or opened:
                         blank.append((directives[0], directives[0]))
                         blank.append((directives[1] if len(directives) >= 2 else li, li))
             continue
@@ -511,6 +517,10 @@ def _blank_expression_branches(src: bytes) -> bytes:
         code = (t if cut < 0 else t[:cut]).rstrip(_PP_SPACE)
         if code:
             last = code
+            opened = code.count(b"{") - code.count(b"}")
+            for g in stack:
+                if len(g[1]) == 1:
+                    g[2] += opened
     if not blank:
         return src
     for lo, hi in blank:

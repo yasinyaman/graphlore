@@ -17,8 +17,9 @@ this script asks it about each of graphify's call, base and reference edges:
               compiler does not say which
   unanswered  it has no binding of that name on those lines
 
-An edge to a constructor is confirmed by the class, which is what the
-compiler binds the name written in `new Foo()` to.
+An edge to a constructor is judged by the constructor the compiler chose where
+it says (C#), and otherwise confirmed by the class, which is what the compiler
+binds the name written in `new Foo()` to.
 
 and then repeats the comparison for each: the share of the confirmed edges
 the native graph has is the number that says what the native graph lacks; a
@@ -29,6 +30,11 @@ is a reference to its enum) is counted apart, `as the enum`.
     python benchmarks/verify_graphify.py /tmp/polyglot/cobra /tmp/polyglot/ripgrep /tmp/polyglot/restsharp
     python benchmarks/verify_graphify.py REPO... --native-dir DIR   # DIR/<repo>.json, built before
     python benchmarks/verify_graphify.py REPO... --markdown         # the table of docs/native-engine.md
+    python benchmarks/verify_graphify.py REPO... --baseline benchmarks/results-verify-graphify.json
+
+The confirmed edges are a floor: with `--baseline` the script exits 1 when,
+for a repository and a kind of edge in the baseline, the native graph lacks
+more of the confirmed edges than it did there (`--update` writes the file).
 
 A repository is read in the language its manifest names (`go.mod`,
 `Cargo.toml`, a `.csproj` / `.sln`), and needs graphify's graph in
@@ -136,7 +142,12 @@ def verdicts(graph: dict[str, Any], uses: list[dict[str, Any]], lang: str, imple
         places = [(target["file"], target["line"])]
         owner = defs.get(up.get(t, ("", ""))[0])
         if owner is not None and owner["name"] == target["name"]:
-            places.append((owner["file"], owner["line"]))
+            # (where the compiler names the constructor chosen, that decides)
+            chosen = [u for u in named if u.get("ctor")]
+            if chosen:
+                named = chosen
+            else:
+                places.append((owner["file"], owner["line"]))
         decls = [d for u in named for d in u["decls"]]
         if not named:
             verdict = "unanswered"
@@ -227,6 +238,19 @@ def judge(root: Path, lang: str, uses: list[dict[str, Any]], native: Path | None
             "refuted_rows": [r for r in rows if r["verdict"] == "refuted"]}
 
 
+def lacking(results: list[dict[str, Any]]) -> dict[str, dict[str, int]]:
+    """Per repository and kind: the confirmed edges the native graph lacks
+    (those it writes as an edge to the enum are not lacking)."""
+    return {f"{r['repo']}:{r['language']}": {g: len(r["confirmed"][g]["only_graphify"]) for g in GROUPS}
+            for r in results}
+
+
+def below_floor(now: dict[str, dict[str, int]], before: dict[str, dict[str, int]]) -> list[str]:
+    return [f"{repo} {g}: {now[repo][g]} confirmed edges lacking, {n} in the baseline"
+            for repo, row in sorted(before.items()) if repo in now
+            for g, n in row.items() if now[repo].get(g, 0) > n]
+
+
 def pct(a: int, b: int) -> str:
     return f"{100 * a / b:.0f}%" if b else "–"
 
@@ -298,6 +322,8 @@ def main() -> int:
                     help="per language: confirmed edges the native graph lacks, and refuted edges, shown")
     ap.add_argument("--markdown", action="store_true")
     ap.add_argument("--json", help="write every repository's counts and refuted edges here")
+    ap.add_argument("--baseline", help="the confirmed edges lacking per repository: more is a failure")
+    ap.add_argument("--update", action="store_true", help="write --baseline from this run")
     args = ap.parse_args()
     results = []
     with tempfile.TemporaryDirectory() as td:
@@ -320,7 +346,7 @@ def main() -> int:
                     uses = oracle_rust.bindings(root)
                 else:
                     cs_tool = cs_tool or oracle_csharp.setup(tmp)
-                    uses = oracle_csharp.uses_of(root, cs_tool)
+                    uses = oracle_csharp.uses_of(root, cs_tool, constructors=True)
                 results.append(judge(root, lang, uses, native, tmp))
     if not results:
         print("no Go, Rust or C# repository among them", file=sys.stderr)
@@ -328,6 +354,20 @@ def main() -> int:
     print(render(results, args.markdown, args.samples))
     if args.json:
         Path(args.json).write_text(json.dumps(results, indent=2), encoding="utf-8")
+    if args.baseline:
+        now = lacking(results)
+        path = Path(args.baseline)
+        if args.update:
+            kept = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+            path.write_text(json.dumps({**kept, **now}, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+            return 0
+        worse = below_floor(now, json.loads(path.read_text(encoding="utf-8")))
+        total_now = sum(n for row in now.values() for n in row.values())
+        print(f"\nagainst the baseline: {total_now} confirmed edges lacking, {len(worse)} rows worse")
+        for line in worse:
+            print(f"  BELOW THE FLOOR  {line}")
+        if worse:
+            return 1
     return 0
 
 

@@ -91,6 +91,18 @@ foreach (var tree in trees)
         else if (def.DeclaringSyntaxReferences.Length > 0) continue;
         stdout.WriteLine(JsonSerializer.Serialize(new { file = rel, line, expr = node.Identifier.ValueText, to_file = toFile, to_line = toLine, what = kind }));
     }
+    // `new Foo(1)`: the name is the class's; the constructor chosen is the
+    // creation's own symbol (one the source declares)
+    foreach (var node in tree.GetRoot().DescendantNodes().OfType<BaseObjectCreationExpressionSyntax>())
+    {
+        if (model.GetSymbolInfo(node).Symbol is not IMethodSymbol ctor || ctor.IsImplicitlyDeclared) continue;
+        var def = ctor.OriginalDefinition;
+        var at = def.DeclaringSyntaxReferences.FirstOrDefault(r => r.SyntaxTree.FilePath.StartsWith(root));
+        if (at == null) continue;
+        var loc = def.Locations.FirstOrDefault(l => l.IsInSource && l.SourceTree == at.SyntaxTree) ?? at.GetSyntax().GetLocation();
+        var line = node.GetLocation().GetLineSpan().StartLinePosition.Line + 1;
+        stdout.WriteLine(JsonSerializer.Serialize(new { file = rel, line, expr = def.ContainingType.Name, to_file = at.SyntaxTree.FilePath.Substring(root.Length), to_line = loc.GetLineSpan().StartLinePosition.Line + 1, what = "Constructor" }));
+    }
 }
 stdout.Flush();
 '''
@@ -106,14 +118,19 @@ def bindings(root: Path, tool: Path) -> list[dict[str, Any]]:
     return rows
 
 
-def uses_of(root: Path, tool: Path) -> list[dict[str, Any]]:
-    """Roslyn's bindings in the shape `oracle.compare` reads."""
+def uses_of(root: Path, tool: Path, constructors: bool = False) -> list[dict[str, Any]]:
+    """Roslyn's bindings in the shape `oracle.compare` reads. `constructors`
+    adds, for each `new Foo(…)`, the constructor chosen (`ctor: True`): the
+    name written is bound to the class."""
     uses = []
     for u in bindings(root, tool):
+        if u.get("what") == "Constructor" and not constructors:
+            continue
         decls = [(u["to_file"], u["to_line"])] if u.get("to_file") else []
         uses.append({"file": u["file"], "line": u["line"], "expr": u["expr"], "symbol": u["expr"],
                      "decls": decls, "lib": not decls, "alias": False,
-                     "declares": (u["file"], u["line"]) in decls})
+                     "declares": (u["file"], u["line"]) in decls,
+                     "ctor": u.get("what") == "Constructor"})
     return uses
 
 

@@ -4022,11 +4022,16 @@ impl<'a> Project<'a> {
         let full = &self.def(c).name;
         // (a C++ specialization's constructors carry the template's name)
         let cname = &specialized(full).unwrap_or(full).to_string();
-        let mut out: Vec<DefRef> = self.children[c.0]
-            .get(&c.1)
-            .into_iter()
-            .flat_map(|m| m.values().flatten())
-            .map(|&d| (c.0, d))
+        // (a C# partial type's are those of every file that declares it)
+        let mut out: Vec<DefRef> = std::iter::once(c)
+            .chain(self.partials(c))
+            .flat_map(|p| {
+                self.children[p.0]
+                    .get(&p.1)
+                    .into_iter()
+                    .flat_map(|m| m.values().flatten())
+                    .map(move |&d| (p.0, d))
+            })
             .filter(|r| {
                 let d = self.def(*r);
                 (d.kind == DefKind::Constructor && d.name != "deinit")
@@ -7261,6 +7266,20 @@ impl<'a> Project<'a> {
     /// or in its package. `on` is the receiver's type when the source writes
     /// it: the extension written for that type is `EXTRACTED`; otherwise a
     /// single candidate (the file's own first) is `INFERRED`.
+    /// The namespaces a C# file declares: the one written for the whole file
+    /// (`namespace N;`), else each block at its top (`namespace N { … }`).
+    fn csharp_namespaces(&self, f: usize) -> Vec<String> {
+        if let Some(p) = &self.files[f].package {
+            return vec![p.clone()];
+        }
+        self.files[f]
+            .defs
+            .iter()
+            .filter(|d| d.kind == DefKind::Namespace && d.parent.is_none())
+            .map(|d| d.qualname.replace("::", "."))
+            .collect()
+    }
+
     fn extension_method(
         &self,
         f: usize,
@@ -7275,6 +7294,8 @@ impl<'a> Project<'a> {
         }
         let here = dir_of(&self.files[f].path);
         let pkg = self.files[f].package.as_deref();
+        let spaces =
+            if fam == Some(Family::CSharp) { self.csharp_namespaces(f) } else { Vec::new() };
         // Rust: a method of an `impl Trait for` a type the project does not
         // define (`impl RequestExt for http::Request<()>`) extends that type
         let mut pool: Vec<DefRef> =
@@ -7294,11 +7315,17 @@ impl<'a> Project<'a> {
                     || dir_of(&self.files[r.0].path) == here
                     || (pkg.is_some() && self.files[r.0].package.as_deref() == pkg)
                     // C#: a namespace sees what the ones around it declare
-                    // (`RestSharp.Tests` sees `RestSharp`'s extensions)
-                    || (fam == Some(Family::CSharp)
-                        && pkg.zip(self.files[r.0].package.as_deref()).is_some_and(|(mine, its)| {
-                            mine.strip_prefix(its).is_some_and(|rest| rest.starts_with('.'))
-                        }))
+                    // (`RestSharp.Tests` sees `RestSharp`'s extensions),
+                    // written as a block or for the whole file
+                    || (fam == Some(Family::CSharp) && {
+                        let its = self.csharp_namespaces(r.0);
+                        spaces.iter().any(|mine| {
+                            its.iter().any(|its| {
+                                mine == its
+                                    || mine.strip_prefix(its.as_str()).is_some_and(|rest| rest.starts_with('.'))
+                            })
+                        })
+                    })
                     || self.uses_namespace_of(f, r.0)
             })
             .collect();
@@ -7637,8 +7664,9 @@ impl<'a> Project<'a> {
         while let Some(x) = cur {
             // (an extra definition that is a callable, RSpec's `let`, is
             // the source of its own block's uses)
-            let skip =
-                defs[x].extra && !defs[x].kind.is_callable() && !(swift && r.kind != RefKind::Type);
+            // (and so is a C# property with a body)
+            let own = (swift || defs[x].computed) && r.kind != RefKind::Type;
+            let skip = defs[x].extra && !defs[x].kind.is_callable() && !own;
             if skip {
                 cur = defs[x].parent;
                 continue;

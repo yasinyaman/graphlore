@@ -129,6 +129,10 @@ pub struct Def {
     /// knows it by its name too.
     #[serde(default)]
     pub returned_out: bool,
+    /// A C# property with a body (`get { … }`, `set => …`, `=> expr`): what
+    /// its body uses is the property's use, as a method's is the method's.
+    #[serde(default)]
+    pub computed: bool,
     /// C, C++: a field declared with an anonymous struct type (`struct {
     /// void *data; void (*addRead)(void *); } ev;`): the bytes of that body,
     /// whose members the grammar gives to the struct around.

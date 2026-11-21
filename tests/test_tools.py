@@ -1144,6 +1144,10 @@ def test_csharp_branches_inside_an_expression_are_blanked():
     # one branch inside an expression: only the directive lines go
     one = blank(b"class A {\n    int x =\n#if NET\n        1 +\n#endif\n        2;\n}\n")
     assert b"1 +" in one and b"#" not in one
+    # a brace the group opens and a later group closes: the directive lines go
+    brace = blank(b"class A {\n    void f() {\n#if NET\n        if (x()) {\n#endif\n        g();\n"
+                  b"#if NET\n        }\n#endif\n    }\n    void h() {}\n}\n")
+    assert b"if (x()) {" in brace and b"#" not in brace and brace.count(b"}") == 4
     # after a statement, a block or an attribute: untouched
     for keep in (b"class A {\n    int x;\n#if NET\n    void a() {}\n#else\n"
                  b"    void b() {}\n#endif\n}\n",

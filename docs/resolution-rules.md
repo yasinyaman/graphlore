@@ -25,7 +25,7 @@ python benchmarks/conformance.py --baseline benchmarks/results-conformance.json 
 python benchmarks/conformance.py --markdown      # the tables below
 ```
 
-Measured 2026-11-21 with graphlore-engine 0.5.58: **496 of 496 rules hold**
+Measured 2026-11-21 with graphlore-engine 0.5.59: **502 of 502 rules hold**
 (356 of the first 406 with 0.5.45). Ten came from the Go type checker and
 rust-analyzer run on whole repositories; fifteen from the Kotlin and Swift
 compilers' tests (type checks, casts, `catch`, aliases); thirty-nine from two
@@ -104,7 +104,7 @@ Each change was measured on the 45 audit repositories as well, by reading
 the edges it added and removed at their source lines; the page on the
 [native engine](native-engine.md#the-rules-themselves) has the numbers.
 Every case but Scala's has been compiled by its own language
-(`benchmarks/verify_cases.py`: 468 of 468 accepted; no Scala compiler runs
+(`benchmarks/verify_cases.py`: 474 of 474 accepted; no Scala compiler runs
 where this was measured).
 
 Passing every case says the engine follows the rules written here, not
@@ -426,7 +426,7 @@ Scala Language Specification, chapter 2 'Identifiers, Names and Scopes', 4.7 'Im
 | a constructor pattern and a typed pattern are uses of the type they name | `pattern-types` | yes |
 | the types a type parameter is bound by are uses of them | `bound-types` | yes |
 
-### csharp (45 of 45)
+### csharp (51 of 51)
 
 C# Language Specification, 'Namespace and type names', 'Member lookup', 'Extension method invocations'.
 
@@ -477,6 +477,12 @@ C# Language Specification, 'Namespace and type names', 'Member lookup', 'Extensi
 | `List<string>` is never a project class `List` that takes no type argument | `generic-use-is-no-plain-type` | yes |
 | a call written with more type arguments than any method of the type takes is the extension's | `extension-by-type-arguments` | yes |
 | the type a local is declared with, and `typeof(T)`, are uses of the type | `local-declared-type` | yes |
+| what a property's accessor calls is the property's call, not its class's | `property-body-is-the-property` | yes |
+| a namespace written as a block sees the extensions of the namespaces around it | `block-namespace-sees-outer-extension` | yes |
+| a brace an `#if` opens and a later `#if` closes hides no member after it | `brace-opened-in-a-directive` | yes |
+| a local assigned a member read is what the member holds | `local-from-member-read` | yes |
+| `new T { … }` with no argument list calls the constructor that takes none | `initializer-without-arguments` | yes |
+| a partial type's constructors are those of every file that declares it | `partial-type-constructor` | yes |
 
 ### rust (47 of 47)
 
@@ -713,4 +719,4 @@ PHP Manual, 'Namespaces: Name resolution rules', 'Classes and Objects' (inherita
 | `\Name` is the global class, never one a namespace of the project declares | `global-class-is-not-a-namespaced-one` | yes |
 | `$x instanceof T` and `catch (T $e)` are uses of T | `instanceof-and-catch` | yes |
 
-496 of 496 rules hold
+502 of 502 rules hold

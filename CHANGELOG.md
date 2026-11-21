@@ -38,18 +38,21 @@ All notable changes to this project are documented here. The format is based on
   engine 0.5.55 and all but 4 with 0.5.56. On ureq, ripgrep, axum-realworld
   and actix-realworld rust-analyzer has one for 11,924; 97.5% before, 98.5%
   now.
-- **graphify's edges are checked before they count**
-  (`benchmarks/verify_graphify.py`). The comparison with graphify took each
-  of its edges as a fact. For Go, Rust and C# repositories the compiler is
-  now asked about each one first (confirmed, refuted, one implementation of
-  a trait's method, no answer), and the share the native graph has is given
-  per kind. On twelve repositories the native graph has 82% of graphify's
-  Rust calls and 99% of the ones rust-analyzer confirms; 481 of graphify's
-  are refuted. The gap that stays real is C# calls: 93% of the confirmed
-  (260 edges, named in `docs/native-engine.md`).
+- **graphify's edges are checked before they count, and the confirmed ones
+  are a floor** (`benchmarks/verify_graphify.py`). The comparison with
+  graphify took each of its edges as a fact. For Go, Rust and C#
+  repositories the compiler is now asked about each one first (confirmed,
+  refuted, one implementation of a trait's method, no answer), and the share
+  the native graph has is given per kind. On twelve repositories the native
+  graph has 82% of graphify's Rust calls and 99% of the ones rust-analyzer
+  confirms; 481 of graphify's are refuted. `--baseline
+  benchmarks/results-verify-graphify.json` exits 1 when a build lacks more
+  of the confirmed edges, per repository and kind, than the baseline: 115 of
+  14,400 with engine 0.5.59, 346 with 0.5.58.
   `compare_engines.compare_edges(..., pairs=True)` returns every pair only
   graphify has; `oracle_go.py` and `oracle_csharp.py` expose their bindings
-  (`uses_of`, `setup`).
+  (`uses_of`, `setup`), and Roslyn also says which constructor a `new`
+  chose.
 - **Roslyn as the judge of the C# edges** (`benchmarks/oracle_csharp.py`):
   the C# compiler's semantic model, on one compilation of every source of
   a repository. On todoapi, RestSharp, commandline and aspnetcore-realworld
@@ -384,6 +387,30 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- **Native engine 0.5.59: the confirmed edges of graphify's the native graph
+  lacked** (502 cases in the checklist, all hold). All C#, from
+  `verify_graphify.py`; 260 confirmed calls were missing, 28 are:
+  - **What a property's accessor calls is the property's call.** The uses in
+    `get { … }`, `set => …` and `=> expr` left from the class around; they
+    leave from the property now (`Def::computed`), as a method's do from the
+    method.
+  - **A namespace written as a block sees the extensions of the namespaces
+    around it** (`namespace N.Tests.Unit { … }` and an extension class in
+    `N.Tests`), as one written for the whole file did.
+  - **A brace an `#if` opens and a later `#if` closes** (`#if NET` / `if
+    (…) {` / `#endif`) no longer hides the members after it. The parser
+    paired the brace inside the group and lost the rest of the class: every
+    call of `RestClient.Dispose()` had no target. The directive lines of
+    such a group are blanked before parsing (`parse::blank_expression_branches`,
+    and `spans._blank_expression_branches` for the span engine).
+  - **A local assigned a member read is what the member holds** (`var sut =
+    Parser.Default;`): read in Go and Rust since 0.5.56, never in C#.
+  - **`new T { … }` with no argument list calls the constructor that takes
+    none**, and a partial type's constructors are those of every file that
+    declares it.
+  - `using RestSharp.Serializers;` beside a property `RestClient.Serializers`
+    is the namespace again (the misparsed class had made the property a
+    top-level name).
 - **Native engine 0.5.58: the gaps the compilers had left open** (496 cases
   in the checklist, all hold):
   - **C#: a type is told from its generic namesake by the type arguments
