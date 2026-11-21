@@ -2244,6 +2244,80 @@ case("csharp", "qualified-nested-type", "`Outer.Inner` names the nested type",
      [("C.M", "references", "Outer.Inner"), ("C.M", "calls", "Outer.Inner.Go")], [("C.M", "references", "A.cs:App.Inner")],
      source=STD_CS + "basic-concepts.md §7.8.1 (trailing part: a nested accessible type of Rₚ); " + RS_CS + "Binder_Symbols.cs BindQualifiedName")
 
+# Phase 2 for Rust: the rules the Rust Reference states (rust-lang/reference,
+# `src/names/`, `src/items/use-declarations.md`, `src/expressions/method-call-expr.md`,
+# each cited by its rule identifier `r[...]`) and rustc's resolver
+# (`compiler/rustc_resolve`) and method probe (`compiler/rustc_hir_typeck/src/method/probe.rs`)
+# where the Reference leaves primary and type-relative resolution to the compiler.
+found_by("source")
+REF_RS = "rust-lang/reference@c9cc32825b03:src/"
+RC_RS = "rust-lang/rust@c7d5ba59d8e1:compiler/"
+CARGO21 = CARGO + "edition = \"2021\"\n"
+case("rust", "item-in-a-block", "a function declared in a block is a name of that block, before the module's of its name",
+     RS, {"Cargo.toml": CARGO, "src/lib.rs": "pub fn helper() -> i32 {\n    1\n}\n\npub fn outer() -> i32 {\n    fn helper() -> i32 {\n        2\n    }\n    helper()\n}\n\npub fn other() -> i32 {\n    helper()\n}\n"},
+     [("outer", "calls", "outer.helper"), ("other", "calls", "src/lib.rs:helper")], [("outer", "calls", "src/lib.rs:helper")],
+     source=REF_RS + "names/scopes.md r[names.scopes.items.statement]")
+case("rust", "outer-module-items-not-in-scope", "the items of a module around are no names of a nested module: only its own and what it imports are",
+     RS, {"Cargo.toml": CARGO, "src/lib.rs": "pub fn helper() -> i32 {\n    1\n}\n\npub mod inner {\n    pub fn helper() -> i32 {\n        2\n    }\n\n    pub mod deeper {\n        use super::helper;\n\n        pub fn run() -> i32 {\n            helper()\n        }\n    }\n}\n"},
+     [("inner.deeper.run", "calls", "inner.helper")], [("inner.deeper.run", "calls", "src/lib.rs:helper")],
+     source=REF_RS + "names/scopes.md r[names.scopes.items.nested-modules]")
+case("rust", "let-shadows-from-where-it-is", "a `let` binding shadows a function of its name only after it: a call before it is the function",
+     RS, {"Cargo.toml": CARGO, "src/lib.rs": "pub fn foo() -> i32 {\n    1\n}\n\npub fn before() -> i32 {\n    let a = foo();\n    let foo = || 2;\n    a + foo()\n}\n\npub fn after() -> i32 {\n    let foo = || 2;\n    foo()\n}\n"},
+     [("before", "calls", "foo")], [("after", "calls", "foo")],
+     source=REF_RS + "names/scopes.md r[names.scopes.pattern-bindings.let], r[names.scopes.pattern-bindings.shadow]")
+case("rust", "associated-items-are-not-scoped", "in an `impl`, a bare name is never an associated function of the type: that takes `Self::`",
+     RS, {"Cargo.toml": CARGO, "src/lib.rs": "pub fn make() -> i32 {\n    1\n}\n\npub struct S;\n\nimpl S {\n    pub fn make() -> i32 {\n        2\n    }\n\n    pub fn bare() -> i32 {\n        make()\n    }\n\n    pub fn own() -> i32 {\n        Self::make()\n    }\n}\n"},
+     [("S.bare", "calls", "make"), ("S.own", "calls", "S.make")], [("S.bare", "calls", "S.make")],
+     source=REF_RS + "names/scopes.md r[names.scopes.associated-items.scope]")
+case("rust", "generic-parameter-hides-a-type", "a generic type parameter is the name in the item it is declared on, before a type of the module",
+     RS, {"Cargo.toml": CARGO, "src/lib.rs": "pub struct Config;\n\npub fn generic<Config: Clone>(c: Config) -> Config {\n    c.clone()\n}\n\npub fn plain(c: Config) -> Config {\n    c\n}\n"},
+     [("plain", "references", "Config")], [("generic", "references", "Config")],
+     source=REF_RS + "names/scopes.md r[names.scopes.generic-parameters.param-list]")
+case("rust", "glob-shadowed-by-an-item", "a name the module declares shadows the one a glob import brings; the glob still brings the others",
+     RS, {"Cargo.toml": CARGO, "src/lib.rs": "pub mod other;\n\nuse other::*;\n\npub struct Foo;\n\npub fn make() -> usize {\n    let _a = Foo;\n    let _b = Bar;\n    0\n}\n",
+          "src/other.rs": "pub struct Foo;\npub struct Bar;\n"},
+     [("make", "references", "src/lib.rs:Foo"), ("make", "references", "Bar")], [("make", "references", "src/other.rs:Foo")],
+     source=REF_RS + "items/use-declarations.md r[items.use.glob.shadowing]")
+case("rust", "named-import-shadows-a-glob", "a name imported by name shadows the one a glob import brings",
+     RS, {"Cargo.toml": CARGO, "src/lib.rs": "pub mod a;\npub mod b;\n\nuse a::*;\nuse b::Thing;\n\npub fn make() -> i32 {\n    Thing::new()\n}\n",
+          "src/a.rs": "pub struct Thing;\n\nimpl Thing {\n    pub fn new() -> i32 {\n        1\n    }\n}\n",
+          "src/b.rs": "pub struct Thing;\n\nimpl Thing {\n    pub fn new() -> i32 {\n        2\n    }\n}\n"},
+     [("make", "calls", "src/b.rs:Thing.new")], [("make", "calls", "src/a.rs:Thing.new")],
+     source=REF_RS + "items/use-declarations.md r[items.use.glob.shadowing]")
+case("rust", "inner-use-shadows-outer", "a `use` in a block shadows a `use` of the module of the same name",
+     RS, {"Cargo.toml": CARGO, "src/lib.rs": "pub mod m1;\npub mod m2;\n\nuse m1::make;\n\npub fn outer() -> i32 {\n    make()\n}\n\npub fn inner() -> i32 {\n    use m2::make;\n    make()\n}\n",
+          "src/m1.rs": "pub fn make() -> i32 {\n    1\n}\n", "src/m2.rs": "pub fn make() -> i32 {\n    2\n}\n"},
+     [("outer", "calls", "src/m1.rs:make"), ("inner", "calls", "src/m2.rs:make")], [("inner", "calls", "src/m1.rs:make")],
+     source=REF_RS + "names/name-resolution.md r[names.resolution.expansion.imports.shadowing]")
+case("rust", "module-and-function-namespaces", "a module and a function of one name live in different namespaces: `log::f()` is the module's, `log()` the function",
+     RS, {"Cargo.toml": CARGO, "src/lib.rs": "pub mod log {\n    pub fn write() -> i32 {\n        1\n    }\n}\n\npub fn log() -> i32 {\n    2\n}\n\npub fn run() -> i32 {\n    log::write() + log()\n}\n"},
+     [("run", "calls", "log.write"), ("run", "calls", "src/lib.rs:log")],
+     source=REF_RS + "names/namespaces.md r[names.namespaces.kinds]")
+case("rust", "uniform-paths", "since 2018 a `use` path starts at a name in scope: a child module of the module that writes it before one of the crate root",
+     RS, {"Cargo.toml": CARGO21, "src/lib.rs": "pub mod m {\n    pub fn f() -> i32 {\n        1\n    }\n}\n\npub mod a {\n    pub mod m {\n        pub fn f() -> i32 {\n            2\n        }\n    }\n\n    use m::f;\n\n    pub fn run() -> i32 {\n        f()\n    }\n}\n"},
+     [("a.run", "calls", "a.m.f")], [("a.run", "calls", "src/lib.rs:m.f")],
+     source=REF_RS + "items/use-declarations.md r[items.use.path.edition2018]", since="2018")
+case("rust", "inherent-method-first", "a method of the type's own `impl` is found before a trait's method of the name",
+     RS, {"Cargo.toml": CARGO, "src/lib.rs": "pub struct Foo;\n\npub trait Run {\n    fn run(&self) -> i32;\n}\n\nimpl Foo {\n    pub fn run(&self) -> i32 {\n        1\n    }\n}\n\nimpl Run for Foo {\n    fn run(&self) -> i32 {\n        2\n    }\n}\n\npub fn go(f: &Foo) -> i32 {\n    f.run()\n}\n"},
+     [("go", "calls", "src/lib.rs:Foo.run@8")], [("go", "calls", "src/lib.rs:Foo.run@14"), ("go", "calls", "Run.run")],
+     source=REF_RS + "expressions/method-call-expr.md r[expr.method.candidate-search]; " + RC_RS + "rustc_hir_typeck/src/method/probe.rs assemble_inherent_candidates")
+case("rust", "self-in-a-trait", "`Self::f()` in a trait's default method is the trait's associated function",
+     RS, {"Cargo.toml": CARGO, "src/lib.rs": "pub fn helper() -> i32 {\n    0\n}\n\npub trait Tr {\n    fn helper() -> i32;\n\n    fn run() -> i32 {\n        Self::helper()\n    }\n}\n"},
+     [("Tr.run", "calls", "Tr.helper")], [("Tr.run", "calls", "src/lib.rs:helper")],
+     source=REF_RS + "names/scopes.md r[names.scopes.self.def-scope]")
+case("rust", "self-type-in-a-struct", "`Self` in a struct's own fields is the struct",
+     RS, {"Cargo.toml": CARGO, "src/lib.rs": "pub struct Node {\n    pub next: Option<Box<Self>>,\n    pub value: i32,\n}\n\nimpl Node {\n    pub fn value(&self) -> i32 {\n        self.value\n    }\n}\n\npub fn second(n: &Node) -> i32 {\n    n.next.as_ref().unwrap().value()\n}\n"},
+     [("second", "calls", "Node.value")],
+     source=REF_RS + "names/scopes.md r[names.scopes.self.def-scope]")
+case("rust", "tuple-struct-constructor", "a tuple struct's name called is its constructor, in the value namespace",
+     RS, {"Cargo.toml": CARGO, "src/lib.rs": "pub struct Meters(pub i32);\n\npub fn make() -> Meters {\n    Meters(3)\n}\n"},
+     [("make", "calls", "Meters")],
+     source=REF_RS + "names/namespaces.md r[names.namespaces.kinds] (struct constructors)")
+case("rust", "match-arm-binding", "a binding of a `match` arm is a name of the arm: it hides a function of its name there only",
+     RS, {"Cargo.toml": CARGO, "src/lib.rs": "pub fn size() -> i32 {\n    1\n}\n\npub fn pick(o: Option<i32>) -> i32 {\n    match o {\n        Some(size) => size,\n        None => size(),\n    }\n}\n\npub fn shadowed(o: Option<i32>) -> i32 {\n    match o {\n        Some(size) => size,\n        None => 0,\n    }\n}\n"},
+     [("pick", "calls", "size")], [("shadowed", "calls", "size"), ("shadowed", "references", "size")],
+     source=REF_RS + "names/scopes.md r[names.scopes.pattern-bindings.match-arm]")
+
 # --- running ------------------------------------------------------------------
 
 def _matches(node: dict[str, Any], want: str) -> bool:

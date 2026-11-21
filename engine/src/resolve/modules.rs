@@ -796,6 +796,14 @@ pub fn resolve_import(p: &Project, fam: Family, f: usize, imp: &ImportFact) -> M
                     other => other,
                 };
             }
+            // (2018: `use m::f;` in `mod a { … }` is `a`'s own `m` first)
+            if !imp.within.is_empty() {
+                let mut inner: Vec<String> = imp.within.clone();
+                inner.extend(segs.iter().cloned());
+                if let ModRes::Target(t) = walk(p, Target::Module(vec![f]), &inner) {
+                    return ModRes::Target(t);
+                }
+            }
             rust_path(p, f, &segs)
         }
         Family::Ruby => {

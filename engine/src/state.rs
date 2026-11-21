@@ -539,6 +539,16 @@ impl State {
         {
             return;
         }
+        // (a Rust attribute's arguments are macro input: `#[derive(Debug)]`
+        // names a derive macro, never a value)
+        if anc
+            .iter()
+            .rev()
+            .take(8)
+            .any(|a| matches!(a.kind(), "attribute_item" | "inner_attribute_item"))
+        {
+            return;
+        }
         // (a base named where a type is declared is its base, no value read)
         if pk.contains("heritage")
             || pk.contains("extends")
@@ -685,6 +695,7 @@ impl State {
                 known.extend(imp.module.rsplit(['.', '/', ':']).next());
             }
         }
+        let star = imports.iter().any(|i| i.form == crate::facts::ImportForm::Wildcard);
         let bytes: Vec<usize> = self.uses.iter().map(|u| u.byte).collect();
         let homes = innermost(&bytes);
         let mut seen: HashSet<(Option<usize>, RefKind, Vec<String>)> = HashSet::new();
@@ -727,10 +738,15 @@ impl State {
                         .blocked
                         .iter()
                         .any(|(lo, hi, n)| n == head && *lo <= u.byte && u.byte < *hi));
+            // (a glob import brings names the file never writes: a type or a
+            // constant it names, `Bar` of `use other::*;`, is kept for
+            // resolution to look up there)
+            let globbed = star && head.chars().next().is_some_and(char::is_uppercase);
             if needs_import
                 && !matches!(head, "self" | "super" | "crate")
                 && !known.contains(head)
                 && !of_local
+                && !globbed
             {
                 continue;
             }

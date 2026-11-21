@@ -174,6 +174,9 @@ struct BoundArg {
 struct Scope {
     /// Local name -> what it is bound to, and the import that bound it.
     bindings: HashMap<String, (Bind, usize)>,
+    /// Rust: names a `use` in a block binds there only: the block's range,
+    /// the name, what it is bound to, the import.
+    scoped: Vec<(usize, usize, String, Bind, usize)>,
     /// Wildcard imports, with the import index.
     stars: Vec<(Target, usize)>,
     /// What each import's module resolved to.
@@ -1499,7 +1502,8 @@ impl<'a> Project<'a> {
         // the files a file's imported names live in (`use A\B\C`, `import a.b.C`)
         for f in 0..files.len() {
             let mut more = Vec::new();
-            for (b, _) in p.scopes[f].bindings.values() {
+            let scoped = p.scopes[f].scoped.iter().map(|(_, _, _, b, _)| b);
+            for b in p.scopes[f].bindings.values().map(|(b, _)| b).chain(scoped) {
                 if let Some(Target::Def((g, _))) = p.eval(b, 2) {
                     more.push(g);
                 }
@@ -1810,6 +1814,20 @@ impl<'a> Project<'a> {
         if let Some((last, of)) = path.split_last() {
             if is_element_marker(last) {
                 return self.elem_of_as(f, d, of, last);
+            }
+        }
+        // Rust `Self` written in a struct's, enum's or trait's own body is
+        // that type (r[names.scopes.self.def-scope])
+        // Rust `Self` written in a struct's or enum's own fields is that type
+        // (r[names.scopes.self.def-scope])
+        if let (Some(x), [one]) = (d, path) {
+            // (the reader writes the `Self` type as the word for the object)
+            if (one == "Self" || one == "self")
+                && self.family[f] == Some(Family::Rust)
+                && self.files[f].defs[x].kind.is_class_like()
+                && self.files[f].defs[x].owner.is_none()
+            {
+                return Some(((f, x), Confidence::Extracted));
             }
         }
         let found = self.resolve_path(f, d, path, true);
@@ -3791,6 +3809,11 @@ impl<'a> Project<'a> {
             }
             if let Some(t) = target {
                 for (name, bind) in modules::bindings(self, fam, f, imp, &t) {
+                    // (a `use` in a block binds the name in the block only)
+                    if let Some((lo, hi)) = imp.scope {
+                        s.scoped.push((lo, hi, name, bind, i));
+                        continue;
+                    }
                     s.bindings.entry(name).or_insert((bind, i));
                 }
                 if imp.form == ImportForm::Wildcard || modules::is_star(fam, imp) {
@@ -3929,7 +3952,9 @@ impl<'a> Project<'a> {
                 if !twins || m.0 == c.0 {
                     return !twins || self.top[m.0].get(name).is_none_or(|ds| ds.contains(&c.1));
                 }
-                match self.resolve_name(m.0, None, name) {
+                // (from where the `impl` is written: inside an inline module,
+                // that module's names)
+                match self.resolve_name(m.0, self.def(m).parent, name) {
                     Some(Target::Def(x)) if self.def(x).kind.is_class_like() => x == c,
                     _ => true,
                 }
@@ -4413,6 +4438,34 @@ impl<'a> Project<'a> {
     fn resolve_name_any(&self, f: usize, d: Option<usize>, name: &str) -> Option<Target> {
         let fam = self.family[f]?;
         let defs = &self.files[f].defs;
+        // Rust: a `use` in a block around the use shadows the module's names
+        // (r[names.resolution.expansion.imports.shadowing]); the innermost
+        // (with no site, the use is somewhere in `d`: a block of `d` is in
+        // sight, the innermost first)
+        let site = (*self.site.borrow()).filter(|(sf, _)| *sf == f).map(|(_, at)| at);
+        let home = d.map(|x| (defs[x].start_byte, defs[x].end_byte));
+        if site.is_some() || home.is_some() {
+            let inner = self.scopes[f]
+                .scoped
+                .iter()
+                .filter(|(lo, hi, n, _, _)| {
+                    n == name
+                        && match (site, home) {
+                            (Some(at), _) => *lo <= at && at < *hi,
+                            (None, Some((a, b))) => a <= *lo && *hi <= b,
+                            _ => false,
+                        }
+                })
+                .min_by_key(|(lo, hi, ..)| hi - lo);
+            if let Some((_, _, _, b, imp)) = inner {
+                if let Some(t) = self.eval(b, 3) {
+                    if self.acceptable(&t) {
+                        self.note_use(f, *imp, &t);
+                        return Some(t);
+                    }
+                }
+            }
+        }
         // enclosing definitions: nested functions; class members where
         // methods see them
         let mut cur = d;
@@ -4476,7 +4529,10 @@ impl<'a> Project<'a> {
             return Some(Target::Def(found));
         }
         if let Some(r) = self.top_in(&[f], name) {
-            if self.acceptable(&Target::Def(r)) && self.cs_namespace_in_sight(f, d, r) {
+            if self.acceptable(&Target::Def(r))
+                && self.cs_namespace_in_sight(f, d, r)
+                && self.rust_module_in_sight(f, d, r)
+            {
                 return Some(Target::Def(r));
             }
         }
@@ -4912,6 +4968,15 @@ impl<'a> Project<'a> {
                 .and_then(|t| self.walk(t, rest, Confidence::Extracted));
             if named.is_some() {
                 return named;
+            }
+        }
+        // Rust: a module and a function of one name are in two namespaces
+        // (`mod log` beside `fn log`): `log::write()` is the module's,
+        // `log()` the function (r[names.namespaces.kinds])
+        if fam == Family::Rust && !self.is_local_name(f, d, head) {
+            let called = rest.first().is_none_or(|s| s == "()");
+            if let Some(r) = self.rust_namespace_pick(f, d, head, called) {
+                return self.walk(Target::Def(r), rest, Confidence::Extracted);
             }
         }
         // C++ `namespace u = util; u::twice()`: the namespace the alias names
@@ -7352,6 +7417,42 @@ impl<'a> Project<'a> {
             .collect()
     }
 
+    /// Rust: of a module and a value of one name in the nearest scope that
+    /// declares the name, the value where it is called, the module where a
+    /// path goes on from it. `None` when the scope has only one kind.
+    fn rust_namespace_pick(
+        &self,
+        f: usize,
+        d: Option<usize>,
+        name: &str,
+        called: bool,
+    ) -> Option<DefRef> {
+        let defs = &self.files[f].defs;
+        let mut cur = d;
+        let mut cands: Vec<usize> = Vec::new();
+        while let Some(x) = cur {
+            if let Some(k) = self.children[f].get(&x).and_then(|m| m.get(name)) {
+                cands = k.clone();
+                break;
+            }
+            cur = defs[x].parent;
+        }
+        if cands.is_empty() {
+            cands = self.top[f].get(name).cloned().unwrap_or_default();
+        }
+        let module = |i: &usize| matches!(defs[*i].kind, DefKind::Module | DefKind::Namespace);
+        let value = |i: &usize| defs[*i].kind.is_callable();
+        if !(cands.iter().any(module) && cands.iter().any(value)) {
+            return None;
+        }
+        let pick: Vec<DefRef> = cands
+            .iter()
+            .filter(|i| if called { value(i) } else { module(i) })
+            .map(|&i| (f, i))
+            .collect();
+        self.best(pick)
+    }
+
     /// The C# namespace a definition is written in: the innermost
     /// namespace block around it, else the file's.
     fn cs_namespace_of(&self, f: usize, mut i: usize) -> Option<String> {
@@ -7379,6 +7480,36 @@ impl<'a> Project<'a> {
             return true;
         };
         mine == theirs || mine.strip_prefix(theirs.as_str()).is_some_and(|x| x.starts_with('.'))
+    }
+
+    /// Rust: an item of an inline module is no name outside it, only by a
+    /// path (r[names.scopes.items.nested-modules]). (An item of the file's
+    /// own module stays in sight of its inline modules: `use super::*;` in
+    /// `mod tests` is read as the file's scope.)
+    fn rust_module_in_sight(&self, f: usize, d: Option<usize>, r: DefRef) -> bool {
+        if self.family[f] != Some(Family::Rust) || r.0 != f {
+            return true;
+        }
+        let defs = &self.files[f].defs;
+        let module_of = |mut i: usize| -> Option<usize> {
+            while let Some(p) = defs[i].parent {
+                if matches!(defs[p].kind, DefKind::Module | DefKind::Namespace) {
+                    return Some(p);
+                }
+                i = p;
+            }
+            None
+        };
+        let Some(theirs) = module_of(r.1) else { return true };
+        // the use is inside that module (or is it)
+        let mut cur = d;
+        while let Some(x) = cur {
+            if x == theirs {
+                return true;
+            }
+            cur = defs[x].parent;
+        }
+        false
     }
 
     /// Of extensions written for one type, those of the namespace closest

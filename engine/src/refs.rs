@@ -2238,21 +2238,26 @@ fn call_targs(n: Node) -> u8 {
     list.map(|l| kids(l).len().min(255) as u8).unwrap_or(0)
 }
 
+/// A name a statement binds: name, path, declared, the range it holds in.
+type Bound = (String, Vec<String>, bool, Option<(usize, usize)>);
+
 /// Names a statement binds whose type the source states at the binding:
-/// `(name, path, declared)`. A loop variable written with its type (Java
+/// `(name, path, declared, range)`. A loop variable written with its type (Java
 /// `for (Pet pet : pets)`, C# `foreach (Pet pet in pets)`), a type pattern
 /// (Java `o instanceof Pet p`, C# `o is Pet p`, `case Pet p:`), and a name
 /// bound to what a wrapper holds: Rust `if let Some(p) = e`, `while let`,
 /// `let Some(p) = e else { … }`, a `match` arm's `Some(p)` / `Ok(p)` or the
 /// fields of an enum variant, Swift `if let p = e` / `guard let p = e`. A
-/// pattern that writes no name (`x is Foo`) binds none.
-fn bound_by_pattern(n: Node, src: &[u8]) -> Vec<(String, Vec<String>, bool)> {
-    let mut out = Vec::new();
+/// pattern that writes no name (`x is Foo`) binds none. The range is where
+/// the name holds when that is narrower than the block around: a `match`
+/// arm's bindings are the arm's (r[names.scopes.pattern-bindings.match-arm]).
+fn bound_by_pattern(n: Node, src: &[u8]) -> Vec<Bound> {
+    let mut out: Vec<Bound> = Vec::new();
     let typed = |ty: Option<Node>, name: Option<Node>, out: &mut Vec<_>| {
         let ty = ty.and_then(|t| first_type(t, src));
         let name = name.filter(|x| x.kind() == "identifier").map(|x| text(x, src));
         if let (Some(ty), Some(name)) = (ty, name) {
-            out.push((name, ty, true));
+            out.push((name, ty, true, None));
         }
     };
     match n.kind() {
@@ -2275,7 +2280,11 @@ fn bound_by_pattern(n: Node, src: &[u8]) -> Vec<(String, Vec<String>, bool)> {
             let pattern = n.child_by_field_name("pattern");
             let value = n.child_by_field_name("value").and_then(|v| held_path(v, src));
             if let Some(p) = pattern {
-                out.extend(held_by_pattern(p, value.as_deref(), src));
+                out.extend(
+                    held_by_pattern(p, value.as_deref(), src)
+                        .into_iter()
+                        .map(|(a, b, c)| (a, b, c, None)),
+                );
             }
         }
         "match_expression" => {
@@ -2285,7 +2294,12 @@ fn bound_by_pattern(n: Node, src: &[u8]) -> Vec<(String, Vec<String>, bool)> {
                 let pattern =
                     arm.child_by_field_name("pattern").and_then(|p| kids(p).into_iter().next());
                 if let Some(p) = pattern {
-                    out.extend(held_by_pattern(p, value.as_deref(), src));
+                    let arm_range = Some((arm.start_byte(), arm.end_byte()));
+                    out.extend(
+                        held_by_pattern(p, value.as_deref(), src)
+                            .into_iter()
+                            .map(|(a, b, c)| (a, b, c, arm_range)),
+                    );
                 }
             }
         }
@@ -2311,7 +2325,7 @@ fn bound_by_pattern(n: Node, src: &[u8]) -> Vec<(String, Vec<String>, bool)> {
                     continue;
                 }
                 path.push(OPENED.into());
-                out.push((name, path, false));
+                out.push((name, path, false, None));
             }
         }
         _ => {}
@@ -2758,6 +2772,8 @@ pub fn import(n: Node, form: ImportForm, module: impl Into<String>) -> ImportFac
         system: false,
         public: false,
         byte: n.start_byte(),
+        scope: None,
+        within: Vec::new(),
     }
 }
 
@@ -3746,7 +3762,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                 }
             }
             // `for (Pet pet : pets)`, `o is Pet p`, `if let Some(p) = e`
-            for (name, path, declared) in bound_by_pattern(n, src) {
+            for (name, path, declared, range) in bound_by_pattern(n, src) {
                 locals.push(Local {
                     name,
                     path,
@@ -3763,9 +3779,9 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                     key: None,
                     written_head: None,
                     from_def: None,
-                    byte: n.start_byte(),
-                    until: 0,
-                    after: 0,
+                    byte: range.map_or(n.start_byte(), |(lo, _)| lo),
+                    until: range.map_or(0, |(_, hi)| hi),
+                    after: range.map_or(0, |(lo, _)| lo),
                 });
             }
             let taken_apart = parts.is_some();

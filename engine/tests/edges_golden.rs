@@ -3195,3 +3195,33 @@ fn csharp_extensions_of_the_closest_namespace() {
     has(&got, &[("App.Inner.C.M", "calls", "App.Inner.Near.Size")]);
     lacks(&got, &[("App.Inner.C.M", "calls", "App.Outer.Size")]);
 }
+
+/// Rust's rules read from the Reference (engine 0.5.65): a `match` arm's
+/// binding, `Self` in a struct's fields, a module beside a function of its
+/// name, a `use` in a block, a glob shadowed by an item, 2018 paths.
+#[test]
+fn rust_rules_from_the_reference() {
+    let got = quals("rsref", &[
+        ("Cargo.toml", "[package]\nname = \"demo\"\nversion = \"0.1.0\"\nedition = \"2021\"\n"),
+        (
+            "src/lib.rs",
+            "pub mod m1;\npub mod m2;\npub mod other;\n\nuse m1::make;\nuse other::*;\n\npub struct Foo;\n\npub fn size() -> i32 {\n    1\n}\n\npub fn pick(o: Option<i32>) -> i32 {\n    match o {\n        Some(size) => size,\n        None => size(),\n    }\n}\n\npub struct Node {\n    pub next: Option<Box<Self>>,\n}\n\nimpl Node {\n    pub fn value(&self) -> i32 {\n        1\n    }\n}\n\npub fn second(n: &Node) -> i32 {\n    n.next.as_ref().unwrap().value()\n}\n\npub mod log {\n    pub fn write() -> i32 {\n        1\n    }\n}\n\npub fn log() -> i32 {\n    2\n}\n\npub fn run() -> i32 {\n    log::write() + log()\n}\n\npub fn inner() -> i32 {\n    use m2::make;\n    make()\n}\n\npub fn globbed() -> usize {\n    let _b = Bar;\n    0\n}\n\npub mod a {\n    pub mod m {\n        pub fn f() -> i32 {\n            2\n        }\n    }\n\n    use m::f;\n\n    pub fn go() -> i32 {\n        f()\n    }\n}\n",
+        ),
+        ("src/m1.rs", "pub fn make() -> i32 {\n    1\n}\n"),
+        ("src/m2.rs", "pub fn make() -> i32 {\n    2\n}\n"),
+        ("src/other.rs", "pub struct Foo;\npub struct Bar;\n"),
+    ]);
+    has(
+        &got,
+        &[
+            ("pick", "calls", "size"),
+            ("second", "calls", "Node.value"),
+            ("run", "calls", "log.write"),
+            ("run", "calls", "log"),
+            ("globbed", "references", "Bar"),
+            ("a.go", "calls", "a.m.f"),
+        ],
+    );
+    let inner: Vec<_> = got.iter().filter(|(s, r, _)| s == "inner" && r == "calls").collect();
+    assert_eq!(inner.len(), 1, "inner calls one make: {inner:?}");
+}
