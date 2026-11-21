@@ -1,6 +1,6 @@
 {
- "passed": 464,
- "total": 464,
+ "passed": 479,
+ "total": 479,
  "cases": [
   {
    "id": "python/module-function",
@@ -2782,6 +2782,96 @@
   },
   {
    "id": "go/function-named-as-value",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/property-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/is-and-as",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/when-is",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/catch-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/object-as-value",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/typealias-body",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/instanceof-cast-catch",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/is-as-catch",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/is-and-as",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/typealias-and-where",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/as-and-instanceof",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/type-assertion-and-switch",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "php/instanceof-and-catch",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/associated-type-is-no-file-name",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/alias-and-where",
    "ok": true,
    "missing": [],
    "unwanted": []

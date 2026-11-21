@@ -1846,6 +1846,59 @@ case("go", "function-named-as-value", "a function named as a value is a use of i
           "a.go": "package app\n\nfunc helper() int {\n\treturn 1\n}\n\nfunc user() func() int {\n\tq := helper\n\treturn q\n}\n"},
      [("user", "references", "helper")])
 
+# What the Kotlin and Swift compilers' own test suites showed (`oracle_kotlin.py`,
+# `oracle_swift.py`, engine 0.5.55): the places a type is named to test, convert
+# or catch a value, in every language that has them.
+case("kotlin", "property-type", "the type a property is declared with is a use of it",
+     KT, {"a.kt": "package app\n\nclass Engine\n\nclass Car {\n    val engine: Engine = Engine()\n}\n\nfun local(): Int {\n    val spare: Engine? = null\n    return if (spare == null) 0 else 1\n}\n"},
+     [("Car", "references", "Engine"), ("local", "references", "Engine")])
+case("kotlin", "is-and-as", "`x is T` and `x as T` are uses of T",
+     KT, {"a.kt": "package app\n\nopen class Shape\nclass Circle : Shape()\nclass Square : Shape()\n\nfun kind(s: Any): Int {\n    if (s is Circle) return 1\n    val q = s as? Square\n    return if (q == null) 0 else 2\n}\n"},
+     [("kind", "references", "Circle"), ("kind", "references", "Square")])
+case("kotlin", "when-is", "`is T ->` in a `when` is a use of T, written through its outer type too",
+     KT, {"a.kt": "package app\n\nsealed class Sealed {\n    class B : Sealed()\n    object A : Sealed()\n}\n\nfun pick(q: Sealed): Int = when (q) {\n    is Sealed.B -> 1\n    Sealed.A -> 2\n}\n"},
+     [("pick", "references", "Sealed.B"), ("pick", "references", "Sealed.A")])
+case("kotlin", "catch-type", "the type a `catch` names is a use of it",
+     KT, {"a.kt": "package app\n\nclass Boom : Exception()\n\nfun safe(): Int {\n    try {\n        return 1\n    } catch (e: Boom) {\n        return 2\n    }\n}\n"},
+     [("safe", "references", "Boom")])
+case("kotlin", "object-as-value", "an object named as a value is a use of it",
+     KT, {"a.kt": "package app\n\nopen class Base {\n    object Nested : Base()\n}\n\nfun take(b: Base): Base = b\n\nfun give(): Base = take(Base.Nested)\n"},
+     [("give", "references", "Base.Nested")])
+case("kotlin", "typealias-body", "the type a typealias names is a use of it",
+     KT, {"a.kt": "package app\n\nclass Engine\n\ntypealias Motor = Engine\n"},
+     [("Motor", "references", "Engine")])
+case("java", "instanceof-cast-catch", "`instanceof T`, `(T) x` and `catch (T e)` are uses of T",
+     JAVA, {"A.java": "class Foo {\n}\n\nclass Bar extends Foo {\n}\n\nclass Baz extends Foo {\n}\n\nclass Err extends RuntimeException {\n}\n\nclass J {\n    int f(Object s) {\n        if (s instanceof Bar) {\n            return 1;\n        }\n        Object c = (Baz) s;\n        try {\n            return c.hashCode();\n        } catch (Err e) {\n            return 2;\n        }\n    }\n}\n"},
+     [("J.f", "references", "Bar"), ("J.f", "references", "Baz"), ("J.f", "references", "Err")])
+case("csharp", "is-as-catch", "`x is T`, `x as T` and `catch (T e)` are uses of T",
+     CS, {"A.cs": "namespace App\n{\n    public class Foo { }\n    public class Bar : Foo { }\n    public class Baz : Foo { }\n    public class Qux : Foo { }\n    public class Err : System.Exception { }\n\n    public class C\n    {\n        public int F(object s)\n        {\n            if (s is Bar) return 1;\n            if (s is Qux q) return 3;\n            var c = s as Baz;\n            try { return c == null ? 0 : 4; }\n            catch (Err) { return 2; }\n        }\n    }\n}\n"},
+     [("C.F", "references", "Bar"), ("C.F", "references", "Qux"), ("C.F", "references", "Baz"),
+      ("C.F", "references", "Err")])
+case("swift", "is-and-as", "`x is T`, `x as? T` and `catch let e as T` are uses of T",
+     SW, {"a.swift": "class Foo {}\nclass Bar: Foo {}\nclass Baz: Foo {}\nstruct Err: Error {}\n\nfunc kind(_ s: Any) -> Int {\n    if s is Bar { return 1 }\n    let c = s as? Baz\n    do {\n        throw Err()\n    } catch let e as Err {\n        _ = e\n        return 2\n    } catch {\n        return c == nil ? 0 : 3\n    }\n}\n"},
+     [("kind", "references", "Bar"), ("kind", "references", "Baz"), ("kind", "references", "Err")])
+case("swift", "typealias-and-where", "what a typealias composes and what a `where` clause bounds by are uses of those types",
+     SW, {"a.swift": "protocol P1 {}\nprotocol P2 {}\nclass Base {}\n\ntypealias Both = Base & P1\n\nclass Foo<Bar> {}\n\nextension Foo where Bar: P2 {\n    func bar() {}\n}\n\nfunc gen<T>(x: T) where T: P1 {}\n"},
+     [("Both", "references", "Base"), ("Both", "references", "P1"), ("gen", "references", "P1")])
+case("typescript", "as-and-instanceof", "`x as T` and `x instanceof T` are uses of T",
+     TS, {"a.ts": "export class Foo {\n  f = 1;\n}\n\nexport class Bar extends Foo {\n  b = 2;\n}\n\nexport class Baz extends Foo {\n  z = 3;\n}\n\nexport function f(s: unknown) {\n  if (s instanceof Bar) return 1;\n  const c = s as Baz;\n  return c.z;\n}\n"},
+     [("f", "references", "Bar"), ("f", "references", "Baz")])
+case("go", "type-assertion-and-switch", "`x.(T)` and a type switch's `case T` are uses of T",
+     GO, {"go.mod": GOMOD,
+          "a.go": "package app\n\ntype Foo struct{}\n\ntype Bar struct{}\n\nfunc kind(s interface{}) int {\n\tif _, ok := s.(Bar); ok {\n\t\treturn 1\n\t}\n\tswitch s.(type) {\n\tcase Foo:\n\t\treturn 2\n\t}\n\treturn 0\n}\n"},
+     [("kind", "references", "Bar"), ("kind", "references", "Foo")])
+case("php", "instanceof-and-catch", "`$x instanceof T` and `catch (T $e)` are uses of T",
+     PHP, {"src/A.php": "<?php\n\nnamespace App;\n\nclass Foo\n{\n}\n\nclass Bar extends Foo\n{\n}\n\nclass Err extends \\Exception\n{\n}\n\nclass P\n{\n    public function f($s)\n    {\n        if ($s instanceof Bar) {\n            return 1;\n        }\n        try {\n            return 0;\n        } catch (Err $e) {\n            return 2;\n        }\n    }\n}\n"},
+     [("P.f", "references", "Bar"), ("P.f", "references", "Err")])
+case("rust", "associated-type-is-no-file-name", "the type an `impl` gives its trait is no name of the file",
+     RS, {"Cargo.toml": CARGO,
+          "src/lib.rs": "pub struct Resp;\npub struct Other;\n\npub type Outcome<T> = std::result::Result<T, Other>;\n\npub trait Handler {\n    type Outcome;\n    fn run(&self);\n}\n\npub struct A;\npub struct B;\n\nimpl Handler for A {\n    type Outcome = Outcome<Resp>;\n    fn run(&self) {}\n}\n\nimpl Handler for B {\n    type Outcome = Outcome<Other>;\n    fn run(&self) {}\n}\n\npub fn free() -> Outcome<Resp> {\n    Ok(Resp)\n}\n"},
+     [("free", "references", "src/lib.rs:Outcome")])
+case("rust", "alias-and-where", "what a type alias names and what a `where` clause bounds by are uses of those types",
+     RS, {"Cargo.toml": CARGO,
+          "src/lib.rs": "pub struct Wide;\n\npub trait Lim {}\n\npub type Id = Wide;\n\npub fn lim<T>(x: T) -> T\nwhere\n    T: Lim,\n{\n    x\n}\n"},
+     [("Id", "references", "Wide"), ("lim", "references", "Lim")])
+
 # --- running ------------------------------------------------------------------
 
 def _matches(node: dict[str, Any], want: str) -> bool:

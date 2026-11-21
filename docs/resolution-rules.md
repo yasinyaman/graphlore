@@ -25,8 +25,9 @@ python benchmarks/conformance.py --baseline benchmarks/results-conformance.json 
 python benchmarks/conformance.py --markdown      # the tables below
 ```
 
-Measured 2026-11-21 with graphlore-engine 0.5.54: **464 of 464 rules hold**
-(356 of the first 406 with 0.5.45). The last thirty-nine came from two
+Measured 2026-11-21 with graphlore-engine 0.5.55: **479 of 479 rules hold**
+(356 of the first 406 with 0.5.45). Fifteen came from the Kotlin and Swift
+compilers' tests (type checks, casts, `catch`, aliases); thirty-nine from two
 compilers' own test suites ([native-engine.md](native-engine.md#the-compiler-as-the-judge)):
 TypeScript's (block scopes, type parameters and their bounds, parameter
 properties, enum members, the types of aliases and signatures) and Scala's
@@ -193,7 +194,7 @@ ECMAScript Language Specification, 'Executable Code and Execution Contexts' (sco
 | an arrow function in a class field sees the class's `this` | `class-field-arrow` | yes |
 | a local assigned `new C()` keeps its type in a nested callback | `for-of-new` | yes |
 
-### typescript (47 of 47)
+### typescript (48 of 48)
 
 TypeScript Handbook, 'Modules', 'Classes', 'Generics' (types are the compiler's, tsc).
 
@@ -246,8 +247,9 @@ TypeScript Handbook, 'Modules', 'Classes', 'Generics' (types are the compiler's,
 | a function merged with a namespace of its name has what the namespace declares | `function-namespace-merge` | yes |
 | a function named as a value is a use of it | `function-as-value` | yes |
 | a `let` in a block at the top of a file is the block's, beside a variable of the file | `block-scope-file-level` | yes |
+| `x as T` and `x instanceof T` are uses of T | `as-and-instanceof` | yes |
 
-### go (25 of 25)
+### go (26 of 26)
 
 The Go Programming Language Specification, 'Declarations and scope', 'Selectors', 'Method sets'.
 
@@ -278,8 +280,9 @@ The Go Programming Language Specification, 'Declarations and scope', 'Selectors'
 | a function literal sees the functions of the package | `closure` | yes |
 | a value of a type parameter has the methods of its constraint | `generic-constraint` | yes |
 | a function named as a value is a use of it | `function-named-as-value` | yes |
+| `x.(T)` and a type switch's `case T` are uses of T | `type-assertion-and-switch` | yes |
 
-### java (43 of 43)
+### java (44 of 44)
 
 The Java Language Specification, 6.4 'Shadowing and Obscuring', 15.12 'Method Invocation Expressions'.
 
@@ -328,8 +331,9 @@ The Java Language Specification, 6.4 'Shadowing and Obscuring', 15.12 'Method In
 | a method of an anonymous class sees the methods of the class around it | `anonymous-class` | yes |
 | an enum constant named as a value is a use of its enum | `enum-constant-value` | yes |
 | a class of another package is not in reach without an import | `other-package-not-in-reach` | yes |
+| `instanceof T`, `(T) x` and `catch (T e)` are uses of T | `instanceof-cast-catch` | yes |
 
-### kotlin (32 of 32)
+### kotlin (38 of 38)
 
 Kotlin Language Specification, 'Scopes and identifiers', 'Overload resolution' (receivers).
 
@@ -367,6 +371,12 @@ Kotlin Language Specification, 'Scopes and identifiers', 'Overload resolution' (
 | a nested class is named through the class around it | `nested-class` | yes |
 | an enum entry has the enum's members | `enum-entry` | yes |
 | a call names the function beside a parameter of its name that cannot be called | `function-beside-parameter` | yes |
+| the type a property is declared with is a use of it | `property-type` | yes |
+| `x is T` and `x as T` are uses of T | `is-and-as` | yes |
+| `is T ->` in a `when` is a use of T, written through its outer type too | `when-is` | yes |
+| the type a `catch` names is a use of it | `catch-type` | yes |
+| an object named as a value is a use of it | `object-as-value` | yes |
+| the type a typealias names is a use of it | `typealias-body` | yes |
 
 ### scala (28 of 28)
 
@@ -403,7 +413,7 @@ Scala Language Specification, chapter 2 'Identifiers, Names and Scopes', 4.7 'Im
 | a constructor pattern and a typed pattern are uses of the type they name | `pattern-types` | yes |
 | the types a type parameter is bound by are uses of them | `bound-types` | yes |
 
-### csharp (40 of 40)
+### csharp (41 of 41)
 
 C# Language Specification, 'Namespace and type names', 'Member lookup', 'Extension method invocations'.
 
@@ -449,8 +459,9 @@ C# Language Specification, 'Namespace and type names', 'Member lookup', 'Extensi
 | an enum member is a member of its enum | `enum-member` | yes |
 | `new R(…)` constructs a record, which has methods like a class | `record` | yes |
 | an enum member named as a value is a use of its enum | `enum-member-value` | yes |
+| `x is T`, `x as T` and `catch (T e)` are uses of T | `is-as-catch` | yes |
 
-### rust (41 of 41)
+### rust (43 of 43)
 
 The Rust Reference, 'Names' (name resolution, scopes, paths), 'Method call expressions', 'Field access expressions'.
 
@@ -497,8 +508,10 @@ The Rust Reference, 'Names' (name resolution, scopes, paths), 'Method call expre
 | a value of a type parameter has the methods of the trait that bounds it | `generic-bound-where` | yes |
 | `Option<Space<M>>` holds a `Space`, whatever `M` is bound by | `wrapper-holds-first-argument` | yes |
 | an enum variant named as a value or a pattern is a use of its enum | `enum-variant-value` | yes |
+| the type an `impl` gives its trait is no name of the file | `associated-type-is-no-file-name` | yes |
+| what a type alias names and what a `where` clause bounds by are uses of those types | `alias-and-where` | yes |
 
-### swift (35 of 35)
+### swift (37 of 37)
 
 The Swift Programming Language, 'Declarations', 'Extensions', 'Protocols' (member lookup is the compiler's).
 
@@ -539,6 +552,8 @@ The Swift Programming Language, 'Declarations', 'Extensions', 'Protocols' (membe
 | a function passed by name is a use of it | `function-as-value` | yes |
 | a member asked of a type parameter is a member of the protocol that constrains it | `generic-bound` | yes |
 | inside the value a `let` is declared with, its name is still the outer one | `own-value-is-outer` | yes |
+| `x is T`, `x as? T` and `catch let e as T` are uses of T | `is-and-as` | yes |
+| what a typealias composes and what a `where` clause bounds by are uses of those types | `typealias-and-where` | yes |
 
 ### c (14 of 14)
 
@@ -636,7 +651,7 @@ Ruby documentation, 'Calling Methods' and Module#ancestors (method lookup), 'Mod
 | a call in a block is the enclosing method's | `block-body` | yes |
 | a private method is called with an implicit receiver | `private-method` | yes |
 
-### php (32 of 32)
+### php (33 of 33)
 
 PHP Manual, 'Namespaces: Name resolution rules', 'Classes and Objects' (inheritance, traits, static).
 
@@ -674,5 +689,6 @@ PHP Manual, 'Namespaces: Name resolution rules', 'Classes and Objects' (inherita
 | `C::m()` is C's static method | `static-method-via-class` | yes |
 | a method passed as `[$this, 'm']` is a use of m | `callable-string` | yes |
 | `\Name` is the global class, never one a namespace of the project declares | `global-class-is-not-a-namespaced-one` | yes |
+| `$x instanceof T` and `catch (T $e)` are uses of T | `instanceof-and-catch` | yes |
 
-464 of 464 rules hold
+479 of 479 rules hold

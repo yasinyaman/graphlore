@@ -3173,6 +3173,104 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                 }
             }
         }
+        // a type named to test or to convert a value, or to catch one: `s is
+        // Foo`, `s as Foo`, `(Foo) s`, `s instanceof Foo`, `s.(Foo)`, `catch
+        // (e: Foo)`; and Kotlin's `val x: Foo`, whose type has no field name
+        if matches!(
+            n.kind(),
+            "instanceof_expression"
+                | "cast_expression"
+                | "is_expression"
+                | "is_pattern_expression"
+                | "as_expression"
+                | "check_expression"
+                | "type_test"
+                | "type_assertion_expression"
+                | "type_assertion"
+                | "satisfies_expression"
+                | "type_cast_expression"
+                | "catch_block"
+                | "catch_declaration"
+                | "catch_formal_parameter"
+                | "catch_clause"
+                | "type_case"
+                | "declaration_pattern"
+                | "type_pattern"
+                | "variable_declaration"
+        ) {
+            let kotlin = facts.lang == Some(crate::lang::Lang::Kotlin);
+            let ks = kids(n);
+            let written: Vec<Node> = if n.kind() == "variable_declaration" {
+                // (the other grammars give a declaration's type a field)
+                if kotlin {
+                    ks.into_iter().skip(1).collect()
+                } else {
+                    Vec::new()
+                }
+            } else if let Some(t) =
+                n.child_by_field_name("type").or_else(|| n.child_by_field_name("right"))
+            {
+                vec![t]
+            } else if n.kind() == "catch_clause" {
+                Vec::new() // (JS: it names no type)
+            } else {
+                // (after the value tested: what is left that writes a type)
+                let tested =
+                    usize::from(!(n.kind().starts_with("catch") || n.kind() == "type_test"));
+                ks.into_iter()
+                    .skip(tested)
+                    .filter(|c| c.kind().contains("type") || c.kind().contains("pattern"))
+                    .collect()
+            };
+            let mut types = Vec::new();
+            for t in written {
+                if !matches!(t.kind(), "declaration_pattern" | "type_pattern") {
+                    types_in(t, src, "cast", &mut types);
+                }
+            }
+            for (p, ctx) in types {
+                push(&mut refs, n, RefKind::Type, p, ctx, None);
+            }
+        }
+        // what a type alias is written with (TypeScript's has its own rule
+        // above), and what a `where` clause bounds a type parameter by
+        if matches!(
+            n.kind(),
+            "typealias_declaration" | "type_alias" | "type_item" | "alias_declaration"
+        ) {
+            let named = n.child_by_field_name("type").map(|t| vec![t]).unwrap_or_else(|| {
+                kids(n)
+                    .into_iter()
+                    .skip(1)
+                    .filter(|c| !c.kind().contains("parameter") && !c.kind().contains("modifier"))
+                    .collect()
+            });
+            let mut types = Vec::new();
+            for t in named {
+                types_in(t, src, "alias", &mut types);
+            }
+            for (p, ctx) in types {
+                push(&mut refs, n, RefKind::Type, p, ctx, None);
+            }
+        }
+        // (a C# `where_clause` is a LINQ query's: only Rust's bounds types)
+        if matches!(n.kind(), "type_constraints" | "type_parameter_constraints_clause")
+            || (n.kind() == "where_clause" && facts.lang == Some(crate::lang::Lang::Rust))
+        {
+            let mut types = Vec::new();
+            types_in(n, src, "bound", &mut types);
+            for (p, ctx) in types {
+                push(&mut refs, n, RefKind::Type, p, ctx, None);
+            }
+        }
+        // JS / TS / PHP `s instanceof Foo`
+        if n.kind() == "binary_expression"
+            && n.child_by_field_name("operator").is_some_and(|o| o.kind() == "instanceof")
+        {
+            if let Some(p) = n.child_by_field_name("right").and_then(|r| path_of(r, src)) {
+                push(&mut refs, n, RefKind::Type, p, "cast", None);
+            }
+        }
         // `typeof Backbone.Model`: the value whose type is meant
         if n.kind() == "type_query" {
             if let Some(p) = kids(n).into_iter().next().and_then(|v| path_of(v, src)) {

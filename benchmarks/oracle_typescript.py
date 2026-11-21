@@ -260,7 +260,13 @@ def compare(name: str, files: dict[str, list[str]], uses: list[dict[str, Any]],
             sources = around(u["file"], u["line"]) | ({hubs[u["file"]]} if u["file"] in hubs else set())
             if target_id in sources and len(sources) <= 2:
                 continue  # a definition naming itself
-            if any((s, target_id) in have for s in sources):
+            # (an enum member named is an edge to its enum: the engine's rule)
+            reached = {target_id}
+            if code[target_id].get("kind") == "enum_member":
+                owner = str(code[target_id]["qualname"]).rsplit(".", 1)[0]
+                reached |= {i for i, n in code.items() if n["qualname"] == owner
+                            and n["source_file"] == code[target_id]["source_file"]}
+            if any((s, t) in have for s in sources for t in reached):
                 found += 1
             else:
                 missed.append({"case": name, "file": u["file"], "line": u["line"],

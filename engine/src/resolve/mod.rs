@@ -1668,7 +1668,10 @@ impl<'a> Project<'a> {
                 let bare = (fam == Some(Family::C) && d.kind.is_class_like())
                     .then(|| specialized(&d.name))
                     .flatten();
-                if is_top(&f.defs, di) && !(d.owner.is_some() && d.kind.is_callable()) {
+                // (nor is a type an `impl` gives its trait: `type Output = …`)
+                let of_owner =
+                    d.owner.is_some() && (d.kind.is_callable() || d.kind == DefKind::TypeAlias);
+                if is_top(&f.defs, di) && !of_owner {
                     top.entry(d.name.clone()).or_default().push(di);
                     if let Some(b) = bare {
                         top.entry(b.to_string()).or_default().push(di);
@@ -7724,6 +7727,13 @@ pub fn resolve(
                             {
                                 "references"
                             }
+                            // a type named as a value through what holds it
+                            // (`take(MyClass.Nested)`, `Sealed.A -> …`)
+                            RefKind::Attr
+                                if tk.is_class_like() && conf == Confidence::Extracted =>
+                            {
+                                "references"
+                            }
                             RefKind::Attr => {
                                 if !tk.is_callable() {
                                     continue;
@@ -7741,14 +7751,15 @@ pub fn resolve(
                             // `cb = helper`, `exports.f = helper`), where a bare
                             // function name is one
                             RefKind::Read
-                                if tk.is_callable()
-                                    && conf == Confidence::Extracted
+                                if conf == Confidence::Extracted
                                     && r.path.len() == 1
                                     && r.context != "object"
-                                    && matches!(
-                                        p.family[f],
-                                        Some(Family::Ecma | Family::Python | Family::Go)
-                                    ) =>
+                                    && (tk.is_class_like()
+                                        || (tk.is_callable()
+                                            && matches!(
+                                                p.family[f],
+                                                Some(Family::Ecma | Family::Python | Family::Go)
+                                            ))) =>
                             {
                                 "references"
                             }
@@ -7944,10 +7955,38 @@ pub fn resolve(
                     confidence: conf,
                     file: f,
                     line: r.line,
-                    context: if r.kind == RefKind::Decorator { "decorator" } else { r.context },
+                    context: if r.kind == RefKind::Decorator {
+                        "decorator"
+                    } else if matches!(r.kind, RefKind::Read | RefKind::Attr)
+                        && relation == "references"
+                    {
+                        "value"
+                    } else {
+                        r.context
+                    },
                     runs: None,
                 });
             }
+        }
+        // a name read as a value says nothing more where the same definition
+        // already calls, builds or extends what it names (`new Foo()`, `class
+        // A < B`)
+        {
+            let stronger: HashSet<(String, String)> = edges
+                .iter()
+                .filter(|e| {
+                    matches!(
+                        e.relation,
+                        "calls" | "inherits" | "implements" | "mixes_in" | "embeds"
+                    )
+                })
+                .map(|e| (e.source.clone(), e.target.clone()))
+                .collect();
+            edges.retain(|e| {
+                !(e.context == "value"
+                    && e.relation == "references"
+                    && stronger.contains(&(e.source.clone(), e.target.clone())))
+            });
         }
         // C, C++: a function put in a slot of a struct is what a call through
         // the slot reaches (`dispatches_to`, an interface method to its

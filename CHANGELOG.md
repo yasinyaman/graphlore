@@ -21,6 +21,14 @@ All notable changes to this project are documented here. The format is based on
   here, so this is the first check of the Scala rules by Scala itself: 73.3%
   of the edges it has an answer for were right with engine 0.5.52, 96.7% with
   0.5.53.
+- **The Kotlin and Swift compilers as judges**
+  (`benchmarks/oracle_kotlin.py`, `benchmarks/oracle_swift.py`). Kotlin's
+  Analysis API tests state, for every element of 186 programs, the symbol
+  the compiler resolved it to; Swift's index tests state it for the lines
+  their authors chose (16 programs with an answer). Neither compiler runs
+  here. Of the edges each has an answer for, 99.7% (Kotlin, 612 edges) and
+  92.7% (Swift, 55) were right with engine 0.5.54: the resolver's rules for
+  both held. What the lists showed was what the reader never read, below.
 - **`benchmarks/verify_cases.py`** gives each case of the rule checklist to
   the language's own compiler or interpreter (10 of the 14 languages have
   one here): a case the language rejects says nothing about the rule.
@@ -345,6 +353,26 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- **Native engine 0.5.55: a type named to test, convert or catch a value is
+  a use of it**, in every language. The Kotlin compiler binds 1,771 names of
+  its own tests to definitions the graph has; 62% had an edge, 88.5% now
+  (Swift: 60% to 65.7%; TypeScript: 83.6% to 86.1%). 479 cases in the
+  checklist, all hold. No edge came of:
+  - `x is T`, `x as T`, `(T) x`, `x instanceof T`, `x.(T)`, a type switch's
+    `case T`, `catch (e: T)` / `catch (T e)`, a pattern's type (`s is Qux
+    q`), in Kotlin, Java, C#, Swift, TypeScript, Go, PHP and Rust;
+  - the type of a Kotlin property or local (`val engine: Engine`): its
+    grammar gives it no field name, so every Kotlin class lacked the
+    references to the types of its properties;
+  - what a type alias names (Kotlin, Swift, Rust, C++) and what a `where`
+    clause bounds a type parameter by (Swift, Kotlin, Rust, C#);
+  - a class or object named as a value (`take(Base.Nested)`, `k = Foo`,
+    `raise Faraday::Error`), unless the same definition already calls,
+    builds or extends it.
+  Also: the type an `impl` gives its trait (`type Output = …`) is no name of
+  the file (in actix-realworld every `Result<T>` beside an `impl Handler`
+  went to another handler's `type Result`); a C# LINQ `where` is no bound.
+  On the 45 audit repositories: about 4,000 new `references` edges.
 - **Native engine 0.5.54: the rest of the TypeScript compiler's list.**
   99.5% of the 9,283 edges the compiler has an answer for now go where it
   says (98.9% of 7,806 with 0.5.51), and 83.6% of the uses it binds to a

@@ -1633,13 +1633,13 @@ python benchmarks/oracle_typescript.py ts/tsc/testdata/baselines/reference/compi
 (The paths are those of the repository on 2026-11-20, commit `6417c48`; the
 tests' sources are looked for beside the baselines, or where `--cases` says.)
 
-| | 0.5.51 | 0.5.52 | 0.5.53 | 0.5.54 |
-|---|---:|---:|---:|---:|
-| programs (those with a definition and a use) | 3,169 | 3,169 | 3,169 | 3,169 |
-| edges whose site the compiler has an answer for | 7,806 | 7,935 | 8,822 | 9,283 |
-| of them, to the declaration the compiler names | 7,721 (98.9%) | 7,864 (99.1%) | 8,747 (99.1%) | 9,240 (99.5%) |
-| uses the compiler binds to a definition the graph has | 19,430 | 19,526 | 19,760 | 19,760 |
-| of them, with an edge from the definition around | 14,237 (73.3%) | 14,426 (73.9%) | 15,691 (79.4%) | 16,526 (83.6%) |
+| | 0.5.51 | 0.5.52 | 0.5.53 | 0.5.54 | 0.5.55 |
+|---|---:|---:|---:|---:|---:|
+| programs (those with a definition and a use) | 3,169 | 3,169 | 3,169 | 3,169 | 3,169 |
+| edges whose site the compiler has an answer for | 7,806 | 7,935 | 8,822 | 9,283 | 9,398 |
+| of them, to the declaration the compiler names | 7,721 (98.9%) | 7,864 (99.1%) | 8,747 (99.1%) | 9,240 (99.5%) | 9,347 (99.5%) |
+| uses the compiler binds to a definition the graph has | 19,430 | 19,526 | 19,760 | 19,760 | 19,760 |
+| of them, with an edge from the definition around | 14,237 (73.3%) | 14,426 (73.9%) | 15,691 (79.4%) | 16,526 (83.6%) | 17,004 (86.1%) |
 
 The first number is the one that matters: an edge that goes somewhere else
 than the compiler says is a wrong edge, and all but two of the 85 were
@@ -1709,11 +1709,80 @@ Scala's: a named argument read as an assignment, the type parameters of an
 `extension`, a type written through its package. The seven left are a
 structural type's member, `p.x.type`, and guesses marked `INFERRED`.
 
-What this is not: the other twelve languages. The same kind of file exists
-for several (Swift's index tests, Kotlin's resolved-call dumps,
-rust-analyzer's fixtures, gopls's markers), each in its own format; none is
-read yet. And a compiler's tests are small programs: they find a rule read
-wrong, not a framework's convention.
+**Kotlin.** The Analysis API tests under
+`analysis/analysis-api/testData/components/resolver/allByPsi` have a
+`.symbol.txt` beside each program: every element of the source with its
+character offsets and the symbol the compiler resolved it to
+(`KtNameReferenceExpression(142,149): 'Another'` … `/Another`), the
+declarations among them, so a symbol's name can be put back on the line that
+declares it. `benchmarks/oracle_kotlin.py`:
+
+```bash
+git clone --depth 1 --filter=blob:none --no-checkout https://github.com/JetBrains/kotlin
+git -C kotlin sparse-checkout set --no-cone '/analysis/analysis-api/testData/components/resolver/allByPsi/*'
+git -C kotlin checkout
+python benchmarks/oracle_kotlin.py kotlin/analysis/analysis-api/testData/components/resolver/allByPsi --samples 20
+```
+
+| | 0.5.54 | 0.5.55 |
+|---|---:|---:|
+| programs (one file, with a use of a definition) | 186 | 186 |
+| edges whose site the compiler has an answer for | 612 | 781 |
+| of them, to the declaration the compiler names | 610 (99.7%) | 776 (99.4%) |
+| uses the compiler binds to a definition the graph has, with an edge | 1,102 of 1,771 (62.2%) | 1,567 of 1,771 (88.5%) |
+
+(Commit `04f3c969` of 2026-11-20. The 0.5.54 column counts an enum entry
+named as missed where the edge goes to its enum, as the engine's rule has it:
+about 190 of its 669; the 0.5.55 column counts those as found.) Here the first number was never the
+problem: two edges in 612 went elsewhere than the compiler says (an
+extension that wins over a companion's member, an enum entry resolved by the
+expected type). The second was. Read by kind, the 669 uses with no edge were
+not resolution at all: the reader never looked at `x is T`, `x as T`, `catch
+(e: T)`, at the type of a property or a local (Kotlin's grammar gives it no
+field name, so no class had references to the types of its own properties),
+at an object named as a value. None of these is Kotlin's alone: `instanceof`,
+casts, type assertions and `catch` clauses made no edge in Java, C#, Swift,
+TypeScript, Go, PHP or Rust either, and the 45 repositories gained about
+4,000 `references` edges with the fix. Of the 204 left, most are a type named
+only as the qualifier of something the graph does link (`C.foo()` is an edge
+to `foo`), and names Kotlin 2.2 resolves by the expected type (`is Right`
+for `MySealed.Right`, `X` for `MyEnum.X`).
+
+**Swift.** The index tests (`test/Index/*.swift`) state, in `CHECK` lines
+under a line of a program, each name on it with the compiler's symbol for it
+and whether the line declares or uses it. `benchmarks/oracle_swift.py` reads
+them (a symbol written as a FileCheck variable is followed to where the test
+first names it; one written `{{.*}}` says nothing):
+
+```bash
+git clone --depth 1 --filter=blob:none --sparse https://github.com/swiftlang/swift
+git -C swift sparse-checkout set test/Index
+python benchmarks/oracle_swift.py swift/test/Index --samples 20
+```
+
+| | 0.5.54 | 0.5.55 |
+|---|---:|---:|
+| programs with an answer | 16 | 16 |
+| edges whose site the compiler has an answer for | 55 | 63 |
+| of them, to the declaration the compiler names | 51 (92.7%) | 59 (93.7%) |
+| uses the compiler binds to a definition the graph has, with an edge | 84 of 140 (60.0%) | 92 of 140 (65.7%) |
+
+(Commit `df95e65` of 2026-11-20.) A small list: the tests assert what their
+authors chose to, and most of their symbols are another module's. The four
+edges called wrong are a test that imports a module declaring the same names
+as the file, an Objective-C protocol's method and a property wrapper's `$y`.
+What it added was a type alias's composition (`typealias Both = Base & P1`)
+and a `where` clause's bounds. Left: `Self()` and `.init()` as calls of the
+initializer, `type(of: x).m()`, an associated type through its bound
+(`Bar.Assoc`). SourceKit's own indexing tests are larger but have their
+symbols scrubbed (`key.usr: <usr>`), so they say which names are uses, not of
+what.
+
+What this is not: the other ten languages. The same kind of file exists for
+several (rust-analyzer's fixtures, gopls's markers, Roslyn's tests), each in
+its own format; none is read yet. And a compiler's tests are small programs:
+they find a rule read wrong and a position never read, not a framework's
+convention.
 
 ### What is left without an edge
 
