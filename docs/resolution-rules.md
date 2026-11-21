@@ -25,7 +25,7 @@ python benchmarks/conformance.py --baseline benchmarks/results-conformance.json 
 python benchmarks/conformance.py --markdown      # the tables below
 ```
 
-Measured 2026-11-21 with graphlore-engine 0.5.62: **536 of 536 rules hold**
+Measured 2026-11-21 with graphlore-engine 0.5.63: **541 of 541 rules hold**
 (356 of the first 406 with 0.5.45). Ten came from the Go type checker and
 rust-analyzer run on whole repositories; fifteen from the Kotlin and Swift
 compilers' tests (type checks, casts, `catch`, aliases); thirty-nine from two
@@ -104,7 +104,7 @@ Each change was measured on the 45 audit repositories as well, by reading
 the edges it added and removed at their source lines; the page on the
 [native engine](native-engine.md#the-rules-themselves) has the numbers.
 Every case has been compiled by its own language
-(`benchmarks/verify_cases.py`: 536 of 536 accepted). The Versions column is
+(`benchmarks/verify_cases.py`: 541 of 541 accepted). The Versions column is
 the oldest version of the language whose compiler accepts the case, where the
 compiler can be asked (`verify_cases.py --min-version`: Java, Kotlin, Scala,
 C#, Swift, C, C++); `all` is the oldest version asked, `–` a language with no
@@ -124,11 +124,11 @@ name to the engine, so the case names it `fetchAll`.
 
 ## The rules
 
-### python (37 of 37)
+### python (38 of 38)
 
 The Python Language Reference, 'Naming and binding' (4.2) and 'The import system'.
 
-Found by: the specification 36, a compiler 1, comparison 0, the grammar 0. With the place it was read in the language's own tools: 0.
+Found by: the specification 36, a compiler 1, comparison 0, the grammar 1. With the place it was read in the language's own tools: 0.
 
 | Rule | Case | Versions | Engine |
 |---|---|---|---|
@@ -169,6 +169,7 @@ Found by: the specification 36, a compiler 1, comparison 0, the grammar 0. With 
 | a function passed by name is a use of it | `function-as-value` | – | yes |
 | a base imported under another name is still the base | `inherited-from-aliased-import` | – | yes |
 | a function named as a value is a use of it | `function-named-as-value` | – | yes |
+| a member read through a typed parameter is the member of its type | `member-of-a-parameter` | – | yes |
 
 ### javascript (29 of 29)
 
@@ -208,11 +209,11 @@ Found by: the specification 29, a compiler 0, comparison 0, the grammar 0. With 
 | an arrow function in a class field sees the class's `this` | `class-field-arrow` | – | yes |
 | a local assigned `new C()` keeps its type in a nested callback | `for-of-new` | – | yes |
 
-### typescript (50 of 50)
+### typescript (51 of 51)
 
 TypeScript Handbook, 'Modules', 'Classes', 'Generics' (types are the compiler's, tsc).
 
-Found by: the specification 30, a compiler 19, comparison 0, the grammar 1. With the place it was read in the language's own tools: 0.
+Found by: the specification 30, a compiler 19, comparison 0, the grammar 2. With the place it was read in the language's own tools: 0.
 
 | Rule | Case | Versions | Engine |
 |---|---|---|---|
@@ -266,6 +267,7 @@ Found by: the specification 30, a compiler 19, comparison 0, the grammar 1. With
 | `x as T` and `x instanceof T` are uses of T | `as-and-instanceof` | – | yes |
 | every name a closure's parameter pattern binds is the closure's | `destructured-closure-parameter` | – | yes |
 | the parameters of a function type name their types, not their names | `function-type-parameter-types` | – | yes |
+| a member read or written through a local or a parameter is the member of the object it holds | `member-of-a-local` | – | yes |
 
 ### go (38 of 38)
 
@@ -420,11 +422,11 @@ Found by: the specification 31, a compiler 9, comparison 0, the grammar 0. With 
 | a constructor parameter written `val` is a property of the class | `constructor-property-read` | all | yes |
 | the name of an argument given by name reads no property of that name | `named-argument-label` | all | yes |
 
-### scala (31 of 31)
+### scala (32 of 32)
 
 Scala Language Specification, chapter 2 'Identifiers, Names and Scopes', 4.7 'Import Clauses'.
 
-Found by: the specification 20, a compiler 8, comparison 0, the grammar 3. With the place it was read in the language's own tools: 0.
+Found by: the specification 20, a compiler 8, comparison 0, the grammar 4. With the place it was read in the language's own tools: 0.
 
 | Rule | Case | Versions | Engine |
 |---|---|---|---|
@@ -459,6 +461,7 @@ Found by: the specification 20, a compiler 8, comparison 0, the grammar 3. With 
 | the type a `val` or `var` is declared with is a use of it | `declared-value-type` | – | yes |
 | `new Outer.Inner(…)` constructs Inner | `new-through-its-holder` | – | yes |
 | `new p.T[A](…)` constructs T | `new-generic-through-package` | – | yes |
+| `f[T](…)` calls f | `generic-call` | – | yes |
 
 ### csharp (52 of 52)
 
@@ -521,11 +524,11 @@ Found by: the specification 39, a compiler 6, comparison 6, the grammar 1. With 
 | a partial type's constructors are those of every file that declares it | `partial-type-constructor` | all | yes |
 | `new T[n]` is a use of T | `array-creation-type` | – | yes |
 
-### rust (54 of 54)
+### rust (55 of 55)
 
 The Rust Reference, 'Names' (name resolution, scopes, paths), 'Method call expressions', 'Field access expressions'.
 
-Found by: the specification 37, a compiler 10, comparison 6, the grammar 1. With the place it was read in the language's own tools: 0.
+Found by: the specification 37, a compiler 10, comparison 6, the grammar 2. With the place it was read in the language's own tools: 0.
 
 | Rule | Case | Versions | Engine |
 |---|---|---|---|
@@ -583,12 +586,13 @@ Found by: the specification 37, a compiler 10, comparison 6, the grammar 1. With
 | `io::Error::message(m)` is the method a trait of the project gives the library's type | `trait-method-through-a-library-type` | – | yes |
 | the types a trait is written with in an `impl` are uses of the implementing type | `impl-trait-type-arguments` | – | yes |
 | the struct a pattern takes apart is a use of it | `struct-pattern-type` | – | yes |
+| a field read in a macro's arguments is a read of the field | `macro-argument-member-read` | – | yes |
 
-### swift (42 of 42)
+### swift (43 of 43)
 
 The Swift Programming Language, 'Declarations', 'Extensions', 'Protocols' (member lookup is the compiler's).
 
-Found by: the specification 33, a compiler 5, comparison 0, the grammar 4. With the place it was read in the language's own tools: 0.
+Found by: the specification 33, a compiler 5, comparison 0, the grammar 5. With the place it was read in the language's own tools: 0.
 
 | Rule | Case | Versions | Engine |
 |---|---|---|---|
@@ -634,6 +638,7 @@ Found by: the specification 33, a compiler 5, comparison 0, the grammar 4. With 
 | the type of a property a protocol requires is a use of it | `protocol-property-type` | – | yes |
 | `(any P).self` is a use of P | `metatype-of-existential` | – | yes |
 | `Box<T>(…)` constructs Box | `generic-construction` | – | yes |
+| `.case` compared with, assigned to or switched on a value is a case of that value's type | `implicit-member-beside-a-value` | – | yes |
 
 ### c (16 of 16)
 
@@ -786,4 +791,4 @@ Found by: the specification 31, a compiler 2, comparison 0, the grammar 1. With 
 | `$x instanceof T` and `catch (T $e)` are uses of T | `instanceof-and-catch` | – | yes |
 | an anonymous function's parameters and result name their types | `closure-signature` | – | yes |
 
-536 of 536 rules hold
+541 of 541 rules hold

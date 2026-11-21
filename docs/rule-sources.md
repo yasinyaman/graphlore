@@ -306,10 +306,68 @@ Twenty-six cases of the checklist are marked `grammar`. One mistake of the
 measure was found on the way: it compared `$`-prefixed TypeScript names
 without their `$`, and reported zod's `$ZodType` family as unread.
 
-What this phase does not cover: the places a *value* name is written (a
-call's callee, a member read). Those are read by other rules and are
-measured by the compilers' "missed" lists; the same listing for them is the
-next use of this script.
+**The places a value is written.** `positions.py --values` does the same
+for every name of the repository's own functions, methods, constants,
+variables, properties and enum members written where a value is (a call's
+callee, a member read, an argument), in all 15 report languages. A name that
+is also a local or a parameter in the file is left out (the measure cannot
+tell which is meant), and the engine records a use once per definition, so a
+name counts as read when a use of it is recorded in the definition it is
+written in. Engine 0.5.63 reads 97.7% of 162,839 names:
+
+| Language | names of the repository's own values | read |
+|---|--:|--:|
+| c | 5,387 | 5,342 (99.2%) |
+| c/c++ header | 48 | 47 (97.9%) |
+| cpp | 9,152 | 9,013 (98.5%) |
+| csharp | 6,612 | 6,485 (98.1%) |
+| go | 18,971 | 18,914 (99.7%) |
+| java | 8,788 | 8,723 (99.3%) |
+| javascript | 3,506 | 3,266 (93.2%) |
+| kotlin | 16,691 | 16,420 (98.4%) |
+| php | 9,999 | 9,995 (100.0%) |
+| python | 8,210 | 8,148 (99.2%) |
+| ruby | 8,241 | 8,065 (97.9%) |
+| rust | 21,298 | 20,805 (97.7%) |
+| scala | 2,444 | 2,368 (96.9%) |
+| swift | 15,274 | 14,114 (92.4%) |
+| tsx | 896 | 888 (99.1%) |
+| typescript | 27,322 | 26,457 (96.8%) |
+
+The list it gave, and what came of it:
+
+- **Read now.** A member read or written through a local or a parameter, in
+  the languages where a name from another file needs an import (Python,
+  JavaScript, TypeScript, Rust): `ctx.headers`, `request._noPipe = true`,
+  `args.crlf`. The state reader dropped every such use whose head was not a
+  name the file declares or imports, and a local is neither; a name a block
+  declares counted for a bare use only. Swift `.case` beside a value whose
+  type gives it (`h.section == .header`, `x.section = .body`, `case .body:`)
+  is a reference to that type's case; only a called one (`.status(301)`) was
+  read. A Rust macro's arguments are read for their member reads and writes
+  too, not only for calls (`assert_eq!(false, args.crlf)`). A Scala or Rust
+  call written with type arguments (`opt[URI]("x")`, `parse::<T>()`) is a
+  call, not a reference. A local assigned a bare name holds what the name
+  does (`const request = first;`).
+- **Left out on purpose** (`DECIDED`, each with its reason): an object
+  literal's keys and a struct literal's field names, argument labels and
+  named arguments, a macro's own name, the arguments of a Swift attribute, a
+  C++ constructor's member initializers (a constructor setting its own fields
+  couples nothing), export lists.
+- **Left**: TypeScript test files whose callbacks take untyped parameters
+  (`(context) => context.command`), Swift `.case` in places the reader does
+  not type (an array literal, a call whose parameter the walk cannot find),
+  Ruby `@x += 1` on a field nothing declares, Java `case NULL:` labels.
+
+On the 45 audit repositories that is about 1,900 `reads`, 1,100
+`references`, 220 `writes` and 150 calls more. The compilers agree: Go 12,279
+of 12,284, rust-analyzer 98.5% (recall 78.8% → 83.4%), TypeScript's 99.5%,
+Kotlin's 99.4%, Swift's 94.0%. Many of the new `reads` are `INFERRED`: a
+member of a local typed by what a call returns, or by the one type that has
+every member the local is used with (`structural_type`); the second is a
+guess, and it is wrong where a library type the project does not define has
+the same members (got's `response.body` is read as `Options.body`).
+
 
 One thing the cases showed that is not a position: a Swift protocol's
 property requirement is a definition of its own named `var handler`, of kind

@@ -124,6 +124,11 @@ pub fn path_of(n: Node, src: &[u8]) -> Option<Vec<String>> {
         let t = text(n, src);
         return Some(vec![if t == "$this" || t == "this" { "self".into() } else { t }]);
     }
+    // Scala `opt[URI]`, Rust `parse::<T>`: the function, its type arguments
+    // aside
+    if k == "generic_function" {
+        return path_of(n.child_by_field_name("function")?, src);
+    }
     if k == "instance_variable" {
         // Ruby `@repo`: a field of the object
         return Some(vec!["self".into(), text(n, src).trim_start_matches('@').to_string()]);
@@ -931,6 +936,11 @@ fn value_type(v: Node, src: &[u8]) -> Option<Vec<String>> {
                 .flatten()
                 .filter(|p| p.len() >= 2 && !p.iter().any(|s| s == "()" || s.starts_with('[')))
             };
+            // (`const request = first`: what the name holds)
+            if matches!(v.kind(), "identifier" | "simple_identifier") {
+                return path_of(v, src)
+                    .filter(|p| p.len() == 1 && p[0] != "self" && p[0] != "super");
+            }
             let Some(called) = callee(v, src).map(|(_, p)| p) else {
                 return read().filter(|p| p.first().is_some_and(|s| s != UNKNOWN));
             };
@@ -2441,6 +2451,19 @@ fn locals_of(n: Node, src: &[u8], in_params: bool) -> Vec<(String, Vec<String>, 
     match k {
         // `x = Foo()`, `self.x = Foo()`, `$x = new Foo`, `@x = Foo.new`
         "assignment" | "assignment_expression" => {
+            // (C# `new Article { Author = author }`: a member of the object being
+            // made is set, no name is declared)
+            if n.parent().is_some_and(|p| {
+                matches!(
+                    p.kind(),
+                    "initializer_expression"
+                        | "anonymous_object_creation_expression"
+                        | "with_initializer"
+                        | "object_creation_expression"
+                )
+            }) {
+                return out;
+            }
             let (Some(l), Some(r)) =
                 (n.child_by_field_name("left"), n.child_by_field_name("right"))
             else {
@@ -3881,6 +3904,14 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
         } else if n.parent().is_some_and(|p| p.kind() == "decorator") {
             // the decorator expression itself is the definition's decorator
             // reference, not a call of the enclosing scope
+        } else if let Some((name, of)) = implicit_member_value(n, src, &anc) {
+            // Swift `.body` not called: a case or static member of the type the
+            // place asks for
+            let at = refs.len();
+            push(&mut refs, n, RefKind::Attr, vec![IMPLICIT.into(), name], "implicit", None);
+            if let Some(r) = refs.get_mut(at) {
+                r.implicit = Some(of);
+            }
         } else if let Some(name) = implicit_member_call(n, src) {
             // Swift `.status(301)`: a static member of the type the place asks
             // for (an argument's parameter, a declared type, a result)
@@ -4347,6 +4378,11 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
     if !declaring.is_empty() {
         refs.retain(|r| !(r.path.len() == 1 && declaring.contains(&r.byte)));
     }
+    // what a Rust macro's arguments read and write (`assert_eq!(c.n, 1)`):
+    // the same walk on the arguments read as an expression
+    for mac in &macros {
+        state.add_uses(macro_state_uses(*mac, src));
+    }
     refs.extend(state.finish(defs, &imports, m.needs_import(), |bytes| {
         innermost_where(defs, bytes, |d| !d.misread)
     }));
@@ -4457,6 +4493,52 @@ fn implicit_member_call(n: Node, src: &[u8]) -> Option<String> {
     (target.kind() == "simple_identifier").then(|| text(target, src))
 }
 
+/// `.body` written where a value is and not called, with the place that types
+/// it: what `implicit_place` reads, the other side of `==` / `!=`, the target of
+/// an assignment, the value `??` falls back from, or the subject of the
+/// `switch` whose `case .body:` it is.
+fn implicit_member_value(n: Node, src: &[u8], anc: &[Node]) -> Option<(String, Implicit)> {
+    if crate::parse::current() != Some(crate::lang::Lang::Swift) {
+        return None;
+    }
+    let parent = anc.last()?;
+    // `case .body:`: the grammar keeps the name, and drops the dot, in a pattern
+    if n.kind() == "simple_identifier" && parent.kind() == "pattern" {
+        let entry = anc.iter().rev().nth(2).filter(|e| e.kind() == "switch_entry")?;
+        let switch = anc.iter().rev().nth(3).filter(|s| s.kind() == "switch_statement")?;
+        let _ = entry;
+        let dot = src[..n.start_byte()].iter().rev().find(|b| !b.is_ascii_whitespace());
+        if dot != Some(&b'.') || kids(*parent).len() != 1 {
+            return None;
+        }
+        let subject = switch.child_by_field_name("expr")?;
+        return Some((text(n, src), Implicit::Value(path_of(subject, src)?)));
+    }
+    if n.kind() != "prefix_expression" || src.get(n.start_byte()) != Some(&b'.') {
+        return None;
+    }
+    let target = n.child_by_field_name("target").filter(|t| t.kind() == "simple_identifier")?;
+    if parent.kind() == "call_expression" {
+        return None; // `.status(301)`: `implicit_member_call`'s
+    }
+    let name = text(target, src);
+    let other = |field: &str| parent.child_by_field_name(field).filter(|o| o.id() != n.id());
+    let place = match parent.kind() {
+        "equality_expression" => {
+            let side = other("lhs").or_else(|| other("rhs"))?;
+            Implicit::Value(path_of(side, src)?)
+        }
+        "assignment" => {
+            let t = parent.child_by_field_name("target")?;
+            let t = kids(t).into_iter().next().unwrap_or(t);
+            Implicit::Value(path_of(t, src)?)
+        }
+        "nil_coalescing_expression" => Implicit::Value(path_of(other("value")?, src)?),
+        _ => implicit_place(anc, src)?,
+    };
+    Some((name, place))
+}
+
 /// The place an implicit member stands in, which is what types it: an
 /// argument of a call (`anc` ends `call_expression`, `call_suffix`,
 /// `value_arguments`, `value_argument`), the value of a declaration with a
@@ -4490,6 +4572,47 @@ fn implicit_place(anc: &[Node], src: &[u8]) -> Option<Implicit> {
         }
         _ => None,
     }
+}
+
+/// The reads and writes in the arguments of a Rust macro invocation (see
+/// `macro_refs`), at their bytes and lines in the file.
+fn macro_state_uses(mac: Node, src: &[u8]) -> Vec<RefFact> {
+    const PREFIX: &[u8] = b"fn __m(){";
+    let Some(tt) = kids(mac).into_iter().find(|c| c.kind() == "token_tree") else {
+        return Vec::new();
+    };
+    let tokens = &src[tt.start_byte()..tt.end_byte()];
+    if !matches!(tokens.first(), Some(b'(' | b'[')) || tokens.len() > 20_000 {
+        return Vec::new();
+    }
+    let wrapped = [PREFIX, tokens, b";}".as_slice()].concat();
+    let Ok(tree) = crate::parse::parse(crate::lang::Lang::Rust, &wrapped, None) else {
+        return Vec::new();
+    };
+    if tree.root_node().has_error() {
+        return Vec::new();
+    }
+    let mut st = crate::state::State::new(false);
+    let mut stack: Vec<(Node, usize)> = vec![(tree.root_node(), 0)];
+    let mut anc: Vec<Node> = Vec::new();
+    while let Some((n, depth)) = stack.pop() {
+        anc.truncate(depth);
+        st.visit(n, &wrapped, &anc);
+        anc.push(n);
+        for c in kids(n).into_iter().rev() {
+            stack.push((c, depth + 1));
+        }
+    }
+    let row = tt.start_position().row as u32;
+    st.take_uses()
+        .into_iter()
+        .filter(|u| u.byte >= PREFIX.len())
+        .map(|mut u| {
+            u.byte = tt.start_byte() + u.byte - PREFIX.len();
+            u.line += row;
+            u
+        })
+        .collect()
 }
 
 /// The calls and constructions in the arguments of a Rust macro invocation

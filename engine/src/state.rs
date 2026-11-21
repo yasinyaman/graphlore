@@ -291,6 +291,17 @@ impl State {
         State { assignment_declares, ..Default::default() }
     }
 
+    /// The uses recorded so far, taken out (a Rust macro's arguments are read
+    /// on their own and given to the file's walk: `add_uses`).
+    pub fn take_uses(&mut self) -> Vec<RefFact> {
+        std::mem::take(&mut self.uses)
+    }
+
+    /// Uses read elsewhere, at their places in this file.
+    pub fn add_uses(&mut self, uses: Vec<RefFact>) {
+        self.uses.extend(uses);
+    }
+
     /// Record what `n` reads, writes and declares. Called for every node.
     pub fn visit<'t>(&mut self, n: Node<'t>, src: &[u8], anc: &[Node<'t>]) {
         let k = n.kind();
@@ -708,7 +719,18 @@ impl State {
             {
                 continue;
             }
-            if needs_import && !matches!(head, "self" | "super" | "crate") && !known.contains(head)
+            // (`ctx.headers` of a parameter or local `ctx`: the member of the
+            // object it holds, which resolution types)
+            let of_local = u.path.len() > 1
+                && (shadowed(home, head)
+                    || self
+                        .blocked
+                        .iter()
+                        .any(|(lo, hi, n)| n == head && *lo <= u.byte && u.byte < *hi));
+            if needs_import
+                && !matches!(head, "self" | "super" | "crate")
+                && !known.contains(head)
+                && !of_local
             {
                 continue;
             }

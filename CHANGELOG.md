@@ -426,6 +426,27 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- **Native engine 0.5.63: places a value is written that were not
+  recorded**, listed by `benchmarks/positions.py --values` (541 cases in the
+  checklist, all hold). 97.7% of 162,839 names of the audit
+  repositories' own values are read now:
+  - Python, JavaScript, TypeScript, Rust: a member read or written through a
+    local or a parameter (`ctx.headers`, `request._noPipe = true`). The state
+    reader dropped any use whose head the file neither declares nor imports,
+    a local included. About 1,900 `reads`, 1,100 `references` and 220
+    `writes` more on the audit repositories; many are `INFERRED`.
+  - Swift `.case` beside a value whose type gives it (`h.section == .header`,
+    an assignment, `case .body:`) is a reference to that type's case.
+  - A Rust macro's arguments are read for member reads and writes as well as
+    calls (`assert_eq!(false, args.crlf)`).
+  - `opt[URI]("x")` (Scala) and `parse::<T>()` (Rust) are calls.
+  - A local assigned a bare name holds what the name does (`const request =
+    first;`); a member set in a C# initializer (`new Article { Author = author
+    }`) declares no local.
+- **`benchmarks/positions.py --values`**: the places a name of the project's
+  own functions and values is written, with the share the engine records
+  (`benchmarks/results-positions-values.json`); the type measure leaves out
+  documentation, `dist` and minified files now.
 - **Native engine 0.5.62: places a type is written that were never read**,
   listed from the grammars by `benchmarks/positions.py` (536 cases in the
   checklist, all hold). The share of the repositories' own type names the

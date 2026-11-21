@@ -956,33 +956,28 @@
  "tsx": {
   "as_expression.-": {
    "example": "",
-   "read": 4,
-   "seen": 4
+   "read": 3,
+   "seen": 3
   },
   "call_expression.type_arguments": {
    "example": "",
-   "read": 18,
-   "seen": 18
-  },
-  "constraint.-": {
-   "example": "",
-   "read": 2,
-   "seen": 2
+   "read": 17,
+   "seen": 17
   },
   "property_signature.type": {
    "example": "",
-   "read": 9,
-   "seen": 9
+   "read": 5,
+   "seen": 5
   },
   "required_parameter.type": {
    "example": "",
-   "read": 47,
-   "seen": 47
+   "read": 40,
+   "seen": 40
   },
   "variable_declarator.type": {
    "example": "",
-   "read": 18,
-   "seen": 18
+   "read": 8,
+   "seen": 8
   }
  },
  "typescript": {
@@ -993,18 +988,18 @@
   },
   "arrow_function.return_type": {
    "example": "",
-   "read": 126,
-   "seen": 126
+   "read": 139,
+   "seen": 139
   },
   "as_expression.-": {
    "example": "",
-   "read": 307,
-   "seen": 307
+   "read": 511,
+   "seen": 511
   },
   "call_expression.type_arguments": {
    "example": "",
-   "read": 879,
-   "seen": 879
+   "read": 1121,
+   "seen": 1121
   },
   "call_signature.return_type": {
    "example": "",
@@ -1013,18 +1008,23 @@
   },
   "constraint.-": {
    "example": "",
-   "read": 360,
-   "seen": 360
+   "read": 725,
+   "seen": 725
+  },
+  "construct_signature.type": {
+   "example": "",
+   "read": 1,
+   "seen": 1
   },
   "constructor_type.type": {
    "example": "",
-   "read": 3,
-   "seen": 3
+   "read": 4,
+   "seen": 4
   },
   "default_type.-": {
    "example": "",
-   "read": 131,
-   "seen": 131
+   "read": 312,
+   "seen": 312
   },
   "extends_clause.type_arguments": {
    "example": "",
@@ -1033,18 +1033,18 @@
   },
   "extends_type_clause.type": {
    "example": "frontend/src/client/client/types.gen.ts:62  ServerSentEventsOptions<TData>,",
-   "read": 263,
-   "seen": 264
+   "read": 709,
+   "seen": 710
   },
   "function_declaration.return_type": {
    "example": "",
-   "read": 173,
-   "seen": 173
+   "read": 301,
+   "seen": 301
   },
   "function_signature.return_type": {
    "example": "",
-   "read": 34,
-   "seen": 34
+   "read": 52,
+   "seen": 52
   },
   "implements_clause.-": {
    "example": "",
@@ -1053,13 +1053,13 @@
   },
   "index_signature.type": {
    "example": "",
-   "read": 71,
-   "seen": 71
+   "read": 120,
+   "seen": 120
   },
   "infer_type.-": {
    "example": "packages/zod/src/v3/tests/firstpartyschematypes.test.ts:8  type ZodFirstPartySchemaForType<T extends ZodFirstPartyTypeKind> = ZodFirstPartySchemaTypes extends ",
-   "read": 20,
-   "seen": 21
+   "read": 29,
+   "seen": 32
   },
   "instantiation_expression.type_arguments": {
    "example": "",
@@ -1067,79 +1067,79 @@
    "seen": 2
   },
   "mapped_type_clause.alias": {
-   "example": "",
+   "example": "packages/zod/src/v4/core/schemas.ts:1996  -readonly [k in keyof T as T[k] extends OptionalInSchema ? k : never]?: T[k][\"_zod\"][\"input\"];",
    "read": 4,
-   "seen": 4
+   "seen": 9
   },
   "mapped_type_clause.type": {
    "example": "frontend/src/client/core/types.gen.ts:32  [K in HttpMethod]: MethodFn;",
-   "read": 28,
-   "seen": 29
+   "read": 101,
+   "seen": 102
   },
   "method_definition.return_type": {
    "example": "",
-   "read": 212,
-   "seen": 212
+   "read": 223,
+   "seen": 223
   },
   "method_signature.return_type": {
    "example": "",
-   "read": 182,
-   "seen": 182
+   "read": 198,
+   "seen": 198
   },
   "new_expression.type_arguments": {
    "example": "",
-   "read": 28,
-   "seen": 28
+   "read": 48,
+   "seen": 48
   },
   "opting_type_annotation.-": {
    "example": "",
-   "read": 4,
-   "seen": 4
+   "read": 9,
+   "seen": 9
   },
   "optional_parameter.type": {
    "example": "source/core/index.ts:165  & ((name: 'retry', listener: (retryCount: number, error: RequestError, createRetryStream: (options?:",
-   "read": 466,
-   "seen": 470
+   "read": 653,
+   "seen": 658
   },
   "property_signature.type": {
    "example": "",
-   "read": 476,
-   "seen": 476
+   "read": 1163,
+   "seen": 1163
   },
   "public_field_definition.type": {
-   "example": "",
-   "read": 56,
-   "seen": 56
-  },
-  "required_parameter.type": {
-   "example": "typings/index.d.ts:1088  text: (context: AddHelpTextContext) => string,",
-   "read": 935,
-   "seen": 976
-  },
-  "satisfies_expression.-": {
    "example": "",
    "read": 62,
    "seen": 62
   },
-  "template_literal_type.-": {
+  "required_parameter.type": {
+   "example": "typings/index.d.ts:1088  text: (context: AddHelpTextContext) => string,",
+   "read": 1621,
+   "seen": 1669
+  },
+  "satisfies_expression.-": {
    "example": "",
-   "read": 1,
-   "seen": 1
+   "read": 84,
+   "seen": 84
+  },
+  "template_literal_type.-": {
+   "example": "packages/zod/src/v4/classic/tests/template-literal.test.ts:155  expectTypeOf<z.infer<typeof brandedString>>().toEqualTypeOf<`${string & z.core.$brand<\"myBrand\">}`>(",
+   "read": 8,
+   "seen": 11
   },
   "type_alias_declaration.value": {
    "example": "packages/zod/src/v3/tests/firstpartyschematypes.test.ts:10  ? Schema",
-   "read": 635,
-   "seen": 637
+   "read": 1255,
+   "seen": 1257
   },
   "type_predicate.type": {
    "example": "",
-   "read": 19,
-   "seen": 19
+   "read": 20,
+   "seen": 20
   },
   "variable_declarator.type": {
    "example": "",
-   "read": 468,
-   "seen": 468
+   "read": 937,
+   "seen": 937
   }
  }
 }

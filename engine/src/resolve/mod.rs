@@ -6452,6 +6452,12 @@ impl<'a> Project<'a> {
             Implicit::Typed(path) => {
                 (self.type_of_path(f, d, path, true), path.last().cloned(), Confidence::Extracted)
             }
+            Implicit::Value(path) => {
+                let saved = self.suspend();
+                let t = self.type_of_path(f, d, path, false);
+                self.restore(saved);
+                (t, None, Confidence::Extracted)
+            }
             Implicit::Return => {
                 let defs = &self.files[f].defs;
                 let mut cur = d;
