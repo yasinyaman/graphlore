@@ -25,8 +25,8 @@ python benchmarks/conformance.py --baseline benchmarks/results-conformance.json 
 python benchmarks/conformance.py --markdown      # the tables below
 ```
 
-Measured 2026-11-21 with graphlore-engine 0.5.53: **456 of 456 rules hold**
-(356 of the first 406 with 0.5.45). The last thirty-one came from two
+Measured 2026-11-21 with graphlore-engine 0.5.54: **464 of 464 rules hold**
+(356 of the first 406 with 0.5.45). The last thirty-nine came from two
 compilers' own test suites ([native-engine.md](native-engine.md#the-compiler-as-the-judge)):
 TypeScript's (block scopes, type parameters and their bounds, parameter
 properties, enum members, the types of aliases and signatures) and Scala's
@@ -113,7 +113,7 @@ name to the engine, so the case names it `fetchAll`.
 
 ## The rules
 
-### python (36 of 36)
+### python (37 of 37)
 
 The Python Language Reference, 'Naming and binding' (4.2) and 'The import system'.
 
@@ -155,6 +155,7 @@ The Python Language Reference, 'Naming and binding' (4.2) and 'The import system
 | a call in a class body is the class's | `class-body-call` | yes |
 | a function passed by name is a use of it | `function-as-value` | yes |
 | a base imported under another name is still the base | `inherited-from-aliased-import` | yes |
+| a function named as a value is a use of it | `function-named-as-value` | yes |
 
 ### javascript (29 of 29)
 
@@ -192,7 +193,7 @@ ECMAScript Language Specification, 'Executable Code and Execution Contexts' (sco
 | an arrow function in a class field sees the class's `this` | `class-field-arrow` | yes |
 | a local assigned `new C()` keeps its type in a nested callback | `for-of-new` | yes |
 
-### typescript (41 of 41)
+### typescript (47 of 47)
 
 TypeScript Handbook, 'Modules', 'Classes', 'Generics' (types are the compiler's, tsc).
 
@@ -239,8 +240,14 @@ TypeScript Handbook, 'Modules', 'Classes', 'Generics' (types are the compiler's,
 | the types a type alias is written with are uses of them | `type-alias-body` | yes |
 | the types of an interface's property, call, construct and index signatures are uses of them | `interface-signatures` | yes |
 | `typeof ns.Class` in a type position is a use of the class | `typeof-type` | yes |
+| `import x = require('./m')` binds the module under that name | `import-equals-require` | yes |
+| `export = E` is what `import x = require()` of the module names | `export-assignment` | yes |
+| `import A = N.M` names what the path names | `import-alias` | yes |
+| a function merged with a namespace of its name has what the namespace declares | `function-namespace-merge` | yes |
+| a function named as a value is a use of it | `function-as-value` | yes |
+| a `let` in a block at the top of a file is the block's, beside a variable of the file | `block-scope-file-level` | yes |
 
-### go (24 of 24)
+### go (25 of 25)
 
 The Go Programming Language Specification, 'Declarations and scope', 'Selectors', 'Method sets'.
 
@@ -270,6 +277,7 @@ The Go Programming Language Specification, 'Declarations and scope', 'Selectors'
 | a method with a value receiver is called on a value | `value-receiver` | yes |
 | a function literal sees the functions of the package | `closure` | yes |
 | a value of a type parameter has the methods of its constraint | `generic-constraint` | yes |
+| a function named as a value is a use of it | `function-named-as-value` | yes |
 
 ### java (43 of 43)
 
@@ -667,4 +675,4 @@ PHP Manual, 'Namespaces: Name resolution rules', 'Classes and Objects' (inherita
 | a method passed as `[$this, 'm']` is a use of m | `callable-string` | yes |
 | `\Name` is the global class, never one a namespace of the project declares | `global-class-is-not-a-namespaced-one` | yes |
 
-456 of 456 rules hold
+464 of 464 rules hold

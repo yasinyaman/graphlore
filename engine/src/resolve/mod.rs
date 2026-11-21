@@ -1367,6 +1367,10 @@ pub struct Project<'a> {
     typing: RefCell<HashSet<(usize, usize)>>,
     /// The use being resolved, when it is a call: `(file, index of the use)`.
     cur: RefCell<Option<(usize, usize)>>,
+    /// Where the use being resolved is written, whatever its kind: `(file,
+    /// byte)`. What a name means depends on it (a block's local, a
+    /// redeclaration).
+    site: RefCell<Option<(usize, usize)>>,
     /// What the reference being resolved is (a type written, a call, …).
     ref_kind: RefCell<Option<RefKind>>,
     /// The file the path being walked is written in: of several blocks of
@@ -1480,6 +1484,7 @@ impl<'a> Project<'a> {
             typing_value: RefCell::new(false),
             typing: RefCell::new(HashSet::new()),
             cur: RefCell::new(None),
+            site: RefCell::new(None),
             ref_kind: RefCell::new(None),
             asking: RefCell::new(None),
             args: RefCell::new(None),
@@ -2534,10 +2539,7 @@ impl<'a> Project<'a> {
             return li;
         }
         let Some(all) = self.shadows.get(&(f, x, name.to_string())) else { return li };
-        let Some(at) = (*self.cur.borrow())
-            .filter(|(cf, _)| *cf == f)
-            .map(|(cf, ci)| self.files[cf].refs[ci].byte)
-        else {
+        let Some((_, at)) = (*self.site.borrow()).filter(|(sf, _)| *sf == f) else {
             return li;
         };
         let locals = &self.files[f].locals;
@@ -3413,9 +3415,8 @@ impl<'a> Project<'a> {
                 let declares =
                     !matches!(self.family[f], Some(Family::Python | Family::Ruby | Family::Php));
                 let first = self.first_declared(f, x, name, li);
-                let before = declares
-                    && (*self.cur.borrow())
-                        .is_some_and(|(cf, ci)| cf == f && self.files[cf].refs[ci].byte < first);
+                let before =
+                    declares && (*self.site.borrow()).is_some_and(|(sf, at)| sf == f && at < first);
                 // C, C++: a variable hides a function of its name (they share
                 // one scope), unless it is of a project type, where the walk
                 // has no call operator to name
@@ -3482,6 +3483,18 @@ impl<'a> Project<'a> {
             cur = defs[x].parent;
         }
         false
+    }
+
+    /// The local `name` of a block outside every definition that the use
+    /// being resolved is written in.
+    fn file_block_local(&self, f: usize, name: &str) -> Option<&crate::facts::Local> {
+        let (_, at) = (*self.site.borrow()).filter(|(sf, _)| *sf == f)?;
+        self.files[f]
+            .locals
+            .iter()
+            .filter(|l| l.from_def.is_none() && !l.field && l.until != 0 && l.name == name)
+            .filter(|l| l.byte <= at && at < l.until && (l.after == 0 || l.after <= at))
+            .max_by_key(|l| l.byte)
     }
 
     /// Whether the name is a local or parameter declared with its type.
@@ -4059,6 +4072,22 @@ impl<'a> Project<'a> {
                         }
                     }
                     return self.best(all).map(Target::Def);
+                }
+                // TS: a function, class or enum merged with a `namespace` of
+                // its name has what the namespace declares
+                if self.family[c.0] == Some(Family::Ecma) && d.kind != DefKind::Namespace {
+                    let merged = self
+                        .by_qual
+                        .get(&qual_key(Family::Ecma, &d.qualname))
+                        .into_iter()
+                        .flatten()
+                        .copied()
+                        .filter(|o| o.0 == c.0 && self.def(*o).kind == DefKind::Namespace)
+                        .flat_map(|o| self.namespace_members(o, name))
+                        .collect::<Vec<_>>();
+                    if !merged.is_empty() && self.members(*c, name).is_empty() {
+                        return self.best(merged).map(Target::Def);
+                    }
                 }
                 // `Color.RED.label()`: an enum's value has the enum's members
                 // (after what the value declares itself: Java `DEFAULT { … }`)
@@ -4649,6 +4678,16 @@ impl<'a> Project<'a> {
                 };
             }
         }
+        // a `let` in a block at the top of a file (`for (let x; …) { x }`
+        // beside a file-level `var x`): a local of that block, which no
+        // definition holds
+        if let Some(l) = self.file_block_local(f, head) {
+            if rest.is_empty() || l.path.is_empty() {
+                return None;
+            }
+            let t = self.type_of_path(f, d, &l.path, l.declared)?;
+            return self.walk(Target::Def(t), rest, Confidence::Extracted);
+        }
         // a local declared with a type, called: the call is of what it holds,
         // which is no definition (`cb('hi')` with `cb: (x: string) => number`)
         if rest.is_empty()
@@ -4675,7 +4714,10 @@ impl<'a> Project<'a> {
             }
         }
         // C++ `namespace u = util; u::twice()`: the namespace the alias names
-        if fam == Family::C && !rest.is_empty() && !self.files[f].ns_aliases.is_empty() {
+        // (TS `import Internal = My.Internal;`, also named alone: `new C()`)
+        if (fam == Family::Ecma || (fam == Family::C && !rest.is_empty()))
+            && !self.files[f].ns_aliases.is_empty()
+        {
             let named = self.files[f].ns_aliases.iter().find(|(a, _)| a == head);
             if let Some((_, of)) = named.filter(|_| !self.is_local_name(f, d, head)) {
                 let mut whole = of.clone();
@@ -7542,6 +7584,7 @@ pub fn resolve(
                 *p.self_arg.borrow_mut() = r.self_arg;
                 let is_call = matches!(r.kind, RefKind::Call | RefKind::New);
                 *p.cur.borrow_mut() = is_call.then_some((f, ri));
+                *p.site.borrow_mut() = Some((f, r.byte));
                 *p.ref_kind.borrow_mut() = Some(r.kind);
                 p.guessed.set(false);
                 let found = if let Some(place) = &r.implicit {
@@ -7580,6 +7623,7 @@ pub fn resolve(
                 *p.args.borrow_mut() = None;
                 *p.self_arg.borrow_mut() = false;
                 *p.cur.borrow_mut() = None;
+                *p.site.borrow_mut() = None;
                 *p.ref_kind.borrow_mut() = None;
                 // a guess by name alone on another object never links a
                 // definition to itself: `base.evaluate()` inside `evaluate()`
@@ -7692,6 +7736,21 @@ pub fn resolve(
                                 } else {
                                     "references"
                                 }
+                            }
+                            // a function named as a value (`const k = helper`,
+                            // `cb = helper`, `exports.f = helper`), where a bare
+                            // function name is one
+                            RefKind::Read
+                                if tk.is_callable()
+                                    && conf == Confidence::Extracted
+                                    && r.path.len() == 1
+                                    && r.context != "object"
+                                    && matches!(
+                                        p.family[f],
+                                        Some(Family::Ecma | Family::Python | Family::Go)
+                                    ) =>
+                            {
+                                "references"
                             }
                             RefKind::Read | RefKind::Write => {
                                 if !tk.is_state() {

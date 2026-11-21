@@ -1816,6 +1816,36 @@ case("php", "global-class-is-not-a-namespaced-one", "`\\Name` is the global clas
            "src/Use.php": "<?php\n\nnamespace App\\Other;\n\nclass Use_\n{\n    public function make()\n    {\n        return new \\DateTimeImmutable('@0');\n    }\n}\n"},
      [], [("Use_.make", "calls", "DateTimeImmutable")])
 
+# The rest of the TypeScript compiler's list (`oracle_typescript.py`, engine 0.5.54).
+case("typescript", "import-equals-require", "`import x = require('./m')` binds the module under that name",
+     TS, {"back.ts": "export class Model {\n  id = 1;\n}\n\nexport function helper(): number {\n  return 1;\n}\n",
+          "a.ts": "import Backbone = require(\"./back\");\n\nexport class Viz extends Backbone.Model {}\n\nexport function f() {\n  return Backbone.helper();\n}\n"},
+     [("Viz", "inherits", "Model"), ("f", "calls", "helper")])
+case("typescript", "export-assignment", "`export = E` is what `import x = require()` of the module names",
+     TS, {"e.ts": "enum E {\n  A,\n  B,\n}\n\nexport = E;\n",
+          "use.ts": "import EnumE = require(\"./e\");\n\nexport function g() {\n  return EnumE.A;\n}\n"},
+     [("g", "references", "E")])
+case("typescript", "import-alias", "`import A = N.M` names what the path names",
+     TS, {"a.ts": "namespace My.Internal {\n  export function getThing(): void {}\n  export class Cls {\n    run() {}\n  }\n}\n\nnamespace Other {\n  import Internal = My.Internal;\n  import C = My.Internal.Cls;\n\n  export function k() {\n    Internal.getThing();\n    const c = new C();\n    c.run();\n  }\n}\n"},
+     [("Other.k", "calls", "My.Internal.getThing"), ("Other.k", "calls", "My.Internal.Cls.run")])
+case("typescript", "function-namespace-merge", "a function merged with a namespace of its name has what the namespace declares",
+     TS, {"a.ts": "function Cf(x: number) {\n  return x;\n}\n\nnamespace Cf {\n  export function foo() {\n    return 1;\n  }\n}\n\nexport function h() {\n  return Cf.foo();\n}\n"},
+     [("h", "calls", "Cf.foo")])
+case("typescript", "function-as-value", "a function named as a value is a use of it",
+     TS, {"a.ts": "export function helper(): number {\n  return 1;\n}\n\nexport function user(cb = helper) {\n  const q = helper;\n  return [q, cb];\n}\n"},
+     [("user", "references", "helper")])
+case("typescript", "block-scope-file-level", "a `let` in a block at the top of a file is the block's, beside a variable of the file",
+     "ECMAScript Language Specification, 'Block' (14.2) and 'Let and Const Declarations' (14.3.1)",
+     {"a.ts": "export let count = 0;\n\nexport function bump() {\n  count += 1;\n}\n\nexport function inner() {\n  {\n    let count = 5;\n    count += 1;\n  }\n}\n\nexport function after() {\n  {\n    let count = 5;\n    void count;\n  }\n  return count;\n}\n"},
+     [("bump", "writes", "count"), ("after", "reads", "count")], [("inner", "writes", "count")])
+case("python", "function-named-as-value", "a function named as a value is a use of it",
+     PY, {"a.py": "def helper():\n    return 1\n\n\ndef user():\n    q = helper\n    return q\n"},
+     [("user", "references", "helper")])
+case("go", "function-named-as-value", "a function named as a value is a use of it",
+     GO, {"go.mod": GOMOD,
+          "a.go": "package app\n\nfunc helper() int {\n\treturn 1\n}\n\nfunc user() func() int {\n\tq := helper\n\treturn q\n}\n"},
+     [("user", "references", "helper")])
+
 # --- running ------------------------------------------------------------------
 
 def _matches(node: dict[str, Any], want: str) -> bool:

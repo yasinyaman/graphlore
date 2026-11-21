@@ -1633,13 +1633,13 @@ python benchmarks/oracle_typescript.py ts/tsc/testdata/baselines/reference/compi
 (The paths are those of the repository on 2026-11-20, commit `6417c48`; the
 tests' sources are looked for beside the baselines, or where `--cases` says.)
 
-| | 0.5.51 | 0.5.52 | 0.5.53 |
-|---|---:|---:|---:|
-| programs (those with a definition and a use) | 3,169 | 3,169 | 3,169 |
-| edges whose site the compiler has an answer for | 7,806 | 7,935 | 8,822 |
-| of them, to the declaration the compiler names | 7,721 (98.9%) | 7,864 (99.1%) | 8,747 (99.1%) |
-| uses the compiler binds to a definition the graph has | 19,430 | 19,526 | 19,760 |
-| of them, with an edge from the definition around | 14,237 (73.3%) | 14,426 (73.9%) | 15,691 (79.4%) |
+| | 0.5.51 | 0.5.52 | 0.5.53 | 0.5.54 |
+|---|---:|---:|---:|---:|
+| programs (those with a definition and a use) | 3,169 | 3,169 | 3,169 | 3,169 |
+| edges whose site the compiler has an answer for | 7,806 | 7,935 | 8,822 | 9,283 |
+| of them, to the declaration the compiler names | 7,721 (98.9%) | 7,864 (99.1%) | 8,747 (99.1%) | 9,240 (99.5%) |
+| uses the compiler binds to a definition the graph has | 19,430 | 19,526 | 19,760 | 19,760 |
+| of them, with an edge from the definition around | 14,237 (73.3%) | 14,426 (73.9%) | 15,691 (79.4%) | 16,526 (83.6%) |
 
 The first number is the one that matters: an edge that goes somewhere else
 than the compiler says is a wrong edge, and all but two of the 85 were
@@ -1661,6 +1661,22 @@ of the 5,100), uses at the top of a file. It is a list to read, not a score:
 0.5.53 read the second list where it named something concrete: the types of
 a type alias and of an interface's signatures, `typeof ns.Class`, enum
 members.
+
+0.5.54 finished both lists. Block scopes had worked for calls only: the
+resolver knew where a use was written just for those, so a read, a write or
+a type still got the first local of the name. It knows for every use now,
+`state.rs` hides a variable only inside the block that declares a local of
+its name, and a block at the top of a file has locals of its own; the 40
+rows of that kind are gone. `import x = require()`, `export =`, `import A =
+N.M`, a function merged with a namespace and a function named as a value
+were the rest of what was missing. Of the 43 edges still called wrong, 8 are
+one test whose property, parameter and imported type share a name on one
+line, which the judge cannot tell apart; the others are single cases (a
+class expression's own name, a class declared in a block, `arguments`). Of
+the 3,234 uses with no edge, most are what a test suite writes and a
+repository does not: a member of a value with no written type (`var r =
+f(); r.then(…)`), a constructor writing its own fields (left out on
+purpose), ambient declarations.
 
 **Scala.** No Scala compiler runs where the engine is built, so its rules
 had only ever been checked against memory. The Scala 3 compiler's test suite

@@ -345,6 +345,29 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- **Native engine 0.5.54: the rest of the TypeScript compiler's list.**
+  99.5% of the 9,283 edges the compiler has an answer for now go where it
+  says (98.9% of 7,806 with 0.5.51), and 83.6% of the uses it binds to a
+  definition of the graph have an edge (73.3%). 464 cases in the checklist,
+  all hold.
+  - **Block scopes hold for every kind of use**, not only calls: the place
+    a use is written (`Project::site`) decides which local of a name is
+    meant for a read, a write, a type or a value passed too, and `state.rs`
+    hides a variable only inside the block that declares a local of its
+    name. A `let` in a block at the top of a file is that block's. A local
+    declared after an inner block no longer hides the field the code before
+    it reads (C++, Java, Kotlin, Go: about 50 `reads` / `writes` edges on the 45
+    repositories), and a redeclared parameter is the new value after its
+    declaration (`let timeout = timeout.for_write()`).
+  - **`import x = require("./m")`, `export = E`, `import A = N.M`** are read:
+    the module under that name, the module's own value, a name for a path.
+  - **A function, class or enum merged with a `namespace` of its name** has
+    what the namespace declares (`Cf.foo()`).
+  - **A function named as a value is a `references` edge** where a bare
+    function name is one (JS / TS, Python, Go): `const q = helper`, `cb =
+    helper`, `Run: emptyRun`, `key=sort_key`. About 1,600 edges on the 45
+    repositories.
+  - JS `for ([a, b] of rows)` with no `let` assigns names declared elsewhere.
 - **Native engine 0.5.53: what the Scala compiler showed, and the rest of
   TypeScript's list** (456 cases in the checklist, all hold):
   - **A name of another package is not in reach without an import** (JVM

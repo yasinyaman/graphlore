@@ -276,6 +276,10 @@ pub struct State {
     uses: Vec<RefFact>,
     /// `(byte, name)` of every name a declaration binds.
     declared: Vec<(usize, String)>,
+    /// Names declared in a block, a loop or a closure: `(the scope's first
+    /// byte, its end, the name)`. Outside every function nothing else says
+    /// that a use in there is the block's own.
+    blocked: Vec<(usize, usize, String)>,
     /// Python `global x` / `nonlocal x`: assignments of `x` are not locals.
     outer: Vec<(usize, String)>,
     /// An assignment to a bare name declares a local (Python).
@@ -296,7 +300,51 @@ impl State {
             }
             return;
         }
+        let had = self.declared.len();
         self.declarations(n, k, src);
+        if self.declared.len() > had {
+            use crate::lang::Lang;
+            let lang = crate::parse::current();
+            let scoped = !matches!(lang, Some(Lang::Python | Lang::Ruby | Lang::Php) | None);
+            // (JS `var` is the function's, whatever block it is written in)
+            let hoisted = matches!(lang, Some(Lang::JavaScript | Lang::TypeScript | Lang::Tsx))
+                && (k == "variable_declaration"
+                    || up(anc, 0).is_some_and(|p| p.kind() == "variable_declaration"));
+            // (the body of a type is no block: what it declares are members)
+            let of_type = |kind: &str| {
+                [
+                    "class",
+                    "interface",
+                    "enum",
+                    "struct",
+                    "object",
+                    "trait",
+                    "impl",
+                    "protocol",
+                    "template",
+                    "extension",
+                    "declaration_list",
+                    "record",
+                    "union",
+                    "namespace",
+                    "module",
+                ]
+                .iter()
+                .any(|w| kind.contains(w))
+            };
+            let scope = std::iter::once(&n)
+                .chain(anc.iter().rev())
+                .find(|a| crate::refs::is_scope(a.kind()) || of_type(a.kind()))
+                .filter(|a| scoped && !hoisted && !of_type(a.kind()));
+            if let Some(scope) = scope {
+                let (lo, hi) = (scope.start_byte(), scope.end_byte());
+                let names: Vec<String> =
+                    self.declared[had..].iter().map(|(_, name)| name.clone()).collect();
+                self.blocked.extend(names.into_iter().map(|name| (lo, hi, name)));
+                // (its range says where it hides: no local of the whole function)
+                self.declared.truncate(had);
+            }
+        }
         if k == "infix_expression" && scala_compound(n, src) {
             // Scala `hits += 1`
             let mut out = Vec::new();
@@ -403,6 +451,21 @@ impl State {
         if !parameter && !DECLARATIONS.contains(&k) {
             return;
         }
+        // JS `for ([a, b] of rows)` with no `let` / `const` / `var` assigns
+        // names declared elsewhere
+        if k == "for_in_statement"
+            && n.child_by_field_name("kind").is_none()
+            && matches!(
+                crate::parse::current(),
+                Some(
+                    crate::lang::Lang::JavaScript
+                        | crate::lang::Lang::TypeScript
+                        | crate::lang::Lang::Tsx
+                )
+            )
+        {
+            return;
+        }
         if let Some(name) = bound_name(n, src) {
             self.declared.push((n.start_byte(), name));
         }
@@ -438,7 +501,11 @@ impl State {
         }
         let Some(p) = up(anc, 0) else { return };
         let pk = p.kind();
-        if pk.contains("parameter") {
+        // (a parameter's name; its default value is read like any other)
+        let default_value = ["value", "default_value"]
+            .iter()
+            .any(|f| p.child_by_field_name(f).is_some_and(|v| v.id() == n.id()));
+        if pk.contains("parameter") && !default_value {
             self.declared.push((n.start_byte(), text(n, src)));
             return;
         }
@@ -491,7 +558,9 @@ impl State {
         if calls_mutator(n, src, anc) {
             self.push(n, RefKind::Write, path.clone(), "mutate");
         }
-        self.push(n, RefKind::Read, path, "read");
+        // (the object of `a.b` is read on the way to `b`: no value of its own)
+        let ctx = if MEMBER_KINDS.contains(&pk) { "object" } else { "read" };
+        self.push(n, RefKind::Read, path, ctx);
     }
 
     /// `a.b` in an expression: read on its own (`Attr`, as a method taken as a
@@ -590,6 +659,23 @@ impl State {
             // a local of the same name hides a variable; `local.field` is the
             // field of the object the local holds, which resolution types
             if u.path.len() == 1 && shadowed(home, head) {
+                continue;
+            }
+            // (or the name of a block the use is written in, unless what the
+            // block declares by it is a function: `const f = () => …`)
+            if u.path.len() == 1
+                && self.blocked.iter().any(|(lo, hi, n)| {
+                    n == head
+                        && *lo <= u.byte
+                        && u.byte < *hi
+                        && !defs.iter().any(|d| {
+                            d.name == *n
+                                && d.kind.is_callable()
+                                && *lo <= d.start_byte
+                                && d.start_byte < *hi
+                        })
+                })
+            {
                 continue;
             }
             if needs_import && !matches!(head, "self" | "super" | "crate") && !known.contains(head)
