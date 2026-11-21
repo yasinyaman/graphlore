@@ -38,6 +38,16 @@ All notable changes to this project are documented here. The format is based on
   engine 0.5.55 and all but 4 with 0.5.56. On ureq, ripgrep, axum-realworld
   and actix-realworld rust-analyzer has one for 11,924; 97.5% before, 98.5%
   now.
+- **The plan for reading the rules out of the languages' own tools**
+  (`docs/rule-sources.md`), and `benchmarks/rule_sources.py`, which fetches
+  what it names: per language the compiler's or interpreter's name binder,
+  its member and overload lookup, its table of language versions and their
+  features, and the specification, as sparse checkouts of 17 repositories
+  (300 MB, under a minute) with the commits recorded. The plan covers
+  language versions (the engine reads none today), a `source` and `since` /
+  `until` on each case of the checklist, languages with no open compiler,
+  and the phases: positions from the grammars, binding rules from the
+  binders, inference by the numbers.
 - **graphify's edges are checked before they count, and the confirmed ones
   are a floor** (`benchmarks/verify_graphify.py`). The comparison with
   graphify took each of its edges as a fact. For Go, Rust and C#
