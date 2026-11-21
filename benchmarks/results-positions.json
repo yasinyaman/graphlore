@@ -53,13 +53,13 @@
    "seen": 98
   },
   "compound_literal_expression.type": {
-   "example": "include/cpr/async.h:64  return async_wrapper_t{std::move(future)};",
-   "read": 2,
+   "example": "",
+   "read": 6,
    "seen": 6
   },
   "declaration.type": {
-   "example": "include/leveldb/cache.h:65  virtual Handle* Lookup(const Slice& key) = 0;",
-   "read": 365,
+   "example": "",
+   "read": 409,
    "seen": 409
   },
   "dependent_type.-": {
@@ -68,8 +68,8 @@
    "seen": 4
   },
   "field_declaration.type": {
-   "example": "include/cpr/async.h:36  static GlobalThreadPool* GetInstance(boost::asio::io_context& context);",
-   "read": 195,
+   "example": "",
+   "read": 321,
    "seen": 321
   },
   "for_range_loop.type": {
@@ -78,8 +78,8 @@
    "seen": 1
   },
   "friend_declaration.-": {
-   "example": "include/cpr/async_wrapper.h:23  friend class AsyncWrapper<T, true>;",
-   "read": 2,
+   "example": "",
+   "read": 18,
    "seen": 18
   },
   "function_declarator.declarator": {
@@ -114,12 +114,12 @@
   },
   "parameter_declaration.type": {
    "example": "include/cpr/api.h:106  template <session_action_t SessionAction, typename T, typename... Ts>",
-   "read": 1285,
+   "read": 1286,
    "seen": 1291
   },
   "parameter_pack_expansion.pattern": {
-   "example": "include/cpr/api.h:337  priv::setup_multiperform<Ts...>(multiperform, std::forward<Ts>(ts)...);",
-   "read": 1,
+   "example": "",
+   "read": 16,
    "seen": 16
   },
   "parenthesized_declarator.-": {
@@ -128,18 +128,18 @@
    "seen": 1
   },
   "template_function.arguments": {
-   "example": "include/cpr/api.h:385  priv::setup_multiasync<&cpr::Session::Put>(ret, std::forward<Ts>(ts)...);",
-   "read": 10,
+   "example": "",
+   "read": 61,
    "seen": 61
   },
   "template_method.arguments": {
-   "example": "include/cpr/body.h:24  Body(const Buffer& buffer) : StringHolder<Body>(reinterpret_cast<const char*>(buffer.data), static_c",
-   "read": 2,
+   "example": "",
+   "read": 25,
    "seen": 25
   },
   "trailing_return_type.-": {
-   "example": "include/cpr/threadpool.h:223  const auto task = std::make_shared<std::packaged_task<RetType()>>([fn = std::forward<Fn>(fn), argume",
-   "read": 2,
+   "example": "",
+   "read": 3,
    "seen": 3
   },
   "type_definition.declarator": {
@@ -180,8 +180,8 @@
    "seen": 18
   },
   "compound_literal_expression.type": {
-   "example": "test/post_tests.cpp:112  auto state = std::make_shared<StreamState>(StreamState{\"owned data\"});",
-   "read": 0,
+   "example": "",
+   "read": 2,
    "seen": 2
   },
   "declaration.type": {
@@ -190,8 +190,8 @@
    "seen": 215
   },
   "field_declaration.type": {
-   "example": "db/skiplist_test.cc:326  ReaderState state_ GUARDED_BY(mu_);",
-   "read": 78,
+   "example": "",
+   "read": 83,
    "seen": 83
   },
   "for_range_loop.type": {
@@ -230,8 +230,8 @@
    "seen": 2
   },
   "template_function.arguments": {
-   "example": "cpr/threadpool.cpp:59  ThreadPool::ThreadPool(boost::asio::io_context& context, size_t minThreadCount, size_t maxThreadCoun",
-   "read": 17,
+   "example": "",
+   "read": 77,
    "seen": 77
   },
   "type_definition.declarator": {
@@ -851,8 +851,8 @@
    "seen": 57
   },
   "instance_expression.-": {
-   "example": "jvm/src/test/scala/scopt/ImmutableParserSpecJVM.scala:111  val uriParser1 = new scopt.OptionParser[Config](\"scopt\") {",
-   "read": 101,
+   "example": "shared/src/main/scala/scopt/OParser.scala:282  private[this] lazy val esetup0: DefaultOEffectSetup = new DefaultOEffectSetup with OEffectSetup {",
+   "read": 183,
    "seen": 185
   },
   "parameter.type": {
@@ -997,13 +997,13 @@
    "seen": 126
   },
   "as_expression.-": {
-   "example": "packages/bench/error-construction-breakdown.ts:15  const raw = () => ({ code: \"invalid_type\", expected: \"string\", input: 42, inst }) as unknown as core",
-   "read": 272,
+   "example": "",
+   "read": 307,
    "seen": 307
   },
   "call_expression.type_arguments": {
-   "example": "packages/zod/src/v4/classic/tests/assignability.test.ts:373  expectTypeOf<z.ZodType extends z.core.$ZodType ? true : false>().toEqualTypeOf<true>();",
-   "read": 869,
+   "example": "",
+   "read": 879,
    "seen": 879
   },
   "call_signature.return_type": {
@@ -1012,8 +1012,8 @@
    "seen": 44
   },
   "constraint.-": {
-   "example": "packages/zod/src/v4/classic/compat.ts:71  Internals extends core.$ZodTypeInternals<Output, Input> = core.$ZodTypeInternals<Output, Input>,",
-   "read": 299,
+   "example": "",
+   "read": 360,
    "seen": 360
   },
   "constructor_type.type": {
@@ -1022,8 +1022,8 @@
    "seen": 3
   },
   "default_type.-": {
-   "example": "packages/zod/src/v4/classic/compat.ts:71  Internals extends core.$ZodTypeInternals<Output, Input> = core.$ZodTypeInternals<Output, Input>,",
-   "read": 76,
+   "example": "",
+   "read": 131,
    "seen": 131
   },
   "extends_clause.type_arguments": {
@@ -1033,17 +1033,17 @@
   },
   "extends_type_clause.type": {
    "example": "frontend/src/client/client/types.gen.ts:62  ServerSentEventsOptions<TData>,",
-   "read": 180,
+   "read": 263,
    "seen": 264
   },
   "function_declaration.return_type": {
-   "example": "packages/zod/src/v4/classic/compat.ts:51  export function getErrorMap(): core.$ZodErrorMap<core.$ZodIssue> | undefined {",
-   "read": 160,
+   "example": "",
+   "read": 173,
    "seen": 173
   },
   "function_signature.return_type": {
-   "example": "packages/zod/src/v4/classic/schemas.ts:2769  }): ZodFunction<core.$ZodFunctionIn, Out>;",
-   "read": 30,
+   "example": "",
+   "read": 34,
    "seen": 34
   },
   "implements_clause.-": {
@@ -1062,8 +1062,8 @@
    "seen": 21
   },
   "instantiation_expression.type_arguments": {
-   "example": "packages/zod/src/v4/classic/tests/assignability.test.ts:150  z.preprocess((v) => v, z.number()) satisfies z.core.$ZodPipe<z.core.$ZodTransform, z.ZodNumber>;",
-   "read": 1,
+   "example": "",
+   "read": 2,
    "seen": 2
   },
   "mapped_type_clause.alias": {
@@ -1077,13 +1077,13 @@
    "seen": 29
   },
   "method_definition.return_type": {
-   "example": "packages/zod/src/v4/classic/schemas.ts:354  get _def(): core.$ZodTypeDef {",
-   "read": 211,
+   "example": "",
+   "read": 212,
    "seen": 212
   },
   "method_signature.return_type": {
-   "example": "packages/zod/src/v4/classic/errors.ts:15  flatten<U>(mapper: (issue: core.$ZodIssue) => U): core.$ZodFlattenedError<T, U>;",
-   "read": 169,
+   "example": "",
+   "read": 182,
    "seen": 182
   },
   "new_expression.type_arguments": {
@@ -1092,18 +1092,18 @@
    "seen": 28
   },
   "opting_type_annotation.-": {
-   "example": "packages/zod/src/v4/classic/schemas.ts:2848  properties<Shape extends { [k in keyof T as T[k] extends Function ? never : k]?: core.$ZodType<unkno",
-   "read": 3,
+   "example": "",
+   "read": 4,
    "seen": 4
   },
   "optional_parameter.type": {
    "example": "source/core/index.ts:165  & ((name: 'retry', listener: (retryCount: number, error: RequestError, createRetryStream: (options?:",
-   "read": 264,
+   "read": 466,
    "seen": 470
   },
   "property_signature.type": {
-   "example": "packages/zod/src/v4/classic/from-json-schema.ts:28  registry: $ZodRegistry<any>;",
-   "read": 422,
+   "example": "",
+   "read": 476,
    "seen": 476
   },
   "public_field_definition.type": {
@@ -1113,12 +1113,12 @@
   },
   "required_parameter.type": {
    "example": "typings/index.d.ts:1088  text: (context: AddHelpTextContext) => string,",
-   "read": 910,
+   "read": 935,
    "seen": 976
   },
   "satisfies_expression.-": {
-   "example": "packages/zod/src/v4/classic/tests/assignability.test.ts:151  z.preprocess((v) => v, z.number()) satisfies z.ZodPipe<z.core.$ZodTransform, z.ZodNumber>;",
-   "read": 61,
+   "example": "",
+   "read": 62,
    "seen": 62
   },
   "template_literal_type.-": {
@@ -1128,7 +1128,7 @@
   },
   "type_alias_declaration.value": {
    "example": "packages/zod/src/v3/tests/firstpartyschematypes.test.ts:10  ? Schema",
-   "read": 625,
+   "read": 635,
    "seen": 637
   },
   "type_predicate.type": {
@@ -1137,8 +1137,8 @@
    "seen": 19
   },
   "variable_declarator.type": {
-   "example": "packages/zod/src/v4/classic/errors.ts:77  export const ZodRealError: core.$constructor<ZodError> = /*@__PURE__*/ core.$constructor(",
-   "read": 378,
+   "example": "",
+   "read": 468,
    "seen": 468
   }
  }

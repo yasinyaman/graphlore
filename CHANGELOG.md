@@ -427,11 +427,11 @@ All notable changes to this project are documented here. The format is based on
 
 ### Fixed
 - **Native engine 0.5.62: places a type is written that were never read**,
-  listed from the grammars by `benchmarks/positions.py` (530 cases in the
+  listed from the grammars by `benchmarks/positions.py` (536 cases in the
   checklist, all hold). The share of the repositories' own type names the
-  reader records went from 88.9% to 97.0%; 4,050 reference edges and 200
-  calls more on the 45 audit repositories, with the compilers' agreement
-  unchanged (Go 12,273 of 12,278).
+  reader records went from 88.9% to 99.6%; 4,300 reference edges and
+  950 calls more on the 45 audit repositories, with the compilers'
+  agreement unchanged (Go 12,273 of 12,278).
   - Every language: a closure's own parameters and result.
   - Go: what a defined type is defined as (`type Key Opt`), a constant's
     type, the types of a slice or map literal, the type handed to `make`; a
@@ -441,8 +441,14 @@ All notable changes to this project are documented here. The format is based on
     parameter and an interface's constant.
   - Swift: `throws(E)`, a protocol property's type, `(any P).self`;
     `Box<T>(…)` is a construction of `Box`.
-  - C# `new T[n]`; Scala a `val`'s declared type and `new Outer.Inner(…)`;
-    Rust the struct a pattern takes apart.
+  - C# `new T[n]`; Scala a `val`'s declared type, `new Outer.Inner(…)` and
+    `new p.T[A](…)`; Rust the struct a pattern takes apart.
+  - C++: `T{…}` is a construction of `T`; the result type of a member
+    function declared in its class, explicit template arguments of a call,
+    a trailing result type and a `friend` are references.
+  - TypeScript: a function type's parameters name their types; their names
+    were read as types (`(err: Err) => void` gave a reference to a value
+    `err`).
 - **Native engine 0.5.60: the rest of graphify's confirmed edges, in Rust
   and Go** (510 cases in the checklist, all hold). Of the 115 confirmed
   edges the native graph lacked 45 are left, none in Go:

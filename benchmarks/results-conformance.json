@@ -1,6 +1,6 @@
 {
- "passed": 530,
- "total": 530,
+ "passed": 536,
+ "total": 536,
  "cases": [
   {
    "id": "python/module-function",
@@ -3178,6 +3178,42 @@
   },
   {
    "id": "php/closure-signature",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "cpp/brace-construction",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "cpp/member-declaration-result",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "cpp/explicit-template-argument",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "cpp/trailing-result-and-friend",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "scala/new-generic-through-package",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/function-type-parameter-types",
    "ok": true,
    "missing": [],
    "unwanted": []

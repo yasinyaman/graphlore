@@ -2118,6 +2118,25 @@ case("php", "closure-signature", "an anonymous function's parameters and result 
      PHP, {"src/A.php": "<?php\n\nnamespace App;\n\nclass Cookie\n{\n}\n\nclass Result\n{\n}\n\nclass A\n{\n    public function run()\n    {\n        return static function (Cookie $c): Result {\n            return new Result();\n        };\n    }\n}\n"},
      [("A.run", "references", "Cookie")])
 
+case("cpp", "brace-construction", "`T{…}` constructs T",
+     CPP, {"a.cpp": "struct Auth {\n    const char* user;\n    const char* pass;\n};\n\nstruct Pool {\n};\n\nint send(Auth a) {\n    return a.user != 0;\n}\n\nint run() {\n    Pool p = Pool{};\n    (void)p;\n    return send(Auth{\"user\", \"pw\"});\n}\n"},
+     [("run", "calls", "Auth"), ("run", "calls", "Pool")])
+case("cpp", "member-declaration-result", "the result type of a member function declared in its class is a use of it",
+     CPP, {"a.cpp": "class Pool {\n};\n\nclass Slice {\n};\n\nstruct Handle {\n};\n\nclass Cache {\n public:\n    static Pool* Get(Slice& s);\n    virtual Handle* Lookup(const Slice& key) = 0;\n};\n"},
+     [("Cache.Get", "references", "Pool"), ("Cache.Lookup", "references", "Handle")])
+case("cpp", "explicit-template-argument", "a type written as a template argument of a call is a use of it",
+     CPP, {"a.cpp": "struct Slice {\n};\n\nstruct Pool {\n};\n\ntemplate <class T>\nint setup(Pool& p) {\n    return sizeof(T) > 0;\n}\n\nint run(Pool& p) {\n    return setup<Slice>(p);\n}\n"},
+     [("run", "references", "Slice")])
+case("cpp", "trailing-result-and-friend", "a trailing result type and a `friend` name their types",
+     CPP, {"a.cpp": "class Pool {\n};\n\nclass Guard {\n};\n\nclass Cache {\n    friend class Guard;\n};\n\ninline auto make() -> Pool {\n    return Pool();\n}\n"},
+     [("make", "references", "Pool"), ("Cache", "references", "Guard")])
+case("scala", "new-generic-through-package", "`new p.T[A](…)` constructs T",
+     SC, {"src/scopt/A.scala": "package scopt\n\nclass Config\n\nclass OptionParser[C](name: String)\n\nobject Main {\n  def run(): Any = new scopt.OptionParser[Config](\"scopt\")\n}\n"},
+     [("Main.run", "calls", "OptionParser"), ("Main.run", "references", "Config")])
+case("typescript", "function-type-parameter-types", "the parameters of a function type name their types, not their names",
+     TS, {"a.ts": "export interface Ctx {\n  id: number;\n}\n\nexport interface Err {\n  message: string;\n}\n\nexport interface Hooks {\n  preprocess: (arg: unknown, ctx: Ctx) => unknown;\n}\n\nexport function run(cb: (err: Err) => void): void {\n  cb({ message: \"x\" });\n}\n\nexport const err = 1;\n"},
+     [("Hooks", "references", "Ctx"), ("run", "references", "Err")], [("run", "references", "a.ts:err")])
+
 # --- running ------------------------------------------------------------------
 
 def _matches(node: dict[str, Any], want: str) -> bool:

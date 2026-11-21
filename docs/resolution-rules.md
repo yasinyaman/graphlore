@@ -25,7 +25,7 @@ python benchmarks/conformance.py --baseline benchmarks/results-conformance.json 
 python benchmarks/conformance.py --markdown      # the tables below
 ```
 
-Measured 2026-11-21 with graphlore-engine 0.5.62: **530 of 530 rules hold**
+Measured 2026-11-21 with graphlore-engine 0.5.62: **536 of 536 rules hold**
 (356 of the first 406 with 0.5.45). Ten came from the Go type checker and
 rust-analyzer run on whole repositories; fifteen from the Kotlin and Swift
 compilers' tests (type checks, casts, `catch`, aliases); thirty-nine from two
@@ -104,7 +104,7 @@ Each change was measured on the 45 audit repositories as well, by reading
 the edges it added and removed at their source lines; the page on the
 [native engine](native-engine.md#the-rules-themselves) has the numbers.
 Every case has been compiled by its own language
-(`benchmarks/verify_cases.py`: 530 of 530 accepted). The Versions column is
+(`benchmarks/verify_cases.py`: 536 of 536 accepted). The Versions column is
 the oldest version of the language whose compiler accepts the case, where the
 compiler can be asked (`verify_cases.py --min-version`: Java, Kotlin, Scala,
 C#, Swift, C, C++); `all` is the oldest version asked, `–` a language with no
@@ -208,11 +208,11 @@ Found by: the specification 29, a compiler 0, comparison 0, the grammar 0. With 
 | an arrow function in a class field sees the class's `this` | `class-field-arrow` | – | yes |
 | a local assigned `new C()` keeps its type in a nested callback | `for-of-new` | – | yes |
 
-### typescript (49 of 49)
+### typescript (50 of 50)
 
 TypeScript Handbook, 'Modules', 'Classes', 'Generics' (types are the compiler's, tsc).
 
-Found by: the specification 30, a compiler 19, comparison 0, the grammar 0. With the place it was read in the language's own tools: 0.
+Found by: the specification 30, a compiler 19, comparison 0, the grammar 1. With the place it was read in the language's own tools: 0.
 
 | Rule | Case | Versions | Engine |
 |---|---|---|---|
@@ -265,6 +265,7 @@ Found by: the specification 30, a compiler 19, comparison 0, the grammar 0. With
 | a `let` in a block at the top of a file is the block's, beside a variable of the file | `block-scope-file-level` | – | yes |
 | `x as T` and `x instanceof T` are uses of T | `as-and-instanceof` | – | yes |
 | every name a closure's parameter pattern binds is the closure's | `destructured-closure-parameter` | – | yes |
+| the parameters of a function type name their types, not their names | `function-type-parameter-types` | – | yes |
 
 ### go (38 of 38)
 
@@ -419,11 +420,11 @@ Found by: the specification 31, a compiler 9, comparison 0, the grammar 0. With 
 | a constructor parameter written `val` is a property of the class | `constructor-property-read` | all | yes |
 | the name of an argument given by name reads no property of that name | `named-argument-label` | all | yes |
 
-### scala (30 of 30)
+### scala (31 of 31)
 
 Scala Language Specification, chapter 2 'Identifiers, Names and Scopes', 4.7 'Import Clauses'.
 
-Found by: the specification 20, a compiler 8, comparison 0, the grammar 2. With the place it was read in the language's own tools: 0.
+Found by: the specification 20, a compiler 8, comparison 0, the grammar 3. With the place it was read in the language's own tools: 0.
 
 | Rule | Case | Versions | Engine |
 |---|---|---|---|
@@ -457,6 +458,7 @@ Found by: the specification 20, a compiler 8, comparison 0, the grammar 2. With 
 | the types a type parameter is bound by are uses of them | `bound-types` | all | yes |
 | the type a `val` or `var` is declared with is a use of it | `declared-value-type` | – | yes |
 | `new Outer.Inner(…)` constructs Inner | `new-through-its-holder` | – | yes |
+| `new p.T[A](…)` constructs T | `new-generic-through-package` | – | yes |
 
 ### csharp (52 of 52)
 
@@ -658,11 +660,11 @@ Found by: the specification 14, a compiler 0, comparison 0, the grammar 2. With 
 | the type a local is declared with is a use of it | `local-declaration-type` | – | yes |
 | a `typedef` of a named type is a use of that type | `typedef-names-its-type` | – | yes |
 
-### cpp (32 of 32)
+### cpp (36 of 36)
 
 ISO C++, [basic.lookup] (unqualified, qualified and argument-dependent lookup), [class.member.lookup], [dcl.ambig.res].
 
-Found by: the specification 32, a compiler 0, comparison 0, the grammar 0. With the place it was read in the language's own tools: 0.
+Found by: the specification 32, a compiler 0, comparison 0, the grammar 4. With the place it was read in the language's own tools: 0.
 
 | Rule | Case | Versions | Engine |
 |---|---|---|---|
@@ -698,6 +700,10 @@ Found by: the specification 32, a compiler 0, comparison 0, the grammar 0. With 
 | `Page<Item>`'s member typed `T` is an Item | `template-argument` | all | yes |
 | a macro between `class` and the name (`class API Env {`) leaves the class a class | `export-macro` | all | yes |
 | `T x(1);` constructs a T | `constructor-arguments` | all | yes |
+| `T{…}` constructs T | `brace-construction` | – | yes |
+| the result type of a member function declared in its class is a use of it | `member-declaration-result` | – | yes |
+| a type written as a template argument of a call is a use of it | `explicit-template-argument` | – | yes |
+| a trailing result type and a `friend` name their types | `trailing-result-and-friend` | – | yes |
 
 ### ruby (29 of 29)
 
@@ -780,4 +786,4 @@ Found by: the specification 31, a compiler 2, comparison 0, the grammar 1. With 
 | `$x instanceof T` and `catch (T $e)` are uses of T | `instanceof-and-catch` | – | yes |
 | an anonymous function's parameters and result name their types | `closure-signature` | – | yes |
 
-530 of 530 rules hold
+536 of 536 rules hold
