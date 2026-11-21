@@ -7886,8 +7886,18 @@ pub fn resolve(
                             }
                             // a type named as a value through what holds it
                             // (`take(MyClass.Nested)`, `Sealed.A -> …`)
+                            // (a generic method's bare name, `Maybe.Nothing<T>()`,
+                            // reaches here alone: no type named through anything)
                             RefKind::Attr
-                                if tk.is_class_like() && conf == Confidence::Extracted =>
+                                if tk.is_class_like()
+                                    && conf == Confidence::Extracted
+                                    && r.path.len() >= 2
+                                    // (… which is the type or namespace it is
+                                    // declared in, or a module: `Maybe.Nothing`
+                                    // beside a class `Nothing` is the method)
+                                    && p.def(t).parent.is_none_or(|up| {
+                                        p.def((t.0, up)).name == r.path[r.path.len() - 2]
+                                    }) =>
                             {
                                 "references"
                             }

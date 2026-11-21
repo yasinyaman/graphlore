@@ -38,6 +38,13 @@ All notable changes to this project are documented here. The format is based on
   engine 0.5.55 and all but 4 with 0.5.56. On ureq, ripgrep, axum-realworld
   and actix-realworld rust-analyzer has one for 11,924; 97.5% before, 98.5%
   now.
+- **Roslyn as the judge of the C# edges** (`benchmarks/oracle_csharp.py`):
+  the C# compiler's semantic model, on one compilation of every source of
+  a repository. On todoapi, RestSharp, commandline and aspnetcore-realworld
+  it has an answer for 10,251 edges, and 96.2% go where it says with engine
+  0.5.57. The two clusters left are named in `docs/native-engine.md`: a
+  type and its generic namesake (`RestResponse`, `RestResponse<T>`), and an
+  extension overload chosen over an instance method.
 - **`benchmarks/verify_cases.py` checks Kotlin, Swift and C# too** (kotlinc,
   swiftc, `dotnet build`): every case of the checklist but Scala's has now
   been compiled by its own language, and all are accepted.
@@ -365,6 +372,11 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- **Native engine 0.5.57**: a type named as a value through something is a
+  reference only when that something is what declares it (or a module):
+  C# `Maybe.Nothing<T>()` beside a class `Nothing<T>` was a reference to the
+  class, 55 times in commandline. The name of a generic member or callee
+  (`generic_name`) is no value read.
 - **Native engine 0.5.56: what the Go type checker and rust-analyzer showed
   on whole repositories** (489 cases in the checklist, all hold):
   - **Every declaration is a local**, whatever it is assigned. `endpoint :=

@@ -235,12 +235,20 @@ def compare(name: str, files: dict[str, list[str]], uses: list[dict[str, Any]],
         if not named:
             continue
         target = (t["source_file"], line_of(t.get("source_location")))
+        # (a constructor stands for its class where the compiler binds the
+        # name written, `new Foo()`, to the class)
+        places = [target]
+        if t.get("kind") == "constructor" and "." in str(t["qualname"]):
+            owner = str(t["qualname"]).rsplit(".", 1)[0]
+            places += [(n["source_file"], line_of(n.get("source_location"))) for n in code.values()
+                       if n["qualname"] == owner and n["source_file"] == t["source_file"]]
         row = {"case": name, "file": site[0], "line": site[1], "relation": e["relation"],
                "confidence": e.get("confidence"), "to": t["qualname"],
                "src": files.get(site[0], [""] * site[1])[site[1] - 1].strip()[:110]}
         # (the graph's line is the definition's first line; a decorator or a
         # modifier line above the name is within three lines of it)
-        if any(f == target[0] and slack[0] <= target[1] - ln <= slack[1] for u in named for f, ln in u["decls"]):
+        if any(f == at[0] and slack[0] <= at[1] - ln <= slack[1]
+               for at in places for u in named for f, ln in u["decls"]):
             right.append(row)
         else:
             row["compiler"] = (named[0]["symbol"] + (" (library)" if named[0]["lib"] else "")

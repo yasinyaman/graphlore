@@ -531,6 +531,17 @@ impl State {
         {
             return;
         }
+        // C# `Maybe.Nothing<T>()`, `Parse<T>(x)`: the name of a generic
+        // member or callee, written inside a `generic_name`
+        if pk == "generic_name" {
+            let Some(g) = up(anc, 1) else { return };
+            let named = ["name", "function"]
+                .iter()
+                .any(|f| g.child_by_field_name(f).is_some_and(|x| x.id() == p.id()));
+            if named {
+                return;
+            }
+        }
         if pk.contains("import")
             || pk.contains("type")
             || pk.contains("label")

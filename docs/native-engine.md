@@ -1818,10 +1818,36 @@ The uses with no edge are mostly positions the engine leaves out on purpose
 (a struct literal's field names, a method's own receiver type) and, in Rust,
 what only type inference names.
 
-What this is not: C#, Java, C, C++, Ruby, PHP, Python. Roslyn, javac and
-clang could be asked the same way as `go/types`; none is yet. And a compiler
-finds a rule read wrong and a position never read, not a framework's
-convention.
+**C#.** Roslyn is asked the same way (`benchmarks/oracle_csharp.py`: one
+compilation of every `.cs` file of a repository against the runtime's own
+assemblies; a name it cannot bind without the repository's NuGet packages
+has no answer and is left out):
+
+```bash
+python benchmarks/oracle_csharp.py /tmp/polyglot/todoapi /tmp/polyglot/restsharp /tmp/polyglot/commandline /tmp/polyglot/aspnetcore-realworld
+```
+
+| | 0.5.56 | 0.5.57 |
+|---|---:|---:|
+| edges whose site the compiler has an answer for | 10,308 | 10,251 |
+| of them, to the declaration it names | 9,863 (95.7%) | 9,863 (96.2%) |
+| uses it binds to a definition the graph has, with an edge | 77.1% | 77.1% |
+
+The 388 edges left are not spread evenly. About 150 are one rule the engine
+does not have: C# tells `RestResponse` from `RestResponse<T>` by the number
+of type arguments written, and the reader does not keep that number for a
+type written in a signature, so one of the two gets the other's references
+(and `List<string>` goes to a project class `List`). 55 are
+`parser.ParseArguments<T>(…)`, where an extension overload fits and the
+instance method of the name does not. The rest are guesses and
+`ContentType.Xml` read as the property `ContentType` where the compiler
+means the type of that name. The uses with no edge are, by count, an object
+initializer's property names (left out on purpose, as a Go struct literal's
+are), the types of a lambda's parameters, and `typeof(T)` / `nameof(T)`.
+
+What this is not: Java, C, C++, Ruby, PHP, Python. javac and clang could be
+asked the same way; neither is yet. And a compiler finds a rule read wrong
+and a position never read, not a framework's convention.
 
 ### What is left without an edge
 
