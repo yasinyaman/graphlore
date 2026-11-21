@@ -3025,3 +3025,46 @@ fn rust_tuple_fields_items_crate_roots_and_go_results() {
         ],
     );
 }
+
+#[test]
+fn positions_a_type_is_written_at() {
+    let got = quals("positions", &[
+        ("go.mod", "module example.com/app\n\ngo 1.22\n"),
+        (
+            "a.go",
+            "package app\n\ntype Opt struct{}\n\ntype Handler struct{}\n\ntype Key Opt\n\nconst RequestID Key = 0\n\nfunc Run() int {\n\tf := func(next Handler) Opt {\n\t\treturn Opt{}\n\t}\n\tm := make(map[string]Handler)\n\t_ = f\n\treturn len(m)\n}\n",
+        ),
+        (
+            "a.c",
+            "typedef struct item {\n    int v;\n} item;\n\ntypedef item *item_ptr;\n\nint run_c(void) {\n    item p = { 0 };\n    return p.v;\n}\n",
+        ),
+        (
+            "A.java",
+            "class Err extends Exception {\n}\n\nclass El {\n}\n\nclass A {\n    void quiet(El... many) throws Err {\n    }\n\n    Object lit() {\n        return El.class;\n    }\n}\n",
+        ),
+        (
+            "a.swift",
+            "struct ParseError: Error {\n}\n\nstruct Cred {\n}\n\nstruct Box<T> {\n    init(value: Int) {\n    }\n}\n\nfunc parse() throws(ParseError) -> Box<Cred> {\n    return Box<Cred>(value: 1)\n}\n",
+        ),
+        (
+            "src/lib.rs",
+            "pub struct Limited {\n    pub n: u32,\n}\n\npub enum Mode {\n    L(Limited),\n    N,\n}\n\npub fn pick(m: Mode) -> u32 {\n    match m {\n        Mode::L(Limited { n }) => n,\n        Mode::N => 0,\n    }\n}\n",
+        ),
+    ]);
+    has(
+        &got,
+        &[
+            ("Key", "references", "Opt"),
+            ("RequestID", "references", "Key"),
+            ("Run", "references", "Handler"),
+            ("item_ptr", "references", "item"),
+            ("run_c", "references", "item"),
+            ("A.quiet", "references", "Err"),
+            ("A.quiet", "references", "El"),
+            ("A.lit", "references", "El"),
+            ("parse", "references", "ParseError"),
+            ("parse", "calls", "Box"),
+            ("pick", "references", "Limited"),
+        ],
+    );
+}

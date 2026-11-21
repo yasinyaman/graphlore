@@ -195,7 +195,7 @@ Phase 0 is done (engine 0.5.61; no rule changed, and the 45 audit graphs
 have the same edges as before):
 
 - **The cases say how they were found**: 425 from the specification, 71
-  shown by a compiler, 14 by comparison. None has a `source` yet: that
+  shown by a compiler, 14 by comparison (and, since, 20 from the grammar). None has a `source` yet: that
   number is what phase 2 raises.
 - **Every case is compiled by its own language**: 510 of 510, Scala's 28
   included now that a Scala compiler runs here.
@@ -237,53 +237,70 @@ have the same edges as before):
   file of another name (RestSharp), the second framework of a multi-target
   project, and a version set on the command line.
 
-Phase 1 has its list. `benchmarks/positions.py` parses the audit's
+Phase 1 is under way. `benchmarks/positions.py` parses the audit's
 repositories with each grammar, takes every name of a type the repository
 itself defines written where a type is, names the place by the node that
 holds it (`type_spec.type`, `const_spec.type`, `throws.-`) and asks the engine
 whether it read a use there. Over 13 languages (JavaScript and Ruby write no
-types): 49,097 names, 43,631 read (88.9%), in a minute and a half.
+types) the first run found 88.9% of the names read and 55 places read less
+than nine times in ten. Engine 0.5.62 reads the first half of that list:
+97.0% of 48,286 names, 26 places left.
 
-| Language | places | names of the repository's own types | read |
-|---|--:|--:|--:|
-| c | 6 | 108 | 53 (49.1%) |
-| c/c++ header | 26 | 2,547 | 2,096 (82.3%) |
-| cpp | 16 | 948 | 732 (77.2%) |
-| csharp | 22 | 4,830 | 4,751 (98.4%) |
-| go | 15 | 3,974 | 2,456 (61.8%) |
-| java | 20 | 15,701 | 14,328 (91.3%) |
-| kotlin | 19 | 4,123 | 3,873 (93.9%) |
-| php | 10 | 1,205 | 1,088 (90.3%) |
-| python | 4 | 704 | 704 (100.0%) |
-| rust | 18 | 4,737 | 4,714 (99.5%) |
-| scala | 18 | 676 | 529 (78.3%) |
-| swift | 11 | 3,326 | 2,909 (87.5%) |
-| tsx | 6 | 98 | 98 (100.0%) |
-| typescript | 31 | 6,120 | 5,300 (86.6%) |
+| Language | places | names of the repository's own types | read with 0.5.61 | read with 0.5.62 |
+|---|--:|--:|--:|--:|
+| c | 6 | 108 | 49.1% | 108 (100.0%) |
+| c/c++ header | 26 | 2,547 | 82.3% | 2,245 (88.1%) |
+| cpp | 16 | 948 | 77.2% | 872 (92.0%) |
+| csharp | 22 | 4,830 | 98.4% | 4,814 (99.7%) |
+| go | 16 | 3,163 | 61.8% | 3,163 (100.0%) |
+| java | 20 | 15,701 | 91.3% | 15,700 (100.0%) |
+| kotlin | 19 | 4,123 | 93.9% | 3,873 (93.9%) |
+| php | 10 | 1,205 | 90.3% | 1,205 (100.0%) |
+| python | 4 | 704 | 100.0% | 704 (100.0%) |
+| rust | 18 | 4,737 | 99.5% | 4,734 (99.9%) |
+| scala | 18 | 676 | 78.3% | 586 (86.7%) |
+| swift | 11 | 3,326 | 87.5% | 3,303 (99.3%) |
+| tsx | 6 | 98 | 100.0% | 98 (100.0%) |
+| typescript | 31 | 6,120 | 86.6% | 5,411 (88.4%) |
 
-55 places are read less than nine times in ten (the script prints each with
-an example; `benchmarks/results-positions.json` is the baseline, and
-`--baseline` fails when a place is read less than it was). Among them, none
-of which a repository comparison had pointed at:
+What 0.5.62 reads, none of which a repository comparison had pointed at
+(twenty cases of the checklist, marked `grammar`):
 
-- Go: the type a `type` declaration is defined as (`type Middlewares
-  []func(http.Handler) http.Handler`), a constant's type, a function
-  literal's result, the type argument of `make`;
-- Java: `throws` clauses (1 of 62), class literals (`Foo.class`), the element
-  type of `new T[] { … }` and of an enhanced `for`;
-- Swift: `throws(ParserError)`, `(any Error).self`, a protocol property's
-  type;
-- C and C++: what a `typedef` names, explicit template arguments of a call;
-- C#: the element type of `new Error[] { … }`;
-- PHP: the return type of an anonymous function;
-- Scala: the type of `new Outer.Inner(…)`, a `val`'s declared type.
+- every language: a closure's own parameters and result (`func(next Handler)
+  Handler { … }`, `function (Cookie $c): Result { … }`);
+- Go: what a defined type is defined as (`type Key Opt`, `type Mid
+  []func(Handler) Handler`), a constant's type, the types a slice or map
+  literal is made of, the type handed to `make`; a package's `const` and
+  `var` are the source of their own uses, as a Rust item is;
+- C and C++: the type of a declaration (`buffer p = { 0 };`) and what a
+  `typedef` names;
+- Java: `throws` clauses, `T.class`, the type of a for-each variable, of a
+  varargs parameter and of an interface's constant;
+- Swift: `throws(E)`, a protocol property's type, `(any P).self`, and
+  `Box<T>(…)` as a construction of `Box`;
+- C#: `new T[n]`; Scala: a `val`'s declared type and `new Outer.Inner(…)`;
+  Rust: the struct a pattern takes apart.
 
-Some rows are the measure's and not the reader's (a parameter list that runs
-over several lines is matched by line), and seven places are left out on
-purpose and say why (`DECIDED` in the script: the type an `impl` is of, a
-declaration's own name). The work of phase 1 is this list, top to bottom:
-each place is read (a case, then code) or added to `DECIDED` with its reason.
+On the 45 audit repositories that is 4,050 more reference edges and 200 more
+calls, and the compilers agree with them: Go 12,273 of 12,278 edges where
+`go/types` has an answer (five wrong, as before), rust-analyzer 98.5%, Roslyn
+97.9%, the Scala compiler's files 97.3% (96.7%), TypeScript's 99.5%; the
+floor of graphify's confirmed edges holds.
 
+Left (`python benchmarks/positions.py --root …` prints each with an
+example): TypeScript's multi-line signatures and type parameter defaults,
+C++ explicit template arguments and member declarations in headers, a Kotlin
+extension's receiver type, Scala `new p.T[A](…)`. Some of these are the
+measure's and not the reader's (a declaration that runs over several lines is
+matched by line). Eight places are left out on purpose and say why
+(`DECIDED` in the script: the type an `impl` is of, a Go method's receiver, a
+declaration's own name).
+
+One thing the cases showed that is not a position: a Swift protocol's
+property requirement is a definition of its own named `var handler`, of kind
+interface (the span rule takes `protocol_property_declaration` for a
+protocol). It is a node today; whether it should be is a span decision, and
+`spans.py` and the engine make it together.
 
 ## Phases
 

@@ -7704,7 +7704,8 @@ impl<'a> Project<'a> {
         // a field's type, or what its initializer calls, is its type's use
         // (a Swift computed property's body is its own)
         let swift = self.family[f] == Some(Family::Swift);
-        let rust = self.family[f] == Some(Family::Rust);
+        // (and a Go package's `const` / `var`)
+        let rust = matches!(self.family[f], Some(Family::Rust | Family::Go));
         let rust_item = |x: usize| {
             rust && matches!(defs[x].kind, DefKind::Constant | DefKind::Variable)
                 && defs[x].parent.is_none_or(|p| !defs[p].kind.is_class_like())

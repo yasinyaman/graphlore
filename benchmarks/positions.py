@@ -76,6 +76,7 @@ LEAVES = {"python": {"identifier"}, "csharp": {"identifier"}, "php": {"name"}}
 
 # Places the reader leaves out on purpose: "language: holder.field" -> why.
 DECIDED: dict[str, str] = {
+    "go: method_declaration.receiver": "the type a method is declared for owns it; it is not a use of the type",
     "rust: impl_item.type": "the type an `impl` is of owns what the block declares; it is not a use of the type",
     "kotlin: class_declaration.-": "the declaration's own name (the grammar gives it no `name` field)",
     "kotlin: object_declaration.-": "the declaration's own name",
@@ -109,6 +110,12 @@ def position(leaf: Any, lang: str) -> tuple[str, Any] | None:
             if field == "name" or node.type in ("type_parameter", "type_parameters", "type_parameter_list",
                                                 "type_parameter_declaration", "constrained_type_parameter"):
                 return None
+            # (a Go method's receiver is a parameter list of its own)
+            up = node.parent
+            if up is not None and up.parent is not None and up.type == "parameter_list" \
+                    and up.parent.child_by_field_name("receiver") is not None \
+                    and up.parent.child_by_field_name("receiver").id == up.id:
+                return "method_declaration.receiver", node
             return f"{node.type}.{field or '-'}", node
         # (inside a builder: the member of a qualified name that is not its
         # last part is a namespace or an outer type, read with the whole path)
