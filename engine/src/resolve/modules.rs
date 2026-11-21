@@ -137,6 +137,9 @@ fn toml_value(src: &str, section: &str, key: &str) -> Option<String> {
 impl ModuleSystems {
     pub fn build(p: &Project) -> ModuleSystems {
         let mut m = ModuleSystems::default();
+        // Rust crates whose root file the manifest names (`[[bin]] path =
+        // "crates/core/main.rs"`): its directory and the file
+        let mut rs_roots: Vec<(String, String)> = Vec::new();
         for (rel, _) in &p.manifests {
             let base = rel.rsplit('/').next().unwrap_or(rel);
             let dir = dir_of(rel).to_string();
@@ -197,6 +200,17 @@ impl ModuleSystems {
                             };
                             m.rs_crates.insert(name.replace('-', "_"), key);
                         }
+                        for section in ["lib", "bin"] {
+                            let Some(path) = toml_value(&src, section, "path") else { continue };
+                            let full = if dir.is_empty() { path } else { format!("{dir}/{path}") };
+                            let at = dir_of(&full).to_string();
+                            let conventional = at.rsplit('/').next().is_some_and(|d| {
+                                matches!(d, "src" | "tests" | "examples" | "benches" | "bin")
+                            });
+                            if full.ends_with(".rs") && !at.is_empty() && !conventional {
+                                rs_roots.push((at, full));
+                            }
+                        }
                     }
                 }
                 _ => {}
@@ -249,7 +263,27 @@ impl ModuleSystems {
                 }
                 Lang::Go => m.go_dirs.entry(dir_of(path).to_string()).or_default().push(fi),
                 Lang::Rust => {
-                    let (key, modpath) = rust_module_path(path);
+                    let named = rs_roots
+                        .iter()
+                        .filter(|(dir, _)| path.starts_with(&format!("{dir}/")))
+                        .max_by_key(|(dir, _)| dir.len())
+                        .filter(|(dir, _)| {
+                            // (a crate of its own below it keeps its own root)
+                            !path[dir.len() + 1..].split('/').any(|d| d == "src")
+                        });
+                    let (key, modpath) = match named {
+                        Some((dir, root)) => {
+                            let mut module: Vec<String> = path[dir.len() + 1..]
+                                .split('/')
+                                .map(|s| s.trim_end_matches(".rs").to_string())
+                                .collect();
+                            if path == root || module.last().is_some_and(|m| m == "mod") {
+                                module.pop();
+                            }
+                            (dir.clone(), module)
+                        }
+                        None => rust_module_path(path),
+                    };
                     m.rs_files.entry((key.clone(), modpath.clone())).or_default().push(fi);
                     m.rs_mod.insert(fi, (key, modpath));
                 }

@@ -1,8 +1,8 @@
 {
   "actix-realworld:rust": {
-    "bases": 1,
+    "bases": 0,
     "calls": 0,
-    "references": 1
+    "references": 0
   },
   "aspnetcore-realworld:csharp": {
     "bases": 0,
@@ -16,13 +16,13 @@
   },
   "chi:go": {
     "bases": 0,
-    "calls": 2,
-    "references": 1
+    "calls": 0,
+    "references": 0
   },
   "cobra:go": {
     "bases": 0,
     "calls": 0,
-    "references": 3
+    "references": 0
   },
   "commandline:csharp": {
     "bases": 0,
@@ -35,19 +35,19 @@
     "references": 0
   },
   "restsharp:csharp": {
-    "bases": 1,
+    "bases": 0,
     "calls": 5,
-    "references": 5
+    "references": 1
   },
   "resty:go": {
     "bases": 0,
-    "calls": 1,
+    "calls": 0,
     "references": 0
   },
   "ripgrep:rust": {
     "bases": 2,
-    "calls": 23,
-    "references": 28
+    "calls": 6,
+    "references": 1
   },
   "todoapi:csharp": {
     "bases": 0,
@@ -55,8 +55,8 @@
     "references": 0
   },
   "ureq:rust": {
-    "bases": 2,
+    "bases": 0,
     "calls": 7,
-    "references": 10
+    "references": 0
   }
 }

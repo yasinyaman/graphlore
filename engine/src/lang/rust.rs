@@ -220,11 +220,27 @@ impl LanguageModule for Rust {
 
     fn heritage_of(&self, n: Node, src: &[u8]) -> Vec<(RefKind, Vec<String>)> {
         match n.kind() {
-            "impl_item" => n
-                .child_by_field_name("trait")
-                .and_then(|t| path_of(t, src))
-                .map(|p| vec![(RefKind::Implements, p)])
-                .unwrap_or_default(),
+            "impl_item" => {
+                let Some(t) = n.child_by_field_name("trait") else { return Vec::new() };
+                let mut out: Vec<(RefKind, Vec<String>)> =
+                    path_of(t, src).map(|p| (RefKind::Implements, p)).into_iter().collect();
+                // `impl From<Config> for Agent`: the types the trait is
+                // written with are the implementing type's uses
+                let mut stack: Vec<Node> =
+                    t.child_by_field_name("type_arguments").map(kids).unwrap_or_default();
+                while let Some(a) = stack.pop() {
+                    match a.kind() {
+                        "type_identifier" | "scoped_type_identifier" => {
+                            if let Some(p) = path_of(a, src) {
+                                out.push((RefKind::Type, p));
+                            }
+                        }
+                        "lifetime" | "primitive_type" => {}
+                        _ => stack.extend(kids(a)),
+                    }
+                }
+                out
+            }
             "trait_item" => n
                 .child_by_field_name("bounds")
                 .map(|b| {

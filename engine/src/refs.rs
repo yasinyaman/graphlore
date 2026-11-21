@@ -497,11 +497,10 @@ fn signature_types(def: Node, src: &[u8], out: &mut Vec<(Vec<String>, &'static s
         match field {
             Some("receiver") => {}
             Some("parameters") => param_types(child, src, out),
-            // Go `(*Response, error)`: the first result is what a caller
-            // takes first
+            // Go `(*Response, Directive, error)`: every result names its type
             Some("result") if child.kind() == "parameter_list" => {
-                if let Some(first) = kids(child).into_iter().next() {
-                    types_in(first, src, "return_type", out);
+                for one in kids(child) {
+                    types_in(one, src, "return_type", out);
                 }
             }
             Some("return_type") | Some("result") | Some("returns") => {
@@ -3198,12 +3197,28 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                 | "local_variable_declaration"
                 | "short_var_declaration"
                 | "var_spec"
+                // (Rust `const FLAGS: &[&dyn Flag] = …`, `static N: Foo = …`)
+                | "const_item"
+                | "static_item"
         ) {
             if let Some(t) = n.child_by_field_name("type") {
                 let mut types = Vec::new();
                 types_in(t, src, "variable_type", &mut types);
                 for (p, ctx) in types {
                     push(&mut refs, n, RefKind::Type, p, ctx, None);
+                }
+            }
+        }
+        // Rust `struct Wrapper(pub Inner);`, `enum E { Loaded(Ignore) }`: the
+        // types of a tuple struct's or variant's fields
+        if n.kind() == "ordered_field_declaration_list" {
+            let mut cursor = n.walk();
+            let written: Vec<Node> = n.children_by_field_name("type", &mut cursor).collect();
+            for t in written {
+                let mut types = Vec::new();
+                types_in(t, src, "field", &mut types);
+                for (p, ctx) in types {
+                    push(&mut refs, t, RefKind::Type, p, ctx, None);
                 }
             }
         }
@@ -3735,6 +3750,15 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                             "argument",
                             None,
                         ),
+                        // Go `http.HandlerFunc(mx.routeHTTP)`, `time.AfterFunc(d,
+                        // cb.onTimeout)`: a method value handed over
+                        "selector_expression"
+                            if crate::parse::current() == Some(crate::lang::Lang::Go) =>
+                        {
+                            if let Some(p) = path_of(a, src) {
+                                push(&mut refs, a, RefKind::Indirect, p, "argument", None);
+                            }
+                        }
                         // PHP `[$this, 'handle']`, `[Foo::class, 'handle']`: a
                         // method named by the object and its name
                         "array_creation_expression" => {

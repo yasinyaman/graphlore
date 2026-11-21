@@ -3891,7 +3891,26 @@ impl<'a> Project<'a> {
     fn owner_scope_matches(&self, c: DefRef, m: DefRef) -> bool {
         match self.family[c.0] {
             Some(Family::Go) => dir_of(&self.files[c.0].path) == dir_of(&self.files[m.0].path),
-            Some(Family::Rust) => self.modsys.crate_of(c.0) == self.modsys.crate_of(m.0),
+            Some(Family::Rust) => {
+                if self.modsys.crate_of(c.0) != self.modsys.crate_of(m.0) {
+                    return false;
+                }
+                // two types of one name in a crate (a private `Config` per
+                // module): the `impl` is of the one its own file names
+                let name = &self.def(c).name;
+                let twins = self.by_name.get(name).into_iter().flatten().any(|r| {
+                    *r != c
+                        && self.def(*r).kind.is_class_like()
+                        && self.modsys.crate_of(r.0) == self.modsys.crate_of(c.0)
+                });
+                if !twins || m.0 == c.0 {
+                    return !twins || self.top[m.0].get(name).is_none_or(|ds| ds.contains(&c.1));
+                }
+                match self.resolve_name(m.0, None, name) {
+                    Some(Target::Def(x)) if self.def(x).kind.is_class_like() => x == c,
+                    _ => true,
+                }
+            }
             _ => true,
         }
     }
@@ -4561,6 +4580,30 @@ impl<'a> Project<'a> {
                 }
             }
         }
+        // Rust `io::Error::error_message(msg)`: a method a trait of the
+        // project gives a library's type, called through the type's path
+        let found = match found {
+            Some((Target::Ext(..), _))
+                if self.family[f] == Some(Family::Rust)
+                    && *self.calling.borrow()
+                    && !bases
+                    && path.len() >= 2
+                    && !path.iter().any(|s| s == "()" || s.starts_with('['))
+                    && path[path.len() - 2].chars().next().is_some_and(char::is_uppercase)
+                    && !RUST_CORE_METHODS.contains(&path[path.len() - 1].as_str()) =>
+            {
+                let (name, on) = (&path[path.len() - 1], &path[path.len() - 2]);
+                let guessed = self.guessed.get();
+                match self.extension_method(f, name, Some(on)) {
+                    Some((t, Confidence::Extracted)) => Some((t, Confidence::Extracted)),
+                    _ => {
+                        self.guessed.set(guessed);
+                        found
+                    }
+                }
+            }
+            other => other,
+        };
         let found = found.or_else(|| {
             // C++ `port::CondVar cv;`, `typename SkipList<K, C>::Node*`: a
             // type written with a qualifier the walk could not follow is
@@ -7661,11 +7704,20 @@ impl<'a> Project<'a> {
         // a field's type, or what its initializer calls, is its type's use
         // (a Swift computed property's body is its own)
         let swift = self.family[f] == Some(Family::Swift);
+        let rust = self.family[f] == Some(Family::Rust);
+        let rust_item = |x: usize| {
+            rust && matches!(defs[x].kind, DefKind::Constant | DefKind::Variable)
+                && defs[x].parent.is_none_or(|p| !defs[p].kind.is_class_like())
+        };
         while let Some(x) = cur {
             // (an extra definition that is a callable, RSpec's `let`, is
             // the source of its own block's uses)
             // (and so is a C# property with a body)
-            let own = (swift || defs[x].computed) && r.kind != RefKind::Type;
+            let own = (swift || defs[x].computed) && r.kind != RefKind::Type
+                // (a Rust `const` / `static` item of a module: its type and
+                // what its value names are its own, there being no type
+                // around to have them)
+                || (rust_item(x) && defs[x].extra);
             let skip = defs[x].extra && !defs[x].kind.is_callable() && !own;
             if skip {
                 cur = defs[x].parent;

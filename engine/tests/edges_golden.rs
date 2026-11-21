@@ -2984,3 +2984,44 @@ fn csharp_property_bodies_block_namespaces_directive_braces_and_constructors() {
         ],
     );
 }
+
+#[test]
+fn rust_tuple_fields_items_crate_roots_and_go_results() {
+    let got = quals("floor", &[
+        (
+            "Cargo.toml",
+            "[package]\nname = \"tool\"\nversion = \"0.1.0\"\n\n[[bin]]\npath = \"crates/core/main.rs\"\nname = \"tl\"\n",
+        ),
+        (
+            "crates/core/main.rs",
+            "mod json;\nmod messages;\nmod standard;\n\nuse std::io;\n\npub struct Agent {\n    pub n: u32,\n}\n\npub struct Timeout;\n\npub struct AgentInstance(pub(crate) Agent);\n\npub enum Failure {\n    Timeout(Timeout),\n}\n\npub trait Flag {\n    fn name(&self) -> &str;\n}\n\npub const FLAGS: &[&dyn Flag] = &[];\n\nimpl From<Timeout> for Agent {\n    fn from(_t: Timeout) -> Agent {\n        Agent { n: 0 }\n    }\n}\n\npub trait SinkError: Sized {\n    fn error_message(message: String) -> Self;\n}\n\nimpl SinkError for io::Error {\n    fn error_message(message: String) -> io::Error {\n        io::Error::new(io::ErrorKind::Other, message)\n    }\n}\n\nfn main() {\n    crate::messages::set_messages(true);\n    let _ = io::Error::error_message(String::new());\n}\n",
+        ),
+        ("crates/core/messages.rs", "pub fn set_messages(_on: bool) {}\n"),
+        (
+            "crates/core/json.rs",
+            "struct Config {\n    pretty: bool,\n}\n\nimpl Default for Config {\n    fn default() -> Config {\n        Config { pretty: false }\n    }\n}\n\npub struct JsonBuilder {\n    config: Config,\n}\n\nimpl JsonBuilder {\n    pub fn new() -> JsonBuilder {\n        JsonBuilder { config: Config::default() }\n    }\n}\n",
+        ),
+        (
+            "crates/core/standard.rs",
+            "struct Config {\n    stats: bool,\n}\n\nimpl Default for Config {\n    fn default() -> Config {\n        Config { stats: false }\n    }\n}\n\npub struct StandardBuilder {\n    config: Config,\n}\n\nimpl StandardBuilder {\n    pub fn new() -> StandardBuilder {\n        StandardBuilder { config: Config::default() }\n    }\n}\n",
+        ),
+        ("go.mod", "module example.com/app\n\ngo 1.22\n"),
+        (
+            "a.go",
+            "package app\n\nimport \"time\"\n\ntype Directive int\n\ntype Completion string\n\ntype Breaker struct {\n\ttimer *time.Timer\n}\n\nfunc (b *Breaker) onReset() {}\n\nfunc (b *Breaker) open() {\n\tb.timer = time.AfterFunc(time.Second, b.onReset)\n}\n\nfunc NoFile(args []string) ([]Completion, Directive) {\n\treturn nil, 0\n}\n",
+        ),
+    ]);
+    has(
+        &got,
+        &[
+            ("AgentInstance", "references", "Agent"),
+            ("Failure.Timeout", "references", "Timeout"),
+            ("FLAGS", "references", "Flag"),
+            ("Agent", "references", "Timeout"),
+            ("main", "calls", "set_messages"),
+            ("main", "calls", "io::Error.error_message"),
+            ("NoFile", "references", "Directive"),
+            ("Breaker.open", "indirect_call", "Breaker.onReset"),
+        ],
+    );
+}

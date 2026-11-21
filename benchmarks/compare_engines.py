@@ -264,7 +264,9 @@ def compare_edges(theirs_graph: dict, ours_graph: dict, paired: dict[str, str],
     def name_key(n: dict) -> tuple[str, str]:
         return (_node_file(n), str(n.get("qualname") or _node_label(n)))
 
-    twins = {name_key(ours_by[i]): i for i in common if i in ours_by}
+    # (in a fixed order: of two definitions with one name in a file the same
+    # one stands for both on every run)
+    twins = {name_key(ours_by[i]): i for i in sorted(common, reverse=True) if i in ours_by}
     # C, C++: graphify has one node for a member function, the declaration in
     # the class (usually a header), and hangs the calls of the body on it; the
     # native graph has the declaration and the definition written out of the
@@ -278,6 +280,17 @@ def compare_edges(theirs_graph: dict, ours_graph: dict, paired: dict[str, str],
             q = str(n["qualname"])
             declared[q] = None if q in declared else i
 
+    # C#: a partial type is one type written in several files; graphify has
+    # one node for it, the native graph one per file. An edge of a part that
+    # is not the paired one is compared as an edge of the part that is.
+    whole: dict[str, str | None] = {}
+    for i in common:
+        n = ours_by.get(i)
+        if (n is not None and language(_node_file(n) or "") == "csharp" and n.get("qualname")
+                and str(n.get("kind") or "") in TYPE_KINDS):
+            q = str(n["qualname"])
+            whole[q] = None if q in whole else i
+
     def lifted(i: str, climb: bool) -> str | None:
         for _ in range(8):
             if i in common:
@@ -288,6 +301,11 @@ def compare_edges(theirs_graph: dict, ours_graph: dict, paired: dict[str, str],
             twin = twins.get(name_key(n))
             if twin is not None:
                 return twin
+            if (language(_node_file(n) or "") == "csharp" and n.get("qualname")
+                    and str(n.get("kind") or "") in TYPE_KINDS):
+                twin = whole.get(str(n["qualname"]))
+                if twin is not None:
+                    return twin
             if language(_node_file(n) or "") in C_FAMILY and n.get("qualname"):
                 twin = declared.get(str(n["qualname"]))
                 if twin is not None:
