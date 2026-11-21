@@ -2579,6 +2579,97 @@ case("kotlin", "property-invoke", "a property of a function type called is the p
      [], [("Job.run", "calls", "src/app/A.kt:handler")],
      source=OR_KT + "'Callables and invoke convention' (a property with invoke is a callable of the receiver)")
 
+# Phase 2 for Swift: the compiler's unqualified lookup (swiftlang/swift
+# `lib/AST/UnqualifiedLookup.cpp`, `ASTScopeLookup.cpp`) and its ranking of
+# overloads (`lib/Sema/CSRanking.cpp` isDeclAsSpecializedAs, compareSolutions).
+found_by("source")
+UL_SW = "swiftlang/swift@1176ade30d65:lib/AST/"
+RK_SW = "swiftlang/swift@1176ade30d65:lib/Sema/CSRanking.cpp "
+case("swift", "local-function-before-member", "a function declared in a method comes before a method of the type",
+     SW, {"a.swift": "class Job {\n  func h() -> Int {\n    return 1\n  }\n\n  func run() -> Int {\n    func h() -> Int {\n      return 2\n    }\n    return h()\n  }\n}\n"},
+     [("Job.run", "calls", "Job.run.h")], [("Job.run", "calls", "a.swift:Job.h")],
+     source=UL_SW + "ASTScopeLookup.cpp (local scopes before the type's members)")
+case("swift", "member-before-global", "a member of the type around comes before a function of the module",
+     SW, {"a.swift": "func h() -> Int {\n  return 1\n}\n\nclass Job {\n  func h() -> Int {\n    return 2\n  }\n\n  func run() -> Int {\n    return h()\n  }\n}\n"},
+     [("Job.run", "calls", "Job.h")], [("Job.run", "calls", "a.swift:h")],
+     source=UL_SW + "UnqualifiedLookup.cpp (lookInMembers of each type context before the module scope)")
+case("swift", "concrete-before-protocol-extension", "a type's own method comes before a protocol extension's default of its name",
+     SW, {"a.swift": "protocol Named {\n  func name() -> String\n}\n\nextension Named {\n  func name() -> String {\n    return \"default\"\n  }\n}\n\nstruct User: Named {\n  func name() -> String {\n    return \"user\"\n  }\n}\n\nfunc show(u: User) -> String {\n  return u.name()\n}\n"},
+     [("show", "calls", "User.name")], [("show", "calls", "Named.name")],
+     source=RK_SW + "isDeclAsSpecializedAs (a member of a concrete type over a protocol extension's)")
+case("swift", "overload-by-label", "argument labels choose among overloads of one base name",
+     SW, {"a.swift": "struct Mover {\n  func move(to x: Int) -> Int {\n    return x\n  }\n\n  func move(by dx: Int) -> Int {\n    return dx + 1\n  }\n}\n\nfunc go(m: Mover) -> Int {\n  return m.move(by: 3)\n}\n"},
+     [("go", "calls", "a.swift:Mover.move@6")], [("go", "calls", "a.swift:Mover.move@2")],
+     source="The Swift Programming Language, 'Functions' (argument labels are part of the name)")
+case("swift", "overload-specific-type", "of two applicable overloads, the one whose parameter type is not `Any`",
+     SW, {"a.swift": "struct Log {\n  func write(_ x: Any) -> Int {\n    return 1\n  }\n\n  func write(_ s: String) -> Int {\n    return 2\n  }\n}\n\nfunc run(l: Log) -> Int {\n  return l.write(\"x\")\n}\n"},
+     [("run", "calls", "a.swift:Log.write@6")], [("run", "calls", "a.swift:Log.write@2")],
+     source=RK_SW + "isDeclAsSpecializedAs (parameter types that convert to the other's)")
+case("swift", "non-generic-before-generic", "a non-generic overload is more specialized than a generic one",
+     SW, {"a.swift": "struct Log {\n  func write<T>(_ x: T) -> Int {\n    return 1\n  }\n\n  func write(_ s: String) -> Int {\n    return 2\n  }\n}\n\nfunc run(l: Log) -> Int {\n  return l.write(\"x\")\n}\n"},
+     [("run", "calls", "a.swift:Log.write@6")], [("run", "calls", "a.swift:Log.write@2")],
+     source=RK_SW + "isDeclAsSpecializedAs (generic parameters opened)")
+case("swift", "non-variadic-before-variadic", "a non-variadic overload is preferred to a variadic one",
+     SW, {"a.swift": "struct Log {\n  func write(_ parts: String...) -> Int {\n    return 1\n  }\n\n  func write(_ one: String) -> Int {\n    return 2\n  }\n}\n\nfunc run(l: Log) -> Int {\n  return l.write(\"x\")\n}\n"},
+     [("run", "calls", "a.swift:Log.write@6")], [("run", "calls", "a.swift:Log.write@2")],
+     source=RK_SW + "compareSolutions (a variadic parameter is a worse match)")
+case("swift", "fewer-defaults", "of overloads that fit, the one that fills no default argument",
+     SW, {"a.swift": "struct Log {\n  func flush(level: Int = 0) -> Int {\n    return 1\n  }\n\n  func flush() -> Int {\n    return 2\n  }\n}\n\nfunc run(l: Log) -> Int {\n  return l.flush()\n}\n"},
+     [("run", "calls", "a.swift:Log.flush@6")], [("run", "calls", "a.swift:Log.flush@2")],
+     source=RK_SW + "compareSolutions (fewer default arguments)")
+case("swift", "closure-parameter-hides-a-function", "a closure's parameter is a name of the closure: it hides a function of its name",
+     SW, {"a.swift": "func size() -> Int {\n  return 1\n}\n\nfunc run(xs: [Int]) -> [Int] {\n  return xs.map { size in size + 1 }\n}\n\nfunc other() -> Int {\n  return size()\n}\n"},
+     [("other", "calls", "size")], [("run", "calls", "size"), ("run", "references", "size")],
+     source=UL_SW + "ASTScopeLookup.cpp (a closure's parameters are names of its body)")
+
+# Phase 2 for C and C++: the standards' lookup rules (C 6.2.1, 6.2.3 name
+# spaces; C++ [basic.lookup], [class.member.lookup], [over.match.best]) and
+# clang (llvm/llvm-project `clang/lib/Sema/SemaLookup.cpp` LookupName /
+# CppLookupName, `SemaOverload.cpp` isBetterOverloadCandidate).
+found_by("source")
+SL_CPP = "llvm/llvm-project@87764a902a9b:clang/lib/Sema/SemaLookup.cpp "
+SO_CPP = "llvm/llvm-project@87764a902a9b:clang/lib/Sema/SemaOverload.cpp "
+case("c", "tag-name-space", "a struct tag and a function of one name are in different name spaces",
+     CC, {"a.c": "struct stat {\n    int size;\n};\n\nint stat(int x) {\n    return x;\n}\n\nint run(void) {\n    struct stat s;\n    s.size = 1;\n    return stat(s.size);\n}\n"},
+     [("run", "calls", "a.c:stat@5"), ("run", "references", "a.c:stat@1")],
+     source="ISO C 6.2.3 (tags are a name space of their own); " + SL_CPP + "LookupName (LookupTagName)")
+case("cpp", "derived-member-hides-base", "a member of a derived class hides every member of its name in the base",
+     CPP, {"a.cc": "class Base {\n public:\n  int Get(int x) {\n    return x;\n  }\n};\n\nclass Derived : public Base {\n public:\n  int Get() {\n    return 2;\n  }\n  int Run() {\n    return Get();\n  }\n};\n\nint Use(Derived& d) {\n  return d.Get();\n}\n"},
+     [("Derived.Run", "calls", "Derived.Get"), ("Use", "calls", "Derived.Get")], [("Use", "calls", "Base.Get"), ("Derived.Run", "calls", "Base.Get")],
+     source="ISO C++ [class.member.lookup] (a declaration in a derived class hides the base's); " + SL_CPP + "LookupQualifiedName")
+case("cpp", "using-declaration-of-a-base-member", "`using Base::Get;` brings the base's overloads into the derived class",
+     CPP, {"a.cc": "class Base {\n public:\n  int Get(int x) {\n    return x;\n  }\n};\n\nclass Derived : public Base {\n public:\n  using Base::Get;\n  int Get() {\n    return 2;\n  }\n};\n\nint Use(Derived& d) {\n  return d.Get(3);\n}\n"},
+     [("Use", "calls", "Base.Get")], [("Use", "calls", "Derived.Get")],
+     source="ISO C++ [namespace.udecl] (a using-declaration in a class names the base's members)")
+case("cpp", "member-before-namespace", "a member of the class comes before a function of the namespace around",
+     CPP, {"a.cc": "int Helper() {\n  return 1;\n}\n\nclass A {\n public:\n  int Helper() {\n    return 2;\n  }\n  int Run() {\n    return Helper();\n  }\n};\n"},
+     [("A.Run", "calls", "A.Helper")], [("A.Run", "calls", "a.cc:Helper")],
+     source="ISO C++ [basic.lookup.unqual] (class scope before the enclosing namespace)")
+case("cpp", "member-declared-later", "a member function's body sees members declared after it",
+     CPP, {"a.cc": "class A {\n public:\n  int Run() {\n    return Later();\n  }\n  int Later() {\n    return 2;\n  }\n};\n"},
+     [("A.Run", "calls", "A.Later")],
+     source="ISO C++ [class.mem] (a function body is a complete-class context)")
+case("cpp", "global-scope-operator", "`::f()` is the function of the global namespace, not the namespace around",
+     CPP, {"a.cc": "int Helper() {\n  return 1;\n}\n\nnamespace app {\nint Helper() {\n  return 2;\n}\n\nint Run() {\n  return ::Helper() + Helper();\n}\n}  // namespace app\n"},
+     [("app.Run", "calls", "a.cc:Helper"), ("app.Run", "calls", "app.Helper")],
+     source="ISO C++ [namespace.qual] (a name after a bare `::` is looked up in the global namespace)")
+case("cpp", "exact-match-before-conversion", "an overload whose parameter type is the argument's exactly wins over one that converts it",
+     CPP, {"a.cc": "class Log {\n public:\n  int Write(double d) {\n    return 1;\n  }\n  int Write(int n) {\n    return 2;\n  }\n};\n\nint Run(Log& l) {\n  return l.Write(3);\n}\n"},
+     [("Run", "calls", "a.cc:Log.Write@6")], [("Run", "calls", "a.cc:Log.Write@3")],
+     source="ISO C++ [over.ics.rank] (an exact match is better than a conversion); " + SO_CPP + "CompareStandardConversionSequences")
+case("cpp", "non-template-before-template", "a function that is no template wins over a template specialization equally good",
+     CPP, {"a.cc": "template <typename T>\nint Show(T x) {\n  return 1;\n}\n\nint Show(int x) {\n  return 2;\n}\n\nint Run() {\n  return Show(3);\n}\n"},
+     [("Run", "calls", "a.cc:Show@6")], [("Run", "calls", "a.cc:Show@2")],
+     source="ISO C++ [over.match.best] (F1 is not a template specialization and F2 is); " + SO_CPP + "isBetterOverloadCandidate")
+case("cpp", "operator-call", "`a + b` calls the `operator+` of a's class",
+     CPP, {"a.cc": "class Money {\n public:\n  int cents;\n  Money operator+(const Money& o) const {\n    return Money{cents + o.cents};\n  }\n};\n\nMoney Total(const Money& a, const Money& b) {\n  return a + b;\n}\n"},
+     [("Total", "calls", "Money.operator+")],
+     source="ISO C++ [over.match.oper] (a + b is a.operator+(b) or operator+(a, b))")
+case("cpp", "inline-namespace", "a member of an inline namespace is a member of the namespace around",
+     CPP, {"a.cc": "namespace lib {\ninline namespace v2 {\nint Get() {\n  return 2;\n}\n}  // namespace v2\n}  // namespace lib\n\nint Run() {\n  return lib::Get();\n}\n"},
+     [("Run", "calls", "lib.v2.Get")],
+     source="ISO C++ [namespace.def] (members of an inline namespace are members of the enclosing one)")
+
 # --- running ------------------------------------------------------------------
 
 def _matches(node: dict[str, Any], want: str) -> bool:

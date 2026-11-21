@@ -426,6 +426,17 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- **Native engine 0.5.71: Swift's, C's and C++'s rules, read from their
+  compilers** (phase 2 of `docs/rule-sources.md`; 19 cases): overloads are
+  of one scope (a local function's are its own; `::f` and `ns::f` are not
+  overloads of each other); a C struct tag is its own name space and a C++
+  function hides the class of its name; `::f()` is the global one; an
+  inline namespace's members are the enclosing namespace's; `a + b` calls a
+  C++ member `operator+`; an integer literal prefers an `int` parameter and
+  a string literal a `const char*`; a non-template (C++) or non-generic
+  (Swift) overload wins a tie when every argument is a literal; `p + 1` in C
+  and C++ is of unknown kind. `benchmarks/rule_inventory.py` covers Swift
+  (16 rules, 13 held) and C / C++ (21 rules, 17 held).
 - **Native engine 0.5.69: Kotlin's rules, read from the Kotlin
   specification** (phase 2 of `docs/rule-sources.md`; 13 cases): `a + b`,
   `a[i]` and `a foo b` call the operator or infix function of a's type;

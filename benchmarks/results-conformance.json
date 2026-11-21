@@ -1,6 +1,6 @@
 {
- "passed": 625,
- "total": 625,
+ "passed": 644,
+ "total": 644,
  "cases": [
   {
    "id": "python/module-function",
@@ -3748,6 +3748,120 @@
   },
   {
    "id": "kotlin/property-invoke",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/local-function-before-member",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/member-before-global",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/concrete-before-protocol-extension",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/overload-by-label",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/overload-specific-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/non-generic-before-generic",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/non-variadic-before-variadic",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/fewer-defaults",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/closure-parameter-hides-a-function",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "c/tag-name-space",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "cpp/derived-member-hides-base",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "cpp/using-declaration-of-a-base-member",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "cpp/member-before-namespace",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "cpp/member-declared-later",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "cpp/global-scope-operator",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "cpp/exact-match-before-conversion",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "cpp/non-template-before-template",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "cpp/operator-call",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "cpp/inline-namespace",
    "ok": true,
    "missing": [],
    "unwanted": []

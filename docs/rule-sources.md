@@ -787,6 +787,101 @@ edges, as before. On the 45 audit repositories kotlinpoet gains three
 `get` calls through `typeParamResolver[name]`, and clikt loses four
 `INFERRED` reads on lines written with Kotest's infix `shouldBe`.
 
+### Phase 2: Swift, C and C++
+
+Swift: the compiler's unqualified lookup (`lib/AST/UnqualifiedLookup.cpp`,
+`ASTScopeLookup.cpp`: local scopes, then the members of each type around,
+then the module and what it imports) and its ranking of overloads
+(`lib/Sema/CSRanking.cpp`). C and C++: the standards' lookup rules (C 6.2.1–
+6.2.3; C++ [basic.lookup], [class.member.lookup], [namespace.*],
+[over.match.best], [over.ics.rank]) and clang (`SemaLookup.cpp`,
+`SemaOverload.cpp`). `benchmarks/rule_inventory.py` lists every rule (Swift:
+16 rules, 13 held by a case, 3 not followed; 9 of 52 cases found in the language's own tools; C and C++: 21 rules, 17 held by a case, 4 not followed; 9 of 45 cases found in the language's own tools).
+
+| Source | Rule | Held by / why not |
+|---|---|---|
+| ASTScopeLookup | local declarations (a function, a `let`, a closure's parameters) first | `local-function-before-member`, `nested-function`, `closure-parameter-hides-a-function`, `own-value-is-outer` |
+| UnqualifiedLookup lookInMembers | then members of each type around (implicit `self`) | `member-before-global`, `implicit-self`, `inherited` |
+| UnqualifiedLookup module scope | then the module's top-level names, then imported modules' | `method-on-parameter` |
+| TSPL 'Extensions' | an extension's members are the type's | `extension`, `conformance-in-extension` |
+| TSPL 'Protocols' | a protocol's requirements and extensions | `protocol-typed`, `protocol-extension`, `generic-bound` |
+| CSRanking isDeclAsSpecializedAs | a concrete type's member over a protocol extension's | `concrete-before-protocol-extension` |
+| TSPL 'Functions' | argument labels are part of a function's name | `overload-by-label` |
+| CSRanking isDeclAsSpecializedAs | a more specific parameter type; a non-generic candidate | `overload-specific-type`, `non-generic-before-generic` |
+| CSRanking compareSolutions | non-variadic and fewer default arguments | `non-variadic-before-variadic`, `fewer-defaults` |
+| TSPL 'Implicit Member Expression' | `.name` where a type is expected | `implicit-member`, `implicit-member-beside-a-value` |
+| TSPL 'Optional Chaining', 'if let' | unwrapping keeps the type | `optional-chaining`, `if-let`, `guard-let` |
+| TSPL 'Type Casting' | `as`, `as?`, `is`, `catch … as` | `as-cast`, `is-and-as` |
+| TSPL 'Initialization' | `T(…)` and `Self()` call an initializer | `initializer`, `self-constructs`, `generic-construction` |
+| TSPL 'Access Control' | `private`, `fileprivate`, `internal` | not followed: code that compiles reaches only what it may |
+| UnqualifiedLookup (weak self) | `guard let self` rebinding in closures | not followed: `self` names the type around either way |
+| CSGen / CSSolver | a closure's parameter typed by the parameter it is passed for | not followed: phase 3: inference |
+
+| Source | Rule | Held by / why not |
+|---|---|---|
+| C 6.2.1 | an identifier is in scope from its declaration; a block's hides the file's | `same-file`, `local-hides-function`, `forward-declaration` |
+| C 6.2.2 | linkage: `static` is the file's, `extern` another file's | `static-wins`, `external-linkage`, `extern-variable` |
+| C 6.2.3; SemaLookup LookupTagName | struct tags are a name space of their own | `tag-name-space`, `typedef-struct` |
+| [basic.lookup.unqual] | block, then class (and bases), then namespaces outwards | `implicit-this`, `inherited`, `member-before-namespace`, `enclosing-namespace` |
+| [class.mem] | a member function's body sees every member of its class | `member-declared-later` |
+| [class.member.lookup] | a derived class's member hides the base's of its name | `derived-member-hides-base` |
+| [namespace.udecl] | `using Base::f;` and `using ns::f;` | `using-declaration-of-a-base-member`, `using-declaration` |
+| [namespace.udir] | `using namespace ns;` | `using-namespace` |
+| [namespace.qual] | `ns::f`, `::f` | `namespace-qualified`, `global-scope-operator` |
+| [namespace.def] | inline and unnamed namespaces | `inline-namespace`, `anonymous-namespace` |
+| [namespace.alias] | `namespace u = util;` | `namespace-alias` |
+| [basic.lookup.argdep] | argument-dependent lookup | `argument-dependent-lookup` |
+| [over.match.viable] | a candidate takes the call's number of arguments | `overload-arity` |
+| [over.ics.rank]; SemaOverload CompareStandardConversionSequences | an exact match over a conversion | `exact-match-before-conversion` |
+| [over.match.best]; SemaOverload isBetterOverloadCandidate | a non-template over a template specialization | `non-template-before-template` |
+| [over.match.oper] | `a + b` is `a.operator+(b)` | `operator-call` |
+| [over.match.oper] | a free `operator+(a, b)` | not followed: only member operators are read yet |
+| [dcl.ambig.res] | `T x(f());` declares a variable when f() is no type | `vexing-parse`, `constructor-arguments` |
+| [temp.deduct] | template arguments deduced from a call | not followed: phase 3: deduction is not modelled; `Page<Item>` written out is read |
+| [class.access] | `private`, `protected` | not followed: code that compiles reaches only what it may |
+| preprocessor | macros and conditional compilation | not followed: macros are not expanded; `#if` branches that agree are blanked to one (parse::blank_duplicate_branches) |
+
+19 cases were written (9 Swift, 10 C / C++), all accepted by swiftc, cc and
+c++. Swift held all but one; C and C++ six of ten. Engine 0.5.71 follows the
+seven:
+
+- **A local function's overloads are its own scope's** (Swift): a function
+  declared in a method tied with the type's method of its name, so
+  `h()` was an `INFERRED` call of both. Overloads are now of one scope (one
+  parent) in every language, which also keeps `::Helper` and
+  `app::Helper` apart.
+- **C struct tags are a name space of their own** (C 6.2.3), and in C++ a
+  function hides the class of its name: `stat(x)` beside `struct stat` is
+  the function, `struct stat s` the struct (`rust_namespace_pick` now serves
+  C and C++ too; an out-of-class constructor is no function beside the
+  class).
+- **`::f()`** is the global namespace's `f`; the reader dropped the `::`.
+- **An inline namespace's members** are the enclosing namespace's
+  (`FileFacts::inline_namespaces`).
+- **`a + b`** is `a.operator+(b)` when a's class declares it (the Kotlin
+  mechanism, context `operator`, for C++ member operators).
+- **Overload ranking**: an integer literal matches an `int` parameter
+  exactly and a string literal a `const char*`, before a conversion; of
+  candidates that fit alike, one that is no template (C++) or not generic
+  (Swift), only where every argument is a literal and the generic one's
+  parameters are its type parameters themselves (`Show<T>(T x)`): an array
+  literal or a value the walk cannot type may be the very `Sequence` or
+  closure the generic one takes (Alamofire's `write { … }`, swift-argument-parser's
+  `self.init([arg])`), and those stay `INFERRED` ties.
+
+Reading the audit repositories' changes found one more: in C and C++ `p + 1`
+may be a pointer moved along, so its kind is unknown, not a number (it had
+picked leveldb's `Slice(const Slice&)` for `Slice(sep + 1)`).
+
+Measured with engine 0.5.71: the Swift index tests give 94.0%, the Kotlin
+tests 99.4%, Roslyn 98.0%, all as before; `verify_graphify.py` lacks 44
+confirmed edges, as before. On the 45 audit repositories leveldb's twelve
+`Slice("…")` constructions go from `Slice(const std::string&)` to
+`Slice(const char*)`, cpr's thirteen `Redirect(false)` / `Redirect(0L)` are
+linked to the constructor of that type, and three edges into libraries
+(`::crc32c::Extend`, Windows' `::LockFile` / `::UnlockFile`) no longer name a
+project function of the name.
+
 One thing the cases showed that is not a position: a Swift protocol's
 property requirement is a definition of its own named `var handler`, of kind
 interface (the span rule takes `protocol_property_declaration` for a
@@ -831,7 +926,7 @@ say is left and by how directly the compiler can check the result:
 4. **TypeScript / JavaScript** (module resolution modes): read (engine 0.5.67, 31 rules, 26 held by a case, 5 not followed)
 5. **Java**, then **Kotlin** (one platform; `--release` and
    `-language-version` give every version from one compiler): Java read (engine 0.5.68, 30 rules, 26 held by a case, 4 not followed); Kotlin read (engine 0.5.69, 24 rules, 20 held by a case, 4 not followed)
-6. **Swift**, **C / C++** (need the large toolchains)
+6. **Swift**, **C / C++** (need the large toolchains): read (engine 0.5.71; Swift 16 rules, 13 held by a case, 3 not followed, C and C++ 21 rules, 17 held by a case, 4 not followed)
 7. **Python**, **PHP**, **Ruby** (interpreters; the static tools as second
    source)
 8. **Scala** (when a compiler is available)

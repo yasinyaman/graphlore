@@ -2010,7 +2010,7 @@ impl<'a> Project<'a> {
             // predefined one through an `implicit operator`)
             let literal = !matches!(a.kind, crate::facts::Arg::Path(_));
             let ty = if literal
-                && (self.family[c.0] == Some(Family::CSharp)
+                && (matches!(self.family[c.0], Some(Family::CSharp | Family::C))
                     || self.files[c.0].lang == Some(crate::lang::Lang::Java))
                 && param.ty.is_empty()
                 && !w.is_empty()
@@ -2071,9 +2071,19 @@ impl<'a> Project<'a> {
             _ => 0,
         };
         match arg {
+            // (C++: a string literal is a `const char*` exactly, a
+            // `std::string` through a user-defined conversion)
+            Arg::Str if self.family[c.0] == Some(Family::C) => {
+                literal(Prim::Str).map(|x| x + i32::from(name == "char"))
+            }
             Arg::Str => literal(Prim::Str),
             Arg::Num => literal(Prim::Num).map(|x| x + i32::from(unboxed)),
             Arg::Int if java && matches!(name.as_str(), "short" | "byte" | "char") => None,
+            // (C++: an `int` parameter is an exact match, any other numeric
+            // type a conversion, [over.ics.rank])
+            Arg::Int if self.family[c.0] == Some(Family::C) => {
+                literal(Prim::Num).map(|x| x + if name == "int" { 2 } else { 0 })
+            }
             Arg::Int => {
                 literal(Prim::Num).map(|x| x + if unboxed { 1 + widening(name) } else { 0 })
             }
@@ -2323,13 +2333,18 @@ impl<'a> Project<'a> {
             .map(|&i| (m.0, i))
             .filter(|r| {
                 let x = self.def(*r);
-                x.kind.is_callable() && !x.decl_only && x.owner == d.owner
+                // (of one scope: `::Helper` and `app::Helper` are no overloads
+                // of each other)
+                x.kind.is_callable() && !x.decl_only && x.owner == d.owner && x.parent == d.parent
             })
             .collect();
         out.sort();
         // Swift: those an extension of the type adds under the name
         // (`extension Session { func request(_ endpoint: Endpoint) }`)
-        if self.family[m.0] == Some(Family::Swift) {
+        // (never for a function declared in a function: its overloads are
+        // its own scope's)
+        let local = d.parent.is_some_and(|p| self.files[m.0].defs[p].kind.is_callable());
+        if self.family[m.0] == Some(Family::Swift) && !local {
             if let Some(c) = self.class_of(m.0, Some(m.1)) {
                 for x in self.members(c, &d.name) {
                     let def = self.def(x);
@@ -2437,6 +2452,39 @@ impl<'a> Project<'a> {
                         || plain.iter().any(|p| self.same_parameters(*p, *c))
                 });
             if twins && plain.len() < best.len() {
+                best = plain;
+            }
+        }
+        // C++ and Swift: of candidates that fit alike, one that is no template
+        // (no generic parameters) is better ([over.match.best]; Swift's
+        // isDeclAsSpecializedAs opens the generic one's parameters)
+        // Only a generic one whose parameters are its type parameters
+        // themselves (`Show<T>(T x)`) is known to fit alike: one taking a
+        // closure or a `Box<T>` may be the only one that fits at all.
+        // (and only where every argument is a literal of a known kind: an
+        // array literal or a value the walk cannot type may be the very
+        // `Sequence` the generic one takes)
+        let known_args = r.args.is_some_and(|a| usize::from(a) == r.hints.len())
+            && r.hints.iter().all(|h| {
+                use crate::facts::Arg;
+                matches!(h.kind, Arg::Str | Arg::Num | Arg::Int | Arg::Bool)
+            });
+        if best.len() > 1
+            && r.targs == 0
+            && known_args
+            && matches!(self.family[m.0], Some(Family::C | Family::Swift))
+        {
+            let opened = |c: DefRef| {
+                let d = self.def(c);
+                !d.type_params.is_empty()
+                    && d.plist.iter().all(|p| {
+                        let w = p.written.trim();
+                        d.type_params.iter().any(|t| t == w)
+                    })
+            };
+            let plain: Vec<DefRef> =
+                best.iter().copied().filter(|c| self.def(*c).type_params.is_empty()).collect();
+            if !plain.is_empty() && best.iter().all(|c| plain.contains(c) || opened(*c)) {
                 best = plain;
             }
         }
@@ -2999,6 +3047,11 @@ impl<'a> Project<'a> {
             if member.starts_with(['(', '[']) || matches!(head.as_str(), "self" | "super" | "()") {
                 continue;
             }
+            // (an operator written `a + b` or `a upTo b` says nothing of what
+            // a is: a library type answers to it as well)
+            if r.context == "operator" {
+                continue;
+            }
             // called there, or only read
             let called = r.path.len() == 2 && matches!(r.kind, RefKind::Call);
             let names = out.entry((d, head.clone())).or_default();
@@ -3137,6 +3190,30 @@ impl<'a> Project<'a> {
             }
             let kids = self.children[other.0].get(&other.1).and_then(|m| m.get(name));
             out.extend(kids.into_iter().flatten().map(|&k| (other.0, k)));
+        }
+        // C++ `inline namespace v2` inside the namespace: its members are the
+        // namespace's ([namespace.def])
+        if fam == Family::C {
+            let blocks: Vec<DefRef> = std::iter::once(c)
+                .chain(self.by_qual.get(&key).into_iter().flatten().copied())
+                .collect();
+            for b in blocks {
+                let inline = &self.files[b.0].inline_namespaces;
+                if inline.is_empty() {
+                    continue;
+                }
+                for kids in self.children[b.0].get(&b.1).into_iter().flat_map(|m| m.values()) {
+                    for &k in kids {
+                        let d = &self.files[b.0].defs[k];
+                        if d.kind == DefKind::Namespace && inline.contains(&d.start_byte) {
+                            let inner = self.children[b.0].get(&k).and_then(|m| m.get(name));
+                            out.extend(inner.into_iter().flatten().map(|&x| (b.0, x)));
+                        }
+                    }
+                }
+            }
+            out.sort();
+            out.dedup();
         }
         // a method defined for a type in the block (`Response Session::Get()
         // { … }` inside `namespace cpr { }`) is the type's, no name of the
@@ -5041,11 +5118,27 @@ impl<'a> Project<'a> {
         // Rust: a module and a function of one name are in two namespaces
         // (`mod log` beside `fn log`): `log::write()` is the module's,
         // `log()` the function (r[names.namespaces.kinds])
-        if fam == Family::Rust && !self.is_local_name(f, d, head) {
-            let called = rest.first().is_none_or(|s| s == "()");
+        // (C: a struct tag and a function of one name are two name spaces,
+        // C 6.2.3; C++ hides the class behind the function, [basic.scope.hiding])
+        if matches!(fam, Family::Rust | Family::C) && !self.is_local_name(f, d, head) {
+            let called = rest.first().is_none_or(|s| s == "()") && !self.naming_type();
             if let Some(r) = self.rust_namespace_pick(f, d, head, called) {
                 return self.walk(Target::Def(r), rest, Confidence::Extracted);
             }
+        }
+        // C++ `::Helper()`: a name of the global namespace (no namespace
+        // around), in the file or a file it includes ([namespace.qual])
+        if fam == Family::C && head == "::" {
+            let (name, more) = rest.split_first()?;
+            let mut files: Vec<usize> = vec![f];
+            files.extend(self.scopes[f].imported.iter().copied().filter(|&g| g != f));
+            let found: Vec<DefRef> = files
+                .iter()
+                .flat_map(|&g| self.top[g].get(name).into_iter().flatten().map(move |&i| (g, i)))
+                .filter(|r| self.def(*r).parent.is_none())
+                .collect();
+            let r = self.best(found)?;
+            return self.walk(Target::Def(r), more, Confidence::Extracted);
         }
         // C++ `namespace u = util; u::twice()`: the namespace the alias names
         // (TS `import Internal = My.Internal;`, also named alone: `new C()`)
@@ -7516,8 +7609,18 @@ impl<'a> Project<'a> {
         if cands.is_empty() {
             cands = self.top[f].get(name).cloned().unwrap_or_default();
         }
-        let module = |i: &usize| matches!(defs[*i].kind, DefKind::Module | DefKind::Namespace);
-        let value = |i: &usize| defs[*i].kind.is_callable();
+        let c_family = self.family[f] == Some(Family::C);
+        let module = |i: &usize| {
+            matches!(defs[*i].kind, DefKind::Module | DefKind::Namespace)
+                || (c_family && defs[*i].kind.is_class_like())
+        };
+        // (C++: a constructor defined out of its class, `T::T()`, is the
+        // class's, not a function beside it)
+        let value = |i: &usize| {
+            defs[*i].kind.is_callable()
+                && !(c_family
+                    && (defs[*i].owner.is_some() || defs[*i].kind == DefKind::Constructor))
+        };
         if !(cands.iter().any(module) && cands.iter().any(value)) {
             return None;
         }

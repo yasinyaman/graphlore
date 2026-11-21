@@ -339,6 +339,13 @@ pub fn path_of(n: Node, src: &[u8]) -> Option<Vec<String>> {
         // Java `a.b.C` written as names with no fields
         "scoped_type_identifier" | "scoped_identifier" | "qualified_identifier" => {
             let mut p = Vec::new();
+            // C++ `::Helper()`: the global namespace, written `::`
+            if n.kind() == "qualified_identifier"
+                && n.child_by_field_name("scope").is_none()
+                && text(n, src).trim_start().starts_with("::")
+            {
+                p.push("::".to_string());
+            }
             for c in kids(n) {
                 if matches!(c.kind(), "type_arguments" | "annotation" | "marker_annotation") {
                     continue;
@@ -1836,6 +1843,14 @@ fn arg_kind(v: Node, src: &[u8]) -> crate::facts::Arg {
             Arg::Bool
         } else if has(Arg::Str) {
             Arg::Str
+        } else if matches!(op.as_str(), "+" | "-")
+            && matches!(
+                crate::parse::current(),
+                Some(crate::lang::Lang::C | crate::lang::Lang::Cpp)
+            )
+        {
+            // (C / C++ `sep + 1` may be a pointer moved along, no number)
+            Arg::Unknown
         } else if has(Arg::Num) || has(Arg::Int) {
             Arg::Num
         } else {
@@ -3878,6 +3893,20 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
         // Kotlin operator conventions (kotlin.core/operators.md): `a + b` is
         // `a.plus(b)`, `a[i]` is `a.get(i)`, `a upTo b` is `a.upTo(b)` (an
         // `infix fun`); context `operator`, resolved only through a's type
+        // (C++ `a + b`: `a.operator+(b)` when a's class declares it,
+        // [over.match.oper])
+        if facts.lang == Some(crate::lang::Lang::Cpp) && n.kind() == "binary_expression" {
+            let op = n.child_by_field_name("operator").map(|o| text(o, src));
+            let lhs = n.child_by_field_name("left").and_then(|l| path_of(l, src));
+            if let (Some(op), Some(mut path)) = (op, lhs) {
+                if matches!(op.as_str(), "+" | "-" | "*" | "/" | "%" | "==" | "!=" | "<" | ">")
+                    && !path.iter().any(|s| s == UNKNOWN)
+                {
+                    path.push(format!("operator{op}"));
+                    push(&mut refs, n, RefKind::Call, path, "operator", None);
+                }
+            }
+        }
         if facts.lang == Some(crate::lang::Lang::Kotlin) {
             let named = kids(n);
             let method = match n.kind() {
@@ -4311,6 +4340,13 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                     }
                 }
             }
+        }
+        // C++ `inline namespace v2 { … }`
+        if n.kind() == "namespace_definition" && kids(n).iter().any(|c| c.kind() == "inline")
+            || (n.kind() == "namespace_definition"
+                && text(n, src).trim_start().starts_with("inline"))
+        {
+            facts.inline_namespaces.push(n.start_byte());
         }
         // TS `import Internal = My.Internal;`: a name for what the path names
         if n.kind() == "import_alias" {
