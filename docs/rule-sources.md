@@ -237,7 +237,53 @@ have the same edges as before):
   file of another name (RestSharp), the second framework of a multi-target
   project, and a version set on the command line.
 
-Next is phase 1.
+Phase 1 has its list. `benchmarks/positions.py` parses the audit's
+repositories with each grammar, takes every name of a type the repository
+itself defines written where a type is, names the place by the node that
+holds it (`type_spec.type`, `const_spec.type`, `throws.-`) and asks the engine
+whether it read a use there. Over 13 languages (JavaScript and Ruby write no
+types): 49,097 names, 43,631 read (88.9%), in a minute and a half.
+
+| Language | places | names of the repository's own types | read |
+|---|--:|--:|--:|
+| c | 6 | 108 | 53 (49.1%) |
+| c/c++ header | 26 | 2,547 | 2,096 (82.3%) |
+| cpp | 16 | 948 | 732 (77.2%) |
+| csharp | 22 | 4,830 | 4,751 (98.4%) |
+| go | 15 | 3,974 | 2,456 (61.8%) |
+| java | 20 | 15,701 | 14,328 (91.3%) |
+| kotlin | 19 | 4,123 | 3,873 (93.9%) |
+| php | 10 | 1,205 | 1,088 (90.3%) |
+| python | 4 | 704 | 704 (100.0%) |
+| rust | 18 | 4,737 | 4,714 (99.5%) |
+| scala | 18 | 676 | 529 (78.3%) |
+| swift | 11 | 3,326 | 2,909 (87.5%) |
+| tsx | 6 | 98 | 98 (100.0%) |
+| typescript | 31 | 6,120 | 5,300 (86.6%) |
+
+55 places are read less than nine times in ten (the script prints each with
+an example; `benchmarks/results-positions.json` is the baseline, and
+`--baseline` fails when a place is read less than it was). Among them, none
+of which a repository comparison had pointed at:
+
+- Go: the type a `type` declaration is defined as (`type Middlewares
+  []func(http.Handler) http.Handler`), a constant's type, a function
+  literal's result, the type argument of `make`;
+- Java: `throws` clauses (1 of 62), class literals (`Foo.class`), the element
+  type of `new T[] { … }` and of an enhanced `for`;
+- Swift: `throws(ParserError)`, `(any Error).self`, a protocol property's
+  type;
+- C and C++: what a `typedef` names, explicit template arguments of a call;
+- C#: the element type of `new Error[] { … }`;
+- PHP: the return type of an anonymous function;
+- Scala: the type of `new Outer.Inner(…)`, a `val`'s declared type.
+
+Some rows are the measure's and not the reader's (a parameter list that runs
+over several lines is matched by line), and seven places are left out on
+purpose and say why (`DECIDED` in the script: the type an `impl` is of, a
+declaration's own name). The work of phase 1 is this list, top to bottom:
+each place is read (a case, then code) or added to `DECIDED` with its reason.
+
 
 ## Phases
 

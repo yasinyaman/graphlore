@@ -38,6 +38,15 @@ All notable changes to this project are documented here. The format is based on
   engine 0.5.55 and all but 4 with 0.5.56. On ureq, ripgrep, axum-realworld
   and actix-realworld rust-analyzer has one for 11,924; 97.5% before, 98.5%
   now.
+- **`benchmarks/positions.py`: the places a type can be written, per
+  grammar, and whether the reader reads them** (phase 1 of that plan). It
+  parses a corpus with each tree-sitter grammar, names every place a name of
+  the repository's own types is written by the node that holds it, and asks
+  the engine (`file_facts`) whether a use was read there. On the audit's
+  repositories: 49,097 names in 13 languages, 88.9% read, and 55 places read
+  less than nine times in ten, listed with an example each
+  (`benchmarks/results-positions.json` is the baseline). Nothing is fixed by
+  this change: it is the list.
 - **Language versions, phase 0 of that plan** (engine 0.5.61; no edge
   changes):
   - The native graph's header has `graph.language_versions`: the version
