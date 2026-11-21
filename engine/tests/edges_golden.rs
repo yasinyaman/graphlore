@@ -2871,3 +2871,39 @@ fn a_type_named_to_test_convert_or_catch_a_value_is_a_use_of_it() {
     // a base is the class's base, once
     lacks(&got, &[("Circle", "references", "Shape"), ("Bar", "references", "Foo")]);
 }
+
+#[test]
+fn what_the_go_type_checker_and_rust_analyzer_showed() {
+    let got = quals("go-oracle", &[
+        ("go.mod", "module example.com/app\n\ngo 1.22\n"),
+        (
+            "a.go",
+            "package app\n\nimport \"bytes\"\n\ntype Client struct{}\n\nfunc (c *Client) Bytes() []byte {\n\treturn nil\n}\n\ntype Inner struct {\n\tSize int\n}\n\nfunc (i *Inner) Dump() {}\n\ntype Outer struct {\n\tIn *Inner\n}\n\nfunc endpoint() string {\n\treturn \"/pkg\"\n}\n\nfunc take(s interface{}) {}\n\nvar expected = \"pkg\"\n\nfunc local() string {\n\tendpoint := \"/secure\"\n\ttake(endpoint)\n\tvar body, expected string\n\texpected = \"x\"\n\treturn body + expected\n}\n\nfunc use(o *Outer) []byte {\n\tin := o.In\n\tin.Dump()\n\tvar buf bytes.Buffer\n\treturn buf.Bytes()\n}\n\nfunc pkg() string {\n\treturn expected\n}\n",
+        ),
+    ]);
+    has(&got, &[("use", "calls", "Inner.Dump"), ("pkg", "reads", "expected")]);
+    lacks(
+        &got,
+        &[
+            ("local", "indirect_call", "endpoint"),
+            ("local", "writes", "expected"),
+            ("use", "calls", "Client.Bytes"),
+        ],
+    );
+    let got = quals("rust-oracle", &[
+        ("Cargo.toml", "[package]\nname = \"demo\"\nversion = \"0.1.0\"\n"),
+        (
+            "src/lib.rs",
+            "pub struct Error;\n\npub struct Authority;\n\nimpl Authority {\n    pub fn username(&self) -> u8 {\n        1\n    }\n}\n\npub struct Proxy {\n    port: u8,\n}\n\nimpl Proxy {\n    pub fn new(_s: &str) -> Result<Self, Error> {\n        Err(Error)\n    }\n\n    pub fn port(mut self, p: u8) -> Self {\n        self.port = p;\n        self\n    }\n\n    pub fn show(&self) -> u8 {\n        self.port\n    }\n\n    pub fn username(&self) -> u8 {\n        2\n    }\n}\n\npub fn hostname() -> u8 {\n    1\n}\n\npub fn take(_x: u8) {}\n\npub fn user() -> u8 {\n    let hostname = 3u8;\n    take(hostname);\n    let proxy = Proxy::new(\"x\").unwrap_or(Proxy { port: 0 });\n    proxy.username()\n}\n",
+        ),
+    ]);
+    has(&got, &[("user", "calls", "Proxy.username"), ("Proxy.show", "reads", "Proxy.port")]);
+    lacks(
+        &got,
+        &[
+            ("user", "calls", "Authority.username"),
+            ("user", "indirect_call", "hostname"),
+            ("Proxy.show", "references", "Proxy.port"),
+        ],
+    );
+}

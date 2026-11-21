@@ -104,7 +104,7 @@ dependencies = [
 
 [[package]]
 name = "graphlore-engine"
-version = "0.5.55"
+version = "0.5.56"
 dependencies = [
  "bincode",
  "ignore",

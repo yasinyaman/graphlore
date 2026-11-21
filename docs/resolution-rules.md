@@ -25,8 +25,9 @@ python benchmarks/conformance.py --baseline benchmarks/results-conformance.json 
 python benchmarks/conformance.py --markdown      # the tables below
 ```
 
-Measured 2026-11-21 with graphlore-engine 0.5.55: **479 of 479 rules hold**
-(356 of the first 406 with 0.5.45). Fifteen came from the Kotlin and Swift
+Measured 2026-11-21 with graphlore-engine 0.5.56: **489 of 489 rules hold**
+(356 of the first 406 with 0.5.45). Ten came from the Go type checker and
+rust-analyzer run on whole repositories; fifteen from the Kotlin and Swift
 compilers' tests (type checks, casts, `catch`, aliases); thirty-nine from two
 compilers' own test suites ([native-engine.md](native-engine.md#the-compiler-as-the-judge)):
 TypeScript's (block scopes, type parameters and their bounds, parameter
@@ -102,6 +103,10 @@ name that is a type and a value, and a C++ class written with an export macro
 Each change was measured on the 45 audit repositories as well, by reading
 the edges it added and removed at their source lines; the page on the
 [native engine](native-engine.md#the-rules-themselves) has the numbers.
+Every case but Scala's has been compiled by its own language
+(`benchmarks/verify_cases.py`: 461 of 461 accepted; no Scala compiler runs
+where this was measured).
+
 Passing every case says the engine follows the rules written here, not
 every rule of each language: see the limits above.
 
@@ -194,7 +199,7 @@ ECMAScript Language Specification, 'Executable Code and Execution Contexts' (sco
 | an arrow function in a class field sees the class's `this` | `class-field-arrow` | yes |
 | a local assigned `new C()` keeps its type in a nested callback | `for-of-new` | yes |
 
-### typescript (48 of 48)
+### typescript (49 of 49)
 
 TypeScript Handbook, 'Modules', 'Classes', 'Generics' (types are the compiler's, tsc).
 
@@ -248,8 +253,9 @@ TypeScript Handbook, 'Modules', 'Classes', 'Generics' (types are the compiler's,
 | a function named as a value is a use of it | `function-as-value` | yes |
 | a `let` in a block at the top of a file is the block's, beside a variable of the file | `block-scope-file-level` | yes |
 | `x as T` and `x instanceof T` are uses of T | `as-and-instanceof` | yes |
+| every name a closure's parameter pattern binds is the closure's | `destructured-closure-parameter` | yes |
 
-### go (26 of 26)
+### go (31 of 31)
 
 The Go Programming Language Specification, 'Declarations and scope', 'Selectors', 'Method sets'.
 
@@ -281,6 +287,11 @@ The Go Programming Language Specification, 'Declarations and scope', 'Selectors'
 | a value of a type parameter has the methods of its constraint | `generic-constraint` | yes |
 | a function named as a value is a use of it | `function-named-as-value` | yes |
 | `x.(T)` and a type switch's `case T` are uses of T | `type-assertion-and-switch` | yes |
+| a name declared with `:=` is a local, whatever it is assigned | `short-var-hides-package-name` | yes |
+| `var a, b T` declares every name | `multi-name-var` | yes |
+| a field of a struct, named or not, is no name of the package | `struct-field-is-no-package-name` | yes |
+| a local assigned a field is of the field's type | `member-read-types-a-local` | yes |
+| a method called on a value the source types as a library's is the library's | `library-receiver-is-no-guess` | yes |
 
 ### java (44 of 44)
 
@@ -461,7 +472,7 @@ C# Language Specification, 'Namespace and type names', 'Member lookup', 'Extensi
 | an enum member named as a value is a use of its enum | `enum-member-value` | yes |
 | `x is T`, `x as T` and `catch (T e)` are uses of T | `is-as-catch` | yes |
 
-### rust (43 of 43)
+### rust (47 of 47)
 
 The Rust Reference, 'Names' (name resolution, scopes, paths), 'Method call expressions', 'Field access expressions'.
 
@@ -510,6 +521,10 @@ The Rust Reference, 'Names' (name resolution, scopes, paths), 'Method call expre
 | an enum variant named as a value or a pattern is a use of its enum | `enum-variant-value` | yes |
 | the type an `impl` gives its trait is no name of the file | `associated-type-is-no-file-name` | yes |
 | what a type alias names and what a `where` clause bounds by are uses of those types | `alias-and-where` | yes |
+| `self.x` with no call is the field, beside a method of its name | `field-beside-a-method` | yes |
+| `-> Result<Self, E>` gives the type the method is declared for | `result-of-self` | yes |
+| a `let` of any value is a local where it is passed on | `untyped-let-hides-a-function` | yes |
+| a name of another crate is in reach only through a `use` | `another-crates-name` | yes |
 
 ### swift (37 of 37)
 
@@ -691,4 +706,4 @@ PHP Manual, 'Namespaces: Name resolution rules', 'Classes and Objects' (inherita
 | `\Name` is the global class, never one a namespace of the project declares | `global-class-is-not-a-namespaced-one` | yes |
 | `$x instanceof T` and `catch (T $e)` are uses of T | `instanceof-and-catch` | yes |
 
-479 of 479 rules hold
+489 of 489 rules hold

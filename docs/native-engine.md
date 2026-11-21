@@ -1778,10 +1778,49 @@ initializer, `type(of: x).m()`, an associated type through its bound
 symbols scrubbed (`key.usr: <usr>`), so they say which names are uses, not of
 what.
 
-What this is not: the other ten languages. The same kind of file exists for
-several (rust-analyzer's fixtures, gopls's markers, Roslyn's tests), each in
-its own format; none is read yet. And a compiler's tests are small programs:
-they find a rule read wrong and a position never read, not a framework's
+**Go and Rust: the compiler itself, on whole repositories.** Where the
+language's own resolver runs as a tool there is no need for its tests.
+`benchmarks/oracle_go.py` loads a repository with `go/types` (through
+`golang.org/x/tools/go/packages`) and takes, for every identifier, the
+position of the object it is bound to; `benchmarks/oracle_rust.py` does the
+same with `rust-analyzer lsif`, which resolves a Cargo workspace with macros
+expanded and traits solved. Both then compare as above, on the audit's own
+repositories:
+
+```bash
+python benchmarks/oracle_go.py /tmp/polyglot/cobra /tmp/polyglot/chi /tmp/polyglot/resty /tmp/polyglot/gin-examples
+rustup component add rust-analyzer
+python benchmarks/oracle_rust.py /tmp/polyglot/ureq /tmp/polyglot/ripgrep /tmp/polyglot/axum-realworld /tmp/polyglot/actix-realworld
+```
+
+| | Go, 0.5.55 | Go, 0.5.56 | Rust, 0.5.55 | Rust, 0.5.56 |
+|---|---:|---:|---:|---:|
+| edges whose site the compiler has an answer for | 11,996 | 11,961 | 12,029 | 11,924 |
+| of them, to the declaration it names | 11,955 (99.7%) | 11,957 (99.97%) | 11,730 (97.5%) | 11,740 (98.5%) |
+| uses it binds to a definition the graph has, with an edge | 82.1% | 82.7% | 78.7% | 78.8% |
+
+Go's 41 wrong edges were three things: a name declared with `:=` or `var`
+and assigned a literal was no local to the resolver, so a value passed on
+went to a package-level name; a field of an anonymous struct in a test table
+was a name of the whole package; and a method called on a library's value
+(`jar.SetCookies(…)` on a `*cookiejar.Jar`) was guessed to be the project's
+method of that name. The four left are `INFERRED`. Rust's 299 were, in order:
+every `Result<…>` of the standard library linked to a `type Result` in
+another crate's tests (157 on ripgrep); `self.field` read where a method has
+the field's name (43 on ureq, 300 `reads` gained on ripgrep); `->
+Result<Self, E>` not giving the type. Of the 184 left, most are one question
+the graph cannot settle from the source: a call through a trait object goes
+to the trait's method where rust-analyzer names the `impl` for `Box<dyn
+Trait>`, or the reverse; then `impl Foo<A>` beside `impl Foo<B>` with a
+method of one name, and guesses.
+
+The uses with no edge are mostly positions the engine leaves out on purpose
+(a struct literal's field names, a method's own receiver type) and, in Rust,
+what only type inference names.
+
+What this is not: C#, Java, C, C++, Ruby, PHP, Python. Roslyn, javac and
+clang could be asked the same way as `go/types`; none is yet. And a compiler
+finds a rule read wrong and a position never read, not a framework's
 convention.
 
 ### What is left without an edge

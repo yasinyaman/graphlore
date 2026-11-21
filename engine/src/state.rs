@@ -472,7 +472,10 @@ impl State {
         // names bound by a pattern or listed on the left: `a, b := f()`,
         // `for k, v in d`, `const { a, b } = x`, `let (a, b) = t`
         for field in ["left", "name", "pattern", "declarator", "alias", "key", "value_name"] {
-            if let Some(side) = n.child_by_field_name(field) {
+            // (every one of them: Go `var body, expected string`)
+            let mut cursor = n.walk();
+            let sides: Vec<Node> = n.children_by_field_name(field, &mut cursor).collect();
+            for side in sides {
                 let mut stack = vec![(side, 0)];
                 while let Some((c, depth)) = stack.pop() {
                     if BARE_KINDS.contains(&c.kind())
