@@ -2791,3 +2791,38 @@ fn a_name_of_another_package_is_not_in_reach_and_what_scala_writes_beside() {
         ],
     );
 }
+
+#[test]
+fn typescript_import_equals_namespace_aliases_and_functions_as_values() {
+    let got = quals("ts-rest", &[
+        ("back.ts", "export class Model {\n  id = 1;\n}\n\nexport function helper(): number {\n  return 1;\n}\n"),
+        (
+            "a.ts",
+            "import Backbone = require(\"./back\");\n\nexport class Viz extends Backbone.Model {}\n\nexport function f() {\n  return Backbone.helper();\n}\n",
+        ),
+        ("e.ts", "enum E {\n  A,\n  B,\n}\n\nexport = E;\n"),
+        ("use.ts", "import EnumE = require(\"./e\");\n\nexport function g() {\n  return EnumE.A;\n}\n"),
+        (
+            "ns.ts",
+            "namespace My.Internal {\n  export function getThing(): void {}\n}\n\nnamespace Other {\n  import Internal = My.Internal;\n\n  export function k() {\n    Internal.getThing();\n  }\n}\n\nfunction Cf(x: number) {\n  return x;\n}\n\nnamespace Cf {\n  export function foo() {\n    return 1;\n  }\n}\n\nexport function h() {\n  return Cf.foo();\n}\n\nexport function user(cb = h) {\n  const q = h;\n  return [q, cb];\n}\n",
+        ),
+        (
+            "blocks.ts",
+            "export let count = 0;\n\nexport function bump() {\n  count += 1;\n}\n\nexport function inner() {\n  {\n    let count = 5;\n    count += 1;\n  }\n}\n\nexport function after() {\n  {\n    let count = 5;\n    void count;\n  }\n  return count;\n}\n",
+        ),
+    ]);
+    has(
+        &got,
+        &[
+            ("Viz", "inherits", "Model"),
+            ("f", "calls", "helper"),
+            ("g", "references", "E"),
+            ("Other.k", "calls", "My.Internal.getThing"),
+            ("h", "calls", "Cf.foo"),
+            ("user", "references", "h"),
+            ("bump", "writes", "count"),
+            ("after", "reads", "count"),
+        ],
+    );
+    lacks(&got, &[("inner", "writes", "count")]);
+}

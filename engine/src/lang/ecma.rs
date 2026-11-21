@@ -300,6 +300,16 @@ impl LanguageModule for Ecma {
     fn imports_of(&self, n: Node, src: &[u8]) -> Option<Vec<ImportFact>> {
         match n.kind() {
             "import_statement" => {
+                // `import fs = require("./fs")`: the module, under that name
+                if let Some(cl) = kids(n).into_iter().find(|c| c.kind() == "import_require_clause")
+                {
+                    let mut f = import(n, ImportForm::Module, source(cl, src)?);
+                    f.alias = kids(cl)
+                        .into_iter()
+                        .find(|c| c.kind() == "identifier")
+                        .map(|x| text(x, src));
+                    return Some(vec![f]);
+                }
                 let module = source(n, src)?;
                 let type_only = all_kids(n).iter().any(|c| c.kind() == "type");
                 let mut out = Vec::new();
@@ -438,7 +448,8 @@ impl LanguageModule for Ecma {
         let mut out = Vec::new();
         match n.kind() {
             "export_statement" if n.child_by_field_name("source").is_none() => {
-                let default = all_kids(n).iter().any(|c| c.kind() == "default");
+                // (`export = E;` is the module itself, as a default is)
+                let default = all_kids(n).iter().any(|c| matches!(c.kind(), "default" | "="));
                 for c in kids(n) {
                     match c.kind() {
                         "export_clause" => {

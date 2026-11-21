@@ -2702,8 +2702,11 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
         anc.truncate(depth);
         until = 0;
         // (the declaration the node is, or is the name of)
+        // (never a definition's own node: a parameter's default value is
+        // no value its function is declared with)
         declared = std::iter::once(&n)
             .chain(anc.iter().rev().take(2))
+            .filter(|a| !by_node.contains_key(&a.id()))
             .find_map(|a| value_node(*a).map(|v| (v.start_byte(), a.end_byte())));
         // (JS `var` is the function's, whatever block it is written in)
         let hoisted = ecma
@@ -3784,6 +3787,17 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                     {
                         d.declared_type = Some(ty.clone());
                     }
+                }
+            }
+        }
+        // TS `import Internal = My.Internal;`: a name for what the path names
+        if n.kind() == "import_alias" {
+            let ks = kids(n);
+            let name = ks.first().filter(|c| c.kind() == "identifier").map(|c| text(*c, src));
+            let of = ks.get(1).and_then(|c| path_of(*c, src));
+            if let (Some(name), Some(of)) = (name, of) {
+                if of.first() != Some(&name) {
+                    facts.ns_aliases.push((name, of));
                 }
             }
         }
@@ -5992,7 +6006,7 @@ fn params_field<'t>(n: Node<'t>) -> Option<Node<'t>> {
 
 /// Whether a node of this kind is a scope of its own for what is declared
 /// in it: a block, a loop, a `catch`, a closure, one arm of a match.
-fn is_scope(kind: &str) -> bool {
+pub(crate) fn is_scope(kind: &str) -> bool {
     kind.ends_with("block")
         || kind.ends_with("_body")
         || kind.starts_with("for")

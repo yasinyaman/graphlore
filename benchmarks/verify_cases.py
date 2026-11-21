@@ -83,9 +83,15 @@ def check(lang: str, root: Path) -> tuple[int, str]:
                 return code, out
         return 0, ""
     if lang == "typescript":
+        srcs = files(root, ".ts", ".tsx")
+        text = "\n".join((root / f).read_text() for f in srcs)
+        # `import x = require()` and `export =` are CommonJS's
+        if "= require(" in text or "export =" in text:
+            return sh(["tsc", "--noEmit", "--skipLibCheck", "--target", "ES2022", "--module",
+                       "commonjs", "--strict", "false", *srcs], root)
         return sh(["tsc", "--noEmit", "--skipLibCheck", "--target", "ES2022", "--module",
                    "ESNext", "--moduleResolution", "bundler", "--strict", "false",
-                   "--allowImportingTsExtensions", *files(root, ".ts", ".tsx")], root)
+                   "--allowImportingTsExtensions", *srcs], root)
     if lang == "go":
         return sh(["go", "vet", "./..."], root, {"GOFLAGS": "-mod=mod", "GOPROXY": "off"})
     if lang == "java":

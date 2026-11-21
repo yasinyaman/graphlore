@@ -1,6 +1,6 @@
 {
- "passed": 456,
- "total": 456,
+ "passed": 464,
+ "total": 464,
  "cases": [
   {
    "id": "python/module-function",
@@ -2734,6 +2734,54 @@
   },
   {
    "id": "php/global-class-is-not-a-namespaced-one",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/import-equals-require",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/export-assignment",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/import-alias",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/function-namespace-merge",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/function-as-value",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/block-scope-file-level",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "python/function-named-as-value",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/function-named-as-value",
    "ok": true,
    "missing": [],
    "unwanted": []
