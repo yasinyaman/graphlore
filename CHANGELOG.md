@@ -7,6 +7,17 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **The TypeScript compiler as the judge of the native engine's edges**
+  (`benchmarks/oracle_typescript.py`). The compiler's own test suite keeps,
+  for 7,242 programs, a file the compiler wrote: every name of the program
+  and the declaration it is bound to. The script builds the native graph of
+  each program and compares: of the edges whose site the compiler has an
+  answer for, 98.9% went where it says with engine 0.5.51 and 99.1% with
+  0.5.52; what was wrong is the list under Fixed. No rule in it was written
+  from memory of the language.
+- **`benchmarks/verify_cases.py`** gives each case of the rule checklist to
+  the language's own compiler or interpreter (10 of the 14 languages have
+  one here): a case the language rejects says nothing about the rule.
 - **The name-resolution rules of each language as a list**
   (`docs/resolution-rules.md`, `benchmarks/conformance.py`): 406 rules in 14
   languages, each a small project with the edge the rule says is there and
@@ -328,6 +339,37 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- **Native engine 0.5.52: the rules the TypeScript compiler showed missing**,
+  each also where the other languages have it (440 cases in the checklist,
+  all hold):
+  - **Block scopes.** A name declared in a block is a local of that block
+    (`Local::until`): `if (a) { const x = new A() } else { const x = new B() }`
+    is two variables, a use beside the block has the outer one, and inside
+    the value a declaration is written with the name is still the outer one
+    (`let convertible = Wrap(convertible)`). The engine had one local of a
+    name per function, the first declared type winning. Not Python, Ruby,
+    PHP or a JS `var`, which have no such scope.
+  - **A type parameter hides a type of its name** (`interface Box<T>` beside
+    a `type T`), and a member asked of it, or of a value typed by it, is a
+    member of the type that bounds it: `fn run<S: Sink>(s: S) { s.begin() }`,
+    `where T: Sink`, `<T extends Foo>`, `[B <: Base]`, `[T Runner]`,
+    `where A: Parsable`. A bound that is not one named type (`FnMut(Match)
+    -> bool`, `keyof T`, a Scala context bound) says nothing.
+  - **A call of a typed parameter or local is no call of an outer function of
+    its name** (`cb('hi')` with `cb: (x: string) => number`), except in Java
+    and Kotlin, where a variable and a function are names of two kinds.
+  - **TypeScript**: `constructor(public greeting: string)` declares the
+    property (it was a node only where a method assigned it); what a
+    `namespace` declares is no name beside one the file declares.
+  - **Scala**: a generic method's parameters were not read at all (the
+    grammar gives its type parameters the same field name), so nothing in
+    `def opt[B <: Base](b: B)` knew `b`.
+  - **A wrapper holds its first type argument**: `Option<Space<M>>` was read
+    as holding `M`.
+  On the 45 audit repositories: 501 edges gone (a type parameter or a
+  callback parameter linked to an unrelated definition of its name), 675
+  new (calls through bounds, parameter properties, the right overload where
+  a redeclared local decides it).
 - **Native engine 0.5.51: a C++ template's member is typed by the argument
   written.** The type parameters of `template <typename T> class Page` sit on
   the declaration around the class, where the reader did not look, so

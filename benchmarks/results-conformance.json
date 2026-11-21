@@ -1,6 +1,6 @@
 {
- "passed": 425,
- "total": 425,
+ "passed": 440,
+ "total": 440,
  "cases": [
   {
    "id": "python/module-function",
@@ -2548,6 +2548,96 @@
   },
   {
    "id": "php/callable-string",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/block-scope",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/block-scope-branches",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/type-parameter-hides",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/type-parameter-bound",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/namespace-member-inside",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/parameter-property-read",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/parameter-called",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/block-scope",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/generic-bound-where",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/wrapper-holds-first-argument",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/generic-bound",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/own-value-is-outer",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "scala/generic-method-parameters",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/generic-constraint",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/function-beside-parameter",
    "ok": true,
    "missing": [],
    "unwanted": []

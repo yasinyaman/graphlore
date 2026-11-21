@@ -1612,6 +1612,58 @@ failed for a C++ template's member, `T lead()` of `Zorp<Item>`: the type
 parameters sit on the `template <typename T>` around the class, where the
 reader did not look. Read since 0.5.51, and the C++ rows are clean too.)
 
+### The compiler as the judge
+
+The rules above were written from the languages' definitions, as remembered.
+A compiler knows them exactly, and several keep the answer in their own test
+suite. TypeScript's has, for each of its 7,242 compiler tests, a `.symbols`
+file the compiler wrote: the program, and under every line each name on it
+with the declaration it is bound to (`>x : Symbol(x, Decl(a.ts, 3, 9))`).
+
+`benchmarks/oracle_typescript.py` reads those, rebuilds each program from the
+test's own source (the `// @filename:` units, the option lines dropped),
+builds the native graph and asks two things:
+
+```bash
+git clone --depth 1 --filter=blob:none --sparse https://github.com/microsoft/TypeScript ts
+git -C ts sparse-checkout set --no-cone '/tsc/testdata/baselines/reference/compiler/*.symbols' '/tsc/testdata/tests/cases/compiler/*'
+python benchmarks/oracle_typescript.py ts/tsc/testdata/baselines/reference/compiler --samples 20
+```
+
+(The paths are those of the repository on 2026-11-20, commit `6417c48`; the
+tests' sources are looked for beside the baselines, or where `--cases` says.)
+
+| | 0.5.51 | 0.5.52 |
+|---|---:|---:|
+| programs (those with a definition and a use) | 3,169 | 3,169 |
+| edges whose site the compiler has an answer for | 7,806 | 7,935 |
+| of them, to the declaration the compiler names | 7,721 (98.9%) | 7,864 (99.1%) |
+| uses the compiler binds to a definition the graph has | 19,430 | 19,526 |
+| of them, with an edge from the definition around | 14,237 (73.3%) | 14,426 (73.9%) |
+
+The first number is the one that matters: an edge that goes somewhere else
+than the compiler says is a wrong edge, and all but two of the 85 were
+`EXTRACTED`. Read one by one they were six rules, none TypeScript's alone:
+block scopes, a type parameter hiding a type, a typed parameter called, a
+namespace's member seen from outside, a parameter property, and, found while
+measuring the fix on the 45 repositories, bounds, Scala's generic methods and
+a wrapper's first argument ([CHANGELOG](../CHANGELOG.md)). The 71 left are
+mostly a `let` in a block at the top of a file (about half: the engine keeps
+locals per definition, and a file is none), a class expression's own name, and
+names the judge cannot tell apart on one line.
+
+The second number is not a recall of real code. The suite is written to
+exercise the checker: ambient declarations, call signatures in interfaces,
+values with no written type whose members only inference names (about 1,500
+of the 5,100), uses at the top of a file. It is a list to read, not a score:
+`--json` writes every row.
+
+What this is not: the other thirteen languages. The same kind of file exists
+for several (Scala's SemanticDB `expect` files, Swift's index tests, Kotlin's
+resolved-call dumps, rust-analyzer's fixtures), each in its own format; none
+is read yet. And a compiler's tests are small programs: they find a rule
+read wrong, not a framework's convention.
+
 ### What is left without an edge
 
 The comparison above measures the native graph against graphify's. What the
