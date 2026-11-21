@@ -3274,3 +3274,23 @@ fn java_rules_from_the_jls() {
         ],
     );
 }
+
+/// Kotlin's rules from the specification (engine 0.5.69): operator and infix
+/// calls, `super<A>`, and a local extension before a top-level one.
+#[test]
+fn kotlin_rules_from_the_spec() {
+    let got = quals("ktspec", &[(
+        "src/app/A.kt",
+        "package app\n\nclass Money(val cents: Int) {\n    operator fun plus(o: Money): Money = Money(cents + o.cents)\n\n    operator fun get(i: Int): Int = i\n\n    infix fun upTo(hi: Int): Int = hi - cents\n}\n\nfun total(a: Money, b: Money): Int = (a + b)[0] + (a upTo 10)\n\ninterface A {\n    fun f(): Int = 1\n}\n\ninterface B {\n    fun f(): Int = 2\n}\n\nclass C : A, B {\n    override fun f(): Int = super<A>.f() + super<B>.f()\n}\n\nclass Repo\n\nfun Repo.size(): Int = 1\n\nfun run(r: Repo): Int {\n    fun Repo.size(): Int = 2\n    return r.size()\n}\n",
+    )]);
+    has(
+        &got,
+        &[
+            ("total", "calls", "Money.plus"),
+            ("total", "calls", "Money.upTo"),
+            ("C.f", "calls", "A.f"),
+            ("C.f", "calls", "B.f"),
+            ("run", "calls", "run.size"),
+        ],
+    );
+}

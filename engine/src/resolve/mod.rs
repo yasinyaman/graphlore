@@ -7588,6 +7588,49 @@ impl<'a> Project<'a> {
         false
     }
 
+    /// Kotlin: of extensions written for the receiver's type, those of the
+    /// first set the specification lists (overload-resolution.md, 'Call with
+    /// an explicit receiver'): declared in a function around the use, then
+    /// imported by name, then of the file's package, then star-imported.
+    fn kotlin_extension_order(&self, f: usize, exact: Vec<DefRef>) -> Vec<DefRef> {
+        let home = (*self.cur.borrow())
+            .filter(|(cf, _)| *cf == f)
+            .and_then(|(cf, ri)| self.files[cf].refs[ri].from_def);
+        let around = |r: &DefRef| -> bool {
+            let Some(p) = self.def(*r).parent else { return false };
+            let mut cur = home;
+            while let Some(x) = cur {
+                if r.0 == f && x == p {
+                    return true;
+                }
+                cur = self.files[f].defs[x].parent;
+            }
+            false
+        };
+        let pkg_of = |g: usize| self.files[g].package.clone().unwrap_or_default();
+        let named = |r: &DefRef| {
+            let name = &self.def(*r).name;
+            self.files[f].imports.iter().any(|imp| {
+                imp.form == ImportForm::From
+                    && imp.module == pkg_of(r.0)
+                    && imp.names.iter().any(|(n, _)| n == name)
+            })
+        };
+        let rank = |r: &DefRef| -> u8 {
+            if around(r) {
+                0
+            } else if named(r) {
+                1
+            } else if pkg_of(r.0) == pkg_of(f) {
+                2
+            } else {
+                3
+            }
+        };
+        let best = exact.iter().map(rank).min().unwrap_or(3);
+        exact.into_iter().filter(|r| rank(r) == best).collect()
+    }
+
     /// Of extensions written for one type, those of the namespace closest
     /// around the use being resolved.
     fn closest_extensions(&self, f: usize, exact: Vec<DefRef>) -> Vec<DefRef> {
@@ -7675,6 +7718,8 @@ impl<'a> Project<'a> {
             // (an imported one ranks below every enclosing one: §12.8.10.3)
             let exact = if fam == Some(Family::CSharp) && exact.len() > 1 {
                 self.closest_extensions(f, exact)
+            } else if self.files[f].lang == Some(crate::lang::Lang::Kotlin) && exact.len() > 1 {
+                self.kotlin_extension_order(f, exact)
             } else {
                 exact
             };
@@ -8191,6 +8236,16 @@ pub fn resolve(
                             continue;
                         }
                     }
+                }
+                // a Kotlin operator (`a + b`) is the operator of a's type, never
+                // a guess by its name (`plus` of some other type)
+                if r.context == "operator"
+                    && !matches!(
+                        &found,
+                        Some((Target::Def(t), Confidence::Extracted)) if p.def(*t).kind.is_callable()
+                    )
+                {
+                    continue;
                 }
                 // a local called (`handler(x)`, `builder::add`) is the value
                 // it holds being called, not its type being constructed

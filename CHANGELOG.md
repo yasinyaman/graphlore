@@ -426,6 +426,12 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- **Native engine 0.5.69: Kotlin's rules, read from the Kotlin
+  specification** (phase 2 of `docs/rule-sources.md`; 13 cases): `a + b`,
+  `a[i]` and `a foo b` call the operator or infix function of a's type;
+  `super<A>.f()` is A's member; extensions are chosen in the specification's
+  order (local, imported by name, same package, star-imported).
+  `benchmarks/rule_inventory.py` covers Kotlin (24 rules, 20 held).
 - **Native engine 0.5.68: Java's rules, read from the JLS and javac**
   (phase 2 of `docs/rule-sources.md`; 14 cases): `Outer.this.m()` is the
   outer class's method; a field an interface declares is a constant of it

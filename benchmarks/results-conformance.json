@@ -1,6 +1,6 @@
 {
- "passed": 612,
- "total": 612,
+ "passed": 625,
+ "total": 625,
  "cases": [
   {
    "id": "python/module-function",
@@ -3670,6 +3670,84 @@
   },
   {
    "id": "java/local-class",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/local-function-before-member",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/member-before-top-level",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/explicit-import-before-package",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/package-before-star-import",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/local-extension-first",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/imported-extension-before-package",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/super-of-a-named-supertype",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/operator-call",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/index-operator",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/infix-call",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/most-specific-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/non-vararg-before-vararg",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/property-invoke",
    "ok": true,
    "missing": [],
    "unwanted": []

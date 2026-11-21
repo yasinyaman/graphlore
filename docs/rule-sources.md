@@ -732,6 +732,61 @@ go to `long` for an integer literal, or are `INFERRED` ties among `float` and
 `ParameterHandler.this.apply(…)` is a call; `ReflectionAccessFilter.BLOCK_ALL_JAVA`
 is read. `verify_graphify.py` lacks 44 confirmed edges, as before.
 
+### Phase 2: Kotlin
+
+The Kotlin specification (`docs/src/md/kotlin.core/overload-resolution.md`:
+'Building the overload candidate set' gives, for a call with and without an
+explicit receiver, the ordered sets of candidates, and the first set with an
+applicable one wins; `scoping.md`; `operators.md`). The K2 resolver
+(`compiler/fir`) follows the same order. `benchmarks/rule_inventory.py` lists
+every rule (24 rules, 20 held by a case, 4 not followed; 13 of 53 cases found in the language's own tools).
+
+| Source | Rule | Held by / why not |
+|---|---|---|
+| scoping.md 'Linked scopes' | a declaration of an inner scope shadows an outer one | `function-beside-parameter`, `local-typed-by-value` |
+| overload-resolution.md 'Call without an explicit receiver' 1 | local functions first | `local-function-before-member` |
+| overload-resolution.md 'Call without an explicit receiver' 2 | then members of the implicit receivers, innermost first | `member-before-top-level`, `inherited`, `receiver-lambda`, `with` |
+| overload-resolution.md 'Call without an explicit receiver' 3 | then top-level: imported by name, same package, star-imported, default imports | `explicit-import-before-package`, `package-before-star-import`, `same-package`, `import` |
+| overload-resolution.md 'Call with an explicit receiver' 1 | members of the receiver's type before any extension | `member-wins`, `member` |
+| overload-resolution.md 'Call with an explicit receiver' 2–5 | extensions: local, imported by name, package, star-imported | `local-extension-first`, `imported-extension-before-package`, `extension` |
+| overload-resolution.md 'Call with an explicit receiver' (member extensions of implicit receivers) | an extension declared as a member of a class in scope | not followed: a member extension is read as a member of its class only |
+| overload-resolution.md 'Call with an explicit type receiver' | `T.f()`: static members, then the companion object's | `companion`, `object` |
+| overload-resolution.md 'Call with an explicit super-form receiver' | `super.f()`, `super<A>.f()` | `super`, `super-of-a-named-supertype` |
+| overload-resolution.md 'Infix function call' | `a foo b` is `a.foo(b)` of an `infix fun` | `infix-call` |
+| overload-resolution.md 'Operator call'; operators.md | `a + b`, `a[i]` are the operator functions of a's type | `operator-call`, `index-operator` |
+| overload-resolution.md 'Operator call' | `+=`, `in`, `..`, comparison and `invoke` conventions, delegated properties | not followed: only the arithmetic and indexing conventions are read yet |
+| overload-resolution.md 'Callables and invoke convention' | a property of a function type called is the property | `property-invoke` |
+| overload-resolution.md 'Call with named parameters' | a named argument is a parameter of the callee | `named-argument-label` |
+| overload-resolution.md 'Choosing the most specific candidate' | the candidate with the more specific parameter types | `most-specific-type` |
+| overload-resolution.md 'Algorithm of MSC selection' | a candidate without `vararg` expansion or defaults wins a tie | `non-vararg-before-vararg` |
+| overload-resolution.md 'Using lambda return type to refine function applicability' | overloads told apart by a lambda's result | not followed: phase 3: the lambda's result type is not inferred |
+| overload-resolution.md 'Resolving callable references' | `::f` is a use of f | `function-reference` |
+| overload-resolution.md 'Resolving property access' | a property through its receiver, a constructor `val` | `constructor-property`, `constructor-property-read`, `property-type` |
+| type-inference.md / cdfa.md | smart casts after `is`, `as`, safe calls | `is-and-as`, `when-is`, `cast`, `safe-call` |
+| declarations.md 'Type alias' | a typealias names its type | `typealias`, `typealias-body` |
+| declarations.md 'Enum class declaration' | an enum entry has the enum's members | `enum-entry` |
+| builtins / standard library | scope functions: `let`, `apply`, `also`, `with`, `run` | `let`, `apply-also`, `it` |
+| declarations.md 'Visibility' | `private`, `internal`, `protected` | not followed: code that compiles reaches only what it may: the engine does not check |
+
+13 cases were written from this reading, all accepted by kotlinc. Six did not
+hold, and engine 0.5.69 follows them:
+
+- **Operator and infix calls** ('Operator call', 'Infix function call'):
+  `a + b` is `a.plus(b)`, `a[i]` is `a.get(i)`, `r upTo 10` is `r.upTo(10)`.
+  The reader read none of them as calls; it now writes a `Call` ref with the
+  context `operator`, kept only when a's type gives the function (never a
+  guess by its name).
+- **`super<A>.f()`** is A's member; `super<A>` was read as plain `super`.
+- **The order of extensions**: one declared in a function around the use,
+  then one imported by name, then one of the file's package, then a
+  star-imported one (`kotlin_extension_order`).
+
+Measured with engine 0.5.69: the Kotlin compiler's resolver tests give
+99.4%, recall 88.7%, as before; `verify_graphify.py` lacks 44 confirmed
+edges, as before. On the 45 audit repositories kotlinpoet gains three
+`get` calls through `typeParamResolver[name]`, and clikt loses four
+`INFERRED` reads on lines written with Kotest's infix `shouldBe`.
+
 One thing the cases showed that is not a position: a Swift protocol's
 property requirement is a definition of its own named `var handler`, of kind
 interface (the span rule takes `protocol_property_declaration` for a
@@ -775,7 +830,7 @@ say is left and by how directly the compiler can check the result:
    reading, and the template for the others): read (engine 0.5.66, 29 rules, 23 held by a case, 6 not followed)
 4. **TypeScript / JavaScript** (module resolution modes): read (engine 0.5.67, 31 rules, 26 held by a case, 5 not followed)
 5. **Java**, then **Kotlin** (one platform; `--release` and
-   `-language-version` give every version from one compiler): Java read (engine 0.5.68, 30 rules, 26 held by a case, 4 not followed)
+   `-language-version` give every version from one compiler): Java read (engine 0.5.68, 30 rules, 26 held by a case, 4 not followed); Kotlin read (engine 0.5.69, 24 rules, 20 held by a case, 4 not followed)
 6. **Swift**, **C / C++** (need the large toolchains)
 7. **Python**, **PHP**, **Ruby** (interpreters; the static tools as second
    source)

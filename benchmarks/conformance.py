@@ -2514,6 +2514,71 @@ case("java", "local-class", "a class declared in a block is a name of the block"
      [("A.other", "calls", "app/Repo.java:Repo.find")], [("A.run", "calls", "app/Repo.java:Repo.find")],
      source="JLS 6.3 (the scope of a local class is the rest of the block)")
 
+# Phase 2 for Kotlin: the Kotlin specification (Kotlin/kotlin-spec,
+# `docs/src/md/kotlin.core/overload-resolution.md` 'Building the overload
+# candidate set', `scoping.md` 'Linked scopes') and the K2 resolver
+# (JetBrains/kotlin `compiler/fir`).
+found_by("source")
+OR_KT = "Kotlin/kotlin-spec@0f762a2314a9:docs/src/md/kotlin.core/overload-resolution.md "
+case("kotlin", "local-function-before-member", "a local function comes before a member of the implicit receiver",
+     KT, {"src/app/A.kt": "package app\n\nclass Job {\n    fun h(): Int = 1\n\n    fun run(): Int {\n        fun h(): Int = 2\n        return h()\n    }\n}\n"},
+     [("Job.run", "calls", "Job.run.h")], [("Job.run", "calls", "src/app/A.kt:Job.h")],
+     source=OR_KT + "'Call without an explicit receiver' (1. local non-extension callables)")
+case("kotlin", "member-before-top-level", "a member of the implicit receiver comes before a top-level function",
+     KT, {"src/app/A.kt": "package app\n\nfun h(): Int = 1\n\nclass Job {\n    fun h(): Int = 2\n\n    fun run(): Int = h()\n}\n"},
+     [("Job.run", "calls", "Job.h")], [("Job.run", "calls", "src/app/A.kt:h")],
+     source=OR_KT + "'Call without an explicit receiver' (2. implicit receivers before 3. top-level)")
+case("kotlin", "explicit-import-before-package", "a top-level function imported by name comes before one of the same package",
+     KT, {"src/lib/L.kt": "package lib\n\nfun helper(): Int = 1\n",
+          "src/app/H.kt": "package app\n\nfun helper(): Int = 2\n",
+          "src/app/A.kt": "package app\n\nimport lib.helper\n\nfun run(): Int = helper()\n"},
+     [("run", "calls", "src/lib/L.kt:helper")], [("run", "calls", "src/app/H.kt:helper")],
+     source=OR_KT + "'Call without an explicit receiver' (3a. explicitly imported, 3b. same package)")
+case("kotlin", "package-before-star-import", "a top-level function of the same package comes before a star-imported one",
+     KT, {"src/lib/L.kt": "package lib\n\nfun helper(): Int = 1\n",
+          "src/app/H.kt": "package app\n\nfun helper(): Int = 2\n",
+          "src/app/A.kt": "package app\n\nimport lib.*\n\nfun run(): Int = helper()\n"},
+     [("run", "calls", "src/app/H.kt:helper")], [("run", "calls", "src/lib/L.kt:helper")],
+     source=OR_KT + "'Call without an explicit receiver' (3b. same package, 3c. star-imported)")
+case("kotlin", "local-extension-first", "an extension declared in the function comes before a top-level one",
+     KT, {"src/app/A.kt": "package app\n\nclass Repo\n\nfun Repo.size(): Int = 1\n\nfun run(r: Repo): Int {\n    fun Repo.size(): Int = 2\n    return r.size()\n}\n"},
+     [("run", "calls", "run.size")], [("run", "calls", "src/app/A.kt:size")],
+     source=OR_KT + "'Call with an explicit receiver' (2. extensions in the current scope, smallest first)")
+case("kotlin", "imported-extension-before-package", "an extension imported by name comes before one of the same package",
+     KT, {"src/lib/L.kt": "package lib\n\nimport app.Repo\n\nfun Repo.size(): Int = 1\n",
+          "src/app/R.kt": "package app\n\nclass Repo\n\nfun Repo.size(): Int = 2\n",
+          "src/app/A.kt": "package app\n\nimport lib.size\n\nfun run(r: Repo): Int = r.size()\n"},
+     [("run", "calls", "src/lib/L.kt:size")], [("run", "calls", "src/app/R.kt:size")],
+     source=OR_KT + "'Call with an explicit receiver' (3. explicitly imported, 4. package scope)")
+case("kotlin", "super-of-a-named-supertype", "`super<A>.f()` is A's member",
+     KT, {"src/app/A.kt": "package app\n\ninterface A {\n    fun f(): Int = 1\n}\n\ninterface B {\n    fun f(): Int = 2\n}\n\nclass C : A, B {\n    override fun f(): Int = super<A>.f() + super<B>.f()\n}\n"},
+     [("C.f", "calls", "A.f"), ("C.f", "calls", "B.f")],
+     source=OR_KT + "'Call with an explicit super-form receiver' (super<A>)")
+case("kotlin", "operator-call", "`a + b` calls the `operator fun plus` of a's type",
+     KT, {"src/app/A.kt": "package app\n\nclass Money(val cents: Int) {\n    operator fun plus(o: Money): Money = Money(cents + o.cents)\n}\n\nfun total(a: Money, b: Money): Money = a + b\n"},
+     [("total", "calls", "Money.plus")],
+     source=OR_KT + "'Operator call'; kotlin.core/operators.md (a + b is a.plus(b))")
+case("kotlin", "index-operator", "`a[i]` calls the `operator fun get` of a's type",
+     KT, {"src/app/A.kt": "package app\n\nclass Grid {\n    operator fun get(i: Int): Int = i\n}\n\nfun first(g: Grid): Int = g[0]\n"},
+     [("first", "calls", "Grid.get")],
+     source=OR_KT + "'Operator call'; kotlin.core/expressions.md 'Indexing expressions' (a[i] is a.get(i))")
+case("kotlin", "infix-call", "`a foo b` calls the `infix fun foo` of a's type",
+     KT, {"src/app/A.kt": "package app\n\nclass Range(val lo: Int) {\n    infix fun upTo(hi: Int): Int = hi - lo\n}\n\nfun span(r: Range): Int = r upTo 10\n"},
+     [("span", "calls", "Range.upTo")],
+     source=OR_KT + "'Infix function call'")
+case("kotlin", "most-specific-type", "of two applicable overloads, the one with the more specific parameter type",
+     KT, {"src/app/A.kt": "package app\n\nclass Log {\n    fun write(o: Any): Int = 1\n\n    fun write(s: String): Int = 2\n}\n\nfun run(l: Log): Int = l.write(\"x\")\n"},
+     [("run", "calls", "src/app/A.kt:Log.write@6")], [("run", "calls", "src/app/A.kt:Log.write@4")],
+     source=OR_KT + "'Choosing the most specific candidate from the overload candidate set'")
+case("kotlin", "non-vararg-before-vararg", "a candidate that needs no `vararg` expansion is more specific",
+     KT, {"src/app/A.kt": "package app\n\nclass Log {\n    fun write(vararg parts: String): Int = 1\n\n    fun write(one: String): Int = 2\n}\n\nfun run(l: Log): Int = l.write(\"x\")\n"},
+     [("run", "calls", "src/app/A.kt:Log.write@6")], [("run", "calls", "src/app/A.kt:Log.write@4")],
+     source=OR_KT + "'Algorithm of MSC selection' (a non-parameterized, non-vararg candidate wins a tie)")
+case("kotlin", "property-invoke", "a property of a function type called is the property, not a function of its name",
+     KT, {"src/app/A.kt": "package app\n\nfun handler(): Int = 1\n\nclass Job(val handler: () -> Int) {\n    fun run(): Int = handler()\n}\n"},
+     [], [("Job.run", "calls", "src/app/A.kt:handler")],
+     source=OR_KT + "'Callables and invoke convention' (a property with invoke is a callable of the receiver)")
+
 # --- running ------------------------------------------------------------------
 
 def _matches(node: dict[str, Any], want: str) -> bool:

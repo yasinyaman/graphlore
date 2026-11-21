@@ -25,7 +25,7 @@ python benchmarks/conformance.py --baseline benchmarks/results-conformance.json 
 python benchmarks/conformance.py --markdown      # the tables below
 ```
 
-Measured 2026-11-21 with graphlore-engine 0.5.68: **612 of 612 rules hold**
+Measured 2026-11-21 with graphlore-engine 0.5.69: **625 of 625 rules hold**
 (356 of the first 406 with 0.5.45). Ten came from the Go type checker and
 rust-analyzer run on whole repositories; fifteen from the Kotlin and Swift
 compilers' tests (type checks, casts, `catch`, aliases); thirty-nine from two
@@ -104,7 +104,7 @@ Each change was measured on the 45 audit repositories as well, by reading
 the edges it added and removed at their source lines; the page on the
 [native engine](native-engine.md#the-rules-themselves) has the numbers.
 Every case has been compiled by its own language
-(`benchmarks/verify_cases.py`: 612 of 612 accepted). The Versions column is
+(`benchmarks/verify_cases.py`: 625 of 625 accepted). The Versions column is
 the oldest version of the language whose compiler accepts the case, where the
 compiler can be asked (`verify_cases.py --min-version`: Java, Kotlin, Scala,
 C#, Swift, C, C++); `all` is the oldest version asked, `–` a language with no
@@ -411,11 +411,11 @@ Found by: the specification 41, a compiler 3, comparison 0, the grammar 4, the l
 | an overload applicable without boxing is chosen before one that needs it | `no-boxing-before-boxing` | – | yes |
 | a class declared in a block is a name of the block | `local-class` | – | yes |
 
-### kotlin (40 of 40)
+### kotlin (53 of 53)
 
 Kotlin Language Specification, 'Scopes and identifiers', 'Overload resolution' (receivers).
 
-Found by: the specification 31, a compiler 9, comparison 0, the grammar 0, the language's own tools 0. With the place it was read in the language's own tools: 0.
+Found by: the specification 31, a compiler 9, comparison 0, the grammar 0, the language's own tools 13. With the place it was read in the language's own tools: 13.
 
 | Rule | Case | Versions | Engine |
 |---|---|---|---|
@@ -459,6 +459,19 @@ Found by: the specification 31, a compiler 9, comparison 0, the grammar 0, the l
 | the type a typealias names is a use of it | `typealias-body` | all | yes |
 | a constructor parameter written `val` is a property of the class | `constructor-property-read` | all | yes |
 | the name of an argument given by name reads no property of that name | `named-argument-label` | all | yes |
+| a local function comes before a member of the implicit receiver | `local-function-before-member` | – | yes |
+| a member of the implicit receiver comes before a top-level function | `member-before-top-level` | – | yes |
+| a top-level function imported by name comes before one of the same package | `explicit-import-before-package` | – | yes |
+| a top-level function of the same package comes before a star-imported one | `package-before-star-import` | – | yes |
+| an extension declared in the function comes before a top-level one | `local-extension-first` | – | yes |
+| an extension imported by name comes before one of the same package | `imported-extension-before-package` | – | yes |
+| `super<A>.f()` is A's member | `super-of-a-named-supertype` | – | yes |
+| `a + b` calls the `operator fun plus` of a's type | `operator-call` | – | yes |
+| `a[i]` calls the `operator fun get` of a's type | `index-operator` | – | yes |
+| `a foo b` calls the `infix fun foo` of a's type | `infix-call` | – | yes |
+| of two applicable overloads, the one with the more specific parameter type | `most-specific-type` | – | yes |
+| a candidate that needs no `vararg` expansion is more specific | `non-vararg-before-vararg` | – | yes |
+| a property of a function type called is the property, not a function of its name | `property-invoke` | – | yes |
 
 ### scala (32 of 32)
 
@@ -862,4 +875,4 @@ Found by: the specification 31, a compiler 2, comparison 0, the grammar 1, the l
 | `$x instanceof T` and `catch (T $e)` are uses of T | `instanceof-and-catch` | – | yes |
 | an anonymous function's parameters and result name their types | `closure-signature` | – | yes |
 
-612 of 612 rules hold
+625 of 625 rules hold
