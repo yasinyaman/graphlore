@@ -3130,3 +3130,68 @@ fn value_places_the_reader_did_not_record() {
         ],
     );
 }
+
+/// The C# rules read out of the standard and Roslyn's binder (engine 0.5.64):
+/// overloads ranked by the written predefined type and by `params` form, the
+/// extensions of the closest namespace, a `using` inside a namespace block.
+#[test]
+fn csharp_rules_from_the_binder() {
+    let dir = project("csbinder", &[
+        (
+            "Log.cs",
+            "namespace App\n{\n    public class Log\n    {\n        public int Write(int n) { return 1; }\n\n        public int Write(object o) { return 2; }\n\n        public int Write(string s) { return 3; }\n\n        public int Many(string a, params string[] rest) { return 4; }\n\n        public int Many(string a, string b) { return 5; }\n    }\n\n    public class C\n    {\n        public int M(Log l) { return l.Write(\"x\") + l.Many(\"a\", \"b\"); }\n    }\n}\n",
+        ),
+        (
+            "Lib.cs",
+            "namespace Lib\n{\n    public class Repo\n    {\n        public int Find() { return 1; }\n    }\n}\n",
+        ),
+        (
+            "A.cs",
+            "namespace Use\n{\n    using Lib;\n\n    public class A\n    {\n        public int M(Repo r) { return r.Find(); }\n    }\n}\n\nnamespace Elsewhere\n{\n    public class Repo\n    {\n        public int Find() { return 2; }\n    }\n}\n",
+        ),
+    ]);
+    let (g, _) = build_graph(&BuildOptions::new(&dir)).unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+    let nodes = g["nodes"].as_array().unwrap();
+    let node = |id: &str| nodes.iter().find(|n| n["id"] == id).unwrap();
+    let calls: BTreeSet<(String, String)> = g["links"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|e| e["relation"] == "calls")
+        .map(|e| {
+            let s = node(e["source"].as_str().unwrap());
+            let t = node(e["target"].as_str().unwrap());
+            let at = t["source_location"].as_str().unwrap_or("").to_string();
+            (
+                format!(
+                    "{}:{}",
+                    s["source_file"].as_str().unwrap(),
+                    s["qualname"].as_str().unwrap()
+                ),
+                format!("{}@{}", t["qualname"].as_str().unwrap(), at.split('-').next().unwrap()),
+            )
+        })
+        .collect();
+    let want = [
+        ("Log.cs:App.C.M", "App.Log.Write@L9"),
+        ("Log.cs:App.C.M", "App.Log.Many@L13"),
+        ("A.cs:Use.A.M", "Lib.Repo.Find@L5"),
+    ];
+    for (s, t) in want {
+        assert!(calls.contains(&(s.to_string(), t.to_string())), "no {s} -> {t} in {calls:?}");
+    }
+    for (s, t) in [("Log.cs:App.C.M", "App.Log.Write@L7"), ("Log.cs:App.C.M", "App.Log.Many@L11")] {
+        assert!(!calls.contains(&(s.to_string(), t.to_string())), "{s} -> {t} in {calls:?}");
+    }
+}
+
+#[test]
+fn csharp_extensions_of_the_closest_namespace() {
+    let got = quals("csclosest", &[(
+        "A.cs",
+        "namespace App\n{\n    public class Repo\n    {\n    }\n\n    public static class Outer\n    {\n        public static int Size(this Repo r) { return 1; }\n    }\n\n    namespace Inner\n    {\n        public static class Near\n        {\n            public static int Size(this Repo r) { return 2; }\n        }\n\n        public class C\n        {\n            public int M(Repo r) { return r.Size(); }\n        }\n    }\n}\n",
+    )]);
+    has(&got, &[("App.Inner.C.M", "calls", "App.Inner.Near.Size")]);
+    lacks(&got, &[("App.Inner.C.M", "calls", "App.Outer.Size")]);
+}

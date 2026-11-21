@@ -1983,7 +1983,30 @@ impl<'a> Project<'a> {
                 },
                 None => continue,
             };
-            score += self.arg_fits(f, d, c, &a.kind, &param.ty)?;
+            // (C# `int`, `string`, `object` are predefined types the path of
+            // a written type leaves empty: the written text is the type)
+            let written: Vec<String>;
+            let w = param.written.trim().trim_end_matches('?');
+            // (only for a literal: a C# type of the project can convert to a
+            // predefined one through an `implicit operator`)
+            let literal = !matches!(a.kind, crate::facts::Arg::Path(_));
+            let ty = if literal
+                && self.family[c.0] == Some(Family::CSharp)
+                && param.ty.is_empty()
+                && !w.is_empty()
+                && w.chars().all(char::is_alphanumeric)
+            {
+                written = vec![w.to_string()];
+                &written
+            } else {
+                &param.ty
+            };
+            score += self.arg_fits(f, d, c, &a.kind, ty)?;
+        }
+        // a `params` member applicable only in its expanded form is worse than
+        // one applicable in its normal form (C# §12.6.4.3)
+        if variadic && r.args.is_some_and(|a| usize::from(a) != plist.len()) {
+            score -= 1;
         }
         Some(score)
     }
@@ -4453,7 +4476,7 @@ impl<'a> Project<'a> {
             return Some(Target::Def(found));
         }
         if let Some(r) = self.top_in(&[f], name) {
-            if self.acceptable(&Target::Def(r)) {
+            if self.acceptable(&Target::Def(r)) && self.cs_namespace_in_sight(f, d, r) {
                 return Some(Target::Def(r));
             }
         }
@@ -7329,6 +7352,60 @@ impl<'a> Project<'a> {
             .collect()
     }
 
+    /// The C# namespace a definition is written in: the innermost
+    /// namespace block around it, else the file's.
+    fn cs_namespace_of(&self, f: usize, mut i: usize) -> Option<String> {
+        loop {
+            let d = &self.files[f].defs[i];
+            if d.kind == DefKind::Namespace {
+                return Some(d.qualname.replace("::", "."));
+            }
+            match d.parent {
+                Some(p) => i = p,
+                None => return self.files[f].package.clone(),
+            }
+        }
+    }
+
+    /// C#: a definition of another namespace block of the file is no name
+    /// of the use's namespace unless that block is around it (§7.8.1).
+    fn cs_namespace_in_sight(&self, f: usize, d: Option<usize>, r: DefRef) -> bool {
+        if self.family[f] != Some(Family::CSharp) || r.0 != f {
+            return true;
+        }
+        let (Some(theirs), Some(mine)) =
+            (self.cs_namespace_of(r.0, r.1), d.and_then(|x| self.cs_namespace_of(f, x)))
+        else {
+            return true;
+        };
+        mine == theirs || mine.strip_prefix(theirs.as_str()).is_some_and(|x| x.starts_with('.'))
+    }
+
+    /// Of extensions written for one type, those of the namespace closest
+    /// around the use being resolved.
+    fn closest_extensions(&self, f: usize, exact: Vec<DefRef>) -> Vec<DefRef> {
+        let Some(home) = (*self.cur.borrow())
+            .filter(|(cf, _)| *cf == f)
+            .and_then(|(cf, ri)| self.files[cf].refs[ri].from_def)
+        else {
+            return exact;
+        };
+        let Some(mine) = self.cs_namespace_of(f, home) else { return exact };
+        let rank = |r: &DefRef| -> usize {
+            match self.cs_namespace_of(r.0, r.1) {
+                Some(ns)
+                    if mine == ns
+                        || mine.strip_prefix(ns.as_str()).is_some_and(|x| x.starts_with('.')) =>
+                {
+                    ns.split('.').count()
+                }
+                _ => 0,
+            }
+        };
+        let best = exact.iter().map(rank).max().unwrap_or(0);
+        exact.into_iter().filter(|r| rank(r) == best).collect()
+    }
+
     fn extension_method(
         &self,
         f: usize,
@@ -7387,6 +7464,13 @@ impl<'a> Project<'a> {
                     written.is_some_and(|t| t.eq_ignore_ascii_case(on))
                 })
                 .collect();
+            // C#: of several, those of the closest namespace around the use
+            // (an imported one ranks below every enclosing one: §12.8.10.3)
+            let exact = if fam == Some(Family::CSharp) && exact.len() > 1 {
+                self.closest_extensions(f, exact)
+            } else {
+                exact
+            };
             let mine: Vec<DefRef> = exact.iter().copied().filter(|r| r.0 == f).collect();
             match (mine.as_slice(), exact.as_slice()) {
                 ([one], _) | (_, [one]) => return Some((Target::Def(*one), Confidence::Extracted)),

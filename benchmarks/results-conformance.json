@@ -1,6 +1,6 @@
 {
- "passed": 541,
- "total": 541,
+ "passed": 559,
+ "total": 559,
  "cases": [
   {
    "id": "python/module-function",
@@ -3244,6 +3244,114 @@
   },
   {
    "id": "scala/generic-call",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/method-type-parameter-first",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/nested-type-of-a-base",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/namespace-type-before-using",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/using-alias-before-using-namespace",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/using-inside-a-namespace-block",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/local-hides-member",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/derived-member-hides-base",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/color-color",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/instance-method-before-extension",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/closest-extension-namespace",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/extension-needs-its-namespace",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/overload-exact-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/overload-without-defaults",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/overload-normal-before-params",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/overload-by-argument-name",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/overload-non-generic-first",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/inherited-from-a-grandparent",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/qualified-nested-type",
    "ok": true,
    "missing": [],
    "unwanted": []

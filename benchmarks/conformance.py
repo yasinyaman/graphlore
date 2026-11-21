@@ -2157,14 +2157,108 @@ case("scala", "generic-call", "`f[T](…)` calls f",
      SC, {"src/app/A.scala": "package app\n\nclass Parser {\n  def opt[A](name: String): Int = 1\n\n  def run(): Int = opt[String](\"foo\")\n}\n"},
      [("Parser.run", "calls", "Parser.opt")])
 
+# Phase 2 of docs/rule-sources.md: C#'s binding rules read from the C# standard
+# (dotnet/csharpstandard, `standard/`) and Roslyn's binder (dotnet/roslyn,
+# `src/Compilers/CSharp/Portable/Binder/`), step by step. Every rule the two
+# state is in `benchmarks/rule_inventory.py` with the case that holds it, or the
+# reason the engine does not follow it.
+found_by("source")
+RS_CS = "dotnet/roslyn@da9878a16b49:src/Compilers/CSharp/Portable/Binder/"
+STD_CS = "dotnet/csharpstandard@dce7bdbaa8b5:standard/"
+case("csharp", "method-type-parameter-first", "in a generic method a name of its type parameters is that parameter, not a type of the namespace",
+     CS, {"A.cs": "namespace App\n{\n    public class T\n    {\n    }\n\n    public class C\n    {\n        public int M<T>(T x)\n        {\n            return 1;\n        }\n\n        public int N(T x)\n        {\n            return 2;\n        }\n    }\n}\n"},
+     [("C.N", "references", "App.T")], [("C.M", "references", "App.T")],
+     source=STD_CS + "basic-concepts.md §7.8.1 (R₀, first step); " + RS_CS + "Binder_Lookup.cs LookupSymbolsInSingleBinder (InMethodBinder: type parameters)")
+case("csharp", "nested-type-of-a-base", "a nested type of a base class is named without its outer type in the derived class",
+     CS, {"A.cs": "namespace App\n{\n    public class Inner\n    {\n    }\n\n    public class Base\n    {\n        public class Inner\n        {\n        }\n    }\n\n    public class Derived : Base\n    {\n        public Inner Make()\n        {\n            return null;\n        }\n    }\n}\n"},
+     [("Derived.Make", "references", "Base.Inner")], [("Derived.Make", "references", "A.cs:App.Inner")],
+     source=STD_CS + "basic-concepts.md §7.8.1 (R₀: T or any of its base types contain a nested accessible type); " + RS_CS + "Binder_Lookup.cs LookupMembersInClass")
+case("csharp", "namespace-type-before-using", "a type of the namespace the use is in comes before one a `using` imports",
+     CS, {"Lib.cs": "namespace Lib\n{\n    public class Repo\n    {\n        public int Find() { return 1; }\n    }\n}\n",
+          "A.cs": "using Lib;\n\nnamespace App\n{\n    public class Repo\n    {\n        public int Find() { return 2; }\n    }\n\n    public class C\n    {\n        public int M(Repo r)\n        {\n            return r.Find();\n        }\n    }\n}\n"},
+     [("C.M", "calls", "App.Repo.Find")], [("C.M", "calls", "Lib.Repo.Find")],
+     source=STD_CS + "basic-concepts.md §7.8.1 (for each namespace N: a type of N before the using directives); " + RS_CS + "InContainerBinder.cs LookupSymbolsInSingleBinder")
+case("csharp", "using-alias-before-using-namespace", "an alias a `using` declares comes before a type of the same name another `using` imports",
+     CS, {"Lib.cs": "namespace Lib\n{\n    public class Repo\n    {\n        public int Find() { return 1; }\n    }\n}\n",
+          "Other.cs": "namespace Other\n{\n    public class Store\n    {\n        public int Find() { return 2; }\n    }\n\n    public class Repo\n    {\n        public int Find() { return 3; }\n    }\n}\n",
+          "A.cs": "namespace App\n{\n    using Repo = Other.Store;\n    using Lib;\n\n    public class C\n    {\n        public int M(Repo r)\n        {\n            return r.Find();\n        }\n    }\n}\n"},
+     [("C.M", "calls", "Other.Store.Find")], [("C.M", "calls", "Lib.Repo.Find"), ("C.M", "calls", "Other.Repo.Find")],
+     source=STD_CS + "basic-concepts.md §7.8.1 (a using_alias_directive before the using_namespace_directives); " + RS_CS + "WithExternAndUsingAliasesBinder.cs, WithUsingNamespacesAndTypesBinder.cs")
+case("csharp", "using-inside-a-namespace-block", "a `using` written inside a namespace block holds only inside it",
+     CS, {"Lib.cs": "namespace Lib\n{\n    public class Repo\n    {\n        public int Find() { return 1; }\n    }\n}\n",
+          "A.cs": "namespace App\n{\n    using Lib;\n\n    public class A\n    {\n        public int M(Repo r)\n        {\n            return r.Find();\n        }\n    }\n}\n\nnamespace Elsewhere\n{\n    public class Repo\n    {\n        public int Find() { return 2; }\n    }\n\n    public class B\n    {\n        public int M(Repo r)\n        {\n            return r.Find();\n        }\n    }\n}\n"},
+     [("A.M", "calls", "Lib.Repo.Find"), ("B.M", "calls", "Elsewhere.Repo.Find")], [("B.M", "calls", "Lib.Repo.Find")],
+     source=STD_CS + "namespaces.md §14.5.1 (the scope of a using directive is the namespace body that contains it)")
+case("csharp", "local-hides-member", "a local or a parameter of a name hides the member of that name",
+     CS, {"A.cs": "namespace App\n{\n    public class C\n    {\n        public int Count;\n\n        public int Get(int Count)\n        {\n            return Count;\n        }\n\n        public int Own()\n        {\n            return Count;\n        }\n    }\n}\n"},
+     [("C.Own", "reads", "C.Count")], [("C.Get", "reads", "C.Count")],
+     source=STD_CS + "expressions.md §12.8.4 (first step: a local variable, parameter or constant); " + RS_CS + "LocalScopeBinder.cs")
+case("csharp", "derived-member-hides-base", "a member of the derived class hides one of its name in the base",
+     CS, {"A.cs": "namespace App\n{\n    public class Base\n    {\n        public int Size() { return 1; }\n    }\n\n    public class Derived : Base\n    {\n        public new int Size() { return 2; }\n\n        public int Use() { return Size(); }\n    }\n\n    public class Client\n    {\n        public int M(Derived d) { return d.Size(); }\n\n        public int N(Base b) { return b.Size(); }\n    }\n}\n"},
+     [("Derived.Use", "calls", "Derived.Size"), ("Client.M", "calls", "Derived.Size"), ("Client.N", "calls", "Base.Size")],
+     [("Derived.Use", "calls", "Base.Size"), ("Client.M", "calls", "Base.Size"), ("Client.N", "calls", "Derived.Size")],
+     source=STD_CS + "expressions.md §12.5.1 (members hidden by other members are removed); " + RS_CS + "Binder_Lookup.cs LookupMembersInClass")
+case("csharp", "color-color", "`Color.White` where a property `Color Color` is in scope is the type's static member",
+     CS, {"A.cs": "namespace App\n{\n    public class Color\n    {\n        public static Color White = new Color();\n\n        public Color Complement() { return this; }\n    }\n\n    public class Shape\n    {\n        public Color Color { get; set; }\n\n        public Color Paint()\n        {\n            return Color.White;\n        }\n\n        public Color Flip()\n        {\n            return Color.Complement();\n        }\n    }\n}\n"},
+     [("Shape.Paint", "reads", "Color.White"), ("Shape.Flip", "calls", "Color.Complement")],
+     source=STD_CS + "expressions.md §12.8.7.2 (identical simple names and type names); " + RS_CS + "Binder_Expressions.cs BindLeftOfPotentialColorColorMemberAccess")
+case("csharp", "instance-method-before-extension", "an instance method that fits comes before an extension method of its name",
+     CS, {"A.cs": "namespace App\n{\n    public class Repo\n    {\n        public int Find(int id) { return id; }\n    }\n\n    public static class RepoExtensions\n    {\n        public static int Find(this Repo r, int id) { return 0; }\n\n        public static int Count(this Repo r) { return 0; }\n    }\n\n    public class C\n    {\n        public int M(Repo r) { return r.Find(1) + r.Count(); }\n    }\n}\n"},
+     [("C.M", "calls", "Repo.Find"), ("C.M", "calls", "RepoExtensions.Count")], [("C.M", "calls", "RepoExtensions.Find")],
+     source=STD_CS + "expressions.md §12.8.10.3 (an extension only if normal processing finds no applicable method); " + RS_CS + "Binder_Invocation.cs BindInvocationExpression")
+case("csharp", "closest-extension-namespace", "of extensions in sight, those of the closest enclosing namespace are the candidates",
+     CS, {"A.cs": "namespace App\n{\n    public class Repo\n    {\n    }\n\n    public static class Outer\n    {\n        public static int Size(this Repo r) { return 1; }\n    }\n\n    namespace Inner\n    {\n        public static class Near\n        {\n            public static int Size(this Repo r) { return 2; }\n        }\n\n        public class C\n        {\n            public int M(Repo r) { return r.Size(); }\n        }\n    }\n}\n"},
+     [("C.M", "calls", "Near.Size")], [("C.M", "calls", "Outer.Size")],
+     source=STD_CS + "expressions.md §12.8.10.3 (starting with the closest enclosing namespace declaration); " + RS_CS + "Binder_Lookup.cs LookupAllExtensions")
+case("csharp", "extension-needs-its-namespace", "an extension of a namespace neither around the use nor imported is not in sight",
+     CS, {"Ext.cs": "namespace Far\n{\n    public static class RepoExtensions\n    {\n        public static int Size(this App.Repo r) { return 1; }\n    }\n}\n",
+          "A.cs": "namespace App\n{\n    public class Repo\n    {\n        public int Size() { return 2; }\n    }\n\n    public class C\n    {\n        public int M(Repo r) { return r.Size(); }\n    }\n}\n"},
+     [("C.M", "calls", "Repo.Size")], [("C.M", "calls", "RepoExtensions.Size")],
+     source=STD_CS + "expressions.md §12.8.10.3 (candidate sets: the namespaces around and those their using directives import)")
+case("csharp", "overload-exact-type", "of two overloads that take the argument, the one whose parameter is its type is called",
+     CS, {"A.cs": "namespace App\n{\n    public class Log\n    {\n        public int Write(int n) { return 1; }\n\n        public int Write(object o) { return 2; }\n\n        public int Write(string s) { return 3; }\n    }\n\n    public class C\n    {\n        public int M(Log l) { return l.Write(\"x\"); }\n    }\n}\n"},
+     [("C.M", "calls", "A.cs:App.Log.Write@9")], [("C.M", "calls", "A.cs:App.Log.Write@5"), ("C.M", "calls", "A.cs:App.Log.Write@7")],
+     source=STD_CS + "expressions.md §12.6.4.3 (better function member), §12.6.4.5 (better conversion from expression); " + RS_CS + "Semantics/OverloadResolution/OverloadResolution.cs BetterFunctionMember")
+case("csharp", "overload-without-defaults", "an overload all of whose parameters have arguments is better than one that needs a default",
+     CS, {"A.cs": "namespace App\n{\n    public class Log\n    {\n        public int Write(int n) { return 1; }\n\n        public int Write(int n, int level = 0) { return 2; }\n    }\n\n    public class C\n    {\n        public int M(Log l) { return l.Write(1); }\n    }\n}\n"},
+     [("C.M", "calls", "A.cs:App.Log.Write@5")], [("C.M", "calls", "A.cs:App.Log.Write@7")],
+     source=STD_CS + "expressions.md §12.6.4.3 (default arguments substituted for an optional parameter make a member worse)")
+case("csharp", "overload-normal-before-params", "an overload applicable in its normal form is better than a `params` one in its expanded form",
+     CS, {"A.cs": "namespace App\n{\n    public class Log\n    {\n        public int Write(int a, int b) { return 1; }\n\n        public int Write(params int[] all) { return 2; }\n    }\n\n    public class C\n    {\n        public int M(Log l) { return l.Write(1, 2); }\n    }\n}\n"},
+     [("C.M", "calls", "A.cs:App.Log.Write@5")], [("C.M", "calls", "A.cs:App.Log.Write@7")],
+     source=STD_CS + "expressions.md §12.6.4.3 (if Mp is applicable in its normal form and Mq has a params array and is applicable only in its expanded form, Mp is better)")
+case("csharp", "overload-by-argument-name", "a named argument picks the overload that has a parameter of that name",
+     CS, {"A.cs": "namespace App\n{\n    public class Log\n    {\n        public int Write(int count) { return 1; }\n\n        public int Write(string text) { return 2; }\n    }\n\n    public class C\n    {\n        public int M(Log l, object v) { return l.Write(text: v.ToString()); }\n    }\n}\n"},
+     [("C.M", "calls", "A.cs:App.Log.Write@7")], [("C.M", "calls", "A.cs:App.Log.Write@5")],
+     source=STD_CS + "expressions.md §12.6.4.2 (applicable function member: each named argument corresponds to a parameter of that name)")
+case("csharp", "overload-non-generic-first", "of two candidates with the same parameter types, the one that is not generic is better",
+     CS, {"A.cs": "namespace App\n{\n    public class Log\n    {\n        public int Write<T>(T value) { return 1; }\n\n        public int Write(string text) { return 2; }\n    }\n\n    public class C\n    {\n        public int M(Log l) { return l.Write(\"x\"); }\n    }\n}\n"},
+     [("C.M", "calls", "A.cs:App.Log.Write@7")], [("C.M", "calls", "A.cs:App.Log.Write@5")],
+     source=STD_CS + "expressions.md §12.6.4.3 (if MP is a non-generic method and MQ is a generic method, MP is better); " + RS_CS + "OverloadResolution.cs BetterFunctionMember")
+case("csharp", "inherited-from-a-grandparent", "a member of a base of the base class is a member of the class",
+     CS, {"A.cs": "namespace App\n{\n    public class Root\n    {\n        public int Id() { return 1; }\n    }\n\n    public class Mid : Root\n    {\n    }\n\n    public class Leaf : Mid\n    {\n        public int Use() { return Id(); }\n    }\n\n    public class C\n    {\n        public int M(Leaf l) { return l.Id(); }\n    }\n}\n"},
+     [("Leaf.Use", "calls", "Root.Id"), ("C.M", "calls", "Root.Id")],
+     source=STD_CS + "expressions.md §12.5.1 (all accessible members named N in T, including inherited members), §12.5.2")
+case("csharp", "qualified-nested-type", "`Outer.Inner` names the nested type",
+     CS, {"A.cs": "namespace App\n{\n    public class Inner\n    {\n    }\n\n    public class Outer\n    {\n        public class Inner\n        {\n            public int Go() { return 1; }\n        }\n    }\n\n    public class C\n    {\n        public int M(Outer.Inner i) { return i.Go(); }\n    }\n}\n"},
+     [("C.M", "references", "Outer.Inner"), ("C.M", "calls", "Outer.Inner.Go")], [("C.M", "references", "A.cs:App.Inner")],
+     source=STD_CS + "basic-concepts.md §7.8.1 (trailing part: a nested accessible type of Rₚ); " + RS_CS + "Binder_Symbols.cs BindQualifiedName")
+
 # --- running ------------------------------------------------------------------
 
 def _matches(node: dict[str, Any], want: str) -> bool:
     qual = node.get("qualname")
     if ":" in want:
-        # `path:name`: that very definition, by its whole qualified name
+        # `path:name`: that very definition, by its whole qualified name;
+        # `path:name@line` the one of several (overloads) on that line
         path, want = want.split(":", 1)
-        return bool(str(node.get("source_file") or "") == path and qual == want)
+        line = None
+        if "@" in want:
+            want, at = want.rsplit("@", 1)
+            line = int(at)
+        loc = str(node.get("source_location") or "").lstrip("L").split("-")[0]
+        return bool(str(node.get("source_file") or "") == path and qual == want
+                    and (line is None or loc == str(line)))
     if qual:
         return bool(qual == want or qual.endswith("." + want))
     return bool(node.get("label") == want)
@@ -2223,11 +2317,12 @@ def main() -> int:
         passed = sum(1 for c in mine if results[c["id"]]["ok"])
         if args.markdown:
             how = {h: sum(1 for c in mine if c["found"] == h)
-                   for h in ("specification", "compiler", "comparison", "grammar")}
+                   for h in ("specification", "compiler", "comparison", "grammar", "source")}
             read = sum(1 for c in mine if c["source"])
             print(f"\n### {lang} ({passed} of {len(mine)})\n\n{mine[0]['where']}.\n")
             print(f"Found by: the specification {how['specification']}, a compiler {how['compiler']}, "
-                  f"comparison {how['comparison']}, the grammar {how['grammar']}. "
+                  f"comparison {how['comparison']}, the grammar {how['grammar']}, "
+                  f"the language's own tools {how['source']}. "
                   f"With the place it was read in the language's own "
                   f"tools: {read}.\n")
             print("| Rule | Case | Versions | Engine |\n|---|---|---|---|")
