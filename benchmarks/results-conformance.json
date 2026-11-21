@@ -1,6 +1,6 @@
 {
- "passed": 496,
- "total": 496,
+ "passed": 502,
+ "total": 502,
  "cases": [
   {
    "id": "python/module-function",
@@ -2974,6 +2974,42 @@
   },
   {
    "id": "swift/self-constructs",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/property-body-is-the-property",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/block-namespace-sees-outer-extension",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/brace-opened-in-a-directive",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/local-from-member-read",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/initializer-without-arguments",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/partial-type-constructor",
    "ok": true,
    "missing": [],
    "unwanted": []

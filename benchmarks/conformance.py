@@ -1971,6 +1971,32 @@ case("swift", "self-constructs", "`Self()` constructs the type around",
      SW, {"a.swift": "struct Point {\n    var x = 0\n\n    init() {}\n\n    static func origin() -> Point {\n        Self()\n    }\n}\n"},
      [("Point.origin", "calls", "Point")])
 
+# The confirmed edges of graphify's the native graph lacked (`verify_graphify.py`, engine 0.5.59).
+case("csharp", "property-body-is-the-property", "what a property's accessor calls is the property's call, not its class's",
+     CS, {"A.cs": "namespace App\n{\n    public static class Setter\n    {\n        public static void Set(ref bool f, bool v) { f = v; }\n    }\n\n    public static class Helper\n    {\n        public static int Size() { return 1; }\n    }\n\n    public class Settings\n    {\n        private bool mode;\n\n        public bool Mode\n        {\n            get => mode;\n            set => Setter.Set(ref mode, value);\n        }\n\n        public int Count => Helper.Size();\n    }\n}\n"},
+     [("Settings.Mode", "calls", "Setter.Set"), ("Settings.Count", "calls", "Helper.Size")],
+     [("Settings", "calls", "Setter.Set")])
+case("csharp", "block-namespace-sees-outer-extension", "a namespace written as a block sees the extensions of the namespaces around it",
+     CS, {"A.cs": "namespace App\n{\n    public class Help\n    {\n        public override string ToString() { return \"\"; }\n    }\n}\n",
+          "tests/Ext.cs": "namespace App.Tests\n{\n    static class StringExtensions\n    {\n        public static string[] ToNotEmptyLines(this string value) { return null; }\n    }\n}\n",
+          "tests/unit/T.cs": "using App;\n\nnamespace App.Tests.Unit\n{\n    public class Tests\n    {\n        public int Run(Help sut)\n        {\n            var lines = sut.ToString().ToNotEmptyLines();\n            return lines.Length;\n        }\n    }\n}\n"},
+     [("Tests.Run", "calls", "StringExtensions.ToNotEmptyLines")])
+case("csharp", "brace-opened-in-a-directive", "a brace an `#if` opens and a later `#if` closes hides no member after it",
+     CS, {"A.cs": "namespace App;\n\npublic class Handler\n{\n    public bool Cookies;\n}\n\npublic class Client\n{\n    static void Configure(Handler handler)\n    {\n#if NET\n        if (!System.OperatingSystem.IsBrowser()) {\n#endif\n        handler.Cookies = false;\n#if NET\n        }\n#endif\n    }\n\n    public void Dispose()\n    {\n    }\n}\n\npublic class Tests\n{\n    readonly Client _client = new Client();\n\n    public void Done()\n    {\n        _client.Dispose();\n    }\n}\n"},
+     [("Tests.Done", "calls", "Client.Dispose")])
+case("csharp", "local-from-member-read", "a local assigned a member read is what the member holds",
+     CS, {"A.cs": "namespace App\n{\n    public class Parser\n    {\n        public static Parser Default { get { return null; } }\n        public Parser Next;\n\n        public int Go() { return 1; }\n    }\n\n    public class Other\n    {\n        public int Go() { return 2; }\n    }\n\n    public class Tests\n    {\n        public int A()\n        {\n            var sut = Parser.Default;\n            return sut.Go();\n        }\n\n        public int B(Parser p)\n        {\n            var next = p.Next;\n            return next.Go();\n        }\n    }\n}\n"},
+     [("Tests.A", "calls", "Parser.Go"), ("Tests.B", "calls", "Parser.Go")],
+     [("Tests.A", "calls", "Other.Go"), ("Tests.B", "calls", "Other.Go")])
+case("csharp", "initializer-without-arguments", "`new T { … }` with no argument list calls the constructor that takes none",
+     CS, {"A.cs": "namespace App\n{\n    public class Help\n    {\n        public bool Dashes { get; set; }\n\n        public Help() { }\n\n        public Help(string heading) { }\n    }\n\n    public class Tests\n    {\n        public Help Make()\n        {\n            return new Help { Dashes = true };\n        }\n    }\n}\n"},
+     [("Tests.Make", "calls", "Help.Help")])
+case("csharp", "partial-type-constructor", "a partial type's constructors are those of every file that declares it",
+     CS, {"A.cs": "namespace App\n{\n    public partial class Client\n    {\n        public void Send() { }\n    }\n}\n",
+          "B.cs": "namespace App\n{\n    public partial class Client\n    {\n        public Client(string url = null) { }\n\n        public Client(int port, string url) { }\n    }\n}\n",
+          "T.cs": "namespace App.Tests\n{\n    public class Tests\n    {\n        public Client Make()\n        {\n            return new Client();\n        }\n    }\n}\n"},
+     [("Tests.Make", "calls", "Client.Client")])
+
 # --- running ------------------------------------------------------------------
 
 def _matches(node: dict[str, Any], want: str) -> bool:

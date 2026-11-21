@@ -240,8 +240,10 @@ def compare(name: str, files: dict[str, list[str]], uses: list[dict[str, Any]],
         places = [target]
         if t.get("kind") == "constructor" and "." in str(t["qualname"]):
             owner = str(t["qualname"]).rsplit(".", 1)[0]
+            # (a C# partial type is declared in several files: any of them)
+            partial = str(t["source_file"]).endswith(".cs")
             places += [(n["source_file"], line_of(n.get("source_location"))) for n in code.values()
-                       if n["qualname"] == owner and n["source_file"] == t["source_file"]]
+                       if n["qualname"] == owner and (partial or n["source_file"] == t["source_file"])]
         row = {"case": name, "file": site[0], "line": site[1], "relation": e["relation"],
                "confidence": e.get("confidence"), "to": t["qualname"],
                "src": files.get(site[0], [""] * site[1])[site[1] - 1].strip()[:110]}

@@ -769,7 +769,7 @@ file pairs). The native graph has definitions graphify folds into the one
 around them (a function nested in a method, the setter beside a getter of the
 same name); an edge from one of those is compared as an edge from the paired
 definition it belongs to, as graphify records it. On the 31 repositories of the
-[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.58,
+[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.59,
 measured 2026-11-21), as native / graphify edges and the share of graphify's
 that the native graph has too:
 
@@ -783,7 +783,7 @@ that the native graph has too:
 | Java | 100% | 1,105 / 1,010 (100%) | 5,760 / 5,123 (85%) | 415 / 168 (94%) | 4,049 / 1,930 (98%) |
 | Kotlin | 99.4% | 368 / 333 (95%) | 4,616 / 2,108 (68%) | 96 / 56 (93%) | 1,466 / 673 (94%) |
 | Scala | 100% | 2 / 0 | 78 / 20 (50%) | 21 / 22 (95%) | 47 / 32 (100%) |
-| C# | 92.8% | 343 / 280 (29%) | 3,325 / 2,460 (97%) | 91 / 86 (98%) | 1,660 / 928 (96%) |
+| C# | 92.9% | 338 / 280 (29%) | 3,467 / 2,467 (97%) | 91 / 86 (98%) | 1,655 / 929 (95%) |
 | Rust | 93.3% | 314 / 370 (75%) | 2,100 / 853 (86%) | 53 / 41 (93%) | 1,568 / 895 (87%) |
 | Swift | 95.9% | 171 / 166 (0%) | 5,494 / 2,141 (83%) | 190 / 164 (100%) | 1,748 / 580 (79%) |
 | C | 100% | 89 / 77 (99%) | 864 / 791 (100%) | – | 263 / 130 (100%) |
@@ -791,12 +791,12 @@ that the native graph has too:
 | C/C++ headers | 91.4% | 164 / 172 (95%) | 422 / 348 (87%) | 12 / 12 (92%) | 701 / 312 (88%) |
 | Ruby | 99.7% | 42 / 0 | 455 / 375 (69%) | 47 / 15 (93%) | 71 / 0 |
 | PHP | 80.6% | 509 / 505 (100%) | 8,920 / 6,140 (90%) | 65 / 60 (98%) | 1,572 / 213 (100%) |
-| **All** | **94.4%** | **5,102 / 5,565 (76%)** | **44,899 / 27,842 (85%)** | **1,138 / 726 (97%)** | **16,288 / 6,936 (93%)** |
+| **All** | **94.4%** | **5,097 / 5,565 (76%)** | **45,041 / 27,849 (85%)** | **1,138 / 726 (97%)** | **16,283 / 6,937 (93%)** |
 
 ⁶ Swift's type references are engine 0.5.44's, which reads the type of a
 stored property (62% before; see [the second set](#a-second-set-of-repositories)).
 
-Of the native calls, 12,949 (29%) are `INFERRED`, against 47% of graphify's.
+Of the native calls, 12,965 (29%) are `INFERRED`, against 47% of graphify's.
 A type reference counts as found when the native graph states it another way:
 graphify writes a type a method uses on the method's *class* and a
 construction as a `uses` edge, the native graph an edge from the method and a
@@ -1451,14 +1451,14 @@ the table above:
 | gson | 100% | 1,048 / 1,079 (97%) | 10,102 / 7,293 (97%) | 516 / 199 (95%) | 3,707 / 1,288 (96%) |
 | clikt | 99.2% | 597 / 480 (98%) | 1,975 / 1,181 (91%) | 477 / 110 (98%) | 851 / 478 (95%) |
 | scopt | 100% | 6 / 8 (0%) | 401 / 213 (83%) | 25 / 25 (100%) | 176 / 87 (89%) |
-| commandline | 96.3% | 256 / 148 (8%) | 2,184 / 1,894 (83%) | 49 / 49 (92%) | 1,535 / 823 (88%) |
+| commandline | 96.3% | 256 / 148 (8%) | 2,444 / 1,894 (95%) | 49 / 49 (92%) | 1,525 / 823 (88%) |
 | ripgrep | 97.2% | 173 / 250 (61%) | 5,488 / 2,952 (81%) | 124 / 117 (98%) | 2,496 / 1,362 (87%) |
 | swift-argument-parser | 94.9% | 271 / 212 (0%) | 1,803 / 957 (90%) | 599 / 438 (100%) | 1,065 / 677 (77%) |
 | cJSON | 97.3% | 171 / 170 (99%) | 1,241 / 1,228 (99%) | – | 203 / 89 (100%) |
 | leveldb | 95.6% | 499 / 499 (100%) | 3,401 / 2,064 (91%) | 70 / 17 (100%) | 1,874 / 748 (87%) |
 | thor | 100% | 61 / 0 | 687 / 533 (83%) | 43 / 4 (100%) | 61 / 0 |
 | monolog | 93.6% | 438 / 439 (100%) | 3,755 / 2,207 (88%) | 241 / 239 (96%) | 912 / 392 (98%) |
-| **All** | **97.7%** | **5,118 / 4,922 (82%)** | **38,441 / 25,537 (90%)** | **2,922 / 1,840 (98%)** | **20,030 / 6,752 (91%)** |
+| **All** | **97.7%** | **5,118 / 4,922 (82%)** | **38,701 / 25,537 (91%)** | **2,922 / 1,840 (98%)** | **20,020 / 6,752 (91%)** |
 
 (Engine 0.5.58; with 0.5.44 the table's last row was 95.5% of the definitions
 and 67% / 85% / 80% / 80% of the edges.) 20% of the native calls are `INFERRED`. The low cells of the first
@@ -1827,11 +1827,11 @@ has no answer and is left out):
 python benchmarks/oracle_csharp.py /tmp/polyglot/todoapi /tmp/polyglot/restsharp /tmp/polyglot/commandline /tmp/polyglot/aspnetcore-realworld
 ```
 
-| | 0.5.56 | 0.5.57 | 0.5.58 |
-|---|---:|---:|---:|
-| edges whose site the compiler has an answer for | 10,308 | 10,251 | 10,344 |
-| of them, to the declaration it names | 9,863 (95.7%) | 9,863 (96.2%) | 10,143 (98.1%) |
-| uses it binds to a definition the graph has, with an edge | 77.1% | 77.1% | 78.9% |
+| | 0.5.56 | 0.5.57 | 0.5.58 | 0.5.59 |
+|---|---:|---:|---:|---:|
+| edges whose site the compiler has an answer for | 10,308 | 10,251 | 10,344 | 10,737 |
+| of them, to the declaration it names | 9,863 (95.7%) | 9,863 (96.2%) | 10,143 (98.1%) | 10,513 (97.9%) |
+| uses it binds to a definition the graph has, with an edge | 77.1% | 77.1% | 78.9% | 79.7% |
 
 The 388 edges 0.5.57 left were not spread evenly, and 0.5.58 took the two
 clusters. About 150 were one rule: C# tells `RestResponse` from
@@ -1844,6 +1844,17 @@ property `ContentType` where the compiler means the type of that name, and
 single cases. The uses with no edge are, by count, an object initializer's
 property names (left out on purpose, as a Go struct literal's are) and the
 types of a lambda's parameters.
+
+0.5.59 added 393 edges the compiler has an answer for (the confirmed edges
+of graphify's below), and the edges called wrong went from 201 to 224: 9
+gone, 32 new. 21 of the new ones are one call, `type.GetTypeInfo()`, and the
+rest overloads of one extension that fit alike, each `INFERRED`. commandline
+declares an extension of
+that name for `Type` inside `#if NET40`, which a namespace written as a block
+now sees. The engine reads every branch of an `#if`; the compiler, given no
+symbol, reads none of that one and binds the name to .NET's. Neither is wrong
+about the source, and the edge is right for the configuration that defines
+the symbol.
 
 What this is not: Java, C, C++, Ruby, PHP, Python. javac and clang could be
 asked the same way; neither is yet. And a compiler finds a rule read wrong
@@ -1871,7 +1882,7 @@ made again for each kind:
 python benchmarks/verify_graphify.py /tmp/polyglot/cobra /tmp/polyglot/ripgrep /tmp/polyglot/restsharp   # Go, Rust, C# repositories
 ```
 
-On the twelve repositories of the three oracles (engine 0.5.58, graphify
+On the twelve repositories of the three oracles (engine 0.5.59, graphify
 0.9.111, measured 2026-11-21), over the edges between definitions both graphs
 have:
 
@@ -1883,30 +1894,59 @@ have:
 | Rust | calls | 3,804 | 2,609 | 481 | 53 | 661 | 3,131 (82%) | 2,579 (99%) | 2,579 (99%) | 25 (5%) |
 | Rust | bases | 158 | 147 | 0 | 0 | 11 | 153 (97%) | 142 (97%) | 142 (97%) | 0 (–) |
 | Rust | references | 2,257 | 1,575 | 54 | 0 | 628 | 1,963 (87%) | 1,396 (89%) | 1,536 (98%) | 2 (4%) |
-| C# | calls | 4,354 | 3,714 | 110 | 0 | 530 | 3,948 (91%) | 3,454 (93%) | 3,454 (93%) | 9 (8%) |
+| C# | calls | 4,361 | 3,720 | 111 | 0 | 530 | 4,193 (96%) | 3,692 (99%) | 3,692 (99%) | 29 (26%) |
 | C# | bases | 135 | 106 | 3 | 0 | 26 | 129 (96%) | 105 (99%) | 105 (99%) | 2 (67%) |
-| C# | references | 1,751 | 1,383 | 109 | 0 | 259 | 1,612 (92%) | 1,379 (100%) | 1,379 (100%) | 16 (15%) |
+| C# | references | 1,752 | 1,384 | 109 | 0 | 259 | 1,612 (92%) | 1,379 (100%) | 1,379 (100%) | 16 (15%) |
 
 Read with only the confirmed edges, the picture changes where it looked
 worst. Rust calls: the native graph has 82% of graphify's, and 99% of the
 ones the compiler confirms; of the 673 it lacks, 456 are edges the compiler
 refutes (a method of the same name on another type, mostly: a call of a
-connection's `is_open()` linked to a test transport's `is_open`) and 49 point to one implementation of
-a trait's method. Rust references are 89% of the confirmed, and 98% once an
-edge to an enum's member is counted with the edge to the enum the native
-graph writes for it (its rule; 140 edges). Go was already whole. What is left
-is real and is C#'s: 260 confirmed calls the native graph does not have, 207
-of them in commandline (extension methods chained on a library's value in the
-tests, `text.ToNotEmptyLines().TrimStringArray()`, 62 edges, and edges that
-leave from a property, `Examples`) and 51 in RestSharp (`Dispose()` and
-constructors, mostly).
+connection's `is_open()` linked to a test transport's `is_open`) and 49
+point to one implementation of a trait's method. Rust references are 89% of
+the confirmed, and 98% once an edge to an enum's member is counted with the
+edge to the enum the native graph writes for it (its rule; 140 edges). Go was
+already whole.
+
+**The confirmed edges are a floor.** graphify's graph is what the native one
+replaces, so an edge of graphify's that the compiler confirms is one the
+native graph must have. With engine 0.5.58 it lacked 346 of the 14,393
+confirmed edges (14,400 now that constructors are judged one by one), 260 of them C# calls. Reading those gave six rules, each a
+case of the checklist now (0.5.59):
+
+- what a property's accessor calls is the property's call, not its class's
+  (`set => PopsicleSetter.Set(…)`): graphify hangs it on the property, and so
+  does the compiler;
+- a namespace written as a block (`namespace N { … }`) sees the extensions of
+  the namespaces around it, as one written for the whole file already did
+  (`text.ToNotEmptyLines().TrimStringArray()` in commandline's tests);
+- a brace an `#if` opens and a later `#if` closes (`#if NET` / `if
+  (!OperatingSystem.IsBrowser()) {` / `#endif`) no longer hides the members
+  after it: every `_client.Dispose()` of RestSharp's tests had no target;
+- a local assigned a member read is what the member holds (`var sut =
+  Parser.Default;`), which 0.5.56 read in Go and Rust and not in C#;
+- `new T { … }` with no argument list calls the constructor that takes none;
+- a partial type's constructors are those of every file that declares it.
+
+It lacks 115 now: 28 C# calls (99% of the confirmed ones), 30 Rust calls, 39
+Rust references, and a handful in every other row.
+`benchmarks/results-verify-graphify.json` holds those counts per repository
+and kind of edge, and `verify_graphify.py --baseline` exits 1 when a build
+lacks more than it did:
+
+```bash
+python benchmarks/verify_graphify.py REPO... --baseline benchmarks/results-verify-graphify.json
+```
+
+Roslyn is also asked which constructor a `new Foo(…)` chose, so an edge of
+graphify's to a constructor is confirmed only when it names that one.
 
 graphify itself, by the same judge: every Go edge the compiler answers is
 confirmed; 84% of its Rust calls and 97% of its Rust references; 97% of its
-C# calls and 93% of its C# references (most of the 109 refuted are `RestResponse`
-linked to `RestResponse<T>`, the namesake 0.5.58 tells apart). Its `INFERRED`
-calls are not the weak ones: in Rust 94% of them are confirmed against 83% of
-the `EXTRACTED`.
+C# calls and 93% of its C# references (most of the 109 refuted are
+`RestResponse` linked to `RestResponse<T>`, the namesake 0.5.58 tells
+apart). Its `INFERRED` calls are not the weak ones: in Rust 94% of them are
+confirmed against 83% of the `EXTRACTED`.
 
 This covers three of the fourteen languages. For the others no compiler is
 asked about whole repositories yet, and their rows in the tables above still

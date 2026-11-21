@@ -156,7 +156,11 @@ pub fn facts_for_source(rel: &str, src: &[u8], deadline: Option<Duration>) -> Fi
 /// type around. The source with the directive lines and every branch but the
 /// first blanked, or `None` when no group is like that; of a group with one
 /// branch only the two directive lines go, its lines being part of the
-/// expression. `spans.py`'s `_blank_expression_branches` is the same rule.
+/// expression. A group whose first branch leaves a brace open or closes one
+/// it did not open (`#if NET` / `if (!OperatingSystem.IsBrowser()) {` /
+/// `#endif`, closed by a `}` in a later group) is treated the same: the
+/// parser, pairing the brace inside the group, loses the members after it.
+/// `spans.py`'s `_blank_expression_branches` is the same rule.
 pub fn blank_expression_branches(src: &[u8]) -> Option<Vec<u8>> {
     if !src.windows(3).any(|w| w == b"#if") {
         return None;
@@ -168,7 +172,9 @@ pub fn blank_expression_branches(src: &[u8]) -> Option<Vec<u8>> {
         (lo, hi)
     };
     let mut blank: Vec<(usize, usize)> = Vec::new(); // line ranges, inclusive
-    let mut stack: Vec<(bool, Vec<usize>)> = Vec::new();
+                                                     // (opened inside an expression, its directive lines, the braces its
+                                                     // first branch leaves open)
+    let mut stack: Vec<(bool, Vec<usize>, i64)> = Vec::new();
     let mut last: Option<u8> = None; // how the last line of code ends
     for (li, line) in lines.iter().enumerate() {
         let (lo, hi) = trim(line);
@@ -181,7 +187,7 @@ pub fn blank_expression_branches(src: &[u8]) -> Option<Vec<u8>> {
             match word.as_slice() {
                 b"if" => {
                     let inside = last.is_some_and(|c| !b";{}],)".contains(&c));
-                    stack.push((inside, vec![li]));
+                    stack.push((inside, vec![li], 0));
                 }
                 b"elif" | b"else" => {
                     if let Some(g) = stack.last_mut() {
@@ -189,8 +195,8 @@ pub fn blank_expression_branches(src: &[u8]) -> Option<Vec<u8>> {
                     }
                 }
                 b"endif" => {
-                    if let Some((inside, directives)) = stack.pop() {
-                        if inside {
+                    if let Some((inside, directives, open)) = stack.pop() {
+                        if inside || open != 0 {
                             blank.push((directives[0], directives[0]));
                             blank.push((directives.get(1).copied().unwrap_or(li), li));
                         }
@@ -204,6 +210,12 @@ pub fn blank_expression_branches(src: &[u8]) -> Option<Vec<u8>> {
         let (_, end) = trim(&t[..cut]);
         if end > 0 {
             last = Some(t[end - 1]);
+            let code = &t[..end];
+            let open = code.iter().filter(|c| **c == b'{').count() as i64
+                - code.iter().filter(|c| **c == b'}').count() as i64;
+            for g in stack.iter_mut().filter(|g| g.1.len() == 1) {
+                g.2 += open;
+            }
         }
     }
     if blank.is_empty() {

@@ -1360,6 +1360,13 @@ fn is_comment(n: &Node) -> bool {
 /// How many arguments a call passes: the entries of its argument list, and a
 /// trailing lambda (Kotlin, Swift) as one more.
 fn arg_count(n: Node) -> Option<u8> {
+    // C# `new Options { Flag = true }`: no list, no argument
+    if n.kind() == "object_creation_expression"
+        && n.child_by_field_name("arguments").is_none()
+        && n.child_by_field_name("initializer").is_some()
+    {
+        return Some(0);
+    }
     let (list, lambdas) = argument_list(n)?;
     let passed = list.map_or(0, |l| kids(l).iter().filter(|c| !is_comment(c)).count());
     u8::try_from(passed + lambdas).ok()
@@ -2599,7 +2606,14 @@ fn locals_of(n: Node, src: &[u8], in_params: bool) -> Vec<(String, Vec<String>, 
                             kids(x).into_iter().find(|c| {
                                 callee(*c, src).is_some()
                                     || is_cast(*c)
-                                    || matches!(c.kind(), "await_expression" | "try_expression")
+                                    || matches!(
+                                        c.kind(),
+                                        "await_expression"
+                                            | "try_expression"
+                                            // (`var sut = Parser.Default`: what
+                                            // the member holds)
+                                            | "member_access_expression"
+                                    )
                             })
                         })
                         .or_else(beside);
@@ -6305,6 +6319,24 @@ fn innermost_where(
     out
 }
 
+/// A C# property written with a body: an accessor with a block or an
+/// expression, or `=> expr` for the property itself. (`{ get; set; }` has
+/// none: what initializes it is the type's use.)
+fn computed_property(node: Node) -> bool {
+    if node.kind() != "property_declaration"
+        || crate::parse::current() != Some(crate::lang::Lang::CSharp)
+    {
+        return false;
+    }
+    kids(node).into_iter().any(|c| match c.kind() {
+        "arrow_expression_clause" => true,
+        "accessor_list" => kids(c).into_iter().any(|a| {
+            kids(a).into_iter().any(|b| matches!(b.kind(), "block" | "arrow_expression_clause"))
+        }),
+        _ => false,
+    })
+}
+
 /// The closures no definition holds, as definitions of their own (see
 /// `Def::block`): a test file's `it('…', () => { … })` has locals like a
 /// function's, and each such callback its own. One inside another has it as
@@ -6377,6 +6409,7 @@ fn add_blocks(
             misread: false,
             block: true,
             returned_out: false,
+            computed: false,
             unspanned: false,
             inline_body: None,
             created_from: None,
@@ -6560,6 +6593,7 @@ fn add_extras(
             misread: false,
             block: false,
             returned_out: false,
+            computed: !*state && computed_property(*node),
             unspanned: false,
             inline_body: inline,
             created_from: kind.is_state().then(|| created_from(*node, src)).flatten(),

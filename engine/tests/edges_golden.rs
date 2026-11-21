@@ -2944,3 +2944,43 @@ fn csharp_types_by_arity_kotlin_constructor_properties_and_swift_self() {
         ],
     );
 }
+
+#[test]
+fn csharp_property_bodies_block_namespaces_directive_braces_and_constructors() {
+    let got = quals("confirmed", &[
+        (
+            "A.cs",
+            "namespace App\n{\n    public static class Setter\n    {\n        public static void Set(ref bool f, bool v) { f = v; }\n    }\n\n    public class Settings\n    {\n        private bool mode;\n\n        public bool Mode\n        {\n            get => mode;\n            set => Setter.Set(ref mode, value);\n        }\n    }\n\n    public class Help\n    {\n        public bool Dashes { get; set; }\n\n        public Help() { }\n\n        public Help(string heading) { }\n\n        public override string ToString() { return \"\"; }\n    }\n\n    public class Parser\n    {\n        public static Parser Default { get { return null; } }\n\n        public int Go() { return 1; }\n    }\n\n    public class Other\n    {\n        public int Go() { return 2; }\n    }\n\n    public class Handler\n    {\n        public bool Cookies;\n    }\n\n    public partial class Client\n    {\n        static void Configure(Handler handler)\n        {\n#if NET\n            if (!System.OperatingSystem.IsBrowser()) {\n#endif\n            handler.Cookies = false;\n#if NET\n            }\n#endif\n        }\n\n        public void Dispose()\n        {\n        }\n    }\n}\n",
+        ),
+        (
+            "B.cs",
+            "namespace App\n{\n    public partial class Client\n    {\n        public Client(string url = null) { }\n\n        public Client(int port, string url) { }\n    }\n}\n",
+        ),
+        (
+            "tests/Ext.cs",
+            "namespace App.Tests\n{\n    static class StringExtensions\n    {\n        public static string[] ToNotEmptyLines(this string value) { return null; }\n    }\n}\n",
+        ),
+        (
+            "tests/unit/T.cs",
+            "using App;\n\nnamespace App.Tests.Unit\n{\n    public class Tests\n    {\n        readonly Client _client = new Client();\n\n        public int Run()\n        {\n            var sut = new Help { Dashes = true };\n            var lines = sut.ToString().ToNotEmptyLines();\n            var parser = Parser.Default;\n            return lines.Length + parser.Go();\n        }\n\n        public void Done()\n        {\n            _client.Dispose();\n        }\n    }\n}\n",
+        ),
+    ]);
+    has(
+        &got,
+        &[
+            ("App.Settings.Mode", "calls", "App.Setter.Set"),
+            ("App.Tests.Unit.Tests.Run", "calls", "App.Help.Help"),
+            ("App.Tests.Unit.Tests.Run", "calls", "App.Tests.StringExtensions.ToNotEmptyLines"),
+            ("App.Tests.Unit.Tests.Run", "calls", "App.Parser.Go"),
+            ("App.Tests.Unit.Tests.Done", "calls", "App.Client.Dispose"),
+            ("App.Tests.Unit.Tests", "calls", "App.Client.Client"),
+        ],
+    );
+    lacks(
+        &got,
+        &[
+            ("App.Settings", "calls", "App.Setter.Set"),
+            ("App.Tests.Unit.Tests.Run", "calls", "App.Other.Go"),
+        ],
+    );
+}
