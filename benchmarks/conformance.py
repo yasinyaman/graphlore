@@ -1105,8 +1105,11 @@ case("java", "cast", "`(T) x` is a T",
 case("java", "instanceof-pattern", "`o instanceof T r` binds r as a T",
      JAVA, java("    int run(Object o) {\n        if (o instanceof Repo r) {\n            return r.find();\n        }\n        return 0;\n    }\n"), *JAVA_BOTH)
 case("java", "try-with-resources", "a resource variable is declared with its type",
-     JAVA, java("    int run() throws Exception {\n        try (Repo r = open()) {\n            return r.find();\n        }\n    }\n\n"
-                "    Repo open() {\n        return new Repo();\n    }\n"), *JAVA_BOTH)
+     JAVA, {"app/A.java": "package app;\n\nclass Repo implements AutoCloseable {\n    int find() {\n        return 1;\n    }\n\n"
+                          "    public void close() {\n    }\n}\n\nclass Other {\n    int find() {\n        return 2;\n    }\n}\n\n"
+                          "public class A {\n    int run() {\n        try (Repo r = open()) {\n            return r.find();\n        }\n    }\n\n"
+                          "    Repo open() {\n        return new Repo();\n    }\n}\n"},
+     *JAVA_BOTH)
 case("java", "this-field", "`this.f.m()` is a member of the field's type",
      JAVA, java("    private Repo repo;\n\n    int run() {\n        return this.repo.find();\n    }\n"), *JAVA_BOTH)
 case("java", "static-field", "a static field's declared type gives its members",
