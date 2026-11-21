@@ -1,0 +1,991 @@
+{
+ "c/callback-argument": {
+  "since": "90",
+  "at_least": true
+ },
+ "c/extern-variable": {
+  "since": "90",
+  "at_least": true
+ },
+ "c/external-linkage": {
+  "since": "90",
+  "at_least": true
+ },
+ "c/forward-declaration": {
+  "since": "90",
+  "at_least": true
+ },
+ "c/function-pointer-slot": {
+  "since": "90",
+  "at_least": true
+ },
+ "c/global-variable": {
+  "since": "90",
+  "at_least": true
+ },
+ "c/header-inline": {
+  "since": "99",
+  "at_least": false
+ },
+ "c/local-hides-function": {
+  "since": "90",
+  "at_least": true
+ },
+ "c/same-file": {
+  "since": "90",
+  "at_least": true
+ },
+ "c/slot-assignment": {
+  "since": "90",
+  "at_least": true
+ },
+ "c/static-wins": {
+  "since": "90",
+  "at_least": true
+ },
+ "c/struct-field-chain": {
+  "since": "90",
+  "at_least": true
+ },
+ "c/typedef-function-pointer": {
+  "since": "90",
+  "at_least": true
+ },
+ "c/typedef-struct": {
+  "since": "90",
+  "at_least": true
+ },
+ "cpp/anonymous-namespace": {
+  "since": "98",
+  "at_least": true
+ },
+ "cpp/argument-dependent-lookup": {
+  "since": "98",
+  "at_least": true
+ },
+ "cpp/auto-from-construction": {
+  "since": "11",
+  "at_least": false
+ },
+ "cpp/auto-from-result": {
+  "since": "11",
+  "at_least": false
+ },
+ "cpp/const-reference": {
+  "since": "98",
+  "at_least": true
+ },
+ "cpp/constructor-arguments": {
+  "since": "98",
+  "at_least": true
+ },
+ "cpp/enclosing-namespace": {
+  "since": "98",
+  "at_least": true
+ },
+ "cpp/export-macro": {
+  "since": "98",
+  "at_least": true
+ },
+ "cpp/field-type": {
+  "since": "98",
+  "at_least": true
+ },
+ "cpp/function-as-value": {
+  "since": "98",
+  "at_least": true
+ },
+ "cpp/implicit-this": {
+  "since": "98",
+  "at_least": true
+ },
+ "cpp/inherited": {
+  "since": "98",
+  "at_least": true
+ },
+ "cpp/lambda-body": {
+  "since": "11",
+  "at_least": false
+ },
+ "cpp/local-object": {
+  "since": "98",
+  "at_least": true
+ },
+ "cpp/member-declared-in-header": {
+  "since": "98",
+  "at_least": true
+ },
+ "cpp/namespace-alias": {
+  "since": "98",
+  "at_least": true
+ },
+ "cpp/namespace-qualified": {
+  "since": "98",
+  "at_least": true
+ },
+ "cpp/nested-class": {
+  "since": "98",
+  "at_least": true
+ },
+ "cpp/new-expression": {
+  "since": "98",
+  "at_least": true
+ },
+ "cpp/out-of-class-static": {
+  "since": "98",
+  "at_least": true
+ },
+ "cpp/overload-arity": {
+  "since": "98",
+  "at_least": true
+ },
+ "cpp/pointer-member": {
+  "since": "98",
+  "at_least": true
+ },
+ "cpp/range-for": {
+  "since": "11",
+  "at_least": false
+ },
+ "cpp/static-member": {
+  "since": "98",
+  "at_least": true
+ },
+ "cpp/template-argument": {
+  "since": "98",
+  "at_least": true
+ },
+ "cpp/this-member": {
+  "since": "98",
+  "at_least": true
+ },
+ "cpp/type-alias": {
+  "since": "11",
+  "at_least": false
+ },
+ "cpp/unique-ptr": {
+  "since": "11",
+  "at_least": false
+ },
+ "cpp/using-declaration": {
+  "since": "98",
+  "at_least": true
+ },
+ "cpp/using-namespace": {
+  "since": "98",
+  "at_least": true
+ },
+ "cpp/vexing-parse": {
+  "since": "98",
+  "at_least": true
+ },
+ "cpp/virtual-base": {
+  "since": "98",
+  "at_least": true
+ },
+ "csharp/as-cast": {
+  "since": "7.3",
+  "at_least": true
+ },
+ "csharp/await-task": {
+  "since": "7.3",
+  "at_least": true
+ },
+ "csharp/base": {
+  "since": "7.3",
+  "at_least": true
+ },
+ "csharp/block-namespace-sees-outer-extension": {
+  "since": "7.3",
+  "at_least": true
+ },
+ "csharp/brace-opened-in-a-directive": {
+  "since": "10.0",
+  "at_least": false
+ },
+ "csharp/cast": {
+  "since": "7.3",
+  "at_least": true
+ },
+ "csharp/constructor-initializer": {
+  "since": "7.3",
+  "at_least": true
+ },
+ "csharp/enclosing-namespace": {
+  "since": "7.3",
+  "at_least": true
+ },
+ "csharp/enum-member": {
+  "since": "7.3",
+  "at_least": true
+ },
+ "csharp/enum-member-value": {
+  "since": "7.3",
+  "at_least": true
+ },
+ "csharp/extension": {
+  "since": "7.3",
+  "at_least": true
+ },
+ "csharp/extension-by-type-arguments": {
+  "since": "7.3",
+  "at_least": true
+ },
+ "csharp/extension-on-interface": {
+  "since": "7.3",
+  "at_least": true
+ },
+ "csharp/file-scoped-namespace": {
+  "since": "10.0",
+  "at_least": false
+ },
+ "csharp/foreach-typed": {
+  "since": "7.3",
+  "at_least": true
+ },
+ "csharp/foreach-var": {
+  "since": "7.3",
+  "at_least": true
+ },
+ "csharp/generic-argument": {
+  "since": "7.3",
+  "at_least": true
+ },
+ "csharp/generic-namesake": {
+  "since": "7.3",
+  "at_least": true
+ },
+ "csharp/generic-use-is-no-plain-type": {
+  "since": "7.3",
+  "at_least": true
+ },
+ "csharp/global-using": {
+  "since": "10.0",
+  "at_least": false
+ },
+ "csharp/implicit-this": {
+  "since": "7.3",
+  "at_least": true
+ },
+ "csharp/inherited": {
+  "since": "7.3",
+  "at_least": true
+ },
+ "csharp/initializer-without-arguments": {
+  "since": "7.3",
+  "at_least": true
+ },
+ "csharp/interface-typed": {
+  "since": "7.3",
+  "at_least": true
+ },
+ "csharp/is-as-catch": {
+  "since": "7.3",
+  "at_least": true
+ },
+ "csharp/is-pattern": {
+  "since": "7.3",
+  "at_least": true
+ },
+ "csharp/lambda-body": {
+  "since": "7.3",
+  "at_least": true
+ },
+ "csharp/local-declared-type": {
+  "since": "7.3",
+  "at_least": true
+ },
+ "csharp/local-from-member-read": {
+  "since": "7.3",
+  "at_least": true
+ },
+ "csharp/local-function": {
+  "since": "7.3",
+  "at_least": true
+ },
+ "csharp/method-group": {
+  "since": "7.3",
+  "at_least": true
+ },
+ "csharp/nested-type": {
+  "since": "7.3",
+  "at_least": true
+ },
+ "csharp/new-names-a-type": {
+  "since": "7.3",
+  "at_least": true
+ },
+ "csharp/null-conditional": {
+  "since": "7.3",
+  "at_least": true
+ },
+ "csharp/overload-arity": {
+  "since": "7.3",
+  "at_least": true
+ },
+ "csharp/partial": {
+  "since": "7.3",
+  "at_least": true
+ },
+ "csharp/partial-type-constructor": {
+  "since": "7.3",
+  "at_least": true
+ },
+ "csharp/primary-constructor": {
+  "since": "12.0",
+  "at_least": false
+ },
+ "csharp/property-body-is-the-property": {
+  "since": "7.3",
+  "at_least": true
+ },
+ "csharp/property-type": {
+  "since": "7.3",
+  "at_least": true
+ },
+ "csharp/record": {
+  "since": "9.0",
+  "at_least": false
+ },
+ "csharp/static-property": {
+  "since": "7.3",
+  "at_least": true
+ },
+ "csharp/static-via-class": {
+  "since": "7.3",
+  "at_least": true
+ },
+ "csharp/target-typed-new": {
+  "since": "9.0",
+  "at_least": false
+ },
+ "csharp/this": {
+  "since": "7.3",
+  "at_least": true
+ },
+ "csharp/type-by-arity": {
+  "since": "7.3",
+  "at_least": true
+ },
+ "csharp/using": {
+  "since": "7.3",
+  "at_least": true
+ },
+ "csharp/using-alias": {
+  "since": "7.3",
+  "at_least": true
+ },
+ "csharp/using-block-namespace": {
+  "since": "7.3",
+  "at_least": true
+ },
+ "csharp/using-static": {
+  "since": "7.3",
+  "at_least": true
+ },
+ "csharp/var-new": {
+  "since": "7.3",
+  "at_least": true
+ },
+ "java/anonymous-class": {
+  "since": "8",
+  "at_least": true
+ },
+ "java/cast": {
+  "since": "8",
+  "at_least": true
+ },
+ "java/chained-result": {
+  "since": "8",
+  "at_least": true
+ },
+ "java/class-named-like-a-wrapper": {
+  "since": "8",
+  "at_least": true
+ },
+ "java/constructor": {
+  "since": "8",
+  "at_least": true
+ },
+ "java/enum-constant-value": {
+  "since": "8",
+  "at_least": true
+ },
+ "java/enum-method": {
+  "since": "8",
+  "at_least": true
+ },
+ "java/explicit-constructor-call": {
+  "since": "8",
+  "at_least": true
+ },
+ "java/field-type": {
+  "since": "8",
+  "at_least": true
+ },
+ "java/for-each": {
+  "since": "8",
+  "at_least": true
+ },
+ "java/fully-qualified": {
+  "since": "8",
+  "at_least": true
+ },
+ "java/generic-argument": {
+  "since": "8",
+  "at_least": true
+ },
+ "java/implicit-this": {
+  "since": "8",
+  "at_least": true
+ },
+ "java/inherited": {
+  "since": "8",
+  "at_least": true
+ },
+ "java/instanceof-cast-catch": {
+  "since": "8",
+  "at_least": true
+ },
+ "java/instanceof-pattern": {
+  "since": "16",
+  "at_least": false
+ },
+ "java/interface-default": {
+  "since": "8",
+  "at_least": true
+ },
+ "java/interface-static": {
+  "since": "8",
+  "at_least": true
+ },
+ "java/interface-typed": {
+  "since": "8",
+  "at_least": true
+ },
+ "java/lambda-body": {
+  "since": "8",
+  "at_least": true
+ },
+ "java/library-optional-beside-own": {
+  "since": "8",
+  "at_least": true
+ },
+ "java/list-element": {
+  "since": "8",
+  "at_least": true
+ },
+ "java/local-hides-field": {
+  "since": "8",
+  "at_least": true
+ },
+ "java/method-named-self": {
+  "since": "8",
+  "at_least": true
+ },
+ "java/method-reference": {
+  "since": "8",
+  "at_least": true
+ },
+ "java/module-info": {
+  "since": "9",
+  "at_least": false
+ },
+ "java/nested-static-class": {
+  "since": "8",
+  "at_least": true
+ },
+ "java/on-demand-import": {
+  "since": "8",
+  "at_least": true
+ },
+ "java/other-package-not-in-reach": {
+  "since": "9",
+  "at_least": false
+ },
+ "java/outer-method": {
+  "since": "8",
+  "at_least": true
+ },
+ "java/overload-arity": {
+  "since": "8",
+  "at_least": true
+ },
+ "java/overload-by-type": {
+  "since": "8",
+  "at_least": true
+ },
+ "java/own-accessor-name": {
+  "since": "8",
+  "at_least": true
+ },
+ "java/own-optional": {
+  "since": "8",
+  "at_least": true
+ },
+ "java/record": {
+  "since": "16",
+  "at_least": false
+ },
+ "java/same-package": {
+  "since": "8",
+  "at_least": true
+ },
+ "java/single-type-import": {
+  "since": "8",
+  "at_least": true
+ },
+ "java/static-field": {
+  "since": "8",
+  "at_least": true
+ },
+ "java/static-import": {
+  "since": "8",
+  "at_least": true
+ },
+ "java/static-via-class": {
+  "since": "8",
+  "at_least": true
+ },
+ "java/super": {
+  "since": "8",
+  "at_least": true
+ },
+ "java/this-field": {
+  "since": "8",
+  "at_least": true
+ },
+ "java/try-with-resources": {
+  "since": "8",
+  "at_least": true
+ },
+ "java/var": {
+  "since": "10",
+  "at_least": false
+ },
+ "kotlin/apply-also": {
+  "since": "1.8",
+  "at_least": true
+ },
+ "kotlin/cast": {
+  "since": "1.8",
+  "at_least": true
+ },
+ "kotlin/catch-type": {
+  "since": "1.8",
+  "at_least": true
+ },
+ "kotlin/companion": {
+  "since": "1.8",
+  "at_least": true
+ },
+ "kotlin/constructor": {
+  "since": "1.8",
+  "at_least": true
+ },
+ "kotlin/constructor-property": {
+  "since": "1.8",
+  "at_least": true
+ },
+ "kotlin/constructor-property-read": {
+  "since": "1.8",
+  "at_least": true
+ },
+ "kotlin/enum-entry": {
+  "since": "1.8",
+  "at_least": true
+ },
+ "kotlin/extension": {
+  "since": "1.8",
+  "at_least": true
+ },
+ "kotlin/for-loop": {
+  "since": "1.8",
+  "at_least": true
+ },
+ "kotlin/function-beside-parameter": {
+  "since": "1.8",
+  "at_least": true
+ },
+ "kotlin/function-reference": {
+  "since": "1.8",
+  "at_least": true
+ },
+ "kotlin/generic-argument": {
+  "since": "1.8",
+  "at_least": true
+ },
+ "kotlin/import": {
+  "since": "1.8",
+  "at_least": true
+ },
+ "kotlin/import-alias": {
+  "since": "1.8",
+  "at_least": true
+ },
+ "kotlin/inherited": {
+  "since": "1.8",
+  "at_least": true
+ },
+ "kotlin/interface-default": {
+  "since": "1.8",
+  "at_least": true
+ },
+ "kotlin/interface-typed": {
+  "since": "1.8",
+  "at_least": true
+ },
+ "kotlin/is-and-as": {
+  "since": "1.8",
+  "at_least": true
+ },
+ "kotlin/it": {
+  "since": "1.8",
+  "at_least": true
+ },
+ "kotlin/lateinit": {
+  "since": "1.8",
+  "at_least": true
+ },
+ "kotlin/let": {
+  "since": "1.8",
+  "at_least": true
+ },
+ "kotlin/local-typed-by-value": {
+  "since": "1.8",
+  "at_least": true
+ },
+ "kotlin/member": {
+  "since": "1.8",
+  "at_least": true
+ },
+ "kotlin/member-wins": {
+  "since": "1.8",
+  "at_least": true
+ },
+ "kotlin/named-argument-label": {
+  "since": "1.8",
+  "at_least": true
+ },
+ "kotlin/nested-class": {
+  "since": "1.8",
+  "at_least": true
+ },
+ "kotlin/object": {
+  "since": "1.8",
+  "at_least": true
+ },
+ "kotlin/object-as-value": {
+  "since": "1.8",
+  "at_least": true
+ },
+ "kotlin/property-type": {
+  "since": "1.8",
+  "at_least": true
+ },
+ "kotlin/receiver-lambda": {
+  "since": "1.8",
+  "at_least": true
+ },
+ "kotlin/return-type": {
+  "since": "1.8",
+  "at_least": true
+ },
+ "kotlin/safe-call": {
+  "since": "1.8",
+  "at_least": true
+ },
+ "kotlin/same-package": {
+  "since": "1.8",
+  "at_least": true
+ },
+ "kotlin/super": {
+  "since": "1.8",
+  "at_least": true
+ },
+ "kotlin/top-level-property": {
+  "since": "1.8",
+  "at_least": true
+ },
+ "kotlin/typealias": {
+  "since": "1.8",
+  "at_least": true
+ },
+ "kotlin/typealias-body": {
+  "since": "1.8",
+  "at_least": true
+ },
+ "kotlin/when-is": {
+  "since": "1.8",
+  "at_least": true
+ },
+ "kotlin/with": {
+  "since": "1.8",
+  "at_least": true
+ },
+ "scala/bound-types": {
+  "since": "3.0",
+  "at_least": true
+ },
+ "scala/case-class": {
+  "since": "3.0",
+  "at_least": true
+ },
+ "scala/companion-apply": {
+  "since": "3.0",
+  "at_least": true
+ },
+ "scala/extends": {
+  "since": "3.0",
+  "at_least": true
+ },
+ "scala/extension-type-parameters": {
+  "since": "3.0",
+  "at_least": true
+ },
+ "scala/generic-argument": {
+  "since": "3.0",
+  "at_least": true
+ },
+ "scala/generic-method-parameters": {
+  "since": "3.0",
+  "at_least": true
+ },
+ "scala/implicit-this": {
+  "since": "3.0",
+  "at_least": true
+ },
+ "scala/import-rename": {
+  "since": "3.0",
+  "at_least": true
+ },
+ "scala/local-typed-by-value": {
+  "since": "3.0",
+  "at_least": true
+ },
+ "scala/member-import": {
+  "since": "3.0",
+  "at_least": true
+ },
+ "scala/named-argument": {
+  "since": "3.0",
+  "at_least": true
+ },
+ "scala/nested-type-not-in-reach": {
+  "since": "3.0",
+  "at_least": true
+ },
+ "scala/new-with-parentheses": {
+  "since": "3.0",
+  "at_least": true
+ },
+ "scala/no-parentheses": {
+  "since": "3.0",
+  "at_least": true
+ },
+ "scala/object-method": {
+  "since": "3.0",
+  "at_least": true
+ },
+ "scala/other-package-not-in-reach": {
+  "since": "3.0",
+  "at_least": true
+ },
+ "scala/pattern-typed": {
+  "since": "3.0",
+  "at_least": true
+ },
+ "scala/pattern-types": {
+  "since": "3.0",
+  "at_least": true
+ },
+ "scala/return-type": {
+  "since": "3.0",
+  "at_least": true
+ },
+ "scala/same-package": {
+  "since": "3.0",
+  "at_least": true
+ },
+ "scala/super": {
+  "since": "3.0",
+  "at_least": true
+ },
+ "scala/trait-method": {
+  "since": "3.0",
+  "at_least": true
+ },
+ "scala/trait-typed": {
+  "since": "3.0",
+  "at_least": true
+ },
+ "scala/type-through-package": {
+  "since": "3.0",
+  "at_least": true
+ },
+ "scala/typed-parameter": {
+  "since": "3.0",
+  "at_least": true
+ },
+ "scala/typed-val": {
+  "since": "3.0",
+  "at_least": true
+ },
+ "scala/wildcard-import": {
+  "since": "3.0",
+  "at_least": true
+ },
+ "swift/as-cast": {
+  "since": "4",
+  "at_least": true
+ },
+ "swift/class-func": {
+  "since": "4",
+  "at_least": true
+ },
+ "swift/closure-body": {
+  "since": "4",
+  "at_least": true
+ },
+ "swift/computed-property": {
+  "since": "4",
+  "at_least": true
+ },
+ "swift/conformance-in-extension": {
+  "since": "4",
+  "at_least": true
+ },
+ "swift/enum-case-built": {
+  "since": "4",
+  "at_least": true
+ },
+ "swift/enum-method": {
+  "since": "4",
+  "at_least": true
+ },
+ "swift/enum-payload": {
+  "since": "4",
+  "at_least": true
+ },
+ "swift/extension": {
+  "since": "4",
+  "at_least": true
+ },
+ "swift/for-in": {
+  "since": "4",
+  "at_least": true
+ },
+ "swift/function-as-value": {
+  "since": "4",
+  "at_least": true
+ },
+ "swift/generic-argument": {
+  "since": "4",
+  "at_least": true
+ },
+ "swift/generic-bound": {
+  "since": "4",
+  "at_least": true
+ },
+ "swift/guard-let": {
+  "since": "4",
+  "at_least": true
+ },
+ "swift/if-let": {
+  "since": "4",
+  "at_least": true
+ },
+ "swift/implicit-member": {
+  "since": "4",
+  "at_least": true
+ },
+ "swift/implicit-self": {
+  "since": "4",
+  "at_least": true
+ },
+ "swift/inherited": {
+  "since": "4",
+  "at_least": true
+ },
+ "swift/initializer": {
+  "since": "4",
+  "at_least": true
+ },
+ "swift/is-and-as": {
+  "since": "4",
+  "at_least": true
+ },
+ "swift/local-typed-by-value": {
+  "since": "4",
+  "at_least": true
+ },
+ "swift/metatype": {
+  "since": "4",
+  "at_least": true
+ },
+ "swift/method-on-parameter": {
+  "since": "4",
+  "at_least": true
+ },
+ "swift/nested-function": {
+  "since": "4",
+  "at_least": true
+ },
+ "swift/nested-type": {
+  "since": "4",
+  "at_least": true
+ },
+ "swift/optional-chaining": {
+  "since": "4",
+  "at_least": true
+ },
+ "swift/own-value-is-outer": {
+  "since": "4",
+  "at_least": true
+ },
+ "swift/property-type": {
+  "since": "4",
+  "at_least": true
+ },
+ "swift/protocol-extension": {
+  "since": "4",
+  "at_least": true
+ },
+ "swift/protocol-typed": {
+  "since": "4",
+  "at_least": true
+ },
+ "swift/return-type": {
+  "since": "4",
+  "at_least": true
+ },
+ "swift/self-constructs": {
+  "since": "4",
+  "at_least": true
+ },
+ "swift/static": {
+  "since": "4",
+  "at_least": true
+ },
+ "swift/static-property": {
+  "since": "4",
+  "at_least": true,
+  "until": "5"
+ },
+ "swift/subscript": {
+  "since": "4",
+  "at_least": true
+ },
+ "swift/super": {
+  "since": "4",
+  "at_least": true
+ },
+ "swift/typealias": {
+  "since": "4",
+  "at_least": true
+ },
+ "swift/typealias-and-where": {
+  "since": "4",
+  "at_least": true
+ }
+}

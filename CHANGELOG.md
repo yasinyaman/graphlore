@@ -38,6 +38,26 @@ All notable changes to this project are documented here. The format is based on
   engine 0.5.55 and all but 4 with 0.5.56. On ureq, ripgrep, axum-realworld
   and actix-realworld rust-analyzer has one for 11,924; 97.5% before, 98.5%
   now.
+- **Language versions, phase 0 of that plan** (engine 0.5.61; no edge
+  changes):
+  - The native graph's header has `graph.language_versions`: the version
+    each file's project states, per language (`engine/src/versions.rs`
+    reads `go.mod`, `Cargo.toml`, `.csproj`, `Directory.Build.props`,
+    `pyproject.toml`, `package.json`, `pom.xml`, Gradle builds and version
+    catalogs, `Package.swift`, `build.sbt`, `composer.json`, Gemfiles and
+    gemspecs, `CMakeLists.txt`). No rule depends on it yet.
+  - `benchmarks/versions.py` reads each compiler's own table of versions
+    and features into `benchmarks/versions/<language>.json` (C#, Java,
+    Kotlin, Swift, Rust, Go, C/C++, Scala), with the places its name
+    resolver asks for the version.
+  - `benchmarks/verify_cases.py --min-version` asks each compiler for the
+    oldest version that accepts each case of the checklist
+    (`benchmarks/results-case-versions.json`); a case can state `since` /
+    `until` and is then compiled in that version. Scala's cases are
+    compiled too: 510 of 510 are accepted by their languages.
+  - A case of `benchmarks/conformance.py` records how it was found and can
+    cite where the rule was read (`source`); `docs/resolution-rules.md`
+    shows the versions and the counts.
 - **The plan for reading the rules out of the languages' own tools**
   (`docs/rule-sources.md`), and `benchmarks/rule_sources.py`, which fetches
   what it names: per language the compiler's or interpreter's name binder,

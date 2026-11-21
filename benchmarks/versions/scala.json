@@ -1,0 +1,198 @@
+{
+ "language": "scala",
+ "source": "scala/scala3@1615177b58f6:compiler/src/dotty/tools/dotc/config/SourceVersion.scala",
+ "versions": [
+  "2.13",
+  "3.0",
+  "3.1",
+  "3.2",
+  "3.3",
+  "3.4",
+  "3.5",
+  "3.6",
+  "3.7",
+  "3.8",
+  "3.9",
+  "3.10",
+  "3.11",
+  "3.12"
+ ],
+ "features": [],
+ "asked": [
+  {
+   "file": "compiler/src/dotty/tools/dotc/typer/Applications.scala",
+   "line": 1370,
+   "text": "if !Feature.sourceVersion.isAtLeast(SourceVersion.future) =>"
+  },
+  {
+   "file": "compiler/src/dotty/tools/dotc/typer/Applications.scala",
+   "line": 2273,
+   "text": "if !preferGeneral || Feature.migrateTo3 && oldResolution then"
+  },
+  {
+   "file": "compiler/src/dotty/tools/dotc/typer/Applications.scala",
+   "line": 2275,
+   "text": "else if Feature.sourceVersion.isAtMost(SourceVersion.`3.5`)"
+  },
+  {
+   "file": "compiler/src/dotty/tools/dotc/typer/Checking.scala",
+   "line": 1082,
+   "text": "if sourceVersion.isAtLeast(`3.8`) then \".runtimeChecked\" else \": @unchecked\""
+  },
+  {
+   "file": "compiler/src/dotty/tools/dotc/typer/Checking.scala",
+   "line": 1097,
+   "text": "if isPatDef && sourceVersion.isAtLeast(`3.8`) then `3.8-migration` else `3.2-migration`"
+  },
+  {
+   "file": "compiler/src/dotty/tools/dotc/typer/Checking.scala",
+   "line": 1127,
+   "text": "!sourceVersion.isAtLeast(`3.2`)"
+  },
+  {
+   "file": "compiler/src/dotty/tools/dotc/typer/Checking.scala",
+   "line": 1731,
+   "text": "if !tp.derivesFrom(defn.MatchableClass) && sourceVersion.isAtLeast(`future-migration`) then"
+  },
+  {
+   "file": "compiler/src/dotty/tools/dotc/typer/Implicits.scala",
+   "line": 31,
+   "text": "import Feature.{migrateTo3, sourceVersion}"
+  },
+  {
+   "file": "compiler/src/dotty/tools/dotc/typer/Implicits.scala",
+   "line": 182,
+   "text": "migrateTo3"
+  },
+  {
+   "file": "compiler/src/dotty/tools/dotc/typer/Implicits.scala",
+   "line": 322,
+   "text": "case oi if migrateTo3(using irefCtx)"
+  },
+  {
+   "file": "compiler/src/dotty/tools/dotc/typer/Implicits.scala",
+   "line": 344,
+   "text": "if !migrateTo3(using irefCtx) && level == outer.level && outer.bindingPrec.beats(bindingPrec) then"
+  },
+  {
+   "file": "compiler/src/dotty/tools/dotc/typer/Implicits.scala",
+   "line": 641,
+   "text": "if migrateTo3 then false else sym.is(Package) || sym.isPackageObject"
+  },
+  {
+   "file": "compiler/src/dotty/tools/dotc/typer/Implicits.scala",
+   "line": 1157,
+   "text": "else if (migrateTo3 && !ctx.mode.is(Mode.OldImplicitResolution))"
+  },
+  {
+   "file": "compiler/src/dotty/tools/dotc/typer/Implicits.scala",
+   "line": 1345,
+   "text": "val isLastOldVersion = sv.stable == SourceVersion.`3.6`"
+  },
+  {
+   "file": "compiler/src/dotty/tools/dotc/typer/Implicits.scala",
+   "line": 1346,
+   "text": "val isWarnPriorityChangeVersion = isLastOldVersion || sv == SourceVersion.`3.7-migration`"
+  },
+  {
+   "file": "compiler/src/dotty/tools/dotc/typer/Implicits.scala",
+   "line": 1494,
+   "text": "if migrateTo3 then"
+  },
+  {
+   "file": "compiler/src/dotty/tools/dotc/typer/Implicits.scala",
+   "line": 1821,
+   "text": "if sourceVersion.isAtLeast(SourceVersion.`3.6`) then SearchMode.New"
+  },
+  {
+   "file": "compiler/src/dotty/tools/dotc/typer/Implicits.scala",
+   "line": 1822,
+   "text": "else if sourceVersion.isAtLeast(SourceVersion.`3.5`) then SearchMode.CompareErr"
+  },
+  {
+   "file": "compiler/src/dotty/tools/dotc/typer/Implicits.scala",
+   "line": 1823,
+   "text": "else if sourceVersion.isAtLeast(SourceVersion.`3.4`) then SearchMode.CompareWarn"
+  },
+  {
+   "file": "compiler/src/dotty/tools/dotc/typer/Migrations.scala",
+   "line": 17,
+   "text": "import config.Feature.{sourceVersion, migrateTo3}"
+  },
+  {
+   "file": "compiler/src/dotty/tools/dotc/typer/Migrations.scala",
+   "line": 113,
+   "text": "if sourceVersion.isAtLeast(`3.4`)"
+  },
+  {
+   "file": "compiler/src/dotty/tools/dotc/typer/Namer.scala",
+   "line": 1750,
+   "text": "case Select(qual: Super, _) if Feature.migrateTo3 =>"
+  },
+  {
+   "file": "compiler/src/dotty/tools/dotc/typer/Namer.scala",
+   "line": 1765,
+   "text": "else if sourceVersion.isAtLeast(future) then"
+  },
+  {
+   "file": "compiler/src/dotty/tools/dotc/typer/ProtoTypes.scala",
+   "line": 144,
+   "text": "if Feature.sourceVersion.isAtLeast(SourceVersion.`3.4`) then"
+  },
+  {
+   "file": "compiler/src/dotty/tools/dotc/typer/RefChecks.scala",
+   "line": 20,
+   "text": "import config.Feature.{warnOnMigration, migrateTo3, sourceVersion}"
+  },
+  {
+   "file": "compiler/src/dotty/tools/dotc/typer/RefChecks.scala",
+   "line": 21,
+   "text": "import config.SourceVersion.`3.0`"
+  },
+  {
+   "file": "compiler/src/dotty/tools/dotc/typer/RefChecks.scala",
+   "line": 138,
+   "text": "if !migrateTo3 then // always error, only traits or enum-syntax is possible under scala 3.x"
+  },
+  {
+   "file": "compiler/src/dotty/tools/dotc/typer/Typer.scala",
+   "line": 43,
+   "text": "import Feature.{migrateTo3, modularity, sourceVersion, warnOnMigration}"
+  },
+  {
+   "file": "compiler/src/dotty/tools/dotc/typer/Typer.scala",
+   "line": 552,
+   "text": "if migrateTo3 && !foundUnderScala2.exists then"
+  },
+  {
+   "file": "compiler/src/dotty/tools/dotc/typer/Typer.scala",
+   "line": 1457,
+   "text": "if tag.symbol.maybeOwner == defn.ClassTagClass && config.Feature.sourceVersion.isAtLeast(config.SourceVersion.future) then"
+  },
+  {
+   "file": "compiler/src/dotty/tools/dotc/typer/Typer.scala",
+   "line": 2313,
+   "text": "&& sourceVersion.isAtLeast(`3.2`)"
+  },
+  {
+   "file": "compiler/src/dotty/tools/dotc/typer/Typer.scala",
+   "line": 2314,
+   "text": "&& sourceVersion.isMigrating"
+  },
+  {
+   "file": "compiler/src/dotty/tools/dotc/typer/Typer.scala",
+   "line": 2318,
+   "text": "if sourceVersion.isAtLeast(`3.8`) then \".runtimeChecked\""
+  },
+  {
+   "file": "compiler/src/dotty/tools/dotc/typer/VarianceChecker.scala",
+   "line": 16,
+   "text": "import config.Feature.migrateTo3"
+  },
+  {
+   "file": "compiler/src/dotty/tools/dotc/typer/VarianceChecker.scala",
+   "line": 198,
+   "text": "if (migrateTo3 &&"
+  }
+ ]
+}

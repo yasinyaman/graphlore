@@ -63,7 +63,10 @@ def files(root: Path, *exts: str) -> list[str]:
                   if p.is_file() and p.suffix in exts)
 
 
-def check(lang: str, root: Path) -> tuple[int, str]:
+def check(lang: str, root: Path, version: str | None = None) -> tuple[int, str]:
+    """Give the case to its language's compiler; in `version` of the language
+    when the case states one (`since`): one installed compiler answers for its
+    older versions through a flag."""
     if lang == "python":
         code, out = sh(["python3", "-m", "py_compile", *files(root, ".py")], root)
         if code:
@@ -98,15 +101,18 @@ def check(lang: str, root: Path) -> tuple[int, str]:
     if lang == "go":
         return sh(["go", "vet", "./..."], root, {"GOFLAGS": "-mod=mod", "GOPROXY": "off"})
     if lang == "java":
-        return sh(["javac", "-nowarn", "-d", "out", *files(root, ".java")], root,
+        release = ["--release", version] if version else []
+        return sh(["javac", "-nowarn", *release, "-d", "out", *files(root, ".java")], root,
                   {"JAVA_TOOL_OPTIONS": ""})
     if lang == "rust":
         return sh(["cargo", "check", "--offline", "--quiet", "--all-targets"], root,
                   {"CARGO_TARGET_DIR": str(root / "target"), "RUSTFLAGS": "-A warnings"})
     if lang == "c":
-        return sh(["gcc", "-fsyntax-only", "-w", *files(root, ".c")], root)
+        std = [f"-std=c{version}"] if version else []
+        return sh(["gcc", *std, "-fsyntax-only", "-w", *files(root, ".c")], root)
     if lang == "cpp":
-        return sh(["g++", "-std=c++20", "-fsyntax-only", "-w", *files(root, ".cc", ".cpp")], root)
+        return sh(["g++", f"-std=c++{version or 20}", "-fsyntax-only", "-w",
+                   *files(root, ".cc", ".cpp")], root)
     if lang == "ruby":
         for f in files(root, ".rb"):
             code, out = sh(["ruby", "-c", f], root)
@@ -120,16 +126,23 @@ def check(lang: str, root: Path) -> tuple[int, str]:
                 return code, out
         return 0, ""
     if lang == "kotlin":
-        return sh(["kotlinc", "-nowarn", "-d", "out", *files(root, ".kt")], root)
+        lv = ["-language-version", version] if version else []
+        return sh(["kotlinc", "-nowarn", *lv, "-d", "out", *files(root, ".kt")], root)
     if lang == "swift":
-        return sh(["swiftc", "-typecheck", "-suppress-warnings", *files(root, ".swift")], root)
+        mode = ["-swift-version", version] if version else []
+        return sh(["swiftc", "-typecheck", "-suppress-warnings", *mode, *files(root, ".swift")], root)
+    if lang == "scala":
+        source = ["-source", version] if version else []
+        (root / "out").mkdir(exist_ok=True)
+        return sh(["scalac", "-nowarn", *source, "-d", "out", *files(root, ".scala")], root,
+                  {"JAVA_TOOL_OPTIONS": ""})
     if lang == "csharp":
         # one library project of every source; no restore from the network
         (root / "case.csproj").write_text(
             '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net8.0</TargetFramework>'
             "<OutputType>Library</OutputType><Nullable>disable</Nullable><ImplicitUsings>disable</ImplicitUsings>"
             "<TreatWarningsAsErrors>false</TreatWarningsAsErrors><NoWarn>CS0169;CS0649;CS0219;CS8321;CS0414;CS0168</NoWarn>"
-            "<LangVersion>preview</LangVersion></PropertyGroup></Project>\n")
+            f"<LangVersion>{version or 'preview'}</LangVersion></PropertyGroup></Project>\n")
         return sh(["dotnet", "build", "--nologo", "-v", "q", "-clp:NoSummary"], root,
                   {"DOTNET_CLI_TELEMETRY_OPTOUT": "1", "DOTNET_NOLOGO": "1"})
     return -1, "no check written for this language"
@@ -142,10 +155,57 @@ def verify(c: dict[str, Any]) -> dict[str, Any]:
             path = root / rel
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(src, encoding="utf-8")
-        code, out = check(c["lang"], root)
+        code, out = check(c["lang"], root, c.get("since"))
     first = next((ln for ln in out.splitlines() if ln.strip() and "JAVA_TOOL_OPTIONS" not in ln), "")
     return {"id": c["id"], "ok": code == 0, "error": "" if code == 0 else out[-1500:],
             "first": first[:200]}
+
+
+# The versions each installed compiler can be asked to compile as, oldest
+# first (its own flag: `--release`, `<LangVersion>`, `-std=`, `-swift-version`,
+# `-language-version`, `-source`). A language missing here has no such flag
+# (Go and Rust state the version in the case's own manifest; the interpreters
+# need one installation per version).
+ASKABLE = {
+    "java": ["8", "9", "10", "11", "14", "15", "16", "17", "21"],
+    "csharp": ["7.3", "8.0", "9.0", "10.0", "11.0", "12.0"],
+    "cpp": ["98", "11", "14", "17", "20"],
+    "c": ["90", "99", "11", "17"],
+    "swift": ["4", "5", "6"],
+    "kotlin": ["1.8", "1.9", "2.0", "2.1", "2.2"],
+    "scala": ["3.0", "3.1", "3.2", "3.3"],
+}
+CASE_VERSIONS = Path(__file__).resolve().parent / "results-case-versions.json"
+
+
+def lowest_version(c: dict[str, Any]) -> dict[str, Any]:
+    """The oldest version of its language that accepts the case, by asking
+    the compiler (a binary search: what one version accepts the next does)."""
+    versions = ASKABLE[c["lang"]]
+    lo, hi = 0, len(versions) - 1
+    with tempfile.TemporaryDirectory() as tmp:
+        def accepts(i: int) -> bool:
+            root = Path(tmp) / f"v{i}"
+            for rel, src in c["files"].items():
+                path = root / rel
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(src, encoding="utf-8")
+            return check(c["lang"], root, versions[i])[0] == 0
+        until = None
+        if not accepts(hi):
+            # valid once and no longer (Swift 6 rejects a mutable `static var`
+            # Swift 5 takes): the newest version that still accepts it
+            hi = next((i for i in range(hi - 1, -1, -1) if accepts(i)), -1)
+            if hi < 0:
+                return {"id": c["id"], "since": None, "newest_rejects": True}
+            until = versions[hi]
+        while lo < hi:
+            mid = (lo + hi) // 2
+            if accepts(mid):
+                hi = mid
+            else:
+                lo = mid + 1
+    return {"id": c["id"], "since": versions[lo], "oldest_asked": versions[0], "until": until}
 
 
 def main() -> int:
@@ -153,11 +213,35 @@ def main() -> int:
     ap.add_argument("--only", default="", help="comma-separated languages or case ids")
     ap.add_argument("--json", help="write the result of every case here")
     ap.add_argument("--jobs", type=int, default=4)
+    ap.add_argument("--min-version", action="store_true",
+                    help="ask each compiler for the oldest version that accepts each case, and "
+                         f"record it in {CASE_VERSIONS.name}")
     args = ap.parse_args()
     only = {x for x in args.only.split(",") if x}
     cases = [c for c in conformance.CASES if not only or c["lang"] in only or c["id"] in only]
     have = {lang for lang, tool in TOOL.items() if shutil.which(tool)}
     todo = [c for c in cases if c["lang"] in have]
+    if args.min_version:
+        asked = [c for c in todo if c["lang"] in ASKABLE]
+        with ThreadPoolExecutor(max_workers=args.jobs) as pool:
+            found = list(pool.map(lowest_version, asked))
+        kept = json.loads(CASE_VERSIONS.read_text(encoding="utf-8")) if CASE_VERSIONS.exists() else {}
+        for c, r in zip(asked, found, strict=True):
+            # (the oldest version asked accepting it says "that old or older")
+            kept[c["id"]] = {"since": r["since"], "at_least": r.get("oldest_asked") == r["since"]}
+            if r.get("until"):
+                kept[c["id"]]["until"] = r["until"]
+                print(f"  accepted up to {r['until']} only: {c['id']}")
+            if r.get("newest_rejects"):
+                print(f"  REJECTED by every version asked: {c['id']}")
+        CASE_VERSIONS.write_text(json.dumps(dict(sorted(kept.items())), indent=1) + "\n", encoding="utf-8")
+        for lang in dict.fromkeys(c["lang"] for c in asked):
+            rows = [kept[c["id"]] for c in asked if c["lang"] == lang]
+            newer = sorted({r["since"] for r in rows if r["since"] and not r["at_least"]},
+                           key=ASKABLE[lang].index)
+            print(f"{lang}: {len(rows)} cases, {sum(1 for r in rows if not r['at_least'])} need a version "
+                  f"newer than {ASKABLE[lang][0]} ({', '.join(newer) or 'none'})")
+        return 0
     with ThreadPoolExecutor(max_workers=args.jobs) as pool:
         results = list(pool.map(verify, todo))
     by_lang: dict[str, list[dict[str, Any]]] = {}
