@@ -402,6 +402,13 @@ impl LanguageModule for Ecma {
             })
         };
         match n.kind() {
+            // an enum's members: `enum Color { Red, Green = 2 }`
+            "enum_assignment" => {
+                n.child_by_field_name("name").map(|name| (name, DefKind::EnumMember))
+            }
+            "property_identifier" if n.parent().is_some_and(|p| p.kind() == "enum_body") => {
+                Some((n, DefKind::EnumMember))
+            }
             // a class field that holds a value, not a function
             "public_field_definition" | "field_definition" => {
                 let name =

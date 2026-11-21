@@ -25,10 +25,12 @@ python benchmarks/conformance.py --baseline benchmarks/results-conformance.json 
 python benchmarks/conformance.py --markdown      # the tables below
 ```
 
-Measured 2026-11-21 with graphlore-engine 0.5.52: **440 of 440 rules hold**
-(356 of the first 406 with 0.5.45). The last fifteen came from the TypeScript
-compiler's own test suite ([native-engine.md](native-engine.md#the-compiler-as-the-judge)):
-block scopes, type parameters and their bounds, parameter properties.
+Measured 2026-11-21 with graphlore-engine 0.5.53: **456 of 456 rules hold**
+(356 of the first 406 with 0.5.45). The last thirty-one came from two
+compilers' own test suites ([native-engine.md](native-engine.md#the-compiler-as-the-judge)):
+TypeScript's (block scopes, type parameters and their bounds, parameter
+properties, enum members, the types of aliases and signatures) and Scala's
+(packages, named arguments, extensions, patterns).
 
 ## What this list is, and is not
 
@@ -190,7 +192,7 @@ ECMAScript Language Specification, 'Executable Code and Execution Contexts' (sco
 | an arrow function in a class field sees the class's `this` | `class-field-arrow` | yes |
 | a local assigned `new C()` keeps its type in a nested callback | `for-of-new` | yes |
 
-### typescript (37 of 37)
+### typescript (41 of 41)
 
 TypeScript Handbook, 'Modules', 'Classes', 'Generics' (types are the compiler's, tsc).
 
@@ -233,6 +235,10 @@ TypeScript Handbook, 'Modules', 'Classes', 'Generics' (types are the compiler's,
 | what a namespace declares is a name inside it, not beside it | `namespace-member-inside` | yes |
 | a constructor parameter with a modifier declares a property of the class | `parameter-property-read` | yes |
 | a call of a parameter is no call of a function of its name outside | `parameter-called` | yes |
+| an enum member named as a value is a use of its enum | `enum-member-value` | yes |
+| the types a type alias is written with are uses of them | `type-alias-body` | yes |
+| the types of an interface's property, call, construct and index signatures are uses of them | `interface-signatures` | yes |
+| `typeof ns.Class` in a type position is a use of the class | `typeof-type` | yes |
 
 ### go (24 of 24)
 
@@ -265,7 +271,7 @@ The Go Programming Language Specification, 'Declarations and scope', 'Selectors'
 | a function literal sees the functions of the package | `closure` | yes |
 | a value of a type parameter has the methods of its constraint | `generic-constraint` | yes |
 
-### java (41 of 41)
+### java (43 of 43)
 
 The Java Language Specification, 6.4 'Shadowing and Obscuring', 15.12 'Method Invocation Expressions'.
 
@@ -312,6 +318,8 @@ The Java Language Specification, 6.4 'Shadowing and Obscuring', 15.12 'Method In
 | `I.m()` is a static method of the interface | `interface-static` | yes |
 | `new R(…)` constructs a record | `record` | yes |
 | a method of an anonymous class sees the methods of the class around it | `anonymous-class` | yes |
+| an enum constant named as a value is a use of its enum | `enum-constant-value` | yes |
+| a class of another package is not in reach without an import | `other-package-not-in-reach` | yes |
 
 ### kotlin (32 of 32)
 
@@ -352,7 +360,7 @@ Kotlin Language Specification, 'Scopes and identifiers', 'Overload resolution' (
 | an enum entry has the enum's members | `enum-entry` | yes |
 | a call names the function beside a parameter of its name that cannot be called | `function-beside-parameter` | yes |
 
-### scala (21 of 21)
+### scala (28 of 28)
 
 Scala Language Specification, chapter 2 'Identifiers, Names and Scopes', 4.7 'Import Clauses'.
 
@@ -379,8 +387,15 @@ Scala Language Specification, chapter 2 'Identifiers, Names and Scopes', 4.7 'Im
 | `class A extends B` names its parent | `extends` | yes |
 | a class of the same package in another file needs no import | `same-package` | yes |
 | a generic method's parameters are its names, typed through an upper bound | `generic-method-parameters` | yes |
+| a type of another package is not in reach without an import | `other-package-not-in-reach` | yes |
+| a type nested in a class of another file is no bare name elsewhere | `nested-type-not-in-reach` | yes |
+| an argument given by name writes no variable of that name | `named-argument` | yes |
+| the type parameters of an `extension` are those of its methods | `extension-type-parameters` | yes |
+| `pkg.Type` in a type position is that package's type | `type-through-package` | yes |
+| a constructor pattern and a typed pattern are uses of the type they name | `pattern-types` | yes |
+| the types a type parameter is bound by are uses of them | `bound-types` | yes |
 
-### csharp (39 of 39)
+### csharp (40 of 40)
 
 C# Language Specification, 'Namespace and type names', 'Member lookup', 'Extension method invocations'.
 
@@ -425,8 +440,9 @@ C# Language Specification, 'Namespace and type names', 'Member lookup', 'Extensi
 | an extension written for an interface is a member of the classes that implement it | `extension-on-interface` | yes |
 | an enum member is a member of its enum | `enum-member` | yes |
 | `new R(…)` constructs a record, which has methods like a class | `record` | yes |
+| an enum member named as a value is a use of its enum | `enum-member-value` | yes |
 
-### rust (40 of 40)
+### rust (41 of 41)
 
 The Rust Reference, 'Names' (name resolution, scopes, paths), 'Method call expressions', 'Field access expressions'.
 
@@ -472,6 +488,7 @@ The Rust Reference, 'Names' (name resolution, scopes, paths), 'Method call expre
 | a `let` in a block ends with the block | `block-scope` | yes |
 | a value of a type parameter has the methods of the trait that bounds it | `generic-bound-where` | yes |
 | `Option<Space<M>>` holds a `Space`, whatever `M` is bound by | `wrapper-holds-first-argument` | yes |
+| an enum variant named as a value or a pattern is a use of its enum | `enum-variant-value` | yes |
 
 ### swift (35 of 35)
 
@@ -611,7 +628,7 @@ Ruby documentation, 'Calling Methods' and Module#ancestors (method lookup), 'Mod
 | a call in a block is the enclosing method's | `block-body` | yes |
 | a private method is called with an implicit receiver | `private-method` | yes |
 
-### php (31 of 31)
+### php (32 of 32)
 
 PHP Manual, 'Namespaces: Name resolution rules', 'Classes and Objects' (inheritance, traits, static).
 
@@ -648,5 +665,6 @@ PHP Manual, 'Namespaces: Name resolution rules', 'Classes and Objects' (inherita
 | a call of an abstract method through `$this` is the declaring class's | `abstract-method` | yes |
 | `C::m()` is C's static method | `static-method-via-class` | yes |
 | a method passed as `[$this, 'm']` is a use of m | `callable-string` | yes |
+| `\Name` is the global class, never one a namespace of the project declares | `global-class-is-not-a-namespaced-one` | yes |
 
-440 of 440 rules hold
+456 of 456 rules hold

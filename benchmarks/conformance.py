@@ -1754,6 +1754,68 @@ case("kotlin", "function-beside-parameter", "a call names the function beside a 
      [("describe", "calls", "help")])
 
 
+case("typescript", "enum-member-value", "an enum member named as a value is a use of its enum",
+     TS, {"a.ts": "export enum Color {\n  Red,\n  Green = 2,\n}\n\nexport function pick() {\n  return Color.Red;\n}\n\nexport function two() {\n  return Color.Green;\n}\n"},
+     [("pick", "references", "Color"), ("two", "references", "Color")])
+case("typescript", "type-alias-body", "the types a type alias is written with are uses of them",
+     TS, {"a.ts": "export class Left {\n  l = 1;\n}\n\nexport class Right {\n  r = 2;\n}\n\nexport type Either = Left | Right;\n"},
+     [("Either", "references", "Left"), ("Either", "references", "Right")])
+case("typescript", "interface-signatures", "the types of an interface's property, call, construct and index signatures are uses of them",
+     TS, {"a.ts": "export interface Opt {\n  x: number;\n}\n\nexport class Made {\n  m = 1;\n}\n\nexport class Kept {\n  k = 1;\n}\n\nexport class Held {\n  h = 1;\n}\n\nexport interface Maker {\n  (o: Opt): number;\n  new (n: number): Made;\n  [n: number]: Kept;\n  held: Held;\n}\n"},
+     [("Maker", "references", "Opt"), ("Maker", "references", "Made"), ("Maker", "references", "Kept"),
+      ("Maker", "references", "Held")])
+case("typescript", "typeof-type", "`typeof ns.Class` in a type position is a use of the class",
+     TS, {"a.ts": "export namespace Backbone {\n  export class Model {\n    id = 1;\n  }\n}\n\nexport interface Holder {\n  ctor: typeof Backbone.Model;\n}\n"},
+     [("Holder", "references", "Backbone.Model")])
+case("rust", "enum-variant-value", "an enum variant named as a value or a pattern is a use of its enum",
+     RS, {"Cargo.toml": CARGO,
+          "src/lib.rs": "pub enum Mode {\n    Fast,\n    Slow,\n}\n\npub fn pick() -> u8 {\n    let _m = Mode::Fast;\n    1\n}\n"},
+     [("pick", "references", "Mode")])
+case("java", "enum-constant-value", "an enum constant named as a value is a use of its enum",
+     JAVA, {"Kind.java": "enum Kind {\n    A,\n    B\n}\n",
+            "U.java": "class U {\n    Object pick() {\n        return Kind.A;\n    }\n}\n"},
+     [("U.pick", "references", "Kind")])
+case("csharp", "enum-member-value", "an enum member named as a value is a use of its enum",
+     CS, {"A.cs": "namespace App\n{\n    public enum Dir\n    {\n        Up,\n        Down\n    }\n\n    public class V\n    {\n        public object Pick()\n        {\n            return Dir.Up;\n        }\n    }\n}\n"},
+     [("V.Pick", "references", "Dir")])
+
+# What the Scala compiler's SemanticDB expect files showed (`oracle_scala.py`).
+case("scala", "other-package-not-in-reach", "a type of another package is not in reach without an import",
+     SC, {"other/List.scala": "package other\n\nclass List[A] {\n  def x = 2\n}\n",
+          "ext/Use.scala": "package ext\n\nclass Use {\n  def held: List[Int] = Nil\n}\n",
+          "ext/Seen.scala": "package ext\n\nimport other.List\n\nclass Seen {\n  def held: List[Int] = new List[Int]\n}\n"},
+     [("Seen.held", "references", "List")], [("Use.held", "references", "List")])
+case("scala", "nested-type-not-in-reach", "a type nested in a class of another file is no bare name elsewhere",
+     SC, {"example/Methods.scala": "package example\n\nclass Methods {\n  class List[T]\n  def own: List[Int] = new List[Int]\n}\n",
+          "example/Other.scala": "package example\n\nclass Other {\n  def e1: List[Int] = Nil\n}\n"},
+     [("Methods.own", "references", "Methods.List")], [("Other.e1", "references", "Methods.List")])
+case("scala", "named-argument", "an argument given by name writes no variable of that name",
+     SC, {"a.scala": "package app\n\nclass Local(a: Int, b: Int)\n\nobject Use {\n  var a = 0\n  def bump(): Unit = { a = 1 }\n  def make = new Local(a = 1, b = 2)\n}\n"},
+     [("Use.bump", "writes", "Use.a")], [("Use.make", "writes", "Use.a")])
+case("scala", "extension-type-parameters", "the type parameters of an `extension` are those of its methods",
+     SC, {"a.scala": "package app\n\nclass A\n\nobject Ops {\n  extension [A](opt: Option[A]) def unwrap: A = opt.get\n  def plain: A = new A\n}\n"},
+     [("Ops.plain", "references", "A")], [("Ops.unwrap", "references", "A")])
+case("scala", "type-through-package", "`pkg.Type` in a type position is that package's type",
+     SC, {"main/scopt/RenderingMode.scala": "package scopt\n\ntrait RenderingMode\n",
+          "test/scopttest/Spec.scala": "package scopttest\n\nclass Spec {\n  def mode: scopt.RenderingMode = ???\n}\n"},
+     [("Spec.mode", "references", "RenderingMode")])
+case("scala", "pattern-types", "a constructor pattern and a typed pattern are uses of the type they name",
+     SC, {"a.scala": "package app\n\ncase class Succ(p: Int)\nclass Obj\n\nobject M {\n  def f(n: Any): Int = n match {\n    case Succ(p) => p\n    case o: Obj => 2\n    case _ => 0\n  }\n}\n"},
+     [("M.f", "references", "Succ"), ("M.f", "references", "Obj")])
+case("scala", "bound-types", "the types a type parameter is bound by are uses of them",
+     SC, {"a.scala": "package app\n\ntrait Txn[T]\ntrait Show[A]\n\ntrait Copy[In <: Txn[In]] {\n  def k = 1\n}\n\nclass W[T: Show] {\n  def k = 2\n}\n"},
+     [("Copy", "references", "Txn"), ("W", "references", "Show")])
+case("java", "other-package-not-in-reach", "a class of another package is not in reach without an import",
+     JAVA, {"a/Lists.java": "package a;\n\npublic class Lists {\n    public static int of() {\n        return 1;\n    }\n}\n",
+            "c/Seen.java": "package c;\n\nimport a.Lists;\n\nclass Seen {\n    int f() {\n        return Lists.of();\n    }\n}\n",
+            "c/Blind.java": "package c;\n\nimport java.util.List;\n\nclass Blind {\n    Object f() {\n        return List.of();\n    }\n}\n",
+            "d/List.java": "package d;\n\npublic class List {\n    public static Object of() {\n        return null;\n    }\n}\n"},
+     [("Seen.f", "calls", "Lists.of")], [("Blind.f", "calls", "List.of")])
+case("php", "global-class-is-not-a-namespaced-one", "`\\Name` is the global class, never one a namespace of the project declares",
+     PHP, {"src/Clock.php": "<?php\n\nnamespace App\\Time;\n\nclass DateTimeImmutable\n{\n    public function __construct(string $at)\n    {\n    }\n}\n",
+           "src/Use.php": "<?php\n\nnamespace App\\Other;\n\nclass Use_\n{\n    public function make()\n    {\n        return new \\DateTimeImmutable('@0');\n    }\n}\n"},
+     [], [("Use_.make", "calls", "DateTimeImmutable")])
+
 # --- running ------------------------------------------------------------------
 
 def _matches(node: dict[str, Any], want: str) -> bool:

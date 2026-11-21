@@ -4192,6 +4192,7 @@ impl<'a> Project<'a> {
             .flatten()
             .copied()
             .filter(|r| self.family[r.0] == fam && self.def(*r).kind.is_class_like())
+            .filter(|r| self.in_reach_by_name(f, *r))
             .collect();
         self.narrow(f, cands).map(|(r, _)| r)
     }
@@ -6743,10 +6744,15 @@ impl<'a> Project<'a> {
             let head = joined(&path[..k]);
             for pre in &prefixes {
                 let key = format!("{pre}{head}");
+                // (where names live in packages, `fqn` holds them all: a
+                // name of another package is not one written without it.
+                // Not C#, whose project files import namespaces for every
+                // source: `<Using Include="…"/>`)
+                let packaged = matches!(fam, Family::Jvm | Family::Php);
                 let found = self
                     .fqn
                     .get(&key)
-                    .or_else(|| self.by_qual.get(&key))
+                    .or_else(|| self.by_qual.get(&key).filter(|_| !packaged))
                     .into_iter()
                     .flatten()
                     .copied()
@@ -6832,6 +6838,18 @@ impl<'a> Project<'a> {
         self.files[f].lang.is_some_and(|l| l.module().builtins().contains(&name))
     }
 
+    /// Whether a guess by name alone may name `r` from file `f`: where names
+    /// live in packages (JVM, PHP), only one of the file's own package or of
+    /// none, and no type nested in a type of another file.
+    fn in_reach_by_name(&self, f: usize, r: DefRef) -> bool {
+        if !matches!(self.family[f], Some(Family::Jvm | Family::Php)) {
+            return true;
+        }
+        let theirs = &self.files[r.0].package;
+        let nested = self.def(r).parent.is_some_and(|p| self.def((r.0, p)).kind.is_class_like());
+        (theirs.is_none() || *theirs == self.files[f].package) && !(nested && r.0 != f)
+    }
+
     /// A bare name defined nowhere in reach: a project-wide unique function or
     /// type of the same family.
     fn fallback_name(&self, f: usize, name: &str) -> Option<DefRef> {
@@ -6852,6 +6870,12 @@ impl<'a> Project<'a> {
                     && !(free && d.kind == DefKind::Method)
                     && d.scope_lines.is_none()
             })
+            // where names live in packages, a name of another package is
+            // not in reach without an import (which the scopes have read),
+            // nor is a type nested in a type of another file. (Not C#: a
+            // project file can import a namespace for every source, `<Using
+            // Include="…"/>`, which nothing here reads.)
+            .filter(|r| self.in_reach_by_name(f, *r))
             .collect();
         self.narrow(f, cands).map(|(r, _)| r)
     }
@@ -7583,8 +7607,9 @@ pub fn resolve(
                 let (target, relation, conf) = match found {
                     Some((Target::Def(t), conf)) => {
                         // `throw ParserError.noValue("x")`: a case built with
-                        // what it carries is a use of its enum
-                        let made = (matches!(r.kind, RefKind::Call | RefKind::New)
+                        // what it carries is a use of its enum, and so is a
+                        // case named as a value (`return Color.Red`)
+                        let made = (matches!(r.kind, RefKind::Call | RefKind::New | RefKind::Attr)
                             && p.def(t).kind == DefKind::EnumMember)
                             .then(|| p.def(t).parent.map(|e| (t.0, e)))
                             .flatten()
@@ -7643,8 +7668,8 @@ pub fn resolve(
                             // taken as a value is referred to
                             RefKind::Attr if tk.is_state() => "reads",
                             // C++ `port::CondVar cv;`: a type named through
-                            // its namespace (an enumerator is a value: no edge,
-                            // as for the other languages' enum members)
+                            // its namespace (an enumerator named became a
+                            // reference to its enum above)
                             RefKind::Attr
                                 if tk.is_class_like()
                                     && p.family[f] == Some(Family::C)

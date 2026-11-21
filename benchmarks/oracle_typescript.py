@@ -186,6 +186,14 @@ def judge(name: str, text: str, case: str) -> dict[str, Any] | None:
     files = {f: ls for f, ls in files.items() if f.endswith(SOURCE_EXT)}
     if not files or any(f.endswith(".d.ts") for f in files):
         return None
+    return compare(name, files, uses)
+
+
+def compare(name: str, files: dict[str, list[str]], uses: list[dict[str, Any]],
+            slack: tuple[int, int] = (0, 3)) -> dict[str, Any] | None:
+    """The native graph of `files` against the compiler's bindings: each use
+    has `file`, `line`, `expr`, `symbol`, `decls` (file, line), and the flags
+    `lib`, `declares`, `alias`."""
     graph = build(files)
     if graph is None:
         return None
@@ -232,7 +240,7 @@ def judge(name: str, text: str, case: str) -> dict[str, Any] | None:
                "src": files.get(site[0], [""] * site[1])[site[1] - 1].strip()[:110]}
         # (the graph's line is the definition's first line; a decorator or a
         # modifier line above the name is within three lines of it)
-        if any(f == target[0] and 0 <= target[1] - ln <= 3 for u in named for f, ln in u["decls"]):
+        if any(f == target[0] and slack[0] <= target[1] - ln <= slack[1] for u in named for f, ln in u["decls"]):
             right.append(row)
         else:
             row["compiler"] = (named[0]["symbol"] + (" (library)" if named[0]["lib"] else "")
@@ -245,7 +253,7 @@ def judge(name: str, text: str, case: str) -> dict[str, Any] | None:
         if u["declares"] or u["alias"]:
             continue
         for decl in u["decls"]:
-            target_id = next((at[(decl[0], decl[1] + k, name_)] for k in range(4)
+            target_id = next((at[(decl[0], decl[1] + k, name_)] for k in range(slack[0], slack[1] + 1)
                               if (decl[0], decl[1] + k, name_) in at), None)
             if target_id is None:
                 continue  # nothing of the graph's stands for it (a local, a parameter, a member of a type literal)
@@ -291,13 +299,18 @@ def main() -> int:
 
     with ThreadPoolExecutor(max_workers=args.jobs) as pool:
         results = [r for r in pool.map(one, paths) if r is not None]
+    report(results, len(paths), args.samples, args.json)
+    return 0
+
+
+def report(results: list[dict[str, Any]], total: int, samples: int, out: str | None) -> None:
     errors = [r for r in results if "error" in r]
     results = [r for r in results if "error" not in r]
     right = sum(len(r["right"]) for r in results)
     wrong = [w for r in results for w in r["wrong"]]
     missed = [m for r in results for m in r["missed"]]
     found = sum(r["found"] for r in results)
-    print(f"{len(results)} programs of the compiler's test suite ({len(paths)} baselines, "
+    print(f"{len(results)} programs of the compiler's test suite ({total} baselines, "
           f"{len(errors)} unreadable)")
     print(f"precision: {right} of {right + len(wrong)} edges the compiler has an answer for go where "
           f"it says ({100 * right / max(1, right + len(wrong)):.1f}%)")
@@ -309,14 +322,13 @@ def main() -> int:
     print("missed, by the kind of what was meant:", dict(by_kind.most_common()))
     for label, rows in (("wrong", wrong), ("missed", missed)):
         print(f"\n--- {label} (a sample) ---")
-        step = max(1, len(rows) // max(1, args.samples))
-        for row in rows[::step][:args.samples]:
+        step = max(1, len(rows) // max(1, samples))
+        for row in rows[::step][:samples]:
             extra = f"compiler: {row['compiler']}" if "compiler" in row else f"expr: {row['expr']}"
             print(f"  {row['case']}:{row['line']}  -> {row['to']}  [{row.get('relation', row.get('kind'))}]  {extra}\n      {row['src']}")
-    if args.json:
-        Path(args.json).write_text(json.dumps({"right": right, "found": found, "wrong": wrong,
-                                               "missed": missed}, indent=1) + "\n", encoding="utf-8")
-    return 0
+    if out:
+        Path(out).write_text(json.dumps({"right": right, "found": found, "wrong": wrong,
+                                         "missed": missed}, indent=1) + "\n", encoding="utf-8")
 
 
 if __name__ == "__main__":
