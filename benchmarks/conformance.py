@@ -45,7 +45,8 @@ CASES: list[dict[str, Any]] = []
 
 # How the cases that follow were found (docs/rule-sources.md): written from the
 # language's `specification`; shown missing by a `compiler` (its test suite, or
-# its answers on whole repositories); or by `comparison` with graphify's graph.
+# its answers on whole repositories); by `comparison` with graphify's graph; or
+# from the `grammar` (a place a name can be written that was not read).
 _FOUND = ["specification"]
 
 
@@ -2053,6 +2054,70 @@ case("go", "method-value-argument", "a method value handed to a call is a functi
      GO, {"go.mod": GOMOD, "a.go": "package app\n\nimport \"time\"\n\ntype Breaker struct {\n\ttimer *time.Timer\n}\n\nfunc (b *Breaker) onReset() {}\n\nfunc (b *Breaker) open() {\n\tb.timer = time.AfterFunc(time.Second, b.onReset)\n}\n"},
      [("Breaker.open", "indirect_call", "Breaker.onReset")])
 
+# The places a type is written that the reader never looked at, listed from the
+# grammars (`positions.py`, engine 0.5.62).
+found_by("grammar")
+case("go", "defined-type-names-its-type", "what a defined type is defined as is a use of it",
+     GO, {"go.mod": GOMOD, "a.go": "package app\n\ntype Opt struct{}\n\ntype Handler struct{}\n\ntype Key Opt\n\ntype Mid []func(h Handler) Handler\n"},
+     [("Key", "references", "Opt"), ("Mid", "references", "Handler")])
+case("go", "constant-type", "the type a constant is declared with is a use of it",
+     GO, {"go.mod": GOMOD, "a.go": "package app\n\ntype Key int\n\nconst RequestID Key = 0\n"},
+     [("RequestID", "references", "Key")])
+case("go", "function-literal-signature", "a function literal's parameters and result name their types",
+     GO, {"go.mod": GOMOD, "a.go": "package app\n\ntype Handler struct{}\n\ntype Opt struct{}\n\nfunc Run() {\n\tf := func(next Handler) Opt {\n\t\treturn Opt{}\n\t}\n\t_ = f\n}\n"},
+     [("Run", "references", "Handler"), ("Run", "references", "Opt")])
+case("go", "literal-element-types", "a slice or map literal names the types it is made of",
+     GO, {"go.mod": GOMOD, "a.go": "package app\n\ntype Opt struct{}\n\ntype Handler struct{}\n\nfunc Run() int {\n\ta := []*Opt{}\n\tb := map[string]Handler{}\n\treturn len(a) + len(b)\n}\n"},
+     [("Run", "references", "Opt"), ("Run", "references", "Handler")])
+case("go", "make-type-argument", "the type handed to `make` is a use of it",
+     GO, {"go.mod": GOMOD, "a.go": "package app\n\ntype Enc func() int\n\ntype Handler struct{}\n\nfunc Run() int {\n\tm := make(map[string]Enc)\n\tc := make(chan Handler, 1)\n\treturn len(m) + len(c)\n}\n"},
+     [("Run", "references", "Enc"), ("Run", "references", "Handler")])
+case("c", "local-declaration-type", "the type a local is declared with is a use of it",
+     CC, {"a.c": "typedef struct {\n    int n;\n} buffer;\n\nint run(void) {\n    buffer p = { 0 };\n    buffer *q = &p;\n    return q->n;\n}\n"},
+     [("run", "references", "buffer")])
+case("c", "typedef-names-its-type", "a `typedef` of a named type is a use of that type",
+     CC, {"a.c": "typedef struct item {\n    int v;\n} item;\n\ntypedef item *item_ptr;\n\nint run(item_ptr p) {\n    return p->v;\n}\n"},
+     [("item_ptr", "references", "item")])
+case("java", "throws-clause", "the exceptions a method declares it throws are uses of them",
+     JAVA, {"A.java": "class Err extends Exception {\n}\n\nclass A {\n    void run() throws Err {\n        throw new Err();\n    }\n\n    void quiet() throws Err {\n    }\n}\n"},
+     [("A.quiet", "references", "Err")])
+case("java", "class-literal", "`T.class` is a use of T",
+     JAVA, {"A.java": "class El {\n}\n\nclass A {\n    Object run() {\n        return El.class;\n    }\n}\n"},
+     [("A.run", "references", "El")])
+case("java", "for-each-and-varargs-types", "the type of a for-each variable and of a varargs parameter are uses of it",
+     JAVA, {"A.java": "class El {\n}\n\nclass Many {\n}\n\nclass A {\n    int each(java.util.List<Object> xs) {\n        int n = 0;\n        for (Object o : xs) {\n            n++;\n        }\n        for (El e : new java.util.ArrayList<El>()) {\n            n++;\n        }\n        return n;\n    }\n\n    int spread(Many... many) {\n        return many.length;\n    }\n}\n"},
+     [("A.each", "references", "El"), ("A.spread", "references", "Many")])
+case("java", "interface-constant-type", "the type of a constant an interface declares is a use of it",
+     JAVA, {"A.java": "class Filter {\n}\n\ninterface Filters {\n    Filter ALL = null;\n}\n"},
+     [("Filters", "references", "Filter")])
+case("swift", "typed-throws", "`throws(E)` is a use of E",
+     SW, {"a.swift": "struct ParseError: Error {\n}\n\nfunc run() throws(ParseError) -> Int {\n    return 1\n}\n"},
+     [("run", "references", "ParseError")])
+case("swift", "protocol-property-type", "the type of a property a protocol requires is a use of it",
+     SW, {"a.swift": "protocol Handler {\n}\n\nstruct Cred {\n}\n\nprotocol Delegate {\n    var handler: (any Handler)? { get }\n    var cred: Cred { get }\n}\n"},
+     [("var handler", "references", "Handler"), ("var cred", "references", "Cred")])
+case("swift", "metatype-of-existential", "`(any P).self` is a use of P",
+     SW, {"a.swift": "protocol Handler {\n}\n\nfunc run() -> Any {\n    return (any Handler).self\n}\n"},
+     [("run", "references", "Handler")])
+case("swift", "generic-construction", "`Box<T>(…)` constructs Box",
+     SW, {"a.swift": "struct Cred {\n}\n\nstruct Box<T> {\n    init(value: Int) {\n    }\n}\n\nfunc run() -> Box<Cred> {\n    return Box<Cred>(value: 1)\n}\n"},
+     [("run", "calls", "Box")])
+case("csharp", "array-creation-type", "`new T[n]` is a use of T",
+     CS, {"A.cs": "namespace App\n{\n    public class Err\n    {\n    }\n\n    public class C\n    {\n        public object Make()\n        {\n            return new Err[2];\n        }\n    }\n}\n"},
+     [("C.Make", "references", "Err")])
+case("scala", "declared-value-type", "the type a `val` or `var` is declared with is a use of it",
+     SC, {"src/app/A.scala": "package app\n\nclass Compress\n\nclass Other\n\nclass T {\n  val c: Compress = null\n\n  def run(): Any = {\n    val l: Other = null\n    l\n  }\n}\n"},
+     [("T", "references", "Compress"), ("T.run", "references", "Other")])
+case("scala", "new-through-its-holder", "`new Outer.Inner(…)` constructs Inner",
+     SC, {"src/app/A.scala": "package app\n\nobject Outer {\n  class Inner(s: String)\n}\n\nobject Main {\n  def run(): Any = new Outer.Inner(\"x\")\n}\n"},
+     [("Main.run", "calls", "Outer.Inner")])
+case("rust", "struct-pattern-type", "the struct a pattern takes apart is a use of it",
+     RS, {"Cargo.toml": CARGO, "src/lib.rs": "pub struct Limited {\n    pub n: u32,\n}\n\npub enum Mode {\n    L(Limited),\n    N,\n}\n\npub fn run(m: Mode) -> u32 {\n    match m {\n        Mode::L(Limited { n }) => n,\n        Mode::N => 0,\n    }\n}\n"},
+     [("run", "references", "Limited")])
+case("php", "closure-signature", "an anonymous function's parameters and result name their types",
+     PHP, {"src/A.php": "<?php\n\nnamespace App;\n\nclass Cookie\n{\n}\n\nclass Result\n{\n}\n\nclass A\n{\n    public function run()\n    {\n        return static function (Cookie $c): Result {\n            return new Result();\n        };\n    }\n}\n"},
+     [("A.run", "references", "Cookie")])
+
 # --- running ------------------------------------------------------------------
 
 def _matches(node: dict[str, Any], want: str) -> bool:
@@ -2118,11 +2183,13 @@ def main() -> int:
         mine = [c for c in cases if c["lang"] == lang]
         passed = sum(1 for c in mine if results[c["id"]]["ok"])
         if args.markdown:
-            how = {h: sum(1 for c in mine if c["found"] == h) for h in ("specification", "compiler", "comparison")}
+            how = {h: sum(1 for c in mine if c["found"] == h)
+                   for h in ("specification", "compiler", "comparison", "grammar")}
             read = sum(1 for c in mine if c["source"])
             print(f"\n### {lang} ({passed} of {len(mine)})\n\n{mine[0]['where']}.\n")
             print(f"Found by: the specification {how['specification']}, a compiler {how['compiler']}, "
-                  f"comparison {how['comparison']}. With the place it was read in the language's own "
+                  f"comparison {how['comparison']}, the grammar {how['grammar']}. "
+                  f"With the place it was read in the language's own "
                   f"tools: {read}.\n")
             print("| Rule | Case | Versions | Engine |\n|---|---|---|---|")
         else:

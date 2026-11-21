@@ -426,6 +426,23 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- **Native engine 0.5.62: places a type is written that were never read**,
+  listed from the grammars by `benchmarks/positions.py` (530 cases in the
+  checklist, all hold). The share of the repositories' own type names the
+  reader records went from 88.9% to 97.0%; 4,050 reference edges and 200
+  calls more on the 45 audit repositories, with the compilers' agreement
+  unchanged (Go 12,273 of 12,278).
+  - Every language: a closure's own parameters and result.
+  - Go: what a defined type is defined as (`type Key Opt`), a constant's
+    type, the types of a slice or map literal, the type handed to `make`; a
+    package's `const` / `var` is the source of its own uses.
+  - C, C++: the type of a declaration and what a `typedef` names.
+  - Java: `throws`, `T.class`, the types of a for-each variable, a varargs
+    parameter and an interface's constant.
+  - Swift: `throws(E)`, a protocol property's type, `(any P).self`;
+    `Box<T>(…)` is a construction of `Box`.
+  - C# `new T[n]`; Scala a `val`'s declared type and `new Outer.Inner(…)`;
+    Rust the struct a pattern takes apart.
 - **Native engine 0.5.60: the rest of graphify's confirmed edges, in Rust
   and Go** (510 cases in the checklist, all hold). Of the 115 confirmed
   edges the native graph lacked 45 are left, none in Go:

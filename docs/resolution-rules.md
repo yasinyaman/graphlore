@@ -25,7 +25,7 @@ python benchmarks/conformance.py --baseline benchmarks/results-conformance.json 
 python benchmarks/conformance.py --markdown      # the tables below
 ```
 
-Measured 2026-11-21 with graphlore-engine 0.5.61: **510 of 510 rules hold**
+Measured 2026-11-21 with graphlore-engine 0.5.62: **530 of 530 rules hold**
 (356 of the first 406 with 0.5.45). Ten came from the Go type checker and
 rust-analyzer run on whole repositories; fifteen from the Kotlin and Swift
 compilers' tests (type checks, casts, `catch`, aliases); thirty-nine from two
@@ -104,7 +104,7 @@ Each change was measured on the 45 audit repositories as well, by reading
 the edges it added and removed at their source lines; the page on the
 [native engine](native-engine.md#the-rules-themselves) has the numbers.
 Every case has been compiled by its own language
-(`benchmarks/verify_cases.py`: 510 of 510 accepted). The Versions column is
+(`benchmarks/verify_cases.py`: 530 of 530 accepted). The Versions column is
 the oldest version of the language whose compiler accepts the case, where the
 compiler can be asked (`verify_cases.py --min-version`: Java, Kotlin, Scala,
 C#, Swift, C, C++); `all` is the oldest version asked, `–` a language with no
@@ -128,7 +128,7 @@ name to the engine, so the case names it `fetchAll`.
 
 The Python Language Reference, 'Naming and binding' (4.2) and 'The import system'.
 
-Found by: the specification 36, a compiler 1, comparison 0. With the place it was read in the language's own tools: 0.
+Found by: the specification 36, a compiler 1, comparison 0, the grammar 0. With the place it was read in the language's own tools: 0.
 
 | Rule | Case | Versions | Engine |
 |---|---|---|---|
@@ -174,7 +174,7 @@ Found by: the specification 36, a compiler 1, comparison 0. With the place it wa
 
 ECMAScript Language Specification, 'Executable Code and Execution Contexts' (scopes), 'Modules'.
 
-Found by: the specification 29, a compiler 0, comparison 0. With the place it was read in the language's own tools: 0.
+Found by: the specification 29, a compiler 0, comparison 0, the grammar 0. With the place it was read in the language's own tools: 0.
 
 | Rule | Case | Versions | Engine |
 |---|---|---|---|
@@ -212,7 +212,7 @@ Found by: the specification 29, a compiler 0, comparison 0. With the place it wa
 
 TypeScript Handbook, 'Modules', 'Classes', 'Generics' (types are the compiler's, tsc).
 
-Found by: the specification 30, a compiler 19, comparison 0. With the place it was read in the language's own tools: 0.
+Found by: the specification 30, a compiler 19, comparison 0, the grammar 0. With the place it was read in the language's own tools: 0.
 
 | Rule | Case | Versions | Engine |
 |---|---|---|---|
@@ -266,11 +266,11 @@ Found by: the specification 30, a compiler 19, comparison 0. With the place it w
 | `x as T` and `x instanceof T` are uses of T | `as-and-instanceof` | – | yes |
 | every name a closure's parameter pattern binds is the closure's | `destructured-closure-parameter` | – | yes |
 
-### go (33 of 33)
+### go (38 of 38)
 
 The Go Programming Language Specification, 'Declarations and scope', 'Selectors', 'Method sets'.
 
-Found by: the specification 23, a compiler 8, comparison 2. With the place it was read in the language's own tools: 0.
+Found by: the specification 23, a compiler 8, comparison 2, the grammar 5. With the place it was read in the language's own tools: 0.
 
 | Rule | Case | Versions | Engine |
 |---|---|---|---|
@@ -307,12 +307,17 @@ Found by: the specification 23, a compiler 8, comparison 2. With the place it wa
 | a method called on a value the source types as a library's is the library's | `library-receiver-is-no-guess` | – | yes |
 | each result of a function names its type | `every-result-type` | – | yes |
 | a method value handed to a call is a function handed over | `method-value-argument` | – | yes |
+| what a defined type is defined as is a use of it | `defined-type-names-its-type` | – | yes |
+| the type a constant is declared with is a use of it | `constant-type` | – | yes |
+| a function literal's parameters and result name their types | `function-literal-signature` | – | yes |
+| a slice or map literal names the types it is made of | `literal-element-types` | – | yes |
+| the type handed to `make` is a use of it | `make-type-argument` | – | yes |
 
-### java (44 of 44)
+### java (48 of 48)
 
 The Java Language Specification, 6.4 'Shadowing and Obscuring', 15.12 'Method Invocation Expressions'.
 
-Found by: the specification 41, a compiler 3, comparison 0. With the place it was read in the language's own tools: 0.
+Found by: the specification 41, a compiler 3, comparison 0, the grammar 4. With the place it was read in the language's own tools: 0.
 
 | Rule | Case | Versions | Engine |
 |---|---|---|---|
@@ -360,12 +365,16 @@ Found by: the specification 41, a compiler 3, comparison 0. With the place it wa
 | an enum constant named as a value is a use of its enum | `enum-constant-value` | all | yes |
 | a class of another package is not in reach without an import | `other-package-not-in-reach` | 9+ | yes |
 | `instanceof T`, `(T) x` and `catch (T e)` are uses of T | `instanceof-cast-catch` | all | yes |
+| the exceptions a method declares it throws are uses of them | `throws-clause` | – | yes |
+| `T.class` is a use of T | `class-literal` | – | yes |
+| the type of a for-each variable and of a varargs parameter are uses of it | `for-each-and-varargs-types` | – | yes |
+| the type of a constant an interface declares is a use of it | `interface-constant-type` | – | yes |
 
 ### kotlin (40 of 40)
 
 Kotlin Language Specification, 'Scopes and identifiers', 'Overload resolution' (receivers).
 
-Found by: the specification 31, a compiler 9, comparison 0. With the place it was read in the language's own tools: 0.
+Found by: the specification 31, a compiler 9, comparison 0, the grammar 0. With the place it was read in the language's own tools: 0.
 
 | Rule | Case | Versions | Engine |
 |---|---|---|---|
@@ -410,11 +419,11 @@ Found by: the specification 31, a compiler 9, comparison 0. With the place it wa
 | a constructor parameter written `val` is a property of the class | `constructor-property-read` | all | yes |
 | the name of an argument given by name reads no property of that name | `named-argument-label` | all | yes |
 
-### scala (28 of 28)
+### scala (30 of 30)
 
 Scala Language Specification, chapter 2 'Identifiers, Names and Scopes', 4.7 'Import Clauses'.
 
-Found by: the specification 20, a compiler 8, comparison 0. With the place it was read in the language's own tools: 0.
+Found by: the specification 20, a compiler 8, comparison 0, the grammar 2. With the place it was read in the language's own tools: 0.
 
 | Rule | Case | Versions | Engine |
 |---|---|---|---|
@@ -446,12 +455,14 @@ Found by: the specification 20, a compiler 8, comparison 0. With the place it wa
 | `pkg.Type` in a type position is that package's type | `type-through-package` | all | yes |
 | a constructor pattern and a typed pattern are uses of the type they name | `pattern-types` | all | yes |
 | the types a type parameter is bound by are uses of them | `bound-types` | all | yes |
+| the type a `val` or `var` is declared with is a use of it | `declared-value-type` | – | yes |
+| `new Outer.Inner(…)` constructs Inner | `new-through-its-holder` | – | yes |
 
-### csharp (51 of 51)
+### csharp (52 of 52)
 
 C# Language Specification, 'Namespace and type names', 'Member lookup', 'Extension method invocations'.
 
-Found by: the specification 39, a compiler 6, comparison 6. With the place it was read in the language's own tools: 0.
+Found by: the specification 39, a compiler 6, comparison 6, the grammar 1. With the place it was read in the language's own tools: 0.
 
 | Rule | Case | Versions | Engine |
 |---|---|---|---|
@@ -506,12 +517,13 @@ Found by: the specification 39, a compiler 6, comparison 6. With the place it wa
 | a local assigned a member read is what the member holds | `local-from-member-read` | all | yes |
 | `new T { … }` with no argument list calls the constructor that takes none | `initializer-without-arguments` | all | yes |
 | a partial type's constructors are those of every file that declares it | `partial-type-constructor` | all | yes |
+| `new T[n]` is a use of T | `array-creation-type` | – | yes |
 
-### rust (53 of 53)
+### rust (54 of 54)
 
 The Rust Reference, 'Names' (name resolution, scopes, paths), 'Method call expressions', 'Field access expressions'.
 
-Found by: the specification 37, a compiler 10, comparison 6. With the place it was read in the language's own tools: 0.
+Found by: the specification 37, a compiler 10, comparison 6, the grammar 1. With the place it was read in the language's own tools: 0.
 
 | Rule | Case | Versions | Engine |
 |---|---|---|---|
@@ -568,12 +580,13 @@ Found by: the specification 37, a compiler 10, comparison 6. With the place it w
 | an `impl` is of the type its own file names, where two modules each have a type of the name | `impl-of-the-files-own-type` | – | yes |
 | `io::Error::message(m)` is the method a trait of the project gives the library's type | `trait-method-through-a-library-type` | – | yes |
 | the types a trait is written with in an `impl` are uses of the implementing type | `impl-trait-type-arguments` | – | yes |
+| the struct a pattern takes apart is a use of it | `struct-pattern-type` | – | yes |
 
-### swift (38 of 38)
+### swift (42 of 42)
 
 The Swift Programming Language, 'Declarations', 'Extensions', 'Protocols' (member lookup is the compiler's).
 
-Found by: the specification 33, a compiler 5, comparison 0. With the place it was read in the language's own tools: 0.
+Found by: the specification 33, a compiler 5, comparison 0, the grammar 4. With the place it was read in the language's own tools: 0.
 
 | Rule | Case | Versions | Engine |
 |---|---|---|---|
@@ -615,12 +628,16 @@ Found by: the specification 33, a compiler 5, comparison 0. With the place it wa
 | `x is T`, `x as? T` and `catch let e as T` are uses of T | `is-and-as` | all | yes |
 | what a typealias composes and what a `where` clause bounds by are uses of those types | `typealias-and-where` | all | yes |
 | `Self()` constructs the type around | `self-constructs` | all | yes |
+| `throws(E)` is a use of E | `typed-throws` | – | yes |
+| the type of a property a protocol requires is a use of it | `protocol-property-type` | – | yes |
+| `(any P).self` is a use of P | `metatype-of-existential` | – | yes |
+| `Box<T>(…)` constructs Box | `generic-construction` | – | yes |
 
-### c (14 of 14)
+### c (16 of 16)
 
 ISO C, 6.2.1 'Scopes of identifiers', 6.2.2 'Linkages of identifiers'.
 
-Found by: the specification 14, a compiler 0, comparison 0. With the place it was read in the language's own tools: 0.
+Found by: the specification 14, a compiler 0, comparison 0, the grammar 2. With the place it was read in the language's own tools: 0.
 
 | Rule | Case | Versions | Engine |
 |---|---|---|---|
@@ -638,12 +655,14 @@ Found by: the specification 14, a compiler 0, comparison 0. With the place it wa
 | a `static inline` function of an included header is called | `header-inline` | 99+ | yes |
 | `a->b->c` reads the field of the struct the field points to | `struct-field-chain` | all | yes |
 | a call through a parameter is no call of a function of its name | `typedef-function-pointer` | all | yes |
+| the type a local is declared with is a use of it | `local-declaration-type` | – | yes |
+| a `typedef` of a named type is a use of that type | `typedef-names-its-type` | – | yes |
 
 ### cpp (32 of 32)
 
 ISO C++, [basic.lookup] (unqualified, qualified and argument-dependent lookup), [class.member.lookup], [dcl.ambig.res].
 
-Found by: the specification 32, a compiler 0, comparison 0. With the place it was read in the language's own tools: 0.
+Found by: the specification 32, a compiler 0, comparison 0, the grammar 0. With the place it was read in the language's own tools: 0.
 
 | Rule | Case | Versions | Engine |
 |---|---|---|---|
@@ -684,7 +703,7 @@ Found by: the specification 32, a compiler 0, comparison 0. With the place it wa
 
 Ruby documentation, 'Calling Methods' and Module#ancestors (method lookup), 'Modules and Classes' (constant lookup).
 
-Found by: the specification 29, a compiler 0, comparison 0. With the place it was read in the language's own tools: 0.
+Found by: the specification 29, a compiler 0, comparison 0, the grammar 0. With the place it was read in the language's own tools: 0.
 
 | Rule | Case | Versions | Engine |
 |---|---|---|---|
@@ -718,11 +737,11 @@ Found by: the specification 29, a compiler 0, comparison 0. With the place it wa
 | a call in a block is the enclosing method's | `block-body` | – | yes |
 | a private method is called with an implicit receiver | `private-method` | – | yes |
 
-### php (33 of 33)
+### php (34 of 34)
 
 PHP Manual, 'Namespaces: Name resolution rules', 'Classes and Objects' (inheritance, traits, static).
 
-Found by: the specification 31, a compiler 2, comparison 0. With the place it was read in the language's own tools: 0.
+Found by: the specification 31, a compiler 2, comparison 0, the grammar 1. With the place it was read in the language's own tools: 0.
 
 | Rule | Case | Versions | Engine |
 |---|---|---|---|
@@ -759,5 +778,6 @@ Found by: the specification 31, a compiler 2, comparison 0. With the place it wa
 | a method passed as `[$this, 'm']` is a use of m | `callable-string` | – | yes |
 | `\Name` is the global class, never one a namespace of the project declares | `global-class-is-not-a-namespaced-one` | – | yes |
 | `$x instanceof T` and `catch (T $e)` are uses of T | `instanceof-and-catch` | – | yes |
+| an anonymous function's parameters and result name their types | `closure-signature` | – | yes |
 
-510 of 510 rules hold
+530 of 530 rules hold

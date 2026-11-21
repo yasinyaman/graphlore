@@ -1,6 +1,6 @@
 {
- "passed": 510,
- "total": 510,
+ "passed": 530,
+ "total": 530,
  "cases": [
   {
    "id": "python/module-function",
@@ -3058,6 +3058,126 @@
   },
   {
    "id": "go/method-value-argument",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/defined-type-names-its-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/constant-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/function-literal-signature",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/literal-element-types",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/make-type-argument",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "c/local-declaration-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "c/typedef-names-its-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/throws-clause",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/class-literal",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/for-each-and-varargs-types",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/interface-constant-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/typed-throws",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/protocol-property-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/metatype-of-existential",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/generic-construction",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/array-creation-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "scala/declared-value-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "scala/new-through-its-holder",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/struct-pattern-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "php/closure-signature",
    "ok": true,
    "missing": [],
    "unwanted": []

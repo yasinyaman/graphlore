@@ -361,9 +361,17 @@ pub fn callee(n: Node, src: &[u8]) -> Option<(RefKind, Vec<String>)> {
             | "struct_expression"
             | "composite_literal"
             | "implicit_object_creation_expression"
+            // (Swift `Res<Cred>(value: 1)`: a construction written with its
+            // type arguments)
+            | "constructor_expression"
     ) {
+        // Scala `new Outer.Inner(…)`: the type named through what holds it
+        if let Some(st) = kids(n).into_iter().find(|c| c.kind() == "stable_type_identifier") {
+            return Some((RefKind::New, stable_path(st, src)));
+        }
         let t = n
             .child_by_field_name("constructor")
+            .or_else(|| n.child_by_field_name("constructed_type"))
             .or_else(|| n.child_by_field_name("type"))
             .or_else(|| n.child_by_field_name("name"))
             .or_else(|| {
@@ -3200,6 +3208,16 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                 // (Rust `const FLAGS: &[&dyn Flag] = …`, `static N: Foo = …`)
                 | "const_item"
                 | "static_item"
+                // (Go `const RequestIDKey ctxKey = 0`)
+                | "const_spec"
+                // (Java `for (El e : xs)`, an interface's `Filter ALL = …`;
+                // Scala `val c: Compress = …`)
+                | "enhanced_for_statement"
+                | "constant_declaration"
+                | "val_definition"
+                | "var_definition"
+                | "val_declaration"
+                | "var_declaration"
         ) {
             if let Some(t) = n.child_by_field_name("type") {
                 let mut types = Vec::new();
@@ -3370,6 +3388,138 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
             let mut types = Vec::new();
             for t in named {
                 types_in(t, src, "alias", &mut types);
+            }
+            for (p, ctx) in types {
+                push(&mut refs, n, RefKind::Type, p, ctx, None);
+            }
+        }
+        // Positions `benchmarks/positions.py` listed as never read.
+        // A closure's own signature: `func(next Handler) Handler { … }`,
+        // `|a: Arg| -> Ret { … }`, `function (Foo $x): Bar { … }`
+        if is_closure(n.kind()) && !by_node.contains_key(&n.id()) {
+            let mut types = Vec::new();
+            signature_types(n, src, &mut types);
+            for (p, ctx) in types {
+                push(&mut refs, n, RefKind::Type, p, ctx, None);
+            }
+        }
+        {
+            let mut types = Vec::new();
+            match n.kind() {
+                // Java `throws Err`, Swift `throws(ParserError)`
+                "throws" | "throws_clause" => {
+                    for t in kids(n) {
+                        types_in(t, src, "throws", &mut types);
+                    }
+                }
+                // Java `El... many`
+                "spread_parameter" => {
+                    for t in kids(n).into_iter().filter(|c| c.kind() != "variable_declarator") {
+                        types_in(t, src, "parameter_type", &mut types);
+                    }
+                }
+                // Java `El.class`
+                "class_literal" => {
+                    if let Some(t) = kids(n).into_iter().next() {
+                        types_in(t, src, "class_literal", &mut types);
+                    }
+                }
+                // Swift `var handler: (any Handler)? { get }` in a protocol
+                "protocol_property_declaration" => {
+                    for t in kids(n).into_iter().filter(|c| c.kind() == "type_annotation") {
+                        types_in(t, src, "field", &mut types);
+                    }
+                }
+                // Rust `Mode::L(Limited { n }) => …`: the struct a pattern
+                // takes apart
+                "struct_pattern" => {
+                    if let Some(t) = n.child_by_field_name("type") {
+                        types_in(t, src, "pattern", &mut types);
+                    }
+                }
+                // C# `new Err[2]`, Java `new El[] { … }`: the element type
+                "array_creation_expression" => {
+                    if let Some(t) = n.child_by_field_name("type") {
+                        types_in(t, src, "constructor", &mut types);
+                    }
+                }
+                // Swift `(any Handler).self`: a type named as a value
+                "navigation_expression" => {
+                    let named =
+                        n.child_by_field_name("element").filter(|t| t.kind().ends_with("_type"));
+                    if let Some(t) = named {
+                        types_in(t, src, "value", &mut types);
+                    }
+                }
+                _ => {}
+            }
+            for (p, ctx) in types {
+                push(&mut refs, n, RefKind::Type, p, ctx, None);
+            }
+        }
+        if facts.lang == Some(crate::lang::Lang::Go) {
+            let mut types = Vec::new();
+            match n.kind() {
+                // `type Key Opt`, `type Mid []func(Handler) Handler`: what a
+                // defined type is defined as (a struct's fields and an
+                // interface's methods are read where they are written)
+                "type_spec" => {
+                    let written = n
+                        .child_by_field_name("type")
+                        .filter(|t| !matches!(t.kind(), "struct_type" | "interface_type"));
+                    if let Some(t) = written {
+                        types_in(t, src, "alias", &mut types);
+                    }
+                }
+                // `[]*Opt{…}`, `map[string]Handler{…}`: the types a literal
+                // of a slice, an array or a map is made of
+                "composite_literal" => {
+                    let written = n.child_by_field_name("type").filter(|t| {
+                        matches!(
+                            t.kind(),
+                            "slice_type" | "array_type" | "map_type" | "implicit_length_array_type"
+                        )
+                    });
+                    if let Some(t) = written {
+                        types_in(t, src, "constructor", &mut types);
+                    }
+                }
+                // `make(map[string]Enc)`, `make(chan Handler, 1)`: a type
+                // written as an argument
+                "argument_list" => {
+                    for a in kids(n) {
+                        if a.kind().ends_with("_type") || a.kind() == "type_identifier" {
+                            types_in(a, src, "type_argument", &mut types);
+                        }
+                    }
+                }
+                _ => {}
+            }
+            for (p, ctx) in types {
+                push(&mut refs, n, RefKind::Type, p, ctx, None);
+            }
+        }
+        if matches!(facts.lang, Some(crate::lang::Lang::C | crate::lang::Lang::Cpp)) {
+            let mut types = Vec::new();
+            match n.kind() {
+                // `printbuffer p = { 0 };`, `item *q;`, `int f(item x);`: the
+                // type a declaration is written with
+                "declaration" => {
+                    if let Some(t) = n.child_by_field_name("type") {
+                        types_in(t, src, "variable_type", &mut types);
+                    }
+                }
+                // `typedef item *item_ptr;`: what the name stands for (a
+                // struct written there with its body is a definition)
+                "type_definition" => {
+                    let written = n
+                        .child_by_field_name("type")
+                        .filter(|t| t.child_by_field_name("body").is_none());
+                    if let Some(t) = written {
+                        types_in(t, src, "alias", &mut types);
+                    }
+                }
+                _ => {}
             }
             for (p, ctx) in types {
                 push(&mut refs, n, RefKind::Type, p, ctx, None);
