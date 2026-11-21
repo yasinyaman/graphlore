@@ -3693,6 +3693,22 @@ impl<'a> Project<'a> {
     /// beside `RestResponse` is another type).
     fn partials(&self, c: DefRef) -> Vec<DefRef> {
         let def = self.def(c);
+        // TypeScript: the interfaces of one name in one scope are one
+        // interface (declaration merging)
+        if self.family[c.0] == Some(Family::Ecma) && def.kind == DefKind::Interface {
+            return self.files[c.0]
+                .defs
+                .iter()
+                .enumerate()
+                .filter(|(i, d)| {
+                    *i != c.1
+                        && d.kind == DefKind::Interface
+                        && d.qualname == def.qualname
+                        && d.parent == def.parent
+                })
+                .map(|(i, _)| (c.0, i))
+                .collect();
+        }
         if self.family[c.0] != Some(Family::CSharp) || !def.kind.is_class_like() {
             return Vec::new();
         }
@@ -4945,6 +4961,18 @@ impl<'a> Project<'a> {
                     self.resolve_path_inner(f, defs_parent(self.files, f, x), &bound, false, false);
                 *self.types_only.borrow_mut() = before;
                 let (t, _) = named?;
+                return if rest.is_empty() {
+                    Some((t, Confidence::Extracted))
+                } else {
+                    self.walk(t, rest, Confidence::Extracted)
+                };
+            }
+        }
+        // TS: where a type is written, a value of the name (`const Repo = 1`)
+        // is no meaning of it; the type around is (types and values are two
+        // meanings of a name: the name resolver's `meaning & SymbolFlagsType`)
+        if fam == Family::Ecma && *self.types_only.borrow() && self.is_local_name(f, d, head) {
+            if let Some(t) = self.resolve_name(f, d, head) {
                 return if rest.is_empty() {
                     Some((t, Confidence::Extracted))
                 } else {
@@ -8073,7 +8101,9 @@ pub fn resolve(
                 {
                     continue;
                 }
-                *p.types_only.borrow_mut() = heritage || r.kind == RefKind::Type;
+                // (`typeof x` in a type names the value `x`: a value meaning)
+                *p.types_only.borrow_mut() =
+                    heritage || (r.kind == RefKind::Type && r.context != "type_query");
                 *p.calling.borrow_mut() = matches!(r.kind, RefKind::Call | RefKind::New);
                 *p.recv.borrow_mut() = r.recv.map(|i| (f, i));
                 *p.args.borrow_mut() = r.args;

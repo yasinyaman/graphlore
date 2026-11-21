@@ -2388,6 +2388,55 @@ case("go", "pointer-method-on-a-value", "a method of `*T` is called on an addres
      [("Run", "calls", "Counter.Inc")],
      source=SPEC_GO + "Calls (if x is addressable and &x's method set contains m, x.m() is shorthand for (&x).m())")
 
+# Phase 2 for TypeScript / JavaScript: TypeScript has no current specification;
+# the binder's name resolver is the source (microsoft/TypeScript, the Go port
+# `tsc/internal/binder/nameresolver.go` `NameResolver.Resolve`, scope by scope),
+# with module resolution from `tsc/internal/module` and ECMAScript's own rules
+# for `var`, `catch` and named function expressions.
+found_by("source")
+NR_TS = "microsoft/TypeScript@01f1a759d92b:tsc/internal/binder/nameresolver.go "
+MOD_TS = "microsoft/TypeScript@01f1a759d92b:tsc/internal/module/"
+case("typescript", "class-members-are-not-names", "a class's members are no names inside its methods: a bare call is the module's function",
+     TS, {"a.ts": "export function helper(): number {\n  return 1\n}\n\nexport class Job {\n  helper(): number {\n    return 2\n  }\n\n  run(): number {\n    return helper() + this.helper()\n  }\n}\n"},
+     [("Job.run", "calls", "a.ts:helper"), ("Job.run", "calls", "Job.helper")],
+     source=NR_TS + "Resolve (KindClassDeclaration: only the class's type parameters, `meaning & SymbolFlagsType`)")
+case("typescript", "decorator-resolved-at-the-class", "a decorator is resolved where the class is declared, not among the method's parameters",
+     TS, {"a.ts": "export function logged(target: any, context: any): any {\n  return target\n}\n\nexport class Job {\n  @logged\n  run(logged: number): number {\n    return logged\n  }\n}\n"},
+     [("Job.run", "references", "logged")],
+     source=NR_TS + "Resolve (KindDecorator: resolved at the class declaration)")
+case("typescript", "catch-binding-is-the-blocks", "a `catch` binding is a name of the catch block only",
+     TS, {"a.ts": "export function report(): number {\n  return 1\n}\n\nexport function run(): number {\n  try {\n    return 0\n  } catch (report) {\n    return report ? 2 : 3\n  } finally {\n    report()\n  }\n}\n"},
+     [("run", "calls", "report")],
+     source=NR_TS + "Resolve (KindCatchClause locals); ECMAScript 'The try Statement' (CatchClauseEvaluation)")
+case("typescript", "declaration-merging", "two `interface` declarations of one name are one interface: a member of either",
+     TS, {"a.ts": "export interface Repo {\n  find(): number\n}\n\nexport interface Repo {\n  save(): void\n}\n\nexport function run(r: Repo): number {\n  r.save()\n  return r.find()\n}\n"},
+     [("run", "calls", "Repo.save"), ("run", "calls", "Repo.find")],
+     source="TypeScript Handbook 'Declaration Merging' (merging interfaces); " + NR_TS + "lookup (one symbol per merged declaration)")
+case("typescript", "tsconfig-paths", "an import through a `paths` mapping of `tsconfig.json` is the file it maps to",
+     TS, {"tsconfig.json": "{\n  \"compilerOptions\": {\n    \"target\": \"ES2022\",\n    \"module\": \"ESNext\",\n    \"moduleResolution\": \"bundler\",\n    \"paths\": { \"@lib/*\": [\"./src/lib/*\"] },\n    \"skipLibCheck\": true,\n    \"noEmit\": true\n  },\n  \"include\": [\"src\"]\n}\n",
+          "src/lib/util.ts": "export function f(): number {\n  return 1\n}\n",
+          "src/a.ts": "import { f } from '@lib/util'\n\nexport function run(): number {\n  return f()\n}\n"},
+     [("run", "calls", "f")],
+     source=MOD_TS + "resolver.go tryLoadModuleUsingPathsIfEligible")
+case("typescript", "package-json-types-entry", "an import of a directory is the file its `package.json` names",
+     TS, {"shared/package.json": "{\n  \"name\": \"shared\",\n  \"types\": \"./src/main.ts\"\n}\n",
+          "shared/src/main.ts": "export function f(): number {\n  return 1\n}\n",
+          "a.ts": "import { f } from './shared'\n\nexport function run(): number {\n  return f()\n}\n"},
+     [("run", "calls", "f")],
+     source=MOD_TS + "resolver.go loadNodeModuleFromDirectoryWorker (the `types` field)")
+case("javascript", "var-is-the-functions", "a `var` declared in a block is a name of the whole function",
+     JS, {"a.js": "export function helper() {\n  return 1\n}\n\nexport function run(ok) {\n  if (ok) {\n    var helper = () => 2\n  }\n  return helper ? helper() : 0\n}\n"},
+     [("run", "calls", "run.helper")], [("run", "calls", "a.js:helper")],
+     source="ECMAScript 'VarDeclaredNames' (FunctionDeclarationInstantiation: var names are the function's)")
+case("javascript", "named-function-expression", "the name of a function expression is a name of its own body only",
+     JS, {"a.js": "export function fact(n) {\n  return n\n}\n\nexport const half = function fact(n) {\n  return n <= 1 ? 1 : fact(n - 1)\n}\n\nexport function run() {\n  return fact(3)\n}\n"},
+     [("run", "calls", "a.js:fact@1")],
+     source="ECMAScript 'Function Definitions' (InstantiateOrdinaryFunctionExpression: funcEnv binds the name)")
+case("typescript", "type-meaning-skips-values", "where a type is written, a value of the name does not hide the type around it",
+     TS, {"a.ts": "export interface Repo {\n  find(): number\n}\n\nexport function run(r: Repo): number {\n  const Repo = 1\n  const other: Repo = r\n  return other.find() + Repo\n}\n"},
+     [("run", "calls", "Repo.find"), ("run", "references", "Repo")],
+     source=NR_TS + "Resolve (meaning: a lookup for SymbolFlagsType passes over a value)")
+
 # --- running ------------------------------------------------------------------
 
 def _matches(node: dict[str, Any], want: str) -> bool:

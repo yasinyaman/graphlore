@@ -3240,3 +3240,15 @@ fn go_rules_from_the_spec() {
     has(&got, &[("Run", "calls", "Named.Name"), ("Pick", "calls", "helper")]);
     lacks(&got, &[("Run", "calls", "Inner.Name")]);
 }
+
+/// TypeScript's rules from the compiler's name resolver (engine 0.5.67): a
+/// type position passes over a value of the name, `typeof x` names the
+/// value, and interfaces of one name merge.
+#[test]
+fn typescript_rules_from_the_name_resolver() {
+    let got = quals("tsnr", &[(
+        "a.ts",
+        "export interface Repo {\n  find(): number\n}\n\nexport interface Repo {\n  save(): void\n}\n\nexport function run(r: Repo): number {\n  const Repo = 1\n  const other: Repo = r\n  other.save()\n  return other.find() + Repo\n}\n",
+    )]);
+    has(&got, &[("run", "calls", "Repo.find"), ("run", "calls", "Repo.save")]);
+}

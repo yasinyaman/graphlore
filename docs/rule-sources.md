@@ -596,6 +596,76 @@ recall 84.0%; `verify_graphify.py` lacks 44 confirmed edges, as before; the
 closest to whole: the reading found two rules missing, and neither occurs in
 the four Go audit repositories.
 
+### Phase 2: TypeScript and JavaScript
+
+TypeScript has no current specification, so the source is the compiler: the
+name resolver of its Go port (`tsc/internal/binder/nameresolver.go`,
+`NameResolver.Resolve`, which walks the scopes from the use outwards with a
+`meaning` of type, value or namespace), module resolution
+(`tsc/internal/module`), and ECMAScript's own rules for `var`, function
+expressions and `catch`. `benchmarks/rule_inventory.py` lists every rule
+(31 rules, 26 held by a case, 5 not followed; 7 of 58 cases found in the language's own tools). The TypeScript compiler's test baselines had already been the
+oracle for engine 0.5.52–0.5.54, so most rules were held before this reading.
+
+| Source | Rule | Held by / why not |
+|---|---|---|
+| nameresolver.go Resolve: locals | a block's `let` / `const` / class is a name of the block | `block-scope`, `block-scope-branches`, `block-scope-file-level` |
+| nameresolver.go Resolve: function-like | a function's type parameters are names of its whole declaration | `type-parameter-hides`, `type-parameter-bound` |
+| nameresolver.go Resolve: function-like | a parameter is a name of the body and the parameter list | `parameter-called`, `parameter-hides-import` |
+| nameresolver.go Resolve: function-like | an expression in a parameter list does not see the body's declarations | not followed: tsc rejects the program that would tell (TS2373); nothing to bind differently |
+| nameresolver.go Resolve: KindSourceFile / KindModuleDeclaration | a module's exports are names inside it; an export specifier is not | `namespace-member-inside`, `namespace` |
+| nameresolver.go Resolve: KindEnumDeclaration | an enum's members are names inside it | `enum-member`, `enum-member-value` |
+| nameresolver.go Resolve: KindClassDeclaration | a class's members are no names inside its methods; only its type parameters are | `class-members-are-not-names`, `this-method` |
+| nameresolver.go Resolve: KindExpressionWithTypeArguments | a class's heritage sees its own type parameters | `generic-argument` |
+| nameresolver.go Resolve: KindDecorator | a decorator is resolved at the class declaration | `decorator-resolved-at-the-class` |
+| nameresolver.go Resolve: KindCatchClause | a `catch` binding is the catch block's | `catch-binding-is-the-blocks` |
+| nameresolver.go Resolve: KindInferType | an `infer T` is a name of the true branch of the conditional type | `type-alias-body` |
+| nameresolver.go Resolve: meaning | a lookup for a type passes over values of the name, and for a value over types | `type-meaning-skips-values`, `type-and-value`, `typeof-type` |
+| nameresolver.go Resolve: lookup / merging | declarations of one name merge: interfaces, a function or class with a namespace | `declaration-merging`, `function-namespace-merge` |
+| nameresolver.go Resolve: KindExportSpecifier | `export { x as y }` binds y for importers only | `re-export`, `default-reexport` |
+| nameresolver.go Resolve: globals | the global scope and `declare global` augmentations | not followed: library globals name no project definition; a project's own `declare global` is not read |
+| checker getPropertyOfType | a member of a type, through what it extends and implements | `inherited-method`, `interface-extends`, `implements`, `abstract-base` |
+| checker getTypeOfSymbol | a declared type before the value's | `local-typed-by-declaration`, `typed-field`, `readonly-field` |
+| checker getReturnTypeOfSignature | a call's declared result | `return-type`, `await-promise` |
+| checker narrowing | `as`, `!`, `instanceof` and optional chaining keep or set the type | `as-cast`, `non-null`, `as-and-instanceof`, `optional-chaining` |
+| checker overload resolution | a call of an overloaded function picks the signature its arguments fit | not followed: TS overloads are signatures of one implementation: the edge is to the function either way |
+| checker contextual typing | a callback's parameter typed by the parameter it is passed for | not followed: phase 3: inference from the call it is passed to |
+| module resolver | a relative import with or without its extension, a directory's `index` | `barrel`, `named-import` |
+| module resolver | a directory's `package.json` `types` / `main` | `package-json-types-entry` |
+| module resolver tryLoadModuleUsingPathsIfEligible | `paths` in `tsconfig.json` | `tsconfig-paths` |
+| module resolver | `import x = require()`, `export =` | `import-equals-require`, `export-assignment` |
+| module resolver | `node_modules` packages | not followed: a library's sources are not read: its names are external |
+| ECMAScript FunctionDeclarationInstantiation | a function declaration is hoisted to its scope | `hoisting` |
+| ECMAScript VarDeclaredNames | a `var` is the function's, whatever block it is written in | `var-is-the-functions` |
+| ECMAScript InstantiateOrdinaryFunctionExpression | a function expression's name is its own body's | `named-function-expression` |
+| ECMAScript CommonJS (Node) | `require`, `module.exports`, `exports.x` | `commonjs-destructure`, `commonjs-default`, `commonjs-member` |
+| ECMAScript prototypes | `F.prototype.m = function` is a method of `new F()` | `prototype-method` |
+
+10 cases were written (one more, a parameter default that would see the
+body's declarations, was dropped: tsc rejects the program, TS2373). Three did
+not hold, and engine 0.5.67 follows them:
+
+- **A type position passes over values** (the resolver's `meaning`):
+  `const Repo = 1` beside `interface Repo` no longer hides the interface in
+  `const other: Repo = r`. On zod, the only audit repository it changes,
+  403 `EXTRACTED` references come and 61 `INFERRED` ones go: a type argument
+  (`util.assertEqual<t1, …>`) was linked through the value `t1` to the
+  schema class it was built with, and is now the type alias `t1` the test
+  declares; `core.$constructor<ZodType>` names the interface, not the
+  `const` of that name.
+- **`typeof x` in a type names the value** `x`, as before; it is resolved
+  with a value meaning now that type positions have one of their own.
+- **Interfaces of one name merge** (declaration merging): a member of either
+  declaration is a member of the interface.
+
+The other cases (`var` is the function's, a function expression's name is
+its own, a `catch` binding, a decorator resolved at the class, class members
+are no bare names, `paths`, a directory's `package.json`) held already.
+
+Measured with engine 0.5.67: the TypeScript compiler's baselines give 99.5%,
+recall 86.4%, as before; `verify_graphify.py` lacks 44 confirmed edges, as
+before.
+
 One thing the cases showed that is not a position: a Swift protocol's
 property requirement is a definition of its own named `var handler`, of kind
 interface (the span rule takes `protocol_property_declaration` for a
@@ -637,7 +707,7 @@ say is left and by how directly the compiler can check the result:
 2. **Rust** (editions change path resolution; rust-analyzer runs here): read (engine 0.5.65, 38 rules, 31 held by a case, 7 not followed)
 3. **Go** (smallest binder, already whole on the floor: the cheapest full
    reading, and the template for the others): read (engine 0.5.66, 29 rules, 23 held by a case, 6 not followed)
-4. **TypeScript / JavaScript** (module resolution modes)
+4. **TypeScript / JavaScript** (module resolution modes): read (engine 0.5.67, 31 rules, 26 held by a case, 5 not followed)
 5. **Java**, then **Kotlin** (one platform; `--release` and
    `-language-version` give every version from one compiler)
 6. **Swift**, **C / C++** (need the large toolchains)

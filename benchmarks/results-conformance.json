@@ -1,6 +1,6 @@
 {
- "passed": 589,
- "total": 589,
+ "passed": 598,
+ "total": 598,
  "cases": [
   {
    "id": "python/module-function",
@@ -3532,6 +3532,60 @@
   },
   {
    "id": "go/pointer-method-on-a-value",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/class-members-are-not-names",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/decorator-resolved-at-the-class",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/catch-binding-is-the-blocks",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/declaration-merging",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/tsconfig-paths",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/package-json-types-entry",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "javascript/var-is-the-functions",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "javascript/named-function-expression",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/type-meaning-skips-values",
    "ok": true,
    "missing": [],
    "unwanted": []
