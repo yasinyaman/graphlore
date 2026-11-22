@@ -2,15 +2,15 @@
 
 The native engine is the ``graphlore-engine`` distribution (import name
 ``graphlore_engine``), written in Rust with its tree-sitter grammars compiled in.
-It is optional and experimental: it extracts definitions with their real spans,
-containment, document headings, the imports, calls, bases and type references it
-resolves from the source, and communities by its own weighting; ``update=True``
-parses only the files that changed. ``GRAPHLORE_ENGINE`` picks the engine at
-call time:
+It is installed with the ``engine`` extra (prebuilt wheels): it extracts
+definitions with their real spans, containment, document headings, the imports,
+calls, bases and type references it resolves from the source, and communities by
+its own weighting; ``update=True`` parses only the files that changed.
+``GRAPHLORE_ENGINE`` picks the engine at call time:
 
-  graphify (default)  the graphify CLI, as before
-  native              the native engine; an error when it is not installed
-  auto                native when installed, graphify for what native cannot do
+  auto (default)  native when installed, graphify for what native cannot do
+  native          the native engine; an error when it is not installed
+  graphify        the graphify CLI, as before (going in the next release)
 
 Nothing here imports ``graphlore_engine`` at module import: ``available`` asks
 ``importlib`` whether it exists, builds run it in a child process, and
@@ -29,17 +29,23 @@ from typing import Any
 from . import config
 
 ENGINES = ("graphify", "native", "auto")
-DEFAULT_ENGINE = "graphify"
+DEFAULT_ENGINE = "auto"
 # graph.json schema versions of the native engine this graphlore reads.
 SUPPORTED_SCHEMAS = frozenset({1, 2, 3, 4, 5, 6})
 INSTALL_HINT = (
-    "Install it with: pip install graphlore-engine (from a checkout of graphlore: "
-    "pip install maturin && maturin develop -m engine/Cargo.toml --release)."
+    'Install it with: pip install "graphlore[engine]" (or pip install graphlore-engine; '
+    "from a checkout of graphlore: pip install maturin && maturin develop -m "
+    "engine/Cargo.toml --release)."
+)
+# Said when graphify answers a build: it is going, and what replaces it.
+GRAPHIFY_DEPRECATED = (
+    "graphify is deprecated as graphlore's extractor and goes in the next release; "
+    "the native engine replaces it. " + INSTALL_HINT
 )
 # What a native graph does not have yet; said after every native build so an
 # empty answer is not mistaken for a codebase without structure.
 NATIVE_GAPS = (
-    "The native engine is experimental: this graph has files, definitions with "
+    "Built by graphlore's native engine: this graph has files, definitions with "
     "their spans, containment, document headings, the imports, calls, bases and "
     "type references it could resolve from the source, and communities by its own "
     "weighting (edge kind, confidence and directory), not graphify's. "
@@ -47,7 +53,7 @@ NATIVE_GAPS = (
 )
 # The same for a graph written before the engine detected communities.
 NATIVE_GAPS_NO_COMMUNITIES = (
-    "The native engine is experimental: this graph has files, definitions with "
+    "Built by graphlore's native engine: this graph has files, definitions with "
     "their spans, containment, document headings and the imports, calls, bases and "
     "type references it could resolve from the source, but no communities, and "
     "update=True rebuilds the whole graph. A current graphlore-engine detects them."
@@ -93,12 +99,12 @@ def choose(
     of the graph already on disk, if any.
     """
     if requested not in ENGINES:
-        return "graphify", (
-            f"GRAPHLORE_ENGINE={requested!r} is not an engine ({', '.join(ENGINES)}); "
-            "built with graphify."
+        return "error", (
+            f"ERROR: GRAPHLORE_ENGINE={requested!r} is not an engine "
+            f"({', '.join(ENGINES)}). Unset it for the default (auto)."
         )
     if requested == "graphify":
-        return "graphify", ""
+        return "graphify", f"GRAPHLORE_ENGINE=graphify: {GRAPHIFY_DEPRECATED}"
     unsupported = f"mode={mode!r} (graphify's LLM extraction)" if mode else ""
     if requested == "native":
         if not native_found:
@@ -114,26 +120,32 @@ def choose(
         return "native", _update_note(update)
     # auto
     if not native_found:
+        if not graphify_found:
+            return "error", (
+                "ERROR: no extractor is installed: neither graphlore's native engine "
+                f"(graphlore_engine) nor the graphify CLI. {INSTALL_HINT}"
+            )
         return "graphify", (
-            "GRAPHLORE_ENGINE=auto: the native engine is not installed, so graphify "
-            "built the graph."
+            "The native engine is not installed, so graphify built the graph. "
+            + GRAPHIFY_DEPRECATED
         )
     if unsupported:
         if graphify_found:
             return "graphify", (
-                f"GRAPHLORE_ENGINE=auto: the native engine has no {unsupported}, so "
-                "graphify ran it."
+                f"The native engine has no {unsupported}, so graphify ran it. mode= "
+                "goes with graphify in the next release."
             )
         return "error", (
-            f"ERROR: the native engine has no {unsupported} yet, and the graphify CLI "
-            "is not installed either (pip install graphifyy && graphify install)."
+            f"ERROR: the native engine has no {unsupported}, and the graphify CLI "
+            "is not installed either. mode= goes with graphify in the next release; "
+            "build without it."
         )
     if (update or cluster_only) and existing == "graphify" and graphify_found:
         what = "update=True" if update else "cluster_only=True"
         return "graphify", (
-            f"GRAPHLORE_ENGINE=auto: the graph on disk is graphify's, so {what} "
-            "went to graphify to keep its edges and communities. "
-            "graphlore_build(update=False) rebuilds it with the native engine."
+            f"The graph on disk is graphify's, so {what} went to graphify to keep "
+            "its edges and communities. graphlore_build(update=False) rebuilds it "
+            "with the native engine, which replaces graphify in the next release."
         )
     return "native", _update_note(update)
 

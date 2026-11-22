@@ -1756,7 +1756,7 @@ def graphlore_build(
 ) -> str:
     """Build or update a knowledge graph from a folder. (Writes to graphify-out/.)
 
-    graphify writes ``graphify-out/`` INSIDE the folder it reads. Building a folder
+    The build writes ``graphify-out/`` INSIDE the folder it reads. Building a folder
     other than the active project (a subfolder, a sibling repository, an absolute
     path) therefore leaves the graph where this server does not read it; the result
     says so and names the ``graphlore_project`` call that switches to it.
@@ -1766,12 +1766,13 @@ def graphlore_build(
     vendored/minified files in the graph and on a graphify-out/ that git neither
     ignores nor tracks.
 
-    GRAPHLORE_ENGINE picks the extractor: ``graphify`` (default) runs the graphify
-    CLI; ``native`` runs graphlore's experimental native engine (the
-    graphlore-engine package: definitions with real spans, containment,
-    Markdown/RST headings, resolved imports, calls, bases and type references, and
-    communities, in 14 languages, all local); ``auto`` uses native when installed
-    and graphify for what native cannot do. With native, ``mode`` is refused,
+    GRAPHLORE_ENGINE picks the extractor: ``auto`` (default) runs graphlore's
+    native engine when it is installed (the graphlore-engine package, the
+    ``engine`` extra: definitions with real spans, containment, Markdown/RST
+    headings, resolved imports, calls, bases and type references, and
+    communities, in 14 languages, all local) and the graphify CLI otherwise;
+    ``native`` forces the engine; ``graphify`` the CLI (deprecated, like
+    ``mode`` and ``no_viz``: they go in the next release). With native, ``mode`` is refused,
     ``cluster_only`` detects the communities of the graph on disk again,
     ``update`` parses only the files changed since the last native build,
     ``code_only`` skips the document headings
@@ -1794,22 +1795,23 @@ def graphlore_build(
     if err:
         return err
     requested = engine.requested()
-    engine_note = ""
-    if requested != "graphify":
-        choice, engine_note = engine.choose(
-            requested=requested,
-            native_found=engine.available(),
-            graphify_found=shutil.which(GRAPHIFY_BIN) is not None,
-            mode=mode, update=update, cluster_only=cluster_only,
-            existing=_existing_engine(path) if update or cluster_only else None,
-        )
-        if choice == "error":
-            return _err(engine_note, False, code="engine")
-        if choice == "native" and cluster_only:
-            return _cluster_native(path, note=engine_note)
-        if choice == "native":
-            return _build_native(path, code_only=code_only, verbose=verbose, note=engine_note,
-                                 update=update)
+    choice, engine_note = engine.choose(
+        requested=requested,
+        native_found=engine.available(),
+        graphify_found=shutil.which(GRAPHIFY_BIN) is not None,
+        mode=mode, update=update, cluster_only=cluster_only,
+        existing=_existing_engine(path) if update or cluster_only else None,
+    )
+    if choice == "error":
+        return _err(engine_note, False, code="engine")
+    if choice == "native" and cluster_only:
+        return _cluster_native(path, note=engine_note)
+    if choice == "native":
+        return _build_native(path, code_only=code_only, verbose=verbose, note=engine_note,
+                             update=update)
+    if not no_viz and "no_viz" not in engine_note:
+        engine_note += (" " if engine_note else "") + (
+            "no_viz=False (graphify's graph.html) goes with graphify in the next release.")
     offline_note = ""
     if config.offline():
         if mode:
@@ -2270,6 +2272,7 @@ def graphlore_explain(node: str, as_json: bool = False, limit: int = _EXPLAIN_NE
 def graphlore_add(url: str, author: str = "", contributor: str = "") -> str:
     """Add an external source to the graph (arXiv paper, tweet, etc.). http/https only.
 
+    Deprecated: it runs the graphify CLI, which goes in the next release.
     Fetches the URL, so it is refused under GRAPHLORE_OFFLINE.
 
     Args:
@@ -2286,7 +2289,11 @@ def graphlore_add(url: str, author: str = "", contributor: str = "") -> str:
         args += ["--author", author]
     if contributor:
         args += ["--contributor", contributor]
-    return _cli_reply(_run_cli(args))
+    out = _run_cli(args)
+    if not out.startswith("ERROR"):
+        out += ("\n\ngraphlore_add is deprecated: it runs the graphify CLI, which goes "
+                "in the next release.")
+    return _cli_reply(out)
 
 
 # ---------------------------------------------------------------------------

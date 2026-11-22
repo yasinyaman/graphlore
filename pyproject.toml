@@ -41,6 +41,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# graphlore's own extractor (engine/, Rust): prebuilt abi3 wheels for Linux,
+# macOS and Windows, so no Rust toolchain enters graphlore's install. With it the
+# default GRAPHLORE_ENGINE=auto builds natively; graphify is the fallback.
+engine = ["graphlore-engine>=0.5.77,<0.6"]
+# Deprecated: the graphify CLI, the fallback extractor until the next release.
 graphify = ["graphifyy"]
 semble = ["semble>=0.3"]
 # The dense tier of the built-in search (GRAPHLORE_SEMANTIC_BACKEND unset or
@@ -62,7 +67,7 @@ tiktoken = ["tiktoken>=0.7"]
 # source changes. Off by default so the stdio server stays light.
 watch = ["watchdog>=4.0"]
 all = [
-    "graphifyy", "semble>=0.3", "model2vec>=0.10", "numpy>=1.24",
+    "graphlore-engine>=0.5.77,<0.6", "graphifyy", "semble>=0.3", "model2vec>=0.10", "numpy>=1.24",
     "tree-sitter>=0.23,<1.0", "tree-sitter-language-pack>=1.11,<2.0",
     "tiktoken>=0.7", "watchdog>=4.0",
 ]

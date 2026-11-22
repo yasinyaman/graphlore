@@ -114,7 +114,7 @@ mcp-publisher login github        # device-code login; grants the io.github.yasi
 mcp-publisher publish             # run in the repository root, reads server.json
 ```
 
-The registry verifies ownership by looking for `mcp-name: io.github.yasinyaman/graphlore` in the README that PyPI shows, which is why that line sits in an HTML comment at the top of `README.md`. Don't remove it, and keep it equal to `name` in `server.json` (a test checks both, and the two versions). The description is capped at 100 characters. `server.json` runs the server as `uvx --with graphifyy graphlore`, so the Graphify CLI is installed alongside it.
+The registry verifies ownership by looking for `mcp-name: io.github.yasinyaman/graphlore` in the README that PyPI shows, which is why that line sits in an HTML comment at the top of `README.md`. Don't remove it, and keep it equal to `name` in `server.json` (a test checks both, and the two versions). The description is capped at 100 characters. `server.json` runs the server as `uvx --with graphlore-engine graphlore`, so the native engine is installed alongside it.
 
 One-time setup, before the first release: on PyPI, add a *pending trusted publisher* for the project name `graphlore` with owner `yasinyaman`, repository `graphlore`, workflow `publish.yml` and environment `pypi`. No API token is needed.
 
