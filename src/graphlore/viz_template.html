@@ -1,0 +1,587 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="generator" content="graphlore">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:">
+<title>__GRAPHLORE_TITLE__</title>
+<style>
+:root {
+  --bg: #fbfbfa; --panel: #ffffff; --ink: #1d1f21; --muted: #6b7075; --line: #e3e4e6;
+  --accent: #2f6fdf; --hover: #f1f3f6; --chip: #eef1f5;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #16181b; --panel: #1d2024; --ink: #e6e7e8; --muted: #9aa0a6; --line: #2e3237;
+          --accent: #7aa7ff; --hover: #262a30; --chip: #2a2e34; }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink);
+  font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+#app { display: flex; height: 100%; }
+#side { width: 340px; min-width: 260px; max-width: 45vw; overflow: auto; background: var(--panel);
+  border-right: 1px solid var(--line); padding: 12px 14px; }
+#stage { flex: 1; position: relative; }
+canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; }
+canvas.dragging { cursor: grabbing; }
+h1 { font-size: 15px; margin: 0 0 2px; }
+h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted);
+  margin: 16px 0 6px; font-weight: 600; }
+.muted { color: var(--muted); }
+.row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+input[type=search] { width: 100%; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px;
+  background: var(--bg); color: var(--ink); font: inherit; }
+button { font: inherit; color: var(--ink); background: var(--chip); border: 1px solid var(--line);
+  border-radius: 6px; padding: 3px 8px; cursor: pointer; }
+button:disabled { opacity: .45; cursor: default; }
+select { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line);
+  border-radius: 6px; padding: 2px 4px; }
+label.chk { display: inline-flex; gap: 4px; align-items: center; margin: 2px 8px 2px 0; }
+.swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; }
+ul.list { list-style: none; margin: 0; padding: 0; }
+ul.list li { padding: 3px 4px; border-radius: 4px; cursor: pointer; display: flex; gap: 6px;
+  align-items: baseline; overflow: hidden; }
+ul.list li:hover { background: var(--hover); }
+ul.list li .lbl { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; }
+ul.list li .tag { color: var(--muted); font-size: 11px; white-space: nowrap; }
+.kv { display: grid; grid-template-columns: 78px 1fr; gap: 2px 8px; word-break: break-all; }
+.kv div:nth-child(odd) { color: var(--muted); }
+code { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
+#crumbs { margin-top: 8px; }
+#crumbs span.sep { color: var(--muted); margin: 0 4px; }
+#crumbs a { color: var(--accent); cursor: pointer; text-decoration: none; }
+#hud { position: absolute; left: 12px; bottom: 10px; color: var(--muted); font-size: 12px;
+  background: color-mix(in srgb, var(--panel) 85%, transparent); padding: 4px 8px; border-radius: 6px;
+  pointer-events: none; }
+#tip { position: absolute; pointer-events: none; background: var(--panel); border: 1px solid var(--line);
+  border-radius: 6px; padding: 4px 8px; font-size: 12px; display: none; max-width: 420px;
+  box-shadow: 0 2px 8px rgba(0,0,0,.12); }
+</style>
+</head>
+<body>
+<div id="app">
+  <aside id="side">
+    <h1 id="title"></h1>
+    <div class="muted" id="stats"></div>
+    <div id="crumbs"></div>
+    <h2>Find</h2>
+    <input type="search" id="q" placeholder="A name, a file…" autocomplete="off">
+    <ul class="list" id="hits"></ul>
+    <div id="details"></div>
+    <h2>Show</h2>
+    <div class="row">
+      <label class="chk"><input type="checkbox" id="f-tests" checked> tests</label>
+      <label class="chk"><input type="checkbox" id="f-ext"> external packages</label>
+    </div>
+    <div class="row" id="f-groups"></div>
+    <div class="row" style="margin-top:6px">
+      <span class="muted">Colour by</span>
+      <select id="colour"><option value="comm">community</option><option value="kind">kind</option></select>
+      <span class="muted">Depth</span>
+      <select id="hops"><option value="1">1 hop</option><option value="2">2 hops</option></select>
+    </div>
+    <h2>Legend</h2>
+    <div id="legend"></div>
+    <p class="muted" style="margin-top:14px">Drag to pan, scroll to zoom, drag a node to move it.
+      Click a bubble to open the community, click a node for its details, double-click it to
+      centre on its neighbourhood. Made by graphlore from graph.json.</p>
+  </aside>
+  <main id="stage">
+    <canvas id="cv"></canvas>
+    <div id="tip"></div>
+    <div id="hud"></div>
+  </main>
+</div>
+<script id="graph-data" type="application/json">/*__GRAPHLORE_DATA__*/</script>
+<script>
+"use strict";
+const D = JSON.parse(document.getElementById("graph-data").textContent);
+const MAX_VIEW = 400;          // nodes drawn in one view
+const LIST = 60;               // rows a list shows before "+N more"
+const OVERVIEW_LINKS = 4;      // links each community keeps in the overview
+const LABELS = 30;             // labels drawn at once, largest nodes first
+const N = D.nodes.length, E = D.edges.length / 4;
+const nId = i => D.nodes[i][0], nLabel = i => D.nodes[i][1], nFile = i => D.nodes[i][2];
+const nLine = i => D.nodes[i][3], nComm = i => D.nodes[i][4], nKind = i => D.kinds[D.nodes[i][5]];
+const nTest = i => (D.nodes[i][6] & 1) !== 0, nExt = i => (D.nodes[i][6] & 2) !== 0;
+const nDeg = i => D.nodes[i][7];
+const eS = j => D.edges[4 * j], eT = j => D.edges[4 * j + 1], eR = j => D.edges[4 * j + 2];
+const eInf = j => D.edges[4 * j + 3] === 1;
+const relName = r => D.rels[r][0], relGroup = r => D.rels[r][1];
+const GROUP_COLOURS = ["#9aa0a6", "#2f9e72", "#2f6fdf", "#b35ae0", "#d08a1c", "#d6455d", "#159fb3", "#7c8591"];
+const groupColour = g => GROUP_COLOURS[g % GROUP_COLOURS.length];
+
+// adjacency: edge indices per node
+const adj = Array.from({length: N}, () => []);
+for (let j = 0; j < E; j++) { adj[eS(j)].push(j); if (eT(j) !== eS(j)) adj[eT(j)].push(j); }
+const members = D.comms.map(() => []);
+for (let i = 0; i < N; i++) if (nComm(i) >= 0) members[nComm(i)].push(i);
+for (const m of members) m.sort((a, b) => nDeg(b) - nDeg(a));
+
+// --- filters ---------------------------------------------------------------
+const show = { tests: true, ext: false, groups: D.groups.map(g => g !== "structure") };
+// containment links every definition to its file: on by default it would draw
+// a star around each file and hide everything else
+const nodeShown = i => (show.tests || !nTest(i)) && (show.ext || !nExt(i));
+const edgeShown = j => show.groups[relGroup(eR(j))] && nodeShown(eS(j)) && nodeShown(eT(j));
+
+// --- colours ---------------------------------------------------------------
+const hue = k => (k * 137.508) % 360;
+const commColour = c => c < 0 ? "#8a8f95" : `hsl(${hue(c)} 58% 52%)`;
+const kindColour = k => `hsl(${hue(D.kinds.indexOf(k) + 3)} 55% 50%)`;
+let colourBy = "comm";
+const nodeColour = i => colourBy === "kind" ? kindColour(nKind(i)) : commColour(nComm(i));
+
+// --- views -----------------------------------------------------------------
+// A view is a set of drawn items (communities or nodes) and links between them.
+let view = null;
+const backStack = [];
+
+function overview() {
+  const order = D.comms.map((c, k) => k).sort((a, b) => D.comms[b][2] - D.comms[a][2]);
+  const shownComms = order.slice(0, D.maxComms);
+  const pos = new Map(shownComms.map((k, i) => [k, i]));
+  const items = shownComms.map(k => ({ comm: k, r: Math.min(46, 6 + Math.sqrt(D.comms[k][2]) * 2.2),
+    label: D.comms[k][1], colour: commColour(k) }));
+  // every pair of communities some edge joins would be a hairball: each keeps
+  // its strongest links, and the panel lists them all
+  const all = [], per = new Map();
+  for (let j = 0; j < D.cedges.length; j += 3) {
+    const a = pos.get(D.cedges[j]), b = pos.get(D.cedges[j + 1]);
+    if (a === undefined || b === undefined) continue;
+    const l = { a, b, w: D.cedges[j + 2], colour: null };
+    all.push(l);
+    for (const k of [a, b]) { if (!per.has(k)) per.set(k, []); per.get(k).push(l); }
+  }
+  const kept = new Set();
+  for (const ls of per.values()) ls.sort((x, y) => y.w - x.w).slice(0, OVERVIEW_LINKS).forEach(l => kept.add(l));
+  const links = all.filter(l => kept.has(l));
+  const left = order.length - shownComms.length;
+  const notes = [];
+  if (left > 0) notes.push(`${left} smaller communities not drawn`);
+  if (links.length < all.length) notes.push(`the ${OVERVIEW_LINKS} strongest links of each community drawn, of ${all.length}`);
+  return { kind: "overview", items, links, note: notes.join(" · "), title: "All communities" };
+}
+
+function nodeView(kind, ids, title, extra) {
+  const chosen = ids.filter(nodeShown);
+  const cut = chosen.length > MAX_VIEW ? chosen.length - MAX_VIEW : 0;
+  const keep = chosen.slice(0, MAX_VIEW);
+  const pos = new Map(keep.map((i, k) => [i, k]));
+  const items = keep.map(i => ({ node: i, r: Math.min(16, 3.5 + Math.sqrt(nDeg(i)) * 0.9),
+    label: nLabel(i), colour: nodeColour(i) }));
+  const links = [], seen = new Set();
+  for (const i of keep) for (const j of adj[i]) {
+    if (seen.has(j) || !edgeShown(j)) continue;
+    seen.add(j);
+    const a = pos.get(eS(j)), b = pos.get(eT(j));
+    if (a !== undefined && b !== undefined && a !== b)
+      links.push({ a, b, w: 1, edge: j, colour: groupColour(relGroup(eR(j))), dashed: eInf(j) });
+  }
+  return Object.assign({ kind, items, links, title,
+    note: cut ? `${cut} more not drawn (the ${MAX_VIEW} most connected are)` : "" }, extra || {});
+}
+
+function communityView(c) {
+  const ids = [...members[c]].sort((a, b) => (nTest(a) ? 1 : 0) - (nTest(b) ? 1 : 0) || nDeg(b) - nDeg(a));
+  return nodeView("community", ids, D.comms[c][1], { comm: c });
+}
+
+function focusView(i) {
+  const hops = +document.getElementById("hops").value;
+  const dist = new Map([[i, 0]]);
+  let frontier = [i];
+  for (let h = 0; h < hops; h++) {
+    const next = [];
+    for (const u of frontier) for (const j of adj[u]) {
+      if (!edgeShown(j)) continue;
+      const v = eS(j) === u ? eT(j) : eS(j);
+      if (!dist.has(v) && nodeShown(v)) { dist.set(v, h + 1); next.push(v); }
+    }
+    frontier = next;
+  }
+  const ids = [...dist.keys()].sort((a, b) => dist.get(a) - dist.get(b)
+    || (nTest(a) ? 1 : 0) - (nTest(b) ? 1 : 0) || nDeg(b) - nDeg(a));
+  return nodeView("focus", ids, nLabel(i), { centre: i });
+}
+
+function go(make, push = true) {
+  if (push && view) backStack.push(view.rebuild);
+  view = make();
+  view.rebuild = make;
+  selected = -1; hover = -1;
+  layout(view);
+  renderSide();
+}
+
+function rebuildView() {           // after a filter change: same view, new contents
+  if (!view) return;
+  const was = selected >= 0 ? view.items[selected].node : undefined;
+  view = Object.assign(view.rebuild(), { rebuild: view.rebuild });
+  layout(view);
+  selected = was === undefined ? -1 : view.items.findIndex(it => it.node === was);
+  hover = -1;
+  renderSide();
+}
+
+// --- layout: a small force simulation, started from a deterministic spiral --
+function layout(v) {
+  const n = v.items.length;
+  const centreIdx = v.centre !== undefined ? v.items.findIndex(it => it.node === v.centre) : -1;
+  v.items.forEach((it, k) => {
+    const a = k * 2.399963, rad = 18 * Math.sqrt(k + 1);
+    it.x = Math.cos(a) * rad; it.y = Math.sin(a) * rad; it.vx = 0; it.vy = 0; it.pinned = false;
+  });
+  if (centreIdx >= 0) { v.items[centreIdx].x = 0; v.items[centreIdx].y = 0; }
+  v.alpha = 1;
+  v.fitted = false;
+  userMoved = false;
+  fit(v);
+}
+
+function fit(v) {                // the camera around every item, with a margin
+  if (!v.items.length) return;
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const p of v.items) {
+    x0 = Math.min(x0, p.x - p.r); y0 = Math.min(y0, p.y - p.r);
+    x1 = Math.max(x1, p.x + p.r); y1 = Math.max(y1, p.y + p.r);
+  }
+  const w = Math.max(40, x1 - x0), h = Math.max(40, y1 - y0);
+  cam.scale = Math.max(0.05, Math.min(2.5, Math.min((cv.clientWidth - 80) / w, (cv.clientHeight - 60) / h)));
+  cam.x = (x0 + x1) / 2; cam.y = (y0 + y1) / 2;
+}
+
+function tick(v) {
+  const it = v.items, n = it.length, k = v.kind === "overview" ? 2600 : 900;
+  for (let a = 0; a < n; a++) {
+    const p = it[a];
+    for (let b = a + 1; b < n; b++) {
+      const q = it[b];
+      let dx = p.x - q.x, dy = p.y - q.y, d2 = dx * dx + dy * dy;
+      if (d2 < 0.01) { dx = (a - b) * 0.01; dy = 0.01; d2 = 0.0002; }
+      if (d2 > 250000) continue;
+      const min = p.r + q.r + 4;
+      let f = k / d2;
+      if (d2 < min * min) f += 0.6 * (min - Math.sqrt(d2)) / Math.sqrt(d2);
+      p.vx += dx * f; p.vy += dy * f; q.vx -= dx * f; q.vy -= dy * f;
+    }
+  }
+  const len = v.kind === "overview" ? 120 : 46;
+  for (const l of v.links) {
+    const p = it[l.a], q = it[l.b];
+    const dx = q.x - p.x, dy = q.y - p.y, d = Math.sqrt(dx * dx + dy * dy) || 1;
+    const want = len + p.r + q.r;
+    const s = (v.kind === "overview" ? 0.02 * Math.min(1, Math.log1p(l.w) / 3) : 0.04) * (d - want) / d;
+    p.vx += dx * s; p.vy += dy * s; q.vx -= dx * s; q.vy -= dy * s;
+  }
+  for (const p of it) {
+    p.vx -= p.x * 0.004; p.vy -= p.y * 0.004;
+    if (p.pinned) { p.vx = 0; p.vy = 0; continue; }
+    p.vx *= 0.6; p.vy *= 0.6;
+    p.x += p.vx * v.alpha; p.y += p.vy * v.alpha;
+  }
+  v.alpha *= 0.985;
+}
+
+// --- drawing ---------------------------------------------------------------
+const cv = document.getElementById("cv"), ctx = cv.getContext("2d");
+const cam = { x: 0, y: 0, scale: 1 };
+let hover = -1, selected = -1, drag = null, userMoved = false;
+const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+function resize() {
+  const dpr = window.devicePixelRatio || 1;
+  cv.width = cv.clientWidth * dpr; cv.height = cv.clientHeight * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+window.addEventListener("resize", resize);
+
+const toScreen = (x, y) => [cv.clientWidth / 2 + (x - cam.x) * cam.scale,
+                            cv.clientHeight / 2 + (y - cam.y) * cam.scale];
+const toWorld = (sx, sy) => [(sx - cv.clientWidth / 2) / cam.scale + cam.x,
+                             (sy - cv.clientHeight / 2) / cam.scale + cam.y];
+
+function neighbourSet(k) {
+  const s = new Set([k]);
+  if (k < 0) return s;
+  for (const l of view.links) { if (l.a === k) s.add(l.b); if (l.b === k) s.add(l.a); }
+  return s;
+}
+
+function draw() {
+  if (view && view.alpha > 0.004) {
+    for (let t = 0; t < 3; t++) tick(view);
+    if (!userMoved) fit(view);     // follow the layout until the reader takes over
+  }
+  ctx.clearRect(0, 0, cv.clientWidth, cv.clientHeight);
+  if (!view) { requestAnimationFrame(draw); return; }
+  const it = view.items, focus = hover >= 0 ? hover : selected;
+  const near = neighbourSet(focus);
+  const dim = focus >= 0;
+  const ink = css("--ink"), muted = css("--muted"), line = css("--line");
+  for (const l of view.links) {
+    const p = it[l.a], q = it[l.b];
+    const lit = !dim || l.a === focus || l.b === focus;
+    const [x1, y1] = toScreen(p.x, p.y), [x2, y2] = toScreen(q.x, q.y);
+    ctx.globalAlpha = lit ? (dim ? 0.95 : 0.5) : 0.08;
+    ctx.strokeStyle = l.colour || muted;
+    ctx.lineWidth = view.kind === "overview" ? Math.min(8, 0.6 + Math.log1p(l.w)) : (lit && dim ? 1.6 : 1);
+    ctx.setLineDash(l.dashed ? [4, 3] : []);
+    ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+    if (l.edge !== undefined && lit && cam.scale > 0.5) {   // arrowhead at the target
+      const ang = Math.atan2(y2 - y1, x2 - x1), r = q.r * cam.scale + 2;
+      const ax = x2 - Math.cos(ang) * r, ay = y2 - Math.sin(ang) * r;
+      ctx.setLineDash([]); ctx.beginPath();
+      ctx.moveTo(ax, ay);
+      ctx.lineTo(ax - Math.cos(ang - 0.4) * 7, ay - Math.sin(ang - 0.4) * 7);
+      ctx.lineTo(ax - Math.cos(ang + 0.4) * 7, ay - Math.sin(ang + 0.4) * 7);
+      ctx.closePath(); ctx.fillStyle = l.colour || muted; ctx.fill();
+    }
+  }
+  ctx.setLineDash([]);
+  // labels: the focused item, then the largest of what is lit, up to LABELS
+  const lit = [...it.keys()].filter(k => !dim || near.has(k));
+  const labelSet = new Set(lit.sort((a, b) => it[b].r - it[a].r).slice(0, LABELS));
+  for (let k = 0; k < it.length; k++) {
+    const p = it[k], [x, y] = toScreen(p.x, p.y), r = Math.max(2, p.r * cam.scale);
+    ctx.globalAlpha = !dim || near.has(k) ? 1 : 0.2;
+    ctx.fillStyle = p.colour;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+    if (p.node !== undefined && nTest(p.node)) {
+      ctx.strokeStyle = line; ctx.lineWidth = 2; ctx.stroke();
+    }
+    if (k === selected || (view.centre !== undefined && p.node === view.centre)) {
+      ctx.strokeStyle = ink; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, r + 3, 0, Math.PI * 2); ctx.stroke();
+    }
+    const showLabel = k === focus || (view.centre !== undefined && p.node === view.centre)
+      || labelSet.has(k) || (!dim && r > 14);
+    if (showLabel) {
+      ctx.globalAlpha = !dim || near.has(k) ? 1 : 0.3;
+      ctx.fillStyle = ink; ctx.font = (k === focus ? "600 " : "") + "12px system-ui, sans-serif";
+      const text = p.label.length > 48 ? p.label.slice(0, 47) + "…" : p.label;
+      ctx.fillText(text, x + r + 4, y + 4);
+    }
+  }
+  ctx.globalAlpha = 1;
+  requestAnimationFrame(draw);
+}
+
+function itemAt(sx, sy) {
+  if (!view) return -1;
+  const [wx, wy] = toWorld(sx, sy);
+  let best = -1, bestD = Infinity;
+  view.items.forEach((p, k) => {
+    const d = Math.hypot(p.x - wx, p.y - wy), reach = p.r + 4 / cam.scale;
+    if (d < reach && d < bestD) { best = k; bestD = d; }
+  });
+  return best;
+}
+
+// --- interaction -----------------------------------------------------------
+const tip = document.getElementById("tip");
+cv.addEventListener("mousemove", ev => {
+  const r = cv.getBoundingClientRect(), sx = ev.clientX - r.left, sy = ev.clientY - r.top;
+  if (drag) {
+    if (drag.item >= 0) {
+      const [wx, wy] = toWorld(sx, sy), p = view.items[drag.item];
+      p.x = wx; p.y = wy; p.pinned = true; view.alpha = Math.max(view.alpha, 0.3);
+    } else {
+      cam.x = drag.cx - (sx - drag.sx) / cam.scale; cam.y = drag.cy - (sy - drag.sy) / cam.scale;
+      userMoved = true;
+    }
+    drag.moved = true;
+    return;
+  }
+  hover = itemAt(sx, sy);
+  if (hover >= 0) {
+    const p = view.items[hover];
+    tip.textContent = p.node !== undefined
+      ? `${nLabel(p.node)} — ${nKind(p.node)}${nFile(p.node) ? " · " + nFile(p.node) + (nLine(p.node) ? ":" + nLine(p.node) : "") : ""}`
+      : `${D.comms[p.comm][1]} — ${D.comms[p.comm][2]} nodes`;
+    tip.style.display = "block";
+    tip.style.left = Math.min(sx + 14, cv.clientWidth - 300) + "px"; tip.style.top = (sy + 14) + "px";
+  } else tip.style.display = "none";
+});
+cv.addEventListener("mouseleave", () => { hover = -1; tip.style.display = "none"; });
+cv.addEventListener("mousedown", ev => {
+  const r = cv.getBoundingClientRect(), sx = ev.clientX - r.left, sy = ev.clientY - r.top;
+  drag = { item: itemAt(sx, sy), sx, sy, cx: cam.x, cy: cam.y, moved: false };
+  cv.classList.add("dragging");
+});
+window.addEventListener("mouseup", () => {
+  if (drag && !drag.moved) {
+    const k = drag.item;
+    if (k < 0) { selected = -1; renderSide(); }
+    else if (view.kind === "overview") { const c = view.items[k].comm; go(() => communityView(c)); }
+    else { selected = k; renderSide(); }
+  }
+  drag = null; cv.classList.remove("dragging");
+});
+cv.addEventListener("dblclick", ev => {
+  const r = cv.getBoundingClientRect(), k = itemAt(ev.clientX - r.left, ev.clientY - r.top);
+  if (k >= 0 && view.items[k].node !== undefined) openNode(view.items[k].node);
+});
+cv.addEventListener("wheel", ev => {
+  ev.preventDefault();
+  userMoved = true;
+  const r = cv.getBoundingClientRect(), sx = ev.clientX - r.left, sy = ev.clientY - r.top;
+  const [wx, wy] = toWorld(sx, sy);
+  cam.scale = Math.max(0.05, Math.min(8, cam.scale * Math.exp(-ev.deltaY * 0.0015)));
+  const [nx, ny] = toWorld(sx, sy);
+  cam.x += wx - nx; cam.y += wy - ny;
+}, { passive: false });
+
+function openNode(i) {
+  go(() => focusView(i));
+  selected = view.items.findIndex(it => it.node === i);
+  renderSide();
+}
+
+// --- the side panel (text only: every string from the graph goes in as text) --
+function el(tag, attrs, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (k === "onclick") e.addEventListener("click", v);
+    else if (k === "class") e.className = v;
+    else if (k === "style") e.setAttribute("style", v);
+    else e.setAttribute(k, v);
+  }
+  for (const kid of kids) if (kid !== null && kid !== undefined)
+    e.append(kid instanceof Node ? kid : document.createTextNode(String(kid)));
+  return e;
+}
+
+function listOf(rows) {               // rows: [label, tag, onclick, colour]
+  const ul = el("ul", { class: "list" });
+  for (const [label, tag, onclick, colour] of rows.slice(0, LIST)) {
+    ul.append(el("li", { onclick }, colour ? el("span", { class: "swatch", style: `background:${colour}` }) : null,
+      el("span", { class: "lbl", title: label }, label), tag ? el("span", { class: "tag" }, tag) : null));
+  }
+  if (rows.length > LIST) ul.append(el("li", { class: "muted" }, `+${rows.length - LIST} more`));
+  return ul;
+}
+
+function renderSide() {
+  document.getElementById("title").textContent = document.title;
+  const m = D.meta;
+  document.getElementById("stats").textContent =
+    `${m.nodes.toLocaleString()} nodes · ${m.edges.toLocaleString()} edges · ${D.comms.length} communities` +
+    ` · built by ${m.engine === "graphlore" ? "graphlore's engine" : "graphify"}` + (m.commit ? ` at ${m.commit}` : "");
+  const crumbs = document.getElementById("crumbs");
+  crumbs.replaceChildren(
+    el("button", { onclick: () => { if (backStack.length) go(backStack.pop(), false); },
+      ...(backStack.length ? {} : { disabled: "" }) }, "← Back"), " ",
+    D.comms.length ? el("button", { onclick: () => go(overview) }, "Communities") : null, " ",
+    el("span", { class: "muted" }, view ? view.title : ""));
+  document.getElementById("hud").textContent = view
+    ? `${view.items.length} ${view.kind === "overview" ? "communities" : "nodes"} · ${view.links.length} links` +
+      (view.note ? ` · ${view.note}` : "")
+    : "";
+  const det = document.getElementById("details");
+  det.replaceChildren();
+  const sel = selected >= 0 && view ? view.items[selected] : null;
+  if (sel && sel.node !== undefined) det.append(...nodeDetails(sel.node));
+  else if (view && view.kind === "community") det.append(...communityDetails(view.comm));
+  else if (view && view.kind === "overview") det.append(...overviewDetails());
+}
+
+function nodeDetails(i) {
+  const c = nComm(i);
+  const out = [el("h2", {}, "Node"),
+    el("div", { style: "font-weight:600;word-break:break-all" }, nLabel(i)),
+    el("div", { class: "kv" },
+      el("div", {}, "kind"), el("div", {}, nKind(i) + (nTest(i) ? " (test)" : "")),
+      el("div", {}, "where"), el("div", {}, nFile(i) ? nFile(i) + (nLine(i) ? ":" + nLine(i) : "") : "—"),
+      el("div", {}, "community"), el("div", {}, c >= 0 ? D.comms[c][1] : "—"),
+      el("div", {}, "id"), el("div", {}, el("code", {}, nId(i))),
+      el("div", {}, "edges"), el("div", {}, String(nDeg(i)))),
+    el("div", { class: "row", style: "margin-top:6px" },
+      el("button", { onclick: () => openNode(i) }, "Neighbourhood"),
+      c >= 0 ? el("button", { onclick: () => go(() => communityView(c)) }, "Its community") : null)];
+  const groups = new Map();           // "calls →" -> rows
+  for (const j of adj[i]) {
+    const outward = eS(j) === i, other = outward ? eT(j) : eS(j);
+    const key = `${relName(eR(j))} ${outward ? "→" : "←"}`;
+    if (!groups.has(key)) groups.set(key, { g: relGroup(eR(j)), rows: [] });
+    groups.get(key).rows.push([nLabel(other), (eInf(j) ? "inferred · " : "") + (nFile(other) || nKind(other)),
+      () => openNode(other), commColour(nComm(other))]);
+  }
+  for (const [key, { g, rows }] of [...groups].sort((a, b) => b[1].rows.length - a[1].rows.length)) {
+    out.push(el("h2", {}, el("span", { class: "swatch", style: `background:${groupColour(g)};margin-right:6px` }),
+      `${key} (${rows.length})`));
+    out.push(listOf(rows));
+  }
+  return out;
+}
+
+function communityDetails(c) {
+  const out = [el("h2", {}, `${D.comms[c][1]} — ${D.comms[c][2]} nodes`)];
+  out.push(listOf(members[c].map(i => [nLabel(i), `${nDeg(i)} edges`, () => openNode(i), null])));
+  const peers = new Map();
+  for (let j = 0; j < D.cedges.length; j += 3) {
+    const a = D.cedges[j], b = D.cedges[j + 1], w = D.cedges[j + 2];
+    if (a === c) peers.set(b, w); else if (b === c) peers.set(a, w);
+  }
+  if (peers.size) {
+    out.push(el("h2", {}, "Linked communities"));
+    out.push(listOf([...peers].sort((x, y) => y[1] - x[1]).map(([k, w]) =>
+      [D.comms[k][1], `${w} edges`, () => go(() => communityView(k)), commColour(k)])));
+  }
+  return out;
+}
+
+function overviewDetails() {
+  const order = D.comms.map((c, k) => k).sort((a, b) => D.comms[b][2] - D.comms[a][2]);
+  return [el("h2", {}, "Largest communities"),
+    listOf(order.map(k => [D.comms[k][1], `${D.comms[k][2]} nodes`, () => go(() => communityView(k)), commColour(k)]))];
+}
+
+// --- search ----------------------------------------------------------------
+const lower = D.nodes.map(r => (r[1] + " " + r[2]).toLowerCase());
+document.getElementById("q").addEventListener("input", ev => {
+  const q = ev.target.value.trim().toLowerCase(), hits = document.getElementById("hits");
+  if (q.length < 2) { hits.replaceChildren(); return; }
+  const found = [];
+  for (let i = 0; i < N && found.length < 400; i++) if (lower[i].includes(q)) found.push(i);
+  found.sort((a, b) => (nLabel(a).toLowerCase().startsWith(q) ? 0 : 1) - (nLabel(b).toLowerCase().startsWith(q) ? 0 : 1)
+                       || nDeg(b) - nDeg(a));
+  hits.replaceChildren(listOf(found.map(i => [nLabel(i), nFile(i) || nKind(i), () => openNode(i), commColour(nComm(i))])
+    .slice(0, 20)));
+});
+
+// --- controls --------------------------------------------------------------
+const fg = document.getElementById("f-groups");
+D.groups.forEach((g, k) => {
+  const box = el("input", { type: "checkbox" });
+  box.checked = show.groups[k];
+  box.addEventListener("change", () => { show.groups[k] = box.checked; rebuildView(); });
+  fg.append(el("label", { class: "chk" }, box, el("span", { class: "swatch", style: `background:${groupColour(k)}` }), g));
+});
+document.getElementById("f-tests").addEventListener("change", e => { show.tests = e.target.checked; rebuildView(); });
+document.getElementById("f-ext").addEventListener("change", e => { show.ext = e.target.checked; rebuildView(); });
+document.getElementById("colour").addEventListener("change", e => {
+  colourBy = e.target.value;
+  if (view && view.kind !== "overview") for (const it of view.items) it.colour = nodeColour(it.node);
+  renderLegend();
+});
+document.getElementById("hops").addEventListener("change", () => { if (view && view.kind === "focus") rebuildView(); });
+
+function renderLegend() {
+  const lg = document.getElementById("legend");
+  const rows = D.groups.map((g, k) => el("div", {}, el("span", { class: "swatch", style: `background:${groupColour(k)}` }), " ", g));
+  rows.push(el("div", { class: "muted" }, "dashed: an inferred edge · ringed: test code"));
+  if (colourBy === "kind")
+    rows.push(el("div", { class: "row", style: "margin-top:4px" },
+      ...D.kinds.map(k => el("span", {}, el("span", { class: "swatch", style: `background:${kindColour(k)}` }), " ", k, " "))));
+  lg.replaceChildren(...rows);
+}
+
+resize();
+renderLegend();
+// a graph without communities opens on its most connected nodes instead
+go(D.comms.length ? overview : () => nodeView("all", D.nodes.map((r, i) => i)
+  .sort((a, b) => nDeg(b) - nDeg(a)), "Most connected nodes"), false);
+requestAnimationFrame(draw);
+</script>
+</body>
+</html>

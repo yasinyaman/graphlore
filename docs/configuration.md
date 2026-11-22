@@ -119,6 +119,7 @@ search index's BM25 tier. These are the exceptions:
 | Built-in search, dense tier (`[embed]`: the same three tools) | First use: model2vec downloads `GRAPHLORE_EMBED_MODEL` (default `minishlab/potion-code-16M-v2`) from the Hugging Face Hub, then caches it | The same flags are set before model2vec is imported, so only a cached model loads; otherwise the index answers with BM25 alone and `backend.dense_unavailable` says why |
 | `GRAPHLORE_TOKENIZER=tiktoken` | First use: tiktoken fetches its encoding file unless cached | Not loaded; the chars/3.5 estimate is used |
 | tree-sitter grammars (`[treesitter]`) | First use of a language: the grammar is downloaded from GitHub releases and cached | Only grammars already in the cache are used; other files get no spans, unless the native engine is installed: its compiled-in grammars answer instead (not with `GRAPHLORE_ENGINE=graphify`) |
+| `graph.html` (written after a build) | Never: the page's code and data are in the file, and its Content Security Policy allows no request | Unchanged |
 | Native engine (`graphlore-engine`, the `engine` extra) | Never: its grammars are compiled into the wheel and a build reads local files only | Unchanged |
 | A custom `GRAPHLORE_SEMANTIC_BACKEND` | Whatever that code does | **Not constrained** — graphlore cannot see inside it |
 | HTTP transports | Inbound only (the server listens) | Unchanged |

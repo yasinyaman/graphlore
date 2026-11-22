@@ -851,8 +851,9 @@ def test_build_wires_flags_to_cli_args(tmp_path, monkeypatch):
     server.graphlore_build(".", update=True, cluster_only=True, code_only=True)
     assert captured[-1] == [".", "--update", "--cluster-only", "--no-viz", "--code-only"]
 
+    # graph.html is graphlore's own: graphify never writes one
     server.graphlore_build(".", no_viz=False)
-    assert captured[-1] == ["."]
+    assert captured[-1] == [".", "--no-viz"]
 
 
 
@@ -4540,6 +4541,94 @@ def test_build_returns_counts_and_warnings_by_default(tmp_path, monkeypatch):
 
     full = server.graphlore_build(".", verbose=True)
     assert "AST extraction: 200/774" in full and "next: run" in full
+
+
+def test_build_writes_graphlore_s_own_graph_html(tmp_path, monkeypatch):
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    _fake_build(monkeypatch, _BUILD_LOG, writes=tmp_path / "graphify-out")
+    out = server.graphlore_build(".")
+    page = tmp_path / "graphify-out" / "graph.html"
+    assert "graph.html written" in out and server.viz.is_ours(page)
+    page.unlink()
+    assert "graph.html" not in server.graphlore_build(".", no_viz=True)
+    assert not page.exists()
+
+
+def _viz_graph():
+    return {
+        "graph": {"engine": "graphlore", "schema_version": 6}, "built_at_commit": "abc123",
+        "nodes": [
+            {"id": "f", "label": "app.py", "source_file": "app.py", "community": 0},
+            {"id": "a", "label": "run()", "source_file": "app.py", "source_location": "L3",
+             "community": 0, "kind": "function"},
+            {"id": "t", "label": "test_run()", "source_file": "tests/test_app.py",
+             "community": 1},
+            {"id": "os", "label": "os", "type": "external"},
+            # repository text that tries to end the script and open markup
+            {"id": "x", "label": "</script><img src=x onerror=alert(1)>&amp;",
+             "source_file": "app.py", "community": 1},
+        ],
+        "links": [
+            {"source": "f", "target": "a", "relation": "contains"},
+            {"source": "t", "target": "a", "relation": "calls", "confidence": "EXTRACTED"},
+            {"source": "a", "target": "os", "relation": "imports", "confidence": "INFERRED"},
+            {"source": "a", "target": "gone", "relation": "calls"},       # dangling
+        ],
+    }
+
+
+def test_graph_html_data_is_compact_and_complete():
+    viz = server.viz
+    data = viz.page_data(_viz_graph(), {"1": "Tests"})
+    assert data["meta"] == {"engine": "graphlore", "commit": "abc123", "nodes": 5, "edges": 3}
+    rels = {name: data["groups"][g] for name, g in data["rels"]}
+    assert rels == {"contains": "structure", "calls": "calls", "imports": "imports"}
+    assert [c[1] for c in data["comms"]] == ["Community 0", "Tests"]
+    rows = {r[0]: r for r in data["nodes"]}
+    assert data["kinds"][rows["f"][5]] == "file" and data["kinds"][rows["a"][5]] == "function"
+    assert data["kinds"][rows["os"][5]] == "external" and rows["os"][6] & 2 and rows["os"][4] == -1
+    assert rows["t"][6] & 1 and rows["a"][3] == 3 and rows["a"][7] == 3      # test, line, degree
+    flat = data["edges"]
+    assert len(flat) == 12 and flat[-1] == 1                                  # inferred flag
+    assert data["cedges"] == [0, 1, 1]          # test_run (1) calls run (0): one edge between
+    assert viz.relation_group("couples_with") == "state"
+    assert viz.relation_group("handles") == "http" and viz.relation_group("odd") == "other"
+
+
+def test_graph_html_never_lets_repository_text_out_of_its_script():
+    page = server.viz.render(_viz_graph(), "<b>proj</b> — graphlore")
+    head, _, rest = page.partition('<script id="graph-data" type="application/json">')
+    data, _, tail = rest.partition("</script>")
+    assert "<" not in data and ">" not in data and "&" not in data
+    assert "\\u003c/script\\u003e" in data
+    assert "<title>&lt;b&gt;proj&lt;/b&gt; — graphlore</title>" in head
+    assert "default-src 'none'" in head and server.viz.GENERATOR in head
+    import json as _json
+    labels = [r[1] for r in _json.loads(data)["nodes"]]
+    assert "</script><img src=x onerror=alert(1)>&amp;" in labels       # still the label
+    # the page writes graph text with textContent / fillText, never as markup
+    assert "innerHTML" not in tail and "insertAdjacentHTML" not in tail
+
+
+def test_graph_html_follows_the_names_and_the_graph(tmp_path, monkeypatch):
+    out = tmp_path / "graphify-out"
+    out.mkdir()
+    (out / "graph.json").write_text(json.dumps(_viz_graph()), encoding="utf-8")
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    server._GRAPH_CACHE.clear()
+    gp = out / "graph.json"
+    assert "graph.html written" in server._write_viz(gp)
+    page = out / "graph.html"
+    assert server.viz.is_ours(page) and not server.viz.is_ours(out / "missing.html")
+    data = json.loads(server.graphlore_set_labels({"0": "Core"}, as_json=True))
+    assert data["graph_html_patched"] is None          # rewritten, not patched
+    assert "Core" in page.read_text(encoding="utf-8")
+    # a graph too large to draw is said, not written
+    monkeypatch.setattr(server.viz, "MAX_NODES", 2)
+    page.unlink()
+    assert "not written" in server._write_viz(gp) and not page.exists()
+    (out / "broken.json").write_text("{", encoding="utf-8")
+    assert "could not be read" in server._write_viz(out / "broken.json")
 
 
 def test_build_log_that_cannot_be_condensed_is_returned_whole(tmp_path, monkeypatch):

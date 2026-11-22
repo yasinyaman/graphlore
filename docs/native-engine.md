@@ -2344,7 +2344,6 @@ each is a piece of work of its own:
   and images (a native version would ask the host model by MCP sampling),
   `mode="deep"`'s inferred edges, sources added by URL (`graphlore_add`),
   rationale and concept nodes.
-- **`graph.html`**, graphify's view of the graph.
 - **Where the engine has less than graphify** (the comparison above): imports
   in Swift, C#, Go and JavaScript; calls in JavaScript, Scala, C++, Kotlin and
   Ruby; the confirmed edges `verify_graphify.py` still lists; the Python `super`

@@ -9,7 +9,7 @@ All notable changes to this project are documented here. The format is based on
 ### Deprecated
 - **graphify as graphlore's extractor**, going in the next release with what
   only it does: `graphlore_add` (a source by URL), `graphlore_build`'s `mode`
-  (`"deep"`) and `no_viz` (graph.html), `GRAPHLORE_ENGINE=graphify`,
+  (`"deep"`), `GRAPHLORE_ENGINE=graphify`,
   `GRAPHLORE_BIN` and the `graphify` extra. A build graphify answers says so.
   What graphify does that the engine does not yet is listed in
   `docs/native-engine.md` ("After graphify").
@@ -65,6 +65,20 @@ All notable changes to this project are documented here. The format is based on
   pairs to 68.
 
 ### Added
+- **`graph.html`, graphlore's own view of the graph.** Every build writes it
+  beside graph.json, whichever engine built the graph (`no_viz=True` skips
+  it; graphify is always run with `--no-viz` now), and `cluster_only`,
+  `graphlore_set_labels` and `graphlore_prune` write it again. One file that
+  needs no network (the drawing code is graphlore's, on a canvas, and a
+  Content Security Policy forbids every request), made for large codebases:
+  it opens on the communities, one bubble each with the strongest links
+  between them, and goes down to one community or one node's 1- or 2-hop
+  neighbourhood (400 nodes at most, production code first). Search by name
+  or file, a details panel (kind, `file:line`, id, community, connections by
+  relation and direction, each a link), filters for relation groups, tests
+  and external packages, colouring by community or kind, a back button.
+  Names, labels and paths from the repository are embedded escaped and shown
+  as text only. A graph over 150,000 nodes is not drawn, and the build says so.
 - **Prebuilt `graphlore-engine` wheels** (`.github/workflows/engine-wheels.yml`):
   abi3 wheels for Linux (x86-64 and ARM on glibc, x86-64 on musl), macOS
   (universal2) and Windows x64, plus an sdist, each wheel installed and run
