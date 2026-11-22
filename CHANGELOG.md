@@ -84,6 +84,33 @@ All notable changes to this project are documented here. The format is based on
   pairs to 68.
 
 ### Added
+- **`graph.html` shows what graphlore's tools find, not only the graph.**
+  - *Findings* (`G`, `#f=`): the cycles `graphlore_cycles` reports (runtime
+    import cycles first), the shared state and surprising links of
+    `graphlore_surprises`, files that change together, and the candidates of
+    `graphlore_unreferenced`. Each row opens its nodes, with the cycle's path
+    drawn, and each node carries badges for the findings it is in.
+  - The server works them out for the active project's graph, from the tools'
+    own JSON, so the page and the tools agree; once per graph.json (path,
+    mtime). A tool that fails costs its finding, never the page.
+  - `graphlore_unreferenced` is left out past 20,000 nodes
+    (`VIZ_UNREFERENCED_MAX`; it took 3.7 s on nginx's 15,000 nodes and over 15
+    minutes on Django's 70,000), and the reply says so. A page written for
+    another path than the active project has no findings and says why.
+  - *Impact* (`I`, `#i=`): what depends on a node, by hop (1–3), in columns,
+    with test code counted apart, walked as `graphlore_impact` walks by default
+    (the page's `impact:begin` block; a test checks the two on every node).
+  - *Details*: a node's span, qualified name, language, route method and
+    pattern, and a state node's coupling pairs (hidden ones first); each edge
+    row says when an import runs, the edge's context and the line it is
+    written at.
+  - On a graphify graph: the calls and imports graphlore resolves from the
+    source are drawn dotted, and vendored or minified files are hidden behind
+    a "vendored files" filter.
+  - A resource node (an environment variable, a table) is no longer drawn as an
+    external package.
+  - Django's page grows from 14.3 to 19.3 MB, and its build from 0 to 15 s of
+    analysis.
 - **`graph.html`, graphlore's own view of the graph.** Every build writes it
   beside graph.json, whichever engine built the graph (`no_viz=True` skips
   it; graphify is always run with `--no-viz` now), and `cluster_only`,

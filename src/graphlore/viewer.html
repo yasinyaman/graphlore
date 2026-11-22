@@ -37,9 +37,13 @@ button { font: inherit; color: var(--ink); background: var(--chip); border: 1px 
   border-radius: 6px; padding: 3px 8px; cursor: pointer; }
 button:disabled { opacity: .45; cursor: default; }
 button.copy { font-size: 12px; padding: 2px 7px; }
+button.badge { font-size: 11px; padding: 1px 7px; border-radius: 10px; color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+ul.why { margin: 6px 0; padding-left: 18px; color: var(--muted); }
 select { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line);
   border-radius: 6px; padding: 2px 4px; }
 label.chk { display: inline-flex; gap: 4px; align-items: center; margin: 2px 8px 2px 0; }
+label.chk[hidden] { display: none; }
 .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; flex: none; }
 ul.list { list-style: none; margin: 0; padding: 0; }
 ul.list li { padding: 3px 4px; border-radius: 4px; cursor: pointer; display: flex; gap: 6px;
@@ -118,20 +122,23 @@ kbd { border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4p
     <div class="row">
       <label class="chk"><input type="checkbox" id="f-tests" checked> tests</label>
       <label class="chk"><input type="checkbox" id="f-ext"> external packages</label>
+      <label class="chk" id="f-vend-l" hidden><input type="checkbox" id="f-vend"> vendored files</label>
     </div>
     <div class="row" id="f-groups"></div>
     <div class="row" style="margin-top:6px">
       <span class="muted">Colour by</span>
       <select id="colour"><option value="comm">community</option><option value="kind">kind</option></select>
       <span class="muted">Depth</span>
-      <select id="hops"><option value="1">1 hop</option><option value="2">2 hops</option></select>
+      <select id="hops"><option value="1">1 hop</option><option value="2">2 hops</option><option value="3">3 hops</option></select>
     </div>
     <h2>Legend</h2>
     <div id="legend"></div>
     <p class="muted" style="margin-top:14px">Drag to pan, scroll or pinch to zoom, drag a node to move it.
       Click a bubble to open the community, click a node for its details, double-click it for its
       neighbourhood: what uses it on the left, what it uses on the right. <kbd>?</kbd> lists the keys.
-      The address bar keeps the view, so a link opens it again. Made by graphlore from graph.json.</p>
+      The address bar keeps the view, so a link opens it again. <kbd>G</kbd> lists what graphlore's
+      tools found (cycles, shared state, surprises, unreferenced code), <kbd>I</kbd> shows what depends
+      on the selected node. Made by graphlore from graph.json.</p>
   </aside>
   <main id="stage">
     <canvas id="cv" aria-label="The graph"></canvas>
@@ -154,7 +161,9 @@ kbd { border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4p
         <tr><td><kbd>Esc</kbd></td><td>clear the selection, then go back</td></tr>
         <tr><td><kbd>F</kbd></td><td>fit the view</td></tr>
         <tr><td><kbd>+</kbd> <kbd>−</kbd></td><td>zoom</td></tr>
-        <tr><td><kbd>1</kbd> <kbd>2</kbd></td><td>neighbourhood depth</td></tr>
+        <tr><td><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd></td><td>neighbourhood or impact depth</td></tr>
+        <tr><td><kbd>I</kbd></td><td>what depends on the selected node (impact)</td></tr>
+        <tr><td><kbd>G</kbd></td><td>findings: cycles, shared state, surprises, unreferenced code</td></tr>
         <tr><td><kbd>?</kbd></td><td>this list</td></tr>
       </table>
       <p class="muted" style="margin-bottom:0">Back and forward in the browser move between views.</p>
@@ -187,6 +196,9 @@ const RELATION_GROUPS = {
   state: ["reads", "writes", "couples_with"],
   http: ["handles", "http_calls"],
 };
+// how the impact view walks a relation: viz.impact_walk (graphlore_impact's skip sets)
+const IMPACT_NEVER = ["rationale_for"];
+const IMPACT_FROM_STATE = ["reads", "writes", "couples_with"];
 const MAX_COMMUNITIES = 300;
 const TEST_DIR_PARTS = new Set(["test", "tests", "spec", "specs", "__tests__", "testing", "e2e"]);
 const TEST_NAME = /[a-z0-9.](?:Tests?|TestCase)(?:$|\.)/;
@@ -227,8 +239,13 @@ function compact(graph, names) {
     return low.startsWith("test_") || low === "conftest"
       || ["_test", "_tests", ".test", ".spec", "_spec"].some(s => low.endsWith(s)) || TEST_NAME.test(stem);
   };
+  const isResource = n => String(n.type === undefined ? "" : n.type).toLowerCase() === "resource";
+  // a resource (an environment variable, a table) has an empty file too, and is the project's own
+  const outside = n => isExternal(n) && !isResource(n);
+  const isState = n => ["variable", "property", "constant"].includes(str(n.kind === undefined ? "" : n.kind).toLowerCase())
+    || isResource(n);
   const kindOf = n => {
-    if (isExternal(n)) return "external";
+    if (outside(n)) return "external";
     if (isFileHub(n)) return "file";
     if (typeof n.kind === "string" && n.kind) return n.kind;
     return nodeType(n) || "node";
@@ -237,10 +254,29 @@ function compact(graph, names) {
     for (const [g, rels] of Object.entries(RELATION_GROUPS)) if (rels.includes(rel)) return GROUPS.indexOf(g);
     return GROUPS.indexOf("other");
   };
+  const walkOf = rel => {
+    const r = rel.trim().toLowerCase();
+    return IMPACT_NEVER.includes(r) ? 0 : IMPACT_FROM_STATE.includes(r) ? 2 : 1;
+  };
+  const int = v => (typeof v === "number" && Number.isInteger(v) ? v
+    : typeof v === "string" && /^\d+$/.test(v) ? parseInt(v, 10) : 0);
+  const text = v => (typeof v === "string" ? v : "");
+  // the qualified name when it says more than the label (viz._qualname)
+  const qualname = n => {
+    const qual = text(n.qualname), label = nodeLabel(n);
+    const bare = (label.endsWith("()") ? label.slice(0, -2) : label).replace(/^\.+/, "");
+    return qual === bare ? "" : qual;
+  };
+  const locLine = e => {
+    const m = /^\d+/.exec(String(present(e.source_location) ? e.source_location : "").replace(/^[Ll]+/, ""));
+    return m ? parseInt(m[0], 10) : 0;
+  };
+  const table = () => { const m = new Map(); m.at = k => { if (!m.has(k)) m.set(k, m.size); return m.get(k); }; return m; };
 
   const index = new Map();
   nodes.forEach((n, i) => { const id = nodeId(n); if (!index.has(id)) index.set(id, i); });
   const degree = new Array(nodes.length).fill(0), flat = [], rels = new Map();
+  const eattrs = [], ctxs = table(), runs = table();
   for (const e of edges) {
     const s = first(e, ["source", "from", "src"]), t = first(e, ["target", "to", "dst"]);
     const si = index.get(s === null ? "?" : str(s)), ti = index.get(t === null ? "?" : str(t));
@@ -250,9 +286,12 @@ function compact(graph, names) {
     if (!rels.has(rel)) rels.set(rel, rels.size);
     const inferred = String(e.confidence === undefined ? "" : e.confidence).toUpperCase() === "INFERRED";
     flat.push(si, ti, rels.get(rel), inferred ? 1 : 0);
+    const context = text(e.context), run = text(e.runs);
+    eattrs.push(locLine(e), context ? ctxs.at(context) : -1, run ? runs.at(run) : -1);
     degree[si] += 1; degree[ti] += 1;
   }
   const commIds = new Map(), commSize = [], commName = [], kinds = new Map(), rows = [];
+  const langs = table(), routes = [], coupling = [];
   nodes.forEach((n, i) => {
     const raw = n.community !== undefined ? n.community : n.cluster;
     let c = -1;
@@ -268,10 +307,26 @@ function compact(graph, names) {
     }
     const kind = kindOf(n);
     if (!kinds.has(kind)) kinds.set(kind, kinds.size);
-    const flags = (n.test === true || isTestPath(nodeFile(n)) ? 1 : 0) | (isExternal(n) ? 2 : 0);
+    const flags = (n.test === true || isTestPath(nodeFile(n)) ? 1 : 0) | (outside(n) ? 2 : 0) | (isState(n) ? 4 : 0);
     const line = String(nodeLine(n));
+    const lang = text(n.language);
     rows.push([nodeId(n), nodeLabel(n), nodeFile(n), /^\d+$/.test(line) ? parseInt(line, 10) : 0,
-               c, kinds.get(kind), flags, degree[i]]);
+               c, kinds.get(kind), flags, degree[i], int(n.end_line), qualname(n),
+               lang ? langs.at(lang) : -1]);
+    if (String(n.type === undefined ? "" : n.type).toLowerCase() === "route")
+      routes.push([i, str(n.method || ""), str(n.pattern || ""), str(n.framework || "")]);
+    const cp = n.coupling;
+    if (cp && typeof cp === "object" && !Array.isArray(cp)) {
+      const listed = [];
+      for (const pair of cp.listed || []) {
+        if (!Array.isArray(pair) || pair.length < 2) continue;
+        const hops = pair.length > 2 ? pair[2] : null, cc = pair.length > 3 ? pair[3] : null;
+        const at = v => { const k = index.get(str(v)); return k === undefined ? -1 : k; };
+        listed.push([at(pair[0]), at(pair[1]), Number.isInteger(hops) ? hops : null,
+                     typeof cc === "boolean" ? cc : null]);
+      }
+      coupling.push([i, int(cp.pairs), int(cp.hidden), listed]);
+    }
   });
   const between = new Map();
   for (let j = 0; j < flat.length; j += 4) {
@@ -290,13 +345,19 @@ function compact(graph, names) {
     meta: { engine: header.engine === "graphlore" ? "graphlore" : "graphify",
             commit: str(commit).slice(0, 12), nodes: nodes.length, edges: flat.length / 4 },
     groups: GROUPS.slice(),
-    rels: [...rels.keys()].map(r => [r, groupOf(r)]),
+    rels: [...rels.keys()].map(r => [r, groupOf(r), walkOf(r)]),
     kinds: [...kinds.keys()],
+    langs: [...langs.keys()],
+    ctxs: [...ctxs.keys()],
+    runs: [...runs.keys()],
     comms: [...commIds].map(([cid, c]) => [cid, commName[c] === undefined ? `Community ${cid}` : commName[c], commSize[c] || 0]),
     maxComms: MAX_COMMUNITIES,
     nodes: rows,
     edges: flat,
     cedges,
+    eattrs,
+    routes,
+    coupling,
   };
 }
 // compact:end
@@ -315,20 +376,30 @@ let idIndex = new Map(), commIndex = new Map();
 const nId = i => D.nodes[i][0], nLabel = i => D.nodes[i][1], nFile = i => D.nodes[i][2];
 const nLine = i => D.nodes[i][3], nComm = i => D.nodes[i][4], nKind = i => D.kinds[D.nodes[i][5]];
 const nTest = i => (D.nodes[i][6] & 1) !== 0, nExt = i => (D.nodes[i][6] & 2) !== 0;
-const nDeg = i => D.nodes[i][7];
+const nDeg = i => D.nodes[i][7], nEnd = i => D.nodes[i][8] || 0, nQual = i => D.nodes[i][9] || "";
+const nLang = i => (D.nodes[i][10] >= 0 ? D.langs[D.nodes[i][10]] : "");
+const nState = i => (D.nodes[i][6] & 4) !== 0;
 const eS = j => D.edges[4 * j], eT = j => D.edges[4 * j + 1], eR = j => D.edges[4 * j + 2];
 const eInf = j => D.edges[4 * j + 3] === 1;
+const eSite = j => D.eattrs[3 * j] || 0;
+const eCtx = j => (D.eattrs[3 * j + 1] >= 0 ? D.ctxs[D.eattrs[3 * j + 1]] : "");
+const eRuns = j => (D.eattrs[3 * j + 2] >= 0 ? D.runs[D.eattrs[3 * j + 2]] : "");
 const relName = r => D.rels[r][0], relGroup = r => D.rels[r][1];
+// what graphlore's tools found (viz.page_data's `analysis`), and what the page
+// derives from it on load: absent for a graph.json opened in the browser
+let A = null, resolvedFrom = Infinity, into = [], vendored = new Uint8Array(0);
+let routeOf = new Map(), couplingOf = new Map(), badges = new Map();
+const eRes = j => j >= resolvedFrom;    // an edge graphlore resolved from the source
 const GROUP_COLOURS = ["#9aa0a6", "#2f9e72", "#2f6fdf", "#b35ae0", "#d08a1c", "#d6455d", "#159fb3", "#7c8591"];
 const groupColour = g => GROUP_COLOURS[g % GROUP_COLOURS.length];
 const site = i => nFile(i) ? nFile(i) + (nLine(i) ? ":" + nLine(i) : "") : "";
 const narrow = () => window.matchMedia("(max-width: 760px)").matches;
 
 // --- filters ---------------------------------------------------------------
-const show = { tests: true, ext: false, groups: GROUPS.map(g => g !== "structure") };
+const show = { tests: true, ext: false, vend: false, groups: GROUPS.map(g => g !== "structure") };
 // containment links every definition to its file: on by default it would draw
 // a star around each file and hide everything else
-const nodeShown = i => (show.tests || !nTest(i)) && (show.ext || !nExt(i));
+const nodeShown = i => (show.tests || !nTest(i)) && (show.ext || !nExt(i)) && (show.vend || !vendored[i]);
 const edgeShown = j => show.groups[relGroup(eR(j))] && nodeShown(eS(j)) && nodeShown(eT(j));
 
 // --- colours ---------------------------------------------------------------
@@ -383,7 +454,7 @@ function nodeView(kind, ids, title, extra) {
     seen.add(j);
     const a = pos.get(eS(j)), b = pos.get(eT(j));
     if (a !== undefined && b !== undefined && a !== b)
-      links.push({ a, b, w: 1, edge: j, colour: groupColour(relGroup(eR(j))), dashed: eInf(j) });
+      links.push({ a, b, w: 1, edge: j, colour: groupColour(relGroup(eR(j))), dashed: eInf(j), dotted: eRes(j) });
   }
   return Object.assign({ kind, items, links, title,
     note: cut ? `${cut} more not drawn (the ${MAX_VIEW} most connected are)` : "" }, extra || {});
@@ -415,8 +486,13 @@ function focusView(i, hops) {
     }
     frontier = next;
   }
+  return columnsView(i, dist, side, hops, "focus", nLabel(i));
+}
+
+// The items of `dist` (node -> hops from i) in columns, by `side` (-1 left, 1 right)
+function columnsView(i, dist, side, hops, kind, title, extra) {
   const ids = [...dist.keys()].sort((a, b) => dist.get(a) - dist.get(b) || byRank(a, b));
-  const v = nodeView("focus", ids, nLabel(i), { centre: i, hops, static: true });
+  const v = nodeView(kind, ids, title, Object.assign({ centre: i, hops, static: true, columns: true }, extra || {}));
   const headers = [];
   for (const s of [-1, 1]) {
     let col = 0;
@@ -457,17 +533,139 @@ function focusView(i, hops) {
 
 const shortPath = f => { const p = f.split("/"); return p.length > 2 ? "…/" + p.slice(-2).join("/") : f; };
 
+// impact:begin
+// What depends on node `start` within `hops`, as graphlore_impact walks it by
+// default: every edge backwards (the containment around the node too) but a
+// docstring's, and the readers and writers of state only from a state node.
+// `data` is the page's data (viz.page_data); `inward` (node -> the edges into
+// it) may be given. Returns a Map from node to its distance.
+function impactOf(data, start, hops, inward) {
+  const n = data.nodes.length, edges = data.edges;
+  if (!inward) {
+    inward = Array.from({ length: n }, () => []);
+    for (let j = 0; j < edges.length / 4; j++) inward[edges[4 * j + 1]].push(j);
+  }
+  const fromState = (data.nodes[start][6] & 4) !== 0;
+  const dist = new Map([[start, 0]]);
+  let frontier = [start];
+  for (let h = 0; h < hops && frontier.length; h++) {
+    const next = [];
+    for (const u of frontier) for (const j of inward[u]) {
+      const walk = data.rels[edges[4 * j + 2]][2];
+      if (walk === 0 || (walk === 2 && !fromState)) continue;
+      const v = edges[4 * j];
+      if (dist.has(v)) continue;
+      dist.set(v, h + 1); next.push(v);
+    }
+    frontier = next;
+  }
+  dist.delete(start);
+  return dist;
+}
+
+// The edges graphlore resolves from the source for a graphify graph (the
+// analysis' `resolved`), added to `data`'s own as graphlore's tools see them.
+// Returns the index of the first one added.
+function withResolved(data) {
+  const first = data.edges.length / 4;
+  for (const [s, t, rel, g, walk, inf] of (data.analysis && data.analysis.resolved) || []) {
+    let r = data.rels.findIndex(x => x[0] === rel);
+    if (r < 0) { r = data.rels.length; data.rels.push([rel, g, walk]); }
+    data.edges.push(s, t, r, inf); data.eattrs.push(0, -1, -1);
+  }
+  return first;
+}
+// impact:end
+
+function impactView(i, hops) {
+  const deps = impactOf(D, i, hops, into);
+  const dist = new Map([[i, 0], ...deps]), side = new Map([...dist.keys()].map(k => [k, -1]));
+  side.set(i, 0);
+  return columnsView(i, dist, side, hops, "impact", `Impact of ${nLabel(i)}`, { deps });
+}
+
+// --- findings: what graphlore's tools found (cycles, coupling, surprises, …) --
+const cycleName = r => (r.kind === "imports" ? `${r.runs || "import"} import cycle`
+  : r.kind === "calls" ? "call cycle" : "cycle through other edges");
+const FINDINGS = [
+  { key: "cycles", title: "Cycles", rows: () => (A.cycles ? A.cycles.rows : []),
+    label: r => `${cycleName(r)}: ${r.labels.slice(0, 3).join(" → ")}${r.labels.length > 3 ? " …" : ""}`,
+    tag: r => `${r.labels.length}`, nodes: r => r.nodes },
+  { key: "coupling", title: "Shared state", rows: () => (A.shared_state ? A.shared_state.rows : []),
+    label: r => r.label, tag: r => (r.hidden ? `${r.hidden} hidden` : `${r.writers}w · ${r.readers}r`),
+    nodes: r => [r.state] },
+  { key: "surprises", title: "Surprising links", rows: () => (A.surprises ? A.surprises.rows : []),
+    label: r => `${r.labels[0]} → ${r.labels[1]}`, tag: r => r.strength || String(r.score), nodes: r => [r.from, r.to] },
+  { key: "unreferenced", title: "Unreferenced code", rows: () => (A.unreferenced && A.unreferenced.rows ? A.unreferenced.rows : []),
+    label: r => r.label, tag: r => r.kind, nodes: r => [r.node] },
+  { key: "co_change", title: "Files that change together", rows: () => (A.co_change ? A.co_change.rows : []),
+    label: r => r.labels.map(shortPath).join(" ↔ "), tag: r => `${r.commits} commits`, nodes: r => r.files },
+];
+const findingKind = key => FINDINGS.find(f => f.key === key);
+const findingCount = () => (A ? FINDINGS.reduce((s, f) => s + f.rows().length, 0) : 0);
+
+function findingsView(r) {
+  if (!A) return null;
+  const kind = r.f === "all" ? null : findingKind(r.f);
+  if (r.f !== "all" && !kind) return null;
+  if (kind && r.k >= 0) {
+    const row = kind.rows()[r.k];
+    if (!row) return null;
+    return findingView(kind, row, r.k);
+  }
+  const ids = new Set();
+  for (const f of kind ? [kind] : FINDINGS)
+    for (const row of f.rows().slice(0, kind ? MAX_VIEW : 25)) for (const i of f.nodes(row)) if (i >= 0) ids.add(i);
+  return nodeView("findings", [...ids].sort(byRank), kind ? kind.title : "Findings", { findings: kind ? kind.key : "all" });
+}
+
+function findingView(kind, row, k) {
+  const extra = { finding: { kind: kind.key, row, k } };
+  if (kind.key === "coupling" && row.state >= 0) {
+    const v = focusView(row.state, 1);
+    return Object.assign(v, { kind: "finding", title: row.label }, extra);
+  }
+  if (kind.key === "unreferenced" && row.node >= 0) {
+    const v = focusView(row.node, 1);
+    return Object.assign(v, { kind: "finding", title: row.label }, extra);
+  }
+  const ids = kind.nodes(row).filter(i => i >= 0);
+  const v = nodeView("finding", [...new Set(ids)], kind.label(row), extra);
+  // the finding's own path, drawn whether or not an edge of the graph joins it
+  const path = kind.key === "cycles" ? row.path : kind.nodes(row);
+  const pos = new Map(v.items.map((it, n) => [it.node, n]));
+  const colour = kind.key === "cycles" ? groupColour(GROUPS.indexOf(row.kind === "imports" ? "imports" : "calls"))
+    : css("--accent");
+  for (let n = 0; n + 1 < path.length; n++) {
+    const a = pos.get(path[n]), b = pos.get(path[n + 1]);
+    if (a === undefined || b === undefined || a === b) continue;
+    const got = v.links.find(l => (l.a === a && l.b === b) || (l.a === b && l.b === a));
+    if (got) got.emph = true;
+    else v.links.push({ a, b, w: 1, colour, emph: true, dashed: kind.key === "co_change" });
+  }
+  return v;
+}
+
 // --- routes: the #fragment names the view, so a link opens it again ----------
-const keyOf = r => r.v === "c" ? "c:" + r.c : r.v === "n" ? `n:${r.n}:${r.h}` : r.v;
+const keyOf = r => r.v === "c" ? "c:" + r.c : r.v === "n" ? `n:${r.n}:${r.h}` : r.v === "i" ? `i:${r.n}:${r.h}`
+  : r.v === "f" ? `f:${r.f}:${r.k}` : r.v;
 const homeRoute = () => (D && D.comms.length ? { v: "o" } : { v: "a" });
 function hashFor(r) {
   if (r.v === "c") return "#c=" + encodeURIComponent(r.c);
-  if (r.v === "n") return "#n=" + encodeURIComponent(r.n) + (r.h === 2 ? "&h=2" : "");
+  if (r.v === "n") return "#n=" + encodeURIComponent(r.n) + (r.h > 1 ? "&h=" + r.h : "");
+  if (r.v === "i") return "#i=" + encodeURIComponent(r.n) + (r.h !== 3 ? "&h=" + r.h : "");
+  if (r.v === "f") return "#f=" + encodeURIComponent(r.f) + (r.k >= 0 ? ":" + r.k : "");
   return "";
 }
 function routeFromHash() {
   const p = new URLSearchParams(location.hash.slice(1));
-  if (p.has("n")) return { v: "n", n: p.get("n"), h: p.get("h") === "2" ? 2 : 1 };
+  const depth = (dflt) => { const h = parseInt(p.get("h"), 10); return h >= 1 && h <= 3 ? h : dflt; };
+  if (p.has("n")) return { v: "n", n: p.get("n"), h: depth(1) };
+  if (p.has("i")) return { v: "i", n: p.get("i"), h: depth(3) };
+  if (p.has("f")) {
+    const [f, k] = p.get("f").split(":");
+    return { v: "f", f: f || "all", k: k === undefined || !/^\d+$/.test(k) ? -1 : parseInt(k, 10) };
+  }
   if (p.has("c")) return { v: "c", c: p.get("c") };
   return homeRoute();
 }
@@ -481,20 +679,29 @@ function build(r) {
     document.getElementById("hops").value = String(r.h);
     return focusView(i, r.h);
   }
+  if (r.v === "i") {
+    const i = idIndex.get(r.n);
+    if (i === undefined) return null;
+    document.getElementById("hops").value = String(r.h);
+    return impactView(i, r.h);
+  }
+  if (r.v === "f") return findingsView(r);
   return r.v === "a" || !D.comms.length ? allView() : overview();
 }
 
 function showRoute(r, keep) {    // draw the view a route names (no history entry)
   let v = build(r), note = "";
   if (!v) {
-    note = `Not in this graph: ${r.v === "n" ? r.n : r.c}`;
+    note = r.v === "f" ? (A ? `No such finding: ${r.f}${r.k >= 0 ? ":" + r.k : ""}` : NO_FINDINGS)
+      : `Not in this graph: ${r.v === "c" ? r.c : r.n}`;
     r = homeRoute(); v = build(r);
   }
   const was = keep && selected >= 0 && view ? view.items[selected].node : undefined;
   route = r; view = v; view.key = keyOf(r);
   hover = -1;
   selected = was !== undefined ? view.items.findIndex(it => it.node === was)
-    : view.centre !== undefined ? view.items.findIndex(it => it.node === view.centre) : -1;
+    : view.centre !== undefined && !view.finding && view.kind !== "impact"
+      ? view.items.findIndex(it => it.node === view.centre) : -1;
   layout(view);
   document.getElementById("load-status").textContent = note;
   renderSide();
@@ -518,6 +725,10 @@ function back() { if (trail.length > 1) history.back(); }
 const rebuildView = () => { if (view) showRoute(route, true); };
 const openNode = i => go({ v: "n", n: nId(i), h: +document.getElementById("hops").value });
 const openComm = c => go({ v: "c", c: D.comms[c][0] });
+const openImpact = i => go({ v: "i", n: nId(i), h: 3 });
+const openFinding = (f, k) => go({ v: "f", f, k: k === undefined ? -1 : k });
+const NO_FINDINGS = "Findings (cycles, surprising links, shared state, unreferenced code) come with the "
+  + "graph.html graphlore_build writes for its active project; a graph.json opened here has none.";
 
 // --- layout: a force simulation for bubbles and communities, from a spiral --
 function layout(v) {
@@ -536,7 +747,7 @@ function layout(v) {
 function fitBox(v) {             // the camera around every item, with a margin
   if (!v || !v.items.length) return { x: 0, y: 0, scale: 1 };
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-  const pad = v.kind === "focus" ? 150 : 0;   // room for the labels beside the columns
+  const pad = v.columns ? 150 : 0;   // room for the labels beside the columns
   for (const p of v.items) {
     x0 = Math.min(x0, p.x - p.r - pad); y0 = Math.min(y0, p.y - p.r - ROW);
     x1 = Math.max(x1, p.x + p.r + pad); y1 = Math.max(y1, p.y + p.r + ROW);
@@ -544,12 +755,12 @@ function fitBox(v) {             // the camera around every item, with a margin
   const w = Math.max(40, x1 - x0), h = Math.max(40, y1 - y0);
   // screen room kept free: the labels to the right of the dots, and on a phone
   // the sheet's handle at the foot
-  const labelRoom = v.kind === "focus" ? 0 : Math.min(140, cv.clientWidth * 0.25);
+  const labelRoom = v.columns ? 0 : Math.min(140, cv.clientWidth * 0.25);
   const footRoom = narrow() ? 56 : 0;
   let scale = Math.max(0.05, Math.min(2.5, Math.min((cv.clientWidth - 60 - labelRoom) / w,
                                                      (cv.clientHeight - 60 - footRoom) / h)));
   let x = (x0 + x1) / 2 + labelRoom / 2 / scale, y = (y0 + y1) / 2 + footRoom / 2 / scale;
-  if (v.kind === "focus") {
+  if (v.columns) {
     // legible before complete: columns that do not fit are panned to, and the
     // node itself stays in the middle part of the screen
     scale = Math.max(scale, READABLE);
@@ -619,7 +830,7 @@ function zoomBy(f) { animateTo({ x: cam.x, y: cam.y, scale: cam.scale * f }); }
 function fitView() { if (view) { animateTo(fitBox(view)); userMoved = false; } }
 function panTo(k) {
   if (!view || k < 0) return;
-  const p = view.items[k], scale = Math.max(cam.scale, view.kind === "focus" ? 0.9 : 0.8);
+  const p = view.items[k], scale = Math.max(cam.scale, view.columns ? 0.9 : 0.8);
   // on a phone the open sheet covers the foot of the screen: put it above that
   const dy = narrow() && side.classList.contains("open") ? cv.clientHeight * 0.35 / scale : 0;
   animateTo({ x: p.x, y: p.y + dy, scale });
@@ -650,15 +861,16 @@ function draw() {
   const it = view.items, focus = hover >= 0 ? hover : selected;
   const near = neighbourSet(focus), dim = focus >= 0;
   const ink = css("--ink"), muted = css("--muted"), line = css("--line");
-  const columns = view.kind === "focus";
+  const columns = !!view.columns;
   for (const l of view.links) {
     const p = it[l.a], q = it[l.b];
     const lit = !dim || l.a === focus || l.b === focus;
     const [x1, y1] = toScreen(p.x, p.y), [x2, y2] = toScreen(q.x, q.y);
     ctx.globalAlpha = lit ? (dim ? 0.95 : columns ? 0.4 : 0.5) : 0.07;
     ctx.strokeStyle = l.colour || muted;
-    ctx.lineWidth = view.kind === "overview" ? Math.min(8, 0.6 + Math.log1p(l.w)) : (lit && dim ? 1.6 : 1);
-    ctx.setLineDash(l.dashed ? [4, 3] : []);
+    ctx.lineWidth = view.kind === "overview" ? Math.min(8, 0.6 + Math.log1p(l.w)) : l.emph ? 2.6 : (lit && dim ? 1.6 : 1);
+    if (l.emph && lit) ctx.globalAlpha = 0.95;
+    ctx.setLineDash(l.dotted ? [1.5, 3] : l.dashed ? [4, 3] : []);
     ctx.beginPath(); ctx.moveTo(x1, y1);
     if (columns && Math.abs(x2 - x1) > 1) {            // a column's edges flow in as curves
       const mx = (x1 + x2) / 2;
@@ -706,7 +918,7 @@ function drawLabels(it, focus, near, dim, ink, muted) {
   const order = [...it.keys()].filter(k => !dim || near.has(k));
   const rank = k => (k === focus ? -3 : k === selected ? -2 : it[k].node !== undefined && it[k].node === view.centre ? -1 : 0);
   order.sort((a, b) => rank(a) - rank(b) || (it[a].hop || 0) - (it[b].hop || 0) || it[b].r - it[a].r);
-  const cap = view.kind === "focus" ? MAX_VIEW : LABELS;
+  const cap = view.columns ? MAX_VIEW : LABELS;
   let drawn = 0;
   for (const k of order) {
     if (drawn >= cap && rank(k) === 0) break;
@@ -732,7 +944,7 @@ function drawLabels(it, focus, near, dim, ink, muted) {
     ctx.textAlign = "left";
     drawn += 1;
   }
-  if (view.kind === "focus" && ROW * cam.scale >= 12 && !dim) {   // the file a group of rows is in
+  if (view.columns && ROW * cam.scale >= 12 && !dim) {   // the file a group of rows is in
     ctx.font = "11px system-ui, sans-serif"; ctx.fillStyle = muted; ctx.globalAlpha = 0.9;
     for (const h of view.headers) {
       const [x, y] = toScreen(h.x, h.y);
@@ -881,13 +1093,19 @@ document.addEventListener("keydown", ev => {
     case "f": case "F": fitView(); break;
     case "+": case "=": zoomBy(1.3); break;
     case "-": case "_": zoomBy(1 / 1.3); break;
-    case "1": case "2": setHops(+ev.key); break;
+    case "1": case "2": case "3": setHops(+ev.key); break;
+    case "i": case "I": {
+      const k = selected >= 0 ? selected : view && view.centre !== undefined ? view.items.findIndex(x => x.node === view.centre) : -1;
+      if (k >= 0 && view.items[k].node !== undefined) openImpact(view.items[k].node);
+      break;
+    }
+    case "g": case "G": if (A) openFinding("all"); break;
     default: return;
   }
 });
 function setHops(h) {
   document.getElementById("hops").value = String(h);
-  if (route.v === "n" && route.h !== h) go({ v: "n", n: route.n, h });
+  if ((route.v === "n" || route.v === "i") && route.h !== h) go({ v: route.v, n: route.n, h });
 }
 
 // --- the side panel (text only: every string from the graph goes in as text) --
@@ -952,49 +1170,77 @@ function renderSide() {
     `${m.nodes.toLocaleString()} nodes · ${m.edges.toLocaleString()} edges · ${D.comms.length} communities` +
     ` · built by ${m.engine === "graphlore" ? "graphlore's engine" : "graphify"}` + (m.commit ? ` at ${m.commit}` : "");
   const crumbs = document.getElementById("crumbs");
-  crumbs.replaceChildren(
+  crumbs.replaceChildren(...[
     el("button", { onclick: back, title: "Back (Esc)", ...(trail.length > 1 ? {} : { disabled: "" }) }, "← Back"), " ",
     D.comms.length ? el("button", { onclick: () => go({ v: "o" }) }, "Communities") : null, " ",
-    el("span", { class: "muted" }, view ? view.title : ""));
+    A ? el("button", { onclick: () => openFinding("all"), title: "Findings (G)" }, `Findings (${findingCount()})`) : null, " ",
+    el("span", { class: "muted" }, view ? view.title : "")].filter(x => x !== null));
   document.getElementById("hud").textContent = view
     ? `${view.items.length} ${view.kind === "overview" ? "communities" : "nodes"} · ${view.links.length} links` +
-      (view.kind === "focus" ? " · uses it ← · → it uses" : "") + (view.note ? ` · ${view.note}` : "")
+      (view.kind === "focus" ? " · uses it ← · → it uses" : view.kind === "impact" ? " · ← depends on it, nearest first" : "")
+      + (view.note ? ` · ${view.note}` : "")
     : "";
   const det = document.getElementById("details");
   det.replaceChildren();
   const sel = selected >= 0 && view ? view.items[selected] : null;
-  if (sel && sel.node !== undefined) det.append(...nodeDetails(sel.node));
+  if (sel && sel.node !== undefined && !(view.kind === "impact" && sel.node === view.centre)) det.append(...nodeDetails(sel.node));
+  else if (view && view.kind === "impact") det.append(...impactDetails(view));
+  else if (view && view.finding) det.append(...findingDetails(view.finding));
+  else if (view && view.kind === "findings") det.append(...findingsDetails(view.findings));
   else if (view && view.kind === "community") det.append(...communityDetails(view.comm));
   else if (view && view.kind === "overview") det.append(...overviewDetails());
+  else if (view && view.kind === "all") det.append(...findingsSummary());
 }
 
 function nodeDetails(i) {
-  const c = nComm(i), id = nId(i);
+  const c = nComm(i), id = nId(i), rt = routeOf.get(i);
+  const kv = (k, v) => (v ? [el("div", {}, k), el("div", {}, v)] : []);
+  const span = nEnd(i) > nLine(i) && nLine(i) ? `L${nLine(i)}–L${nEnd(i)} (${nEnd(i) - nLine(i) + 1} lines)` : "";
   const out = [el("h2", {}, "Node"),
     el("div", { style: "font-weight:600;word-break:break-all" }, nLabel(i)),
+    badges.has(i) ? el("div", { class: "row", style: "margin:4px 0" }, ...badges.get(i).map(([text, f, k]) =>
+      el("button", { class: "badge", onclick: () => openFinding(f, k), title: "Open this finding" }, text))) : null,
     el("div", { class: "kv" },
-      el("div", {}, "kind"), el("div", {}, nKind(i) + (nTest(i) ? " (test)" : "")),
+      el("div", {}, "kind"), el("div", {}, nKind(i) + (nTest(i) ? " (test)" : "") + (vendored[i] ? " (vendored)" : "")),
       el("div", {}, "where"), el("div", {}, site(i) || "—"),
+      ...kv("span", span),
+      ...kv("qualname", nQual(i)),
+      ...kv("language", nLang(i)),
+      ...(rt ? kv("route", `${rt[1]} ${rt[2]}`.trim()).concat(kv("framework", rt[3])) : []),
       el("div", {}, "community"), el("div", {}, c >= 0 ? D.comms[c][1] : "—"),
       el("div", {}, "id"), el("div", {}, el("code", {}, id)),
       el("div", {}, "edges"), el("div", {}, String(nDeg(i)))),
     el("div", { class: "row", style: "margin-top:6px" },
       route.v === "n" && route.n === id ? null : el("button", { onclick: () => openNode(i) }, "Neighbourhood"),
+      route.v === "i" && route.n === id ? null : el("button", { onclick: () => openImpact(i), title: "What depends on it (I)" }, "Impact"),
       c >= 0 ? el("button", { onclick: () => openComm(c) }, "Its community") : null),
     el("h2", {}, "Copy for the assistant"),
     el("div", { class: "row" },
       copyButton("explain", `graphlore_explain(${JSON.stringify(id)})`),
       copyButton("fetch source", `graphlore_fetch([${JSON.stringify(id)}])`),
       copyButton("impact", `graphlore_impact(${JSON.stringify(id)})`),
+      copyButton("tests", `graphlore_tests_for(${JSON.stringify(id)})`),
       copyButton("id", id),
       site(i) ? copyButton("file:line", site(i)) : null)];
+  const cp = couplingOf.get(i);
+  if (cp) {
+    out.push(el("h2", {}, `Shared state: ${cp[1]} pair${cp[1] === 1 ? "" : "s"}, ${cp[2]} with no call path`));
+    const pairs = [...cp[3]].sort((a, b) => (a[2] === null ? 0 : 1) - (b[2] === null ? 0 : 1));
+    out.push(listOf(pairs.map(([w, o, hops, cc]) => [
+      `${w >= 0 ? nLabel(w) : "?"} writes · ${o >= 0 ? nLabel(o) : "?"}`,
+      (hops === null ? "no call path" : `call path, ${hops} hop${hops === 1 ? "" : "s"}`) + (cc ? " · change together" : ""),
+      () => (o >= 0 ? openNode(o) : null), hops === null ? css("--accent") : null])));
+    if (cp[3].length < cp[1]) out.push(el("div", { class: "muted" }, `${cp[1] - cp[3].length} more pairs not listed in graph.json`));
+  }
   const groups = new Map();           // "calls →" -> rows
   for (const j of adj[i]) {
     const outward = eS(j) === i, other = outward ? eT(j) : eS(j);
     const key = `${relName(eR(j))} ${outward ? "→" : "←"}`;
     if (!groups.has(key)) groups.set(key, { g: relGroup(eR(j)), rows: [] });
-    groups.get(key).rows.push([nLabel(other), (eInf(j) ? "inferred · " : "") + (nFile(other) || nKind(other)),
-      () => openNode(other), commColour(nComm(other))]);
+    const notes = [eRes(j) ? "resolved by graphlore" : eInf(j) ? "inferred" : "",
+      eRuns(j) && eRuns(j) !== "module-level" ? eRuns(j) : "", eCtx(j),
+      eSite(j) ? "L" + eSite(j) : "", nFile(other) || nKind(other)].filter(Boolean);
+    groups.get(key).rows.push([nLabel(other), notes.join(" · "), () => openNode(other), commColour(nComm(other))]);
   }
   for (const [key, { g, rows }] of [...groups].sort((a, b) => b[1].rows.length - a[1].rows.length)) {
     out.push(el("h2", {}, el("span", { class: "swatch", style: `background:${groupColour(g)};margin-right:6px` }),
@@ -1030,8 +1276,101 @@ function communityDetails(c) {
 
 function overviewDetails() {
   const order = D.comms.map((c, k) => k).sort((a, b) => D.comms[b][2] - D.comms[a][2]);
-  return [el("h2", {}, "Largest communities"),
+  return [...findingsSummary(),
+    el("h2", {}, "Largest communities"),
     listOf(order.map(k => [D.comms[k][1], `${D.comms[k][2]} nodes`, () => openComm(k), commColour(k)]))];
+}
+
+function findingsSummary() {
+  if (!A) return [el("h2", {}, "Findings"), el("p", { class: "muted" }, NO_FINDINGS)];
+  const rows = FINDINGS.map(f => [f.title, String(f.rows().length), () => openFinding(f.key), null]);
+  const out = [el("h2", {}, "Findings"), listOf(rows)];
+  const u = A.unreferenced || {};
+  if (u.skipped) out.push(el("div", { class: "muted" }, `Unreferenced code is ${u.skipped}.`));
+  if (A.notes && A.notes.length) out.push(el("div", { class: "muted" }, "Not worked out: " + A.notes.join("; ")));
+  return out;
+}
+
+// what the tool said beyond the rows the page lists
+function findingCounts(key) {
+  const c = key === "cycles" ? A.cycles && A.cycles.counts : key === "surprises" ? A.surprises && A.surprises.counts
+    : key === "unreferenced" ? A.unreferenced && A.unreferenced.counts : null;
+  if (key === "coupling" && A.shared_state) return `${A.shared_state.total} in all, the highest scored listed`;
+  if (key === "co_change" && A.co_change) {
+    const h = A.co_change.history || {};
+    return h.note || `${A.co_change.total} pairs in all, from ${h.commits} commits`;
+  }
+  if (!c) return "";
+  if (key === "cycles") return `${c.import_cycle_count || 0} import cycles (${c.runtime_import_cycle_count || 0} at start-up), `
+    + `${c.call_cycle_count || 0} call cycles, ${c.other_cycle_count || 0} through other edges`
+    + (c.truncated ? " — the first listed" : "");
+  if (key === "surprises") return `${c.total} scored, the highest listed` + (A.surprises.basis ? ` (${A.surprises.basis})` : "");
+  return `${c.unreferenced_count} candidates of ${c.examined} definitions examined` + (c.truncated ? ", the first listed" : "");
+}
+
+const TOOL_OF = { cycles: "graphlore_cycles()", coupling: "graphlore_surprises()", surprises: "graphlore_surprises()",
+  unreferenced: "graphlore_unreferenced()", co_change: "graphlore_surprises()" };
+
+function findingsDetails(key) {
+  if (key === "all") return findingsSummary();
+  const f = findingKind(key), rows = f.rows();
+  const out = [el("h2", {}, `${f.title} (${rows.length})`), el("div", { class: "muted" }, findingCounts(key)),
+    el("div", { class: "row", style: "margin:6px 0" }, copyButton("ask the tool", TOOL_OF[key])),
+    listOf(rows.map((row, k) => [f.label(row), f.tag(row), () => openFinding(key, k), null]))];
+  if (key === "unreferenced" && A.unreferenced && A.unreferenced.skipped)
+    out.push(el("div", { class: "muted" }, A.unreferenced.skipped));
+  return out;
+}
+
+function findingDetails(fd) {
+  const f = findingKind(fd.kind), row = fd.row;
+  const out = [el("h2", {}, f.title), el("div", { style: "font-weight:600;word-break:break-all" }, f.label(row))];
+  const why = row.why || [];
+  if (fd.kind === "cycles") out.push(el("div", { class: "muted" }, row.kind === "imports"
+    ? (row.runs === "runtime" ? "Module-level imports in a loop: this fails when the modules load."
+      : row.runs === "deferred" ? "Closes only through an import inside a function: nothing fails at start-up."
+      : "Closes only through a type-checking import: the modules know each other, nothing breaks.")
+    : row.kind === "calls" ? "Functions that call each other in a loop: often deliberate (recursion)." : "A loop through references, bases or other edges."));
+  if (fd.kind === "coupling") out.push(el("div", { class: "muted" },
+    `${row.writers} writer${row.writers === 1 ? "" : "s"} and ${row.readers} reader${row.readers === 1 ? "" : "s"} in other files` +
+    (row.hidden ? `; ${row.hidden} pair${row.hidden === 1 ? "" : "s"} with no call path between them` : "")));
+  if (fd.kind === "surprises") out.push(el("div", { class: "muted" }, `${row.relation}, score ${row.score} (${row.strength})`));
+  if (fd.kind === "unreferenced") out.push(el("div", { class: "muted" },
+    `No edge reaches it; ${row.mentions || 0} mention${row.mentions === 1 ? "" : "s"} elsewhere in the repository. A candidate: check it before deleting.`));
+  if (fd.kind === "co_change") out.push(el("div", { class: "muted" }, `${row.commits} commits together, degree ${row.degree}`));
+  if (why.length) out.push(el("ul", { class: "why" }, ...why.map(w => el("li", {}, w))));
+  const nodes = f.nodes(row), labels = row.labels || [row.label];
+  out.push(el("h2", {}, "Nodes"), listOf(nodes.map((i, n) => [i >= 0 ? nLabel(i) : String(labels[n] || "?"),
+    i >= 0 ? (nFile(i) || nKind(i)) : "not found in the graph", () => (i >= 0 ? openNode(i) : null), i >= 0 ? commColour(nComm(i)) : null])));
+  out.push(el("div", { class: "row", style: "margin-top:6px" },
+    el("button", { onclick: () => openFinding(fd.kind) }, `All ${f.title.toLowerCase()}`),
+    copyButton("ask the tool", TOOL_OF[fd.kind]),
+    nodes[0] >= 0 ? copyButton("explain", `graphlore_explain(${JSON.stringify(nId(nodes[0]))})`) : null));
+  return out;
+}
+
+function impactDetails(v) {
+  const i = v.centre, deps = v.deps, byHop = new Map();
+  let tests = 0;
+  for (const [n, h] of deps) { byHop.set(h, (byHop.get(h) || 0) + 1); if (nTest(n)) tests += 1; }
+  const testRows = [...deps].filter(([n]) => nTest(n)).sort((a, b) => a[1] - b[1] || byRank(a[0], b[0]));
+  const out = [el("h2", {}, `Impact of ${nLabel(i)}`),
+    el("div", {}, `${deps.size} dependent${deps.size === 1 ? "" : "s"} within ${v.hops} hop${v.hops === 1 ? "" : "s"}: `
+      + `${deps.size - tests} production, ${tests} test code`),
+    el("div", { class: "muted" }, [...byHop].sort((a, b) => a[0] - b[0]).map(([h, n]) => `${n} at ${h} hop${h === 1 ? "" : "s"}`).join(" · ")
+      + (nState(i) ? " · its readers and writers count, as it holds state" : "")),
+    el("div", { class: "row", style: "margin:6px 0" },
+      el("button", { onclick: () => openNode(i) }, "Neighbourhood"),
+      copyButton("impact", `graphlore_impact(${JSON.stringify(nId(i))}, hops=${v.hops})`),
+      copyButton("tests", `graphlore_tests_for(${JSON.stringify(nId(i))})`)),
+    el("div", { class: "muted" }, "The edges graphlore_impact walks by default; it also ranks the rows and cuts them to a budget. "
+      + "graphlore_tests_for finds tests by more than edges.")];
+  out.push(el("h2", {}, `Test code among them (${testRows.length})`));
+  out.push(listOf(testRows.map(([n, h]) => [nLabel(n), `${h} hop${h === 1 ? "" : "s"} · ${nFile(n)}`, () => openNode(n), commColour(nComm(n))])));
+  const prod = [...deps].filter(([n]) => !nTest(n)).sort((a, b) => a[1] - b[1] || byRank(a[0], b[0]));
+  out.push(el("h2", {}, `Production code (${prod.length})`));
+  out.push(listOf(prod.map(([n, h]) => [nLabel(n), `${h} hop${h === 1 ? "" : "s"} · ${nFile(n) || nKind(n)}`, () => openNode(n), commColour(nComm(n))])));
+  return out;
 }
 
 // --- search ----------------------------------------------------------------
@@ -1079,6 +1418,7 @@ GROUPS.forEach((g, k) => {
 });
 document.getElementById("f-tests").addEventListener("change", e => { show.tests = e.target.checked; rebuildView(); });
 document.getElementById("f-ext").addEventListener("change", e => { show.ext = e.target.checked; rebuildView(); });
+document.getElementById("f-vend").addEventListener("change", e => { show.vend = e.target.checked; rebuildView(); });
 document.getElementById("colour").addEventListener("change", e => {
   colourBy = e.target.value;
   if (view && view.kind !== "overview") for (const it of view.items) it.colour = nodeColour(it.node);
@@ -1100,7 +1440,8 @@ sheetToggle.addEventListener("click", () => sheet(!side.classList.contains("open
 function renderLegend() {
   const lg = document.getElementById("legend");
   const rows = GROUPS.map((g, k) => el("div", {}, el("span", { class: "swatch", style: `background:${groupColour(k)}` }), " ", g));
-  rows.push(el("div", { class: "muted" }, "dashed: an inferred edge · ringed: test code"));
+  rows.push(el("div", { class: "muted" }, "dashed: an inferred edge · ringed: test code"
+    + (resolvedFrom < E ? " · dotted: resolved by graphlore from the source" : "")));
   if (colourBy === "kind" && D)
     rows.push(el("div", { class: "row", style: "margin-top:4px" },
       ...D.kinds.map(k => el("span", {}, el("span", { class: "swatch", style: `background:${kindColour(k)}` }), " ", k, " "))));
@@ -1109,13 +1450,36 @@ function renderLegend() {
 
 // --- loading: the page's own graph, or a graph.json the reader opens --------
 function load(data, title, fresh) {
-  D = data; N = D.nodes.length; E = D.edges.length / 4;
+  D = data; N = D.nodes.length;
+  A = D.analysis || null;
+  resolvedFrom = withResolved(D);
+  E = D.edges.length / 4;
   adj = Array.from({ length: N }, () => []);
   for (let j = 0; j < E; j++) { adj[eS(j)].push(j); if (eT(j) !== eS(j)) adj[eT(j)].push(j); }
   members = D.comms.map(() => []);
   for (let i = 0; i < N; i++) if (nComm(i) >= 0) members[nComm(i)].push(i);
   for (const m of members) m.sort((a, b) => nDeg(b) - nDeg(a));
   lower = D.nodes.map(r => (r[1] + " " + r[2]).toLowerCase());
+  into = Array.from({ length: N }, () => []);
+  for (let j = 0; j < E; j++) into[eT(j)].push(j);
+  routeOf = new Map(D.routes.map(r => [r[0], r]));
+  couplingOf = new Map(D.coupling.map(c => [c[0], c]));
+  vendored = new Uint8Array(N);
+  const vend = new Set((A && A.vendored_files) || []);
+  if (vend.size) for (let i = 0; i < N; i++) if (vend.has(nFile(i))) vendored[i] = 1;
+  document.getElementById("f-vend-l").hidden = !vend.size;
+  badges = new Map();
+  const badge = (i, text, f, k) => {
+    if (i < 0) return;
+    if (!badges.has(i)) badges.set(i, []);
+    const b = badges.get(i);
+    if (!b.some(x => x[0] === text)) b.push([text, f, k]);
+  };
+  if (A) for (const f of FINDINGS) f.rows().forEach((row, k) => {
+    const say = f.key === "cycles" ? `in a ${cycleName(row)}` : f.key === "coupling" ? "shared state"
+      : f.key === "surprises" ? "a surprising link" : f.key === "unreferenced" ? "unreferenced?" : "changes with another file";
+    for (const i of f.nodes(row)) badge(i, say, f.key, k);
+  });
   idIndex = new Map(); D.nodes.forEach((r, i) => { if (!idIndex.has(r[0])) idIndex.set(r[0], i); });
   commIndex = new Map(D.comms.map((c, k) => [c[0], k]));
   if (title) document.title = title;

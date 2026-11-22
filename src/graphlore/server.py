@@ -1919,8 +1919,204 @@ def _write_viz(gp: Path) -> str:
         return "graph.html not written: graph.json could not be read."
     if not isinstance(graph, dict):
         return "graph.html not written: graph.json is not a graph."
-    return viz.write(graph, gp.with_name("graph.html"),
-                     f"{gp.parent.parent.name} — graphlore", _read_labels(gp.parent))
+    nodes, _ = _nodes_edges(graph)
+    analysis, note = (None, "") if len(nodes) > viz.MAX_NODES else _viz_analysis(gp)
+    written = viz.write(graph, gp.with_name("graph.html"),
+                        f"{gp.parent.parent.name} — graphlore", _read_labels(gp.parent),
+                        analysis)
+    return f"{written} {note}" if note and written.startswith("graph.html written") else written
+
+
+# The findings graph.html shows, worked out once per graph.json (path, mtime):
+# graphlore_set_labels rewrites the page without changing the graph.
+_VIZ_ANALYSIS: dict[str, tuple[float, dict[str, Any]]] = {}
+# Rows of one kind of finding the page lists, in the tool's own order.
+VIZ_ROWS = 200
+# graphlore_unreferenced reads every candidate's source and looks for its name
+# across the repository: minutes on a graph of Django's size. Past this many
+# nodes the page leaves it out and says so; the tool itself still answers.
+VIZ_UNREFERENCED_MAX = 20_000
+
+_LABEL_AT = re.compile(r"^(.*) \((.+?)(?::L(\d+))?\)$")
+
+
+def _last_name(label: str) -> str:
+    return label.lstrip(".").rsplit(".", 1)[-1]
+
+
+class _NodeFinder:
+    """The tools name nodes by display label (``_display_labels``); the page
+    needs their position in graph.json. One per analysis."""
+
+    def __init__(self, nodes: list[dict]):
+        self.nodes = nodes
+        self.labels = _display_labels(nodes)
+        self.pos: dict[str, int] = {}
+        self.by_label: dict[str, list[int]] = {}
+        self.by_last: dict[str, list[int]] = {}
+        self.hubs: dict[str, int] = {}
+        for i, n in enumerate(nodes):
+            self.pos.setdefault(_node_id(n), i)
+            label = _node_label(n)
+            self.by_label.setdefault(label, []).append(i)
+            self.by_last.setdefault(_last_name(label), []).append(i)
+            if _is_file_hub_node(n):
+                self.hubs.setdefault(str(_node_file(n)), i)
+
+    def find(self, label: object, file: object = "", line: object = None) -> int:
+        """The node a row names, or -1. A label with a ``(file:Lline)`` suffix
+        or a qualified name is matched as the tools wrote it; a file path is
+        its file's hub."""
+        label = str(label)
+        m = _LABEL_AT.match(label)
+        base = m.group(1) if m else label
+        file = str(file or (m.group(2) if m else "") or "")
+        line = line if line not in (None, "") else (m.group(3) if m else None)
+        cands = self.by_label.get(base)
+        if not cands:
+            if label in self.hubs:
+                return self.hubs[label]
+            cands = [i for i in self.by_last.get(_last_name(base), [])
+                     if self.labels.get(_node_id(self.nodes[i])) == base]
+        if not cands:
+            return -1
+        if file and len(cands) > 1:
+            cands = [i for i in cands if str(_node_file(self.nodes[i])) == file] or cands
+        if line is not None and len(cands) > 1:
+            cands = [i for i in cands if str(_node_line(self.nodes[i])) == str(line)] or cands
+        if len(cands) > 1:
+            cands = [i for i in cands if self.labels.get(_node_id(self.nodes[i])) == label] or cands
+        return cands[0]
+
+
+def _viz_analysis(gp: Path) -> tuple[dict[str, Any] | None, str]:
+    """What graphlore's tools find in the graph at ``gp``, for graph.html: the
+    tools' own answers (as JSON), with each node they name given as its position
+    in graph.json. Only for the active project's graph, which is the one the
+    tools read; the note says why when there is none."""
+    try:
+        same = gp.resolve() == _graph_path().resolve()
+        mtime = gp.stat().st_mtime
+    except OSError:
+        return None, ""
+    if not same:
+        return None, ("It has no findings (cycles, surprises, unreferenced code): the graph "
+                      "is not the active project's. graphlore_project switches to it.")
+    cached = _VIZ_ANALYSIS.get(str(gp))
+    if cached is not None and cached[0] == mtime:
+        return cached[1], _viz_note(cached[1])
+    graph = _load_graph()
+    if isinstance(graph, str):
+        return None, ""
+    nodes, edges = _nodes_edges(graph)
+    find = _NodeFinder(nodes)
+    out: dict[str, Any] = {"notes": []}
+
+    def run(name: str, call: Callable[[], str]) -> dict[str, Any] | None:
+        try:
+            got = json.loads(call())
+        except Exception as e:  # a failure costs this finding, never the page
+            out["notes"].append(f"{name}: {type(e).__name__}: {e}")
+            return None
+        if not isinstance(got, dict) or "error" in got:
+            out["notes"].append(f"{name}: {got.get('error') if isinstance(got, dict) else got}")
+            return None
+        return got
+
+    def ints(payload: dict[str, Any]) -> dict[str, Any]:
+        return {k: v for k, v in payload.items() if isinstance(v, (int, bool)) and v is not None}
+
+    c = run("graphlore_cycles", lambda: graphlore_cycles(max_cycles=VIZ_ROWS, as_json=True))
+    if c is not None:
+        out["cycles"] = {
+            "rows": [{"kind": r.get("kind", ""), "runs": r.get("import_kind", ""),
+                      "labels": r.get("nodes", []),
+                      "nodes": [find.find(x) for x in r.get("nodes", [])],
+                      "path": [find.find(x) for x in r.get("path", [])]}
+                     for r in c.get("cycles", [])],
+            "self_loops": [find.find(x) for x in c.get("self_loops", [])][:VIZ_ROWS],
+            "counts": ints(c),
+        }
+    s = run("graphlore_surprises", lambda: graphlore_surprises(limit=VIZ_ROWS, as_json=True))
+    if s is not None:
+        out["surprises"] = {
+            "rows": [{"labels": [r.get("from", ""), r.get("to", "")],
+                      "from": find.find(r.get("from", ""), r.get("from_file", "")),
+                      "to": find.find(r.get("to", ""), r.get("to_file", "")),
+                      "relation": r.get("relation", ""), "score": r.get("score"),
+                      "strength": r.get("strength", ""), "why": r.get("why", [])}
+                     for r in s.get("surprises", [])],
+            "basis": s.get("basis", ""), "counts": ints(s),
+        }
+        out["shared_state"] = {
+            "rows": [{"label": r.get("state", ""),
+                      "state": find.find(r.get("state", ""), r.get("file", "")),
+                      "kind": r.get("kind", ""), "score": r.get("score"),
+                      "strength": r.get("strength", ""), "why": r.get("why", []),
+                      "writers": len(r.get("writers") or []),
+                      "readers": len(r.get("readers") or []),
+                      "hidden": r.get("hidden_pairs"), "co_changing": r.get("co_changing_pairs")}
+                     for r in s.get("shared_state", [])],
+            "total": s.get("shared_state_total"),
+        }
+        out["co_change"] = {
+            "rows": [{"labels": r.get("files", []),
+                      "files": [find.hubs.get(str(f), -1) for f in r.get("files", [])],
+                      "commits": r.get("commits"), "degree": r.get("degree"),
+                      "why": r.get("why", [])}
+                     for r in s.get("co_change", [])],
+            "total": s.get("co_change_total"), "history": s.get("history"),
+        }
+    if len(nodes) <= VIZ_UNREFERENCED_MAX:
+        u = run("graphlore_unreferenced",
+                lambda: graphlore_unreferenced(limit=VIZ_ROWS, as_json=True))
+        if u is not None:
+            out["unreferenced"] = {
+                "rows": [{"label": r.get("node", ""), "kind": r.get("kind", ""),
+                          "node": find.find(r.get("node", ""), r.get("file", ""), r.get("line")),
+                          "mentions": r.get("mentions")}
+                         for r in u.get("unreferenced", [])],
+                "counts": ints(u),
+            }
+    else:
+        out["unreferenced"] = {"skipped": (
+            f"left out for a graph of {len(nodes):,} nodes (more than {VIZ_UNREFERENCED_MAX:,}): "
+            "graphlore_unreferenced reads every candidate's source; ask it directly")}
+    try:
+        files = sorted({str(f) for f in map(_node_file, nodes) if f})
+        out["vendored_files"] = [f for f in files if _is_vendored_file(f)]
+    except Exception as e:
+        out["notes"].append(f"vendored files: {type(e).__name__}: {e}")
+    if not _engine_resolved(nodes):
+        try:
+            added = [edge for edge in _resolved(nodes, edges).edges
+                     if edge.get("resolved_by") == "graphlore"]
+            rows = []
+            for edge in added:
+                s_id, t_id = _edge_ends(edge)
+                si, ti = find.pos.get(s_id), find.pos.get(t_id)
+                if si is None or ti is None:
+                    continue
+                rel = _edge_rel(edge) or "related"
+                rows.append([si, ti, rel, viz.GROUPS.index(viz.relation_group(rel)),
+                             viz.impact_walk(rel),
+                             1 if str(edge.get("confidence", "")).upper() == "INFERRED" else 0])
+            out["resolved"] = rows
+        except Exception as e:
+            out["notes"].append(f"resolved edges: {type(e).__name__}: {e}")
+    _VIZ_ANALYSIS[str(gp)] = (mtime, out)
+    return out, _viz_note(out)
+
+
+def _viz_note(analysis: dict[str, Any]) -> str:
+    """What the build's reply says of the page's findings."""
+    bits = []
+    u = analysis.get("unreferenced") or {}
+    if "skipped" in u:
+        bits.append(f"Unreferenced code is {u['skipped']}.")
+    if analysis.get("notes"):
+        bits.append("Some findings are missing: " + "; ".join(analysis["notes"]) + ".")
+    return " ".join(bits)
 
 
 def _existing_engine(path: str) -> str | None:

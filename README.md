@@ -100,6 +100,9 @@ reads the file you drop in your browser and uploads nothing
 ([demo](https://yasinyaman.github.io/graphlore/viewer/demo.html)). A node's page copies
 the `graphlore_explain` / `graphlore_fetch` call for it, so what you find there goes
 straight to the assistant, and the address bar keeps the view, so a link opens it again.
+The page also shows what graphlore's tools find: import and call cycles, shared
+state with no call path, surprising links and unreferenced code (**Findings**, `G`),
+and a node's blast radius as `graphlore_impact` walks it (**Impact**, `I`).
 
 ## Tools
 

@@ -33,7 +33,10 @@ and communities of its own, as the build result says); only when the engine is
 not installed does it fall back to the `graphify` CLI. The build writes
 `graphify-out/` inside the folder it reads, so after
 `graphlore_build("/path/to/other/repo")` the build result tells you to switch
-before the read tools can see that graph.
+before the read tools can see that graph. The build also writes `graph.html`, a
+page for the user: the graph, the tools' findings (cycles, shared state,
+surprises, unreferenced code) and a node's impact. Point the user to it when a
+picture helps; the tools remain your way in.
 
 ## Preconditions: make sure the graph exists and is fresh
 
