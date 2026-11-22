@@ -93,7 +93,11 @@ A misspelled name gets a suggestion, not a guess:
 
 **Or look at it.** Every build also writes `graphify-out/graph.html`, one file
 that opens in any browser with no network: the communities first, then one
-community or one symbol's neighbourhood, with search and a details panel.
+community or one symbol's neighbourhood, with search and a details panel. The
+same page opens any graph.json, graphlore's or Graphify's, without graphlore
+installed: [the viewer on GitHub Pages](https://yasinyaman.github.io/graphlore/viewer/)
+reads the file you drop in your browser and uploads nothing
+([demo](https://yasinyaman.github.io/graphlore/viewer/demo.html)).
 
 ## Tools
 

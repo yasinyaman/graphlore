@@ -53,6 +53,13 @@ code { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
 #hud { position: absolute; left: 12px; bottom: 10px; color: var(--muted); font-size: 12px;
   background: color-mix(in srgb, var(--panel) 85%, transparent); padding: 4px 8px; border-radius: 6px;
   pointer-events: none; }
+#welcome { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  text-align: center; padding: 24px; }
+#welcome[hidden] { display: none; }
+#welcome > div { max-width: 460px; border: 2px dashed var(--line); border-radius: 12px; padding: 24px 28px;
+  background: var(--panel); }
+#stage.drop #welcome > div, #stage.drop { outline: 3px dashed var(--accent); outline-offset: -8px; }
+#hud:empty { display: none; }
 #tip { position: absolute; pointer-events: none; background: var(--panel); border: 1px solid var(--line);
   border-radius: 6px; padding: 4px 8px; font-size: 12px; display: none; max-width: 420px;
   box-shadow: 0 2px 8px rgba(0,0,0,.12); }
@@ -63,6 +70,11 @@ code { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
   <aside id="side">
     <h1 id="title"></h1>
     <div class="muted" id="stats"></div>
+    <div class="row" style="margin-top:8px">
+      <button id="open" title="Read in this browser; nothing is uploaded">Open graph.json…</button>
+      <input type="file" id="file" accept=".json,application/json" multiple hidden>
+      <span class="muted" id="load-status"></span>
+    </div>
     <div id="crumbs"></div>
     <h2>Find</h2>
     <input type="search" id="q" placeholder="A name, a file…" autocomplete="off">
@@ -88,6 +100,16 @@ code { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
   </aside>
   <main id="stage">
     <canvas id="cv"></canvas>
+    <div id="welcome">
+      <div>
+        <h1>Open a graph</h1>
+        <p>Drop a <code>graph.json</code> here (graphlore's or graphify's; with its
+          <code>.graphify_labels.json</code> too, for the community names), or</p>
+        <p><button id="welcome-open">Choose a file…</button></p>
+        <p class="muted">The file is read by this page, in your browser. Nothing is uploaded:
+          the page is not allowed to make any request.</p>
+      </div>
+    </div>
     <div id="tip"></div>
     <div id="hud"></div>
   </main>
@@ -95,12 +117,141 @@ code { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
 <script id="graph-data" type="application/json">/*__GRAPHLORE_DATA__*/</script>
 <script>
 "use strict";
-const D = JSON.parse(document.getElementById("graph-data").textContent);
+// compact:begin
+// The compact form graphlore's Python writes (viz.page_data), made here from a
+// raw graph.json, so this page opens any graph without graphlore. The two must
+// give the same answer: tests/test_tools.py runs this block under node against
+// viz.page_data. Schema tolerance follows graph.py's accessors.
+const GROUPS = ["structure", "imports", "calls", "inheritance", "references", "state", "http", "other"];
+const RELATION_GROUPS = {
+  structure: ["contains", "method", "defines", "case_of"],
+  imports: ["imports", "imports_from", "dynamic_import", "re_exports", "requires"],
+  calls: ["calls", "indirect_call", "dispatches_to"],
+  inheritance: ["inherits", "implements", "mixes_in", "embeds", "extends"],
+  references: ["references"],
+  state: ["reads", "writes", "couples_with"],
+  http: ["handles", "http_calls"],
+};
+const MAX_COMMUNITIES = 300;
+const TEST_DIR_PARTS = new Set(["test", "tests", "spec", "specs", "__tests__", "testing", "e2e"]);
+const TEST_NAME = /[a-z0-9.](?:Tests?|TestCase)(?:$|\.)/;
+
+function compact(graph, names) {
+  names = names || {};
+  const present = v => v !== undefined && v !== null && v !== "";
+  const first = (d, keys) => { for (const k of keys) if (present(d[k])) return d[k]; return null; };
+  const str = v => (typeof v === "boolean" ? (v ? "True" : "False") : String(v));
+  const nonEmpty = v => Array.isArray(v) && v.length ? v : null;
+  const nodes = nonEmpty(graph.nodes) || nonEmpty(graph.vertices) || [];
+  const edges = nonEmpty(graph.edges) || nonEmpty(graph.links) || [];
+  const nodeId = n => { const v = first(n, ["id", "name", "label"]); return v === null ? "?" : str(v); };
+  const nodeLabel = n => { const v = first(n, ["label", "name", "id"]); return v === null ? "?" : str(v); };
+  const nodeFile = n => { const v = first(n, ["file", "path", "source_file"]); return v === null ? "" : str(v); };
+  const nodeLine = n => {
+    for (const k of ["line", "lineno", "start_line"]) if (present(n[k])) return n[k];
+    const m = /^\d+/.exec(String(present(n.source_location) ? n.source_location : "").replace(/^[Ll]+/, ""));
+    return m ? parseInt(m[0], 10) : "";
+  };
+  const nodeType = n => { const v = n.type || n.file_type; return v ? str(v) : ""; };
+  const isExternal = n => {
+    if (n.external === true || String(n.type === undefined ? "" : n.type).toLowerCase() === "external") return true;
+    if (nodeFile(n)) return false;
+    return ["file", "path", "source_file"].some(k => k in n);
+  };
+  const isFileHub = n => {
+    const f = nodeFile(n);
+    if (!f) return false;
+    const label = nodeLabel(n);
+    return label === f.split("/").pop() || f === label || f.endsWith("/" + label);
+  };
+  const isTestPath = path => {
+    const parts = path.split("/");
+    if (parts.slice(0, -1).some(p => TEST_DIR_PARTS.has(p.toLowerCase()) || TEST_NAME.test(p))) return true;
+    const last = parts[parts.length - 1], dot = last.lastIndexOf(".");
+    const stem = dot >= 0 ? last.slice(0, dot) : last, low = stem.toLowerCase();
+    return low.startsWith("test_") || low === "conftest"
+      || ["_test", "_tests", ".test", ".spec", "_spec"].some(s => low.endsWith(s)) || TEST_NAME.test(stem);
+  };
+  const kindOf = n => {
+    if (isExternal(n)) return "external";
+    if (isFileHub(n)) return "file";
+    if (typeof n.kind === "string" && n.kind) return n.kind;
+    return nodeType(n) || "node";
+  };
+  const groupOf = rel => {
+    for (const [g, rels] of Object.entries(RELATION_GROUPS)) if (rels.includes(rel)) return GROUPS.indexOf(g);
+    return GROUPS.indexOf("other");
+  };
+
+  const index = new Map();
+  nodes.forEach((n, i) => { const id = nodeId(n); if (!index.has(id)) index.set(id, i); });
+  const degree = new Array(nodes.length).fill(0), flat = [], rels = new Map();
+  for (const e of edges) {
+    const s = first(e, ["source", "from", "src"]), t = first(e, ["target", "to", "dst"]);
+    const si = index.get(s === null ? "?" : str(s)), ti = index.get(t === null ? "?" : str(t));
+    if (si === undefined || ti === undefined) continue;    // dangling
+    const r0 = first(e, ["relation", "label", "type"]);
+    const rel = (r0 === null ? "->" : str(r0)) || "related";
+    if (!rels.has(rel)) rels.set(rel, rels.size);
+    const inferred = String(e.confidence === undefined ? "" : e.confidence).toUpperCase() === "INFERRED";
+    flat.push(si, ti, rels.get(rel), inferred ? 1 : 0);
+    degree[si] += 1; degree[ti] += 1;
+  }
+  const commIds = new Map(), commSize = [], commName = [], kinds = new Map(), rows = [];
+  nodes.forEach((n, i) => {
+    const raw = n.community !== undefined ? n.community : n.cluster;
+    let c = -1;
+    if (raw !== undefined && raw !== null && raw !== "") {
+      const key = str(raw);
+      if (!commIds.has(key)) commIds.set(key, commIds.size);
+      c = commIds.get(key);
+      commSize[c] = (commSize[c] || 0) + 1;
+      if (commName[c] === undefined) {
+        const given = names[key] || n.community_name;
+        commName[c] = given ? str(given) : `Community ${key}`;
+      }
+    }
+    const kind = kindOf(n);
+    if (!kinds.has(kind)) kinds.set(kind, kinds.size);
+    const flags = (n.test === true || isTestPath(nodeFile(n)) ? 1 : 0) | (isExternal(n) ? 2 : 0);
+    const line = String(nodeLine(n));
+    rows.push([nodeId(n), nodeLabel(n), nodeFile(n), /^\d+$/.test(line) ? parseInt(line, 10) : 0,
+               c, kinds.get(kind), flags, degree[i]]);
+  });
+  const between = new Map();
+  for (let j = 0; j < flat.length; j += 4) {
+    const a = rows[flat[j]][4], b = rows[flat[j + 1]][4];
+    if (a >= 0 && b >= 0 && a !== b) {
+      const key = a < b ? a + "," + b : b + "," + a;
+      between.set(key, (between.get(key) || 0) + 1);
+    }
+  }
+  const cedges = [];
+  [...between].map(([k, w]) => [...k.split(",").map(Number), w])
+    .sort((x, y) => x[0] - y[0] || x[1] - y[1]).forEach(x => cedges.push(...x));
+  const header = graph.graph && typeof graph.graph === "object" && !Array.isArray(graph.graph) ? graph.graph : {};
+  const commit = graph.built_at_commit || header.built_at_commit || "";
+  return {
+    meta: { engine: header.engine === "graphlore" ? "graphlore" : "graphify",
+            commit: str(commit).slice(0, 12), nodes: nodes.length, edges: flat.length / 4 },
+    groups: GROUPS.slice(),
+    rels: [...rels.keys()].map(r => [r, groupOf(r)]),
+    kinds: [...kinds.keys()],
+    comms: [...commIds].map(([cid, c]) => [cid, commName[c] === undefined ? `Community ${cid}` : commName[c], commSize[c] || 0]),
+    maxComms: MAX_COMMUNITIES,
+    nodes: rows,
+    edges: flat,
+    cedges,
+  };
+}
+// compact:end
+
 const MAX_VIEW = 400;          // nodes drawn in one view
 const LIST = 60;               // rows a list shows before "+N more"
 const OVERVIEW_LINKS = 4;      // links each community keeps in the overview
 const LABELS = 30;             // labels drawn at once, largest nodes first
-const N = D.nodes.length, E = D.edges.length / 4;
+// the graph shown: set by load(), from the page's own data or a file opened
+let D = null, N = 0, E = 0, adj = [], members = [], lower = [];
 const nId = i => D.nodes[i][0], nLabel = i => D.nodes[i][1], nFile = i => D.nodes[i][2];
 const nLine = i => D.nodes[i][3], nComm = i => D.nodes[i][4], nKind = i => D.kinds[D.nodes[i][5]];
 const nTest = i => (D.nodes[i][6] & 1) !== 0, nExt = i => (D.nodes[i][6] & 2) !== 0;
@@ -111,15 +262,8 @@ const relName = r => D.rels[r][0], relGroup = r => D.rels[r][1];
 const GROUP_COLOURS = ["#9aa0a6", "#2f9e72", "#2f6fdf", "#b35ae0", "#d08a1c", "#d6455d", "#159fb3", "#7c8591"];
 const groupColour = g => GROUP_COLOURS[g % GROUP_COLOURS.length];
 
-// adjacency: edge indices per node
-const adj = Array.from({length: N}, () => []);
-for (let j = 0; j < E; j++) { adj[eS(j)].push(j); if (eT(j) !== eS(j)) adj[eT(j)].push(j); }
-const members = D.comms.map(() => []);
-for (let i = 0; i < N; i++) if (nComm(i) >= 0) members[nComm(i)].push(i);
-for (const m of members) m.sort((a, b) => nDeg(b) - nDeg(a));
-
 // --- filters ---------------------------------------------------------------
-const show = { tests: true, ext: false, groups: D.groups.map(g => g !== "structure") };
+const show = { tests: true, ext: false, groups: GROUPS.map(g => g !== "structure") };
 // containment links every definition to its file: on by default it would draw
 // a star around each file and hide everything else
 const nodeShown = i => (show.tests || !nTest(i)) && (show.ext || !nExt(i));
@@ -463,6 +607,13 @@ function listOf(rows) {               // rows: [label, tag, onclick, colour]
 
 function renderSide() {
   document.getElementById("title").textContent = document.title;
+  if (!D) {
+    document.getElementById("stats").textContent = "No graph open yet.";
+    document.getElementById("crumbs").replaceChildren();
+    document.getElementById("hud").textContent = "";
+    document.getElementById("details").replaceChildren();
+    return;
+  }
   const m = D.meta;
   document.getElementById("stats").textContent =
     `${m.nodes.toLocaleString()} nodes · ${m.edges.toLocaleString()} edges · ${D.comms.length} communities` +
@@ -537,10 +688,9 @@ function overviewDetails() {
 }
 
 // --- search ----------------------------------------------------------------
-const lower = D.nodes.map(r => (r[1] + " " + r[2]).toLowerCase());
 document.getElementById("q").addEventListener("input", ev => {
   const q = ev.target.value.trim().toLowerCase(), hits = document.getElementById("hits");
-  if (q.length < 2) { hits.replaceChildren(); return; }
+  if (!D || q.length < 2) { hits.replaceChildren(); return; }
   const found = [];
   for (let i = 0; i < N && found.length < 400; i++) if (lower[i].includes(q)) found.push(i);
   found.sort((a, b) => (nLabel(a).toLowerCase().startsWith(q) ? 0 : 1) - (nLabel(b).toLowerCase().startsWith(q) ? 0 : 1)
@@ -551,7 +701,7 @@ document.getElementById("q").addEventListener("input", ev => {
 
 // --- controls --------------------------------------------------------------
 const fg = document.getElementById("f-groups");
-D.groups.forEach((g, k) => {
+GROUPS.forEach((g, k) => {
   const box = el("input", { type: "checkbox" });
   box.checked = show.groups[k];
   box.addEventListener("change", () => { show.groups[k] = box.checked; rebuildView(); });
@@ -568,19 +718,78 @@ document.getElementById("hops").addEventListener("change", () => { if (view && v
 
 function renderLegend() {
   const lg = document.getElementById("legend");
-  const rows = D.groups.map((g, k) => el("div", {}, el("span", { class: "swatch", style: `background:${groupColour(k)}` }), " ", g));
+  const rows = GROUPS.map((g, k) => el("div", {}, el("span", { class: "swatch", style: `background:${groupColour(k)}` }), " ", g));
   rows.push(el("div", { class: "muted" }, "dashed: an inferred edge · ringed: test code"));
-  if (colourBy === "kind")
+  if (colourBy === "kind" && D)
     rows.push(el("div", { class: "row", style: "margin-top:4px" },
       ...D.kinds.map(k => el("span", {}, el("span", { class: "swatch", style: `background:${kindColour(k)}` }), " ", k, " "))));
   lg.replaceChildren(...rows);
 }
 
+// --- loading: the page's own graph, or a graph.json the reader opens --------
+function load(data, title) {
+  D = data; N = D.nodes.length; E = D.edges.length / 4;
+  adj = Array.from({ length: N }, () => []);
+  for (let j = 0; j < E; j++) { adj[eS(j)].push(j); if (eT(j) !== eS(j)) adj[eT(j)].push(j); }
+  members = D.comms.map(() => []);
+  for (let i = 0; i < N; i++) if (nComm(i) >= 0) members[nComm(i)].push(i);
+  for (const m of members) m.sort((a, b) => nDeg(b) - nDeg(a));
+  lower = D.nodes.map(r => (r[1] + " " + r[2]).toLowerCase());
+  if (title) document.title = title;
+  backStack.length = 0; view = null;
+  document.getElementById("q").value = "";
+  document.getElementById("hits").replaceChildren();
+  document.getElementById("welcome").hidden = true;
+  renderLegend();
+  // a graph without communities opens on its most connected nodes instead
+  go(D.comms.length ? overview : () => nodeView("all", D.nodes.map((r, i) => i)
+    .sort((a, b) => nDeg(b) - nDeg(a)), "Most connected nodes"), false);
+}
+
+// Files are read here, in the browser (FileReader): nothing is sent anywhere.
+// A graph.json, and optionally the .graphify_labels.json beside it, at once.
+async function openFiles(files) {
+  const status = document.getElementById("load-status");
+  const list = [...files];
+  const graphFile = list.find(f => !/labels/i.test(f.name)) || list[0];
+  const labelFile = list.find(f => f !== graphFile && /labels/i.test(f.name));
+  if (!graphFile) return;
+  try {
+    status.textContent = `Reading ${graphFile.name}…`;
+    const raw = JSON.parse(await graphFile.text());
+    let names = {};
+    if (labelFile) {
+      const parsed = JSON.parse(await labelFile.text());
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) names = parsed;
+    }
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("not a graph: no top-level object");
+    status.textContent = "Laying out…";
+    const data = compact(raw, names);
+    if (!data.nodes.length) throw new Error("no nodes in it");
+    status.textContent = data.nodes.length > 150000
+      ? `${data.nodes.length.toLocaleString()} nodes: large, each view still draws at most ${MAX_VIEW}` : "";
+    load(data, `${graphFile.name} — graphlore`);
+  } catch (err) {
+    status.textContent = `Could not open ${graphFile.name}: ${err.message}`;
+  }
+}
+
+const picker = document.getElementById("file");
+picker.addEventListener("change", () => { if (picker.files.length) openFiles(picker.files); picker.value = ""; });
+for (const id of ["open", "welcome-open"]) document.getElementById(id).addEventListener("click", () => picker.click());
+const stage = document.getElementById("stage");
+stage.addEventListener("dragover", ev => { ev.preventDefault(); stage.classList.add("drop"); });
+stage.addEventListener("dragleave", () => stage.classList.remove("drop"));
+stage.addEventListener("drop", ev => {
+  ev.preventDefault(); stage.classList.remove("drop");
+  if (ev.dataTransfer && ev.dataTransfer.files.length) openFiles(ev.dataTransfer.files);
+});
+
 resize();
 renderLegend();
-// a graph without communities opens on its most connected nodes instead
-go(D.comms.length ? overview : () => nodeView("all", D.nodes.map((r, i) => i)
-  .sort((a, b) => nDeg(b) - nDeg(a)), "Most connected nodes"), false);
+const embedded = document.getElementById("graph-data").textContent.trim();
+if (embedded && !embedded.startsWith("/*")) load(JSON.parse(embedded));
+else { document.title = "graphlore — graph viewer"; renderSide(); }
 requestAnimationFrame(draw);
 </script>
 </body>

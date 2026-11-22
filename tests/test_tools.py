@@ -4610,6 +4610,65 @@ def test_graph_html_never_lets_repository_text_out_of_its_script():
     assert "innerHTML" not in tail and "insertAdjacentHTML" not in tail
 
 
+def _viewer_compact(graphs, names=None):
+    """Run the viewer's own compact() (the block between its markers) under node
+    on each graph; None when node is not installed."""
+    import shutil as _sh
+    import subprocess as _sp
+    node = _sh.which("node")
+    if node is None:
+        return None
+    page = server.viz.TEMPLATE.read_text(encoding="utf-8")
+    block = page.split("// compact:begin", 1)[1].split("// compact:end", 1)[0]
+    script = block + (
+        "\nconst input = JSON.parse(require('fs').readFileSync(0, 'utf8'));"
+        "\nprocess.stdout.write(JSON.stringify({"
+        "out: input.graphs.map(g => compact(g, input.names)), groups: RELATION_GROUPS,"
+        " order: GROUPS }));"
+    )
+    run = _sp.run([node, "-e", script], input=json.dumps({"graphs": graphs, "names": names or {}}),
+                  capture_output=True, text=True, timeout=60)
+    assert run.returncode == 0, run.stderr
+    return json.loads(run.stdout)
+
+
+def test_the_viewer_reads_a_raw_graph_as_python_does():
+    # the page opens any graph.json itself: its compact() must give what
+    # viz.page_data embeds, on graphify's shapes and the native engine's
+    from pathlib import Path
+
+    import pytest
+    fixtures = Path(__file__).parent / "fixtures"
+    graphs = [_viz_graph(),
+              json.loads((fixtures / "graph.json").read_text(encoding="utf-8")),
+              json.loads((fixtures / "polyglot" / "graph.json").read_text(encoding="utf-8")),
+              {"vertices": [{"name": 0, "file": "a/tests/x.py", "line": "7", "cluster": 2},
+                            {"name": "b", "path": "", "external": True}],
+               "edges": [{"from": 0, "to": "b", "type": "uses", "confidence": "inferred"}]},
+              {"nodes": [], "links": []}]
+    got = _viewer_compact(graphs, {"0": "Named"})
+    if got is None:
+        pytest.skip("node is not installed")
+    for graph, js in zip(graphs, got["out"], strict=True):
+        assert js == server.viz.page_data(graph, {"0": "Named"})
+    # its relation table is graph.py's sets, grouped as viz.relation_group does
+    assert got["order"] == list(server.viz.GROUPS)
+    for group, rels in got["groups"].items():
+        assert all(server.viz.relation_group(r) == group for r in rels), group
+    every = (server._CONTAINMENT_RELATIONS | server._IMPORT_RELATIONS | server._CALL_RELATIONS
+             | server._STATE_RELATIONS | server._COUPLING_RELATIONS | server._HTTP_RELATIONS
+             | server.viz._INHERITANCE | {"dispatches_to", "references"})
+    assert set().union(*map(set, got["groups"].values())) == every
+
+
+def test_the_viewer_without_data_asks_for_a_file():
+    page = server.viz.TEMPLATE.read_text(encoding="utf-8")
+    assert "/*__GRAPHLORE_DATA__*/" in page and 'id="welcome"' in page
+    assert 'type="file"' in page and "openFiles" in page
+    rendered = server.viz.render(_viz_graph(), "t")
+    assert "/*__GRAPHLORE_DATA__*/" not in rendered and 'id="open"' in rendered
+
+
 def test_graph_html_follows_the_names_and_the_graph(tmp_path, monkeypatch):
     out = tmp_path / "graphify-out"
     out.mkdir()
