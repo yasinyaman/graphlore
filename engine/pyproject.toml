@@ -11,7 +11,7 @@ license = { text = "MIT" }
 authors = [{ name = "yasinyaman" }]
 keywords = ["graphlore", "tree-sitter", "code-graph", "knowledge-graph", "static-analysis"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
@@ -22,6 +22,8 @@ dynamic = ["version"]
 
 [project.urls]
 Homepage = "https://github.com/yasinyaman/graphlore"
+Documentation = "https://github.com/yasinyaman/graphlore/blob/master/docs/native-engine.md"
+Changelog = "https://github.com/yasinyaman/graphlore/blob/master/CHANGELOG.md"
 
 [project.scripts]
 graphlore-engine = "graphlore_engine.__main__:main"
