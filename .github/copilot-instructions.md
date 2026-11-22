@@ -2,7 +2,7 @@
 
 This is a condensed copy of `AGENTS.md` at the repository root, which is the full and authoritative guidance. Read it when you can; if the two disagree, `AGENTS.md` wins.
 
-graphlore is a Python MCP server (MCP Python SDK v2: `mcp.server.mcpserver.MCPServer`, not v1 `FastMCP`) that makes a Graphify-built `graphify-out/graph.json` navigable and joins it to real source spans. By default `engine/`, graphlore's native extractor in Rust (a separate `graphlore-engine` wheel, the `engine` extra), builds the graph (`GRAPHLORE_ENGINE=auto`); the external `graphify` CLI is the deprecated fallback when the engine is not installed.
+graphlore is a Python MCP server (MCP Python SDK v2: `mcp.server.mcpserver.MCPServer`, not v1 `FastMCP`) that makes a code knowledge graph (`graphify-out/graph.json`, built by its own native engine or, deprecated, by the graphify CLI) navigable and joins it to real source spans. By default `engine/`, graphlore's native extractor in Rust (a separate `graphlore-engine` wheel, the `engine` extra), builds the graph (`GRAPHLORE_ENGINE=auto`); the external `graphify` CLI is the deprecated fallback when the engine is not installed.
 
 ## Checks
 

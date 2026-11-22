@@ -1,12 +1,12 @@
 ---
 name: graphlore-explore
-description: Explore, understand, review or debug a codebase through its Graphify knowledge graph using the graphlore MCP tools. Use when onboarding to an unfamiliar repository, tracing how a named flow or feature works end-to-end, finding likely root-cause locations for a bug, reviewing a codebase's structure (import cycles, layering, dead or duplicated code), or answering "where/how is X implemented" — especially when a graphify-out/graph.json exists. Favors token-budgeted subgraph extraction over opening many files.
+description: Explore, understand, review or debug a codebase through its code knowledge graph using the graphlore MCP tools. Use when onboarding to an unfamiliar repository, tracing how a named flow or feature works end-to-end, finding likely root-cause locations for a bug, reviewing a codebase's structure (import cycles, layering, dead or duplicated code), or answering "where/how is X implemented" — especially when a graphify-out/graph.json exists. Favors token-budgeted subgraph extraction over opening many files.
 ---
 
-# Exploring a codebase with Graphify
+# Exploring a codebase with graphlore
 
 The `graphlore` MCP server (tools are named `graphlore_*`; they read the
-Graphify-built graph) exposes a codebase knowledge
+code graph graphlore builds) exposes a codebase knowledge
 graph as tools. Reach for it **before** grepping or reading many files: it
 answers structural questions ("what connects to X", "which subsystems exist",
 "where does this flow run") cheaply, returning just the relevant slice instead
@@ -38,8 +38,8 @@ before the read tools can see that graph.
 ## Preconditions: make sure the graph exists and is fresh
 
 1. `graphlore_freshness()` — is `graph.json` stale vs. the current git HEAD?
-2. If missing or stale: `graphlore_build(".", update=True)` (AST-only update needs
-   no API key; `mode="deep"` adds semantic edges but needs a backend key). Read
+2. If missing or stale: `graphlore_build(".", update=True)` (needs no API key;
+   `mode="deep"` is graphify's, deprecated and going in the next release). Read
    the result: it carries the build's warnings (a missing extractor for a file
    type, files skipped as sensitive) and notes on vendored files and an
    unignored `graphify-out/`.

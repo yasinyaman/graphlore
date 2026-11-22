@@ -2,11 +2,12 @@
 
 `engine/` is graphlore's own extractor: a Rust library, shipped as the Python
 package `graphlore-engine`, that walks a project and writes a
-graphify-compatible `graph.json`. It exists so that graphlore can stop depending
-on the graphify CLI. Today it is experimental and opt-in
-(`GRAPHLORE_ENGINE=native`, see [configuration](configuration.md#the-native-engine));
-this page says what it does, how it compares with graphify on real code, and
-what is left before it can be the default.
+graphify-compatible `graph.json`. It is graphlore's default extractor
+(`GRAPHLORE_ENGINE=auto`, the `engine` extra, see
+[configuration](configuration.md#the-native-engine)); the graphify CLI is the
+deprecated fallback when the engine is not installed, and goes in the next
+release. This page says what the engine does, how it compares with graphify on
+real code, and what is left before graphify can go.
 
 ## What it extracts
 
@@ -2317,12 +2318,13 @@ two nodes reference each other. `path` and `explain` read the CLI's default
    from graph.json. Left: the package-API extractors moved into the language
    modules (not a graphify dependency; `apis.py` reads either graph).
 7. **Native by default, in three releases.**
-   - **A:** the `graphlore-engine` wheels on PyPI
+   - **A (done):** the `graphlore-engine` wheels on PyPI
      (`.github/workflows/engine-wheels.yml`: Linux x86-64 and ARM on glibc,
      x86-64 on musl, macOS universal2, Windows x64), an `engine` extra the
      plugin installs, and `auto` the default: native when the engine is
      installed, graphify otherwise. `graphlore_add`, `mode="deep"` and
-     `no_viz` say they are going.
+     `no_viz` say they are going, and graphlore writes its own `graph.html`.
+     Each engine release is published by pushing its `engine-vX.Y.Z` tag.
    - **B:** graphify goes: `_run_cli`, the `graphify` extra, `graphlore_add`,
      `mode`, `no_viz` and `GRAPHLORE_BIN`. Builds write `graphlore-out/` and
      `.graphlore_labels.json`, and a `graphify-out/` graph is still read.

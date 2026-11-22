@@ -33,6 +33,14 @@ All notable changes to this project are documented here. The format is based on
   failed on it before this change too.
 
 ### Changed
+- **The documentation describes the native engine as the default.** The
+  agent instructions, the exploration skill, `docs/concepts.md`,
+  `docs/native-engine.md` (its introduction and the roadmap's release A, now
+  done), the README and CONTRIBUTING no longer speak of a "Graphify-built"
+  graph or of an experimental, opt-in engine; graphify is described as the
+  deprecated fallback. The post-commit hook example runs the native engine
+  (`python -m graphlore_engine build . --incremental`), whose update also drops
+  the nodes of deleted files.
 - **The native engine builds the graph by default.** `GRAPHLORE_ENGINE`
   defaults to `auto`: graphlore's own extractor when it is installed, graphify
   only when it is not (and for `mode`, and for `update` / `cluster_only` of a

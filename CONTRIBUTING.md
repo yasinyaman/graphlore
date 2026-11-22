@@ -82,7 +82,7 @@ Match the surrounding style by hand.
 Please:
 - Keep tools read-only unless they genuinely mutate state, and set the matching MCP annotation (`read_only_hint` / `destructive_hint`).
 - Add a test in `tests/` for any new tool or behavior; reuse the `project` fixture.
-- Stay schema-tolerant — graphify's `graph.json` shape can vary, so parse defensively (see the `_node_*` / `_edge_*` helpers in `graph.py`).
+- Stay schema-tolerant — a `graph.json` from graphify or an older engine can vary in shape, so parse defensively (see the `_node_*` / `_edge_*` helpers in `graph.py`).
 - Keep the graph.json analysis tools dependency-free (no graphify CLI required); the tree-sitter span backend stays an optional `[treesitter]` extra that degrades gracefully when absent.
 
 ## Releasing
