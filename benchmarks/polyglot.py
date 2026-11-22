@@ -1083,38 +1083,34 @@ def check_semantic(a: Audit, sub: Subject) -> None:
     a.call("locate", query="request", budget_tokens=40, expect_error=True)
 
 
-def check_cli(a: Audit, sub: Subject) -> None:
+def check_nav(a: Audit, sub: Subject) -> None:
+    """graphlore_query / path / explain, answered over graph.json."""
     hub = (sub.functions or sub.classes or sub.methods or [None])[0]
     if hub is None:
         return
     label = s._bare_name(s._node_label(sub.byid[hub]))
     asked = next((nm for nid in sub.functions + sub.classes + sub.methods
                   if len(nm := s._bare_name(s._node_label(sub.byid[nid]))) >= 6), label)
-    calls: list[tuple[str, dict[str, Any]]] = [
-        ("query", {"question": f"what calls {asked}", "budget": 300}),
-        ("explain", {"node": hub}),
-    ]
+    q = a.call("query", question=f"what calls {asked}", budget=300)
+    if q is not None and "error" not in q and not q.get("seeds"):
+        a.finding("QUERY-NO-SEED", "low", "gap", "query",
+                  "a question naming a definition of the project found no seed node", asked)
+    a.call("explain", node=hub)
     for e in sub.edges:  # a path that exists: the two ends of a real call
         x, y = s._edge_ends(e)
         if s._rel(e) == "calls" and x != y and x in sub.defs.kind and y in sub.defs.kind:
-            calls.append(("path", {"node_a": x, "node_b": y}))
+            got = a.call("path", node_a=x, node_b=y)
+            if got is not None and "error" not in got and (
+                    not got.get("found") or got.get("direction") != "forward"):
+                a.finding("PATH-MISSED", "medium", "bug", "path",
+                          "the two ends of a call edge have no forward path",
+                          {"from": x, "to": y, "direction": got.get("direction")})
             break
-    for tool, kw in calls:
-        out = a.text(tool, **kw)
-        if out.startswith("ERROR"):
-            a.status(tool, "error")
-            a.finding("CLI-ERROR", "medium", "bug", tool, "the graphify CLI call failed",
-                      {"args": kw, "reply": out[:200]})
-        elif "=== repo text" not in out:
-            a.finding("CLI-UNFRAMED", "medium", "convention", tool,
-                      "CLI output quoting the repository is not framed", out[:120])
     # the same node by its bare name: what an assistant types first
-    bare = a.text("explain", node=label, expect_error=True)
-    if bare.startswith("ERROR") and "Ambiguous" in bare:
-        a.finding("CLI-AMBIGUOUS-NAME", "low", "gap", "explain",
-                  "a bare name several nodes share is refused by the graphify CLI; "
-                  "graphlore passes the refusal through instead of resolving the name",
-                  bare[:160])
+    bare = a.call("explain", node=label, expect_error=True)
+    if bare is not None and "error" in bare:
+        a.finding("EXPLAIN-BARE-NAME", "low", "gap", "explain",
+                  "a bare name of a node in the graph is not resolved", label)
 
 
 def _copy(repo_dir: Path, tmp: Path) -> Path:
@@ -1449,7 +1445,7 @@ def audit_repo(a: Audit, repo: dict[str, Any], root: Path, opts: argparse.Namesp
     if on("locate") and not opts.skip_semantic:
         check_semantic(a, sub)
     if on("query", "path", "explain"):
-        check_cli(a, sub)
+        check_nav(a, sub)
     if want is None:
         check_hostile(a, sub)
         check_protocol(a, sub)
