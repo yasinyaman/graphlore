@@ -7,6 +7,21 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Fixed
+- **`graphlore_unreferenced` no longer grows faster than the graph.** On
+  Django's graph (70,195 nodes) it ran for over 15 minutes and did not finish;
+  it now answers in 9 s (`limit=200`, spans parsed cold), and in 1.2 s instead
+  of 4.3 s on graphlore's own graph (4,630 nodes). The hook check
+  (`_hook_base`) re-read and re-tokenized a base class's whole body for every
+  method of every subclass, and walked the base chain again for each class of
+  the same name: Django's `SimpleTestCase(unittest.TestCase)` leads back to
+  its own `TestCase`, so each helper of each test class scanned the test
+  case bodies four times over. Its answers are now kept per call, and a
+  file's spans (indexed by definition line), a span's identifiers, a class's
+  members, a name's other definitions and a class's referencing files are
+  each worked out once per call. The answers are unchanged (the same JSON on
+  graphlore, httpx and nginx before and after). With that, `graph.html`'s
+  findings carry unreferenced code whatever the graph's size:
+  `VIZ_UNREFERENCED_MAX` (20,000 nodes) is gone.
 - **Native engine: a build no longer panics on a multibyte character**
   (engine 0.5.78). `state.rs`'s `holds_container` and `resources.rs`'s data-model
   detection capped how much of a value they scanned by slicing it at a byte
@@ -93,10 +108,8 @@ All notable changes to this project are documented here. The format is based on
   - The server works them out for the active project's graph, from the tools'
     own JSON, so the page and the tools agree; once per graph.json (path,
     mtime). A tool that fails costs its finding, never the page.
-  - `graphlore_unreferenced` is left out past 20,000 nodes
-    (`VIZ_UNREFERENCED_MAX`; it took 3.7 s on nginx's 15,000 nodes and over 15
-    minutes on Django's 70,000), and the reply says so. A page written for
-    another path than the active project has no findings and says why.
+  - A page written for another path than the active project has no findings
+    and says why.
   - *Impact* (`I`, `#i=`): what depends on a node, by hop (1–3), in columns,
     with test code counted apart, walked as `graphlore_impact` walks by default
     (the page's `impact:begin` block; a test checks the two on every node).

@@ -1932,10 +1932,6 @@ def _write_viz(gp: Path) -> str:
 _VIZ_ANALYSIS: dict[str, tuple[float, dict[str, Any]]] = {}
 # Rows of one kind of finding the page lists, in the tool's own order.
 VIZ_ROWS = 200
-# graphlore_unreferenced reads every candidate's source and looks for its name
-# across the repository: minutes on a graph of Django's size. Past this many
-# nodes the page leaves it out and says so; the tool itself still answers.
-VIZ_UNREFERENCED_MAX = 20_000
 
 _LABEL_AT = re.compile(r"^(.*) \((.+?)(?::L(\d+))?\)$")
 
@@ -2067,21 +2063,16 @@ def _viz_analysis(gp: Path) -> tuple[dict[str, Any] | None, str]:
                      for r in s.get("co_change", [])],
             "total": s.get("co_change_total"), "history": s.get("history"),
         }
-    if len(nodes) <= VIZ_UNREFERENCED_MAX:
-        u = run("graphlore_unreferenced",
-                lambda: graphlore_unreferenced(limit=VIZ_ROWS, as_json=True))
-        if u is not None:
-            out["unreferenced"] = {
-                "rows": [{"label": r.get("node", ""), "kind": r.get("kind", ""),
-                          "node": find.find(r.get("node", ""), r.get("file", ""), r.get("line")),
-                          "mentions": r.get("mentions")}
-                         for r in u.get("unreferenced", [])],
-                "counts": ints(u),
-            }
-    else:
-        out["unreferenced"] = {"skipped": (
-            f"left out for a graph of {len(nodes):,} nodes (more than {VIZ_UNREFERENCED_MAX:,}): "
-            "graphlore_unreferenced reads every candidate's source; ask it directly")}
+    u = run("graphlore_unreferenced",
+            lambda: graphlore_unreferenced(limit=VIZ_ROWS, as_json=True))
+    if u is not None:
+        out["unreferenced"] = {
+            "rows": [{"label": r.get("node", ""), "kind": r.get("kind", ""),
+                      "node": find.find(r.get("node", ""), r.get("file", ""), r.get("line")),
+                      "mentions": r.get("mentions")}
+                     for r in u.get("unreferenced", [])],
+            "counts": ints(u),
+        }
     try:
         files = sorted({str(f) for f in map(_node_file, nodes) if f})
         out["vendored_files"] = [f for f in files if _is_vendored_file(f)]
@@ -2111,9 +2102,6 @@ def _viz_analysis(gp: Path) -> tuple[dict[str, Any] | None, str]:
 def _viz_note(analysis: dict[str, Any]) -> str:
     """What the build's reply says of the page's findings."""
     bits = []
-    u = analysis.get("unreferenced") or {}
-    if "skipped" in u:
-        bits.append(f"Unreferenced code is {u['skipped']}.")
     if analysis.get("notes"):
         bits.append("Some findings are missing: " + "; ".join(analysis["notes"]) + ".")
     return " ".join(bits)
