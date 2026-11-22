@@ -1037,6 +1037,56 @@ answer (`dynamic`, `method_missing`, `getattr`), and inference (a closure's
 parameter typed by the call it is passed to, generic arguments deduced from
 a call) — the last is phase 3.
 
+### Phase 3: inference, by the numbers
+
+`benchmarks/inference_gaps.py` reads every oracle's missed uses (`--json`)
+and sorts each by what stands before the name: a closure's parameter
+(`x => x.m()`, `|r| r.m()`, `{ it.m() }`), a call's result, a name the walk
+did not type, a member named in an initializer or a struct literal, a type
+a member is reached through (`Proxy::new()`), another type position, a bare
+name, an import. Each cell is the rows of the kind and their share of every
+use the compiler binds (engine 0.5.74):
+
+| language | uses | missed | closure-parameter | call-result | bare-name | other-receiver | initializer | type-before-member | type | bare | import |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|
+| csharp | 17318 | 3475 | 154 (0.9%) | 200 (1.2%) | 509 (2.9%) | 122 (0.7%) | 1302 (7.5%) | 1004 (5.8%) | 49 (0.3%) | 101 (0.6%) | 34 (0.2%) |
+| rust | 31105 | 5165 | 111 (0.4%) | 385 (1.2%) | 659 (2.1%) | 303 (1.0%) | 921 (3.0%) | 737 (2.4%) | 1041 (3.3%) | 501 (1.6%) | 507 (1.6%) |
+| go | 24077 | 3862 | 6 (0.0%) | 62 (0.3%) | 568 (2.4%) | 30 (0.1%) | 2693 (11.2%) | 0 (0.0%) | 438 (1.8%) | 60 (0.2%) | 5 (0.0%) |
+| typescript | 19760 | 2682 | 260 (1.3%) | 57 (0.3%) | 1605 (8.1%) | 80 (0.4%) | 50 (0.3%) | 64 (0.3%) | 101 (0.5%) | 435 (2.2%) | 30 (0.2%) |
+| kotlin | 1771 | 200 | 0 (0.0%) | 1 (0.1%) | 23 (1.3%) | 6 (0.3%) | 0 (0.0%) | 85 (4.8%) | 61 (3.4%) | 24 (1.4%) | 0 (0.0%) |
+| swift | 140 | 44 | 0 (0.0%) | 8 (5.7%) | 7 (5.0%) | 1 (0.7%) | 0 (0.0%) | 8 (5.7%) | 15 (10.7%) | 5 (3.6%) | 0 (0.0%) |
+| scala | 439 | 110 | 0 (0.0%) | 3 (0.7%) | 23 (5.2%) | 5 (1.1%) | 0 (0.0%) | 15 (3.4%) | 27 (6.2%) | 28 (6.4%) | 9 (2.1%) |
+
+What it says:
+
+- **A closure's parameter typed by the call it is passed to is at most 1.3%
+  of the uses** (TypeScript 260, C# 154, Rust 111; Go, Kotlin, Swift and
+  Scala none). Most of those closures are passed to a library's method
+  (`db.Todos.Where(t => t.OwnerId …)`, `.map(|c| c.is_tls())`) whose
+  parameter types the engine does not read, and a closure passed over a
+  project collection is already typed by its element (`ITERATION_METHODS`).
+  **Decision: not built.** What it would take (the parameter types of
+  library methods) is more than the 1% it adds.
+- **The largest kind is no inference**: a member named in an initializer or
+  a struct literal (`new T { Name = … }`, `&Command{Use: "child"}`; Go
+  11.2%, C# 7.5%, Rust 3.0%). The compiler binds the name to the field; the
+  reader leaves it out on purpose (`positions.py`'s `DECIDED`: a value built
+  with its fields couples the builder to the type, which the construction
+  edge already says). **Decision: kept out**, with the number written here.
+- **A type a member is reached through** (`Proxy::new()`, `Token.Name()`,
+  `C.foo()`; C# 5.8%, Kotlin 4.8%, Rust 2.4%): the engine links the member
+  and writes no `references` edge to its type, which the oracles count as a
+  use of its own. **Decision: kept**, as a convention: the edge to the
+  member names its type through containment.
+- **What is left** (a name the walk did not type, a call's result: 1–8%) is
+  typing, not inference: the TypeScript rows are the compiler tests' own
+  corner cases (`z.bar()` through an alias of a merged module, `this.cars`
+  in an ES5 class), read case by case as the oracles are, not by a phase.
+
+So phase 3 ends without a change to the engine: the numbers say the
+inference left is small, and the larger gaps are positions left out by
+decision or a convention of the graph's.
+
 One thing the cases showed that is not a position: a Swift protocol's
 property requirement is a definition of its own named `var handler`, of kind
 interface (the span rule takes `protocol_property_declaration` for a
@@ -1090,7 +1140,7 @@ say is left and by how directly the compiler can check the result:
 case or a written "not followed, because", and the share of cases marked
 `found: source` is reported.
 
-**Phase 3: inference, by the numbers.** Per language, what one step of
+**Phase 3: inference, by the numbers.** (Measured: see 'Phase 3: inference, by the numbers' above; nothing built.) Per language, what one step of
 inference would add (a closure parameter typed by the collection it is
 called on, a pattern binding), from the lists the oracles already produce,
 and the decision to build it or to leave those edges out.

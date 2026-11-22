@@ -39,6 +39,7 @@ python benchmarks/polyglot.py --root /tmp/polyglot --engine native   # the audit
 python benchmarks/unresolved.py --root /tmp/polyglot --samples 5     # the calls the engine left without an edge, by reason (--real: without the library names)
 python benchmarks/conformance.py --baseline benchmarks/results-conformance.json   # each language's name-resolution rules, a small project per rule: fixed / broken
 python benchmarks/rule_inventory.py              # every rule of a language's spec and binder: the case that holds it, or why not (--markdown)
+python benchmarks/inference_gaps.py OUT/csharp.json OUT/rust.json ... --root /tmp/polyglot   # the oracles' missed uses (--json) by what stands before the name: what inference would add
 python benchmarks/neutrality.py --baseline benchmarks/results-neutrality.json   # every name table in every language: is a project's own `Optional`, `map`, `self` still the project's? (6 min)
 python benchmarks/verify_cases.py                 # each case of the checklist, given to its language's own compiler
 python benchmarks/rule_sources.py --root /tmp/sources   # sparse checkouts of each language's binder, version table and spec (300 MB): what docs/rule-sources.md says to read
