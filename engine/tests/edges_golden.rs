@@ -3225,3 +3225,18 @@ fn rust_rules_from_the_reference() {
     let inner: Vec<_> = got.iter().filter(|(s, r, _)| s == "inner" && r == "calls").collect();
     assert_eq!(inner.len(), 1, "inner calls one make: {inner:?}");
 }
+
+/// Go's rules from the specification (engine 0.5.66): the member at the
+/// shallowest depth of embedding, and each `switch` clause a block.
+#[test]
+fn go_rules_from_the_spec() {
+    let got = quals("gospec", &[
+        ("go.mod", "module example.com/app\n\ngo 1.22\n"),
+        (
+            "a.go",
+            "package app\n\ntype Inner struct{}\n\nfunc (Inner) Name() string {\n\treturn \"inner\"\n}\n\ntype Middle struct {\n\tInner\n}\n\ntype Named struct{}\n\nfunc (Named) Name() string {\n\treturn \"named\"\n}\n\ntype Outer struct {\n\tMiddle\n\tNamed\n}\n\nfunc Run(o Outer) string {\n\treturn o.Name()\n}\n\nfunc helper() int {\n\treturn 1\n}\n\nfunc Pick(n int) int {\n\tswitch n {\n\tcase 1:\n\t\thelper := 2\n\t\treturn helper\n\tdefault:\n\t\treturn helper()\n\t}\n}\n",
+        ),
+    ]);
+    has(&got, &[("Run", "calls", "Named.Name"), ("Pick", "calls", "helper")]);
+    lacks(&got, &[("Run", "calls", "Inner.Name")]);
+}

@@ -426,6 +426,11 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- **Native engine 0.5.66: Go's rules, read from the Go specification and
+  go/types** (phase 2 of `docs/rule-sources.md`; 15 cases): a selector is the
+  field or method at the shallowest depth of embedding, and each clause of a
+  `switch` / `select` is a block of its own. `benchmarks/rule_inventory.py`
+  covers Go (29 rules, 23 held).
 - **Native engine 0.5.65: Rust's rules, read from the Rust Reference and
   rustc** (phase 2 of `docs/rule-sources.md`; 15 cases citing the
   Reference's rule identifiers):

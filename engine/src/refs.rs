@@ -6608,6 +6608,11 @@ pub(crate) fn is_scope(kind: &str) -> bool {
                 | "using_statement"
                 | "match_arm"
                 | "case_clause"
+                // (Go: each clause of a `switch` or `select` is a block)
+                | "expression_case"
+                | "default_case"
+                | "type_case"
+                | "communication_case"
                 | "switch_entry"
                 | "when_entry"
         )

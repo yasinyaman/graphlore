@@ -25,7 +25,7 @@ python benchmarks/conformance.py --baseline benchmarks/results-conformance.json 
 python benchmarks/conformance.py --markdown      # the tables below
 ```
 
-Measured 2026-11-21 with graphlore-engine 0.5.65: **574 of 574 rules hold**
+Measured 2026-11-21 with graphlore-engine 0.5.66: **589 of 589 rules hold**
 (356 of the first 406 with 0.5.45). Ten came from the Go type checker and
 rust-analyzer run on whole repositories; fifteen from the Kotlin and Swift
 compilers' tests (type checks, casts, `catch`, aliases); thirty-nine from two
@@ -104,7 +104,7 @@ Each change was measured on the 45 audit repositories as well, by reading
 the edges it added and removed at their source lines; the page on the
 [native engine](native-engine.md#the-rules-themselves) has the numbers.
 Every case has been compiled by its own language
-(`benchmarks/verify_cases.py`: 574 of 574 accepted). The Versions column is
+(`benchmarks/verify_cases.py`: 589 of 589 accepted). The Versions column is
 the oldest version of the language whose compiler accepts the case, where the
 compiler can be asked (`verify_cases.py --min-version`: Java, Kotlin, Scala,
 C#, Swift, C, C++); `all` is the oldest version asked, `–` a language with no
@@ -269,11 +269,11 @@ Found by: the specification 30, a compiler 19, comparison 0, the grammar 2, the 
 | the parameters of a function type name their types, not their names | `function-type-parameter-types` | – | yes |
 | a member read or written through a local or a parameter is the member of the object it holds | `member-of-a-local` | – | yes |
 
-### go (38 of 38)
+### go (53 of 53)
 
 The Go Programming Language Specification, 'Declarations and scope', 'Selectors', 'Method sets'.
 
-Found by: the specification 23, a compiler 8, comparison 2, the grammar 5, the language's own tools 0. With the place it was read in the language's own tools: 0.
+Found by: the specification 23, a compiler 8, comparison 2, the grammar 5, the language's own tools 15. With the place it was read in the language's own tools: 15.
 
 | Rule | Case | Versions | Engine |
 |---|---|---|---|
@@ -315,6 +315,21 @@ Found by: the specification 23, a compiler 8, comparison 2, the grammar 5, the l
 | a function literal's parameters and result name their types | `function-literal-signature` | – | yes |
 | a slice or map literal names the types it is made of | `literal-element-types` | – | yes |
 | the type handed to `make` is a use of it | `make-type-argument` | – | yes |
+| `import . "p"` declares p's exported names in the file block: they are used bare | `dot-import` | – | yes |
+| an import is named by the imported package's clause, not by its directory | `package-name-from-the-clause` | – | yes |
+| a selector is the field or method at the shallowest depth: a type's own method before an embedded type's | `shallowest-depth` | – | yes |
+| of two embedded types, the method found at the lesser depth | `shallower-embedding-wins` | – | yes |
+| a field of an embedded struct is a field of the outer one | `promoted-field` | – | yes |
+| a name declared in a block hides a package name only inside that block | `block-redeclaration-ends-with-the-block` | – | yes |
+| each clause of a `switch` is a block of its own: a name of one clause is none of the next | `switch-clause-is-a-block` | – | yes |
+| a name declared by `:=` is in scope after the declaration: its own value names the outer one | `short-var-scope-starts-after` | – | yes |
+| a parameter is a name of the function body: it hides a package function of its name | `parameter-hides-a-function` | – | yes |
+| a type declared in a function hides a package type of its name inside the function | `local-type-hides-a-type` | – | yes |
+| a method is no name of the package block: a bare call in a method is the package function | `method-is-no-package-name` | – | yes |
+| a type parameter of a function hides a package type of its name in the function | `type-parameter-hides-a-type` | – | yes |
+| `T.M` is a method expression: a use of T's method | `method-expression` | – | yes |
+| `x.M` without a call is a method value: a use of the method | `method-value` | – | yes |
+| a method of `*T` is called on an addressable `T` | `pointer-method-on-a-value` | – | yes |
 
 ### java (48 of 48)
 
@@ -824,4 +839,4 @@ Found by: the specification 31, a compiler 2, comparison 0, the grammar 1, the l
 | `$x instanceof T` and `catch (T $e)` are uses of T | `instanceof-and-catch` | – | yes |
 | an anonymous function's parameters and result name their types | `closure-signature` | – | yes |
 
-574 of 574 rules hold
+589 of 589 rules hold
