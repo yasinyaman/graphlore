@@ -25,7 +25,7 @@ python benchmarks/conformance.py --baseline benchmarks/results-conformance.json 
 python benchmarks/conformance.py --markdown      # the tables below
 ```
 
-Measured 2026-11-21 with graphlore-engine 0.5.66: **589 of 589 rules hold**
+Measured 2026-11-21 with graphlore-engine 0.5.67: **598 of 598 rules hold**
 (356 of the first 406 with 0.5.45). Ten came from the Go type checker and
 rust-analyzer run on whole repositories; fifteen from the Kotlin and Swift
 compilers' tests (type checks, casts, `catch`, aliases); thirty-nine from two
@@ -104,7 +104,7 @@ Each change was measured on the 45 audit repositories as well, by reading
 the edges it added and removed at their source lines; the page on the
 [native engine](native-engine.md#the-rules-themselves) has the numbers.
 Every case has been compiled by its own language
-(`benchmarks/verify_cases.py`: 589 of 589 accepted). The Versions column is
+(`benchmarks/verify_cases.py`: 598 of 598 accepted). The Versions column is
 the oldest version of the language whose compiler accepts the case, where the
 compiler can be asked (`verify_cases.py --min-version`: Java, Kotlin, Scala,
 C#, Swift, C, C++); `all` is the oldest version asked, `–` a language with no
@@ -171,11 +171,11 @@ Found by: the specification 36, a compiler 1, comparison 0, the grammar 1, the l
 | a function named as a value is a use of it | `function-named-as-value` | – | yes |
 | a member read through a typed parameter is the member of its type | `member-of-a-parameter` | – | yes |
 
-### javascript (29 of 29)
+### javascript (31 of 31)
 
 ECMAScript Language Specification, 'Executable Code and Execution Contexts' (scopes), 'Modules'.
 
-Found by: the specification 29, a compiler 0, comparison 0, the grammar 0, the language's own tools 0. With the place it was read in the language's own tools: 0.
+Found by: the specification 29, a compiler 0, comparison 0, the grammar 0, the language's own tools 2. With the place it was read in the language's own tools: 2.
 
 | Rule | Case | Versions | Engine |
 |---|---|---|---|
@@ -208,12 +208,14 @@ Found by: the specification 29, a compiler 0, comparison 0, the grammar 0, the l
 | `await import('./m.js')` is the module | `dynamic-import` | – | yes |
 | an arrow function in a class field sees the class's `this` | `class-field-arrow` | – | yes |
 | a local assigned `new C()` keeps its type in a nested callback | `for-of-new` | – | yes |
+| a `var` declared in a block is a name of the whole function | `var-is-the-functions` | – | yes |
+| the name of a function expression is a name of its own body only | `named-function-expression` | – | yes |
 
-### typescript (51 of 51)
+### typescript (58 of 58)
 
 TypeScript Handbook, 'Modules', 'Classes', 'Generics' (types are the compiler's, tsc).
 
-Found by: the specification 30, a compiler 19, comparison 0, the grammar 2, the language's own tools 0. With the place it was read in the language's own tools: 0.
+Found by: the specification 30, a compiler 19, comparison 0, the grammar 2, the language's own tools 7. With the place it was read in the language's own tools: 7.
 
 | Rule | Case | Versions | Engine |
 |---|---|---|---|
@@ -268,6 +270,13 @@ Found by: the specification 30, a compiler 19, comparison 0, the grammar 2, the 
 | every name a closure's parameter pattern binds is the closure's | `destructured-closure-parameter` | – | yes |
 | the parameters of a function type name their types, not their names | `function-type-parameter-types` | – | yes |
 | a member read or written through a local or a parameter is the member of the object it holds | `member-of-a-local` | – | yes |
+| a class's members are no names inside its methods: a bare call is the module's function | `class-members-are-not-names` | – | yes |
+| a decorator is resolved where the class is declared, not among the method's parameters | `decorator-resolved-at-the-class` | – | yes |
+| a `catch` binding is a name of the catch block only | `catch-binding-is-the-blocks` | – | yes |
+| two `interface` declarations of one name are one interface: a member of either | `declaration-merging` | – | yes |
+| an import through a `paths` mapping of `tsconfig.json` is the file it maps to | `tsconfig-paths` | – | yes |
+| an import of a directory is the file its `package.json` names | `package-json-types-entry` | – | yes |
+| where a type is written, a value of the name does not hide the type around it | `type-meaning-skips-values` | – | yes |
 
 ### go (53 of 53)
 
@@ -839,4 +848,4 @@ Found by: the specification 31, a compiler 2, comparison 0, the grammar 1, the l
 | `$x instanceof T` and `catch (T $e)` are uses of T | `instanceof-and-catch` | – | yes |
 | an anonymous function's parameters and result name their types | `closure-signature` | – | yes |
 
-589 of 589 rules hold
+598 of 598 rules hold

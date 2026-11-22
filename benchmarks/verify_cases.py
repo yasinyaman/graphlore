@@ -89,6 +89,9 @@ def check(lang: str, root: Path, version: str | None = None) -> tuple[int, str]:
                 return code, out
         return 0, ""
     if lang == "typescript":
+        # (a case that writes its own `tsconfig.json`: the project as it says)
+        if (root / "tsconfig.json").exists():
+            return sh(["tsc", "-p", "."], root)
         srcs = files(root, ".ts", ".tsx")
         text = "\n".join((root / f).read_text() for f in srcs)
         # `import x = require()` and `export =` are CommonJS's

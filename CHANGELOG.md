@@ -426,6 +426,13 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- **Native engine 0.5.67: TypeScript's rules, read from the compiler's name
+  resolver** (phase 2 of `docs/rule-sources.md`; 10 cases): where a type is
+  written, a value of the name does not hide the type (`const Repo = 1`
+  beside `interface Repo`); `typeof x` keeps its value meaning; interfaces of
+  one name merge. `benchmarks/rule_inventory.py` covers TypeScript and
+  JavaScript (31 rules, 26 held), and `verify_cases.py` compiles a case that
+  writes its own `tsconfig.json` with `tsc -p`.
 - **Native engine 0.5.66: Go's rules, read from the Go specification and
   go/types** (phase 2 of `docs/rule-sources.md`; 15 cases): a selector is the
   field or method at the shallowest depth of embedding, and each clause of a
