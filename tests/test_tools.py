@@ -244,6 +244,49 @@ def test_shared_state_pairs_joined_by_a_call_are_not_hidden(tmp_path, monkeypatc
     assert row["score"] == hidden["score"] - 2
 
 
+def test_shared_state_takes_the_call_path_the_engine_listed():
+    # schema 6: the state node carries its pairs as [writer, other, hops, forward];
+    # the reader takes that answer and looks for a path only where none is listed
+    graph = json.loads(json.dumps(_SHARED_STATE_GRAPH))
+    cache = next(n for n in graph["nodes"] if n["id"] == "cache")
+    cache["coupling"] = {"pairs": 1, "hidden": 0, "listed": [["put", "get", 3, False]]}
+    (row,) = server._shared_state(*server._nodes_edges(graph))
+    assert row["pairs"][0]["call_path"] == {"direction": "b→a", "hops": 3}
+    assert row["hidden_pairs"] == 0
+    cache["coupling"]["listed"] = [["put", "get", None, None]]
+    (row,) = server._shared_state(*server._nodes_edges(graph))
+    assert row["pairs"][0]["call_path"] is None and row["hidden_pairs"] == 1
+    # a pair the cut list leaves out, and a list that is not one: looked for here
+    graph["links"].append({"source": "get", "target": "put", "relation": "calls"})
+    for listed in ([], "nonsense", [["put"]]):
+        cache["coupling"]["listed"] = listed
+        (row,) = server._shared_state(*server._nodes_edges(graph))
+        assert row["pairs"][0]["call_path"] == {"direction": "b→a", "hops": 1}
+
+
+def test_a_couples_with_edge_is_no_dependency_of_its_own(tmp_path, monkeypatch):
+    # the edge the engine writes for a hidden pair repeats what reads / writes
+    # say: no reference, no cycle, no step of a blast radius unless state is asked for
+    graph = json.loads(json.dumps(_SHARED_STATE_GRAPH))
+    graph["links"].append({
+        "source": "get", "target": "put", "relation": "couples_with", "via": ["cache"],
+        "context": "shared_state", "confidence": "EXTRACTED", "source_file": "web/b.py",
+        "source_location": "L4"})
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    server._GRAPH_CACHE.clear()
+    _write_graph(tmp_path, graph)
+    assert "couples_with" in server._NON_DEPENDENCY_RELATIONS
+    plain = json.loads(server.graphlore_impact("put", as_json=True))
+    assert "get()" not in {r["node"] for r in plain["impacted"]}
+    asked = json.loads(server.graphlore_impact("put", relations="state", as_json=True))
+    assert ("get()", "couples_with") in {(r["node"], r["relation"]) for r in asked["impacted"]}
+    nb = json.loads(server.graphlore_neighbors("put", as_json=True))
+    assert ("get()", "couples_with", "in") in {
+        (r["node"], r["relation"], r["direction"]) for r in nb["neighbors"]}
+    cycles = json.loads(server.graphlore_cycles(as_json=True))
+    assert not any(cycles.get(k) for k in ("import_cycles", "call_cycles", "other_cycles"))
+
+
 def _co_change_repo(tmp_path, monkeypatch, links=()):
     """pkg/a.py and web/b.py change together five times (the first commit
     too), c.py alone six more; one commit of 31 files is bulk."""

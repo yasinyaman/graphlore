@@ -6,7 +6,44 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Changed
+- **Shared state leaves out the test code the engine marks**, not only test
+  files: a writer inside a Rust `#[cfg(test)]` module of a source file no
+  longer pairs with production code (`test` on a native node). ureq: 112
+  pairs to 68.
+
 ### Added
+- **Implicit coupling is worked out by the native engine** (engine 0.5.77,
+  `schema_version` 6, `engine/src/coupling.rs`). The pairing of the
+  definitions that share state, which `graph._shared_state` did on every
+  call, runs at build time by the same rules: for state that code in two
+  files or more touches, each writer with each other definition touching it,
+  and the call path that joins the two (calls, dispatch and HTTP, 6 hops) or
+  none. A state node carries its pairs in `coupling` (`pairs`, `hidden`,
+  `listed` as `[writer, other, hops, forward]`, at most 200, the hidden ones
+  first), and a hidden pair is a `couples_with` edge from the definition that
+  sees the state to the one that writes it, naming the state in `via` (at
+  most 10 per state node; the rest stay on the node and are counted in the
+  build reply). `_shared_state` takes the engine's answer where a node has
+  one and looks for the path itself otherwise (graphify graphs, older
+  schemas, a pair past the limit), so `graphlore_surprises` and
+  `graphlore_node_details` say the same either way. `couples_with` is no
+  dependency of its own: not a reference for `graphlore_unreferenced`, not an
+  edge of a cycle or a surprise, not a step of `graphlore_impact` unless
+  `shared_state=True` or `relations="state"`; `graphlore_neighbors` and
+  `graphlore_subgraph` show it. Community detection leaves it out. On ureq
+  68 pairs, 57 hidden; on this repository 1,232 and 1,081. Co-change stays on
+  graphlore's side: it is read from git, not from the source.
+- **A base's method reaches the methods written for it, in every language
+  but Go** (`dispatches_to`, `context: override`, `EXTRACTED`; it was written
+  for C / C++ function slots only). A method of a type whose name a method of
+  its base, interface, trait or mixin has — the nearest base that declares
+  it, constructors left out, and by parameter count where the language has
+  overloads; in Rust the methods under each `impl Trait for Type`, whether
+  or not the type is the project's. `x.connect()` on a trait object now has
+  a path to each `connect` written for the trait: 136 edges on ureq (110 of
+  the methods no call named before), 83 on this repository (all 83). Go is left out: an
+  interface is satisfied by shape and no type says which it implements.
 - **`benchmarks/inference_gaps.py`**: the uses the compilers bind that the
   native graph lacks (every oracle's `--json` rows), sorted by what stands
   before the name: a closure's parameter, a call's result, an untyped name,

@@ -135,6 +135,7 @@ from .graph import (  # noqa: F401  (re-exported for the tools + tests)
     _CALL_RELATIONS,
     _CHARS_PER_TOKEN,
     _CONTAINMENT_RELATIONS,
+    _COUPLING_RELATIONS,
     _GRAPH_CACHE,
     _HTTP_RELATIONS,
     _IMPORT_RELATIONS,
@@ -3137,7 +3138,7 @@ IMPACT_RELATION_PRESETS: dict[str, frozenset[str] | None] = {
     "types": frozenset({"inherits", "extends", "implements", "mixes_in",
                         "embeds", "uses"}),
     # a definition reading or writing a variable, field, constant or resource
-    "state": _STATE_RELATIONS | {"written_by"},
+    "state": _STATE_RELATIONS | {"written_by"} | _COUPLING_RELATIONS,
     # a handler, the routes it serves and the clients that request them
     "http": _HTTP_RELATIONS,
 }
@@ -3297,7 +3298,7 @@ def graphlore_impact(
         shared_state or _is_state_node(start)
         or (rel_filter is not None and bool(rel_filter & _STATE_RELATIONS))
     )
-    state_skip = frozenset() if walk_state else _STATE_RELATIONS
+    state_skip = frozenset() if walk_state else _STATE_RELATIONS | _COUPLING_RELATIONS
     skip = skip | state_skip
     edge_ok = _is_extracted_edge if strict else None
     if direction == "dependents":
