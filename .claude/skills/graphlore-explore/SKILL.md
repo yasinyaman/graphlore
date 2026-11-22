@@ -76,15 +76,17 @@ network access the built-in index answers with BM25 until the model is fetched.
    A token-budgeted BFS slice around a node; this is the cheap way to feed the
    model just the relevant structure. Start from a god node or a community member.
 4. **`graphlore_query("<natural-language question>", budget=1500)`** — ask the
-   graph directly (BFS/DFS traversal, no LLM key needed).
+   graph directly: the question is searched in the code, the best hits seed a
+   budgeted walk (`dfs=True` to trace one branch deep; no LLM key needed).
 5. **`graphlore_node_details("<node>")`** — resolve a node to its `file:line`,
    type, community, and docstring when you need to jump to source.
 
 Supporting tools: `graphlore_search` (find nodes by name), `graphlore_neighbors`
 (1-hop), `graphlore_tests_for("<symbol>")` (which tests exercise it: direct,
 through one caller, weak hints), `graphlore_god_nodes` (most connected), `graphlore_surprises`
-(unexpected cross-domain couplings), `graphlore_path(a, b)` (exact route between
-two nodes), `graphlore_explain(node)` (everything about one node),
+(unexpected cross-domain couplings), `graphlore_path(a, b)` (shortest route between
+two nodes, along the edges' direction when there is one), `graphlore_explain(node)`
+(a node's details and its connections by relation),
 `graphlore_cycles()` (import cycles between modules — runtime first — then call cycles),
 `graphlore_routes()` (framework route → handler table, joined to graph nodes),
 `graphlore_validate()` (lint graph.json for dangling/duplicate/self-loop/orphan
@@ -239,8 +241,8 @@ many): list its members with `graphlore_skeleton` and fetch the one you need.
 
 Leiden clusters are numbered (`Community 7`) until a model names them.
 `graphlore_sampling_status()` reports the options; `graphlore_label_communities()`
-then names them via **host-LLM sampling** (no server API key), a backend key
-(`method="cli"`), or placeholders — `method="auto"` picks the best available. In a
+then names them via **host-LLM sampling** (no server API key) or placeholders —
+`method="auto"` picks the best available. In a
 client that lacks MCP sampling (e.g. Claude Code), read a community's members and
 push your own names with `graphlore_set_labels({"<id>": "<name>", ...})` — no key,
 no sampling required.

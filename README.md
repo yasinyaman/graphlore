@@ -114,7 +114,7 @@ helps a model pick the right tool.
 `GRAPHLORE_TOOLSET=full` exposes all 33: structure review (import and call
 cycles, layer rules, dead-code candidates, same-named symbols, duplication),
 framework routes and package API usage, tests for a symbol, signatures, git
-diffs, community naming and the Graphify CLI passthroughs. The Claude Code
+diffs, community naming, natural-language queries and paths between nodes. The Claude Code
 plugin runs on `full`.
 
 → [Tool reference](https://github.com/yasinyaman/graphlore/blob/master/docs/tools.md)
@@ -235,8 +235,8 @@ own. The old `GRAPHIFY_*` environment variables still work.
 ## Known limits
 
 - One active project at a time; `graphlore_project` switches it (stdio only).
-- By default the `graphify` CLI builds the graph, and
-  `build` / `query` / `path` / `explain` / `add` are thin wrappers over it.
+- By default the `graphify` CLI builds the graph (`build`, and `add` for a URL);
+  every other tool reads graph.json itself.
   graphlore's own extractor (`engine/`, Rust, opt-in with
   `GRAPHLORE_ENGINE=native`) is experimental: definitions, spans,
   imports, calls, bases and type references in 14 languages, resolved from the

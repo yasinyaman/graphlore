@@ -365,7 +365,7 @@ changed beyond recognition (the build says how many).
 ## Naming communities without an API key (MCP sampling)
 
 The Leiden clustering is keyless, but turning `Community 7` into `Authentication`
-needs a model. Three ways, in `graphlore_label_communities`'s preference order:
+needs a model. Two ways, in `graphlore_label_communities`'s preference order:
 
 1. **Host-LLM sampling** — the server asks the *connected client* to run the
    completion via MCP `sampling/createMessage`. The model the user already uses
@@ -375,12 +375,12 @@ needs a model. Three ways, in `graphlore_label_communities`'s preference order:
    a single batched request, carried over whichever transport the negotiated
    protocol allows (the legacy back-channel, or input-required rounds on MCP
    2026-07-28+), so it works with both older and modern clients.
-2. **Backend API key** (`method="cli"`) — set `GEMINI_API_KEY` / `OPENAI_API_KEY`
-   / `ANTHROPIC_API_KEY` / … (or run a local **ollama**) and graphify's own
-   backend names them. This option always remains available.
-3. **Placeholders** — no model anywhere: names stay `Community N`.
+2. **Placeholders** — no model anywhere: names stay `Community N`.
 
-If the client can't sample and you have no backend (e.g. **Claude Code**, which
+graphlore no longer runs graphify's own naming (`method="cli"`, a backend API
+key): it is refused, and the two ways above and below need no key.
+
+If the client can't sample (e.g. **Claude Code**, which
 doesn't support sampling), use the **assistant-driven fallback**: the assistant
 is already a capable model in the loop, so it reads `graphlore_communities` and
 pushes names back via **`graphlore_set_labels({"0": "Authentication", ...})`** —
