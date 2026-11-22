@@ -844,14 +844,16 @@ def test_build_rejects_escaping_path_when_restricted(tmp_path, monkeypatch):
 
 def test_build_wires_flags_to_cli_args(tmp_path, monkeypatch):
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    monkeypatch.setenv("GRAPHLORE_ENGINE", "graphify")
     captured = []
     monkeypatch.setattr(server, "_run_cli", lambda args: captured.append(args) or "ok")
 
     server.graphlore_build(".", update=True, cluster_only=True, code_only=True)
     assert captured[-1] == [".", "--update", "--cluster-only", "--no-viz", "--code-only"]
 
+    # graph.html is graphlore's own: graphify never writes one
     server.graphlore_build(".", no_viz=False)
-    assert captured[-1] == ["."]
+    assert captured[-1] == [".", "--no-viz"]
 
 
 
@@ -860,17 +862,18 @@ def test_build_wires_flags_to_cli_args(tmp_path, monkeypatch):
 def test_engine_choose_routes_each_request():
     choose = server.engine.choose
     both = {"native_found": True, "graphify_found": True}
-    assert choose(requested="graphify", **both) == ("graphify", "")
+    engine, note = choose(requested="graphify", **both)
+    assert engine == "graphify" and "deprecated" in note and "next release" in note
     assert choose(requested="native", **both) == ("native", "")
     assert choose(requested="native", **both, update=True) == ("native", "")
     engine, msg = choose(requested="native", native_found=False, graphify_found=True)
-    assert engine == "error" and msg.startswith("ERROR") and "pip install graphlore-engine" in msg
+    assert engine == "error" and msg.startswith("ERROR") and "graphlore[engine]" in msg
     engine, msg = choose(requested="native", **both, mode="deep")
     assert engine == "error" and "GRAPHLORE_ENGINE=graphify" in msg
     engine, note = choose(requested="auto", **both, mode="deep")
-    assert engine == "graphify" and "graphify ran it" in note
+    assert engine == "graphify" and "graphify ran it" in note and "next release" in note
     engine, msg = choose(requested="auto", native_found=True, graphify_found=False, mode="deep")
-    assert engine == "error" and "pip install graphifyy" in msg
+    assert engine == "error" and "build without it" in msg
     # the native engine detects communities: cluster_only is its own
     assert choose(requested="native", **both, cluster_only=True) == ("native", "")
     assert choose(requested="auto", **both, cluster_only=True, existing="native")[0] == "native"
@@ -880,19 +883,22 @@ def test_engine_choose_routes_each_request():
     engine, note = choose(requested="auto", **both, update=True, existing="graphify")
     assert engine == "graphify" and "update=False" in note
     assert choose(requested="auto", **both, update=True, existing="native")[0] == "native"
+    # without the engine, auto falls back to graphify and says the engine replaces it
     engine, note = choose(requested="auto", native_found=False, graphify_found=True)
-    assert engine == "graphify" and "not installed" in note
-    engine, note = choose(requested="nativ", **both)
-    assert engine == "graphify" and "'nativ' is not an engine" in note
+    assert engine == "graphify" and "not installed" in note and "graphlore[engine]" in note
+    engine, msg = choose(requested="auto", native_found=False, graphify_found=False)
+    assert engine == "error" and "no extractor is installed" in msg
+    engine, msg = choose(requested="nativ", **both)
+    assert engine == "error" and "'nativ' is not an engine" in msg
 
 
 def test_engine_requested_reads_the_environment_per_call(monkeypatch):
-    assert server.engine.requested() == "graphify"
+    assert server.engine.requested() == "auto"          # the default
     monkeypatch.setenv("GRAPHLORE_ENGINE", " Native ")
     assert server.engine.requested() == "native"
     monkeypatch.delenv("GRAPHLORE_ENGINE")
-    monkeypatch.setenv("GRAPHIFY_ENGINE", "auto")      # the legacy spelling
-    assert server.engine.requested() == "auto"
+    monkeypatch.setenv("GRAPHIFY_ENGINE", "graphify")  # the legacy spelling
+    assert server.engine.requested() == "graphify"
 
 
 def test_engine_graph_engine_reads_the_graph_header():
@@ -1124,6 +1130,8 @@ def test_spans_fall_back_to_the_native_engine(monkeypatch):
     from graphlore import spans
     monkeypatch.setattr(spans, "_ts_parser_for", lambda rel, src=None: (None, None))
     monkeypatch.setattr(server.engine, "file_spans", lambda src, rel: [(1, 2, 1, "f")])
+    assert spans._spans_treesitter(b"func f() {}\n", "a.go") == [(1, 2, 1, "f")]  # auto
+    monkeypatch.setenv("GRAPHLORE_ENGINE", "graphify")
     assert spans._spans_treesitter(b"func f() {}\n", "a.go") == []    # graphify: unchanged
     monkeypatch.setenv("GRAPHLORE_ENGINE", "native")
     assert spans._spans_treesitter(b"func f() {}\n", "a.go") == [(1, 2, 1, "f")]
@@ -3077,6 +3085,7 @@ def test_span_backend_graceful_without_treesitter(tmp_path, monkeypatch):
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     server._SPAN_CACHE.clear()
     monkeypatch.setattr(spans, "_ts_parser_for", lambda rel, src=None: (None, None))
+    monkeypatch.setattr(server.engine, "file_spans", lambda src, rel: None)  # no engine either
     (tmp_path / "app.js").write_bytes(b"function f(){ return 1; }\n")
     assert server._spans_for_file("app.js") == []
     assert server._structurally_equal("app.js", b"a", b"a // c") is None
@@ -4234,7 +4243,9 @@ class _FakeProc:
 
 
 def _fake_cli(monkeypatch, tmp_path, run):
-    """Route _run_cli through fakes: binary 'found', subprocess.run replaced."""
+    """Route _run_cli through fakes: binary 'found', subprocess.run replaced, and a
+    build sent to graphify whatever engine is installed."""
+    monkeypatch.setenv("GRAPHLORE_ENGINE", "graphify")
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     monkeypatch.setattr(server.shutil, "which", lambda _b: "/fake/graphify")
     monkeypatch.setattr(server.subprocess, "run", run)
@@ -4484,7 +4495,10 @@ def test_impact_leaves_rationale_nodes_out(tmp_path, monkeypatch):
 
 
 def _fake_build(monkeypatch, log, writes=None):
-    """Replace _run_cli: return `log`, and write a graph.json where `writes` says."""
+    """Replace _run_cli: return `log`, and write a graph.json where `writes` says.
+    The build goes to graphify (deprecated), whatever engine is installed."""
+    monkeypatch.setenv("GRAPHLORE_ENGINE", "graphify")
+
     def run(args, cwd=None):
         if writes is not None:
             writes.mkdir(parents=True, exist_ok=True)
@@ -4527,6 +4541,166 @@ def test_build_returns_counts_and_warnings_by_default(tmp_path, monkeypatch):
 
     full = server.graphlore_build(".", verbose=True)
     assert "AST extraction: 200/774" in full and "next: run" in full
+
+
+def test_build_writes_graphlore_s_own_graph_html(tmp_path, monkeypatch):
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    _fake_build(monkeypatch, _BUILD_LOG, writes=tmp_path / "graphify-out")
+    out = server.graphlore_build(".")
+    page = tmp_path / "graphify-out" / "graph.html"
+    assert "graph.html written" in out and server.viz.is_ours(page)
+    page.unlink()
+    assert "graph.html" not in server.graphlore_build(".", no_viz=True)
+    assert not page.exists()
+
+
+def _viz_graph():
+    return {
+        "graph": {"engine": "graphlore", "schema_version": 6}, "built_at_commit": "abc123",
+        "nodes": [
+            {"id": "f", "label": "app.py", "source_file": "app.py", "community": 0},
+            {"id": "a", "label": "run()", "source_file": "app.py", "source_location": "L3",
+             "community": 0, "kind": "function"},
+            {"id": "t", "label": "test_run()", "source_file": "tests/test_app.py",
+             "community": 1},
+            {"id": "os", "label": "os", "type": "external"},
+            # repository text that tries to end the script and open markup
+            {"id": "x", "label": "</script><img src=x onerror=alert(1)>&amp;",
+             "source_file": "app.py", "community": 1},
+        ],
+        "links": [
+            {"source": "f", "target": "a", "relation": "contains"},
+            {"source": "t", "target": "a", "relation": "calls", "confidence": "EXTRACTED"},
+            {"source": "a", "target": "os", "relation": "imports", "confidence": "INFERRED"},
+            {"source": "a", "target": "gone", "relation": "calls"},       # dangling
+        ],
+    }
+
+
+def test_graph_html_data_is_compact_and_complete():
+    viz = server.viz
+    data = viz.page_data(_viz_graph(), {"1": "Tests"})
+    assert data["meta"] == {"engine": "graphlore", "commit": "abc123", "nodes": 5, "edges": 3}
+    rels = {name: data["groups"][g] for name, g in data["rels"]}
+    assert rels == {"contains": "structure", "calls": "calls", "imports": "imports"}
+    assert [c[1] for c in data["comms"]] == ["Community 0", "Tests"]
+    rows = {r[0]: r for r in data["nodes"]}
+    assert data["kinds"][rows["f"][5]] == "file" and data["kinds"][rows["a"][5]] == "function"
+    assert data["kinds"][rows["os"][5]] == "external" and rows["os"][6] & 2 and rows["os"][4] == -1
+    assert rows["t"][6] & 1 and rows["a"][3] == 3 and rows["a"][7] == 3      # test, line, degree
+    flat = data["edges"]
+    assert len(flat) == 12 and flat[-1] == 1                                  # inferred flag
+    assert data["cedges"] == [0, 1, 1]          # test_run (1) calls run (0): one edge between
+    assert viz.relation_group("couples_with") == "state"
+    assert viz.relation_group("handles") == "http" and viz.relation_group("odd") == "other"
+
+
+def test_graph_html_never_lets_repository_text_out_of_its_script():
+    page = server.viz.render(_viz_graph(), "<b>proj</b> — graphlore")
+    head, _, rest = page.partition('<script id="graph-data" type="application/json">')
+    data, _, tail = rest.partition("</script>")
+    assert "<" not in data and ">" not in data and "&" not in data
+    assert "\\u003c/script\\u003e" in data
+    assert "<title>&lt;b&gt;proj&lt;/b&gt; — graphlore</title>" in head
+    assert "default-src 'none'" in head and server.viz.GENERATOR in head
+    import json as _json
+    labels = [r[1] for r in _json.loads(data)["nodes"]]
+    assert "</script><img src=x onerror=alert(1)>&amp;" in labels       # still the label
+    # the page writes graph text with textContent / fillText, never as markup
+    assert "innerHTML" not in tail and "insertAdjacentHTML" not in tail
+
+
+def _viewer_compact(graphs, names=None):
+    """Run the viewer's own compact() (the block between its markers) under node
+    on each graph; None when node is not installed."""
+    import shutil as _sh
+    import subprocess as _sp
+    node = _sh.which("node")
+    if node is None:
+        return None
+    page = server.viz.TEMPLATE.read_text(encoding="utf-8")
+    block = page.split("// compact:begin", 1)[1].split("// compact:end", 1)[0]
+    script = block + (
+        "\nconst input = JSON.parse(require('fs').readFileSync(0, 'utf8'));"
+        "\nprocess.stdout.write(JSON.stringify({"
+        "out: input.graphs.map(g => compact(g, input.names)), groups: RELATION_GROUPS,"
+        " order: GROUPS }));"
+    )
+    run = _sp.run([node, "-e", script], input=json.dumps({"graphs": graphs, "names": names or {}}),
+                  capture_output=True, text=True, timeout=60)
+    assert run.returncode == 0, run.stderr
+    return json.loads(run.stdout)
+
+
+def test_the_viewer_reads_a_raw_graph_as_python_does():
+    # the page opens any graph.json itself: its compact() must give what
+    # viz.page_data embeds, on graphify's shapes and the native engine's
+    from pathlib import Path
+
+    import pytest
+    fixtures = Path(__file__).parent / "fixtures"
+    graphs = [_viz_graph(),
+              json.loads((fixtures / "graph.json").read_text(encoding="utf-8")),
+              json.loads((fixtures / "polyglot" / "graph.json").read_text(encoding="utf-8")),
+              {"vertices": [{"name": 0, "file": "a/tests/x.py", "line": "7", "cluster": 2},
+                            {"name": "b", "path": "", "external": True}],
+               "edges": [{"from": 0, "to": "b", "type": "uses", "confidence": "inferred"}]},
+              {"nodes": [], "links": []}]
+    got = _viewer_compact(graphs, {"0": "Named"})
+    if got is None:
+        pytest.skip("node is not installed")
+    for graph, js in zip(graphs, got["out"], strict=True):
+        assert js == server.viz.page_data(graph, {"0": "Named"})
+    # its relation table is graph.py's sets, grouped as viz.relation_group does
+    assert got["order"] == list(server.viz.GROUPS)
+    for group, rels in got["groups"].items():
+        assert all(server.viz.relation_group(r) == group for r in rels), group
+    every = (server._CONTAINMENT_RELATIONS | server._IMPORT_RELATIONS | server._CALL_RELATIONS
+             | server._STATE_RELATIONS | server._COUPLING_RELATIONS | server._HTTP_RELATIONS
+             | server.viz._INHERITANCE | {"dispatches_to", "references"})
+    assert set().union(*map(set, got["groups"].values())) == every
+
+
+def test_the_viewer_without_data_asks_for_a_file():
+    page = server.viz.TEMPLATE.read_text(encoding="utf-8")
+    assert "/*__GRAPHLORE_DATA__*/" in page and 'id="welcome"' in page
+    assert 'type="file"' in page and "openFiles" in page
+    rendered = server.viz.render(_viz_graph(), "t")
+    assert "/*__GRAPHLORE_DATA__*/" not in rendered and 'id="open"' in rendered
+
+
+def test_the_viewer_keeps_its_view_in_the_link_and_hands_nodes_to_the_assistant():
+    page = server.viz.TEMPLATE.read_text(encoding="utf-8")
+    # the #fragment names the view, so a link opens it again and Back works
+    assert 'addEventListener("hashchange"' in page and '"#n=" + encodeURIComponent' in page
+    # what the page found goes to the assistant as a call it can make
+    for call in ("graphlore_explain(", "graphlore_fetch([", "graphlore_impact(",
+                 "graphlore_skeleton(community="):
+        assert call in page, call
+    assert 'id="help"' in page and "pointerdown" in page and "max-width: 760px" in page
+    # copied ids are quoted by JSON.stringify, never pasted raw into the call
+    assert "graphlore_explain(${JSON.stringify(id)})" in page
+
+
+def test_graph_html_follows_the_names_and_the_graph(tmp_path, monkeypatch):
+    out = tmp_path / "graphify-out"
+    out.mkdir()
+    (out / "graph.json").write_text(json.dumps(_viz_graph()), encoding="utf-8")
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    server._GRAPH_CACHE.clear()
+    gp = out / "graph.json"
+    assert "graph.html written" in server._write_viz(gp)
+    page = out / "graph.html"
+    assert server.viz.is_ours(page) and not server.viz.is_ours(out / "missing.html")
+    data = json.loads(server.graphlore_set_labels({"0": "Core"}, as_json=True))
+    assert data["graph_html_patched"] is None          # rewritten, not patched
+    assert "Core" in page.read_text(encoding="utf-8")
+    # a graph too large to draw is said, not written
+    monkeypatch.setattr(server.viz, "MAX_NODES", 2)
+    page.unlink()
+    assert "not written" in server._write_viz(gp) and not page.exists()
+    (out / "broken.json").write_text("{", encoding="utf-8")
+    assert "could not be read" in server._write_viz(out / "broken.json")
 
 
 def test_build_log_that_cannot_be_condensed_is_returned_whole(tmp_path, monkeypatch):
@@ -6642,7 +6816,8 @@ def test_cli_error_sets_is_error(tmp_path, monkeypatch):
     _fake_cli(monkeypatch, tmp_path, lambda argv, **kw: _FakeProc(stdout="all good"))
     res = _call_over_mcp("graphlore_add", {"url": "https://example.com/p"})
     assert res.is_error is False
-    assert res.structured_content["output"] == "all good"
+    assert res.structured_content["output"].startswith("all good")
+    assert "deprecated" in res.structured_content["output"]
 
 
 def test_structured_off_switch(project, monkeypatch):
@@ -7772,6 +7947,7 @@ def test_extractors_say_which_source_files_they_did_not_read(tmp_path, monkeypat
 def test_build_without_a_key_falls_back_to_code_only(project, monkeypatch):
     # graphify >= 0.9 refuses a default build of a repository with docs when no
     # LLM key is set: every repository of the polyglot audit has a README
+    monkeypatch.setenv("GRAPHLORE_ENGINE", "graphify")
     refusal = ("ERROR (exit 1):\nerror: no LLM API key found (8 doc/paper/image file(s) "
                "need semantic extraction). Or pass --code-only to index just the code.")
     calls = []

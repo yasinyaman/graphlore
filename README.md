@@ -8,7 +8,8 @@
 
 **graphlore is a Model Context Protocol (MCP) server that lets AI coding
 assistants navigate a codebase through its knowledge graph, instead of grepping
-and reading file after file.** It reads a graph built by
+and reading file after file.** It builds the graph with its own extractor
+(Rust and tree-sitter, 14 languages) or reads one built by
 [Graphify](https://graphify.net), joins every node to its real `start..end`
 source span (Python via `ast`, other languages via tree-sitter), and answers
 the questions text search cannot: who calls this, what breaks if it changes,
@@ -33,7 +34,7 @@ It works with any MCP client. Setup for Claude Code and Claude Desktop is below.
 ## Quick start
 
 **Claude Code plugin** (needs [`uv`](https://docs.astral.sh/uv/)): installs the
-server, the Graphify CLI and an exploration skill, with nothing to configure.
+server, graphlore's native engine and an exploration skill, with nothing to configure.
 
 ```
 /plugin install graphlore --marketplace yasinyaman/graphlore
@@ -42,13 +43,12 @@ server, the Graphify CLI and an exploration skill, with nothing to configure.
 On Claude Code older than 2.1.275, run `/plugin marketplace add yasinyaman/graphlore`
 and then `/plugin install graphlore@graphlore`.
 
-**Any other MCP client**: install graphlore and the Graphify CLI that builds the
-graph, then register the server.
+**Any other MCP client**: install graphlore with its native engine, which builds
+the graph (prebuilt wheels, no Rust toolchain), then register the server.
 
 ```bash
 # graphlore is not on PyPI yet: install from GitHub
-pip install "graphlore @ git+https://github.com/yasinyaman/graphlore"
-pip install graphifyy && graphify install
+pip install "graphlore[engine] @ git+https://github.com/yasinyaman/graphlore"
 ```
 
 ```json
@@ -66,10 +66,11 @@ pip install graphifyy && graphify install
 - Claude Desktop: add it to `claude_desktop_config.json`
   (macOS `~/Library/Application Support/Claude/`, Windows `%APPDATA%\Claude\`).
 
-Optional extras, installed as `graphlore[extra]`: `embed` (static code
+Optional extras, installed as `graphlore[extra]`: `engine` (graphlore's native
+extractor, which builds the graph), `embed` (static code
 embeddings for the built-in search behind `graphlore_locate`), `semble` (semble
 as that search instead), `treesitter` (spans for non-Python
-languages; usually already present through Graphify), `tiktoken` (exact token
+languages; without it the native engine's compiled-in grammars give them), `tiktoken` (exact token
 counts), `watch` (re-sync on file changes). Until the first PyPI release, use
 the GitHub form wherever a message says `pip install "graphlore[extra]"`:
 `pip install "graphlore[semble] @ git+https://github.com/yasinyaman/graphlore"`.
@@ -90,6 +91,16 @@ graphlore_impact("Response", hops=1)
 A misspelled name gets a suggestion, not a guess:
 `No node matching 'Clinet'. Did you mean: Client (httpx/_client.py:50)?`
 
+**Or look at it.** Every build also writes `graphify-out/graph.html`, one file
+that opens in any browser with no network: the communities first, then one
+community or one symbol's neighbourhood, with search and a details panel. The
+same page opens any graph.json, graphlore's or Graphify's, without graphlore
+installed: [the viewer on GitHub Pages](https://yasinyaman.github.io/graphlore/viewer/)
+reads the file you drop in your browser and uploads nothing
+([demo](https://yasinyaman.github.io/graphlore/viewer/demo.html)). A node's page copies
+the `graphlore_explain` / `graphlore_fetch` call for it, so what you find there goes
+straight to the assistant, and the address bar keeps the view, so a link opens it again.
+
 ## Tools
 
 The server starts on the `lean` surface, 12 tools that cover the whole explore
@@ -108,7 +119,7 @@ helps a model pick the right tool.
 | `graphlore_fetch` | A node's source code: the exact span, under a token budget |
 | `graphlore_communities` | The subsystems (Leiden communities) of the codebase |
 | `graphlore_freshness` | Is the graph stale against git: fresh, update or rebuild |
-| `graphlore_build` | Build or update the graph with the Graphify CLI (or the experimental native engine) |
+| `graphlore_build` | Build or update the graph with graphlore's native engine (graphify when the engine is not installed) |
 | `graphlore_project` | Show or switch the project directory the server reads |
 
 `GRAPHLORE_TOOLSET=full` exposes all 33: structure review (import and call
@@ -160,9 +171,10 @@ duplicated code).
 
 ### How is it different from Graphify's own MCP server?
 
-They overlap more than they differ. Graphify's embedded server already has
-graph navigation, token-budgeted subgraphs, an HTTP transport, multi-project
-serving and PR triage tools graphlore lacks. graphlore adds the span engine and
+graphlore builds its own graph (its native engine, in Rust) and reads one
+Graphify built too. Graphify's embedded server has graph navigation,
+token-budgeted subgraphs, an HTTP transport, multi-project serving and PR
+triage tools graphlore lacks. graphlore adds the span engine and
 what it makes possible: semantic `locate` joined to the enclosing symbol,
 source hydration (`fetch`, `skeleton`), route and package-API extraction,
 cosmetic-vs-structural freshness, and calls through a module object
@@ -186,18 +198,22 @@ names.
 
 The analysis tools read local files and need no key. A few paths can reach the
 network: the first embedding search (`[embed]` or `[semble]`) downloads a model, the first use
-of a language downloads its tree-sitter grammar, Graphify can call an LLM
-backend when you set its key, and `graphlore_add` fetches a URL.
+of a language downloads its tree-sitter grammar (the native engine's grammars
+are compiled in and download nothing), graphify, where it still builds the
+graph, can call an LLM backend when you set its key, and `graphlore_add`
+fetches a URL.
 `GRAPHLORE_OFFLINE=1` refuses or restricts the ones graphlore controls; the
 table linked below also lists what it cannot constrain.
 → [What reaches the network, and when](https://github.com/yasinyaman/graphlore/blob/master/docs/configuration.md#what-reaches-the-network-and-when)
 
 ### Which languages are supported?
 
-Python works out of the box through the standard library. JS/TS, Go, Java,
-Kotlin, Scala, C#, Rust, Swift, C/C++, Ruby, PHP and the other languages
-tree-sitter covers need the `[treesitter]` extra; without it, non-Python files
-fall back to nearest-line matching. Package-API extraction reads all of
+The native engine builds the graph for Python, JavaScript, TypeScript/TSX, Go,
+Java, Kotlin, Scala, C#, Rust, Swift, C, C++, Ruby and PHP, and gives their
+spans from its compiled-in grammars. Without the engine, Python works through
+the standard library and the other languages tree-sitter covers need the
+`[treesitter]` extra; without either, non-Python files fall back to
+nearest-line matching. Package-API extraction reads all of
 these; route extraction reads Python, JS/TS, Go, Java, Kotlin, C#, Rust, Ruby
 and PHP frameworks
 ([tool reference](https://github.com/yasinyaman/graphlore/blob/master/docs/tools.md)),
@@ -235,12 +251,11 @@ own. The old `GRAPHIFY_*` environment variables still work.
 ## Known limits
 
 - One active project at a time; `graphlore_project` switches it (stdio only).
-- By default the `graphify` CLI builds the graph (`build`, and `add` for a URL);
-  every other tool reads graph.json itself.
-  graphlore's own extractor (`engine/`, Rust, opt-in with
-  `GRAPHLORE_ENGINE=native`) is experimental: definitions, spans,
-  imports, calls, bases and type references in 14 languages, resolved from the
-  source, with its own communities and incremental updates.
+- graphlore's own extractor (`engine/`, Rust, the `engine` extra) builds the
+  graph: definitions, spans, imports, calls, bases and type references in 14
+  languages, resolved from the source, with its own communities and incremental
+  updates. Without it the `graphify` CLI builds it; graphify, and with it
+  `graphlore_add` and `mode="deep"`, goes in the next release.
 - No PR or review-thread tooling.
 - Calls through an object, a callback or dynamic dispatch are not in the graph,
   so an empty answer means "no edge was indexed", not "nothing calls this".
@@ -251,7 +266,7 @@ own. The old `GRAPHIFY_*` environment variables still work.
 - [How graphlore works](https://github.com/yasinyaman/graphlore/blob/master/docs/concepts.md): resolved edges, import checks, analysis scope, freshness, the search bridge, naming communities
 - [Configuration](https://github.com/yasinyaman/graphlore/blob/master/docs/configuration.md): toolsets, HTTP transport and security, offline mode, environment variables
 - [Benchmark](https://github.com/yasinyaman/graphlore/blob/master/docs/benchmark.md): method, cross-language results, caveats
-- [Native engine](https://github.com/yasinyaman/graphlore/blob/master/docs/native-engine.md): graphlore's own extractor in Rust (experimental), compared with graphify on 31 repositories, and the roadmap
+- [Native engine](https://github.com/yasinyaman/graphlore/blob/master/docs/native-engine.md): graphlore's own extractor in Rust, compared with graphify on 31 repositories, and the roadmap
 - [Changelog](https://github.com/yasinyaman/graphlore/blob/master/CHANGELOG.md) · [Contributing](https://github.com/yasinyaman/graphlore/blob/master/CONTRIBUTING.md) · [Guidance for coding agents](https://github.com/yasinyaman/graphlore/blob/master/AGENTS.md)
 
 ## Development

@@ -385,4 +385,4 @@ doesn't support sampling), use the **assistant-driven fallback**: the assistant
 is already a capable model in the loop, so it reads `graphlore_communities` and
 pushes names back via **`graphlore_set_labels({"0": "Authentication", ...})`** —
 no key, no sampling, works in any client. The names persist to
-`.graphify_labels.json` and are patched into `graph.html`.
+`.graphify_labels.json` and go into `graph.html`.

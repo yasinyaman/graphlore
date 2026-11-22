@@ -38,6 +38,8 @@ def test_native_build_is_read_by_the_tools(native):
     out = server.graphlore_build(".")
     assert out.startswith("native engine "), out
     assert "graph.json ready" in out
+    page = native / "graphify-out" / "graph.html"     # graphlore's own view of it
+    assert "graph.html written" in out and server.viz.is_ours(page)
     graph = _graph(native)
     assert graph["graph"]["engine"] == "graphlore"
     assert graph["graph"]["schema_version"] == graphlore_engine.SCHEMA_VERSION
@@ -315,6 +317,7 @@ def test_native_communities_are_read_kept_and_reclustered(native):
     # cluster_only detects them again from the graph on disk, the same way
     out = server.graphlore_build(".", cluster_only=True)
     assert out.startswith("native engine: communities: "), out
+    assert "graph.html written" in out
     assert {n["id"]: n["community"] for n in _graph(native)["nodes"]} == first
     labels = json.loads((native / "graphify-out" / ".graphify_labels.json").read_text())
     assert labels[str(top)] == "The core"

@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""graphlore MCP Server — a Graphify graph, joined to real source spans.
+"""graphlore MCP Server — a codebase knowledge graph, joined to real source spans.
 
-Wraps the graphify CLI (https://graphify.net) so an AI assistant can query the
-codebase knowledge graph during development. Graphify builds the graph and ships
-its own embedded MCP server for navigating it; what this module adds is the span
-engine (ast + tree-sitter ``start..end`` ranges) and the tools that need it —
-locate/hidden links, fetch, skeleton, routes, package_apis, and
-cosmetic-vs-structural freshness. One active project at a time: PROJECT_DIR,
-switchable with graphlore_project.
+Lets an AI assistant query the codebase knowledge graph during development. The
+graph is built by graphlore's native engine (engine/, the graphlore-engine
+package), or by the graphify CLI (https://graphify.net) when the engine is not
+installed; what this module adds is the span engine (ast + tree-sitter
+``start..end`` ranges) and the tools that read the graph — locate/hidden links,
+fetch, skeleton, routes, package_apis, and cosmetic-vs-structural freshness.
+One active project at a time: PROJECT_DIR, switchable with graphlore_project.
 
 Tool surface: GRAPHLORE_TOOLSET=lean (the default) registers LEAN_TOOLS only,
 =full all of the tools below, =locate LOCATE_TOOLS.
@@ -123,7 +123,7 @@ from mcp.types import (
     ToolAnnotations,
 )
 
-from . import config, engine
+from . import config, engine, viz
 from . import history as history_mod  # noqa: F401  (tests reach _parse)
 from .apis import (  # noqa: F401  (re-exported for the tools + tests)
     _API_CACHE,
@@ -349,7 +349,7 @@ def _instructions(active: set[str] | frozenset[str] | None = None) -> str:
     """The server instructions for the active tool surface: a step or sentence
     naming a tool the toolset removed is left out, so the instructions never send
     an agent to a tool it cannot call."""
-    lines = ["Graphify knowledge graph tools for understanding a codebase.", "Recommended flow:"]
+    lines = ["Knowledge graph tools for understanding a codebase.", "Recommended flow:"]
     steps: list[str] = []
     if _has(active, "graphlore_overview"):
         steps.append("Call graphlore_overview first for orientation.")
@@ -1223,9 +1223,9 @@ def _client_supports_sampling(ctx: Context) -> bool:
         return False
 
 
-def _read_labels() -> dict[str, str]:
-    """graphify-out/.graphify_labels.json — community id -> name (CLI-written)."""
-    lp = _out_dir() / ".graphify_labels.json"
+def _read_labels(out_dir: Path | None = None) -> dict[str, str]:
+    """graphify-out/.graphify_labels.json — community id -> name."""
+    lp = (out_dir or _out_dir()) / ".graphify_labels.json"
     if not lp.exists():
         return {}
     try:
@@ -1750,13 +1750,13 @@ def graphlore_build(
     mode: str = "",
     update: bool = False,
     cluster_only: bool = False,
-    no_viz: bool = True,
+    no_viz: bool = False,
     code_only: bool = False,
     verbose: bool = False,
 ) -> str:
     """Build or update a knowledge graph from a folder. (Writes to graphify-out/.)
 
-    graphify writes ``graphify-out/`` INSIDE the folder it reads. Building a folder
+    The build writes ``graphify-out/`` INSIDE the folder it reads. Building a folder
     other than the active project (a subfolder, a sibling repository, an absolute
     path) therefore leaves the graph where this server does not read it; the result
     says so and names the ``graphlore_project`` call that switches to it.
@@ -1766,23 +1766,27 @@ def graphlore_build(
     vendored/minified files in the graph and on a graphify-out/ that git neither
     ignores nor tracks.
 
-    GRAPHLORE_ENGINE picks the extractor: ``graphify`` (default) runs the graphify
-    CLI; ``native`` runs graphlore's experimental native engine (the
-    graphlore-engine package: definitions with real spans, containment,
-    Markdown/RST headings, resolved imports, calls, bases and type references, and
-    communities, in 14 languages, all local); ``auto`` uses native when installed
-    and graphify for what native cannot do. With native, ``mode`` is refused,
+    GRAPHLORE_ENGINE picks the extractor: ``auto`` (default) runs graphlore's
+    native engine when it is installed (the graphlore-engine package, the
+    ``engine`` extra: definitions with real spans, containment, Markdown/RST
+    headings, resolved imports, calls, bases and type references, and
+    communities, in 14 languages, all local) and the graphify CLI otherwise;
+    ``native`` forces the engine; ``graphify`` the CLI (deprecated, like
+    ``mode``: they go in the next release). With native, ``mode`` is refused,
     ``cluster_only`` detects the communities of the graph on disk again,
-    ``update`` parses only the files changed since the last native build,
-    ``code_only`` skips the document headings
-    and ``no_viz`` has no effect.
+    ``update`` parses only the files changed since the last native build and
+    ``code_only`` skips the document headings.
+
+    Either way graphlore writes graph.html beside graph.json: one offline page
+    that opens on the communities and goes down to a community or a node's
+    neighbourhood (``no_viz=True`` skips it).
 
     Args:
         path: Folder to extract the graph from (relative to the project dir or absolute).
         mode: "deep" -> more aggressive INFERRED edges; empty -> default.
         update: True -> re-extract only changed files and merge into the existing graph.
         cluster_only: True -> rerun clustering only, without re-extraction.
-        no_viz: True -> skip the HTML visualization (faster for development).
+        no_viz: True -> do not write graph.html.
         code_only: True -> index only code via local AST (no LLM key needed); skips
             doc/paper/image files that would otherwise require semantic extraction.
             Forced on under GRAPHLORE_OFFLINE, where ``mode`` is refused. Without
@@ -1794,22 +1798,20 @@ def graphlore_build(
     if err:
         return err
     requested = engine.requested()
-    engine_note = ""
-    if requested != "graphify":
-        choice, engine_note = engine.choose(
-            requested=requested,
-            native_found=engine.available(),
-            graphify_found=shutil.which(GRAPHIFY_BIN) is not None,
-            mode=mode, update=update, cluster_only=cluster_only,
-            existing=_existing_engine(path) if update or cluster_only else None,
-        )
-        if choice == "error":
-            return _err(engine_note, False, code="engine")
-        if choice == "native" and cluster_only:
-            return _cluster_native(path, note=engine_note)
-        if choice == "native":
-            return _build_native(path, code_only=code_only, verbose=verbose, note=engine_note,
-                                 update=update)
+    choice, engine_note = engine.choose(
+        requested=requested,
+        native_found=engine.available(),
+        graphify_found=shutil.which(GRAPHIFY_BIN) is not None,
+        mode=mode, update=update, cluster_only=cluster_only,
+        existing=_existing_engine(path) if update or cluster_only else None,
+    )
+    if choice == "error":
+        return _err(engine_note, False, code="engine")
+    if choice == "native" and cluster_only:
+        return _cluster_native(path, note=engine_note, viz_page=not no_viz)
+    if choice == "native":
+        return _build_native(path, code_only=code_only, verbose=verbose, note=engine_note,
+                             update=update, viz_page=not no_viz)
     offline_note = ""
     if config.offline():
         if mode:
@@ -1832,8 +1834,7 @@ def graphlore_build(
         args.append("--update")
     if cluster_only:
         args.append("--cluster-only")
-    if no_viz:
-        args.append("--no-viz")
+    args.append("--no-viz")  # graph.html is graphlore's own, written below
     if code_only:
         args.append("--code-only")
     result = _run_cli(args)
@@ -1861,6 +1862,9 @@ def graphlore_build(
     if not verbose:
         result = _condense_build_log(result)
     notes = _build_notes(path)
+    written = _build_target(path) / config.OUT_DIR_NAME / "graph.json"
+    if not no_viz and written.is_file():
+        notes.append(_write_viz(written))
     if offline_note:
         notes.append(offline_note)
     if engine_note:
@@ -1906,6 +1910,19 @@ def _build_notes(path: str) -> list[str]:
     return notes
 
 
+def _write_viz(gp: Path) -> str:
+    """Write graphlore's graph.html beside the graph.json at ``gp``; the note the
+    reply carries."""
+    try:
+        graph = json.loads(gp.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return "graph.html not written: graph.json could not be read."
+    if not isinstance(graph, dict):
+        return "graph.html not written: graph.json is not a graph."
+    return viz.write(graph, gp.with_name("graph.html"),
+                     f"{gp.parent.parent.name} — graphlore", _read_labels(gp.parent))
+
+
 def _existing_engine(path: str) -> str | None:
     """The engine that built the graph a build of ``path`` would replace, when
     that is the graph this server reads."""
@@ -1917,6 +1934,7 @@ def _existing_engine(path: str) -> str | None:
 
 def _build_native(
     path: str, *, code_only: bool, verbose: bool, note: str, update: bool = False,
+    viz_page: bool = True,
 ) -> str:
     """graphlore_build with the native engine (GRAPHLORE_ENGINE=native / auto).
     ``update`` reuses the facts of the files unchanged since the last build."""
@@ -1932,6 +1950,9 @@ def _build_native(
         return _err(report, False)
     text = engine.render_report(report, verbose, update=update)
     notes = _build_notes(path)
+    written = target / config.OUT_DIR_NAME / "graph.json"
+    if viz_page and written.is_file():
+        notes.append(_write_viz(written))
     if code_only:
         notes.append("code_only=True: Markdown / reStructuredText headings were not read.")
     if note:
@@ -1941,7 +1962,7 @@ def _build_native(
     return _fmt({"output": text, "engine": "native", "report": report}, False, text)
 
 
-def _cluster_native(path: str, *, note: str) -> str:
+def _cluster_native(path: str, *, note: str, viz_page: bool = True) -> str:
     """graphlore_build(cluster_only=True) on a native graph: the engine detects
     the communities of the graph on disk again."""
     target = _build_target(path)
@@ -1953,6 +1974,8 @@ def _cluster_native(path: str, *, note: str) -> str:
     if isinstance(report, str):
         return _err(report, False)
     text = "native engine: " + engine.render_communities(report)
+    if viz_page:
+        text += "\n\n" + _write_viz(gp)
     if note:
         text += "\n\n" + note
     return _fmt({"output": text, "engine": "native", "communities": report}, False, text)
@@ -2270,6 +2293,7 @@ def graphlore_explain(node: str, as_json: bool = False, limit: int = _EXPLAIN_NE
 def graphlore_add(url: str, author: str = "", contributor: str = "") -> str:
     """Add an external source to the graph (arXiv paper, tweet, etc.). http/https only.
 
+    Deprecated: it runs the graphify CLI, which goes in the next release.
     Fetches the URL, so it is refused under GRAPHLORE_OFFLINE.
 
     Args:
@@ -2286,7 +2310,11 @@ def graphlore_add(url: str, author: str = "", contributor: str = "") -> str:
         args += ["--author", author]
     if contributor:
         args += ["--contributor", contributor]
-    return _cli_reply(_run_cli(args))
+    out = _run_cli(args)
+    if not out.startswith("ERROR"):
+        out += ("\n\ngraphlore_add is deprecated: it runs the graphify CLI, which goes "
+                "in the next release.")
+    return _cli_reply(out)
 
 
 # ---------------------------------------------------------------------------
@@ -2982,11 +3010,11 @@ def graphlore_set_labels(
     The calling assistant is already an LLM in the loop: it names the communities
     itself (e.g. from graphlore_communities members) and pushes them here. Names are
     written to graphify-out/.graphify_labels.json and, when regenerate=True, baked
-    into the existing graph.html in place so the visualization shows them.
+    into the existing graph.html so the visualization shows them.
 
     Args:
         names: {community_id: name}, e.g. {"0": "Authentication", "2": "Test server"}.
-        regenerate: True -> also patch graph.html with the new names (if it exists).
+        regenerate: True -> also put the new names in graph.html (if it exists).
     """
     graph = _load_graph()
     if isinstance(graph, str):
@@ -3013,11 +3041,14 @@ def graphlore_set_labels(
         json.dumps(labels, ensure_ascii=False), encoding="utf-8"
     )
 
-    # 2) patch graph.html in place (quoted-exact: '"Community 1"' != '"Community 10"')
+    # 2) graph.html: graphlore's own is written again; graphify's is patched in
+    # place (quoted-exact: '"Community 1"' != '"Community 10"')
     gh = _out_dir() / "graph.html"
     patched = None
-    viz_note = "graph.html not found (built with --no-viz?) — labels saved, viz unchanged."
-    if regenerate and gh.exists():
+    viz_note = "graph.html not found (built with no_viz?) — labels saved, viz unchanged."
+    if regenerate and gh.exists() and viz.is_ours(gh):
+        viz_note = _write_viz(_graph_path())
+    elif regenerate and gh.exists():
         try:
             html: str | None = gh.read_text(encoding="utf-8")
         except UnicodeDecodeError:
@@ -5541,6 +5572,8 @@ def graphlore_prune(dry_run: bool = True, as_json: bool = False) -> str:
     _GRAPH_CACHE.pop(str(gp), None)
 
     lines.append(f"\ngraph.json rewritten: {gp}")
+    if viz.is_ours(gp.with_name("graph.html")):
+        lines.append(_write_viz(gp))
     lines.append("Run graphlore_freshness to confirm the deletions no longer force a rebuild.")
     return _fmt(payload, as_json, "\n".join(lines))
 
