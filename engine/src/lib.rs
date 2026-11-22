@@ -7,6 +7,7 @@
 //! graphlore's readers — and graphify's own `query`/`path`/`explain` — accept
 //! (`graph`). Nothing here reaches the network.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -27,6 +28,7 @@ pub mod report;
 pub mod resolve;
 pub mod resources;
 pub mod state;
+pub mod versions;
 pub mod walk;
 
 #[cfg(feature = "python")]
@@ -126,6 +128,105 @@ fn read_all(
         .collect()
 }
 
+/// A library wrapper's name (`Optional`, `Future`, `Provider`, `Box`) is a
+/// wrapper only where the project does not mean its own type of that name.
+/// The reader works a file at a time and cannot know; so the files that see a
+/// project type named like a wrapper are read again with that name as an
+/// ordinary type. A file sees it when it defines it, sits in the directory of
+/// a file that does, or imports it from where it is defined (not
+/// `java.util.Optional` beside the project's `com.acme.Optional`). The answer
+/// is the same from the cache as from the sources: what a file defines and
+/// imports does not depend on it.
+fn reread_shadowed(reads: &mut [Read], files: &[walk::Candidate], timeout: Option<Duration>) {
+    use std::collections::{HashMap, HashSet};
+    let same_language = |a: Lang, b: Lang| {
+        let ecma = |l: Lang| matches!(l, Lang::JavaScript | Lang::TypeScript | Lang::Tsx);
+        a == b || (ecma(a) && ecma(b))
+    };
+    let dir = |p: &str| p.rfind('/').map_or(String::new(), |i| p[..i].to_string());
+    // (language, name) -> the files that define a type of that name
+    let mut defined: HashMap<(Lang, String), Vec<usize>> = HashMap::new();
+    for (i, r) in reads.iter().enumerate() {
+        let Read::Facts(f, _, _) = r else { continue };
+        let Some(lang) = f.lang else { continue };
+        for d in &f.defs {
+            if d.kind.is_class_like() && refs::wrapper_name(&d.name) {
+                let at = defined.entry((lang, d.name.clone())).or_default();
+                if !at.contains(&i) {
+                    at.push(i);
+                }
+            }
+        }
+    }
+    if defined.is_empty() {
+        return;
+    }
+    let facts_of = |i: usize| match &reads[i] {
+        Read::Facts(f, _, _) => Some(f),
+        Read::Unreadable(_) => None,
+    };
+    let mut plan: HashMap<usize, HashSet<String>> = HashMap::new();
+    for (i, r) in reads.iter().enumerate() {
+        let Read::Facts(f, _, _) = r else { continue };
+        let Some(lang) = f.lang else { continue };
+        for ((l, name), at) in &defined {
+            if !same_language(*l, lang) {
+                continue;
+            }
+            let imported = || {
+                f.imports.iter().any(|imp| {
+                    let module = imp.module.replace("::", ".").replace(['\\', '/'], ".");
+                    let named = imp.names.iter().any(|(n, _)| n == name)
+                        || module.rsplit('.').next() == Some(name.as_str());
+                    // from where the project defines it: its package, or a
+                    // path inside the project
+                    let from_project = at.iter().filter_map(|&d| facts_of(d)).any(|d| {
+                        match d.package.as_deref() {
+                            Some(pkg) => {
+                                let pkg = pkg.replace('\\', ".");
+                                module == pkg || module == format!("{pkg}.{name}")
+                            }
+                            None => {
+                                imp.module.starts_with('.')
+                                    || imp.module.starts_with("crate")
+                                    || imp.module.starts_with("super")
+                                    || imp.module.starts_with("self")
+                                    || lang == Lang::Python
+                            }
+                        }
+                    });
+                    let whole = imp.form == facts::ImportForm::Wildcard;
+                    from_project && (named || whole)
+                })
+            };
+            let sees = at.contains(&i)
+                || at.iter().filter_map(|&d| facts_of(d)).any(|d| dir(&d.path) == dir(&f.path))
+                || imported();
+            if sees {
+                plan.entry(i).or_default().insert(name.clone());
+            }
+        }
+    }
+    let again: Vec<(usize, Option<FileFacts>)> = plan
+        .into_par_iter()
+        .map(|(i, names)| {
+            let c = &files[i];
+            let walk::FileKind::Code(lang) = c.kind else { return (i, None) };
+            let Ok(src) = std::fs::read(&c.abs) else { return (i, None) };
+            let lang = lang::detect(&c.rel, Some(&src)).unwrap_or(lang);
+            let facts = parse::with_shadowed(std::sync::Arc::new(names), || {
+                parse::file_facts(&c.rel, &src, Some(lang), None, timeout)
+            });
+            (i, Some(facts))
+        })
+        .collect();
+    for (i, facts) in again {
+        if let (Some(facts), Read::Facts(old, _, _)) = (facts, &mut reads[i]) {
+            *old = facts;
+        }
+    }
+}
+
 /// Build the graph and its report. Writes `opts.out` when it is set.
 pub fn build_graph(opts: &BuildOptions) -> Result<(Value, BuildReport), String> {
     let started = Instant::now();
@@ -164,6 +265,9 @@ pub fn build_graph(opts: &BuildOptions) -> Result<(Value, BuildReport), String> 
             .install(|| read_all(&found.files, opts.parse_timeout, cached.as_ref())),
         None => read_all(&found.files, opts.parse_timeout, cached.as_ref()),
     };
+
+    let mut reads = reads;
+    reread_shadowed(&mut reads, &found.files, opts.parse_timeout);
 
     lap("parse", &mut phases);
     let mut report = BuildReport {
@@ -225,6 +329,19 @@ pub fn build_graph(opts: &BuildOptions) -> Result<(Value, BuildReport), String> 
 
     let mut assembled = graph::assemble::assemble(&facts);
     lap("assemble", &mut phases);
+    // the language version each file's project states, per language
+    let declared = versions::read(&root, &found.manifests);
+    let mut language_versions: BTreeMap<String, BTreeMap<String, usize>> = BTreeMap::new();
+    for f in &facts {
+        let Some(lang) = f.lang else { continue };
+        if let Some(v) = versions::of_file(&declared, &f.path, lang.name()) {
+            *language_versions
+                .entry(lang.name().to_string())
+                .or_default()
+                .entry(v.to_string())
+                .or_default() += 1;
+        }
+    }
     let (ext_nodes, edges, resolution, unresolved) =
         resolve::resolve(&root, &facts, &mut assembled, found.manifests, opts.unresolved.is_some());
     if let Some(path) = &opts.unresolved {
@@ -300,6 +417,7 @@ pub fn build_graph(opts: &BuildOptions) -> Result<(Value, BuildReport), String> 
             "engine_version": VERSION,
             "schema_version": SCHEMA_VERSION,
             "languages": languages,
+            "language_versions": language_versions,
             "documents": report.documents,
             "resolution": report.resolution,
             "communities": communities.header,
@@ -402,7 +520,9 @@ pub fn file_spans(src: &[u8], rel: &str) -> Vec<(u32, u32, u32, String)> {
     file_facts(src, rel)
         .defs
         .into_iter()
-        .filter(|d| !d.extra)
+        // (a block is a scope of the resolver's, no definition; nor is a
+        // variable only this grammar took for a function's declaration)
+        .filter(|d| !d.extra && !d.block && !d.unspanned)
         .map(|d| (d.region_start, d.end_line, d.def_line, d.qualname))
         .collect()
 }

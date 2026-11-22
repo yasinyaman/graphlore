@@ -114,6 +114,25 @@ pub struct Def {
     /// for the spans, no node and no name.
     #[serde(default)]
     pub misread: bool,
+    /// A misread declaration `spans.py`'s grammar reads as the variable it
+    /// is (`Random rnd(seed());`): no span either.
+    #[serde(default)]
+    pub unspanned: bool,
+    /// A closure no definition holds (`test('…', () => { … })`, an RSpec
+    /// `it '…' do … end`): no node and no name, only the scope of the locals
+    /// declared in it. Its parent is the block around it, if any.
+    #[serde(default)]
+    pub block: bool,
+    /// Written in a closure that is called where it is written, as the value
+    /// of a declaration of this name (`var Dataset = (function () { function
+    /// Dataset() {} return Dataset })()`): the scope around that closure
+    /// knows it by its name too.
+    #[serde(default)]
+    pub returned_out: bool,
+    /// A C# property with a body (`get { … }`, `set => …`, `=> expr`): what
+    /// its body uses is the property's use, as a method's is the method's.
+    #[serde(default)]
+    pub computed: bool,
     /// C, C++: a field declared with an anonymous struct type (`struct {
     /// void *data; void (*addRead)(void *); } ev;`): the bytes of that body,
     /// whose members the grammar gives to the struct around.
@@ -140,6 +159,10 @@ pub struct Def {
     /// The names of the type parameters a callable declares (`<T>`).
     #[serde(default)]
     pub type_params: Vec<String>,
+    /// For each of `type_params`, the first type it is bound by (`<S: Sink>`,
+    /// `where T : Foo`): what a member asked of the parameter is a member of.
+    #[serde(default)]
+    pub type_bounds: Vec<Option<Vec<String>>>,
     /// The type parameters of a type that are bound by the type itself
     /// (`interface Builder<T : Builder<T>>`): a method that returns one
     /// returns the type it was called on.
@@ -339,6 +362,14 @@ pub struct ImportFact {
     pub public: bool,
     #[serde(skip)]
     pub byte: usize,
+    /// Rust: the block a `use` is written in (`fn f() { use m::g; … }`), whose
+    /// names only it sees; `None` for a `use` of the module.
+    #[serde(default)]
+    pub scope: Option<(usize, usize)>,
+    /// Rust 2018 paths: the inline modules around a `use` whose path starts at
+    /// a plain name, which is looked up in the innermost of them first.
+    #[serde(default)]
+    pub within: Vec<String>,
 }
 
 /// What a reference is.
@@ -424,8 +455,19 @@ pub struct Local {
     #[serde(default)]
     pub written_head: Option<String>,
     pub from_def: Option<usize>,
-    #[serde(skip)]
+    /// Where it is declared: a use written before it is no use of it, and of
+    /// two of one name the one declared last before a use is meant.
+    #[serde(default)]
     pub byte: usize,
+    /// Where the block it is declared in ends (0: the whole definition, or a
+    /// language without block scopes): of two of one name, a use has the one
+    /// whose block it is written in.
+    #[serde(default)]
+    pub until: usize,
+    /// Where its declaration ends, for one declared with a value (0: none):
+    /// inside its own value the name is still the outer one.
+    #[serde(default)]
+    pub after: usize,
 }
 
 /// A reference's context. An alias, not `&'static str` written out, so that
@@ -472,13 +514,18 @@ pub struct RefFact {
     /// (`client.Get<User>(id)`: 1); 0 when it writes none.
     #[serde(default)]
     pub targs: u8,
+    /// C#, for a type written: how many type arguments it is written with
+    /// (`RestResponse` is 0, `RestResponse<T>` 1). C# tells types of one
+    /// name apart by it.
+    #[serde(default)]
+    pub arity: Option<u8>,
     /// JS `this.x` in a function expression no definition holds: what the
     /// function is attached to, `app` of `app[method] = function () {…}`, or
     /// the call it is passed to, `UserSchema.path.().validate` of
     /// `UserSchema.path('name').validate(function () {…})`.
     #[serde(default)]
     pub this_of: Option<Vec<String>>,
-    #[serde(skip)]
+    #[serde(default)]
     pub byte: usize,
 }
 
@@ -494,6 +541,10 @@ pub enum Implicit {
     Typed(Vec<String>),
     /// The value a function returns: its declared result.
     Return,
+    /// Beside a value whose type it takes: the other side of `==`, the target
+    /// of an assignment, the subject of a `switch` (`b == .body`, `case
+    /// .body:`). The value's path.
+    Value(Vec<String>),
 }
 
 /// A parameter of a callable.
@@ -528,6 +579,9 @@ pub enum Arg {
     Unknown,
     Str,
     Num,
+    /// A number written as an integer literal (`3`, `0x1F`; not `3L`, `1.5`,
+    /// `2f`): Java ranks `int` over `long`, `float`, `double` for it.
+    Int,
     Bool,
     Null,
     /// A lambda or function literal.
@@ -593,6 +647,17 @@ pub struct FileFacts {
     /// name or as its default (JS/TS `export { a as b }`, `export default X`,
     /// `module.exports = X`).
     pub exports: Vec<(String, String)>,
+    /// C++ `namespace u = util;`: the alias and the namespace it names.
+    #[serde(default)]
+    pub ns_aliases: Vec<(String, Vec<String>)>,
+    /// C++ `inline namespace v2 { … }`: the first byte of each, whose members
+    /// are members of the namespace around ([namespace.def]).
+    #[serde(default)]
+    pub inline_namespaces: Vec<usize>,
+    /// Scala `export p.print`, `export q.{a, b}`: the first byte of the
+    /// clause and the path to each member it forwards (`["p", "print"]`).
+    #[serde(default)]
+    pub forwards: Vec<(usize, Vec<String>)>,
     pub refs: Vec<RefFact>,
     pub locals: Vec<Local>,
     /// Names a type answers to without a definition of that name: Ruby
@@ -603,6 +668,14 @@ pub struct FileFacts {
     /// methods of.
     #[serde(default)]
     pub spec_includes: Vec<Vec<String>>,
+    /// RSpec `shared_examples 'an adapter' do … end`: its name and the lines
+    /// of its block.
+    #[serde(default)]
+    pub shared_examples: Vec<(String, u32, u32)>,
+    /// RSpec `it_behaves_like 'an adapter'`, `include_examples '…'`: the name
+    /// and the line, where the examples run with the names in scope there.
+    #[serde(default)]
+    pub example_includes: Vec<(String, u32)>,
     /// C, C++: a function put in a slot of a struct (`.close = netClose` in
     /// an initializer, `c->funcs->read = netRead`).
     #[serde(default)]
@@ -653,10 +726,15 @@ impl FileFacts {
             test_regions: Vec::new(),
             imports: Vec::new(),
             exports: Vec::new(),
+            ns_aliases: Vec::new(),
+            inline_namespaces: Vec::new(),
+            forwards: Vec::new(),
             refs: Vec::new(),
             locals: Vec::new(),
             attrs: Vec::new(),
             spec_includes: Vec::new(),
+            shared_examples: Vec::new(),
+            example_includes: Vec::new(),
             slots: Vec::new(),
             models: Vec::new(),
             callbacks: Vec::new(),

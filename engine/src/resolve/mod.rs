@@ -174,6 +174,9 @@ struct BoundArg {
 struct Scope {
     /// Local name -> what it is bound to, and the import that bound it.
     bindings: HashMap<String, (Bind, usize)>,
+    /// Rust: names a `use` in a block binds there only: the block's range,
+    /// the name, what it is bound to, the import.
+    scoped: Vec<(usize, usize, String, Bind, usize)>,
     /// Wildcard imports, with the import index.
     stars: Vec<(Target, usize)>,
     /// What each import's module resolved to.
@@ -321,6 +324,8 @@ fn is_core_member(fam: Family, name: &str) -> bool {
 /// Methods of Ruby's core objects (String, Array, Hash, Object): a project
 /// method of one of these names is not what an untyped receiver is asked.
 const RUBY_CORE_METHODS: &[&str] = &[
+    "dup",
+    "clone",
     "shift",
     "unshift",
     "gsub",
@@ -782,6 +787,19 @@ fn is_collection_step(seg: &str) -> bool {
         || PAIRING_METHODS.contains(&seg)
         || MAP_VIEWS.contains(&seg)
 }
+
+/// Puts back the file a walk was asked from when the walk ends.
+struct Asking<'a>(&'a RefCell<Option<usize>>, Option<usize>);
+
+impl Drop for Asking<'_> {
+    fn drop(&mut self) {
+        *self.0.borrow_mut() = self.1;
+    }
+}
+
+/// What a JavaScript function has of its own: a method read with one of
+/// these after it is the function, not a getter's value.
+const FUNCTION_MEMBERS: &[&str] = &["bind", "call", "apply", "name", "length", "prototype"];
 
 /// `[]`, `[*]`, `[v]`: one of what precedes (see `refs::ELEMENT`).
 fn is_element_marker(seg: &str) -> bool {
@@ -1305,6 +1323,9 @@ pub struct Project<'a> {
     bases_memo: RefCell<HashMap<DefRef, Vec<DefRef>>>,
     /// `(file, definition, name)` -> typed local / parameter.
     locals: HashMap<(usize, usize, String), usize>,
+    /// The locals of one name in one definition, in the order they are
+    /// declared, where there are several (Rust `let r = a(); let r = b();`).
+    shadows: HashMap<(usize, usize, String), Vec<usize>>,
     /// type -> field name -> the field's local (its declared or assigned type).
     fields: HashMap<DefRef, HashMap<String, (usize, usize)>>,
     depth: RefCell<usize>,
@@ -1349,6 +1370,15 @@ pub struct Project<'a> {
     typing: RefCell<HashSet<(usize, usize)>>,
     /// The use being resolved, when it is a call: `(file, index of the use)`.
     cur: RefCell<Option<(usize, usize)>>,
+    /// Where the use being resolved is written, whatever its kind: `(file,
+    /// byte)`. What a name means depends on it (a block's local, a
+    /// redeclaration).
+    site: RefCell<Option<(usize, usize)>>,
+    /// What the reference being resolved is (a type written, a call, …).
+    ref_kind: RefCell<Option<RefKind>>,
+    /// The file the path being walked is written in: of several blocks of
+    /// one namespace, its own and those it includes come first.
+    asking: RefCell<Option<usize>>,
     /// How many arguments the call being resolved passes.
     args: RefCell<Option<u8>>,
     /// One of them is `this`.
@@ -1367,6 +1397,12 @@ fn qual_key(fam: Family, qualname: &str) -> String {
     } else {
         qualname.to_string()
     }
+}
+
+/// The definition around definition `x` of file `f`: where what its
+/// signature writes is looked up.
+fn defs_parent(files: &[FileFacts], f: usize, x: usize) -> Option<usize> {
+    files[f].defs[x].parent
 }
 
 fn is_top(defs: &[Def], d: usize) -> bool {
@@ -1431,6 +1467,7 @@ impl<'a> Project<'a> {
             ext_index: RefCell::new(HashMap::new()),
             bases_memo: RefCell::new(HashMap::new()),
             locals: HashMap::new(),
+            shadows: HashMap::new(),
             fields: HashMap::new(),
             depth: RefCell::new(0),
             types_only: RefCell::new(false),
@@ -1450,6 +1487,9 @@ impl<'a> Project<'a> {
             typing_value: RefCell::new(false),
             typing: RefCell::new(HashSet::new()),
             cur: RefCell::new(None),
+            site: RefCell::new(None),
+            ref_kind: RefCell::new(None),
+            asking: RefCell::new(None),
             args: RefCell::new(None),
             self_arg: RefCell::new(false),
             recv_types: RefCell::new(HashMap::new()),
@@ -1462,7 +1502,8 @@ impl<'a> Project<'a> {
         // the files a file's imported names live in (`use A\B\C`, `import a.b.C`)
         for f in 0..files.len() {
             let mut more = Vec::new();
-            for (b, _) in p.scopes[f].bindings.values() {
+            let scoped = p.scopes[f].scoped.iter().map(|(_, _, _, b, _)| b);
+            for b in p.scopes[f].bindings.values().map(|(b, _)| b).chain(scoped) {
                 if let Some(Target::Def((g, _))) = p.eval(b, 2) {
                     more.push(g);
                 }
@@ -1473,6 +1514,40 @@ impl<'a> Project<'a> {
         // passes on with `pub use crate::error::Error;`. Only a star import:
         // a crate root re-exports most of the crate, and a file that names
         // one thing out of it does not see the rest
+        // C# `global using N;`: a namespace every file under the directory
+        // of the file that writes it has open (the project it is compiled in)
+        let mut global: Vec<(String, Target)> = Vec::new();
+        for (g, file) in files.iter().enumerate() {
+            if p.family[g] != Some(Family::CSharp) {
+                continue;
+            }
+            let dir = match file.path.rfind('/') {
+                Some(i) => file.path[..=i].to_string(),
+                None => String::new(),
+            };
+            for (star, i) in &p.scopes[g].stars {
+                let written = file.imports.get(*i).is_some_and(|imp| imp.public);
+                if written && !matches!(star, Target::Ext(..)) {
+                    global.push((dir.clone(), star.clone()));
+                }
+            }
+        }
+        if !global.is_empty() {
+            for (f, file) in files.iter().enumerate() {
+                if p.family[f] != Some(Family::CSharp) {
+                    continue;
+                }
+                for (dir, star) in &global {
+                    if file.path.starts_with(dir.as_str()) {
+                        if let Target::Module(fs) = star {
+                            p.scopes[f].imported.extend(fs.iter().copied());
+                        }
+                        // (no import of this file's to count the use on)
+                        p.scopes[f].stars.push((star.clone(), usize::MAX));
+                    }
+                }
+            }
+        }
         let public: Vec<Vec<usize>> = (0..files.len()).map(|g| p.rust_public(g)).collect();
         for f in 0..files.len() {
             if p.family[f] != Some(Family::Rust) {
@@ -1587,7 +1662,7 @@ impl<'a> Project<'a> {
                 }
                 // a class with no name of its own answers to none, nor a
                 // variable the grammar took for a declaration
-                if d.anonymous || d.misread {
+                if d.anonymous || d.misread || d.block {
                     continue;
                 }
                 // a method declared for a type (Go receiver, Rust impl, C++
@@ -1597,10 +1672,29 @@ impl<'a> Project<'a> {
                 let bare = (fam == Some(Family::C) && d.kind.is_class_like())
                     .then(|| specialized(&d.name))
                     .flatten();
-                if is_top(&f.defs, di) && !(d.owner.is_some() && d.kind.is_callable()) {
+                // (nor is a type an `impl` gives its trait: `type Output = …`)
+                let of_owner =
+                    d.owner.is_some() && (d.kind.is_callable() || d.kind == DefKind::TypeAlias);
+                // (nor a Go struct's field, whatever holds the struct: a field
+                // of the anonymous struct a test table is made of)
+                let go_field = fam == Some(Family::Go) && d.kind == DefKind::Property;
+                if is_top(&f.defs, di) && !of_owner && !go_field {
                     top.entry(d.name.clone()).or_default().push(di);
                     if let Some(b) = bare {
                         top.entry(b.to_string()).or_default().push(di);
+                    }
+                }
+                // (what a module pattern's function returns is a name of
+                // the scope its declaration is written in)
+                if d.returned_out {
+                    match d.parent.and_then(|b| f.defs[b].parent) {
+                        Some(outer) => children
+                            .entry(outer)
+                            .or_default()
+                            .entry(d.name.clone())
+                            .or_default()
+                            .push(di),
+                        None => top.entry(d.name.clone()).or_default().push(di),
                     }
                 }
                 if let Some(par) = d.parent {
@@ -1656,6 +1750,7 @@ impl<'a> Project<'a> {
 
     fn index_locals(&mut self) {
         let mut locals = HashMap::new();
+        let mut shadows: HashMap<(usize, usize, String), Vec<usize>> = HashMap::new();
         let mut fields: HashMap<DefRef, HashMap<String, (usize, usize)>> = HashMap::new();
         for (fi, f) in self.files.iter().enumerate() {
             for (li, l) in f.locals.iter().enumerate() {
@@ -1665,10 +1760,19 @@ impl<'a> Project<'a> {
                         fields.entry(c).or_default().entry(l.name.clone()).or_insert((fi, li));
                     }
                 } else {
-                    locals.insert((fi, d, l.name.clone()), li);
+                    // (of several, the first is the one the index names)
+                    locals.entry((fi, d, l.name.clone())).or_insert(li);
+                    shadows.entry((fi, d, l.name.clone())).or_default().push(li);
                 }
             }
         }
+        shadows.retain(|_, v| v.len() > 1);
+        for (key, v) in shadows.iter_mut() {
+            v.sort_by_key(|&li| (self.files[key.0].locals[li].byte, li));
+            // (the one the index names is the first declared)
+            locals.insert(key.clone(), v[0]);
+        }
+        self.shadows = shadows;
         self.locals = locals;
         self.fields = fields;
     }
@@ -1712,6 +1816,20 @@ impl<'a> Project<'a> {
                 return self.elem_of_as(f, d, of, last);
             }
         }
+        // Rust `Self` written in a struct's, enum's or trait's own body is
+        // that type (r[names.scopes.self.def-scope])
+        // Rust `Self` written in a struct's or enum's own fields is that type
+        // (r[names.scopes.self.def-scope])
+        if let (Some(x), [one]) = (d, path) {
+            // (the reader writes the `Self` type as the word for the object)
+            if (one == "Self" || one == "self")
+                && self.family[f] == Some(Family::Rust)
+                && self.files[f].defs[x].kind.is_class_like()
+                && self.files[f].defs[x].owner.is_none()
+            {
+                return Some(((f, x), Confidence::Extracted));
+            }
+        }
         let found = self.resolve_path(f, d, path, true);
         match found? {
             (Target::Def(r), conf) => {
@@ -1720,7 +1838,9 @@ impl<'a> Project<'a> {
                 // C, C++ `using AsyncResponseC = AsyncWrapper<Response, true>;`,
                 // `typedef struct conn conn_t;`: the type the alias names, and of
                 // a template's specializations the one its arguments fit
-                let c_alias = k == DefKind::TypeAlias && self.family[r.0] == Some(Family::C);
+                // (and Kotlin / Swift `typealias Store = Repo`)
+                let c_alias = k == DefKind::TypeAlias
+                    && matches!(self.family[r.0], Some(Family::C | Family::Jvm | Family::Swift));
                 // `typedef struct reader { … } reader;`: the struct written
                 // inside the alias, which holds the members
                 let inside = c_alias
@@ -1744,6 +1864,13 @@ impl<'a> Project<'a> {
                 if let Some(t) = aliased {
                     Some((self.specialization_for(t, &def.alias_args), conf))
                 } else if k.is_class_like() || k == DefKind::TypeAlias {
+                    Some((r, conf))
+                } else if k.is_callable()
+                    && self.family[r.0] == Some(Family::Ecma)
+                    && self.has_prototype_members(r)
+                {
+                    // `function Widget() {}` with `Widget.prototype.render =
+                    // function …`: what `new Widget()` makes has those
                     Some((r, conf))
                 } else if let Some((t, declared)) =
                     k.is_callable().then(|| self.return_type(r)).flatten()
@@ -1874,7 +2001,32 @@ impl<'a> Project<'a> {
                 },
                 None => continue,
             };
-            score += self.arg_fits(f, d, c, &a.kind, &param.ty)?;
+            // (C# `int`, `string`, `object` and Java's primitives are types
+            // the path of a written type leaves empty: the written text is
+            // the type)
+            let written: Vec<String>;
+            let w = param.written.trim().trim_end_matches('?');
+            // (only for a literal: a C# type of the project can convert to a
+            // predefined one through an `implicit operator`)
+            let literal = !matches!(a.kind, crate::facts::Arg::Path(_));
+            let ty = if literal
+                && (matches!(self.family[c.0], Some(Family::CSharp | Family::C))
+                    || self.files[c.0].lang == Some(crate::lang::Lang::Java))
+                && param.ty.is_empty()
+                && !w.is_empty()
+                && w.chars().all(char::is_alphanumeric)
+            {
+                written = vec![w.to_string()];
+                &written
+            } else {
+                &param.ty
+            };
+            score += self.arg_fits(f, d, c, &a.kind, ty)?;
+        }
+        // a `params` member applicable only in its expanded form is worse than
+        // one applicable in its normal form (C# §12.6.4.3)
+        if variadic && r.args.is_some_and(|a| usize::from(a) != plist.len()) {
+            score -= 1;
         }
         Some(score)
     }
@@ -1901,10 +2053,41 @@ impl<'a> Project<'a> {
             None if strict && self.param_type(c, ty).is_some() => None,
             None => Some(0),
         };
+        // Java: a number or a flag fits a primitive parameter without boxing,
+        // which phase 1 of overload resolution takes first (JLS 15.12.2.2);
+        // of the primitives an integer literal widens to, the narrowest is
+        // the most specific (15.12.2.5: int <: long <: float <: double)
+        let java = self.files[c.0].lang == Some(crate::lang::Lang::Java);
+        let unboxed = java
+            && matches!(
+                name.as_str(),
+                "int" | "long" | "short" | "byte" | "double" | "float" | "char" | "boolean"
+            );
+        let widening = |n: &str| match n {
+            "int" => 4,
+            "long" => 3,
+            "float" => 2,
+            "double" => 1,
+            _ => 0,
+        };
         match arg {
+            // (C++: a string literal is a `const char*` exactly, a
+            // `std::string` through a user-defined conversion)
+            Arg::Str if self.family[c.0] == Some(Family::C) => {
+                literal(Prim::Str).map(|x| x + i32::from(name == "char"))
+            }
             Arg::Str => literal(Prim::Str),
-            Arg::Num => literal(Prim::Num),
-            Arg::Bool => literal(Prim::Bool),
+            Arg::Num => literal(Prim::Num).map(|x| x + i32::from(unboxed)),
+            Arg::Int if java && matches!(name.as_str(), "short" | "byte" | "char") => None,
+            // (C++: an `int` parameter is an exact match, any other numeric
+            // type a conversion, [over.ics.rank])
+            Arg::Int if self.family[c.0] == Some(Family::C) => {
+                literal(Prim::Num).map(|x| x + if name == "int" { 2 } else { 0 })
+            }
+            Arg::Int => {
+                literal(Prim::Num).map(|x| x + if unboxed { 1 + widening(name) } else { 0 })
+            }
+            Arg::Bool => literal(Prim::Bool).map(|x| x + i32::from(unboxed)),
             Arg::Class => literal(Prim::Class),
             // a lambda is something to call: no string, number, flag or
             // class (it may be an interface of one method, which a class of
@@ -2104,6 +2287,17 @@ impl<'a> Project<'a> {
         }
     }
 
+    /// Whether functions are assigned to the function `c` as its members in
+    /// its file (an ES5 constructor's `prototype`, see `assigned_member`).
+    fn has_prototype_members(&self, c: DefRef) -> bool {
+        let name = self.def(c).name.as_str();
+        self.def(c).object.is_none()
+            && self.files[c.0]
+                .defs
+                .iter()
+                .any(|x| x.kind.is_callable() && x.object.as_deref() == Some(name))
+    }
+
     /// Whether a Python method is a `@property` (or `@cached_property`).
     fn is_property(&self, c: DefRef) -> bool {
         self.files[c.0].refs.iter().any(|r| {
@@ -2139,13 +2333,18 @@ impl<'a> Project<'a> {
             .map(|&i| (m.0, i))
             .filter(|r| {
                 let x = self.def(*r);
-                x.kind.is_callable() && !x.decl_only && x.owner == d.owner
+                // (of one scope: `::Helper` and `app::Helper` are no overloads
+                // of each other)
+                x.kind.is_callable() && !x.decl_only && x.owner == d.owner && x.parent == d.parent
             })
             .collect();
         out.sort();
         // Swift: those an extension of the type adds under the name
         // (`extension Session { func request(_ endpoint: Endpoint) }`)
-        if self.family[m.0] == Some(Family::Swift) {
+        // (never for a function declared in a function: its overloads are
+        // its own scope's)
+        let local = d.parent.is_some_and(|p| self.files[m.0].defs[p].kind.is_callable());
+        if self.family[m.0] == Some(Family::Swift) && !local {
             if let Some(c) = self.class_of(m.0, Some(m.1)) {
                 for x in self.members(c, &d.name) {
                     let def = self.def(x);
@@ -2197,14 +2396,48 @@ impl<'a> Project<'a> {
         if !self.family[m.0].is_some_and(Family::overloads) {
             return vec![m];
         }
+        // C#: no method of the type takes as many type arguments as the call
+        // writes; an extension of the name that does is what is called
+        // (`parser.ParseArguments<A, B>(args)` beside `ParseArguments<T>`)
+        let wider = || -> Vec<DefRef> {
+            if r.targs == 0 || self.family[m.0] != Some(Family::CSharp) {
+                return Vec::new();
+            }
+            let found: Vec<DefRef> = self
+                .extensions
+                .get(&self.def(m).name)
+                .into_iter()
+                .flatten()
+                .copied()
+                .filter(|e| {
+                    self.family[e.0] == Some(Family::CSharp)
+                        && self.def(*e).type_params.len() == usize::from(r.targs)
+                })
+                .collect();
+            if found.len() <= 4 {
+                found
+            } else {
+                Vec::new()
+            }
+        };
         let all = self.overloads(m);
         if all.len() < 2 {
+            if self.def(m).type_params.len() != usize::from(r.targs) {
+                let wider = wider();
+                if !wider.is_empty() {
+                    return wider;
+                }
+            }
             return vec![m];
         }
         let fits: Vec<(DefRef, i32)> =
             all.iter().filter_map(|c| self.fit(f, d, *c, r).map(|s| (*c, s))).collect();
         let mut best = self.exact_first(self.top_fits(&fits), r);
         if best.is_empty() {
+            let wider = wider();
+            if !wider.is_empty() {
+                return wider;
+            }
             return vec![m];
         }
         // a call that writes no type arguments, between a callable and its
@@ -2219,6 +2452,39 @@ impl<'a> Project<'a> {
                         || plain.iter().any(|p| self.same_parameters(*p, *c))
                 });
             if twins && plain.len() < best.len() {
+                best = plain;
+            }
+        }
+        // C++ and Swift: of candidates that fit alike, one that is no template
+        // (no generic parameters) is better ([over.match.best]; Swift's
+        // isDeclAsSpecializedAs opens the generic one's parameters)
+        // Only a generic one whose parameters are its type parameters
+        // themselves (`Show<T>(T x)`) is known to fit alike: one taking a
+        // closure or a `Box<T>` may be the only one that fits at all.
+        // (and only where every argument is a literal of a known kind: an
+        // array literal or a value the walk cannot type may be the very
+        // `Sequence` the generic one takes)
+        let known_args = r.args.is_some_and(|a| usize::from(a) == r.hints.len())
+            && r.hints.iter().all(|h| {
+                use crate::facts::Arg;
+                matches!(h.kind, Arg::Str | Arg::Num | Arg::Int | Arg::Bool)
+            });
+        if best.len() > 1
+            && r.targs == 0
+            && known_args
+            && matches!(self.family[m.0], Some(Family::C | Family::Swift))
+        {
+            let opened = |c: DefRef| {
+                let d = self.def(c);
+                !d.type_params.is_empty()
+                    && d.plist.iter().all(|p| {
+                        let w = p.written.trim();
+                        d.type_params.iter().any(|t| t == w)
+                    })
+            };
+            let plain: Vec<DefRef> =
+                best.iter().copied().filter(|c| self.def(*c).type_params.is_empty()).collect();
+            if !plain.is_empty() && best.iter().all(|c| plain.contains(c) || opened(*c)) {
                 best = plain;
             }
         }
@@ -2302,7 +2568,13 @@ impl<'a> Project<'a> {
         // `-> Option<Foo>`, `Promise<Foo>`: what the wrapper holds (whether
         // it has to be opened first is the walk's `sealed`)
         if let Some(inner) = self.def(r).wraps.as_ref().filter(|_| self.def(r).kind.is_callable()) {
-            let t = self.type_of_path(r.0, self.def(r).parent, inner, true)?;
+            // (`-> Result<Self, Error>`: the type the method is declared for)
+            let own = matches!(inner.as_slice(), [one] if one == "self" || one == "Self");
+            let t = if own {
+                self.class_of(r.0, Some(r.1))?
+            } else {
+                self.type_of_path(r.0, self.def(r).parent, inner, true)?
+            };
             return self.def(t).kind.is_class_like().then_some((t, true));
         }
         let declared = self.files[r.0].refs.iter().find(|x| {
@@ -2339,38 +2611,158 @@ impl<'a> Project<'a> {
         let mut cur = d;
         while let Some(x) = cur {
             if let Some(&li) = self.locals.get(&(f, x, name.to_string())) {
-                // typing a local can come back to it (`let session =
-                // session(using: x)`: the value names the local): the second
-                // time round it has no type
-                if let Some(known) = self.local_types.borrow().get(&(f, li)) {
-                    return *known;
+                let mut li = self.local_in_force(f, x, name, li);
+                // a redeclaration's own value names the declaration before
+                // it (`let agent = agent.clone();`)
+                while self.typing.borrow().contains(&(f, li)) {
+                    match self.declared_before(f, x, name, li) {
+                        Some(prev) => li = prev,
+                        None => break,
+                    }
                 }
-                // worked out from the top, the answer is the local's own and
-                // is kept; inside another typing it may be cut short
-                let whole = self.typing.borrow().is_empty() && *self.depth.borrow() == 0;
-                if !self.typing.borrow_mut().insert((f, li)) {
-                    return None;
-                }
-                // a local's type is the same whatever use asks for it: its
-                // value's path is what is called there (`x = f()` -> `f`),
-                // a written type is not
-                let value = !self.files[f].locals[li].declared;
-                let calling = self.calling.replace(value);
-                let typing_value = self.typing_value.replace(value);
-                let recv = self.recv.replace(None);
-                let out = self.local_type_of(f, x, li, name);
-                *self.recv.borrow_mut() = recv;
-                *self.typing_value.borrow_mut() = typing_value;
-                *self.calling.borrow_mut() = calling;
-                self.typing.borrow_mut().remove(&(f, li));
-                if whole {
-                    self.local_types.borrow_mut().insert((f, li), out);
+                let out = self.local_type_at(f, x, li, name);
+                // … and one the walk cannot type gives way to the declaration
+                // before it that it can: most often its value is made from
+                // that one (`let timings = mem::take(timings);`), and the
+                // walk has no blocks to say the earlier one is out of scope
+                if out.is_none() {
+                    let mut at = li;
+                    while let Some(prev) = self.declared_before(f, x, name, at) {
+                        if let Some((t, _)) = self.local_type_at(f, x, prev, name) {
+                            return Some((t, Confidence::Inferred));
+                        }
+                        at = prev;
+                    }
                 }
                 return out;
             }
             cur = defs[x].parent;
         }
         None
+    }
+
+    /// The declaration of the name before local `li` in the definition.
+    fn declared_before(&self, f: usize, x: usize, name: &str, li: usize) -> Option<usize> {
+        let all = self.shadows.get(&(f, x, name.to_string()))?;
+        let at = all.iter().position(|&i| i == li)?;
+        at.checked_sub(1).map(|i| all[i])
+    }
+
+    /// The type of local `li` of definition `x`, worked out once.
+    fn local_type_at(
+        &self,
+        f: usize,
+        x: usize,
+        li: usize,
+        name: &str,
+    ) -> Option<(DefRef, Confidence)> {
+        // typing a local can come back to it (`let session =
+        // session(using: x)`: the value names the local): the second
+        // time round it has no type
+        if let Some(known) = self.local_types.borrow().get(&(f, li)) {
+            return *known;
+        }
+        // worked out from the top, the answer is the local's own and
+        // is kept; inside another typing it may be cut short
+        let whole = self.typing.borrow().is_empty() && *self.depth.borrow() == 0;
+        if !self.typing.borrow_mut().insert((f, li)) {
+            return None;
+        }
+        // a local's type is the same whatever use asks for it: its
+        // value's path is what is called there (`x = f()` -> `f`),
+        // a written type is not
+        let value = !self.files[f].locals[li].declared;
+        // (`if let Some(r) = opt` beside the parameter `opt`: the
+        // value is that parameter, which nothing calls)
+        let held = value && self.holds_declared_local(f, x, li);
+        let calling = self.calling.replace(value && !held);
+        let typing_value = self.typing_value.replace(value);
+        let recv = self.recv.replace(None);
+        let out = self.local_type_of(f, x, li, name);
+        *self.recv.borrow_mut() = recv;
+        *self.typing_value.borrow_mut() = typing_value;
+        *self.calling.borrow_mut() = calling;
+        self.typing.borrow_mut().remove(&(f, li));
+        if whole {
+            self.local_types.borrow_mut().insert((f, li), out);
+        }
+        out
+    }
+
+    /// Of several locals of one name in a definition, the one in force where
+    /// the reference being resolved is written: the last declared before it
+    /// (the first, for a use above them all). `li` is the one the index holds.
+    fn local_in_force(&self, f: usize, x: usize, name: &str, li: usize) -> usize {
+        if self.shadows.is_empty() {
+            return li;
+        }
+        let Some(all) = self.shadows.get(&(f, x, name.to_string())) else { return li };
+        let Some((_, at)) = (*self.site.borrow()).filter(|(sf, _)| *sf == f) else {
+            return li;
+        };
+        let locals = &self.files[f].locals;
+        // the one whose block the use is written in, the innermost of them
+        // (declared last); else the last declared before the use
+        // (the arms of one `match` are declared at the same place: the first)
+        // (and not in its own value: `let convertible = Wrap(convertible)`)
+        let inside = |i: &usize| {
+            (locals[*i].until == 0 || at < locals[*i].until)
+                && (locals[*i].after == 0 || locals[*i].after <= at || at < locals[*i].byte)
+        };
+        let before = || all.iter().rev().copied().filter(|&i| locals[i].byte <= at);
+        let Some(last) = before().find(inside).or_else(|| before().next()) else {
+            return all.iter().copied().find(inside).unwrap_or(all[0]);
+        };
+        all.iter().copied().find(|&i| locals[i].byte == locals[last].byte).unwrap_or(last)
+    }
+
+    /// Where the first local of the name is declared in the definition.
+    /// Ruby: whether every local `name` of the definitions around is first
+    /// assigned after `byte` (a use there is no use of the local).
+    fn ruby_local_starts_after(&self, f: usize, d: Option<usize>, name: &str, byte: usize) -> bool {
+        if self.files[f].lang != Some(crate::lang::Lang::Ruby) {
+            return false;
+        }
+        let defs = &self.files[f].defs;
+        let mut cur = d;
+        while let Some(x) = cur {
+            if let Some(&li) = self.locals.get(&(f, x, name.to_string())) {
+                return self.first_declared(f, x, name, li) > byte;
+            }
+            cur = defs[x].parent;
+        }
+        false
+    }
+
+    fn first_declared(&self, f: usize, x: usize, name: &str, li: usize) -> usize {
+        match self.shadows.get(&(f, x, name.to_string())) {
+            Some(all) => self.files[f].locals[all[0]].byte,
+            None => self.files[f].locals[li].byte,
+        }
+    }
+
+    /// Whether local `li` is what a binding opens out of another local that
+    /// is declared with its type (`[opt, "[?]"]`, `opt: Option<Repo>`).
+    fn holds_declared_local(&self, f: usize, x: usize, li: usize) -> bool {
+        let l = &self.files[f].locals[li];
+        // (or is that local under another name: the `it` of `r.let { … }`)
+        let head = match l.path.as_slice() {
+            [head] => head,
+            [head, mark] if mark == crate::refs::OPENED => head,
+            _ => return false,
+        };
+        if *head == l.name {
+            return false;
+        }
+        let defs = &self.files[f].defs;
+        let mut cur = Some(x);
+        while let Some(y) = cur {
+            if let Some(&other) = self.locals.get(&(f, y, head.clone())) {
+                return other != li && self.files[f].locals[other].declared;
+            }
+            cur = defs[y].parent;
+        }
+        false
     }
 
     /// The type of local `li` of definition `x` (see `local_type`).
@@ -2383,6 +2775,11 @@ impl<'a> Project<'a> {
     ) -> Option<(DefRef, Confidence)> {
         let l = &self.files[f].locals[li];
         if l.path.is_empty() {
+            // pytest hands a test the result of the fixture its parameter
+            // names (`def test_x(runner):` beside `@pytest.fixture def runner()`)
+            if let Some(t) = self.fixture_type(f, x, name) {
+                return Some((t, Confidence::Inferred));
+            }
             // no type written, nothing typeable assigned: the one
             // type that answers everything asked of it here
             return self.structural_type(f, x, name).map(|t| (t, Confidence::Inferred));
@@ -2407,6 +2804,48 @@ impl<'a> Project<'a> {
         };
         let conf = if l.declared { Confidence::Extracted } else { Confidence::Inferred };
         Some((t, conf))
+    }
+
+    /// What a pytest fixture named `name` returns, for a parameter of that
+    /// name of a function in test code: the fixture of the file itself, else
+    /// of the nearest `conftest.py` in its directory or one above. A fixture
+    /// is a top-level function under `@pytest.fixture` / `@fixture`.
+    fn fixture_type(&self, f: usize, x: usize, name: &str) -> Option<DefRef> {
+        if self.family[f] != Some(Family::Python) || !self.files[f].defs[x].kind.is_callable() {
+            return None;
+        }
+        let is_fixture = |c: DefRef| {
+            let d = self.def(c);
+            d.kind.is_callable()
+                && d.parent.is_none()
+                && self.files[c.0].refs.iter().any(|r| {
+                    r.from_def == Some(c.1)
+                        && r.kind == RefKind::Decorator
+                        && r.path.last().is_some_and(|n| n == "fixture")
+                })
+        };
+        let dir = |p: &str| p.rfind('/').map(|i| p[..=i].to_string()).unwrap_or_default();
+        let here = dir(&self.files[f].path);
+        let mut best: Option<(usize, DefRef)> = None;
+        for &c in self.by_name.get(name).into_iter().flatten() {
+            if self.family[c.0] != Some(Family::Python) || !is_fixture(c) {
+                continue;
+            }
+            let path = &self.files[c.0].path;
+            // the file's own fixture wins over any conftest's
+            let rank = if c.0 == f {
+                usize::MAX
+            } else if path.ends_with("conftest.py") && here.starts_with(dir(path).as_str()) {
+                dir(path).len()
+            } else {
+                continue;
+            };
+            if best.is_none_or(|(r, _)| rank > r) {
+                best = Some((rank, c));
+            }
+        }
+        let (_, fixture) = best?;
+        self.return_type(fixture).map(|(t, _)| t)
     }
 
     /// The type of a local assigned a generic call that is handed a type
@@ -2510,7 +2949,12 @@ impl<'a> Project<'a> {
                         && !l.path.is_empty()
                         && l.path[0] != *name
                         && !l.path.is_empty();
-                    return if alias {
+                    // (`if let Some(r) = opt`: what an optional gives once
+                    // opened is the value, no collection of it)
+                    let opened_optional = matches!(l.path.as_slice(),
+                        [of, mark] if mark == crate::refs::OPENED
+                            && self.local_sealed(f, Some(x), of));
+                    return if alias && !opened_optional {
                         self.elem_of_as(f, Some(x), &l.path, how)
                             .map(|(t, _)| (t, Confidence::Inferred))
                     } else {
@@ -2618,6 +3062,11 @@ impl<'a> Project<'a> {
         for r in &self.files[f].refs {
             let (Some(d), [head, member, ..]) = (r.from_def, r.path.as_slice()) else { continue };
             if member.starts_with(['(', '[']) || matches!(head.as_str(), "self" | "super" | "()") {
+                continue;
+            }
+            // (an operator written `a + b` or `a upTo b` says nothing of what
+            // a is: a library type answers to it as well)
+            if r.context == "operator" {
                 continue;
             }
             // called there, or only read
@@ -2740,22 +3189,48 @@ impl<'a> Project<'a> {
 
     /// A local assigned something external (`ts := httptest.NewServer()`):
     /// its methods are the external type's, never a project namesake's.
-    /// The members named `name` of a namespace: its block's, and in C and
-    /// C++ those of every block that opens the same namespace
+    /// The members named `name` of a namespace: its block's, and in C, C++
+    /// and C# those of every block that opens the same namespace
     /// (`namespace cpr { … }` in each header), its own first.
     fn namespace_members(&self, c: DefRef, name: &str) -> Vec<DefRef> {
         let own = self.children[c.0].get(&c.1).and_then(|m| m.get(name));
         let mut out: Vec<DefRef> = own.into_iter().flatten().map(|&k| (c.0, k)).collect();
-        if self.family[c.0] != Some(Family::C) {
+        // (C# `namespace Shop.Text { … }` is opened by every file that puts a
+        // type in it, as a C++ namespace is by every header)
+        let Some(fam @ (Family::C | Family::CSharp)) = self.family[c.0] else {
             return out;
-        }
-        let key = qual_key(Family::C, &self.def(c).qualname);
+        };
+        let key = qual_key(fam, &self.def(c).qualname);
         for &other in self.by_qual.get(&key).into_iter().flatten() {
             if other == c || self.def(other).kind != DefKind::Namespace {
                 continue;
             }
             let kids = self.children[other.0].get(&other.1).and_then(|m| m.get(name));
             out.extend(kids.into_iter().flatten().map(|&k| (other.0, k)));
+        }
+        // C++ `inline namespace v2` inside the namespace: its members are the
+        // namespace's ([namespace.def])
+        if fam == Family::C {
+            let blocks: Vec<DefRef> = std::iter::once(c)
+                .chain(self.by_qual.get(&key).into_iter().flatten().copied())
+                .collect();
+            for b in blocks {
+                let inline = &self.files[b.0].inline_namespaces;
+                if inline.is_empty() {
+                    continue;
+                }
+                for kids in self.children[b.0].get(&b.1).into_iter().flat_map(|m| m.values()) {
+                    for &k in kids {
+                        let d = &self.files[b.0].defs[k];
+                        if d.kind == DefKind::Namespace && inline.contains(&d.start_byte) {
+                            let inner = self.children[b.0].get(&k).and_then(|m| m.get(name));
+                            out.extend(inner.into_iter().flatten().map(|&x| (b.0, x)));
+                        }
+                    }
+                }
+            }
+            out.sort();
+            out.dedup();
         }
         // a method defined for a type in the block (`Response Session::Get()
         // { … }` inside `namespace cpr { }`) is the type's, no name of the
@@ -3090,6 +3565,106 @@ impl<'a> Project<'a> {
         false
     }
 
+    /// A local written with a type whose capital head names nothing of the
+    /// project (`$p = new \ReflectionProperty(…)`, `let a: SocketAddr`): a
+    /// library's type the file imports by no name the engine reads.
+    fn is_outside_local(&self, f: usize, d: Option<usize>, name: &str) -> bool {
+        let defs = &self.files[f].defs;
+        let mut cur = d;
+        while let Some(x) = cur {
+            if let Some(&li) = self.locals.get(&(f, x, name.to_string())) {
+                let l = &self.files[f].locals[li];
+                // (PHP `new \\ReflectionProperty(…)`: the global namespace's
+                // `\\` is no part of the name)
+                let start = usize::from(l.path.first().is_some_and(|h| h == "\\"));
+                let head = l.path.get(start).map(String::as_str).unwrap_or("");
+                if start == 1 {
+                    return head.chars().next().is_some_and(|c| c.is_uppercase())
+                        && matches!(
+                            self.resolve_path(f, Some(x), &l.path[..2], true),
+                            Some((Target::Ext(..), _)) | None
+                        );
+                }
+                return head.chars().next().is_some_and(|c| c.is_uppercase())
+                    && !self.by_name.contains_key(head)
+                    && !self.is_local_name(f, Some(x), head)
+                    && self.resolve_name(f, Some(x), head).is_none();
+            }
+            cur = defs[x].parent;
+        }
+        false
+    }
+
+    /// Whether `recv` (a path with its last name taken off) is something the
+    /// source writes with a library's type: the result of a project function
+    /// declared to return one, a field or variable declared as one, or a local
+    /// assigned such a thing.
+    fn receiver_is_library(&self, f: usize, d: Option<usize>, recv: &[String]) -> bool {
+        let held: Vec<String>;
+        let mut recv = recv;
+        if let [name] = recv {
+            let defs = &self.files[f].defs;
+            let mut cur = d;
+            let mut local = None;
+            while let Some(x) = cur {
+                if let Some(&li) = self.locals.get(&(f, x, name.clone())) {
+                    local = Some(self.local_in_force(f, x, name, li));
+                    break;
+                }
+                cur = defs[x].parent;
+            }
+            match local {
+                Some(li) if !self.files[f].locals[li].declared => {
+                    held = self.files[f].locals[li].path.clone();
+                    recv = &held;
+                }
+                // (`var buf bytes.Buffer`: declared with a library's type)
+                Some(li) => {
+                    let head = self.files[f].locals[li].path.first();
+                    // (written through an import, or a name the project has
+                    // nothing of: `bytes.Buffer`, `Buffer`)
+                    return head.is_some_and(|h| {
+                        !self.is_local_name(f, d, h)
+                            && match self.resolve_name(f, d, h) {
+                                Some(Target::Ext(..)) => true,
+                                None => !self.by_name.contains_key(h.as_str()),
+                                _ => false,
+                            }
+                    });
+                }
+                None => {}
+            }
+        }
+        let callee = match recv.split_last() {
+            Some((last, before)) if last == "()" => before,
+            _ => recv,
+        };
+        if callee.is_empty() || callee.iter().any(|s| s.starts_with('[')) {
+            return false;
+        }
+        let guessed = self.guessed.get();
+        let calling = self.calling.replace(false);
+        let at = self.resolve_path_inner(f, d, callee, false, false);
+        *self.calling.borrow_mut() = calling;
+        self.guessed.set(guessed);
+        matches!(at, Some((Target::Def(x), Confidence::Extracted)) if self.library_typed(x))
+    }
+
+    /// Whether what a field or variable holds, or a function returns, is
+    /// written as a type the project does not define.
+    fn library_typed(&self, x: DefRef) -> bool {
+        let def = self.def(x);
+        let written = if def.kind.is_callable() {
+            self.return_path(x)
+        } else if def.kind.is_state() {
+            def.declared_type.as_ref()
+        } else {
+            None
+        };
+        let Some(head) = written.and_then(|p| p.first()) else { return false };
+        matches!(self.resolve_name(x.0, def.parent, head), Some(Target::Ext(..)))
+    }
+
     /// A local that does not hide the outer name: a plain assignment where
     /// assigning declares nothing, or, for a bare call (`called`), a local
     /// with a written type (`baseUrl(…)` beside `String baseUrl` calls the
@@ -3102,12 +3677,61 @@ impl<'a> Project<'a> {
         while let Some(x) = cur {
             if let Some(&li) = self.locals.get(&(f, x, name.to_string())) {
                 let l = &self.files[f].locals[li];
+                // (a use written before the local is declared is no use of
+                // it: `stream(…)` above `val stream = response.body()`)
+                // (where a declaration is what makes a local: an assignment
+                // can be one of several, a comprehension binds after its use;
+                // in Ruby the first assignment the parser meets makes the
+                // local, so a use above it is a method call)
+                let declares = !matches!(self.family[f], Some(Family::Python | Family::Php));
+                let first = self.first_declared(f, x, name, li);
+                let before =
+                    declares && (*self.site.borrow()).is_some_and(|(sf, at)| sf == f && at < first);
+                // C, C++: a variable hides a function of its name (they share
+                // one scope), unless it is of a project type, where the walk
+                // has no call operator to name
+                if called
+                    && !before
+                    && l.declared
+                    && self.family[f] == Some(Family::C)
+                    && self
+                        .local_type(f, d, name)
+                        .is_none_or(|(t, _)| !self.def(t).kind.is_class_like())
+                {
+                    return false;
+                }
+                // (`baseUrl(…)` beside `String baseUrl`: only where methods
+                // and variables are names of two kinds; anywhere else the
+                // call is of the local, whatever its type says)
+                let two_kinds = matches!(self.files[f].lang, Some(Lang::Java | Lang::Kotlin));
                 return l.assigned
-                    || (called && (l.declared || l.path.first().is_some_and(|h| h == name)));
+                    || before
+                    || (called
+                        && ((l.declared && two_kinds)
+                            || l.path.first().is_some_and(|h| h == name)));
             }
             cur = defs[x].parent;
         }
         false
+    }
+
+    /// The definition around `d` (or `d` itself) that declares a type
+    /// parameter `name`, and the type that bounds it.
+    fn type_param_around(
+        &self,
+        f: usize,
+        d: Option<usize>,
+        name: &str,
+    ) -> Option<(usize, Option<Vec<String>>)> {
+        let defs = &self.files[f].defs;
+        let mut cur = d;
+        while let Some(x) = cur {
+            if let Some(i) = defs[x].type_params.iter().position(|p| p == name) {
+                return Some((x, defs[x].type_bounds.get(i).cloned().flatten()));
+            }
+            cur = defs[x].parent;
+        }
+        None
     }
 
     /// Whether `path` is the value a local named like its head is declared
@@ -3131,6 +3755,32 @@ impl<'a> Project<'a> {
         false
     }
 
+    /// The local `name` of a block outside every definition that the use
+    /// being resolved is written in.
+    fn file_block_local(&self, f: usize, name: &str) -> Option<&crate::facts::Local> {
+        let (_, at) = (*self.site.borrow()).filter(|(sf, _)| *sf == f)?;
+        self.files[f]
+            .locals
+            .iter()
+            .filter(|l| l.from_def.is_none() && !l.field && l.until != 0 && l.name == name)
+            .filter(|l| l.byte <= at && at < l.until && (l.after == 0 || l.after <= at))
+            .max_by_key(|l| l.byte)
+    }
+
+    /// Whether the name is a local or parameter declared with its type.
+    fn declared_local(&self, f: usize, d: Option<usize>, name: &str) -> bool {
+        let defs = &self.files[f].defs;
+        let mut cur = d;
+        while let Some(x) = cur {
+            if let Some(&li) = self.locals.get(&(f, x, name.to_string())) {
+                let l = &self.files[f].locals[self.local_in_force(f, x, name, li)];
+                return l.declared && !l.assigned;
+            }
+            cur = defs[x].parent;
+        }
+        false
+    }
+
     /// A "local" recorded from a plain assignment that declares nothing.
     fn local_is_hint(&self, f: usize, d: Option<usize>, name: &str) -> bool {
         let defs = &self.files[f].defs;
@@ -3148,9 +3798,18 @@ impl<'a> Project<'a> {
     fn is_local_name(&self, f: usize, d: Option<usize>, name: &str) -> bool {
         let defs = &self.files[f].defs;
         let mut cur = d;
+        // (one declared in a block is a local inside the block: `{ let count
+        // = 5 } return count` names the outer `count`)
+        let at = (*self.site.borrow()).filter(|(sf, _)| *sf == f).map(|(_, at)| at);
         while let Some(x) = cur {
-            if self.locals.contains_key(&(f, x, name.to_string())) {
-                return true;
+            let key = (f, x, name.to_string());
+            if let Some(&li) = self.locals.get(&key) {
+                let all = self.shadows.get(&key);
+                let mut each = all.into_iter().flatten().copied().chain(std::iter::once(li));
+                let locals = &self.files[f].locals;
+                if at.is_none_or(|at| each.any(|i| locals[i].until == 0 || at < locals[i].until)) {
+                    return true;
+                }
             }
             cur = defs[x].parent;
         }
@@ -3162,6 +3821,22 @@ impl<'a> Project<'a> {
     /// beside `RestResponse` is another type).
     fn partials(&self, c: DefRef) -> Vec<DefRef> {
         let def = self.def(c);
+        // TypeScript: the interfaces of one name in one scope are one
+        // interface (declaration merging)
+        if self.family[c.0] == Some(Family::Ecma) && def.kind == DefKind::Interface {
+            return self.files[c.0]
+                .defs
+                .iter()
+                .enumerate()
+                .filter(|(i, d)| {
+                    *i != c.1
+                        && d.kind == DefKind::Interface
+                        && d.qualname == def.qualname
+                        && d.parent == def.parent
+                })
+                .map(|(i, _)| (c.0, i))
+                .collect();
+        }
         if self.family[c.0] != Some(Family::CSharp) || !def.kind.is_class_like() {
             return Vec::new();
         }
@@ -3179,6 +3854,31 @@ impl<'a> Project<'a> {
                     && other.type_params.len() == def.type_params.len()
             })
             .collect()
+    }
+
+    /// C#: a member the type named does not have, of another type of the
+    /// same fully qualified name with another number of type parameters
+    /// (`Maybe.Nothing<T>()` beside `class Maybe<T>` and `static class Maybe`:
+    /// the name written without arguments is either).
+    fn namesake_member(&self, c: DefRef, name: &str) -> Option<DefRef> {
+        let def = self.def(c);
+        if self.family[c.0] != Some(Family::CSharp) || !def.kind.is_class_like() {
+            return None;
+        }
+        let fq = self.fqn_of(c.0, c.1)?;
+        self.fqn
+            .get(&fq)
+            .into_iter()
+            .flatten()
+            .copied()
+            .filter(|r| {
+                let other = self.def(*r);
+                *r != c
+                    && self.family[r.0] == Some(Family::CSharp)
+                    && other.kind.is_class_like()
+                    && other.type_params.len() != def.type_params.len()
+            })
+            .find_map(|r| self.class_member(r, name, 4))
     }
 
     /// The field `name` of type `c`, declared on it or on another declaration
@@ -3253,6 +3953,11 @@ impl<'a> Project<'a> {
             }
             if let Some(t) = target {
                 for (name, bind) in modules::bindings(self, fam, f, imp, &t) {
+                    // (a `use` in a block binds the name in the block only)
+                    if let Some((lo, hi)) = imp.scope {
+                        s.scoped.push((lo, hi, name, bind, i));
+                        continue;
+                    }
                     s.bindings.entry(name).or_insert((bind, i));
                 }
                 if imp.form == ImportForm::Wildcard || modules::is_star(fam, imp) {
@@ -3299,15 +4004,34 @@ impl<'a> Project<'a> {
     fn top_in(&self, files: &[usize], name: &str) -> Option<DefRef> {
         // an `extension Session { … }` adds to a type, it does not declare the
         // name: in a module that only extends it, the name is still the type's
-        self.best(
-            files
-                .iter()
-                .flat_map(|&f| self.top[f].get(name).into_iter().flatten().map(move |&d| (f, d)))
-                // (an RSpec `let` is a name of its block only)
-                .filter(|r| {
-                    self.def(*r).kind != DefKind::Extension && self.def(*r).scope_lines.is_none()
-                }),
-        )
+        let mut found: Vec<DefRef> = files
+            .iter()
+            .flat_map(|&f| self.top[f].get(name).into_iter().flatten().map(move |&d| (f, d)))
+            // (an RSpec `let` is a name of its block only)
+            .filter(|r| {
+                self.def(*r).kind != DefKind::Extension && self.def(*r).scope_lines.is_none()
+            })
+            .collect();
+        // TS: a name can be a type and a value at once (`export interface
+        // $ZodString` beside `export const $ZodString`): where a type is
+        // written it is the type, anywhere else the value
+        if found.len() > 1 && found.iter().all(|r| self.family[r.0] == Some(Family::Ecma)) {
+            let is_type =
+                |r: &DefRef| matches!(self.def(*r).kind, DefKind::Interface | DefKind::TypeAlias);
+            let wanted = self.naming_type();
+            if found.iter().any(|r| is_type(r) == wanted) {
+                found.retain(|r| is_type(r) == wanted);
+            }
+        }
+        // TS: what a `namespace` holds is a name inside it (the walk up the
+        // definitions around finds it there), not beside one the file declares
+        if found.len() > 1 && found.iter().all(|r| self.family[r.0] == Some(Family::Ecma)) {
+            let outer = |r: &DefRef| self.def(*r).parent.is_none();
+            if found.iter().any(outer) {
+                found.retain(outer);
+            }
+        }
+        self.best(found)
     }
 
     /// The members of a type: its lexical children, and the methods attached
@@ -3357,7 +4081,28 @@ impl<'a> Project<'a> {
     fn owner_scope_matches(&self, c: DefRef, m: DefRef) -> bool {
         match self.family[c.0] {
             Some(Family::Go) => dir_of(&self.files[c.0].path) == dir_of(&self.files[m.0].path),
-            Some(Family::Rust) => self.modsys.crate_of(c.0) == self.modsys.crate_of(m.0),
+            Some(Family::Rust) => {
+                if self.modsys.crate_of(c.0) != self.modsys.crate_of(m.0) {
+                    return false;
+                }
+                // two types of one name in a crate (a private `Config` per
+                // module): the `impl` is of the one its own file names
+                let name = &self.def(c).name;
+                let twins = self.by_name.get(name).into_iter().flatten().any(|r| {
+                    *r != c
+                        && self.def(*r).kind.is_class_like()
+                        && self.modsys.crate_of(r.0) == self.modsys.crate_of(c.0)
+                });
+                if !twins || m.0 == c.0 {
+                    return !twins || self.top[m.0].get(name).is_none_or(|ds| ds.contains(&c.1));
+                }
+                // (from where the `impl` is written: inside an inline module,
+                // that module's names)
+                match self.resolve_name(m.0, self.def(m).parent, name) {
+                    Some(Target::Def(x)) if self.def(x).kind.is_class_like() => x == c,
+                    _ => true,
+                }
+            }
             _ => true,
         }
     }
@@ -3441,7 +4186,7 @@ impl<'a> Project<'a> {
 
     /// The bases one declaration of a type writes.
     fn written_bases(&self, c: DefRef) -> Vec<DefRef> {
-        let mut out = Vec::new();
+        let mut out: Vec<(DefRef, RefKind)> = Vec::new();
         let f = &self.files[c.0];
         let cname = &self.def(c).name;
         for r in &f.refs {
@@ -3461,15 +4206,31 @@ impl<'a> Project<'a> {
             let outer = self.def(c).parent;
             if let Some((Target::Def(b), _)) = self.resolve_path(c.0, outer, &r.path, true) {
                 if b != c {
-                    out.push(b);
+                    out.push((b, r.kind));
                 } else if let Some(other) = self.namesake(c) {
                     // C# `RestResponse<T> : RestResponse`: the base is the
                     // other type of the name, not the class itself
-                    out.push(other);
+                    out.push((other, r.kind));
                 }
             }
         }
-        out
+        // the order members are looked up in: Ruby's ancestors are the class,
+        // its modules from the last included, then the superclass
+        // (`include_modules_at`); a PHP trait's methods come before the
+        // parent class's (spec 16-traits.md)
+        match self.files[c.0].lang {
+            Some(crate::lang::Lang::Ruby) => {
+                let (mixed, rest): (Vec<_>, Vec<_>) =
+                    out.into_iter().partition(|(_, k)| *k == RefKind::MixesIn);
+                mixed.into_iter().rev().chain(rest).map(|(b, _)| b).collect()
+            }
+            Some(crate::lang::Lang::Php) => {
+                let (mixed, rest): (Vec<_>, Vec<_>) =
+                    out.into_iter().partition(|(_, k)| *k == RefKind::MixesIn);
+                mixed.into_iter().chain(rest).map(|(b, _)| b).collect()
+            }
+            _ => out.into_iter().map(|(b, _)| b).collect(),
+        }
     }
 
     /// A member of a type, through its bases.
@@ -3480,6 +4241,23 @@ impl<'a> Project<'a> {
         if depth == 0 {
             return None;
         }
+        // Go: the member at the shallowest depth of embedding, level by
+        // level (the spec's Selectors; go/types lookupFieldOrMethodImpl)
+        if self.family[c.0] == Some(Family::Go) {
+            let mut level = self.bases(c);
+            let mut seen: HashSet<DefRef> = HashSet::from([c]);
+            for _ in 0..depth {
+                level.retain(|b| seen.insert(*b));
+                if level.is_empty() {
+                    return None;
+                }
+                if let Some(m) = level.iter().find_map(|b| self.best(self.members(*b, name))) {
+                    return Some(m);
+                }
+                level = level.iter().flat_map(|b| self.bases(*b)).collect();
+            }
+            return None;
+        }
         self.bases(c).into_iter().find_map(|b| self.class_member(b, name, depth - 1))
     }
 
@@ -3488,11 +4266,16 @@ impl<'a> Project<'a> {
         let full = &self.def(c).name;
         // (a C++ specialization's constructors carry the template's name)
         let cname = &specialized(full).unwrap_or(full).to_string();
-        let mut out: Vec<DefRef> = self.children[c.0]
-            .get(&c.1)
-            .into_iter()
-            .flat_map(|m| m.values().flatten())
-            .map(|&d| (c.0, d))
+        // (a C# partial type's are those of every file that declares it)
+        let mut out: Vec<DefRef> = std::iter::once(c)
+            .chain(self.partials(c))
+            .flat_map(|p| {
+                self.children[p.0]
+                    .get(&p.1)
+                    .into_iter()
+                    .flat_map(|m| m.values().flatten())
+                    .map(move |&d| (p.0, d))
+            })
             .filter(|r| {
                 let d = self.def(*r);
                 (d.kind == DefKind::Constructor && d.name != "deinit")
@@ -3525,6 +4308,88 @@ impl<'a> Project<'a> {
         )
     }
 
+    /// JS: a function assigned to a function as its member (`Dataset.extractData
+    /// = function () { … }` beside `function Dataset() { … }`), in its file.
+    fn assigned_member(&self, c: DefRef, name: &str) -> Option<DefRef> {
+        if self.family[c.0] != Some(Family::Ecma) || !self.def(c).kind.is_callable() {
+            return None;
+        }
+        let owner = self.def(c).name.as_str();
+        let found = self.files[c.0].defs.iter().enumerate().filter(|(_, d)| {
+            d.name == name && d.kind.is_callable() && d.object.as_deref() == Some(owner)
+        });
+        self.best(found.map(|(i, _)| (c.0, i)))
+    }
+
+    /// RSpec: a bare name in `shared_examples 'x' do … end` that no block
+    /// around it declares is a `let` of the place the examples are included
+    /// (`it_behaves_like 'x'`): the innermost one around that line, when
+    /// every place that includes them gives the same.
+    fn shared_example_let(&self, f: usize, d: Option<usize>, name: &str) -> Option<DefRef> {
+        if self.family[f] != Some(Family::Ruby) || self.files[f].shared_examples.is_empty() {
+            return None;
+        }
+        let line = (*self.cur.borrow())
+            .filter(|(cf, _)| *cf == f)
+            .map(|(cf, ri)| self.files[cf].refs[ri].line)
+            .or_else(|| d.map(|x| self.files[f].defs[x].def_line))?;
+        let shared = self.files[f]
+            .shared_examples
+            .iter()
+            .filter(|(_, a, b)| *a <= line && line <= *b)
+            .min_by_key(|(_, a, b)| b - a)?;
+        let mut found: Vec<DefRef> = Vec::new();
+        for (g, file) in self.files.iter().enumerate() {
+            if self.family[g] != Some(Family::Ruby) {
+                continue;
+            }
+            for (_, at) in file.example_includes.iter().filter(|(n, _)| *n == shared.0) {
+                let inner = self.top[g]
+                    .get(name)
+                    .into_iter()
+                    .flatten()
+                    .copied()
+                    .filter(|&i| {
+                        file.defs[i].scope_lines.is_some_and(|(a, b)| a <= *at && *at <= b)
+                    })
+                    .min_by_key(|&i| file.defs[i].scope_lines.map(|(a, b)| b - a));
+                match inner {
+                    Some(i) if !found.contains(&(g, i)) => found.push((g, i)),
+                    _ => {}
+                }
+            }
+        }
+        match found.as_slice() {
+            [one] => Some(*one),
+            _ => None,
+        }
+    }
+
+    /// A member a Ruby class has through what another opening of it mixes in
+    /// or extends: `Faraday::Response.register_middleware` in a file that
+    /// opens `class Response` again, beside `extend MiddlewareRegistry` in
+    /// the file that declares it.
+    fn reopened_base_member(&self, c: DefRef, name: &str) -> Option<DefRef> {
+        if self.family[c.0] != Some(Family::Ruby) {
+            return None;
+        }
+        let key = qual_key(Family::Ruby, &self.def(c).qualname);
+        let mut openings: Vec<DefRef> = self
+            .by_qual
+            .get(&key)
+            .into_iter()
+            .flatten()
+            .copied()
+            .filter(|r| {
+                *r != c
+                    && self.family[r.0] == Some(Family::Ruby)
+                    && self.def(*r).kind.is_class_like()
+            })
+            .collect();
+        openings.sort();
+        openings.into_iter().find_map(|r| self.class_member(r, name, 4))
+    }
+
     /// What a JS/TS module is when it is used as a value (`const Foo =
     /// require('./foo'); new Foo()`): the definition it assigns to
     /// `module.exports` or exports as its default, through modules that pass
@@ -3546,13 +4411,64 @@ impl<'a> Project<'a> {
             Target::Def(c) => {
                 let d = self.def(*c);
                 if d.kind == DefKind::Namespace {
-                    return self.best(self.namespace_members(*c, name)).map(Target::Def);
+                    let all = self.namespace_members(*c, name);
+                    // (two files can each define the name in the namespace:
+                    // `leveldb::Benchmark` of each benchmark's own file)
+                    if let Some(f) = *self.asking.borrow() {
+                        let own: Vec<DefRef> = all.iter().copied().filter(|m| m.0 == f).collect();
+                        if !own.is_empty() {
+                            return self.best(own).map(Target::Def);
+                        }
+                        let seen: Vec<DefRef> = all
+                            .iter()
+                            .copied()
+                            .filter(|m| {
+                                self.scopes.get(f).is_some_and(|s| s.imported.contains(&m.0))
+                            })
+                            .collect();
+                        if !seen.is_empty() {
+                            return self.best(seen).map(Target::Def);
+                        }
+                    }
+                    return self.best(all).map(Target::Def);
+                }
+                // TS: a function, class or enum merged with a `namespace` of
+                // its name has what the namespace declares
+                if self.family[c.0] == Some(Family::Ecma) && d.kind != DefKind::Namespace {
+                    let merged = self
+                        .by_qual
+                        .get(&qual_key(Family::Ecma, &d.qualname))
+                        .into_iter()
+                        .flatten()
+                        .copied()
+                        .filter(|o| o.0 == c.0 && self.def(*o).kind == DefKind::Namespace)
+                        .flat_map(|o| self.namespace_members(o, name))
+                        .collect::<Vec<_>>();
+                    if !merged.is_empty() && self.members(*c, name).is_empty() {
+                        return self.best(merged).map(Target::Def);
+                    }
+                }
+                // `Color.RED.label()`: an enum's value has the enum's members
+                // (after what the value declares itself: Java `DEFAULT { … }`)
+                if d.kind == DefKind::EnumMember {
+                    if let Some(own) = self.class_member(*c, name, 4) {
+                        return Some(Target::Def(own));
+                    }
+                    let of =
+                        d.parent.map(|p| (c.0, p)).filter(|e| self.def(*e).kind.is_class_like());
+                    if let Some(e) = of {
+                        return self.member(&Target::Def(e), name, depth);
+                    }
                 }
                 if name == "new" && self.family[c.0] == Some(Family::Ruby) {
                     return Some(Target::Def(*c)); // `Klass.new` constructs Klass
                 }
                 self.class_member(*c, name, 4)
+                    .or_else(|| self.namesake_member(*c, name))
                     .or_else(|| self.reopened_member(*c, name))
+                    .or_else(|| self.reopened_base_member(*c, name))
+                    .or_else(|| self.assigned_member(*c, name))
+                    .or_else(|| self.forwarded_member(*c, name, depth))
                     .map(Target::Def)
             }
             Target::Module(files) => {
@@ -3665,6 +4581,7 @@ impl<'a> Project<'a> {
             .flatten()
             .copied()
             .filter(|r| self.family[r.0] == fam && self.def(*r).kind.is_class_like())
+            .filter(|r| self.in_reach_by_name(f, *r))
             .collect();
         self.narrow(f, cands).map(|(r, _)| r)
     }
@@ -3699,12 +4616,41 @@ impl<'a> Project<'a> {
     fn resolve_name_any(&self, f: usize, d: Option<usize>, name: &str) -> Option<Target> {
         let fam = self.family[f]?;
         let defs = &self.files[f].defs;
+        // Rust: a `use` in a block around the use shadows the module's names
+        // (r[names.resolution.expansion.imports.shadowing]); the innermost
+        // (with no site, the use is somewhere in `d`: a block of `d` is in
+        // sight, the innermost first)
+        let site = (*self.site.borrow()).filter(|(sf, _)| *sf == f).map(|(_, at)| at);
+        let home = d.map(|x| (defs[x].start_byte, defs[x].end_byte));
+        if site.is_some() || home.is_some() {
+            let inner = self.scopes[f]
+                .scoped
+                .iter()
+                .filter(|(lo, hi, n, _, _)| {
+                    n == name
+                        && match (site, home) {
+                            (Some(at), _) => *lo <= at && at < *hi,
+                            (None, Some((a, b))) => a <= *lo && *hi <= b,
+                            _ => false,
+                        }
+                })
+                .min_by_key(|(lo, hi, ..)| hi - lo);
+            if let Some((_, _, _, b, imp)) = inner {
+                if let Some(t) = self.eval(b, 3) {
+                    if self.acceptable(&t) {
+                        self.note_use(f, *imp, &t);
+                        return Some(t);
+                    }
+                }
+            }
+        }
         // enclosing definitions: nested functions; class members where
         // methods see them
         let mut cur = d;
         while let Some(x) = cur {
             if let Some(k) = self.children[f].get(&x).and_then(|m| m.get(name)) {
-                let callable_scope = defs[x].kind.is_callable();
+                // (a closure no definition holds is a scope like a function)
+                let callable_scope = defs[x].kind.is_callable() || defs[x].block;
                 let member_scope = fam.implicit_this() && defs[x].kind.is_class_like();
                 if callable_scope || member_scope || defs[x].kind == DefKind::Namespace {
                     if let Some(r) = self.best(k.iter().map(|&i| (f, i))) {
@@ -3714,7 +4660,12 @@ impl<'a> Project<'a> {
                     }
                 }
             }
-            if fam.implicit_this() && defs[x].kind.is_class_like() {
+            // (Ruby: a constant is looked up in the lexical nesting first, and
+            // only then in the ancestors of the innermost class, the
+            // `class_of` lookup below: vm_get_ev_const)
+            let ruby_constant =
+                fam == Family::Ruby && name.chars().next().is_some_and(char::is_uppercase);
+            if fam.implicit_this() && defs[x].kind.is_class_like() && !ruby_constant {
                 if let Some(m) = self.class_member((f, x), name, 4) {
                     if self.acceptable(&Target::Def(m)) {
                         return Some(Target::Def(m));
@@ -3757,8 +4708,14 @@ impl<'a> Project<'a> {
                 return Some(Target::Def((f, i)));
             }
         }
+        if let Some(found) = self.shared_example_let(f, d, name) {
+            return Some(Target::Def(found));
+        }
         if let Some(r) = self.top_in(&[f], name) {
-            if self.acceptable(&Target::Def(r)) {
+            if self.acceptable(&Target::Def(r))
+                && self.cs_namespace_in_sight(f, d, r)
+                && self.rust_module_in_sight(f, d, r)
+            {
                 return Some(Target::Def(r));
             }
         }
@@ -3768,6 +4725,22 @@ impl<'a> Project<'a> {
                 if self.acceptable(&t) {
                     self.note_use(f, *imp, &t);
                     return Some(t);
+                }
+            }
+        }
+        // Scala: a wildcard import beats a member of the package another
+        // compilation unit defines (Typer's `BindingPrec`: WildImport above
+        // PackageClause); Java has it the other way round
+        if self.files[f].lang == Some(crate::lang::Lang::Scala) {
+            for (star, imp) in &scope.stars {
+                if matches!(star, Target::Ext(..)) {
+                    continue;
+                }
+                if let Some(t) = self.member(star, name, 2) {
+                    if self.acceptable(&t) {
+                        self.note_use(f, *imp, &t);
+                        return Some(t);
+                    }
                 }
             }
         }
@@ -3844,6 +4817,38 @@ impl<'a> Project<'a> {
         bases: bool,
     ) -> Option<(Target, Confidence)> {
         let found = self.resolve_path_inner(f, d, path, bases, false);
+        // `new Name(text)` inside a class with a method `Name`: `new` names a
+        // type, never the method of that name
+        let found = match found {
+            Some((Target::Def(m), _))
+                if *self.ref_kind.borrow() == Some(RefKind::New)
+                    && self.def(m).kind.is_callable()
+                    && self.def(m).kind != DefKind::Constructor
+                    && self.files[f].lang.is_some_and(|l| {
+                        matches!(
+                            l,
+                            Lang::CSharp
+                                | Lang::Java
+                                | Lang::JavaScript
+                                | Lang::TypeScript
+                                | Lang::Tsx
+                                | Lang::Php
+                                | Lang::Cpp
+                        )
+                    }) =>
+            {
+                let before = self.types_only.replace(true);
+                let typed = self.resolve_path_inner(f, d, path, bases, false);
+                *self.types_only.borrow_mut() = before;
+                match typed {
+                    Some((Target::Def(c), conf)) if self.def(c).kind.is_class_like() => {
+                        Some((Target::Def(c), conf))
+                    }
+                    _ => found,
+                }
+            }
+            other => other,
+        };
         // a module called, constructed or named as a type is what it exports
         // as itself (`const express = require('../'); express()`)
         if let Some((Target::Module(fs), conf)) = &found {
@@ -3853,7 +4858,60 @@ impl<'a> Project<'a> {
                 }
             }
         }
-        found.or_else(|| {
+        // Rust `io::Error::error_message(msg)`: a method a trait of the
+        // project gives a library's type, called through the type's path
+        let found = match found {
+            Some((Target::Ext(..), _))
+                if self.family[f] == Some(Family::Rust)
+                    && *self.calling.borrow()
+                    && !bases
+                    && path.len() >= 2
+                    && !path.iter().any(|s| s == "()" || s.starts_with('['))
+                    && path[path.len() - 2].chars().next().is_some_and(char::is_uppercase)
+                    && !RUST_CORE_METHODS.contains(&path[path.len() - 1].as_str()) =>
+            {
+                let (name, on) = (&path[path.len() - 1], &path[path.len() - 2]);
+                let guessed = self.guessed.get();
+                match self.extension_method(f, name, Some(on)) {
+                    Some((t, Confidence::Extracted)) => Some((t, Confidence::Extracted)),
+                    _ => {
+                        self.guessed.set(guessed);
+                        found
+                    }
+                }
+            }
+            other => other,
+        };
+        let found = found.or_else(|| {
+            // C++ `port::CondVar cv;`, `typename SkipList<K, C>::Node*`: a
+            // type written with a qualifier the walk could not follow is
+            // looked up by its own name, as one written bare
+            let as_type = self.naming_type();
+            if self.family[f] == Some(Family::C)
+                && as_type
+                && path.len() >= 2
+                && !path.iter().any(|s| s == "()" || s.starts_with('['))
+            {
+                if let Some(t) =
+                    self.resolve_path_inner(f, d, &path[path.len() - 1..], bases, false)
+                {
+                    return Some(t);
+                }
+            }
+            // Ruby `@pki.issue(…)`: a field the walk cannot type is a
+            // receiver it cannot name
+            if self.family[f] == Some(Family::Ruby) && !bases && *self.calling.borrow() {
+                if let [head, field, method] = path {
+                    // (not a method of the class called on the way)
+                    let is_field = head == "self"
+                        && self
+                            .class_of(f, d)
+                            .is_none_or(|c| self.class_member(c, field, 4).is_none());
+                    if is_field {
+                        return self.unknown_receiver(f, method, None);
+                    }
+                }
+            }
             // an element (`xs[0].run()`) or a mapping (`xs.map { … }`) the
             // walk could not type is a receiver it cannot name: what is
             // called on it is found by a distinctive name alone
@@ -3898,6 +4956,9 @@ impl<'a> Project<'a> {
                     return Some(found);
                 }
             }
+            if let Some(found) = self.library_extension_call(f, d, path, bases) {
+                return Some(found);
+            }
             // `let request = request.with_agent(a)`: the name before the
             // declaration is one the facts no longer hold (a parameter it
             // shadows); only the method's name says what is called
@@ -3907,7 +4968,104 @@ impl<'a> Project<'a> {
                 && self.own_initializer(f, d, path))
             .then(|| self.unknown_receiver(f, &path[1], None))
             .flatten()
-        })
+        });
+        // a guess by a method's name on a receiver the source says is a
+        // library's (`jar := newJar()` with `func newJar() *cookiejar.Jar`,
+        // `c.Flags().HasFlags()`): the method is the library's
+        match found {
+            // (an extension written for a library's type is what such a
+            // receiver can be asked)
+            Some((Target::Def(t), Confidence::Inferred))
+                if path.len() >= 2
+                    && self.def(t).receiver.is_none()
+                    // (nor a method a project trait gives a library's type:
+                    // `impl UriExt for Uri`)
+                    && self
+                        .class_of(t.0, Some(t.1))
+                        .is_some_and(|c| self.def(c).kind != DefKind::Interface)
+                    && self.receiver_is_library(f, d, &path[..path.len() - 1]) =>
+            {
+                None
+            }
+            other => other,
+        }
+    }
+
+    /// A call the walk could not follow, by the name of the one extension in
+    /// sight written for a type the project does not define
+    /// (`e.Name.LocalName.Squash()` beside `Squash(this string s)`,
+    /// `user.email.isEmailValid()` beside `fun String.isEmailValid()`):
+    /// `INFERRED`. The receiver is something the walk gives no project type
+    /// (a library's member, a chain of them); one it does type has the
+    /// extensions written for that type, asked where the walk ends.
+    fn library_extension_call(
+        &self,
+        f: usize,
+        d: Option<usize>,
+        path: &[String],
+        bases: bool,
+    ) -> Option<(Target, Confidence)> {
+        let (name, of) = path.split_last()?;
+        if bases
+            || !*self.calling.borrow()
+            || of.is_empty()
+            || name == "()"
+            || name.starts_with('[')
+            // (`self.name()` is a member of the type around, or nothing)
+            || (of.len() == 1 && matches!(of[0].as_str(), "self" | "super"))
+            // (`HttpUtility.UrlEncode(s)`: a static call on a library's type)
+            || (of.len() == 1
+                && of[0].chars().next().is_some_and(|c| c.is_uppercase())
+                && !self.is_local_name(f, d, &of[0]))
+        {
+            return None;
+        }
+        let guessed = self.guessed.get();
+        let (Target::Def(c), _) = self.extension_method(f, name, None)? else {
+            self.guessed.set(guessed);
+            return None;
+        };
+        let written = self.def(c).receiver.clone().or_else(|| self.extended_type(c));
+        let outside = written.is_some_and(|w| {
+            let plain = w.split('<').next().unwrap_or(&w).trim_end_matches('?').trim();
+            let bare = plain.rsplit(['.', ':']).next().unwrap_or(plain);
+            !bare.is_empty() && self.type_named(c.0, bare).is_none()
+        });
+        // a local whose type the source names was asked where the walk
+        // stopped, with that type: another library's is not this one
+        let named_local = of.len() == 1
+            && (self.is_external_local(f, d, &of[0])
+                || self.local_written_type(f, d, &of[0]).is_some());
+        // a name that is also a member of a type of the project says nothing
+        // of an unknown receiver (`self.0.connect()` beside `impl Connector
+        // for ()`)
+        let fam = self.family[f];
+        let only_extensions = self.by_name.get(name.as_str()).into_iter().flatten().all(|r| {
+            let x = self.def(*r);
+            self.family[r.0] != fam
+                || !x.kind.is_callable()
+                || x.decl_only
+                || x.receiver.is_some()
+                || self.extended_type(*r).is_some()
+                // (the declaration in the trait such an impl is of:
+                // `trait UriExt { fn host_bare(&self); }`)
+                || (x.parent.is_some_and(|p| self.def((r.0, p)).kind == DefKind::Interface)
+                    && self.by_name.get(name.as_str()).into_iter().flatten().any(|o| {
+                        o.0 == r.0 && self.extended_type(*o).is_some()
+                    }))
+        });
+        if !outside
+            || named_local
+            || !only_extensions
+            || self.type_of_path(f, d, of, false).is_some()
+        {
+            self.guessed.set(guessed);
+            return None;
+        }
+        // (by a name alone: never from the extension to itself, a wrapper
+        // calling the library's method of its own name)
+        self.guessed.set(true);
+        Some((Target::Def(c), Confidence::Inferred))
     }
 
     /// `want_many`: the path is asked what it is a collection of (`elem_of`):
@@ -3921,6 +5079,7 @@ impl<'a> Project<'a> {
         want_many: bool,
     ) -> Option<(Target, Confidence)> {
         let fam = self.family[f]?;
+        let _asking = Asking(&self.asking, self.asking.replace(Some(f)));
         // `let p = setup(); p.0.go()`: a part of the tuple a local holds is
         // that part of its value
         if let Some(whole) = self.tuple_local_path(f, d, path) {
@@ -3950,6 +5109,175 @@ impl<'a> Project<'a> {
         };
         let opened_after = |i: usize| opened.get(i).copied().unwrap_or(false);
         let (head, rest) = path.split_first()?;
+        // a type parameter of a definition around (`interface Box<T> { v: T }`
+        // beside a `type T`) is no name of the project; where types and
+        // values are names of two kinds, only where a type is written
+        // (a member asked of it, or of a value typed by it, is a member of
+        // the type that bounds it: `fn run<S: Sink>(s: S) { s.begin() }`)
+        if fam != Family::Ecma || self.naming_type() {
+            if let Some((x, bound)) =
+                self.type_param_around(f, d, head).filter(|_| !self.is_local_name(f, d, head))
+            {
+                // (a type's parameter bound by the type itself is the type it
+                // is used on, which `Binds` and `self_params` know)
+                let own = &self.files[f].defs[x];
+                let bound = bound.filter(|_| !own.self_params.iter().any(|p| p == head))?;
+                let before = self.types_only.replace(true);
+                let named =
+                    self.resolve_path_inner(f, defs_parent(self.files, f, x), &bound, false, false);
+                *self.types_only.borrow_mut() = before;
+                let (t, _) = named?;
+                return if rest.is_empty() {
+                    Some((t, Confidence::Extracted))
+                } else {
+                    self.walk(t, rest, Confidence::Extracted)
+                };
+            }
+        }
+        // TS: where a type is written, a value of the name (`const Repo = 1`)
+        // is no meaning of it; the type around is (types and values are two
+        // meanings of a name: the name resolver's `meaning & SymbolFlagsType`)
+        if fam == Family::Ecma && *self.types_only.borrow() && self.is_local_name(f, d, head) {
+            if let Some(t) = self.resolve_name(f, d, head) {
+                return if rest.is_empty() {
+                    Some((t, Confidence::Extracted))
+                } else {
+                    self.walk(t, rest, Confidence::Extracted)
+                };
+            }
+        }
+        // a `let` in a block at the top of a file (`for (let x; …) { x }`
+        // beside a file-level `var x`): a local of that block, which no
+        // definition holds
+        if let Some(l) = self.file_block_local(f, head) {
+            if rest.is_empty() || l.path.is_empty() {
+                return None;
+            }
+            let t = self.type_of_path(f, d, &l.path, l.declared)?;
+            return self.walk(Target::Def(t), rest, Confidence::Extracted);
+        }
+        // a local declared with a type, called: the call is of what it holds,
+        // which is no definition (`cb('hi')` with `cb: (x: string) => number`)
+        if rest.is_empty()
+            && !bases
+            && *self.calling.borrow()
+            && !*self.types_only.borrow()
+            && self.declared_local(f, d, head)
+            && !self.local_keeps_outer(f, d, head, true)
+        {
+            return None;
+        }
+        // C++ `log::Writer log(file);`: where a type is written, a name
+        // before `::` is a namespace or a type, never the variable of that name
+        if fam == Family::C
+            && !rest.is_empty()
+            && self.naming_type()
+            && self.is_local_name(f, d, head)
+        {
+            let named = self
+                .resolve_name(f, d, head)
+                .and_then(|t| self.walk(t, rest, Confidence::Extracted));
+            if named.is_some() {
+                return named;
+            }
+        }
+        // Rust: a module and a function of one name are in two namespaces
+        // (`mod log` beside `fn log`): `log::write()` is the module's,
+        // `log()` the function (r[names.namespaces.kinds])
+        // (C: a struct tag and a function of one name are two name spaces,
+        // C 6.2.3; C++ hides the class behind the function, [basic.scope.hiding])
+        if matches!(fam, Family::Rust | Family::C) && !self.is_local_name(f, d, head) {
+            let called = rest.first().is_none_or(|s| s == "()") && !self.naming_type();
+            if let Some(r) = self.rust_namespace_pick(f, d, head, called) {
+                return self.walk(Target::Def(r), rest, Confidence::Extracted);
+            }
+        }
+        // C++ `Status::OK()` in a member of Status: the name before `::` is
+        // the class, never the constructor of its name the member lookup
+        // finds first ([class.qual]: a constructor is not found by a
+        // nested-name-specifier)
+        if fam == Family::C && rest.first().is_some_and(|s| s != "()") {
+            if let Some(Target::Def(c)) = self.resolve_name_any(f, d, head) {
+                // (a constructor is a callable of its class's name: the
+                // grammar gives it no kind of its own)
+                if self.def(c).kind.is_callable() {
+                    let class = self.class_of(c.0, Some(c.1));
+                    if let Some(class) = class.filter(|k| &self.def(*k).name == head) {
+                        return self.walk(Target::Def(class), rest, Confidence::Extracted);
+                    }
+                }
+            }
+        }
+        // PHP `\\App\\Models\\User`, `\\DateTimeImmutable`: fully qualified, from
+        // the global namespace (spec 18-namespaces.md)
+        if fam == Family::Php && head == "\\" {
+            for k in (1..=rest.len()).rev() {
+                let key = rest[..k].join(".");
+                let found = self
+                    .fqn
+                    .get(&key)
+                    .into_iter()
+                    .flatten()
+                    .copied()
+                    .filter(|r| self.family[r.0] == Some(Family::Php));
+                if let Some(r) = self.best(found) {
+                    return self.walk(Target::Def(r), &rest[k..], Confidence::Extracted);
+                }
+            }
+            // (a function or class the project declares in the global
+            // namespace: a file with no `namespace`, nothing around it)
+            let (name, more) = rest.split_first()?;
+            let global: Vec<DefRef> = self
+                .by_name
+                .get(name)
+                .into_iter()
+                .flatten()
+                .copied()
+                .filter(|r| {
+                    // (`namespace { … }` is a block of the global namespace)
+                    let global_block = |p: usize| {
+                        let d = &self.files[r.0].defs[p];
+                        d.kind == DefKind::Namespace && d.name.trim().is_empty()
+                    };
+                    self.family[r.0] == Some(Family::Php)
+                        && match self.def(*r).parent {
+                            None => self.files[r.0].package.is_none(),
+                            Some(p) => global_block(p),
+                        }
+                })
+                .collect();
+            // (one the project does not declare is PHP's own or a library's,
+            // `\\ReflectionProperty`, `\\rewind`: it names nothing, as the same
+            // name written bare does)
+            let r = self.best(global)?;
+            return self.walk(Target::Def(r), more, Confidence::Extracted);
+        }
+        // C++ `::Helper()`: a name of the global namespace (no namespace
+        // around), in the file or a file it includes ([namespace.qual])
+        if fam == Family::C && head == "::" {
+            let (name, more) = rest.split_first()?;
+            let mut files: Vec<usize> = vec![f];
+            files.extend(self.scopes[f].imported.iter().copied().filter(|&g| g != f));
+            let found: Vec<DefRef> = files
+                .iter()
+                .flat_map(|&g| self.top[g].get(name).into_iter().flatten().map(move |&i| (g, i)))
+                .filter(|r| self.def(*r).parent.is_none())
+                .collect();
+            let r = self.best(found)?;
+            return self.walk(Target::Def(r), more, Confidence::Extracted);
+        }
+        // C++ `namespace u = util; u::twice()`: the namespace the alias names
+        // (TS `import Internal = My.Internal;`, also named alone: `new C()`)
+        if (fam == Family::Ecma || (fam == Family::C && !rest.is_empty()))
+            && !self.files[f].ns_aliases.is_empty()
+        {
+            let named = self.files[f].ns_aliases.iter().find(|(a, _)| a == head);
+            if let Some((_, of)) = named.filter(|_| !self.is_local_name(f, d, head)) {
+                let mut whole = of.clone();
+                whole.extend(rest.iter().cloned());
+                return self.resolve_path_inner(f, d, &whole, bases, want_many);
+            }
+        }
         let mut conf = Confidence::Extracted;
         // Whether `t` is what a sealed wrapper holds, not opened yet: after a
         // name, field or call declared as one (`Optional<Foo>`, `-> Result<Foo,
@@ -3991,6 +5319,23 @@ impl<'a> Project<'a> {
                 return self.walk(Target::Def(m), &rest[1..], Confidence::Inferred);
             }
         }
+        // `self` / `super` where the language has no such word (Go, C, C++,
+        // Java's `self`, C#'s `super`): a name like any other when the scope
+        // has one. (`this` reaches here as `self` too, so the word is the
+        // receiver unless something is named that.)
+        let lang = self.files[f].lang;
+        let has_word = match head.as_str() {
+            "self" => matches!(
+                lang,
+                Some(Lang::Python | Lang::Rust | Lang::Swift | Lang::Ruby | Lang::Php)
+            ),
+            "super" => {
+                !matches!(lang, Some(Lang::Go | Lang::C | Lang::Cpp | Lang::CSharp | Lang::Php))
+            }
+            _ => true,
+        };
+        let plain_word = !has_word
+            && (self.is_local_name(f, d, head) || self.resolve_name(f, d, head).is_some());
         let mut t = match head.as_str() {
             _ if head_many.is_some() => {
                 let (elem, c) = head_many?;
@@ -4000,9 +5345,18 @@ impl<'a> Project<'a> {
                 keys = keyed.then(|| self.local_key(f, d, head)).flatten();
                 Target::Def(elem)
             }
-            "self" => {
+            "self" if !plain_word => {
                 if rest.is_empty() {
-                    return None;
+                    // PHP `new static()` / `new self()`, C# `: this(…)`, Java
+                    // `this(…)`: the class around
+                    // (and Swift `Self()`)
+                    let constructs =
+                        matches!(fam, Family::Php | Family::CSharp | Family::Jvm | Family::Swift)
+                            && *self.ref_kind.borrow() == Some(RefKind::New);
+                    return constructs
+                        .then(|| self.class_of(f, d))
+                        .flatten()
+                        .map(|c| (Target::Def(c), conf));
                 }
                 // Ruby `self.class.from(x)`: a method of the class itself
                 if fam == Family::Ruby && rest.len() > 1 && rest[0] == "class" {
@@ -4029,13 +5383,61 @@ impl<'a> Project<'a> {
             }
             // Rust `super::x`: the parent module
             "super" if fam == Family::Rust => {
-                let t = modules::rust_parent(self, f)?;
+                // inside an inline `mod inner { … }` the parent is the module
+                // the block is written in: the one around it, else the file's
+                let defs = &self.files[f].defs;
+                let inline = |from: Option<usize>| {
+                    let mut cur = from;
+                    while let Some(x) = cur {
+                        if defs[x].kind == DefKind::Namespace {
+                            return Some(x);
+                        }
+                        cur = defs[x].parent;
+                    }
+                    None
+                };
+                let t = match inline(d) {
+                    Some(x) => match inline(defs[x].parent) {
+                        Some(outer) => Target::Def((f, outer)),
+                        None => Target::Module(vec![f]),
+                    },
+                    None => modules::rust_parent(self, f)?,
+                };
                 return self.walk(t, rest, conf);
             }
-            "super" => {
+            "super" if !plain_word => {
                 let c = self.class_of(f, d)?;
                 // Python `super().m`: the call adds nothing
                 let rest = if rest.first().is_some_and(|s| s == "()") { &rest[1..] } else { rest };
+                // C# `: base(…)`, Java `super(…)`: the class the constructor's
+                // class extends
+                if rest.is_empty()
+                    && matches!(fam, Family::CSharp | Family::Jvm)
+                    && *self.ref_kind.borrow() == Some(RefKind::New)
+                {
+                    let base = self
+                        .bases(c)
+                        .into_iter()
+                        .find(|b| matches!(self.def(*b).kind, DefKind::Class | DefKind::Struct))?;
+                    return Some((Target::Def(base), conf));
+                }
+                // Ruby `super` / `super(x)`: the method of the same name
+                // further up
+                if rest.is_empty() && fam == Family::Ruby {
+                    let defs = &self.files[f].defs;
+                    let mut cur = d;
+                    while let Some(x) = cur {
+                        if defs[x].kind.is_callable() && !defs[x].block {
+                            let m = self
+                                .bases(c)
+                                .into_iter()
+                                .find_map(|b| self.class_member(b, &defs[x].name, 4))?;
+                            return Some((Target::Def(m), conf));
+                        }
+                        cur = defs[x].parent;
+                    }
+                    return None;
+                }
                 let name = rest.first()?;
                 let m = self.bases(c).into_iter().find_map(|b| self.class_member(b, name, 4))?;
                 return self.walk(Target::Def(m), &rest[1..], conf);
@@ -4050,7 +5452,7 @@ impl<'a> Project<'a> {
             }
             // PHP `$x`: a variable. Its declared or assigned type, else only
             // a distinctive method name
-            v if v.starts_with('$') => match self.local_type(f, d, &v[1..]) {
+            v if v.starts_with('$') && fam == Family::Php => match self.local_type(f, d, &v[1..]) {
                 Some((t, c)) => {
                     conf = c;
                     Target::Def(t)
@@ -4071,8 +5473,16 @@ impl<'a> Project<'a> {
             },
             // a parameter or local of no known type, or of a type the project
             // does not define: only an extension written for it can be meant
+            // (where the use is in the local's block, and after its declaration)
             _ if !own_init
                 && (self.is_untyped_local(f, d, head) || self.is_external_local(f, d, head))
+                && self.is_local_name(f, d, head)
+                && !self.local_keeps_outer(
+                    f,
+                    d,
+                    head,
+                    rest.is_empty() && *self.calling.borrow(),
+                )
                 && (*self.types_only.borrow() || self.local_type(f, d, head).is_none()) =>
             {
                 if rest.len() == 1 && !bases && *self.calling.borrow() {
@@ -4350,6 +5760,23 @@ impl<'a> Project<'a> {
                                 return Some(found);
                             }
                         }
+                        // `const api = { load() { … } }; api.load()`: a
+                        // function written in the object the constant holds
+                        if bound.is_none() && fam == Family::Ecma {
+                            let name = &self.def(p).name;
+                            let own: Vec<DefRef> = self.files[p.0]
+                                .defs
+                                .iter()
+                                .enumerate()
+                                .filter(|(_, x)| {
+                                    x.name == rest[0] && x.object.as_deref() == Some(name.as_str())
+                                })
+                                .map(|(i, _)| (p.0, i))
+                                .collect();
+                            if let Some(m) = self.best(own) {
+                                return self.walk(Target::Def(m), &rest[1..], conf);
+                            }
+                        }
                         let (b, imp) = bound?;
                         let m = self.eval(b, 3)?;
                         self.note_use(f, *imp, &m);
@@ -4399,6 +5826,14 @@ impl<'a> Project<'a> {
                 if skip == 0 && opened_after(i + 1) {
                     sealed = false;
                 }
+                continue;
+            }
+            // Java `Outer.this` (JLS 15.8.4): the object of the class named
+            if seg == "self"
+                && i == 0
+                && self.files[f].lang == Some(crate::lang::Lang::Java)
+                && matches!(t, Target::Def(c) if self.def(c).kind.is_class_like())
+            {
                 continue;
             }
             // `let (a, b) = f()`: `a` is `f`'s result's first part
@@ -4641,6 +6076,19 @@ impl<'a> Project<'a> {
                     }
                 }
             }
+            // Kotlin `x.apply { … }.build()`, `x.also(f).done()`: the scope
+            // functions that give the receiver back
+            if matches!(seg.as_str(), "apply" | "also")
+                && i + 1 < rest.len()
+                && self.files[f].lang == Some(crate::lang::Lang::Kotlin)
+            {
+                if let Target::Def(c) = t {
+                    if self.def(c).kind.is_class_like() && self.class_member(c, seg, 4).is_none() {
+                        skip = usize::from(rest.get(i + 1).is_some_and(|s| s == "()"));
+                        continue;
+                    }
+                }
+            }
             if seg == "()" {
                 // the result of a call: constructing a type gives one of it;
                 // anything else returns what the walk cannot know
@@ -4771,6 +6219,19 @@ impl<'a> Project<'a> {
                 }
             }
             let mut found = self.member(&t, seg, 3);
+            // a field beside a method of its name (Rust `input: ConsumeBuf`
+            // and a trait's `fn input()`, Java, PHP): read without a call,
+            // with more after it, the name is the field
+            if let (Target::Def(c), Some(Target::Def(m))) = (&t, &found) {
+                let read = rest.get(i + 1).is_some_and(|s| s != "()");
+                if read && fam != Family::Ruby && self.def(*m).kind.is_callable() {
+                    let field =
+                        self.members(*c, seg).into_iter().find(|x| self.def(*x).kind.is_state());
+                    if let Some(field) = field {
+                        found = Some(Target::Def(field));
+                    }
+                }
+            }
             // C++ `cpr::async(…)` beside `class async`: the name called is the
             // function, a name with `::` after it the type
             if let Target::Def(ns) = t {
@@ -4825,10 +6286,16 @@ impl<'a> Project<'a> {
             if let Some(Target::Def(m)) = &found {
                 let m = *m;
                 let next = rest.get(i + 1);
-                if fam == Family::Python
+                // (a JS / TS method read so is a getter: a function has no
+                // members of the project's)
+                let property = match fam {
+                    Family::Python => self.is_property(m),
+                    Family::Ecma => next.is_some_and(|s| !FUNCTION_MEMBERS.contains(&s.as_str())),
+                    _ => false,
+                };
+                if property
                     && self.def(m).kind.is_callable()
                     && next.is_some_and(|s| s != "()" && !s.starts_with('['))
-                    && self.is_property(m)
                 {
                     if let Some((r, declared)) = self.return_type(m) {
                         if !declared {
@@ -5368,6 +6835,12 @@ impl<'a> Project<'a> {
             Implicit::Typed(path) => {
                 (self.type_of_path(f, d, path, true), path.last().cloned(), Confidence::Extracted)
             }
+            Implicit::Value(path) => {
+                let saved = self.suspend();
+                let t = self.type_of_path(f, d, path, false);
+                self.restore(saved);
+                (t, None, Confidence::Extracted)
+            }
             Implicit::Return => {
                 let defs = &self.files[f].defs;
                 let mut cur = d;
@@ -5420,15 +6893,21 @@ impl<'a> Project<'a> {
     fn explain_unresolved(&self, f: usize, d: Option<usize>, r: &RefFact) -> Option<Value> {
         let name = r.path.last().filter(|s| !s.starts_with('[') && *s != "()")?;
         let fam = self.family[f]?;
+        // (an RSpec `let` is a bare name of its block: no member of anything)
+        let member_call = r.path.len() >= 2;
         let mut cands = self.by_name.get(name.as_str())?.iter().copied().filter(|c| {
             self.def(*c).kind.is_callable()
                 && self.family[c.0] == Some(fam)
                 && self.node_id(*c).is_some()
+                && !(member_call && self.def(*c).scope_lines.is_some())
         });
         let (c, None) = (cands.next()?, cands.next()) else { return None };
         let marker = r.path.iter().any(|s| s.starts_with('['));
         let head = r.path[0].as_str();
         let bare = head.split('@').next().unwrap_or(head);
+        // (a PHP `$x` is a local under its bare name)
+        let lhead = head.trim_start_matches('$');
+        let lbare = bare.trim_start_matches('$');
         let reason = if r.path.len() == 1 {
             "bare name: not in scope".to_string()
         } else if head == "self" {
@@ -5439,13 +6918,13 @@ impl<'a> Project<'a> {
             "implicit member: its place gives no type".to_string()
         } else if head == "()" {
             "receiver the walk cannot name".to_string()
-        } else if self.is_local_name(f, d, head) || self.is_local_name(f, d, bare) {
-            if self.is_untyped_local(f, d, head) {
+        } else if self.is_local_name(f, d, lhead) || self.is_local_name(f, d, lbare) {
+            if self.is_untyped_local(f, d, lhead) {
                 "untyped local or parameter".to_string()
-            } else if self.is_external_local(f, d, head) {
+            } else if self.is_external_local(f, d, lhead) {
                 "local of a library type".to_string()
             } else {
-                match self.local_type(f, d, head) {
+                match self.local_type(f, d, lhead) {
                     Some((t, _)) if r.path.len() == 2 => {
                         format!("typed local: no such member on its type ({:?})", self.def(t).kind)
                     }
@@ -5522,11 +7001,68 @@ impl<'a> Project<'a> {
             }
             _ => false,
         };
+        // the longest start of the path that names something: a library's
+        // name, or a field, variable or function whose written type is one
+        // (`$this->request->getBody()`, `RequestInterface $request`). What
+        // hangs off it is the library's, unless the one definition is an
+        // extension written for such a type.
+        // (a C# method with no type around is one a `#if` inside an
+        // expression cost its class: it may be an extension all the same)
+        let extension = cd.receiver.is_some()
+            || self.extended_type(c).is_some()
+            || (fam == Family::CSharp && cd.parent.is_none());
+        // a name of the project between the head and the name called: the
+        // path may come back into the project (`trust.af.evaluate()`)
+        let comes_back = r.path.len() > 2
+            && r.path[1..r.path.len() - 1].iter().any(|s| self.by_name.contains_key(s.as_str()));
+        let library_step = || {
+            if r.path.len() < 2 || extension {
+                return false;
+            }
+            if self.is_outside_local(f, d, lhead) && self.local_type(f, d, lhead).is_none() {
+                return !comes_back;
+            }
+            for k in (1..r.path.len()).rev() {
+                let last = r.path[k - 1].as_str();
+                if last == "()" || last.starts_with('[') {
+                    continue;
+                }
+                match self.resolve_path(f, d, &r.path[..k], true) {
+                    Some((Target::Ext(..), _)) => return true,
+                    Some((Target::Def(x), _)) => return self.library_typed(x),
+                    Some(_) => return false,
+                    None => {}
+                }
+            }
+            false
+        };
+        // where a method is not in scope by its bare name, a bare call is a
+        // function's (PHP `\rewind($h)` beside a `rewind()` method, a Go
+        // `h := func…` beside a method `h`)
+        // (PHP `\\rewind(…)`, fully qualified, is as bare: the global function)
+        let bare = r.path.len() == 1 || (r.path.len() == 2 && r.path[0] == "\\");
+        let bare_is_no_method = bare
+            && !fam.implicit_this()
+            && cd.parent.is_some_and(|p| self.def((c.0, p)).kind.is_class_like());
+        // a `let` of another block of this file: the name here is a local of
+        // the block it is used in
+        let let_elsewhere = r.path.len() == 1 && c.0 == f && cd.scope_lines.is_some();
         let library_like = if reason == "library name"
             || reason == "local of a library type"
             || std_held
+            || library_step()
         {
             Some("the receiver is a library's")
+        } else if r.path.len() >= 2 && self.attrs.contains(&(fam, name.to_string())) {
+            // (`env.status` beside `Env = Options.new(:status, …)`, `conn.adapter`
+            // beside `def_delegators :builder, :adapter`: the receiver may be
+            // the type that declares it with no `def`, typed or not — a
+            // typed one that lacks the `def` has the attribute, or nothing)
+            Some("a type declares an attribute of the name")
+        } else if bare_is_no_method {
+            Some("a bare name is no method here")
+        } else if let_elsewhere {
+            Some("the one definition is a let of another block")
         } else if outside_head || std_head {
             Some("the head is a library's type or global")
         } else if core.contains(&name.as_str())
@@ -5596,7 +7132,7 @@ impl<'a> Project<'a> {
             "language": self.files[f].lang.map(|l| l.name()),
             "path": r.path.join("."),
             "name": name,
-            "in_definition": d.is_some(),
+            "in_definition": d.is_some_and(|x| !self.files[f].defs[x].block),
             "markers": marker,
             "reason": reason,
             "candidate": {
@@ -5608,6 +7144,22 @@ impl<'a> Project<'a> {
             "candidate_visible": visible,
             "library_like": library_like,
         }))
+    }
+
+    /// Whether the path being resolved is written where a type is: a
+    /// declaration's type, a construction, a base.
+    fn naming_type(&self) -> bool {
+        *self.types_only.borrow()
+            || matches!(
+                *self.ref_kind.borrow(),
+                Some(
+                    RefKind::Type
+                        | RefKind::New
+                        | RefKind::Inherits
+                        | RefKind::Implements
+                        | RefKind::Base
+                )
+            )
     }
 
     /// Whether the path being walked is a call to link (not a local's value
@@ -5813,14 +7365,38 @@ impl<'a> Project<'a> {
             let head = joined(&path[..k]);
             for pre in &prefixes {
                 let key = format!("{pre}{head}");
+                // (where names live in packages, `fqn` holds them all: a
+                // name of another package is not one written without it.
+                // Not C#, whose project files import namespaces for every
+                // source: `<Using Include="…"/>`)
+                let packaged = matches!(fam, Family::Jvm | Family::Php);
                 let found = self
                     .fqn
                     .get(&key)
-                    .or_else(|| self.by_qual.get(&key))
+                    .or_else(|| self.by_qual.get(&key).filter(|_| !packaged))
                     .into_iter()
                     .flatten()
                     .copied()
                     .filter(|r| self.family[r.0] == Some(fam))
+                    // (Rust: a crate's names are its own)
+                    // (… or what the file imports by that name from a crate
+                    // the engine cannot follow: `use grep::printer::ColorSpecs`
+                    // through a facade crate)
+                    .filter(|r| {
+                        fam != Family::Rust
+                            || self.crate_of(r.0) == self.crate_of(f)
+                            || self.imports_name(f, &path[0])
+                    })
+                    // PHP: a global class is no name of a namespaced file
+                    // written bare (only functions and constants fall back)
+                    .filter(|r| {
+                        !(fam == Family::Php
+                            && k == 1
+                            && pre.is_empty()
+                            && self.files[f].package.is_some()
+                            && self.files[r.0].package.is_none()
+                            && self.def(*r).kind.is_class_like())
+                    })
                     // Ruby: a method at another file's top level is there
                     // only for the files that require it
                     .filter(|r| {
@@ -5830,6 +7406,22 @@ impl<'a> Project<'a> {
                             || !self.def(*r).kind.is_callable()
                             || self.scopes[f].imported.contains(&r.0)
                     });
+                // (C, C++: of the definitions of one qualified name, the
+                // file's own, then those of the files it includes)
+                let mut found: Vec<DefRef> = found.collect();
+                if fam == Family::C && found.len() > 1 {
+                    let own: Vec<DefRef> = found.iter().copied().filter(|r| r.0 == f).collect();
+                    let seen: Vec<DefRef> = found
+                        .iter()
+                        .copied()
+                        .filter(|r| self.scopes[f].imported.contains(&r.0))
+                        .collect();
+                    if !own.is_empty() {
+                        found = own;
+                    } else if !seen.is_empty() {
+                        found = seen;
+                    }
+                }
                 if let Some(r) = self.best(found) {
                     let t = self.walk_target(Target::Def(r), &path[k..])?;
                     return Some((t, Confidence::Extracted));
@@ -5886,6 +7478,52 @@ impl<'a> Project<'a> {
         self.files[f].lang.is_some_and(|l| l.module().builtins().contains(&name))
     }
 
+    /// Whether an import of file `f` binds `name`, resolved or not.
+    fn imports_name(&self, f: usize, name: &str) -> bool {
+        self.scopes[f].bindings.contains_key(name)
+            || self.files[f].imports.iter().any(|imp| {
+                imp.alias.as_deref() == Some(name)
+                    || imp.names.iter().any(|(n, a)| a.as_deref().unwrap_or(n) == name)
+                    || imp.module.rsplit("::").next() == Some(name)
+            })
+    }
+
+    /// The directory of the Cargo package file `f` belongs to: the deepest
+    /// one above it that a manifest names (empty: none, or the root's).
+    fn crate_of(&self, f: usize) -> &str {
+        let path = self.files[f].path.as_str();
+        self.modsys
+            .rs_crates
+            .values()
+            .map(|src| src.strip_suffix("src").unwrap_or(src).trim_end_matches('/'))
+            .filter(|dir| dir.is_empty() || path.starts_with(&format!("{dir}/")))
+            .max_by_key(|dir| dir.len())
+            .unwrap_or("")
+    }
+
+    /// Whether a guess by name alone may name `r` from file `f`: where names
+    /// live in packages (JVM, PHP), only one of the file's own package or of
+    /// none, and no type nested in a type of another file.
+    fn in_reach_by_name(&self, f: usize, r: DefRef) -> bool {
+        // (Rust: a name of another crate is in reach only through a `use`)
+        if self.family[f] == Some(Family::Rust) {
+            return self.crate_of(f) == self.crate_of(r.0)
+                || self.imports_name(f, &self.def(r).name);
+        }
+        if !matches!(self.family[f], Some(Family::Jvm | Family::Php)) {
+            return true;
+        }
+        let theirs = &self.files[r.0].package;
+        let nested = self.def(r).parent.is_some_and(|p| self.def((r.0, p)).kind.is_class_like());
+        // (PHP: only a function or a constant falls back from a namespace to
+        // the global one; a class name does not, spec 18-namespaces.md)
+        let global_ok = theirs.is_none()
+            && !(self.family[f] == Some(Family::Php)
+                && self.files[f].package.is_some()
+                && self.def(r).kind.is_class_like());
+        (global_ok || *theirs == self.files[f].package) && !(nested && r.0 != f)
+    }
+
     /// A bare name defined nowhere in reach: a project-wide unique function or
     /// type of the same family.
     fn fallback_name(&self, f: usize, name: &str) -> Option<DefRef> {
@@ -5906,6 +7544,12 @@ impl<'a> Project<'a> {
                     && !(free && d.kind == DefKind::Method)
                     && d.scope_lines.is_none()
             })
+            // where names live in packages, a name of another package is
+            // not in reach without an import (which the scopes have read),
+            // nor is a type nested in a type of another file. (Not C#: a
+            // project file can import a namespace for every source, `<Using
+            // Include="…"/>`, which nothing here reads.)
+            .filter(|r| self.in_reach_by_name(f, *r))
             .collect();
         self.narrow(f, cands).map(|(r, _)| r)
     }
@@ -6072,6 +7716,211 @@ impl<'a> Project<'a> {
     /// or in its package. `on` is the receiver's type when the source writes
     /// it: the extension written for that type is `EXTRACTED`; otherwise a
     /// single candidate (the file's own first) is `INFERRED`.
+    /// The namespaces a C# file declares: the one written for the whole file
+    /// (`namespace N;`), else each block at its top (`namespace N { … }`).
+    fn csharp_namespaces(&self, f: usize) -> Vec<String> {
+        if let Some(p) = &self.files[f].package {
+            return vec![p.clone()];
+        }
+        self.files[f]
+            .defs
+            .iter()
+            .filter(|d| d.kind == DefKind::Namespace && d.parent.is_none())
+            .map(|d| d.qualname.replace("::", "."))
+            .collect()
+    }
+
+    /// Scala `export p.print` in `c`: the member it forwards, looked up from
+    /// inside `c` ("Export Clauses": an alias of the member selected).
+    fn forwarded_member(&self, c: DefRef, name: &str, depth: usize) -> Option<DefRef> {
+        let facts = &self.files[c.0];
+        if facts.forwards.is_empty() || depth == 0 {
+            return None;
+        }
+        let d = self.def(c);
+        let path = facts.forwards.iter().find_map(|(at, p)| {
+            (d.start_byte <= *at && *at < d.end_byte && p.last().is_some_and(|l| l == name))
+                .then_some(p)
+        })?;
+        match self.resolve_path(c.0, Some(c.1), path, true)? {
+            (Target::Def(m), _) if m != c => Some(m),
+            _ => None,
+        }
+    }
+
+    /// Rust: of a module and a value of one name in the nearest scope that
+    /// declares the name, the value where it is called, the module where a
+    /// path goes on from it. `None` when the scope has only one kind.
+    fn rust_namespace_pick(
+        &self,
+        f: usize,
+        d: Option<usize>,
+        name: &str,
+        called: bool,
+    ) -> Option<DefRef> {
+        let defs = &self.files[f].defs;
+        let mut cur = d;
+        let mut cands: Vec<usize> = Vec::new();
+        while let Some(x) = cur {
+            if let Some(k) = self.children[f].get(&x).and_then(|m| m.get(name)) {
+                cands = k.clone();
+                break;
+            }
+            cur = defs[x].parent;
+        }
+        if cands.is_empty() {
+            cands = self.top[f].get(name).cloned().unwrap_or_default();
+        }
+        let c_family = self.family[f] == Some(Family::C);
+        let module = |i: &usize| {
+            matches!(defs[*i].kind, DefKind::Module | DefKind::Namespace)
+                || (c_family && defs[*i].kind.is_class_like())
+        };
+        // (C++: a constructor defined out of its class, `T::T()`, is the
+        // class's, not a function beside it)
+        let value = |i: &usize| {
+            defs[*i].kind.is_callable()
+                && !(c_family
+                    && (defs[*i].owner.is_some() || defs[*i].kind == DefKind::Constructor))
+        };
+        if !(cands.iter().any(module) && cands.iter().any(value)) {
+            return None;
+        }
+        let pick: Vec<DefRef> = cands
+            .iter()
+            .filter(|i| if called { value(i) } else { module(i) })
+            .map(|&i| (f, i))
+            .collect();
+        self.best(pick)
+    }
+
+    /// The C# namespace a definition is written in: the innermost
+    /// namespace block around it, else the file's.
+    fn cs_namespace_of(&self, f: usize, mut i: usize) -> Option<String> {
+        loop {
+            let d = &self.files[f].defs[i];
+            if d.kind == DefKind::Namespace {
+                return Some(d.qualname.replace("::", "."));
+            }
+            match d.parent {
+                Some(p) => i = p,
+                None => return self.files[f].package.clone(),
+            }
+        }
+    }
+
+    /// C#: a definition of another namespace block of the file is no name
+    /// of the use's namespace unless that block is around it (§7.8.1).
+    fn cs_namespace_in_sight(&self, f: usize, d: Option<usize>, r: DefRef) -> bool {
+        if self.family[f] != Some(Family::CSharp) || r.0 != f {
+            return true;
+        }
+        let (Some(theirs), Some(mine)) =
+            (self.cs_namespace_of(r.0, r.1), d.and_then(|x| self.cs_namespace_of(f, x)))
+        else {
+            return true;
+        };
+        mine == theirs || mine.strip_prefix(theirs.as_str()).is_some_and(|x| x.starts_with('.'))
+    }
+
+    /// Rust: an item of an inline module is no name outside it, only by a
+    /// path (r[names.scopes.items.nested-modules]). (An item of the file's
+    /// own module stays in sight of its inline modules: `use super::*;` in
+    /// `mod tests` is read as the file's scope.)
+    fn rust_module_in_sight(&self, f: usize, d: Option<usize>, r: DefRef) -> bool {
+        if self.family[f] != Some(Family::Rust) || r.0 != f {
+            return true;
+        }
+        let defs = &self.files[f].defs;
+        let module_of = |mut i: usize| -> Option<usize> {
+            while let Some(p) = defs[i].parent {
+                if matches!(defs[p].kind, DefKind::Module | DefKind::Namespace) {
+                    return Some(p);
+                }
+                i = p;
+            }
+            None
+        };
+        let Some(theirs) = module_of(r.1) else { return true };
+        // the use is inside that module (or is it)
+        let mut cur = d;
+        while let Some(x) = cur {
+            if x == theirs {
+                return true;
+            }
+            cur = defs[x].parent;
+        }
+        false
+    }
+
+    /// Kotlin: of extensions written for the receiver's type, those of the
+    /// first set the specification lists (overload-resolution.md, 'Call with
+    /// an explicit receiver'): declared in a function around the use, then
+    /// imported by name, then of the file's package, then star-imported.
+    fn kotlin_extension_order(&self, f: usize, exact: Vec<DefRef>) -> Vec<DefRef> {
+        let home = (*self.cur.borrow())
+            .filter(|(cf, _)| *cf == f)
+            .and_then(|(cf, ri)| self.files[cf].refs[ri].from_def);
+        let around = |r: &DefRef| -> bool {
+            let Some(p) = self.def(*r).parent else { return false };
+            let mut cur = home;
+            while let Some(x) = cur {
+                if r.0 == f && x == p {
+                    return true;
+                }
+                cur = self.files[f].defs[x].parent;
+            }
+            false
+        };
+        let pkg_of = |g: usize| self.files[g].package.clone().unwrap_or_default();
+        let named = |r: &DefRef| {
+            let name = &self.def(*r).name;
+            self.files[f].imports.iter().any(|imp| {
+                imp.form == ImportForm::From
+                    && imp.module == pkg_of(r.0)
+                    && imp.names.iter().any(|(n, _)| n == name)
+            })
+        };
+        let rank = |r: &DefRef| -> u8 {
+            if around(r) {
+                0
+            } else if named(r) {
+                1
+            } else if pkg_of(r.0) == pkg_of(f) {
+                2
+            } else {
+                3
+            }
+        };
+        let best = exact.iter().map(rank).min().unwrap_or(3);
+        exact.into_iter().filter(|r| rank(r) == best).collect()
+    }
+
+    /// Of extensions written for one type, those of the namespace closest
+    /// around the use being resolved.
+    fn closest_extensions(&self, f: usize, exact: Vec<DefRef>) -> Vec<DefRef> {
+        let Some(home) = (*self.cur.borrow())
+            .filter(|(cf, _)| *cf == f)
+            .and_then(|(cf, ri)| self.files[cf].refs[ri].from_def)
+        else {
+            return exact;
+        };
+        let Some(mine) = self.cs_namespace_of(f, home) else { return exact };
+        let rank = |r: &DefRef| -> usize {
+            match self.cs_namespace_of(r.0, r.1) {
+                Some(ns)
+                    if mine == ns
+                        || mine.strip_prefix(ns.as_str()).is_some_and(|x| x.starts_with('.')) =>
+                {
+                    ns.split('.').count()
+                }
+                _ => 0,
+            }
+        };
+        let best = exact.iter().map(rank).max().unwrap_or(0);
+        exact.into_iter().filter(|r| rank(r) == best).collect()
+    }
+
     fn extension_method(
         &self,
         f: usize,
@@ -6086,6 +7935,8 @@ impl<'a> Project<'a> {
         }
         let here = dir_of(&self.files[f].path);
         let pkg = self.files[f].package.as_deref();
+        let spaces =
+            if fam == Some(Family::CSharp) { self.csharp_namespaces(f) } else { Vec::new() };
         // Rust: a method of an `impl Trait for` a type the project does not
         // define (`impl RequestExt for http::Request<()>`) extends that type
         let mut pool: Vec<DefRef> =
@@ -6105,11 +7956,17 @@ impl<'a> Project<'a> {
                     || dir_of(&self.files[r.0].path) == here
                     || (pkg.is_some() && self.files[r.0].package.as_deref() == pkg)
                     // C#: a namespace sees what the ones around it declare
-                    // (`RestSharp.Tests` sees `RestSharp`'s extensions)
-                    || (fam == Some(Family::CSharp)
-                        && pkg.zip(self.files[r.0].package.as_deref()).is_some_and(|(mine, its)| {
-                            mine.strip_prefix(its).is_some_and(|rest| rest.starts_with('.'))
-                        }))
+                    // (`RestSharp.Tests` sees `RestSharp`'s extensions),
+                    // written as a block or for the whole file
+                    || (fam == Some(Family::CSharp) && {
+                        let its = self.csharp_namespaces(r.0);
+                        spaces.iter().any(|mine| {
+                            its.iter().any(|its| {
+                                mine == its
+                                    || mine.strip_prefix(its.as_str()).is_some_and(|rest| rest.starts_with('.'))
+                            })
+                        })
+                    })
                     || self.uses_namespace_of(f, r.0)
             })
             .collect();
@@ -6122,6 +7979,15 @@ impl<'a> Project<'a> {
                     written.is_some_and(|t| t.eq_ignore_ascii_case(on))
                 })
                 .collect();
+            // C#: of several, those of the closest namespace around the use
+            // (an imported one ranks below every enclosing one: §12.8.10.3)
+            let exact = if fam == Some(Family::CSharp) && exact.len() > 1 {
+                self.closest_extensions(f, exact)
+            } else if self.files[f].lang == Some(crate::lang::Lang::Kotlin) && exact.len() > 1 {
+                self.kotlin_extension_order(f, exact)
+            } else {
+                exact
+            };
             let mine: Vec<DefRef> = exact.iter().copied().filter(|r| r.0 == f).collect();
             match (mine.as_slice(), exact.as_slice()) {
                 ([one], _) | (_, [one]) => return Some((Target::Def(*one), Confidence::Extracted)),
@@ -6202,6 +8068,12 @@ impl<'a> Project<'a> {
                 self.pkg_files.get(&(fam, ns.clone())).is_some_and(|fs| fs.contains(&g))
             }
             Target::Module(fs) => fs.contains(&g),
+            // (a namespace written as a block, `namespace N { … }`: every
+            // file that opens it)
+            Target::Def(c) if self.def(*c).kind == DefKind::Namespace => {
+                let ns = self.def(*c).qualname.replace("::", ".");
+                c.0 == g || self.pkg_files.get(&(fam, ns)).is_some_and(|fs| fs.contains(&g))
+            }
             _ => false,
         })
     }
@@ -6439,11 +8311,22 @@ impl<'a> Project<'a> {
         // a field's type, or what its initializer calls, is its type's use
         // (a Swift computed property's body is its own)
         let swift = self.family[f] == Some(Family::Swift);
+        // (and a Go package's `const` / `var`)
+        let rust = matches!(self.family[f], Some(Family::Rust | Family::Go));
+        let rust_item = |x: usize| {
+            rust && matches!(defs[x].kind, DefKind::Constant | DefKind::Variable)
+                && defs[x].parent.is_none_or(|p| !defs[p].kind.is_class_like())
+        };
         while let Some(x) = cur {
             // (an extra definition that is a callable, RSpec's `let`, is
             // the source of its own block's uses)
-            let skip =
-                defs[x].extra && !defs[x].kind.is_callable() && !(swift && r.kind != RefKind::Type);
+            // (and so is a C# property with a body)
+            let own = (swift || defs[x].computed) && r.kind != RefKind::Type
+                // (a Rust `const` / `static` item of a module: its type and
+                // what its value names are its own, there being no type
+                // around to have them)
+                || (rust_item(x) && defs[x].extra);
+            let skip = defs[x].extra && !defs[x].kind.is_callable() && !own;
             if skip {
                 cur = defs[x].parent;
                 continue;
@@ -6553,19 +8436,26 @@ pub fn resolve(
                     || r.context == "implicit_call";
                 // a bare Ruby name that is a local is the local, not a call
                 // (typed or not: `s = stubs; s.match(x)` calls nothing at `s`)
+                // (only once the local exists: in Ruby the first assignment
+                // the parser meets makes it, so a use above it is a call)
                 if r.context == "implicit_call"
                     && r.path.len() == 1
                     && p.is_local_name(f, scope_def, &r.path[0])
+                    && !p.ruby_local_starts_after(f, scope_def, &r.path[0], r.byte)
                 {
                     continue;
                 }
-                *p.types_only.borrow_mut() = heritage || r.kind == RefKind::Type;
+                // (`typeof x` in a type names the value `x`: a value meaning)
+                *p.types_only.borrow_mut() =
+                    heritage || (r.kind == RefKind::Type && r.context != "type_query");
                 *p.calling.borrow_mut() = matches!(r.kind, RefKind::Call | RefKind::New);
                 *p.recv.borrow_mut() = r.recv.map(|i| (f, i));
                 *p.args.borrow_mut() = r.args;
                 *p.self_arg.borrow_mut() = r.self_arg;
                 let is_call = matches!(r.kind, RefKind::Call | RefKind::New);
                 *p.cur.borrow_mut() = is_call.then_some((f, ri));
+                *p.site.borrow_mut() = Some((f, r.byte));
+                *p.ref_kind.borrow_mut() = Some(r.kind);
                 p.guessed.set(false);
                 let found = if let Some(place) = &r.implicit {
                     // Swift `.status(301)`: a static member of the type the
@@ -6603,6 +8493,8 @@ pub fn resolve(
                 *p.args.borrow_mut() = None;
                 *p.self_arg.borrow_mut() = false;
                 *p.cur.borrow_mut() = None;
+                *p.site.borrow_mut() = None;
+                *p.ref_kind.borrow_mut() = None;
                 // a guess by name alone on another object never links a
                 // definition to itself: `base.evaluate()` inside `evaluate()`
                 // is a wrapper handing on to what it wraps
@@ -6612,6 +8504,16 @@ pub fn resolve(
                             continue;
                         }
                     }
+                }
+                // a Kotlin operator (`a + b`) is the operator of a's type, never
+                // a guess by its name (`plus` of some other type)
+                if r.context == "operator"
+                    && !matches!(
+                        &found,
+                        Some((Target::Def(t), Confidence::Extracted)) if p.def(*t).kind.is_callable()
+                    )
+                {
+                    continue;
                 }
                 // a local called (`handler(x)`, `builder::add`) is the value
                 // it holds being called, not its type being constructed
@@ -6626,11 +8528,71 @@ pub fn resolve(
                     Some((Target::Def(t), _)) if p.def(*t).kind.is_class_like() => Some(*t),
                     _ => None,
                 };
+                // C#: a type is told from its namesakes by the number of type
+                // arguments it is written with (`RestResponse` beside
+                // `RestResponse<T>`); one written with arguments is never a
+                // type that takes none (`List<string>` beside a class `List`)
+                let found = match (found, r.arity) {
+                    (Some((Target::Def(t), conf)), Some(want))
+                        if fam == Family::CSharp && p.def(t).kind.is_class_like() =>
+                    {
+                        let want = usize::from(want);
+                        let has = p.def(t).type_params.len();
+                        let other = || {
+                            let fq = p.fqn_of(t.0, t.1)?;
+                            p.fqn.get(&fq)?.iter().copied().find(|o| {
+                                p.def(*o).kind.is_class_like()
+                                    && p.def(*o).type_params.len() == want
+                            })
+                        };
+                        if has == want {
+                            Some((Target::Def(t), conf))
+                        } else if let Some(o) = other() {
+                            Some((Target::Def(o), conf))
+                        } else if want > 0 && has == 0 {
+                            None
+                        } else {
+                            Some((Target::Def(t), conf))
+                        }
+                    }
+                    (found, _) => found,
+                };
+                // Rust: `self.proxy` with no call is the field, beside a
+                // method of its name (a method is never read without a call)
+                let found = match found {
+                    Some((Target::Def(t), conf))
+                        if matches!(r.kind, RefKind::Attr | RefKind::Read | RefKind::Write)
+                            && r.path.len() >= 2
+                            && fam == Family::Rust
+                            && p.def(t).kind.is_callable() =>
+                    {
+                        let name = p.def(t).name.clone();
+                        let field = p.class_of(t.0, Some(t.1)).and_then(|c| {
+                            p.members(c, &name)
+                                .into_iter()
+                                .find(|m| p.def(*m).kind == DefKind::Property)
+                        });
+                        Some((Target::Def(field.unwrap_or(t)), conf))
+                    }
+                    other => other,
+                };
                 let (target, relation, conf) = match found {
                     Some((Target::Def(t), conf)) => {
+                        // `throw ParserError.noValue("x")`: a case built with
+                        // what it carries is a use of its enum, and so is a
+                        // case named as a value (`return Color.Red`)
+                        let made = (matches!(r.kind, RefKind::Call | RefKind::New | RefKind::Attr)
+                            && p.def(t).kind == DefKind::EnumMember)
+                            .then(|| p.def(t).parent.map(|e| (t.0, e)))
+                            .flatten()
+                            .filter(|e| p.def(*e).kind.is_class_like());
+                        let (t, kind) = match made {
+                            Some(e) => (e, RefKind::Type),
+                            None => (t, r.kind),
+                        };
                         let Some(id) = p.node_id(t) else { continue };
                         let tk = p.def(t).kind;
-                        let rel = match r.kind {
+                        let rel = match kind {
                             RefKind::Call | RefKind::New => {
                                 // a Lombok accessor called: the field it reads
                                 // or writes
@@ -6677,10 +8639,63 @@ pub fn resolve(
                             // a member read on its own: state is read, a method
                             // taken as a value is referred to
                             RefKind::Attr if tk.is_state() => "reads",
+                            // C++ `port::CondVar cv;`: a type named through
+                            // its namespace (an enumerator named became a
+                            // reference to its enum above)
+                            RefKind::Attr
+                                if tk.is_class_like()
+                                    && p.family[f] == Some(Family::C)
+                                    && !p
+                                        .def(t)
+                                        .parent
+                                        .is_some_and(|e| p.def((t.0, e)).kind == DefKind::Enum) =>
+                            {
+                                "references"
+                            }
+                            // a type named as a value through what holds it
+                            // (`take(MyClass.Nested)`, `Sealed.A -> …`)
+                            // (a generic method's bare name, `Maybe.Nothing<T>()`,
+                            // reaches here alone: no type named through anything)
+                            RefKind::Attr
+                                if tk.is_class_like()
+                                    && conf == Confidence::Extracted
+                                    && r.path.len() >= 2
+                                    // (… which is the type or namespace it is
+                                    // declared in, or a module: `Maybe.Nothing`
+                                    // beside a class `Nothing` is the method)
+                                    && p.def(t).parent.is_none_or(|up| {
+                                        p.def((t.0, up)).name == r.path[r.path.len() - 2]
+                                    }) =>
+                            {
+                                "references"
+                            }
                             RefKind::Attr => {
                                 if !tk.is_callable() {
                                     continue;
                                 }
+                                // Scala `r.size`: a method that takes nothing
+                                // is called by naming it
+                                let scala = p.files[f].lang == Some(crate::lang::Lang::Scala);
+                                if scala && p.def(t).params.is_none_or(|n| n == 0) {
+                                    "calls"
+                                } else {
+                                    "references"
+                                }
+                            }
+                            // a function named as a value (`const k = helper`,
+                            // `cb = helper`, `exports.f = helper`), where a bare
+                            // function name is one
+                            RefKind::Read
+                                if conf == Confidence::Extracted
+                                    && r.path.len() == 1
+                                    && r.context != "object"
+                                    && (tk.is_class_like()
+                                        || (tk.is_callable()
+                                            && matches!(
+                                                p.family[f],
+                                                Some(Family::Ecma | Family::Python | Family::Go)
+                                            ))) =>
+                            {
                                 "references"
                             }
                             RefKind::Read | RefKind::Write => {
@@ -6875,10 +8890,43 @@ pub fn resolve(
                     confidence: conf,
                     file: f,
                     line: r.line,
-                    context: if r.kind == RefKind::Decorator { "decorator" } else { r.context },
+                    context: if r.kind == RefKind::Decorator {
+                        "decorator"
+                    } else if matches!(r.kind, RefKind::Read | RefKind::Attr)
+                        && relation == "references"
+                    {
+                        "value"
+                    } else {
+                        r.context
+                    },
                     runs: None,
                 });
             }
+        }
+        // a name read as a value says nothing more where the same definition
+        // already calls, builds or extends what it names (`new Foo()`, `class
+        // A < B`)
+        {
+            let stronger: HashSet<(String, String)> = edges
+                .iter()
+                .filter(|e| {
+                    matches!(
+                        e.relation,
+                        "calls"
+                            | "indirect_call"
+                            | "inherits"
+                            | "implements"
+                            | "mixes_in"
+                            | "embeds"
+                    )
+                })
+                .map(|e| (e.source.clone(), e.target.clone()))
+                .collect();
+            edges.retain(|e| {
+                !(e.context == "value"
+                    && e.relation == "references"
+                    && stronger.contains(&(e.source.clone(), e.target.clone())))
+            });
         }
         // C, C++: a function put in a slot of a struct is what a call through
         // the slot reaches (`dispatches_to`, an interface method to its
@@ -6926,6 +8974,7 @@ pub fn resolve(
                     hints: Vec::new(),
                     implicit: None,
                     targs: 0,
+                    arity: None,
                     this_of: None,
                     recv: None,
                     byte: u.byte,

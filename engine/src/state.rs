@@ -276,6 +276,10 @@ pub struct State {
     uses: Vec<RefFact>,
     /// `(byte, name)` of every name a declaration binds.
     declared: Vec<(usize, String)>,
+    /// Names declared in a block, a loop or a closure: `(the scope's first
+    /// byte, its end, the name)`. Outside every function nothing else says
+    /// that a use in there is the block's own.
+    blocked: Vec<(usize, usize, String)>,
     /// Python `global x` / `nonlocal x`: assignments of `x` are not locals.
     outer: Vec<(usize, String)>,
     /// An assignment to a bare name declares a local (Python).
@@ -287,6 +291,17 @@ impl State {
         State { assignment_declares, ..Default::default() }
     }
 
+    /// The uses recorded so far, taken out (a Rust macro's arguments are read
+    /// on their own and given to the file's walk: `add_uses`).
+    pub fn take_uses(&mut self) -> Vec<RefFact> {
+        std::mem::take(&mut self.uses)
+    }
+
+    /// Uses read elsewhere, at their places in this file.
+    pub fn add_uses(&mut self, uses: Vec<RefFact>) {
+        self.uses.extend(uses);
+    }
+
     /// Record what `n` reads, writes and declares. Called for every node.
     pub fn visit<'t>(&mut self, n: Node<'t>, src: &[u8], anc: &[Node<'t>]) {
         let k = n.kind();
@@ -296,7 +311,51 @@ impl State {
             }
             return;
         }
+        let had = self.declared.len();
         self.declarations(n, k, src);
+        if self.declared.len() > had {
+            use crate::lang::Lang;
+            let lang = crate::parse::current();
+            let scoped = !matches!(lang, Some(Lang::Python | Lang::Ruby | Lang::Php) | None);
+            // (JS `var` is the function's, whatever block it is written in)
+            let hoisted = matches!(lang, Some(Lang::JavaScript | Lang::TypeScript | Lang::Tsx))
+                && (k == "variable_declaration"
+                    || up(anc, 0).is_some_and(|p| p.kind() == "variable_declaration"));
+            // (the body of a type is no block: what it declares are members)
+            let of_type = |kind: &str| {
+                [
+                    "class",
+                    "interface",
+                    "enum",
+                    "struct",
+                    "object",
+                    "trait",
+                    "impl",
+                    "protocol",
+                    "template",
+                    "extension",
+                    "declaration_list",
+                    "record",
+                    "union",
+                    "namespace",
+                    "module",
+                ]
+                .iter()
+                .any(|w| kind.contains(w))
+            };
+            let scope = std::iter::once(&n)
+                .chain(anc.iter().rev())
+                .find(|a| crate::refs::is_scope(a.kind()) || of_type(a.kind()))
+                .filter(|a| scoped && !hoisted && !of_type(a.kind()));
+            if let Some(scope) = scope {
+                let (lo, hi) = (scope.start_byte(), scope.end_byte());
+                let names: Vec<String> =
+                    self.declared[had..].iter().map(|(_, name)| name.clone()).collect();
+                self.blocked.extend(names.into_iter().map(|name| (lo, hi, name)));
+                // (its range says where it hides: no local of the whole function)
+                self.declared.truncate(had);
+            }
+        }
         if k == "infix_expression" && scala_compound(n, src) {
             // Scala `hits += 1`
             let mut out = Vec::new();
@@ -307,6 +366,11 @@ impl State {
                 self.push(node, RefKind::Write, path.clone(), ctx);
                 self.push(node, RefKind::Read, path, "read");
             }
+        } else if k == "assignment_expression"
+            && up(anc, 0).is_some_and(|p| p.kind() == "arguments")
+            && crate::parse::current() == Some(crate::lang::Lang::Scala)
+        {
+            // Scala `Local(a = 1)`: an argument given by name writes nothing
         } else if ASSIGNMENTS.contains(&k) {
             let target = n
                 .child_by_field_name("left")
@@ -387,6 +451,7 @@ impl State {
             hints: Vec::new(),
             implicit: None,
             targs: 0,
+            arity: None,
             this_of: None,
             recv: None,
             byte: n.start_byte(),
@@ -398,13 +463,31 @@ impl State {
         if !parameter && !DECLARATIONS.contains(&k) {
             return;
         }
+        // JS `for ([a, b] of rows)` with no `let` / `const` / `var` assigns
+        // names declared elsewhere
+        if k == "for_in_statement"
+            && n.child_by_field_name("kind").is_none()
+            && matches!(
+                crate::parse::current(),
+                Some(
+                    crate::lang::Lang::JavaScript
+                        | crate::lang::Lang::TypeScript
+                        | crate::lang::Lang::Tsx
+                )
+            )
+        {
+            return;
+        }
         if let Some(name) = bound_name(n, src) {
             self.declared.push((n.start_byte(), name));
         }
         // names bound by a pattern or listed on the left: `a, b := f()`,
         // `for k, v in d`, `const { a, b } = x`, `let (a, b) = t`
         for field in ["left", "name", "pattern", "declarator", "alias", "key", "value_name"] {
-            if let Some(side) = n.child_by_field_name(field) {
+            // (every one of them: Go `var body, expected string`)
+            let mut cursor = n.walk();
+            let sides: Vec<Node> = n.children_by_field_name(field, &mut cursor).collect();
+            for side in sides {
                 let mut stack = vec![(side, 0)];
                 while let Some((c, depth)) = stack.pop() {
                     if BARE_KINDS.contains(&c.kind())
@@ -421,9 +504,30 @@ impl State {
 
     /// A bare name in an expression.
     fn bare<'t>(&mut self, n: Node<'t>, src: &[u8], anc: &[Node<'t>]) {
+        // Scala `Local(a = 1)`: the name of an argument, no variable
+        if crate::parse::current() == Some(crate::lang::Lang::Scala)
+            && up(anc, 1).is_some_and(|g| g.kind() == "arguments")
+            && up(anc, 0).is_some_and(|p| {
+                p.kind() == "assignment_expression"
+                    && p.child_by_field_name("left").is_some_and(|l| l.id() == n.id())
+            })
+        {
+            return;
+        }
         let Some(p) = up(anc, 0) else { return };
         let pk = p.kind();
-        if pk.contains("parameter") {
+        // Kotlin `Command(name = "x")`: the name of an argument, no variable
+        if pk == "value_argument"
+            && p.child(0).is_some_and(|c| c.id() == n.id())
+            && p.child(1).is_some_and(|c| c.kind() == "=")
+        {
+            return;
+        }
+        // (a parameter's name; its default value is read like any other)
+        let default_value = ["value", "default_value"]
+            .iter()
+            .any(|f| p.child_by_field_name(f).is_some_and(|v| v.id() == n.id()));
+        if pk.contains("parameter") && !default_value {
             self.declared.push((n.start_byte(), text(n, src)));
             return;
         }
@@ -433,6 +537,32 @@ impl State {
             && up(anc, 1)
                 .is_some_and(|k| k.kind() == "keyed_element" && first_named(k) == Some(p.id()))
         {
+            return;
+        }
+        // (a Rust attribute's arguments are macro input: `#[derive(Debug)]`
+        // names a derive macro, never a value)
+        if anc
+            .iter()
+            .rev()
+            .take(8)
+            .any(|a| matches!(a.kind(), "attribute_item" | "inner_attribute_item"))
+        {
+            return;
+        }
+        // (a base named where a type is declared is its base, no value read)
+        if pk.contains("heritage")
+            || pk.contains("extends")
+            || pk.contains("implements")
+            || pk.contains("superclass")
+            || pk.contains("delegation_specifier")
+            || matches!(pk, "base_list" | "base_class_clause" | "super_interfaces")
+            || (pk == "argument_list" && up(anc, 1).is_some_and(|c| c.kind() == "class_definition"))
+        {
+            return;
+        }
+        // C# `Maybe.Nothing<T>()`, `List<string>`: the name inside a
+        // `generic_name` is a generic method's or a type's, no value read
+        if pk == "generic_name" {
             return;
         }
         if pk.contains("import")
@@ -458,6 +588,9 @@ impl State {
             "declarator",
             "pattern",
             "suffix",
+            // (`new Foo { … }`: the type built, no value read; a JS `new`
+            // takes a value, which is read)
+            "type",
         ] {
             if p.child_by_field_name(field).is_some_and(|x| x.id() == n.id()) {
                 return;
@@ -476,7 +609,9 @@ impl State {
         if calls_mutator(n, src, anc) {
             self.push(n, RefKind::Write, path.clone(), "mutate");
         }
-        self.push(n, RefKind::Read, path, "read");
+        // (the object of `a.b` is read on the way to `b`: no value of its own)
+        let ctx = if MEMBER_KINDS.contains(&pk) { "object" } else { "read" };
+        self.push(n, RefKind::Read, path, ctx);
     }
 
     /// `a.b` in an expression: read on its own (`Attr`, as a method taken as a
@@ -560,6 +695,7 @@ impl State {
                 known.extend(imp.module.rsplit(['.', '/', ':']).next());
             }
         }
+        let star = imports.iter().any(|i| i.form == crate::facts::ImportForm::Wildcard);
         let bytes: Vec<usize> = self.uses.iter().map(|u| u.byte).collect();
         let homes = innermost(&bytes);
         let mut seen: HashSet<(Option<usize>, RefKind, Vec<String>)> = HashSet::new();
@@ -577,7 +713,40 @@ impl State {
             if u.path.len() == 1 && shadowed(home, head) {
                 continue;
             }
-            if needs_import && !matches!(head, "self" | "super" | "crate") && !known.contains(head)
+            // (or the name of a block the use is written in, unless what the
+            // block declares by it is a function: `const f = () => …`)
+            if u.path.len() == 1
+                && self.blocked.iter().any(|(lo, hi, n)| {
+                    n == head
+                        && *lo <= u.byte
+                        && u.byte < *hi
+                        && !defs.iter().any(|d| {
+                            d.name == *n
+                                && d.kind.is_callable()
+                                && *lo <= d.start_byte
+                                && d.start_byte < *hi
+                        })
+                })
+            {
+                continue;
+            }
+            // (`ctx.headers` of a parameter or local `ctx`: the member of the
+            // object it holds, which resolution types)
+            let of_local = u.path.len() > 1
+                && (shadowed(home, head)
+                    || self
+                        .blocked
+                        .iter()
+                        .any(|(lo, hi, n)| n == head && *lo <= u.byte && u.byte < *hi));
+            // (a glob import brings names the file never writes: a type or a
+            // constant it names, `Bar` of `use other::*;`, is kept for
+            // resolution to look up there)
+            let globbed = star && head.chars().next().is_some_and(char::is_uppercase);
+            if needs_import
+                && !matches!(head, "self" | "super" | "crate")
+                && !known.contains(head)
+                && !of_local
+                && !globbed
             {
                 continue;
             }
@@ -594,7 +763,16 @@ impl State {
 /// A bare name as the definitions spell it (`$hits` is `hits`, as
 /// `add_extras` strips the sigil).
 fn bare_name(n: Node, src: &[u8]) -> String {
-    text(n, src).trim_start_matches('$').to_string()
+    let written = text(n, src);
+    // (the sigil is PHP's: a JS / TS `$name` is spelled with it)
+    if matches!(
+        crate::parse::current(),
+        Some(crate::lang::Lang::Php | crate::lang::Lang::Ruby | crate::lang::Lang::Swift)
+    ) {
+        written.trim_start_matches('$').to_string()
+    } else {
+        written
+    }
 }
 
 /// `path_of`, and PHP `self::$total` (whose `$total` `path_of` cannot name).

@@ -1,0 +1,262 @@
+{
+ "language": "go",
+ "source": "golang/go@2dbf8b413af3:src/go/types/version.go",
+ "versions": [
+  "1.9",
+  "1.13",
+  "1.14",
+  "1.17",
+  "1.18",
+  "1.20",
+  "1.21",
+  "1.22",
+  "1.23",
+  "1.24",
+  "1.26",
+  "1.27",
+  "1.28"
+ ],
+ "features": [],
+ "asked": [
+  {
+   "file": "src/go/types/builtins.go",
+   "line": 213,
+   "text": "check.verifyVersionf(call.Fun, go1_21, \"clear\")"
+  },
+  {
+   "file": "src/go/types/builtins.go",
+   "line": 630,
+   "text": "check.verifyVersionf(call.Fun, go1_21, \"built-in %s\", name)"
+  },
+  {
+   "file": "src/go/types/builtins.go",
+   "line": 740,
+   "text": "check.verifyVersionf(call.Fun, go1_26, \"new(%s)\", arg)"
+  },
+  {
+   "file": "src/go/types/builtins.go",
+   "line": 840,
+   "text": "check.verifyVersionf(call.Fun, go1_17, \"unsafe.Add\")"
+  },
+  {
+   "file": "src/go/types/builtins.go",
+   "line": 994,
+   "text": "check.verifyVersionf(call.Fun, go1_17, \"unsafe.Slice\")"
+  },
+  {
+   "file": "src/go/types/builtins.go",
+   "line": 1021,
+   "text": "check.verifyVersionf(call.Fun, go1_20, \"unsafe.SliceData\")"
+  },
+  {
+   "file": "src/go/types/builtins.go",
+   "line": 1044,
+   "text": "check.verifyVersionf(call.Fun, go1_20, \"unsafe.String\")"
+  },
+  {
+   "file": "src/go/types/builtins.go",
+   "line": 1069,
+   "text": "check.verifyVersionf(call.Fun, go1_20, \"unsafe.StringData\")"
+  },
+  {
+   "file": "src/go/types/call.go",
+   "line": 45,
+   "text": "versionErr := !check.verifyVersionf(instErrPos, go1_18, \"function instantiation\")"
+  },
+  {
+   "file": "src/go/types/call.go",
+   "line": 91,
+   "text": "if !versionErr && !check.allowVersion(go1_21) {"
+  },
+  {
+   "file": "src/go/types/call.go",
+   "line": 93,
+   "text": "check.versionErrorf(instErrPos, go1_21, \"partially instantiated function in assignment\")"
+  },
+  {
+   "file": "src/go/types/call.go",
+   "line": 95,
+   "text": "check.versionErrorf(instErrPos, go1_21, \"implicitly instantiated function in assignment\")"
+  },
+  {
+   "file": "src/go/types/call.go",
+   "line": 309,
+   "text": "check.verifyVersionf(atPos(ix.lbrack), go1_18, \"function instantiation\")"
+  },
+  {
+   "file": "src/go/types/call.go",
+   "line": 406,
+   "text": "if n > 0 && check.allowVersion(go1_21) {"
+  },
+  {
+   "file": "src/go/types/call.go",
+   "line": 570,
+   "text": "if !check.allowVersion(go1_18) {"
+  },
+  {
+   "file": "src/go/types/call.go",
+   "line": 574,
+   "text": "check.versionErrorf(inNode(call.Fun, ix.lbrack), go1_18, \"function instantiation\")"
+  },
+  {
+   "file": "src/go/types/call.go",
+   "line": 576,
+   "text": "check.versionErrorf(inNode(call, call.Lparen), go1_18, \"implicit function instantiation\")"
+  },
+  {
+   "file": "src/go/types/call.go",
+   "line": 627,
+   "text": "_ = len(genericArgs) > 0 && check.verifyVersionf(args[genericArgs[0]], go1_21, \"implicitly instantiated function as argument\")"
+  },
+  {
+   "file": "src/go/types/check.go",
+   "line": 344,
+   "text": "v = string(versionMax(fileVersion, go1_21))"
+  },
+  {
+   "file": "src/go/types/conversions.go",
+   "line": 114,
+   "text": "if check.allowVersion(go1_28) && !isByteOrRune(x.typ()) {"
+  },
+  {
+   "file": "src/go/types/conversions.go",
+   "line": 211,
+   "text": "if (check == nil || check.allowVersion(go1_28)) && !isByteOrRune(Vu) {"
+  },
+  {
+   "file": "src/go/types/conversions.go",
+   "line": 245,
+   "text": "if check == nil || check.allowVersion(go1_20) {"
+  },
+  {
+   "file": "src/go/types/conversions.go",
+   "line": 258,
+   "text": "if check == nil || check.allowVersion(go1_17) {"
+  },
+  {
+   "file": "src/go/types/decl.go",
+   "line": 509,
+   "text": "_ = !versionErr && check.isImportedConstraint(rhs) && check.verifyVersionf(tdecl.Type, go1_18, \"using type constraint %s\", rhs)"
+  },
+  {
+   "file": "src/go/types/decl.go",
+   "line": 522,
+   "text": "if !versionErr && tparam0 != nil && !check.verifyVersionf(tparam0, go1_24, \"generic type alias\") {"
+  },
+  {
+   "file": "src/go/types/decl.go",
+   "line": 525,
+   "text": "if !versionErr && !check.verifyVersionf(atPos(tdecl.Assign), go1_9, \"type alias\") {"
+  },
+  {
+   "file": "src/go/types/decl.go",
+   "line": 562,
+   "text": "if !versionErr && tparam0 != nil && !check.verifyVersionf(tparam0, go1_18, \"type parameter\") {"
+  },
+  {
+   "file": "src/go/types/expr.go",
+   "line": 677,
+   "text": "if !allUnsigned(y.typ()) && !check.verifyVersionf(y, go1_13, invalidOp+\"signed shift count %s\", y) {"
+  },
+  {
+   "file": "src/go/types/infer.go",
+   "line": 117,
+   "text": "u := newUnifier(check, tparams, targs, check.allowVersion(go1_21))"
+  },
+  {
+   "file": "src/go/types/instantiate.go",
+   "line": 316,
+   "text": "if check == nil || check.allowVersion(go1_20) {"
+  },
+  {
+   "file": "src/go/types/literals.go",
+   "line": 24,
+   "text": "if len(s) <= 2 || check.allowVersion(go1_13) {"
+  },
+  {
+   "file": "src/go/types/literals.go",
+   "line": 29,
+   "text": "check.versionErrorf(lit, go1_13, \"underscore in numeric literal\")"
+  },
+  {
+   "file": "src/go/types/literals.go",
+   "line": 37,
+   "text": "check.versionErrorf(lit, go1_13, \"binary literal\")"
+  },
+  {
+   "file": "src/go/types/literals.go",
+   "line": 41,
+   "text": "check.versionErrorf(lit, go1_13, \"0o/0O-style octal literal\")"
+  },
+  {
+   "file": "src/go/types/literals.go",
+   "line": 45,
+   "text": "check.versionErrorf(lit, go1_13, \"hexadecimal floating-point literal\")"
+  },
+  {
+   "file": "src/go/types/literals.go",
+   "line": 135,
+   "text": "_ = T.hint || check.verifyVersionf(e, go1_28, \"missing type in composite literal\")"
+  },
+  {
+   "file": "src/go/types/literals.go",
+   "line": 203,
+   "text": "if len(index) > 1 && !check.verifyVersionf(kv.Key, go1_27, \"use of promoted field %s in struct literal of type %s\", fieldPath(utyp, index), base) {"
+  },
+  {
+   "file": "src/go/types/range.go",
+   "line": 233,
+   "text": "if allowVersion != nil && !allowVersion(go1_22) {"
+  },
+  {
+   "file": "src/go/types/range.go",
+   "line": 248,
+   "text": "if allowVersion != nil && !allowVersion(go1_23) {"
+  },
+  {
+   "file": "src/go/types/resolver.go",
+   "line": 427,
+   "text": "_ = tparam0 != nil && check.verifyVersionf(tparam0, go1_18, \"type parameter\")"
+  },
+  {
+   "file": "src/go/types/resolver.go",
+   "line": 448,
+   "text": "_ = tparam0 != nil && check.verifyVersionf(tparam0, go1_27, \"generic method\")"
+  },
+  {
+   "file": "src/go/types/signature.go",
+   "line": 324,
+   "text": "check.verifyVersionf(rbase, go1_18, \"type instantiation\")"
+  },
+  {
+   "file": "src/go/types/typeset.go",
+   "line": 243,
+   "text": "if pos.IsValid() && !check.allowVersion(go1_14) || !Identical(m.typ, other.Type()) {"
+  },
+  {
+   "file": "src/go/types/typeset.go",
+   "line": 276,
+   "text": "if pos.IsValid() && check != nil && check.isImportedConstraint(typ) && !check.verifyVersionf(atPos(pos), go1_18, \"embedding constraint interface %s\", typ) {"
+  },
+  {
+   "file": "src/go/types/typeset.go",
+   "line": 285,
+   "text": "if pos.IsValid() && check != nil && !check.verifyVersionf(atPos(pos), go1_18, \"embedding interface element %s\", u) {"
+  },
+  {
+   "file": "src/go/types/typeset.go",
+   "line": 299,
+   "text": "if pos.IsValid() && check != nil && !check.verifyVersionf(atPos(pos), go1_18, \"embedding non-interface type %s\", typ) {"
+  },
+  {
+   "file": "src/go/types/typexpr.go",
+   "line": 34,
+   "text": "if !check.verifyVersionf(e, go1_18, \"predeclared %s\", e.Name) {"
+  },
+  {
+   "file": "src/go/types/typexpr.go",
+   "line": 277,
+   "text": "check.verifyVersionf(inNode(e, ix.lbrack), go1_18, \"type instantiation\")"
+  }
+ ]
+}

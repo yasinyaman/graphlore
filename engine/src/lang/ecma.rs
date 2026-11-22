@@ -115,7 +115,40 @@ fn call_import(n: Node, src: &[u8]) -> Option<Vec<ImportFact>> {
     }
     let module = string_value(first, src);
     if f.kind() == "import" {
-        return Some(vec![import(n, ImportForm::Dynamic, module)]);
+        // `const m = await import('./m.js')`, `const { f } = await import(…)`:
+        // the names the declaration binds to the module
+        let mut fact = import(n, ImportForm::Dynamic, module);
+        let mut holder = n.parent();
+        while holder
+            .is_some_and(|h| matches!(h.kind(), "await_expression" | "parenthesized_expression"))
+        {
+            holder = holder.and_then(|h| h.parent());
+        }
+        let target = holder
+            .filter(|h| h.kind() == "variable_declarator")
+            .and_then(|h| h.child_by_field_name("name"));
+        match target {
+            Some(t) if t.kind() == "identifier" => fact.alias = Some(text(t, src)),
+            Some(t) if t.kind() == "object_pattern" => {
+                for p in kids(t) {
+                    match p.kind() {
+                        "shorthand_property_identifier_pattern" => {
+                            fact.names.push((text(p, src), None))
+                        }
+                        "pair_pattern" => {
+                            let k = p.child_by_field_name("key").map(|x| text(x, src));
+                            let v = p.child_by_field_name("value").map(|x| text(x, src));
+                            if let Some(k) = k {
+                                fact.names.push((k, v));
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+        return Some(vec![fact]);
     }
     if f.kind() != "identifier" || text(f, src) != "require" {
         return None;
@@ -200,6 +233,22 @@ impl LanguageModule for Ecma {
                 _ => Vec::new(),
             };
         }
+        // `constructor(public greeting: string)`: a parameter that declares
+        // a property of the class
+        if matches!(n.kind(), "required_parameter" | "optional_parameter") {
+            let property = all_kids(n).iter().any(|c| {
+                matches!(c.kind(), "accessibility_modifier" | "readonly" | "override_modifier")
+            });
+            let of_class = n
+                .parent()
+                .and_then(|ps| ps.parent())
+                .filter(|m| m.kind() == "method_definition")
+                .is_some_and(|m| m.parent().is_some_and(|b| b.kind() == "class_body"));
+            return match n.child_by_field_name("pattern").filter(|x| x.kind() == "identifier") {
+                Some(name) if property && of_class => vec![(n, name, DefKind::Property)],
+                _ => Vec::new(),
+            };
+        }
         if n.kind() != "variable_declarator" {
             return Vec::new();
         }
@@ -210,9 +259,8 @@ impl LanguageModule for Ecma {
             return Vec::new();
         };
         let top = decl.parent().is_some_and(|p| {
-            p.kind() == "program"
-                || (p.kind() == "export_statement"
-                    && p.parent().is_some_and(|q| q.kind() == "program"))
+            module_level(p)
+                || (p.kind() == "export_statement" && p.parent().is_some_and(module_level))
         });
         let is_const = all_kids(decl).iter().any(|c| c.kind() == "const");
         let value = n.child_by_field_name("value");
@@ -251,6 +299,16 @@ impl LanguageModule for Ecma {
     fn imports_of(&self, n: Node, src: &[u8]) -> Option<Vec<ImportFact>> {
         match n.kind() {
             "import_statement" => {
+                // `import fs = require("./fs")`: the module, under that name
+                if let Some(cl) = kids(n).into_iter().find(|c| c.kind() == "import_require_clause")
+                {
+                    let mut f = import(n, ImportForm::Module, source(cl, src)?);
+                    f.alias = kids(cl)
+                        .into_iter()
+                        .find(|c| c.kind() == "identifier")
+                        .map(|x| text(x, src));
+                    return Some(vec![f]);
+                }
                 let module = source(n, src)?;
                 let type_only = all_kids(n).iter().any(|c| c.kind() == "type");
                 let mut out = Vec::new();
@@ -353,6 +411,13 @@ impl LanguageModule for Ecma {
             })
         };
         match n.kind() {
+            // an enum's members: `enum Color { Red, Green = 2 }`
+            "enum_assignment" => {
+                n.child_by_field_name("name").map(|name| (name, DefKind::EnumMember))
+            }
+            "property_identifier" if n.parent().is_some_and(|p| p.kind() == "enum_body") => {
+                Some((n, DefKind::EnumMember))
+            }
             // a class field that holds a value, not a function
             "public_field_definition" | "field_definition" => {
                 let name =
@@ -363,9 +428,8 @@ impl LanguageModule for Ecma {
             "variable_declarator" => {
                 let decl = n.parent().filter(|p| p.kind() == "lexical_declaration")?;
                 let top = decl.parent().is_some_and(|p| {
-                    p.kind() == "program"
-                        || (p.kind() == "export_statement"
-                            && p.parent().is_some_and(|q| q.kind() == "program"))
+                    module_level(p)
+                        || (p.kind() == "export_statement" && p.parent().is_some_and(module_level))
                 });
                 let is_const = all_kids(decl).iter().any(|c| c.kind() == "const");
                 let name = n.child_by_field_name("name").filter(|x| x.kind() == "identifier")?;
@@ -382,7 +446,8 @@ impl LanguageModule for Ecma {
         let mut out = Vec::new();
         match n.kind() {
             "export_statement" if n.child_by_field_name("source").is_none() => {
-                let default = all_kids(n).iter().any(|c| c.kind() == "default");
+                // (`export = E;` is the module itself, as a default is)
+                let default = all_kids(n).iter().any(|c| matches!(c.kind(), "default" | "="));
                 for c in kids(n) {
                     match c.kind() {
                         "export_clause" => {
@@ -491,4 +556,13 @@ impl LanguageModule for Ecma {
     fn builtins(&self) -> &'static [&'static str] {
         BUILTINS
     }
+}
+
+/// Whether a statement directly in `p` is at the level of a module: the
+/// program, or the body of a TypeScript `namespace` (whose `const`s and
+/// variables are the namespace's, as a module's are the module's).
+fn module_level(p: Node) -> bool {
+    p.kind() == "program"
+        || (p.kind() == "statement_block"
+            && p.parent().is_some_and(|q| matches!(q.kind(), "internal_module" | "module")))
 }

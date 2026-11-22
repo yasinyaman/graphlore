@@ -1,0 +1,62 @@
+{
+  "actix-realworld:rust": {
+    "bases": 0,
+    "calls": 0,
+    "references": 0
+  },
+  "aspnetcore-realworld:csharp": {
+    "bases": 0,
+    "calls": 2,
+    "references": 0
+  },
+  "axum-realworld:rust": {
+    "bases": 0,
+    "calls": 0,
+    "references": 0
+  },
+  "chi:go": {
+    "bases": 0,
+    "calls": 0,
+    "references": 0
+  },
+  "cobra:go": {
+    "bases": 0,
+    "calls": 0,
+    "references": 0
+  },
+  "commandline:csharp": {
+    "bases": 0,
+    "calls": 21,
+    "references": 0
+  },
+  "gin-examples:go": {
+    "bases": 0,
+    "calls": 0,
+    "references": 0
+  },
+  "restsharp:csharp": {
+    "bases": 0,
+    "calls": 4,
+    "references": 1
+  },
+  "resty:go": {
+    "bases": 0,
+    "calls": 0,
+    "references": 0
+  },
+  "ripgrep:rust": {
+    "bases": 2,
+    "calls": 6,
+    "references": 1
+  },
+  "todoapi:csharp": {
+    "bases": 0,
+    "calls": 0,
+    "references": 0
+  },
+  "ureq:rust": {
+    "bases": 0,
+    "calls": 7,
+    "references": 0
+  }
+}

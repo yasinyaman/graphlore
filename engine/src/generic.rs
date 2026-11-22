@@ -60,8 +60,16 @@ const CALL_TYPES: &[&str] = &[
 const KEYWORD_NAMES: &[(&str, &str)] = &[
     ("init_declaration", "init"),
     ("deinit_declaration", "deinit"),
+    ("subscript_declaration", "subscript"),
     ("secondary_constructor", "constructor"),
+    ("indexer_declaration", "this[]"),
 ];
+/// C# operators: named by the operator (`operator+`) or the type a conversion
+/// gives (`operator string`), as C++'s `operator_name` is.
+const OPERATOR_TYPES: &[&str] = &["operator_declaration", "conversion_operator_declaration"];
+/// Definitions whose name is written with a mark the language calls them by:
+/// a Rust macro is `name!` (and never answers a lookup of `name`).
+const NAME_SUFFIX: &[(&str, &str)] = &[("macro_definition", "!")];
 /// The child that names a declaration in a grammar without a `name` field.
 const NAME_CHILD_TYPES: &[&str] = &["simple_identifier", "type_identifier", "identifier"];
 /// C/C++ declarations with no body: spans only when they declare a function.
@@ -260,9 +268,52 @@ fn declarator_name(node: Node, src: &[u8]) -> Option<String> {
             "qualified_identifier" => return Some(text(d, src).replace("::", ".")),
             _ => {}
         }
-        decl = next_declarator(d, true);
+        decl = next_declarator(d, true).or_else(|| {
+            // (`typedef void (Cb)(int);`: the name in parentheses)
+            (d.kind() == "parenthesized_declarator").then(|| kids(d).into_iter().next()).flatten()
+        });
     }
     None
+}
+
+/// `_ts_macro_statement`: a `declaration` whose type is a macro call the
+/// parser could not read (`TEST_ASSERT_EQUAL(p0, p1, 4);` followed by another
+/// in a function the parser lost): two statements, no declaration.
+fn macro_statement(node: Node) -> bool {
+    node.child_by_field_name("type")
+        .is_some_and(|t| t.kind() == "macro_type_specifier" && t.has_error())
+}
+
+/// `_ts_test_macro_name`: C++ `TEST(Suite, Name) { … }`, `TEST_F(Fixture,
+/// Name) { … }`: a function with no return type, named in capitals, given two
+/// bare names. The test is `Suite.Name`, a method of the fixture when the
+/// file defines one.
+fn test_macro_name(node: Node, src: &[u8]) -> Option<String> {
+    if node.kind() != "function_definition" || node.child_by_field_name("type").is_some() {
+        return None;
+    }
+    let decl =
+        node.child_by_field_name("declarator").filter(|d| d.kind() == "function_declarator")?;
+    let name = decl.child_by_field_name("declarator").filter(|n| n.kind() == "identifier")?;
+    let macro_name = text(name, src);
+    let capitals = macro_name.len() >= 3
+        && macro_name.bytes().all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_')
+        && macro_name.as_bytes()[0].is_ascii_uppercase();
+    if !capitals {
+        return None;
+    }
+    let params = kids(decl.child_by_field_name("parameters")?);
+    let bare = |p: &Node| {
+        let inner = kids(*p);
+        (p.kind() == "parameter_declaration"
+            && inner.len() == 1
+            && inner[0].kind() == "type_identifier")
+            .then(|| text(inner[0], src))
+    };
+    match params.as_slice() {
+        [a, b] => Some(format!("{}.{}", bare(a)?, bare(b)?)),
+        _ => None,
+    }
 }
 
 /// `_ts_declares_function`: `int f(void);`, not a variable or a field.
@@ -284,6 +335,9 @@ fn child_name(node: Node, src: &[u8]) -> Option<String> {
     if let Some(k) = keyword_name(node.kind()) {
         return Some(k.to_string());
     }
+    if OPERATOR_TYPES.contains(&node.kind()) {
+        return operator_name(node, src);
+    }
     let t = node.kind().to_ascii_lowercase();
     if !(t.ends_with("_declaration") || t.ends_with("_entry") || t.ends_with("type_alias"))
         || t.contains("package")
@@ -291,6 +345,27 @@ fn child_name(node: Node, src: &[u8]) -> Option<String> {
         return None;
     }
     kids(node).into_iter().find(|c| NAME_CHILD_TYPES.contains(&c.kind())).map(|c| text(c, src))
+}
+
+/// `_ts_operator_name`: C# `operator +` -> `operator+`, `implicit operator
+/// string(…)` -> `operator string`.
+fn operator_name(node: Node, src: &[u8]) -> Option<String> {
+    if node.kind() == "conversion_operator_declaration" {
+        return node.child_by_field_name("type").map(|t| format!("operator {}", text(t, src)));
+    }
+    let all = all_kids(node);
+    let at = all.iter().position(|c| c.kind() == "operator")?;
+    all.get(at + 1).map(|c| format!("operator{}", text(*c, src)))
+}
+
+/// The other names of a definition that declares several (Swift `case a, b,
+/// c`): every `name` field after the first, in an enum's node.
+pub fn more_names<'t>(node: Node<'t>) -> Vec<Node<'t>> {
+    if !node.kind().contains("enum") {
+        return Vec::new();
+    }
+    let mut cursor = node.walk();
+    node.children_by_field_name("name", &mut cursor).skip(1).collect()
 }
 
 /// The generic classification of one node, in `spans.py`'s order.
@@ -305,6 +380,11 @@ pub fn classify<'t, M: LanguageModule + ?Sized>(m: &M, node: Node<'t>, src: &[u8
         owner: None,
         kind: None,
     };
+    if let Some(k) = keyword_name(kind) {
+        // a keyword-named definition (Swift `subscript`, whose `name` field is
+        // its result type)
+        return def(k.to_string());
+    }
     if is_sym {
         if let Some(name_node) = node.child_by_field_name("name") {
             if kind.ends_with("_specifier") && node.child_by_field_name("body").is_none() {
@@ -315,8 +395,9 @@ pub fn classify<'t, M: LanguageModule + ?Sized>(m: &M, node: Node<'t>, src: &[u8
                 return Step::Skip; // Rust `mod foo;` names a file
             }
             let owner = node.child_by_field_name("receiver").and_then(|r| receiver_type(r, src));
+            let suffix = NAME_SUFFIX.iter().find(|(k, _)| *k == kind).map_or("", |(_, v)| *v);
             return Step::Def {
-                name: text(name_node, src),
+                name: format!("{}{suffix}", text(name_node, src)),
                 node,
                 descend: node,
                 region_start: None,
@@ -333,9 +414,10 @@ pub fn classify<'t, M: LanguageModule + ?Sized>(m: &M, node: Node<'t>, src: &[u8
             }
         }
     }
-    let prototype = PROTOTYPE_TYPES.contains(&kind) && declares_function(node);
+    let prototype =
+        PROTOTYPE_TYPES.contains(&kind) && declares_function(node) && !macro_statement(node);
     if is_sym || prototype {
-        if let Some(name) = declarator_name(node, src) {
+        if let Some(name) = test_macro_name(node, src).or_else(|| declarator_name(node, src)) {
             let kind = if prototype || kind == "function_definition" {
                 Some(DefKind::Function)
             } else {
@@ -377,13 +459,29 @@ pub fn classify<'t, M: LanguageModule + ?Sized>(m: &M, node: Node<'t>, src: &[u8
 /// What a definition is, from its node type alone.
 /// `spans._TS_SYMBOL_TYPES`: definitions whose node type has no hint word (C++
 /// `using AsyncResponse = AsyncWrapper<Response>;`).
-const SYMBOL_TYPES: &[&str] = &["alias_declaration"];
+/// C# `delegate void Cb(…);`, Rust `macro_rules! name`, C# operators.
+const SYMBOL_TYPES: &[&str] = &[
+    "alias_declaration",
+    "delegate_declaration",
+    "macro_definition",
+    "operator_declaration",
+    "conversion_operator_declaration",
+];
 
 pub fn kind_of(kind: &str) -> DefKind {
     let t = kind.to_ascii_lowercase();
     let has = |h: &str| t.contains(h);
     let word = |w: &str| t.split('_').any(|p| p == w);
-    if has("enum")
+    if OPERATOR_TYPES.contains(&t.as_str())
+        || t == "indexer_declaration"
+        || t == "subscript_declaration"
+    {
+        DefKind::Method
+    } else if t == "macro_definition" {
+        DefKind::Function
+    } else if t == "delegate_declaration" {
+        DefKind::TypeAlias
+    } else if has("enum")
         && ["variant", "member", "constant", "entry", "case", "assignment"].iter().any(|h| has(h))
     {
         DefKind::EnumMember
@@ -491,7 +589,8 @@ pub fn walk_defs(m: &dyn LanguageModule, root: Node, src: &[u8]) -> Vec<Def> {
                     name: bare,
                     qualname: qualname.clone(),
                     kind,
-                    region_start: region_start.unwrap_or_else(|| m.region_start(node, def_line)),
+                    region_start: region_start
+                        .unwrap_or_else(|| m.region_start_in(node, def_line, src)),
                     def_line,
                     end_line: m.end_line(node),
                     parent: item.parent,
@@ -523,6 +622,10 @@ pub fn walk_defs(m: &dyn LanguageModule, root: Node, src: &[u8]) -> Vec<Def> {
                     receiver: None,
                     anonymous: false,
                     misread: false,
+                    block: false,
+                    unspanned: false,
+                    returned_out: false,
+                    computed: false,
                     inline_body: None,
                     created_from: None,
                     model_name: None,
@@ -533,11 +636,18 @@ pub fn walk_defs(m: &dyn LanguageModule, root: Node, src: &[u8]) -> Vec<Def> {
                     self_params: Vec::new(),
                     attrs: Vec::new(),
                     type_params: Vec::new(),
+                    type_bounds: Vec::new(),
                     node_id: node.id(),
                     start_byte: node.start_byte(),
                     end_byte: node.end_byte(),
                 });
                 let idx = defs.len() - 1;
+                for other in more_names(node) {
+                    let mut d = defs[idx].clone();
+                    d.name = text(other, src);
+                    d.qualname = format!("{}{}", item.prefix, d.name);
+                    defs.push(d);
+                }
                 push_children(
                     &mut stack,
                     descend,

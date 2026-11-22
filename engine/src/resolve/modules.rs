@@ -4,7 +4,7 @@
 use std::collections::{HashMap, HashSet};
 
 use super::{dir_of, normalize, Bind, Family, ModRes, Project, Target};
-use crate::facts::{ImportFact, ImportForm};
+use crate::facts::{DefKind, ImportFact, ImportForm};
 use crate::lang::Lang;
 
 /// Directories Python puts on `sys.path` by convention (graphlore's
@@ -35,7 +35,7 @@ pub struct ModuleSystems {
     // Rust: file -> (root key, module path); (root key, module path) -> files
     rs_mod: HashMap<usize, (String, Vec<String>)>,
     rs_files: HashMap<(String, Vec<String>), Vec<usize>>,
-    rs_crates: HashMap<String, String>,
+    pub(super) rs_crates: HashMap<String, String>,
     // Swift: file -> module; module -> files
     swift_module: HashMap<usize, String>,
     swift_files: HashMap<String, Vec<usize>>,
@@ -137,6 +137,9 @@ fn toml_value(src: &str, section: &str, key: &str) -> Option<String> {
 impl ModuleSystems {
     pub fn build(p: &Project) -> ModuleSystems {
         let mut m = ModuleSystems::default();
+        // Rust crates whose root file the manifest names (`[[bin]] path =
+        // "crates/core/main.rs"`): its directory and the file
+        let mut rs_roots: Vec<(String, String)> = Vec::new();
         for (rel, _) in &p.manifests {
             let base = rel.rsplit('/').next().unwrap_or(rel);
             let dir = dir_of(rel).to_string();
@@ -197,6 +200,17 @@ impl ModuleSystems {
                             };
                             m.rs_crates.insert(name.replace('-', "_"), key);
                         }
+                        for section in ["lib", "bin"] {
+                            let Some(path) = toml_value(&src, section, "path") else { continue };
+                            let full = if dir.is_empty() { path } else { format!("{dir}/{path}") };
+                            let at = dir_of(&full).to_string();
+                            let conventional = at.rsplit('/').next().is_some_and(|d| {
+                                matches!(d, "src" | "tests" | "examples" | "benches" | "bin")
+                            });
+                            if full.ends_with(".rs") && !at.is_empty() && !conventional {
+                                rs_roots.push((at, full));
+                            }
+                        }
                     }
                 }
                 _ => {}
@@ -249,7 +263,27 @@ impl ModuleSystems {
                 }
                 Lang::Go => m.go_dirs.entry(dir_of(path).to_string()).or_default().push(fi),
                 Lang::Rust => {
-                    let (key, modpath) = rust_module_path(path);
+                    let named = rs_roots
+                        .iter()
+                        .filter(|(dir, _)| path.starts_with(&format!("{dir}/")))
+                        .max_by_key(|(dir, _)| dir.len())
+                        .filter(|(dir, _)| {
+                            // (a crate of its own below it keeps its own root)
+                            !path[dir.len() + 1..].split('/').any(|d| d == "src")
+                        });
+                    let (key, modpath) = match named {
+                        Some((dir, root)) => {
+                            let mut module: Vec<String> = path[dir.len() + 1..]
+                                .split('/')
+                                .map(|s| s.trim_end_matches(".rs").to_string())
+                                .collect();
+                            if path == root || module.last().is_some_and(|m| m == "mod") {
+                                module.pop();
+                            }
+                            (dir.clone(), module)
+                        }
+                        None => rust_module_path(path),
+                    };
                     m.rs_files.entry((key.clone(), modpath.clone())).or_default().push(fi);
                     m.rs_mod.insert(fi, (key, modpath));
                 }
@@ -601,12 +635,17 @@ fn go_resolve(p: &Project, path: &str) -> ModRes {
 
 fn ns_target(p: &Project, fam: Family, name: &str) -> Option<Target> {
     let dotted = name.replace('\\', ".").trim_start_matches('.').to_string();
-    if let Some(d) = p.best(
-        p.fqn.get(&dotted).into_iter().flatten().copied().filter(|r| p.family[r.0] == Some(fam)),
-    ) {
+    let is_package = p.namespaces.contains(&(fam, dotted.clone()));
+    // (a Java `module com.acme { … }` in module-info.java declares no type:
+    // where a package has the name, the import means the package)
+    let found = p.best(p.fqn.get(&dotted).into_iter().flatten().copied().filter(|r| {
+        p.family[r.0] == Some(fam)
+            && !(is_package && matches!(p.def(*r).kind, DefKind::Module | DefKind::Namespace))
+    }));
+    if let Some(d) = found {
         return Some(Target::Def(d));
     }
-    p.namespaces.contains(&(fam, dotted.clone())).then_some(Target::Ns(dotted))
+    is_package.then_some(Target::Ns(dotted))
 }
 
 // ---- Rust -----------------------------------------------------------------
@@ -757,6 +796,14 @@ pub fn resolve_import(p: &Project, fam: Family, f: usize, imp: &ImportFact) -> M
                     other => other,
                 };
             }
+            // (2018: `use m::f;` in `mod a { … }` is `a`'s own `m` first)
+            if !imp.within.is_empty() {
+                let mut inner: Vec<String> = imp.within.clone();
+                inner.extend(segs.iter().cloned());
+                if let ModRes::Target(t) = walk(p, Target::Module(vec![f]), &inner) {
+                    return ModRes::Target(t);
+                }
+            }
             rust_path(p, f, &segs)
         }
         Family::Ruby => {
@@ -866,6 +913,16 @@ pub fn bindings(
                 }
             }
         }
+        // `const m = await import('./m.js')`, `const { f } = await import(…)`
+        ImportForm::Dynamic => {
+            if let Some(a) = &imp.alias {
+                out.push((a.clone(), Bind::T(t.clone())));
+            }
+            for (name, alias) in &imp.names {
+                let local = alias.clone().unwrap_or_else(|| name.clone());
+                out.push((local, Bind::Member(t.clone(), name.clone())));
+            }
+        }
         _ => {}
     }
     out
@@ -950,6 +1007,17 @@ pub fn scope_lookup(
             while let Some(x) = cur {
                 if defs[x].kind == crate::facts::DefKind::Namespace {
                     spaces.push(defs[x].qualname.clone());
+                    // C# `namespace Shop.Core { … }`: `Shop`'s names too, as
+                    // for a file-scoped `namespace Shop.Core;` below
+                    if fam == Family::CSharp {
+                        let q = defs[x].qualname.replace("::", ".");
+                        let mut parts: Vec<&str> = q.split('.').collect();
+                        parts.pop();
+                        while !parts.is_empty() {
+                            spaces.push(parts.join("."));
+                            parts.pop();
+                        }
+                    }
                 }
                 cur = defs[x].parent;
             }
@@ -965,6 +1033,9 @@ pub fn scope_lookup(
                 }
             }
             spaces.push(String::new());
+            // (PHP: from a namespace, only a function or a constant falls back
+            // to the global one, never a class: spec 18-namespaces.md)
+            let namespaced_php = fam == Family::Php && p.files[f].package.is_some();
             for ns in spaces {
                 let key = if ns.is_empty() { name.to_string() } else { format!("{ns}.{name}") };
                 let found = p
@@ -973,7 +1044,10 @@ pub fn scope_lookup(
                     .into_iter()
                     .flatten()
                     .copied()
-                    .filter(|r| p.family[r.0] == Some(fam));
+                    .filter(|r| p.family[r.0] == Some(fam))
+                    .filter(|r| {
+                        !(namespaced_php && ns.is_empty() && p.def(*r).kind.is_class_like())
+                    });
                 if let Some(r) = p.best(found) {
                     return Some(Target::Def(r));
                 }

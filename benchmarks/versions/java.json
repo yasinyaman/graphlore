@@ -1,0 +1,305 @@
+{
+ "language": "java",
+ "source": "openjdk/jdk@78bf06f425a9:src/jdk.compiler/share/classes/com/sun/tools/javac/code/Source.java",
+ "features": [
+  {
+   "name": "MODULES",
+   "since": "9"
+  },
+  {
+   "name": "EFFECTIVELY_FINAL_VARIABLES_IN_TRY_WITH_RESOURCES",
+   "since": "9"
+  },
+  {
+   "name": "PRIVATE_SAFE_VARARGS",
+   "since": "9"
+  },
+  {
+   "name": "DIAMOND_WITH_ANONYMOUS_CLASS_CREATION",
+   "since": "9"
+  },
+  {
+   "name": "PRIVATE_INTERFACE_METHODS",
+   "since": "9"
+  },
+  {
+   "name": "LOCAL_VARIABLE_TYPE_INFERENCE",
+   "since": "10"
+  },
+  {
+   "name": "VAR_SYNTAX_IMPLICIT_LAMBDAS",
+   "since": "11"
+  },
+  {
+   "name": "IMPORT_ON_DEMAND_OBSERVABLE_PACKAGES",
+   "since": "1.2",
+   "until": "8"
+  },
+  {
+   "name": "SWITCH_MULTIPLE_CASE_LABELS",
+   "since": "14"
+  },
+  {
+   "name": "SWITCH_RULE",
+   "since": "14"
+  },
+  {
+   "name": "SWITCH_EXPRESSION",
+   "since": "14"
+  },
+  {
+   "name": "NO_TARGET_ANNOTATION_APPLICABILITY",
+   "since": "14"
+  },
+  {
+   "name": "TEXT_BLOCKS",
+   "since": "15"
+  },
+  {
+   "name": "PATTERN_MATCHING_IN_INSTANCEOF",
+   "since": "16"
+  },
+  {
+   "name": "REIFIABLE_TYPES_INSTANCEOF",
+   "since": "16"
+  },
+  {
+   "name": "RECORDS",
+   "since": "16"
+  },
+  {
+   "name": "SEALED_CLASSES",
+   "since": "17"
+  },
+  {
+   "name": "CASE_NULL",
+   "since": "21"
+  },
+  {
+   "name": "PATTERN_SWITCH",
+   "since": "21"
+  },
+  {
+   "name": "REDUNDANT_STRICTFP",
+   "since": "17"
+  },
+  {
+   "name": "UNCONDITIONAL_PATTERN_IN_INSTANCEOF",
+   "since": "21"
+  },
+  {
+   "name": "RECORD_PATTERNS",
+   "since": "21"
+  },
+  {
+   "name": "IMPLICIT_CLASSES",
+   "since": "25"
+  },
+  {
+   "name": "UNNAMED_VARIABLES",
+   "since": "22"
+  },
+  {
+   "name": "PRIMITIVE_PATTERNS",
+   "since": "23"
+  },
+  {
+   "name": "FLEXIBLE_CONSTRUCTORS",
+   "since": "25"
+  },
+  {
+   "name": "MODULE_IMPORTS",
+   "since": "25"
+  },
+  {
+   "name": "JAVA_BASE_TRANSITIVE",
+   "since": "25"
+  },
+  {
+   "name": "PRIVATE_MEMBERS_IN_PERMITS_CLAUSE",
+   "since": "19"
+  },
+  {
+   "name": "ERASE_POLY_SIG_RETURN_TYPE",
+   "since": "24"
+  },
+  {
+   "name": "CAPTURE_MREF_RETURN_TYPE",
+   "since": "26"
+  }
+ ],
+ "asked": [
+  {
+   "file": "src/jdk.compiler/share/classes/com/sun/tools/javac/comp/Analyzer.java",
+   "line": 135,
+   "text": "allowDiamondWithAnonymousClassCreation = Feature.DIAMOND_WITH_ANONYMOUS_CLASS_CREATION.allowedInSource(source);"
+  },
+  {
+   "file": "src/jdk.compiler/share/classes/com/sun/tools/javac/comp/Attr.java",
+   "line": 171,
+   "text": "allowReifiableTypesInInstanceof = Feature.REIFIABLE_TYPES_INSTANCEOF.allowedInSource(source);"
+  },
+  {
+   "file": "src/jdk.compiler/share/classes/com/sun/tools/javac/comp/Attr.java",
+   "line": 172,
+   "text": "allowRecords = Feature.RECORDS.allowedInSource(source);"
+  },
+  {
+   "file": "src/jdk.compiler/share/classes/com/sun/tools/javac/comp/Attr.java",
+   "line": 174,
+   "text": "Feature.PATTERN_SWITCH.allowedInSource(source);"
+  },
+  {
+   "file": "src/jdk.compiler/share/classes/com/sun/tools/javac/comp/Attr.java",
+   "line": 176,
+   "text": "Feature.UNCONDITIONAL_PATTERN_IN_INSTANCEOF.allowedInSource(source);"
+  },
+  {
+   "file": "src/jdk.compiler/share/classes/com/sun/tools/javac/comp/Attr.java",
+   "line": 179,
+   "text": "captureMRefReturnType = Source.Feature.CAPTURE_MREF_RETURN_TYPE.allowedInSource(source);"
+  },
+  {
+   "file": "src/jdk.compiler/share/classes/com/sun/tools/javac/comp/Attr.java",
+   "line": 190,
+   "text": "allowValueClasses = preview.isEnabled() && Feature.VALUE_CLASSES.allowedInSource(source);"
+  },
+  {
+   "file": "src/jdk.compiler/share/classes/com/sun/tools/javac/comp/Check.java",
+   "line": 166,
+   "text": "allowModules = Feature.MODULES.allowedInSource(source);"
+  },
+  {
+   "file": "src/jdk.compiler/share/classes/com/sun/tools/javac/comp/Check.java",
+   "line": 167,
+   "text": "allowRecords = Feature.RECORDS.allowedInSource(source);"
+  },
+  {
+   "file": "src/jdk.compiler/share/classes/com/sun/tools/javac/comp/Check.java",
+   "line": 168,
+   "text": "allowSealed = Feature.SEALED_CLASSES.allowedInSource(source);"
+  },
+  {
+   "file": "src/jdk.compiler/share/classes/com/sun/tools/javac/comp/Check.java",
+   "line": 169,
+   "text": "allowPrimitivePatterns = preview.isEnabled() && Feature.PRIMITIVE_PATTERNS.allowedInSource(source);"
+  },
+  {
+   "file": "src/jdk.compiler/share/classes/com/sun/tools/javac/comp/Check.java",
+   "line": 170,
+   "text": "allowValueClasses = preview.isEnabled() && Feature.VALUE_CLASSES.allowedInSource(source);"
+  },
+  {
+   "file": "src/jdk.compiler/share/classes/com/sun/tools/javac/comp/Check.java",
+   "line": 849,
+   "text": "if (tree.def != null && !Feature.DIAMOND_WITH_ANONYMOUS_CLASS_CREATION.allowedInSource(source)) {"
+  },
+  {
+   "file": "src/jdk.compiler/share/classes/com/sun/tools/javac/comp/Check.java",
+   "line": 948,
+   "text": "JCDiagnostic msg = Feature.PRIVATE_SAFE_VARARGS.allowedInSource(source) ?"
+  },
+  {
+   "file": "src/jdk.compiler/share/classes/com/sun/tools/javac/comp/Check.java",
+   "line": 975,
+   "text": "(Feature.PRIVATE_SAFE_VARARGS.allowedInSource(source) ? PRIVATE : 0) )) != 0);"
+  },
+  {
+   "file": "src/jdk.compiler/share/classes/com/sun/tools/javac/comp/Check.java",
+   "line": 3560,
+   "text": "(Feature.NO_TARGET_ANNOTATION_APPLICABILITY.allowedInSource(source) && isTypeParameter) :"
+  },
+  {
+   "file": "src/jdk.compiler/share/classes/com/sun/tools/javac/comp/Check.java",
+   "line": 3660,
+   "text": "(!Feature.TYPE_ANNOTATIONS_ON_VAR_LAMBDA_PARAMETER.allowedInSource(source) ||"
+  },
+  {
+   "file": "src/jdk.compiler/share/classes/com/sun/tools/javac/comp/Check.java",
+   "line": 4370,
+   "text": "Feature.MODULES.allowedInSource(source)) {"
+  },
+  {
+   "file": "src/jdk.compiler/share/classes/com/sun/tools/javac/comp/Check.java",
+   "line": 4504,
+   "text": "!(Feature.IMPORT_ON_DEMAND_OBSERVABLE_PACKAGES.allowedInSource(source) && tsym.exists())) {"
+  },
+  {
+   "file": "src/jdk.compiler/share/classes/com/sun/tools/javac/comp/Infer.java",
+   "line": 129,
+   "text": "erasePolySigReturnType = Source.Feature.ERASE_POLY_SIG_RETURN_TYPE.allowedInSource(source);"
+  },
+  {
+   "file": "src/jdk.compiler/share/classes/com/sun/tools/javac/comp/Lower.java",
+   "line": 142,
+   "text": "useMatchException = Feature.PATTERN_SWITCH.allowedInSource(source) &&"
+  },
+  {
+   "file": "src/jdk.compiler/share/classes/com/sun/tools/javac/comp/Lower.java",
+   "line": 145,
+   "text": "this.allowValueClasses = preview.isEnabled() && Feature.VALUE_CLASSES.allowedInSource(source);"
+  },
+  {
+   "file": "src/jdk.compiler/share/classes/com/sun/tools/javac/comp/MemberEnter.java",
+   "line": 91,
+   "text": "allowValueClasses = preview.isEnabled() && Feature.VALUE_CLASSES.allowedInSource(source);"
+  },
+  {
+   "file": "src/jdk.compiler/share/classes/com/sun/tools/javac/comp/MemberEnter.java",
+   "line": 307,
+   "text": "if(!(Feature.UNNAMED_VARIABLES.allowedInSource(source) && tree.sym.isUnnamedVariable())) {"
+  },
+  {
+   "file": "src/jdk.compiler/share/classes/com/sun/tools/javac/comp/Modules.java",
+   "line": 198,
+   "text": "allowModules = Feature.MODULES.allowedInSource(source);"
+  },
+  {
+   "file": "src/jdk.compiler/share/classes/com/sun/tools/javac/comp/Resolve.java",
+   "line": 151,
+   "text": "allowLocalVariableTypeInference = Feature.LOCAL_VARIABLE_TYPE_INFERENCE.allowedInSource(source);"
+  },
+  {
+   "file": "src/jdk.compiler/share/classes/com/sun/tools/javac/comp/Resolve.java",
+   "line": 152,
+   "text": "allowYieldStatement = Feature.SWITCH_EXPRESSION.allowedInSource(source);"
+  },
+  {
+   "file": "src/jdk.compiler/share/classes/com/sun/tools/javac/comp/Resolve.java",
+   "line": 153,
+   "text": "allowPrivateMembersInPermitsClause = Feature.PRIVATE_MEMBERS_IN_PERMITS_CLAUSE.allowedInSource(source);"
+  },
+  {
+   "file": "src/jdk.compiler/share/classes/com/sun/tools/javac/comp/Resolve.java",
+   "line": 155,
+   "text": "allowModules = Feature.MODULES.allowedInSource(source);"
+  },
+  {
+   "file": "src/jdk.compiler/share/classes/com/sun/tools/javac/comp/Resolve.java",
+   "line": 156,
+   "text": "allowRecords = Feature.RECORDS.allowedInSource(source);"
+  },
+  {
+   "file": "src/jdk.compiler/share/classes/com/sun/tools/javac/comp/TypeEnter.java",
+   "line": 138,
+   "text": "allowDeprecationOnImport = Feature.DEPRECATION_ON_IMPORT.allowedInSource(source);"
+  }
+ ],
+ "versions": [
+  "1.2",
+  "9",
+  "10",
+  "11",
+  "14",
+  "15",
+  "16",
+  "17",
+  "19",
+  "21",
+  "22",
+  "23",
+  "24",
+  "25",
+  "26"
+ ]
+}

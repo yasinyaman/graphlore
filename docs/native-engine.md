@@ -11,7 +11,9 @@ what is left before it can be the default.
 ## What it extracts
 
 - **Files.** It reads everything under the project root that git would not
-  ignore (and `.graphifyignore` / `.graphloreignore`), skipping the output
+  ignore, and what git tracks even where an ignore rule matches its name
+  (`.graphifyignore` / `.graphloreignore` are the engine's own and always
+  hold), skipping the output
   directory, `node_modules`, virtualenvs and files over 2 MB. Source files with
   an extension no module reads (`.lua`, `.zig`, `.ex`, …) are counted in the
   build reply, not dropped silently.
@@ -767,31 +769,46 @@ file pairs). The native graph has definitions graphify folds into the one
 around them (a function nested in a method, the setter beside a getter of the
 same name); an edge from one of those is compared as an edge from the paired
 definition it belongs to, as graphify records it. On the 31 repositories of the
-[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.37,
-measured 2026-11-18), as native / graphify edges and the share of graphify's
+[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.62,
+measured 2026-11-21), as native / graphify edges and the share of graphify's
 that the native graph has too:
 
 | Language | same definition | imports (file pairs) | calls | bases | type references |
 |---|--:|--:|--:|--:|--:|
-| Python | 100% | 212 / 219 (96%) | 2,970 / 834 (94%) | 73 / 62 (100%) | 440 / 494 (68%) |
-| JavaScript | 93.5%⁵ | 190 / 305 (59%) | 1,386 / 2,058 (43%)¹ | 1 / 1 | 3 / 0 |
-| TypeScript | 99.4% | 527 / 634 (83%) | 805 / 687 (98%) | 25 / 20 (100%) | 740 / 156 (88%) |
-| TSX | 99.7% | 253 / 316 (80%) | 435 / 456 (95%) | – | 42 / 4 |
-| Go | 100% | 538 / 950 (47%)² | 6,723 / 3,167 (99%) | 19 / 14 (100%) | 679 / 355 (99%) |
-| Java | 100% | 1,105 / 1,010 (100%) | 5,718 / 5,123 (85%) | 415 / 168 (94%) | 3,989 / 1,930 (98%) |
-| Kotlin | 99.4% | 368 / 333 (95%) | 4,786 / 2,108 (71%) | 96 / 56 (93%) | 1,079 / 673 (91%) |
-| Scala | 100% | 2 / 0 | 46 / 20 (45%) | 21 / 22 (95%) | 75 / 32 (100%) |
-| C# | 92.7% | 347 / 280 (30%)³ | 2,860 / 2,450 (96%) | 87 / 86 (98%) | 1,248 / 806 (99%) |
-| Rust | 93.3% | 314 / 370 (75%) | 2,016 / 853 (86%) | 53 / 41 (93%) | 1,245 / 895 (81%) |
-| Swift | 95.9% | 166 / 166 (–)³ | 5,494 / 2,141 (83%) | 190 / 164 (100%) | 1,091 / 580 (62%) |
-| C | 100% | 89 / 77 (99%) | 864 / 791 (100%) | – | 253 / 130 (97%) |
-| C++ | 98.7% | 215 / 228 (93%) | 765 / 281 (29%)⁴ | 30 / 5 (100%) | 350 / 234 (88%) |
-| C/C++ headers | 91.4% | 164 / 172 (95%) | 372 / 348 (84%) | 12 / 12 (92%) | 563 / 312 (90%) |
-| Ruby | 99.7% | 42 / 0 | 443 / 375 (69%) | 46 / 15 (93%) | 28 / 0 |
-| PHP | 80.6% | 429 / 505 (84%) | 8,873 / 6,140 (90%) | 65 / 60 (98%) | 648 / 213 (95%) |
-| **All** | **94.4%** | **4,962 / 5,565 (75%)** | **44,556 / 27,832 (85%)** | **1,137 / 726 (97%)** | **12,473 / 6,814 (89%)** |
+| Python | 100% | 212 / 219 (96%) | 2,976 / 834 (94%) | 73 / 62 (100%) | 546 / 494 (93%) |
+| JavaScript | 93.5% | 250 / 305 (59%) | 1,047 / 2,058 (37%) | 1 / 1 (100%) | 99 / 0 |
+| TypeScript | 99.4% | 527 / 634 (83%) | 793 / 687 (98%) | 25 / 20 (100%) | 1,093 / 156 (94%) |
+| TSX | 99.7% | 253 / 316 (80%) | 435 / 456 (95%) | – | 51 / 4 (100%) |
+| Go | 100% | 538 / 950 (47%) | 6,769 / 3,167 (100%) | 19 / 14 (100%) | 914 / 355 (100%) |
+| Java | 100% | 1,112 / 1,010 (100%) | 5,760 / 5,123 (85%) | 415 / 168 (94%) | 4,245 / 1,930 (98%) |
+| Kotlin | 99.4% | 368 / 333 (95%) | 4,616 / 2,108 (68%) | 96 / 56 (93%) | 1,466 / 673 (94%) |
+| Scala | 100% | 2 / 0 | 77 / 20 (50%) | 21 / 22 (95%) | 48 / 32 (100%) |
+| C# | 92.9% | 338 / 280 (29%) | 3,472 / 2,467 (97%) | 92 / 86 (99%) | 1,667 / 929 (96%) |
+| Rust | 93.3% | 314 / 370 (75%) | 2,101 / 853 (86%) | 53 / 41 (93%) | 1,621 / 895 (88%) |
+| Swift | 95.9% | 174 / 166 (0%) | 5,615 / 2,141 (83%) | 190 / 164 (100%) | 1,751 / 580 (79%) |
+| C | 100% | 89 / 77 (99%) | 864 / 791 (100%) | – | 439 / 130 (100%) |
+| C++ | 98.7% | 215 / 228 (93%) | 987 / 281 (57%) | 30 / 5 (100%) | 698 / 234 (93%) |
+| C/C++ headers | 91.4% | 164 / 172 (95%) | 426 / 348 (87%) | 12 / 12 (92%) | 816 / 312 (89%) |
+| Ruby | 99.7% | 42 / 0 | 455 / 375 (69%) | 47 / 15 (93%) | 71 / 0 |
+| PHP | 80.6% | 509 / 505 (100%) | 8,936 / 6,140 (90%) | 65 / 60 (98%) | 1,610 / 213 (100%) |
+| **All** | **94.4%** | **5,107 / 5,565 (76%)** | **45,329 / 27,849 (85%)** | **1,139 / 726 (97%)** | **17,135 / 6,937 (94%)** |
 
-Of the native calls, 12,772 (29%) are `INFERRED`, against 47% of graphify's.
+⁶ Swift's type references are engine 0.5.44's, which reads the type of a
+stored property (62% before; see [the second set](#a-second-set-of-repositories)).
+
+Of the native calls, 13,000 (29%) are `INFERRED`, against 47% of graphify's.
+A type reference counts as found when the native graph states it another way:
+graphify writes a type a method uses on the method's *class* and a
+construction as a `uses` edge, the native graph an edge from the method and a
+`calls` edge to the class (the references column was 90% before the
+comparison read those as the same statement).
+(Engine 0.5.42 had 44,960 calls in this table and the same 85% of graphify's;
+the C++ row was 29% before the comparison folded a definition written out of
+its class into the declaration graphify hangs its calls on, footnote ⁴.)
+(Engine 0.5.37 had 44,556 calls in this table; the 404 more are C# 427,
+Rust 49, Kotlin 33, Swift 8 and JavaScript 112 fewer, the last in the
+vendored bundles whose one-letter names 0.5.40's scopes no longer take for
+file-wide: 41% of graphify's JavaScript calls from 43%.)
 That share was 20% before engine 0.5.5: a call of an overloaded name that the
 arguments do not decide used to be an `EXTRACTED` edge to the first overload,
 and is now an `INFERRED` edge to each overload that fits (999 calls, with
@@ -834,6 +851,93 @@ two edges of got are gone that named a function defined in another loop
 for a destructured loop variable of the same name. The maps of these
 repositories that hold project types are mostly looked up by key once, or
 not walked at all.
+Engine 0.5.42 closes what 0.5.40's scopes left open. The module pattern
+`var Dataset = (function () { function Dataset() {} return Dataset })()`:
+the function written in the closure is what the declaration names, so the
+scope around knows it by that name (`Def::returned_out`) and the
+declaration is no local; with it, a function assigned to a function as a
+member (`Dataset.extractData = function () {}`, `assigned_member`).
+typeahead.js in alamofire's documentation assets has its `new Dataset()` /
+`new Input()` and `Input.normalizeQuery()` again, in each of its two
+copies, where 0.5.40 had linked one copy to the other. A function declared
+with a type (`const firstLookup: LookupFunction = () => {}`) makes no local
+that hides the function where it is passed as a value (got, 3 edges). And
+RSpec: a bare name in `shared_examples 'a request method' do … end` that no
+block around it declares is the `let` of the block that includes the
+examples (`it_behaves_like 'a request method'`), when every including place
+gives the same `let` — faraday's adapter examples reach `request_stub`,
+`conn_options`, `conn` and `remote` (5 edges; 2 guesses by a method's name on
+what is now a `let` whose result is not typed are gone). The vendored
+bundles gain 423 edges from members assigned to functions.
+One change was measured and not kept: when a receiver has a project type
+and no member of the name asked, the engine links the one extension of that
+name in sight, `INFERRED`, whatever type it is written for. Refusing it
+unless the extension's type is the receiver's, a base of it, or a library's
+type the receiver could implement removed 207 edges on the audit
+repositories, and the sampled ones were all right
+(`client.BuildUri(request)` on a `RestClient`, written for `IRestClient`;
+`FunSpec.getterBuilder().strictfp()`, written for `FunSpec.Builder`;
+`Properties::class.toTypeSpecWithTestHandler()`, written for `KClass<*>`):
+the type the walk gives a receiver is the declared or constructed one, not
+exact enough to refuse by.
+Engine 0.5.41 is Ruby's: a class opened in several files has, in each of
+them, what any opening mixes in or extends (`reopened_base_member`), and a
+class written as a constant assigned `Struct.new(…) do … end` mixes in what
+the block says. faraday gets its eight `Faraday::Request.register_middleware(…)`
+/ `Faraday::Response.…` calls (`EXTRACTED`, through `extend
+MiddlewareRegistry`) and three `mixes_in` edges; nothing else changes.
+Engine 0.5.40 gives a closure no definition holds a scope of its own
+(`Def::block`: no node, no name). A test file is mostly such closures —
+`test('…', async t => { const request = … })`, `it '…' do conn = … end` —
+and a local declared in one was no local at all: the name went on to the
+file, the imports and the project, so `request` in one test was a `request`
+function of another file, `EXTRACTED`, and `assert.strictEqual(body, 'ok')`
+passed another test file's `body`. Each closure is now a definition to the
+resolver (its parent the closure around it), its locals are typed like a
+function's, and a definition written in it is its child. In the 31
+repositories' own code that adds 210 edges (got 96, faraday 59, express 41,
+alamofire 13, nestjs-realworld 1) and removes 140 (got 95, express 22,
+faraday 13, alamofire 9, express-mongoose-demo 1). Read at their sites, the
+removed ones are a local or a callback's parameter taken for a definition of
+its name somewhere else, but for two kinds: ten guesses by a method's name
+on what is now an untyped local of a block in faraday's specs, four of them
+right (`b.adapter :test`, `options.each_key`; an untyped local is asked only
+a name no other type answers to), and typeahead.js in alamofire's
+documentation assets, a module written `var Dataset = (function () {
+function Dataset() {} return Dataset })()`, whose `new Dataset()` outside
+that function no longer resolves (5 edges). The vendored and minified bundles (jQuery, Bootstrap,
+retrofit's generated Dokka `main.js`), which the analysis scope leaves out,
+lose 2,587 edges and gain 1,347: their one-letter names were file-wide.
+The 31 builds take as long as before (15.5 s).
+Engine 0.5.39 asks one more thing of a call the walk could not follow: the
+one extension in sight written for a type the project does not define
+(`library_extension_call`, `INFERRED`). The receiver of such a call is a
+library's member or a chain of them, which the walk cannot type:
+`e.Name.LocalName.RemoveUnderscoresAndDashes()` (an `XElement`'s name, an
+extension for `string`), `user.email.isEmailValid()`,
+`NotificationCenter.default.postNotification(…)`,
+`request.headers().has_content_type()` (`impl HeaderMapExt for HeaderMap`).
+It adds 79 calls (kotlinpoet 30, restsharp 23, alamofire 13, ureq 7,
+aspnetcore-realworld 3, ktor-realworld 3), each read at its site. The first
+version of the rule added 96, and the 17 wrong ones made the rule what it
+is: a local whose type the source names was already asked with that type
+(`call.is_chunked()` on a `ureq_proto` `Call` is not `HeaderMap`'s), a name
+that is also a member of a project type says nothing of an unknown receiver
+(`self.0.connect()` beside `impl Connector for ()`), a static call on a
+library's type is the library's (`HttpUtility.UrlEncode(s)`), and an
+extension that wraps the library's method of its own name does not call
+itself (`FileManager.default.createDirectory(…)` inside
+`createDirectory`). The same version parses a C# `#if` written inside an
+expression once (its first branch): with both branches in the tree the
+grammar lost the class around, and RestSharp's `HttpResponseExtensions` was
+no node (13 node ids of restsharp change; its three extension methods are
+methods again, called `EXTRACTED`).
+Engine 0.5.38 fixes one walk: a member read without a call, with more after
+it, is the field when the type also has a method of that name. ureq's
+`LazyBuffers` holds `input: ConsumeBuf` and implements a trait's `fn
+input()`, so `self.input.unconsumed()` took the method and named nothing;
+the same for `self.current_time.now()` and `self.der.as_ref()`. ureq gets 42
+calls (`EXTRACTED` but one), and no other edge of the 31 graphs changes.
 Engine 0.5.36 (JavaScript receivers) reads four things the source states. A
 `this` in a function expression no definition holds is what the function
 is attached to (`RefFact::this_of`): `app[method] = function () {
@@ -1228,6 +1332,8 @@ Reading a sample of each side's edges the other lacks, per language:
   helper, Ruby's `@article.destroy` linked to the controller's own `destroy`.
   ⁴ C++ calls: graphify links a call to the declaration in the header; the
   native graph to the definition, whose body is what `fetch` and `impact` read.
+  The comparison counts an edge of the definition as an edge of the one
+  declaration with its qualified name (the row was 29% before it did).
   A call by name alone to a method of the same file is most of the rest:
   `funSpec.toString()` linked to a test's own `toString()` (262 of Kotlin's 716
   in kotlinpoet), `Truth.assertThat()` to a project `assertThat` (653 in
@@ -1288,6 +1394,597 @@ times; retrofit 2.9 s against 13.1 s, guzzle 0.9 s / 6.1 s, alamofire 1.2 s /
 31 builds take 16.3 to 18.9 s through Python, 15.8 to 18.1 s in the engine alone, retrofit 3.7 to 4.1 s). An update after a one-file change takes a third of
 a build ([above](#incremental-updates)).
 
+### A second set of repositories
+
+Every number above is of the 31 repositories the resolver was written
+against, and by engine 0.5.43 they had 314 calls left that an edge was still
+plausible for. `benchmarks/polyglot.py` has a second set (`--set 2`) to say
+what that is worth elsewhere: one more repository per language, none of them
+an HTTP client or a web application — click, commander.js, zod, cobra, gson,
+clikt, scopt, commandline, ripgrep, swift-argument-parser, cJSON, leveldb,
+thor, monolog (pinned commits, 2026-11-20). The same engine left 1,387 such
+calls in these 14, four times as many in half as many repositories, and the
+builds and the comparisons found what the first set had no code to show:
+
+- **`file_spans` returned 0.5.40's block scopes as unnamed spans.** The
+  comparison with `spans.py` on a snippet per language passed: no snippet
+  had a closure at file level. On these repositories 513 of 2,288 files
+  differed (zod 310, commander 128). A block is no span; a snippet with one
+  is in `tests/test_engine.py` now.
+- **C#, namespaces written as blocks.** `namespace Shop.Core { … }` did not
+  see `Shop`'s names (a file-scoped `namespace Shop.Core;` did), and `using
+  Shop.Text;` reached the one file a lookup landed on instead of every file
+  that opens the namespace. commandline, which writes every namespace as a
+  block: 1,295 edges added, 52 removed (a guess by name to a namesake in the
+  tests, now the type the source names).
+- **C#, one branch of an `#if` inside an expression** (`() =>` / `#if X` /
+  `a ? b :` / `#endif` / `c;`): the class around was lost. The two directive
+  lines are blanked.
+- **Rust, a closure in a macro's arguments.** ripgrep's tests are `rgtest!(name,
+  |dir: Dir, mut cmd: TestCommand| { … })`: the typed parameters and the
+  `let`s of that closure were dropped with the macro. 69 calls.
+- **C++, `Random rnd(test::RandomSeed());`**, which the grammar reads as the
+  declaration of a function `rnd`: a call where a parameter's type would be
+  is a variable's argument. leveldb: 71 edges added, and the 23 removed left
+  from functions that were none.
+- **Kotlin regions.** The grammar drops some comments from the tree (a KDoc
+  block before a declaration with modifiers), so the region started at the
+  declaration; it is read from the source where the tree has no comment.
+- **Swift, the type of a stored property** (`var fav: ColorOptions`) was no
+  reference: 429 `references` in swift-argument-parser, and 592 in
+  alamofire, where the first set's 62% of graphify's type references had
+  been put down to the two models.
+
+After these (engine 0.5.44) the 14 repositories have 1,041 such calls —
+C# 327, Rust 182, Kotlin 98, Swift 88, Ruby 85, Java 73, C++ 45, Python 41,
+PHP 29, Scala 28, Go 23, TypeScript 19, JavaScript 3 — and the first 31
+still 314, with no edge of theirs changed but four redundant `using` edges
+of todoapi and alamofire's property types. Against graphify 0.9.111, as in
+the table above:
+
+| Repository | same definition | imports (file pairs) | calls | bases | type references |
+|---|--:|--:|--:|--:|--:|
+| click | 100% | 174 / 159 (100%) | 2,924 / 1,473 (74%) | 77 / 30 (100%) | 1,308 / 592 (97%) |
+| commander.js | 97% | 264 / 185 (98%) | 349 / 197 (97%) | 17 / 3 (100%) | 74 / 0 |
+| zod | 99.1% | 1,001 / 1,008 (73%) | 2,308 / 2,006 (87%) | 684 / 609 (97%) | 5,402 / 122 (99%) |
+| cobra | 100% | 159 / 285 (56%) | 1,823 / 1,339 (100%) | – | 467 / 94 (100%) |
+| gson | 100% | 1,048 / 1,079 (97%) | 10,102 / 7,293 (97%) | 516 / 199 (95%) | 4,145 / 1,288 (97%) |
+| clikt | 99.2% | 597 / 480 (98%) | 1,975 / 1,181 (91%) | 477 / 110 (98%) | 851 / 478 (95%) |
+| scopt | 100% | 6 / 8 (0%) | 525 / 213 (83%) | 25 / 25 (100%) | 185 / 87 (92%) |
+| commandline | 96.3% | 256 / 148 (8%) | 2,444 / 1,894 (95%) | 49 / 49 (92%) | 1,548 / 823 (88%) |
+| ripgrep | 97.2% | 204 / 250 (68%) | 5,535 / 2,952 (82%) | 124 / 117 (98%) | 2,661 / 1,362 (89%) |
+| swift-argument-parser | 94.9% | 271 / 212 (0%) | 1,809 / 957 (90%) | 599 / 438 (100%) | 1,077 / 677 (77%) |
+| cJSON | 97.3% | 171 / 170 (99%) | 1,241 / 1,228 (99%) | – | 297 / 89 (100%) |
+| leveldb | 95.6% | 499 / 499 (100%) | 3,401 / 2,064 (91%) | 70 / 17 (100%) | 2,372 / 748 (93%) |
+| thor | 100% | 61 / 0 | 687 / 533 (83%) | 43 / 4 (100%) | 61 / 0 |
+| monolog | 93.6% | 438 / 439 (100%) | 3,755 / 2,207 (88%) | 241 / 239 (96%) | 928 / 392 (98%) |
+| **All** | **97.7%** | **5,149 / 4,922 (82%)** | **38,878 / 25,537 (91%)** | **2,922 / 1,840 (98%)** | **21,376 / 6,752 (92%)** |
+
+(Engine 0.5.58; with 0.5.44 the table's last row was 95.5% of the definitions
+and 67% / 85% / 80% / 80% of the edges.) 20% of the native calls are `INFERRED`. The low cells of the first
+measurement were read one by one, and most of them were one rule each:
+
+- **leveldb, 54% of the calls and 49% of the type references.** Its classes
+  are written `class LEVELDB_EXPORT Env { … }`: the grammar takes the macro
+  for the type's name and `Env { … }` for a function, so the members
+  belonged to no class. The macro is blanked before parsing, in the engine
+  and in `spans.py` (`blank_class_macros`): 1,173 more calls and 1,128 more
+  references on leveldb alone, 91% and 86% now. The rest of the C++ gap was
+  the comparison's: graphify hangs the calls of `void DBImpl::Work() { … }`
+  on the declaration in the header, the native graph on the definition, and
+  the two were counted as different edges (header calls 9% → 93%).
+- **click, 53% of the calls.** Of the 693 edges only graphify had, 301 were
+  `runner.invoke(…)` on a pytest fixture: a test's parameter is what the
+  fixture of its name returns (`conftest.py`), which the engine now reads
+  (306 calls, 74%). Another 265 are graphify linking `runner.invoke(cli)`
+  to the `cli` nested in *another* test of the file; the engine links the
+  one written in the calling test. Those stay "only graphify".
+- **zod, 44% of the bases.** `$` was read as PHP's sigil in every language,
+  so `interface $ZodULID extends $ZodType` named `ZodType`. Kept as part of
+  the name outside PHP, Ruby and Swift: 97% of the bases. A TypeScript name
+  that is an interface and a constant at once is the type where a type is
+  written and the value elsewhere.
+- **commandline, 68% of the calls.** Three rules: `: base(…)` / `: this(…)`
+  (and Java's `super(…)` / `this(…)`) call a constructor; `Maybe.Nothing<T>()`
+  is a member of the static class `Maybe` beside the generic `Maybe<T>`; and a
+  `using N;` of a namespace written as a block did not bring its extension
+  methods into sight from another directory. 82% now. Its **imports** are
+  graphify's namespace nodes (footnote ³).
+- **cJSON, 48.7% of the definitions; zod's workspace imports.** One cause.
+  cJSON's `.gitignore` has a line `test` and `tests/unity/test/` is committed
+  all the same; zod's `packages/zod/.gitignore` has `**/package.json`, and
+  the package's own `package.json` is committed, so the engine never learned
+  that the directory is the package `zod`, and every `import … from "zod"`
+  in the workspace was an external module. Git ignores only what is
+  untracked: the engine now asks git which files it tracks and reads those
+  an ignore rule matched (not hidden paths, `node_modules`, or what
+  `.graphloreignore` names). cJSON: 97.3% of the definitions; zod: 2,042 more
+  calls. A repository that commits its build output (`dist/` in
+  nestjs-realworld) gets it read too; the analysis scope leaves it out as
+  vendored, as it does for graphify's graph.
+- **click's and httpx's type references (57%, 64%)** were the comparison's:
+  graphify writes them on the class, the engine on the method (see above).
+  96% and 90% once read as the same statement.
+- **Not read yet:** cobra's and chi's imports (footnote ²), ripgrep's calls
+  (81%: most of the sample is graphify linking `line.is_empty()` to a project
+  method of that name), kotlinpoet's (72%, footnote ⁴).
+
+### The rules themselves
+
+Both sets measure the engine on code. [resolution-rules.md](resolution-rules.md)
+is the other half: the name-resolution rules each language defines, one
+small project a rule (`benchmarks/conformance.py`). A gap found on a
+repository becomes a case there first, so that it is found once.
+
+Engine 0.5.45 followed 356 of the first 406 (176 of the 185 about scopes, imports
+and member lookup; 180 of the 221 about types written in an expression, a
+pattern or an alias). The 50 it did not were few rules in many languages —
+a cast used at once, a null-safe call, a binding that opens an optional, a
+member of an enum's value, type aliases, a variable typed by its value, a
+function named without a call, `self::` / `super::`, a second `let` of a
+name — and 0.5.46 closes them all; the page lists them by rule. Each was
+written as a change to the reader or the walk, then measured on the 45
+repositories by reading the edges it added and removed:
+
+| On the 45 repositories | 0.5.45 | 0.5.46 |
+|---|---:|---:|
+| `calls` | 121,235 | 121,691 |
+| `indirect_call` | 4,137 | 4,229 |
+| `references` | 41,711 | 43,396 |
+| `uses` | 5,291 | 5,384 |
+| `reads` | 32,219 | 32,475 |
+| `inherits` | 3,913 | 3,990 |
+| unresolved rows left unmarked, first set | 314 | 305 |
+| unresolved rows left unmarked, second set | 1,041 | 953 |
+
+`calls` grows by less than was added: about 350 Kotlin class literals
+(`Foo::class`) were `calls` edges to the class and are `references` now, and
+a callable reference (`::handle`) is an `indirect_call` as in the other
+languages. Three things the cases did not ask for came out of reading the
+edges. A local hid a call written *above* its declaration (requests-scala's
+`stream(…)` above `val stream = response.body()`): a use before a
+declaration now keeps the outer name, where a declaration is what makes a
+local (not Python, Ruby or PHP, where an assignment can be one of several).
+Rust keeps every `let` of a name, so the walk — which has no blocks — falls
+back to an earlier declaration it can type when the one in force is made
+from it (`let timings = mem::take(timings);`). And a C++ name written with
+its namespace is looked up in the asking file first, then in the files it
+includes: leveldb's three benchmark files each define `leveldb::Benchmark`,
+and `Comparator` was linked to a test's struct of that name.
+
+What passing every case does not say: the list is the rules written so far,
+not every rule of each language, and it has no type inference in it.
+
+The comparison with graphify did not move with them: the share of graphify's
+calls the native graph has was 84.7% on the first set before 0.5.46 and after
+it. Those 50 rules were edges neither engine had. What moved it was reading
+the edges only graphify had in the lowest cells of the second set (0.5.47,
+[above](#a-second-set-of-repositories)): 84.9% to 90.1% of the calls there,
+79.9% to 97.4% of the bases. Each rule found that way became a case of the
+list too, which now has 414.
+
+### One language's rule, read in another
+
+The reader and the resolver are shared by the 14 languages, and their tables
+of names — wrappers, methods of collections, unwrappers, core methods,
+receiver words — each belong to some of them. Twice a rule of one language
+was found applied to the others by accident: `Box`, `Arc` and `Rc` were
+wrappers in Java, and a leading `$` was dropped from every name because PHP
+writes variables with one (zod's `$ZodType`). Neither was found by looking
+for it.
+
+`benchmarks/neutrality.py` looks for it. For every name of every table, and
+a list of name shapes (`$x`, `_x`, `Zorp`, `__x__`) and other languages'
+keywords, in every language, it builds a small project that *defines* the
+name itself — a method on a typed receiver, a method called on `self`, a
+bare function, a generic type — beside the same project with a neutral name,
+and compares the edges. Whatever a library means by the name, the project's
+own definition is what the source names, so a difference is a leak.
+
+| | projects | differ from the control |
+|---|---:|---:|
+| engine 0.5.48 | 38,317 | 199 (42 names) |
+| engine 0.5.49 | 39,657 | 1 |
+
+- **161: the wrapper tables.** A project's own generic class named
+  `Optional`, `Future`, `Lazy`, `Promise`, `Provider`, `Mutex`, `Ref`,
+  `Result`, `Task` … (23 names) was the library's wrapper in TypeScript, Java,
+  Kotlin, Scala, C#, Rust and Swift alike: `run(b: Optional<Item>)` typed `b`
+  as an `Item`, and `b.lead()` named nothing. The reader works a file at a
+  time and cannot know what the project defines, so the files that see a
+  project type of such a name are read a second time with the name as an
+  ordinary type. A file sees it when it defines it, shares its directory, or
+  imports it from where it is defined: `java.util.Optional` imported in one
+  file stays the library's beside a project `Optional` in another package.
+- **About 20: `self` and `super`** taken for the receiver where the language
+  has no such word (a Java method `self()`, a Go or C function `super()`).
+- **The rest** were names the language reserves (`await`, `static`, `default`),
+  which the script now skips.
+- **No method table leaked.** A typed project receiver's own `map`, `get`,
+  `unwrap`, `first` or `toString` was the project's in every language: those
+  tables are consulted only where the walk has no project type to ask.
+
+None of the 45 audit repositories has an edge changed by this: none defines
+a type named like a wrapper where it matters. The one row left is a Python
+function named `super`. What the script does not see: a rule keyed on a
+node kind or on a punctuation the fixtures do not write. (Its control
+failed for a C++ template's member, `T lead()` of `Zorp<Item>`: the type
+parameters sit on the `template <typename T>` around the class, where the
+reader did not look. Read since 0.5.51, and the C++ rows are clean too.)
+
+### The compiler as the judge
+
+The rules above were written from the languages' definitions, as remembered.
+A compiler knows them exactly, and several keep the answer in their own test
+suite. TypeScript's has, for each of its 7,242 compiler tests, a `.symbols`
+file the compiler wrote: the program, and under every line each name on it
+with the declaration it is bound to (`>x : Symbol(x, Decl(a.ts, 3, 9))`).
+
+`benchmarks/oracle_typescript.py` reads those, rebuilds each program from the
+test's own source (the `// @filename:` units, the option lines dropped),
+builds the native graph and asks two things:
+
+```bash
+git clone --depth 1 --filter=blob:none --sparse https://github.com/microsoft/TypeScript ts
+git -C ts sparse-checkout set --no-cone '/tsc/testdata/baselines/reference/compiler/*.symbols' '/tsc/testdata/tests/cases/compiler/*'
+python benchmarks/oracle_typescript.py ts/tsc/testdata/baselines/reference/compiler --samples 20
+```
+
+(The paths are those of the repository on 2026-11-20, commit `6417c48`; the
+tests' sources are looked for beside the baselines, or where `--cases` says.)
+
+| | 0.5.51 | 0.5.52 | 0.5.53 | 0.5.54 | 0.5.55 |
+|---|---:|---:|---:|---:|---:|
+| programs (those with a definition and a use) | 3,169 | 3,169 | 3,169 | 3,169 | 3,169 |
+| edges whose site the compiler has an answer for | 7,806 | 7,935 | 8,822 | 9,283 | 9,398 |
+| of them, to the declaration the compiler names | 7,721 (98.9%) | 7,864 (99.1%) | 8,747 (99.1%) | 9,240 (99.5%) | 9,347 (99.5%) |
+| uses the compiler binds to a definition the graph has | 19,430 | 19,526 | 19,760 | 19,760 | 19,760 |
+| of them, with an edge from the definition around | 14,237 (73.3%) | 14,426 (73.9%) | 15,691 (79.4%) | 16,526 (83.6%) | 17,004 (86.1%) |
+
+The first number is the one that matters: an edge that goes somewhere else
+than the compiler says is a wrong edge, and all but two of the 85 were
+`EXTRACTED`. Read one by one they were six rules, none TypeScript's alone:
+block scopes, a type parameter hiding a type, a typed parameter called, a
+namespace's member seen from outside, a parameter property, and, found while
+measuring the fix on the 45 repositories, bounds, Scala's generic methods and
+a wrapper's first argument ([CHANGELOG](../CHANGELOG.md)). The 71 left are
+mostly a `let` in a block at the top of a file (about half: the engine keeps
+locals per definition, and a file is none), a class expression's own name, and
+names the judge cannot tell apart on one line.
+
+The second number is not a recall of real code. The suite is written to
+exercise the checker: ambient declarations, call signatures in interfaces,
+values with no written type whose members only inference names (about 1,500
+of the 5,100), uses at the top of a file. It is a list to read, not a score:
+`--json` writes every row.
+
+0.5.53 read the second list where it named something concrete: the types of
+a type alias and of an interface's signatures, `typeof ns.Class`, enum
+members.
+
+0.5.54 finished both lists. Block scopes had worked for calls only: the
+resolver knew where a use was written just for those, so a read, a write or
+a type still got the first local of the name. It knows for every use now,
+`state.rs` hides a variable only inside the block that declares a local of
+its name, and a block at the top of a file has locals of its own; the 40
+rows of that kind are gone. `import x = require()`, `export =`, `import A =
+N.M`, a function merged with a namespace and a function named as a value
+were the rest of what was missing. Of the 43 edges still called wrong, 8 are
+one test whose property, parameter and imported type share a name on one
+line, which the judge cannot tell apart; the others are single cases (a
+class expression's own name, a class declared in a block, `arguments`). Of
+the 3,234 uses with no edge, most are what a test suite writes and a
+repository does not: a member of a value with no written type (`var r =
+f(); r.then(…)`), a constructor writing its own fields (left out on
+purpose), ambient declarations.
+
+**Scala.** No Scala compiler runs where the engine is built, so its rules
+had only ever been checked against memory. The Scala 3 compiler's test suite
+has 73 programs under `tests/semanticdb/expect`, each with the symbol the
+compiler bound after every name (`class Access/*<-example::Access#*/`,
+`List/*->scala::package.List#*/`). `benchmarks/oracle_scala.py` takes the
+annotations out, builds the directory as one project and compares the same
+way:
+
+```bash
+git clone --depth 1 --filter=blob:none --sparse https://github.com/scala/scala3
+git -C scala3 sparse-checkout set tests/semanticdb/expect
+python benchmarks/oracle_scala.py scala3/tests/semanticdb/expect --samples 20
+```
+
+| | 0.5.52 | 0.5.53 |
+|---|---:|---:|
+| edges whose site the compiler has an answer for | 262 | 212 |
+| of them, to the declaration the compiler names | 192 (73.3%) | 205 (96.7%) |
+| uses the compiler binds to a definition the graph has, with an edge | 292 of 434 (67.3%) | 313 of 439 (71.3%) |
+
+(Commit `1615177` of 2026-11-20. A few of the first 70 wrong rows were the
+judge's own: a case class's companion and locals numbered per file.) One in
+four edges was wrong, and the largest cause was no rule of Scala's at all: a
+type that was the only one of its name in the project was linked from any
+file, whatever its package, so `List[Int]` went to a `List` nested in
+another program's class. That lookup is shared with Java, Kotlin and PHP,
+and the 45 repositories lost about 400 such edges with it. The rest were
+Scala's: a named argument read as an assignment, the type parameters of an
+`extension`, a type written through its package. The seven left are a
+structural type's member, `p.x.type`, and guesses marked `INFERRED`.
+
+**Kotlin.** The Analysis API tests under
+`analysis/analysis-api/testData/components/resolver/allByPsi` have a
+`.symbol.txt` beside each program: every element of the source with its
+character offsets and the symbol the compiler resolved it to
+(`KtNameReferenceExpression(142,149): 'Another'` … `/Another`), the
+declarations among them, so a symbol's name can be put back on the line that
+declares it. `benchmarks/oracle_kotlin.py`:
+
+```bash
+git clone --depth 1 --filter=blob:none --no-checkout https://github.com/JetBrains/kotlin
+git -C kotlin sparse-checkout set --no-cone '/analysis/analysis-api/testData/components/resolver/allByPsi/*'
+git -C kotlin checkout
+python benchmarks/oracle_kotlin.py kotlin/analysis/analysis-api/testData/components/resolver/allByPsi --samples 20
+```
+
+| | 0.5.54 | 0.5.55 |
+|---|---:|---:|
+| programs (one file, with a use of a definition) | 186 | 186 |
+| edges whose site the compiler has an answer for | 612 | 781 |
+| of them, to the declaration the compiler names | 610 (99.7%) | 776 (99.4%) |
+| uses the compiler binds to a definition the graph has, with an edge | 1,102 of 1,771 (62.2%) | 1,567 of 1,771 (88.5%) |
+
+(Commit `04f3c969` of 2026-11-20. The 0.5.54 column counts an enum entry
+named as missed where the edge goes to its enum, as the engine's rule has it:
+about 190 of its 669; the 0.5.55 column counts those as found.) Here the first number was never the
+problem: two edges in 612 went elsewhere than the compiler says (an
+extension that wins over a companion's member, an enum entry resolved by the
+expected type). The second was. Read by kind, the 669 uses with no edge were
+not resolution at all: the reader never looked at `x is T`, `x as T`, `catch
+(e: T)`, at the type of a property or a local (Kotlin's grammar gives it no
+field name, so no class had references to the types of its own properties),
+at an object named as a value. None of these is Kotlin's alone: `instanceof`,
+casts, type assertions and `catch` clauses made no edge in Java, C#, Swift,
+TypeScript, Go, PHP or Rust either, and the 45 repositories gained about
+4,000 `references` edges with the fix. Of the 204 left, most are a type named
+only as the qualifier of something the graph does link (`C.foo()` is an edge
+to `foo`), and names Kotlin 2.2 resolves by the expected type (`is Right`
+for `MySealed.Right`, `X` for `MyEnum.X`).
+
+**Swift.** The index tests (`test/Index/*.swift`) state, in `CHECK` lines
+under a line of a program, each name on it with the compiler's symbol for it
+and whether the line declares or uses it. `benchmarks/oracle_swift.py` reads
+them (a symbol written as a FileCheck variable is followed to where the test
+first names it; one written `{{.*}}` says nothing):
+
+```bash
+git clone --depth 1 --filter=blob:none --sparse https://github.com/swiftlang/swift
+git -C swift sparse-checkout set test/Index
+python benchmarks/oracle_swift.py swift/test/Index --samples 20
+```
+
+| | 0.5.54 | 0.5.55 |
+|---|---:|---:|
+| programs with an answer | 16 | 16 |
+| edges whose site the compiler has an answer for | 55 | 63 |
+| of them, to the declaration the compiler names | 51 (92.7%) | 59 (93.7%) |
+| uses the compiler binds to a definition the graph has, with an edge | 84 of 140 (60.0%) | 92 of 140 (65.7%) |
+
+(Commit `df95e65` of 2026-11-20.) A small list: the tests assert what their
+authors chose to, and most of their symbols are another module's. The four
+edges called wrong are a test that imports a module declaring the same names
+as the file, an Objective-C protocol's method and a property wrapper's `$y`.
+What it added was a type alias's composition (`typealias Both = Base & P1`),
+a `where` clause's bounds and, with 0.5.58, `Self()` as a construction (63 of
+67 edges, 94.0%). Left: `type(of: x).m()` and an associated type through its
+bound (`Bar.Assoc`). SourceKit's own indexing tests are larger but have their
+symbols scrubbed (`key.usr: <usr>`), so they say which names are uses, not of
+what.
+
+**Go and Rust: the compiler itself, on whole repositories.** Where the
+language's own resolver runs as a tool there is no need for its tests.
+`benchmarks/oracle_go.py` loads a repository with `go/types` (through
+`golang.org/x/tools/go/packages`) and takes, for every identifier, the
+position of the object it is bound to; `benchmarks/oracle_rust.py` does the
+same with `rust-analyzer lsif`, which resolves a Cargo workspace with macros
+expanded and traits solved. Both then compare as above, on the audit's own
+repositories:
+
+```bash
+python benchmarks/oracle_go.py /tmp/polyglot/cobra /tmp/polyglot/chi /tmp/polyglot/resty /tmp/polyglot/gin-examples
+rustup component add rust-analyzer
+python benchmarks/oracle_rust.py /tmp/polyglot/ureq /tmp/polyglot/ripgrep /tmp/polyglot/axum-realworld /tmp/polyglot/actix-realworld
+```
+
+| | Go, 0.5.55 | Go, 0.5.56 | Go, 0.5.60 | Rust, 0.5.55 | Rust, 0.5.56 | Rust, 0.5.60 |
+|---|---:|---:|---:|---:|---:|---:|
+| edges whose site the compiler has an answer for | 11,996 | 11,961 | 11,965 | 12,029 | 11,924 | 12,059 |
+| of them, to the declaration it names | 11,955 (99.7%) | 11,957 (99.97%) | 11,961 (99.97%) | 11,730 (97.5%) | 11,740 (98.5%) | 11,879 (98.5%) |
+| uses it binds to a definition the graph has, with an edge | 82.1% | 82.7% | 82.7% | 78.7% | 78.8% | 78.8% |
+
+Go's 41 wrong edges were three things: a name declared with `:=` or `var`
+and assigned a literal was no local to the resolver, so a value passed on
+went to a package-level name; a field of an anonymous struct in a test table
+was a name of the whole package; and a method called on a library's value
+(`jar.SetCookies(…)` on a `*cookiejar.Jar`) was guessed to be the project's
+method of that name. The four left are `INFERRED`. Rust's 299 were, in order:
+every `Result<…>` of the standard library linked to a `type Result` in
+another crate's tests (157 on ripgrep); `self.field` read where a method has
+the field's name (43 on ureq, 300 `reads` gained on ripgrep); `->
+Result<Self, E>` not giving the type. Of the 184 left, most are one question
+the graph cannot settle from the source: a call through a trait object goes
+to the trait's method where rust-analyzer names the `impl` for `Box<dyn
+Trait>`, or the reverse; then `impl Foo<A>` beside `impl Foo<B>` with a
+method of one name, and guesses.
+
+The uses with no edge are mostly positions the engine leaves out on purpose
+(a struct literal's field names, a method's own receiver type) and, in Rust,
+what only type inference names.
+
+**C#.** Roslyn is asked the same way (`benchmarks/oracle_csharp.py`: one
+compilation of every `.cs` file of a repository against the runtime's own
+assemblies; a name it cannot bind without the repository's NuGet packages
+has no answer and is left out):
+
+```bash
+python benchmarks/oracle_csharp.py /tmp/polyglot/todoapi /tmp/polyglot/restsharp /tmp/polyglot/commandline /tmp/polyglot/aspnetcore-realworld
+```
+
+| | 0.5.56 | 0.5.57 | 0.5.58 | 0.5.59 |
+|---|---:|---:|---:|---:|
+| edges whose site the compiler has an answer for | 10,308 | 10,251 | 10,344 | 10,737 |
+| of them, to the declaration it names | 9,863 (95.7%) | 9,863 (96.2%) | 10,143 (98.1%) | 10,513 (97.9%) |
+| uses it binds to a definition the graph has, with an edge | 77.1% | 77.1% | 78.9% | 79.7% |
+
+The 388 edges 0.5.57 left were not spread evenly, and 0.5.58 took the two
+clusters. About 150 were one rule: C# tells `RestResponse` from
+`RestResponse<T>` by the number of type arguments written, which the reader
+did not keep for a type (`RefFact::arity` now; `List<string>` went to a
+project class `List`). 55 were `parser.ParseArguments<A, B>(…)`, where no
+method of the type takes two type arguments and an extension does. The 201
+left are guesses marked `INFERRED` (115), `ContentType.Xml` read as the
+property `ContentType` where the compiler means the type of that name, and
+single cases. The uses with no edge are, by count, an object initializer's
+property names (left out on purpose, as a Go struct literal's are) and the
+types of a lambda's parameters.
+
+0.5.59 added 393 edges the compiler has an answer for (the confirmed edges
+of graphify's below), and the edges called wrong went from 201 to 224: 9
+gone, 32 new. 21 of the new ones are one call, `type.GetTypeInfo()`, and the
+rest overloads of one extension that fit alike, each `INFERRED`. commandline
+declares an extension of
+that name for `Type` inside `#if NET40`, which a namespace written as a block
+now sees. The engine reads every branch of an `#if`; the compiler, given no
+symbol, reads none of that one and binds the name to .NET's. Neither is wrong
+about the source, and the edge is right for the configuration that defines
+the symbol.
+
+What this is not: Java, C, C++, Ruby, PHP, Python. javac and clang could be
+asked the same way; neither is yet. And a compiler finds a rule read wrong
+and a position never read, not a framework's convention.
+
+### graphify's edges, checked before they count
+
+The tables at the top of this comparison take every edge of graphify's as a
+fact and ask whether the native graph has it. graphify is no judge: it
+resolves by name, and an edge only it has can be a gap of the native graph or
+an edge that should not exist. Where a compiler can be asked about a whole
+repository the question is settled per edge. `benchmarks/verify_graphify.py`
+gives each of graphify's call, base and reference edges to the same bindings
+the oracles above read (`go/types`, rust-analyzer, Roslyn): **confirmed** when
+the compiler binds the target's name, on a line the edge is seen at, to the
+declaration the edge points to (a constructor is confirmed by its class);
+**refuted** when it binds that name there to something else; **to an
+implementation** when it names a trait's method and the edge points to one
+implementation of it, which the call can run and the compiler does not pick;
+and **no answer** when it has no binding of that name there (a name only the
+repository's packages would bind, a macro's argument). Then the comparison is
+made again for each kind:
+
+```bash
+python benchmarks/verify_graphify.py /tmp/polyglot/cobra /tmp/polyglot/ripgrep /tmp/polyglot/restsharp   # Go, Rust, C# repositories
+```
+
+On the twelve repositories of the three oracles (engine 0.5.60, graphify
+0.9.111, measured 2026-11-21), over the edges between definitions both graphs
+have:
+
+| Language | edges | graphify's, compared | confirmed | refuted | to an implementation | no answer | native has, of all | of the confirmed | with an enum for its member | of the refuted |
+|---|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|
+| Go | calls | 4,506 | 4,435 | 0 | 0 | 71 | 4,506 (100%) | 4,435 (100%) | 4,435 (100%) | 0 (–) |
+| Go | bases | 14 | 12 | 0 | 0 | 2 | 14 (100%) | 12 (100%) | 12 (100%) | 0 (–) |
+| Go | references | 449 | 412 | 0 | 0 | 37 | 449 (100%) | 412 (100%) | 412 (100%) | 0 (–) |
+| Rust | calls | 3,804 | 2,609 | 481 | 53 | 661 | 3,148 (83%) | 2,596 (100%) | 2,596 (100%) | 25 (5%) |
+| Rust | bases | 158 | 147 | 0 | 0 | 11 | 153 (97%) | 142 (97%) | 145 (99%) | 0 (–) |
+| Rust | references | 2,257 | 1,575 | 54 | 0 | 628 | 2,007 (89%) | 1,434 (91%) | 1,574 (100%) | 2 (4%) |
+| C# | calls | 4,361 | 3,720 | 111 | 0 | 530 | 4,193 (96%) | 3,692 (99%) | 3,692 (99%) | 29 (26%) |
+| C# | bases | 135 | 106 | 3 | 0 | 26 | 130 (96%) | 106 (100%) | 106 (100%) | 2 (67%) |
+| C# | references | 1,752 | 1,384 | 109 | 0 | 259 | 1,616 (92%) | 1,383 (100%) | 1,383 (100%) | 16 (15%) |
+
+("With an enum for its member" also counts a base of graphify's that is a
+type argument of the trait, `impl From<Config> for Agent`, which the native
+graph writes as a reference.)
+
+Read with only the confirmed edges, the picture changes where it looked
+worst. Rust calls: the native graph has 83% of graphify's, and all but 13 of
+the 2,609 the compiler confirms; of the 656 it lacks, 456 are edges the
+compiler refutes (a method of the same name on another type, mostly: a call
+of a connection's `is_open()` linked to a test transport's `is_open`) and 49
+point to one implementation of a trait's method.
+
+**The confirmed edges are a floor.** graphify's graph is what the native one
+replaces, so an edge of graphify's that the compiler confirms is one the
+native graph must have. With engine 0.5.58 it lacked 346 of the 14,400
+confirmed edges; it lacks 45 with 0.5.60. Each rule that closed some is a
+case of the checklist.
+
+0.5.59, from the 260 C# calls:
+
+- what a property's accessor calls is the property's call, not its class's
+  (`set => PopsicleSetter.Set(…)`): graphify hangs it on the property, and so
+  does the compiler;
+- a namespace written as a block (`namespace N { … }`) sees the extensions of
+  the namespaces around it, as one written for the whole file already did
+  (`text.ToNotEmptyLines().TrimStringArray()` in commandline's tests);
+- a brace an `#if` opens and a later `#if` closes (`#if NET` / `if
+  (!OperatingSystem.IsBrowser()) {` / `#endif`) no longer hides the members
+  after it: every `_client.Dispose()` of RestSharp's tests had no target;
+- a local assigned a member read is what the member holds (`var sut =
+  Parser.Default;`), which 0.5.56 read in Go and Rust and not in C#;
+- `new T { … }` with no argument list calls the constructor that takes none;
+- a partial type's constructors are those of every file that declares it.
+
+0.5.60, from the 70 Rust and 7 Go edges:
+
+- the types of a tuple struct's and a tuple variant's fields (`struct
+  Override(Gitignore);`, `Loaded(Ignore)`) were never read: 30 references;
+- the type a Rust `const` or `static` item is written with is the item's
+  use, and so is what its value names (`const FLAGS: &[&dyn Flag] = &[…]`
+  left from the file, which no comparison counts);
+- `crate::` starts at the file a manifest names (`[[bin]] path =
+  "crates/core/main.rs"`): ripgrep's binary crate has no `src`, and none of
+  its `crate::flags::…` paths resolved;
+- an `impl` is of the type its own file names. Two modules of a crate with a
+  private `Config` each had every `Config::default()` linked to the first:
+  an `EXTRACTED` edge to the wrong file, which no oracle run had sampled;
+- `io::Error::error_message(m)` is the method a trait of the project gives
+  the library's type;
+- the types a trait is written with in an `impl` (`impl From<Config> for
+  Agent`) are uses of the implementing type;
+- every result of a Go function names its type, not the first only;
+- a Go method value handed to a call (`time.AfterFunc(d, cb.onTimeout)`) is
+  an `indirect_call`, as a bare function handed over is.
+
+The 45 left: 13 Rust calls that need what the reader does not have, a
+closure parameter's inferred type (`.map(|worker| worker.run())`) or a
+binding out of a pattern over an inferred value; 28 C# calls, scattered
+(extensions on the member of a lambda's parameter, a property constructing
+its own class, an overload calling another overload of its name); and four
+single edges, two of which start at the wrong definition in graphify's own
+graph and are confirmed by their target alone (`impl SinkError for
+io::Error` hung on a project `Error`). Go has none.
+
+`benchmarks/results-verify-graphify.json` holds those counts per repository
+and kind of edge, and `verify_graphify.py --baseline` exits 1 when a build
+lacks more than it did:
+
+```bash
+python benchmarks/verify_graphify.py REPO... --baseline benchmarks/results-verify-graphify.json
+```
+
+Roslyn is also asked which constructor a `new Foo(…)` chose, so an edge of
+graphify's to a constructor is confirmed only when it names that one. A C#
+partial type is compared as one type: graphify has one node for it, the
+native graph one per file.
+
+graphify itself, by the same judge: every Go edge the compiler answers is
+confirmed; 84% of its Rust calls and 97% of its Rust references; 97% of its
+C# calls and 93% of its C# references (most of the 109 refuted are
+`RestResponse` linked to `RestResponse<T>`, the namesake 0.5.58 tells
+apart). Its `INFERRED` calls are not the weak ones: in Rust 94% of them are
+confirmed against 83% of the `EXTRACTED`.
+
+This covers three of the fourteen languages. For the others no compiler is
+asked about whole repositories yet, and their rows in the tables above still
+count every edge of graphify's.
+
 ### What is left without an edge
 
 The comparison above measures the native graph against graphify's. What the
@@ -1332,7 +2029,7 @@ implicit members since 0.5.17: 39 whose place gives no type are rows now
 closure parameters and variables of express's tests. What is left at file
 level there is `app.use` and `app.set` (842 rows of express), names too
 short and too common to guess by. Engine 0.5.19 takes 123 more off (6,362;
-C# 349 from 470; 6,360 with 0.5.20, 6,348 with 0.5.21, 6,285 with 0.5.22, 6,237 with 0.5.25, 6,206 with 0.5.27, 6,166 with 0.5.28, 6,156 with 0.5.30, 6,140 with 0.5.31, 6,132 with 0.5.32, 6,126 with 0.5.33, 6,093 with 0.5.34, 6,047 with 0.5.36, 6,046 with 0.5.37). Most of what C# has left is not the project's: `Assert.
+C# 349 from 470; 6,360 with 0.5.20, 6,348 with 0.5.21, 6,285 with 0.5.22, 6,237 with 0.5.25, 6,206 with 0.5.27, 6,166 with 0.5.28, 6,156 with 0.5.30, 6,140 with 0.5.31, 6,132 with 0.5.32, 6,126 with 0.5.33, 6,093 with 0.5.34, 6,047 with 0.5.36, 6,046 with 0.5.37, 6,012 with 0.5.38, 5,928 with 0.5.39, 5,908 with 0.5.40, 5,898 with 0.5.41, 5,882 with 0.5.42 and 0.5.43). Most of what C# has left is not the project's: `Assert.
 NotNull` beside its own `Ensure.NotNull` (77), `WireMockServer.Start` (23).
 
 By then most rows were of that kind: a library's name the project happens
@@ -1377,7 +2074,48 @@ type declares: symfony-demo's `$user->getFullName()` is marked beside the
 on `std` (`std::async(…)`, and a member of a field or local declared with a
 `std::` type, as written, `Def::written_head` / `Local::written_head`: the
 readers of types drop a C++ namespace), and reads C++ locals; C++ is left
-with 28 unmarked rows, from 50, with 12 after 0.5.31's namespaces 6 after 0.5.32's aliases and none after 0.5.33's preprocessor branches.) The 2,114 by language: PHP 445, TypeScript 405, Ruby 304, C# 196, Rust 192,
+with 28 unmarked rows, from 50, with 12 after 0.5.31's namespaces 6 after 0.5.32's aliases and none after 0.5.33's preprocessor branches.
+Engine 0.5.38 marks four more kinds, found by reading the 801 rows 0.5.37
+left unmarked: the path reaches a field, variable or function written with a
+library's type, or a local constructed from a type the project does not
+define (`$easy->response->getHeaderLine()` with `?ResponseInterface
+$response`, `self.builder.header()` on an `http::request::Builder`, `new
+\ReflectionProperty(…)`; never when the one definition is an extension, which
+may be written for that very type); a bare call where a method is not in
+scope by its bare name (PHP `\rewind($h)`, `\getenv(…)`); a bare name whose
+one definition is an RSpec `let` of another block of the file (`uri =
+conn.build_exclusive_url(…)` in an `it` beside a `let(:uri)`); and Ruby's
+`dup`. A `let` is no candidate for a member call either. 576 are left
+unmarked — Ruby 175, TypeScript 87, C# 75, Rust 64, Swift 61, Kotlin 42, PHP
+29, Go 14, Java 12, Python 9, TSX 4, Scala 4. Read by hand, what is left is
+mostly four things: extension methods called on a library's type (C#,
+Kotlin, Swift), locals of a file-level callback (`test('…', () => { const
+request = … })`), the members of a Ruby `Struct`, and a library's generic
+holding a project type (`http::Response<Body>`). One of the C# rows is a
+parse: an `#if` inside an expression costs
+`HttpResponseExtensions` its class. 0.5.39 fixes that parse and links
+the extensions for a library's type: 509 are left unmarked — Ruby 175,
+TypeScript 87, Rust 64, Swift 49, C# 40, PHP 29, Kotlin 22, Go 14, Java 12,
+Python 9, TSX 4, Scala 4. 0.5.40's block scopes leave 501: TypeScript 39
+from 87, and Ruby 215 from 175 — a receiver that was no name at all
+(`head name not found`) is an untyped local of its block now, and the
+members of faraday's `Struct` options asked of it are the rows. 0.5.41
+marks those: a member an untyped receiver is asked, of a name a type
+declares with no `def` (a `Struct` member, `attr_accessor`,
+`def_delegators`), may be that type's as well as the one `def`'s — 131
+rows, all Ruby (`adapter` 26, `response_headers` 23, `response_body` 22,
+`headers` 15, `status` 14). 383 are left unmarked: Ruby 97, Rust 64, Swift
+49, C# 40, TypeScript 39, PHP 29, Kotlin 22, Go 14, Java 12, Python 9, TSX
+4, Scala 4. Ruby's largest group left was a `let` shared through
+`shared_examples` (`request_stub`, 20 rows of faraday's adapter examples),
+which 0.5.42 reads: 367 unmarked, Ruby 81. 0.5.43 marks an attribute's
+name on a typed receiver too (one that lacks the `def` has the attribute or
+nothing): 314 unmarked — Rust 64, Swift 49, C# 40, TypeScript 39, PHP 29,
+Ruby 28, Kotlin 22, Go 14, Java 12, Python 9, TSX 4, Scala 4. No group of
+them is larger than 13 rows, and each is its own mechanism in one
+repository: what a library's generic holds (`http::Response<Body>`,
+`Protected<T>`'s closure parameter), a promise's methods added at run time
+(got's `promise.buffer()`), a parameter no source types.) The 2,114 by language: PHP 445, TypeScript 405, Ruby 304, C# 196, Rust 192,
 C++ 169, Swift 94, Kotlin 79, JavaScript 71, Java 49, Go 34, C 33, Python
 20, TSX 19, Scala 4. They are still an upper bound: the marks are
 conservative, and PHP's and TypeScript's rows are mostly PSR-7 and Node
@@ -1427,8 +2165,9 @@ but one convention finding, fixed since: `graphlore_surprises(limit=0)` cut its
 `shared_state` list without saying how much (`shared_state_left_out` does now).
 `SKELETON-EMPTY` went from 5 to 0, and the tool time stayed at 131 s.
 
-Rerun on graphs built by engine 0.5.3, and again by 0.5.4 through 0.5.27
-(2026-11-18), the audit raises nothing on the native graphs but its
+Rerun on graphs built by engine 0.5.3, again by 0.5.4 through 0.5.27
+(2026-11-18) and by 0.5.42 (2026-11-20, 279 s for the whole run), the audit
+raises nothing on the native graphs but its
 `GRAPH-ORPHAN-NODES` note on 19 of them; 115 to 172 s of tool time (on the 0.5.7 run, retrofit's build through `graphlore_build` took 5.1 s and was reported `SLOW` for crossing 5 s). What the table above still listed is
 gone:
 

@@ -65,7 +65,8 @@ fn rust_test_regions_and_modules() {
     let src = "pub fn acquire() -> i32 {\n    1\n}\nmod helpers;\n#[cfg(not(test))]\nmod real {\n    \
         pub fn used() { super::acquire(); }\n}\n#[cfg(test)]\nmod tests {\n    use super::*;\n    \
         fn setup() -> i32 { acquire() }\n    #[test]\n    fn it_acquires() {\n        \
-        assert_eq!(setup(), 1);\n    }\n}\n#[tokio::test]\nasync fn top_level_test() { acquire(); }\n";
+        assert_eq!(setup(), 1);\n    }\n}\n#[tokio::test]\nasync fn top_level_test() { acquire(); }\n\
+        #[cfg(test)]\npub fn only_for_tests() -> i32 { 2 }\n";
     let got = quals("src/pool.rs", src);
     has_all(
         &got,
@@ -81,10 +82,14 @@ fn rust_test_regions_and_modules() {
     );
     assert!(!got.contains("helpers"));
     let facts = file_facts(src.as_bytes(), "src/pool.rs");
-    assert_eq!(facts.test_regions, vec![(10, 17), (19, 19)]);
+    // (`#[cfg(test)] fn`: a helper only the tests are compiled with)
+    assert_eq!(facts.test_regions, vec![(10, 17), (19, 19), (21, 21)]);
     let tests: BTreeSet<_> =
         facts.defs.iter().filter(|d| d.is_test).map(|d| d.qualname.as_str()).collect();
-    assert_eq!(tests, ["tests", "tests.it_acquires", "tests.setup", "top_level_test"].into());
+    assert_eq!(
+        tests,
+        ["only_for_tests", "tests", "tests.it_acquires", "tests.setup", "top_level_test"].into()
+    );
     assert!(facts.defs.iter().all(|d| d.name != "tests" || d.kind == DefKind::Namespace));
 }
 
@@ -305,4 +310,83 @@ fn cpp_an_alias_declaration_is_a_definition() {
     let src = "namespace cpr {\nusing Header = std::map<std::string, std::string>;\nusing AsyncResponse = AsyncWrapper<Response>;\n}\n";
     has_all(&quals("api.h", src), &["cpr.Header", "cpr.AsyncResponse"]);
     assert_eq!(span("api.h", src, "cpr.AsyncResponse"), (3, 3, 3));
+}
+
+#[test]
+fn definitions_with_no_hint_word_or_no_name() {
+    // a C# delegate and a Rust macro carry no hint word in their node type;
+    // C# operators and indexers and a Swift subscript carry no name of their
+    // own; a Rust macro is `name!`, never the function `name`
+    let cs = "public delegate void Cb(int x);\npublic class C\n{\n    public static implicit operator string(C c) => \"\";\n    public static C operator +(C a, C b) => a;\n    public int this[int i] => i;\n}\n";
+    assert_eq!(
+        quals("Ops.cs", cs),
+        set(&["Cb", "C", "C.operator string", "C.operator+", "C.this[]"])
+    );
+    let facts = file_facts(cs.as_bytes(), "Ops.cs");
+    let kind = |n: &str| facts.defs.iter().find(|d| d.name == n).map(|d| d.kind);
+    assert_eq!(kind("Cb"), Some(DefKind::TypeAlias));
+    assert_eq!(kind("operator+"), Some(DefKind::Method));
+    let rs = "macro_rules! ext {\n    () => {};\n}\nfn ext() {}\n";
+    assert_eq!(quals("m.rs", rs), set(&["ext!", "ext"]));
+    let swift = "struct H {\n    subscript(_ name: String) -> String? { nil }\n}\n";
+    assert_eq!(quals("H.swift", swift), set(&["H", "H.subscript"]));
+}
+
+#[test]
+fn swift_one_case_line_declares_each_name() {
+    let src = "enum K {\n    case a, b, c\n    case d\n}\n";
+    assert_eq!(quals("K.swift", src), set(&["K", "K.a", "K.b", "K.c", "K.d"]));
+    assert_eq!(span("K.swift", src, "K.b"), (2, 2, 2));
+}
+
+#[test]
+fn cpp_a_lock_annotation_is_no_declarator() {
+    // `int num GUARDED_BY(mu);` is a field, `void f() REQUIRES(mu);` the
+    // function f: the macro is blanked; a function in capitals and a call
+    // statement stay
+    let src = "class S {\n  int num GUARDED_BY(mu);\n  int stats_[4] GUARDED_BY(mu);\n  void f() EXCLUSIVE_LOCKS_REQUIRED(mu);\n  int Recover(int* edit,\n              bool* save)\n      EXCLUSIVE_LOCKS_REQUIRED(mu);\n  void g() const LOCKS_EXCLUDED(mu) {\n  }\n};\nint ADD(int a, int b) {\n  if (a) LOG(b);\n  return ADD2(a);\n}\n";
+    assert_eq!(quals("s.cc", src), set(&["S", "S.f", "S.Recover", "S.g", "ADD"]));
+    let facts = file_facts(src.as_bytes(), "s.cc");
+    assert!(facts.defs.iter().any(|d| d.name == "num" && d.kind == DefKind::Property));
+    assert!(facts.defs.iter().any(|d| d.name == "stats_" && d.kind == DefKind::Property));
+    let calls: BTreeSet<String> =
+        facts.refs.iter().filter_map(|r| r.path.last().cloned()).collect();
+    assert!(calls.contains("LOG") && calls.contains("ADD2"), "{calls:?}");
+}
+
+#[test]
+fn c_a_typedef_named_in_parentheses() {
+    let src = "typedef void (Cb)(int);\ntypedef void (*Cb2)(int);\n";
+    assert_eq!(quals("a.h", src), set(&["Cb", "Cb2"]));
+}
+
+#[test]
+fn cpp_a_gtest_test_is_named_by_its_two_names() {
+    // `TEST(Suite, Name) { … }`: a function with no return type, named in
+    // capitals, given two bare names; a method of the fixture for `TEST_F`
+    let src = "class Fix {\n};\nTEST(Suite, Works) {\n  int x = 1;\n}\nTEST_F(Fix, Reads) { Do(1); }\nALPN(bool on) {\n}\n";
+    assert_eq!(quals("a_test.cc", src), set(&["Fix", "Suite.Works", "Fix.Reads", "ALPN"]));
+    let facts = file_facts(src.as_bytes(), "a_test.cc");
+    let reads = facts.defs.iter().find(|d| d.name == "Reads").expect("the test");
+    assert_eq!(reads.owner.as_deref(), Some("Fix"));
+    assert_eq!(reads.kind, DefKind::Method);
+}
+
+#[test]
+fn c_a_macro_alone_on_a_line_is_no_type() {
+    // `EXPECT_ABORT_BEGIN` / `TEST_ASSERT(0);` is two statements: the macro is
+    // blanked, the assert is a call and the functions after are found
+    let src = "void testA(void)\n{\n    EXPECT_ABORT_BEGIN\n    TEST_ASSERT(0);\n    VERIFY_FAILS_END\n}\nvoid testB(void)\n{\n}\n";
+    assert_eq!(quals("t.c", src), set(&["testA", "testB"]));
+    let facts = file_facts(src.as_bytes(), "t.c");
+    assert!(facts.refs.iter().any(|r| r.path.last().is_some_and(|n| n == "TEST_ASSERT")));
+}
+
+#[test]
+fn ts_a_namespace_constant_is_a_definition() {
+    let src = "export namespace util {\n  export const keys: number = 1;\n  let count = 0;\n  export const f = () => 1;\n}\n";
+    let facts = file_facts(src.as_bytes(), "util.ts");
+    let extra: BTreeSet<(&str, DefKind)> =
+        facts.defs.iter().filter(|d| d.extra).map(|d| (d.qualname.as_str(), d.kind)).collect();
+    assert_eq!(extra, [("util.keys", DefKind::Constant), ("util.count", DefKind::Variable)].into());
 }
