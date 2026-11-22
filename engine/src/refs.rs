@@ -116,6 +116,15 @@ pub fn path_of(n: Node, src: &[u8]) -> Option<Vec<String>> {
         return Some(vec![if k == "crate" { "crate".into() } else { "self".into() }]);
     }
     if SUPER_KINDS.contains(&k) {
+        // Kotlin `super<A>`: the supertype named (overload-resolution.md,
+        // 'Call with an explicit super-form receiver')
+        if k == "super_expression" {
+            if let Some(t) = kids(n).into_iter().find(|c| c.kind() == "user_type") {
+                if let Some(p) = path_of(t, src) {
+                    return Some(p);
+                }
+            }
+        }
         return Some(vec!["super".into()]);
     }
     if k == "variable_name" {
@@ -3864,6 +3873,42 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
             }
             for (p, ctx) in types {
                 push(&mut refs, n, RefKind::Type, p, ctx, None);
+            }
+        }
+        // Kotlin operator conventions (kotlin.core/operators.md): `a + b` is
+        // `a.plus(b)`, `a[i]` is `a.get(i)`, `a upTo b` is `a.upTo(b)` (an
+        // `infix fun`); context `operator`, resolved only through a's type
+        if facts.lang == Some(crate::lang::Lang::Kotlin) {
+            let named = kids(n);
+            let method = match n.kind() {
+                "additive_expression" | "multiplicative_expression" => {
+                    let mut cursor = n.walk();
+                    let op = n
+                        .children(&mut cursor)
+                        .find(|c| !c.is_named())
+                        .map(|c| c.kind().to_string())
+                        .unwrap_or_default();
+                    match op.as_str() {
+                        "+" => Some("plus".to_string()),
+                        "-" => Some("minus".to_string()),
+                        "*" => Some("times".to_string()),
+                        "/" => Some("div".to_string()),
+                        "%" => Some("rem".to_string()),
+                        _ => None,
+                    }
+                }
+                "indexing_expression" => Some("get".to_string()),
+                "infix_expression" => {
+                    named.get(1).filter(|x| x.kind() == "simple_identifier").map(|x| text(*x, src))
+                }
+                _ => None,
+            };
+            if let Some(m) = method {
+                let lhs = named.first().and_then(|l| path_of(*l, src));
+                if let Some(mut path) = lhs.filter(|p| !p.iter().any(|s| s == UNKNOWN)) {
+                    path.push(m);
+                    push(&mut refs, n, RefKind::Call, path, "operator", None);
+                }
             }
         }
         // JSX: `<FormMessage />`, `<Table.Cell>` render a component
