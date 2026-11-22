@@ -4468,6 +4468,7 @@ impl<'a> Project<'a> {
                     .or_else(|| self.reopened_member(*c, name))
                     .or_else(|| self.reopened_base_member(*c, name))
                     .or_else(|| self.assigned_member(*c, name))
+                    .or_else(|| self.forwarded_member(*c, name, depth))
                     .map(Target::Def)
             }
             Target::Module(files) => {
@@ -4724,6 +4725,22 @@ impl<'a> Project<'a> {
                 if self.acceptable(&t) {
                     self.note_use(f, *imp, &t);
                     return Some(t);
+                }
+            }
+        }
+        // Scala: a wildcard import beats a member of the package another
+        // compilation unit defines (Typer's `BindingPrec`: WildImport above
+        // PackageClause); Java has it the other way round
+        if self.files[f].lang == Some(crate::lang::Lang::Scala) {
+            for (star, imp) in &scope.stars {
+                if matches!(star, Target::Ext(..)) {
+                    continue;
+                }
+                if let Some(t) = self.member(star, name, 2) {
+                    if self.acceptable(&t) {
+                        self.note_use(f, *imp, &t);
+                        return Some(t);
+                    }
                 }
             }
         }
@@ -7695,6 +7712,24 @@ impl<'a> Project<'a> {
             .filter(|d| d.kind == DefKind::Namespace && d.parent.is_none())
             .map(|d| d.qualname.replace("::", "."))
             .collect()
+    }
+
+    /// Scala `export p.print` in `c`: the member it forwards, looked up from
+    /// inside `c` ("Export Clauses": an alias of the member selected).
+    fn forwarded_member(&self, c: DefRef, name: &str, depth: usize) -> Option<DefRef> {
+        let facts = &self.files[c.0];
+        if facts.forwards.is_empty() || depth == 0 {
+            return None;
+        }
+        let d = self.def(c);
+        let path = facts.forwards.iter().find_map(|(at, p)| {
+            (d.start_byte <= *at && *at < d.end_byte && p.last().is_some_and(|l| l == name))
+                .then_some(p)
+        })?;
+        match self.resolve_path(c.0, Some(c.1), path, true)? {
+            (Target::Def(m), _) if m != c => Some(m),
+            _ => None,
+        }
     }
 
     /// Rust: of a module and a value of one name in the nearest scope that

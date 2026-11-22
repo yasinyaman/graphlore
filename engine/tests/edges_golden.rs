@@ -3361,3 +3361,23 @@ fn python_php_ruby_rules_from_their_references() {
         ],
     );
 }
+
+/// Scala's rules from the Scala 3 typer (engine 0.5.74): a wildcard import
+/// before another unit's package member, and an `export` clause's forwards.
+#[test]
+fn scala_rules_from_the_typer() {
+    let got = quals("scalatyper", &[
+        ("src/lib/Repo.scala", "package lib\n\nclass Repo {\n  def find: Int = 1\n}\n"),
+        ("src/app/Repo.scala", "package app\n\nclass Repo {\n  def find: Int = 2\n}\n"),
+        (
+            "src/app/A.scala",
+            "package app\n\nimport lib._\n\nclass Printer {\n  def print(): Int = 1\n}\n\nobject Facade {\n  private val p = new Printer\n  export p.print\n}\n\nobject Main {\n  def run(r: Repo): Int = r.find + Facade.print()\n}\n",
+        ),
+    ]);
+    has(&got, &[("Main.run", "calls", "Printer.print"), ("Main.run", "calls", "Repo.find")]);
+    let finds: Vec<_> = got
+        .iter()
+        .filter(|(s, r, t)| s == "Main.run" && r == "calls" && t == "Repo.find")
+        .collect();
+    assert_eq!(finds.len(), 1);
+}
