@@ -1,0 +1,65 @@
+name: Viewer on Pages
+
+# Publishes graphlore's graph viewer (src/graphlore/viewer.html) to GitHub Pages:
+# viewer/ is the bare page, which opens any graph.json the visitor picks, and
+# viewer/demo.html the same page with the polyglot fixture's graph in it. The
+# page reads the file in the browser and its Content Security Policy forbids
+# every request, so nothing a visitor opens leaves their machine.
+# One-time setup: Settings -> Pages -> Source: GitHub Actions.
+on:
+  push:
+    branches: [master]
+    paths:
+      - "src/graphlore/viewer.html"
+      - "src/graphlore/viz.py"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Build the site
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          python - <<'EOF'
+          import json, pathlib, shutil
+          from graphlore import viz
+          site = pathlib.Path("site/viewer")
+          site.mkdir(parents=True)
+          shutil.copy(viz.TEMPLATE, site / "index.html")
+          graph = json.loads(pathlib.Path("tests/fixtures/polyglot/graph.json").read_text())
+          (site / "demo.html").write_text(viz.render(graph, "polyglot demo — graphlore"))
+          pathlib.Path("site/index.html").write_text(
+              '<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="0; url=viewer/">'
+              '<title>graphlore</title><a href="viewer/">graphlore graph viewer</a>\n')
+          EOF
+          ls -lR site
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}viewer/
+    permissions:
+      pages: write
+      id-token: write
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

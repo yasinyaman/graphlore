@@ -79,6 +79,16 @@ All notable changes to this project are documented here. The format is based on
   and external packages, colouring by community or kind, a back button.
   Names, labels and paths from the repository are embedded escaped and shown
   as text only. A graph over 150,000 nodes is not drawn, and the build says so.
+- **A graph viewer of its own, for any graph.json.** The page
+  (`src/graphlore/viewer.html`) opens a graph.json the reader picks or drops
+  on it, graphlore's or graphify's, with its `.graphify_labels.json` for the
+  names, read in the browser: nothing is uploaded and the page still makes
+  no request. Every `graph.html` has the "Open graph.json…" button, and the
+  page with no graph in it is a standalone viewer, published to GitHub Pages
+  by `.github/workflows/pages.yml` (`viewer/`, and `viewer/demo.html` with the
+  polyglot fixture). Its `compact()` is the JavaScript twin of
+  `viz.page_data`; a test runs it under node on graphify's shapes and the
+  native engine's and checks the two agree.
 - **Prebuilt `graphlore-engine` wheels** (`.github/workflows/engine-wheels.yml`):
   abi3 wheels for Linux (x86-64 and ARM on glibc, x86-64 on musl), macOS
   (universal2) and Windows x64, plus an sdist, each wheel installed and run

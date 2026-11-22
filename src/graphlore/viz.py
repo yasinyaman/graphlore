@@ -2,9 +2,13 @@
 
 graphlore writes it next to graph.json after every build (``no_viz=True`` skips
 it), whichever engine built the graph, and again when community names change.
-The page is one file: the drawing code is graphlore's own (``viz_template.html``,
+The page is one file: the drawing code is graphlore's own (``viewer.html``,
 canvas and plain JavaScript), the graph is embedded as JSON, and a Content
 Security Policy forbids every request, so opening it reaches no network.
+``viewer.html`` with no graph in it is a viewer of its own: it opens any
+graph.json the reader picks or drops (read in the browser), through its
+``compact()``, the JavaScript twin of :func:`page_data` — the two give the
+same answer (``test_the_viewer_reads_a_raw_graph_as_python_does``).
 
 A large codebase does not fit on one screen, so the page starts from the
 communities (one bubble each, the edges between them counted) and opens one
@@ -44,7 +48,7 @@ from .graph import (
     _nodes_edges,
 )
 
-TEMPLATE = Path(__file__).with_name("viz_template.html")
+TEMPLATE = Path(__file__).with_name("viewer.html")
 # How a graph.html says graphlore wrote it (graphify's is patched, not rewritten).
 GENERATOR = '<meta name="generator" content="graphlore">'
 # Past this many nodes the page would be tens of megabytes and slow to open:
