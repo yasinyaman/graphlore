@@ -1,4 +1,4 @@
-"""graphlore — an MCP server exposing the Graphify knowledge graph."""
+"""graphlore — an MCP server exposing a codebase knowledge graph, joined to source spans."""
 
 from graphlore.apis import api_uses_for_source
 from graphlore.routes import routes_for_source

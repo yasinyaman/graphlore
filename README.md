@@ -161,9 +161,10 @@ duplicated code).
 
 ### How is it different from Graphify's own MCP server?
 
-They overlap more than they differ. Graphify's embedded server already has
-graph navigation, token-budgeted subgraphs, an HTTP transport, multi-project
-serving and PR triage tools graphlore lacks. graphlore adds the span engine and
+graphlore builds its own graph (its native engine, in Rust) and reads one
+Graphify built too. Graphify's embedded server has graph navigation,
+token-budgeted subgraphs, an HTTP transport, multi-project serving and PR
+triage tools graphlore lacks. graphlore adds the span engine and
 what it makes possible: semantic `locate` joined to the enclosing symbol,
 source hydration (`fetch`, `skeleton`), route and package-API extraction,
 cosmetic-vs-structural freshness, and calls through a module object
@@ -187,18 +188,22 @@ names.
 
 The analysis tools read local files and need no key. A few paths can reach the
 network: the first embedding search (`[embed]` or `[semble]`) downloads a model, the first use
-of a language downloads its tree-sitter grammar, Graphify can call an LLM
-backend when you set its key, and `graphlore_add` fetches a URL.
+of a language downloads its tree-sitter grammar (the native engine's grammars
+are compiled in and download nothing), graphify, where it still builds the
+graph, can call an LLM backend when you set its key, and `graphlore_add`
+fetches a URL.
 `GRAPHLORE_OFFLINE=1` refuses or restricts the ones graphlore controls; the
 table linked below also lists what it cannot constrain.
 → [What reaches the network, and when](https://github.com/yasinyaman/graphlore/blob/master/docs/configuration.md#what-reaches-the-network-and-when)
 
 ### Which languages are supported?
 
-Python works out of the box through the standard library. JS/TS, Go, Java,
-Kotlin, Scala, C#, Rust, Swift, C/C++, Ruby, PHP and the other languages
-tree-sitter covers need the `[treesitter]` extra; without it, non-Python files
-fall back to nearest-line matching. Package-API extraction reads all of
+The native engine builds the graph for Python, JavaScript, TypeScript/TSX, Go,
+Java, Kotlin, Scala, C#, Rust, Swift, C, C++, Ruby and PHP, and gives their
+spans from its compiled-in grammars. Without the engine, Python works through
+the standard library and the other languages tree-sitter covers need the
+`[treesitter]` extra; without either, non-Python files fall back to
+nearest-line matching. Package-API extraction reads all of
 these; route extraction reads Python, JS/TS, Go, Java, Kotlin, C#, Rust, Ruby
 and PHP frameworks
 ([tool reference](https://github.com/yasinyaman/graphlore/blob/master/docs/tools.md)),
