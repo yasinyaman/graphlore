@@ -89,6 +89,23 @@ All notable changes to this project are documented here. The format is based on
   polyglot fixture). Its `compact()` is the JavaScript twin of
   `viz.page_data`; a test runs it under node on graphify's shapes and the
   native engine's and checks the two agree.
+- **The viewer is easier to read and to use.**
+  - A node's neighbourhood is drawn in columns instead of a star: what uses
+    it on the left, what it uses on the right, the second hop a column
+    further out, production code first and grouped by file under the file's
+    name. It is never fitted too small to read; the columns that do not fit
+    are panned to.
+  - Labels never overlap one another or a dot: they are placed by importance
+    where they fit, so zooming in shows more.
+  - The address bar keeps the view (`#n=<id>&h=2`, `#c=<community>`): a link
+    opens it again, and the browser's Back and Forward move between views.
+  - Keys: `/` find (`↑` `↓` `Enter` to pick), `Esc` back, `F` fit, `+` / `−`
+    zoom, `1` / `2` depth, `?` the list. Zoom and fit buttons too.
+  - "Copy for the assistant": a node's panel copies `graphlore_explain`,
+    `graphlore_fetch` and `graphlore_impact` calls, its id and `file:line`; a
+    community's copies `graphlore_skeleton(community=…)`.
+  - On a phone: touch, pinch to zoom, long press for what a node is, and the
+    panel as a sheet over the foot of the screen.
 - **Prebuilt `graphlore-engine` wheels** (`.github/workflows/engine-wheels.yml`):
   abi3 wheels for Linux (x86-64 and ARM on glibc, x86-64 on musl), macOS
   (universal2) and Windows x64, plus an sdist, each wheel installed and run

@@ -9,11 +9,11 @@
 <style>
 :root {
   --bg: #fbfbfa; --panel: #ffffff; --ink: #1d1f21; --muted: #6b7075; --line: #e3e4e6;
-  --accent: #2f6fdf; --hover: #f1f3f6; --chip: #eef1f5;
+  --accent: #2f6fdf; --hover: #f1f3f6; --chip: #eef1f5; --shadow: rgba(0,0,0,.12);
 }
 @media (prefers-color-scheme: dark) {
   :root { --bg: #16181b; --panel: #1d2024; --ink: #e6e7e8; --muted: #9aa0a6; --line: #2e3237;
-          --accent: #7aa7ff; --hover: #262a30; --chip: #2a2e34; }
+          --accent: #7aa7ff; --hover: #262a30; --chip: #2a2e34; --shadow: rgba(0,0,0,.5); }
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink);
@@ -21,54 +21,88 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink);
 #app { display: flex; height: 100%; }
 #side { width: 340px; min-width: 260px; max-width: 45vw; overflow: auto; background: var(--panel);
   border-right: 1px solid var(--line); padding: 12px 14px; }
-#stage { flex: 1; position: relative; }
-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; }
+#stage { flex: 1; position: relative; overflow: hidden; }
+canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: grab;
+  touch-action: none; }
 canvas.dragging { cursor: grabbing; }
 h1 { font-size: 15px; margin: 0 0 2px; }
 h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted);
   margin: 16px 0 6px; font-weight: 600; }
 .muted { color: var(--muted); }
 .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.sheet-head { justify-content: space-between; flex-wrap: nowrap; }
 input[type=search] { width: 100%; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px;
   background: var(--bg); color: var(--ink); font: inherit; }
 button { font: inherit; color: var(--ink); background: var(--chip); border: 1px solid var(--line);
   border-radius: 6px; padding: 3px 8px; cursor: pointer; }
 button:disabled { opacity: .45; cursor: default; }
+button.copy { font-size: 12px; padding: 2px 7px; }
 select { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line);
   border-radius: 6px; padding: 2px 4px; }
 label.chk { display: inline-flex; gap: 4px; align-items: center; margin: 2px 8px 2px 0; }
-.swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; }
+.swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; flex: none; }
 ul.list { list-style: none; margin: 0; padding: 0; }
 ul.list li { padding: 3px 4px; border-radius: 4px; cursor: pointer; display: flex; gap: 6px;
   align-items: baseline; overflow: hidden; }
-ul.list li:hover { background: var(--hover); }
+ul.list li:hover, ul.list li.active { background: var(--hover); }
+ul.list li.active { outline: 1px solid var(--accent); }
 ul.list li .lbl { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; }
 ul.list li .tag { color: var(--muted); font-size: 11px; white-space: nowrap; }
 .kv { display: grid; grid-template-columns: 78px 1fr; gap: 2px 8px; word-break: break-all; }
 .kv div:nth-child(odd) { color: var(--muted); }
-code { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
+code, kbd { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
+kbd { border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px;
+  background: var(--chip); }
 #crumbs { margin-top: 8px; }
-#crumbs span.sep { color: var(--muted); margin: 0 4px; }
-#crumbs a { color: var(--accent); cursor: pointer; text-decoration: none; }
 #hud { position: absolute; left: 12px; bottom: 10px; color: var(--muted); font-size: 12px;
   background: color-mix(in srgb, var(--panel) 85%, transparent); padding: 4px 8px; border-radius: 6px;
-  pointer-events: none; }
+  pointer-events: none; max-width: calc(100% - 180px); }
+#hud:empty { display: none; }
+#zoom { position: absolute; right: 12px; bottom: 10px; display: flex; gap: 4px; }
+#zoom button { width: 34px; height: 34px; padding: 0; font-size: 16px; background: var(--panel);
+  box-shadow: 0 1px 4px var(--shadow); }
 #welcome { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
   text-align: center; padding: 24px; }
-#welcome[hidden] { display: none; }
+#welcome[hidden], #help[hidden] { display: none; }
 #welcome > div { max-width: 460px; border: 2px dashed var(--line); border-radius: 12px; padding: 24px 28px;
   background: var(--panel); }
-#stage.drop #welcome > div, #stage.drop { outline: 3px dashed var(--accent); outline-offset: -8px; }
-#hud:empty { display: none; }
+#stage.drop { outline: 3px dashed var(--accent); outline-offset: -8px; }
+#help { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: var(--panel);
+  border: 1px solid var(--line); border-radius: 10px; padding: 14px 18px; box-shadow: 0 6px 24px var(--shadow);
+  z-index: 3; min-width: 280px; }
+#help table { border-collapse: collapse; }
+#help td { padding: 3px 10px 3px 0; vertical-align: top; }
 #tip { position: absolute; pointer-events: none; background: var(--panel); border: 1px solid var(--line);
   border-radius: 6px; padding: 4px 8px; font-size: 12px; display: none; max-width: 420px;
-  box-shadow: 0 2px 8px rgba(0,0,0,.12); }
+  box-shadow: 0 2px 8px var(--shadow); z-index: 2; }
+#sheet-toggle { display: none; }
+@media (hover: none) { .drop-hint { display: none; } }
+/* a phone: the canvas fills the screen and the panel is a sheet over its foot */
+@media (max-width: 760px) {
+  #app { display: block; }
+  #stage { position: fixed; inset: 0; }
+  #side { position: fixed; left: 0; right: 0; bottom: 0; width: auto; min-width: 0; max-width: none;
+    height: 72vh; border-right: 0; border-top: 1px solid var(--line); border-radius: 14px 14px 0 0;
+    z-index: 5; transform: translateY(calc(100% - 56px)); transition: transform .2s ease;
+    box-shadow: 0 -4px 18px var(--shadow); }
+  #side.open { transform: translateY(0); }
+  #sheet-toggle { display: inline-block; flex: none; }
+  button, select { min-height: 40px; }
+  button.copy { min-height: 36px; }
+  ul.list li { padding: 9px 6px; }
+  #hud { top: 10px; bottom: auto; max-width: calc(100% - 24px); }
+  #zoom { bottom: 66px; }
+  #zoom button { width: 42px; height: 42px; }
+}
 </style>
 </head>
 <body>
 <div id="app">
   <aside id="side">
-    <h1 id="title"></h1>
+    <div class="row sheet-head">
+      <h1 id="title"></h1>
+      <button id="sheet-toggle" aria-expanded="false">☰ Panel</button>
+    </div>
     <div class="muted" id="stats"></div>
     <div class="row" style="margin-top:8px">
       <button id="open" title="Read in this browser; nothing is uploaded">Open graph.json…</button>
@@ -76,8 +110,8 @@ code { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
       <span class="muted" id="load-status"></span>
     </div>
     <div id="crumbs"></div>
-    <h2>Find</h2>
-    <input type="search" id="q" placeholder="A name, a file…" autocomplete="off">
+    <h2>Find <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:400">— <kbd>/</kbd></span></h2>
+    <input type="search" id="q" placeholder="A name, a file…" autocomplete="off" aria-label="Find a node">
     <ul class="list" id="hits"></ul>
     <div id="details"></div>
     <h2>Show</h2>
@@ -94,24 +128,45 @@ code { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
     </div>
     <h2>Legend</h2>
     <div id="legend"></div>
-    <p class="muted" style="margin-top:14px">Drag to pan, scroll to zoom, drag a node to move it.
-      Click a bubble to open the community, click a node for its details, double-click it to
-      centre on its neighbourhood. Made by graphlore from graph.json.</p>
+    <p class="muted" style="margin-top:14px">Drag to pan, scroll or pinch to zoom, drag a node to move it.
+      Click a bubble to open the community, click a node for its details, double-click it for its
+      neighbourhood: what uses it on the left, what it uses on the right. <kbd>?</kbd> lists the keys.
+      The address bar keeps the view, so a link opens it again. Made by graphlore from graph.json.</p>
   </aside>
   <main id="stage">
-    <canvas id="cv"></canvas>
+    <canvas id="cv" aria-label="The graph"></canvas>
     <div id="welcome">
       <div>
         <h1>Open a graph</h1>
-        <p>Drop a <code>graph.json</code> here (graphlore's or graphify's; with its
-          <code>.graphify_labels.json</code> too, for the community names), or</p>
+        <p><span class="drop-hint">Drop a <code>graph.json</code> here, or choose one </span>
+          (graphlore's or graphify's; with its <code>.graphify_labels.json</code> too, for the
+          community names):</p>
         <p><button id="welcome-open">Choose a file…</button></p>
         <p class="muted">The file is read by this page, in your browser. Nothing is uploaded:
           the page is not allowed to make any request.</p>
       </div>
     </div>
+    <div id="help" hidden role="dialog" aria-label="Keyboard shortcuts">
+      <h2 style="margin-top:0">Keys</h2>
+      <table>
+        <tr><td><kbd>/</kbd></td><td>find a node</td></tr>
+        <tr><td><kbd>↑</kbd> <kbd>↓</kbd> <kbd>Enter</kbd></td><td>pick a result and open it</td></tr>
+        <tr><td><kbd>Esc</kbd></td><td>clear the selection, then go back</td></tr>
+        <tr><td><kbd>F</kbd></td><td>fit the view</td></tr>
+        <tr><td><kbd>+</kbd> <kbd>−</kbd></td><td>zoom</td></tr>
+        <tr><td><kbd>1</kbd> <kbd>2</kbd></td><td>neighbourhood depth</td></tr>
+        <tr><td><kbd>?</kbd></td><td>this list</td></tr>
+      </table>
+      <p class="muted" style="margin-bottom:0">Back and forward in the browser move between views.</p>
+    </div>
     <div id="tip"></div>
     <div id="hud"></div>
+    <div id="zoom">
+      <button id="z-in" title="Zoom in (+)" aria-label="Zoom in">+</button>
+      <button id="z-out" title="Zoom out (−)" aria-label="Zoom out">−</button>
+      <button id="z-fit" title="Fit (F)" aria-label="Fit the view">⤢</button>
+      <button id="z-help" title="Keys (?)" aria-label="Keyboard shortcuts">?</button>
+    </div>
   </main>
 </div>
 <script id="graph-data" type="application/json">/*__GRAPHLORE_DATA__*/</script>
@@ -249,9 +304,14 @@ function compact(graph, names) {
 const MAX_VIEW = 400;          // nodes drawn in one view
 const LIST = 60;               // rows a list shows before "+N more"
 const OVERVIEW_LINKS = 4;      // links each community keeps in the overview
-const LABELS = 30;             // labels drawn at once, largest nodes first
+const LABELS = 60;             // labels a force view draws at most (the free spots, largest first)
+const ROW = 18;                // a row of the neighbourhood's columns, in world units
+const COL_W = 340;             // the gap between two columns
+const READABLE = 0.7;          // the neighbourhood is never fitted smaller than this: its rows stay legible
+const MAX_ROWS = 40;           // rows per column before it is split
 // the graph shown: set by load(), from the page's own data or a file opened
 let D = null, N = 0, E = 0, adj = [], members = [], lower = [];
+let idIndex = new Map(), commIndex = new Map();
 const nId = i => D.nodes[i][0], nLabel = i => D.nodes[i][1], nFile = i => D.nodes[i][2];
 const nLine = i => D.nodes[i][3], nComm = i => D.nodes[i][4], nKind = i => D.kinds[D.nodes[i][5]];
 const nTest = i => (D.nodes[i][6] & 1) !== 0, nExt = i => (D.nodes[i][6] & 2) !== 0;
@@ -261,6 +321,8 @@ const eInf = j => D.edges[4 * j + 3] === 1;
 const relName = r => D.rels[r][0], relGroup = r => D.rels[r][1];
 const GROUP_COLOURS = ["#9aa0a6", "#2f9e72", "#2f6fdf", "#b35ae0", "#d08a1c", "#d6455d", "#159fb3", "#7c8591"];
 const groupColour = g => GROUP_COLOURS[g % GROUP_COLOURS.length];
+const site = i => nFile(i) ? nFile(i) + (nLine(i) ? ":" + nLine(i) : "") : "";
+const narrow = () => window.matchMedia("(max-width: 760px)").matches;
 
 // --- filters ---------------------------------------------------------------
 const show = { tests: true, ext: false, groups: GROUPS.map(g => g !== "structure") };
@@ -278,8 +340,9 @@ const nodeColour = i => colourBy === "kind" ? kindColour(nKind(i)) : commColour(
 
 // --- views -----------------------------------------------------------------
 // A view is a set of drawn items (communities or nodes) and links between them.
-let view = null;
-const backStack = [];
+// Which view is open is a route, kept in the address bar's #fragment.
+let view = null, route = { v: "o" };
+const byRank = (a, b) => (nTest(a) ? 1 : 0) - (nTest(b) ? 1 : 0) || nDeg(b) - nDeg(a);
 
 function overview() {
   const order = D.comms.map((c, k) => k).sort((a, b) => D.comms[b][2] - D.comms[a][2]);
@@ -327,72 +390,174 @@ function nodeView(kind, ids, title, extra) {
 }
 
 function communityView(c) {
-  const ids = [...members[c]].sort((a, b) => (nTest(a) ? 1 : 0) - (nTest(b) ? 1 : 0) || nDeg(b) - nDeg(a));
-  return nodeView("community", ids, D.comms[c][1], { comm: c });
+  return nodeView("community", [...members[c]].sort(byRank), D.comms[c][1], { comm: c });
 }
 
-function focusView(i) {
-  const hops = +document.getElementById("hops").value;
-  const dist = new Map([[i, 0]]);
+function allView() {
+  return nodeView("all", D.nodes.map((r, i) => i).sort(byRank), "Most connected nodes");
+}
+
+// A node's neighbourhood in columns: what uses it on the left, what it uses on
+// the right (both ways: right), the second hop one column further out; in each
+// column production code first, grouped by file under the file's name.
+function focusView(i, hops) {
+  const dist = new Map([[i, 0]]), side = new Map([[i, 0]]);
   let frontier = [i];
   for (let h = 0; h < hops; h++) {
     const next = [];
     for (const u of frontier) for (const j of adj[u]) {
       if (!edgeShown(j)) continue;
       const v = eS(j) === u ? eT(j) : eS(j);
-      if (!dist.has(v) && nodeShown(v)) { dist.set(v, h + 1); next.push(v); }
+      if (dist.has(v) || !nodeShown(v)) continue;
+      dist.set(v, h + 1); next.push(v);
+      if (u === i) side.set(v, adj[i].some(k => edgeShown(k) && eS(k) === i && eT(k) === v) ? 1 : -1);
+      else side.set(v, side.get(u));
     }
     frontier = next;
   }
-  const ids = [...dist.keys()].sort((a, b) => dist.get(a) - dist.get(b)
-    || (nTest(a) ? 1 : 0) - (nTest(b) ? 1 : 0) || nDeg(b) - nDeg(a));
-  return nodeView("focus", ids, nLabel(i), { centre: i });
+  const ids = [...dist.keys()].sort((a, b) => dist.get(a) - dist.get(b) || byRank(a, b));
+  const v = nodeView("focus", ids, nLabel(i), { centre: i, hops, static: true });
+  const headers = [];
+  for (const s of [-1, 1]) {
+    let col = 0;
+    for (let hop = 1; hop <= hops; hop++) {
+      const its = v.items.filter(it => it.node !== i && side.get(it.node) === s && dist.get(it.node) === hop);
+      its.sort((a, b) => (nTest(a.node) ? 1 : 0) - (nTest(b.node) ? 1 : 0)
+        || nFile(a.node).localeCompare(nFile(b.node)) || nDeg(b.node) - nDeg(a.node)
+        || nLabel(a.node).localeCompare(nLabel(b.node)));
+      // rows: a header row per file, then its nodes; split into columns of MAX_ROWS,
+      // a column that starts inside a file repeating the file's header
+      const columns = [[]];
+      let last = null;
+      for (const it of its) {
+        const f = nFile(it.node) || "(no file)";
+        let cur = columns[columns.length - 1];
+        const need = f !== last ? 2 : 1;
+        if (cur.length + need > MAX_ROWS && cur.length) { cur = []; columns.push(cur); last = null; }
+        if (f !== last) { cur.push({ header: f }); last = f; }
+        cur.push({ item: it });
+      }
+      for (const rows of columns) {
+        if (!rows.length) continue;
+        col += 1;
+        const x = s * col * COL_W;
+        rows.forEach((row, k) => {
+          const y = (k - (rows.length - 1) / 2) * ROW;
+          if (row.header) headers.push({ x, y, side: s, text: shortPath(row.header) });
+          else Object.assign(row.item, { x, y, side: s, hop });
+        });
+      }
+    }
+  }
+  const c = v.items.find(it => it.node === i);
+  if (c) Object.assign(c, { x: 0, y: 0, side: 0, hop: 0 });
+  v.headers = headers;
+  return v;
 }
 
-function go(make, push = true) {
-  if (push && view) backStack.push(view.rebuild);
-  view = make();
-  view.rebuild = make;
-  selected = -1; hover = -1;
-  layout(view);
-  renderSide();
+const shortPath = f => { const p = f.split("/"); return p.length > 2 ? "…/" + p.slice(-2).join("/") : f; };
+
+// --- routes: the #fragment names the view, so a link opens it again ----------
+const keyOf = r => r.v === "c" ? "c:" + r.c : r.v === "n" ? `n:${r.n}:${r.h}` : r.v;
+const homeRoute = () => (D && D.comms.length ? { v: "o" } : { v: "a" });
+function hashFor(r) {
+  if (r.v === "c") return "#c=" + encodeURIComponent(r.c);
+  if (r.v === "n") return "#n=" + encodeURIComponent(r.n) + (r.h === 2 ? "&h=2" : "");
+  return "";
+}
+function routeFromHash() {
+  const p = new URLSearchParams(location.hash.slice(1));
+  if (p.has("n")) return { v: "n", n: p.get("n"), h: p.get("h") === "2" ? 2 : 1 };
+  if (p.has("c")) return { v: "c", c: p.get("c") };
+  return homeRoute();
+}
+const trail = [];                // the keys of the views visited, for the Back button
+
+function build(r) {
+  if (r.v === "c") { const k = commIndex.get(r.c); return k === undefined ? null : communityView(k); }
+  if (r.v === "n") {
+    const i = idIndex.get(r.n);
+    if (i === undefined) return null;
+    document.getElementById("hops").value = String(r.h);
+    return focusView(i, r.h);
+  }
+  return r.v === "a" || !D.comms.length ? allView() : overview();
 }
 
-function rebuildView() {           // after a filter change: same view, new contents
-  if (!view) return;
-  const was = selected >= 0 ? view.items[selected].node : undefined;
-  view = Object.assign(view.rebuild(), { rebuild: view.rebuild });
-  layout(view);
-  selected = was === undefined ? -1 : view.items.findIndex(it => it.node === was);
+function showRoute(r, keep) {    // draw the view a route names (no history entry)
+  let v = build(r), note = "";
+  if (!v) {
+    note = `Not in this graph: ${r.v === "n" ? r.n : r.c}`;
+    r = homeRoute(); v = build(r);
+  }
+  const was = keep && selected >= 0 && view ? view.items[selected].node : undefined;
+  route = r; view = v; view.key = keyOf(r);
   hover = -1;
+  selected = was !== undefined ? view.items.findIndex(it => it.node === was)
+    : view.centre !== undefined ? view.items.findIndex(it => it.node === view.centre) : -1;
+  layout(view);
+  document.getElementById("load-status").textContent = note;
   renderSide();
 }
 
-// --- layout: a small force simulation, started from a deterministic spiral --
+function go(r) {                 // open a view, as a step the browser's Back can undo
+  if (!D) return;
+  const h = hashFor(r), cur = location.hash === "#" ? "" : location.hash;
+  if (h === cur) showRoute(r);
+  else location.hash = h;        // -> hashchange -> onHash
+}
+function onHash() {
+  if (!D) return;
+  const r = routeFromHash(), k = keyOf(r);
+  if (view && k === view.key) return;
+  if (trail.length > 1 && trail[trail.length - 2] === k) trail.pop(); else trail.push(k);
+  showRoute(r);
+}
+window.addEventListener("hashchange", onHash);
+function back() { if (trail.length > 1) history.back(); }
+const rebuildView = () => { if (view) showRoute(route, true); };
+const openNode = i => go({ v: "n", n: nId(i), h: +document.getElementById("hops").value });
+const openComm = c => go({ v: "c", c: D.comms[c][0] });
+
+// --- layout: a force simulation for bubbles and communities, from a spiral --
 function layout(v) {
-  const n = v.items.length;
-  const centreIdx = v.centre !== undefined ? v.items.findIndex(it => it.node === v.centre) : -1;
-  v.items.forEach((it, k) => {
-    const a = k * 2.399963, rad = 18 * Math.sqrt(k + 1);
-    it.x = Math.cos(a) * rad; it.y = Math.sin(a) * rad; it.vx = 0; it.vy = 0; it.pinned = false;
-  });
-  if (centreIdx >= 0) { v.items[centreIdx].x = 0; v.items[centreIdx].y = 0; }
-  v.alpha = 1;
-  v.fitted = false;
-  userMoved = false;
-  fit(v);
+  if (!v.static) {
+    v.items.forEach((it, k) => {
+      const a = k * 2.399963, rad = 18 * Math.sqrt(k + 1);
+      it.x = Math.cos(a) * rad; it.y = Math.sin(a) * rad;
+    });
+  }
+  v.items.forEach(it => { it.vx = 0; it.vy = 0; it.pinned = false; });
+  v.alpha = v.static ? 0 : 1;
+  userMoved = false; camAnim = null;
+  Object.assign(cam, fitBox(v));
 }
 
-function fit(v) {                // the camera around every item, with a margin
-  if (!v.items.length) return;
+function fitBox(v) {             // the camera around every item, with a margin
+  if (!v || !v.items.length) return { x: 0, y: 0, scale: 1 };
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  const pad = v.kind === "focus" ? 150 : 0;   // room for the labels beside the columns
   for (const p of v.items) {
-    x0 = Math.min(x0, p.x - p.r); y0 = Math.min(y0, p.y - p.r);
-    x1 = Math.max(x1, p.x + p.r); y1 = Math.max(y1, p.y + p.r);
+    x0 = Math.min(x0, p.x - p.r - pad); y0 = Math.min(y0, p.y - p.r - ROW);
+    x1 = Math.max(x1, p.x + p.r + pad); y1 = Math.max(y1, p.y + p.r + ROW);
   }
   const w = Math.max(40, x1 - x0), h = Math.max(40, y1 - y0);
-  cam.scale = Math.max(0.05, Math.min(2.5, Math.min((cv.clientWidth - 80) / w, (cv.clientHeight - 60) / h)));
-  cam.x = (x0 + x1) / 2; cam.y = (y0 + y1) / 2;
+  // screen room kept free: the labels to the right of the dots, and on a phone
+  // the sheet's handle at the foot
+  const labelRoom = v.kind === "focus" ? 0 : Math.min(140, cv.clientWidth * 0.25);
+  const footRoom = narrow() ? 56 : 0;
+  let scale = Math.max(0.05, Math.min(2.5, Math.min((cv.clientWidth - 60 - labelRoom) / w,
+                                                     (cv.clientHeight - 60 - footRoom) / h)));
+  let x = (x0 + x1) / 2 + labelRoom / 2 / scale, y = (y0 + y1) / 2 + footRoom / 2 / scale;
+  if (v.kind === "focus") {
+    // legible before complete: columns that do not fit are panned to, and the
+    // node itself stays in the middle part of the screen
+    scale = Math.max(scale, READABLE);
+    const half = cv.clientWidth * 0.3 / scale;
+    x = Math.max(-half, Math.min(half, x));
+    y = Math.max(-cv.clientHeight * 0.3 / scale, Math.min(cv.clientHeight * 0.3 / scale, y));
+  }
+  return { x, y, scale };
 }
 
 function tick(v) {
@@ -430,7 +595,8 @@ function tick(v) {
 // --- drawing ---------------------------------------------------------------
 const cv = document.getElementById("cv"), ctx = cv.getContext("2d");
 const cam = { x: 0, y: 0, scale: 1 };
-let hover = -1, selected = -1, drag = null, userMoved = false;
+let hover = -1, selected = -1, userMoved = false, camAnim = null;
+let placedLabels = [];           // the label boxes drawn last frame: they are clickable too
 const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
 function resize() {
@@ -438,12 +604,26 @@ function resize() {
   cv.width = cv.clientWidth * dpr; cv.height = cv.clientHeight * dpr;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 }
-window.addEventListener("resize", resize);
+window.addEventListener("resize", () => {
+  resize();
+  if (view && !userMoved) Object.assign(cam, fitBox(view));
+});
 
 const toScreen = (x, y) => [cv.clientWidth / 2 + (x - cam.x) * cam.scale,
                             cv.clientHeight / 2 + (y - cam.y) * cam.scale];
 const toWorld = (sx, sy) => [(sx - cv.clientWidth / 2) / cam.scale + cam.x,
                              (sy - cv.clientHeight / 2) / cam.scale + cam.y];
+const clampScale = s => Math.max(0.05, Math.min(8, s));
+function animateTo(t) { camAnim = { x: t.x, y: t.y, scale: clampScale(t.scale) }; userMoved = true; }
+function zoomBy(f) { animateTo({ x: cam.x, y: cam.y, scale: cam.scale * f }); }
+function fitView() { if (view) { animateTo(fitBox(view)); userMoved = false; } }
+function panTo(k) {
+  if (!view || k < 0) return;
+  const p = view.items[k], scale = Math.max(cam.scale, view.kind === "focus" ? 0.9 : 0.8);
+  // on a phone the open sheet covers the foot of the screen: put it above that
+  const dy = narrow() && side.classList.contains("open") ? cv.clientHeight * 0.35 / scale : 0;
+  animateTo({ x: p.x, y: p.y + dy, scale });
+}
 
 function neighbourSet(k) {
   const s = new Set([k]);
@@ -453,61 +633,115 @@ function neighbourSet(k) {
 }
 
 function draw() {
-  if (view && view.alpha > 0.004) {
+  if (view && !view.static && view.alpha > 0.004) {
     for (let t = 0; t < 3; t++) tick(view);
-    if (!userMoved) fit(view);     // follow the layout until the reader takes over
+    if (!userMoved) Object.assign(cam, fitBox(view));     // follow the layout until the reader takes over
+  }
+  if (camAnim) {
+    cam.x += (camAnim.x - cam.x) * 0.22; cam.y += (camAnim.y - cam.y) * 0.22;
+    cam.scale += (camAnim.scale - cam.scale) * 0.22;
+    if (Math.abs(camAnim.scale - cam.scale) < 0.002 && Math.hypot(camAnim.x - cam.x, camAnim.y - cam.y) < 0.5) {
+      Object.assign(cam, camAnim); camAnim = null;
+    }
   }
   ctx.clearRect(0, 0, cv.clientWidth, cv.clientHeight);
+  placedLabels = [];
   if (!view) { requestAnimationFrame(draw); return; }
   const it = view.items, focus = hover >= 0 ? hover : selected;
-  const near = neighbourSet(focus);
-  const dim = focus >= 0;
+  const near = neighbourSet(focus), dim = focus >= 0;
   const ink = css("--ink"), muted = css("--muted"), line = css("--line");
+  const columns = view.kind === "focus";
   for (const l of view.links) {
     const p = it[l.a], q = it[l.b];
     const lit = !dim || l.a === focus || l.b === focus;
     const [x1, y1] = toScreen(p.x, p.y), [x2, y2] = toScreen(q.x, q.y);
-    ctx.globalAlpha = lit ? (dim ? 0.95 : 0.5) : 0.08;
+    ctx.globalAlpha = lit ? (dim ? 0.95 : columns ? 0.4 : 0.5) : 0.07;
     ctx.strokeStyle = l.colour || muted;
     ctx.lineWidth = view.kind === "overview" ? Math.min(8, 0.6 + Math.log1p(l.w)) : (lit && dim ? 1.6 : 1);
     ctx.setLineDash(l.dashed ? [4, 3] : []);
-    ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
-    if (l.edge !== undefined && lit && cam.scale > 0.5) {   // arrowhead at the target
-      const ang = Math.atan2(y2 - y1, x2 - x1), r = q.r * cam.scale + 2;
-      const ax = x2 - Math.cos(ang) * r, ay = y2 - Math.sin(ang) * r;
-      ctx.setLineDash([]); ctx.beginPath();
-      ctx.moveTo(ax, ay);
+    ctx.beginPath(); ctx.moveTo(x1, y1);
+    if (columns && Math.abs(x2 - x1) > 1) {            // a column's edges flow in as curves
+      const mx = (x1 + x2) / 2;
+      ctx.bezierCurveTo(mx, y1, mx, y2, x2, y2);
+    } else ctx.lineTo(x2, y2);
+    ctx.stroke();
+    if (l.edge !== undefined && lit && cam.scale > 0.45) {   // arrowhead at the target
+      const ang = columns && Math.abs(x2 - x1) > 1 ? (x2 > x1 ? 0 : Math.PI) : Math.atan2(y2 - y1, x2 - x1);
+      const r = q.r * cam.scale + 2, ax = x2 - Math.cos(ang) * r, ay = y2 - Math.sin(ang) * r;
+      ctx.setLineDash([]); ctx.beginPath(); ctx.moveTo(ax, ay);
       ctx.lineTo(ax - Math.cos(ang - 0.4) * 7, ay - Math.sin(ang - 0.4) * 7);
       ctx.lineTo(ax - Math.cos(ang + 0.4) * 7, ay - Math.sin(ang + 0.4) * 7);
       ctx.closePath(); ctx.fillStyle = l.colour || muted; ctx.fill();
     }
   }
   ctx.setLineDash([]);
-  // labels: the focused item, then the largest of what is lit, up to LABELS
-  const lit = [...it.keys()].filter(k => !dim || near.has(k));
-  const labelSet = new Set(lit.sort((a, b) => it[b].r - it[a].r).slice(0, LABELS));
   for (let k = 0; k < it.length; k++) {
     const p = it[k], [x, y] = toScreen(p.x, p.y), r = Math.max(2, p.r * cam.scale);
     ctx.globalAlpha = !dim || near.has(k) ? 1 : 0.2;
     ctx.fillStyle = p.colour;
     ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
-    if (p.node !== undefined && nTest(p.node)) {
-      ctx.strokeStyle = line; ctx.lineWidth = 2; ctx.stroke();
-    }
-    if (k === selected || (view.centre !== undefined && p.node === view.centre)) {
+    if (p.node !== undefined && nTest(p.node)) { ctx.strokeStyle = line; ctx.lineWidth = 2; ctx.stroke(); }
+    if (k === selected) {
       ctx.strokeStyle = ink; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, r + 3, 0, Math.PI * 2); ctx.stroke();
     }
-    const showLabel = k === focus || (view.centre !== undefined && p.node === view.centre)
-      || labelSet.has(k) || (!dim && r > 14);
-    if (showLabel) {
-      ctx.globalAlpha = !dim || near.has(k) ? 1 : 0.3;
-      ctx.fillStyle = ink; ctx.font = (k === focus ? "600 " : "") + "12px system-ui, sans-serif";
-      const text = p.label.length > 48 ? p.label.slice(0, 47) + "…" : p.label;
-      ctx.fillText(text, x + r + 4, y + 4);
-    }
   }
+  drawLabels(it, focus, near, dim, ink, muted);
   ctx.globalAlpha = 1;
   requestAnimationFrame(draw);
+}
+
+// Labels go where they fit: in order of importance (the item pointed at, the
+// selected one, the centre, then the nearest hops and the largest), each placed
+// only if its box overlaps none placed before. Zooming in frees room for more.
+function drawLabels(it, focus, near, dim, ink, muted) {
+  const W = cv.clientWidth, H = cv.clientHeight;
+  // a label covers neither another label nor a dot of another item
+  const dots = [];
+  for (const p of it) {
+    const [x, y] = toScreen(p.x, p.y), r = Math.max(2, p.r * cam.scale);
+    if (x > -r && x < W + r && y > -r && y < H + r) dots.push({ x0: x - r, x1: x + r, y0: y - r, y1: y + r });
+  }
+  const clash = (b, o) => b.x0 < o.x1 && o.x0 < b.x1 && b.y0 < o.y1 && o.y0 < b.y1;
+  const fits = b => !placedLabels.some(o => clash(b, o)) && !dots.some(o => clash(b, o));
+  const order = [...it.keys()].filter(k => !dim || near.has(k));
+  const rank = k => (k === focus ? -3 : k === selected ? -2 : it[k].node !== undefined && it[k].node === view.centre ? -1 : 0);
+  order.sort((a, b) => rank(a) - rank(b) || (it[a].hop || 0) - (it[b].hop || 0) || it[b].r - it[a].r);
+  const cap = view.kind === "focus" ? MAX_VIEW : LABELS;
+  let drawn = 0;
+  for (const k of order) {
+    if (drawn >= cap && rank(k) === 0) break;
+    const p = it[k], [x, y] = toScreen(p.x, p.y), r = Math.max(2, p.r * cam.scale);
+    if (x < -300 || x > W + 300 || y < -20 || y > H + 20) continue;
+    const strong = rank(k) < 0;
+    ctx.font = (strong ? "600 " : "") + "12px system-ui, sans-serif";
+    const text = p.label.length > 48 ? p.label.slice(0, 47) + "…" : p.label;
+    const w = ctx.measureText(text).width;
+    let tx, align = "left";
+    if (p.side === -1) { tx = x - r - 6; align = "right"; }
+    else if (p.side === 0) { tx = x - w / 2; }
+    else tx = x + r + 4;
+    const ty = p.side === 0 ? y - r - 8 : y + 4;
+    const box = align === "right" ? { x0: tx - w - 2, x1: tx + 2, y0: ty - 11, y1: ty + 3 }
+                                  : { x0: tx - 2, x1: tx + w + 2, y0: ty - 11, y1: ty + 3 };
+    if (!strong && !fits(box)) continue;
+    box.k = k;
+    placedLabels.push(box);
+    ctx.globalAlpha = !dim || near.has(k) ? 1 : 0.3;
+    ctx.fillStyle = ink; ctx.textAlign = align;
+    ctx.fillText(text, align === "right" ? tx : tx, ty);
+    ctx.textAlign = "left";
+    drawn += 1;
+  }
+  if (view.kind === "focus" && ROW * cam.scale >= 12 && !dim) {   // the file a group of rows is in
+    ctx.font = "11px system-ui, sans-serif"; ctx.fillStyle = muted; ctx.globalAlpha = 0.9;
+    for (const h of view.headers) {
+      const [x, y] = toScreen(h.x, h.y);
+      if (y < -20 || y > H + 20) continue;
+      ctx.textAlign = h.side === -1 ? "right" : "left";
+      ctx.fillText(h.text, h.side === -1 ? x + 4 : x - 4, y + 4);
+    }
+    ctx.textAlign = "left";
+  }
 }
 
 function itemAt(sx, sy) {
@@ -515,70 +749,145 @@ function itemAt(sx, sy) {
   const [wx, wy] = toWorld(sx, sy);
   let best = -1, bestD = Infinity;
   view.items.forEach((p, k) => {
-    const d = Math.hypot(p.x - wx, p.y - wy), reach = p.r + 4 / cam.scale;
+    const d = Math.hypot(p.x - wx, p.y - wy), reach = p.r + 6 / cam.scale;
     if (d < reach && d < bestD) { best = k; bestD = d; }
   });
-  return best;
+  if (best >= 0) return best;
+  const hit = placedLabels.find(b => sx >= b.x0 && sx <= b.x1 && sy >= b.y0 && sy <= b.y1);
+  return hit ? hit.k : -1;
 }
 
-// --- interaction -----------------------------------------------------------
+// --- pointer: mouse, pen and touch alike ------------------------------------
 const tip = document.getElementById("tip");
-cv.addEventListener("mousemove", ev => {
-  const r = cv.getBoundingClientRect(), sx = ev.clientX - r.left, sy = ev.clientY - r.top;
+const pointers = new Map();
+let drag = null, pinch = null, lastTap = { t: 0, k: -2 }, pressTimer = null;
+const at = ev => { const r = cv.getBoundingClientRect(); return [ev.clientX - r.left, ev.clientY - r.top]; };
+
+function showTip(k, sx, sy) {
+  const p = view.items[k];
+  tip.textContent = p.node !== undefined
+    ? `${nLabel(p.node)} — ${nKind(p.node)}${site(p.node) ? " · " + site(p.node) : ""}`
+    : `${D.comms[p.comm][1]} — ${D.comms[p.comm][2]} nodes`;
+  tip.style.display = "block";
+  tip.style.left = Math.max(4, Math.min(sx + 14, cv.clientWidth - 300)) + "px";
+  tip.style.top = Math.max(4, sy + 14) + "px";
+}
+const hideTip = () => { tip.style.display = "none"; };
+
+cv.addEventListener("pointerdown", ev => {
+  try { cv.setPointerCapture(ev.pointerId); } catch (e) { /* a pointer the browser no longer tracks */ }
+  pointers.set(ev.pointerId, at(ev));
+  camAnim = null;
+  if (pointers.size === 2) {                       // two fingers: pinch to zoom
+    const [a, b] = [...pointers.values()];
+    const mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+    pinch = { d: Math.hypot(a[0] - b[0], a[1] - b[1]) || 1, scale: cam.scale, world: toWorld(...mid) };
+    drag = null; clearTimeout(pressTimer);
+    return;
+  }
+  const [sx, sy] = at(ev);
+  drag = { item: itemAt(sx, sy), sx, sy, cx: cam.x, cy: cam.y, moved: false, long: false };
+  cv.classList.add("dragging");
+  if (ev.pointerType !== "mouse") {                // a long press shows what a node is
+    clearTimeout(pressTimer);
+    pressTimer = setTimeout(() => {
+      if (drag && !drag.moved && drag.item >= 0) { drag.long = true; showTip(drag.item, sx, sy); }
+    }, 500);
+  }
+});
+cv.addEventListener("pointermove", ev => {
+  if (pointers.has(ev.pointerId)) pointers.set(ev.pointerId, at(ev));
+  if (pinch && pointers.size >= 2) {
+    const [a, b] = [...pointers.values()];
+    const mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+    cam.scale = clampScale(pinch.scale * (Math.hypot(a[0] - b[0], a[1] - b[1]) || 1) / pinch.d);
+    const [wx, wy] = toWorld(...mid);
+    cam.x += pinch.world[0] - wx; cam.y += pinch.world[1] - wy;
+    userMoved = true;
+    return;
+  }
+  const [sx, sy] = at(ev);
   if (drag) {
+    if (!drag.moved && Math.hypot(sx - drag.sx, sy - drag.sy) < 5) return;
+    drag.moved = true; clearTimeout(pressTimer);
     if (drag.item >= 0) {
       const [wx, wy] = toWorld(sx, sy), p = view.items[drag.item];
-      p.x = wx; p.y = wy; p.pinned = true; view.alpha = Math.max(view.alpha, 0.3);
+      p.x = wx; p.y = wy; p.pinned = true;
+      if (!view.static) view.alpha = Math.max(view.alpha, 0.3);
     } else {
       cam.x = drag.cx - (sx - drag.sx) / cam.scale; cam.y = drag.cy - (sy - drag.sy) / cam.scale;
       userMoved = true;
     }
-    drag.moved = true;
     return;
   }
+  if (ev.pointerType !== "mouse") return;
   hover = itemAt(sx, sy);
-  if (hover >= 0) {
-    const p = view.items[hover];
-    tip.textContent = p.node !== undefined
-      ? `${nLabel(p.node)} — ${nKind(p.node)}${nFile(p.node) ? " · " + nFile(p.node) + (nLine(p.node) ? ":" + nLine(p.node) : "") : ""}`
-      : `${D.comms[p.comm][1]} — ${D.comms[p.comm][2]} nodes`;
-    tip.style.display = "block";
-    tip.style.left = Math.min(sx + 14, cv.clientWidth - 300) + "px"; tip.style.top = (sy + 14) + "px";
-  } else tip.style.display = "none";
+  if (hover >= 0) showTip(hover, sx, sy); else hideTip();
 });
-cv.addEventListener("mouseleave", () => { hover = -1; tip.style.display = "none"; });
-cv.addEventListener("mousedown", ev => {
-  const r = cv.getBoundingClientRect(), sx = ev.clientX - r.left, sy = ev.clientY - r.top;
-  drag = { item: itemAt(sx, sy), sx, sy, cx: cam.x, cy: cam.y, moved: false };
-  cv.classList.add("dragging");
-});
-window.addEventListener("mouseup", () => {
-  if (drag && !drag.moved) {
-    const k = drag.item;
-    if (k < 0) { selected = -1; renderSide(); }
-    else if (view.kind === "overview") { const c = view.items[k].comm; go(() => communityView(c)); }
-    else { selected = k; renderSide(); }
-  }
-  drag = null; cv.classList.remove("dragging");
-});
-cv.addEventListener("dblclick", ev => {
-  const r = cv.getBoundingClientRect(), k = itemAt(ev.clientX - r.left, ev.clientY - r.top);
-  if (k >= 0 && view.items[k].node !== undefined) openNode(view.items[k].node);
-});
+function endPointer(ev) {
+  pointers.delete(ev.pointerId);
+  clearTimeout(pressTimer);
+  if (pinch) { if (pointers.size < 2) { pinch = null; drag = null; } return; }
+  const d = drag; drag = null;
+  cv.classList.remove("dragging");
+  if (d && d.long) { setTimeout(hideTip, 1500); return; }
+  if (d && !d.moved && ev.type === "pointerup") tap(d.item);
+}
+cv.addEventListener("pointerup", endPointer);
+cv.addEventListener("pointercancel", endPointer);
+cv.addEventListener("pointerleave", ev => { if (ev.pointerType === "mouse") { hover = -1; hideTip(); } });
+
+function tap(k) {
+  const now = performance.now();
+  const double = k >= 0 && k === lastTap.k && now - lastTap.t < 320;
+  lastTap = double ? { t: 0, k: -2 } : { t: now, k };
+  if (k < 0) { select(-1); return; }
+  const p = view.items[k];
+  if (p.comm !== undefined) { openComm(p.comm); return; }
+  if (double) { openNode(p.node); return; }
+  select(k);
+}
+function select(k) {
+  selected = k;
+  renderSide();
+  if (k >= 0 && narrow()) { sheet(true); panTo(k); }
+}
+
 cv.addEventListener("wheel", ev => {
   ev.preventDefault();
-  userMoved = true;
-  const r = cv.getBoundingClientRect(), sx = ev.clientX - r.left, sy = ev.clientY - r.top;
-  const [wx, wy] = toWorld(sx, sy);
-  cam.scale = Math.max(0.05, Math.min(8, cam.scale * Math.exp(-ev.deltaY * 0.0015)));
+  camAnim = null; userMoved = true;
+  const [sx, sy] = at(ev), [wx, wy] = toWorld(sx, sy);
+  cam.scale = clampScale(cam.scale * Math.exp(-ev.deltaY * 0.0015));
   const [nx, ny] = toWorld(sx, sy);
   cam.x += wx - nx; cam.y += wy - ny;
 }, { passive: false });
 
-function openNode(i) {
-  go(() => focusView(i));
-  selected = view.items.findIndex(it => it.node === i);
-  renderSide();
+// --- keys ------------------------------------------------------------------
+const help = document.getElementById("help");
+const toggleHelp = force => { help.hidden = force === undefined ? !help.hidden : !force; };
+document.addEventListener("keydown", ev => {
+  const t = ev.target;
+  if (t && t.id === "q") { searchKeys(ev); return; }
+  if (t && /^(INPUT|SELECT|TEXTAREA|BUTTON)$/.test(t.tagName) && ev.key !== "Escape") return;
+  if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
+  switch (ev.key) {
+    case "/": ev.preventDefault(); if (narrow()) sheet(true); document.getElementById("q").focus(); break;
+    case "?": toggleHelp(); break;
+    case "Escape":
+      if (!help.hidden) toggleHelp(false);
+      else if (selected >= 0 && !(view && view.centre !== undefined && view.items[selected].node === view.centre)) select(-1);
+      else back();
+      break;
+    case "f": case "F": fitView(); break;
+    case "+": case "=": zoomBy(1.3); break;
+    case "-": case "_": zoomBy(1 / 1.3); break;
+    case "1": case "2": setHops(+ev.key); break;
+    default: return;
+  }
+});
+function setHops(h) {
+  document.getElementById("hops").value = String(h);
+  if (route.v === "n" && route.h !== h) go({ v: "n", n: route.n, h });
 }
 
 // --- the side panel (text only: every string from the graph goes in as text) --
@@ -605,6 +914,30 @@ function listOf(rows) {               // rows: [label, tag, onclick, colour]
   return ul;
 }
 
+// Copy to the clipboard, to hand what the page found to the assistant.
+async function copyText(text, btn) {
+  let ok = false;
+  try {
+    if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(text); ok = true; }
+  } catch (e) { ok = false; }
+  if (!ok) {
+    const ta = el("textarea", { style: "position:fixed;top:0;left:0;opacity:0", "aria-hidden": "true" });
+    ta.value = text; document.body.append(ta); ta.select();
+    try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+    ta.remove();
+  }
+  const old = btn.dataset.label || btn.textContent;
+  btn.dataset.label = old;
+  btn.textContent = ok ? "Copied ✓" : "Could not copy";
+  setTimeout(() => { btn.textContent = old; }, 1500);
+}
+const copyButton = (label, text, title) => {
+  const b = el("button", { class: "copy", title: title || text });
+  b.textContent = label;
+  b.addEventListener("click", () => copyText(text, b));
+  return b;
+};
+
 function renderSide() {
   document.getElementById("title").textContent = document.title;
   if (!D) {
@@ -620,13 +953,12 @@ function renderSide() {
     ` · built by ${m.engine === "graphlore" ? "graphlore's engine" : "graphify"}` + (m.commit ? ` at ${m.commit}` : "");
   const crumbs = document.getElementById("crumbs");
   crumbs.replaceChildren(
-    el("button", { onclick: () => { if (backStack.length) go(backStack.pop(), false); },
-      ...(backStack.length ? {} : { disabled: "" }) }, "← Back"), " ",
-    D.comms.length ? el("button", { onclick: () => go(overview) }, "Communities") : null, " ",
+    el("button", { onclick: back, title: "Back (Esc)", ...(trail.length > 1 ? {} : { disabled: "" }) }, "← Back"), " ",
+    D.comms.length ? el("button", { onclick: () => go({ v: "o" }) }, "Communities") : null, " ",
     el("span", { class: "muted" }, view ? view.title : ""));
   document.getElementById("hud").textContent = view
     ? `${view.items.length} ${view.kind === "overview" ? "communities" : "nodes"} · ${view.links.length} links` +
-      (view.note ? ` · ${view.note}` : "")
+      (view.kind === "focus" ? " · uses it ← · → it uses" : "") + (view.note ? ` · ${view.note}` : "")
     : "";
   const det = document.getElementById("details");
   det.replaceChildren();
@@ -637,18 +969,25 @@ function renderSide() {
 }
 
 function nodeDetails(i) {
-  const c = nComm(i);
+  const c = nComm(i), id = nId(i);
   const out = [el("h2", {}, "Node"),
     el("div", { style: "font-weight:600;word-break:break-all" }, nLabel(i)),
     el("div", { class: "kv" },
       el("div", {}, "kind"), el("div", {}, nKind(i) + (nTest(i) ? " (test)" : "")),
-      el("div", {}, "where"), el("div", {}, nFile(i) ? nFile(i) + (nLine(i) ? ":" + nLine(i) : "") : "—"),
+      el("div", {}, "where"), el("div", {}, site(i) || "—"),
       el("div", {}, "community"), el("div", {}, c >= 0 ? D.comms[c][1] : "—"),
-      el("div", {}, "id"), el("div", {}, el("code", {}, nId(i))),
+      el("div", {}, "id"), el("div", {}, el("code", {}, id)),
       el("div", {}, "edges"), el("div", {}, String(nDeg(i)))),
     el("div", { class: "row", style: "margin-top:6px" },
-      el("button", { onclick: () => openNode(i) }, "Neighbourhood"),
-      c >= 0 ? el("button", { onclick: () => go(() => communityView(c)) }, "Its community") : null)];
+      route.v === "n" && route.n === id ? null : el("button", { onclick: () => openNode(i) }, "Neighbourhood"),
+      c >= 0 ? el("button", { onclick: () => openComm(c) }, "Its community") : null),
+    el("h2", {}, "Copy for the assistant"),
+    el("div", { class: "row" },
+      copyButton("explain", `graphlore_explain(${JSON.stringify(id)})`),
+      copyButton("fetch source", `graphlore_fetch([${JSON.stringify(id)}])`),
+      copyButton("impact", `graphlore_impact(${JSON.stringify(id)})`),
+      copyButton("id", id),
+      site(i) ? copyButton("file:line", site(i)) : null)];
   const groups = new Map();           // "calls →" -> rows
   for (const j of adj[i]) {
     const outward = eS(j) === i, other = outward ? eT(j) : eS(j);
@@ -666,8 +1005,16 @@ function nodeDetails(i) {
 }
 
 function communityDetails(c) {
-  const out = [el("h2", {}, `${D.comms[c][1]} — ${D.comms[c][2]} nodes`)];
-  out.push(listOf(members[c].map(i => [nLabel(i), `${nDeg(i)} edges`, () => openNode(i), null])));
+  const cid = D.comms[c][0];
+  const out = [el("h2", {}, `${D.comms[c][1]} — ${D.comms[c][2]} nodes`),
+    el("div", { class: "row", style: "margin-bottom:6px" },
+      copyButton("signatures", `graphlore_skeleton(community=${JSON.stringify(cid)})`,
+        "Copy graphlore_skeleton(community=…) for the assistant"),
+      copyButton("community id", cid))];
+  // a member drawn in this view is selected where it is; the others open
+  const drawnAt = new Map(view.items.map((it, k) => [it.node, k]));
+  out.push(listOf(members[c].map(i => [nLabel(i), `${nDeg(i)} edges`,
+    () => (drawnAt.has(i) ? (select(drawnAt.get(i)), panTo(drawnAt.get(i))) : openNode(i)), null])));
   const peers = new Map();
   for (let j = 0; j < D.cedges.length; j += 3) {
     const a = D.cedges[j], b = D.cedges[j + 1], w = D.cedges[j + 2];
@@ -676,7 +1023,7 @@ function communityDetails(c) {
   if (peers.size) {
     out.push(el("h2", {}, "Linked communities"));
     out.push(listOf([...peers].sort((x, y) => y[1] - x[1]).map(([k, w]) =>
-      [D.comms[k][1], `${w} edges`, () => go(() => communityView(k)), commColour(k)])));
+      [D.comms[k][1], `${w} edges`, () => openComm(k), commColour(k)])));
   }
   return out;
 }
@@ -684,20 +1031,43 @@ function communityDetails(c) {
 function overviewDetails() {
   const order = D.comms.map((c, k) => k).sort((a, b) => D.comms[b][2] - D.comms[a][2]);
   return [el("h2", {}, "Largest communities"),
-    listOf(order.map(k => [D.comms[k][1], `${D.comms[k][2]} nodes`, () => go(() => communityView(k)), commColour(k)]))];
+    listOf(order.map(k => [D.comms[k][1], `${D.comms[k][2]} nodes`, () => openComm(k), commColour(k)]))];
 }
 
 // --- search ----------------------------------------------------------------
-document.getElementById("q").addEventListener("input", ev => {
-  const q = ev.target.value.trim().toLowerCase(), hits = document.getElementById("hits");
-  if (!D || q.length < 2) { hits.replaceChildren(); return; }
+let hitIds = [], hitPos = -1;
+const q = document.getElementById("q"), hits = document.getElementById("hits");
+function renderHits() {
+  hits.replaceChildren(listOf(hitIds.map(i => [nLabel(i), nFile(i) || nKind(i), () => openHit(i), commColour(nComm(i))])));
+  [...hits.querySelectorAll("li")].forEach((li, k) => li.classList.toggle("active", k === hitPos));
+}
+function openHit(i) {
+  openNode(i);
+  if (narrow()) q.blur();
+}
+q.addEventListener("input", () => {
+  const s = q.value.trim().toLowerCase();
+  hitPos = -1;
+  if (!D || s.length < 2) { hitIds = []; hits.replaceChildren(); return; }
   const found = [];
-  for (let i = 0; i < N && found.length < 400; i++) if (lower[i].includes(q)) found.push(i);
-  found.sort((a, b) => (nLabel(a).toLowerCase().startsWith(q) ? 0 : 1) - (nLabel(b).toLowerCase().startsWith(q) ? 0 : 1)
+  for (let i = 0; i < N && found.length < 400; i++) if (lower[i].includes(s)) found.push(i);
+  found.sort((a, b) => (nLabel(a).toLowerCase().startsWith(s) ? 0 : 1) - (nLabel(b).toLowerCase().startsWith(s) ? 0 : 1)
                        || nDeg(b) - nDeg(a));
-  hits.replaceChildren(listOf(found.map(i => [nLabel(i), nFile(i) || nKind(i), () => openNode(i), commColour(nComm(i))])
-    .slice(0, 20)));
+  hitIds = found.slice(0, 20);
+  renderHits();
 });
+function searchKeys(ev) {
+  if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
+    if (!hitIds.length) return;
+    ev.preventDefault();
+    hitPos = (hitPos + (ev.key === "ArrowDown" ? 1 : -1) + hitIds.length) % hitIds.length;
+    renderHits();
+  } else if (ev.key === "Enter") {
+    if (hitIds.length) { ev.preventDefault(); openHit(hitIds[Math.max(0, hitPos)]); }
+  } else if (ev.key === "Escape") {
+    q.value = ""; hitIds = []; hitPos = -1; hits.replaceChildren(); q.blur();
+  }
+}
 
 // --- controls --------------------------------------------------------------
 const fg = document.getElementById("f-groups");
@@ -714,7 +1084,18 @@ document.getElementById("colour").addEventListener("change", e => {
   if (view && view.kind !== "overview") for (const it of view.items) it.colour = nodeColour(it.node);
   renderLegend();
 });
-document.getElementById("hops").addEventListener("change", () => { if (view && view.kind === "focus") rebuildView(); });
+document.getElementById("hops").addEventListener("change", e => setHops(+e.target.value));
+document.getElementById("z-in").addEventListener("click", () => zoomBy(1.3));
+document.getElementById("z-out").addEventListener("click", () => zoomBy(1 / 1.3));
+document.getElementById("z-fit").addEventListener("click", fitView);
+document.getElementById("z-help").addEventListener("click", () => toggleHelp());
+const side = document.getElementById("side"), sheetToggle = document.getElementById("sheet-toggle");
+function sheet(open) {
+  side.classList.toggle("open", open);
+  sheetToggle.setAttribute("aria-expanded", String(open));
+  sheetToggle.textContent = open ? "▾ Close" : "☰ Panel";
+}
+sheetToggle.addEventListener("click", () => sheet(!side.classList.contains("open")));
 
 function renderLegend() {
   const lg = document.getElementById("legend");
@@ -727,7 +1108,7 @@ function renderLegend() {
 }
 
 // --- loading: the page's own graph, or a graph.json the reader opens --------
-function load(data, title) {
+function load(data, title, fresh) {
   D = data; N = D.nodes.length; E = D.edges.length / 4;
   adj = Array.from({ length: N }, () => []);
   for (let j = 0; j < E; j++) { adj[eS(j)].push(j); if (eT(j) !== eS(j)) adj[eT(j)].push(j); }
@@ -735,19 +1116,22 @@ function load(data, title) {
   for (let i = 0; i < N; i++) if (nComm(i) >= 0) members[nComm(i)].push(i);
   for (const m of members) m.sort((a, b) => nDeg(b) - nDeg(a));
   lower = D.nodes.map(r => (r[1] + " " + r[2]).toLowerCase());
+  idIndex = new Map(); D.nodes.forEach((r, i) => { if (!idIndex.has(r[0])) idIndex.set(r[0], i); });
+  commIndex = new Map(D.comms.map((c, k) => [c[0], k]));
   if (title) document.title = title;
-  backStack.length = 0; view = null;
-  document.getElementById("q").value = "";
-  document.getElementById("hits").replaceChildren();
+  view = null; trail.length = 0;
+  q.value = ""; hitIds = []; hits.replaceChildren();
   document.getElementById("welcome").hidden = true;
   renderLegend();
-  // a graph without communities opens on its most connected nodes instead
-  go(D.comms.length ? overview : () => nodeView("all", D.nodes.map((r, i) => i)
-    .sort((a, b) => nDeg(b) - nDeg(a)), "Most connected nodes"), false);
+  // a graph just opened starts at its top; the page's own graph at the view its link names
+  const r = fresh ? homeRoute() : routeFromHash();
+  if (fresh && location.hash && location.hash !== "#") location.hash = "";
+  trail.push(keyOf(r));
+  showRoute(r);
 }
 
-// Files are read here, in the browser (FileReader): nothing is sent anywhere.
-// A graph.json, and optionally the .graphify_labels.json beside it, at once.
+// Files are read here, in the browser: nothing is sent anywhere. A graph.json,
+// and optionally the .graphify_labels.json beside it, at once.
 async function openFiles(files) {
   const status = document.getElementById("load-status");
   const list = [...files];
@@ -766,9 +1150,9 @@ async function openFiles(files) {
     status.textContent = "Laying out…";
     const data = compact(raw, names);
     if (!data.nodes.length) throw new Error("no nodes in it");
+    load(data, `${graphFile.name} — graphlore`, true);
     status.textContent = data.nodes.length > 150000
       ? `${data.nodes.length.toLocaleString()} nodes: large, each view still draws at most ${MAX_VIEW}` : "";
-    load(data, `${graphFile.name} — graphlore`);
   } catch (err) {
     status.textContent = `Could not open ${graphFile.name}: ${err.message}`;
   }
