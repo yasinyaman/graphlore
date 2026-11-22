@@ -32,18 +32,25 @@ All notable changes to this project are documented here. The format is based on
   edge of a cycle or a surprise, not a step of `graphlore_impact` unless
   `shared_state=True` or `relations="state"`; `graphlore_neighbors` and
   `graphlore_subgraph` show it. Community detection leaves it out. On ureq
-  68 pairs, 57 hidden; on this repository 1,232 and 1,081. Co-change stays on
+  68 pairs, 57 hidden; on this repository 1,232 and 1,081; on the 31 audit
+  repositories 3,694 and 3,060, with 1,112 edges. Against engine 0.5.76 on
+  those repositories every earlier edge and every community is unchanged,
+  and the polyglot audit on native graphs has no finding new or gone. Co-change stays on
   graphlore's side: it is read from git, not from the source.
 - **A base's method reaches the methods written for it, in every language
   but Go** (`dispatches_to`, `context: override`, `EXTRACTED`; it was written
   for C / C++ function slots only). A method of a type whose name a method of
   its base, interface, trait or mixin has — the nearest base that declares
-  it, constructors left out, and by parameter count where the language has
-  overloads; in Rust the methods under each `impl Trait for Type`, whether
+  it, constructors left out; where the language has overloads, by
+  parameter count, by the types as written when either type has several
+  such methods of the name, and in Swift by the labels, which are part of
+  the name; in Rust the methods under each `impl Trait for Type`, whether
   or not the type is the project's. `x.connect()` on a trait object now has
   a path to each `connect` written for the trait: 136 edges on ureq (110 of
-  the methods no call named before), 83 on this repository (all 83). Go is left out: an
-  interface is satisfied by shape and no type says which it implements.
+  the methods no call named before), 83 on this repository (all 83), 1,350 on
+  the 31 audit repositories. Community detection leaves these edges out: the
+  type's `inherits` / `implements` edge already weighs them. Go is left out:
+  an interface is satisfied by shape and no type says which it implements.
 - **`benchmarks/inference_gaps.py`**: the uses the compilers bind that the
   native graph lacks (every oracle's `--json` rows), sorted by what stands
   before the name: a closure's parameter, a call's result, an untyped name,

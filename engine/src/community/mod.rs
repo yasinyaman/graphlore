@@ -254,8 +254,13 @@ pub fn detect(
             continue;
         }
         let rel = e.get("relation").and_then(Value::as_str).unwrap_or("");
-        // a pair sharing state is derived from the edges already counted
-        if rel == crate::coupling::RELATION {
+        // a pair sharing state is derived from the edges already counted, and
+        // a method written for a base's method repeats what the type's
+        // `inherits` / `implements` edge weighs
+        let derived = rel == crate::coupling::RELATION
+            || (rel == "dispatches_to"
+                && e.get("context").and_then(Value::as_str) == Some("override"));
+        if derived {
             continue;
         }
         raw.push((a, b));

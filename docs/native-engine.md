@@ -719,11 +719,16 @@ Dispatch is part of the path, so it has to be in the graph: a method written
 for a method of its base, interface, trait or mixin gets a `dispatches_to`
 edge from that method (`context: override`). The nearest base that declares
 the name answers; a constructor is nobody's override; where a language tells
-methods of one name apart by their parameters, the count has to agree. In
+methods of one name apart by their parameters, the count has to agree, the
+types as written too when either type has several such methods of the name
+(`Serialize(object)` beside `Serialize(Parameter)`), and in Swift the labels,
+which are part of the name (`request(_:didParseResponse:)` is not
+`request(_:didCreateTask:)`). In
 Rust the methods are those under each `impl Trait for Type`, whether or not
 the project defines the type (`impl AsSendBody for &File`). Go gets none: an
 interface is satisfied by shape, and an embedded type's method of the same
-name is hidden, not dispatched to.
+name is hidden, not dispatched to. Community detection does not read these
+edges either: the type's `inherits` / `implements` edge already weighs them.
 
 | | ureq | realworld-axum-sqlx | graphlore |
 |---|--:|--:|--:|
@@ -741,6 +746,27 @@ what keeps one such field from adding a hundred edges. Without an edge: a
 static method that hides rather than overrides (the walk does not know a
 method is static), and co-change, which graphlore reads from git
 ([concepts](concepts.md#files-that-change-together)).
+
+On the 31 audit repositories (engine 0.5.77 against 0.5.76, each built by
+both):
+
+| | |
+|---|--:|
+| `dispatches_to` edges for a base's method | 1,350 |
+| … Swift 419, Java 294, JavaScript 151, Rust 139, Kotlin 100, C++ 74, Python 68, C# 55, PHP 24, Scala 22, Ruby 3, TypeScript 1 | |
+| state nodes with pairs | 343 |
+| pairs / hidden | 3,694 / 3,060 |
+| `couples_with` edges | 1,112 |
+| edges of 0.5.76 missing or changed | 0 of 202,257 |
+| nodes in another community | 0 of 56,623 |
+| polyglot audit findings, new / gone | 0 / 0 |
+
+Sixty-five dispatch edges were read against their source, a few per
+language. Two rules above came from that reading: Alamofire's `EventMonitor`
+has dozens of `request(_:…:)` methods told apart by their second label, and
+counting parameters linked each to every implementation (3,300 Swift edges
+before the labels were asked, 419 after); RestSharp's test stub has two
+`Serialize` methods of one parameter.
 
 ### HTTP routes and requests
 
