@@ -86,6 +86,18 @@ pub fn text(n: Node, src: &[u8]) -> String {
     String::from_utf8_lossy(&src[n.byte_range()]).into_owned()
 }
 
+/// The first `max` bytes of `s` at most, cut back to a char boundary so the
+/// slice never falls inside a multibyte character (a byte index of `max` can
+/// land inside one — a curly quote, an emoji — and slicing there panics).
+/// Used to cap how much of a value the regex scanners read.
+pub fn prefix(s: &str, max: usize) -> &str {
+    let mut n = s.len().min(max);
+    while n > 0 && !s.is_char_boundary(n) {
+        n -= 1;
+    }
+    &s[..n]
+}
+
 pub fn line(n: Node) -> u32 {
     n.start_position().row as u32 + 1
 }
@@ -681,4 +693,31 @@ pub fn walk_defs(m: &dyn LanguageModule, root: Node, src: &[u8]) -> Vec<Def> {
         }
     }
     defs
+}
+
+#[cfg(test)]
+mod tests {
+    use super::prefix;
+
+    #[test]
+    fn prefix_cuts_back_to_a_char_boundary() {
+        // ASCII: an exact byte cut
+        assert_eq!(prefix("hello world", 5), "hello");
+        assert_eq!(prefix("hi", 200), "hi");
+        assert_eq!(prefix("", 10), "");
+
+        // a multibyte char straddling the cut must not panic and must be dropped
+        // whole (the Django crash: byte 200 landed inside a 3-byte '”')
+        let s = format!("{}{}", "a".repeat(199), '”'); // '”' occupies bytes 199..202
+        assert_eq!(s.len(), 202);
+        assert!(!s.is_char_boundary(200));
+        let p = prefix(&s, 200);
+        assert_eq!(p.len(), 199); // cut back to just before the quote
+        assert_eq!(p, "a".repeat(199));
+
+        // a cut exactly on a boundary keeps the char
+        let s2 = "é".repeat(4); // 8 bytes, boundaries at 0,2,4,6,8
+        assert_eq!(prefix(&s2, 4), "éé");
+        assert_eq!(prefix(&s2, 5), "éé"); // 5 is mid-char -> back to 4
+    }
 }

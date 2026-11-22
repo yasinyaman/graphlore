@@ -6,6 +6,17 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Fixed
+- **Native engine: a build no longer panics on a multibyte character**
+  (engine 0.5.78). `state.rs`'s `holds_container` and `resources.rs`'s data-model
+  detection capped how much of a value they scanned by slicing it at a byte
+  index (`&t[..t.len().min(200)]`), which panics when that index lands inside a
+  UTF-8 character — a curly quote, an emoji. Found by building the graph of
+  Django, where it killed the whole build (`src/state.rs:269 ... is not a char
+  boundary; it is inside '”'`). A new `generic::prefix` cuts back to a char
+  boundary; both sites use it. The engine release to publish is **0.5.78**, not
+  0.5.77.
+
 ### Deprecated
 - **graphify as graphlore's extractor**, going in the next release with what
   only it does: `graphlore_add` (a source by URL), `graphlore_build`'s `mode`

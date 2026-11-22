@@ -18,7 +18,7 @@ use std::collections::{HashMap, HashSet};
 use tree_sitter::Node;
 
 use crate::facts::{Def, ImportFact, RefFact, RefKind};
-use crate::generic::{kids, line, text};
+use crate::generic::{kids, line, prefix, text};
 use crate::refs::{bound_name, is_call_kind, path_of, MEMBER_FIELDS, UNKNOWN};
 
 /// Member-access shapes: `a.b`, `a::b`, `a->b`.
@@ -266,7 +266,7 @@ pub fn holds_container(node: Node, src: &[u8]) -> bool {
     }
     parts.iter().any(|p| {
         let t = text(*p, src);
-        re.is_match(&t[..t.len().min(200)])
+        re.is_match(prefix(&t, 200))
     })
 }
 
