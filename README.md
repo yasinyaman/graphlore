@@ -91,6 +91,10 @@ graphlore_impact("Response", hops=1)
 A misspelled name gets a suggestion, not a guess:
 `No node matching 'Clinet'. Did you mean: Client (httpx/_client.py:50)?`
 
+**Or look at it.** Every build also writes `graphify-out/graph.html`, one file
+that opens in any browser with no network: the communities first, then one
+community or one symbol's neighbourhood, with search and a details panel.
+
 ## Tools
 
 The server starts on the `lean` surface, 12 tools that cover the whole explore
