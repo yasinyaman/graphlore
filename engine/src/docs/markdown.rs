@@ -3,7 +3,8 @@
 
 use tree_sitter::{Node, Parser};
 
-use crate::facts::Heading;
+use super::{code_spans, mention};
+use crate::facts::{DocMention, Heading, MentionForm};
 use crate::generic::{kids, line, text};
 
 pub fn headings(src: &[u8]) -> Vec<Heading> {
@@ -52,4 +53,27 @@ fn setext(node: Node, src: &[u8]) -> Option<Heading> {
     let level = if ks.iter().any(|c| c.kind() == "setext_h1_underline") { 1 } else { 2 };
     let content = node.child_by_field_name("heading_content").or_else(|| ks.first().copied())?;
     heading(level, &text(content, src).replace('\n', " "), node)
+}
+
+/// The code spans of the document's text (paragraphs, headings, lists,
+/// tables): never what a fenced or indented code block holds, which the block
+/// grammar keeps out of its `inline` nodes.
+pub fn mentions(src: &[u8]) -> Vec<DocMention> {
+    let mut parser = Parser::new();
+    if parser.set_language(&tree_sitter_md::LANGUAGE.into()).is_err() {
+        return Vec::new();
+    }
+    let Some(tree) = parser.parse(src, None) else { return Vec::new() };
+    let mut out = Vec::new();
+    let mut stack = vec![tree.root_node()];
+    while let Some(node) = stack.pop() {
+        if node.kind() == "inline" {
+            for (raw, at) in code_spans(&text(node, src), line(node)) {
+                out.extend(mention(&raw, at, MentionForm::Literal, None));
+            }
+            continue;
+        }
+        stack.extend(kids(node).into_iter().rev());
+    }
+    out
 }

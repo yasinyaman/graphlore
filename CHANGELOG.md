@@ -7,6 +7,9 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Fixed
+- **graph.html printed "null" under a node's name** in its details panel, for
+  every node without a finding badge: the panel handed the missing badge row to
+  `append()`, which writes `null` as text. Parts left out are dropped now.
 - **`graphlore_unreferenced` no longer grows faster than the graph.** On
   Django's graph (70,195 nodes) it ran for over 15 minutes and did not finish;
   it now answers in 9 s (`limit=200`, spans parsed cold), and in 1.2 s instead
@@ -29,8 +32,8 @@ All notable changes to this project are documented here. The format is based on
   UTF-8 character — a curly quote, an emoji. Found by building the graph of
   Django, where it killed the whole build (`src/state.rs:269 ... is not a char
   boundary; it is inside '”'`). A new `generic::prefix` cuts back to a char
-  boundary; both sites use it. The engine release to publish is **0.5.78**, not
-  0.5.77.
+  boundary; both sites use it. The engine release to publish is **0.5.79**
+  (this fix and the `documents` edges under Added), not 0.5.77.
 
 ### Deprecated
 - **graphify as graphlore's extractor**, going in the next release with what
@@ -99,6 +102,37 @@ All notable changes to this project are documented here. The format is based on
   pairs to 68.
 
 ### Added
+- **Documents link to the code they name** (native engine 0.5.79, schema 7).
+  A name of code a document writes — a Markdown code span, a reStructuredText
+  object role (`:class:`, `:meth:`, `:func:` …), inline literal or object
+  directive (`.. class::`, `.. autofunction::`; a method directive is named
+  under its class, a name under `.. currentmodule::` is tried in that module
+  first) — is a `documents` edge from the heading it is written under to the
+  one definition the name means: its last segments end the definition's
+  qualified name and the ones before them are a run of its module path. No
+  edge when several definitions answer, for test code, for a module or package
+  path, for a code span of one plain word, or from a bare code span to a
+  variable or field. 12,278 edges on Django, 263 on httpx; a sample of 30 of
+  Django's read right but for one, which the variable rule then removed.
+  Before, a document's only edges were the `contains` between its headings.
+  - `documents` is in the new `graph._DOCUMENT_RELATIONS`, part of
+    `_NON_DEPENDENCY_RELATIONS`: cycles, surprises, layers and
+    `graphlore_unreferenced` (same answers on httpx and Django) leave it out,
+    and the engine's community detection skips it, so communities stay where
+    they were. `graphlore_impact` walks it: the pages that describe a
+    definition are what a change to it may need to update.
+  - The build reply says `documents: N headings, M links …`.
+- **Sphinx documentation written in `.txt` files is read.** A `.txt` file is
+  reStructuredText under a `conf.py` whose `source_suffix` names `.txt`
+  (`requirements*.txt`, `robots.txt` aside). Django's graph went from 8
+  documents to 689, and 14 headings to 6,904.
+- **graph.html: a `documents` relation group, and document outlines always
+  drawn.** The group has its own colour and filter. A document's page and
+  headings are joined by `contains`, which is in the structure group that is
+  off by default (it would draw a star around every source file): a community
+  of headings read "42 nodes · 0 links". Containment between two document
+  nodes (flag 8 in the page data, `file_type: document`) is now drawn whatever
+  the structure filter says.
 - **`graph.html` shows what graphlore's tools find, not only the graph.**
   - *Findings* (`G`, `#f=`): the cycles `graphlore_cycles` reports (runtime
     import cycles first), the shared state and surprising links of

@@ -405,10 +405,16 @@ _CONTAINMENT_RELATIONS = frozenset({"contains", "method", "defines", "case_of"})
 # state to the one that writes it. Derived from the `reads` / `writes` edges,
 # which stay in the graph, so it is never counted as a dependency of its own.
 _COUPLING_RELATIONS = frozenset({"couples_with"})
+# A document naming code (the native engine, schema 7 on): `documents` from the
+# heading a Markdown or reStructuredText document names it under to the one
+# definition the name means. The document describes the code; it is no part of it.
+_DOCUMENT_RELATIONS = frozenset({"documents"})
 # Edges that say nothing about one piece of code depending on another: structural
-# containment, a docstring/comment node pointing at the code it describes, and
-# the pairs derived from shared state.
-_NON_DEPENDENCY_RELATIONS = _CONTAINMENT_RELATIONS | {"rationale_for"} | _COUPLING_RELATIONS
+# containment, a docstring/comment node or a document pointing at the code it
+# describes, and the pairs derived from shared state.
+_NON_DEPENDENCY_RELATIONS = (
+    _CONTAINMENT_RELATIONS | {"rationale_for"} | _DOCUMENT_RELATIONS | _COUPLING_RELATIONS
+)
 # A definition reading or writing a variable, a field, a constant or a resource
 # (the native engine). Two definitions touching one such node affect each other
 # without either calling the other: shared state.

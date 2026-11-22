@@ -4719,7 +4719,8 @@ def test_the_viewer_reads_a_raw_graph_as_python_does():
         assert all(server.viz.relation_group(r) == group for r in rels), group
     every = (server._CONTAINMENT_RELATIONS | server._IMPORT_RELATIONS | server._CALL_RELATIONS
              | server._STATE_RELATIONS | server._COUPLING_RELATIONS | server._HTTP_RELATIONS
-             | server.viz._INHERITANCE | {"dispatches_to", "references"})
+             | server.viz._INHERITANCE | server._DOCUMENT_RELATIONS
+             | {"dispatches_to", "references"})
     assert set().union(*map(set, got["groups"].values())) == every
     # and it walks impact as graphlore_impact does by default
     assert set(got["never"]) == set(server._IMPACT_SKIPPED_RELATIONS)

@@ -41,7 +41,7 @@ pub use report::BuildReport;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Bumped when graph.json changes in a way graphlore's readers must know about.
-pub const SCHEMA_VERSION: u32 = 6;
+pub const SCHEMA_VERSION: u32 = 7;
 pub const DEFAULT_MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
 pub const DEFAULT_PARSE_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -352,6 +352,9 @@ pub fn build_graph(opts: &BuildOptions) -> Result<(Value, BuildReport), String> 
     lap("resolve", &mut phases);
     assembled.nodes.extend(ext_nodes);
     assembled.links.extend(edges);
+    let documented = docs::link::edges(&facts, &assembled);
+    report.doc_links = documented.len();
+    assembled.links.extend(documented);
     let (coupled, coupling) = coupling::detect(&mut assembled.nodes, &assembled.links);
     assembled.links.extend(coupled);
     report.coupling = coupling;

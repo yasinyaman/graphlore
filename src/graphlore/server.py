@@ -136,6 +136,7 @@ from .graph import (  # noqa: F401  (re-exported for the tools + tests)
     _CHARS_PER_TOKEN,
     _CONTAINMENT_RELATIONS,
     _COUPLING_RELATIONS,
+    _DOCUMENT_RELATIONS,
     _GRAPH_CACHE,
     _HTTP_RELATIONS,
     _IMPORT_RELATIONS,
@@ -3552,7 +3553,9 @@ IMPACT_RELATION_PRESETS: dict[str, frozenset[str] | None] = {
 # seed so a class's own members stay reachable when containment is filtered out.
 _IMPACT_MEMBER_RELATIONS = _CONTAINMENT_RELATIONS
 # Never a dependency in either direction: a docstring / rationale node pointing
-# at the code it describes. Left out of the walk unless asked for by name.
+# at the code it describes. Left out of the walk unless asked for by name. (A
+# document's `documents` edge is walked: the pages that describe a definition
+# are part of what changing it touches.)
 _IMPACT_SKIPPED_RELATIONS = frozenset({"rationale_for"})
 
 
@@ -3621,6 +3624,8 @@ def graphlore_impact(
     Docstring / rationale nodes (relation ``rationale_for``) describe code, they do
     not depend on it: they are left out of the blast radius and counted in
     ``rationale_nodes_skipped``. Name the relation in ``relations`` to walk them.
+    The document headings that name a definition (``documents``, the native
+    engine) are walked: they are the pages a change to it may need to update.
 
     Shared state (``reads`` / ``writes`` of a variable, field, constant or
     resource, from the native engine) is not walked by default, so a call graph

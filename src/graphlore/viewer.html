@@ -186,7 +186,7 @@ kbd { border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4p
 // raw graph.json, so this page opens any graph without graphlore. The two must
 // give the same answer: tests/test_tools.py runs this block under node against
 // viz.page_data. Schema tolerance follows graph.py's accessors.
-const GROUPS = ["structure", "imports", "calls", "inheritance", "references", "state", "http", "other"];
+const GROUPS = ["structure", "imports", "calls", "inheritance", "references", "state", "http", "documents", "other"];
 const RELATION_GROUPS = {
   structure: ["contains", "method", "defines", "case_of"],
   imports: ["imports", "imports_from", "dynamic_import", "re_exports", "requires"],
@@ -195,6 +195,7 @@ const RELATION_GROUPS = {
   references: ["references"],
   state: ["reads", "writes", "couples_with"],
   http: ["handles", "http_calls"],
+  documents: ["documents"],
 };
 // how the impact view walks a relation: viz.impact_walk (graphlore_impact's skip sets)
 const IMPACT_NEVER = ["rationale_for"];
@@ -307,7 +308,8 @@ function compact(graph, names) {
     }
     const kind = kindOf(n);
     if (!kinds.has(kind)) kinds.set(kind, kinds.size);
-    const flags = (n.test === true || isTestPath(nodeFile(n)) ? 1 : 0) | (outside(n) ? 2 : 0) | (isState(n) ? 4 : 0);
+    const flags = (n.test === true || isTestPath(nodeFile(n)) ? 1 : 0) | (outside(n) ? 2 : 0) | (isState(n) ? 4 : 0)
+      | (String(n.file_type || "").toLowerCase() === "document" ? 8 : 0);
     const line = String(nodeLine(n));
     const lang = text(n.language);
     rows.push([nodeId(n), nodeLabel(n), nodeFile(n), /^\d+$/.test(line) ? parseInt(line, 10) : 0,
@@ -376,6 +378,7 @@ let idIndex = new Map(), commIndex = new Map();
 const nId = i => D.nodes[i][0], nLabel = i => D.nodes[i][1], nFile = i => D.nodes[i][2];
 const nLine = i => D.nodes[i][3], nComm = i => D.nodes[i][4], nKind = i => D.kinds[D.nodes[i][5]];
 const nTest = i => (D.nodes[i][6] & 1) !== 0, nExt = i => (D.nodes[i][6] & 2) !== 0;
+const nDoc = i => (D.nodes[i][6] & 8) !== 0;
 const nDeg = i => D.nodes[i][7], nEnd = i => D.nodes[i][8] || 0, nQual = i => D.nodes[i][9] || "";
 const nLang = i => (D.nodes[i][10] >= 0 ? D.langs[D.nodes[i][10]] : "");
 const nState = i => (D.nodes[i][6] & 4) !== 0;
@@ -390,7 +393,7 @@ const relName = r => D.rels[r][0], relGroup = r => D.rels[r][1];
 let A = null, resolvedFrom = Infinity, into = [], vendored = new Uint8Array(0);
 let routeOf = new Map(), couplingOf = new Map(), badges = new Map();
 const eRes = j => j >= resolvedFrom;    // an edge graphlore resolved from the source
-const GROUP_COLOURS = ["#9aa0a6", "#2f9e72", "#2f6fdf", "#b35ae0", "#d08a1c", "#d6455d", "#159fb3", "#7c8591"];
+const GROUP_COLOURS = ["#9aa0a6", "#2f9e72", "#2f6fdf", "#b35ae0", "#d08a1c", "#d6455d", "#159fb3", "#c0569b", "#7c8591"];
 const groupColour = g => GROUP_COLOURS[g % GROUP_COLOURS.length];
 const site = i => nFile(i) ? nFile(i) + (nLine(i) ? ":" + nLine(i) : "") : "";
 const narrow = () => window.matchMedia("(max-width: 760px)").matches;
@@ -400,7 +403,12 @@ const show = { tests: true, ext: false, vend: false, groups: GROUPS.map(g => g !
 // containment links every definition to its file: on by default it would draw
 // a star around each file and hide everything else
 const nodeShown = i => (show.tests || !nTest(i)) && (show.ext || !nExt(i)) && (show.vend || !vendored[i]);
-const edgeShown = j => show.groups[relGroup(eR(j))] && nodeShown(eS(j)) && nodeShown(eT(j));
+// a document's outline (its file and headings, joined by containment) is drawn
+// whatever the structure filter says: it is the only thing that links them
+const STRUCTURE = GROUPS.indexOf("structure");
+const edgeShown = j => (show.groups[relGroup(eR(j))]
+    || (relGroup(eR(j)) === STRUCTURE && nDoc(eS(j)) && nDoc(eT(j))))
+  && nodeShown(eS(j)) && nodeShown(eT(j));
 
 // --- colours ---------------------------------------------------------------
 const hue = k => (k * 137.508) % 360;
@@ -1183,13 +1191,16 @@ function renderSide() {
   const det = document.getElementById("details");
   det.replaceChildren();
   const sel = selected >= 0 && view ? view.items[selected] : null;
-  if (sel && sel.node !== undefined && !(view.kind === "impact" && sel.node === view.centre)) det.append(...nodeDetails(sel.node));
-  else if (view && view.kind === "impact") det.append(...impactDetails(view));
-  else if (view && view.finding) det.append(...findingDetails(view.finding));
-  else if (view && view.kind === "findings") det.append(...findingsDetails(view.findings));
-  else if (view && view.kind === "community") det.append(...communityDetails(view.comm));
-  else if (view && view.kind === "overview") det.append(...overviewDetails());
-  else if (view && view.kind === "all") det.append(...findingsSummary());
+  let parts = [];
+  if (sel && sel.node !== undefined && !(view.kind === "impact" && sel.node === view.centre)) parts = nodeDetails(sel.node);
+  else if (view && view.kind === "impact") parts = impactDetails(view);
+  else if (view && view.finding) parts = findingDetails(view.finding);
+  else if (view && view.kind === "findings") parts = findingsDetails(view.findings);
+  else if (view && view.kind === "community") parts = communityDetails(view.comm);
+  else if (view && view.kind === "overview") parts = overviewDetails();
+  else if (view && view.kind === "all") parts = findingsSummary();
+  // a part left out is null: append() would print it as the text "null"
+  det.append(...parts.filter(x => x !== null && x !== undefined));
 }
 
 function nodeDetails(i) {
