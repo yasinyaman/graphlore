@@ -4669,6 +4669,19 @@ def test_the_viewer_without_data_asks_for_a_file():
     assert "/*__GRAPHLORE_DATA__*/" not in rendered and 'id="open"' in rendered
 
 
+def test_the_viewer_keeps_its_view_in_the_link_and_hands_nodes_to_the_assistant():
+    page = server.viz.TEMPLATE.read_text(encoding="utf-8")
+    # the #fragment names the view, so a link opens it again and Back works
+    assert 'addEventListener("hashchange"' in page and '"#n=" + encodeURIComponent' in page
+    # what the page found goes to the assistant as a call it can make
+    for call in ("graphlore_explain(", "graphlore_fetch([", "graphlore_impact(",
+                 "graphlore_skeleton(community="):
+        assert call in page, call
+    assert 'id="help"' in page and "pointerdown" in page and "max-width: 760px" in page
+    # copied ids are quoted by JSON.stringify, never pasted raw into the call
+    assert "graphlore_explain(${JSON.stringify(id)})" in page
+
+
 def test_graph_html_follows_the_names_and_the_graph(tmp_path, monkeypatch):
     out = tmp_path / "graphify-out"
     out.mkdir()

@@ -97,7 +97,9 @@ community or one symbol's neighbourhood, with search and a details panel. The
 same page opens any graph.json, graphlore's or Graphify's, without graphlore
 installed: [the viewer on GitHub Pages](https://yasinyaman.github.io/graphlore/viewer/)
 reads the file you drop in your browser and uploads nothing
-([demo](https://yasinyaman.github.io/graphlore/viewer/demo.html)).
+([demo](https://yasinyaman.github.io/graphlore/viewer/demo.html)). A node's page copies
+the `graphlore_explain` / `graphlore_fetch` call for it, so what you find there goes
+straight to the assistant, and the address bar keeps the view, so a link opens it again.
 
 ## Tools
 
