@@ -1924,8 +1924,37 @@ def _write_viz(gp: Path) -> str:
     analysis, note = (None, "") if len(nodes) > viz.MAX_NODES else _viz_analysis(gp)
     written = viz.write(graph, gp.with_name("graph.html"),
                         f"{gp.parent.parent.name} — graphlore", _read_labels(gp.parent),
-                        analysis)
+                        analysis, _viz_source(gp.parent.parent, graph))
     return f"{written} {note}" if note and written.startswith("graph.html written") else written
+
+
+def _git_out(cwd: Path, *args: str) -> str:
+    """A local git command's output, "" when git, the repository or the answer is
+    missing. Reads only: no fetch, nothing that reaches the network."""
+    try:
+        proc = subprocess.run(["git", "-C", str(cwd), *args], capture_output=True,
+                              text=True, timeout=5, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return proc.stdout.strip() if proc.returncode == 0 else ""
+
+
+def _viz_source(project: Path, graph: dict) -> dict[str, str] | None:
+    """Where graph.html opens a node's lines: the repository's remote on its web
+    host, at the commit the graph was built from (else HEAD), so the lines match.
+    None when the folder is no git repository or its remote is no host the page
+    links to (``viz.source_of_remote``)."""
+    remotes = _git_out(project, "remote").split()
+    if not remotes:
+        return None
+    name = next((r for r in ("origin", "upstream") if r in remotes), remotes[0])
+    url = _git_out(project, "config", "--get", f"remote.{name}.url")
+    header = graph.get("graph")
+    commit = str(graph.get("built_at_commit")
+                 or (header.get("built_at_commit") if isinstance(header, dict) else "") or "")
+    if not re.fullmatch(r"[0-9a-f]{7,40}", commit):
+        commit = _git_out(project, "rev-parse", "HEAD")
+    return viz.source_of_remote(url, commit, _git_out(project, "rev-parse", "--show-prefix"))
 
 
 # The findings graph.html shows, worked out once per graph.json (path, mtime):

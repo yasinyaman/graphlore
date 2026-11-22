@@ -102,6 +102,15 @@ All notable changes to this project are documented here. The format is based on
   pairs to 68.
 
 ### Added
+- **graph.html opens a node's lines on GitHub.** A node's panel has an
+  *On GitHub ↗* link (GitLab and Bitbucket alike) to its `start..end` lines at
+  the commit the graph was built from (HEAD when the graph names none), in a
+  new tab: GitHub refuses to sit in a frame (`X-Frame-Options: deny`), and the
+  page keeps making no request of its own. The repository comes from the
+  folder's `git remote` (`origin`, else `upstream`, else the first), read
+  locally; only the host and the repository's path reach the page, never a
+  user name, token or port, and a host it has no link form for gets no link.
+  A Markdown or reST page opens with `?plain=1`, so its line anchors work.
 - **Documents link to the code they name** (native engine 0.5.79, schema 7).
   A name of code a document writes — a Markdown code span, a reStructuredText
   object role (`:class:`, `:meth:`, `:func:` …), inline literal or object
