@@ -1,6 +1,6 @@
 {
- "passed": 644,
- "total": 644,
+ "passed": 660,
+ "total": 660,
  "cases": [
   {
    "id": "python/module-function",
@@ -3862,6 +3862,102 @@
   },
   {
    "id": "cpp/inline-namespace",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "python/class-scope-not-in-methods",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "python/bound-later-is-local",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "python/global-statement",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "python/star-import-respects-all",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "python/star-import-skips-underscore",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "python/lambda-parameter-hides",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "python/pep695-type-parameter",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "python/class-attribute-through-self",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "php/class-name-has-no-global-fallback",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "php/trait-insteadof",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "php/trait-before-inherited",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "ruby/last-include-first",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "ruby/class-before-included-module",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "ruby/lexical-constant-before-ancestor",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "ruby/block-parameter-hides-a-method",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "ruby/local-only-after-assignment",
    "ok": true,
    "missing": [],
    "unwanted": []

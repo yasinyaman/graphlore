@@ -305,10 +305,16 @@ pub fn path_of(n: Node, src: &[u8]) -> Option<Vec<String>> {
         "qualified_name" => {
             // PHP: prefix namespace_name + name; C# has qualifier/name fields
             let mut p = Vec::new();
+            // (PHP `\Name`: the global namespace, written `\`)
+            if crate::parse::current() == Some(crate::lang::Lang::Php)
+                && text(n, src).trim_start().starts_with('\\')
+            {
+                p.push("\\".to_string());
+            }
             for c in kids(n) {
                 p.extend(path_of(c, src)?);
             }
-            (!p.is_empty()).then_some(p)
+            (p.len() > usize::from(p.first().is_some_and(|h| h == "\\"))).then_some(p)
         }
         "generic_type" | "generic_name" | "parameterized_type" | "template_type" => n
             .child_by_field_name("name")
@@ -1528,6 +1534,35 @@ fn type_params(n: Node, src: &[u8]) -> Vec<String> {
 fn type_params_bounds(n: Node, src: &[u8]) -> (Vec<String>, Vec<Option<Vec<String>>>) {
     let mut names: Vec<String> = Vec::new();
     let mut bounds: Vec<Option<Vec<String>>> = Vec::new();
+    // Python 3.12 `def f[T: Base](…)`, `class C[U]` (PEP 695): one
+    // `type_parameter` whose `type`s are the parameters, a bound written
+    // `T: Base` (a `constrained_type`)
+    if let Some(list) =
+        n.child_by_field_name("type_parameters").filter(|l| l.kind() == "type_parameter")
+    {
+        for t in kids(list).into_iter().filter(|c| c.kind() == "type") {
+            let inner = kids(t);
+            match inner.first() {
+                Some(c) if c.kind() == "identifier" => {
+                    names.push(text(*c, src));
+                    bounds.push(None);
+                }
+                Some(c) if c.kind() == "constrained_type" => {
+                    let parts: Vec<Node> =
+                        kids(*c).into_iter().filter(|x| x.kind() == "type").collect();
+                    if let Some(name) = parts
+                        .first()
+                        .and_then(|p| kids(*p).into_iter().find(|x| x.kind() == "identifier"))
+                    {
+                        names.push(text(name, src));
+                        bounds.push(parts.get(1).and_then(|b| bound_path(&text(*b, src))));
+                    }
+                }
+                _ => {}
+            }
+        }
+        return (names, bounds);
+    }
     let lists = kids(n)
         .into_iter()
         .filter(|c| matches!(c.kind(), "type_parameters" | "type_parameter_list"));
@@ -2874,6 +2909,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
     let mut invoked: HashMap<usize, (String, usize)> = HashMap::new();
     // where a declaration whose value is a function starts
     let mut function_decls: std::collections::HashSet<usize> = std::collections::HashSet::new();
+    let mut outer_names: Vec<(usize, String)> = Vec::new();
     // every closure: (start, end, first line, last line, node id)
     let mut blocks: Vec<(usize, usize, u32, u32, usize)> = Vec::new();
     // lambdas with a receiver: (start, end, where the receiver comes from)
@@ -4341,6 +4377,13 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                 }
             }
         }
+        // Python `global x` / `nonlocal x`: an assignment to x in the function
+        // binds the module's (or the enclosing function's) name, no local
+        if matches!(n.kind(), "global_statement" | "nonlocal_statement") {
+            for c in kids(n).into_iter().filter(|c| c.kind() == "identifier") {
+                outer_names.push((n.start_byte(), text(c, src)));
+            }
+        }
         // C++ `inline namespace v2 { … }`
         if n.kind() == "namespace_definition" && kids(n).iter().any(|c| c.kind() == "inline")
             || (n.kind() == "namespace_definition"
@@ -4532,6 +4575,15 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                         && d.parent == l.from_def
                 })
         });
+    }
+    // (`global counter` in a function: `counter = …` there is the module's)
+    if !outer_names.is_empty() {
+        let bytes: Vec<usize> = outer_names.iter().map(|(b, _)| *b).collect();
+        let named: Vec<(Option<usize>, String)> = homes(&facts.defs, &bytes)
+            .into_iter()
+            .zip(outer_names.iter().map(|(_, n)| n.clone()))
+            .collect();
+        locals.retain(|l| l.field || !named.iter().any(|(d, n)| *d == l.from_def && *n == l.name));
     }
     // one per (definition, name, field): a declared type over a guessed one
     locals.retain(|l| !matches!(l.path.as_slice(), [t] if t == "var" || t == "auto" || t == "let"));

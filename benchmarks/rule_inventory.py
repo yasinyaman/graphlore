@@ -474,6 +474,52 @@ INVENTORY: dict[str, list[tuple[str, str, dict]]] = {
         ("preprocessor", "macros and conditional compilation",
          not_followed("macros are not expanded; `#if` branches that agree are blanked to one (parse::blank_duplicate_branches)")),
     ],
+    "python": [
+        # Doc/reference/executionmodel.rst 4.2 'Naming and binding'; Python/symtable.c
+        ("4.2.2; symtable analyze_name", "a name bound in a block is local to all of it", held("python/local-hides-global", "python/bound-later-is-local")),
+        ("4.2.2", "free names: the enclosing functions, then the module, then builtins", held("python/enclosing-scope", "python/module-function")),
+        ("4.2.2", "a class body's names are no names of its methods", held("python/class-scope-not-in-methods", "python/class-body-call")),
+        ("4.2.2; symtable DEF_GLOBAL / DEF_NONLOCAL", "`global` / `nonlocal` make an assignment bind the outer name", held("python/global-statement")),
+        ("4.2.1", "a lambda's and a comprehension's names are their own", held("python/lambda-parameter-hides", "python/comprehension")),
+        ("4.2.2 'Annotation scopes'", "PEP 695 type parameters", held("python/pep695-type-parameter")),
+        ("7.11 'The import statement'", "`import a.b`, `from m import f as g`, relative imports", held("python/from-import", "python/import-alias", "python/relative-import", "python/module-attribute", "python/module-alias", "python/submodule-import")),
+        ("7.11", "`from m import *`: `__all__`, else the names without `_`", held("python/star-import", "python/star-import-respects-all", "python/star-import-skips-underscore")),
+        ("7.11", "an import inside a function binds there", held("python/function-local-import")),
+        ("5.4 packages", "a name a package's `__init__` imports is the package's", held("python/package-reexport")),
+        ("3.3.2 / MRO", "attributes through the C3 method resolution order", held("python/inherited-method", "python/mro-first-base", "python/mro-second-base", "python/super")),
+        ("3.2 'Custom classes'", "an instance attribute, else the class's", held("python/self-method", "python/class-attribute-through-self", "python/attribute-assigned-in-init")),
+        ("descriptors", "`@property`, `@classmethod`, `@staticmethod`", held("python/property", "python/classmethod-via-class", "python/staticmethod-via-self")),
+        ("typing (PEP 484)", "annotations type parameters, results and attributes", held("python/annotated-parameter", "python/return-annotation", "python/class-attribute-annotation")),
+        ("runtime", "`getattr`, `__getattr__`, monkey-patching, `exec`", not_followed("no static answer")),
+    ],
+    "php": [
+        # php/php-langspec spec/18-namespaces.md, 14-classes.md, 16-traits.md
+        ("18-namespaces 'Name Lookup'", "`use` imports, aliases, groups, `use function`", held("php/use", "php/use-alias", "php/group-use", "php/use-function")),
+        ("18-namespaces 'Name Lookup'", "`\\N\\C` fully qualified, `Sub\\C` relative", held("php/fully-qualified", "php/qualified-relative", "php/global-class-is-not-a-namespaced-one")),
+        ("18-namespaces 'Name Lookup'", "an unqualified class is the current namespace's: no fallback", held("php/same-namespace", "php/class-name-has-no-global-fallback")),
+        ("18-namespaces 'Name Lookup'", "an unqualified function: the namespace's, else the global one", held("php/namespaced-function", "php/function-fallback")),
+        ("14-classes", "`$this`, `self::`, `static::`, `parent::`", held("php/this", "php/self-static", "php/parent", "php/parent-constructor", "php/static-return")),
+        ("14-classes", "members through the parent class and interfaces", held("php/inherited", "php/interface-typed", "php/abstract-method")),
+        ("16-traits", "a trait's methods; the class's own over the trait's over the parent's", held("php/trait", "php/trait-before-inherited")),
+        ("16-traits", "`insteadof` and `as` resolve trait conflicts", held("php/trait-insteadof")),
+        ("14-classes", "typed properties, promoted parameters, return types", held("php/typed-property", "php/constructor-promotion", "php/return-type", "php/nullable-parameter")),
+        ("10-expressions", "`new`, `::class`, `instanceof`, `?->`, closures", held("php/new", "php/class-constant-fetch", "php/instanceof-and-catch", "php/nullsafe", "php/closure-use", "php/closure-signature")),
+        ("07-variables", "a variable is the function's: no outer variable without `global`", not_followed("variables name no definition of the graph")),
+        ("runtime", "variable functions and methods (`$f()`, `$o->$m()`), `__call`", not_followed("no static answer; `[$this, 'm']` is read")),
+    ],
+    "ruby": [
+        # Ruby documentation; ruby/ruby class.c, vm_insnhelper.c
+        ("doc 'Assignment'", "a local exists from its first assignment on; before it a bare name is a call", held("ruby/local-only-after-assignment", "ruby/local-hides-method", "ruby/implicit-self")),
+        ("doc 'Blocks'", "a block's parameters are its own", held("ruby/block-parameter-hides-a-method", "ruby/block-body")),
+        ("class.c Module#ancestors", "the class, its modules from the last included, then the superclass", held("ruby/class-before-included-module", "ruby/last-include-first", "ruby/include", "ruby/superclass")),
+        ("class.c rb_prepend_module", "a prepended module before the class", held("ruby/prepend")),
+        ("class.c", "`extend`, `def self.m`, `class << self`, `module_function`", held("ruby/extend", "ruby/class-method", "ruby/singleton-class", "ruby/module-function")),
+        ("vm_insnhelper.c vm_get_ev_const", "a constant: the lexical nesting, then the ancestors, then the top level", held("ruby/lexical-constant", "ruby/lexical-constant-before-ancestor", "ruby/nested-constant")),
+        ("doc 'Modules and Classes'", "a class reopened in another file is one class", held("ruby/reopened-class")),
+        ("doc 'Calling Methods'", "`super`, `&.`, predicate names, private calls", held("ruby/super", "ruby/super-with-arguments", "ruby/safe-navigation", "ruby/predicate-name", "ruby/private-method")),
+        ("Kernel#require", "a required file's names", held("ruby/top-level-method", "ruby/include-across-files")),
+        ("runtime", "`method_missing`, `define_method`, `send`, refinements", not_followed("no static answer")),
+    ],
 }
 
 

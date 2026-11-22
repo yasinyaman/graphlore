@@ -426,6 +426,18 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- **Native engine 0.5.73: Python's, PHP's and Ruby's rules, read from their
+  references** (phase 2 of `docs/rule-sources.md`; 19 cases): Python
+  `global` / `nonlocal` make an assignment bind the outer name, and PEP 695
+  type parameters hide a class of their name; Ruby looks members up in the
+  class, its modules from the last included, then the superclass, a local
+  only exists from its first assignment, and a constant is looked up
+  lexically before the ancestors; a PHP trait's methods come before the
+  parent's, a class name does not fall back to the global namespace, and
+  `\Name` is the global one (128 of guzzle's `\InvalidArgumentException`
+  references no longer name its own class of that name).
+  `benchmarks/rule_inventory.py` covers Python (15 rules, 14 held), PHP
+  (12, 10) and Ruby (10, 9).
 - **Native engine 0.5.71: Swift's, C's and C++'s rules, read from their
   compilers** (phase 2 of `docs/rule-sources.md`; 19 cases): overloads are
   of one scope (a local function's are its own; `::f` and `ns::f` are not

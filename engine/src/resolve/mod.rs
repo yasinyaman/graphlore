@@ -2717,6 +2717,23 @@ impl<'a> Project<'a> {
     }
 
     /// Where the first local of the name is declared in the definition.
+    /// Ruby: whether every local `name` of the definitions around is first
+    /// assigned after `byte` (a use there is no use of the local).
+    fn ruby_local_starts_after(&self, f: usize, d: Option<usize>, name: &str, byte: usize) -> bool {
+        if self.files[f].lang != Some(crate::lang::Lang::Ruby) {
+            return false;
+        }
+        let defs = &self.files[f].defs;
+        let mut cur = d;
+        while let Some(x) = cur {
+            if let Some(&li) = self.locals.get(&(f, x, name.to_string())) {
+                return self.first_declared(f, x, name, li) > byte;
+            }
+            cur = defs[x].parent;
+        }
+        false
+    }
+
     fn first_declared(&self, f: usize, x: usize, name: &str, li: usize) -> usize {
         match self.shadows.get(&(f, x, name.to_string())) {
             Some(all) => self.files[f].locals[all[0]].byte,
@@ -3557,7 +3574,17 @@ impl<'a> Project<'a> {
         while let Some(x) = cur {
             if let Some(&li) = self.locals.get(&(f, x, name.to_string())) {
                 let l = &self.files[f].locals[li];
-                let head = l.path.first().map(String::as_str).unwrap_or("");
+                // (PHP `new \\ReflectionProperty(…)`: the global namespace's
+                // `\\` is no part of the name)
+                let start = usize::from(l.path.first().is_some_and(|h| h == "\\"));
+                let head = l.path.get(start).map(String::as_str).unwrap_or("");
+                if start == 1 {
+                    return head.chars().next().is_some_and(|c| c.is_uppercase())
+                        && matches!(
+                            self.resolve_path(f, Some(x), &l.path[..2], true),
+                            Some((Target::Ext(..), _)) | None
+                        );
+                }
                 return head.chars().next().is_some_and(|c| c.is_uppercase())
                     && !self.by_name.contains_key(head)
                     && !self.is_local_name(f, Some(x), head)
@@ -3653,9 +3680,10 @@ impl<'a> Project<'a> {
                 // (a use written before the local is declared is no use of
                 // it: `stream(…)` above `val stream = response.body()`)
                 // (where a declaration is what makes a local: an assignment
-                // can be one of several, a comprehension binds after its use)
-                let declares =
-                    !matches!(self.family[f], Some(Family::Python | Family::Ruby | Family::Php));
+                // can be one of several, a comprehension binds after its use;
+                // in Ruby the first assignment the parser meets makes the
+                // local, so a use above it is a method call)
+                let declares = !matches!(self.family[f], Some(Family::Python | Family::Php));
                 let first = self.first_declared(f, x, name, li);
                 let before =
                     declares && (*self.site.borrow()).is_some_and(|(sf, at)| sf == f && at < first);
@@ -4158,7 +4186,7 @@ impl<'a> Project<'a> {
 
     /// The bases one declaration of a type writes.
     fn written_bases(&self, c: DefRef) -> Vec<DefRef> {
-        let mut out = Vec::new();
+        let mut out: Vec<(DefRef, RefKind)> = Vec::new();
         let f = &self.files[c.0];
         let cname = &self.def(c).name;
         for r in &f.refs {
@@ -4178,15 +4206,31 @@ impl<'a> Project<'a> {
             let outer = self.def(c).parent;
             if let Some((Target::Def(b), _)) = self.resolve_path(c.0, outer, &r.path, true) {
                 if b != c {
-                    out.push(b);
+                    out.push((b, r.kind));
                 } else if let Some(other) = self.namesake(c) {
                     // C# `RestResponse<T> : RestResponse`: the base is the
                     // other type of the name, not the class itself
-                    out.push(other);
+                    out.push((other, r.kind));
                 }
             }
         }
-        out
+        // the order members are looked up in: Ruby's ancestors are the class,
+        // its modules from the last included, then the superclass
+        // (`include_modules_at`); a PHP trait's methods come before the
+        // parent class's (spec 16-traits.md)
+        match self.files[c.0].lang {
+            Some(crate::lang::Lang::Ruby) => {
+                let (mixed, rest): (Vec<_>, Vec<_>) =
+                    out.into_iter().partition(|(_, k)| *k == RefKind::MixesIn);
+                mixed.into_iter().rev().chain(rest).map(|(b, _)| b).collect()
+            }
+            Some(crate::lang::Lang::Php) => {
+                let (mixed, rest): (Vec<_>, Vec<_>) =
+                    out.into_iter().partition(|(_, k)| *k == RefKind::MixesIn);
+                mixed.into_iter().chain(rest).map(|(b, _)| b).collect()
+            }
+            _ => out.into_iter().map(|(b, _)| b).collect(),
+        }
     }
 
     /// A member of a type, through its bases.
@@ -4615,7 +4659,12 @@ impl<'a> Project<'a> {
                     }
                 }
             }
-            if fam.implicit_this() && defs[x].kind.is_class_like() {
+            // (Ruby: a constant is looked up in the lexical nesting first, and
+            // only then in the ancestors of the innermost class, the
+            // `class_of` lookup below: vm_get_ev_const)
+            let ruby_constant =
+                fam == Family::Ruby && name.chars().next().is_some_and(char::is_uppercase);
+            if fam.implicit_this() && defs[x].kind.is_class_like() && !ruby_constant {
                 if let Some(m) = self.class_member((f, x), name, 4) {
                     if self.acceptable(&Target::Def(m)) {
                         return Some(Target::Def(m));
@@ -5125,6 +5174,50 @@ impl<'a> Project<'a> {
             if let Some(r) = self.rust_namespace_pick(f, d, head, called) {
                 return self.walk(Target::Def(r), rest, Confidence::Extracted);
             }
+        }
+        // PHP `\\App\\Models\\User`, `\\DateTimeImmutable`: fully qualified, from
+        // the global namespace (spec 18-namespaces.md)
+        if fam == Family::Php && head == "\\" {
+            for k in (1..=rest.len()).rev() {
+                let key = rest[..k].join(".");
+                let found = self
+                    .fqn
+                    .get(&key)
+                    .into_iter()
+                    .flatten()
+                    .copied()
+                    .filter(|r| self.family[r.0] == Some(Family::Php));
+                if let Some(r) = self.best(found) {
+                    return self.walk(Target::Def(r), &rest[k..], Confidence::Extracted);
+                }
+            }
+            // (a function or class the project declares in the global
+            // namespace: a file with no `namespace`, nothing around it)
+            let (name, more) = rest.split_first()?;
+            let global: Vec<DefRef> = self
+                .by_name
+                .get(name)
+                .into_iter()
+                .flatten()
+                .copied()
+                .filter(|r| {
+                    // (`namespace { … }` is a block of the global namespace)
+                    let global_block = |p: usize| {
+                        let d = &self.files[r.0].defs[p];
+                        d.kind == DefKind::Namespace && d.name.trim().is_empty()
+                    };
+                    self.family[r.0] == Some(Family::Php)
+                        && match self.def(*r).parent {
+                            None => self.files[r.0].package.is_none(),
+                            Some(p) => global_block(p),
+                        }
+                })
+                .collect();
+            // (one the project does not declare is PHP's own or a library's,
+            // `\\ReflectionProperty`, `\\rewind`: it names nothing, as the same
+            // name written bare does)
+            let r = self.best(global)?;
+            return self.walk(Target::Def(r), more, Confidence::Extracted);
         }
         // C++ `::Helper()`: a name of the global namespace (no namespace
         // around), in the file or a file it includes ([namespace.qual])
@@ -6913,7 +7006,9 @@ impl<'a> Project<'a> {
         // where a method is not in scope by its bare name, a bare call is a
         // function's (PHP `\rewind($h)` beside a `rewind()` method, a Go
         // `h := func…` beside a method `h`)
-        let bare_is_no_method = r.path.len() == 1
+        // (PHP `\\rewind(…)`, fully qualified, is as bare: the global function)
+        let bare = r.path.len() == 1 || (r.path.len() == 2 && r.path[0] == "\\");
+        let bare_is_no_method = bare
             && !fam.implicit_this()
             && cd.parent.is_some_and(|p| self.def((c.0, p)).kind.is_class_like());
         // a `let` of another block of this file: the name here is a local of
@@ -7259,6 +7354,16 @@ impl<'a> Project<'a> {
                             || self.crate_of(r.0) == self.crate_of(f)
                             || self.imports_name(f, &path[0])
                     })
+                    // PHP: a global class is no name of a namespaced file
+                    // written bare (only functions and constants fall back)
+                    .filter(|r| {
+                        !(fam == Family::Php
+                            && k == 1
+                            && pre.is_empty()
+                            && self.files[f].package.is_some()
+                            && self.files[r.0].package.is_none()
+                            && self.def(*r).kind.is_class_like())
+                    })
                     // Ruby: a method at another file's top level is there
                     // only for the files that require it
                     .filter(|r| {
@@ -7377,7 +7482,13 @@ impl<'a> Project<'a> {
         }
         let theirs = &self.files[r.0].package;
         let nested = self.def(r).parent.is_some_and(|p| self.def((r.0, p)).kind.is_class_like());
-        (theirs.is_none() || *theirs == self.files[f].package) && !(nested && r.0 != f)
+        // (PHP: only a function or a constant falls back from a namespace to
+        // the global one; a class name does not, spec 18-namespaces.md)
+        let global_ok = theirs.is_none()
+            && !(self.family[f] == Some(Family::Php)
+                && self.files[f].package.is_some()
+                && self.def(r).kind.is_class_like());
+        (global_ok || *theirs == self.files[f].package) && !(nested && r.0 != f)
     }
 
     /// A bare name defined nowhere in reach: a project-wide unique function or
@@ -8274,9 +8385,12 @@ pub fn resolve(
                     || r.context == "implicit_call";
                 // a bare Ruby name that is a local is the local, not a call
                 // (typed or not: `s = stubs; s.match(x)` calls nothing at `s`)
+                // (only once the local exists: in Ruby the first assignment
+                // the parser meets makes it, so a use above it is a call)
                 if r.context == "implicit_call"
                     && r.path.len() == 1
                     && p.is_local_name(f, scope_def, &r.path[0])
+                    && !p.ruby_local_starts_after(f, scope_def, &r.path[0], r.byte)
                 {
                     continue;
                 }

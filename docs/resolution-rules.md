@@ -25,7 +25,7 @@ python benchmarks/conformance.py --baseline benchmarks/results-conformance.json 
 python benchmarks/conformance.py --markdown      # the tables below
 ```
 
-Measured 2026-11-21 with graphlore-engine 0.5.71: **644 of 644 rules hold**
+Measured 2026-11-21 with graphlore-engine 0.5.73: **660 of 660 rules hold**
 (356 of the first 406 with 0.5.45). Ten came from the Go type checker and
 rust-analyzer run on whole repositories; fifteen from the Kotlin and Swift
 compilers' tests (type checks, casts, `catch`, aliases); thirty-nine from two
@@ -104,7 +104,7 @@ Each change was measured on the 45 audit repositories as well, by reading
 the edges it added and removed at their source lines; the page on the
 [native engine](native-engine.md#the-rules-themselves) has the numbers.
 Every case has been compiled by its own language
-(`benchmarks/verify_cases.py`: 644 of 644 accepted). The Versions column is
+(`benchmarks/verify_cases.py`: 660 of 660 accepted). The Versions column is
 the oldest version of the language whose compiler accepts the case, where the
 compiler can be asked (`verify_cases.py --min-version`: Java, Kotlin, Scala,
 C#, Swift, C, C++); `all` is the oldest version asked, `–` a language with no
@@ -124,11 +124,11 @@ name to the engine, so the case names it `fetchAll`.
 
 ## The rules
 
-### python (38 of 38)
+### python (46 of 46)
 
 The Python Language Reference, 'Naming and binding' (4.2) and 'The import system'.
 
-Found by: the specification 36, a compiler 1, comparison 0, the grammar 1, the language's own tools 0. With the place it was read in the language's own tools: 0.
+Found by: the specification 36, a compiler 1, comparison 0, the grammar 1, the language's own tools 8. With the place it was read in the language's own tools: 8.
 
 | Rule | Case | Versions | Engine |
 |---|---|---|---|
@@ -170,6 +170,14 @@ Found by: the specification 36, a compiler 1, comparison 0, the grammar 1, the l
 | a base imported under another name is still the base | `inherited-from-aliased-import` | – | yes |
 | a function named as a value is a use of it | `function-named-as-value` | – | yes |
 | a member read through a typed parameter is the member of its type | `member-of-a-parameter` | – | yes |
+| a name bound in a class body is no name of its methods: a bare call is the module's | `class-scope-not-in-methods` | – | yes |
+| a name bound anywhere in a function is local to all of it, before the binding too | `bound-later-is-local` | – | yes |
+| `global x` makes an assignment in a function write the module's variable | `global-statement` | – | yes |
+| `from m import *` binds only the names of m's `__all__` | `star-import-respects-all` | – | yes |
+| `from m import *` without `__all__` binds no name that starts with `_` | `star-import-skips-underscore` | – | yes |
+| a lambda's parameter is a name of the lambda: it hides a function of its name there | `lambda-parameter-hides` | – | yes |
+| a type parameter (`def f[T](x: T)`) hides a class of its name in the function | `pep695-type-parameter` | 3.12– | yes |
+| `self.x` of a class attribute is the class's attribute | `class-attribute-through-self` | – | yes |
 
 ### javascript (31 of 31)
 
@@ -813,11 +821,11 @@ Found by: the specification 32, a compiler 0, comparison 0, the grammar 4, the l
 | `a + b` calls the `operator+` of a's class | `operator-call` | – | yes |
 | a member of an inline namespace is a member of the namespace around | `inline-namespace` | – | yes |
 
-### ruby (29 of 29)
+### ruby (34 of 34)
 
 Ruby documentation, 'Calling Methods' and Module#ancestors (method lookup), 'Modules and Classes' (constant lookup).
 
-Found by: the specification 29, a compiler 0, comparison 0, the grammar 0, the language's own tools 0. With the place it was read in the language's own tools: 0.
+Found by: the specification 29, a compiler 0, comparison 0, the grammar 0, the language's own tools 5. With the place it was read in the language's own tools: 5.
 
 | Rule | Case | Versions | Engine |
 |---|---|---|---|
@@ -850,12 +858,17 @@ Found by: the specification 29, a compiler 0, comparison 0, the grammar 0, the l
 | a top-level method of a required file is in scope | `top-level-method` | – | yes |
 | a call in a block is the enclosing method's | `block-body` | – | yes |
 | a private method is called with an implicit receiver | `private-method` | – | yes |
+| of two included modules with a method of one name, the one included last is found first | `last-include-first` | – | yes |
+| a method of the class comes before an included module's | `class-before-included-module` | – | yes |
+| a constant of a module around the use comes before one of the class's ancestors | `lexical-constant-before-ancestor` | – | yes |
+| a block's parameter is a name of the block: it hides a method of its name there | `block-parameter-hides-a-method` | – | yes |
+| a name is a local only after the assignment that makes it one: before it, it is a method call | `local-only-after-assignment` | – | yes |
 
-### php (34 of 34)
+### php (37 of 37)
 
 PHP Manual, 'Namespaces: Name resolution rules', 'Classes and Objects' (inheritance, traits, static).
 
-Found by: the specification 31, a compiler 2, comparison 0, the grammar 1, the language's own tools 0. With the place it was read in the language's own tools: 0.
+Found by: the specification 31, a compiler 2, comparison 0, the grammar 1, the language's own tools 3. With the place it was read in the language's own tools: 3.
 
 | Rule | Case | Versions | Engine |
 |---|---|---|---|
@@ -893,5 +906,8 @@ Found by: the specification 31, a compiler 2, comparison 0, the grammar 1, the l
 | `\Name` is the global class, never one a namespace of the project declares | `global-class-is-not-a-namespaced-one` | – | yes |
 | `$x instanceof T` and `catch (T $e)` are uses of T | `instanceof-and-catch` | – | yes |
 | an anonymous function's parameters and result name their types | `closure-signature` | – | yes |
+| an unqualified class name is of the current namespace only: unlike a function, it does not fall back to the global one | `class-name-has-no-global-fallback` | – | yes |
+| `A::hello insteadof B` picks A's method of two used traits | `trait-insteadof` | – | yes |
+| a method a trait brings comes before an inherited one, and the class's own before both | `trait-before-inherited` | – | yes |
 
-644 of 644 rules hold
+660 of 660 rules hold

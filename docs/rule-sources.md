@@ -882,6 +882,96 @@ linked to the constructor of that type, and three edges into libraries
 (`::crc32c::Extend`, Windows' `::LockFile` / `::UnlockFile`) no longer name a
 project function of the name.
 
+### Phase 2: Python, PHP and Ruby
+
+These have interpreters, not binders that check a program before it runs, so
+the sources are the languages' own references, with the interpreter's
+symbol table where there is one: Python's Language Reference ('Naming and
+binding', 'The import statement') and CPython's `Python/symtable.c`; PHP's
+language specification (`spec/18-namespaces.md`, `14-classes.md`,
+`16-traits.md`); Ruby's documentation and its method and constant tables
+(`class.c` `include_modules_at`, `vm_insnhelper.c` `vm_get_ev_const`).
+`benchmarks/rule_inventory.py` lists every rule (Python: 15 rules, 14 held by a case, 1 not followed; 8 of 46 cases found in the language's own tools; PHP: 12 rules, 10 held by a case, 2 not followed; 3 of 37 cases found in the language's own tools;
+Ruby: 10 rules, 9 held by a case, 1 not followed; 5 of 34 cases found in the language's own tools).
+
+| Source | Rule | Held by / why not |
+|---|---|---|
+| 4.2.2; symtable analyze_name | a name bound in a block is local to all of it | `local-hides-global`, `bound-later-is-local` |
+| 4.2.2 | free names: the enclosing functions, then the module, then builtins | `enclosing-scope`, `module-function` |
+| 4.2.2 | a class body's names are no names of its methods | `class-scope-not-in-methods`, `class-body-call` |
+| 4.2.2; symtable DEF_GLOBAL / DEF_NONLOCAL | `global` / `nonlocal` make an assignment bind the outer name | `global-statement` |
+| 4.2.1 | a lambda's and a comprehension's names are their own | `lambda-parameter-hides`, `comprehension` |
+| 4.2.2 'Annotation scopes' | PEP 695 type parameters | `pep695-type-parameter` |
+| 7.11 'The import statement' | `import a.b`, `from m import f as g`, relative imports | `from-import`, `import-alias`, `relative-import`, `module-attribute`, `module-alias`, `submodule-import` |
+| 7.11 | `from m import *`: `__all__`, else the names without `_` | `star-import`, `star-import-respects-all`, `star-import-skips-underscore` |
+| 7.11 | an import inside a function binds there | `function-local-import` |
+| 5.4 packages | a name a package's `__init__` imports is the package's | `package-reexport` |
+| 3.3.2 / MRO | attributes through the C3 method resolution order | `inherited-method`, `mro-first-base`, `mro-second-base`, `super` |
+| 3.2 'Custom classes' | an instance attribute, else the class's | `self-method`, `class-attribute-through-self`, `attribute-assigned-in-init` |
+| descriptors | `@property`, `@classmethod`, `@staticmethod` | `property`, `classmethod-via-class`, `staticmethod-via-self` |
+| typing (PEP 484) | annotations type parameters, results and attributes | `annotated-parameter`, `return-annotation`, `class-attribute-annotation` |
+| runtime | `getattr`, `__getattr__`, monkey-patching, `exec` | not followed: no static answer |
+
+| Source | Rule | Held by / why not |
+|---|---|---|
+| 18-namespaces 'Name Lookup' | `use` imports, aliases, groups, `use function` | `use`, `use-alias`, `group-use`, `use-function` |
+| 18-namespaces 'Name Lookup' | `\N\C` fully qualified, `Sub\C` relative | `fully-qualified`, `qualified-relative`, `global-class-is-not-a-namespaced-one` |
+| 18-namespaces 'Name Lookup' | an unqualified class is the current namespace's: no fallback | `same-namespace`, `class-name-has-no-global-fallback` |
+| 18-namespaces 'Name Lookup' | an unqualified function: the namespace's, else the global one | `namespaced-function`, `function-fallback` |
+| 14-classes | `$this`, `self::`, `static::`, `parent::` | `this`, `self-static`, `parent`, `parent-constructor`, `static-return` |
+| 14-classes | members through the parent class and interfaces | `inherited`, `interface-typed`, `abstract-method` |
+| 16-traits | a trait's methods; the class's own over the trait's over the parent's | `trait`, `trait-before-inherited` |
+| 16-traits | `insteadof` and `as` resolve trait conflicts | `trait-insteadof` |
+| 14-classes | typed properties, promoted parameters, return types | `typed-property`, `constructor-promotion`, `return-type`, `nullable-parameter` |
+| 10-expressions | `new`, `::class`, `instanceof`, `?->`, closures | `new`, `class-constant-fetch`, `instanceof-and-catch`, `nullsafe`, `closure-use`, `closure-signature` |
+| 07-variables | a variable is the function's: no outer variable without `global` | not followed: variables name no definition of the graph |
+| runtime | variable functions and methods (`$f()`, `$o->$m()`), `__call` | not followed: no static answer; `[$this, 'm']` is read |
+
+| Source | Rule | Held by / why not |
+|---|---|---|
+| doc 'Assignment' | a local exists from its first assignment on; before it a bare name is a call | `local-only-after-assignment`, `local-hides-method`, `implicit-self` |
+| doc 'Blocks' | a block's parameters are its own | `block-parameter-hides-a-method`, `block-body` |
+| class.c Module#ancestors | the class, its modules from the last included, then the superclass | `class-before-included-module`, `last-include-first`, `include`, `superclass` |
+| class.c rb_prepend_module | a prepended module before the class | `prepend` |
+| class.c | `extend`, `def self.m`, `class << self`, `module_function` | `extend`, `class-method`, `singleton-class`, `module-function` |
+| vm_insnhelper.c vm_get_ev_const | a constant: the lexical nesting, then the ancestors, then the top level | `lexical-constant`, `lexical-constant-before-ancestor`, `nested-constant` |
+| doc 'Modules and Classes' | a class reopened in another file is one class | `reopened-class` |
+| doc 'Calling Methods' | `super`, `&.`, predicate names, private calls | `super`, `super-with-arguments`, `safe-navigation`, `predicate-name`, `private-method` |
+| Kernel#require | a required file's names | `top-level-method`, `include-across-files` |
+| runtime | `method_missing`, `define_method`, `send`, refinements | not followed: no static answer |
+
+19 cases were written (8 Python, 3 PHP, 8 Ruby), all accepted by their
+interpreters. Nine did not hold, and engine 0.5.73 follows them:
+
+- **Python `global x` / `nonlocal x`**: an assignment to x in the function
+  binds the module's (or the enclosing function's) name; it was a local that
+  hid the module variable. click's `_getchar` and httpx's
+  `HTTPCORE_EXC_MAP` are now written and read by the functions that say
+  `global`.
+- **PEP 695 type parameters** (`def f[T](x: T)`, `class C[U]`) hide a class of
+  their name.
+- **The order members are looked up in**: Ruby's ancestors are the class, its
+  modules from the last included, then the superclass; a PHP trait's methods
+  come before the parent class's (monolog's `$this->getFormatter()` is now the
+  `FormattableHandlerTrait`'s, not the interface's declaration).
+- **A Ruby local exists from its first assignment on**: a bare name above it
+  is a method call.
+- **A Ruby constant** is looked up in the lexical nesting before the
+  ancestors of the class.
+- **PHP class names do not fall back to the global namespace** (only
+  functions and constants do), and **`\Name` is the global one**: the reader
+  keeps the `\` (`["\\", "Name"]`) and the resolver takes the name from the
+  global namespace, or nothing. guzzle's 128 `catch (\InvalidArgumentException
+  $e)` and `instanceof \CurlShareHandle` were linked to the project's own
+  `GuzzleHttp\Exception\InvalidArgumentException` and to a phpstan stub; its
+  test stub `curl_setopt` no longer calls itself through `\curl_setopt`.
+
+The other cases (a class body's names are no names of its methods, a name
+bound later in a function is local to all of it, `__all__` and `_` names for
+`import *`, a lambda's parameters, PHP `insteadof`, a Ruby block's
+parameters, the class's method before a module's) held already.
+`verify_graphify.py` lacks 44 confirmed edges, as before.
+
 One thing the cases showed that is not a position: a Swift protocol's
 property requirement is a definition of its own named `var handler`, of kind
 interface (the span rule takes `protocol_property_declaration` for a
@@ -928,7 +1018,7 @@ say is left and by how directly the compiler can check the result:
    `-language-version` give every version from one compiler): Java read (engine 0.5.68, 30 rules, 26 held by a case, 4 not followed); Kotlin read (engine 0.5.69, 24 rules, 20 held by a case, 4 not followed)
 6. **Swift**, **C / C++** (need the large toolchains): read (engine 0.5.71; Swift 16 rules, 13 held by a case, 3 not followed, C and C++ 21 rules, 17 held by a case, 4 not followed)
 7. **Python**, **PHP**, **Ruby** (interpreters; the static tools as second
-   source)
+   source): read (engine 0.5.73; Python 15 rules, 14 held by a case, 1 not followed, PHP 12 rules, 10 held by a case, 2 not followed, Ruby 10 rules, 9 held by a case, 1 not followed)
 8. **Scala** (when a compiler is available)
 
 *Done per language when*: every section of the binder's lookup is either a

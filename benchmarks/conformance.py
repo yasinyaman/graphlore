@@ -2670,6 +2670,88 @@ case("cpp", "inline-namespace", "a member of an inline namespace is a member of 
      [("Run", "calls", "lib.v2.Get")],
      source="ISO C++ [namespace.def] (members of an inline namespace are members of the enclosing one)")
 
+# Phase 2 for Python: the Language Reference's 'Naming and binding' (4.2) and
+# 'The import system', and CPython's symbol table (python/cpython
+# `Python/symtable.c`: analyze_name, the class block's free names).
+found_by("source")
+NB_PY = "python/cpython@1822ff517a90:Doc/reference/executionmodel.rst "
+ST_PY = "python/cpython@1822ff517a90:Python/symtable.c "
+case("python", "class-scope-not-in-methods", "a name bound in a class body is no name of its methods: a bare call is the module's",
+     PY, {"a.py": "def helper():\n    return 1\n\n\nclass A:\n    def helper(self):\n        return 2\n\n    def run(self):\n        return helper()\n"},
+     [("A.run", "calls", "a.py:helper")], [("A.run", "calls", "A.helper")],
+     source=NB_PY + "4.2.2 (the scope of names defined in a class block is limited to the class block; it does not extend to the code blocks of methods); " + ST_PY + "analyze_name")
+case("python", "bound-later-is-local", "a name bound anywhere in a function is local to all of it, before the binding too",
+     PY, {"a.py": "def helper():\n    return 1\n\n\ndef run():\n    x = helper()\n    helper = 2\n    return x + helper\n\n\ndef other():\n    return helper()\n"},
+     [("other", "calls", "helper")], [("run", "calls", "helper")],
+     source=NB_PY + "4.2.2 (if a name binding operation occurs anywhere within a code block, all uses of the name within the block are treated as references to the current block)")
+case("python", "global-statement", "`global x` makes an assignment in a function write the module's variable",
+     PY, {"a.py": "counter = 0\n\n\ndef bump():\n    global counter\n    counter = counter + 1\n    return counter\n\n\ndef local_only():\n    counter = 5\n    return counter\n"},
+     [("bump", "writes", "counter")], [("local_only", "writes", "counter")],
+     source=NB_PY + "4.2.2 (the global statement); " + ST_PY + "DEF_GLOBAL")
+case("python", "star-import-respects-all", "`from m import *` binds only the names of m's `__all__`",
+     PY, {"pkg/__init__.py": "", "pkg/m.py": "__all__ = [\"shown\"]\n\n\ndef shown():\n    return 1\n\n\ndef hidden():\n    return 2\n",
+          "pkg/a.py": "from pkg.m import *\n\n\ndef hidden():\n    return 3\n\n\ndef run():\n    return shown() + hidden()\n"},
+     [("run", "calls", "shown"), ("run", "calls", "pkg/a.py:hidden")], [("run", "calls", "pkg/m.py:hidden")],
+     source="The Python Language Reference 7.11 'The import statement' (the public names are those of __all__)")
+case("python", "star-import-skips-underscore", "`from m import *` without `__all__` binds no name that starts with `_`",
+     PY, {"pkg/__init__.py": "", "pkg/m.py": "def _private():\n    return 1\n\n\ndef public():\n    return 2\n",
+          "pkg/a.py": "from pkg.m import *\n\n\ndef _private():\n    return 3\n\n\ndef run():\n    return public() + _private()\n"},
+     [("run", "calls", "public"), ("run", "calls", "pkg/a.py:_private")], [("run", "calls", "pkg/m.py:_private")],
+     source="The Python Language Reference 7.11 'The import statement' (all names that do not begin with an underscore)")
+case("python", "lambda-parameter-hides", "a lambda's parameter is a name of the lambda: it hides a function of its name there",
+     PY, {"a.py": "def size():\n    return 1\n\n\ndef run(xs):\n    return list(map(lambda size: size + 1, xs))\n\n\ndef other():\n    return size()\n"},
+     [("other", "calls", "size")], [("run", "calls", "size"), ("run", "references", "size")],
+     source=NB_PY + "4.2.1 (a lambda's parameters are bound in its block)")
+case("python", "pep695-type-parameter", "a type parameter (`def f[T](x: T)`) hides a class of its name in the function",
+     PY, {"a.py": "class T:\n    pass\n\n\ndef keep[T](x: T) -> T:\n    return x\n\n\ndef plain(x: T) -> T:\n    return x\n"},
+     [("plain", "references", "T")], [("keep", "references", "T")],
+     source=NB_PY + "4.2.2 'Annotation scopes' (type parameter lists introduce an annotation scope)", since="3.12")
+case("python", "class-attribute-through-self", "`self.x` of a class attribute is the class's attribute",
+     PY, {"a.py": "class Repo:\n    def find(self):\n        return 1\n\n\nclass A:\n    repo = Repo()\n\n    def run(self):\n        return self.repo.find()\n"},
+     [("A.run", "calls", "Repo.find")],
+     source="The Python Language Reference 3.2 'Custom classes' (an attribute not found on the instance is looked up on the class)")
+
+# Phase 2 for PHP and Ruby: the PHP language specification (php/php-langspec
+# `spec/18-namespaces.md`, `spec/16-traits.md`, `spec/14-classes.md`) and
+# Ruby's own documentation and method table (ruby/ruby `doc/`, `class.c`
+# include_modules_at / rb_prepend_module, `vm_insnhelper.c` constant lookup).
+found_by("source")
+SPEC_PHP = "php/php-langspec@ca697b43031e:spec/"
+RUBY_SRC = "ruby/ruby@6e687b542739:"
+case("php", "class-name-has-no-global-fallback", "an unqualified class name is of the current namespace only: unlike a function, it does not fall back to the global one",
+     PHP, {"g.php": "<?php\nclass Helper\n{\n    public function run(): int\n    {\n        return 1;\n    }\n}\n",
+           "a.php": "<?php\nnamespace App;\n\nfunction make()\n{\n    return new Helper();\n}\n"},
+     [], [("App.make", "calls", "Helper"), ("make", "calls", "Helper")],
+     source=SPEC_PHP + "18-namespaces.md 'Name Lookup' (unqualified class names are resolved against the current namespace; only functions and constants fall back)")
+case("php", "trait-insteadof", "`A::hello insteadof B` picks A's method of two used traits",
+     PHP, {"a.php": "<?php\ntrait A\n{\n    public function hello(): string\n    {\n        return 'a';\n    }\n}\n\ntrait B\n{\n    public function hello(): string\n    {\n        return 'b';\n    }\n}\n\nclass C\n{\n    use A, B {\n        A::hello insteadof B;\n    }\n\n    public function run(): string\n    {\n        return $this->hello();\n    }\n}\n"},
+     [("C.run", "calls", "A.hello")], [("C.run", "calls", "B.hello")],
+     source=SPEC_PHP + "16-traits.md 'Trait Declarations' (insteadof)")
+case("php", "trait-before-inherited", "a method a trait brings comes before an inherited one, and the class's own before both",
+     PHP, {"a.php": "<?php\nclass Base\n{\n    public function hello(): string\n    {\n        return 'base';\n    }\n}\n\ntrait T\n{\n    public function hello(): string\n    {\n        return 'trait';\n    }\n}\n\nclass C extends Base\n{\n    use T;\n\n    public function run(): string\n    {\n        return $this->hello();\n    }\n}\n"},
+     [("C.run", "calls", "T.hello")], [("C.run", "calls", "Base.hello")],
+     source=SPEC_PHP + "16-traits.md (an inherited member is overridden by a trait's; a member of the class overrides the trait's)")
+case("ruby", "last-include-first", "of two included modules with a method of one name, the one included last is found first",
+     RB, {"a.rb": "module A\n  def hello\n    'a'\n  end\nend\n\nmodule B\n  def hello\n    'b'\n  end\nend\n\nclass C\n  include A\n  include B\n\n  def run\n    hello\n  end\nend\n"},
+     [("C.run", "calls", "B.hello")], [("C.run", "calls", "A.hello")],
+     source=RUBY_SRC + "class.c include_modules_at (a module is inserted right above the class: the last included is the nearest)")
+case("ruby", "class-before-included-module", "a method of the class comes before an included module's",
+     RB, {"a.rb": "module A\n  def hello\n    'a'\n  end\nend\n\nclass C\n  include A\n\n  def hello\n    'c'\n  end\n\n  def run\n    hello\n  end\nend\n"},
+     [("C.run", "calls", "C.hello")], [("C.run", "calls", "A.hello")],
+     source=RUBY_SRC + "class.c (Module#ancestors: the class, then its modules, then the superclass)")
+case("ruby", "lexical-constant-before-ancestor", "a constant of a module around the use comes before one of the class's ancestors",
+     RB, {"a.rb": "class Base\n  LIMIT = Limits.new\nend\n\nclass Limits\n  def max\n    1\n  end\nend\n\nclass Other\n  def max\n    2\n  end\nend\n\nmodule Outer\n  LIMIT = Other.new\n\n  class C < Base\n    def run\n      LIMIT.max\n    end\n  end\nend\n"},
+     [("Outer.C.run", "calls", "Other.max")], [("Outer.C.run", "calls", "Limits.max")],
+     source=RUBY_SRC + "vm_insnhelper.c vm_get_ev_const (the lexical scope, Module.nesting, before the ancestors)")
+case("ruby", "block-parameter-hides-a-method", "a block's parameter is a name of the block: it hides a method of its name there",
+     RB, {"a.rb": "class C\n  def size\n    1\n  end\n\n  def run(xs)\n    xs.map { |size| size + 1 }\n  end\n\n  def other\n    size\n  end\nend\n"},
+     [("C.other", "calls", "C.size")], [("C.run", "calls", "C.size")],
+     source="Ruby documentation 'Methods' / 'Blocks' (block parameters are local to the block)")
+case("ruby", "local-only-after-assignment", "a name is a local only after the assignment that makes it one: before it, it is a method call",
+     RB, {"a.rb": "class C\n  def helper\n    1\n  end\n\n  def run\n    a = helper\n    helper = 2\n    a + helper\n  end\nend\n"},
+     [("C.run", "calls", "C.helper")],
+     source="Ruby documentation 'Assignment' (a local variable is created when the parser encounters the assignment)")
+
 # --- running ------------------------------------------------------------------
 
 def _matches(node: dict[str, Any], want: str) -> bool:

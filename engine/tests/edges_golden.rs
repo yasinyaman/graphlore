@@ -3321,3 +3321,43 @@ fn cpp_and_swift_rules_from_the_compilers() {
     );
     lacks(&got, &[("app.Run", "calls", "app.Helper"), ("Job.run", "calls", "Job.h")]);
 }
+
+/// Python, PHP and Ruby rules from their references (engine 0.5.73): a
+/// class body's names are no names of its methods, `global`, a trait before
+/// the parent, the last included module first, a Ruby local only after its
+/// assignment.
+#[test]
+fn python_php_ruby_rules_from_their_references() {
+    let got = quals("pyphprb", &[
+        (
+            "a.py",
+            "counter = 0\n\n\ndef helper():\n    return 1\n\n\nclass A:\n    def helper(self):\n        return 2\n\n    def run(self):\n        return helper()\n\n\ndef bump():\n    global counter\n    counter = counter + 1\n    return counter\n",
+        ),
+        (
+            "t.php",
+            "<?php\nclass Base\n{\n    public function hello(): string\n    {\n        return 'base';\n    }\n}\n\ntrait T\n{\n    public function hello(): string\n    {\n        return 'trait';\n    }\n}\n\nclass C extends Base\n{\n    use T;\n\n    public function run(): string\n    {\n        return $this->hello();\n    }\n}\n",
+        ),
+        (
+            "r.rb",
+            "module A\n  def hi\n    'a'\n  end\nend\n\nmodule B\n  def hi\n    'b'\n  end\nend\n\nclass K\n  include A\n  include B\n\n  def helper\n    1\n  end\n\n  def run\n    x = helper\n    helper = 2\n    x + helper + hi.size\n  end\nend\n",
+        ),
+    ]);
+    has(
+        &got,
+        &[
+            ("A.run", "calls", "helper"),
+            ("bump", "writes", "counter"),
+            ("C.run", "calls", "T.hello"),
+            ("K.run", "calls", "K.helper"),
+            ("K.run", "calls", "B.hi"),
+        ],
+    );
+    lacks(
+        &got,
+        &[
+            ("A.run", "calls", "A.helper"),
+            ("C.run", "calls", "Base.hello"),
+            ("K.run", "calls", "A.hi"),
+        ],
+    );
+}
