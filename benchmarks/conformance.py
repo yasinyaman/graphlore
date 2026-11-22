@@ -2437,6 +2437,83 @@ case("typescript", "type-meaning-skips-values", "where a type is written, a valu
      [("run", "calls", "Repo.find"), ("run", "references", "Repo")],
      source=NR_TS + "Resolve (meaning: a lookup for SymbolFlagsType passes over a value)")
 
+# Phase 2 for Java: the JLS (6.3 scope, 6.4 shadowing, 7.5 imports, 15.12
+# method invocation) and javac's resolver (openjdk/jdk,
+# `src/jdk.compiler/share/classes/com/sun/tools/javac/comp/Resolve.java`:
+# findVar, findFun, findType, mostSpecific).
+found_by("source")
+RS_JAVA = "openjdk/jdk@78bf06f425a9:src/jdk.compiler/share/classes/com/sun/tools/javac/comp/Resolve.java "
+case("java", "inherited-before-enclosing", "a method a class inherits comes before one of the class around it (the innermost class with a method of the name)",
+     JAVA, {"app/Base.java": "package app;\n\npublic class Base {\n    int size() {\n        return 1;\n    }\n}\n",
+            "app/A.java": "package app;\n\npublic class A {\n    int size() {\n        return 2;\n    }\n\n    class Inner extends Base {\n        int run() {\n            return size();\n        }\n    }\n}\n"},
+     [("A.Inner.run", "calls", "Base.size")], [("A.Inner.run", "calls", "A.size")],
+     source="JLS 15.12.1 (the innermost type declaration of which the method is a member); " + RS_JAVA + "findFun")
+case("java", "inherited-field-before-enclosing", "a field a class inherits comes before a field of the class around it",
+     JAVA, {"app/Base.java": "package app;\n\npublic class Base {\n    protected Repo repo = new Repo();\n}\n",
+            "app/Repo.java": "package app;\n\npublic class Repo {\n    int find() {\n        return 1;\n    }\n}\n",
+            "app/Other.java": "package app;\n\npublic class Other {\n    int find() {\n        return 2;\n    }\n}\n",
+            "app/A.java": "package app;\n\npublic class A {\n    Other repo = new Other();\n\n    class Inner extends Base {\n        int run() {\n            return repo.find();\n        }\n    }\n}\n"},
+     [("A.Inner.run", "calls", "Repo.find")], [("A.Inner.run", "calls", "Other.find")],
+     source="JLS 6.4.1, 15.11; " + RS_JAVA + "findVar (findField of the class before the outer environment)")
+case("java", "own-method-before-static-import", "a method of the class shadows a method a static import brings",
+     JAVA, {"lib/U.java": "package lib;\n\npublic class U {\n    public static int helper() {\n        return 1;\n    }\n}\n",
+            "app/A.java": "package app;\n\nimport static lib.U.helper;\n\npublic class A {\n    static int helper() {\n        return 2;\n    }\n\n    int run() {\n        return helper();\n    }\n}\n"},
+     [("A.run", "calls", "A.helper")], [("A.run", "calls", "U.helper")],
+     source="JLS 6.4.1 (a method declared in a class shadows a single-static-import); " + RS_JAVA + "findFun (members before named imports)")
+case("java", "single-type-import-before-package", "a single-type import shadows a type of the same package",
+     JAVA, {"app/Repo.java": "package app;\n\npublic class Repo {\n    public int find() {\n        return 1;\n    }\n}\n",
+            "lib/Repo.java": "package lib;\n\npublic class Repo {\n    public int find() {\n        return 2;\n    }\n}\n",
+            "app/A.java": "package app;\n\nimport lib.Repo;\n\npublic class A {\n    int run(Repo r) {\n        return r.find();\n    }\n}\n"},
+     [("A.run", "calls", "lib/Repo.java:Repo.find")], [("A.run", "calls", "app/Repo.java:Repo.find")],
+     source="JLS 6.4.1 (a single-type-import shadows types of the same package); " + RS_JAVA + "findType (namedImportScope before the package)")
+case("java", "package-before-on-demand-import", "a type of the same package shadows one an on-demand import brings",
+     JAVA, {"app/Repo.java": "package app;\n\npublic class Repo {\n    public int find() {\n        return 1;\n    }\n}\n",
+            "lib/Repo.java": "package lib;\n\npublic class Repo {\n    public int find() {\n        return 2;\n    }\n}\n",
+            "app/A.java": "package app;\n\nimport lib.*;\n\npublic class A {\n    int run(Repo r) {\n        return r.find();\n    }\n}\n"},
+     [("A.run", "calls", "app/Repo.java:Repo.find")], [("A.run", "calls", "lib/Repo.java:Repo.find")],
+     source="JLS 7.5.2 (type-import-on-demand never shadows); " + RS_JAVA + "findType (the package before starImportScope)")
+case("java", "member-type-before-import", "a member type of the class shadows an imported type of its name",
+     JAVA, {"lib/Repo.java": "package lib;\n\npublic class Repo {\n    public int find() {\n        return 1;\n    }\n}\n",
+            "app/A.java": "package app;\n\nimport lib.Repo;\n\npublic class A {\n    static class Repo {\n        int find() {\n            return 2;\n        }\n    }\n\n    int run(Repo r) {\n        return r.find();\n    }\n}\n"},
+     [("A.run", "calls", "A.Repo.find")], [("A.run", "calls", "lib/Repo.java:Repo.find")],
+     source="JLS 6.4.1; " + RS_JAVA + "findType (findMemberType of each enclosing class before the imports)")
+case("java", "inherited-member-type", "a member type a class inherits is in scope in it",
+     JAVA, {"app/Base.java": "package app;\n\npublic class Base {\n    public static class Node {\n        public int size() {\n            return 1;\n        }\n    }\n}\n",
+            "app/A.java": "package app;\n\npublic class A extends Base {\n    int run(Node n) {\n        return n.size();\n    }\n}\n"},
+     [("A.run", "calls", "Base.Node.size")],
+     source="JLS 8.5 (member types are inherited); " + RS_JAVA + "findInheritedMemberType")
+case("java", "qualified-this", "`Outer.this.m()` is the method of the class around",
+     JAVA, {"app/A.java": "package app;\n\npublic class A {\n    int size() {\n        return 1;\n    }\n\n    class Inner {\n        int size() {\n            return 2;\n        }\n\n        int run() {\n            return A.this.size() + size();\n        }\n    }\n}\n"},
+     [("A.Inner.run", "calls", "A.size"), ("A.Inner.run", "calls", "A.Inner.size")],
+     source="JLS 15.8.4 (qualified this)")
+case("java", "method-type-parameter-hides-a-class", "a generic method's type parameter hides a class of its name",
+     JAVA, {"app/Repo.java": "package app;\n\npublic class Repo {\n}\n",
+            "app/A.java": "package app;\n\npublic class A {\n    <Repo> Repo keep(Repo r) {\n        return r;\n    }\n\n    Repo plain(Repo r) {\n        return r;\n    }\n}\n"},
+     [("A.plain", "references", "Repo")], [("A.keep", "references", "Repo")],
+     source="JLS 6.4.1 (a type parameter shadows a type of the same name); " + RS_JAVA + "findType (type variables first)")
+case("java", "inherited-interface-constant", "a constant of an implemented interface is a name in the class",
+     JAVA, {"app/Limits.java": "package app;\n\npublic interface Limits {\n    int MAX = 10;\n}\n",
+            "app/A.java": "package app;\n\npublic class A implements Limits {\n    int cap(int n) {\n        return Math.min(n, MAX);\n    }\n}\n"},
+     [("A.cap", "reads", "Limits.MAX")],
+     source="JLS 9.3, 8.3 (fields of superinterfaces are inherited); " + RS_JAVA + "findField")
+case("java", "most-specific-reference-type", "of two applicable overloads, the one whose parameter type is a subtype is more specific",
+     JAVA, {"app/A.java": "package app;\n\npublic class A {\n    int write(Object o) {\n        return 1;\n    }\n\n    int write(String s) {\n        return 2;\n    }\n\n    int run() {\n        return write(\"x\");\n    }\n}\n"},
+     [("A.run", "calls", "app/A.java:A.write@8")], [("A.run", "calls", "app/A.java:A.write@4")],
+     source="JLS 15.12.2.5 (choosing the most specific method); " + RS_JAVA + "mostSpecific")
+case("java", "fixed-arity-before-varargs", "an overload applicable without variable arity is chosen before a varargs one",
+     JAVA, {"app/A.java": "package app;\n\npublic class A {\n    int log(String... parts) {\n        return 1;\n    }\n\n    int log(String one) {\n        return 2;\n    }\n\n    int run() {\n        return log(\"x\");\n    }\n}\n"},
+     [("A.run", "calls", "app/A.java:A.log@8")], [("A.run", "calls", "app/A.java:A.log@4")],
+     source="JLS 15.12.2.2–4 (phases: strict, loose, then variable arity); " + RS_JAVA + "findMethod (phases)")
+case("java", "no-boxing-before-boxing", "an overload applicable without boxing is chosen before one that needs it",
+     JAVA, {"app/A.java": "package app;\n\npublic class A {\n    int put(Integer n) {\n        return 1;\n    }\n\n    int put(long n) {\n        return 2;\n    }\n\n    int run() {\n        return put(3);\n    }\n}\n"},
+     [("A.run", "calls", "app/A.java:A.put@8")], [("A.run", "calls", "app/A.java:A.put@4")],
+     source="JLS 15.12.2.2 (phase 1: strict invocation, no boxing); " + RS_JAVA + "findMethod (allowBoxing false first)")
+case("java", "local-class", "a class declared in a block is a name of the block",
+     JAVA, {"app/Repo.java": "package app;\n\npublic class Repo {\n    int find() {\n        return 1;\n    }\n}\n",
+            "app/A.java": "package app;\n\npublic class A {\n    int run() {\n        class Repo {\n            int find() {\n                return 2;\n            }\n        }\n        return new Repo().find();\n    }\n\n    int other() {\n        return new Repo().find();\n    }\n}\n"},
+     [("A.other", "calls", "app/Repo.java:Repo.find")], [("A.run", "calls", "app/Repo.java:Repo.find")],
+     source="JLS 6.3 (the scope of a local class is the rest of the block)")
+
 # --- running ------------------------------------------------------------------
 
 def _matches(node: dict[str, Any], want: str) -> bool:

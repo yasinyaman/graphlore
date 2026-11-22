@@ -666,6 +666,72 @@ Measured with engine 0.5.67: the TypeScript compiler's baselines give 99.5%,
 recall 86.4%, as before; `verify_graphify.py` lacks 44 confirmed edges, as
 before.
 
+### Phase 2: Java
+
+The JLS (6.3 scope, 6.4 shadowing and obscuring, 7.5 imports, 15.12 method
+invocation) and javac's resolver (`com/sun/tools/javac/comp/Resolve.java`:
+`findVar` looks in each environment's scope and then the class's fields,
+inherited ones included, before going out a class; `findFun` the same for
+methods; `findType` type variables, member types, then the file's imports
+and package; `findMethod` in three phases, then `mostSpecific`).
+`benchmarks/rule_inventory.py` lists every rule (30 rules, 26 held by a case, 4 not followed; 14 of 62 cases found in the language's own tools).
+
+| Source | Rule | Held by / why not |
+|---|---|---|
+| JLS 6.3; Resolve findVar | a local or parameter is a name from its declaration to the end of its block | `local-hides-field`, `for-each`, `try-with-resources`, `instanceof-pattern` |
+| JLS 15.12.1; Resolve findFun | a bare method name is a method of the innermost class that has one of the name, inherited ones counted | `implicit-this`, `inherited`, `inherited-before-enclosing`, `outer-method` |
+| JLS 6.4.1; Resolve findVar | a bare field name: the class's own and inherited fields before the class around | `inherited-field-before-enclosing`, `this-field` |
+| JLS 9.3, 8.3; Resolve findField | a constant of an implemented interface is inherited | `inherited-interface-constant`, `interface-constant-type` |
+| JLS 6.4.1; Resolve findFun | a method of the class shadows a static import of the name | `own-method-before-static-import`, `static-import` |
+| JLS 6.4.1; Resolve findType | type variables, then member types (own and inherited) of each class around, then the file's | `method-type-parameter-hides-a-class`, `member-type-before-import`, `inherited-member-type`, `nested-static-class` |
+| JLS 6.3 | a local class is a name of the rest of its block | `local-class` |
+| JLS 6.4.1; Resolve findType | a single-type import shadows a type of the package | `single-type-import-before-package`, `single-type-import` |
+| JLS 7.5.2; Resolve findType | a type of the package shadows an on-demand import | `package-before-on-demand-import`, `same-package`, `on-demand-import` |
+| JLS 7.4.3 | a class of another package is not in reach without an import or a qualified name | `other-package-not-in-reach`, `fully-qualified` |
+| JLS 6.4.2 obscuring | a variable obscures a type, a type obscures a package of its name | not followed: code that compiles is written around it; no case tells a variable from a type there yet |
+| JLS 15.8.4 | `Outer.this` is the object of the class named | `qualified-this` |
+| JLS 15.11.2 | `super.m()`, `super(…)`, `this(…)` | `super`, `explicit-constructor-call` |
+| JLS 15.12.2.1 | a candidate takes the call's number of arguments | `overload-arity` |
+| JLS 15.12.2.2; Resolve findMethod | phase 1: applicable without boxing | `no-boxing-before-boxing` |
+| JLS 15.12.2.4 | phase 3: variable arity last | `fixed-arity-before-varargs` |
+| JLS 15.12.2.5; Resolve mostSpecific | the most specific of the applicable: a subtype, a narrower primitive | `most-specific-reference-type`, `overload-by-type` |
+| JLS 15.12.2.5 | a floating literal's `float` / `double` overload | not followed: the facts tell an integer literal from another number, not `1.0f` from `1.0`: such ties are INFERRED |
+| JLS 15.12.2.7 | a generic method's type arguments inferred from the call | not followed: phase 3: inference |
+| JLS 8.4.8 | an interface's default method is inherited | `interface-default`, `interface-typed` |
+| JLS 15.12.3 | a static method through its class or interface | `static-via-class`, `interface-static` |
+| JLS 14.4.1 | `var` is the type of its initializer | `var` |
+| JLS 15.16 | a cast is a value of its type | `cast`, `instanceof-cast-catch` |
+| JLS 15.13 | a method reference is a use of the method | `method-reference` |
+| JLS 15.27 | a lambda's body sees the method around | `lambda-body` |
+| JLS 15.9.5 | an anonymous class sees the class around | `anonymous-class` |
+| JLS 8.9 | an enum constant has the enum's methods and is a use of it | `enum-method`, `enum-constant-value` |
+| JLS 8.10 | a record is a class with its components | `record` |
+| JLS 4.5 | a member of a parameterized type with its arguments | `generic-argument`, `list-element`, `chained-result` |
+| JLS 6.6 | access control (`private`, package-private) | not followed: code that compiles reaches only what it may: the engine does not check |
+
+14 cases were written from this reading, all accepted by javac. Three did not
+hold, and engine 0.5.68 follows them:
+
+- **`Outer.this`** (15.8.4): `A.this.size()` in an inner class is `A`'s
+  method; it was read as a member `self` of the class, and named nothing.
+- **An interface's fields are constants** (9.3): the reader took state only
+  from `field_declaration`, so `int MAX = 10;` in an interface was no
+  definition and `MAX` in an implementing class read nothing.
+- **Phase 1 and specificity for numbers** (15.12.2.2, 15.12.2.5): a number
+  literal fits a primitive parameter before a boxed one (`put(long)` over
+  `put(Integer)`), and of the primitives an integer literal widens to the
+  narrowest is the most specific (`int`, `long`, `float`, `double`). Java's
+  primitive parameter types have no type path, as C#'s predefined ones, so
+  `fit` reads their written text for a literal. The facts now tell an
+  integer literal (`Arg::Int`) from another number.
+
+On the 45 audit repositories only gson and retrofit change: 43 `EXTRACTED`
+calls of gson's `JsonWriter.value(…)` that went to the `Number` overload now
+go to `long` for an integer literal, or are `INFERRED` ties among `float` and
+`double` for `1.0` / `1.0f` (the facts do not tell those apart);
+`ParameterHandler.this.apply(…)` is a call; `ReflectionAccessFilter.BLOCK_ALL_JAVA`
+is read. `verify_graphify.py` lacks 44 confirmed edges, as before.
+
 One thing the cases showed that is not a position: a Swift protocol's
 property requirement is a definition of its own named `var handler`, of kind
 interface (the span rule takes `protocol_property_declaration` for a
@@ -709,7 +775,7 @@ say is left and by how directly the compiler can check the result:
    reading, and the template for the others): read (engine 0.5.66, 29 rules, 23 held by a case, 6 not followed)
 4. **TypeScript / JavaScript** (module resolution modes): read (engine 0.5.67, 31 rules, 26 held by a case, 5 not followed)
 5. **Java**, then **Kotlin** (one platform; `--release` and
-   `-language-version` give every version from one compiler)
+   `-language-version` give every version from one compiler): Java read (engine 0.5.68, 30 rules, 26 held by a case, 4 not followed)
 6. **Swift**, **C / C++** (need the large toolchains)
 7. **Python**, **PHP**, **Ruby** (interpreters; the static tools as second
    source)

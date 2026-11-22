@@ -1,6 +1,6 @@
 {
- "passed": 598,
- "total": 598,
+ "passed": 612,
+ "total": 612,
  "cases": [
   {
    "id": "python/module-function",
@@ -3586,6 +3586,90 @@
   },
   {
    "id": "typescript/type-meaning-skips-values",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/inherited-before-enclosing",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/inherited-field-before-enclosing",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/own-method-before-static-import",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/single-type-import-before-package",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/package-before-on-demand-import",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/member-type-before-import",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/inherited-member-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/qualified-this",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/method-type-parameter-hides-a-class",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/inherited-interface-constant",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/most-specific-reference-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/fixed-arity-before-varargs",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/no-boxing-before-boxing",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/local-class",
    "ok": true,
    "missing": [],
    "unwanted": []

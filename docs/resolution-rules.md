@@ -25,7 +25,7 @@ python benchmarks/conformance.py --baseline benchmarks/results-conformance.json 
 python benchmarks/conformance.py --markdown      # the tables below
 ```
 
-Measured 2026-11-21 with graphlore-engine 0.5.67: **598 of 598 rules hold**
+Measured 2026-11-21 with graphlore-engine 0.5.68: **612 of 612 rules hold**
 (356 of the first 406 with 0.5.45). Ten came from the Go type checker and
 rust-analyzer run on whole repositories; fifteen from the Kotlin and Swift
 compilers' tests (type checks, casts, `catch`, aliases); thirty-nine from two
@@ -104,7 +104,7 @@ Each change was measured on the 45 audit repositories as well, by reading
 the edges it added and removed at their source lines; the page on the
 [native engine](native-engine.md#the-rules-themselves) has the numbers.
 Every case has been compiled by its own language
-(`benchmarks/verify_cases.py`: 598 of 598 accepted). The Versions column is
+(`benchmarks/verify_cases.py`: 612 of 612 accepted). The Versions column is
 the oldest version of the language whose compiler accepts the case, where the
 compiler can be asked (`verify_cases.py --min-version`: Java, Kotlin, Scala,
 C#, Swift, C, C++); `all` is the oldest version asked, `–` a language with no
@@ -340,11 +340,11 @@ Found by: the specification 23, a compiler 8, comparison 2, the grammar 5, the l
 | `x.M` without a call is a method value: a use of the method | `method-value` | – | yes |
 | a method of `*T` is called on an addressable `T` | `pointer-method-on-a-value` | – | yes |
 
-### java (48 of 48)
+### java (62 of 62)
 
 The Java Language Specification, 6.4 'Shadowing and Obscuring', 15.12 'Method Invocation Expressions'.
 
-Found by: the specification 41, a compiler 3, comparison 0, the grammar 4, the language's own tools 0. With the place it was read in the language's own tools: 0.
+Found by: the specification 41, a compiler 3, comparison 0, the grammar 4, the language's own tools 14. With the place it was read in the language's own tools: 14.
 
 | Rule | Case | Versions | Engine |
 |---|---|---|---|
@@ -396,6 +396,20 @@ Found by: the specification 41, a compiler 3, comparison 0, the grammar 4, the l
 | `T.class` is a use of T | `class-literal` | – | yes |
 | the type of a for-each variable and of a varargs parameter are uses of it | `for-each-and-varargs-types` | – | yes |
 | the type of a constant an interface declares is a use of it | `interface-constant-type` | – | yes |
+| a method a class inherits comes before one of the class around it (the innermost class with a method of the name) | `inherited-before-enclosing` | – | yes |
+| a field a class inherits comes before a field of the class around it | `inherited-field-before-enclosing` | – | yes |
+| a method of the class shadows a method a static import brings | `own-method-before-static-import` | – | yes |
+| a single-type import shadows a type of the same package | `single-type-import-before-package` | – | yes |
+| a type of the same package shadows one an on-demand import brings | `package-before-on-demand-import` | – | yes |
+| a member type of the class shadows an imported type of its name | `member-type-before-import` | – | yes |
+| a member type a class inherits is in scope in it | `inherited-member-type` | – | yes |
+| `Outer.this.m()` is the method of the class around | `qualified-this` | – | yes |
+| a generic method's type parameter hides a class of its name | `method-type-parameter-hides-a-class` | – | yes |
+| a constant of an implemented interface is a name in the class | `inherited-interface-constant` | – | yes |
+| of two applicable overloads, the one whose parameter type is a subtype is more specific | `most-specific-reference-type` | – | yes |
+| an overload applicable without variable arity is chosen before a varargs one | `fixed-arity-before-varargs` | – | yes |
+| an overload applicable without boxing is chosen before one that needs it | `no-boxing-before-boxing` | – | yes |
+| a class declared in a block is a name of the block | `local-class` | – | yes |
 
 ### kotlin (40 of 40)
 
@@ -848,4 +862,4 @@ Found by: the specification 31, a compiler 2, comparison 0, the grammar 1, the l
 | `$x instanceof T` and `catch (T $e)` are uses of T | `instanceof-and-catch` | – | yes |
 | an anonymous function's parameters and result name their types | `closure-signature` | – | yes |
 
-598 of 598 rules hold
+612 of 612 rules hold

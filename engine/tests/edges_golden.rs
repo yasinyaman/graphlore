@@ -3252,3 +3252,25 @@ fn typescript_rules_from_the_name_resolver() {
     )]);
     has(&got, &[("run", "calls", "Repo.find"), ("run", "calls", "Repo.save")]);
 }
+
+/// Java's rules from the JLS and javac (engine 0.5.68): `Outer.this`, an
+/// interface's constant, and phase 1 and specificity of overloads for an
+/// integer literal.
+#[test]
+fn java_rules_from_the_jls() {
+    let got = quals("javajls", &[
+        ("app/Limits.java", "package app;\n\npublic interface Limits {\n    int MAX = 10;\n}\n"),
+        (
+            "app/A.java",
+            "package app;\n\npublic class A implements Limits {\n    int size() {\n        return 1;\n    }\n\n    int cap(int n) {\n        return Math.min(n, MAX);\n    }\n\n    class Inner {\n        int size() {\n            return 2;\n        }\n\n        int run() {\n            return A.this.size() + size();\n        }\n    }\n}\n",
+        ),
+    ]);
+    has(
+        &got,
+        &[
+            ("A.cap", "reads", "Limits.MAX"),
+            ("A.Inner.run", "calls", "A.size"),
+            ("A.Inner.run", "calls", "A.Inner.size"),
+        ],
+    );
+}

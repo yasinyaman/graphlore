@@ -2001,15 +2001,17 @@ impl<'a> Project<'a> {
                 },
                 None => continue,
             };
-            // (C# `int`, `string`, `object` are predefined types the path of
-            // a written type leaves empty: the written text is the type)
+            // (C# `int`, `string`, `object` and Java's primitives are types
+            // the path of a written type leaves empty: the written text is
+            // the type)
             let written: Vec<String>;
             let w = param.written.trim().trim_end_matches('?');
             // (only for a literal: a C# type of the project can convert to a
             // predefined one through an `implicit operator`)
             let literal = !matches!(a.kind, crate::facts::Arg::Path(_));
             let ty = if literal
-                && self.family[c.0] == Some(Family::CSharp)
+                && (self.family[c.0] == Some(Family::CSharp)
+                    || self.files[c.0].lang == Some(crate::lang::Lang::Java))
                 && param.ty.is_empty()
                 && !w.is_empty()
                 && w.chars().all(char::is_alphanumeric)
@@ -2051,10 +2053,31 @@ impl<'a> Project<'a> {
             None if strict && self.param_type(c, ty).is_some() => None,
             None => Some(0),
         };
+        // Java: a number or a flag fits a primitive parameter without boxing,
+        // which phase 1 of overload resolution takes first (JLS 15.12.2.2);
+        // of the primitives an integer literal widens to, the narrowest is
+        // the most specific (15.12.2.5: int <: long <: float <: double)
+        let java = self.files[c.0].lang == Some(crate::lang::Lang::Java);
+        let unboxed = java
+            && matches!(
+                name.as_str(),
+                "int" | "long" | "short" | "byte" | "double" | "float" | "char" | "boolean"
+            );
+        let widening = |n: &str| match n {
+            "int" => 4,
+            "long" => 3,
+            "float" => 2,
+            "double" => 1,
+            _ => 0,
+        };
         match arg {
             Arg::Str => literal(Prim::Str),
-            Arg::Num => literal(Prim::Num),
-            Arg::Bool => literal(Prim::Bool),
+            Arg::Num => literal(Prim::Num).map(|x| x + i32::from(unboxed)),
+            Arg::Int if java && matches!(name.as_str(), "short" | "byte" | "char") => None,
+            Arg::Int => {
+                literal(Prim::Num).map(|x| x + if unboxed { 1 + widening(name) } else { 0 })
+            }
+            Arg::Bool => literal(Prim::Bool).map(|x| x + i32::from(unboxed)),
             Arg::Class => literal(Prim::Class),
             // a lambda is something to call: no string, number, flag or
             // class (it may be an interface of one method, which a class of
@@ -5584,6 +5607,14 @@ impl<'a> Project<'a> {
                 if skip == 0 && opened_after(i + 1) {
                     sealed = false;
                 }
+                continue;
+            }
+            // Java `Outer.this` (JLS 15.8.4): the object of the class named
+            if seg == "self"
+                && i == 0
+                && self.files[f].lang == Some(crate::lang::Lang::Java)
+                && matches!(t, Target::Def(c) if self.def(c).kind.is_class_like())
+            {
                 continue;
             }
             // `let (a, b) = f()`: `a` is `f`'s result's first part
