@@ -357,7 +357,11 @@ const CONTROL: &[&str] = &[
 /// optionally followed by `const` / `override` / `noexcept`, on its line or at
 /// the start of the next, and when its
 /// arguments declare no parameter (`ADD(int a)` is a function). Each byte of
-/// the macro becomes a space, or `None` when there is none. `spans.py`'s
+/// the macro becomes a space, or `None` when there is none. So does a macro
+/// alone on an indented line before a line that starts with a call (Unity's
+/// `EXPECT_ABORT_BEGIN` / `TEST_ASSERT(0);`, Qt's `Q_OBJECT` / `Window(int
+/// w);`): a statement or nothing once expanded, which the parser takes for
+/// the type of a declaration the next line would be. `spans.py`'s
 /// `_blank_annotation_macros` is the same rule.
 pub fn blank_annotation_macros(src: &[u8]) -> Option<Vec<u8>> {
     static PATTERN: std::sync::OnceLock<regex::bytes::Regex> = std::sync::OnceLock::new();
@@ -382,7 +386,21 @@ pub fn blank_annotation_macros(src: &[u8]) -> Option<Vec<u8>> {
         }
         k
     };
+    static STATEMENT: std::sync::OnceLock<regex::bytes::Regex> = std::sync::OnceLock::new();
+    let statement = STATEMENT.get_or_init(|| {
+        regex::bytes::Regex::new(
+            r"(?m)^[ \t]+([A-Z][A-Z0-9_]{2,})[ \t]*\r?\n[ \t]*[A-Za-z_][A-Za-z0-9_]*[ \t]*\(",
+        )
+        .expect("a valid pattern")
+    });
     let mut out: Option<Vec<u8>> = None;
+    for found in statement.captures_iter(src) {
+        let Some(m) = found.get(1) else { continue };
+        let buf = out.get_or_insert_with(|| src.to_vec());
+        for b in &mut buf[m.start()..m.end()] {
+            *b = b' ';
+        }
+    }
     for found in pattern.captures_iter(src) {
         let (Some(g1), Some(g2), Some(g3), Some(g4)) =
             (found.get(1), found.get(2), found.get(3), found.get(4))

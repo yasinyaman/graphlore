@@ -188,6 +188,14 @@ _SNIPPETS = {
                 "  void g() const LOCKS_EXCLUDED(mu) {\n  }\n};\n"
                 "int ADD(int a, int b) {\n  return ADD2(a);\n}\n"
                 "typedef void (Cb)(int);\n",
+    # a gtest test is named by its two names; a macro alone on a line before a
+    # call is no type of a declaration
+    "gtest.cc": "class Fix {\n};\nTEST(Suite, Works) {\n  int x = 1;\n}\n"
+                "TEST_F(Fix, Reads) { Do(1); }\n",
+    "unity.c": "void testA(void)\n{\n    EXPECT_ABORT_BEGIN\n    TEST_ASSERT(0);\n"
+               "    VERIFY_FAILS_END\n}\nvoid testB(void)\n{\n}\n",
+    "util.ts": "export namespace util {\n  export const keys: number = 1;\n"
+               "  export const f = () => 1;\n}\n",
     "cart.rb": (FIXTURES / "polyglot" / "lib" / "shop" / "cart.rb").read_text(encoding="utf-8"),
     "Stack.php": (FIXTURES / "polyglot" / "php" / "src" / "Stack.php").read_text(encoding="utf-8"),
 }

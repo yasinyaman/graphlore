@@ -1,6 +1,6 @@
 {
- "passed": 665,
- "total": 665,
+ "passed": 666,
+ "total": 666,
  "cases": [
   {
    "id": "python/module-function",
@@ -3862,6 +3862,12 @@
   },
   {
    "id": "cpp/inline-namespace",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "cpp/class-before-its-constructor",
    "ok": true,
    "missing": [],
    "unwanted": []

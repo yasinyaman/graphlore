@@ -25,7 +25,7 @@ python benchmarks/conformance.py --baseline benchmarks/results-conformance.json 
 python benchmarks/conformance.py --markdown      # the tables below
 ```
 
-Measured 2026-11-21 with graphlore-engine 0.5.74: **665 of 665 rules hold**
+Measured 2026-11-22 with graphlore-engine 0.5.76: **666 of 666 rules hold**
 (356 of the first 406 with 0.5.45). Ten came from the Go type checker and
 rust-analyzer run on whole repositories; fifteen from the Kotlin and Swift
 compilers' tests (type checks, casts, `catch`, aliases); thirty-nine from two
@@ -104,7 +104,7 @@ Each change was measured on the 45 audit repositories as well, by reading
 the edges it added and removed at their source lines; the page on the
 [native engine](native-engine.md#the-rules-themselves) has the numbers.
 Every case has been compiled by its own language
-(`benchmarks/verify_cases.py`: 665 of 665 accepted). The Versions column is
+(`benchmarks/verify_cases.py`: 666 of 666 accepted). The Versions column is
 the oldest version of the language whose compiler accepts the case, where the
 compiler can be asked (`verify_cases.py --min-version`: Java, Kotlin, Scala,
 C#, Swift, C, C++); `all` is the oldest version asked, `–` a language with no
@@ -772,11 +772,11 @@ Found by: the specification 14, a compiler 0, comparison 0, the grammar 2, the l
 | a `typedef` of a named type is a use of that type | `typedef-names-its-type` | – | yes |
 | a struct tag and a function of one name are in different name spaces | `tag-name-space` | – | yes |
 
-### cpp (45 of 45)
+### cpp (46 of 46)
 
 ISO C++, [basic.lookup] (unqualified, qualified and argument-dependent lookup), [class.member.lookup], [dcl.ambig.res].
 
-Found by: the specification 32, a compiler 0, comparison 0, the grammar 4, the language's own tools 9. With the place it was read in the language's own tools: 9.
+Found by: the specification 32, a compiler 0, comparison 0, the grammar 4, the language's own tools 10. With the place it was read in the language's own tools: 10.
 
 | Rule | Case | Versions | Engine |
 |---|---|---|---|
@@ -825,6 +825,7 @@ Found by: the specification 32, a compiler 0, comparison 0, the grammar 4, the l
 | a function that is no template wins over a template specialization equally good | `non-template-before-template` | – | yes |
 | `a + b` calls the `operator+` of a's class | `operator-call` | – | yes |
 | a member of an inline namespace is a member of the namespace around | `inline-namespace` | – | yes |
+| `T::f()` in a member of T: the name before `::` is the class, not the constructor of its name | `class-before-its-constructor` | – | yes |
 
 ### ruby (34 of 34)
 
@@ -915,4 +916,4 @@ Found by: the specification 31, a compiler 2, comparison 0, the grammar 1, the l
 | `A::hello insteadof B` picks A's method of two used traits | `trait-insteadof` | – | yes |
 | a method a trait brings comes before an inherited one, and the class's own before both | `trait-before-inherited` | – | yes |
 
-665 of 665 rules hold
+666 of 666 rules hold

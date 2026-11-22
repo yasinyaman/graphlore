@@ -359,3 +359,34 @@ fn c_a_typedef_named_in_parentheses() {
     let src = "typedef void (Cb)(int);\ntypedef void (*Cb2)(int);\n";
     assert_eq!(quals("a.h", src), set(&["Cb", "Cb2"]));
 }
+
+#[test]
+fn cpp_a_gtest_test_is_named_by_its_two_names() {
+    // `TEST(Suite, Name) { … }`: a function with no return type, named in
+    // capitals, given two bare names; a method of the fixture for `TEST_F`
+    let src = "class Fix {\n};\nTEST(Suite, Works) {\n  int x = 1;\n}\nTEST_F(Fix, Reads) { Do(1); }\nALPN(bool on) {\n}\n";
+    assert_eq!(quals("a_test.cc", src), set(&["Fix", "Suite.Works", "Fix.Reads", "ALPN"]));
+    let facts = file_facts(src.as_bytes(), "a_test.cc");
+    let reads = facts.defs.iter().find(|d| d.name == "Reads").expect("the test");
+    assert_eq!(reads.owner.as_deref(), Some("Fix"));
+    assert_eq!(reads.kind, DefKind::Method);
+}
+
+#[test]
+fn c_a_macro_alone_on_a_line_is_no_type() {
+    // `EXPECT_ABORT_BEGIN` / `TEST_ASSERT(0);` is two statements: the macro is
+    // blanked, the assert is a call and the functions after are found
+    let src = "void testA(void)\n{\n    EXPECT_ABORT_BEGIN\n    TEST_ASSERT(0);\n    VERIFY_FAILS_END\n}\nvoid testB(void)\n{\n}\n";
+    assert_eq!(quals("t.c", src), set(&["testA", "testB"]));
+    let facts = file_facts(src.as_bytes(), "t.c");
+    assert!(facts.refs.iter().any(|r| r.path.last().is_some_and(|n| n == "TEST_ASSERT")));
+}
+
+#[test]
+fn ts_a_namespace_constant_is_a_definition() {
+    let src = "export namespace util {\n  export const keys: number = 1;\n  let count = 0;\n  export const f = () => 1;\n}\n";
+    let facts = file_facts(src.as_bytes(), "util.ts");
+    let extra: BTreeSet<(&str, DefKind)> =
+        facts.defs.iter().filter(|d| d.extra).map(|d| (d.qualname.as_str(), d.kind)).collect();
+    assert_eq!(extra, [("util.keys", DefKind::Constant), ("util.count", DefKind::Variable)].into());
+}

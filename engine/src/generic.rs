@@ -276,6 +276,46 @@ fn declarator_name(node: Node, src: &[u8]) -> Option<String> {
     None
 }
 
+/// `_ts_macro_statement`: a `declaration` whose type is a macro call the
+/// parser could not read (`TEST_ASSERT_EQUAL(p0, p1, 4);` followed by another
+/// in a function the parser lost): two statements, no declaration.
+fn macro_statement(node: Node) -> bool {
+    node.child_by_field_name("type")
+        .is_some_and(|t| t.kind() == "macro_type_specifier" && t.has_error())
+}
+
+/// `_ts_test_macro_name`: C++ `TEST(Suite, Name) { … }`, `TEST_F(Fixture,
+/// Name) { … }`: a function with no return type, named in capitals, given two
+/// bare names. The test is `Suite.Name`, a method of the fixture when the
+/// file defines one.
+fn test_macro_name(node: Node, src: &[u8]) -> Option<String> {
+    if node.kind() != "function_definition" || node.child_by_field_name("type").is_some() {
+        return None;
+    }
+    let decl =
+        node.child_by_field_name("declarator").filter(|d| d.kind() == "function_declarator")?;
+    let name = decl.child_by_field_name("declarator").filter(|n| n.kind() == "identifier")?;
+    let macro_name = text(name, src);
+    let capitals = macro_name.len() >= 3
+        && macro_name.bytes().all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_')
+        && macro_name.as_bytes()[0].is_ascii_uppercase();
+    if !capitals {
+        return None;
+    }
+    let params = kids(decl.child_by_field_name("parameters")?);
+    let bare = |p: &Node| {
+        let inner = kids(*p);
+        (p.kind() == "parameter_declaration"
+            && inner.len() == 1
+            && inner[0].kind() == "type_identifier")
+            .then(|| text(inner[0], src))
+    };
+    match params.as_slice() {
+        [a, b] => Some(format!("{}.{}", bare(a)?, bare(b)?)),
+        _ => None,
+    }
+}
+
 /// `_ts_declares_function`: `int f(void);`, not a variable or a field.
 fn declares_function(node: Node) -> bool {
     let mut decl = node.child_by_field_name("declarator");
@@ -374,9 +414,10 @@ pub fn classify<'t, M: LanguageModule + ?Sized>(m: &M, node: Node<'t>, src: &[u8
             }
         }
     }
-    let prototype = PROTOTYPE_TYPES.contains(&kind) && declares_function(node);
+    let prototype =
+        PROTOTYPE_TYPES.contains(&kind) && declares_function(node) && !macro_statement(node);
     if is_sym || prototype {
-        if let Some(name) = declarator_name(node, src) {
+        if let Some(name) = test_macro_name(node, src).or_else(|| declarator_name(node, src)) {
             let kind = if prototype || kind == "function_definition" {
                 Some(DefKind::Function)
             } else {
