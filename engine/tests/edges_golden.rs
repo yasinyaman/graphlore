@@ -3294,3 +3294,30 @@ fn kotlin_rules_from_the_spec() {
         ],
     );
 }
+
+/// C++ and Swift rules from clang and the Swift compiler (engine 0.5.71):
+/// `::f`, an inline namespace, `operator+`, an exact match and a
+/// non-template overload; a local function's overloads are its scope's.
+#[test]
+fn cpp_and_swift_rules_from_the_compilers() {
+    let got = quals("cppswift", &[
+        (
+            "a.cc",
+            "int Helper() {\n  return 1;\n}\n\nnamespace lib {\ninline namespace v2 {\nint Get() {\n  return 2;\n}\n}  // namespace v2\n}  // namespace lib\n\nnamespace app {\nint Helper() {\n  return 2;\n}\n\nint Run() {\n  return ::Helper() + lib::Get();\n}\n}  // namespace app\n\nclass Money {\n public:\n  int cents;\n  Money operator+(const Money& o) const {\n    return Money{cents + o.cents};\n  }\n};\n\nMoney Total(const Money& a, const Money& b) {\n  return a + b;\n}\n",
+        ),
+        (
+            "j.swift",
+            "class Job {\n  func h() -> Int {\n    return 1\n  }\n\n  func run() -> Int {\n    func h() -> Int {\n      return 2\n    }\n    return h()\n  }\n}\n",
+        ),
+    ]);
+    has(
+        &got,
+        &[
+            ("app.Run", "calls", "Helper"),
+            ("app.Run", "calls", "lib.v2.Get"),
+            ("Total", "calls", "Money.operator+"),
+            ("Job.run", "calls", "Job.run.h"),
+        ],
+    );
+    lacks(&got, &[("app.Run", "calls", "app.Helper"), ("Job.run", "calls", "Job.h")]);
+}

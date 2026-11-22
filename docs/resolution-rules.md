@@ -25,7 +25,7 @@ python benchmarks/conformance.py --baseline benchmarks/results-conformance.json 
 python benchmarks/conformance.py --markdown      # the tables below
 ```
 
-Measured 2026-11-21 with graphlore-engine 0.5.69: **625 of 625 rules hold**
+Measured 2026-11-21 with graphlore-engine 0.5.71: **644 of 644 rules hold**
 (356 of the first 406 with 0.5.45). Ten came from the Go type checker and
 rust-analyzer run on whole repositories; fifteen from the Kotlin and Swift
 compilers' tests (type checks, casts, `catch`, aliases); thirty-nine from two
@@ -104,7 +104,7 @@ Each change was measured on the 45 audit repositories as well, by reading
 the edges it added and removed at their source lines; the page on the
 [native engine](native-engine.md#the-rules-themselves) has the numbers.
 Every case has been compiled by its own language
-(`benchmarks/verify_cases.py`: 625 of 625 accepted). The Versions column is
+(`benchmarks/verify_cases.py`: 644 of 644 accepted). The Versions column is
 the oldest version of the language whose compiler accepts the case, where the
 compiler can be asked (`verify_cases.py --min-version`: Java, Kotlin, Scala,
 C#, Swift, C, C++); `all` is the oldest version asked, `–` a language with no
@@ -672,11 +672,11 @@ Found by: the specification 37, a compiler 10, comparison 6, the grammar 2, the 
 | a tuple struct's name called is its constructor, in the value namespace | `tuple-struct-constructor` | – | yes |
 | a binding of a `match` arm is a name of the arm: it hides a function of its name there only | `match-arm-binding` | – | yes |
 
-### swift (43 of 43)
+### swift (52 of 52)
 
 The Swift Programming Language, 'Declarations', 'Extensions', 'Protocols' (member lookup is the compiler's).
 
-Found by: the specification 33, a compiler 5, comparison 0, the grammar 5, the language's own tools 0. With the place it was read in the language's own tools: 0.
+Found by: the specification 33, a compiler 5, comparison 0, the grammar 5, the language's own tools 9. With the place it was read in the language's own tools: 9.
 
 | Rule | Case | Versions | Engine |
 |---|---|---|---|
@@ -723,12 +723,21 @@ Found by: the specification 33, a compiler 5, comparison 0, the grammar 5, the l
 | `(any P).self` is a use of P | `metatype-of-existential` | – | yes |
 | `Box<T>(…)` constructs Box | `generic-construction` | – | yes |
 | `.case` compared with, assigned to or switched on a value is a case of that value's type | `implicit-member-beside-a-value` | – | yes |
+| a function declared in a method comes before a method of the type | `local-function-before-member` | – | yes |
+| a member of the type around comes before a function of the module | `member-before-global` | – | yes |
+| a type's own method comes before a protocol extension's default of its name | `concrete-before-protocol-extension` | – | yes |
+| argument labels choose among overloads of one base name | `overload-by-label` | – | yes |
+| of two applicable overloads, the one whose parameter type is not `Any` | `overload-specific-type` | – | yes |
+| a non-generic overload is more specialized than a generic one | `non-generic-before-generic` | – | yes |
+| a non-variadic overload is preferred to a variadic one | `non-variadic-before-variadic` | – | yes |
+| of overloads that fit, the one that fills no default argument | `fewer-defaults` | – | yes |
+| a closure's parameter is a name of the closure: it hides a function of its name | `closure-parameter-hides-a-function` | – | yes |
 
-### c (16 of 16)
+### c (17 of 17)
 
 ISO C, 6.2.1 'Scopes of identifiers', 6.2.2 'Linkages of identifiers'.
 
-Found by: the specification 14, a compiler 0, comparison 0, the grammar 2, the language's own tools 0. With the place it was read in the language's own tools: 0.
+Found by: the specification 14, a compiler 0, comparison 0, the grammar 2, the language's own tools 1. With the place it was read in the language's own tools: 1.
 
 | Rule | Case | Versions | Engine |
 |---|---|---|---|
@@ -748,12 +757,13 @@ Found by: the specification 14, a compiler 0, comparison 0, the grammar 2, the l
 | a call through a parameter is no call of a function of its name | `typedef-function-pointer` | all | yes |
 | the type a local is declared with is a use of it | `local-declaration-type` | – | yes |
 | a `typedef` of a named type is a use of that type | `typedef-names-its-type` | – | yes |
+| a struct tag and a function of one name are in different name spaces | `tag-name-space` | – | yes |
 
-### cpp (36 of 36)
+### cpp (45 of 45)
 
 ISO C++, [basic.lookup] (unqualified, qualified and argument-dependent lookup), [class.member.lookup], [dcl.ambig.res].
 
-Found by: the specification 32, a compiler 0, comparison 0, the grammar 4, the language's own tools 0. With the place it was read in the language's own tools: 0.
+Found by: the specification 32, a compiler 0, comparison 0, the grammar 4, the language's own tools 9. With the place it was read in the language's own tools: 9.
 
 | Rule | Case | Versions | Engine |
 |---|---|---|---|
@@ -793,6 +803,15 @@ Found by: the specification 32, a compiler 0, comparison 0, the grammar 4, the l
 | the result type of a member function declared in its class is a use of it | `member-declaration-result` | – | yes |
 | a type written as a template argument of a call is a use of it | `explicit-template-argument` | – | yes |
 | a trailing result type and a `friend` name their types | `trailing-result-and-friend` | – | yes |
+| a member of a derived class hides every member of its name in the base | `derived-member-hides-base` | – | yes |
+| `using Base::Get;` brings the base's overloads into the derived class | `using-declaration-of-a-base-member` | – | yes |
+| a member of the class comes before a function of the namespace around | `member-before-namespace` | – | yes |
+| a member function's body sees members declared after it | `member-declared-later` | – | yes |
+| `::f()` is the function of the global namespace, not the namespace around | `global-scope-operator` | – | yes |
+| an overload whose parameter type is the argument's exactly wins over one that converts it | `exact-match-before-conversion` | – | yes |
+| a function that is no template wins over a template specialization equally good | `non-template-before-template` | – | yes |
+| `a + b` calls the `operator+` of a's class | `operator-call` | – | yes |
+| a member of an inline namespace is a member of the namespace around | `inline-namespace` | – | yes |
 
 ### ruby (29 of 29)
 
@@ -875,4 +894,4 @@ Found by: the specification 31, a compiler 2, comparison 0, the grammar 1, the l
 | `$x instanceof T` and `catch (T $e)` are uses of T | `instanceof-and-catch` | – | yes |
 | an anonymous function's parameters and result name their types | `closure-signature` | – | yes |
 
-625 of 625 rules hold
+644 of 644 rules hold

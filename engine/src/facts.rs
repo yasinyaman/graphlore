@@ -650,6 +650,10 @@ pub struct FileFacts {
     /// C++ `namespace u = util;`: the alias and the namespace it names.
     #[serde(default)]
     pub ns_aliases: Vec<(String, Vec<String>)>,
+    /// C++ `inline namespace v2 { … }`: the first byte of each, whose members
+    /// are members of the namespace around ([namespace.def]).
+    #[serde(default)]
+    pub inline_namespaces: Vec<usize>,
     pub refs: Vec<RefFact>,
     pub locals: Vec<Local>,
     /// Names a type answers to without a definition of that name: Ruby
@@ -719,6 +723,7 @@ impl FileFacts {
             imports: Vec::new(),
             exports: Vec::new(),
             ns_aliases: Vec::new(),
+            inline_namespaces: Vec::new(),
             refs: Vec::new(),
             locals: Vec::new(),
             attrs: Vec::new(),
