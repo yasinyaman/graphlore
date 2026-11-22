@@ -3253,6 +3253,22 @@ fn typescript_rules_from_the_name_resolver() {
     has(&got, &[("run", "calls", "Repo.find"), ("run", "calls", "Repo.save")]);
 }
 
+/// `Outer.this` is the object of a class that is named; `self` is no word of
+/// Java's, and a method called `self` on a typed receiver is that method
+/// (found by `benchmarks/neutrality.py`: the call went to the class).
+#[test]
+fn java_a_method_named_self_is_a_method() {
+    let got = quals("javaself", &[(
+        "app/A.java",
+        "package app;\n\nclass Repo {\n    int self() {\n        return 1;\n    }\n}\n\nclass Other {\n    int self() {\n        return 2;\n    }\n}\n\npublic class A {\n    int run(Repo r) {\n        return r.self();\n    }\n}\n",
+    )]);
+    has(&got, &[("A.run", "calls", "Repo.self")]);
+    assert!(
+        !got.iter().any(|(s, r, t)| s == "A.run" && r == "calls" && t != "Repo.self"),
+        "{got:#?}"
+    );
+}
+
 /// Java's rules from the JLS and javac (engine 0.5.68): `Outer.this`, an
 /// interface's constant, and phase 1 and specificity of overloads for an
 /// integer literal.

@@ -760,6 +760,7 @@ both):
 | edges of 0.5.76 missing or changed | 0 of 202,257 |
 | nodes in another community | 0 of 56,623 |
 | polyglot audit findings, new / gone | 0 / 0 |
+| confirmed edges of graphify's lacking, rows worse than the baseline (`verify_graphify.py`: go/types, rust-analyzer and Roslyn on nine of the repositories) | 0 |
 
 Sixty-five dispatch edges were read against their source, a few per
 language. Two rules above came from that reading: Alamofire's `EventMonitor`
@@ -767,6 +768,21 @@ has dozens of `request(_:…:)` methods told apart by their second label, and
 counting parameters linked each to every implementation (3,300 Swift edges
 before the labels were asked, 419 after); RestSharp's test stub has two
 `Serialize` methods of one parameter.
+
+Neither kind of edge is given to community detection, and that is measured,
+not assumed. With them at the default weight of an edge, over the same 31
+repositories (`compare_engines.py --communities`, means per repository):
+
+| edges weighed | communities | modularity | in the main directory | test nodes with production | NMI with graphify |
+|---|--:|--:|--:|--:|--:|
+| neither (what is built) | 2,844 | 0.585 | 85.9% | 9.5% | 0.768 |
+| `couples_with` | 2,821 | 0.586 | 85.9% | 9.6% | 0.767 |
+| override `dispatches_to` | 2,806 | 0.586 | 85.6% | 9.7% | 0.768 |
+| both | 2,792 | 0.588 | 85.6% | 9.5% | 0.767 |
+
+Nothing a reader would notice improves, and with the dispatch edges alone
+26,667 of the 56,623 nodes land in a community of another id, which is what
+saved community names are keyed by.
 
 ### HTTP routes and requests
 
