@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use tree_sitter::Node;
 
 use crate::facts::Context;
-use crate::generic::{kids, line, text};
+use crate::generic::{kids, line, prefix, text};
 use crate::lang::Lang;
 use crate::refs::{callee, is_call_kind, path_of, string_value};
 
@@ -606,7 +606,7 @@ pub fn declared_table(n: Node, src: &[u8], lang: Option<Lang>, name: &str) -> Op
     if let Some(p) = n.parent().filter(|p| p.kind() == "export_statement") {
         t = text(p, src);
     }
-    let t = &t[..t.len().min(6000)];
+    let t = prefix(&t, 6000);
     let Some(lang) = lang else {
         // `public DbSet<Item> Items { get; set; }`, `const User = mongoose.model('User', …)`
         let dbset = DBSET.get_or_init(|| Regex::new(r"\bDbSet<\s*[\w.]+\s*>\s+(\w+)").unwrap());
