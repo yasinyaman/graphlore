@@ -433,6 +433,21 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- **Macros that made up definitions, a gtest test's name and a C++ class
+  before its constructor** (`spans.py` and the native engine 0.5.76). A
+  C++ `TEST(Suite, Name) { … }` / `TEST_F(Fixture, Name) { … }` (a function
+  with no return type, named in capitals, given two bare names) is
+  `Suite.Name`, not a function called `TEST` 810 times over; a `TEST_F`
+  test is a method of its fixture, so the fixture's fields type what it
+  calls (leveldb: 333 more calls, 104 reads). C and C++ sources are parsed
+  with a macro alone on an indented line before a call blanked (Unity's
+  `EXPECT_ABORT_BEGIN` / `TEST_ASSERT(0);`): the parser read the pair as a
+  declaration and lost the functions after it (118 made-up definitions in
+  one cJSON test file, none now). A TypeScript `const` or variable directly
+  in a `namespace` is a definition, as a module's is. In a member of
+  `Status`, `Status::OK()` names the class before `::`, not the
+  constructor of its name the member lookup found first ([class.qual];
+  conformance case `cpp/class-before-its-constructor`).
 - **Definitions graphify finds that the span rule missed, checked against
   the source** (`spans.py` and the native engine 0.5.75, the same rule).
   Of the 2,020 definitions only graphify had on the 45 audit repositories,

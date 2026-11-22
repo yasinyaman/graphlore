@@ -5192,6 +5192,22 @@ impl<'a> Project<'a> {
                 return self.walk(Target::Def(r), rest, Confidence::Extracted);
             }
         }
+        // C++ `Status::OK()` in a member of Status: the name before `::` is
+        // the class, never the constructor of its name the member lookup
+        // finds first ([class.qual]: a constructor is not found by a
+        // nested-name-specifier)
+        if fam == Family::C && rest.first().is_some_and(|s| s != "()") {
+            if let Some(Target::Def(c)) = self.resolve_name_any(f, d, head) {
+                // (a constructor is a callable of its class's name: the
+                // grammar gives it no kind of its own)
+                if self.def(c).kind.is_callable() {
+                    let class = self.class_of(c.0, Some(c.1));
+                    if let Some(class) = class.filter(|k| &self.def(*k).name == head) {
+                        return self.walk(Target::Def(class), rest, Confidence::Extracted);
+                    }
+                }
+            }
+        }
         // PHP `\\App\\Models\\User`, `\\DateTimeImmutable`: fully qualified, from
         // the global namespace (spec 18-namespaces.md)
         if fam == Family::Php && head == "\\" {

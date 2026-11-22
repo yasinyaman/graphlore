@@ -461,6 +461,41 @@ def _ts_declares_function(node: Any) -> bool:
     return False
 
 
+def _ts_macro_statement(node: Any) -> bool:
+    """A ``declaration`` whose type is a macro call the parser could not read
+    (``TEST_ASSERT_EQUAL(p0, p1, 4);`` followed by another, in a function the
+    parser lost): two statements, no declaration."""
+    typ = node.child_by_field_name("type")
+    return typ is not None and typ.type == "macro_type_specifier" and typ.has_error
+
+
+_CAPITALS = re.compile(r"[A-Z][A-Z0-9_]{2,}")
+
+
+def _ts_test_macro_name(node: Any) -> str | None:
+    """C++ ``TEST(Suite, Name) { … }``, ``TEST_F(Fixture, Name) { … }``: a
+    function with no return type, named in capitals, given two bare names. The
+    test is ``Suite.Name``, a method of the fixture when the file defines one."""
+    if node.type != "function_definition" or node.child_by_field_name("type") is not None:
+        return None
+    decl = node.child_by_field_name("declarator")
+    if decl is None or decl.type != "function_declarator":
+        return None
+    name = decl.child_by_field_name("declarator")
+    params = decl.child_by_field_name("parameters")
+    if name is None or name.type != "identifier" or params is None \
+            or not _CAPITALS.fullmatch(name.text.decode("utf-8", "replace")):
+        return None
+    parts = []
+    for p in params.named_children:
+        inner = p.named_children
+        if p.type != "parameter_declaration" or len(inner) != 1 \
+                or inner[0].type != "type_identifier":
+            return None
+        parts.append(inner[0].text.decode("utf-8", "replace"))
+    return ".".join(parts) if len(parts) == 2 else None
+
+
 def _ts_child_name(node: Any) -> str | None:
     """The name of a declaration whose grammar has no ``name`` field: its keyword
     (Swift ``init``), or its first identifier child (Kotlin)."""
@@ -596,6 +631,9 @@ _AFTER_PARAMS = frozenset((b"const", b"override", b"final", b"noexcept"))
 _LOOKBACK = 2000  # how far back the `(` a parameter list opens with is looked for
 _CONTROL = frozenset(
     b"if while for switch catch return sizeof alignof decltype typeof defined".split())
+# A macro alone on an indented line, before a line that starts with a call.
+_STATEMENT_MACRO = re.compile(
+    rb"(?m)^[ \t]+([A-Z][A-Z0-9_]{2,})[ \t]*\r?\n[ \t]*[A-Za-z_][A-Za-z0-9_]*[ \t]*\(")
 _PARAM_DECL = re.compile(rb"[A-Za-z_][A-Za-z0-9_]*[ \t*&]+[A-Za-z_]")
 
 
@@ -612,12 +650,20 @@ def _blank_annotation_macros(src: bytes) -> bytes:
     optionally followed by `const` / `override` / `noexcept`, on its line or
     at the start of the next, and when its
     arguments declare no parameter (`ADD(int a)` is a function). Each byte of
-    the macro becomes a space. The engine's `parse::blank_annotation_macros`
-    is the same rule.
+    the macro becomes a space. So does a macro alone on an indented line
+    before a line that starts with a call (Unity's `EXPECT_ABORT_BEGIN` /
+    `TEST_ASSERT(0);`, Qt's `Q_OBJECT` / `Window(int w);`): a statement or
+    nothing once expanded, which the parser takes for the type of a
+    declaration the next line would be. The engine's
+    `parse::blank_annotation_macros` is the same rule.
     """
     if b"(" not in src:
         return src
     out: bytearray | None = None
+    for m in _STATEMENT_MACRO.finditer(src):
+        if out is None:
+            out = bytearray(src)
+        out[m.start(1):m.end(1)] = b" " * (m.end(1) - m.start(1))
     for m in _ANNOTATION_MACRO.finditer(src):
         before, word, args = m.group(1).rstrip(b" \t"), m.group(2), m.group(4)
         close = m.start(2)  # where the `)` of a parameter list is
@@ -852,8 +898,10 @@ def _spans_treesitter(src: bytes, rel: str) -> list[tuple[int, int, int, str]]:
                 base = type_node.child_by_field_id(f_type) or type_node
                 walk(child, f"{prefix}{base.text.decode('utf-8', 'replace')}.")
             elif (is_sym or (t in _TS_PROTOTYPE_TYPES
-                             and _ts_declares_function(child))) \
-                    and (dname := _ts_declarator_name(child)) is not None:
+                             and _ts_declares_function(child)
+                             and not _ts_macro_statement(child))) \
+                    and (dname := (_ts_test_macro_name(child)
+                                   or _ts_declarator_name(child))) is not None:
                 # C/C++ function/method: the name lives in the declarator chain
                 qual = f"{prefix}{dname}"
                 add(child, qual)

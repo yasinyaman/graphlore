@@ -259,9 +259,8 @@ impl LanguageModule for Ecma {
             return Vec::new();
         };
         let top = decl.parent().is_some_and(|p| {
-            p.kind() == "program"
-                || (p.kind() == "export_statement"
-                    && p.parent().is_some_and(|q| q.kind() == "program"))
+            module_level(p)
+                || (p.kind() == "export_statement" && p.parent().is_some_and(module_level))
         });
         let is_const = all_kids(decl).iter().any(|c| c.kind() == "const");
         let value = n.child_by_field_name("value");
@@ -429,9 +428,8 @@ impl LanguageModule for Ecma {
             "variable_declarator" => {
                 let decl = n.parent().filter(|p| p.kind() == "lexical_declaration")?;
                 let top = decl.parent().is_some_and(|p| {
-                    p.kind() == "program"
-                        || (p.kind() == "export_statement"
-                            && p.parent().is_some_and(|q| q.kind() == "program"))
+                    module_level(p)
+                        || (p.kind() == "export_statement" && p.parent().is_some_and(module_level))
                 });
                 let is_const = all_kids(decl).iter().any(|c| c.kind() == "const");
                 let name = n.child_by_field_name("name").filter(|x| x.kind() == "identifier")?;
@@ -558,4 +556,13 @@ impl LanguageModule for Ecma {
     fn builtins(&self) -> &'static [&'static str] {
         BUILTINS
     }
+}
+
+/// Whether a statement directly in `p` is at the level of a module: the
+/// program, or the body of a TypeScript `namespace` (whose `const`s and
+/// variables are the namespace's, as a module's are the module's).
+fn module_level(p: Node) -> bool {
+    p.kind() == "program"
+        || (p.kind() == "statement_block"
+            && p.parent().is_some_and(|q| matches!(q.kind(), "internal_module" | "module")))
 }

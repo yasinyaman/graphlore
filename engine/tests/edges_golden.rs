@@ -3381,3 +3381,25 @@ fn scala_rules_from_the_typer() {
         .collect();
     assert_eq!(finds.len(), 1);
 }
+
+/// C++ (engine 0.5.76): in a member of `Status`, `Status::OK()` names the
+/// class before `::`, not the constructor of its name; a gtest test is a
+/// method of its fixture and sees the fixture's fields.
+#[test]
+fn cpp_the_class_before_its_constructor_and_gtest_fixtures() {
+    let got = quals("cppctor", &[
+        (
+            "status.h",
+            "class Status {\n public:\n  Status(const Status& rhs);\n  static Status OK() {\n    return Status();\n  }\n  Status Copy();\n};\n\ninline Status::Status(const Status& rhs) {\n}\n",
+        ),
+        (
+            "status.cc",
+            "#include \"status.h\"\n\nStatus Status::Copy() {\n  Status s = Status::OK();\n  return s;\n}\n",
+        ),
+        (
+            "db_test.cc",
+            "class Db {\n public:\n  int Write() {\n    return 1;\n  }\n};\n\nclass DbTest {\n public:\n  Db db_;\n};\n\nTEST_F(DbTest, Writes) {\n  db_.Write();\n}\n",
+        ),
+    ]);
+    has(&got, &[("Status.Copy", "calls", "Status.OK"), ("DbTest.Writes", "calls", "Db.Write")]);
+}

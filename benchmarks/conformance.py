@@ -2669,6 +2669,11 @@ case("cpp", "inline-namespace", "a member of an inline namespace is a member of 
      CPP, {"a.cc": "namespace lib {\ninline namespace v2 {\nint Get() {\n  return 2;\n}\n}  // namespace v2\n}  // namespace lib\n\nint Run() {\n  return lib::Get();\n}\n"},
      [("Run", "calls", "lib.v2.Get")],
      source="ISO C++ [namespace.def] (members of an inline namespace are members of the enclosing one)")
+case("cpp", "class-before-its-constructor", "`T::f()` in a member of T: the name before `::` is the class, not the constructor of its name",
+     CPP, {"status.h": "class Status {\n public:\n  Status() {\n  }\n  Status(const Status& rhs);\n  static Status OK() {\n    return Status();\n  }\n  Status Copy();\n};\n\ninline Status::Status(const Status& rhs) {\n}\n",
+           "status.cc": "#include \"status.h\"\n\nStatus Status::Copy() {\n  Status s = Status::OK();\n  return s;\n}\n"},
+     [("Status.Copy", "calls", "Status.OK")],
+     source="ISO C++ [class.qual] (in a nested-name-specifier a constructor is not found: the injected class name is the class)")
 
 # Phase 2 for Python: the Language Reference's 'Naming and binding' (4.2) and
 # 'The import system', and CPython's symbol table (python/cpython
