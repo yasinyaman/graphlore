@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""graphlore MCP Server — a Graphify graph, joined to real source spans.
+"""graphlore MCP Server — a codebase knowledge graph, joined to real source spans.
 
-Wraps the graphify CLI (https://graphify.net) so an AI assistant can query the
-codebase knowledge graph during development. Graphify builds the graph and ships
-its own embedded MCP server for navigating it; what this module adds is the span
-engine (ast + tree-sitter ``start..end`` ranges) and the tools that need it —
-locate/hidden links, fetch, skeleton, routes, package_apis, and
-cosmetic-vs-structural freshness. One active project at a time: PROJECT_DIR,
+Lets an AI assistant query the codebase knowledge graph during development. The
+graph is built by graphlore's native engine (engine/, the graphlore-engine
+package), or by the graphify CLI (https://graphify.net) when the engine is not
+installed; what this module adds is the span engine (ast + tree-sitter
+``start..end`` ranges) and the tools that read the graph — locate/hidden links,
+fetch, skeleton, routes, package_apis, and cosmetic-vs-structural freshness. One active project at a time: PROJECT_DIR,
 switchable with graphlore_project.
 
 Tool surface: GRAPHLORE_TOOLSET=lean (the default) registers LEAN_TOOLS only,
@@ -349,7 +349,7 @@ def _instructions(active: set[str] | frozenset[str] | None = None) -> str:
     """The server instructions for the active tool surface: a step or sentence
     naming a tool the toolset removed is left out, so the instructions never send
     an agent to a tool it cannot call."""
-    lines = ["Graphify knowledge graph tools for understanding a codebase.", "Recommended flow:"]
+    lines = ["Knowledge graph tools for understanding a codebase.", "Recommended flow:"]
     steps: list[str] = []
     if _has(active, "graphlore_overview"):
         steps.append("Call graphlore_overview first for orientation.")
