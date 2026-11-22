@@ -4796,6 +4796,60 @@ def test_graph_html_shows_what_graphlore_s_tools_find(tmp_path, monkeypatch):
     assert "cycles" in _graph_html_data(gp.with_name("graph.html"))["analysis"]
 
 
+def test_graph_html_links_a_node_to_its_lines_on_the_repository_host():
+    sha = "0123456789abcdef0123456789abcdef01234567"
+    src = server.viz.source_of_remote
+    assert src("https://github.com/encode/httpx.git", sha) == {
+        "host": "github", "web": "https://github.com/encode/httpx", "commit": sha, "prefix": ""}
+    # a token, a user name or a port in the remote never reaches the page
+    got = src("https://x-access-token:ghp_secret@github.com:443/o/r", sha, "sub/dir")
+    assert got == {"host": "github", "web": "https://github.com/o/r", "commit": sha,
+                   "prefix": "sub/dir/"}
+    assert "secret" not in json.dumps(got)
+    assert src("git@gitlab.com:group/sub/proj.git", sha)["web"] == "https://gitlab.com/group/sub/proj"
+    assert src("ssh://git@bitbucket.org/team/repo.git", sha)["host"] == "bitbucket"
+    # hosts it has no link form for, malformed remotes and commits: no link
+    assert src("https://git.example.com/o/r", sha) is None
+    assert src("http://local_proxy@127.0.0.1:8080/git/o/r", sha) is None
+    assert src("https://github.com/o", sha) is None
+    assert src("https://github.com/o/r\"onclick=x", sha) is None
+    assert src("https://github.com/o/r", "HEAD") is None
+    assert src("https://github.com/o/r", sha, "../up") is None
+    page = server.viz.TEMPLATE.read_text(encoding="utf-8")
+    assert 'rel: "noopener noreferrer"' in page and "?plain=1" in page
+
+
+def test_graph_html_carries_the_remote_of_its_repository(tmp_path, monkeypatch):
+    import subprocess
+
+    import pytest
+    (tmp_path / "graphify-out").mkdir()
+    gp = tmp_path / "graphify-out" / "graph.json"
+    gp.write_text(json.dumps(_viz_graph()), encoding="utf-8")
+    git = ["git", "-C", str(tmp_path), "-c", "user.name=t", "-c", "user.email=t@example.com"]
+    try:
+        subprocess.run([*git, "init", "-q"], check=True)
+    except (OSError, subprocess.CalledProcessError):
+        pytest.skip("git is not installed")
+    subprocess.run([*git, "remote", "add", "origin", "https://tok@github.com/o/r.git"], check=True)
+    (tmp_path / "a.py").write_text("x = 1\n", encoding="utf-8")
+    subprocess.run([*git, "add", "a.py"], check=True)
+    subprocess.run([*git, "commit", "-qm", "c"], check=True)
+    head = subprocess.run([*git, "rev-parse", "HEAD"], capture_output=True, text=True,
+                          check=True).stdout.strip()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    server._GRAPH_CACHE.clear()
+    server._VIZ_ANALYSIS.clear()
+    server._write_viz(tmp_path / "graphify-out" / "graph.json")
+    data = _graph_html_data(tmp_path / "graphify-out" / "graph.html")
+    assert data["source"] == {"host": "github", "web": "https://github.com/o/r",
+                              "commit": head, "prefix": ""}
+    # no remote: no link, and the page says nothing of one
+    subprocess.run([*git, "remote", "remove", "origin"], check=True)
+    server._write_viz(tmp_path / "graphify-out" / "graph.json")
+    assert "source" not in _graph_html_data(tmp_path / "graphify-out" / "graph.html")
+
+
 def test_graph_html_says_when_it_has_no_findings(tmp_path, monkeypatch):
     project, other = tmp_path / "proj", tmp_path / "other"
     for d in (project, other):

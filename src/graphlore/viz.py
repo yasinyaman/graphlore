@@ -112,6 +112,48 @@ def impact_walk(rel: str) -> int:
     return 2 if r in _IMPACT_FROM_STATE else 1
 
 
+# Where a node's source can be opened on the web: the hosts whose file pages
+# take a commit and a line range in the URL (the page builds it, `sourceUrl`).
+_SOURCE_HOSTS = {"github.com": "github", "gitlab.com": "gitlab", "bitbucket.org": "bitbucket"}
+_REPO_PART = re.compile(r"[A-Za-z0-9_.-]+")
+_SCP_REMOTE = re.compile(r"^[A-Za-z0-9_.-]+@([A-Za-z0-9.-]+):(.+)$")
+
+
+def source_of_remote(url: str, commit: str, prefix: str = "") -> dict[str, str] | None:
+    """What graph.html needs to open a node's lines on its host, from a git
+    remote's URL: ``{"host", "web", "commit", "prefix"}``, or None for a host it
+    has no link form for, a malformed URL or commit. Only the host and the
+    repository's path are kept: a user name, a token or a port in the remote
+    never reaches the page."""
+    from urllib.parse import urlsplit
+
+    url, commit = url.strip(), commit.strip()
+    if not re.fullmatch(r"[0-9a-f]{7,40}", commit):
+        return None
+    scp = _SCP_REMOTE.match(url)
+    if scp:
+        host, path = scp.group(1), scp.group(2)
+    else:
+        try:
+            parts = urlsplit(url)
+            host = parts.hostname or ""
+        except ValueError:
+            return None
+        if parts.scheme not in ("https", "http", "ssh", "git"):
+            return None
+        path = parts.path
+    kind = _SOURCE_HOSTS.get(host.lower())
+    path = path.strip("/").removesuffix(".git")
+    segments = path.split("/")
+    if kind is None or len(segments) < 2 or not all(_REPO_PART.fullmatch(s) for s in segments):
+        return None
+    prefix = prefix.strip("/")
+    if prefix and not all(p and p not in (".", "..") for p in prefix.split("/")):
+        return None
+    return {"host": kind, "web": f"https://{host.lower()}/{path}", "commit": commit,
+            "prefix": prefix + "/" if prefix else ""}
+
+
 def _int(v: Any) -> int:
     """An integer the graph wrote, as JSON gives it; 0 when it is none."""
     if isinstance(v, bool):
@@ -177,13 +219,15 @@ def _is_test(n: dict) -> bool:
 def page_data(
     graph: dict, names: dict[str, str] | None = None,
     analysis: dict[str, Any] | None = None,
+    source: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """The compact form of ``graph`` the page reads: nodes and edges as arrays of
     indices into the relation, kind and community tables.
 
     Everything but ``analysis`` comes from graph.json alone, so the page's own
     ``compact()`` makes the same from a raw graph. ``analysis`` is what
-    graphlore's tools found (server.py's ``_viz_analysis``), put in unchanged."""
+    graphlore's tools found (server.py's ``_viz_analysis``), put in unchanged, and
+    so is ``source`` (``source_of_remote``: where a node's lines open on the web)."""
     nodes, edges = _nodes_edges(graph)
     names = names or {}
     index: dict[str, int] = {}
@@ -288,6 +332,8 @@ def page_data(
     }
     if analysis is not None:
         data["analysis"] = analysis
+    if source is not None:
+        data["source"] = source
     return data
 
 
@@ -299,12 +345,14 @@ def _embed(data: dict[str, Any]) -> str:
 
 def render(
     graph: dict, title: str, names: dict[str, str] | None = None,
-    analysis: dict[str, Any] | None = None,
+    analysis: dict[str, Any] | None = None, source: dict[str, str] | None = None,
 ) -> str:
-    """graph.html for ``graph``, with what graphlore's tools found in ``analysis``."""
+    """graph.html for ``graph``, with what graphlore's tools found in ``analysis``
+    and where its nodes' lines open on the web in ``source``."""
     page = TEMPLATE.read_text(encoding="utf-8")
     return (page.replace("__GRAPHLORE_TITLE__", html.escape(title))
-                .replace("/*__GRAPHLORE_DATA__*/", _embed(page_data(graph, names, analysis))))
+                .replace("/*__GRAPHLORE_DATA__*/",
+                         _embed(page_data(graph, names, analysis, source))))
 
 
 def is_ours(path: Path) -> bool:
@@ -318,7 +366,7 @@ def is_ours(path: Path) -> bool:
 
 def write(
     graph: dict, out: Path, title: str, names: dict[str, str] | None = None,
-    analysis: dict[str, Any] | None = None,
+    analysis: dict[str, Any] | None = None, source: dict[str, str] | None = None,
 ) -> str:
     """Write graph.html for ``graph`` to ``out``; a one-line note saying what was
     done, for the build's reply."""
@@ -327,7 +375,7 @@ def write(
         return (f"graph.html not written: {len(nodes):,} nodes is more than the page "
                 f"draws ({MAX_NODES:,}).")
     try:
-        out.write_text(render(graph, title, names, analysis), encoding="utf-8")
+        out.write_text(render(graph, title, names, analysis, source), encoding="utf-8")
     except OSError as e:
         return f"graph.html not written: {e}"
     return f"graph.html written: {out} (open it in a browser; it reaches no network)"

@@ -36,6 +36,8 @@ input[type=search] { width: 100%; padding: 6px 8px; border: 1px solid var(--line
 button { font: inherit; color: var(--ink); background: var(--chip); border: 1px solid var(--line);
   border-radius: 6px; padding: 3px 8px; cursor: pointer; }
 button:disabled { opacity: .45; cursor: default; }
+a.button { font: inherit; color: var(--ink); background: var(--chip); border: 1px solid var(--line);
+  border-radius: 6px; padding: 3px 8px; text-decoration: none; }
 button.copy { font-size: 12px; padding: 2px 7px; }
 button.badge { font-size: 11px; padding: 1px 7px; border-radius: 10px; color: var(--accent);
   border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
@@ -1203,6 +1205,28 @@ function renderSide() {
   det.append(...parts.filter(x => x !== null && x !== undefined));
 }
 
+// A node's lines on the repository's web host, at the commit the graph was
+// built from; a new tab, since a host's page will not sit in a frame. Only a
+// page graphlore wrote for a repository with such a remote has D.source.
+const SOURCE_HOSTS = { github: "GitHub", gitlab: "GitLab", bitbucket: "Bitbucket" };
+function sourceUrl(i) {
+  const s = D.source;
+  if (!s || !SOURCE_HOSTS[s.host] || !/^https:\/\//.test(s.web) || !nFile(i) || nExt(i)) return null;
+  const path = (s.prefix + nFile(i)).split("/").map(encodeURIComponent).join("/");
+  const a = nKind(i) === "file" ? 0 : nLine(i), b = nEnd(i) > a ? nEnd(i) : a;
+  const plain = a && /\.(md|markdown|mdx|rst|txt)$/i.test(nFile(i)) ? "?plain=1" : "";
+  const commit = encodeURIComponent(s.commit);
+  if (s.host === "github") return `${s.web}/blob/${commit}/${path}${plain}` + (a ? `#L${a}` + (b > a ? `-L${b}` : "") : "");
+  if (s.host === "gitlab") return `${s.web}/-/blob/${commit}/${path}${plain}` + (a ? `#L${a}` + (b > a ? `-${b}` : "") : "");
+  return `${s.web}/src/${commit}/${path}` + (a ? `#lines-${a}` + (b > a ? `:${b}` : "") : "");
+}
+function sourceLink(i) {
+  const url = sourceUrl(i);
+  return url ? el("a", { class: "button", href: url, target: "_blank", rel: "noopener noreferrer",
+    title: `Open these lines on ${SOURCE_HOSTS[D.source.host]}, at commit ${D.source.commit.slice(0, 12)}` },
+    `On ${SOURCE_HOSTS[D.source.host]} ↗`) : null;
+}
+
 function nodeDetails(i) {
   const c = nComm(i), id = nId(i), rt = routeOf.get(i);
   const kv = (k, v) => (v ? [el("div", {}, k), el("div", {}, v)] : []);
@@ -1224,7 +1248,8 @@ function nodeDetails(i) {
     el("div", { class: "row", style: "margin-top:6px" },
       route.v === "n" && route.n === id ? null : el("button", { onclick: () => openNode(i) }, "Neighbourhood"),
       route.v === "i" && route.n === id ? null : el("button", { onclick: () => openImpact(i), title: "What depends on it (I)" }, "Impact"),
-      c >= 0 ? el("button", { onclick: () => openComm(c) }, "Its community") : null),
+      c >= 0 ? el("button", { onclick: () => openComm(c) }, "Its community") : null,
+      sourceLink(i)),
     el("h2", {}, "Copy for the assistant"),
     el("div", { class: "row" },
       copyButton("explain", `graphlore_explain(${JSON.stringify(id)})`),
