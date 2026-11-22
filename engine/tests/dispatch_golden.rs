@@ -22,6 +22,11 @@ fn project(name: &str, files: &[(&str, &str)]) -> PathBuf {
 /// `(base method, implementing method)` by qualified name, and the edges'
 /// confidence and context checked on the way.
 fn dispatch(name: &str, files: &[(&str, &str)]) -> BTreeSet<(String, String)> {
+    dispatch_lines(name, files).into_iter().map(|(a, _, b, _)| (a, b)).collect()
+}
+
+/// The same with each end's line: overloads share a qualified name.
+fn dispatch_lines(name: &str, files: &[(&str, &str)]) -> BTreeSet<(String, u64, String, u64)> {
     let dir = project(name, files);
     let (g, _) = build_graph(&BuildOptions::new(&dir)).unwrap();
     std::fs::remove_dir_all(&dir).unwrap();
@@ -31,7 +36,11 @@ fn dispatch(name: &str, files: &[(&str, &str)]) -> BTreeSet<(String, String)> {
             .unwrap()
             .iter()
             .find(|n| n["id"] == id)
-            .map(|n| n["qualname"].as_str().unwrap_or_default().to_string())
+            .map(|n| {
+                let at = n["source_location"].as_str().unwrap_or_default();
+                let line = at.trim_start_matches('L').split('-').next().unwrap_or_default();
+                (n["qualname"].as_str().unwrap_or_default().to_string(), line.parse().unwrap_or(0))
+            })
             .unwrap_or_default()
     };
     g["links"]
@@ -42,7 +51,9 @@ fn dispatch(name: &str, files: &[(&str, &str)]) -> BTreeSet<(String, String)> {
         .map(|e| {
             assert_eq!(e["confidence"], "EXTRACTED", "{e}");
             assert_eq!(e["context"], "override", "{e}");
-            (qual(e["source"].as_str().unwrap()), qual(e["target"].as_str().unwrap()))
+            let (a, la) = qual(e["source"].as_str().unwrap());
+            let (b, lb) = qual(e["target"].as_str().unwrap());
+            (a, la, b, lb)
         })
         .collect()
 }
@@ -116,4 +127,27 @@ fn go_says_nothing() {
         ("a.go", "package demo\n\ntype Reader interface {\n\tRead() int\n}\n\ntype Base struct{}\n\nfunc (b Base) Read() int { return 1 }\n\ntype File struct {\n\tBase\n}\n\nfunc (f File) Read() int { return 2 }\n"),
     ]);
     assert!(got.is_empty(), "{got:#?}");
+}
+
+#[test]
+fn swift_the_labels_are_part_of_the_name() {
+    // a protocol with two `request`s told apart by their second label: each
+    // goes to the method written with its labels, not to both
+    let got = dispatch_lines("swift", &[
+        ("Package.swift", "// swift-tools-version:5.9\nimport PackageDescription\nlet package = Package(name: \"Demo\", targets: [.target(name: \"Demo\")])\n"),
+        ("Sources/Demo/Monitor.swift", "protocol Monitor {\n    func request(_ r: Int, didStart at: Int)\n    func request(_ r: Int, didFinish at: Int)\n}\n\nfinal class Logger: Monitor {\n    func request(_ r: Int, didStart at: Int) {}\n    func request(_ r: Int, didFinish at: Int) {}\n    func request(_ r: Int, didFail at: Int) {}\n}\n"),
+    ]);
+    let lines: BTreeSet<(u64, u64)> = got.iter().map(|(_, a, _, b)| (*a, *b)).collect();
+    assert_eq!(lines, BTreeSet::from([(2, 7), (3, 8)]), "{got:#?}");
+}
+
+#[test]
+fn csharp_overloads_of_one_count_go_by_their_types() {
+    // `Serialize(object)` and `Serialize(Parameter)` in one class: the
+    // interface's method reaches the one written with its type
+    let got = dispatch("cs", &[
+        ("ISerializer.cs", "namespace Demo;\n\npublic interface ISerializer {\n    string Serialize(object obj);\n}\n"),
+        ("Stub.cs", "namespace Demo;\n\npublic class Parameter {}\n\npublic class Stub : ISerializer {\n    public string Serialize(object obj) { return \"\"; }\n    public string Serialize(Parameter p) { return \"\"; }\n}\n"),
+    ]);
+    assert_eq!(got.len(), 1, "{got:#?}");
 }

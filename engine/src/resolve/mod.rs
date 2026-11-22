@@ -8370,6 +8370,21 @@ impl<'a> Project<'a> {
         !counted || x.params.is_none() || y.params.is_none() || x.params == y.params
     }
 
+    /// Whether `m` is written with the parameters of `base`, where a count
+    /// that agrees does not say so. In Swift the labels are part of a method's
+    /// name (`request(_:didParse:)` is not `request(_:didCreate:)`), always;
+    /// the types as written tell overloads apart, and are asked only when
+    /// either type has several such methods of the name (`contested`).
+    fn same_signature(&self, m: DefRef, base: DefRef, contested: bool) -> bool {
+        let (x, y) = (&self.def(m).plist, &self.def(base).plist);
+        if self.files[m.0].lang == Some(Lang::Swift)
+            && !(x.len() == y.len() && x.iter().zip(y).all(|(p, q)| p.name == q.name))
+        {
+            return false;
+        }
+        !contested || self.same_parameters(m, base)
+    }
+
     /// `(base method, the method written for it)`: a type's method of the
     /// name of a method its base, interface, trait or mixin declares. A call
     /// of the base's method is a call of whichever of these the object has,
@@ -8447,8 +8462,17 @@ impl<'a> Project<'a> {
                 }
                 own.sort_unstable();
                 own.dedup();
-                for m in own {
+                let counted = fam.overloads();
+                for &m in &own {
                     let name = &self.def(m).name;
+                    // the type's other methods of the name and as many parameters
+                    let rivals = counted
+                        && own.iter().any(|&o| {
+                            o != m
+                                && self.def(o).name == *name
+                                && self.def(o).params == self.def(m).params
+                                && self.overrides(o, m)
+                        });
                     let mut level = first.clone();
                     let mut seen: HashSet<DefRef> = HashSet::from([c]);
                     for _ in 0..DEPTH {
@@ -8458,11 +8482,15 @@ impl<'a> Project<'a> {
                         }
                         let mut next: Vec<DefRef> = Vec::new();
                         for &b in &level {
-                            let found: Vec<DefRef> = self
+                            let mut found: Vec<DefRef> = self
                                 .members(b, name)
                                 .into_iter()
                                 .filter(|&x| self.overrides(m, x))
                                 .collect();
+                            if counted {
+                                let contested = rivals || found.len() > 1;
+                                found.retain(|&x| self.same_signature(m, x, contested));
+                            }
                             if found.is_empty() {
                                 next.extend(self.bases(b));
                             } else {
