@@ -1285,8 +1285,6 @@ function findingsSummary() {
   if (!A) return [el("h2", {}, "Findings"), el("p", { class: "muted" }, NO_FINDINGS)];
   const rows = FINDINGS.map(f => [f.title, String(f.rows().length), () => openFinding(f.key), null]);
   const out = [el("h2", {}, "Findings"), listOf(rows)];
-  const u = A.unreferenced || {};
-  if (u.skipped) out.push(el("div", { class: "muted" }, `Unreferenced code is ${u.skipped}.`));
   if (A.notes && A.notes.length) out.push(el("div", { class: "muted" }, "Not worked out: " + A.notes.join("; ")));
   return out;
 }
@@ -1317,8 +1315,6 @@ function findingsDetails(key) {
   const out = [el("h2", {}, `${f.title} (${rows.length})`), el("div", { class: "muted" }, findingCounts(key)),
     el("div", { class: "row", style: "margin:6px 0" }, copyButton("ask the tool", TOOL_OF[key])),
     listOf(rows.map((row, k) => [f.label(row), f.tag(row), () => openFinding(key, k), null]))];
-  if (key === "unreferenced" && A.unreferenced && A.unreferenced.skipped)
-    out.push(el("div", { class: "muted" }, A.unreferenced.skipped));
   return out;
 }
 

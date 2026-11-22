@@ -4807,11 +4807,10 @@ def test_graph_html_says_when_it_has_no_findings(tmp_path, monkeypatch):
     note = server._write_viz(other / "graphify-out" / "graph.json")
     assert "no findings" in note and "graphlore_project" in note
     assert "analysis" not in _graph_html_data(other / "graphify-out" / "graph.html")
-    # past the size limit, unreferenced code is left out and the reply says so
-    monkeypatch.setattr(server, "VIZ_UNREFERENCED_MAX", 2)
-    note = server._write_viz(project / "graphify-out" / "graph.json")
+    # whatever the graph's size, the page carries unreferenced code
+    server._write_viz(project / "graphify-out" / "graph.json")
     a = _graph_html_data(project / "graphify-out" / "graph.html")["analysis"]
-    assert "skipped" in a["unreferenced"] and "graphlore_unreferenced" in note
+    assert "rows" in a["unreferenced"] and "skipped" not in a["unreferenced"]
     # a tool that fails costs its finding, never the page
     server._VIZ_ANALYSIS.clear()
     monkeypatch.setattr(server, "graphlore_surprises", lambda **kw: 1 / 0)
