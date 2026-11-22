@@ -6,6 +6,14 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Deprecated
+- **graphify as graphlore's extractor**, going in the next release with what
+  only it does: `graphlore_add` (a source by URL), `graphlore_build`'s `mode`
+  (`"deep"`) and `no_viz` (graph.html), `GRAPHLORE_ENGINE=graphify`,
+  `GRAPHLORE_BIN` and the `graphify` extra. A build graphify answers says so.
+  What graphify does that the engine does not yet is listed in
+  `docs/native-engine.md` ("After graphify").
+
 ### Fixed
 - **Java: a method called `self` on a typed receiver is that method.** The
   rule for `Outer.this` took any `x.self` whose `x` has a class for its type,
@@ -14,6 +22,17 @@ All notable changes to this project are documented here. The format is based on
   failed on it before this change too.
 
 ### Changed
+- **The native engine builds the graph by default.** `GRAPHLORE_ENGINE`
+  defaults to `auto`: graphlore's own extractor when it is installed, graphify
+  only when it is not (and for `mode`, and for `update` / `cluster_only` of a
+  graph graphify built). The engine is the new `engine` extra
+  (`graphlore-engine`, prebuilt wheels: no Rust toolchain), part of `all`;
+  the Claude Code plugin installs it, and `server.json` runs the server with
+  `--with graphlore-engine` instead of `--with graphifyy`. With neither
+  extractor installed, a build says how to install the engine; an unknown
+  `GRAPHLORE_ENGINE` is now an error instead of a graphify build. Without
+  Python tree-sitter, spans come from the engine's compiled-in grammars unless
+  `GRAPHLORE_ENGINE=graphify`.
 - **`graphlore_query`, `graphlore_path` and `graphlore_explain` no longer run
   graphify**: they read graph.json like every other analysis tool, so they
   work on a native graph with no `graphify` binary, and take `as_json`.

@@ -20,8 +20,8 @@
         {
           "type": "named",
           "name": "--with",
-          "value": "graphifyy",
-          "description": "Installs the Graphify CLI next to the server; graphlore_build needs it to build the graph."
+          "value": "graphlore-engine",
+          "description": "Installs graphlore's native engine (prebuilt wheels); graphlore_build builds the graph with it."
         }
       ],
       "transport": {

@@ -17,7 +17,7 @@
       "command": "uvx",
       "args": [
         "--from",
-        "graphlore[graphify,treesitter,semble,embed] @ ${CLAUDE_PLUGIN_ROOT}",
+        "graphlore[engine,graphify,treesitter,semble,embed] @ ${CLAUDE_PLUGIN_ROOT}",
         "graphlore"
       ],
       "env": {

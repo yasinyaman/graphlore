@@ -27,10 +27,11 @@ silently.
 The server reads one project at a time — at first the directory it was started
 with. `graphlore_project()` shows it; `graphlore_project("/path/to/other/repo")`
 switches to another repository (there is no per-call project argument).
-`graphlore_build` requires the `graphify` CLI on PATH, unless
-`GRAPHLORE_ENGINE=native` selects graphlore's experimental native engine (then
-the graph has definitions, spans, imports, calls and type references resolved
-from the source, and communities of its own, as the build result says). graphify writes `graphify-out/` inside the folder it reads, so after
+`graphlore_build` builds with graphlore's native engine (the graph has
+definitions, spans, imports, calls and type references resolved from the source,
+and communities of its own, as the build result says); only when the engine is
+not installed does it fall back to the `graphify` CLI. The build writes
+`graphify-out/` inside the folder it reads, so after
 `graphlore_build("/path/to/other/repo")` the build result tells you to switch
 before the read tools can see that graph.
 
