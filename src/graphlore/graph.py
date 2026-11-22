@@ -219,6 +219,32 @@ _CALL_PATH_HOPS = 6
 _SHARED_PAIRS_LIMIT = 10
 
 
+def _in_test_code(n: dict) -> bool:
+    """A node of a test file, or one the native engine marked as test code
+    inside a source file (`test`: a Rust `#[cfg(test)]` module)."""
+    f = _node_file(n)
+    return n.get("test") is True or (bool(f) and _is_test_path(f))
+
+
+def _engine_pairs(state: dict) -> dict[frozenset[str], tuple[str, int | None]]:
+    """The pairs the native engine listed on a state node (`coupling.listed`,
+    rows of `[writer, other, hops, forward]`): pair -> (the end its call path
+    starts at, hops), hops None for a hidden pair. Empty when the node carries
+    none, and a pair missing from a cut list is simply not answered."""
+    coupling = state.get("coupling")
+    rows = coupling.get("listed") if isinstance(coupling, dict) else None
+    out: dict[frozenset[str], tuple[str, int | None]] = {}
+    for row in rows if isinstance(rows, list) else []:
+        if not (isinstance(row, list) and len(row) == 4):
+            continue
+        writer, other, n, forward = row
+        if isinstance(writer, str) and isinstance(other, str):
+            hidden = not isinstance(n, int) or isinstance(n, bool)
+            out[frozenset((writer, other))] = (
+                writer if forward or hidden else other, None if hidden else n)
+    return out
+
+
 def _shared_state(
     nodes: list[dict], edges: list[dict], labels: Any = None,
     call_edges: list[dict] | None = None,
@@ -229,8 +255,10 @@ def _shared_state(
 
     Each pair of a writer and another definition touching the state says
     whether a call path joins them (`call_path`, either way, over calls,
-    dispatch and HTTP, within 6 hops, on `call_edges` — the graph's edges by
-    default) and whether their files change together (`co_change`, from
+    dispatch and HTTP, within 6 hops) and whether their files change together.
+    The call path is the native engine's answer where the state node carries
+    one (`coupling.listed`, schema 6 on); otherwise it is looked for here, on
+    `call_edges` — the graph's edges by default. `co_change` comes from
     `coupled(file_a, file_b)`, the git history). A score per state node: +2 when
     some pair has no call path between them (a hidden pair), +2 when the
     touching files sit in different top-level directories, +1 when they are in
@@ -250,25 +278,40 @@ def _shared_state(
         s, t = _edge_ends(e)
         (writers if rel == "writes" else readers).setdefault(t, set()).add(s)
     call_rels = _CALL_RELATIONS | {"dispatches_to"} | _HTTP_RELATIONS
-    adj = _relation_adjacency(call_edges if call_edges is not None else edges, call_rels)
+    adj: _Adj | None = None
     reach: dict[str, dict[str, int]] = {}
 
     def hops(a: str, b: str) -> int | None:
+        nonlocal adj
+        if adj is None:  # built on the first pair the graph does not answer
+            adj = _relation_adjacency(
+                call_edges if call_edges is not None else edges, call_rels)
         if a not in reach:
             reach[a] = _hop_distances(adj, a, _CALL_PATH_HOPS)
         return reach[a].get(b)
+
+    def call_path(w: str, o: str, known: dict[frozenset[str], Any]) -> dict | None:
+        """How a call path joins the two, or None for a hidden pair."""
+        got = known.get(frozenset((w, o)))
+        if got is not None:
+            start, n = got
+            return None if n is None else {
+                "direction": "a→b" if start == w else "b→a", "hops": n}
+        ab, ba = hops(w, o), hops(o, w)
+        return ({"direction": "a→b", "hops": ab} if ab is not None
+                else {"direction": "b→a", "hops": ba} if ba is not None else None)
 
     out: list[dict] = []
     for sid, ws in writers.items():
         state = byid.get(sid)
         if state is None:
             continue
-        test_state = bool(_node_file(state)) and _is_test_path(_node_file(state))
+        test_state = _in_test_code(state)
 
         def keep(i: str, test_state: bool = test_state) -> bool:
             n = byid.get(i)
-            f = _node_file(n) if n else ""
-            return bool(f) and (test_state or not _is_test_path(f))
+            return n is not None and bool(_node_file(n)) and (
+                test_state or not _in_test_code(n))
 
         ws_kept = sorted(i for i in ws if keep(i))
         rs_kept = sorted(i for i in readers.get(sid, set()) - ws if keep(i))
@@ -285,14 +328,13 @@ def _shared_state(
                       if file_of[o] != file_of[w]]
         pairs: list[dict] = []
         seen: set[frozenset[str]] = set()
+        known = _engine_pairs(state)
         for w in ws_kept:
             for o in touch:
                 if o == w or frozenset((w, o)) in seen:
                     continue
                 seen.add(frozenset((w, o)))
-                ab, ba = hops(w, o), hops(o, w)
-                path = ({"direction": "a→b", "hops": ab} if ab is not None
-                        else {"direction": "b→a", "hops": ba} if ba is not None else None)
+                path = call_path(w, o, known)
                 cc = (coupled(file_of[w], file_of[o])
                       if coupled is not None and file_of[w] != file_of[o] else None)
                 pairs.append({
@@ -358,9 +400,15 @@ _CALL_RELATIONS = frozenset({"calls", "indirect_call"})
 # Parent -> member. graphify >= 0.9 also writes `defines` (a class's field, a
 # script's function) and `case_of` (an enum's case).
 _CONTAINMENT_RELATIONS = frozenset({"contains", "method", "defines", "case_of"})
+# A pair of definitions that share state with no call path between them (the
+# native engine, schema 6 on): `couples_with` from the definition that sees the
+# state to the one that writes it. Derived from the `reads` / `writes` edges,
+# which stay in the graph, so it is never counted as a dependency of its own.
+_COUPLING_RELATIONS = frozenset({"couples_with"})
 # Edges that say nothing about one piece of code depending on another: structural
-# containment, and a docstring/comment node pointing at the code it describes.
-_NON_DEPENDENCY_RELATIONS = _CONTAINMENT_RELATIONS | {"rationale_for"}
+# containment, a docstring/comment node pointing at the code it describes, and
+# the pairs derived from shared state.
+_NON_DEPENDENCY_RELATIONS = _CONTAINMENT_RELATIONS | {"rationale_for"} | _COUPLING_RELATIONS
 # A definition reading or writing a variable, a field, a constant or a resource
 # (the native engine). Two definitions touching one such node affect each other
 # without either calling the other: shared state.

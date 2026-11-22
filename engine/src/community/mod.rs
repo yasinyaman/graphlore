@@ -253,11 +253,20 @@ pub fn detect(
         if a == b {
             continue;
         }
+        let rel = e.get("relation").and_then(Value::as_str).unwrap_or("");
+        // a pair sharing state is derived from the edges already counted, and
+        // a method written for a base's method repeats what the type's
+        // `inherits` / `implements` edge weighs
+        let derived = rel == crate::coupling::RELATION
+            || (rel == "dispatches_to"
+                && e.get("context").and_then(Value::as_str) == Some("override"));
+        if derived {
+            continue;
+        }
         raw.push((a, b));
         if infos[a].external || infos[b].external {
             continue;
         }
-        let rel = e.get("relation").and_then(Value::as_str).unwrap_or("");
         let mut w = relation_weight(rel, infos[b].is_file);
         if e.get("confidence").and_then(Value::as_str) == Some("INFERRED") {
             w *= INFERRED;
