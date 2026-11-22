@@ -169,6 +169,25 @@ _SNIPPETS = {
     "pool.cpp": "namespace m {\nvoid Pool::Run() {\n#if NEW_API\n    if (poll(1)) {\n#else\n"
                 "    if (wait(1)) {\n#endif\n        return;\n    }\n}\n"
                 "void Pool::Stop() {\n}\n}\n",
+    # definitions whose node type has no hint word, or no name: a delegate, a
+    # conversion and an arithmetic operator, an indexer
+    "Ops.cs": "public delegate void Cb(int x);\npublic class C\n{\n"
+              "    public static implicit operator string(C c) => \"\";\n"
+              "    public static C operator +(C a, C b) => a;\n"
+              "    public int this[int i] => i;\n}\n",
+    # a macro is `name!`; a subscript is named by its keyword; one `case` line
+    # declares each of its names
+    "macros.rs": "macro_rules! ext {\n    () => {};\n}\nfn ext() {}\n",
+    "Kinds.swift": "enum K {\n    case a, b, c\n    case d\n}\n"
+                   "struct H {\n    subscript(_ name: String) -> String? { nil }\n}\n",
+    # a lock annotation after a declarator is blanked: the field and the
+    # function keep their names; a function named in parentheses
+    "locks.cc": "class S {\n  int num GUARDED_BY(mu);\n  int stats_[4] GUARDED_BY(mu);\n"
+                "  void f() EXCLUSIVE_LOCKS_REQUIRED(mu);\n"
+                "  int Recover(int* edit,\n      bool* save)\n      EXCLUSIVE_LOCKS_REQUIRED(mu);\n"
+                "  void g() const LOCKS_EXCLUDED(mu) {\n  }\n};\n"
+                "int ADD(int a, int b) {\n  return ADD2(a);\n}\n"
+                "typedef void (Cb)(int);\n",
     "cart.rb": (FIXTURES / "polyglot" / "lib" / "shop" / "cart.rb").read_text(encoding="utf-8"),
     "Stack.php": (FIXTURES / "polyglot" / "php" / "src" / "Stack.php").read_text(encoding="utf-8"),
 }

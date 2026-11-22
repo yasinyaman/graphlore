@@ -311,3 +311,51 @@ fn cpp_an_alias_declaration_is_a_definition() {
     has_all(&quals("api.h", src), &["cpr.Header", "cpr.AsyncResponse"]);
     assert_eq!(span("api.h", src, "cpr.AsyncResponse"), (3, 3, 3));
 }
+
+#[test]
+fn definitions_with_no_hint_word_or_no_name() {
+    // a C# delegate and a Rust macro carry no hint word in their node type;
+    // C# operators and indexers and a Swift subscript carry no name of their
+    // own; a Rust macro is `name!`, never the function `name`
+    let cs = "public delegate void Cb(int x);\npublic class C\n{\n    public static implicit operator string(C c) => \"\";\n    public static C operator +(C a, C b) => a;\n    public int this[int i] => i;\n}\n";
+    assert_eq!(
+        quals("Ops.cs", cs),
+        set(&["Cb", "C", "C.operator string", "C.operator+", "C.this[]"])
+    );
+    let facts = file_facts(cs.as_bytes(), "Ops.cs");
+    let kind = |n: &str| facts.defs.iter().find(|d| d.name == n).map(|d| d.kind);
+    assert_eq!(kind("Cb"), Some(DefKind::TypeAlias));
+    assert_eq!(kind("operator+"), Some(DefKind::Method));
+    let rs = "macro_rules! ext {\n    () => {};\n}\nfn ext() {}\n";
+    assert_eq!(quals("m.rs", rs), set(&["ext!", "ext"]));
+    let swift = "struct H {\n    subscript(_ name: String) -> String? { nil }\n}\n";
+    assert_eq!(quals("H.swift", swift), set(&["H", "H.subscript"]));
+}
+
+#[test]
+fn swift_one_case_line_declares_each_name() {
+    let src = "enum K {\n    case a, b, c\n    case d\n}\n";
+    assert_eq!(quals("K.swift", src), set(&["K", "K.a", "K.b", "K.c", "K.d"]));
+    assert_eq!(span("K.swift", src, "K.b"), (2, 2, 2));
+}
+
+#[test]
+fn cpp_a_lock_annotation_is_no_declarator() {
+    // `int num GUARDED_BY(mu);` is a field, `void f() REQUIRES(mu);` the
+    // function f: the macro is blanked; a function in capitals and a call
+    // statement stay
+    let src = "class S {\n  int num GUARDED_BY(mu);\n  int stats_[4] GUARDED_BY(mu);\n  void f() EXCLUSIVE_LOCKS_REQUIRED(mu);\n  int Recover(int* edit,\n              bool* save)\n      EXCLUSIVE_LOCKS_REQUIRED(mu);\n  void g() const LOCKS_EXCLUDED(mu) {\n  }\n};\nint ADD(int a, int b) {\n  if (a) LOG(b);\n  return ADD2(a);\n}\n";
+    assert_eq!(quals("s.cc", src), set(&["S", "S.f", "S.Recover", "S.g", "ADD"]));
+    let facts = file_facts(src.as_bytes(), "s.cc");
+    assert!(facts.defs.iter().any(|d| d.name == "num" && d.kind == DefKind::Property));
+    assert!(facts.defs.iter().any(|d| d.name == "stats_" && d.kind == DefKind::Property));
+    let calls: BTreeSet<String> =
+        facts.refs.iter().filter_map(|r| r.path.last().cloned()).collect();
+    assert!(calls.contains("LOG") && calls.contains("ADD2"), "{calls:?}");
+}
+
+#[test]
+fn c_a_typedef_named_in_parentheses() {
+    let src = "typedef void (Cb)(int);\ntypedef void (*Cb2)(int);\n";
+    assert_eq!(quals("a.h", src), set(&["Cb", "Cb2"]));
+}
