@@ -1,0 +1,135 @@
+name: Engine wheels
+
+# Builds the graphlore-engine wheels (engine/) for Linux, macOS and Windows and,
+# on an `engine-vX.Y.Z` tag, uploads them to PyPI with Trusted Publishing (OIDC).
+# The extension is abi3 (Python 3.10+), so one wheel per platform covers every
+# Python. graphlore itself stays pure Python: the plugin and `pip install
+# "graphlore[engine]"` take these prebuilt wheels, never a Rust toolchain.
+# One-time PyPI setup is described under "Releasing" in CONTRIBUTING.md.
+on:
+  push:
+    tags: ["engine-v*"]
+  pull_request:
+    paths:
+      - "engine/**"
+      - ".github/workflows/engine-wheels.yml"
+  workflow_dispatch:
+    inputs:
+      publish_to:
+        description: "Upload the wheels to"
+        type: choice
+        options: [none, testpypi]
+        default: none
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    if: startsWith(github.ref, 'refs/tags/engine-v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check the tag matches engine/Cargo.toml
+        run: |
+          version=$(python3 -c "import tomllib; print(tomllib.load(open('engine/Cargo.toml', 'rb'))['package']['version'])")
+          tag="${GITHUB_REF_NAME#engine-v}"
+          if [ "$tag" != "$version" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match engine/Cargo.toml version $version"
+            exit 1
+          fi
+
+  wheels:
+    name: wheel (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: linux-x86_64, os: ubuntu-latest, target: x86_64, manylinux: auto }
+          - { name: linux-aarch64, os: ubuntu-24.04-arm, target: aarch64, manylinux: auto }
+          - { name: musllinux-x86_64, os: ubuntu-latest, target: x86_64, manylinux: musllinux_1_2 }
+          - { name: macos-universal2, os: macos-latest, target: universal2-apple-darwin }
+          - { name: windows-x64, os: windows-latest, target: x64 }
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.10"
+      - name: Build (maturin)
+        uses: PyO3/maturin-action@v1
+        with:
+          working-directory: engine
+          target: ${{ matrix.target }}
+          manylinux: ${{ matrix.manylinux }}
+          args: --release --out ../dist
+      - name: Smoke test
+        if: matrix.manylinux != 'musllinux_1_2'
+        shell: bash
+        run: |
+          python -m pip install --no-index --find-links dist graphlore-engine
+          python -m graphlore_engine languages
+          python -m graphlore_engine build tests/fixtures/polyglot --out "$RUNNER_TEMP/graph.json"
+          python -c "import json, sys; n = len(json.load(open(sys.argv[1]))['nodes']); print(n, 'nodes'); assert n > 20" "$RUNNER_TEMP/graph.json"
+      - name: Smoke test (Alpine)
+        if: matrix.manylinux == 'musllinux_1_2'
+        run: |
+          docker run --rm -v "$PWD:/w" -w /w python:3.12-alpine sh -c '
+            pip install --no-index --find-links dist graphlore-engine &&
+            python -m graphlore_engine languages &&
+            python -m graphlore_engine build tests/fixtures/polyglot --out /tmp/graph.json'
+      - uses: actions/upload-artifact@v7
+        with:
+          name: wheel-${{ matrix.name }}
+          path: dist/
+          if-no-files-found: error
+
+  sdist:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build the sdist (maturin)
+        uses: PyO3/maturin-action@v1
+        with:
+          working-directory: engine
+          command: sdist
+          args: --out ../dist
+      - uses: actions/upload-artifact@v7
+        with:
+          name: sdist
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    needs: [version, wheels, sdist]
+    if: startsWith(github.ref, 'refs/tags/engine-v')
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/graphlore-engine
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist/
+          merge-multiple: true
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  publish-testpypi:
+    needs: [wheels, sdist]
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_to == 'testpypi'
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/graphlore-engine
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist/
+          merge-multiple: true
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/

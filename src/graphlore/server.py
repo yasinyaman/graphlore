@@ -15,13 +15,14 @@ Tool surface: GRAPHLORE_TOOLSET=lean (the default) registers LEAN_TOOLS only,
 CLI-backed tools:
   - graphlore_build      : build / update the graph from a folder (graphify, or
                           the native engine with GRAPHLORE_ENGINE=native|auto)
-  - graphlore_query      : natural-language graph query
-  - graphlore_path       : path between two nodes
-  - graphlore_explain    : full explanation of a single node
   - graphlore_add        : add an external source by URL (paper, tweet)
 
 graph.json analysis tools (no CLI needed):
   - graphlore_overview   : one-shot orientation (call this first)
+  - graphlore_query      : natural-language question -> code search seeds ->
+                          token-budgeted walk (breadth- or depth-first)
+  - graphlore_path       : shortest path between two nodes
+  - graphlore_explain    : a node's metadata and its connections by relation
   - graphlore_locate     : code search (built-in BM25 [+ embeddings with [embed]], or
                           semble) -> enclosing node -> token-budgeted subgraph +
                           hidden links
@@ -59,12 +60,12 @@ Project selection:
   - graphlore_project    : show / switch the project directory the server reads
 
 Community naming:
-  - graphlore_label_communities : name Leiden clusters (host-LLM sampling / backend key)
+  - graphlore_label_communities : name Leiden clusters (host-LLM sampling)
   - graphlore_sampling_status   : report which naming options are available
   - graphlore_set_labels        : assistant-pushed {id: name} (no key, no sampling)
 
 Resources:
-  - graphlore://report          : GRAPH_REPORT.md
+  - graphlore://report          : the graph's report (overview + surprises)
   - graphlore://graph           : graph.json
   - graphlore://community/{id}  : per-community wiki
 
@@ -109,7 +110,6 @@ from contextvars import ContextVar
 from pathlib import Path
 from typing import Annotated, Any, NamedTuple, Protocol, TypeVar, overload
 
-import anyio.to_thread
 from mcp import MCPDeprecationWarning
 from mcp.server.mcpserver import Context, MCPServer, Resolve, Sample
 from mcp.server.transport_security import TransportSecuritySettings
@@ -187,6 +187,7 @@ from .graph import (  # noqa: F401  (re-exported for the tools + tests)
     _rel,
     _relation_adjacency,
     _resolve_node,
+    _route,
     _shared_state,
     _substring_matches,
     _tiered_import_cycles,
@@ -1967,85 +1968,302 @@ def _no_communities_msg(graph: object) -> str:
     return "Nodes carry no community info. Try graphlore_build(cluster_only=True)."
 
 
+# How many nodes graphlore_query starts from, and how deep it walks from them.
+_QUERY_SEEDS = 3
+_QUERY_HOPS = 3
+_QUERY_DFS_HOPS = 6
+_QUERY_BUDGET = 2000
+# Words of a question that name nothing in code.
+_QUERY_STOPWORDS = frozenset(
+    "the a an and or of to in on for from with by is are was be does do how what "
+    "which who where when why that this these those it its into between through "
+    "connect connects connected use uses used call calls called graph code".split()
+)
+
+
+def _query_terms(question: str) -> list[str]:
+    """The words of ``question`` worth matching against node names."""
+    words = re.findall(r"[A-Za-z_$][\w$]*", question)
+    return list(dict.fromkeys(
+        w.lower() for w in words if len(w) > 2 and w.lower() not in _QUERY_STOPWORDS
+    ))
+
+
+def _query_seeds_by_label(nodes: list[dict], edges: list[dict], question: str) -> list[dict]:
+    """The nodes whose names share the most words with ``question`` (most connected
+    first among equals): the seeds when no search index can be built."""
+    terms = _query_terms(question)
+    if not terms:
+        return []
+    degree: Counter[str] = Counter()
+    for e in edges:
+        s, t = _edge_ends(e)
+        degree[s] += 1
+        degree[t] += 1
+    scored = []
+    for n in nodes:
+        if _is_external_node(n):
+            continue
+        label = _node_label(n).lower()
+        score = sum(1 for t in terms if t in label)
+        if score:
+            scored.append((-score, not _is_code_definition(n), -degree[_node_id(n)],
+                           _node_id(n), n))
+    scored.sort(key=lambda x: x[:4])
+    return [x[-1] for x in scored[:_QUERY_SEEDS]]
+
+
 @_tool(annotations=ToolAnnotations(title="Query graph", read_only_hint=True))
-def graphlore_query(question: str, dfs: bool = False, budget: int = 0) -> str:
-    """Run a natural-language query against the graph.
+def graphlore_query(
+    question: str, dfs: bool = False, budget: int = 0, as_json: bool = False,
+    scope: str = "",
+) -> str:
+    """Answer a natural-language question with the part of the graph it is about.
+
+    The question is searched in the code (the same index as graphlore_locate:
+    semble when installed, else the built-in one), the best hits become the
+    seed nodes, and the graph is walked out from them until the token budget is
+    spent. Without a search index the seeds are the nodes whose names share the
+    most words with the question.
 
     Args:
         question: Natural-language question, e.g. "what connects attention to the optimizer?"
-        dfs: True -> trace a specific path in depth.
-        budget: If >0, cap the number of tokens returned (e.g. 1500).
+        dfs: True -> follow each branch deep (6 hops) before the next, to trace
+            one path; False walks breadth-first, 3 hops.
+        budget: If >0, cap the number of tokens returned (default 2000).
+        scope: Which part of the graph to walk — path prefixes / globs,
+            ``!pattern``, ``-tests``, ``-external``, ``-vendored``. Empty leaves
+            nothing out.
     """
-    args = ["query", question]
-    if dfs:
-        args.append("--dfs")
-    if budget > 0:
-        args += ["--budget", str(budget)]
-    args += _graph_arg()
-    return _cli_reply(_run_cli(args), repo_text=True)
+    graph = _load_graph()
+    if isinstance(graph, str):
+        return _err(graph, as_json)
+    nodes, edges = _nodes_edges(graph)
+    nav = _nav_view(nodes, edges, scope, as_json)
+    if isinstance(nav, str):
+        return nav
+    view, resolved = nav
+    budget = budget if budget > 0 else _QUERY_BUDGET
+    hops = _QUERY_DFS_HOPS if dfs else _QUERY_HOPS
+    kept = {_node_id(n) for n in view.nodes}
 
+    seeds: list[tuple[dict, str]] = []
+    backend = _semantic_backend(nodes, edges)
+    backend_info: dict[str, Any] | None = None
+    if backend.index is not None:
+        backend_info = _backend_payload(backend)
+        for h in backend.index.search(question, top_k=_QUERY_SEEDS * 3):
+            c = h.chunk
+            n = _node_for_location(nodes, str(c.file_path), int(c.start_line), int(c.end_line))
+            if n is None or _node_id(n) not in kept or any(n is m for m, _ in seeds):
+                continue
+            seeds.append((n, "search"))
+            if len(seeds) >= _QUERY_SEEDS:
+                break
+    if not seeds:
+        seeds = [(n, "name") for n in _query_seeds_by_label(view.nodes, view.edges, question)]
+    if not seeds:
+        msg = (f"Nothing in the graph matches '{question}'. Ask in the code's own words, "
+               "or name a symbol.")
+        payload: dict[str, Any] = {"question": question, "seeds": [], "edges": [], "note": msg}
+        if backend_info:
+            payload["backend"] = backend_info
+        return _fmt(payload, as_json, _with_note(msg, view))
 
-def _graph_arg() -> list[str]:
-    """``--graph <path>`` for the CLI's read commands, so they read the graph the
-    analysis tools read (``GRAPHLORE_OUT_DIR``), not the CLI's own default."""
-    gp = _graph_path()
-    return ["--graph", str(gp)] if gp.exists() else []
+    labels = _display_labels(nodes)
+    adj = _adjacency(view.edges)
+    tests = {_node_id(m) for m in view.nodes if _is_test_node(m)}
+    seed_ids = [_node_id(n) for n, _how in seeds]
+    visited, sub_edges, truncated, tokens = _bfs_subgraph(
+        adj, labels, seed_ids[0], hops, budget, edge_set=_edge_set(view.edges),
+        order=lambda x: (x[0] in tests, -len(adj.get(x[0], ())), x[0]),
+        edge_flags=_edge_flags(view.edges), also=seed_ids[1:], depth_first=dfs,
+    )
+    # the seeds' own neighbours the budget cut off: how much of the answer is missing
+    left_out = {nb for sid in seed_ids for nb, _rel in adj.get(sid, []) if nb not in visited}
+    seed_rows = [{"node": labels.get(_node_id(n), _node_label(n)),
+                  "site": _site(n) or "no source location", "by": how}
+                 for n, how in seeds]
+    payload = {
+        "question": question, "seeds": seed_rows, "dfs": dfs, "hops": hops,
+        "nodes": len(visited), "edges": sub_edges, "truncated": truncated,
+        "direct_neighbors_left_out": len(left_out),
+        "approx_tokens": tokens, "scope": view.payload(),
+        "resolved_edges": resolved.payload(),
+    }
+    if backend_info:
+        payload["backend"] = backend_info
+    _cut_hint(payload, "Raise budget for more of the walk, narrow it with scope=, or "
+                       "start from one node with graphlore_subgraph. "
+                       "direct_neighbors_left_out counts the seeds' neighbours not shown.")
+    text = [f"Query: {question}",
+            "Seeds: " + ", ".join(f"{r['node']} ({r['site']})" for r in seed_rows),
+            f"{len(visited)} nodes, {len(sub_edges)} edges "
+            f"({'depth' if dfs else 'breadth'}-first, ≤{hops} hops, ~{tokens} est. tokens"
+            + (f", TRUNCATED at budget: {len(left_out)} of the seeds' direct "
+               "neighbour(s) not shown" if truncated else "") + "):"]
+    text += [f"  {e['from']} —{e['relation']}→ {e['to']}"
+             + (f"  [{_flag_suffix(e)[2:]}]" if _flag_suffix(e) else "")
+             for e in sub_edges]
+    if not sub_edges:
+        payload["note"] = _EMPTY_NOTE
+        text.append(_EMPTY_NOTE)
+    if truncated:
+        text.append(payload["hint"])
+    if backend_info:
+        text.append(_backend_line(backend_info))
+    return _fmt(payload, as_json, _with_note("\n".join(text), view))
 
 
 @_tool(annotations=ToolAnnotations(title="Path between nodes", read_only_hint=True))
-def graphlore_path(node_a: str, node_b: str) -> str:
-    """Find the exact path between two nodes (e.g. "DigestAuth" -> "Response").
+def graphlore_path(node_a: str, node_b: str, as_json: bool = False, scope: str = "") -> str:
+    """Find the shortest path between two nodes (e.g. "DigestAuth" -> "Response").
+
+    Edges are followed in their own direction first (``direction: forward``,
+    node_a reaches node_b); failing that from node_b to node_a (``backward``);
+    failing that in either direction (``undirected``), each step saying which
+    way its edge points; an undirected path goes through a file's containment
+    edges only when there is no other (``via_containment``), and never through
+    an external package. The edges include
+    the calls and imports graphlore resolves from the source; ``couples_with``
+    (shared state) is not walked.
 
     Each end may be an id, a label or a bare name; a name several nodes share
     resolves like everywhere else in graphlore, and the reply says which node
     was used.
+
+    Args:
+        scope: Which part of the graph to walk — path prefixes / globs,
+            ``!pattern``, ``-tests``, ``-external``, ``-vendored``. Empty leaves
+            nothing out.
     """
-    (a, note_a), (b, note_b) = _cli_node_key(node_a), _cli_node_key(node_b)
-    return _cli_node_reply(_run_cli(["path", a, b, *_graph_arg()]), [note_a, note_b])
+    graph = _load_graph()
+    if isinstance(graph, str):
+        return _err(graph, as_json)
+    nodes, edges = _nodes_edges(graph)
+    picked_a, picked_b = _pick_node(nodes, node_a), _pick_node(nodes, node_b)
+    if picked_a.node is None:
+        return _not_found(nodes, node_a, as_json)
+    if picked_b.node is None:
+        return _not_found(nodes, node_b, as_json)
+    nav = _nav_view(nodes, edges, scope, as_json)
+    if isinstance(nav, str):
+        return nav
+    view, resolved = nav
+    a, b = _node_id(picked_a.node), _node_id(picked_b.node)
+    forward, _reverse = _directed_adjacency(view.edges)
+    es = _edge_set(view.edges)
+    direction = "forward"
+    steps = _route(forward, a, b, _COUPLING_RELATIONS)
+    if steps is None:
+        direction = "backward"
+        back = _route(forward, b, a, _COUPLING_RELATIONS)
+        steps = [(t, s, rel) for s, t, rel in reversed(back)] if back is not None else None
+    via_containment = False
+    if steps is None:
+        # either way: first without containment, since two definitions of one file
+        # always meet through the file and that says nothing about how they relate
+        # and never through an external package, which joins whatever uses it
+        direction = "undirected"
+        both = _adjacency(view.edges)
+        outside = {_node_id(n) for n in view.nodes if _is_external_node(n)}
+        steps = _route(both, a, b, _COUPLING_RELATIONS | _CONTAINMENT_RELATIONS, outside)
+        if steps is None:
+            steps = _route(both, a, b, _COUPLING_RELATIONS, outside)
+            via_containment = steps is not None
+    labels = _display_labels(nodes)
+    rows = []
+    for s, t, rel in steps or []:
+        # the edge as the graph has it: a step walked against its edge says so
+        points = "forward" if (s, t, rel) in es else "backward"
+        rows.append({"from": labels.get(s, s), "to": labels.get(t, t), "relation": rel,
+                     "edge": points})
+    name_a, name_b = labels.get(a, a), labels.get(b, b)
+    payload: dict[str, Any] = {
+        "from": name_a, "to": name_b, "found": steps is not None,
+        "direction": direction if steps is not None else None,
+        "hops": len(rows), "path": rows, "via_containment": via_containment,
+        "scope": view.payload(), "resolved_edges": resolved.payload(),
+    }
+    notes = []
+    for key, picked, field in ((node_a, picked_a, "matched_from"),
+                               (node_b, picked_b, "matched_to")):
+        matched, matched_text = _matched(key, picked)
+        if matched:
+            payload[field] = matched
+            notes.append(matched_text)
+    if steps is None:
+        payload["note"] = _EMPTY_NOTE
+        text = [f"No path between {name_a} and {name_b}.", _EMPTY_NOTE]
+    elif not rows:
+        text = [f"{name_a} and {name_b} are the same node."]
+    else:
+        line = name_a
+        for r in rows:
+            line += (f" —{r['relation']}→ {r['to']}" if r["edge"] == "forward"
+                     else f" ←{r['relation']}— {r['to']}")
+        text = [f"Path ({len(rows)} hop{'s' if len(rows) != 1 else ''}, {direction}"
+                + (", only through containment" if via_containment else "") + "):", line]
+    text += notes
+    return _fmt(payload, as_json, _with_note("\n".join(text), view))
+
+
+# How many neighbours graphlore_explain lists (the rest are counted by relation).
+_EXPLAIN_NEIGHBOURS = 30
 
 
 @_tool(annotations=ToolAnnotations(title="Explain node", read_only_hint=True))
-def graphlore_explain(node: str) -> str:
-    """Return everything Graphify knows about a node.
+def graphlore_explain(node: str, as_json: bool = False, limit: int = _EXPLAIN_NEIGHBOURS) -> str:
+    """Return everything the graph knows about a node: its metadata (what
+    graphlore_node_details gives) and its connections, by relation.
 
     ``node`` may be an id, a label or a bare name; a name several nodes share
     resolves like everywhere else in graphlore, and the reply says which node
     was used.
-    """
-    key, note = _cli_node_key(node)
-    return _cli_node_reply(_run_cli(["explain", key, *_graph_arg()]), [note])
 
-
-def _cli_node_key(name: str) -> tuple[str, str]:
-    """(what to pass the graphify CLI for ``name``, a note saying how it resolved).
-
-    graphify refuses a name that several nodes share ("Ambiguous: matches 3
-    nodes … retry with the full node id"), so the name is resolved here with
-    `_pick_node` and the CLI gets the id. With no graph, or no match, the name
-    goes through as it was given and the CLI answers for itself.
+    Args:
+        limit: Cap on the neighbours listed; ``counts`` tallies them all.
     """
     graph = _load_graph()
     if isinstance(graph, str):
-        return name, ""
-    nodes, _edges = _nodes_edges(graph)
-    picked = _pick_node(nodes, name)
-    if picked.node is None:
-        return name, ""
-    _payload, text = _matched(name, picked)
-    return _node_id(picked.node), text
-
-
-def _cli_node_reply(out: str, notes: list[str]) -> str:
-    """`_cli_reply` for a CLI call about named nodes, with graphlore's notes on how
-    the names resolved kept outside the frame (errors stay bare)."""
-    notes = [n for n in notes if n]
-    if out.startswith("ERROR") or not notes:
-        return _cli_reply(out, repo_text=True)
-    payload = {
-        "output": out, "resolved": notes,
-        "content_trust": _CONTENT_TRUST, "untrusted_fields": ["output"],
-    }
-    return _fmt(payload, False, _frame_repo_text(out) + "\n\n" + "\n".join(notes))
+        return _err(graph, as_json)
+    nodes, edges = _nodes_edges(graph)
+    picked = _pick_node(nodes, node)
+    n = picked.node
+    if n is None:
+        return _not_found(nodes, node, as_json)
+    nav = _nav_view(nodes, edges, "", as_json)
+    if isinstance(nav, str):
+        return nav
+    view, resolved = nav
+    detail, text = _node_detail(nodes, edges, n)
+    neigh = _neighbor_rows(view, _node_id(n), _display_labels(nodes))
+    tally: Counter[str] = Counter(f"{x['relation']} {x['direction']}" for x in neigh)
+    shown = neigh[:max(0, limit)]
+    detail["neighbors"] = shown
+    detail["neighbors_total"] = len(neigh)
+    detail["counts"] = dict(sorted(tally.items(), key=lambda kv: (-kv[1], kv[0])))
+    detail["truncated"] = len(neigh) > len(shown)
+    detail["resolved_edges"] = resolved.payload()
+    _cut_hint(detail, "Raise limit, or list them all with graphlore_neighbors.")
+    text.append(f"  connections ({len(neigh)}): "
+                + (", ".join(f"{v} {k}" for k, v in detail["counts"].items()) or "none"))
+    text += [
+        (f"    —{x['relation']}→ {x['node']}" if x["direction"] == "out"
+         else f"    ←{x['relation']}— {x['node']}")
+        + (f"  [{_flag_suffix(x)[2:]}]" if _flag_suffix(x) else "")
+        for x in shown
+    ]
+    if detail["truncated"]:
+        text.append(f"    … {len(neigh) - len(shown)} more. {detail['hint']}")
+    if not neigh:
+        detail["note"] = _EMPTY_NOTE
+        text.append("  " + _EMPTY_NOTE)
+    matched, matched_text = _matched(node, picked)
+    if matched:
+        detail["matched"] = matched
+        text.append(matched_text)
+    return _fmt(detail, as_json, "\n".join(text))
 
 
 @_tool(annotations=ToolAnnotations(title="Add external source", destructive_hint=False))
@@ -2513,40 +2731,26 @@ def graphlore_sampling_status(ctx: Context, as_json: bool = False) -> str:
     """Capability test: how can semantic naming be produced in this session?
 
     Reports whether the connected client supports host-LLM **sampling** (so the
-    server needs no API key), whether a backend **API key** is configured as a
-    fallback, and which method graphlore_label_communities will pick.
+    server needs no API key), and which method graphlore_label_communities will pick.
     """
     sampling = _client_supports_sampling(ctx)
-    backend = None if config.offline() else _detect_backend()
-    cli = shutil.which(GRAPHIFY_BIN) is not None
     if sampling:
         method = "sampling"
         advice = "graphlore_label_communities() will use the host LLM — no API key needed."
-    elif backend and cli:
-        method = "cli"
-        advice = (
-            f"Host sampling unsupported; the '{backend}' backend key will be used via "
-            'graphlore_label_communities(method="cli").'
-        )
     else:
         method = "placeholder"
         advice = (
-            "No host sampling and no backend key — names stay as 'Community N'. "
-            "Name them yourself with graphlore_set_labels (assistant-driven, no key), or "
-            "set GEMINI_API_KEY / OPENAI_API_KEY / ... or run a local ollama."
+            "No host sampling — names stay as 'Community N'. Name them yourself with "
+            "graphlore_set_labels (assistant-driven, no key)."
         )
     payload = {
         "host_sampling_supported": sampling,
-        "backend_key_detected": backend,
-        "graphify_cli_available": cli,
         "preferred_method": method,
         "advice": advice,
         "offline": config.offline(),
     }
     text = (
         f"Host LLM sampling : {'SUPPORTED' if sampling else 'not supported'}\n"
-        f"Backend API key   : {backend or 'none detected'}\n"
-        f"graphify CLI      : {'available' if cli else 'missing'}\n"
         f"-> preferred method: {method}\n{advice}"
     )
     return _fmt(payload, as_json, text)
@@ -2657,7 +2861,7 @@ def _names_from_sampling(
 
 @_tool(
     annotations=ToolAnnotations(
-        title="Name communities (host LLM / key)",
+        title="Name communities (host LLM)",
         read_only_hint=False,
         destructive_hint=False,
     )
@@ -2679,12 +2883,10 @@ async def graphlore_label_communities(
     """Give the Leiden communities human-readable names.
 
     Args:
-        method: "auto" -> host-LLM sampling if the client supports it, else a
-            configured backend key (graphify CLI), else "Community N" placeholders.
-            "sampling" -> force host-LLM sampling (no API key needed).
-            "cli" -> force the graphify backend (GEMINI_API_KEY/OPENAI_API_KEY/...
-            or a local ollama); refused under GRAPHLORE_OFFLINE, where "auto"
-            skips it. "placeholder" -> no LLM at all.
+        method: "auto" -> host-LLM sampling if the client supports it, else
+            "Community N" placeholders (name them yourself with
+            graphlore_set_labels). "sampling" -> force host-LLM sampling (no API
+            key needed). "placeholder" -> no LLM at all.
         limit: Only the largest `limit` communities are named, to stay cheap.
         sample_size: Member labels per community handed to the model.
     """
@@ -2695,19 +2897,18 @@ async def graphlore_label_communities(
 
     sampling_ok = _client_supports_sampling(ctx)
     chosen = method
-    if method == "cli" and config.offline():
+    if method == "cli":
         return _err(
-            _offline_error("method='cli' (graphify calls an LLM backend)")
-            + " Name them with graphlore_set_labels, or use method='sampling'.",
-            as_json, code="offline",
+            "method='cli' is gone: graphlore no longer runs the graphify CLI to name "
+            "communities. Use method='sampling' (the host LLM, no API key), or name them "
+            "yourself with graphlore_set_labels.",
+            as_json, code="removed",
         )
+    if method not in ("auto", "sampling", "placeholder"):
+        return _err(f"Unknown method '{method}': use auto, sampling or placeholder.",
+                    as_json, code="bad_argument")
     if method == "auto":
-        if sampling_ok:
-            chosen = "sampling"
-        elif not config.offline() and _detect_backend() and shutil.which(GRAPHIFY_BIN):
-            chosen = "cli"
-        else:
-            chosen = "placeholder"
+        chosen = "sampling" if sampling_ok else "placeholder"
 
     names: dict[Any, str] = {}
     note = ""
@@ -2716,8 +2917,8 @@ async def graphlore_label_communities(
             return _err(
                 "ERROR: method='sampling' but the connected client does not support MCP "
                 "sampling. Name them yourself with graphlore_set_labels (assistant-driven, "
-                "no key/sampling needed), use method='cli' with a backend key/ollama, or "
-                "call graphlore_sampling_status() for the options.",
+                "no key/sampling needed), or call graphlore_sampling_status() for the "
+                "options.",
                 as_json,
             )
         fail_note = ""
@@ -2740,21 +2941,6 @@ async def graphlore_label_communities(
         names, note = _names_from_sampling(host_naming, ordered)
         if fail_note:
             note = fail_note
-    elif chosen == "cli":
-        # The CLI labeling job can run for minutes; _run_cli is blocking, and an
-        # async tool body executes ON the event loop (the SDK only threadpools
-        # sync tools) — run it in a worker thread so the whole server (other
-        # sessions' requests, pings, cancellations) doesn't freeze meanwhile.
-        out = await anyio.to_thread.run_sync(_run_cli, ["label", str(config.PROJECT_DIR)])
-        if out.startswith("ERROR"):
-            return _err(
-                out + "\n\nNo usable backend for method='cli'. Set GEMINI_API_KEY / "
-                "OPENAI_API_KEY / ... (or run ollama), or use a sampling-capable client "
-                "with method='sampling'.",
-                as_json,
-            )
-        labels = _read_labels()
-        names = {cid: labels.get(str(cid), f"Community {cid}") for cid, _ in ordered}
     else:  # placeholder
         names = {cid: f"Community {cid}" for cid, _ in ordered}
 
@@ -2906,6 +3092,39 @@ def graphlore_search(pattern: str, limit: int = 25, as_json: bool = False) -> st
     return _fmt(payload, as_json, "\n".join(text))
 
 
+def _neighbor_rows(view: ScopeView, nid: str, labels: Any) -> list[dict[str, Any]]:
+    """The 1-hop neighbours of ``nid`` in ``view``, one row per edge with its true
+    direction: production code before tests, most connected first."""
+    adj = _adjacency(view.edges)
+    es = _edge_set(view.edges)
+    tests = {_node_id(m) for m in view.nodes if _is_test_node(m)}
+    # The adjacency is undirected; recover each edge's true orientation so an
+    # incoming "calls" edge isn't drawn as if this node were the caller.
+    ranked = sorted(
+        adj.get(nid, []),
+        key=lambda x: (x[0] in tests, -len(adj.get(x[0], ())), labels.get(x[0], x[0])),
+    )
+    flags = _edge_flags(view.edges)
+    neigh: list[dict[str, Any]] = []
+    listed: set[tuple[str, str, bool]] = set()
+    for t, rel in ranked:
+        # A pair linked both ways by one relation (A references B, B references A)
+        # sits in the undirected adjacency twice, once per edge: list each
+        # direction once. A self-loop also sits there twice, and is one row.
+        ways = [True] if t == nid else [
+            d for d, present in ((True, (nid, t, rel) in es), (False, (t, nid, rel) in es))
+            if present
+        ]
+        out = next((d for d in ways if (t, rel, d) not in listed), None)
+        if out is None:
+            continue
+        listed.add((t, rel, out))
+        row = {"node": labels.get(t, t), "relation": rel, "direction": "out" if out else "in"}
+        row.update(flags.get((nid, t, rel) if out else (t, nid, rel), {}))
+        neigh.append(row)
+    return neigh
+
+
 @_tool(annotations=ToolAnnotations(title="Node neighbors", read_only_hint=True))
 def graphlore_neighbors(
     node: str, as_json: bool = False, scope: str = "", limit: int = 200,
@@ -2937,35 +3156,7 @@ def graphlore_neighbors(
     if isinstance(nav, str):
         return nav
     view, resolved = nav
-    nid = _node_id(n)
-    labels = _display_labels(nodes)
-    adj = _adjacency(view.edges)
-    es = _edge_set(view.edges)
-    tests = {_node_id(m) for m in view.nodes if _is_test_node(m)}
-    # The adjacency is undirected; recover each edge's true orientation so an
-    # incoming "calls" edge isn't drawn as if this node were the caller.
-    ranked = sorted(
-        adj.get(nid, []),
-        key=lambda x: (x[0] in tests, -len(adj.get(x[0], ())), labels.get(x[0], x[0])),
-    )
-    flags = _edge_flags(view.edges)
-    neigh = []
-    listed: set[tuple[str, str, bool]] = set()
-    for t, rel in ranked:
-        # A pair linked both ways by one relation (A references B, B references A)
-        # sits in the undirected adjacency twice, once per edge: list each
-        # direction once. A self-loop also sits there twice, and is one row.
-        ways = [True] if t == nid else [
-            d for d, present in ((True, (nid, t, rel) in es), (False, (t, nid, rel) in es))
-            if present
-        ]
-        out = next((d for d in ways if (t, rel, d) not in listed), None)
-        if out is None:
-            continue
-        listed.add((t, rel, out))
-        row = {"node": labels.get(t, t), "relation": rel, "direction": "out" if out else "in"}
-        row.update(flags.get((nid, t, rel) if out else (t, nid, rel), {}))
-        neigh.append(row)
+    neigh = _neighbor_rows(view, _node_id(n), _display_labels(nodes))
     matched, matched_text = _matched(node, picked)
     total = len(neigh)
     shown = neigh[:max(0, limit)]
@@ -4349,8 +4540,20 @@ def graphlore_node_details(node: str, as_json: bool = False) -> str:
     n = picked.node
     if n is None:
         return _not_found(nodes, node, as_json)
+    detail, text = _node_detail(nodes, edges, n)
+    matched, matched_text = _matched(node, picked)
+    if matched:
+        detail["matched"] = matched
+        text.append(matched_text)
+    return _fmt(detail, as_json, "\n".join(text))
+
+
+def _node_detail(
+    nodes: list[dict], edges: list[dict], n: dict,
+) -> tuple[dict[str, Any], list[str]]:
+    """graphlore_node_details' payload and text lines for the node ``n``."""
     # Common metadata keys across graphify schema variants.
-    detail = {
+    detail: dict[str, Any] = {
         "id": _node_id(n),
         "label": _node_label(n),
         "type": _node_type(n),
@@ -4389,11 +4592,7 @@ def graphlore_node_details(node: str, as_json: bool = False) -> str:
     if extra:
         text.append(f"  other    : {', '.join(extra.keys())}")
     text += state_text + http_text + co_text
-    matched, matched_text = _matched(node, picked)
-    if matched:
-        detail["matched"] = matched
-        text.append(matched_text)
-    return _fmt(detail, as_json, "\n".join(text))
+    return detail, text
 
 
 _CO_CHANGE_PARTNERS = 5
@@ -6722,11 +6921,25 @@ def graphlore_routes(
 
 @mcp.resource("graphlore://report")
 def report() -> str:
-    """GRAPH_REPORT.md — core nodes, surprises and suggested questions."""
+    """The graph's report — core nodes, surprises and suggested questions.
+
+    Made from graph.json (graphlore_overview and graphlore_surprises). A
+    GRAPH_REPORT.md graphify wrote next to a graphify graph is returned as it is;
+    beside a native graph it is a leftover of an earlier build and is not read.
+    """
+    graph = _load_graph()
     rp = _out_dir() / "GRAPH_REPORT.md"
-    if not rp.exists():
-        return f"GRAPH_REPORT.md missing ({rp}). Run graphlore_build first."
-    return rp.read_text(encoding="utf-8")
+    if isinstance(graph, str):
+        return graph
+    if rp.exists() and engine.graph_engine(graph) != "native":
+        return rp.read_text(encoding="utf-8")
+    return (
+        "# Graph report\n\nMade by graphlore from graph.json.\n\n## Overview\n\n"
+        + graphlore_overview()
+        + "\n\n## Surprising connections\n\n"
+        + graphlore_surprises(limit=10)
+        + "\n"
+    )
 
 
 @mcp.resource("graphlore://graph")

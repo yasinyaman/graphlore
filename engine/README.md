@@ -21,6 +21,10 @@ It is experimental: graphlore uses it only when `GRAPHLORE_ENGINE=native` (or
 `auto`) is set.
 
 ```bash
+pip install graphlore-engine      # prebuilt abi3 wheels: Linux (glibc, musl), macOS, Windows; Python 3.10+
+```
+
+```bash
 python -m graphlore_engine build /path/to/repo      # writes graphify-out/graph.json
 python -m graphlore_engine build /path/to/repo --incremental   # parse only what changed
 python -m graphlore_engine build /path/to/repo --unresolved left.json   # the calls left without an edge, with the reason
