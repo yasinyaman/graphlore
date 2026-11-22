@@ -27,6 +27,8 @@ pub struct BuildReport {
     pub documents: usize,
     pub definitions: usize,
     pub headings: usize,
+    /// `documents` edges: a document naming one definition of the project.
+    pub doc_links: usize,
     pub languages: BTreeMap<String, LangStats>,
     /// Source files with an extension graphlore knows but no module reads.
     pub not_read: BTreeMap<String, usize>,

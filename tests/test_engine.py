@@ -404,7 +404,7 @@ def test_native_implicit_coupling_matches_the_python_reading(tmp_path, monkeypat
     out = server.graphlore_build(".")
     assert "implicit coupling: 7 pairs of definitions share state, 5 with no call path" in out, out
     graph = _graph(tmp_path)
-    assert graph["graph"]["schema_version"] == 6
+    assert graph["graph"]["schema_version"] >= 6  # coupling pairs arrived in 6
     label = {n["id"]: n["label"] for n in graph["nodes"]}
     qual = {n["id"]: n.get("qualname") for n in graph["nodes"]}
     rel = lambda name: {(qual[e["source"]], qual[e["target"]])  # noqa: E731
@@ -473,3 +473,49 @@ def test_native_routes_and_requests_end_to_end(tmp_path, monkeypatch):
         r["node"] for r in impact["impacted"]}
     details = json.loads(server.graphlore_node_details("read_user", as_json=True))
     assert details["http"]["called_by"] == ["readUserById()"]
+
+
+def test_native_documents_name_code_end_to_end(tmp_path, monkeypatch):
+    """A document's names of code are `documents` edges (Sphinx `.txt` sources
+    too); they are no dependency to the review tools, the impact walk lists the
+    page that describes a definition, and graph.html draws a page's outline."""
+    files = {
+        "pkg/_client.py": (
+            "class Client:\n    def send(self, request):\n        return request\n\n\n"
+            "def unused_helper():\n    return 1\n"),
+        "README.md": "# Usage\n\nCreate a `pkg.Client` and call `Client.send()`.\n",
+        "docs/conf.py": "source_suffix = '.txt'\n",
+        "docs/api.txt": ("API\n===\n\n.. currentmodule:: pkg\n\n.. autofunction:: unused_helper\n"),
+    }
+    for rel, text in files.items():
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_text(text, encoding="utf-8")
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    monkeypatch.setenv("GRAPHLORE_ENGINE", "native")
+    server._GRAPH_CACHE.clear()
+    out = server.graphlore_build(".")
+    assert "documents: 2 headings, 3 links" in out, out
+    graph = _graph(tmp_path)
+    assert graph["graph"]["schema_version"] == 7
+    label = {n["id"]: n["label"] for n in graph["nodes"]}
+    docs = {(label[e["source"]], label[e["target"]], e["confidence"], e["context"])
+            for e in graph["links"] if e["relation"] == "documents"}
+    assert docs == {
+        ("Usage", "Client", "INFERRED", "literal"),
+        ("Usage", ".send()", "INFERRED", "literal"),
+        ("API", "unused_helper()", "EXTRACTED", "directive"),
+    }
+    # a document naming a function keeps no graph reference to it alive: its
+    # name in the text is counted as a mention, as before
+    unref = json.loads(server.graphlore_unreferenced(include_mentioned=True, as_json=True))
+    row = next(r for r in unref["unreferenced"] if r["node"] == "unused_helper()")
+    assert row["mentions"] >= 1
+    # the page describing a definition is part of what changing it touches
+    impact = json.loads(server.graphlore_impact("Client", as_json=True))
+    assert "Usage" in {r["node"] for r in impact["impacted"]}
+    # graph.html: the documents group, and document nodes flagged as such
+    data = server.viz.page_data(graph)
+    assert "documents" in data["groups"]
+    flagged = {row[1] for row in data["nodes"] if row[6] & 8}
+    assert {"README.md", "Usage", "api.txt", "API"} <= flagged
+    assert "Client" not in flagged

@@ -41,6 +41,7 @@ from .graph import (
     _CALL_RELATIONS,
     _CONTAINMENT_RELATIONS,
     _COUPLING_RELATIONS,
+    _DOCUMENT_RELATIONS,
     _HTTP_RELATIONS,
     _IMPORT_RELATIONS,
     _STATE_RELATIONS,
@@ -72,7 +73,7 @@ MAX_COMMUNITIES = 300
 _INHERITANCE = frozenset({"inherits", "implements", "mixes_in", "embeds", "extends"})
 # Edge groups: the page colours and filters edges by these, in this order.
 GROUPS = ("structure", "imports", "calls", "inheritance", "references", "state",
-          "http", "other")
+          "http", "documents", "other")
 
 
 def relation_group(rel: str) -> str:
@@ -91,6 +92,8 @@ def relation_group(rel: str) -> str:
         return "state"
     if rel in _HTTP_RELATIONS:
         return "http"
+    if rel in _DOCUMENT_RELATIONS:
+        return "documents"
     return "other"
 
 
@@ -160,6 +163,11 @@ def _kind(n: dict) -> str:
     return _node_type(n) or "node"
 
 
+def _is_document(n: dict) -> bool:
+    """A document's file or heading node: what graph.json calls a document."""
+    return str(n.get("file_type") or "").lower() == "document"
+
+
 def _is_test(n: dict) -> bool:
     """Test code as the graph says it, without reading any file: the native
     engine's ``test`` mark, or a test path."""
@@ -223,7 +231,7 @@ def page_data(
                 comm_name[c] = str(given) if given else f"Community {key}"
         k = kinds.setdefault(_kind(n), len(kinds))
         flags = ((1 if _is_test(n) else 0) | (2 if _external(n) else 0)
-                 | (4 if _is_state_node(n) else 0))
+                 | (4 if _is_state_node(n) else 0) | (8 if _is_document(n) else 0))
         line = str(_node_line(n))
         lang = _text(n.get("language"))
         rows.append([_node_id(n), _node_label(n), _node_file(n),

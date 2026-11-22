@@ -142,7 +142,8 @@ Scala, C#, Rust, Swift, C, C++, Ruby and PHP. It builds the graph by default
 goes in the next release. A native graph
 has a node per file, per definition (with its `start..end` span, `kind` and
 `qualname`), property, module-level constant and Markdown / reStructuredText
-heading; containment; and the imports (with when each runs), calls, bases and
+heading (Sphinx `.txt` sources included), with a `documents` edge from a heading
+to the definition a name of code under it means; containment; and the imports (with when each runs), calls, bases and
 type references it resolves from the source, each `EXTRACTED` or, when found
 by name alone, `INFERRED`. It is written in graphify's id and label conventions,
 so every tool reads it. It also has shared state: variables, fields and
