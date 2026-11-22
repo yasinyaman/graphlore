@@ -426,6 +426,12 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- **Native engine 0.5.74: Scala's rules, read from the Scala 3 typer**
+  (phase 2 of `docs/rule-sources.md`, which every language of the plan has
+  now been through; 292 rules in `benchmarks/rule_inventory.py`, 245 held by a
+  case): a wildcard import beats a member of the package another compilation
+  unit defines, and `export p.m` makes m a member of the object that writes
+  it.
 - **Native engine 0.5.73: Python's, PHP's and Ruby's rules, read from their
   references** (phase 2 of `docs/rule-sources.md`; 19 cases): Python
   `global` / `nonlocal` make an assignment bind the outer name, and PEP 695

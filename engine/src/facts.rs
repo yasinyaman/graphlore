@@ -654,6 +654,10 @@ pub struct FileFacts {
     /// are members of the namespace around ([namespace.def]).
     #[serde(default)]
     pub inline_namespaces: Vec<usize>,
+    /// Scala `export p.print`, `export q.{a, b}`: the first byte of the
+    /// clause and the path to each member it forwards (`["p", "print"]`).
+    #[serde(default)]
+    pub forwards: Vec<(usize, Vec<String>)>,
     pub refs: Vec<RefFact>,
     pub locals: Vec<Local>,
     /// Names a type answers to without a definition of that name: Ruby
@@ -724,6 +728,7 @@ impl FileFacts {
             exports: Vec::new(),
             ns_aliases: Vec::new(),
             inline_namespaces: Vec::new(),
+            forwards: Vec::new(),
             refs: Vec::new(),
             locals: Vec::new(),
             attrs: Vec::new(),

@@ -25,7 +25,7 @@ python benchmarks/conformance.py --baseline benchmarks/results-conformance.json 
 python benchmarks/conformance.py --markdown      # the tables below
 ```
 
-Measured 2026-11-21 with graphlore-engine 0.5.73: **660 of 660 rules hold**
+Measured 2026-11-21 with graphlore-engine 0.5.74: **665 of 665 rules hold**
 (356 of the first 406 with 0.5.45). Ten came from the Go type checker and
 rust-analyzer run on whole repositories; fifteen from the Kotlin and Swift
 compilers' tests (type checks, casts, `catch`, aliases); thirty-nine from two
@@ -104,7 +104,7 @@ Each change was measured on the 45 audit repositories as well, by reading
 the edges it added and removed at their source lines; the page on the
 [native engine](native-engine.md#the-rules-themselves) has the numbers.
 Every case has been compiled by its own language
-(`benchmarks/verify_cases.py`: 660 of 660 accepted). The Versions column is
+(`benchmarks/verify_cases.py`: 665 of 665 accepted). The Versions column is
 the oldest version of the language whose compiler accepts the case, where the
 compiler can be asked (`verify_cases.py --min-version`: Java, Kotlin, Scala,
 C#, Swift, C, C++); `all` is the oldest version asked, `–` a language with no
@@ -481,11 +481,11 @@ Found by: the specification 31, a compiler 9, comparison 0, the grammar 0, the l
 | a candidate that needs no `vararg` expansion is more specific | `non-vararg-before-vararg` | – | yes |
 | a property of a function type called is the property, not a function of its name | `property-invoke` | – | yes |
 
-### scala (32 of 32)
+### scala (37 of 37)
 
 Scala Language Specification, chapter 2 'Identifiers, Names and Scopes', 4.7 'Import Clauses'.
 
-Found by: the specification 20, a compiler 8, comparison 0, the grammar 4, the language's own tools 0. With the place it was read in the language's own tools: 0.
+Found by: the specification 20, a compiler 8, comparison 0, the grammar 4, the language's own tools 5. With the place it was read in the language's own tools: 5.
 
 | Rule | Case | Versions | Engine |
 |---|---|---|---|
@@ -521,6 +521,11 @@ Found by: the specification 20, a compiler 8, comparison 0, the grammar 4, the l
 | `new Outer.Inner(…)` constructs Inner | `new-through-its-holder` | – | yes |
 | `new p.T[A](…)` constructs T | `new-generic-through-package` | – | yes |
 | `f[T](…)` calls f | `generic-call` | – | yes |
+| a name imported by name beats one a wildcard import brings | `named-import-before-wildcard` | – | yes |
+| a definition of the compilation unit beats an imported name | `definition-before-import` | – | yes |
+| a wildcard import beats a member of the package that another compilation unit defines | `wildcard-import-before-other-unit` | – | yes |
+| a member of the receiver's type comes before an extension method of the name | `member-before-extension` | – | yes |
+| `export inner.f` makes f a member of the object that writes it | `export-clause` | – | yes |
 
 ### csharp (70 of 70)
 
@@ -910,4 +915,4 @@ Found by: the specification 31, a compiler 2, comparison 0, the grammar 1, the l
 | `A::hello insteadof B` picks A's method of two used traits | `trait-insteadof` | – | yes |
 | a method a trait brings comes before an inherited one, and the class's own before both | `trait-before-inherited` | – | yes |
 
-660 of 660 rules hold
+665 of 665 rules hold

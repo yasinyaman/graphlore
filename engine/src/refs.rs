@@ -4384,6 +4384,33 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                 outer_names.push((n.start_byte(), text(c, src)));
             }
         }
+        // Scala `export p.print` / `export q.{a, b}`: members forwarded
+        if n.kind() == "export_declaration" {
+            let mut cursor = n.walk();
+            let path: Vec<String> = n
+                .children_by_field_name("path", &mut cursor)
+                .filter(|c| c.is_named())
+                .map(|c| text(c, src))
+                .collect();
+            let picked: Vec<String> = kids(n)
+                .into_iter()
+                .filter(|c| c.kind() == "namespace_selectors")
+                .flat_map(kids)
+                .filter(|c| c.kind() == "identifier")
+                .map(|c| text(c, src))
+                .collect();
+            if picked.is_empty() {
+                if path.len() >= 2 {
+                    facts.forwards.push((n.start_byte(), path));
+                }
+            } else {
+                for m in picked {
+                    let mut p = path.clone();
+                    p.push(m);
+                    facts.forwards.push((n.start_byte(), p));
+                }
+            }
+        }
         // C++ `inline namespace v2 { … }`
         if n.kind() == "namespace_definition" && kids(n).iter().any(|c| c.kind() == "inline")
             || (n.kind() == "namespace_definition"

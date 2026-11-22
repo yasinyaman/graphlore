@@ -520,6 +520,22 @@ INVENTORY: dict[str, list[tuple[str, str, dict]]] = {
         ("Kernel#require", "a required file's names", held("ruby/top-level-method", "ruby/include-across-files")),
         ("runtime", "`method_missing`, `define_method`, `send`, refinements", not_followed("no static answer")),
     ],
+    "scala": [
+        # scala/scala3 compiler/src/dotty/tools/dotc/typer/Typer.scala BindingPrec, findRef; SLS 2
+        ("Typer BindingPrec", "a definition of the compilation unit, local or inherited, first", held("scala/definition-before-import", "scala/implicit-this", "scala/trait-method")),
+        ("Typer BindingPrec", "then a named import, then a wildcard import", held("scala/named-import-before-wildcard", "scala/member-import", "scala/import-rename", "scala/wildcard-import")),
+        ("Typer BindingPrec", "then a member of the package another compilation unit defines", held("scala/wildcard-import-before-other-unit", "scala/same-package")),
+        ("Typer checkNewOrShadowed", "a name both inherited and defined in a scope around is ambiguous",
+         not_followed("an error is no binding (scalac E049)")),
+        ("SLS 2", "a type of another package needs an import or its path", held("scala/other-package-not-in-reach", "scala/nested-type-not-in-reach", "scala/type-through-package")),
+        ("Scala 3 'Extension Methods'", "a member before an extension of the name", held("scala/member-before-extension", "scala/extension-type-parameters")),
+        ("Scala 3 'Export Clauses'", "`export p.m` makes m a member of the object writing it", held("scala/export-clause")),
+        ("SLS 6.6 / apply", "`C(…)` is the companion's `apply`, or a case class built", held("scala/companion-apply", "scala/case-class")),
+        ("SLS 8 patterns", "`case r: T` and constructor patterns", held("scala/pattern-typed", "scala/pattern-types")),
+        ("SLS 4.6", "a method called without parentheses, generic calls", held("scala/no-parentheses", "scala/generic-call", "scala/generic-method-parameters")),
+        ("Scala 3 'Given Instances'", "`given` / `using` contextual parameters", not_followed("implicit resolution is not modelled")),
+        ("Scala 3 'Implicit Conversions'", "a member found through an implicit conversion", not_followed("implicit resolution is not modelled")),
+    ],
 }
 
 

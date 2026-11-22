@@ -2752,6 +2752,38 @@ case("ruby", "local-only-after-assignment", "a name is a local only after the as
      [("C.run", "calls", "C.helper")],
      source="Ruby documentation 'Assignment' (a local variable is created when the parser encounters the assignment)")
 
+# Phase 2 for Scala: the binding precedences of the Scala 3 typer
+# (scala/scala3 `compiler/src/dotty/tools/dotc/typer/Typer.scala`, `BindingPrec`
+# and findRef: a definition of the compilation unit, then a named import, then
+# a wildcard import, then a package member of another unit) and SLS chapter 2.
+found_by("source")
+TY_SC = "scala/scala3@1615177b58f6:compiler/src/dotty/tools/dotc/typer/Typer.scala "
+case("scala", "named-import-before-wildcard", "a name imported by name beats one a wildcard import brings",
+     SC, {"src/a/Thing.scala": "package a\n\nclass Thing {\n  def size: Int = 1\n}\n",
+          "src/b/Thing.scala": "package b\n\nclass Thing {\n  def size: Int = 2\n}\n",
+          "src/app/A.scala": "package app\n\nimport a.Thing\nimport b._\n\nobject Main {\n  def run(t: Thing): Int = t.size\n}\n"},
+     [("Main.run", "calls", "src/a/Thing.scala:Thing.size")], [("Main.run", "calls", "src/b/Thing.scala:Thing.size")],
+     source=TY_SC + "BindingPrec (NamedImport beats WildImport)")
+case("scala", "definition-before-import", "a definition of the compilation unit beats an imported name",
+     SC, {"src/lib/Util.scala": "package lib\n\nobject Util {\n  def helper(): Int = 1\n}\n",
+          "src/app/A.scala": "package app\n\nimport lib.Util.helper\n\nobject Main {\n  def helper(): Int = 2\n\n  def run(): Int = helper()\n}\n"},
+     [("Main.run", "calls", "Main.helper")], [("Main.run", "calls", "Util.helper")],
+     source=TY_SC + "findRef (a definition in an inner scope is found before the imports outside it)")
+case("scala", "wildcard-import-before-other-unit", "a wildcard import beats a member of the package that another compilation unit defines",
+     SC, {"src/lib/Repo.scala": "package lib\n\nclass Repo {\n  def find: Int = 1\n}\n",
+          "src/app/Repo.scala": "package app\n\nclass Repo {\n  def find: Int = 2\n}\n",
+          "src/app/A.scala": "package app\n\nimport lib._\n\nobject Main {\n  def run(r: Repo): Int = r.find\n}\n"},
+     [("Main.run", "calls", "src/lib/Repo.scala:Repo.find")], [("Main.run", "calls", "src/app/Repo.scala:Repo.find")],
+     source=TY_SC + "BindingPrec (PackageClause of another unit is the lowest: WildImport beats it)")
+case("scala", "member-before-extension", "a member of the receiver's type comes before an extension method of the name",
+     SC, {"src/app/A.scala": "package app\n\nclass Repo {\n  def size: Int = 1\n}\n\nextension (r: Repo)\n  def size: Int = 2\n\nobject Main {\n  def run(r: Repo): Int = r.size\n}\n"},
+     [("Main.run", "calls", "Repo.size")],
+     source="Scala 3 reference 'Extension Methods' (an extension is tried only when the member is not there)")
+case("scala", "export-clause", "`export inner.f` makes f a member of the object that writes it",
+     SC, {"src/app/A.scala": "package app\n\nclass Printer {\n  def print(): Int = 1\n}\n\nobject Facade {\n  private val p = new Printer\n  export p.print\n}\n\nobject Main {\n  def run(): Int = Facade.print()\n}\n"},
+     [("Main.run", "calls", "Printer.print")],
+     source="Scala 3 reference 'Export Clauses' (an export defines aliases of the members selected)")
+
 # --- running ------------------------------------------------------------------
 
 def _matches(node: dict[str, Any], want: str) -> bool:

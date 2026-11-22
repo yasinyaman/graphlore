@@ -972,6 +972,71 @@ bound later in a function is local to all of it, `__all__` and `_` names for
 parameters, the class's method before a module's) held already.
 `verify_graphify.py` lacks 44 confirmed edges, as before.
 
+### Phase 2: Scala
+
+The Scala 3 typer gives the binding precedences outright
+(`compiler/src/dotty/tools/dotc/typer/Typer.scala`, `BindingPrec`: a
+definition of the compilation unit, then a named import, then a wildcard
+import, then a member of the package that another compilation unit defines),
+and `findRef` walks them scope by scope. `benchmarks/rule_inventory.py` lists
+every rule (12 rules, 9 held by a case, 3 not followed; 5 of 37 cases found in the language's own tools).
+
+| Source | Rule | Held by / why not |
+|---|---|---|
+| Typer BindingPrec | a definition of the compilation unit, local or inherited, first | `definition-before-import`, `implicit-this`, `trait-method` |
+| Typer BindingPrec | then a named import, then a wildcard import | `named-import-before-wildcard`, `member-import`, `import-rename`, `wildcard-import` |
+| Typer BindingPrec | then a member of the package another compilation unit defines | `wildcard-import-before-other-unit`, `same-package` |
+| Typer checkNewOrShadowed | a name both inherited and defined in a scope around is ambiguous | not followed: an error is no binding (scalac E049) |
+| SLS 2 | a type of another package needs an import or its path | `other-package-not-in-reach`, `nested-type-not-in-reach`, `type-through-package` |
+| Scala 3 'Extension Methods' | a member before an extension of the name | `member-before-extension`, `extension-type-parameters` |
+| Scala 3 'Export Clauses' | `export p.m` makes m a member of the object writing it | `export-clause` |
+| SLS 6.6 / apply | `C(…)` is the companion's `apply`, or a case class built | `companion-apply`, `case-class` |
+| SLS 8 patterns | `case r: T` and constructor patterns | `pattern-typed`, `pattern-types` |
+| SLS 4.6 | a method called without parentheses, generic calls | `no-parentheses`, `generic-call`, `generic-method-parameters` |
+| Scala 3 'Given Instances' | `given` / `using` contextual parameters | not followed: implicit resolution is not modelled |
+| Scala 3 'Implicit Conversions' | a member found through an implicit conversion | not followed: implicit resolution is not modelled |
+
+5 cases were written (a sixth, an inherited member beside a definition of the
+scope around, was dropped: scalac rejects it as ambiguous, E049). Two did
+not hold, and engine 0.5.74 follows them:
+
+- **A wildcard import beats another unit's package member**: `import lib._`
+  gives `lib.Repo` over `app.Repo` of another file of the package; it is the
+  other way round in Java, and was here too.
+- **`export p.print`** makes `print` a member of the object that writes it
+  (`FileFacts::forwards`).
+
+Measured with engine 0.5.74: the Scala compiler's SemanticDB expect files
+give 97.4%, recall 74.9%, as before; no edge of the 45 audit repositories
+changes.
+
+### Phase 2, done
+
+Every language of the plan has been read. What the reading left:
+
+| Language | rules | held by a case | not followed | cases read from its own tools |
+|---|--:|--:|--:|--:|
+| csharp | 54 | 47 | 7 | 18 of 70 |
+| rust | 38 | 31 | 7 | 15 of 70 |
+| go | 29 | 23 | 6 | 15 of 53 |
+| typescript | 31 | 26 | 5 | 7 of 58 |
+| java | 30 | 26 | 4 | 14 of 62 |
+| kotlin | 24 | 20 | 4 | 13 of 53 |
+| swift | 16 | 13 | 3 | 9 of 52 |
+| cpp | 21 | 17 | 4 | 9 of 45 |
+| python | 15 | 14 | 1 | 8 of 46 |
+| php | 12 | 10 | 2 | 3 of 37 |
+| ruby | 10 | 9 | 1 | 5 of 34 |
+| scala | 12 | 9 | 3 | 5 of 37 |
+| **all** | **292** | **245** | **47** | |
+
+The 47 rules not followed are of four kinds, each written down in the
+inventory with its reason: errors (an ambiguity is no binding), access
+control (code that compiles reaches only what it may), what has no static
+answer (`dynamic`, `method_missing`, `getattr`), and inference (a closure's
+parameter typed by the call it is passed to, generic arguments deduced from
+a call) — the last is phase 3.
+
 One thing the cases showed that is not a position: a Swift protocol's
 property requirement is a definition of its own named `var handler`, of kind
 interface (the span rule takes `protocol_property_declaration` for a
@@ -1019,7 +1084,7 @@ say is left and by how directly the compiler can check the result:
 6. **Swift**, **C / C++** (need the large toolchains): read (engine 0.5.71; Swift 16 rules, 13 held by a case, 3 not followed, C and C++ 21 rules, 17 held by a case, 4 not followed)
 7. **Python**, **PHP**, **Ruby** (interpreters; the static tools as second
    source): read (engine 0.5.73; Python 15 rules, 14 held by a case, 1 not followed, PHP 12 rules, 10 held by a case, 2 not followed, Ruby 10 rules, 9 held by a case, 1 not followed)
-8. **Scala** (when a compiler is available)
+8. **Scala** (when a compiler is available): read (engine 0.5.74, 12 rules, 9 held by a case, 3 not followed)
 
 *Done per language when*: every section of the binder's lookup is either a
 case or a written "not followed, because", and the share of cases marked

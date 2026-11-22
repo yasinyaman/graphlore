@@ -1,6 +1,6 @@
 {
- "passed": 660,
- "total": 660,
+ "passed": 665,
+ "total": 665,
  "cases": [
   {
    "id": "python/module-function",
@@ -3958,6 +3958,36 @@
   },
   {
    "id": "ruby/local-only-after-assignment",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "scala/named-import-before-wildcard",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "scala/definition-before-import",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "scala/wildcard-import-before-other-unit",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "scala/member-before-extension",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "scala/export-clause",
    "ok": true,
    "missing": [],
    "unwanted": []
