@@ -31,7 +31,7 @@ from . import config
 ENGINES = ("graphify", "native", "auto")
 DEFAULT_ENGINE = "graphify"
 # graph.json schema versions of the native engine this graphlore reads.
-SUPPORTED_SCHEMAS = frozenset({1, 2, 3, 4, 5})
+SUPPORTED_SCHEMAS = frozenset({1, 2, 3, 4, 5, 6})
 INSTALL_HINT = (
     "Install it with: pip install graphlore-engine (from a checkout of graphlore: "
     "pip install maturin && maturin develop -m engine/Cargo.toml --release)."
@@ -299,6 +299,14 @@ def render_report(report: dict[str, Any], verbose: bool = False, update: bool = 
             line += "; resources: " + ", ".join(f"{k} {v}" for k, v in sorted(res.items()))
         if state.get("single_touch"):
             line += f" ({state['single_touch']} more touched in one place only, not shown)"
+        lines.append(line)
+    coupling = report.get("coupling")
+    if isinstance(coupling, dict) and coupling.get("pairs"):
+        line = (f"  implicit coupling: {_plural(coupling['pairs'], 'pair')} of definitions "
+                f"share state, {coupling.get('hidden', 0)} with no call path between them")
+        if coupling.get("hidden_without_edge"):
+            line += (f" ({coupling['hidden_without_edge']} of them past the limit of "
+                     "couples_with edges per state node: listed on the node only)")
         lines.append(line)
     communities = report.get("communities")
     if isinstance(communities, dict) and communities.get("count"):

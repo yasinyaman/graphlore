@@ -372,6 +372,66 @@ def test_native_shared_state_end_to_end(tmp_path, monkeypatch):
     assert details["state"]["shared_with"][0]["node"] == "get()"
 
 
+def test_native_implicit_coupling_matches_the_python_reading(tmp_path, monkeypatch):
+    # put() and warm() write CACHE, and nothing joins the two. get() reads it
+    # and nothing joins it to either: hidden.
+    # refresh() calls put(): joined. Disk.load() is reached from warm() only
+    # through the method of the base it is written for: joined by dispatch.
+    files = {
+        "pkg/__init__.py": "",
+        "pkg/cache.py": "CACHE = {}\n",
+        "pkg/a.py": "from pkg.cache import CACHE\n\n\ndef put(k, v):\n    CACHE[k] = v\n",
+        "pkg/store.py": (
+            "from pkg.cache import CACHE\n\n\nclass Store:\n    def load(self):\n"
+            "        return None\n\n\nclass Disk(Store):\n    def load(self):\n"
+            "        return CACHE.get('disk')\n"),
+        "web/__init__.py": "",
+        "web/b.py": "from pkg.cache import CACHE\n\n\ndef get(k):\n    return CACHE.get(k)\n",
+        "web/c.py": (
+            "from pkg.a import put\nfrom pkg.cache import CACHE\nfrom pkg.store import Store\n\n\n"
+            "def refresh():\n    put('k', 1)\n    return CACHE.get('k')\n\n\n"
+            "def warm(store: Store):\n    CACHE['warm'] = 1\n    return store.load()\n"),
+    }
+    for rel, text in files.items():
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_text(text, encoding="utf-8")
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    monkeypatch.setenv("GRAPHLORE_ENGINE", "native")
+    server._GRAPH_CACHE.clear()
+    out = server.graphlore_build(".")
+    assert "implicit coupling: 7 pairs of definitions share state, 5 with no call path" in out, out
+    graph = _graph(tmp_path)
+    assert graph["graph"]["schema_version"] == 6
+    label = {n["id"]: n["label"] for n in graph["nodes"]}
+    qual = {n["id"]: n.get("qualname") for n in graph["nodes"]}
+    rel = lambda name: {(qual[e["source"]], qual[e["target"]])  # noqa: E731
+                        for e in graph["links"] if e["relation"] == name}
+    assert rel("dispatches_to") == {("Store.load", "Disk.load")}
+    # from the definition that sees the state to the one that writes it
+    assert rel("couples_with") == {
+        ("get", "put"), ("Disk.load", "put"), ("warm", "put"), ("get", "warm"),
+        ("refresh", "warm")}
+    assert all(e["via"] == ["pkg_cache_cache"] and e["context"] == "shared_state"
+               for e in graph["links"] if e["relation"] == "couples_with")
+    cache = next(n for n in graph["nodes"] if n["label"] == "CACHE")
+    assert (cache["coupling"]["pairs"], cache["coupling"]["hidden"]) == (7, 5)
+    listed = {(label[w], label[o]): (n, fwd) for w, o, n, fwd in cache["coupling"]["listed"]}
+    assert listed[("put()", "refresh()")] == (1, False)
+    assert listed[("warm()", ".load()")] == (2, True)
+
+    # the same rows whether the reader takes the engine's pairs or looks itself
+    nodes, edges = server._nodes_edges(graph)
+    bare = [{k: v for k, v in n.items() if k != "coupling"} for n in nodes]
+    (given,), (looked,) = server._shared_state(nodes, edges), server._shared_state(bare, edges)
+    assert given == looked and given["hidden_pairs"] == 5
+
+    plain = json.loads(server.graphlore_impact("put", as_json=True))
+    assert "get()" not in {r["node"] for r in plain["impacted"]}
+    # a call of the base's method reaches the method written for it
+    reached = json.loads(server.graphlore_impact("Disk.load", as_json=True))
+    assert "warm()" in {r["node"] for r in reached["impacted"]}
+
+
 def test_native_routes_and_requests_end_to_end(tmp_path, monkeypatch):
     # a FastAPI route under two prefixes from two other files, and a generated
     # TypeScript client that requests it: the tools cross the wire

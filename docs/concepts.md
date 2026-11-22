@@ -272,9 +272,21 @@ The tools use it in four places:
   call path joins them (`call_path`: either way, over calls, dispatch and HTTP,
   within 6 hops) and whether their files change together (`co_change`, below).
   A hidden pair, one with no call path, is what a call graph cannot show; it
-  raises the score, and more when the two files also change together.
+  raises the score, and more when the two files also change together. The
+  native engine works the pairs out when it builds and writes them on the
+  state node (`coupling`); on any other graph graphlore looks for the paths
+  itself, with the same result.
 - `graphlore_node_details` says what a definition reads and writes and which
   other definitions share that state with it.
+
+A hidden pair is also an edge of a native graph: `couples_with`, from the
+definition that sees the state to the one that writes it, with the state in
+`via` (at most 10 per piece of state). `graphlore_neighbors` and
+`graphlore_subgraph` show it; it is never counted as a dependency of its own
+(no reference, no surprise, no cycle), and `graphlore_impact` follows it only
+with `shared_state=True` or `relations="state"`. Test code is left out of the
+pairs: test files, and what the engine marks as test code inside a source
+file (a Rust `#[cfg(test)]` module).
 
 `graphlore_cycles` ignores reads and writes: two functions sharing a counter
 do not depend on each other in a cycle.

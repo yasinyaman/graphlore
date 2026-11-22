@@ -44,6 +44,8 @@ pub struct BuildReport {
     pub incremental: Incremental,
     pub state: StateReport,
     pub http: HttpReport,
+    /// The definitions that share state, paired up (`coupling.rs`).
+    pub coupling: crate::coupling::CouplingReport,
     /// Milliseconds per phase: walk, parse, assemble, resolve, communities, write, cache.
     pub phases_ms: BTreeMap<&'static str, u128>,
     pub max_file_bytes: u64,
