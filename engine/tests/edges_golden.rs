@@ -2034,3 +2034,1372 @@ fn js_a_mongoose_document_has_its_schemas_methods() {
     );
     assert!(!got.iter().any(|(f, t, _)| f == "other.js" && t.starts_with("app_")), "{got:#?}");
 }
+
+#[test]
+fn rust_field_beside_a_method_of_its_name() {
+    // `self.input.fill()`: read without a call, `input` is the field, not
+    // the trait method of the same name beside it
+    let got = edges("rs-field-method", &[
+        ("Cargo.toml", "[package]\nname = \"demo\"\nversion = \"0.1.0\"\n"),
+        ("src/lib.rs", "mod buf;\nmod util;\n"),
+        ("src/util.rs", "pub struct ConsumeBuf {\n    filled: usize,\n}\n\nimpl ConsumeBuf {\n    pub fn fill(&mut self) {\n        self.filled += 1;\n    }\n}\n"),
+        ("src/buf.rs", "use crate::util::ConsumeBuf;\n\npub trait Buffers {\n    fn input(&self) -> &[u8];\n}\n\npub struct LazyBuffers {\n    input: ConsumeBuf,\n}\n\nimpl Buffers for LazyBuffers {\n    fn input(&self) -> &[u8] {\n        &[]\n    }\n}\n\nimpl LazyBuffers {\n    fn ensure(&mut self) {\n        self.input.fill();\n    }\n}\n"),
+    ]);
+    has(&got, &[(".ensure()", "calls", ".fill()")]);
+}
+
+#[test]
+fn an_extension_for_a_library_type_on_a_receiver_the_walk_cannot_type() {
+    // the receiver is a library's member, or a chain of them: the one
+    // extension in sight written for a type the project does not define
+    let cs = edges("cs-lib-ext", &[
+        ("Shop/Text.cs", "namespace Shop.Extensions;\n\npublic static class Text {\n    public static string Squash(this string s) => s.Replace(\"_\", \"\");\n}\n"),
+        ("Shop/Reader.cs", "using System.Xml.Linq;\nusing Shop.Extensions;\n\nnamespace Shop;\n\npublic class Reader {\n    public bool Same(XElement e, string name) {\n        return e.Name.LocalName.Squash() == name;\n    }\n}\n"),
+    ]);
+    has(&cs, &[(".Same()", "calls", ".Squash()")]);
+    let kt = edges("kt-lib-ext", &[
+        ("src/main/kotlin/app/ext/Strings.kt", "package app.ext\n\nfun String.isEmailValid(): Boolean = this.contains(\"@\")\n"),
+        ("src/main/kotlin/app/domain/User.kt", "package app.domain\n\nimport app.ext.isEmailValid\nimport lib.Account\n\nclass Check(val account: Account) {\n    fun ok(): Boolean {\n        return account.owner.email.isEmailValid()\n    }\n}\n"),
+    ]);
+    has(&kt, &[(".ok()", "calls", "isEmailValid()")]);
+}
+
+#[test]
+fn a_callback_no_definition_holds_has_locals_of_its_own() {
+    // `test('…', () => { const client = new Client() })`: each callback is a
+    // scope; `client` in one is not `client` in the next (both types have a
+    // `run`, so only the local's type says which), and a callback inside
+    // another sees the outer one's locals
+    let ts = calls_conf("block-locals", &[
+        ("src/client.ts", "export class Client {\n  run(): number {\n    return 1\n  }\n}\n\nexport class Server {\n  run(): number {\n    return 2\n  }\n  stop(): number {\n    return 3\n  }\n}\n"),
+        ("test/client.test.ts", "import { Client, Server } from '../src/client'\n\ntest('sends', () => {\n  const client = new Client()\n  client.run()\n})\n\ntest('listens', () => {\n  const client = new Server()\n  client.run()\n})\n\ndescribe('outer', () => {\n  const shared = new Server()\n  it('inner', () => {\n    shared.stop()\n  })\n})\n"),
+    ]);
+    let has = |to: &str| ts.iter().any(|(from, t, _)| from == "client.test.ts" && t == to);
+    assert!(has("src_client_client_run"), "{ts:#?}");
+    assert!(has("src_client_server_run"), "{ts:#?}");
+    assert!(has("src_client_server_stop"), "{ts:#?}");
+    // a function written in a callback is a name of that callback and of
+    // the ones inside it; a module wrapped in a function still calls its own
+    let js = calls_conf("block-defs", &[
+        ("test/helper.test.js", "describe('outer', () => {\n  const make = () => 1\n  it('inner', () => {\n    make()\n  })\n})\n"),
+        ("lib/wrapped.js", "(function () {\n  function helper() {\n    return 1\n  }\n  function run() {\n    return helper()\n  }\n  run()\n})()\n"),
+    ]);
+    assert!(js.iter().any(|(_, t, _)| t == "test_helper_test_make"), "{js:#?}");
+    assert!(js.iter().any(|(f, t, _)| f == "run()" && t == "lib_wrapped_helper"), "{js:#?}");
+    assert!(js.iter().any(|(f, t, _)| f == "wrapped.js" && t == "lib_wrapped_run"), "{js:#?}");
+    let rb = calls_conf("block-locals-rb", &[
+        ("lib/conn.rb", "class Conn\n  def build_url\n    1\n  end\nend\n\nclass Pool\n  def build_url\n    2\n  end\nend\n"),
+        ("spec/conn_spec.rb", "require_relative '../lib/conn'\n\nRSpec.describe Conn do\n  it 'builds' do\n    conn = Conn.new\n    conn.build_url\n  end\n\n  it 'pools' do\n    conn = Pool.new\n    conn.build_url\n  end\nend\n"),
+    ]);
+    assert!(rb.iter().any(|(_, t, _)| t == "lib_conn_conn_build_url"), "{rb:#?}");
+    assert!(rb.iter().any(|(_, t, _)| t == "lib_conn_pool_build_url"), "{rb:#?}");
+}
+
+#[test]
+fn ruby_a_reopened_class_has_what_its_other_opening_extends() {
+    // `Shop::Order.register(…)` in a file that opens `class Order` again:
+    // `extend Registry` is written where the class is declared
+    let got = calls_conf("rb-reopened-extend", &[
+        ("lib/shop/registry.rb", "module Shop\n  module Registry\n    def register(x)\n      x\n    end\n  end\nend\n"),
+        ("lib/shop/order.rb", "require_relative 'registry'\n\nmodule Shop\n  class Order\n    extend Registry\n  end\nend\n"),
+        ("lib/shop/order/json.rb", "require_relative '../order'\n\nmodule Shop\n  class Order\n    class Json\n    end\n  end\nend\n\nShop::Order.register(json: Shop::Order::Json)\n"),
+        // a class written as a constant assigned `Struct.new(…) do … end`
+        ("lib/shop/line.rb", "require_relative 'registry'\n\nmodule Shop\n  Line = Struct.new(:sku, :count) do\n    extend Registry\n  end\nend\n"),
+        ("lib/shop/line/csv.rb", "require_relative '../line'\n\nShop::Line.register(csv: 1)\n"),
+    ]);
+    assert!(
+        got.iter()
+            .any(|(f, t, _)| f == "csv.rb" && t == "lib_shop_registry_shop_registry_register"),
+        "{got:#?}"
+    );
+    assert!(
+        got.iter()
+            .any(|(f, t, _)| f == "json.rb" && t == "lib_shop_registry_shop_registry_register"),
+        "{got:#?}"
+    );
+}
+
+#[test]
+fn a_function_declared_with_a_type_is_still_the_function_where_it_is_passed() {
+    // `const first: Lookup = () => {}`: `first` is a definition; its written
+    // type makes no local that hides it as a value
+    let got = edges("ts-typed-fn-local", &[(
+        "a.ts",
+        "type Lookup = () => void\ndeclare const agent: any\n\nexport function run() {\n  const first: Lookup = () => {}\n  agent.normalize({ lookup: first })\n  first()\n}\n",
+    )]);
+    has(&got, &[("run()", "indirect_call", "first()"), ("run()", "calls", "first()")]);
+}
+
+#[test]
+fn a_module_pattern_names_what_its_function_returns() {
+    // `var Dataset = (function () { function Dataset() {} return Dataset })()`:
+    // outside that function, `Dataset` is the function written in it
+    let got = edges("js-module-pattern", &[(
+        "lib/typeahead.js",
+        "(function () {\n  var Dataset = (function () {\n    function Dataset(o) {\n      this.o = o\n    }\n    Dataset.extract = function extract(el) {\n      return el\n    }\n    return Dataset\n  })()\n  var Menu = (function () {\n    function Menu() {\n      this.dataset = new Dataset(1)\n      Dataset.extract(this)\n    }\n    return Menu\n  })()\n  return new Menu()\n})()\n",
+    )]);
+    has(
+        &got,
+        &[
+            ("Menu()", "calls", "Dataset()"),
+            ("Menu()", "calls", "extract()"),
+            ("typeahead.js", "calls", "Menu()"),
+        ],
+    );
+}
+
+#[test]
+fn rspec_shared_examples_see_the_lets_of_where_they_are_included() {
+    // `request_stub` in `shared_examples 'a request'` is the `let` of the
+    // block that says `it_behaves_like 'a request'`
+    let got = calls_conf("rspec-shared", &[
+        ("lib/stub.rb", "class Stub\n  def hit\n    1\n  end\nend\n"),
+        ("spec/support/request.rb", "shared_examples 'a request' do\n  it 'hits' do\n    request_stub.hit\n  end\nend\n"),
+        ("spec/adapter_spec.rb", "require_relative '../lib/stub'\n\ndescribe 'adapter' do\n  let(:request_stub) { Stub.new }\n\n  it_behaves_like 'a request'\nend\n"),
+    ]);
+    assert!(
+        got.iter().any(|(f, t, _)| f == "request.rb" && t == "spec_adapter_spec_request_stub"),
+        "{got:#?}"
+    );
+    assert!(got.iter().any(|(f, t, _)| f == "request.rb" && t == "lib_stub_stub_hit"), "{got:#?}");
+}
+
+#[test]
+fn cpp_a_variable_constructed_from_a_call_is_no_function() {
+    // `Random rnd(seed());`: the grammar reads a function `rnd` taking a
+    // function; a call where a type would be is a variable's argument
+    let got = edges("cpp-call-arg-variable", &[(
+        "a.cc",
+        "class Random {\n public:\n  explicit Random(int s) {}\n  int Next() { return 1; }\n};\n\nint seed() { return 3; }\n\nint run() {\n  Random rnd(seed());\n  return rnd.Next();\n}\n",
+    )]);
+    has(&got, &[("run()", "calls", "seed()"), ("run()", "calls", ".Next()")]);
+    assert!(!got.iter().any(|(_, _, t)| t == "rnd()"), "{got:#?}");
+}
+
+#[test]
+fn csharp_a_block_namespace_sees_the_namespaces_around_it() {
+    // `namespace Shop.Core { … new NameInfo(…) }`: `NameInfo` is `Shop`'s
+    let got = edges("cs-outer-namespace", &[
+        ("NameInfo.cs", "namespace Shop\n{\n    public sealed class NameInfo\n    {\n        internal NameInfo(string a, string b)\n        {\n        }\n    }\n}\n"),
+        ("Core/Ext.cs", "namespace Shop.Core\n{\n    static class Ext\n    {\n        public static NameInfo F()\n        {\n            return new NameInfo(\"a\", \"b\");\n        }\n    }\n}\n"),
+    ]);
+    has(&got, &[(".F()", "calls", "NameInfo"), (".F()", "references", "NameInfo")]);
+    // `using Shop.Text;`: the namespace is every block that opens it, not
+    // the one file a lookup happens to land on
+    let got = edges("cs-namespace-blocks", &[
+        ("Text/Sentence.cs", "namespace Shop.Text\n{\n    public class Sentence\n    {\n    }\n}\n"),
+        ("Text/Wrapper.cs", "namespace Shop.Text\n{\n    public class Wrapper\n    {\n        public string Wrap() { return \"\"; }\n    }\n}\n"),
+        ("Text/Usage.cs", "namespace Shop.Text\n{\n    public class Usage\n    {\n    }\n}\n"),
+        ("Tests/T.cs", "using Shop.Text;\n\nnamespace Shop.Tests.Unit\n{\n    public class T\n    {\n        public void Run()\n        {\n            var w = new Wrapper();\n            w.Wrap();\n            var s = new Sentence();\n            var u = new Usage();\n        }\n    }\n}\n"),
+    ]);
+    has(
+        &got,
+        &[
+            (".Run()", "calls", "Wrapper"),
+            (".Run()", "calls", ".Wrap()"),
+            (".Run()", "calls", "Sentence"),
+            (".Run()", "calls", "Usage"),
+        ],
+    );
+}
+
+#[test]
+fn rust_a_closure_in_a_macros_arguments_has_its_parameters_and_locals() {
+    // `rgtest!(name, |mut cmd: TestCommand| { cmd.arg("x"); let d = Dir::new(); d.path() })`
+    let got = edges("rs-macro-closure", &[
+        ("Cargo.toml", "[package]\nname = \"demo\"\nversion = \"0.1.0\"\n"),
+        ("src/lib.rs", "pub mod util;\n"),
+        ("src/util.rs", "pub struct TestCommand;\n\nimpl TestCommand {\n    pub fn arg(&mut self, a: &str) -> &mut TestCommand {\n        self\n    }\n    pub fn run(&mut self) {}\n}\n\npub struct Dir;\n\nimpl Dir {\n    pub fn new() -> Dir {\n        Dir\n    }\n    pub fn path(&self) {}\n}\n"),
+        ("tests/regression.rs", "use demo::util::{Dir, TestCommand};\n\nmacro_rules! rgtest {\n    ($name:ident, $fun:expr) => {\n        #[test]\n        fn $name() {}\n    };\n}\n\nrgtest!(first, |mut cmd: TestCommand| {\n    cmd.arg(\"a\").run();\n    let d = Dir::new();\n    d.path();\n});\n"),
+    ]);
+    has(
+        &got,
+        &[
+            ("regression.rs", "calls", ".arg()"),
+            ("regression.rs", "calls", ".run()"),
+            ("regression.rs", "calls", ".path()"),
+        ],
+    );
+}
+
+#[test]
+fn swift_a_stored_propertys_type_is_a_reference() {
+    // `@Option var fav: ColorOptions`, `var second: ColorOptions?`
+    let got = edges("swift-property-type", &[(
+        "a.swift",
+        "enum ColorOptions: String {\n  case red\n}\n\nstruct Shade {\n}\n\nstruct Color {\n  @Option(help: \"x\")\n  var fav: ColorOptions\n  var second: Shade?\n}\n",
+    )]);
+    has(&got, &[("Color", "references", "ColorOptions"), ("Color", "references", "Shade")]);
+}
+
+// --- the name-resolution rules `benchmarks/conformance.py` found missing ----
+// Two types answer to the one method name in each: only the type says which.
+
+/// `(source qualname, relation, target qualname)` of every non-containment
+/// edge (a file's label where it has no qualname).
+fn quals(name: &str, files: &[(&str, &str)]) -> BTreeSet<(String, String, String)> {
+    let dir = project(name, files);
+    let (g, _) = build_graph(&BuildOptions::new(&dir)).unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+    let named = |id: &str| {
+        g["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|n| n["id"] == id)
+            .map(|n| n["qualname"].as_str().or(n["label"].as_str()).unwrap_or("").to_string())
+            .unwrap_or_default()
+    };
+    g["links"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|e| {
+            !matches!(e["relation"].as_str(), Some("contains" | "method" | "case_of" | "defines"))
+        })
+        .map(|e: &Value| {
+            (
+                named(e["source"].as_str().unwrap()),
+                e["relation"].as_str().unwrap().to_string(),
+                named(e["target"].as_str().unwrap()),
+            )
+        })
+        .collect()
+}
+
+#[track_caller]
+fn lacks(got: &BTreeSet<(String, String, String)>, unwanted: &[(&str, &str, &str)]) {
+    for (s, r, t) in unwanted {
+        assert!(
+            !got.contains(&(s.to_string(), r.to_string(), t.to_string())),
+            "unwanted {s} -{r}-> {t} in {got:#?}"
+        );
+    }
+}
+
+const JAVA_TWO: &str = "package app;\n\nclass Repo {\n    int find() {\n        return 1;\n    }\n}\n\nclass Other {\n    int find() {\n        return 2;\n    }\n}\n\n";
+
+#[test]
+fn a_cast_used_where_it_is_written_is_a_value_of_its_type() {
+    // Java `((Repo) o).find()`, a resource variable, Go `x.(*Repo).Find()`
+    let java = format!(
+        "{JAVA_TWO}public class A {{\n    int run(Object o) {{\n        return ((Repo) o).find();\n    }}\n\n    int res() throws Exception {{\n        try (Repo r = open()) {{\n            return r.find();\n        }}\n    }}\n\n    Repo open() {{\n        return new Repo();\n    }}\n}}\n"
+    );
+    let got = quals("cast-java", &[("app/A.java", &java)]);
+    has(&got, &[("A.run", "calls", "Repo.find"), ("A.res", "calls", "Repo.find")]);
+    lacks(&got, &[("A.run", "calls", "Other.find"), ("A.res", "calls", "Other.find")]);
+    let got = quals("cast-go", &[
+        ("go.mod", "module example.com/app\n\ngo 1.21\n"),
+        ("a.go", "package app\n\ntype Repo struct{}\n\nfunc (r *Repo) Find() int {\n\treturn 1\n}\n\ntype Other struct{}\n\nfunc (o *Other) Find() int {\n\treturn 2\n}\n\nvar store = &Repo{}\n\nfunc Run(x interface{}) int {\n\treturn x.(*Repo).Find()\n}\n\nfunc Stored() int {\n\treturn store.Find()\n}\n"),
+    ]);
+    has(&got, &[("Run", "calls", "Repo.Find"), ("Stored", "calls", "Repo.Find")]);
+    lacks(&got, &[("Run", "calls", "Other.Find"), ("Stored", "calls", "Other.Find")]);
+}
+
+#[test]
+fn a_null_safe_call_and_a_nullable_parameter_keep_the_type() {
+    // C# `r?.Find()`, `(o as Repo).Find()`; Kotlin `r: Repo?`, `r.let { it.find() }`
+    let got = quals("nullsafe-cs", &[(
+        "A.cs",
+        "namespace App\n{\n    public class Repo\n    {\n        public int Find() { return 1; }\n    }\n\n    public class Other\n    {\n        public int Find() { return 2; }\n    }\n\n    public class A\n    {\n        public int? Run(Repo r)\n        {\n            return r?.Find();\n        }\n\n        public int As(object o)\n        {\n            return (o as Repo).Find();\n        }\n    }\n}\n",
+    )]);
+    has(&got, &[("App.A.Run", "calls", "App.Repo.Find"), ("App.A.As", "calls", "App.Repo.Find")]);
+    lacks(&got, &[("App.A.Run", "calls", "App.Other.Find")]);
+    let got = quals("nullsafe-kt", &[(
+        "A.kt",
+        "package app\n\nclass Repo {\n    fun find(): Int = 1\n}\n\nclass Other {\n    fun find(): Int = 2\n}\n\ntypealias Store = Repo\n\nval kept = Repo()\n\nfun run(r: Repo?): Int? = r?.find()\n\nfun scoped(r: Repo): Int = r.let { it.find() }\n\nfun aliased(s: Store): Int = s.find()\n\nfun top(): Int = kept.find()\n",
+    )]);
+    has(
+        &got,
+        &[
+            ("run", "calls", "Repo.find"),
+            ("scoped", "calls", "Repo.find"),
+            ("aliased", "calls", "Repo.find"),
+            ("top", "calls", "Repo.find"),
+        ],
+    );
+    lacks(&got, &[("run", "calls", "Other.find"), ("scoped", "calls", "Other.find")]);
+}
+
+#[test]
+fn a_binding_that_opens_an_optional_is_what_it_holds() {
+    // Rust `if let Some(r) = opt` on a parameter; a second `let` of a name
+    let got = quals("iflet-rs", &[
+        ("Cargo.toml", "[package]\nname = \"demo\"\nversion = \"0.1.0\"\n"),
+        ("src/lib.rs", "pub struct Repo;\n\nimpl Repo {\n    pub fn new() -> Repo {\n        Repo\n    }\n    pub fn find(&self) -> i32 {\n        1\n    }\n}\n\npub struct Other;\n\nimpl Other {\n    pub fn new() -> Other {\n        Other\n    }\n    pub fn find(&self) -> i32 {\n        2\n    }\n}\n\npub fn run(opt: Option<Repo>) -> i32 {\n    if let Some(r) = opt {\n        return r.find();\n    }\n    0\n}\n\npub fn again() -> i32 {\n    let r = Other::new();\n    let r = Repo::new();\n    r.find()\n}\n\nfn f() -> i32 {\n    1\n}\n\npub fn own() -> i32 {\n    self::f()\n}\n\nmod inner {\n    pub fn up() -> i32 {\n        super::f()\n    }\n}\n"),
+    ]);
+    has(
+        &got,
+        &[
+            ("run", "calls", "Repo.find"),
+            ("again", "calls", "Repo.find"),
+            ("own", "calls", "f"),
+            ("inner.up", "calls", "f"),
+        ],
+    );
+    lacks(&got, &[("run", "calls", "Other.find"), ("again", "calls", "Other.find")]);
+    // Swift `if let r = opt`, `(x as! Repo)`, an enum case's method
+    let got = quals("iflet-swift", &[(
+        "a.swift",
+        "class Repo {\n  func find() -> Int {\n    return 1\n  }\n}\n\nclass Other {\n  func find() -> Int {\n    return 2\n  }\n}\n\nenum Shape {\n  case circle\n\n  func area() -> Int {\n    return 1\n  }\n}\n\nfunc run(opt: Repo?) -> Int {\n  if let r = opt {\n    return r.find()\n  }\n  return 0\n}\n\nfunc cast(x: Any) -> Int {\n  return (x as! Repo).find()\n}\n\nfunc side() -> Int {\n  return Shape.circle.area()\n}\n",
+    )]);
+    has(
+        &got,
+        &[
+            ("run", "calls", "Repo.find"),
+            ("cast", "calls", "Repo.find"),
+            ("side", "calls", "Shape.area"),
+        ],
+    );
+    lacks(&got, &[("run", "calls", "Other.find"), ("cast", "calls", "Other.find")]);
+}
+
+#[test]
+fn a_function_named_without_a_call_is_an_indirect_use() {
+    // Java `this::helper`, Kotlin `::handle` (no call), PHP `[$this, 'handle']`,
+    // `Repo::class`, `new static()`
+    let got = quals("named-java", &[(
+        "app/A.java",
+        "package app;\n\nimport java.util.List;\n\npublic class A {\n    int helper(int x) {\n        return x;\n    }\n\n    void run(List<Integer> xs) {\n        xs.forEach(this::helper);\n    }\n}\n",
+    )]);
+    has(&got, &[("A.run", "indirect_call", "A.helper")]);
+    let got = quals("named-kt", &[(
+        "A.kt",
+        "package app\n\nclass Repo\n\nfun handle(x: Int): Int = x\n\nfun run(xs: List<Int>): List<Int> = xs.map(::handle)\n\nfun literal(): Any = Repo::class\n",
+    )]);
+    has(&got, &[("run", "indirect_call", "handle"), ("literal", "references", "Repo")]);
+    lacks(&got, &[("run", "calls", "handle"), ("literal", "calls", "Repo")]);
+    let got = quals("named-php", &[(
+        "a.php",
+        "<?php\nclass Repo\n{\n    public static function make(): static\n    {\n        return new static();\n    }\n\n    public function handle(int $x): int\n    {\n        return $x;\n    }\n\n    public function run(array $xs): array\n    {\n        return array_map([$this, 'handle'], $xs);\n    }\n}\n\nfunction name(): string\n{\n    return Repo::class;\n}\n",
+    )]);
+    has(
+        &got,
+        &[
+            ("Repo.run", "indirect_call", "Repo.handle"),
+            ("Repo.make", "calls", "Repo"),
+            ("name", "references", "Repo"),
+        ],
+    );
+}
+
+#[test]
+fn ruby_super_fields_and_constants() {
+    // `super`, `super(x)`, `@repo.find`, `Store = Repo`
+    let got = quals("rb-super", &[(
+        "a.rb",
+        "class Repo\n  def find\n    1\n  end\nend\n\nclass Other\n  def find\n    2\n  end\nend\n\nStore = Repo\n\nclass Base\n  def m(x)\n    x\n  end\n\n  def n\n    1\n  end\nend\n\nclass A < Base\n  def initialize\n    @repo = Repo.new\n  end\n\n  def m(x)\n    super(x)\n  end\n\n  def n\n    super\n  end\n\n  def go\n    @repo.find\n  end\n\n  def named\n    Store.new.find\n  end\nend\n",
+    )]);
+    has(
+        &got,
+        &[
+            ("A.m", "calls", "Base.m"),
+            ("A.n", "calls", "Base.n"),
+            ("A.go", "calls", "Repo.find"),
+            ("A.named", "calls", "Repo.find"),
+        ],
+    );
+    lacks(&got, &[("A.go", "calls", "Other.find"), ("A.named", "calls", "Other.find")]);
+}
+
+#[test]
+fn ecma_objects_getters_and_dynamic_imports() {
+    // an object literal's method, a prototype method on `new F()`,
+    // `await import()`; TS `r?: Repo`, `m.Repo`, a getter
+    let got = quals("js-objects", &[
+        ("m.js", "export function f() {\n  return 1\n}\n"),
+        ("a.js", "const api = {\n  fetchAll() {\n    return 1\n  },\n}\n\nfunction Widget() {}\n\nWidget.prototype.render = function () {\n  return 1\n}\n\nexport function run() {\n  return api.fetchAll()\n}\n\nexport function draw() {\n  const w = new Widget()\n  return w.render()\n}\n\nexport async function late() {\n  const m = await import('./m.js')\n  return m.f()\n}\n"),
+    ]);
+    has(&got, &[("run", "calls", "fetchAll"), ("draw", "calls", "render"), ("late", "calls", "f")]);
+    let got = quals("ts-types", &[
+        ("m.ts", "export class Repo {\n  find(): number {\n    return 1\n  }\n}\n\nexport class Other {\n  find(): number {\n    return 2\n  }\n}\n"),
+        ("a.ts", "import * as m from './m'\nimport { Repo } from './m'\n\nexport function opt(r?: Repo): number {\n  return r.find()\n}\n\nexport function ns(r: m.Repo): number {\n  return r.find()\n}\n\nexport function cast(x: unknown): number {\n  return (x as Repo).find()\n}\n\nexport class Svc {\n  get repo(): Repo {\n    return new Repo()\n  }\n\n  run(): number {\n    return this.repo.find()\n  }\n}\n"),
+    ]);
+    has(
+        &got,
+        &[
+            ("opt", "calls", "Repo.find"),
+            ("ns", "calls", "Repo.find"),
+            ("cast", "calls", "Repo.find"),
+            ("Svc.run", "calls", "Repo.find"),
+        ],
+    );
+    lacks(&got, &[("opt", "calls", "Other.find"), ("Svc.run", "calls", "Other.find")]);
+}
+
+#[test]
+fn csharp_global_using_and_scala_locals() {
+    let got = quals("cs-global", &[
+        ("Usings.cs", "global using Lib;\n"),
+        ("Lib/Repo.cs", "namespace Lib\n{\n    public class Repo\n    {\n        public int Find() { return 1; }\n    }\n}\n"),
+        ("App/A.cs", "namespace App\n{\n    public class A\n    {\n        public int Run(Repo r)\n        {\n            return r.Find();\n        }\n    }\n}\n"),
+    ]);
+    has(&got, &[("App.A.Run", "calls", "Lib.Repo.Find")]);
+    // Scala: a `val` in a method, `case r: Repo`, a method named with no
+    // parentheses, a call above a local of its name
+    let got = quals("scala-locals", &[(
+        "A.scala",
+        "package app\n\nclass Repo {\n  def find(): Int = 1\n  def size: Int = 1\n}\n\nclass Other {\n  def find(): Int = 2\n}\n\nobject Main {\n  def stream(): Int = 1\n\n  def run(): Int = {\n    val r = new Repo\n    r.find()\n  }\n\n  def pick(x: Any): Int = x match {\n    case r: Repo => r.find()\n    case _ => 0\n  }\n\n  def count(r: Repo): Int = r.size\n\n  def early(): Int = {\n    val n = stream()\n    val stream = n\n    stream\n  }\n}\n",
+    )]);
+    has(
+        &got,
+        &[
+            ("Main.run", "calls", "Repo.find"),
+            ("Main.pick", "calls", "Repo.find"),
+            ("Main.count", "calls", "Repo.size"),
+            ("Main.early", "calls", "Main.stream"),
+        ],
+    );
+    lacks(&got, &[("Main.run", "calls", "Other.find"), ("Main.pick", "calls", "Other.find")]);
+}
+
+#[test]
+fn cpp_qualified_types_aliases_and_range_for() {
+    let got = quals("cpp-scopes", &[(
+        "a.cc",
+        "#include <vector>\n\nnamespace util {\nint twice(int x) {\n  return 2 * x;\n}\n}  // namespace util\n\nnamespace u = util;\n\nclass Repo {\n public:\n  int Find() {\n    return 1;\n  }\n};\n\nclass Other {\n public:\n  int Find() {\n    return 2;\n  }\n};\n\nclass Outer {\n public:\n  class Inner {\n   public:\n    int Fetch() {\n      return 1;\n    }\n  };\n};\n\nint alias() {\n  return u::twice(2);\n}\n\nint nested(Outer::Inner& i) {\n  return i.Fetch();\n}\n\nvoid loop(std::vector<Repo>& repos) {\n  for (auto& r : repos) {\n    r.Find();\n  }\n}\n",
+    )]);
+    has(
+        &got,
+        &[
+            ("alias", "calls", "util.twice"),
+            ("nested", "calls", "Outer.Inner.Fetch"),
+            ("loop", "calls", "Repo.Find"),
+        ],
+    );
+    lacks(&got, &[("loop", "calls", "Other.Find")]);
+    // C: a parameter hides a function of its name
+    let got = quals("c-param", &[(
+        "a.c",
+        "int handler(void) {\n    return 0;\n}\n\ntypedef int (*fn)(void);\n\nint run(fn handler) {\n    return handler();\n}\n",
+    )]);
+    lacks(&got, &[("run", "calls", "handler")]);
+}
+
+#[test]
+fn a_projects_own_box_is_no_wrapper_outside_rust() {
+    let got = quals("java-box", &[(
+        "app/A.java",
+        "package app;\n\nclass Item {\n    int size() {\n        return 1;\n    }\n}\n\nclass Other {\n    int size() {\n        return 2;\n    }\n}\n\nclass Box<T> {\n    T held;\n\n    T lead() {\n        return held;\n    }\n}\n\npublic class A {\n    int run(Box<Item> b) {\n        return b.lead().size();\n    }\n}\n",
+    )]);
+    has(&got, &[("A.run", "calls", "Box.lead"), ("A.run", "calls", "Item.size")]);
+    lacks(&got, &[("A.run", "calls", "Other.size")]);
+}
+
+#[test]
+fn cpp_a_macro_between_class_and_its_name_leaves_a_class() {
+    // `class LEVELDB_EXPORT Env { … }`: the grammar reads `Env { … }` as a
+    // function otherwise, and its members belong to no class
+    let got = quals("cpp-export-macro", &[
+        ("env.h", "#define EXPORT\n\nnamespace db {\nclass EXPORT Env {\n public:\n  virtual int NowMicros() = 0;\n};\n\nclass EXPORT Wrapper : public Env {\n public:\n  int NowMicros() override {\n    return 1;\n  }\n};\n}  // namespace db\n"),
+        ("a.cc", "#include \"env.h\"\n\nnamespace db {\nclass Impl {\n public:\n  int Work();\n\n private:\n  Env* const env_;\n};\n\nint Impl::Work() {\n  return env_->NowMicros();\n}\n}  // namespace db\n"),
+    ]);
+    has(
+        &got,
+        &[("db.Impl.Work", "calls", "db.Env.NowMicros"), ("db.Wrapper", "inherits", "db.Env")],
+    );
+    lacks(&got, &[("db.Impl.Work", "calls", "db.Wrapper.NowMicros")]);
+}
+
+#[test]
+fn a_constructor_calls_the_one_it_names_in_its_head() {
+    // C# `: base(1, text)` / `: this("x")`, Java `super(1, text);` / `this("x");`
+    let got = quals("ctor-cs", &[(
+        "A.cs",
+        "namespace App\n{\n    public abstract class Maybe<T>\n    {\n    }\n\n    public static class Maybe\n    {\n        public static Maybe<T> Nothing<T>() { return null; }\n    }\n\n    public class Token\n    {\n        public Token(int tag, string text) { }\n    }\n\n    public class Name : Token\n    {\n        public Name(string text) : base(1, text) { }\n        public Name() : this(\"x\") { }\n\n        public object None()\n        {\n            return Maybe.Nothing<object>();\n        }\n    }\n}\n",
+    )]);
+    has(
+        &got,
+        &[
+            ("App.Name.Name", "calls", "App.Token.Token"),
+            ("App.Name.Name", "calls", "App.Name.Name"),
+            // a static class beside its generic namesake
+            ("App.Name.None", "calls", "App.Maybe.Nothing"),
+        ],
+    );
+    let got = quals("ctor-java", &[(
+        "app/A.java",
+        "package app;\n\nclass Token {\n    Token(int tag, String text) {\n    }\n}\n\nclass Name extends Token {\n    Name(String text) {\n        super(1, text);\n    }\n\n    Name() {\n        this(\"x\");\n    }\n}\n",
+    )]);
+    has(&got, &[("Name.Name", "calls", "Token.Token"), ("Name.Name", "calls", "Name.Name")]);
+}
+
+#[test]
+fn python_a_test_parameter_is_what_the_fixture_of_its_name_returns() {
+    let got = quals("py-fixture", &[
+        ("app.py", "class Runner:\n    def invoke(self):\n        return 1\n\n\nclass Context:\n    def invoke(self):\n        return 2\n"),
+        ("tests/conftest.py", "import pytest\n\nfrom app import Runner\n\n\n@pytest.fixture\ndef runner():\n    return Runner()\n"),
+        ("tests/test_app.py", "def test_run(runner):\n    assert runner.invoke() == 1\n"),
+        // a conftest beside another directory's tests says nothing here
+        ("other/conftest.py", "import pytest\n\nfrom app import Context\n\n\n@pytest.fixture\ndef runner():\n    return Context()\n"),
+    ]);
+    has(&got, &[("test_run", "calls", "Runner.invoke")]);
+    lacks(&got, &[("test_run", "calls", "Context.invoke")]);
+}
+
+#[test]
+fn csharp_a_using_of_a_block_namespace_brings_its_extensions_into_sight() {
+    let got = quals("cs-using-block", &[
+        ("Infra/Ext.cs", "using System.Collections.Generic;\n\nnamespace App.Infra\n{\n    static class EnumerableExtensions\n    {\n        public static bool Empty<T>(this IEnumerable<T> source) { return true; }\n    }\n}\n"),
+        ("Core/A.cs", "using System.Collections.Generic;\nusing App.Infra;\n\nnamespace App.Core\n{\n    public class A\n    {\n        public bool Run(IEnumerable<string> values)\n        {\n            return values.Empty();\n        }\n    }\n}\n"),
+    ]);
+    has(&got, &[("App.Core.A.Run", "calls", "App.Infra.EnumerableExtensions.Empty")]);
+}
+
+#[test]
+fn typescript_a_dollar_is_part_of_a_name_and_a_name_is_a_type_or_a_value() {
+    // `$Base` (the `$` is PHP's and Ruby's sigil only); `Kind` the interface
+    // where a type is written, the constant where a value is used
+    let got = quals("ts-dollar", &[(
+        "a.ts",
+        "export interface $Base {\n  x: number\n}\n\nexport interface $Sub extends $Base {\n  y: number\n}\n\nexport const $limit = { max: 1 }\n\nexport interface Kind {\n  tag: string\n}\n\nexport const Kind = {\n  make(): number {\n    return 1\n  },\n}\n\nexport function run(b: $Base, k: Kind): number {\n  return $limit.max + Kind.make()\n}\n",
+    )]);
+    has(
+        &got,
+        &[
+            ("$Sub", "inherits", "$Base"),
+            ("run", "references", "$Base"),
+            ("run", "reads", "$limit"),
+            ("run", "references", "Kind"),
+            ("run", "calls", "make"),
+        ],
+    );
+}
+
+#[test]
+fn types_named_where_no_declaration_writes_them() {
+    // Python `except Exit as e:`; Swift enum payloads, a case built, `T.Type`
+    let got = quals("py-except", &[(
+        "a.py",
+        "class Exit(Exception):\n    pass\n\n\nclass Abort(Exception):\n    pass\n\n\ndef run():\n    try:\n        pass\n    except Exit as e:\n        raise\n    except (Abort, ValueError):\n        pass\n",
+    )]);
+    has(&got, &[("run", "references", "Exit"), ("run", "references", "Abort")]);
+    let got = quals("swift-enum-types", &[(
+        "a.swift",
+        "struct InputKey {\n}\n\nprotocol Command {\n}\n\nenum ValidationResult {\n  case missing([InputKey])\n  case plain\n}\n\nenum ParserError: Error {\n  case noValue(String)\n}\n\nfunc run(root: Command.Type) throws {\n  throw ParserError.noValue(\"x\")\n}\n",
+    )]);
+    has(
+        &got,
+        &[
+            ("ValidationResult.missing", "references", "InputKey"),
+            ("run", "references", "ParserError"),
+            ("run", "references", "Command"),
+        ],
+    );
+}
+
+#[test]
+fn java_an_import_names_the_package_beside_a_module_of_its_name() {
+    let got = quals("java-module-info", &[
+        ("src/main/java/module-info.java", "module com.acme {\n  exports com.acme;\n}\n"),
+        ("src/main/java/com/acme/Gson.java", "package com.acme;\n\npublic class Gson {\n    public int go() {\n        return 1;\n    }\n}\n"),
+        ("src/test/java/com/acme/fn/T.java", "package com.acme.fn;\n\nimport com.acme.Gson;\n\npublic class T {\n    int run(Gson g) {\n        return g.go();\n    }\n}\n"),
+    ]);
+    has(&got, &[("T.java", "imports", "Gson"), ("T.run", "calls", "Gson.go")]);
+}
+
+#[test]
+fn kotlin_apply_and_also_give_the_receiver_back() {
+    let got = quals("kt-apply", &[(
+        "A.kt",
+        "package app\n\nclass Builder {\n    fun build(): Int = 1\n}\n\nclass Other {\n    fun build(): Int = 2\n}\n\nfun make(b: Builder, action: Builder.() -> Unit): Int = b.apply(action).build()\n\nfun log(b: Builder): Int = b.also { println(it) }.build()\n",
+    )]);
+    has(&got, &[("make", "calls", "Builder.build"), ("log", "calls", "Builder.build")]);
+    lacks(&got, &[("make", "calls", "Other.build"), ("log", "calls", "Other.build")]);
+}
+
+#[test]
+fn a_wrappers_name_is_the_projects_type_where_the_project_defines_it() {
+    // `Optional<T>` of the project's own, in the file that uses it …
+    let got = quals("own-optional", &[(
+        "app/A.java",
+        "package app;\n\nclass Item {\n    int size() {\n        return 1;\n    }\n}\n\nclass Other {\n    int size() {\n        return 2;\n    }\n}\n\nclass Optional<T> {\n    T held;\n\n    T lead() {\n        return held;\n    }\n}\n\npublic class A {\n    int run(Optional<Item> b) {\n        return b.lead().size();\n    }\n\n    int self() {\n        return 1;\n    }\n\n    int own() {\n        return self();\n    }\n}\n",
+    )]);
+    has(
+        &got,
+        &[
+            ("A.run", "calls", "Optional.lead"),
+            ("A.run", "calls", "Item.size"),
+            // `self` is no word of Java's: the method of that name
+            ("A.own", "calls", "A.self"),
+        ],
+    );
+    lacks(&got, &[("A.run", "calls", "Other.size")]);
+    // … and the library's, in a file that imports `java.util.Optional`
+    let got = quals("library-optional", &[
+        ("lib/Optional.java", "package lib;\n\npublic class Optional<T> {\n    public T lead() {\n        return null;\n    }\n}\n"),
+        ("app/A.java", "package app;\n\nimport java.util.Optional;\n\nclass Item {\n    int size() {\n        return 1;\n    }\n}\n\npublic class A {\n    int run(Optional<Item> b) {\n        return b.get().size();\n    }\n}\n"),
+    ]);
+    has(&got, &[("A.run", "calls", "Item.size")]);
+}
+
+#[test]
+fn csharp_new_names_a_type_beside_a_method_of_its_name() {
+    // `return new Name(text);` inside `static Token Name(string text)`
+    let got = quals("cs-new-type", &[(
+        "A.cs",
+        "namespace App\n{\n    public class Name : Token\n    {\n        public Name(string text) { }\n    }\n\n    public class Token\n    {\n        public static Token Name(string text)\n        {\n            return new Name(text);\n        }\n    }\n}\n",
+    )]);
+    has(&got, &[("App.Token.Name", "calls", "App.Name")]);
+    lacks(&got, &[("App.Token.Name", "calls", "App.Token.Name")]);
+}
+
+#[test]
+fn cpp_a_templates_member_is_typed_by_the_argument_written() {
+    // `template <typename T> class Page { T lead(); T held; }`, `Page<Item>& p`
+    let got = quals("cpp-template-arg", &[(
+        "a.cc",
+        "class Item {\n public:\n  int size() {\n    return 1;\n  }\n};\n\nclass Spare {\n public:\n  int size() {\n    return 2;\n  }\n};\n\ntemplate <typename T>\nclass Page {\n public:\n  T lead() {\n    return held;\n  }\n  T held;\n};\n\nint run(Page<Item>& p) {\n  return p.lead().size();\n}\n\nint field(Page<Item>& p) {\n  return p.held.size();\n}\n",
+    )]);
+    has(
+        &got,
+        &[
+            ("run", "calls", "Page.lead"),
+            ("run", "calls", "Item.size"),
+            ("field", "calls", "Item.size"),
+        ],
+    );
+    lacks(&got, &[("run", "calls", "Spare.size"), ("field", "calls", "Spare.size")]);
+}
+
+#[test]
+fn a_name_declared_in_a_block_is_that_blocks() {
+    // TS `const`, Rust `let`: beside the block the outer one stands; and in
+    // the value a `let` is declared with, the name is still the outer one
+    let got = quals("block-scopes", &[
+        (
+            "a.ts",
+            "class A { run() {} }\nclass B { go() {} }\n\nexport function f(x: A) {\n  {\n    const x = new B();\n    x.go();\n  }\n  x.run();\n}\n\nexport function g(c: boolean) {\n  if (c) {\n    const y = new A();\n    return y;\n  } else {\n    const y = new B();\n    y.go();\n  }\n}\n",
+        ),
+        (
+            "b.swift",
+            "protocol Convertible {\n    func asURL()\n}\n\nclass Wrap {\n    init(url: Convertible) {}\n}\n\nfunc use(_ convertible: Convertible) -> Wrap {\n    let convertible = Wrap(url: convertible)\n    return convertible\n}\n",
+        ),
+    ]);
+    has(
+        &got,
+        &[
+            ("f", "calls", "A.run"),
+            ("f", "calls", "B.go"),
+            ("g", "calls", "B.go"),
+            ("use", "uses", "Convertible"),
+        ],
+    );
+    lacks(&got, &[("f", "calls", "B.run"), ("g", "calls", "A.go")]);
+}
+
+#[test]
+fn a_type_parameter_is_no_type_of_the_project_but_has_its_bounds_members() {
+    let got = quals("type-parameters", &[
+        (
+            "a.ts",
+            "export type T = string;\n\nexport interface Box<T> {\n  held: T;\n}\n\nexport function plain(v: T): T {\n  return v;\n}\n\nexport interface Foo {\n  run(): void;\n}\n\nexport function f<U extends Foo>(x: U) {\n  x.run();\n}\n",
+        ),
+        (
+            "src/lib.rs",
+            "pub trait Sink {\n    fn begin(&self);\n}\n\npub struct Match;\n\npub fn run<S: Sink + Send, F: FnMut(Match) -> bool>(s: S, f: F) {\n    s.begin();\n}\n\npub fn later<T>(s: T)\nwhere\n    T: Sink,\n{\n    s.begin();\n}\n\npub trait Matcher {\n    fn find(&self);\n}\n\npub struct Space<M: Matcher> {\n    pub inner: M,\n    pub dst: Vec<u8>,\n}\n\npub struct Replacer<M: Matcher> {\n    space: Option<Space<M>>,\n}\n\nimpl<M: Matcher> Replacer<M> {\n    pub fn clear(&mut self) {\n        if let Some(ref mut space) = self.space {\n            space.dst.clear();\n        }\n    }\n}\n",
+        ),
+        ("Cargo.toml", "[package]\nname = \"demo\"\nversion = \"0.1.0\"\n"),
+        (
+            "c.scala",
+            "trait Read[A] {\n  def reads(s: String): A\n}\n\ntrait Base {\n  def id(): Int\n}\n\nobject O {\n  def opt[A: Read, B <: Base](name: String, b: B): Int = b.id()\n}\n",
+        ),
+    ]);
+    has(
+        &got,
+        &[
+            ("plain", "references", "T"),
+            ("f", "calls", "Foo.run"),
+            ("run", "calls", "Sink.begin"),
+            ("later", "calls", "Sink.begin"),
+            ("Replacer.clear", "reads", "Space.dst"),
+            ("O.opt", "calls", "Base.id"),
+        ],
+    );
+    lacks(&got, &[("Box", "references", "T")]);
+}
+
+#[test]
+fn typescript_names_of_a_namespace_a_parameter_and_a_parameter_property() {
+    let got = quals("ts-oracle", &[(
+        "a.ts",
+        "export namespace Types {\n  export interface Shape {\n    side: number;\n  }\n}\n\nexport interface Shape {\n  area: number;\n}\n\nexport interface Square extends Shape {\n  w: number;\n}\n\nexport class Greeter {\n  constructor(public greeting: string) {}\n\n  greet() {\n    return this.greeting;\n  }\n}\n\nexport function cb(n: number): number {\n  return n;\n}\n\nexport function call(cb: (x: string) => number) {\n  return cb('hi');\n}\n",
+    )]);
+    has(&got, &[("Square", "inherits", "Shape"), ("Greeter.greet", "reads", "Greeter.greeting")]);
+    lacks(&got, &[("Square", "inherits", "Types.Shape"), ("call", "calls", "cb")]);
+}
+
+#[test]
+fn an_enum_member_named_and_the_types_typescript_writes_outside_signatures() {
+    let got = quals("enum-members", &[
+        (
+            "a.ts",
+            "export enum Color {\n  Red,\n  Green = 2,\n}\n\nexport function pick() {\n  return Color.Red;\n}\n\nexport function two() {\n  return Color.Green;\n}\n\nexport class Left {\n  l = 1;\n}\n\nexport class Right {\n  r = 2;\n}\n\nexport type Either = Left | Right;\n\nexport interface Maker {\n  (o: Left): number;\n  new (n: number): Right;\n  held: typeof Color;\n}\n",
+        ),
+        ("src/lib.rs", "pub enum Mode {\n    Fast,\n    Slow,\n}\n\npub fn pick_mode() -> u8 {\n    let _m = Mode::Fast;\n    1\n}\n"),
+        ("Cargo.toml", "[package]\nname = \"demo\"\nversion = \"0.1.0\"\n"),
+    ]);
+    has(
+        &got,
+        &[
+            ("pick", "references", "Color"),
+            ("two", "references", "Color"),
+            ("Either", "references", "Left"),
+            ("Either", "references", "Right"),
+            ("Maker", "references", "Left"),
+            ("Maker", "references", "Right"),
+            ("Maker", "references", "Color"),
+            ("pick_mode", "references", "Mode"),
+        ],
+    );
+}
+
+#[test]
+fn a_name_of_another_package_is_not_in_reach_and_what_scala_writes_beside() {
+    let got = quals("packages", &[
+        ("other/List.scala", "package other\n\nclass List[A] {\n  def x = 2\n}\n"),
+        ("ext/Use.scala", "package ext\n\nclass Use {\n  def held: List[Int] = Nil\n}\n"),
+        (
+            "ext/Seen.scala",
+            "package ext\n\nimport other.List\n\nclass Seen {\n  def held: List[Int] = new List[Int]\n  def far: other.List[Int] = held\n}\n",
+        ),
+        (
+            "app/a.scala",
+            "package app\n\ntrait Txn[T]\ncase class Succ(p: Int)\nclass Local(a: Int, b: Int)\nclass A\n\ntrait Copy[In <: Txn[In]] {\n  def k = 1\n}\n\nobject Use {\n  var a = 0\n  def bump(): Unit = { a = 1 }\n  def make = new Local(a = 1, b = 2)\n  def f(n: Any): Int = n match {\n    case Succ(p) => p\n    case _ => 0\n  }\n  extension [A](opt: Option[A]) def unwrap: A = opt.get\n  def plain: A = new A\n}\n",
+        ),
+        ("a/Lists.java", "package a;\n\npublic class Lists {\n    public static int of() {\n        return 1;\n    }\n}\n"),
+        ("c/Blind.java", "package c;\n\nclass Blind {\n    Object f() {\n        return Lists.of();\n    }\n}\n"),
+    ]);
+    has(
+        &got,
+        &[
+            ("Seen.held", "references", "List"),
+            ("Seen.far", "references", "List"),
+            ("Copy", "references", "Txn"),
+            ("Use.bump", "writes", "Use.a"),
+            ("Use.f", "references", "Succ"),
+            ("Use.plain", "references", "A"),
+        ],
+    );
+    lacks(
+        &got,
+        &[
+            ("Use.held", "references", "List"),
+            ("Use.make", "writes", "Use.a"),
+            ("Use.unwrap", "references", "A"),
+            ("Blind.f", "calls", "Lists.of"),
+        ],
+    );
+}
+
+#[test]
+fn typescript_import_equals_namespace_aliases_and_functions_as_values() {
+    let got = quals("ts-rest", &[
+        ("back.ts", "export class Model {\n  id = 1;\n}\n\nexport function helper(): number {\n  return 1;\n}\n"),
+        (
+            "a.ts",
+            "import Backbone = require(\"./back\");\n\nexport class Viz extends Backbone.Model {}\n\nexport function f() {\n  return Backbone.helper();\n}\n",
+        ),
+        ("e.ts", "enum E {\n  A,\n  B,\n}\n\nexport = E;\n"),
+        ("use.ts", "import EnumE = require(\"./e\");\n\nexport function g() {\n  return EnumE.A;\n}\n"),
+        (
+            "ns.ts",
+            "namespace My.Internal {\n  export function getThing(): void {}\n}\n\nnamespace Other {\n  import Internal = My.Internal;\n\n  export function k() {\n    Internal.getThing();\n  }\n}\n\nfunction Cf(x: number) {\n  return x;\n}\n\nnamespace Cf {\n  export function foo() {\n    return 1;\n  }\n}\n\nexport function h() {\n  return Cf.foo();\n}\n\nexport function user(cb = h) {\n  const q = h;\n  return [q, cb];\n}\n",
+        ),
+        (
+            "blocks.ts",
+            "export let count = 0;\n\nexport function bump() {\n  count += 1;\n}\n\nexport function inner() {\n  {\n    let count = 5;\n    count += 1;\n  }\n}\n\nexport function after() {\n  {\n    let count = 5;\n    void count;\n  }\n  return count;\n}\n",
+        ),
+    ]);
+    has(
+        &got,
+        &[
+            ("Viz", "inherits", "Model"),
+            ("f", "calls", "helper"),
+            ("g", "references", "E"),
+            ("Other.k", "calls", "My.Internal.getThing"),
+            ("h", "calls", "Cf.foo"),
+            ("user", "references", "h"),
+            ("bump", "writes", "count"),
+            ("after", "reads", "count"),
+        ],
+    );
+    lacks(&got, &[("inner", "writes", "count")]);
+}
+
+#[test]
+fn a_type_named_to_test_convert_or_catch_a_value_is_a_use_of_it() {
+    let got = quals("type-checks", &[
+        (
+            "a.kt",
+            "package app\n\nopen class Shape {\n    object Unit : Shape()\n}\nclass Circle : Shape()\nclass Square : Shape()\nclass Boom : Exception()\n\ntypealias Round = Circle\n\nclass Holder {\n    val held: Shape = Circle()\n}\n\nfun take(s: Shape): Shape = s\n\nfun kind(s: Any): Int {\n    if (s is Circle) return 1\n    val q = s as? Square\n    try {\n        take(Shape.Unit)\n    } catch (e: Boom) {\n        return 2\n    }\n    return if (q == null) 0 else 3\n}\n",
+        ),
+        (
+            "A.java",
+            "class Foo {\n}\n\nclass Bar extends Foo {\n}\n\nclass Baz extends Foo {\n}\n\nclass Err extends RuntimeException {\n}\n\nclass J {\n    int f(Object s) {\n        if (s instanceof Bar) {\n            return 1;\n        }\n        Object c = (Baz) s;\n        try {\n            return c.hashCode();\n        } catch (Err e) {\n            return 2;\n        }\n    }\n}\n",
+        ),
+        (
+            "b.swift",
+            "protocol P1 {}\nclass SBase {}\nclass SBar: SBase {}\n\ntypealias Both = SBase & P1\n\nfunc skind(_ s: Any) -> Int {\n    if s is SBar { return 1 }\n    return 0\n}\n\nfunc gen<T>(x: T) where T: P1 {}\n",
+        ),
+        (
+            "c.go",
+            "package app\n\ntype GFoo struct{}\n\ntype GBar struct{}\n\nfunc gkind(s interface{}) int {\n\tif _, ok := s.(GBar); ok {\n\t\treturn 1\n\t}\n\tswitch s.(type) {\n\tcase GFoo:\n\t\treturn 2\n\t}\n\treturn 0\n}\n",
+        ),
+        ("go.mod", "module example.com/app\n\ngo 1.22\n"),
+    ]);
+    has(
+        &got,
+        &[
+            ("Holder", "references", "Shape"),
+            ("Round", "references", "Circle"),
+            ("kind", "references", "Circle"),
+            ("kind", "references", "Square"),
+            ("kind", "references", "Boom"),
+            ("kind", "references", "Shape.Unit"),
+            ("J.f", "references", "Bar"),
+            ("J.f", "references", "Baz"),
+            ("J.f", "references", "Err"),
+            ("Both", "references", "SBase"),
+            ("Both", "references", "P1"),
+            ("skind", "references", "SBar"),
+            ("gen", "references", "P1"),
+            ("gkind", "references", "GBar"),
+            ("gkind", "references", "GFoo"),
+        ],
+    );
+    // a base is the class's base, once
+    lacks(&got, &[("Circle", "references", "Shape"), ("Bar", "references", "Foo")]);
+}
+
+#[test]
+fn what_the_go_type_checker_and_rust_analyzer_showed() {
+    let got = quals("go-oracle", &[
+        ("go.mod", "module example.com/app\n\ngo 1.22\n"),
+        (
+            "a.go",
+            "package app\n\nimport \"bytes\"\n\ntype Client struct{}\n\nfunc (c *Client) Bytes() []byte {\n\treturn nil\n}\n\ntype Inner struct {\n\tSize int\n}\n\nfunc (i *Inner) Dump() {}\n\ntype Outer struct {\n\tIn *Inner\n}\n\nfunc endpoint() string {\n\treturn \"/pkg\"\n}\n\nfunc take(s interface{}) {}\n\nvar expected = \"pkg\"\n\nfunc local() string {\n\tendpoint := \"/secure\"\n\ttake(endpoint)\n\tvar body, expected string\n\texpected = \"x\"\n\treturn body + expected\n}\n\nfunc use(o *Outer) []byte {\n\tin := o.In\n\tin.Dump()\n\tvar buf bytes.Buffer\n\treturn buf.Bytes()\n}\n\nfunc pkg() string {\n\treturn expected\n}\n",
+        ),
+    ]);
+    has(&got, &[("use", "calls", "Inner.Dump"), ("pkg", "reads", "expected")]);
+    lacks(
+        &got,
+        &[
+            ("local", "indirect_call", "endpoint"),
+            ("local", "writes", "expected"),
+            ("use", "calls", "Client.Bytes"),
+        ],
+    );
+    let got = quals("rust-oracle", &[
+        ("Cargo.toml", "[package]\nname = \"demo\"\nversion = \"0.1.0\"\n"),
+        (
+            "src/lib.rs",
+            "pub struct Error;\n\npub struct Authority;\n\nimpl Authority {\n    pub fn username(&self) -> u8 {\n        1\n    }\n}\n\npub struct Proxy {\n    port: u8,\n}\n\nimpl Proxy {\n    pub fn new(_s: &str) -> Result<Self, Error> {\n        Err(Error)\n    }\n\n    pub fn port(mut self, p: u8) -> Self {\n        self.port = p;\n        self\n    }\n\n    pub fn show(&self) -> u8 {\n        self.port\n    }\n\n    pub fn username(&self) -> u8 {\n        2\n    }\n}\n\npub fn hostname() -> u8 {\n    1\n}\n\npub fn take(_x: u8) {}\n\npub fn user() -> u8 {\n    let hostname = 3u8;\n    take(hostname);\n    let proxy = Proxy::new(\"x\").unwrap_or(Proxy { port: 0 });\n    proxy.username()\n}\n",
+        ),
+    ]);
+    has(&got, &[("user", "calls", "Proxy.username"), ("Proxy.show", "reads", "Proxy.port")]);
+    lacks(
+        &got,
+        &[
+            ("user", "calls", "Authority.username"),
+            ("user", "indirect_call", "hostname"),
+            ("Proxy.show", "references", "Proxy.port"),
+        ],
+    );
+}
+
+#[test]
+fn csharp_types_by_arity_kotlin_constructor_properties_and_swift_self() {
+    let got = quals("arity", &[
+        (
+            "A.cs",
+            "using System.Collections.Generic;\n\nnamespace App\n{\n    public class RestResponse\n    {\n        public int Code;\n    }\n\n    public class RestResponse<T> : RestResponse\n    {\n        public T Data;\n    }\n\n    public class List\n    {\n        public int N;\n    }\n\n    public class Parser\n    {\n        public int Parse<T>(string[] args)\n        {\n            return 1;\n        }\n    }\n\n    public static class ParserExtensions\n    {\n        public static int Parse<T1, T2>(this Parser parser, string[] args)\n        {\n            return 2;\n        }\n    }\n\n    public class C\n    {\n        public List<string> Tags()\n        {\n            return new List<string>();\n        }\n\n        public List Own()\n        {\n            return new List();\n        }\n\n        public int Two(Parser p, string[] args)\n        {\n            RestResponse<int> r = null;\n            return p.Parse<int, string>(args);\n        }\n    }\n}\n",
+        ),
+        (
+            "a.kt",
+            "package app\n\nopen class Command(val name: String)\n\nclass Holder(val parameters: List<String>) {\n    val name = \"tool\"\n\n    fun count(): Int {\n        return parameters.size\n    }\n\n    fun make(): Command {\n        return Command(name = \"x\")\n    }\n}\n",
+        ),
+        (
+            "a.swift",
+            "struct Point {\n    var x = 0\n\n    init() {}\n\n    static func origin() -> Point {\n        Self()\n    }\n}\n",
+        ),
+    ]);
+    has(
+        &got,
+        &[
+            ("App.C.Own", "references", "App.List"),
+            ("App.C.Two", "calls", "App.ParserExtensions.Parse"),
+            ("App.C.Two", "references", "App.RestResponse"),
+            ("Holder.count", "reads", "Holder.parameters"),
+            ("Point.origin", "calls", "Point"),
+        ],
+    );
+    lacks(
+        &got,
+        &[
+            ("App.C.Tags", "references", "App.List"),
+            ("App.C.Tags", "calls", "App.List"),
+            ("App.C.Two", "calls", "App.Parser.Parse"),
+            ("Holder.make", "reads", "Holder.name"),
+        ],
+    );
+}
+
+#[test]
+fn csharp_property_bodies_block_namespaces_directive_braces_and_constructors() {
+    let got = quals("confirmed", &[
+        (
+            "A.cs",
+            "namespace App\n{\n    public static class Setter\n    {\n        public static void Set(ref bool f, bool v) { f = v; }\n    }\n\n    public class Settings\n    {\n        private bool mode;\n\n        public bool Mode\n        {\n            get => mode;\n            set => Setter.Set(ref mode, value);\n        }\n    }\n\n    public class Help\n    {\n        public bool Dashes { get; set; }\n\n        public Help() { }\n\n        public Help(string heading) { }\n\n        public override string ToString() { return \"\"; }\n    }\n\n    public class Parser\n    {\n        public static Parser Default { get { return null; } }\n\n        public int Go() { return 1; }\n    }\n\n    public class Other\n    {\n        public int Go() { return 2; }\n    }\n\n    public class Handler\n    {\n        public bool Cookies;\n    }\n\n    public partial class Client\n    {\n        static void Configure(Handler handler)\n        {\n#if NET\n            if (!System.OperatingSystem.IsBrowser()) {\n#endif\n            handler.Cookies = false;\n#if NET\n            }\n#endif\n        }\n\n        public void Dispose()\n        {\n        }\n    }\n}\n",
+        ),
+        (
+            "B.cs",
+            "namespace App\n{\n    public partial class Client\n    {\n        public Client(string url = null) { }\n\n        public Client(int port, string url) { }\n    }\n}\n",
+        ),
+        (
+            "tests/Ext.cs",
+            "namespace App.Tests\n{\n    static class StringExtensions\n    {\n        public static string[] ToNotEmptyLines(this string value) { return null; }\n    }\n}\n",
+        ),
+        (
+            "tests/unit/T.cs",
+            "using App;\n\nnamespace App.Tests.Unit\n{\n    public class Tests\n    {\n        readonly Client _client = new Client();\n\n        public int Run()\n        {\n            var sut = new Help { Dashes = true };\n            var lines = sut.ToString().ToNotEmptyLines();\n            var parser = Parser.Default;\n            return lines.Length + parser.Go();\n        }\n\n        public void Done()\n        {\n            _client.Dispose();\n        }\n    }\n}\n",
+        ),
+    ]);
+    has(
+        &got,
+        &[
+            ("App.Settings.Mode", "calls", "App.Setter.Set"),
+            ("App.Tests.Unit.Tests.Run", "calls", "App.Help.Help"),
+            ("App.Tests.Unit.Tests.Run", "calls", "App.Tests.StringExtensions.ToNotEmptyLines"),
+            ("App.Tests.Unit.Tests.Run", "calls", "App.Parser.Go"),
+            ("App.Tests.Unit.Tests.Done", "calls", "App.Client.Dispose"),
+            ("App.Tests.Unit.Tests", "calls", "App.Client.Client"),
+        ],
+    );
+    lacks(
+        &got,
+        &[
+            ("App.Settings", "calls", "App.Setter.Set"),
+            ("App.Tests.Unit.Tests.Run", "calls", "App.Other.Go"),
+        ],
+    );
+}
+
+#[test]
+fn rust_tuple_fields_items_crate_roots_and_go_results() {
+    let got = quals("floor", &[
+        (
+            "Cargo.toml",
+            "[package]\nname = \"tool\"\nversion = \"0.1.0\"\n\n[[bin]]\npath = \"crates/core/main.rs\"\nname = \"tl\"\n",
+        ),
+        (
+            "crates/core/main.rs",
+            "mod json;\nmod messages;\nmod standard;\n\nuse std::io;\n\npub struct Agent {\n    pub n: u32,\n}\n\npub struct Timeout;\n\npub struct AgentInstance(pub(crate) Agent);\n\npub enum Failure {\n    Timeout(Timeout),\n}\n\npub trait Flag {\n    fn name(&self) -> &str;\n}\n\npub const FLAGS: &[&dyn Flag] = &[];\n\nimpl From<Timeout> for Agent {\n    fn from(_t: Timeout) -> Agent {\n        Agent { n: 0 }\n    }\n}\n\npub trait SinkError: Sized {\n    fn error_message(message: String) -> Self;\n}\n\nimpl SinkError for io::Error {\n    fn error_message(message: String) -> io::Error {\n        io::Error::new(io::ErrorKind::Other, message)\n    }\n}\n\nfn main() {\n    crate::messages::set_messages(true);\n    let _ = io::Error::error_message(String::new());\n}\n",
+        ),
+        ("crates/core/messages.rs", "pub fn set_messages(_on: bool) {}\n"),
+        (
+            "crates/core/json.rs",
+            "struct Config {\n    pretty: bool,\n}\n\nimpl Default for Config {\n    fn default() -> Config {\n        Config { pretty: false }\n    }\n}\n\npub struct JsonBuilder {\n    config: Config,\n}\n\nimpl JsonBuilder {\n    pub fn new() -> JsonBuilder {\n        JsonBuilder { config: Config::default() }\n    }\n}\n",
+        ),
+        (
+            "crates/core/standard.rs",
+            "struct Config {\n    stats: bool,\n}\n\nimpl Default for Config {\n    fn default() -> Config {\n        Config { stats: false }\n    }\n}\n\npub struct StandardBuilder {\n    config: Config,\n}\n\nimpl StandardBuilder {\n    pub fn new() -> StandardBuilder {\n        StandardBuilder { config: Config::default() }\n    }\n}\n",
+        ),
+        ("go.mod", "module example.com/app\n\ngo 1.22\n"),
+        (
+            "a.go",
+            "package app\n\nimport \"time\"\n\ntype Directive int\n\ntype Completion string\n\ntype Breaker struct {\n\ttimer *time.Timer\n}\n\nfunc (b *Breaker) onReset() {}\n\nfunc (b *Breaker) open() {\n\tb.timer = time.AfterFunc(time.Second, b.onReset)\n}\n\nfunc NoFile(args []string) ([]Completion, Directive) {\n\treturn nil, 0\n}\n",
+        ),
+    ]);
+    has(
+        &got,
+        &[
+            ("AgentInstance", "references", "Agent"),
+            ("Failure.Timeout", "references", "Timeout"),
+            ("FLAGS", "references", "Flag"),
+            ("Agent", "references", "Timeout"),
+            ("main", "calls", "set_messages"),
+            ("main", "calls", "io::Error.error_message"),
+            ("NoFile", "references", "Directive"),
+            ("Breaker.open", "indirect_call", "Breaker.onReset"),
+        ],
+    );
+}
+
+#[test]
+fn positions_a_type_is_written_at() {
+    let got = quals("positions", &[
+        ("go.mod", "module example.com/app\n\ngo 1.22\n"),
+        (
+            "a.go",
+            "package app\n\ntype Opt struct{}\n\ntype Handler struct{}\n\ntype Key Opt\n\nconst RequestID Key = 0\n\nfunc Run() int {\n\tf := func(next Handler) Opt {\n\t\treturn Opt{}\n\t}\n\tm := make(map[string]Handler)\n\t_ = f\n\treturn len(m)\n}\n",
+        ),
+        (
+            "a.c",
+            "typedef struct item {\n    int v;\n} item;\n\ntypedef item *item_ptr;\n\nint run_c(void) {\n    item p = { 0 };\n    return p.v;\n}\n",
+        ),
+        (
+            "A.java",
+            "class Err extends Exception {\n}\n\nclass El {\n}\n\nclass A {\n    void quiet(El... many) throws Err {\n    }\n\n    Object lit() {\n        return El.class;\n    }\n}\n",
+        ),
+        (
+            "a.swift",
+            "struct ParseError: Error {\n}\n\nstruct Cred {\n}\n\nstruct Box<T> {\n    init(value: Int) {\n    }\n}\n\nfunc parse() throws(ParseError) -> Box<Cred> {\n    return Box<Cred>(value: 1)\n}\n",
+        ),
+        (
+            "src/lib.rs",
+            "pub struct Limited {\n    pub n: u32,\n}\n\npub enum Mode {\n    L(Limited),\n    N,\n}\n\npub fn pick(m: Mode) -> u32 {\n    match m {\n        Mode::L(Limited { n }) => n,\n        Mode::N => 0,\n    }\n}\n",
+        ),
+    ]);
+    has(
+        &got,
+        &[
+            ("Key", "references", "Opt"),
+            ("RequestID", "references", "Key"),
+            ("Run", "references", "Handler"),
+            ("item_ptr", "references", "item"),
+            ("run_c", "references", "item"),
+            ("A.quiet", "references", "Err"),
+            ("A.quiet", "references", "El"),
+            ("A.lit", "references", "El"),
+            ("parse", "references", "ParseError"),
+            ("parse", "calls", "Box"),
+            ("pick", "references", "Limited"),
+        ],
+    );
+}
+
+#[test]
+fn more_positions_a_type_is_written_at() {
+    let got = quals("positions2", &[
+        (
+            "a.cpp",
+            "struct Auth {\n    const char* user;\n};\n\nstruct Slice {\n};\n\nclass Pool {\n};\n\nclass Guard {\n};\n\nclass Cache {\n    friend class Guard;\n\n public:\n    static Pool* Get(Slice& s);\n};\n\ntemplate <class T>\nint setup(Pool& p) {\n    return sizeof(T) > 0;\n}\n\nint send(Auth a) {\n    return a.user != 0;\n}\n\nint run(Pool& p) {\n    return send(Auth{\"user\"}) + setup<Slice>(p);\n}\n",
+        ),
+        (
+            "src/scopt/A.scala",
+            "package scopt\n\nclass Config\n\nclass OptionParser[C](name: String)\n\nobject Main {\n  def run(): Any = new scopt.OptionParser[Config](\"scopt\")\n}\n",
+        ),
+        (
+            "a.ts",
+            "export interface Ctx {\n  id: number;\n}\n\nexport interface Hooks {\n  preprocess: (arg: unknown, ctx: Ctx) => unknown;\n}\n\nexport const ctx = 1;\n",
+        ),
+    ]);
+    has(
+        &got,
+        &[
+            ("run", "calls", "Auth"),
+            ("run", "references", "Slice"),
+            ("Cache.Get", "references", "Pool"),
+            ("Cache", "references", "Guard"),
+            ("Main.run", "calls", "OptionParser"),
+            ("Hooks", "references", "Ctx"),
+        ],
+    );
+    lacks(&got, &[("Hooks", "references", "ctx")]);
+}
+
+#[test]
+fn value_places_the_reader_did_not_record() {
+    let got = quals("values", &[
+        (
+            "a.ts",
+            "export class Request {\n  retryCount = 0;\n  headers: string[] = [];\n}\n\nexport function make(first: Request): number {\n  const request = first;\n  request.retryCount = 1;\n  return first.headers.length;\n}\n",
+        ),
+        (
+            "a.swift",
+            "enum Section {\n    case body\n    case header\n}\n\nstruct Holder {\n    var section: Section\n}\n\nfunc compare(h: Holder) -> Bool {\n    return h.section == .header\n}\n",
+        ),
+        (
+            "src/lib.rs",
+            "pub struct Args {\n    pub crlf: bool,\n}\n\npub fn check(args: &Args) {\n    assert_eq!(false, args.crlf);\n}\n",
+        ),
+        (
+            "src/app/A.scala",
+            "package app\n\nclass Parser {\n  def opt[A](name: String): Int = 1\n\n  def run(): Int = opt[String](\"foo\")\n}\n",
+        ),
+    ]);
+    has(
+        &got,
+        &[
+            ("make", "writes", "Request.retryCount"),
+            ("make", "reads", "Request.headers"),
+            ("compare", "references", "Section"),
+            ("check", "reads", "Args.crlf"),
+            ("Parser.run", "calls", "Parser.opt"),
+        ],
+    );
+}
+
+/// The C# rules read out of the standard and Roslyn's binder (engine 0.5.64):
+/// overloads ranked by the written predefined type and by `params` form, the
+/// extensions of the closest namespace, a `using` inside a namespace block.
+#[test]
+fn csharp_rules_from_the_binder() {
+    let dir = project("csbinder", &[
+        (
+            "Log.cs",
+            "namespace App\n{\n    public class Log\n    {\n        public int Write(int n) { return 1; }\n\n        public int Write(object o) { return 2; }\n\n        public int Write(string s) { return 3; }\n\n        public int Many(string a, params string[] rest) { return 4; }\n\n        public int Many(string a, string b) { return 5; }\n    }\n\n    public class C\n    {\n        public int M(Log l) { return l.Write(\"x\") + l.Many(\"a\", \"b\"); }\n    }\n}\n",
+        ),
+        (
+            "Lib.cs",
+            "namespace Lib\n{\n    public class Repo\n    {\n        public int Find() { return 1; }\n    }\n}\n",
+        ),
+        (
+            "A.cs",
+            "namespace Use\n{\n    using Lib;\n\n    public class A\n    {\n        public int M(Repo r) { return r.Find(); }\n    }\n}\n\nnamespace Elsewhere\n{\n    public class Repo\n    {\n        public int Find() { return 2; }\n    }\n}\n",
+        ),
+    ]);
+    let (g, _) = build_graph(&BuildOptions::new(&dir)).unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+    let nodes = g["nodes"].as_array().unwrap();
+    let node = |id: &str| nodes.iter().find(|n| n["id"] == id).unwrap();
+    let calls: BTreeSet<(String, String)> = g["links"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|e| e["relation"] == "calls")
+        .map(|e| {
+            let s = node(e["source"].as_str().unwrap());
+            let t = node(e["target"].as_str().unwrap());
+            let at = t["source_location"].as_str().unwrap_or("").to_string();
+            (
+                format!(
+                    "{}:{}",
+                    s["source_file"].as_str().unwrap(),
+                    s["qualname"].as_str().unwrap()
+                ),
+                format!("{}@{}", t["qualname"].as_str().unwrap(), at.split('-').next().unwrap()),
+            )
+        })
+        .collect();
+    let want = [
+        ("Log.cs:App.C.M", "App.Log.Write@L9"),
+        ("Log.cs:App.C.M", "App.Log.Many@L13"),
+        ("A.cs:Use.A.M", "Lib.Repo.Find@L5"),
+    ];
+    for (s, t) in want {
+        assert!(calls.contains(&(s.to_string(), t.to_string())), "no {s} -> {t} in {calls:?}");
+    }
+    for (s, t) in [("Log.cs:App.C.M", "App.Log.Write@L7"), ("Log.cs:App.C.M", "App.Log.Many@L11")] {
+        assert!(!calls.contains(&(s.to_string(), t.to_string())), "{s} -> {t} in {calls:?}");
+    }
+}
+
+#[test]
+fn csharp_extensions_of_the_closest_namespace() {
+    let got = quals("csclosest", &[(
+        "A.cs",
+        "namespace App\n{\n    public class Repo\n    {\n    }\n\n    public static class Outer\n    {\n        public static int Size(this Repo r) { return 1; }\n    }\n\n    namespace Inner\n    {\n        public static class Near\n        {\n            public static int Size(this Repo r) { return 2; }\n        }\n\n        public class C\n        {\n            public int M(Repo r) { return r.Size(); }\n        }\n    }\n}\n",
+    )]);
+    has(&got, &[("App.Inner.C.M", "calls", "App.Inner.Near.Size")]);
+    lacks(&got, &[("App.Inner.C.M", "calls", "App.Outer.Size")]);
+}
+
+/// Rust's rules read from the Reference (engine 0.5.65): a `match` arm's
+/// binding, `Self` in a struct's fields, a module beside a function of its
+/// name, a `use` in a block, a glob shadowed by an item, 2018 paths.
+#[test]
+fn rust_rules_from_the_reference() {
+    let got = quals("rsref", &[
+        ("Cargo.toml", "[package]\nname = \"demo\"\nversion = \"0.1.0\"\nedition = \"2021\"\n"),
+        (
+            "src/lib.rs",
+            "pub mod m1;\npub mod m2;\npub mod other;\n\nuse m1::make;\nuse other::*;\n\npub struct Foo;\n\npub fn size() -> i32 {\n    1\n}\n\npub fn pick(o: Option<i32>) -> i32 {\n    match o {\n        Some(size) => size,\n        None => size(),\n    }\n}\n\npub struct Node {\n    pub next: Option<Box<Self>>,\n}\n\nimpl Node {\n    pub fn value(&self) -> i32 {\n        1\n    }\n}\n\npub fn second(n: &Node) -> i32 {\n    n.next.as_ref().unwrap().value()\n}\n\npub mod log {\n    pub fn write() -> i32 {\n        1\n    }\n}\n\npub fn log() -> i32 {\n    2\n}\n\npub fn run() -> i32 {\n    log::write() + log()\n}\n\npub fn inner() -> i32 {\n    use m2::make;\n    make()\n}\n\npub fn globbed() -> usize {\n    let _b = Bar;\n    0\n}\n\npub mod a {\n    pub mod m {\n        pub fn f() -> i32 {\n            2\n        }\n    }\n\n    use m::f;\n\n    pub fn go() -> i32 {\n        f()\n    }\n}\n",
+        ),
+        ("src/m1.rs", "pub fn make() -> i32 {\n    1\n}\n"),
+        ("src/m2.rs", "pub fn make() -> i32 {\n    2\n}\n"),
+        ("src/other.rs", "pub struct Foo;\npub struct Bar;\n"),
+    ]);
+    has(
+        &got,
+        &[
+            ("pick", "calls", "size"),
+            ("second", "calls", "Node.value"),
+            ("run", "calls", "log.write"),
+            ("run", "calls", "log"),
+            ("globbed", "references", "Bar"),
+            ("a.go", "calls", "a.m.f"),
+        ],
+    );
+    let inner: Vec<_> = got.iter().filter(|(s, r, _)| s == "inner" && r == "calls").collect();
+    assert_eq!(inner.len(), 1, "inner calls one make: {inner:?}");
+}
+
+/// Go's rules from the specification (engine 0.5.66): the member at the
+/// shallowest depth of embedding, and each `switch` clause a block.
+#[test]
+fn go_rules_from_the_spec() {
+    let got = quals("gospec", &[
+        ("go.mod", "module example.com/app\n\ngo 1.22\n"),
+        (
+            "a.go",
+            "package app\n\ntype Inner struct{}\n\nfunc (Inner) Name() string {\n\treturn \"inner\"\n}\n\ntype Middle struct {\n\tInner\n}\n\ntype Named struct{}\n\nfunc (Named) Name() string {\n\treturn \"named\"\n}\n\ntype Outer struct {\n\tMiddle\n\tNamed\n}\n\nfunc Run(o Outer) string {\n\treturn o.Name()\n}\n\nfunc helper() int {\n\treturn 1\n}\n\nfunc Pick(n int) int {\n\tswitch n {\n\tcase 1:\n\t\thelper := 2\n\t\treturn helper\n\tdefault:\n\t\treturn helper()\n\t}\n}\n",
+        ),
+    ]);
+    has(&got, &[("Run", "calls", "Named.Name"), ("Pick", "calls", "helper")]);
+    lacks(&got, &[("Run", "calls", "Inner.Name")]);
+}
+
+/// TypeScript's rules from the compiler's name resolver (engine 0.5.67): a
+/// type position passes over a value of the name, `typeof x` names the
+/// value, and interfaces of one name merge.
+#[test]
+fn typescript_rules_from_the_name_resolver() {
+    let got = quals("tsnr", &[(
+        "a.ts",
+        "export interface Repo {\n  find(): number\n}\n\nexport interface Repo {\n  save(): void\n}\n\nexport function run(r: Repo): number {\n  const Repo = 1\n  const other: Repo = r\n  other.save()\n  return other.find() + Repo\n}\n",
+    )]);
+    has(&got, &[("run", "calls", "Repo.find"), ("run", "calls", "Repo.save")]);
+}
+
+/// Java's rules from the JLS and javac (engine 0.5.68): `Outer.this`, an
+/// interface's constant, and phase 1 and specificity of overloads for an
+/// integer literal.
+#[test]
+fn java_rules_from_the_jls() {
+    let got = quals("javajls", &[
+        ("app/Limits.java", "package app;\n\npublic interface Limits {\n    int MAX = 10;\n}\n"),
+        (
+            "app/A.java",
+            "package app;\n\npublic class A implements Limits {\n    int size() {\n        return 1;\n    }\n\n    int cap(int n) {\n        return Math.min(n, MAX);\n    }\n\n    class Inner {\n        int size() {\n            return 2;\n        }\n\n        int run() {\n            return A.this.size() + size();\n        }\n    }\n}\n",
+        ),
+    ]);
+    has(
+        &got,
+        &[
+            ("A.cap", "reads", "Limits.MAX"),
+            ("A.Inner.run", "calls", "A.size"),
+            ("A.Inner.run", "calls", "A.Inner.size"),
+        ],
+    );
+}
+
+/// Kotlin's rules from the specification (engine 0.5.69): operator and infix
+/// calls, `super<A>`, and a local extension before a top-level one.
+#[test]
+fn kotlin_rules_from_the_spec() {
+    let got = quals("ktspec", &[(
+        "src/app/A.kt",
+        "package app\n\nclass Money(val cents: Int) {\n    operator fun plus(o: Money): Money = Money(cents + o.cents)\n\n    operator fun get(i: Int): Int = i\n\n    infix fun upTo(hi: Int): Int = hi - cents\n}\n\nfun total(a: Money, b: Money): Int = (a + b)[0] + (a upTo 10)\n\ninterface A {\n    fun f(): Int = 1\n}\n\ninterface B {\n    fun f(): Int = 2\n}\n\nclass C : A, B {\n    override fun f(): Int = super<A>.f() + super<B>.f()\n}\n\nclass Repo\n\nfun Repo.size(): Int = 1\n\nfun run(r: Repo): Int {\n    fun Repo.size(): Int = 2\n    return r.size()\n}\n",
+    )]);
+    has(
+        &got,
+        &[
+            ("total", "calls", "Money.plus"),
+            ("total", "calls", "Money.upTo"),
+            ("C.f", "calls", "A.f"),
+            ("C.f", "calls", "B.f"),
+            ("run", "calls", "run.size"),
+        ],
+    );
+}
+
+/// C++ and Swift rules from clang and the Swift compiler (engine 0.5.71):
+/// `::f`, an inline namespace, `operator+`, an exact match and a
+/// non-template overload; a local function's overloads are its scope's.
+#[test]
+fn cpp_and_swift_rules_from_the_compilers() {
+    let got = quals("cppswift", &[
+        (
+            "a.cc",
+            "int Helper() {\n  return 1;\n}\n\nnamespace lib {\ninline namespace v2 {\nint Get() {\n  return 2;\n}\n}  // namespace v2\n}  // namespace lib\n\nnamespace app {\nint Helper() {\n  return 2;\n}\n\nint Run() {\n  return ::Helper() + lib::Get();\n}\n}  // namespace app\n\nclass Money {\n public:\n  int cents;\n  Money operator+(const Money& o) const {\n    return Money{cents + o.cents};\n  }\n};\n\nMoney Total(const Money& a, const Money& b) {\n  return a + b;\n}\n",
+        ),
+        (
+            "j.swift",
+            "class Job {\n  func h() -> Int {\n    return 1\n  }\n\n  func run() -> Int {\n    func h() -> Int {\n      return 2\n    }\n    return h()\n  }\n}\n",
+        ),
+    ]);
+    has(
+        &got,
+        &[
+            ("app.Run", "calls", "Helper"),
+            ("app.Run", "calls", "lib.v2.Get"),
+            ("Total", "calls", "Money.operator+"),
+            ("Job.run", "calls", "Job.run.h"),
+        ],
+    );
+    lacks(&got, &[("app.Run", "calls", "app.Helper"), ("Job.run", "calls", "Job.h")]);
+}
+
+/// Python, PHP and Ruby rules from their references (engine 0.5.73): a
+/// class body's names are no names of its methods, `global`, a trait before
+/// the parent, the last included module first, a Ruby local only after its
+/// assignment.
+#[test]
+fn python_php_ruby_rules_from_their_references() {
+    let got = quals("pyphprb", &[
+        (
+            "a.py",
+            "counter = 0\n\n\ndef helper():\n    return 1\n\n\nclass A:\n    def helper(self):\n        return 2\n\n    def run(self):\n        return helper()\n\n\ndef bump():\n    global counter\n    counter = counter + 1\n    return counter\n",
+        ),
+        (
+            "t.php",
+            "<?php\nclass Base\n{\n    public function hello(): string\n    {\n        return 'base';\n    }\n}\n\ntrait T\n{\n    public function hello(): string\n    {\n        return 'trait';\n    }\n}\n\nclass C extends Base\n{\n    use T;\n\n    public function run(): string\n    {\n        return $this->hello();\n    }\n}\n",
+        ),
+        (
+            "r.rb",
+            "module A\n  def hi\n    'a'\n  end\nend\n\nmodule B\n  def hi\n    'b'\n  end\nend\n\nclass K\n  include A\n  include B\n\n  def helper\n    1\n  end\n\n  def run\n    x = helper\n    helper = 2\n    x + helper + hi.size\n  end\nend\n",
+        ),
+    ]);
+    has(
+        &got,
+        &[
+            ("A.run", "calls", "helper"),
+            ("bump", "writes", "counter"),
+            ("C.run", "calls", "T.hello"),
+            ("K.run", "calls", "K.helper"),
+            ("K.run", "calls", "B.hi"),
+        ],
+    );
+    lacks(
+        &got,
+        &[
+            ("A.run", "calls", "A.helper"),
+            ("C.run", "calls", "Base.hello"),
+            ("K.run", "calls", "A.hi"),
+        ],
+    );
+}
+
+/// Scala's rules from the Scala 3 typer (engine 0.5.74): a wildcard import
+/// before another unit's package member, and an `export` clause's forwards.
+#[test]
+fn scala_rules_from_the_typer() {
+    let got = quals("scalatyper", &[
+        ("src/lib/Repo.scala", "package lib\n\nclass Repo {\n  def find: Int = 1\n}\n"),
+        ("src/app/Repo.scala", "package app\n\nclass Repo {\n  def find: Int = 2\n}\n"),
+        (
+            "src/app/A.scala",
+            "package app\n\nimport lib._\n\nclass Printer {\n  def print(): Int = 1\n}\n\nobject Facade {\n  private val p = new Printer\n  export p.print\n}\n\nobject Main {\n  def run(r: Repo): Int = r.find + Facade.print()\n}\n",
+        ),
+    ]);
+    has(&got, &[("Main.run", "calls", "Printer.print"), ("Main.run", "calls", "Repo.find")]);
+    let finds: Vec<_> = got
+        .iter()
+        .filter(|(s, r, t)| s == "Main.run" && r == "calls" && t == "Repo.find")
+        .collect();
+    assert_eq!(finds.len(), 1);
+}
+
+/// C++ (engine 0.5.76): in a member of `Status`, `Status::OK()` names the
+/// class before `::`, not the constructor of its name; a gtest test is a
+/// method of its fixture and sees the fixture's fields.
+#[test]
+fn cpp_the_class_before_its_constructor_and_gtest_fixtures() {
+    let got = quals("cppctor", &[
+        (
+            "status.h",
+            "class Status {\n public:\n  Status(const Status& rhs);\n  static Status OK() {\n    return Status();\n  }\n  Status Copy();\n};\n\ninline Status::Status(const Status& rhs) {\n}\n",
+        ),
+        (
+            "status.cc",
+            "#include \"status.h\"\n\nStatus Status::Copy() {\n  Status s = Status::OK();\n  return s;\n}\n",
+        ),
+        (
+            "db_test.cc",
+            "class Db {\n public:\n  int Write() {\n    return 1;\n  }\n};\n\nclass DbTest {\n public:\n  Db db_;\n};\n\nTEST_F(DbTest, Writes) {\n  db_.Write();\n}\n",
+        ),
+    ]);
+    has(&got, &[("Status.Copy", "calls", "Status.OK"), ("DbTest.Writes", "calls", "Db.Write")]);
+}

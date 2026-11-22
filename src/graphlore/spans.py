@@ -132,8 +132,16 @@ _TS_CALL_TYPES = frozenset({
 # Definitions whose grammar gives them a keyword, not a name.
 _TS_KEYWORD_NAMES = {
     "init_declaration": "init", "deinit_declaration": "deinit",   # Swift
+    "subscript_declaration": "subscript",                          # Swift
     "secondary_constructor": "constructor",                        # Kotlin
+    "indexer_declaration": "this[]",                               # C#
 }
+# C# operators: named by the operator (`operator+`) or the type a conversion
+# gives (`operator string`), as C++'s `operator_name` is.
+_TS_OPERATOR_TYPES = frozenset({"operator_declaration", "conversion_operator_declaration"})
+# Definitions whose name is written with a mark the language calls them by:
+# a Rust macro is `name!` (and never answers a lookup of `name`).
+_TS_NAME_SUFFIX = {"macro_definition": "!"}
 # The child that names a declaration in a grammar without a `name` field (Kotlin:
 # `function_declaration > simple_identifier`, `class_declaration > type_identifier`).
 _TS_NAME_CHILD_TYPES = frozenset({"simple_identifier", "type_identifier", "identifier"})
@@ -215,7 +223,9 @@ def _grammar_cached(lang: str) -> bool:
 # Definitions whose node type has no hint word: C++ `using AsyncResponse =
 # AsyncWrapper<Response>;` (not every `alias`: Python's `aliased_import` names a
 # module it imports).
-_TS_SYMBOL_TYPES = frozenset({"alias_declaration"})
+# C# `delegate void Cb(…);`, Rust `macro_rules! name`, C# operators.
+_TS_SYMBOL_TYPES = frozenset({"alias_declaration", "delegate_declaration", "macro_definition",
+                              "operator_declaration", "conversion_operator_declaration"})
 
 
 def _is_ts_symbol(node_type: str) -> bool:
@@ -431,7 +441,9 @@ def _ts_declarator_name(node: Any) -> str | None:
             return decl.text.decode("utf-8", "replace").replace("::", ".")
         decl = decl.child_by_field_name("declarator") or next(
             (c for c in decl.named_children
-             if c.type.endswith("declarator") or c.type == "qualified_identifier"), None)
+             if c.type.endswith("declarator") or c.type == "qualified_identifier"
+             # (`typedef void (Cb)(int);`: the name in parentheses)
+             or decl.type == "parenthesized_declarator"), None)
     return None
 
 
@@ -449,12 +461,49 @@ def _ts_declares_function(node: Any) -> bool:
     return False
 
 
+def _ts_macro_statement(node: Any) -> bool:
+    """A ``declaration`` whose type is a macro call the parser could not read
+    (``TEST_ASSERT_EQUAL(p0, p1, 4);`` followed by another, in a function the
+    parser lost): two statements, no declaration."""
+    typ = node.child_by_field_name("type")
+    return typ is not None and typ.type == "macro_type_specifier" and typ.has_error
+
+
+_CAPITALS = re.compile(r"[A-Z][A-Z0-9_]{2,}")
+
+
+def _ts_test_macro_name(node: Any) -> str | None:
+    """C++ ``TEST(Suite, Name) { … }``, ``TEST_F(Fixture, Name) { … }``: a
+    function with no return type, named in capitals, given two bare names. The
+    test is ``Suite.Name``, a method of the fixture when the file defines one."""
+    if node.type != "function_definition" or node.child_by_field_name("type") is not None:
+        return None
+    decl = node.child_by_field_name("declarator")
+    if decl is None or decl.type != "function_declarator":
+        return None
+    name = decl.child_by_field_name("declarator")
+    params = decl.child_by_field_name("parameters")
+    if name is None or name.type != "identifier" or params is None \
+            or not _CAPITALS.fullmatch(name.text.decode("utf-8", "replace")):
+        return None
+    parts = []
+    for p in params.named_children:
+        inner = p.named_children
+        if p.type != "parameter_declaration" or len(inner) != 1 \
+                or inner[0].type != "type_identifier":
+            return None
+        parts.append(inner[0].text.decode("utf-8", "replace"))
+    return ".".join(parts) if len(parts) == 2 else None
+
+
 def _ts_child_name(node: Any) -> str | None:
     """The name of a declaration whose grammar has no ``name`` field: its keyword
     (Swift ``init``), or its first identifier child (Kotlin)."""
     fixed = _TS_KEYWORD_NAMES.get(node.type)
     if fixed is not None:
         return fixed
+    if node.type in _TS_OPERATOR_TYPES:
+        return _ts_operator_name(node)
     t = node.type.lower()
     if not t.endswith(("_declaration", "_entry", "type_alias")) or "package" in t:
         return None
@@ -464,7 +513,195 @@ def _ts_child_name(node: Any) -> str | None:
     return None
 
 
+def _ts_operator_name(node: Any) -> str | None:
+    """C# `operator +` -> ``operator+``; `implicit operator string(…)` ->
+    ``operator string``."""
+    if node.type == "conversion_operator_declaration":
+        typ = node.child_by_field_name("type")
+        return None if typ is None else "operator " + typ.text.decode("utf-8", "replace")
+    seen = False
+    for c in node.children:
+        if seen:
+            return "operator" + c.text.decode("utf-8", "replace")
+        seen = c.type == "operator"
+    return None
+
+
 _PP_SPACE = b" \t\n\x0c\r"  # what Rust's `is_ascii_whitespace` strips
+_PP_ENDS = b";{}],)"  # what ends a statement, a block, an attribute or an item of a list
+
+
+def _blank_expression_branches(src: bytes) -> bytes:
+    """C#: an ``#if`` … ``#else`` … ``#endif`` that opens in the middle of an
+    expression or a declaration (the code line before it ends none: ``? null``
+    before ``#if NET`` / ``: new A(x)`` / ``#else`` / ``: new A()``) is one
+    piece of code written once per configuration; the parser, seeing every
+    branch, loses the type around. The source with the directive lines and
+    every branch but the first blanked (each byte but a newline or carriage
+    return a space), else ``src``. Of a group with one branch only the two
+    directive lines go: its lines are part of the expression. A group whose
+    first branch leaves a brace open, or closes one it did not open (``#if
+    NET`` / ``if (!OperatingSystem.IsBrowser()) {`` / ``#endif``, closed by a
+    ``}`` in a later group), is treated the same: the parser, pairing the
+    brace inside the group, loses the members after it.
+
+    The native engine's ``parse::blank_expression_branches`` is the same rule.
+    """
+    if b"#if" not in src:
+        return src
+    lines = src.split(b"\n")
+    blank: list[tuple[int, int]] = []
+    # (opened inside an expression, its directive lines, the braces its first
+    # branch leaves open)
+    stack: list[list[Any]] = []
+    last = b""  # the last line of code, without its comment
+    for li, line in enumerate(lines):
+        t = line.strip(_PP_SPACE)
+        if t.startswith(b"#"):
+            word = t[1:].lstrip(_PP_SPACE)
+            n = 0
+            while n < len(word) and word[n:n + 1].isalpha():
+                n += 1
+            word = word[:n]
+            if word == b"if":
+                inside = bool(last) and last[-1:] not in _PP_ENDS
+                stack.append([inside, [li], 0])
+            elif word in (b"elif", b"else"):
+                if stack:
+                    stack[-1][1].append(li)
+            elif word == b"endif":
+                if stack:
+                    inside, directives, opened = stack.pop()
+                    if inside or opened:
+                        blank.append((directives[0], directives[0]))
+                        blank.append((directives[1] if len(directives) >= 2 else li, li))
+            continue
+        cut = t.find(b"//")
+        code = (t if cut < 0 else t[:cut]).rstrip(_PP_SPACE)
+        if code:
+            last = code
+            opened = code.count(b"{") - code.count(b"}")
+            for g in stack:
+                if len(g[1]) == 1:
+                    g[2] += opened
+    if not blank:
+        return src
+    for lo, hi in blank:
+        for i in range(lo, hi + 1):
+            lines[i] = bytes(c if c == 0x0D else 0x20 for c in lines[i])
+    return b"\n".join(lines)
+
+
+
+_CLASS_MACRO = re.compile(
+    rb"\b(?:class|struct|union)[ \t]+([A-Z][A-Z0-9_]{2,})[ \t]+[A-Za-z_][A-Za-z0-9_]*"
+    rb"[ \t\r\n]*(?:\{|:[^:]|final\b)")
+
+
+def _blank_class_macros(src: bytes) -> bytes:
+    """C, C++: `class LEVELDB_EXPORT Env {` with the macro blanked.
+
+    A macro between the keyword and the name is nothing to the language once
+    expanded, but the parser takes it for the type's name and the rest for a
+    function, so the members belong to no class. Each byte of the macro becomes
+    a space (bytes and lines stay where they were). The engine's
+    `parse::blank_class_macros` is the same rule.
+    """
+    out: bytearray | None = None
+    for m in _CLASS_MACRO.finditer(src):
+        if out is None:
+            out = bytearray(src)
+        out[m.start(1):m.end(1)] = b" " * (m.end(1) - m.start(1))
+    return bytes(out) if out is not None else src
+
+
+_ANNOTATION_MACRO = re.compile(
+    rb"(?m)^([^#\n]*?)([A-Za-z_][A-Za-z0-9_]*|\)|\])(?:[ \t]+|[ \t]*\r?\n[ \t]*)"
+    rb"([A-Z][A-Z0-9_]{2,}[ \t]*\(([^()\n]*)\))[ \t]*(?:;|\{|=|,)")
+# Words a declarator name is never: what stands before a call statement
+# (`return FOO(x);`) and the words of a type (`static int ADD(int a);`).
+_NOT_DECLARATOR = frozenset(
+    b"return case throw else do goto co_return co_yield co_await sizeof alignof new delete "
+    b"typedef using namespace struct class union enum if while for switch catch int char void "
+    b"long short unsigned signed float double bool auto static inline extern volatile constexpr "
+    b"consteval constinit virtual explicit register mutable thread_local friend operator "
+    b"template typename public private protected const override final noexcept".split())
+# Of those, the words that end a function's declarator (`void g() const LOCKS_EXCLUDED(mu)`).
+_AFTER_PARAMS = frozenset((b"const", b"override", b"final", b"noexcept"))
+_LOOKBACK = 2000  # how far back the `(` a parameter list opens with is looked for
+_CONTROL = frozenset(
+    b"if while for switch catch return sizeof alignof decltype typeof defined".split())
+# A macro alone on an indented line, before a line that starts with a call.
+_STATEMENT_MACRO = re.compile(
+    rb"(?m)^[ \t]+([A-Z][A-Z0-9_]{2,})[ \t]*\r?\n[ \t]*[A-Za-z_][A-Za-z0-9_]*[ \t]*\(")
+_PARAM_DECL = re.compile(rb"[A-Za-z_][A-Za-z0-9_]*[ \t*&]+[A-Za-z_]")
+
+
+def _blank_annotation_macros(src: bytes) -> bytes:
+    """C, C++: `int count GUARDED_BY(mu);` and `void f() REQUIRES(mu);` with the
+    macro blanked.
+
+    An all-capital macro written after a declaration's name or parameters
+    (clang's thread-safety annotations, `ABSL_GUARDED_BY`) expands to an
+    attribute, but the parser takes it for the declarator: the field is lost
+    and a function named after the macro is made up. A macro counts when what
+    stands before it is a declarator name (an identifier after a type, not a
+    keyword) or a parameter list (`)` not closing an `if`, a `while`, …),
+    optionally followed by `const` / `override` / `noexcept`, on its line or
+    at the start of the next, and when its
+    arguments declare no parameter (`ADD(int a)` is a function). Each byte of
+    the macro becomes a space. So does a macro alone on an indented line
+    before a line that starts with a call (Unity's `EXPECT_ABORT_BEGIN` /
+    `TEST_ASSERT(0);`, Qt's `Q_OBJECT` / `Window(int w);`): a statement or
+    nothing once expanded, which the parser takes for the type of a
+    declaration the next line would be. The engine's
+    `parse::blank_annotation_macros` is the same rule.
+    """
+    if b"(" not in src:
+        return src
+    out: bytearray | None = None
+    for m in _STATEMENT_MACRO.finditer(src):
+        if out is None:
+            out = bytearray(src)
+        out[m.start(1):m.end(1)] = b" " * (m.end(1) - m.start(1))
+    for m in _ANNOTATION_MACRO.finditer(src):
+        before, word, args = m.group(1).rstrip(b" \t"), m.group(2), m.group(4)
+        close = m.start(2)  # where the `)` of a parameter list is
+        if _PARAM_DECL.search(args):
+            continue
+        if word in _AFTER_PARAMS:
+            if not before.endswith(b")"):
+                continue
+            word, close = b")", m.start(1) + len(before) - 1
+        elif word not in (b")", b"]"):
+            # (`]`: an array's declarator, `int stats_[4] GUARDED_BY(mu);`)
+            if word in _NOT_DECLARATOR or not before or before[-1:] not in \
+                    b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_*&>":
+                continue
+        if word == b")":
+            # the word before the `(` this closes, on this line or one above
+            # (`Status Recover(VersionEdit* edit,` / `bool* save)` / `REQUIRES(mu);`)
+            before = src[max(0, close - _LOOKBACK):close]
+            depth, i = 1, len(before) - 1
+            while i >= 0 and depth:
+                if before[i:i + 1] == b")":
+                    depth += 1
+                elif before[i:i + 1] == b"(":
+                    depth -= 1
+                i -= 1
+            if depth:
+                continue
+            head = before[:i + 1].rstrip(b" \t")
+            k = len(head)
+            while k > 0 and (head[k - 1:k].isalnum() or head[k - 1:k] in (b"_", b":", b"~")):
+                k -= 1
+            callee = head[k:].rsplit(b":", 1)[-1]
+            if not callee or callee in _CONTROL:
+                continue
+        if out is None:
+            out = bytearray(src)
+        out[m.start(3):m.end(3)] = b" " * (m.end(3) - m.start(3))
+    return bytes(out) if out is not None else src
 
 
 def _blank_duplicate_branches(src: bytes) -> bytes:
@@ -581,7 +818,14 @@ def _spans_treesitter(src: bytes, rel: str) -> list[tuple[int, int, int, str]]:
         return []
     try:
         # (C, C++: an `#if` written once per configuration is parsed once)
-        parsed = _blank_duplicate_branches(src) if lang in ("c", "cpp") else src
+        parsed = src
+        if lang in ("c", "cpp"):
+            # (and `class EXPORT_MACRO Name {` without the macro)
+            # (and `int n GUARDED_BY(mu);` without the macro)
+            parsed = _blank_duplicate_branches(_blank_annotation_macros(_blank_class_macros(src)))
+        elif lang == "csharp":
+            # (C#: an `#if` in the middle of an expression is parsed once)
+            parsed = _blank_expression_branches(src)
         root = parser.parse(parsed).root_node
     except Exception:
         return []
@@ -612,6 +856,14 @@ def _spans_treesitter(src: bytes, rel: str) -> list[tuple[int, int, int, str]]:
             is_sym = symbol_cache.get(t)
             if is_sym is None:
                 is_sym = _ts_is_symbol_type(t)
+            kname = _TS_KEYWORD_NAMES.get(t)
+            if kname is not None:
+                # a keyword-named definition (Swift `subscript`, whose `name`
+                # field is its result type)
+                qual = f"{prefix}{kname}"
+                add(child, qual)
+                walk(child, qual + ".")
+                continue
             name_node = child.child_by_field_id(f_name) \
                 if is_sym and f_name is not None else None
             if name_node is not None and t.endswith("_specifier") \
@@ -623,13 +875,17 @@ def _spans_treesitter(src: bytes, rel: str) -> list[tuple[int, int, int, str]]:
                     and (f_body is None or child.child_by_field_id(f_body) is None):
                 pass  # Rust `mod foo;` names a file, it defines nothing here
             elif name_node is not None:
-                base = name_node.text.decode("utf-8", "replace")
+                base = name_node.text.decode("utf-8", "replace") + _TS_NAME_SUFFIX.get(t, "")
                 # Go method: prefix the receiver's type
                 recv = child.child_by_field_id(f_recv) if f_recv is not None else None
                 if recv is not None and (rt := _ts_receiver_type(recv)):
                     base = f"{rt}.{base}"
                 qual = f"{prefix}{base}"
                 add(child, qual)
+                if "enum" in t:
+                    # Swift `case a, b, c`: one definition per name
+                    for other in child.children_by_field_name("name")[1:]:
+                        add(child, prefix + other.text.decode("utf-8", "replace"))
                 walk(child, qual + ".")
             elif is_sym and f_type is not None and "impl" in t.lower() \
                     and (type_node := child.child_by_field_id(f_type)) is not None:
@@ -642,8 +898,10 @@ def _spans_treesitter(src: bytes, rel: str) -> list[tuple[int, int, int, str]]:
                 base = type_node.child_by_field_id(f_type) or type_node
                 walk(child, f"{prefix}{base.text.decode('utf-8', 'replace')}.")
             elif (is_sym or (t in _TS_PROTOTYPE_TYPES
-                             and _ts_declares_function(child))) \
-                    and (dname := _ts_declarator_name(child)) is not None:
+                             and _ts_declares_function(child)
+                             and not _ts_macro_statement(child))) \
+                    and (dname := (_ts_test_macro_name(child)
+                                   or _ts_declarator_name(child))) is not None:
                 # C/C++ function/method: the name lives in the declarator chain
                 qual = f"{prefix}{dname}"
                 add(child, qual)
@@ -734,7 +992,9 @@ def _test_regions_rust(src: bytes, rel: str) -> list[tuple[int, int]]:
                     regions.append(span)
                     continue
             elif child.type == "function_item" and any(
-                    _RUST_TEST_ATTR.match(a) for a in _rust_attributes(child)):
+                    # (`#[cfg(test)] fn helper()`: compiled only with the tests)
+                    _RUST_TEST_ATTR.match(a) or _is_cfg_test(a)
+                    for a in _rust_attributes(child)):
                 regions.append(span)
                 continue
             walk(child)

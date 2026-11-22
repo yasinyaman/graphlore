@@ -132,9 +132,29 @@ _SNIPPETS = {
     "Api.java": "class Api {\n    int fetch(String u) {\n        return get(u);\n    }\n}\n",
     "Greeter.kt": "package demo\n\nclass Greeter(val name: String) {\n  @JvmStatic\n"
                   "  fun greet(): String {\n    return name\n  }\n}\n\nobject Registry {\n}\n",
+    # a KDoc block before a declaration with modifiers, and a `//` line after it
+    "Doc.kt": "package a\n\n/**\n * Doc.\n */\nabstract class C(\n    val x: Int,\n) {\n}\n\n"
+              "/**\n * Doc.\n */\n// note\ninterface O<A> : D<A> {\n}\n\n"
+              "val y = 1 // trailing\nclass E\n",
     "Model.scala": "class ResponseBlob(val bytes: Array[Byte]) {\n  def size = bytes.length\n}\n",
     "Parameter.cs": "namespace Shop {\npublic record Parameter(string Name) {\n"
                     "  public int Size() {\n    return 1;\n  }\n}\n}\n",
+    # a callback no definition holds is a scope to the resolver, never a span
+    "a.test.js": "describe('x', () => {\n  const a = 1\n  it('y', () => {\n    a\n  })\n})\n"
+                 "function f() {\n  return 1\n}\n",
+    # a macro between `class` and the name is blanked: a class, not a function
+    "env.h": "class LEVELDB_EXPORT Env {\n public:\n  Env();\n"
+             "  virtual int NowMicros() = 0;\n  int Twice() {\n    return 2;\n  }\n};\n",
+    # an `#if` inside an expression is parsed once: the class keeps its methods
+    "Ext.cs": "static class Ext {\n    static int F(bool a)\n        => a\n            ? 1\n"
+              "#if NET\n            : 2;\n#else\n            : 3;\n#endif\n"
+              "    static int G() => 4;\n    static int H(bool a) =>\n#if NET\n"
+              "        a ? 5 :\n#endif\n"
+              "        6;\n    static int I() => 7;\n}\n",
+    # a brace an `#if` opens and a later `#if` closes: the members after it stay
+    "Client.cs": "class Client {\n    static void Configure(Handler h) {\n#if NET\n"
+                 "        if (!OperatingSystem.IsBrowser()) {\n#endif\n        h.Cookies = false;\n"
+                 "#if NET\n        }\n#endif\n    }\n    public void Dispose() {\n    }\n}\n",
     "lib.rs": (FIXTURES / "polyglot" / "core" / "src" / "lib.rs").read_text(encoding="utf-8"),
     "Retrier.swift": "protocol DataDecoder {\n  func decode(_ data: Data) -> Value\n}\n"
                      "class OfflineRetrier {\n  init(monitor: Monitor) {\n  }\n}\n",
@@ -149,6 +169,33 @@ _SNIPPETS = {
     "pool.cpp": "namespace m {\nvoid Pool::Run() {\n#if NEW_API\n    if (poll(1)) {\n#else\n"
                 "    if (wait(1)) {\n#endif\n        return;\n    }\n}\n"
                 "void Pool::Stop() {\n}\n}\n",
+    # definitions whose node type has no hint word, or no name: a delegate, a
+    # conversion and an arithmetic operator, an indexer
+    "Ops.cs": "public delegate void Cb(int x);\npublic class C\n{\n"
+              "    public static implicit operator string(C c) => \"\";\n"
+              "    public static C operator +(C a, C b) => a;\n"
+              "    public int this[int i] => i;\n}\n",
+    # a macro is `name!`; a subscript is named by its keyword; one `case` line
+    # declares each of its names
+    "macros.rs": "macro_rules! ext {\n    () => {};\n}\nfn ext() {}\n",
+    "Kinds.swift": "enum K {\n    case a, b, c\n    case d\n}\n"
+                   "struct H {\n    subscript(_ name: String) -> String? { nil }\n}\n",
+    # a lock annotation after a declarator is blanked: the field and the
+    # function keep their names; a function named in parentheses
+    "locks.cc": "class S {\n  int num GUARDED_BY(mu);\n  int stats_[4] GUARDED_BY(mu);\n"
+                "  void f() EXCLUSIVE_LOCKS_REQUIRED(mu);\n"
+                "  int Recover(int* edit,\n      bool* save)\n      EXCLUSIVE_LOCKS_REQUIRED(mu);\n"
+                "  void g() const LOCKS_EXCLUDED(mu) {\n  }\n};\n"
+                "int ADD(int a, int b) {\n  return ADD2(a);\n}\n"
+                "typedef void (Cb)(int);\n",
+    # a gtest test is named by its two names; a macro alone on a line before a
+    # call is no type of a declaration
+    "gtest.cc": "class Fix {\n};\nTEST(Suite, Works) {\n  int x = 1;\n}\n"
+                "TEST_F(Fix, Reads) { Do(1); }\n",
+    "unity.c": "void testA(void)\n{\n    EXPECT_ABORT_BEGIN\n    TEST_ASSERT(0);\n"
+               "    VERIFY_FAILS_END\n}\nvoid testB(void)\n{\n}\n",
+    "util.ts": "export namespace util {\n  export const keys: number = 1;\n"
+               "  export const f = () => 1;\n}\n",
     "cart.rb": (FIXTURES / "polyglot" / "lib" / "shop" / "cart.rb").read_text(encoding="utf-8"),
     "Stack.php": (FIXTURES / "polyglot" / "php" / "src" / "Stack.php").read_text(encoding="utf-8"),
 }

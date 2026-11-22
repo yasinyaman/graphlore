@@ -1,0 +1,18 @@
+[
+ {
+  "test": "function",
+  "lang": "python",
+  "name": "super",
+  "tables": [
+   "BUILTINS@lang/python.rs"
+  ],
+  "missing": [
+   [
+    "run",
+    "calls",
+    "super"
+   ]
+  ],
+  "unwanted": []
+ }
+]

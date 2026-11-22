@@ -1,0 +1,2282 @@
+{
+ "language": "kotlin",
+ "source": "JetBrains/kotlin@04f3c969a5c6:core/language.version-settings/src/org/jetbrains/kotlin/config/LanguageVersionSettings.kt",
+ "features": [
+  {
+   "name": "TypeAliases",
+   "since": "1.1"
+  },
+  {
+   "name": "BoundCallableReferences",
+   "since": "1.1"
+  },
+  {
+   "name": "LocalDelegatedProperties",
+   "since": "1.1"
+  },
+  {
+   "name": "TopLevelSealedInheritance",
+   "since": "1.1"
+  },
+  {
+   "name": "AdditionalBuiltInsMembers",
+   "since": "1.1"
+  },
+  {
+   "name": "DataClassInheritance",
+   "since": "1.1"
+  },
+  {
+   "name": "InlineProperties",
+   "since": "1.1"
+  },
+  {
+   "name": "DestructuringLambdaParameters",
+   "since": "1.1"
+  },
+  {
+   "name": "SingleUnderscoreForParameterName",
+   "since": "1.1"
+  },
+  {
+   "name": "DslMarkersSupport",
+   "since": "1.1"
+  },
+  {
+   "name": "UnderscoresInNumericLiterals",
+   "since": "1.1"
+  },
+  {
+   "name": "DivisionByZeroInConstantExpressions",
+   "since": "1.1"
+  },
+  {
+   "name": "InlineConstVals",
+   "since": "1.1"
+  },
+  {
+   "name": "OperatorProvideDelegate",
+   "since": "1.1"
+  },
+  {
+   "name": "ShortSyntaxForPropertyGetters",
+   "since": "1.1"
+  },
+  {
+   "name": "RefinedSamAdaptersPriority",
+   "since": "1.1"
+  },
+  {
+   "name": "SafeCallBoundSmartCasts",
+   "since": "1.1"
+  },
+  {
+   "name": "TypeInferenceOnGenericsForCallableReferences",
+   "since": "1.1"
+  },
+  {
+   "name": "NoDelegationToJavaDefaultInterfaceMembers",
+   "since": "1.1"
+  },
+  {
+   "name": "Coroutines",
+   "since": "1.1"
+  },
+  {
+   "name": "InlineDefaultFunctionalParameters",
+   "since": "1.2"
+  },
+  {
+   "name": "SoundSmartCastsAfterTry",
+   "since": "1.2"
+  },
+  {
+   "name": "NullabilityAssertionOnExtensionReceiver",
+   "since": "1.2"
+  },
+  {
+   "name": "SafeCastCheckBoundSmartCasts",
+   "since": "1.2"
+  },
+  {
+   "name": "CapturedInClosureSmartCasts",
+   "since": "1.2"
+  },
+  {
+   "name": "LateinitTopLevelProperties",
+   "since": "1.2"
+  },
+  {
+   "name": "LateinitLocalVariables",
+   "since": "1.2"
+  },
+  {
+   "name": "InnerClassInEnumEntryClass",
+   "since": "1.2"
+  },
+  {
+   "name": "CallableReferencesToClassMembersWithEmptyLHS",
+   "since": "1.2"
+  },
+  {
+   "name": "JvmPackageName",
+   "since": "1.2"
+  },
+  {
+   "name": "AssigningArraysToVarargsInNamedFormInAnnotations",
+   "since": "1.2"
+  },
+  {
+   "name": "ExpectedTypeFromCast",
+   "since": "1.2"
+  },
+  {
+   "name": "RestrictionOfValReassignmentViaBackingField",
+   "since": "1.3"
+  },
+  {
+   "name": "NestedClassesInEnumEntryShouldBeInner",
+   "since": "1.3"
+  },
+  {
+   "name": "ProhibitDataClassesOverridingCopy",
+   "since": "1.3"
+  },
+  {
+   "name": "RestrictionOfWrongAnnotationsWithUseSiteTargetsOnTypes",
+   "since": "1.3"
+  },
+  {
+   "name": "ProhibitInnerClassesOfGenericClassExtendingThrowable",
+   "since": "1.3"
+  },
+  {
+   "name": "ProperForInArrayLoopRangeVariableAssignmentSemantic",
+   "since": "1.3"
+  },
+  {
+   "name": "NestedClassesInAnnotations",
+   "since": "1.3"
+  },
+  {
+   "name": "JvmStaticInInterface",
+   "since": "1.3"
+  },
+  {
+   "name": "JvmFieldInInterface",
+   "since": "1.3"
+  },
+  {
+   "name": "ProhibitVisibilityOfNestedClassifiersFromSupertypesOfCompanion",
+   "since": "1.3"
+  },
+  {
+   "name": "ProhibitNonConstValuesAsVarargsInAnnotations",
+   "since": "1.3"
+  },
+  {
+   "name": "ReleaseCoroutines",
+   "since": "1.3"
+  },
+  {
+   "name": "ReadDeserializedContracts",
+   "since": "1.3"
+  },
+  {
+   "name": "UseReturnsEffect",
+   "since": "1.3"
+  },
+  {
+   "name": "UseCallsInPlaceEffect",
+   "since": "1.3"
+  },
+  {
+   "name": "AllowContractsForCustomFunctions",
+   "since": "1.3"
+  },
+  {
+   "name": "VariableDeclarationInWhenSubject",
+   "since": "1.3"
+  },
+  {
+   "name": "ProhibitLocalAnnotations",
+   "since": "1.3"
+  },
+  {
+   "name": "ProhibitSmartcastsOnLocalDelegatedProperty",
+   "since": "1.3"
+  },
+  {
+   "name": "ProhibitAssigningSingleElementsToVarargsInNamedForm",
+   "since": "1.3"
+  },
+  {
+   "name": "FunctionTypesWithBigArity",
+   "since": "1.3"
+  },
+  {
+   "name": "RestrictRetentionForExpressionAnnotations",
+   "since": "1.3"
+  },
+  {
+   "name": "StrictJavaNullabilityAssertions",
+   "since": "1.3"
+  },
+  {
+   "name": "SoundSmartcastForEnumEntries",
+   "since": "1.3"
+  },
+  {
+   "name": "ProhibitErroneousExpressionsInAnnotationsWithUseSiteTargets",
+   "since": "1.3"
+  },
+  {
+   "name": "NewCapturedReceiverFieldNamingConvention",
+   "since": "1.3"
+  },
+  {
+   "name": "ExtendedMainConvention",
+   "since": "1.3"
+  },
+  {
+   "name": "ExperimentalBuilderInference",
+   "since": "1.3"
+  },
+  {
+   "name": "InlineClasses",
+   "since": "1.3"
+  },
+  {
+   "name": "DslMarkerOnFunctionTypeReceiver",
+   "since": "1.4"
+  },
+  {
+   "name": "RestrictReturnStatementTarget",
+   "since": "1.4"
+  },
+  {
+   "name": "WarningOnMainUnusedParameter",
+   "since": "1.4"
+  },
+  {
+   "name": "PolymorphicSignature",
+   "since": "1.4"
+  },
+  {
+   "name": "ProhibitConcurrentHashMapContains",
+   "since": "1.4"
+  },
+  {
+   "name": "ProhibitTypeParametersForLocalVariables",
+   "since": "1.4"
+  },
+  {
+   "name": "ProhibitJvmOverloadsOnConstructorsOfAnnotationClasses",
+   "since": "1.4"
+  },
+  {
+   "name": "ProhibitTypeParametersInAnonymousObjects",
+   "since": "1.4"
+  },
+  {
+   "name": "ProhibitRepeatedUseSiteTargetAnnotations",
+   "since": "1.4"
+  },
+  {
+   "name": "ProhibitUseSiteTargetAnnotationsOnSuperTypes",
+   "since": "1.4"
+  },
+  {
+   "name": "ProhibitTypeParametersInClassLiteralsInAnnotationArguments",
+   "since": "1.4"
+  },
+  {
+   "name": "ProhibitComparisonOfIncompatibleEnums",
+   "since": "1.4"
+  },
+  {
+   "name": "BareArrayClassLiteral",
+   "since": "1.4"
+  },
+  {
+   "name": "ProhibitGenericArrayClassLiteral",
+   "since": "1.4"
+  },
+  {
+   "name": "NonParenthesizedAnnotationsOnFunctionalTypes",
+   "since": "1.4"
+  },
+  {
+   "name": "UseGetterNameForPropertyAnnotationsMethodOnJvm",
+   "since": "1.4"
+  },
+  {
+   "name": "AllowBreakAndContinueInsideWhen",
+   "since": "1.4"
+  },
+  {
+   "name": "MixedNamedArgumentsInTheirOwnPosition",
+   "since": "1.4"
+  },
+  {
+   "name": "ProhibitTailrecOnVirtualMember",
+   "since": "1.4"
+  },
+  {
+   "name": "ProperComputationOrderOfTailrecDefaultParameters",
+   "since": "1.4"
+  },
+  {
+   "name": "TrailingCommas",
+   "since": "1.4"
+  },
+  {
+   "name": "ProhibitProtectedCallFromInline",
+   "since": "1.4"
+  },
+  {
+   "name": "ProperFinally",
+   "since": "1.4"
+  },
+  {
+   "name": "AllowAssigningArrayElementsToVarargsInNamedFormForFunctions",
+   "since": "1.4"
+  },
+  {
+   "name": "AllowNullOperatorsForResult",
+   "since": "1.4"
+  },
+  {
+   "name": "PreferJavaFieldOverload",
+   "since": "1.4"
+  },
+  {
+   "name": "AllowContractsForNonOverridableMembers",
+   "since": "1.4"
+  },
+  {
+   "name": "AllowReifiedGenericsInContracts",
+   "since": "1.4"
+  },
+  {
+   "name": "ProperVisibilityForCompanionObjectInstanceField",
+   "since": "1.4"
+  },
+  {
+   "name": "DoNotGenerateThrowsForDelegatedKotlinMembers",
+   "since": "1.4"
+  },
+  {
+   "name": "ProperIeee754Comparisons",
+   "since": "1.4"
+  },
+  {
+   "name": "FunctionalInterfaceConversion",
+   "since": "1.4"
+  },
+  {
+   "name": "GenerateJvmOverloadsAsFinal",
+   "since": "1.4"
+  },
+  {
+   "name": "MangleClassMembersReturningInlineClasses",
+   "since": "1.4"
+  },
+  {
+   "name": "ImproveReportingDiagnosticsOnProtectedMembersOfBaseClass",
+   "since": "1.4"
+  },
+  {
+   "name": "NewInference",
+   "since": "1.4"
+  },
+  {
+   "name": "SamConversionForKotlinFunctions",
+   "since": "1.4"
+  },
+  {
+   "name": "SamConversionPerArgument",
+   "since": "1.4"
+  },
+  {
+   "name": "FunctionReferenceWithDefaultValueAsOtherType",
+   "since": "1.4"
+  },
+  {
+   "name": "OverloadResolutionByLambdaReturnType",
+   "since": "1.4"
+  },
+  {
+   "name": "ContractsOnCallsWithImplicitReceiver",
+   "since": "1.4"
+  },
+  {
+   "name": "ProhibitSpreadOnSignaturePolymorphicCall",
+   "since": "1.5"
+  },
+  {
+   "name": "ProhibitInvisibleAbstractMethodsInSuperclasses",
+   "since": "1.5"
+  },
+  {
+   "name": "ProhibitNonReifiedArraysAsReifiedTypeArguments",
+   "since": "1.5"
+  },
+  {
+   "name": "ProhibitVarargAsArrayAfterSamArgument",
+   "since": "1.5"
+  },
+  {
+   "name": "CorrectSourceMappingSyntax",
+   "since": "1.5"
+  },
+  {
+   "name": "RequiredPrimaryConstructorDelegationCallInEnums",
+   "since": "1.5"
+  },
+  {
+   "name": "ApproximateAnonymousReturnTypesInPrivateInlineFunctions",
+   "since": "1.5"
+  },
+  {
+   "name": "ForbidReferencingToUnderscoreNamedParameterOfCatchBlock",
+   "since": "1.5"
+  },
+  {
+   "name": "UseCorrectExecutionOrderForVarargArguments",
+   "since": "1.5"
+  },
+  {
+   "name": "JvmRecordSupport",
+   "since": "1.5"
+  },
+  {
+   "name": "AllowNullOperatorsForResultAndResultReturnTypeByDefault",
+   "since": "1.5"
+  },
+  {
+   "name": "AllowSealedInheritorsInDifferentFilesOfSamePackage",
+   "since": "1.5"
+  },
+  {
+   "name": "SealedInterfaces",
+   "since": "1.5"
+  },
+  {
+   "name": "JvmInlineValueClasses",
+   "since": "1.5"
+  },
+  {
+   "name": "SuspendFunctionsInFunInterfaces",
+   "since": "1.5"
+  },
+  {
+   "name": "SamWrapperClassesAreSynthetic",
+   "since": "1.5"
+  },
+  {
+   "name": "StrictOnlyInputTypesChecks",
+   "since": "1.5"
+  },
+  {
+   "name": "ProhibitJvmFieldOnOverrideFromInterfaceInPrimaryConstructor",
+   "since": "1.6"
+  },
+  {
+   "name": "PrivateInFileEffectiveVisibility",
+   "since": "1.6"
+  },
+  {
+   "name": "ProhibitSelfCallsInNestedObjects",
+   "since": "1.6"
+  },
+  {
+   "name": "ProperCheckAnnotationsTargetInTypeUsePositions",
+   "since": "1.6"
+  },
+  {
+   "name": "SuspendFunctionAsSupertype",
+   "since": "1.6"
+  },
+  {
+   "name": "UnrestrictedBuilderInference",
+   "since": "1.6"
+  },
+  {
+   "name": "ClassTypeParameterAnnotations",
+   "since": "1.6"
+  },
+  {
+   "name": "WarnAboutNonExhaustiveWhenOnAlgebraicTypes",
+   "since": "1.6"
+  },
+  {
+   "name": "InstantiationOfAnnotationClasses",
+   "since": "1.6"
+  },
+  {
+   "name": "OptInContagiousSignatures",
+   "since": "1.6"
+  },
+  {
+   "name": "RepeatableAnnotations",
+   "since": "1.6"
+  },
+  {
+   "name": "RepeatableAnnotationContainerConstraints",
+   "since": "1.6"
+  },
+  {
+   "name": "UseBuilderInferenceOnlyIfNeeded",
+   "since": "1.6"
+  },
+  {
+   "name": "SuspendConversion",
+   "since": "1.6"
+  },
+  {
+   "name": "ProhibitSuperCallsFromPublicInline",
+   "since": "1.6"
+  },
+  {
+   "name": "ProhibitProtectedConstructorCallFromPublicInline",
+   "since": "1.6"
+  },
+  {
+   "name": "TypeEnhancementImprovementsInStrictMode",
+   "since": "1.7"
+  },
+  {
+   "name": "OptInRelease",
+   "since": "1.7"
+  },
+  {
+   "name": "ProhibitNonExhaustiveWhenOnAlgebraicTypes",
+   "since": "1.7"
+  },
+  {
+   "name": "UseBuilderInferenceWithoutAnnotation",
+   "since": "1.7"
+  },
+  {
+   "name": "ProhibitSmartcastsOnPropertyFromAlienBaseClass",
+   "since": "1.7"
+  },
+  {
+   "name": "ProhibitInvalidCharsInNativeIdentifiers",
+   "since": "1.7"
+  },
+  {
+   "name": "DefinitelyNonNullableTypes",
+   "since": "1.7"
+  },
+  {
+   "name": "ProhibitSimplificationOfNonTrivialConstBooleanExpressions",
+   "since": "1.7"
+  },
+  {
+   "name": "SafeCallsAreAlwaysNullable",
+   "since": "1.7"
+  },
+  {
+   "name": "JvmPermittedSubclassesAttributeForSealed",
+   "since": "1.7"
+  },
+  {
+   "name": "ProperTypeInferenceConstraintsProcessing",
+   "since": "1.7"
+  },
+  {
+   "name": "ForbidExposingTypesInPrimaryConstructorProperties",
+   "since": "1.7"
+  },
+  {
+   "name": "PartiallySpecifiedTypeArguments",
+   "since": "1.7"
+  },
+  {
+   "name": "EliminateAmbiguitiesWithExternalTypeParameters",
+   "since": "1.7"
+  },
+  {
+   "name": "EliminateAmbiguitiesOnInheritedSamInterfaces",
+   "since": "1.7"
+  },
+  {
+   "name": "ProperInternalVisibilityCheckInImportingScope",
+   "since": "1.7"
+  },
+  {
+   "name": "InlineClassImplementationByDelegation",
+   "since": "1.7"
+  },
+  {
+   "name": "QualifiedSupertypeMayBeExtendedByOtherSupertype",
+   "since": "1.7"
+  },
+  {
+   "name": "YieldIsNoMoreReserved",
+   "since": "1.7"
+  },
+  {
+   "name": "NoDeprecationOnDeprecatedEnumEntries",
+   "since": "1.7"
+  },
+  {
+   "name": "ProhibitQualifiedAccessToUninitializedEnumEntry",
+   "since": "1.7"
+  },
+  {
+   "name": "ForbidRecursiveDelegateExpressions",
+   "since": "1.7"
+  },
+  {
+   "name": "KotlinFunInterfaceConstructorReference",
+   "since": "1.7"
+  },
+  {
+   "name": "SuspendOnlySamConversions",
+   "since": "1.7"
+  },
+  {
+   "name": "DontLoseDiagnosticsDuringOverloadResolutionByReturnType",
+   "since": "1.8"
+  },
+  {
+   "name": "ProhibitConfusingSyntaxInWhenBranches",
+   "since": "1.8"
+  },
+  {
+   "name": "UseConsistentRulesForPrivateConstructorsOfSealedClasses",
+   "since": "1.8"
+  },
+  {
+   "name": "ProgressionsChangingResolve",
+   "since": "1.8"
+  },
+  {
+   "name": "AbstractClassMemberNotImplementedWithIntermediateAbstractClass",
+   "since": "1.8"
+  },
+  {
+   "name": "ForbidSuperDelegationToAbstractAnyMethod",
+   "since": "1.8"
+  },
+  {
+   "name": "ProperEqualityChecksInBuilderInferenceCalls",
+   "since": "1.8"
+  },
+  {
+   "name": "ProhibitNonExhaustiveIfInRhsOfElvis",
+   "since": "1.8"
+  },
+  {
+   "name": "ReportMissingUpperBoundsViolatedErrorOnAbbreviationAtSupertypes",
+   "since": "1.8"
+  },
+  {
+   "name": "ForbidUsingExtensionPropertyTypeParameterInDelegate",
+   "since": "1.8"
+  },
+  {
+   "name": "SynchronizedSuspendError",
+   "since": "1.8"
+  },
+  {
+   "name": "ReportNonVarargSpreadOnGenericCalls",
+   "since": "1.8"
+  },
+  {
+   "name": "RangeUntilOperator",
+   "since": "1.8"
+  },
+  {
+   "name": "GenericInlineClassParameter",
+   "since": "1.8"
+  },
+  {
+   "name": "ProhibitIllegalValueParameterUsageInDefaultArguments",
+   "since": "1.9"
+  },
+  {
+   "name": "ProhibitConstructorCallOnFunctionalSupertype",
+   "since": "1.9"
+  },
+  {
+   "name": "ProhibitArrayLiteralsInCompanionOfAnnotation",
+   "since": "1.9"
+  },
+  {
+   "name": "ProhibitCyclesInAnnotations",
+   "since": "1.9"
+  },
+  {
+   "name": "ForbidExtensionFunctionTypeOnNonFunctionTypes",
+   "since": "1.9"
+  },
+  {
+   "name": "ProhibitEnumDeclaringClass",
+   "since": "1.9"
+  },
+  {
+   "name": "StopPropagatingDeprecationThroughOverrides",
+   "since": "1.9"
+  },
+  {
+   "name": "ReportTypeVarianceConflictOnQualifierArguments",
+   "since": "1.9"
+  },
+  {
+   "name": "ReportErrorsOnRecursiveTypeInsidePlusAssignment",
+   "since": "1.9"
+  },
+  {
+   "name": "ForbidExtensionCallsOnInlineFunctionalParameters",
+   "since": "1.9"
+  },
+  {
+   "name": "ModifierNonBuiltinSuspendFunError",
+   "since": "1.9"
+  },
+  {
+   "name": "EnumEntries",
+   "since": "1.9"
+  },
+  {
+   "name": "ForbidSuperDelegationToAbstractFakeOverride",
+   "since": "1.9"
+  },
+  {
+   "name": "DataObjects",
+   "since": "1.9"
+  },
+  {
+   "name": "ProhibitAccessToEnumCompanionMembersInEnumConstructorCall",
+   "since": "1.9"
+  },
+  {
+   "name": "RefineTypeCheckingOnAssignmentsToJavaFields",
+   "since": "1.9"
+  },
+  {
+   "name": "ValueClassesSecondaryConstructorWithBody",
+   "since": "1.9"
+  },
+  {
+   "name": "NativeJsProhibitLateinitIsInitializedIntrinsicWithoutPrivateAccess",
+   "since": "1.9"
+  },
+  {
+   "name": "TakeIntoAccountEffectivelyFinalInMustBeInitializedCheck",
+   "since": "1.9"
+  },
+  {
+   "name": "ProhibitUsingNullableTypeParameterAgainstNotNullAnnotated",
+   "since": "1.9"
+  },
+  {
+   "name": "NoSourceCodeInNotNullAssertionExceptions",
+   "since": "1.9"
+  },
+  {
+   "name": "MultiplatformRestrictions",
+   "since": "1.9"
+  },
+  {
+   "name": "EnhanceNullabilityOfPrimitiveArrays",
+   "since": "2.0"
+  },
+  {
+   "name": "AllowEmptyIntersectionsInResultTypeResolver",
+   "since": "2.0"
+  },
+  {
+   "name": "ProhibitSmartcastsOnPropertyFromAlienBaseClassInheritedInInvisibleClass",
+   "since": "2.0"
+  },
+  {
+   "name": "ForbidInferringPostponedTypeVariableIntoDeclaredUpperBound",
+   "since": "2.0"
+  },
+  {
+   "name": "ProhibitUseSiteGetTargetAnnotations",
+   "since": "2.0"
+  },
+  {
+   "name": "KeepNullabilityWhenApproximatingLocalType",
+   "since": "2.0"
+  },
+  {
+   "name": "ProhibitAccessToInvisibleSetterFromDerivedClass",
+   "since": "2.0"
+  },
+  {
+   "name": "ProhibitOpenValDeferredInitialization",
+   "since": "2.0"
+  },
+  {
+   "name": "SupportEffectivelyFinalInExpectActualVisibilityCheck",
+   "since": "2.0"
+  },
+  {
+   "name": "ProhibitMissedMustBeInitializedWhenThereIsNoPrimaryConstructor",
+   "since": "2.0"
+  },
+  {
+   "name": "MangleCallsToJavaMethodsWithValueClasses",
+   "since": "2.0"
+  },
+  {
+   "name": "ProhibitDefaultArgumentsInExpectActualizedByFakeOverride",
+   "since": "2.0"
+  },
+  {
+   "name": "DisableCompatibilityModeForNewInference",
+   "since": "2.0"
+  },
+  {
+   "name": "DfaBooleanVariables",
+   "since": "2.0"
+  },
+  {
+   "name": "LightweightLambdas",
+   "since": "2.0"
+  },
+  {
+   "name": "ObjCSignatureOverrideAnnotation",
+   "since": "2.0"
+  },
+  {
+   "name": "JsAllowValueClassesInExternals",
+   "since": "2.0"
+  },
+  {
+   "name": "ProhibitImplementingVarByInheritedVal",
+   "since": "2.1"
+  },
+  {
+   "name": "PrioritizedEnumEntries",
+   "since": "2.1"
+  },
+  {
+   "name": "ProhibitInlineModifierOnPrimaryConstructorParameters",
+   "since": "2.1"
+  },
+  {
+   "name": "ProhibitSingleNamedFunctionAsExpression",
+   "since": "2.1"
+  },
+  {
+   "name": "ForbidLambdaParameterWithMissingDependencyType",
+   "since": "2.1"
+  },
+  {
+   "name": "JsAllowInvalidCharsIdentifiersEscaping",
+   "since": "2.1"
+  },
+  {
+   "name": "SupportJavaErrorEnhancementOfArgumentsOfWarningLevelEnhanced",
+   "since": "2.1"
+  },
+  {
+   "name": "ProhibitPrivateOperatorCallInInline",
+   "since": "2.1"
+  },
+  {
+   "name": "ProhibitTypealiasAsCallableQualifierInImport",
+   "since": "2.1"
+  },
+  {
+   "name": "JsExternalPropertyParameters",
+   "since": "2.1"
+  },
+  {
+   "name": "CorrectSpecificityCheckForSignedAndUnsigned",
+   "since": "2.1"
+  },
+  {
+   "name": "AllowAccessToProtectedFieldFromSuperCompanion",
+   "since": "2.1"
+  },
+  {
+   "name": "CheckLambdaAgainstTypeVariableContradictionInResolution",
+   "since": "2.1"
+  },
+  {
+   "name": "ProperUninitializedEnumEntryAccessAnalysis",
+   "since": "2.1"
+  },
+  {
+   "name": "ImprovedCapturedTypeApproximationInInference",
+   "since": "2.1"
+  },
+  {
+   "name": "ImprovedVarianceInCst",
+   "since": "2.1"
+  },
+  {
+   "name": "InferMoreImplicationsFromBooleanExpressions",
+   "since": "2.1"
+  },
+  {
+   "name": "ImprovedExhaustivenessChecksIn21",
+   "since": "2.1"
+  },
+  {
+   "name": "ProhibitSynchronizationByValueClassesAndPrimitives",
+   "since": "2.1"
+  },
+  {
+   "name": "AllowSuperCallToJavaInterface",
+   "since": "2.1"
+  },
+  {
+   "name": "ProhibitJavaClassInheritingPrivateKotlinClass",
+   "since": "2.1"
+  },
+  {
+   "name": "ProhibitReturningIncorrectNullabilityValuesFromSamConstructorLambdaOfJdkInterfaces",
+   "since": "2.1"
+  },
+  {
+   "name": "ProhibitNothingAsCatchParameter",
+   "since": "2.1"
+  },
+  {
+   "name": "NullableNothingInReifiedPosition",
+   "since": "2.1"
+  },
+  {
+   "name": "ElvisInferenceImprovementsIn21",
+   "since": "2.1"
+  },
+  {
+   "name": "ConsiderForkPointsWhenCheckingContradictions",
+   "since": "2.1"
+  },
+  {
+   "name": "AvoidApproximationOfRecursiveCapturedTypesWithNoReason",
+   "since": "2.1"
+  },
+  {
+   "name": "PCLAEnhancementsIn21",
+   "since": "2.1"
+  },
+  {
+   "name": "InferenceEnhancementsIn21",
+   "since": "2.1"
+  },
+  {
+   "name": "StricterConstraintIncorporationRecursionDetector",
+   "since": "2.1"
+  },
+  {
+   "name": "ForkIsNotSuccessfulWhenNoBranchIsSuccessful",
+   "since": "2.1"
+  },
+  {
+   "name": "BreakContinueInInlineLambdas",
+   "since": "2.2"
+  },
+  {
+   "name": "ForbidUsingExpressionTypesWithInaccessibleContent",
+   "since": "2.2"
+  },
+  {
+   "name": "ReportExposedTypeForMoreCasesOfTypeParameterBounds",
+   "since": "2.2"
+  },
+  {
+   "name": "ForbidReifiedTypeParametersOnTypeAliases",
+   "since": "2.2"
+  },
+  {
+   "name": "ForbidProjectionsInAnnotationProperties",
+   "since": "2.2"
+  },
+  {
+   "name": "ForbidJvmAnnotationsOnAnnotationParameters",
+   "since": "2.2"
+  },
+  {
+   "name": "ForbidFieldAnnotationsOnAnnotationParameters",
+   "since": "2.2"
+  },
+  {
+   "name": "ProhibitConstructorAndSupertypeOnTypealiasWithTypeProjection",
+   "since": "2.2"
+  },
+  {
+   "name": "CallableReferenceOverloadResolutionInLambda",
+   "since": "2.2"
+  },
+  {
+   "name": "ProhibitGenericQualifiersOnConstructorCalls",
+   "since": "2.2"
+  },
+  {
+   "name": "AvoidWrongOptimizationOfTypeOperatorsOnValueClasses",
+   "since": "2.2"
+  },
+  {
+   "name": "ForbidSyntheticPropertiesWithoutBaseJavaGetter",
+   "since": "2.2"
+  },
+  {
+   "name": "AnnotationDefaultTargetMigrationWarning",
+   "since": "2.2"
+  },
+  {
+   "name": "AllowDnnTypeOverridingFlexibleType",
+   "since": "2.2"
+  },
+  {
+   "name": "ForbidEnumEntryNamedEntries",
+   "since": "2.2"
+  },
+  {
+   "name": "WhenGuards",
+   "since": "2.2"
+  },
+  {
+   "name": "MultiDollarInterpolation",
+   "since": "2.2"
+  },
+  {
+   "name": "JvmDefaultEnableByDefault",
+   "since": "2.2"
+  },
+  {
+   "name": "ForbidExposureOfPrivateTypesInNonPrivateInlineFunctionsInKlibs",
+   "since": "2.2"
+  },
+  {
+   "name": "FixationEnhancementsIn22",
+   "since": "2.2"
+  },
+  {
+   "name": "ForbidCrossFileIrFieldAccessInKlibs",
+   "since": "2.2"
+  },
+  {
+   "name": "AllowExpectDeclarationsInJsExport",
+   "since": "2.2"
+  },
+  {
+   "name": "DoNotRunSuspendConversionForLambdaReturnStatements",
+   "since": "2.2"
+  },
+  {
+   "name": "JvmNullOutSpilledCoroutineLocals",
+   "since": "2.2"
+  },
+  {
+   "name": "CapturedTypeApproximationReworked",
+   "since": "2.2"
+  },
+  {
+   "name": "ForbidCompanionInLocalInnerClass",
+   "since": "2.3"
+  },
+  {
+   "name": "ForbidImplementationByDelegationWithDifferentGenericSignature",
+   "since": "2.3"
+  },
+  {
+   "name": "ForbidJvmSerializableLambdaOnInlinedFunctionLiterals",
+   "since": "2.3"
+  },
+  {
+   "name": "ReportExposedTypeForInternalTypeParameterBounds",
+   "since": "2.3"
+  },
+  {
+   "name": "EnableDfaWarningsInK2",
+   "since": "2.3"
+  },
+  {
+   "name": "ResolveTopLevelLambdasAsSyntheticCallArgument",
+   "since": "2.3"
+  },
+  {
+   "name": "DataFlowBasedExhaustiveness",
+   "since": "2.3"
+  },
+  {
+   "name": "UnstableSmartcastOnDelegatedProperties",
+   "since": "2.3"
+  },
+  {
+   "name": "ForbidAnnotationsWithUseSiteTargetOnExpressions",
+   "since": "2.3"
+  },
+  {
+   "name": "ProhibitNullableTypeThroughTypealias",
+   "since": "2.3"
+  },
+  {
+   "name": "ForbidObjectDelegationToItself",
+   "since": "2.3"
+  },
+  {
+   "name": "JvmIndyAllowLambdasWithAnnotations",
+   "since": "2.3"
+  },
+  {
+   "name": "NestedTypeAliases",
+   "since": "2.3"
+  },
+  {
+   "name": "ProhibitIntersectionReifiedTypeParameter",
+   "since": "2.3"
+  },
+  {
+   "name": "AllowCheckForErasedTypesInContracts",
+   "since": "2.3"
+  },
+  {
+   "name": "AllowContractsOnSomeOperators",
+   "since": "2.3"
+  },
+  {
+   "name": "AllowContractsOnPropertyAccessors",
+   "since": "2.3"
+  },
+  {
+   "name": "ConditionImpliesReturnsContracts",
+   "since": "2.3"
+  },
+  {
+   "name": "HoldsInContracts",
+   "since": "2.3"
+  },
+  {
+   "name": "InferenceEnhancementsIn23",
+   "since": "2.3"
+  },
+  {
+   "name": "AllowReturnInExpressionBodyWithExplicitType",
+   "since": "2.3"
+  },
+  {
+   "name": "ParseLambdaWithSuspendModifier",
+   "since": "2.3"
+  },
+  {
+   "name": "JsAllowLongInExportedDeclarations",
+   "since": "2.3"
+  },
+  {
+   "name": "JsStaticInInterface",
+   "since": "2.3"
+  },
+  {
+   "name": "IrRichCallableReferencesInKlibs",
+   "since": "2.3"
+  },
+  {
+   "name": "AllowCallingJavaOpenSealedClassConstructor",
+   "since": "2.3"
+  },
+  {
+   "name": "ImprovedExhaustivenessChecksIn23",
+   "since": "2.3"
+  },
+  {
+   "name": "EqualityConstraintForOperatorsUnderAssignments",
+   "since": "2.3"
+  },
+  {
+   "name": "AnnotationsInMetadata",
+   "since": "2.4"
+  },
+  {
+   "name": "ForbidExposingLessVisibleTypesInInline",
+   "since": "2.4"
+  },
+  {
+   "name": "ForbidCaptureInlinableLambdasInJsCode",
+   "since": "2.4"
+  },
+  {
+   "name": "ForbidInitializationBeforeDeclarationInAnonymous",
+   "since": "2.4"
+  },
+  {
+   "name": "ForbidPrivateToThisUnboundCallableReferences",
+   "since": "2.4"
+  },
+  {
+   "name": "AllowReifiedTypeInCatchClause",
+   "since": "2.4"
+  },
+  {
+   "name": "ApproximateLocalTypesInPublicDeclarations",
+   "since": "2.4"
+  },
+  {
+   "name": "LocalVariableTargetedAnnotationOnDestructuring",
+   "since": "2.4"
+  },
+  {
+   "name": "ForbidGetSetValueWithTooManyParameters",
+   "since": "2.4"
+  },
+  {
+   "name": "ForbidInlineEnumEntries",
+   "since": "2.4"
+  },
+  {
+   "name": "TurnTypeCheckWarningsIntoErrors",
+   "since": "2.4"
+  },
+  {
+   "name": "ProhibitExtendingAnnotationClasses",
+   "since": "2.4"
+  },
+  {
+   "name": "RefinedVarargConversionRulesForCallableReferences",
+   "since": "2.4"
+  },
+  {
+   "name": "CheckOptInOnPureEnumEntries",
+   "since": "2.4"
+  },
+  {
+   "name": "ProperlyCheckUpperBoundsViolationsWhenCreatingFreshVariables",
+   "since": "2.4"
+  },
+  {
+   "name": "ReportUpperBoundViolatedInCallArgumentInteractions",
+   "since": "2.4"
+  },
+  {
+   "name": "CheckPackageInfoNullnessAnnotations",
+   "since": "2.4"
+  },
+  {
+   "name": "ForbidTypeAliasWithMissingDependencyType",
+   "since": "2.4"
+  },
+  {
+   "name": "ForbidImplicitTypeAnnotationWithMissingDependency",
+   "since": "2.4"
+  },
+  {
+   "name": "ProperExhaustivenessCheckForJavaOpenSealedClass",
+   "since": "2.4"
+  },
+  {
+   "name": "DisableMaxTypeDepthFromInitialConstraints",
+   "since": "2.4"
+  },
+  {
+   "name": "JsAllowExportingSuspendFunctions",
+   "since": "2.4"
+  },
+  {
+   "name": "ImprovedResolutionInSecondaryConstructors",
+   "since": "2.4"
+  },
+  {
+   "name": "CacheLocalVariableScopes",
+   "since": "2.4"
+  },
+  {
+   "name": "ContextParameters",
+   "since": "2.4"
+  },
+  {
+   "name": "PropertyParamAnnotationDefaultTargetMode",
+   "since": "2.4"
+  },
+  {
+   "name": "AnnotationAllUseSiteTarget",
+   "since": "2.4"
+  },
+  {
+   "name": "OverloadResolutionSpecificityForEnhancedJvmPrimitiveWrappers",
+   "since": "2.4"
+  },
+  {
+   "name": "ForbidTypeAliasToCompilerRequiredAnnotation",
+   "since": "2.4"
+  },
+  {
+   "name": "ForbidArrayLiteralsInNonAnnotationContexts",
+   "since": "2.4"
+  },
+  {
+   "name": "LexicographicVariableReadinessCalculation",
+   "since": "2.4"
+  },
+  {
+   "name": "ForbidClassLiteralWithPotentiallyNullableReifiedLhs",
+   "since": "2.4"
+  },
+  {
+   "name": "ForbidOverriddenDefaultParametersInInline",
+   "since": "2.4"
+  },
+  {
+   "name": "ForbidRootIdePackageInCli",
+   "since": "2.4"
+  },
+  {
+   "name": "ReportOptInUsageOnCompanionObjectAccesses",
+   "since": "2.4"
+  },
+  {
+   "name": "ChangedIntersectionWithRecursiveCapturedType",
+   "since": "2.4"
+  },
+  {
+   "name": "FixedUninitializedEnumCompanionCheck",
+   "since": "2.4"
+  },
+  {
+   "name": "SkipHiddenObjectsInResolution",
+   "since": "2.4"
+  },
+  {
+   "name": "NoDeprecationOnImportStatements",
+   "since": "2.4"
+  },
+  {
+   "name": "JvmEnhancedBridges",
+   "since": "2.4"
+  },
+  {
+   "name": "DiscriminateNothingAsNullabilityConstraintInInference",
+   "since": "2.4"
+  },
+  {
+   "name": "ResolveEqualsRhsInDependentContextWithCompletion",
+   "since": "2.4"
+  },
+  {
+   "name": "IrIntraModuleInlinerBeforeKlibSerialization",
+   "since": "2.4"
+  },
+  {
+   "name": "ImprovedExhaustivenessCheckForSubjectVariable24",
+   "since": "2.4"
+  },
+  {
+   "name": "DontMakeExplicitNullableJavaTypeArgumentsFlexible",
+   "since": "2.4"
+  },
+  {
+   "name": "ExplicitBackingFields",
+   "since": "2.4"
+  },
+  {
+   "name": "ProhibitFunctionCallsInDefaultParametersOfInline",
+   "since": "2.4"
+  },
+  {
+   "name": "AllowNamedCompanionForJsExport",
+   "since": "2.4"
+  },
+  {
+   "name": "AllowInterfaceNestedClassesInJsExport",
+   "since": "2.4"
+  },
+  {
+   "name": "NativeTestProcessorBeforeSerialization",
+   "since": "2.4"
+  },
+  {
+   "name": "JsAllowExportingValueClasses",
+   "since": "2.4"
+  },
+  {
+   "name": "DontCreateSyntheticPropertiesWithoutBaseJavaGetter",
+   "since": "2.4"
+  },
+  {
+   "name": "KlibAnnotationsInMetadata",
+   "since": "2.5"
+  },
+  {
+   "name": "ReportDeprecationsOfClassifiersInImplicitInvokes",
+   "since": "2.5"
+  },
+  {
+   "name": "ForbidArrayOfNothingInLhsOfClassLiteral",
+   "since": "2.5"
+  },
+  {
+   "name": "ForbidReturnInExpressionBodyWithoutExplicitTypeEdgeCases",
+   "since": "2.5"
+  },
+  {
+   "name": "ForbidExternalEnumEntriesAndPrimaryConstructorProperties",
+   "since": "2.5"
+  },
+  {
+   "name": "ReportTypeVarianceConflictsInDnnAndFlexible",
+   "since": "2.5"
+  },
+  {
+   "name": "ProperSupportOfInnerClassesInCallableReferenceLHS",
+   "since": "2.5"
+  },
+  {
+   "name": "DontIgnoreUpperBoundViolatedOnImplicitArguments",
+   "since": "2.5"
+  },
+  {
+   "name": "AllowAnnotationsOnArgumentsOfAnnotations",
+   "since": "2.5"
+  },
+  {
+   "name": "ConsiderLambdaArrayConstructorsInlinableInBodiesOfInlineFunctions",
+   "since": "2.5"
+  },
+  {
+   "name": "ReportDeprecatedCompanionInDelegation",
+   "since": "2.5"
+  },
+  {
+   "name": "ReportDeprecationsOfOuterImportedClasses",
+   "since": "2.5"
+  },
+  {
+   "name": "ForbidUpperBoundsViolationOnTypeOperatorAndParameterBounds",
+   "since": "2.5"
+  },
+  {
+   "name": "FixesForIntersectionTypesIn25",
+   "since": "2.5"
+  },
+  {
+   "name": "ProhibitScriptTopLevelInnerClasses",
+   "since": "2.5"
+  },
+  {
+   "name": "AllowEagerSupertypeAccessibilityChecks",
+   "since": "2.5"
+  },
+  {
+   "name": "WrapContinuationForTailCallFunctions",
+   "since": "2.5"
+  },
+  {
+   "name": "ForbidOperatorEqualsInEnumEntriesAndAnonymousObjects",
+   "since": "2.5"
+  },
+  {
+   "name": "ForbidAnnotationsTypeArgumentsAndParenthesesForPackageQualifier",
+   "since": "2.5"
+  },
+  {
+   "name": "FixApplicabilityOfEmptyIntersection",
+   "since": "2.5"
+  },
+  {
+   "name": "EnhancementsOfSecondIncorporationKind25",
+   "since": "2.5"
+  },
+  {
+   "name": "EliminateSecondKindIncorporation",
+   "since": "2.5"
+  },
+  {
+   "name": "NoWhenBranchMatchedExceptionWithMessage",
+   "since": "2.5"
+  },
+  {
+   "name": "NameBasedDestructuring",
+   "since": "2.5"
+  },
+  {
+   "name": "JsAllowExportingAnnotationClasses",
+   "since": "2.5"
+  },
+  {
+   "name": "DnnTypeForUnboundedReifiedTypeParameters",
+   "since": "2.5"
+  },
+  {
+   "name": "JsAllowExportingStarProjection",
+   "since": "2.5"
+  },
+  {
+   "name": "AllowReturnsResultOfContract",
+   "since": "2.5"
+  },
+  {
+   "name": "UnnamedLocalVariables",
+   "since": "2.5"
+  },
+  {
+   "name": "ReturnValueCheckerIsStable",
+   "since": "2.5"
+  },
+  {
+   "name": "ForbidAliasedRepeatedAnnotationsOnExpressionsInMultiplatform",
+   "since": "2.5"
+  },
+  {
+   "name": "ProhibitIllegalNotNullSmartCastsInEqualities",
+   "since": "2.5"
+  },
+  {
+   "name": "ProhibitNotNullSmartCastsBasedOnFlexibleComponentsInEqualities",
+   "since": "2.5"
+  },
+  {
+   "name": "CallCompletionRefinementsFor25",
+   "since": "2.5"
+  },
+  {
+   "name": "ForbidValueClassRecursionViaTypeParameters",
+   "since": "2.5"
+  },
+  {
+   "name": "IrCrossModuleInlinerBeforeKlibSerialization",
+   "since": "2.5"
+  },
+  {
+   "name": "JvmSupportRecursiveTypeOf",
+   "since": "2.5"
+  },
+  {
+   "name": "ForbidNonLiteralStringArgumentsForCompilerRequiredAnnotationParameters",
+   "since": "2.5"
+  },
+  {
+   "name": "JsAllowExportTypealiases",
+   "since": "2.5"
+  },
+  {
+   "name": "IntrinsicConstEvaluation",
+   "since": "2.5"
+  },
+  {
+   "name": "NormalizeNaNValuesInConstContext",
+   "since": "2.5"
+  },
+  {
+   "name": "ExplicitInlineValueClassesSyntax",
+   "since": "2.5"
+  },
+  {
+   "name": "CallableReferencesWithBoundCompanionDontWinOverDefaultImports",
+   "since": "2.6"
+  },
+  {
+   "name": "ReportReificationProblemsInDnnAndFlexible",
+   "since": "2.6"
+  },
+  {
+   "name": "ForbidSamConstructorCallsWithMissingDependencySupertype",
+   "since": "2.6"
+  },
+  {
+   "name": "ExplicitContextArguments",
+   "since": "2.6"
+  },
+  {
+   "name": "ForbidJavaClassPropertyReferences",
+   "since": "2.6"
+  },
+  {
+   "name": "ForbidNonTopLevelEagerInitialization",
+   "since": "2.6"
+  },
+  {
+   "name": "ReportSubclassCantCallCompanionProtectedNonStaticWithGenerics",
+   "since": "2.6"
+  },
+  {
+   "name": "AvoidStarProjectingSupertypeOfRecursiveCapturedTypes",
+   "since": "2.6"
+  },
+  {
+   "name": "ConsiderUseSiteRecursiveBoundsOnCapturedTypes",
+   "since": "2.6"
+  },
+  {
+   "name": "ExplicitInlineValueClassesSyntaxRequiredOnAllPlatforms",
+   "since": "2.6"
+  },
+  {
+   "name": "ConcurrentMapPurelyImplemented",
+   "since": "2.6"
+  },
+  {
+   "name": "ForbidUselessTypeArgumentsIn26",
+   "since": "2.6"
+  },
+  {
+   "name": "EnforceMissingNamedArgumentsOnJavaAnnotation",
+   "since": "2.6"
+  },
+  {
+   "name": "JsIntegerDivisionCheck",
+   "since": "2.6"
+  },
+  {
+   "name": "ReportMissingErrorsOnForLoopOperatorCalls",
+   "since": "2.6"
+  },
+  {
+   "name": "ProhibitVarInJsModuleFile",
+   "since": "2.6"
+  },
+  {
+   "name": "ProhibitJsQualifierOnMembersAndNonExternals",
+   "since": "2.6"
+  },
+  {
+   "name": "ExpectActualClasses",
+   "since": null
+  },
+  {
+   "name": "DataClassCopyRespectsConstructorVisibility",
+   "since": null
+  },
+  {
+   "name": "ForbidParenthesizedLhsInAssignments",
+   "since": null
+  },
+  {
+   "name": "DirectJavaActualization",
+   "since": null
+  },
+  {
+   "name": "IgnoreNullabilityForErasedValueParameters",
+   "since": null
+  },
+  {
+   "name": "NoBuilderInferenceWithoutAnnotationRestriction",
+   "since": null
+  },
+  {
+   "name": "ReportErrorsForComparisonOperators",
+   "since": null
+  },
+  {
+   "name": "NoAdditionalErrorsInK1DiagnosticReporter",
+   "since": null
+  },
+  {
+   "name": "AllowExpectValueClassesWithNoPrimaryConstructor",
+   "since": null
+  },
+  {
+   "name": "AllowMultipleExpectsForSingleActual",
+   "since": null
+  },
+  {
+   "name": "DiscriminateSuspendInOverloadResolution",
+   "since": null
+  },
+  {
+   "name": "ExpectRefinement",
+   "since": null
+  },
+  {
+   "name": "JsEnableExtensionFunctionInExternals",
+   "since": null
+  },
+  {
+   "name": "PackagePrivateFileClassesWithAllPrivateMembers",
+   "since": null
+  },
+  {
+   "name": "MultiPlatformProjects",
+   "since": null
+  },
+  {
+   "name": "ProhibitComparisonOfIncompatibleClasses",
+   "since": null
+  },
+  {
+   "name": "ProhibitAllMultipleDefaultsInheritedFromSupertypes",
+   "since": null
+  },
+  {
+   "name": "FunctionalTypeWithExtensionAsSupertype",
+   "since": null
+  },
+  {
+   "name": "ContextReceivers",
+   "since": null
+  },
+  {
+   "name": "StrictEqualsForStructuralClasses",
+   "since": null
+  },
+  {
+   "name": "StrictEquals",
+   "since": null
+  },
+  {
+   "name": "CallableReferencesToContextual",
+   "since": null
+  },
+  {
+   "name": "JavaSamConversionEqualsHashCode",
+   "since": null
+  },
+  {
+   "name": "AllowAnyAsAnActualTypeForExpectInterface",
+   "since": null
+  },
+  {
+   "name": "CompanionBlocks",
+   "since": null
+  },
+  {
+   "name": "CompanionExtensions",
+   "since": null
+  },
+  {
+   "name": "ProhibitCallableReferencesToStaticsWithTypeArgumentsOrNullMarkInLhs",
+   "since": null
+  },
+  {
+   "name": "DeprecateNameMismatchInShortDestructuringWithParentheses",
+   "since": null
+  },
+  {
+   "name": "EnableNameBasedDestructuringShortForm",
+   "since": null
+  },
+  {
+   "name": "LocalTypeAliases",
+   "since": null
+  },
+  {
+   "name": "ErrorAboutDataClassCopyVisibilityChange",
+   "since": null
+  },
+  {
+   "name": "ForbidUsingParameterWithDefaultValueTypesWithInaccessibleContent",
+   "since": null
+  },
+  {
+   "name": "JsExposedNotExportedSuperInterfaceApiByExportedOne",
+   "since": null
+  },
+  {
+   "name": "JsExportInterfacesInImplementableWay",
+   "since": null
+  },
+  {
+   "name": "JsAllowImplementingFunctionInterface",
+   "since": null
+  },
+  {
+   "name": "CustomEqualsInValueClasses",
+   "since": null
+  },
+  {
+   "name": "ContractSyntaxV2",
+   "since": null
+  },
+  {
+   "name": "ReferencesToSyntheticJavaProperties",
+   "since": null
+  },
+  {
+   "name": "ImplicitSignedToUnsignedIntegerConversion",
+   "since": null
+  },
+  {
+   "name": "ForbidInferringTypeVariablesIntoEmptyIntersection",
+   "since": null
+  },
+  {
+   "name": "DisableCheckingChangedProgressionsResolve",
+   "since": null
+  },
+  {
+   "name": "CollectionLiteralsBasedAnnotationResolution",
+   "since": null
+  },
+  {
+   "name": "CollectionLiterals",
+   "since": null
+  },
+  {
+   "name": "ProperFieldAccessGenerationForFieldAccessShadowedByKotlinProperty",
+   "since": null
+  },
+  {
+   "name": "ContextSensitiveResolutionUsingExpectedType",
+   "since": null
+  },
+  {
+   "name": "ExportKlibToOlderAbiVersion",
+   "since": null
+  },
+  {
+   "name": "JvmLoadAnnotationsOnAnnotationProperties",
+   "since": null
+  },
+  {
+   "name": "RichErrors",
+   "since": null
+  },
+  {
+   "name": "ExportKDocDocumentationToKlib",
+   "since": null
+  },
+  {
+   "name": "FullValueClasses",
+   "since": null
+  },
+  {
+   "name": "JsExportingSuspendLambdas",
+   "since": null
+  },
+  {
+   "name": "LateinitVals",
+   "since": null
+  },
+  {
+   "name": "InferThrowableTypeParameterToUpperBound",
+   "since": null
+  },
+  {
+   "name": "EagerLambdaAnalysis",
+   "since": null
+  },
+  {
+   "name": "ReportEscapingCapturedVariable",
+   "since": null
+  },
+  {
+   "name": "UnitConversionsOnArbitraryExpressions",
+   "since": null
+  },
+  {
+   "name": "JvmInlineScopesNumbers",
+   "since": null
+  }
+ ],
+ "asked": [
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/CollectionLiteralResolution.kt",
+   "line": 273,
+   "text": "if (context.session.languageVersionSettings.supportsFeature(LanguageFeature.CompanionBlocks)) {"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/CollectionLiteralResolution.kt",
+   "line": 328,
+   "text": "return if (LanguageFeature.CollectionLiterals.isEnabled()) {"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/CollectionLiteralResolution.kt",
+   "line": 335,
+   "text": "assert(LanguageFeature.CollectionLiteralsBasedAnnotationResolution.isEnabled())"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/QualifiedNameResolution.kt",
+   "line": 306,
+   "text": "get() = LanguageFeature.ForbidAnnotationsTypeArgumentsAndParenthesesForPackageQualifier.isEnabled()"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/ResolveUtils.kt",
+   "line": 442,
+   "text": "if (classSymbol !is FirTypeAliasSymbol || typeArguments.isEmpty() || LanguageFeature.ForbidUselessTypeArgumentsIn26.isEnabled()) {"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/calls/candidate/CandidateFactory.kt",
+   "line": 43,
+   "text": "private val companionBlocksEnabled: Boolean = LanguageFeature.CompanionBlocks.isEnabled()"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/calls/candidate/CandidateFactory.kt",
+   "line": 241,
+   "text": "return LanguageFeature.SkipHiddenObjectsInResolution.isEnabled() && companionObject.isDeprecationLevelHidden(session)"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/calls/overloads/ConeOverloadConflictResolver.kt",
+   "line": 111,
+   "text": "unitCoercionInLambdas = LanguageFeature.EagerLambdaAnalysis.isEnabled(),"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/calls/overloads/ConeOverloadConflictResolver.kt",
+   "line": 481,
+   "text": "inferenceComponents.session.languageVersionSettings.supportsFeature(LanguageFeature.CorrectSpecificityCheckForSignedAndUnsigned)"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/calls/overloads/ConeOverloadConflictResolver.kt",
+   "line": 491,
+   "text": "inferenceComponents.session.languageVersionSettings.supportsFeature(LanguageFeature.DiscriminateSuspendInOverloadResolution)"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/calls/overloads/ConeOverloadConflictResolver.kt",
+   "line": 657,
+   "text": "LanguageFeature.EagerLambdaAnalysis.isEnabled() -> ::customSubtypingForNumerics"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/calls/stages/ArgumentCheckingProcessor.kt",
+   "line": 415,
+   "text": "if (expectedType == null || !LanguageFeature.ContextSensitiveResolutionUsingExpectedType.isEnabled()) {"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/calls/stages/CheckArguments.kt",
+   "line": 228,
+   "text": "if (!session.languageVersionSettings.supportsFeature(LanguageFeature.ImplicitSignedToUnsignedIntegerConversion)) return null"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/calls/stages/CreateFreshTypeVariableSubstitutorStage.kt",
+   "line": 172,
+   "text": "if (LanguageFeature.DontMakeExplicitNullableJavaTypeArgumentsFlexible.isEnabled()) {"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/calls/stages/CreateFreshTypeVariableSubstitutorStage.kt",
+   "line": 206,
+   "text": "if (context.session.languageVersionSettings.supportsFeature(LanguageFeature.DontMakeExplicitNullableJavaTypeArgumentsFlexible) &&"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/calls/stages/CreateFreshTypeVariableSubstitutorStage.kt",
+   "line": 247,
+   "text": "val constraints = if (LanguageFeature.ProperlyCheckUpperBoundsViolationsWhenCreatingFreshVariables.isEnabled()) {"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/calls/stages/ResolutionStages.kt",
+   "line": 252,
+   "text": "if (!LanguageFeature.ContextParameters.isEnabled() &&"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/calls/stages/ResolutionStages.kt",
+   "line": 253,
+   "text": "!LanguageFeature.ContextReceivers.isEnabled()"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/calls/stages/ResolutionStages.kt",
+   "line": 747,
+   "text": "lookInContextParameters = LanguageFeature.ExplicitContextArguments.isEnabled(),"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/calls/stages/ResolutionStages.kt",
+   "line": 809,
+   "text": "languageVersionSettings.supportsFeature(LanguageFeature.ContextParameters) ||"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/calls/stages/ResolutionStages.kt",
+   "line": 810,
+   "text": "languageVersionSettings.supportsFeature(LanguageFeature.ContextReceivers)"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/calls/stages/ResolutionStages.kt",
+   "line": 953,
+   "text": "LanguageFeature.ForbidEnumEntryNamedEntries.isEnabled()"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/calls/stages/ResolutionStages.kt",
+   "line": 1076,
+   "text": "if (symbol.isDeprecatedHidden(candidate.callInfo) && LanguageFeature.SkipHiddenObjectsInResolution.isEnabled()) {"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/calls/stages/ResolutionStages.kt",
+   "line": 1177,
+   "text": "check(!LanguageFeature.ConsiderForkPointsWhenCheckingContradictions.isEnabled()) {"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/calls/stages/ResolutionStages.kt",
+   "line": 1203,
+   "text": "if (!LanguageFeature.CheckLambdaAgainstTypeVariableContradictionInResolution.isEnabled()) return"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/calls/tower/FirInvokeResolveTowerExtension.kt",
+   "line": 412,
+   "text": "is FirValueParameterSymbol if LanguageFeature.StrictEquals.isEnabled() -> {"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/calls/tower/FirTowerResolveTask.kt",
+   "line": 69,
+   "text": "protected val companionBlocksEnabled = LanguageFeature.CompanionBlocks.isEnabled()"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/calls/tower/FirTowerResolveTask.kt",
+   "line": 70,
+   "text": "protected val companionExtensionsEnabled = LanguageFeature.CompanionExtensions.isEnabled()"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/calls/tower/TowerLevels.kt",
+   "line": 75,
+   "text": "is ExpressionReceiverValue if LanguageFeature.CacheLocalVariableScopes.isEnabled() ->"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/calls/tower/TowerLevels.kt",
+   "line": 364,
+   "text": "private val scope = if (LanguageFeature.MultiPlatformProjects.isEnabled()) {"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/dfa/FirDataFlowAnalyzer.kt",
+   "line": 829,
+   "text": "LanguageFeature.ProhibitNotNullSmartCastsBasedOnFlexibleComponentsInEqualities.isEnabled()"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/dfa/FirDataFlowAnalyzer.kt",
+   "line": 830,
+   "text": "else -> LanguageFeature.ProhibitIllegalNotNullSmartCastsInEqualities.isEnabled()"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/dfa/FirDataFlowAnalyzer.kt",
+   "line": 1382,
+   "text": "LanguageFeature.StrictEquals.isEnabled()"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/dfa/FirDataFlowAnalyzer.kt",
+   "line": 1613,
+   "text": "val translateAll = LanguageFeature.DfaBooleanVariables.isEnabled()"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/dfa/FirDataFlowAnalyzer.kt",
+   "line": 1660,
+   "text": "LanguageFeature.InferMoreImplicationsFromBooleanExpressions.isEnabled()"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/inference/ConstraintSystemCompleter.kt",
+   "line": 45,
+   "text": "private val isEagerLambdaAnalysisEnabled = languageVersionSettings.supportsFeature(LanguageFeature.EagerLambdaAnalysis)"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/inference/ConstraintSystemCompleter.kt",
+   "line": 49,
+   "text": "private val completionRefinementsFor25Enabled = languageVersionSettings.supportsFeature(LanguageFeature.CallCompletionRefinementsFor25)"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/inference/FirCallCompleter.kt",
+   "line": 232,
+   "text": "if (!LanguageFeature.PCLAEnhancementsIn21.isEnabled()) return"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/inference/FirCallCompleter.kt",
+   "line": 317,
+   "text": "if (!LanguageFeature.EqualityConstraintForOperatorsUnderAssignments.isEnabled() && components.context.isInsideAssignmentRhs) return false"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/inference/FirCallCompleter.kt",
+   "line": 594,
+   "text": "!LanguageFeature.PCLAEnhancementsIn21.isEnabled() ->"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/inference/FirPCLAInferenceSession.kt",
+   "line": 240,
+   "text": "inferenceComponents.session.languageVersionSettings.supportsFeature(LanguageFeature.PCLAEnhancementsIn21)"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/inference/InferenceComponents.kt",
+   "line": 43,
+   "text": "LanguageFeature.LexicographicVariableReadinessCalculation.isEnabled() ->"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/inference/InferenceUtils.kt",
+   "line": 80,
+   "text": "if (session.languageVersionSettings.supportsFeature(LanguageFeature.LexicographicVariableReadinessCalculation)) {"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/inference/PostponedArgumentsAnalyzer.kt",
+   "line": 245,
+   "text": "val forEagerLambdaAnalysis = forOverloadByLambdaReturnType && LanguageFeature.EagerLambdaAnalysis.isEnabled()"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/inference/PostponedArgumentsAnalyzer.kt",
+   "line": 266,
+   "text": "withPCLASession && LanguageFeature.PCLAEnhancementsIn21.isEnabled() ->"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/providers/impl/FirNonErrorSymbolProvider.kt",
+   "line": 49,
+   "text": "): FirNonErrorSymbolProvider? = runIf(session.languageVersionSettings.supportsFeature(LanguageFeature.RichErrors)) {"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/providers/impl/FirTypeResolverImpl.kt",
+   "line": 51,
+   "text": "session.languageVersionSettings.supportsFeature(LanguageFeature.ProperSupportOfInnerClassesInCallableReferenceLHS)"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/transformers/FirCallCompletionResultsWriterTransformer.kt",
+   "line": 1346,
+   "text": "LanguageFeature.EqualityConstraintForOperatorsUnderAssignments.isEnabled()"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/transformers/FirCallCompletionResultsWriterTransformer.kt",
+   "line": 1588,
+   "text": "return hasExplicitTypeArguments && LanguageFeature.CompanionBlocks.isEnabled() || hasNullableMark"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/transformers/FirSealedClassInheritorsProcessor.kt",
+   "line": 88,
+   "text": "if (!session.languageVersionSettings.supportsFeature(LanguageFeature.MultiPlatformProjects)) return"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/transformers/FirStatusResolver.kt",
+   "line": 153,
+   "text": "if (session.languageVersionSettings.supportsFeature(LanguageFeature.StrictEquals)"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/transformers/FirStatusResolver.kt",
+   "line": 374,
+   "text": "LanguageFeature.DataClassCopyRespectsConstructorVisibility.isEnabled() ||"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/transformers/FirTypeResolveTransformer.kt",
+   "line": 455,
+   "text": "if (LanguageFeature.StrictEquals.isEnabled()) {"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/transformers/FirWhenExhaustivenessComputer.kt",
+   "line": 62,
+   "text": "LanguageFeature.ImprovedExhaustivenessCheckForSubjectVariable24.isEnabled() &&"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/transformers/FirWhenExhaustivenessComputer.kt",
+   "line": 85,
+   "text": "is ConeDynamicType -> when (LanguageFeature.ImprovedExhaustivenessChecksIn21.isEnabled()) {"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/transformers/FirWhenExhaustivenessComputer.kt",
+   "line": 99,
+   "text": "is ConeTypeParameterType if LanguageFeature.ImprovedExhaustivenessChecksIn21.isEnabled()"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/transformers/FirWhenExhaustivenessComputer.kt",
+   "line": 106,
+   "text": "is ConeDefinitelyNotNullType if LanguageFeature.ImprovedExhaustivenessChecksIn21.isEnabled()"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/transformers/FirWhenExhaustivenessComputer.kt",
+   "line": 396,
+   "text": "if (LanguageFeature.ImprovedExhaustivenessChecksIn21.isEnabled() &&"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/transformers/FirWhenExhaustivenessComputer.kt",
+   "line": 403,
+   "text": "if (c.session.languageVersionSettings.supportsFeature(LanguageFeature.DataFlowBasedExhaustiveness)) {"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/transformers/FirWhenExhaustivenessComputer.kt",
+   "line": 448,
+   "text": "if (LanguageFeature.DataFlowBasedExhaustiveness.isEnabled()) {"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/transformers/FirWhenExhaustivenessComputer.kt",
+   "line": 491,
+   "text": "if (LanguageFeature.DataFlowBasedExhaustiveness.isEnabled()) {"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/transformers/FirWhenExhaustivenessComputer.kt",
+   "line": 560,
+   "text": "if (data.session.languageVersionSettings.supportsFeature(LanguageFeature.ImprovedExhaustivenessChecksIn23)) {"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/transformers/FirWhenExhaustivenessComputer.kt",
+   "line": 654,
+   "text": "LanguageFeature.DataFlowBasedExhaustiveness.isEnabled() -> collectKnownNonTypesFromSubjectSmartCast(whenExpression)"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/transformers/FirWhenExhaustivenessComputer.kt",
+   "line": 741,
+   "text": "if (!session.languageVersionSettings.supportsFeature(LanguageFeature.DataFlowBasedExhaustiveness)) return"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/transformers/body/resolve/BodyResolveContext.kt",
+   "line": 373,
+   "text": "if (LanguageFeature.ImprovedResolutionInSecondaryConstructors.isEnabled()) return"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/transformers/body/resolve/DeclarationApproximationUtils.kt",
+   "line": 44,
+   "text": ") -> if (approximateLocalTypes || LanguageFeature.ApproximateLocalTypesInPublicDeclarations.isEnabled()) {"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/transformers/body/resolve/FirControlFlowStatementsResolveTransformer.kt",
+   "line": 311,
+   "text": "!LanguageFeature.ElvisInferenceImprovementsIn21.isEnabled()"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/transformers/body/resolve/FirDeclarationsResolveTransformer.kt",
+   "line": 632,
+   "text": "if (session.languageVersionSettings.supportsFeature(LanguageFeature.EliminateSecondKindIncorporation)) {"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/transformers/body/resolve/FirDeclarationsResolveTransformer.kt",
+   "line": 1360,
+   "text": "LanguageFeature.ResolveTopLevelLambdasAsSyntheticCallArgument.isEnabled() ->"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/transformers/body/resolve/FirExpressionsResolveTransformer.kt",
+   "line": 731,
+   "text": "LanguageFeature.EnableNameBasedDestructuringShortForm.isEnabled()"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/transformers/body/resolve/FirExpressionsResolveTransformer.kt",
+   "line": 1347,
+   "text": "when (LanguageFeature.ResolveEqualsRhsInDependentContextWithCompletion.isEnabled()) {"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/transformers/body/resolve/FirExpressionsResolveTransformer.kt",
+   "line": 1471,
+   "text": "if (!LanguageFeature.ContextSensitiveResolutionUsingExpectedType.isEnabled()) return"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/transformers/body/resolve/FirExpressionsResolveTransformer.kt",
+   "line": 1789,
+   "text": "symbol.constructType().applyIf(LanguageFeature.DnnTypeForUnboundedReifiedTypeParameters.isEnabled()) {"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/transformers/contracts/ConeEffectExtractor.kt",
+   "line": 102,
+   "text": "if (LanguageFeature.ConditionImpliesReturnsContracts.isEnabled()) {"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/transformers/contracts/ConeEffectExtractor.kt",
+   "line": 116,
+   "text": "if (LanguageFeature.HoldsInContracts.isEnabled()) {"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/transformers/contracts/ConeEffectExtractor.kt",
+   "line": 127,
+   "text": "&& LanguageFeature.AllowReturnsResultOfContract.isEnabled()"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/transformers/contracts/ConeEffectExtractor.kt",
+   "line": 282,
+   "text": "&& !LanguageFeature.AllowCheckForErasedTypesInContracts.isEnabled()"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/transformers/mpp/FirExpectActualMatcherTransformer.kt",
+   "line": 24,
+   "text": "private val enabled = LanguageFeature.MultiPlatformProjects.isEnabled()"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/transformers/mpp/FirExpectActualResolver.kt",
+   "line": 82,
+   "text": ".applyIf(!useSiteSession.languageVersionSettings.supportsFeature(LanguageFeature.AllowMultipleExpectsForSingleActual)) {"
+  },
+  {
+   "file": "compiler/fir/resolve/src/org/jetbrains/kotlin/fir/resolve/transformers/mpp/FirExpectActualResolver.kt",
+   "line": 113,
+   "text": ".applyIf(!useSiteSession.languageVersionSettings.supportsFeature(LanguageFeature.AllowMultipleExpectsForSingleActual)) {"
+  }
+ ],
+ "versions": [
+  "1.1",
+  "1.2",
+  "1.3",
+  "1.4",
+  "1.5",
+  "1.6",
+  "1.7",
+  "1.8",
+  "1.9",
+  "2.0",
+  "2.1",
+  "2.2",
+  "2.3",
+  "2.4",
+  "2.5",
+  "2.6"
+ ]
+}

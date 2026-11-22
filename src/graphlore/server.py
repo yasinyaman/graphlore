@@ -1321,7 +1321,7 @@ def _read_source_lines(
 _SIG_CONT_MAX = 40
 # How many lines below the first line of a definition its name may sit (stacked
 # annotations / attributes above the declaration).
-_SIG_NAME_MAX = 12
+_SIG_NAME_MAX = 40
 
 
 def _skeleton_lines(file_path: str, prefix: str | None = None) -> list[tuple[str, list[str]]]:
@@ -6299,7 +6299,9 @@ def graphlore_package_apis(
 
     Args:
         package: Report one package in detail (per-symbol file lists). Empty = all.
-        limit: Cap on packages listed in the summary view (most-used first).
+        limit: Cap on packages listed in the summary view (most-used first);
+            with ``package``, on the files listed per symbol (``symbol_file_counts``
+            has the full count of each list that was cut).
         scope: Which files to read — path prefixes / globs, ``!pattern``,
             ``-tests`` (a package only the tests use), ``+vendored``. The default
             leaves out vendored/minified files.
@@ -6340,25 +6342,53 @@ def graphlore_package_apis(
                 f"No external package '{package}' in the scanned files. Known: {known}",
                 as_json,
             )
-        per_symbol = {s: sorted(fs) for s, fs in sorted(sym_files.get(match, {}).items())}
+        # A package used everywhere (a framework, the project's own published
+        # name in a workspace) lists hundreds of files per symbol: each list is
+        # cut at `limit`, the file list at ten times that, and the counts say
+        # what was left out.
+        wide = max(1, limit) * 10
+        cap = max(1, limit)
+        every = {s: sorted(fs) for s, fs in sorted(sym_files.get(match, {}).items())}
+        # (with hundreds of symbols even `limit` files each is a book: the
+        # lists are shortened together until they fit some 20 per `limit`)
+        while cap > 3 and sum(min(len(fs), cap) for fs in every.values()) > wide * 2:
+            cap = max(3, cap // 2)
+        per_symbol = {s: fs[:cap] for s, fs in every.items()}
+        cut_symbols = {s: len(fs) for s, fs in every.items() if len(fs) > cap}
+        all_files = sorted(pkg_files[match])
+        all_paths = sorted(pkg_paths.get(match, ()))
         payload: dict[str, Any] = {
             "package": match,
-            "files": sorted(pkg_files[match]),
+            "files": all_files[:wide],
+            "file_count": len(all_files),
             "symbols": sorted(pkg_syms.get(match, ())),
-            "qualified_paths": sorted(pkg_paths.get(match, ())),
+            "qualified_paths": all_paths[:wide],
             "symbol_files": per_symbol,
             "note": _API_SURFACE_NOTE,
             "scope": view.payload(),
         }
+        if cut_symbols or len(all_files) > wide or len(all_paths) > wide:
+            payload["truncated"] = True
+            payload["symbol_file_counts"] = cut_symbols
+            payload["files_left_out"] = max(0, len(all_files) - wide)
+            payload["qualified_paths_left_out"] = max(0, len(all_paths) - wide)
+            _cut_hint(payload, "Raise limit for more files per symbol, or narrow with scope= "
+                               "(a directory) to list the files of one part.")
         lines = [
             f"{match} — {len(payload['symbols'])} symbol(s) across "
-            f"{len(payload['files'])} file(s) ({_API_SURFACE_NOTE}):"
+            f"{len(all_files)} file(s) ({_API_SURFACE_NOTE}):"
         ]
-        lines += [f"  {s}: {', '.join(fs)}" for s, fs in per_symbol.items()]
+        for s, fs in per_symbol.items():
+            more = f" (+{cut_symbols[s] - len(fs)} more)" if s in cut_symbols else ""
+            lines.append(f"  {s}: {', '.join(fs)}{more}")
         if not per_symbol:
             lines.append("  no symbols visible (package-level import only)")
         if payload["qualified_paths"]:
-            lines.append("qualified paths: " + ", ".join(payload["qualified_paths"]))
+            left = payload.get("qualified_paths_left_out", 0)
+            lines.append("qualified paths: " + ", ".join(payload["qualified_paths"])
+                         + (f" (+{left} more)" if left else ""))
+        if payload.get("truncated"):
+            lines.append(f"… {payload['hint']}")
         return _fmt(payload, as_json, _with_note("\n".join(lines), view))
 
     ranked = sorted(

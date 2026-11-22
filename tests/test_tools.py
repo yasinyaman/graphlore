@@ -1111,6 +1111,65 @@ def test_cpp_branches_written_once_per_configuration_are_blanked():
         assert blank(keep) is keep
 
 
+def test_cpp_macro_between_class_and_its_name_is_blanked():
+    """`class EXPORT Name {` is read without the macro: the parser takes it for
+    the type's name and the class for a function otherwise."""
+    from graphlore.spans import _blank_class_macros as blank
+
+    src = (b"class LEVELDB_EXPORT Env {\n public:\n  virtual int NowMicros() = 0;\n};\n"
+           b"struct API_EXPORT Options : Base {\n};\nclass DLL_PUBLIC Last final {\n};\n")
+    out = blank(src)
+    assert len(out) == len(src) and out.count(b"\n") == src.count(b"\n")
+    assert b"EXPORT" not in out and b"DLL_PUBLIC" not in out
+    assert b"Env {" in out and b"Options : Base" in out and b"Last final" in out
+    # a plain class, a forward declaration, a variable of a struct type, a
+    # short or mixed-case name before the class's: untouched
+    for keep in (b"class Env {\n};\n", b"struct FOO_API Bar;\n",
+                 b"class My Other {\n};\n",
+                 b"class Foo final {\n};\n", b"class NS_API Scope::Name {\n};\n"):
+        assert blank(keep) is keep
+
+
+def test_csharp_branches_inside_an_expression_are_blanked():
+    """A C# `#if` that opens in the middle of an expression is read once: the
+    first branch stays, the rest and the directives are blanked in place."""
+    from graphlore.spans import _blank_expression_branches as blank
+
+    src = (b"static class Ext {\n    static int F(bool a)\n        => a\n            ? 1\n"
+           b"#if NET\n            : 2;\n#else\n            : 3;\n#endif\n"
+           b"    static int G() => 4;\n}\n")
+    out = blank(src)
+    assert len(out) == len(src) and out.count(b"\n") == src.count(b"\n")
+    assert b": 2;" in out and b": 3;" not in out and b"#" not in out
+    # one branch inside an expression: only the directive lines go
+    one = blank(b"class A {\n    int x =\n#if NET\n        1 +\n#endif\n        2;\n}\n")
+    assert b"1 +" in one and b"#" not in one
+    # a brace the group opens and a later group closes: the directive lines go
+    brace = blank(b"class A {\n    void f() {\n#if NET\n        if (x()) {\n#endif\n        g();\n"
+                  b"#if NET\n        }\n#endif\n    }\n    void h() {}\n}\n")
+    assert b"if (x()) {" in brace and b"#" not in brace and brace.count(b"}") == 4
+    # after a statement, a block or an attribute: untouched
+    for keep in (b"class A {\n    int x;\n#if NET\n    void a() {}\n#else\n"
+                 b"    void b() {}\n#endif\n}\n",
+                 b"[Fact]\n#if NET\nvoid a() {}\n#else\nvoid b() {}\n#endif\n"):
+        assert blank(keep) is keep
+
+
+def test_csharp_type_keeps_its_methods_past_an_if_in_an_expression(tmp_path):
+    """The class around an `#if` written inside an expression is still a span,
+    and its methods are its own."""
+    import pytest
+
+    pytest.importorskip("tree_sitter_language_pack")
+    from graphlore.spans import _spans_treesitter
+
+    src = (b"static class Ext {\n    static int F(bool a)\n        => a\n            ? 1\n"
+           b"#if NET\n            : 2;\n#else\n            : 3;\n#endif\n"
+           b"    static int G() => 4;\n}\n")
+    names = [s[3] for s in _spans_treesitter(src, "Ext.cs")]
+    assert names == ["Ext", "Ext.F", "Ext.G"]
+
+
 def test_engine_version_pins_stay_in_sync():
     """engine/Cargo.toml's version is the engine's only copy; the schema graphlore
     reads must be the one the engine writes."""
@@ -3477,6 +3536,29 @@ def test_package_apis_single_package_detail(tmp_path, monkeypatch):
     assert sorted(data["qualified_paths"]) == ["fastapi.APIRouter", "fastapi.Depends"]
     text = server.graphlore_package_apis(package="fastapi")
     assert "Depends: app.py, worker.py" in text
+
+
+def test_package_apis_detail_cuts_long_file_lists_and_says_so(tmp_path, monkeypatch):
+    """A package used in hundreds of files: each symbol's list is cut at `limit`
+    and the counts say what was left out (a 136 KB reply on zod's own name)."""
+    nodes = []
+    for i in range(40):
+        (tmp_path / f"m{i:02}.py").write_text("from fastapi import Depends\n", encoding="utf-8")
+        nodes.append({"id": f"n{i}", "label": f"n{i}", "file": f"m{i:02}.py", "line": 1})
+    _write_graph(tmp_path, {"nodes": nodes, "edges": []})
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    server._API_CACHE.clear()
+    server._GRAPH_CACHE.clear()
+    data = json.loads(server.graphlore_package_apis(package="fastapi", limit=3, as_json=True))
+    assert data["symbol_files"]["Depends"] == ["m00.py", "m01.py", "m02.py"]
+    assert data["symbol_file_counts"] == {"Depends": 40}
+    assert data["truncated"] is True and data["file_count"] == 40
+    assert len(data["files"]) == 30 and data["files_left_out"] == 10
+    assert "limit" in data["hint"]
+    assert "(+37 more)" in server.graphlore_package_apis(package="fastapi", limit=3)
+    # under the cap nothing is marked
+    whole = json.loads(server.graphlore_package_apis(package="fastapi", limit=50, as_json=True))
+    assert "truncated" not in whole and len(whole["symbol_files"]["Depends"]) == 40
 
 
 def test_package_apis_unknown_package_lists_known(tmp_path, monkeypatch):
@@ -7785,7 +7867,9 @@ def test_rust_tests_inside_a_source_file_are_tests(tmp_path, monkeypatch):
         "    }\n"                            # 16
         "}\n"                                # 17
         "#[tokio::test]\n"                   # 18
-        "async fn top_level_test() { acquire(); }\n",   # 19
+        "async fn top_level_test() { acquire(); }\n"   # 19
+        "#[cfg(test)]\n"                     # 20
+        "pub fn only_for_tests() -> i32 { 2 }\n",   # 21  a helper the tests are compiled with
         encoding="utf-8")
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     server._SPAN_CACHE.clear()
@@ -7795,7 +7879,7 @@ def test_rust_tests_inside_a_source_file_are_tests(tmp_path, monkeypatch):
     assert "helpers" not in quals
     from graphlore import spans
     # the regions are the items themselves, not their attributes
-    assert spans._test_regions("src/pool.rs") == [(10, 17), (19, 19)]
+    assert spans._test_regions("src/pool.rs") == [(10, 17), (19, 19), (21, 21)]
 
     def node(nid, label, line):
         return {"id": nid, "label": label, "source_file": "src/pool.rs",

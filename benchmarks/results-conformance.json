@@ -1,0 +1,4002 @@
+{
+ "passed": 666,
+ "total": 666,
+ "cases": [
+  {
+   "id": "python/module-function",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "python/enclosing-scope",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "python/local-hides-global",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "python/from-import",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "python/import-alias",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "python/module-attribute",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "python/relative-import",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "python/star-import",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "python/self-method",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "python/inherited-method",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "python/super",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "python/class-call",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "python/annotated-parameter",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "python/attribute-assigned-in-init",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "python/classmethod-via-class",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "python/local-typed-by-value",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "python/decorator",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "javascript/hoisting",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "javascript/block-const-hides",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "javascript/closure",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "javascript/named-import",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "javascript/import-alias",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "javascript/default-import",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "javascript/namespace-import",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "javascript/re-export",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "javascript/commonjs-destructure",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "javascript/this-method",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "javascript/inherited-method",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "javascript/super",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "javascript/new-then-method",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "javascript/prototype-method",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/typed-parameter",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/interface-typed",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/parameter-property",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/typed-field",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/generic-argument",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/return-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/import-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/barrel",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/optional-chaining",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/optional-parameter",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/enum-member",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/static-method",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/namespace-import-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/package-scope",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/imported-package",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/import-alias",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/method-on-local",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/embedded-struct",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/interface-method",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/result-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/local-hides-function",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/field-method",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/multiple-results",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/implicit-this",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/inherited",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/super",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/same-package",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/single-type-import",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/on-demand-import",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/static-import",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/static-via-class",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/field-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/local-hides-field",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/overload-arity",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/constructor",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/interface-default",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/outer-method",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/chained-result",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/generic-argument",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/own-accessor-name",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/class-named-like-a-wrapper",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/same-package",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/import",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/import-alias",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/member",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/extension",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/member-wins",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/companion",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/object",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/constructor-property",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/receiver-lambda",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/it",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/inherited",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/local-typed-by-value",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/generic-argument",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "scala/object-method",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "scala/typed-parameter",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "scala/trait-method",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "scala/wildcard-import",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "scala/import-rename",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "scala/implicit-this",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "scala/case-class",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "scala/local-typed-by-value",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/enclosing-namespace",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/using",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/file-scoped-namespace",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/using-alias",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/using-static",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/implicit-this",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/base",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/extension",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/partial",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/var-new",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/property-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/overload-arity",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/static-via-class",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/interface-typed",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/nested-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/generic-argument",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/use-path",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/use-alias",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/glob-import",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/qualified-path",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/super",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/re-export",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/associated-function",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/method-on-local",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/self-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/field-not-method",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/trait-method",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/impl-in-another-file",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/shadowing",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/macro-arguments",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/enum-variant",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/field-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/method-on-parameter",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/implicit-self",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/extension",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/static",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/initializer",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/super",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/inherited",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/protocol-typed",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/protocol-extension",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/property-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/implicit-member",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/local-typed-by-value",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/nested-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "c/same-file",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "c/external-linkage",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "c/static-wins",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "c/local-hides-function",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "c/function-pointer-slot",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "c/typedef-struct",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "cpp/member-declared-in-header",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "cpp/namespace-qualified",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "cpp/using-namespace",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "cpp/enclosing-namespace",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "cpp/implicit-this",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "cpp/inherited",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "cpp/static-member",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "cpp/local-object",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "cpp/vexing-parse",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "cpp/overload-arity",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "cpp/pointer-member",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "cpp/type-alias",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "cpp/field-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "ruby/implicit-self",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "ruby/local-hides-method",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "ruby/superclass",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "ruby/include",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "ruby/extend",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "ruby/class-method",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "ruby/new-then-method",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "ruby/local-typed-by-value",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "ruby/super",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "ruby/nested-constant",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "ruby/lexical-constant",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "ruby/reopened-class",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "ruby/instance-variable-typed",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "php/use",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "php/use-alias",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "php/fully-qualified",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "php/qualified-relative",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "php/same-namespace",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "php/this",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "php/inherited",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "php/parent",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "php/self-static",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "php/trait",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "php/typed-property",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "php/new-then-method",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "php/function-fallback",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "php/use-function",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "python/return-annotation",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "python/class-attribute-annotation",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "python/property",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "python/with-as",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "python/for-over-annotated-list",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "python/comprehension",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "python/module-alias",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "python/submodule-import",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "python/package-reexport",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "python/function-local-import",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "python/pytest-fixture",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "python/except-clause",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "python/mro-first-base",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "python/mro-second-base",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "python/nested-class",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "python/staticmethod-via-self",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "python/class-body-call",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "python/function-as-value",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "python/inherited-from-aliased-import",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "javascript/arrow-const",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "javascript/function-expression",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "javascript/object-literal-method",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "javascript/object-literal-this",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "javascript/commonjs-default",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "javascript/commonjs-member",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "javascript/static-method",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "javascript/default-export-class",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "javascript/exported-arrow",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "javascript/function-as-value",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "javascript/parameter-hides-import",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "javascript/module-pattern",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "javascript/dynamic-import",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "javascript/class-field-arrow",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "javascript/for-of-new",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/dollar-name",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/type-and-value",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/array-element",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/for-of",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/await-promise",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/getter",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/as-cast",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/non-null",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/readonly-field",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/interface-extends",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/implements",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/abstract-base",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/type-alias",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/namespace",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/default-reexport",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/local-typed-by-declaration",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/map-value",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/range-slice",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/slice-index",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/map-value",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/package-variable",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/type-assertion",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/go-and-defer",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/function-as-value",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/named-slice-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/embedded-interface",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/imported-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/test-file",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/value-receiver",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/closure",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/for-each",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/list-element",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/var",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/cast",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/instanceof-pattern",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/try-with-resources",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/this-field",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/static-field",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/lambda-body",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/method-reference",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/overload-by-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/explicit-constructor-call",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/module-info",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/own-optional",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/library-optional-beside-own",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/method-named-self",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/nested-static-class",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/enum-method",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/interface-typed",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/fully-qualified",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/interface-static",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/record",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/anonymous-class",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/safe-call",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/with",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/let",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/top-level-property",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/lateinit",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/for-loop",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/cast",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/return-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/typealias",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/apply-also",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/constructor",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/super",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/interface-default",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/interface-typed",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/function-reference",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/nested-class",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/enum-entry",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "scala/new-with-parentheses",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "scala/typed-val",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "scala/return-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "scala/pattern-typed",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "scala/no-parentheses",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "scala/trait-typed",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "scala/member-import",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "scala/super",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "scala/companion-apply",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "scala/generic-argument",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "scala/extends",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "scala/same-package",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/foreach-typed",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/foreach-var",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/is-pattern",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/cast",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/as-cast",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/null-conditional",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/target-typed-new",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/await-task",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/static-property",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/lambda-body",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/method-group",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/local-function",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/this",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/inherited",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/constructor-initializer",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/using-block-namespace",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/new-names-a-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/generic-namesake",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/primary-constructor",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/global-using",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/extension-on-interface",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/enum-member",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/record",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/question-mark",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/option-unwrap",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/if-let-some",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/smart-pointer",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/vec-iteration",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/tuple-struct-field",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/static-item",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/reference-parameter",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/dyn-trait",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/generic-bound",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/trait-default-method",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/nested-module-path",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/self-path",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/use-super-glob",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/mod-rs",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/use-self-in-braces",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/function-as-value",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/closure-body",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/builder-chain",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/enum-method",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/struct-literal",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/optional-chaining",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/if-let",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/guard-let",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/for-in",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/subscript",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/as-cast",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/return-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/computed-property",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/static-property",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/enum-payload",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/enum-case-built",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/metatype",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/typealias",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/generic-argument",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/conformance-in-extension",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/enum-method",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/class-func",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/nested-function",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/closure-body",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/function-as-value",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "c/forward-declaration",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "c/callback-argument",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "c/slot-assignment",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "c/global-variable",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "c/extern-variable",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "c/header-inline",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "c/struct-field-chain",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "c/typedef-function-pointer",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "cpp/auto-from-construction",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "cpp/auto-from-result",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "cpp/unique-ptr",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "cpp/new-expression",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "cpp/const-reference",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "cpp/range-for",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "cpp/this-member",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "cpp/virtual-base",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "cpp/namespace-alias",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "cpp/using-declaration",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "cpp/nested-class",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "cpp/anonymous-namespace",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "cpp/argument-dependent-lookup",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "cpp/lambda-body",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "cpp/function-as-value",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "cpp/out-of-class-static",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "cpp/template-argument",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "cpp/export-macro",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "cpp/constructor-arguments",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "ruby/prepend",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "ruby/module-function",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "ruby/singleton-class",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "ruby/attr-reader-typed",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "ruby/struct-with-block",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "ruby/constant-alias",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "ruby/self-class",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "ruby/super-with-arguments",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "ruby/safe-navigation",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "ruby/predicate-name",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "ruby/namespaced-superclass",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "ruby/include-across-files",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "ruby/new-with-arguments",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "ruby/top-level-method",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "ruby/block-body",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "ruby/private-method",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "php/constructor-promotion",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "php/return-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "php/nullable-parameter",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "php/nullsafe",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "php/closure-use",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "php/arrow-function-parameter",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "php/interface-typed",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "php/group-use",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "php/class-constant-fetch",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "php/new",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "php/parent-constructor",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "php/namespaced-function",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "php/enum-method",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "php/static-return",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "php/abstract-method",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "php/static-method-via-class",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "php/callable-string",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/block-scope",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/block-scope-branches",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/type-parameter-hides",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/type-parameter-bound",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/namespace-member-inside",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/parameter-property-read",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/parameter-called",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/block-scope",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/generic-bound-where",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/wrapper-holds-first-argument",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/generic-bound",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/own-value-is-outer",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "scala/generic-method-parameters",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/generic-constraint",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/function-beside-parameter",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/enum-member-value",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/type-alias-body",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/interface-signatures",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/typeof-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/enum-variant-value",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/enum-constant-value",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/enum-member-value",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "scala/other-package-not-in-reach",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "scala/nested-type-not-in-reach",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "scala/named-argument",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "scala/extension-type-parameters",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "scala/type-through-package",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "scala/pattern-types",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "scala/bound-types",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/other-package-not-in-reach",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "php/global-class-is-not-a-namespaced-one",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/import-equals-require",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/export-assignment",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/import-alias",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/function-namespace-merge",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/function-as-value",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/block-scope-file-level",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "python/function-named-as-value",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/function-named-as-value",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/property-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/is-and-as",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/when-is",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/catch-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/object-as-value",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/typealias-body",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/instanceof-cast-catch",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/is-as-catch",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/is-and-as",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/typealias-and-where",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/as-and-instanceof",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/type-assertion-and-switch",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "php/instanceof-and-catch",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/associated-type-is-no-file-name",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/alias-and-where",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/short-var-hides-package-name",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/multi-name-var",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/struct-field-is-no-package-name",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/member-read-types-a-local",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/library-receiver-is-no-guess",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/field-beside-a-method",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/result-of-self",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/untyped-let-hides-a-function",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/another-crates-name",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/destructured-closure-parameter",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/type-by-arity",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/generic-use-is-no-plain-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/extension-by-type-arguments",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/local-declared-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/constructor-property-read",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/named-argument-label",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/self-constructs",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/property-body-is-the-property",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/block-namespace-sees-outer-extension",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/brace-opened-in-a-directive",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/local-from-member-read",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/initializer-without-arguments",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/partial-type-constructor",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/tuple-field-types",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/item-type-is-the-items",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/crate-root-named-by-the-manifest",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/impl-of-the-files-own-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/trait-method-through-a-library-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/impl-trait-type-arguments",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/every-result-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/method-value-argument",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/defined-type-names-its-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/constant-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/function-literal-signature",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/literal-element-types",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/make-type-argument",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "c/local-declaration-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "c/typedef-names-its-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/throws-clause",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/class-literal",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/for-each-and-varargs-types",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/interface-constant-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/typed-throws",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/protocol-property-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/metatype-of-existential",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/generic-construction",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/array-creation-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "scala/declared-value-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "scala/new-through-its-holder",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/struct-pattern-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "php/closure-signature",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "cpp/brace-construction",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "cpp/member-declaration-result",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "cpp/explicit-template-argument",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "cpp/trailing-result-and-friend",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "scala/new-generic-through-package",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/function-type-parameter-types",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/member-of-a-local",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "python/member-of-a-parameter",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/implicit-member-beside-a-value",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/macro-argument-member-read",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "scala/generic-call",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/method-type-parameter-first",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/nested-type-of-a-base",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/namespace-type-before-using",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/using-alias-before-using-namespace",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/using-inside-a-namespace-block",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/local-hides-member",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/derived-member-hides-base",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/color-color",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/instance-method-before-extension",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/closest-extension-namespace",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/extension-needs-its-namespace",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/overload-exact-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/overload-without-defaults",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/overload-normal-before-params",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/overload-by-argument-name",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/overload-non-generic-first",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/inherited-from-a-grandparent",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/qualified-nested-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/item-in-a-block",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/outer-module-items-not-in-scope",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/let-shadows-from-where-it-is",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/associated-items-are-not-scoped",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/generic-parameter-hides-a-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/glob-shadowed-by-an-item",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/named-import-shadows-a-glob",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/inner-use-shadows-outer",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/module-and-function-namespaces",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/uniform-paths",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/inherent-method-first",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/self-in-a-trait",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/self-type-in-a-struct",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/tuple-struct-constructor",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/match-arm-binding",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/dot-import",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/package-name-from-the-clause",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/shallowest-depth",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/shallower-embedding-wins",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/promoted-field",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/block-redeclaration-ends-with-the-block",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/switch-clause-is-a-block",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/short-var-scope-starts-after",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/parameter-hides-a-function",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/local-type-hides-a-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/method-is-no-package-name",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/type-parameter-hides-a-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/method-expression",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/method-value",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/pointer-method-on-a-value",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/class-members-are-not-names",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/decorator-resolved-at-the-class",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/catch-binding-is-the-blocks",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/declaration-merging",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/tsconfig-paths",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/package-json-types-entry",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "javascript/var-is-the-functions",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "javascript/named-function-expression",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "typescript/type-meaning-skips-values",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/inherited-before-enclosing",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/inherited-field-before-enclosing",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/own-method-before-static-import",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/single-type-import-before-package",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/package-before-on-demand-import",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/member-type-before-import",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/inherited-member-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/qualified-this",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/method-type-parameter-hides-a-class",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/inherited-interface-constant",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/most-specific-reference-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/fixed-arity-before-varargs",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/no-boxing-before-boxing",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "java/local-class",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/local-function-before-member",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/member-before-top-level",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/explicit-import-before-package",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/package-before-star-import",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/local-extension-first",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/imported-extension-before-package",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/super-of-a-named-supertype",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/operator-call",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/index-operator",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/infix-call",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/most-specific-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/non-vararg-before-vararg",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/property-invoke",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/local-function-before-member",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/member-before-global",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/concrete-before-protocol-extension",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/overload-by-label",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/overload-specific-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/non-generic-before-generic",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/non-variadic-before-variadic",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/fewer-defaults",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "swift/closure-parameter-hides-a-function",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "c/tag-name-space",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "cpp/derived-member-hides-base",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "cpp/using-declaration-of-a-base-member",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "cpp/member-before-namespace",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "cpp/member-declared-later",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "cpp/global-scope-operator",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "cpp/exact-match-before-conversion",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "cpp/non-template-before-template",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "cpp/operator-call",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "cpp/inline-namespace",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "cpp/class-before-its-constructor",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "python/class-scope-not-in-methods",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "python/bound-later-is-local",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "python/global-statement",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "python/star-import-respects-all",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "python/star-import-skips-underscore",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "python/lambda-parameter-hides",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "python/pep695-type-parameter",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "python/class-attribute-through-self",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "php/class-name-has-no-global-fallback",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "php/trait-insteadof",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "php/trait-before-inherited",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "ruby/last-include-first",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "ruby/class-before-included-module",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "ruby/lexical-constant-before-ancestor",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "ruby/block-parameter-hides-a-method",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "ruby/local-only-after-assignment",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "scala/named-import-before-wildcard",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "scala/definition-before-import",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "scala/wildcard-import-before-other-unit",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "scala/member-before-extension",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "scala/export-clause",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  }
+ ]
+}

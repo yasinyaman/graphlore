@@ -105,6 +105,20 @@ fn inline_mods(n: Node, src: &[u8]) -> Vec<String> {
     out
 }
 
+/// The block a `use` is written in, when that is inside a function (`fn f()
+/// { use m::g; }`) rather than in a module: its names are the block's.
+fn use_block(n: Node) -> Option<(usize, usize)> {
+    let mut cur = n.parent();
+    while let Some(p) = cur {
+        match p.kind() {
+            "block" => return Some((p.start_byte(), p.end_byte())),
+            "mod_item" | "source_file" => return None,
+            _ => cur = p.parent(),
+        }
+    }
+    None
+}
+
 /// A `use` path written inside inline modules, as the file's module sees it:
 /// `super::x` in `mod tests` is `self::x`, `self::x` is `self::tests::x`.
 /// `None` when it only names the file's own module or one of its items, which
@@ -203,8 +217,18 @@ impl LanguageModule for Rust {
                         out.push(f);
                     }
                 }
+                let block = use_block(n);
                 for f in &mut out {
                     f.public = public;
+                    f.scope = block;
+                    // (a plain first name: since 2018 a name in scope where
+                    // the `use` is, a child of the inline module first)
+                    let first = f.module.split("::").next().unwrap_or("");
+                    let plain = !first.is_empty()
+                        && !matches!(first, "crate" | "self" | "super" | "std" | "core" | "alloc");
+                    if plain && !inline.is_empty() {
+                        f.within = inline.clone();
+                    }
                 }
                 Some(out)
             }
@@ -220,11 +244,27 @@ impl LanguageModule for Rust {
 
     fn heritage_of(&self, n: Node, src: &[u8]) -> Vec<(RefKind, Vec<String>)> {
         match n.kind() {
-            "impl_item" => n
-                .child_by_field_name("trait")
-                .and_then(|t| path_of(t, src))
-                .map(|p| vec![(RefKind::Implements, p)])
-                .unwrap_or_default(),
+            "impl_item" => {
+                let Some(t) = n.child_by_field_name("trait") else { return Vec::new() };
+                let mut out: Vec<(RefKind, Vec<String>)> =
+                    path_of(t, src).map(|p| (RefKind::Implements, p)).into_iter().collect();
+                // `impl From<Config> for Agent`: the types the trait is
+                // written with are the implementing type's uses
+                let mut stack: Vec<Node> =
+                    t.child_by_field_name("type_arguments").map(kids).unwrap_or_default();
+                while let Some(a) = stack.pop() {
+                    match a.kind() {
+                        "type_identifier" | "scoped_type_identifier" => {
+                            if let Some(p) = path_of(a, src) {
+                                out.push((RefKind::Type, p));
+                            }
+                        }
+                        "lifetime" | "primitive_type" => {}
+                        _ => stack.extend(kids(a)),
+                    }
+                }
+                out
+            }
             "trait_item" => n
                 .child_by_field_name("bounds")
                 .map(|b| {
@@ -269,7 +309,9 @@ impl LanguageModule for Rust {
                         continue;
                     }
                 } else if child.kind() == "function_item"
-                    && attributes(child, src).iter().any(|a| TEST_ATTR.is_match(a))
+                    // (`#[cfg(test)] fn get_limited(&self)`: a helper only
+                    // the tests are compiled with)
+                    && attributes(child, src).iter().any(|a| TEST_ATTR.is_match(a) || is_cfg_test(a))
                 {
                     regions.push(span);
                     continue;
