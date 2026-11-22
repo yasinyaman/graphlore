@@ -9,8 +9,8 @@
 **graphlore is a Model Context Protocol (MCP) server that lets AI coding
 assistants navigate a codebase through its knowledge graph, instead of grepping
 and reading file after file.** It builds the graph with its own extractor
-(Rust and tree-sitter, 14 languages) or reads one built by
-[Graphify](https://graphify.net), joins every node to its real `start..end`
+(Rust and tree-sitter, 14 languages), and still reads one built by
+[Graphify](https://graphify.net); it joins every node to its real `start..end`
 source span (Python via `ast`, other languages via tree-sitter), and answers
 the questions text search cannot: who calls this, what breaks if it changes,
 where a behavior lives.
@@ -171,8 +171,8 @@ duplicated code).
 
 ### How is it different from Graphify's own MCP server?
 
-graphlore builds its own graph (its native engine, in Rust) and reads one
-Graphify built too. Graphify's embedded server has graph navigation,
+graphlore builds its own graph (its native engine, in Rust), so it does not
+need graphify installed, and it reads a graph Graphify built too. Graphify's embedded server has graph navigation,
 token-budgeted subgraphs, an HTTP transport, multi-project serving and PR
 triage tools graphlore lacks. graphlore adds the span engine and
 what it makes possible: semantic `locate` joined to the enclosing symbol,
