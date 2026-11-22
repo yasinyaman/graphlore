@@ -8346,6 +8346,139 @@ impl<'a> Project<'a> {
         self.hubs[f].clone()
     }
 
+    /// Whether `m` can be what a call of `base` runs: a method, written for
+    /// as many parameters where the language tells methods of one name apart
+    /// by them.
+    fn overrides(&self, m: DefRef, base: DefRef) -> bool {
+        let (x, y) = (self.def(m), self.def(base));
+        let method = |d: &Def| d.kind.is_callable() && d.kind != DefKind::Constructor;
+        if m == base || !method(x) || !method(y) || x.anonymous || y.anonymous {
+            return false;
+        }
+        // what builds an object is called on the class that is named, never
+        // through its base: each language's constructor by its own name
+        let builds = match self.files[m.0].lang {
+            Some(Lang::Python) => matches!(x.name.as_str(), "__init__" | "__new__"),
+            Some(Lang::Ruby) => x.name == "initialize",
+            Some(Lang::Php) => x.name == "__construct",
+            _ => false,
+        };
+        if builds {
+            return false;
+        }
+        let counted = self.family[m.0].is_some_and(Family::overloads);
+        !counted || x.params.is_none() || y.params.is_none() || x.params == y.params
+    }
+
+    /// `(base method, the method written for it)`: a type's method of the
+    /// name of a method its base, interface, trait or mixin declares. A call
+    /// of the base's method is a call of whichever of these the object has,
+    /// and no call names them.
+    ///
+    /// The nearest base that declares the name answers; what it overrides in
+    /// turn is its own pair. Go is left out: its interfaces are satisfied by
+    /// shape, no type says which it implements, and an embedded type's method
+    /// of the same name is hidden, not dispatched to.
+    fn dispatch_pairs(&self) -> Vec<(DefRef, DefRef)> {
+        const DEPTH: usize = 8;
+        let mut out: Vec<(DefRef, DefRef)> = Vec::new();
+        for (f, facts) in self.files.iter().enumerate() {
+            let Some(fam) = self.family[f] else { continue };
+            if fam == Family::Go {
+                continue;
+            }
+            if fam == Family::Rust {
+                // `impl Trait for Type { fn m }`: the methods written under
+                // the `impl`, which the type need not be the project's
+                // (`impl AsBody for &File`)
+                let mut impls: Vec<(u32, &str, DefRef)> = Vec::new();
+                for r in &facts.refs {
+                    let Some(owner) = r.from_owner.as_deref() else { continue };
+                    if r.kind != RefKind::Implements {
+                        continue;
+                    }
+                    *self.types_only.borrow_mut() = true;
+                    let found = self.resolve_path(f, None, &r.path, true);
+                    *self.types_only.borrow_mut() = false;
+                    if let Some((Target::Def(b), _)) = found {
+                        impls.push((r.line, owner, b));
+                    }
+                }
+                if impls.is_empty() {
+                    continue;
+                }
+                impls.sort_by_key(|i| i.0);
+                for (di, d) in facts.defs.iter().enumerate() {
+                    let Some(owner) = d.owner.as_deref() else { continue };
+                    // the `impl` the method is written under: the last one
+                    // for its type that starts above it
+                    let Some(&(_, _, b)) =
+                        impls.iter().rev().find(|i| i.1 == owner && i.0 <= d.def_line)
+                    else {
+                        continue;
+                    };
+                    for base in self.members(b, &d.name) {
+                        if self.overrides((f, di), base) {
+                            out.push((base, (f, di)));
+                        }
+                    }
+                }
+                continue;
+            }
+            for (ci, c) in facts.defs.iter().enumerate() {
+                if !c.kind.is_class_like() || c.anonymous || c.misread || c.block {
+                    continue;
+                }
+                let c = (f, ci);
+                let first = self.bases(c);
+                if first.is_empty() {
+                    continue;
+                }
+                let mut own: Vec<DefRef> = self.children[f]
+                    .get(&ci)
+                    .into_iter()
+                    .flat_map(|m| m.values().flatten().map(|&d| (f, d)))
+                    .collect();
+                let cname = &self.def(c).name;
+                for &m in self.owner_methods.get(&(fam, cname.clone())).into_iter().flatten() {
+                    if self.owner_scope_matches(c, m) {
+                        own.push(m);
+                    }
+                }
+                own.sort_unstable();
+                own.dedup();
+                for m in own {
+                    let name = &self.def(m).name;
+                    let mut level = first.clone();
+                    let mut seen: HashSet<DefRef> = HashSet::from([c]);
+                    for _ in 0..DEPTH {
+                        level.retain(|b| seen.insert(*b));
+                        if level.is_empty() {
+                            break;
+                        }
+                        let mut next: Vec<DefRef> = Vec::new();
+                        for &b in &level {
+                            let found: Vec<DefRef> = self
+                                .members(b, name)
+                                .into_iter()
+                                .filter(|&x| self.overrides(m, x))
+                                .collect();
+                            if found.is_empty() {
+                                next.extend(self.bases(b));
+                            } else {
+                                out.extend(found.into_iter().map(|x| (x, m)));
+                            }
+                        }
+                        level = next;
+                    }
+                }
+            }
+        }
+        out.sort_unstable();
+        out.dedup();
+        out
+    }
+
     fn ext_node_id(
         &self,
         e: usize,
@@ -8953,6 +9086,25 @@ pub fn resolve(
                         runs: None,
                     });
                 }
+            }
+        }
+        // a method written for a method of a base, an interface or a trait is
+        // what a call of that method reaches, and no call names it
+        for (base, m) in p.dispatch_pairs() {
+            let node =
+                |r: DefRef| p.node_id(r).or_else(|| p.definition_of(r).and_then(|d| p.node_id(d)));
+            let (Some(from), Some(to)) = (node(base), node(m)) else { continue };
+            if from != to {
+                edges.push(EdgeOut {
+                    source: from.to_string(),
+                    target: to.to_string(),
+                    relation: "dispatches_to",
+                    confidence: Confidence::Extracted,
+                    file: m.0,
+                    line: p.def(m).def_line,
+                    context: "override",
+                    runs: None,
+                });
             }
         }
         // resources: one node per (kind, key) that two definitions or more

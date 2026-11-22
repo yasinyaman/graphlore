@@ -1031,6 +1031,7 @@ def check_languages(a: Audit, sub: Subject, repo: dict[str, Any]) -> None:
     not_code = {"rationale_for", "declares", "depends_on", "includes", "cites"}
     known = (s._IMPORT_RELATIONS | s._CALL_RELATIONS | gl_graph._CONTAINMENT_RELATIONS
              | s._IMPACT_CODE_RELATIONS | s._STATE_RELATIONS | s._HTTP_RELATIONS
+             | s._COUPLING_RELATIONS
              | not_code)
     rels = Counter(s._rel(e) for e in sub.edges)
     m["relations"] = dict(rels.most_common())

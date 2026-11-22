@@ -253,11 +253,15 @@ pub fn detect(
         if a == b {
             continue;
         }
+        let rel = e.get("relation").and_then(Value::as_str).unwrap_or("");
+        // a pair sharing state is derived from the edges already counted
+        if rel == crate::coupling::RELATION {
+            continue;
+        }
         raw.push((a, b));
         if infos[a].external || infos[b].external {
             continue;
         }
-        let rel = e.get("relation").and_then(Value::as_str).unwrap_or("");
         let mut w = relation_weight(rel, infos[b].is_file);
         if e.get("confidence").and_then(Value::as_str) == Some("INFERRED") {
             w *= INFERRED;

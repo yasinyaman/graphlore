@@ -53,6 +53,11 @@ what is left before it can be the default.
   variables, files, tables, events and cache keys code uses by a literal key
   (`type: resource`); `reads` / `writes` link the definitions that touch them
   ([below](#shared-state-and-resources)).
+- **Implicit coupling.** The definitions that share such state are paired on
+  its node (`coupling`), each pair with the call path that joins the two or
+  none; a pair no path joins is a `couples_with` edge
+  ([below](#implicit-coupling)). A method written for a method of a base, an
+  interface or a trait is linked from it (`dispatches_to`).
 - **Routes and HTTP requests.** A route is a node (`type: route`, its
   method, full path and framework) with a `handles` edge to its handler, the
   path joined across files; a request the code makes to one of the project's
@@ -69,7 +74,7 @@ what is left before it can be the default.
   `.name()` / bare, and the node-link layout is graphify's, so every graphlore
   tool — and graphify's own `query` / `path` / `explain` — reads the graph
   unchanged. `built_at_commit` is recorded for freshness. The graph says
-  `graph.engine: graphlore` and `schema_version: 5`, and graphlore then trusts
+  `graph.engine: graphlore` and `schema_version: 6`, and graphlore then trusts
   its edges: `ImportChecker` reads `runs` instead of re-checking an import
   against the source, and the edges `resolve.py` adds to graphify's graphs are
   already there.
@@ -681,6 +686,61 @@ message is no SQL, and `data` / `close` / `click` are no shared events.
 Builds take 15% longer (median of eight repositories against 0.3.0, −1% to
 +27%): the walk keeps a stack of ancestors for these rules, as tree-sitter's
 `parent()` walks down from the root again and cost twice that.
+
+### Implicit coupling
+
+A variable with a writer and a reader is not yet a finding: most of the time
+one calls the other, and the call graph already says they belong together.
+What it cannot say is the pair with no path between them. The engine works
+that out when it builds (`engine/src/coupling.rs`), from the edges alone and
+by the rules graphlore's `_shared_state` had:
+
+- A state node counts when code in two files or more touches it and some
+  definition writes it. Test code is left out (a test setting a global is how
+  tests work) unless the state is test code itself.
+- Each writer is paired with each other definition touching the state.
+- A pair is joined when a path leads from one to the other, either way,
+  within 6 hops, over `calls`, `indirect_call`, `dispatches_to`, `handles`
+  and `http_calls`. A pair nothing joins is hidden.
+
+The node gets `coupling`: `pairs`, `hidden`, and `listed`, rows of
+`[writer, other, hops, forward]` with the hidden ones first (`hops` null;
+`forward` says the path starts at the writer), at most 200 with the rest in
+`left_out`. A hidden pair is also an edge, `couples_with`, from the
+definition that sees the state to the one that writes it — the direction of
+a call, from what depends to what it depends on — with the state in `via`,
+`effect` (`both write it` / `the other reads what it writes`) and the site
+where the source touches the state. At most 10 per state node, pairs across
+files first; two definitions sharing several pieces of state get one edge
+naming all of them. Community detection does not read these edges: they
+repeat what `reads` and `writes` already weigh.
+
+Dispatch is part of the path, so it has to be in the graph: a method written
+for a method of its base, interface, trait or mixin gets a `dispatches_to`
+edge from that method (`context: override`). The nearest base that declares
+the name answers; a constructor is nobody's override; where a language tells
+methods of one name apart by their parameters, the count has to agree. In
+Rust the methods are those under each `impl Trait for Type`, whether or not
+the project defines the type (`impl AsSendBody for &File`). Go gets none: an
+interface is satisfied by shape, and an embedded type's method of the same
+name is hidden, not dispatched to.
+
+| | ureq | realworld-axum-sqlx | graphlore |
+|---|--:|--:|--:|
+| `dispatches_to` edges | 136 | 1 | 83 |
+| state nodes with pairs | 10 | 4 | 126 |
+| pairs / hidden | 68 / 57 | 72 / 69 | 1,232 / 1,081 |
+| `couples_with` edges | 41 | 39 | 362 |
+
+Measured 2026-11-22 with engine 0.5.77. The pass takes 7, 1 and 28 ms of
+builds of 0.6, 0.1 and 2.3 s (graphlore's `_shared_state` gives the same rows from the engine's pairs and
+from its own search, which `tests/test_engine.py` asserts on a small
+project). Most pairs in a typed codebase are a struct's field written where
+the struct is built and read where it is used; the limit per state node is
+what keeps one such field from adding a hundred edges. Without an edge: a
+static method that hides rather than overrides (the walk does not know a
+method is static), and co-change, which graphlore reads from git
+([concepts](concepts.md#files-that-change-together)).
 
 ### HTTP routes and requests
 
@@ -2205,8 +2265,9 @@ two nodes reference each other. `path` and `explain` read the CLI's default
 4. **Shared state and resources.** Done (this page): what two definitions
    couple through without a call.
 5. **HTTP routes and requests.** Done (this page): route nodes with full
-   paths in 10 languages, and the requests that reach them. Git co-change and
-   the call-path check of shared-state pairs are done on graphlore's side
+   paths in 10 languages, and the requests that reach them. The call-path
+   check of shared-state pairs is the engine's ([above](#implicit-coupling));
+   git co-change is read on graphlore's side
    ([concepts](concepts.md#files-that-change-together)), for both engines.
 6. **No CLI behind the CLI tools.** `query`, `path` and `explain` answered over
    graph.json in Python; community naming by MCP sampling only; the
