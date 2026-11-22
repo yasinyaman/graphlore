@@ -7,6 +7,13 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **`benchmarks/inference_gaps.py`**: the uses the compilers bind that the
+  native graph lacks (every oracle's `--json` rows), sorted by what stands
+  before the name: a closure's parameter, a call's result, an untyped name,
+  an initializer's member, a type a member is reached through, a type, a
+  bare name, an import. Phase 3 of `docs/rule-sources.md` reads it: a
+  closure parameter typed by its call is at most 1.3% of the uses, so that
+  inference is not built.
 - **The TypeScript compiler as the judge of the native engine's edges**
   (`benchmarks/oracle_typescript.py`). The compiler's own test suite keeps,
   for 7,242 programs, a file the compiler wrote: every name of the program
