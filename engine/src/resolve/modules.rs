@@ -1033,6 +1033,9 @@ pub fn scope_lookup(
                 }
             }
             spaces.push(String::new());
+            // (PHP: from a namespace, only a function or a constant falls back
+            // to the global one, never a class: spec 18-namespaces.md)
+            let namespaced_php = fam == Family::Php && p.files[f].package.is_some();
             for ns in spaces {
                 let key = if ns.is_empty() { name.to_string() } else { format!("{ns}.{name}") };
                 let found = p
@@ -1041,7 +1044,10 @@ pub fn scope_lookup(
                     .into_iter()
                     .flatten()
                     .copied()
-                    .filter(|r| p.family[r.0] == Some(fam));
+                    .filter(|r| p.family[r.0] == Some(fam))
+                    .filter(|r| {
+                        !(namespaced_php && ns.is_empty() && p.def(*r).kind.is_class_like())
+                    });
                 if let Some(r) = p.best(found) {
                     return Some(Target::Def(r));
                 }

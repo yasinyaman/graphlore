@@ -254,7 +254,9 @@ fn rows_a_librarys_type_or_another_scope_explains_say_so() {
             .unwrap_or_else(|| panic!("no row {file} {path} in {rows:#?}"))
     };
     // PHP: a method is not in scope by its bare name
-    assert_eq!(row("app/use.php", "rewind")["library_like"], "a bare name is no method here");
+    // (`\\rewind`, fully qualified, keeps the global namespace's `\\` in its
+    // path, and is as bare: the global function, never `Stream::rewind`)
+    assert_eq!(row("app/use.php", "\\.rewind")["library_like"], "a bare name is no method here");
     // a local constructed from a type the project does not define
     assert_eq!(row("app/use.php", "$p.getValue")["library_like"], "the receiver is a library's");
     // a field written with a library's type: what hangs off it is the library's
