@@ -433,6 +433,25 @@ All notable changes to this project are documented here. The format is based on
   changed this way; the share of `INFERRED` calls goes from 20% to 29%.
 
 ### Fixed
+- **Definitions graphify finds that the span rule missed, checked against
+  the source** (`spans.py` and the native engine 0.5.75, the same rule).
+  Of the 2,020 definitions only graphify had on the 45 audit repositories,
+  1,619 are none (PHP closures, Rust `impl` and Swift `extension` blocks of
+  a type defined elsewhere, names bound to an import, forward declarations);
+  of the rest, these were missing and are now read: a C# `delegate`, a
+  conversion or arithmetic `operator` (`operator string`, `operator+`) and an
+  indexer (`this[]`); a Rust `macro_rules!` macro, named `name!` so that it
+  never answers a lookup of the function `name`; a Swift `subscript` (its
+  `name` field is its result type, so a keyword-named definition now takes
+  its keyword first) and every name of a `case a, b, c` line, not only the
+  first; a C `typedef void (Cb)(int);`, whose name is in parentheses (also
+  `TEST_SETUP(Group) {`, named `Group`). C and C++ sources are parsed with a
+  capitals-only macro after a declarator or a parameter list blanked
+  (`int count GUARDED_BY(mu);`, `void f() REQUIRES(mu);`, on its line or the
+  next): the parser took the macro for the declarator, which lost the field
+  and made up a method `GUARDED_BY` (leveldb: 41 fields, their reads and
+  writes, and calls of `Mutex::Lock` now going to the class that defines
+  it).
 - **Native engine 0.5.74: Scala's rules, read from the Scala 3 typer**
   (phase 2 of `docs/rule-sources.md`, which every language of the plan has
   now been through; 292 rules in `benchmarks/rule_inventory.py`, 245 held by a
