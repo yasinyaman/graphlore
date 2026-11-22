@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Fixed
+- **Java: a method called `self` on a typed receiver is that method.** The
+  rule for `Outer.this` took any `x.self` whose `x` has a class for its type,
+  so `r.self()` on a `Repo r` became a call of `Repo` itself. It holds only
+  where the path names the class. Found by `benchmarks/neutrality.py`, which
+  failed on it before this change too.
+
 ### Changed
 - **Shared state leaves out the test code the engine marks**, not only test
   files: a writer inside a Rust `#[cfg(test)]` module of a source file no
@@ -49,7 +56,9 @@ All notable changes to this project are documented here. The format is based on
   a path to each `connect` written for the trait: 136 edges on ureq (110 of
   the methods no call named before), 83 on this repository (all 83), 1,350 on
   the 31 audit repositories. Community detection leaves these edges out: the
-  type's `inherits` / `implements` edge already weighs them. Go is left out:
+  type's `inherits` / `implements` edge already weighs them, and weighing
+  them moves half the nodes to a community of another id for a modularity of
+  0.586 against 0.585 (`docs/native-engine.md`). Go is left out:
   an interface is satisfied by shape and no type says which it implements.
 - **`benchmarks/inference_gaps.py`**: the uses the compilers bind that the
   native graph lacks (every oracle's `--json` rows), sorted by what stands

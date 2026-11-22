@@ -5828,11 +5828,14 @@ impl<'a> Project<'a> {
                 }
                 continue;
             }
-            // Java `Outer.this` (JLS 15.8.4): the object of the class named
+            // Java `Outer.this` (JLS 15.8.4): the object of the class named,
+            // and only of a class named: `r.self()` on a `Repo r` is a method
+            // called `self`, which is no word of Java's
             if seg == "self"
                 && i == 0
                 && self.files[f].lang == Some(crate::lang::Lang::Java)
-                && matches!(t, Target::Def(c) if self.def(c).kind.is_class_like())
+                && matches!(t, Target::Def(c)
+                    if self.def(c).kind.is_class_like() && self.def(c).name == *head)
             {
                 continue;
             }
