@@ -4577,12 +4577,72 @@ def _viz_graph():
     }
 
 
+def _viz_native_graph():
+    """What the native engine adds: spans, qualnames, languages, a route, a state
+    node's coupling, a resource, edges with their site, context and when an
+    import runs."""
+    return {
+        "graph": {"engine": "graphlore", "schema_version": 6},
+        "nodes": [
+            {"id": "f", "label": "app.py", "source_file": "app.py", "language": "python"},
+            {"id": "run", "label": "run()", "source_file": "app.py", "source_location": "L3-L9",
+             "region_start": 2, "end_line": 9, "qualname": "App.run", "language": "python",
+             "kind": "method"},
+            {"id": "cfg", "label": "CONFIG", "source_file": "app.py", "source_location": "L1",
+             "end_line": "1", "kind": "variable", "language": "python", "qualname": "CONFIG",
+             "coupling": {"pairs": 3, "hidden": 1, "edges": 1,
+                          "listed": [["run", "load", None, True], ["run", "gone", 2, None],
+                                     ["bad"]]}},
+            {"id": "load", "label": "load()", "source_file": "lib.py", "end_line": 4.0},
+            {"id": "env", "label": "HOME", "type": "resource", "resource": "env", "key": "HOME",
+             "source_file": ""},
+            {"id": "r1", "label": "GET /items", "type": "route", "method": "GET",
+             "pattern": "/items", "framework": "fastapi", "source_file": "app.py",
+             "source_location": "L12"},
+            {"id": "x", "label": "Runs the app.", "file_type": "rationale"},
+        ],
+        "links": [
+            {"source": "f", "target": "run", "relation": "contains"},
+            {"source": "run", "target": "cfg", "relation": "writes", "source_location": "L5",
+             "context": "assign"},
+            {"source": "load", "target": "cfg", "relation": "reads", "source_location": "L2"},
+            {"source": "f", "target": "load", "relation": "imports", "runs": "deferred",
+             "source_location": "L7-L7", "confidence": "EXTRACTED"},
+            {"source": "load", "target": "env", "relation": "reads"},
+            {"source": "r1", "target": "run", "relation": "handles", "context": "route"},
+            {"source": "x", "target": "run", "relation": "rationale_for"},
+        ],
+    }
+
+
+def test_graph_html_carries_what_the_native_engine_writes():
+    data = server.viz.page_data(_viz_native_graph())
+    rows = {r[0]: r for r in data["nodes"]}
+    assert rows["run"][8:] == [9, "App.run", data["langs"].index("python")]
+    assert rows["cfg"][9] == ""                    # a qualname that is its label is not repeated
+    assert rows["cfg"][8] == 1 and rows["load"][8] == 4 and rows["load"][10] == -1
+    assert rows["cfg"][6] & 4 and rows["env"][6] & 4 and not rows["run"][6] & 4   # state nodes
+    # a resource is the project's own, not an external package
+    assert not rows["env"][6] & 2 and data["kinds"][rows["env"][5]] != "external"
+    pos = {r[0]: i for i, r in enumerate(data["nodes"])}
+    assert data["routes"] == [[pos["r1"], "GET", "/items", "fastapi"]]
+    assert data["coupling"] == [[pos["cfg"], 3, 1, [[pos["run"], pos["load"], None, True],
+                                                   [pos["run"], -1, 2, None]]]]
+    attrs = [data["eattrs"][k:k + 3] for k in range(0, len(data["eattrs"]), 3)]
+    assert attrs[1] == [5, data["ctxs"].index("assign"), -1]
+    assert attrs[3] == [7, -1, data["runs"].index("deferred")]
+    walks = {name: walk for name, _g, walk in data["rels"]}
+    assert walks["writes"] == 2 and walks["rationale_for"] == 0 and walks["handles"] == 1
+
+
 def test_graph_html_data_is_compact_and_complete():
     viz = server.viz
     data = viz.page_data(_viz_graph(), {"1": "Tests"})
     assert data["meta"] == {"engine": "graphlore", "commit": "abc123", "nodes": 5, "edges": 3}
-    rels = {name: data["groups"][g] for name, g in data["rels"]}
+    rels = {name: data["groups"][g] for name, g, _walk in data["rels"]}
     assert rels == {"contains": "structure", "calls": "calls", "imports": "imports"}
+    walks = {name: walk for name, _g, walk in data["rels"]}
+    assert walks == {"contains": 1, "calls": 1, "imports": 1}
     assert [c[1] for c in data["comms"]] == ["Community 0", "Tests"]
     rows = {r[0]: r for r in data["nodes"]}
     assert data["kinds"][rows["f"][5]] == "file" and data["kinds"][rows["a"][5]] == "function"
@@ -4590,6 +4650,8 @@ def test_graph_html_data_is_compact_and_complete():
     assert rows["t"][6] & 1 and rows["a"][3] == 3 and rows["a"][7] == 3      # test, line, degree
     flat = data["edges"]
     assert len(flat) == 12 and flat[-1] == 1                                  # inferred flag
+    assert len(data["eattrs"]) == 9 and "analysis" not in data
+    assert rows["a"][8:] == [0, "", -1]                       # no span end, qualname, language
     assert data["cedges"] == [0, 1, 1]          # test_run (1) calls run (0): one edge between
     assert viz.relation_group("couples_with") == "state"
     assert viz.relation_group("handles") == "http" and viz.relation_group("odd") == "other"
@@ -4624,7 +4686,7 @@ def _viewer_compact(graphs, names=None):
         "\nconst input = JSON.parse(require('fs').readFileSync(0, 'utf8'));"
         "\nprocess.stdout.write(JSON.stringify({"
         "out: input.graphs.map(g => compact(g, input.names)), groups: RELATION_GROUPS,"
-        " order: GROUPS }));"
+        " order: GROUPS, never: IMPACT_NEVER, from_state: IMPACT_FROM_STATE }));"
     )
     run = _sp.run([node, "-e", script], input=json.dumps({"graphs": graphs, "names": names or {}}),
                   capture_output=True, text=True, timeout=60)
@@ -4639,7 +4701,7 @@ def test_the_viewer_reads_a_raw_graph_as_python_does():
 
     import pytest
     fixtures = Path(__file__).parent / "fixtures"
-    graphs = [_viz_graph(),
+    graphs = [_viz_graph(), _viz_native_graph(),
               json.loads((fixtures / "graph.json").read_text(encoding="utf-8")),
               json.loads((fixtures / "polyglot" / "graph.json").read_text(encoding="utf-8")),
               {"vertices": [{"name": 0, "file": "a/tests/x.py", "line": "7", "cluster": 2},
@@ -4659,6 +4721,106 @@ def test_the_viewer_reads_a_raw_graph_as_python_does():
              | server._STATE_RELATIONS | server._COUPLING_RELATIONS | server._HTTP_RELATIONS
              | server.viz._INHERITANCE | {"dispatches_to", "references"})
     assert set().union(*map(set, got["groups"].values())) == every
+    # and it walks impact as graphlore_impact does by default
+    assert set(got["never"]) == set(server._IMPACT_SKIPPED_RELATIONS)
+    assert set(got["from_state"]) == set(server._STATE_RELATIONS | server._COUPLING_RELATIONS)
+
+
+def _viewer_impact(data, hops=3):
+    """The page's impact walk (its impact:begin / impact:end block) from every
+    node of ``data`` under node: {node id: {dependent id: hops}}; None without node."""
+    import shutil as _sh
+    import subprocess as _sp
+    node = _sh.which("node")
+    if node is None:
+        return None
+    page = server.viz.TEMPLATE.read_text(encoding="utf-8")
+    block = page.split("// impact:begin", 1)[1].split("// impact:end", 1)[0]
+    script = block + (
+        "\nconst data = JSON.parse(require('fs').readFileSync(0, 'utf8'));"
+        "\nwithResolved(data);"
+        f"\nconst out = {{}}; data.nodes.forEach((r, i) => {{ out[r[0]] = Object.fromEntries("
+        f"[...impactOf(data, i, {hops})].map(([k, h]) => [data.nodes[k][0], h])); }});"
+        "\nprocess.stdout.write(JSON.stringify(out));"
+    )
+    run = _sp.run([node, "-e", script], input=json.dumps(data), capture_output=True,
+                  text=True, timeout=60)
+    assert run.returncode == 0, run.stderr
+    return json.loads(run.stdout)
+
+
+def _graph_html_data(page):
+    text = page.read_text(encoding="utf-8")
+    raw = text.split('<script id="graph-data" type="application/json">', 1)[1]
+    raw = raw.split("</script>", 1)[0]
+    return json.loads(raw)
+
+
+def test_graph_html_shows_what_graphlore_s_tools_find(tmp_path, monkeypatch):
+    # the active project's page carries the tools' own findings, each node named
+    # by its place in graph.json, and the edges graphlore resolves for graphify
+    _module_call_project(tmp_path)
+    _write(tmp_path, "node_modules/lib/x.js", "module.exports = 1;\n")
+    gp = tmp_path / "graphify-out" / "graph.json"
+    graph = json.loads(gp.read_text(encoding="utf-8"))
+    graph["nodes"].append({"id": "vend", "label": "x.js", "source_file": "node_modules/lib/x.js",
+                           "source_location": "L1", "file_type": "code"})
+    gp.write_text(json.dumps(graph), encoding="utf-8")
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    server._GRAPH_CACHE.clear()
+    server._VIZ_ANALYSIS.clear()
+    assert server._write_viz(gp).startswith("graph.html written")
+    data = _graph_html_data(gp.with_name("graph.html"))
+    a = data["analysis"]
+    pos = {r[0]: i for i, r in enumerate(data["nodes"])}
+    assert {"cycles", "surprises", "shared_state", "co_change", "unreferenced"} <= set(a)
+    assert a["notes"] == [] and a["vendored_files"] == ["node_modules/lib/x.js"]
+    assert [pos["main"], pos["fn_tool"], "calls"] in [r[:3] for r in a["resolved"]]
+    for row in a["unreferenced"]["rows"]:
+        assert row["node"] >= 0 and data["nodes"][row["node"]][1] == row["label"]
+    # the page's impact walk is graphlore_impact's, resolved edges and all
+    walked = _viewer_impact(data)
+    if walked is None:
+        import pytest
+        pytest.skip("node is not installed")
+    assert any(walked.values())
+    for nid in pos:
+        tool = json.loads(server.graphlore_impact(nid, budget_tokens=10**6, as_json=True))
+        want = {r["node"]: r["distance"] for r in tool["impacted"]}
+        labels = {data["nodes"][pos[k]][1]: h for k, h in walked[nid].items()}
+        assert labels == want, nid
+    # set_labels rewrites the page from the same findings, not a second run
+    monkeypatch.setattr(server, "graphlore_cycles", lambda **kw: 1 / 0)
+    server._write_viz(gp)
+    assert "cycles" in _graph_html_data(gp.with_name("graph.html"))["analysis"]
+
+
+def test_graph_html_says_when_it_has_no_findings(tmp_path, monkeypatch):
+    project, other = tmp_path / "proj", tmp_path / "other"
+    for d in (project, other):
+        (d / "graphify-out").mkdir(parents=True)
+        (d / "graphify-out" / "graph.json").write_text(json.dumps(_viz_graph()), encoding="utf-8")
+    monkeypatch.setattr(server.config, "PROJECT_DIR", project)
+    server._GRAPH_CACHE.clear()
+    server._VIZ_ANALYSIS.clear()
+    # a graph the tools do not read (a build of another path) has none, and says so
+    note = server._write_viz(other / "graphify-out" / "graph.json")
+    assert "no findings" in note and "graphlore_project" in note
+    assert "analysis" not in _graph_html_data(other / "graphify-out" / "graph.html")
+    # past the size limit, unreferenced code is left out and the reply says so
+    monkeypatch.setattr(server, "VIZ_UNREFERENCED_MAX", 2)
+    note = server._write_viz(project / "graphify-out" / "graph.json")
+    a = _graph_html_data(project / "graphify-out" / "graph.html")["analysis"]
+    assert "skipped" in a["unreferenced"] and "graphlore_unreferenced" in note
+    # a tool that fails costs its finding, never the page
+    server._VIZ_ANALYSIS.clear()
+    monkeypatch.setattr(server, "graphlore_surprises", lambda **kw: 1 / 0)
+    note = server._write_viz(project / "graphify-out" / "graph.json")
+    a = _graph_html_data(project / "graphify-out" / "graph.html")["analysis"]
+    assert "surprises" not in a and "ZeroDivisionError" in a["notes"][0] and "missing" in note
+    page = server.viz.TEMPLATE.read_text(encoding="utf-8")
+    assert "come with the" in page and '"#f=" + encodeURIComponent' in page
+    assert '"#i=" + encodeURIComponent' in page and "graphlore_tests_for(" in page
 
 
 def test_the_viewer_without_data_asks_for_a_file():
