@@ -2311,15 +2311,42 @@ two nodes reference each other. `path` and `explain` read the CLI's default
    check of shared-state pairs is the engine's ([above](#implicit-coupling));
    git co-change is read on graphlore's side
    ([concepts](concepts.md#files-that-change-together)), for both engines.
-6. **No CLI behind the CLI tools.** `query`, `path` and `explain` answered over
-   graph.json in Python; community naming by MCP sampling only; the
-   package-API extractors moved into the language modules.
-7. **Native by default.** The polyglot audit passes on native graphs (above),
-   so what is left is publishing the wheels (below) and making `auto` the
-   default; then
-   graphify, `graphlore_add` and `mode="deep"` go, and the output directory gets
-   graphlore's own name (still reading `graphify-out/`).
+6. **No CLI behind the CLI tools.** Done for the tools: `query`, `path` and
+   `explain` are answered over graph.json in Python, community naming is MCP
+   sampling or `graphlore_set_labels` only, and `graphlore://report` is made
+   from graph.json. Left: the package-API extractors moved into the language
+   modules (not a graphify dependency; `apis.py` reads either graph).
+7. **Native by default, in three releases.**
+   - **A:** the `graphlore-engine` wheels on PyPI
+     (`.github/workflows/engine-wheels.yml`: Linux x86-64 and ARM on glibc,
+     x86-64 on musl, macOS universal2, Windows x64), an `engine` extra the
+     plugin installs, and `auto` the default: native when the engine is
+     installed, graphify otherwise. `graphlore_add`, `mode="deep"` and
+     `no_viz` say they are going.
+   - **B:** graphify goes: `_run_cli`, the `graphify` extra, `graphlore_add`,
+     `mode`, `no_viz` and `GRAPHLORE_BIN`. Builds write `graphlore-out/` and
+     `.graphlore_labels.json`, and a `graphify-out/` graph is still read.
+   - **C:** what reads graphify's graphs goes: `resolve.py`'s added edges,
+     `ImportChecker`'s rejection of name-resolved imports, the
+     `graphify-out/` and `GRAPHIFY_*` fallbacks.
 
-Publishing `graphlore-engine` wheels (Linux, macOS and Windows, x86-64 and
-ARM) comes before the plugin can install it; until then it is built from a
-checkout.
+   graphify stays a tool of the benchmarks only (`compare_engines.py`,
+   `verify_graphify.py`, `polyglot.py --engine graphify`), never a dependency.
+
+### After graphify
+
+What graphify does and the engine does not. None of it holds back the switch;
+each is a piece of work of its own:
+
+- **Languages:** Objective-C, Lua, Zig and Elixir (graphlore's extension
+  tables list them; the engine counts their files in `not_read`).
+- **What graphify does with an LLM:** semantic extraction of documents, papers
+  and images (a native version would ask the host model by MCP sampling),
+  `mode="deep"`'s inferred edges, sources added by URL (`graphlore_add`),
+  rationale and concept nodes.
+- **`graph.html`**, graphify's view of the graph.
+- **Where the engine has less than graphify** (the comparison above): imports
+  in Swift, C#, Go and JavaScript; calls in JavaScript, Scala, C++, Kotlin and
+  Ruby; the confirmed edges `verify_graphify.py` still lists; the Python `super`
+  row of `results-neutrality.json`; the calls `unresolved.py` leaves on the
+  second set of 14 repositories.

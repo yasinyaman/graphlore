@@ -4081,7 +4081,151 @@ def test_validate_orphans_use_qualified_labels(tmp_path, monkeypatch):
     assert "__init__.py" not in orphans  # no bare, indistinguishable entries
 
 
-# --- CLI-backed tools (query/path/explain) and _run_cli plumbing ------------
+# --- query / path / explain over graph.json, and _run_cli plumbing ----------
+
+
+def test_path_walks_edges_forward_then_backward_then_either_way(project):
+    fwd = json.loads(server.graphlore_path("Client", "Response", as_json=True))
+    assert fwd["found"] and fwd["direction"] == "forward" and fwd["hops"] == 1
+    assert fwd["path"] == [{"from": "Client", "to": "Response", "relation": "returns",
+                            "edge": "forward"}]
+    back = json.loads(server.graphlore_path("Response", "Client", as_json=True))
+    assert back["direction"] == "backward" and back["path"][0]["edge"] == "backward"
+    # AsyncClient and DigestAuth reach each other only against some edges
+    either = json.loads(server.graphlore_path("AsyncClient", "DigestAuth", as_json=True))
+    assert either["direction"] == "undirected" and either["hops"] == 4
+    assert [r["edge"] for r in either["path"]] == ["forward", "backward", "forward", "backward"]
+    text = server.graphlore_path("Client", "Response")
+    assert "Path (1 hop, forward)" in text and "Client —returns→ Response" in text
+    assert "← " not in text
+    same = json.loads(server.graphlore_path("Client", "Client", as_json=True))
+    assert same["found"] and same["hops"] == 0
+    miss = json.loads(server.graphlore_path("Client", "NoSuchNode", as_json=True))
+    assert miss["code"] == "not_found"
+
+
+def test_path_says_when_no_path_exists(tmp_path, monkeypatch):
+    _write_graph(tmp_path, {"nodes": [{"id": "a", "label": "a"}, {"id": "b", "label": "b"}],
+                            "links": []})
+    server._GRAPH_CACHE.clear()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    out = json.loads(server.graphlore_path("a", "b", as_json=True))
+    assert out["found"] is False and out["path"] == [] and out["note"] == server._EMPTY_NOTE
+    assert server.graphlore_path("a", "b").startswith("No path between a and b.")
+
+
+def test_path_skips_shared_state_pairs(tmp_path, monkeypatch):
+    _write_graph(tmp_path, {
+        "nodes": [{"id": "a", "label": "a"}, {"id": "b", "label": "b"}],
+        "links": [{"source": "a", "target": "b", "relation": "couples_with"}],
+    })
+    server._GRAPH_CACHE.clear()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    assert json.loads(server.graphlore_path("a", "b", as_json=True))["found"] is False
+
+
+def test_path_either_way_keeps_off_files_and_packages(tmp_path, monkeypatch):
+    # a and b sit in one file and both use `os`: neither says how they relate
+    _write_graph(tmp_path, {
+        "nodes": [{"id": "f", "label": "m.py", "source_file": "m.py"},
+                  {"id": "a", "label": "a()", "source_file": "m.py"},
+                  {"id": "b", "label": "b()", "source_file": "m.py"},
+                  {"id": "c", "label": "c()", "source_file": "n.py"},
+                  {"id": "os", "label": "os", "type": "external"}],
+        "links": [{"source": "f", "target": "a", "relation": "contains"},
+                  {"source": "f", "target": "b", "relation": "contains"},
+                  {"source": "a", "target": "os", "relation": "calls"},
+                  {"source": "b", "target": "os", "relation": "calls"},
+                  {"source": "a", "target": "c", "relation": "calls"},
+                  {"source": "b", "target": "c", "relation": "calls"}],
+    })
+    server._GRAPH_CACHE.clear()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    got = json.loads(server.graphlore_path("a", "b", as_json=True))
+    assert got["direction"] == "undirected" and got["via_containment"] is False
+    assert [r["to"] for r in got["path"]] == ["c()", "b()"]
+    # with only the file between them, the file it is, and the reply says so
+    (tmp_path / "graphify-out" / "graph.json").write_text(json.dumps({
+        "nodes": [{"id": "f", "label": "m.py"}, {"id": "a", "label": "a()"},
+                  {"id": "b", "label": "b()"}],
+        "links": [{"source": "f", "target": "a", "relation": "contains"},
+                  {"source": "f", "target": "b", "relation": "contains"}],
+    }))
+    server._GRAPH_CACHE.clear()
+    got = json.loads(server.graphlore_path("a", "b", as_json=True))
+    assert got["found"] and got["via_containment"] is True and got["hops"] == 2
+    assert "only through containment" in server.graphlore_path("a", "b")
+
+
+def test_report_is_made_from_the_graph_without_graphify_s_file(tmp_path, monkeypatch):
+    graph = {"graph": {"engine": "graphlore", "schema_version": 6},
+             "nodes": [{"id": "a", "label": "a()"}, {"id": "b", "label": "b()"}],
+             "links": [{"source": "a", "target": "b", "relation": "calls"}]}
+    _write_graph(tmp_path, graph)
+    server._GRAPH_CACHE.clear()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    # a native graph: graphify's GRAPH_REPORT.md beside it is from an earlier build
+    (tmp_path / "graphify-out" / "GRAPH_REPORT.md").write_text("stale graphify report")
+    out = server.report()
+    assert out.startswith("# Graph report") and "2 nodes, 1 edges" in out
+    assert "stale" not in out and "## Surprising connections" in out
+    # a graphify graph without the file: made from the graph too
+    del graph["graph"]
+    (tmp_path / "graphify-out" / "graph.json").write_text(json.dumps(graph))
+    (tmp_path / "graphify-out" / "GRAPH_REPORT.md").unlink()
+    server._GRAPH_CACHE.clear()
+    assert server.report().startswith("# Graph report")
+
+
+def test_report_without_a_graph_says_so(empty_project):
+    assert "graphlore_build" in server.report()
+
+
+def test_query_seeds_from_the_question_and_walks_the_graph(project):
+    out = json.loads(server.graphlore_query("digest auth response", as_json=True))
+    seeds = [s["node"] for s in out["seeds"]]
+    assert "DigestAuth" in seeds and out["dfs"] is False and out["hops"] == 3
+    rels = {(e["from"], e["relation"], e["to"]) for e in out["edges"]}
+    assert ("DigestAuth", "inferred", "Response") in rels
+    assert ("Client", "returns", "Response") in rels      # reached from a seed
+    deep = json.loads(server.graphlore_query("client request", dfs=True, as_json=True))
+    assert deep["dfs"] is True and deep["hops"] == 6 and deep["edges"]
+    tight = json.loads(server.graphlore_query("client request", budget=1, as_json=True))
+    assert tight["truncated"] is True and "hint" in tight
+    assert tight["direct_neighbors_left_out"] > 0
+    text = server.graphlore_query("digest auth response")
+    assert text.startswith("Query: digest auth response") and "Seeds: " in text
+
+
+def test_query_without_a_match_is_an_empty_answer(project):
+    res = _call_over_mcp("graphlore_query", {"question": "zzz qqq"})
+    assert res.is_error is False
+    assert res.structured_content["seeds"] == [] and "Nothing in the graph" in \
+        res.structured_content["note"]
+
+
+def test_explain_gives_details_and_connections(project):
+    out = json.loads(server.graphlore_explain("Response", as_json=True))
+    assert out["label"] == "Response" and out["file"] == "httpx/_models.py"
+    assert out["neighbors_total"] == 2 and out["truncated"] is False
+    assert out["counts"] == {"inferred in": 1, "returns in": 1}
+    assert {(n["node"], n["direction"]) for n in out["neighbors"]} == {
+        ("Client", "in"), ("DigestAuth", "in")}
+    cut = json.loads(server.graphlore_explain("Response", limit=1, as_json=True))
+    assert cut["truncated"] is True and len(cut["neighbors"]) == 1 and "hint" in cut
+    text = server.graphlore_explain("Response")
+    assert "connections (2)" in text and "←returns— Client" in text
+    assert json.loads(server.graphlore_explain("Nope", as_json=True))["code"] == "not_found"
+
+
+def test_query_path_explain_need_no_graphify(project, monkeypatch):
+    import pytest
+
+    monkeypatch.setattr(server, "_run_cli", lambda *a, **k: pytest.fail("ran the CLI"))
+    monkeypatch.setattr(server.shutil, "which", lambda _b: None)
+    assert not server.graphlore_query("client").startswith("ERROR")
+    assert not server.graphlore_path("Client", "Response").startswith("ERROR")
+    assert not server.graphlore_explain("Client").startswith("ERROR")
 
 
 class _FakeProc:
@@ -4096,40 +4240,10 @@ def _fake_cli(monkeypatch, tmp_path, run):
     monkeypatch.setattr(server.subprocess, "run", run)
 
 
-def test_query_path_explain_wire_cli_args(tmp_path, monkeypatch):
-    calls = []
-
-    def run(argv, **kwargs):
-        calls.append(list(argv))
-        return _FakeProc(stdout="ok")
-
-    _fake_cli(monkeypatch, tmp_path, run)
-    out = server.graphlore_query("who calls send?", dfs=True, budget=1500)
-    assert "\nok\n=== end repo text" in out
-    assert calls[-1][1:] == ["query", "who calls send?", "--dfs", "--budget", "1500"]
-    assert "\nok\n=== end repo text" in server.graphlore_path("DigestAuth", "Response")
-    assert calls[-1][1:] == ["path", "DigestAuth", "Response"]
-    assert "\nok\n=== end repo text" in server.graphlore_explain("Client")
-    assert calls[-1][1:] == ["explain", "Client"]
-
-
-def test_query_passes_graph_flag_when_graph_exists(tmp_path, monkeypatch):
-    calls = []
-
-    def run(argv, **kwargs):
-        calls.append(list(argv))
-        return _FakeProc(stdout="ok")
-
-    _fake_cli(monkeypatch, tmp_path, run)
-    _write_graph(tmp_path, {"nodes": [], "links": []})
-    server.graphlore_query("q")
-    assert calls[-1][-2] == "--graph" and calls[-1][-1].endswith("graph.json")
-
-
 def test_run_cli_missing_binary_is_clean_error(tmp_path, monkeypatch):
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     monkeypatch.setattr(server.shutil, "which", lambda _b: None)
-    out = server.graphlore_explain("Client")
+    out = server.graphlore_add("https://example.com/paper")
     assert out.startswith("ERROR:") and "pip install graphifyy" in out
 
 
@@ -4138,19 +4252,19 @@ def test_run_cli_timeout_and_exit_code_and_oserror(tmp_path, monkeypatch):
         raise server.subprocess.TimeoutExpired(cmd=argv, timeout=1)
 
     _fake_cli(monkeypatch, tmp_path, run_timeout)
-    assert "did not finish within" in server.graphlore_path("A", "B")
+    assert "did not finish within" in server._run_cli(["add", "https://x"])
 
     def run_fail(argv, **kwargs):
         return _FakeProc(stderr="boom", returncode=3)
 
     monkeypatch.setattr(server.subprocess, "run", run_fail)
-    assert server.graphlore_explain("X") == "ERROR (exit 3):\nboom"
+    assert server._run_cli(["add", "https://x"]) == "ERROR (exit 3):\nboom"
 
     def run_oserror(argv, **kwargs):
         raise FileNotFoundError("interpreter gone")
 
     monkeypatch.setattr(server.subprocess, "run", run_oserror)
-    out = server.graphlore_query("q")
+    out = server._run_cli(["add", "https://x"])
     assert out.startswith("ERROR: failed to run") and "interpreter gone" in out
 
 
@@ -6521,15 +6635,14 @@ def test_tool_functions_stay_plain_strings(project):
 
 def test_cli_error_sets_is_error(tmp_path, monkeypatch):
     _fake_cli(monkeypatch, tmp_path, lambda argv, **kw: _FakeProc(stderr="boom", returncode=3))
-    res = _call_over_mcp("graphlore_explain", {"node": "Client"})
+    res = _call_over_mcp("graphlore_add", {"url": "https://example.com/p"})
     assert res.is_error is True
     assert res.content[0].text.startswith("ERROR (exit 3)")
 
     _fake_cli(monkeypatch, tmp_path, lambda argv, **kw: _FakeProc(stdout="all good"))
-    res = _call_over_mcp("graphlore_explain", {"node": "Client"})
+    res = _call_over_mcp("graphlore_add", {"url": "https://example.com/p"})
     assert res.is_error is False
     assert res.structured_content["output"] == "all good"
-    assert res.structured_content["content_trust"] == "untrusted_repo_text"
 
 
 def test_structured_off_switch(project, monkeypatch):
@@ -6901,24 +7014,32 @@ def test_offline_strips_backend_keys_from_the_cli(tmp_path, monkeypatch):
     _fake_cli(monkeypatch, tmp_path,
               lambda argv, **kw: envs.append(kw.get("env")) or _FakeProc("ok"))
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
-    server.graphlore_explain("Client")
+    server._run_cli(["label", "."])
     assert envs[-1] is None  # online: inherited unchanged
     monkeypatch.setenv("GRAPHLORE_OFFLINE", "1")
-    server.graphlore_explain("Client")
+    server._run_cli(["label", "."])
     assert "OPENAI_API_KEY" not in envs[-1]
     assert envs[-1]["HF_HUB_OFFLINE"] == "1" and "PATH" in envs[-1]
 
 
-def test_offline_naming_skips_and_refuses_the_cli(project, monkeypatch):
+def test_naming_never_runs_the_graphify_cli(project, monkeypatch):
+    # a backend key and a graphify binary used to send "auto" to `graphify label`
+    import pytest
+
     monkeypatch.setenv("GEMINI_API_KEY", "k")
     monkeypatch.setattr(server.shutil, "which", lambda _b: "/fake/graphify")
-    monkeypatch.setenv("GRAPHLORE_OFFLINE", "1")
+    monkeypatch.setattr(server, "_run_cli", lambda *a, **k: pytest.fail("ran the CLI"))
     auto = json.loads(_run_in_memory(project, "graphlore_label_communities", {"as_json": True}))
     assert auto["method"] == "placeholder"
     res = _call_over_mcp("graphlore_label_communities", {"method": "cli"})
-    assert res.is_error is True and res.structured_content["code"] == "offline"
+    assert res.is_error is True and res.structured_content["code"] == "removed"
+    assert "graphlore_set_labels" in res.structured_content["error"]
+    res = _call_over_mcp("graphlore_label_communities", {"method": "llm"})
+    assert res.is_error is True and res.structured_content["code"] == "bad_argument"
+    monkeypatch.setenv("GRAPHLORE_OFFLINE", "1")
     status = json.loads(_run_in_memory(project, "graphlore_sampling_status", {"as_json": True}))
     assert status["preferred_method"] == "placeholder" and status["offline"] is True
+    assert "graphify_cli_available" not in status and "backend_key_detected" not in status
 
 
 def test_offline_counts_tokens_without_loading_tiktoken(monkeypatch):
@@ -7786,8 +7907,7 @@ def test_a_negative_limit_lists_nothing_rather_than_all_but_one(project):
     assert all(rows == [] for rows in examples.values())
 
 
-def test_cli_tools_resolve_a_shared_name_before_the_cli_sees_it(tmp_path, monkeypatch):
-    # graphify 0.9 refuses `explain create` when three nodes are named create
+def test_path_and_explain_resolve_a_shared_name(tmp_path, monkeypatch):
     _write_graph(tmp_path, {
         "nodes": [
             {"id": "articles_create", "label": "create()", "source_file": "app/articles.js",
@@ -7796,37 +7916,19 @@ def test_cli_tools_resolve_a_shared_name_before_the_cli_sees_it(tmp_path, monkey
              "source_location": "L30", "file_type": "code"},
             {"id": "only", "label": "Session", "source_file": "s.py", "source_location": "L1"},
         ],
-        "edges": [],
+        "edges": [{"source": "only", "target": "articles_create", "relation": "calls"}],
     })
     server._GRAPH_CACHE.clear()
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
-    seen = []
-
-    graph_arg = ["--graph", str(tmp_path / "graphify-out" / "graph.json")]
-
-    def fake(args, cwd=None):
-        # the CLI reads the graph graphlore reads, whatever GRAPHLORE_OUT_DIR is
-        assert args[-2:] == graph_arg
-        seen.append(list(args[:-2]))
-        return f"Node: {args[-3]}"
-
-    monkeypatch.setattr(server, "_run_cli", fake)
     out = server.graphlore_explain("create")
-    assert seen[-1] == ["explain", "articles_create"]
-    framed, _, notes = out.partition("=== end repo text")
-    assert "Matched 2 nodes for 'create'" in notes and "users_create" in notes
-    assert "Matched" not in framed                  # graphlore's note is outside the frame
-    # a unique name needs no note, an id passes through, an unknown name too
-    assert "Matched" not in server.graphlore_explain("Session") and seen[-1][-1] == "only"
-    server.graphlore_explain("users_create")
-    assert seen[-1] == ["explain", "users_create"]
-    server.graphlore_explain("nothing_like_it")
-    assert seen[-1] == ["explain", "nothing_like_it"]
-    server.graphlore_path("Session", "create")
-    assert seen[-1] == ["path", "only", "articles_create"]
-    # a CLI error stays an error, unframed
-    monkeypatch.setattr(server, "_run_cli", lambda args, cwd=None: "ERROR (exit 4): no path")
-    assert server.graphlore_path("Session", "create").startswith("ERROR")
+    assert "Matched 2 nodes for 'create'" in out and "users_create" in out
+    assert json.loads(server.graphlore_explain("create", as_json=True))["id"] == "articles_create"
+    assert "Matched" not in server.graphlore_explain("Session")
+    assert json.loads(server.graphlore_explain("users_create", as_json=True))["id"] == \
+        "users_create"
+    path = json.loads(server.graphlore_path("Session", "create", as_json=True))
+    assert path["found"] and path["matched_to"]["using"] == "articles_create"
+    assert "matched_from" not in path
 
 
 def test_routes_package_apis_layers_and_tests_for_take_a_scope(tmp_path, monkeypatch):

@@ -9,7 +9,7 @@ import difflib
 import json
 import re
 from collections import deque
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -1192,6 +1192,8 @@ def _bfs_subgraph(
     order: Callable[[tuple[str, str]], Any] | None = None,
     *,
     edge_flags: _EdgeFlags | None = None,
+    also: Sequence[str] = (),
+    depth_first: bool = False,
 ) -> tuple[set[str], list[dict], bool, int]:
     """BFS around start_id collecting edges until a token budget is hit.
 
@@ -1203,20 +1205,26 @@ def _bfs_subgraph(
     ``order`` is a sort key over a node's ``(neighbor, relation)`` entries: what
     comes first is what the budget keeps. ``edge_flags`` (from :func:`_edge_flags`)
     adds ``confidence`` / ``resolved_by`` to the edges that carry them.
+    ``also`` are more nodes to start from (each at depth 0, after ``start_id``),
+    and ``depth_first`` follows each branch to ``hops`` before the next one:
+    graphlore_query's seeds and its ``dfs``.
     """
-    visited = {start_id}
-    frontier = deque([(start_id, 0)])
+    starts = list(dict.fromkeys([start_id, *also]))
+    visited = set(starts)
+    frontier = deque((s, 0) for s in (reversed(starts) if depth_first else starts))
     collected_edges: list[dict] = []
     seen_pairs: set[tuple[str, ...]] = set()
     truncated = False
     running_chars = 2 + _PAYLOAD_ENVELOPE_CHARS  # "[]" of the edge array + JSON envelope
 
     while frontier:
-        cur, depth = frontier.popleft()
+        cur, depth = frontier.pop() if depth_first else frontier.popleft()
         if depth >= hops:
             continue
         neighbours = adj.get(cur, [])
-        for nb, rel in (sorted(neighbours, key=order) if order else neighbours):
+        ranked = sorted(neighbours, key=order) if order else neighbours
+        pushed: list[tuple[str, int]] = []
+        for nb, rel in ranked:
             src, dst = cur, nb
             if (edge_set is not None and (src, dst, rel) not in edge_set
                     and (dst, src, rel) in edge_set):
@@ -1232,11 +1240,15 @@ def _bfs_subgraph(
                 running_chars += len(json.dumps(edge, ensure_ascii=False)) + 2
             if nb not in visited:
                 visited.add(nb)
-                frontier.append((nb, depth + 1))
+                pushed.append((nb, depth + 1))
             if running_chars / _CHARS_PER_TOKEN >= budget_tokens:
                 truncated = True
                 frontier.clear()
+                pushed.clear()
                 break
+        # a stack pops the last pushed first: push in reverse so the best-ranked
+        # neighbour is the branch followed next
+        frontier.extend(reversed(pushed) if depth_first else pushed)
 
     # Report the count via _count_tokens (exact under GRAPHLORE_TOKENIZER=tiktoken,
     # else the heuristic). The budget gate above stays on the fast char heuristic,
@@ -1405,6 +1417,37 @@ def _shortest_path(forward: _Adj, members: set[str], src: str, dst: str) -> list
                 return path[::-1]
             queue.append(nb)
     return []
+
+
+def _route(
+    adj: _Adj, src: str, dst: str, skip: frozenset[str] = frozenset(),
+    avoid: frozenset[str] | set[str] = frozenset(),
+) -> list[tuple[str, str, str]] | None:
+    """Shortest ``src -> ... -> dst`` walk over ``adj`` as ``(from, to, relation)``
+    steps, never along a relation in ``skip`` nor through a node in ``avoid``
+    (which may still be an end); ``[]`` when ``src == dst``, None when ``dst``
+    cannot be reached. Of two routes of one length the one whose neighbours
+    come first in ``adj`` wins, so the answer is deterministic."""
+    if src == dst:
+        return []
+    prev: dict[str, tuple[str, str]] = {}
+    queue = deque([src])
+    while queue:
+        cur = queue.popleft()
+        for nb, rel in adj.get(cur, []):
+            if rel in skip or nb == src or nb in prev or (nb in avoid and nb != dst):
+                continue
+            prev[nb] = (cur, rel)
+            if nb == dst:
+                steps: list[tuple[str, str, str]] = []
+                at = dst
+                while at != src:
+                    back, how = prev[at]
+                    steps.append((back, at, how))
+                    at = back
+                return steps[::-1]
+            queue.append(nb)
+    return None
 
 
 # The three kinds of import cycle, most serious first, with the import kinds

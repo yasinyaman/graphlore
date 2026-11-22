@@ -14,12 +14,47 @@ All notable changes to this project are documented here. The format is based on
   failed on it before this change too.
 
 ### Changed
+- **`graphlore_query`, `graphlore_path` and `graphlore_explain` no longer run
+  graphify**: they read graph.json like every other analysis tool, so they
+  work on a native graph with no `graphify` binary, and take `as_json`.
+  - `graphlore_query` searches the question in the code (the `locate` index;
+    without one, the nodes whose names share its words), takes up to 3 hits as
+    `seeds` and walks the graph out from them until `budget` (2000 tokens) is
+    spent: breadth-first 3 hops, or `dfs=True` depth-first 6 hops. It takes
+    `scope`, and a cut says so (`truncated`, `hint`).
+  - `graphlore_path` is the shortest path along the edges' direction
+    (`direction: forward`), else from the second node to the first
+    (`backward`), else either way (`undirected`); each step says which way its
+    edge points, and `couples_with` is not walked. It takes `scope`.
+  - `graphlore_explain` is `graphlore_node_details` plus the node's
+    connections, tallied by relation and direction (`counts`) and listed up
+    to `limit` (30).
+  - The audit's `CLI-*` checks are replaced by `QUERY-NO-SEED`,
+    `PATH-MISSED` and `EXPLAIN-BARE-NAME`.
+- **Communities are named by MCP sampling only.**
+  `graphlore_label_communities(method="cli")` (`graphify label` with a backend
+  API key) is refused (`code: "removed"`), and `method="auto"` goes from
+  sampling straight to placeholders; `graphlore_set_labels` takes names the
+  assistant writes. `graphlore_sampling_status` drops `backend_key_detected`
+  and `graphify_cli_available`.
+- **`graphlore://report` is made from graph.json** (`graphlore_overview` and
+  `graphlore_surprises`) when graphify wrote no `GRAPH_REPORT.md`, or the graph
+  is native and that file is a leftover of an earlier build.
 - **Shared state leaves out the test code the engine marks**, not only test
   files: a writer inside a Rust `#[cfg(test)]` module of a source file no
   longer pairs with production code (`test` on a native node). ureq: 112
   pairs to 68.
 
 ### Added
+- **Prebuilt `graphlore-engine` wheels** (`.github/workflows/engine-wheels.yml`):
+  abi3 wheels for Linux (x86-64 and ARM on glibc, x86-64 on musl), macOS
+  (universal2) and Windows x64, plus an sdist, each wheel installed and run
+  on the polyglot fixture before anything is uploaded. An `engine-vX.Y.Z` tag
+  publishes them to PyPI by Trusted Publishing; a pull request touching
+  `engine/` builds them without uploading. This is the first step of
+  replacing graphify: the plugin can take the engine only as a prebuilt
+  wheel, never through a Rust toolchain. The release steps are under
+  "Releasing" in `CONTRIBUTING.md`.
 - **Implicit coupling is worked out by the native engine** (engine 0.5.77,
   `schema_version` 6, `engine/src/coupling.rs`). The pairing of the
   definitions that share state, which `graph._shared_state` did on every
