@@ -93,6 +93,17 @@ Please:
 
 Publishing the release runs `.github/workflows/publish.yml`, which builds the package and uploads it to PyPI. It refuses to upload when the tag and the `pyproject.toml` version differ.
 
+### The native engine (`graphlore-engine`)
+
+The engine in `engine/` is its own distribution with its own version, kept only in `engine/Cargo.toml` (independent of graphlore's).
+
+1. Bump `version` in `engine/Cargo.toml` (and `SCHEMA_VERSION` in `engine/src/lib.rs` plus `engine.SUPPORTED_SCHEMAS` if graph.json changed in a way readers must know about).
+2. Merge, then push a tag `engine-vX.Y.Z` equal to that version.
+
+The tag runs `.github/workflows/engine-wheels.yml`: it builds the abi3 wheels (Linux x86-64 and ARM on glibc, Linux x86-64 on musl, macOS universal2, Windows x64) and an sdist, installs each wheel and builds the polyglot fixture with it, and uploads them to PyPI. It refuses to upload when the tag and the `Cargo.toml` version differ. The same workflow runs without uploading on every pull request that touches `engine/`, and by hand (`workflow_dispatch`) with `publish_to: testpypi` to try a release on TestPyPI first.
+
+One-time setup, before the first engine release: on PyPI (and on TestPyPI, for the dry run), add a *pending trusted publisher* for the project name `graphlore-engine` with owner `yasinyaman`, repository `graphlore`, workflow `engine-wheels.yml` and environment `pypi` (`testpypi` on TestPyPI).
+
 ### MCP Registry
 
 `server.json` is the entry for the [official MCP Registry](https://registry.modelcontextprotocol.io). The registry holds metadata only and checks the package itself, so publish there **after** the PyPI release exists:
