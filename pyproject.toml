@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "graphlore"
 version = "0.6.0"
-description = "MCP server that lets AI coding assistants navigate a codebase knowledge graph (Graphify): semantic code search, impact analysis, token-budgeted subgraphs and exact source spans."
+description = "MCP server that lets AI coding assistants navigate a codebase through a knowledge graph it builds itself (Rust and tree-sitter, 14 languages): semantic code search, impact analysis, token-budgeted subgraphs and exact source spans."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
@@ -41,6 +41,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# graphlore's own extractor (engine/, Rust): prebuilt abi3 wheels for Linux,
+# macOS and Windows, so no Rust toolchain enters graphlore's install. With it the
+# default GRAPHLORE_ENGINE=auto builds natively; graphify is the fallback.
+engine = ["graphlore-engine>=0.5.77,<0.6"]
+# Deprecated: the graphify CLI, the fallback extractor until the next release.
 graphify = ["graphifyy"]
 semble = ["semble>=0.3"]
 # The dense tier of the built-in search (GRAPHLORE_SEMANTIC_BACKEND unset or
@@ -48,7 +53,7 @@ semble = ["semble>=0.3"]
 # use downloads the model (minishlab/potion-code-16M-v2) from the Hugging Face Hub.
 embed = ["model2vec>=0.10", "numpy>=1.24"]
 # Multi-language span/structure backend for graphify_locate and graphify_freshness
-# (Python works without it via stdlib ast). tree-sitter also ships with graphify.
+# (Python works without it via stdlib ast; without it the native engine gives the spans).
 # Bounds: the floors are the oldest pair the suite passes with (Python 3.10,
 # mcp 2.1). Language-pack 1.9 and 1.10 hand back a Language that
 # `tree_sitter.Parser` rejects, and 1.11 needs tree-sitter >= 0.23. Both stay below
@@ -62,7 +67,7 @@ tiktoken = ["tiktoken>=0.7"]
 # source changes. Off by default so the stdio server stays light.
 watch = ["watchdog>=4.0"]
 all = [
-    "graphifyy", "semble>=0.3", "model2vec>=0.10", "numpy>=1.24",
+    "graphlore-engine>=0.5.77,<0.6", "graphifyy", "semble>=0.3", "model2vec>=0.10", "numpy>=1.24",
     "tree-sitter>=0.23,<1.0", "tree-sitter-language-pack>=1.11,<2.0",
     "tiktoken>=0.7", "watchdog>=4.0",
 ]

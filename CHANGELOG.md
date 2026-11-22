@@ -6,6 +6,14 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Deprecated
+- **graphify as graphlore's extractor**, going in the next release with what
+  only it does: `graphlore_add` (a source by URL), `graphlore_build`'s `mode`
+  (`"deep"`), `GRAPHLORE_ENGINE=graphify`,
+  `GRAPHLORE_BIN` and the `graphify` extra. A build graphify answers says so.
+  What graphify does that the engine does not yet is listed in
+  `docs/native-engine.md` ("After graphify").
+
 ### Fixed
 - **Java: a method called `self` on a typed receiver is that method.** The
   rule for `Outer.this` took any `x.self` whose `x` has a class for its type,
@@ -14,6 +22,17 @@ All notable changes to this project are documented here. The format is based on
   failed on it before this change too.
 
 ### Changed
+- **The native engine builds the graph by default.** `GRAPHLORE_ENGINE`
+  defaults to `auto`: graphlore's own extractor when it is installed, graphify
+  only when it is not (and for `mode`, and for `update` / `cluster_only` of a
+  graph graphify built). The engine is the new `engine` extra
+  (`graphlore-engine`, prebuilt wheels: no Rust toolchain), part of `all`;
+  the Claude Code plugin installs it, and `server.json` runs the server with
+  `--with graphlore-engine` instead of `--with graphifyy`. With neither
+  extractor installed, a build says how to install the engine; an unknown
+  `GRAPHLORE_ENGINE` is now an error instead of a graphify build. Without
+  Python tree-sitter, spans come from the engine's compiled-in grammars unless
+  `GRAPHLORE_ENGINE=graphify`.
 - **`graphlore_query`, `graphlore_path` and `graphlore_explain` no longer run
   graphify**: they read graph.json like every other analysis tool, so they
   work on a native graph with no `graphify` binary, and take `as_json`.
@@ -46,6 +65,47 @@ All notable changes to this project are documented here. The format is based on
   pairs to 68.
 
 ### Added
+- **`graph.html`, graphlore's own view of the graph.** Every build writes it
+  beside graph.json, whichever engine built the graph (`no_viz=True` skips
+  it; graphify is always run with `--no-viz` now), and `cluster_only`,
+  `graphlore_set_labels` and `graphlore_prune` write it again. One file that
+  needs no network (the drawing code is graphlore's, on a canvas, and a
+  Content Security Policy forbids every request), made for large codebases:
+  it opens on the communities, one bubble each with the strongest links
+  between them, and goes down to one community or one node's 1- or 2-hop
+  neighbourhood (400 nodes at most, production code first). Search by name
+  or file, a details panel (kind, `file:line`, id, community, connections by
+  relation and direction, each a link), filters for relation groups, tests
+  and external packages, colouring by community or kind, a back button.
+  Names, labels and paths from the repository are embedded escaped and shown
+  as text only. A graph over 150,000 nodes is not drawn, and the build says so.
+- **A graph viewer of its own, for any graph.json.** The page
+  (`src/graphlore/viewer.html`) opens a graph.json the reader picks or drops
+  on it, graphlore's or graphify's, with its `.graphify_labels.json` for the
+  names, read in the browser: nothing is uploaded and the page still makes
+  no request. Every `graph.html` has the "Open graph.json…" button, and the
+  page with no graph in it is a standalone viewer, published to GitHub Pages
+  by `.github/workflows/pages.yml` (`viewer/`, and `viewer/demo.html` with the
+  polyglot fixture). Its `compact()` is the JavaScript twin of
+  `viz.page_data`; a test runs it under node on graphify's shapes and the
+  native engine's and checks the two agree.
+- **The viewer is easier to read and to use.**
+  - A node's neighbourhood is drawn in columns instead of a star: what uses
+    it on the left, what it uses on the right, the second hop a column
+    further out, production code first and grouped by file under the file's
+    name. It is never fitted too small to read; the columns that do not fit
+    are panned to.
+  - Labels never overlap one another or a dot: they are placed by importance
+    where they fit, so zooming in shows more.
+  - The address bar keeps the view (`#n=<id>&h=2`, `#c=<community>`): a link
+    opens it again, and the browser's Back and Forward move between views.
+  - Keys: `/` find (`↑` `↓` `Enter` to pick), `Esc` back, `F` fit, `+` / `−`
+    zoom, `1` / `2` depth, `?` the list. Zoom and fit buttons too.
+  - "Copy for the assistant": a node's panel copies `graphlore_explain`,
+    `graphlore_fetch` and `graphlore_impact` calls, its id and `file:line`; a
+    community's copies `graphlore_skeleton(community=…)`.
+  - On a phone: touch, pinch to zoom, long press for what a node is, and the
+    panel as a sheet over the foot of the screen.
 - **Prebuilt `graphlore-engine` wheels** (`.github/workflows/engine-wheels.yml`):
   abi3 wheels for Linux (x86-64 and ARM on glibc, x86-64 on musl), macOS
   (universal2) and Windows x64, plus an sdist, each wheel installed and run

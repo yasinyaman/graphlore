@@ -23,8 +23,8 @@ script `graphifyy` ships for its own embedded server.
 
 The plugin starts the server with [`uvx`](https://docs.astral.sh/uv/) from its
 own copy of this repository, so **`uv` must be installed**. It installs the
-`graphify`, `treesitter` and `semble` extras into an isolated environment — the
-Graphify CLI included — and points `GRAPHLORE_PROJECT_DIR` at the project you
+`engine`, `graphify`, `treesitter`, `semble` and `embed` extras into an isolated
+environment — graphlore's native engine included, as a prebuilt wheel — and points `GRAPHLORE_PROJECT_DIR` at the project you
 opened. The first start downloads the dependencies and can take a while; later
 starts come from uv's cache. Without `uv`, use the manual setup below. The plugin
 sets `GRAPHLORE_TOOLSET=full`: its skill uses the review and naming tools that the
@@ -118,8 +118,9 @@ search index's BM25 tier. These are the exceptions:
 | Semantic search (`[semble]`: `graphlore_locate`, `graphlore_query`, `graphlore_duplication_scan`) | First use: semble downloads its embedding model from the Hugging Face Hub, then caches it | `HF_HUB_OFFLINE=1` / `TRANSFORMERS_OFFLINE=1` are set before semble is imported, so only a cached model loads; otherwise the built-in index answers (backend unset), or the error says how to prefetch it (`GRAPHLORE_SEMANTIC_BACKEND=semble`) |
 | Built-in search, dense tier (`[embed]`: the same three tools) | First use: model2vec downloads `GRAPHLORE_EMBED_MODEL` (default `minishlab/potion-code-16M-v2`) from the Hugging Face Hub, then caches it | The same flags are set before model2vec is imported, so only a cached model loads; otherwise the index answers with BM25 alone and `backend.dense_unavailable` says why |
 | `GRAPHLORE_TOKENIZER=tiktoken` | First use: tiktoken fetches its encoding file unless cached | Not loaded; the chars/3.5 estimate is used |
-| tree-sitter grammars (`[treesitter]`) | First use of a language: the grammar is downloaded from GitHub releases and cached | Only grammars already in the cache are used; other files get no spans (with `GRAPHLORE_ENGINE=native` or `auto`, the native engine's compiled-in grammars answer instead) |
-| Native engine (`graphlore-engine`, `GRAPHLORE_ENGINE=native`) | Never: its grammars are compiled into the wheel and a build reads local files only | Unchanged |
+| tree-sitter grammars (`[treesitter]`) | First use of a language: the grammar is downloaded from GitHub releases and cached | Only grammars already in the cache are used; other files get no spans, unless the native engine is installed: its compiled-in grammars answer instead (not with `GRAPHLORE_ENGINE=graphify`) |
+| `graph.html` (written after a build) and the viewer (`viewer.html`, also on GitHub Pages) | Never: the page's code and data are in the file, a graph.json opened in it is read in the browser, and its Content Security Policy allows no request (the Pages copy is fetched once, like any web page, and sends nothing) | Unchanged |
+| Native engine (`graphlore-engine`, the `engine` extra) | Never: its grammars are compiled into the wheel and a build reads local files only | Unchanged |
 | A custom `GRAPHLORE_SEMANTIC_BACKEND` | Whatever that code does | **Not constrained** — graphlore cannot see inside it |
 | HTTP transports | Inbound only (the server listens) | Unchanged |
 
@@ -136,7 +137,9 @@ boot banner on stderr prints `egress=offline` or `egress=on-demand`.
 `engine/` in this repository is graphlore's own extractor, written in Rust and
 shipped as a separate package, `graphlore-engine`, whose wheels carry the
 tree-sitter grammars for Python, JavaScript, TypeScript/TSX, Go, Java, Kotlin,
-Scala, C#, Rust, Swift, C, C++, Ruby and PHP. It is experimental. A native graph
+Scala, C#, Rust, Swift, C, C++, Ruby and PHP. It builds the graph by default
+(`GRAPHLORE_ENGINE=auto`); graphify answers only when it is not installed, and
+goes in the next release. A native graph
 has a node per file, per definition (with its `start..end` span, `kind` and
 `qualname`), property, module-level constant and Markdown / reStructuredText
 heading; containment; and the imports (with when each runs), calls, bases and
@@ -151,13 +154,19 @@ by kind, confidence and directory, see
 across rebuilds, so names saved for them stay attached; every native build says
 so.
 
-It is not on PyPI yet. From a checkout:
+It is graphlore's `engine` extra, prebuilt for Linux (glibc and musl, x86-64
+and ARM), macOS and Windows; no Rust toolchain is needed:
+
+```bash
+pip install "graphlore[engine]"      # or: pip install graphlore-engine
+```
+
+From a checkout, with a Rust toolchain:
 
 ```bash
 pip install maturin
 maturin build -m engine/Cargo.toml --release --out dist-engine
 pip install dist-engine/*.whl
-GRAPHLORE_ENGINE=native GRAPHLORE_PROJECT_DIR=/path/to/repo python -m graphlore
 ```
 
 With the native engine, `graphlore_build`'s `update` parses only the files that
@@ -179,7 +188,7 @@ has the results on 31 repositories and the roadmap.
 | `GRAPHLORE_PROJECT_DIR` | `.` | Project root to extract the graph from |
 | `GRAPHLORE_OUT_DIR` | `graphify-out` | Output folder name |
 | `GRAPHLORE_BIN` | `graphify` | CLI path |
-| `GRAPHLORE_ENGINE` | `graphify` | What `graphlore_build` extracts with: `graphify` (the CLI), `native` (graphlore's experimental Rust engine, the `graphlore-engine` package; an error when it is not installed) or `auto` (native when installed, graphify for `mode`, `cluster_only` and updates of a graphify-built graph). See [The native engine](#the-native-engine) |
+| `GRAPHLORE_ENGINE` | `auto` | What `graphlore_build` extracts with: `auto` (graphlore's native engine when it is installed, else graphify; graphify also for `mode` and for `update` / `cluster_only` of a graphify-built graph), `native` (the engine, the `graphlore-engine` package; an error when it is not installed) or `graphify` (the CLI; deprecated, goes in the next release). Another value is an error. See [The native engine](#the-native-engine) |
 | `GRAPHLORE_TIMEOUT` | `600` | CLI and native build timeout (seconds) |
 | `GRAPHLORE_RESTRICT_PATHS` | `0` | Confine `graphlore_build`'s `path` to the project dir (auto-on for HTTP) |
 | `GRAPHLORE_TRANSPORT` | `stdio` | `stdio` \| `streamable-http` \| `sse` |
