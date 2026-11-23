@@ -1982,7 +1982,7 @@ def test_sampling_status_supported(project):
     )
     data = json.loads(out)
     assert data["host_sampling_supported"] is True
-    assert data["preferred_method"] == "sampling"
+    assert data["preferred_method"] == "derived"  # sampling only when asked for
 
 
 def test_sampling_status_unsupported(project):
@@ -1995,7 +1995,7 @@ def test_label_communities_via_sampling(project):
     # host naming must round-trip on both.
     for mode in ("auto", "legacy"):
         out = _run_in_memory(
-            project, "graphlore_label_communities", {"method": "auto", "as_json": True},
+            project, "graphlore_label_communities", {"method": "sampling", "as_json": True},
             sampling_callback=_first_member_host_llm, mode=mode,
         )
         data = json.loads(out)
@@ -2122,6 +2122,57 @@ def test_set_labels_persists_and_patches_html(tmp_path, monkeypatch):
 def test_set_labels_rejects_unknown_only(project):
     out = server.graphlore_set_labels({"999": "X"})
     assert "No valid community ids" in out
+
+
+def test_label_communities_derives_names_without_a_model(project):
+    """auto names communities from the graph, even when the client could sample:
+    no request reaches the host model, and no name is a bare placeholder."""
+    calls = {"n": 0}
+
+    async def _counting(context, params):
+        calls["n"] += 1
+        return await _first_member_host_llm(context, params)
+
+    for kw in ({}, {"sampling_callback": _counting}):
+        data = json.loads(_run_in_memory(
+            project, "graphlore_label_communities", {"as_json": True}, **kw))
+        assert data["method"] == "derived"
+        assert data["communities"]
+        assert all(not c["name"].startswith("Community ") for c in data["communities"])
+    assert calls["n"] == 0
+
+
+def test_derived_community_names_follow_the_engine_rule():
+    nodes = [
+        {"id": "a", "label": "Client()", "source_file": "pkg/http/client.py", "community": 0},
+        {"id": "b", "label": "send()", "source_file": "pkg/http/client.py", "community": 0},
+        {"id": "c", "label": ".helper()", "source_file": "pkg/http/util.py", "community": 0},
+        {"id": "x", "label": "requests", "type": "external", "community": 0},
+        {"id": "d", "label": "main()", "source_file": "app.py", "community": 1},
+        {"id": "e", "label": "cli()", "source_file": "tools/cli.py", "community": 1},
+        {"id": "f", "label": "Named", "source_file": "z.py", "community": 2,
+         "community_name": "z: Named by the engine"},
+    ]
+    edges = [
+        {"source": "a", "target": "b", "relation": "calls"},
+        {"source": "a", "target": "c", "relation": "calls"},
+        # an external's edges count, but an external never names the community
+        {"source": "x", "target": "b", "relation": "calls"},
+        {"source": "x", "target": "c", "relation": "calls"},
+        {"source": "x", "target": "a", "relation": "calls"},
+        {"source": "x", "target": "d", "relation": "calls"},
+        # derived relations and self-loops are not counted
+        {"source": "e", "target": "d", "relation": "couples_with"},
+        {"source": "e", "target": "e", "relation": "calls"},
+        {"source": "d", "target": "e", "relation": "calls"},
+    ]
+    names = server._derived_community_names(nodes, edges, [0, 1, 2, 3])
+    # 3 of 3 placed members in pkg/http -> the directory comes first; "()" dropped
+    assert names[0] == "pkg/http: Client"
+    # d and e tie on degree once x is counted for d: d has 2, e has 1
+    assert names[1] == "main"           # no directory holds more than 60%
+    assert names[2] == "z: Named by the engine"   # the build's own name wins
+    assert names[3] == "Community 3"    # nothing to name it after
 
 
 def test_label_communities_placeholder(project):
@@ -7586,7 +7637,7 @@ def test_naming_never_runs_the_graphify_cli(project, monkeypatch):
     monkeypatch.setattr(server.shutil, "which", lambda _b: "/fake/graphify")
     monkeypatch.setattr(server, "_run_cli", lambda *a, **k: pytest.fail("ran the CLI"))
     auto = json.loads(_run_in_memory(project, "graphlore_label_communities", {"as_json": True}))
-    assert auto["method"] == "placeholder"
+    assert auto["method"] == "derived"
     res = _call_over_mcp("graphlore_label_communities", {"method": "cli"})
     assert res.is_error is True and res.structured_content["code"] == "removed"
     assert "graphlore_set_labels" in res.structured_content["error"]
@@ -7594,7 +7645,7 @@ def test_naming_never_runs_the_graphify_cli(project, monkeypatch):
     assert res.is_error is True and res.structured_content["code"] == "bad_argument"
     monkeypatch.setenv("GRAPHLORE_OFFLINE", "1")
     status = json.loads(_run_in_memory(project, "graphlore_sampling_status", {"as_json": True}))
-    assert status["preferred_method"] == "placeholder" and status["offline"] is True
+    assert status["preferred_method"] == "derived" and status["offline"] is True
     assert "graphify_cli_available" not in status and "backend_key_detected" not in status
 
 

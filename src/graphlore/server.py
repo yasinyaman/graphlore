@@ -62,7 +62,7 @@ Project selection:
   - graphlore_project    : show / switch the project directory the server reads
 
 Community naming:
-  - graphlore_label_communities : name Leiden clusters (host-LLM sampling)
+  - graphlore_label_communities : name Leiden clusters (from the graph; sampling on request)
   - graphlore_sampling_status   : report which naming options are available
   - graphlore_set_labels        : assistant-pushed {id: name} (no key, no sampling)
 
@@ -3439,18 +3439,19 @@ def graphlore_sampling_status(ctx: Context, as_json: bool = False) -> str:
     """Capability test: how can semantic naming be produced in this session?
 
     Reports whether the connected client supports host-LLM **sampling** (so the
-    server needs no API key), and which method graphlore_label_communities will pick.
+    server needs no API key), and the method graphlore_label_communities uses by
+    default (``derived``: names from the graph, no model).
     """
     sampling = _client_supports_sampling(ctx)
+    method = "derived"
     if sampling:
-        method = "sampling"
-        advice = "graphlore_label_communities() will use the host LLM — no API key needed."
-    else:
-        method = "placeholder"
         advice = (
-            "No host sampling — names stay as 'Community N'. Name them yourself with "
-            "graphlore_set_labels (assistant-driven, no key)."
-        )
+            "graphlore_label_communities() derives names from the graph (no model); "
+            "method='sampling' asks the host LLM instead — no API key needed.")
+    else:
+        advice = (
+            "No host sampling. graphlore_label_communities() derives names from the "
+            "graph (no model); name them yourself with graphlore_set_labels.")
     payload = {
         "host_sampling_supported": sampling,
         "preferred_method": method,
@@ -3487,6 +3488,85 @@ def _communities_for_naming(limit: int) -> tuple[list[tuple[Any, list[str]]], in
     return sorted(comms.items(), key=lambda kv: -len(kv[1]))[:max(0, limit)], len(comms)
 
 
+# the engine's rule (engine/src/community/mod.rs, name_of): a directory names a
+# community when more than this share of its placed members sit in it
+_DIR_NAME_SHARE = 0.6
+
+
+def _derived_community_names(
+    nodes: list[dict], edges: list[dict], cids: list[Any]
+) -> dict[Any, str]:
+    """Names for communities without asking any model: the build's own.
+
+    A native graph carries the engine's ``community_name`` on every node; this
+    returns it. Otherwise (a graphify graph) it applies the same rule as the
+    engine: the member with the most edges names the community (internal nodes
+    before external ones, ties by id), and when most of the members sit in one
+    directory the directory comes first (``httpx/_transports: HTTPTransport``).
+    Deterministic for a given graph.json, free, and needs no session.
+    """
+    wanted = set(cids)
+    members: dict[Any, list[dict]] = {}
+    for n in nodes:
+        c = n.get("community", n.get("cluster"))
+        if c in wanted:
+            members.setdefault(c, []).append(n)
+    names: dict[Any, str] = {}
+    degree: dict[str, int] | None = None
+    for cid in cids:
+        group = members.get(cid) or []
+        given = next((str(n["community_name"]).strip() for n in group
+                      if str(n.get("community_name") or "").strip()), "")
+        if given:
+            names[cid] = given
+            continue
+        if not group:
+            names[cid] = f"Community {cid}"
+            continue
+        if degree is None:
+            degree = _naming_degrees(nodes, edges)
+        deg = degree
+        hub = min(group, key=lambda n: (n.get("type") in ("external", "resource"),
+                                        -deg.get(str(_node_id(n)), 0), str(_node_id(n))))
+        name = str(hub.get("label") or "").strip().lstrip(".")
+        if name.endswith("()"):
+            name = name[:-2]
+        name = name or str(_node_id(hub))
+        dirs: dict[str, int] = {}
+        placed = 0
+        for n in group:
+            f = str(n.get("source_file") or "")
+            if f:
+                placed += 1
+                d = f.rsplit("/", 1)[0] if "/" in f else ""
+                dirs[d] = dirs.get(d, 0) + 1
+        if dirs:
+            top, count = min(dirs.items(), key=lambda kv: (-kv[1], kv[0]))
+            if top and len(group) > 1 and count > _DIR_NAME_SHARE * placed:
+                name = f"{top}: {name}"
+        names[cid] = name
+    return names
+
+
+def _naming_degrees(nodes: list[dict], edges: list[dict]) -> dict[str, int]:
+    """Edges per node as the engine counts them for naming: between two known
+    nodes, no self-loop, and none of the derived relations (a shared-state
+    pair, a document naming code, a method written for a base's method)."""
+    known = {str(_node_id(n)) for n in nodes}
+    degree: dict[str, int] = {}
+    for e in edges:
+        a, b = (str(x) for x in _edge_ends(e))
+        if a == b or a not in known or b not in known:
+            continue
+        rel = _edge_rel(e)
+        if (rel in _COUPLING_RELATIONS or rel in _DOCUMENT_RELATIONS
+                or (rel == "dispatches_to" and e.get("context") == "override")):
+            continue
+        degree[a] = degree.get(a, 0) + 1
+        degree[b] = degree.get(b, 0) + 1
+    return degree
+
+
 def _naming_request(
     ordered: list[tuple[Any, list[str]]], sample_size: int
 ) -> tuple[list[SamplingMessage], str, int]:
@@ -3520,10 +3600,10 @@ def _resolve_host_naming(
     this returns None and the tool body samples directly instead: that path
     can catch a failing host model and degrade to placeholder names, which a
     resolver cannot (Sample has no error arm — a failure would error the whole
-    tool call). Also None when sampling isn't the (potential) method, the
+    tool call). Also None when sampling isn't the method asked for, the
     client can't sample, or there is nothing to name.
     """
-    if method not in ("auto", "sampling") or not _client_supports_sampling(ctx):
+    if method != "sampling" or not _client_supports_sampling(ctx):
         return None
     if ctx.session.can_send_request:
         return None
@@ -3569,7 +3649,7 @@ def _names_from_sampling(
 
 @_tool(
     annotations=ToolAnnotations(
-        title="Name communities (host LLM)",
+        title="Name communities",
         read_only_hint=False,
         destructive_hint=False,
     )
@@ -3590,11 +3670,17 @@ async def graphlore_label_communities(
 ) -> str:
     """Give the Leiden communities human-readable names.
 
+    By default the names are derived from the graph, with no model: the build's
+    own (``community_name``), else the same rule applied here (the most
+    connected member, after its directory when most members share one).
+    ``method="sampling"`` asks the client's model instead (MCP sampling,
+    deprecated in the 2026-07-28 revision). Nothing is saved: persist names
+    with graphlore_set_labels.
+
     Args:
-        method: "auto" -> host-LLM sampling if the client supports it, else
-            "Community N" placeholders (name them yourself with
-            graphlore_set_labels). "sampling" -> force host-LLM sampling (no API
-            key needed). "placeholder" -> no LLM at all.
+        method: "auto" or "derived" -> names from the graph, no model.
+            "sampling" -> the client's model (MCP sampling, no API key).
+            "placeholder" -> "Community N".
         limit: Only the largest `limit` communities are named, to stay cheap.
         sample_size: Member labels per community handed to the model.
     """
@@ -3612,11 +3698,11 @@ async def graphlore_label_communities(
             "yourself with graphlore_set_labels.",
             as_json, code="removed",
         )
-    if method not in ("auto", "sampling", "placeholder"):
-        return _err(f"Unknown method '{method}': use auto, sampling or placeholder.",
+    if method not in ("auto", "derived", "sampling", "placeholder"):
+        return _err(f"Unknown method '{method}': use auto, derived, sampling or placeholder.",
                     as_json, code="bad_argument")
     if method == "auto":
-        chosen = "sampling" if sampling_ok else "placeholder"
+        chosen = "derived"
 
     names: dict[Any, str] = {}
     note = ""
@@ -3649,6 +3735,10 @@ async def graphlore_label_communities(
         names, note = _names_from_sampling(host_naming, ordered)
         if fail_note:
             note = fail_note
+    elif chosen == "derived":
+        graph = _load_graph()
+        g_nodes, g_edges = _nodes_edges(graph) if isinstance(graph, dict) else ([], [])
+        names = _derived_community_names(g_nodes, g_edges, [cid for cid, _ in ordered])
     else:  # placeholder
         names = {cid: f"Community {cid}" for cid, _ in ordered}
 
@@ -3674,8 +3764,14 @@ async def graphlore_label_communities(
     ]
     if chosen == "placeholder":
         text.append(
-            "\nNo automatic naming available. Name these yourself and persist them with "
+            "\nPlaceholder names. Name these yourself and persist them with "
             'graphlore_set_labels({"<id>": "<name>", ...}).'
+        )
+    elif chosen == "derived":
+        text.append(
+            "\nDerived from each community's most connected member and its directory. "
+            + _tool_hint("graphlore_set_labels", "Better names: persist them with "
+                         'graphlore_set_labels({"<id>": "<name>", ...}).')
         )
     return _fmt(payload, as_json, "\n".join(text))
 

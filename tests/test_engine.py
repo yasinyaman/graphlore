@@ -328,6 +328,18 @@ def test_native_communities_are_read_kept_and_reclustered(native):
     assert skeleton["sections"]
 
 
+def test_derived_community_names_are_the_engine_s(native):
+    """graphlore names a graphify graph's communities by the rule the engine
+    names its own with: on a native graph with its names taken off, the Python
+    rule gives back every one of them."""
+    server.graphlore_build(".")
+    graph = _graph(native)
+    nodes, edges = graph["nodes"], graph.get("links", graph.get("edges", []))
+    engine = {n["community"]: n["community_name"] for n in nodes}
+    bare = [{k: v for k, v in n.items() if k != "community_name"} for n in nodes]
+    assert server._derived_community_names(bare, edges, sorted(engine)) == engine
+
+
 def test_native_update_parses_only_what_changed(py_project):
     cache = py_project / "graphify-out" / "cache" / "graphlore-native.bin"
     assert cache.is_file()

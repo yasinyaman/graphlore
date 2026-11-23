@@ -36,6 +36,17 @@ All notable changes to this project are documented here. The format is based on
   release. A published release still starts it as before.
 
 ### Changed
+- **Communities are named from the graph by default, with no model.**
+  `graphlore_label_communities(method="auto")` now returns derived names
+  (`method="derived"`): the build's own `community_name` on a native graph,
+  else the engine's rule applied in Python (the member with the most edges,
+  internal before external, after the directory more than 60% of the members
+  share), which `tests/test_engine.py` holds to the engine's names. `auto`
+  used to sample the client's model when it could and fall back to bare
+  `Community N` otherwise; MCP's 2026-07-28 revision deprecates sampling
+  (SEP-2577) and a stateless server has no session to sample through, so
+  `method="sampling"` is now only used when asked for.
+  `graphlore_sampling_status` reports `preferred_method: "derived"`.
 - **Every `lean` tool's description says what it is for and what it is not
   for** ("Use for: … Not for: … (use X)"). Claude Code defers MCP tools behind
   its tool search, where a tool is picked by its name and description alone;

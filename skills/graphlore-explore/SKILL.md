@@ -253,13 +253,13 @@ many): list its members with `graphlore_skeleton` and fetch the one you need.
 
 ## Naming communities (optional, for readable subsystems)
 
-Leiden clusters are numbered (`Community 7`) until a model names them.
-`graphlore_sampling_status()` reports the options; `graphlore_label_communities()`
-then names them via **host-LLM sampling** (no server API key) or placeholders —
-`method="auto"` picks the best available. In a
-client that lacks MCP sampling (e.g. Claude Code), read a community's members and
-push your own names with `graphlore_set_labels({"<id>": "<name>", ...})` — no key,
-no sampling required.
+`graphlore_communities` already shows a name per community, derived from the
+graph (its most connected member, after the directory most members share);
+`graphlore_label_communities()` gives the same names with no model, and
+`method="sampling"` asks the client's model when the client supports MCP
+sampling (`graphlore_sampling_status()`). For names a reader would choose, read
+a community's members and push your own with
+`graphlore_set_labels({"<id>": "<name>", ...})` — no key, no sampling required.
 
 ## After code changes
 
