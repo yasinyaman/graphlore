@@ -71,9 +71,10 @@ The other clients and what each plugin carries are in
 the graph (prebuilt wheels, no Rust toolchain), then register the server.
 
 ```bash
-# graphlore is not on PyPI yet: install from GitHub
-pip install "graphlore[engine] @ git+https://github.com/yasinyaman/graphlore"
+pip install "graphlore[engine]"
 ```
+
+or run it with nothing installed: `uvx --from "graphlore[engine]" graphlore`.
 
 Then let graphlore write your client's config, and the usage guide its agent
 reads (`AGENTS.md`, `GEMINI.md`, Copilot's instructions):
@@ -106,9 +107,7 @@ extractor, which builds the graph), `embed` (static code
 embeddings for the built-in search behind `graphlore_locate`), `semble` (semble
 as that search instead, with `GRAPHLORE_SEMANTIC_BACKEND=semble`), `treesitter` (spans for non-Python
 languages; without it the native engine's compiled-in grammars give them), `tiktoken` (exact token
-counts), `watch` (re-sync on file changes). Until the first PyPI release, use
-the GitHub form wherever a message says `pip install "graphlore[extra]"`:
-`pip install "graphlore[semble] @ git+https://github.com/yasinyaman/graphlore"`.
+counts), `watch` (re-sync on file changes).
 
 **Then ask.** The assistant builds the graph once and explores from there
 (output from the repository's small test fixture):

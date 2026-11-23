@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "graphlore"
-version = "0.7.0"
+version = "0.8.0"
 description = "MCP server that lets AI coding assistants navigate a codebase through a knowledge graph it builds itself (Rust and tree-sitter, 14 languages): semantic code search, impact analysis, token-budgeted subgraphs and exact source spans."
 readme = "README.md"
 requires-python = ">=3.10"

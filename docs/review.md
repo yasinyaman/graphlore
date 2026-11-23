@@ -99,7 +99,7 @@ graphlore-review:
   variables:
     GIT_DEPTH: 0
   script:
-    - pip install "graphlore[engine] @ git+https://github.com/yasinyaman/graphlore@v0.8.0"
+    - pip install "graphlore[engine]==0.8.0"
     - git fetch origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
     - graphlore review --base "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" --output review.md --fail-on cycle
   artifacts:

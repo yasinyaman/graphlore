@@ -3,10 +3,10 @@
 graphlore is a local stdio MCP server. Every client below starts it the same
 way, as the command `graphlore` (installed as the [README](../README.md#quick-start)
 says), with `GRAPHLORE_PROJECT_DIR` naming the repository it reads (and
-`GRAPHLORE_TOOLSET=full` for all 34 tools; the default `lean` has 12). Once
-graphlore is on PyPI, `uvx --from "graphlore[engine,treesitter]" graphlore`
-starts it with nothing installed (`--command uvx` below); the examples on this
-page use that form.
+`GRAPHLORE_TOOLSET=full` for all 34 tools; the default `lean` has 12).
+`uvx --from "graphlore[engine,treesitter]" graphlore` starts it from PyPI with
+nothing installed (`--command uvx` below); the examples on this page use that
+form.
 
 The quickest way is to let graphlore write the block:
 

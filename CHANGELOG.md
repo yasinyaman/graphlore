@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-23
+
+The first release on PyPI: 0.7.0, below, was never uploaded, so `pip install graphlore` installs
+0.8.0 with the changes of both.
+
 ### Added
 - **Claude Code hooks** (`graphlore hook pre|post`). Before a `Grep` or
   `Glob` for one identifier the graph defines, a line of context names where
