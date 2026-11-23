@@ -36,6 +36,11 @@ All notable changes to this project are documented here. The format is based on
   release. A published release still starts it as before.
 
 ### Changed
+- **`import graphlore` no longer loads the server.** The package's exports
+  (`main`, `mcp`, `__version__`, `api_uses_for_source`, `routes_for_source`)
+  load on first use, so `graphlore setup`, `clients` and `agents-md` start in
+  about 25 ms instead of 0.6 s (the MCP SDK and the 34 tools were imported
+  first).
 - **Communities are named from the graph by default, with no model.**
   `graphlore_label_communities(method="auto")` now returns derived names
   (`method="derived"`): the build's own `community_name` on a native graph,

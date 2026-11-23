@@ -587,6 +587,21 @@ def test_version_reported_over_mcp():
     assert server.mcp.version == server.__version__
 
 
+def test_the_cli_does_not_load_the_server_until_it_runs_it():
+    # `graphlore hook` runs on every tool call of an agent: the package and the
+    # CLI must import without the MCP SDK and the 34 tools behind it
+    import subprocess
+    import sys
+
+    code = ("import sys, graphlore, graphlore.cli; "
+            "assert 'graphlore.server' not in sys.modules, 'server loaded'; "
+            "assert 'mcp' not in sys.modules, 'mcp loaded'; "
+            "v = graphlore.__version__; assert 'graphlore.server' in sys.modules; print(v)")
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.strip() == server.__version__
+
+
 def test_main_module_wired():
     import importlib
 
