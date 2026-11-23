@@ -8639,6 +8639,31 @@ def test_unreferenced_skips_anonymous_classes(tmp_path, monkeypatch):
     assert [r["node"] for r in rows] == ["Lonely"]
 
 
+def test_unreferenced_skips_googletest_cases_the_native_engine_names(tmp_path, monkeypatch):
+    # cpr: the native engine names `TEST_F(Fixture, Name)` `Fixture.Name`, not `TEST`
+    (tmp_path / "test").mkdir()
+    (tmp_path / "test" / "a_tests.cpp").write_text(
+        "TEST(ErrorTests, Timeout) {\n}\n"
+        "TEST_F(Fixture, Works) {\n}\n"
+        "static int helper(int a, int b) { return a; }\n", encoding="utf-8")
+    (tmp_path / "src.cpp").write_text("TEST(Not, Test) {\n}\n", encoding="utf-8")
+    _write_graph(tmp_path, {"nodes": [
+        {"id": "t", "label": ".Timeout()", "qualname": "ErrorTests.Timeout", "kind": "method",
+         "source_file": "test/a_tests.cpp", "source_location": "L1"},
+        {"id": "f", "label": ".Works()", "qualname": "Fixture.Works", "kind": "method",
+         "source_file": "test/a_tests.cpp", "source_location": "L3"},
+        {"id": "h", "label": "helper()", "qualname": "helper", "kind": "function",
+         "source_file": "test/a_tests.cpp", "source_location": "L5"},
+        # outside a test directory the macro shape proves nothing
+        {"id": "p", "label": ".Test()", "qualname": "Not.Test", "kind": "method",
+         "source_file": "src.cpp", "source_location": "L1"},
+    ], "edges": []})
+    server._GRAPH_CACHE.clear()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    rows = json.loads(server.graphlore_unreferenced(as_json=True))["unreferenced"]
+    assert sorted(r["node"] for r in rows) == [".Test()", "helper()"]
+
+
 def test_package_api_readers_of_eight_more_languages():
     _skip_without_treesitter()
     from graphlore.apis import api_uses_for_source as uses
@@ -9958,3 +9983,132 @@ def test_oauth_is_refused_offline(monkeypatch):
     with pytest.raises(oauth.AuthConfigError, match="OFFLINE"):
         oauth.apply(server.mcp, {"issuer": "https://idp.example.com",
                                  "resource": "https://g.example.com/mcp", "scopes": []})
+
+
+def _plugin_mode(monkeypatch, plugin_root):
+    """A server a plugin client started in its own directory, naming no project."""
+    monkeypatch.setattr(server.config, "PROJECT_FROM_CLIENT", True)
+    monkeypatch.setattr(server.config, "project_pending", True)
+    monkeypatch.setattr(server.config, "PROJECT_DIR", plugin_root)
+    monkeypatch.setattr(server, "_ROOTS_ASKED", False)
+    monkeypatch.setattr(server, "RESTRICT_PATHS", False)  # stdio, as a plugin runs it
+
+
+def test_a_plugin_started_server_asks_for_the_project_before_answering(
+        project, tmp_path_factory, monkeypatch):
+    import asyncio
+
+    from mcp import Client
+
+    _plugin_mode(monkeypatch, tmp_path_factory.mktemp("plugin"))
+
+    async def go():
+        async with Client(server.mcp) as client:
+            async def call(tool, **args):
+                res = await client.call_tool(tool, {"as_json": True, **args})
+                return res.is_error, json.loads(res.content[0].text)
+            return [await call("graphlore_overview"), await call("graphlore_project"),
+                    await call("graphlore_project", path=str(project)),
+                    await call("graphlore_overview")]
+
+    before, asked, named, after = asyncio.run(go())
+    assert before[0] and before[1]["code"] == "project_unknown"
+    assert "graphlore_project" in before[1]["error"]
+    assert not asked[0] and asked[1]["project_known"] is False
+    assert named[1].get("project_dir") == str(project), named
+    assert named[1]["switched"] is False
+    assert not after[0] and after[1]["nodes"] > 0
+    assert server.config.project_pending is False
+    assert "project_unknown" in server._instructions(None)
+
+
+def test_a_plugin_started_server_reads_the_client_s_first_root(
+        project, tmp_path_factory, monkeypatch):
+    import asyncio
+
+    from mcp import Client, types
+
+    plugin_root = tmp_path_factory.mktemp("plugin")
+    _plugin_mode(monkeypatch, plugin_root)
+
+    async def roots(_context):
+        return types.ListRootsResult(roots=[
+            types.Root(uri=(project / "missing").as_uri()),  # not a directory: skipped
+            types.Root(uri=project.as_uri(), name="repo"),
+        ])
+
+    async def go():
+        # roots/list is a server->client request: the pre-2026-07-28 back-channel
+        async with Client(server.mcp, list_roots_callback=roots, mode="legacy") as client:
+            res = await client.call_tool("graphlore_overview", {"as_json": True})
+            return json.loads(res.content[0].text)
+
+    out = asyncio.run(go())
+    assert out.get("nodes", 0) > 0, out
+    assert server.config.PROJECT_DIR == project.resolve()
+    assert server.config.project_pending is False
+
+
+def test_a_plugin_started_server_without_roots_waits_for_graphlore_project(
+        project, tmp_path_factory, monkeypatch):
+    import asyncio
+
+    from mcp import Client
+
+    _plugin_mode(monkeypatch, tmp_path_factory.mktemp("plugin"))
+
+    async def go():
+        async with Client(server.mcp) as client:  # no roots capability
+            res = await client.call_tool("graphlore_overview", {"as_json": True})
+            return res.is_error, json.loads(res.content[0].text)
+
+    is_error, out = asyncio.run(go())
+    assert is_error and out["code"] == "project_unknown"
+    assert server.config.project_pending is True
+
+
+def test_plugin_manifests_stay_in_sync():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent
+    version = server.__version__
+    claude = json.loads((root / ".claude-plugin" / "plugin.json").read_text())
+    agent = json.loads((root / "plugin.json").read_text())
+    mcp_json = json.loads((root / "mcp.json").read_text())
+    gemini = json.loads((root / "gemini-extension.json").read_text())
+    # Agent Plugins 1.0 (Codex, Copilot CLI, Cursor): a closed manifest, skills in
+    # skills/, the server in mcp.json, started in the plugin root
+    assert agent["$schema"] == "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json"
+    assert set(agent) <= {"$schema", "name", "version", "description", "author", "homepage",
+                          "repository", "license", "keywords", "extensions"}
+    assert mcp_json["$schema"] == "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json"
+    assert {claude["version"], agent["version"], gemini["version"]} == {version}
+    assert claude["name"] == agent["name"] == gemini["name"] == "graphlore"
+    assert claude["skills"] == ["./skills/"]
+    assert (root / "skills" / "graphlore-explore" / "SKILL.md").is_file()
+    servers = {"claude": claude["mcpServers"]["graphlore"],
+               "agent": mcp_json["mcpServers"]["graphlore"],
+               "gemini": gemini["mcpServers"]["graphlore"]}
+    # every manifest builds the same package with the same extras from its own copy
+    sources = {k: s["args"][1] for k, s in servers.items()}
+    assert sources == {
+        "claude": "graphlore[engine,graphify,treesitter,semble,embed] @ ${CLAUDE_PLUGIN_ROOT}",
+        "agent": "graphlore[engine,graphify,treesitter,semble,embed] @ .",
+        "gemini": "graphlore[engine,graphify,treesitter,semble,embed] @ ${extensionPath}"}
+    pyproject = (root / "pyproject.toml").read_text()
+    for extra in ("engine", "graphify", "treesitter", "semble", "embed"):
+        assert f"\n{extra} = [" in pyproject, extra
+    for s in servers.values():
+        assert s["command"] == "uvx" and s["args"][0] == "--from" and s["args"][2] == "graphlore"
+        assert s["env"]["GRAPHLORE_TOOLSET"] == "full"
+    agent_server = servers["agent"]
+    assert agent_server["type"] == "stdio" and agent_server["cwd"] == "./"
+    assert agent_server["env"] == {"GRAPHLORE_PROJECT_FROM_CLIENT": "1",
+                                   "GRAPHLORE_TOOLSET": "full"}
+    assert servers["gemini"]["env"]["GRAPHLORE_PROJECT_DIR"] == "${workspacePath}"
+    # Gemini loads its context file, never the repository's own GEMINI.md
+    from graphlore import agents_md
+
+    guide = (root / gemini["contextFileName"]).read_text()
+    assert gemini["contextFileName"] != "GEMINI.md"
+    assert guide == agents_md.render(sorted(server._registered_tool_names()))

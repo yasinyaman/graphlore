@@ -6,7 +6,22 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-23
+
 ### Fixed
+- **`graphlore_unreferenced` no longer lists googletest cases as dead code
+  on native graphs.** Since engine 0.5.76 a `TEST(Suite, Name)` /
+  `TEST_F(Fixture, Name)` is the method `Suite.Name`, not a function called
+  `TEST`, so the rule that skipped tests by name stopped matching: on cpr
+  112 of its 220 rows were tests. A C / C++ definition in a test file whose
+  line is a test macro (a name in capitals given two bare names, the
+  engine's own rule) is skipped. `benchmarks/polyglot.py` now expects 34
+  tools, knows the `documents` relation and runs `graphlore_bridges` and
+  `graphlore_god_nodes`' `rank=` modes.
+- **`benchmarks/polyglot.py --setup --engine native` no longer needs
+  graphify.** Setup ran `graphify update .` whatever the engine and stopped
+  at the first repository without the deprecated CLI; with `--engine native`
+  it now only clones and the native engine builds the graphs.
 - **A reply with default arguments stays under 35,000 characters (~10k
   tokens)**, what Claude Code, Codex and Gemini CLI all keep; the result's
   `structuredContent` carries the same payload, so a large JSON payload was a
@@ -100,6 +115,8 @@ All notable changes to this project are documented here. The format is based on
   failed on it before this change too.
 
 ### Changed
+- **The `engine` extra needs `graphlore-engine` 0.5.79** (`>=0.5.79,<0.6`), the
+  first engine release on PyPI: graph.json schema 7, with `documents` edges.
 - **The documentation describes the native engine as the default.** The
   agent instructions, the exploration skill, `docs/concepts.md`,
   `docs/native-engine.md` (its introduction and the roadmap's release A, now
@@ -151,6 +168,25 @@ All notable changes to this project are documented here. The format is based on
   pairs to 68.
 
 ### Added
+- **graphlore installs as a plugin in Codex, GitHub Copilot CLI and Gemini CLI**,
+  as it does in Claude Code: the repository root is also an
+  [Agent Plugins 1.0](https://github.com/agentplugins/agent-plugins-spec) plugin
+  (`plugin.json`, `mcp.json`, `skills/`), which Codex and Copilot CLI read
+  through the existing `.claude-plugin/marketplace.json`, and a Gemini CLI
+  extension (`gemini-extension.json`, with `.gemini-extension/GRAPHLORE.md` as
+  its context file). Each starts the same server with `uvx` from its own copy and
+  ships the `graphlore-explore` skill, which moved to `skills/` (the fixed place
+  the standard reads; Claude Code's manifest points there too). Checked with
+  Codex 0.171, Copilot CLI 1.0.114 and Gemini CLI 0.70. The root `mcp.json`, an
+  example config, is now the plugin's server.
+- **`GRAPHLORE_PROJECT_FROM_CLIENT=1`: the project comes from the client.** An
+  Agent Plugins client starts the server in the plugin's own directory and names
+  no project. With this set (and no `GRAPHLORE_PROJECT_DIR`), graphlore asks the
+  client for its workspace roots on the first tool call and reads the first
+  directory; a client that gives none gets `code: project_unknown` from every
+  tool but `graphlore_project` and `graphlore_sampling_status`, with the call
+  that names the project. The server instructions say so, the `locate` and
+  `lean` surfaces keep `graphlore_project`, and the watcher does not start.
 - **OAuth for the HTTP transport**, for remote clients (claude.ai and ChatGPT
   connectors, Claude Code or Codex over HTTP): graphlore as a resource server
   (`oauth.py`, the new `remote` extra: pyjwt). `GRAPHLORE_AUTH_ISSUER` and

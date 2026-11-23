@@ -2307,6 +2307,17 @@ gone:
   audit's own: `[Test],` as an element of a list, `#[cfg(test)]` on a `let`,
   and Ruby's `class ActiveSupport::TestCase` compared by its whole name.
 
+Rerun on graphs built by engine 0.5.79 (2026-11-23, 93 s of tool time), with
+the audit's reply limit lowered from 90 KB to 35,000 characters (what Claude
+Code, Codex and Gemini CLI keep) and `graphlore_bridges` and
+`graphlore_god_nodes`' `rank=` modes added to it: no reply over the limit,
+and nothing new but retrofit's build through `graphlore_build` (7.9 s,
+`SLOW`) and guzzle's `noBodyProvider()`, a PHPUnit data provider listed as
+unreferenced. The first run of the day found 112 googletest cases in cpr's
+`graphlore_unreferenced`: since engine 0.5.76 names `TEST_F(Fixture, Name)`
+`Fixture.Name`, the rule that skipped a test named `TEST` no longer matched.
+A test file's definition written as a test macro is skipped now.
+
 An earlier version of this page reported a rerun "with engine 0.5.2" that had
 in fact read graphs engine 0.5.1 built: the audit kept a native graph it found
 on disk. It now rebuilds one built by another version of the engine and says

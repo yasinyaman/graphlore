@@ -33,10 +33,14 @@ def env(name: str, default: str | None = None) -> str | None:
     return default if value is None else value
 
 
+def _truthy(value: str | None) -> bool:
+    return (value or "").strip().lower() in ("1", "true", "yes", "on")
+
+
 def offline() -> bool:
     """``GRAPHLORE_OFFLINE=1``: refuse every path graphlore knows reaches the network
     (read per call, so tests and a restarted watcher see the current value)."""
-    return (env("OFFLINE", "") or "").strip().lower() in ("1", "true", "yes", "on")
+    return _truthy(env("OFFLINE", ""))
 
 
 # The Hugging Face libraries behind the embedding models (semble's, and the
@@ -54,4 +58,11 @@ def export_offline_env() -> None:
 
 
 PROJECT_DIR = Path(env("PROJECT_DIR", ".")).resolve()
+# A plugin client (Agent Plugins 1.0: Codex, Copilot CLI) starts the server in the
+# plugin's own directory and names no project. With GRAPHLORE_PROJECT_FROM_CLIENT=1
+# and no GRAPHLORE_PROJECT_DIR, the project is the client's first root (MCP
+# `roots/list`, asked on the first tool call) or the directory `graphlore_project`
+# is given; until then `project_pending` is True and the tools say so.
+PROJECT_FROM_CLIENT = _truthy(env("PROJECT_FROM_CLIENT")) and env("PROJECT_DIR") is None
+project_pending = PROJECT_FROM_CLIENT
 OUT_DIR_NAME = env("OUT_DIR", "graphify-out")

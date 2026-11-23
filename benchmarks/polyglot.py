@@ -2,7 +2,7 @@
 """Polyglot audit: run every graphlore tool on real repositories in 14 languages.
 
 benchmarks/multilang.py measures one tool (graphlore_locate) on six libraries.
-This script exercises the whole surface — all 33 tools, the resources and the
+This script exercises the whole surface — all 34 tools, the resources and the
 prompts — on real code in Python, JavaScript, TypeScript/TSX, Go, Java, Kotlin,
 Scala, C#, Rust, Swift, C, C++, Ruby and PHP, and turns what it sees into a
 list of findings. It needs no ground truth per repository: every check is an
@@ -202,7 +202,7 @@ NODE_TOOLS = ("neighbors", "subgraph", "impact", "tests_for", "node_details", "s
 # Tools the conventions say carry the analysis scope in their payload.
 SCOPED_TOOLS = frozenset({
     "overview", "god_nodes", "surprises", "duplication_scan", "validate", "cycles",
-    "unreferenced", "same_names", "neighbors", "subgraph", "impact",
+    "unreferenced", "same_names", "neighbors", "subgraph", "impact", "bridges",
 })
 QUOTING_TOOLS = frozenset({"node_details", "fetch", "skeleton"})
 # The list a tool exists to return: empty means the tool had nothing to say.
@@ -288,8 +288,10 @@ def _graphify() -> str:
     return str(beside) if beside.exists() else (shutil.which("graphify") or "graphify")
 
 
-def setup(root: Path, repos: list[dict[str, Any]]) -> None:
-    """Fetch each pinned commit and build its graph (local AST extraction)."""
+def setup(root: Path, repos: list[dict[str, Any]], graphify: bool = True) -> None:
+    """Fetch each pinned commit and build its graph (local AST extraction).
+    With ``graphify=False`` (``--engine native``) only fetch: `build_native`
+    builds the graphs, and graphify need not be installed."""
     root.mkdir(parents=True, exist_ok=True)
     for repo in repos:
         d = root / repo["key"]
@@ -301,7 +303,9 @@ def setup(root: Path, repos: list[dict[str, Any]]) -> None:
             _git(d, "checkout", "-q", "FETCH_HEAD")
         with (d / ".git" / "info" / "exclude").open("a", encoding="utf-8") as fh:
             fh.write("graphify-out/\n")
-        if not (d / "graphify-out" / "graph.json").exists():
+        if not graphify:
+            print(f"fetched {repo['key']}")
+        elif not (d / "graphify-out" / "graph.json").exists():
             res = subprocess.run([_graphify(), "update", "."], cwd=str(d),
                                  capture_output=True, text=True)
             tail = (res.stdout + res.stderr).strip().splitlines()[-3:]
@@ -550,6 +554,24 @@ def check_orientation(a: Audit, sub: Subject) -> None:
                     a.finding("SUGGESTS-UNKNOWN-TOOL", "medium", "bug", "overview",
                               "suggested_next names a tool that does not exist", hint)
     a.call("god_nodes", top_n=3, scope="all", expect_error=True)
+    for rank in ("pagerank", "betweenness"):
+        ranked = a.call("god_nodes", rank=rank)
+        if ranked and "error" not in ranked:
+            scores = [g.get(rank, 0) for g in ranked.get("god_nodes", [])]
+            if scores != sorted(scores, reverse=True):
+                a.finding("GOD-NODES-UNSORTED", "medium", "bug", "god_nodes",
+                          f"not sorted by {rank}")
+    for level in ("file", "directory", "node"):
+        br = a.call("bridges", level=level)
+        if br and "error" not in br:
+            # what a cut leaves is a proper part of its component, on one side of it
+            rows = br.get("bridges", []) + br.get("cut_points", [])
+            bad = [r for r in rows
+                   if not 0 < (r.get("cuts_off") or 0) < (r.get("component") or 0)
+                   or ("between" in r and r.get("with") not in r["between"])]
+            if bad:
+                a.finding("BRIDGE-SIDES", "low", "bug", "bridges",
+                          "a cut that cuts off nothing, or its whole component", bad[0])
     sp = a.call("surprises")
     if sp and "error" not in sp and sp.get("basis") not in ("flagged", "computed", "none"):
         a.finding("SURPRISES-BASIS", "low", "bug", "surprises", "unexpected basis",
@@ -1033,7 +1055,7 @@ def check_languages(a: Audit, sub: Subject, repo: dict[str, Any]) -> None:
     not_code = {"rationale_for", "declares", "depends_on", "includes", "cites"}
     known = (s._IMPORT_RELATIONS | s._CALL_RELATIONS | gl_graph._CONTAINMENT_RELATIONS
              | s._IMPACT_CODE_RELATIONS | s._STATE_RELATIONS | s._HTTP_RELATIONS
-             | s._COUPLING_RELATIONS
+             | s._COUPLING_RELATIONS | gl_graph._DOCUMENT_RELATIONS
              | not_code)
     rels = Counter(s._rel(e) for e in sub.edges)
     m["relations"] = dict(rels.most_common())
@@ -1289,9 +1311,9 @@ def check_protocol(a: Audit, sub: Subject) -> None:
     async def go() -> None:
         async with Client(s.mcp) as client:
             tools = (await client.list_tools()).tools
-            if len(tools) != 33:
+            if len(tools) != 34:
                 a.finding("TOOL-COUNT", "high", "bug", "protocol",
-                          "list_tools does not return 33 tools", len(tools))
+                          "list_tools does not return 34 tools", len(tools))
             for tool in tools:
                 if not (tool.description or "").strip():
                     a.finding("TOOL-NO-DESCRIPTION", "medium", "bug", "protocol",
@@ -1530,7 +1552,9 @@ def main(argv: list[str] | None = None) -> None:
         repos = [r for r in repos if r.get("set", 1) == opts.repo_set]
     root = Path(opts.root)
     if opts.setup:
-        setup(root, repos)
+        setup(root, repos, graphify=opts.engine != "native")
+        if opts.engine == "native":
+            build_native(root, repos, opts.rebuild)
         return
     for key in s._BACKEND_ENV:  # no tool may reach an LLM backend from here
         os.environ.pop(key, None)
