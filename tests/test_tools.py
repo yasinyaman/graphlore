@@ -1173,6 +1173,23 @@ def test_cpp_branches_written_once_per_configuration_are_blanked():
         assert blank(keep) is keep
 
 
+def test_kotlin_external_modifier_is_blanked():
+    """`internal external interface A { … }` is read without `external` (the
+    native engine's grammar loses the type otherwise); a name `external` stays."""
+    from graphlore.spans import _blank_kotlin_external as blank
+
+    src = (b"internal external interface RegExpMatch {\n  val index: Int\n}\n"
+           b"@JsName(\"x\") public external fun f(): Int\nexternal class B\n"
+           b"internal actual external object O\n")
+    out = blank(src)
+    assert len(out) == len(src) and out.count(b"\n") == src.count(b"\n")
+    assert b"external" not in out
+    assert b"interface RegExpMatch {" in out and b"fun f(): Int" in out and b"object O" in out
+    for keep in (b"val external = 1\n", b"fun f(external: Int) {}\n",
+                 b"// an external interface\n", b"class A\n"):
+        assert blank(keep) is keep
+
+
 def test_cpp_macro_between_class_and_its_name_is_blanked():
     """`class EXPORT Name {` is read without the macro: the parser takes it for
     the type's name and the class for a function otherwise."""

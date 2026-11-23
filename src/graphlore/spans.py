@@ -287,6 +287,11 @@ def _spans_python(src: bytes) -> list[tuple[int, int, int, str]]:
     try:
         tree = ast.parse(src)
     except Exception:
+        # Source this Python cannot parse (a newer one's syntax: 3.14's
+        # `except A, B:`): the native engine's reading of Python, which is the
+        # same rule on tree-sitter, rather than no definition at all
+        if engine.requested() != "graphify":
+            return engine.file_spans(src, "module.py") or spans
         return spans
 
     def walk(node: ast.AST, prefix: str) -> None:
@@ -439,11 +444,16 @@ def _ts_declarator_name(node: Any) -> str | None:
             return decl.text.decode("utf-8", "replace")
         if decl.type == "qualified_identifier":
             return decl.text.decode("utf-8", "replace").replace("::", ".")
+        kids = decl.named_children
+        parenthesized = decl.type == "parenthesized_declarator"
         decl = decl.child_by_field_name("declarator") or next(
-            (c for c in decl.named_children
-             if c.type.endswith("declarator") or c.type == "qualified_identifier"
-             # (`typedef void (Cb)(int);`: the name in parentheses)
-             or decl.type == "parenthesized_declarator"), None)
+            (c for c in kids
+             if c.type.endswith("declarator") or c.type == "qualified_identifier"), None)
+        if decl is None and parenthesized and kids:
+            # (`typedef void (Cb)(int);`: the name in parentheses. A declarator
+            # comes first, so `void (CDECL *f)(int)`, whose macro the parser
+            # could not read, is still `f`: the engine's order)
+            decl = kids[0]
     return None
 
 
@@ -459,6 +469,49 @@ def _ts_declares_function(node: Any) -> bool:
         decl = decl.child_by_field_name("declarator") or next(
             (c for c in decl.named_children if c.type.endswith("declarator")), None)
     return False
+
+
+def _ts_braced_initializer(node: Any) -> bool:
+    """C++ ``std::function<R(T)> f{[…](T x) { … }};`` as this grammar reads it:
+    a ``function_definition`` whose declarator is a bare name (no parameter
+    list) and whose "body" is one function, the lambda. A variable with a brace
+    initializer, not a function. A real function the parser misread keeps its
+    body of statements, and its span. The engine's ``braced_initializer`` is
+    the same rule."""
+    decl = node.child_by_field_name("declarator")
+    body = node.child_by_field_name("body")
+    if decl is None or body is None or decl.type != "identifier":
+        return False
+    stmts = [c for c in body.named_children if "comment" not in c.type]
+    return len(stmts) == 1 and stmts[0].type in ("function_definition", "lambda_expression")
+
+
+def _ts_defaulted_member(node: Any) -> str | None:
+    """C++ ``Env::~Env() = default;`` (or ``= delete``) outside a class: an
+    out-of-line definition, which this grammar reads as an expression statement
+    assigning ``default`` to a call. Its name (``Env.~Env``), else None. The
+    native engine's grammar (tree-sitter-cpp 0.23) reads it as the
+    ``function_definition`` it is, so `generic.rs` needs no such rule."""
+    parent = node.parent
+    if parent is None or parent.type not in ("translation_unit", "declaration_list") \
+            or node.named_child_count != 1:
+        return None
+    assign = node.named_children[0]
+    if assign.type != "assignment_expression":
+        return None
+    left, right = assign.child_by_field_name("left"), assign.child_by_field_name("right")
+    if left is None or right is None or left.type != "call_expression" \
+            or right.type != "identifier" or right.text not in (b"default", b"delete"):
+        return None
+    callee = left.child_by_field_name("function")
+    if callee is None or callee.type != "qualified_identifier":
+        return None
+    name = callee.child_by_field_name("name")
+    while name is not None and name.type == "qualified_identifier":  # `Reader::Reporter::~Reporter`
+        name = name.child_by_field_name("name")
+    if name is None or name.type not in ("identifier", "destructor_name"):
+        return None
+    return callee.text.decode("utf-8", "replace").replace("::", ".")
 
 
 def _ts_macro_statement(node: Any) -> bool:
@@ -591,6 +644,38 @@ def _blank_expression_branches(src: bytes) -> bytes:
             lines[i] = bytes(c if c == 0x0D else 0x20 for c in lines[i])
     return b"\n".join(lines)
 
+
+
+# Kotlin's modifiers, which may stand before and after `external`.
+_KOTLIN_MODIFIERS = (
+    rb"public|private|internal|protected|abstract|open|final|sealed|data|inline|value|"
+    rb"expect|actual|annotation|enum|inner|override|lateinit|const|suspend|operator|"
+    rb"infix|tailrec|companion")
+_KOTLIN_EXTERNAL = re.compile(
+    rb"(?m)^[ \t]*(?:@[A-Za-z_][A-Za-z0-9_.]*(?:\([^()\n]*\))?[ \t]+)*"
+    rb"(?:(?:" + _KOTLIN_MODIFIERS + rb")[ \t]+)*(external)[ \t]+"
+    rb"(?:(?:" + _KOTLIN_MODIFIERS + rb"|fun)[ \t]+)*"
+    rb"(?:class|interface|object|fun|val|var|typealias)\b")
+
+
+def _blank_kotlin_external(src: bytes) -> bytes:
+    """Kotlin: `internal external interface RegExpMatch { … }` with `external` blanked.
+
+    `external` says a declaration is implemented outside Kotlin and nothing
+    about its name or members, but the native engine's Kotlin grammar reads
+    `internal external interface A { … }` followed by another such declaration
+    as infix expressions and loses the type. Each `external` among a
+    declaration's modifiers becomes spaces (bytes and lines stay where they
+    were). The engine's `parse::blank_kotlin_external` is the same rule.
+    """
+    if b"external" not in src:
+        return src
+    out: bytearray | None = None
+    for m in _KOTLIN_EXTERNAL.finditer(src):
+        if out is None:
+            out = bytearray(src)
+        out[m.start(1):m.end(1)] = b" " * (m.end(1) - m.start(1))
+    return bytes(out) if out is not None else src
 
 
 _CLASS_MACRO = re.compile(
@@ -826,6 +911,9 @@ def _spans_treesitter(src: bytes, rel: str) -> list[tuple[int, int, int, str]]:
         elif lang == "csharp":
             # (C#: an `#if` in the middle of an expression is parsed once)
             parsed = _blank_expression_branches(src)
+        elif lang == "kotlin":
+            # (Kotlin: `internal external interface A { … }` without `external`)
+            parsed = _blank_kotlin_external(src)
         root = parser.parse(parsed).root_node
     except Exception:
         return []
@@ -897,6 +985,11 @@ def _spans_treesitter(src: bytes, rel: str) -> list[tuple[int, int, int, str]]:
                 # full `ConfigBuilder<X>.`.
                 base = type_node.child_by_field_id(f_type) or type_node
                 walk(child, f"{prefix}{base.text.decode('utf-8', 'replace')}.")
+            elif t == "function_definition" and lang in ("c", "cpp") \
+                    and _ts_braced_initializer(child):
+                # `std::function<R(T)> f{[…](T x) { … }};`: a variable whose
+                # value is a lambda, which this grammar reads as a definition
+                walk(child, prefix)
             elif (is_sym or (t in _TS_PROTOTYPE_TYPES
                              and _ts_declares_function(child)
                              and not _ts_macro_statement(child))) \
@@ -912,6 +1005,10 @@ def _spans_treesitter(src: bytes, rel: str) -> list[tuple[int, int, int, str]]:
                 qual = f"{prefix}{kname}"
                 add(child, qual)
                 walk(child, qual + ".")
+            elif t == "expression_statement" and lang == "cpp" \
+                    and (dname := _ts_defaulted_member(child)) is not None:
+                # `Env::~Env() = default;`, which this grammar reads as an assignment
+                add(child, f"{prefix}{dname}")
             elif t in _TS_ANON_CLASS_TYPES and (anon := _ts_anonymous_class(child)) is not None:
                 # a class with no name of its own: named by what it implements
                 qual = f"{prefix}{anon}"

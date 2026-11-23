@@ -198,6 +198,27 @@ _SNIPPETS = {
                "    VERIFY_FAILS_END\n}\nvoid testB(void)\n{\n}\n",
     "util.ts": "export namespace util {\n  export const keys: number = 1;\n"
                "  export const f = () => 1;\n}\n",
+    # a macro inside a function pointer's parentheses, and a pointer to member
+    "hooks.c": "typedef struct H\n{\n    void *(CDECL *allocate)(int n);\n"
+               "    void (CDECL *release)(void *p);\n} H;\n",
+    # `this` passed: a variable, not a function declaration; a pointer-to-member field
+    "bench.cc": "struct Arg {\n  void (Bench::*method)(State*);\n};\n"
+                "void Env::Schedule() {\n  std::thread worker(Env::Entry, this);\n"
+                "  worker.detach();\n}\n",
+    # an out-of-line `= default` definition, also two scopes deep
+    "env.cc": "namespace leveldb {\nEnv::Env() = default;\n\nEnv::~Env() = default;\n\n"
+              "log::Reader::Reporter::~Reporter() = default;\n\nvoid Env::Run() {\n}\n}\n",
+    # a variable whose brace initializer is a lambda
+    "async.h": "template <typename T>\nvoid setup(T&& parameters) {\n"
+               "    std::shared_ptr<std::atomic_bool> state =\n"
+               "        std::make_shared<std::atomic_bool>(false);\n"
+               "    std::function<Response(T)> execFn{[state](T params) {\n"
+               "        if (state->load()) {\n            return Response{};\n        }\n"
+               "        return Response{};\n    }};\n    run(std::move(execFn));\n}\n",
+    # `external` among the modifiers of two declarations in a row
+    "Util.kt": "internal external interface RegExpMatch {\n  val index: Int\n}\n\n"
+               "internal external class RegExp(pattern: String) : JsAny {\n"
+               "  fun exec(str: String): RegExpMatch?\n}\n",
     "cart.rb": (FIXTURES / "polyglot" / "lib" / "shop" / "cart.rb").read_text(encoding="utf-8"),
     "Stack.php": (FIXTURES / "polyglot" / "php" / "src" / "Stack.php").read_text(encoding="utf-8"),
 }
@@ -214,6 +235,23 @@ def test_native_spans_match_spans_py(name, monkeypatch):
     if hasattr(graphlore_engine, "definition_spans"):  # engine 0.5.80: spans alone
         fast = graphlore_engine.definition_spans(src, name)
         assert fast == graphlore_engine.file_spans(src, name)
+
+
+def test_python_spans_of_source_this_python_cannot_parse(monkeypatch):
+    """Python 3.14's `except A, B:` is a syntax error to an older `ast`: the file's
+    definitions come from the engine's reading of Python, not from nothing."""
+    src = (b"def get_db():\n    yield 1\n\n\ndef current(token):\n    try:\n        return 1\n"
+           b"    except KeyError, ValueError:\n        return 2\n")
+    import ast
+    try:
+        ast.parse(src)
+    except SyntaxError:
+        pass
+    else:
+        pytest.skip("this Python parses PEP 758")
+    assert spans._spans_python(src) == [(1, 2, 1, "get_db"), (5, 9, 5, "current")]
+    monkeypatch.setenv("GRAPHLORE_ENGINE", "graphify")  # graphify's choice: no engine
+    assert spans._spans_python(src) == []
 
 
 def test_native_python_spans_match_ast():

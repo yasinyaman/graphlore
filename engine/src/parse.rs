@@ -151,6 +151,8 @@ fn prepare(lang: Lang, src: &[u8]) -> Cow<'_, [u8]> {
     let blanked = match lang {
         Lang::C | Lang::Cpp => blank_duplicate_branches(&out),
         Lang::CSharp => blank_expression_branches(&out),
+        // (Kotlin: `internal external interface A { … }` without `external`)
+        Lang::Kotlin => blank_kotlin_external(&out),
         _ => None,
     };
     if let Some(b) = blanked {
@@ -276,6 +278,36 @@ pub fn blank_expression_branches(src: &[u8]) -> Option<Vec<u8>> {
         }
     }
     Some(out)
+}
+
+/// Kotlin: `internal external interface RegExpMatch { … }`. `external` says
+/// the declaration is implemented outside Kotlin (JavaScript, Wasm) and
+/// nothing about its name or members, but the engine's grammar
+/// (tree-sitter-kotlin-sg 0.4) reads `internal external interface A { … }`
+/// followed by another such declaration as infix expressions, and loses the
+/// type. The source with every `external` among a declaration's modifiers
+/// blanked (each byte a space), or `None` when there is none. `spans.py`'s
+/// `_blank_kotlin_external` is the same rule.
+pub fn blank_kotlin_external(src: &[u8]) -> Option<Vec<u8>> {
+    if !src.windows(8).any(|w| w == b"external") {
+        return None;
+    }
+    static PATTERN: std::sync::OnceLock<regex::bytes::Regex> = std::sync::OnceLock::new();
+    let pattern = PATTERN.get_or_init(|| {
+        regex::bytes::Regex::new(
+            r"(?m)^[ \t]*(?:@[A-Za-z_][A-Za-z0-9_.]*(?:\([^()\n]*\))?[ \t]+)*(?:(?:public|private|internal|protected|abstract|open|final|sealed|data|inline|value|expect|actual|annotation|enum|inner|override|lateinit|const|suspend|operator|infix|tailrec|companion)[ \t]+)*(external)[ \t]+(?:(?:public|private|internal|protected|abstract|open|final|sealed|data|inline|value|expect|actual|annotation|enum|inner|override|lateinit|const|suspend|operator|infix|tailrec|companion|fun)[ \t]+)*(?:class|interface|object|fun|val|var|typealias)\b",
+        )
+        .expect("a valid pattern")
+    });
+    let mut out: Option<Vec<u8>> = None;
+    for found in pattern.captures_iter(src) {
+        let Some(m) = found.get(1) else { continue };
+        let buf = out.get_or_insert_with(|| src.to_vec());
+        for b in &mut buf[m.start()..m.end()] {
+            *b = b' ';
+        }
+    }
+    out
 }
 
 /// C, C++: `class LEVELDB_EXPORT Env {`, `struct API_EXPORT Options : Base {`.
