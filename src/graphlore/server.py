@@ -28,7 +28,9 @@ graph.json analysis tools (no CLI needed):
                           hidden links
   - graphlore_duplication_scan: repo-wide duplication audit — identical bodies
                           (exact), then hidden links (similar, unconnected code)
-  - graphlore_god_nodes  : highest-degree nodes
+  - graphlore_god_nodes  : the most central nodes (degree, PageRank or betweenness)
+  - graphlore_bridges    : bridges and cut points: where the dependency graph
+                           hangs by one link (files, directories or nodes)
   - graphlore_surprises  : unexpected cross-domain connections, shared state, co-change
   - graphlore_communities: Leiden community summaries
   - graphlore_search     : node name/label search
@@ -125,6 +127,14 @@ from mcp.types import (
 
 from . import config, engine, viz
 from . import history as history_mod  # noqa: F401  (tests reach _parse)
+from .algorithms import (
+    betweenness,
+    certain_route,
+    cut_structure,
+    dominated_counts,
+    dominators,
+    pagerank,
+)
 from .apis import (  # noqa: F401  (re-exported for the tools + tests)
     _API_CACHE,
     _API_CACHE_MAX,
@@ -144,6 +154,7 @@ from .graph import (  # noqa: F401  (re-exported for the tools + tests)
     _PAYLOAD_ENVELOPE_CHARS,
     _STATE_KINDS,
     _STATE_RELATIONS,
+    _Adj,
     _adjacency,
     _approx_tokens,
     _bare_name,
@@ -377,7 +388,7 @@ def _instructions(active: set[str] | frozenset[str] | None = None) -> str:
     if _has(active, "graphlore_build"):
         steps.append("graphlore_build (with update=True) re-syncs after code changes.")
     review = _any_of(active, "graphlore_validate", "graphlore_cycles", "graphlore_layers",
-                     "graphlore_unreferenced", "graphlore_same_names")
+                     "graphlore_bridges", "graphlore_unreferenced", "graphlore_same_names")
     if review:
         steps.append(
             "To review a codebase: " + ", ".join(review) + " (the `review` prompt gives "
@@ -2352,6 +2363,47 @@ def graphlore_query(
     return _fmt(payload, as_json, _with_note("\n".join(text), view))
 
 
+# Chokepoints graphlore_impact lists, and how many walked nodes one must stand in
+# front of to be one.
+_CHOKEPOINTS = 5
+_CHOKEPOINT_MIN = 2
+
+
+def _impact_chokepoints(
+    adj: dict[str, list[tuple[str, dict]]], recs: dict[str, tuple[int, str, dict | None]],
+    root: str, seeds: Iterable[str], relations: frozenset[str] | None,
+    exclude: frozenset[str], edge_ok: Callable[[dict], bool] | None,
+) -> list[tuple[str, int]]:
+    """The nodes of an impact walk every path from the start to many others
+    passes through: ``(node, how many walked nodes it stands in front of)``,
+    most first. The dominator tree of the walked nodes over the edges the walk
+    may take (the same filters), rooted at the start; a seeded member is reached
+    from the start directly."""
+    succ: dict[str, list[str]] = {nid: [] for nid in recs}
+    succ[root] = [s for s in seeds if s in recs and s != root]
+    for u in recs:
+        for nb, e in adj.get(u, []):
+            rel = _rel(e)
+            if nb not in recs or nb == u or rel in exclude:
+                continue
+            if relations is not None and rel not in relations:
+                continue
+            if edge_ok is not None and not edge_ok(e):
+                continue
+            succ[u].append(nb)
+    counts = dominated_counts(dominators(root, succ))
+    seeded = set(seeds)
+    rows = [(nid, n) for nid, n in counts.items()
+            if nid != root and nid not in seeded and n >= _CHOKEPOINT_MIN]
+    rows.sort(key=lambda r: (-r[1], r[0]))
+    return rows
+
+
+# Confidences of an edge found by name rather than resolved: what graphlore_path
+# walks only when no more certain way leads there.
+_GUESSED_CONFIDENCES = frozenset({"INFERRED", "AMBIGUOUS"})
+
+
 @_tool(annotations=ToolAnnotations(title="Path between nodes", read_only_hint=True))
 def graphlore_path(node_a: str, node_b: str, as_json: bool = False, scope: str = "") -> str:
     """Find the shortest path between two nodes (e.g. "DigestAuth" -> "Response").
@@ -2363,7 +2415,14 @@ def graphlore_path(node_a: str, node_b: str, as_json: bool = False, scope: str =
     edges only when there is no other (``via_containment``), and never through
     an external package. The edges include
     the calls and imports graphlore resolves from the source; ``couples_with``
-    (shared state) is not walked.
+    (shared state) is not walked, nor a document's ``documents`` edges unless
+    one end is a document (a page naming two definitions does not link them).
+
+    Of the paths each way, the reply takes the most certain: the fewest edges
+    the extractor inferred by name (``confidence: INFERRED`` / ``AMBIGUOUS``),
+    then the fewest steps. Each such step says so, ``inferred_steps`` counts
+    them, and when a shorter but less certain path exists ``shortest`` gives
+    its length and its inferred steps.
 
     Each end may be an id, a label or a bare name; a name several nodes share
     resolves like everywhere else in graphlore, and the reply says which node
@@ -2390,12 +2449,35 @@ def graphlore_path(node_a: str, node_b: str, as_json: bool = False, scope: str =
     a, b = _node_id(picked_a.node), _node_id(picked_b.node)
     forward, _reverse = _directed_adjacency(view.edges)
     es = _edge_set(view.edges)
+    flags = _edge_flags(view.edges)
+
+    def guessed(s: str, t: str, rel: str) -> bool:
+        """A step along an edge the extractor inferred (or found ambiguous),
+        whichever way the walk takes it."""
+        f = flags.get((s, t, rel)) if (s, t, rel) in es else flags.get((t, s, rel))
+        return f is not None and f.get("confidence", "") in _GUESSED_CONFIDENCES
+
+    # The most certain path: the fewest inferred edges, then the fewest steps
+    # (on a graph with none, the shortest path, as a breadth-first walk finds it).
+    def walk(adj: _Adj, src: str, dst: str, skip: frozenset[str],
+             avoid: frozenset[str] | set[str] = frozenset()) -> list[tuple[str, str, str]] | None:
+        return certain_route(adj, src, dst, guessed, skip, avoid)
+
+    def against(steps: list[tuple[str, str, str]] | None) -> list[tuple[str, str, str]] | None:
+        return [(t, s, rel) for s, t, rel in reversed(steps)] if steps is not None else None
+
+    # a page naming two definitions is no link between them: a document's edges
+    # are walked only when one end is a document
+    doc_end = any(str(p.node.get("file_type") or "").lower() == "document"
+                  for p in (picked_a, picked_b) if p.node is not None)
+    never = _COUPLING_RELATIONS if doc_end else _COUPLING_RELATIONS | _DOCUMENT_RELATIONS
     direction = "forward"
-    steps = _route(forward, a, b, _COUPLING_RELATIONS)
+    walked: tuple[Any, ...] = (forward, a, b, never)
+    steps = walk(*walked)
     if steps is None:
         direction = "backward"
-        back = _route(forward, b, a, _COUPLING_RELATIONS)
-        steps = [(t, s, rel) for s, t, rel in reversed(back)] if back is not None else None
+        walked = (forward, b, a, never)
+        steps = against(walk(*walked))
     via_containment = False
     if steps is None:
         # either way: first without containment, since two definitions of one file
@@ -2404,24 +2486,44 @@ def graphlore_path(node_a: str, node_b: str, as_json: bool = False, scope: str =
         direction = "undirected"
         both = _adjacency(view.edges)
         outside = {_node_id(n) for n in view.nodes if _is_external_node(n)}
-        steps = _route(both, a, b, _COUPLING_RELATIONS | _CONTAINMENT_RELATIONS, outside)
+        walked = (both, a, b, never | _CONTAINMENT_RELATIONS, outside)
+        steps = walk(*walked)
         if steps is None:
-            steps = _route(both, a, b, _COUPLING_RELATIONS, outside)
+            walked = (both, a, b, never, outside)
+            steps = walk(*walked)
             via_containment = steps is not None
+    # the shortest path of the same walk, when the certain one took a longer way
+    shortest = None
+    if steps:
+        plain = _route(*walked)
+        if plain is not None and direction == "backward":
+            plain = against(plain)
+        if plain is not None and len(plain) < len(steps):
+            shortest = plain
     labels = _display_labels(nodes)
     rows = []
     for s, t, rel in steps or []:
         # the edge as the graph has it: a step walked against its edge says so
         points = "forward" if (s, t, rel) in es else "backward"
-        rows.append({"from": labels.get(s, s), "to": labels.get(t, t), "relation": rel,
-                     "edge": points})
+        row = {"from": labels.get(s, s), "to": labels.get(t, t), "relation": rel,
+               "edge": points}
+        if guessed(s, t, rel):
+            row["confidence"] = "INFERRED"
+        rows.append(row)
     name_a, name_b = labels.get(a, a), labels.get(b, b)
+    inferred = sum(1 for r in rows if r.get("confidence"))
     payload: dict[str, Any] = {
         "from": name_a, "to": name_b, "found": steps is not None,
         "direction": direction if steps is not None else None,
-        "hops": len(rows), "path": rows, "via_containment": via_containment,
+        "hops": len(rows), "path": rows, "inferred_steps": inferred,
+        "via_containment": via_containment,
         "scope": view.payload(), "resolved_edges": resolved.payload(),
     }
+    if shortest is not None:
+        payload["shortest"] = {
+            "hops": len(shortest),
+            "inferred_steps": sum(1 for s, t, rel in shortest if guessed(s, t, rel)),
+        }
     notes = []
     for key, picked, field in ((node_a, picked_a, "matched_from"),
                                (node_b, picked_b, "matched_to")):
@@ -2440,7 +2542,12 @@ def graphlore_path(node_a: str, node_b: str, as_json: bool = False, scope: str =
             line += (f" —{r['relation']}→ {r['to']}" if r["edge"] == "forward"
                      else f" ←{r['relation']}— {r['to']}")
         text = [f"Path ({len(rows)} hop{'s' if len(rows) != 1 else ''}, {direction}"
-                + (", only through containment" if via_containment else "") + "):", line]
+                + (", only through containment" if via_containment else "")
+                + (f", {inferred} inferred" if inferred else "") + "):", line]
+        if shortest is not None:
+            text.append(f"(A shorter path of {payload['shortest']['hops']} hops exists, with "
+                        f"{payload['shortest']['inferred_steps']} inferred step(s): this one "
+                        "goes through fewer guesses.)")
     text += notes
     return _fmt(payload, as_json, _with_note("\n".join(text), view))
 
@@ -2625,9 +2732,70 @@ def graphlore_overview(top_n: int = 8, as_json: bool = False) -> str:
     return _fmt(payload, as_json, "\n".join(lines))
 
 
+# What graphlore_god_nodes ranks by, and how many sources an estimated
+# betweenness counts paths from (each one a breadth-first walk of the graph).
+_GOD_RANKINGS = ("degree", "pagerank", "betweenness")
+_BETWEENNESS_SAMPLES = 64
+# (id of the edge list, ranking, samples) -> (that list, the scores, how they were made)
+_CENTRALITY_CACHE: dict[tuple[int, str, int], tuple[list[dict], dict[str, float], dict]] = {}
+_CENTRALITY_CACHE_MAX = 8
+
+
+def _dependency_succ(ids: Iterable[str], edges: list[dict]) -> dict[str, list[str]]:
+    """``node -> [what it depends on]`` along the edges that are a dependency
+    (containment, documents, docstrings and coupling pairs are none): the
+    direction rank and shortest paths flow in."""
+    keep = set(ids)
+    succ: dict[str, list[str]] = {nid: [] for nid in keep}
+    for e in edges:
+        if _rel(e) in _NON_DEPENDENCY_RELATIONS:
+            continue
+        s, t = _edge_ends(e)
+        if s in keep and t in keep and s != t:
+            succ[s].append(t)
+    return succ
+
+
+def _centrality(view: ScopeView, ranking: str, samples: int) -> tuple[dict[str, float], dict]:
+    """PageRank or betweenness of the scope's nodes over its dependency edges,
+    cached on the scope's edge list (a ScopeView hands back the same lists)."""
+    key = (id(view.edges), ranking, samples if ranking == "betweenness" else 0)
+    hit = _CENTRALITY_CACHE.get(key)
+    if hit is not None and hit[0] is view.edges:
+        return hit[1], hit[2]
+    ids = [_node_id(n) for n in view.nodes]
+    succ = _dependency_succ(ids, view.edges)
+    if ranking == "pagerank":
+        scores, how = pagerank(ids, succ), {"damping": 0.85}
+    else:
+        b = betweenness(ids, succ, samples)
+        scores = b.scores
+        how = {"sources": b.sources, "nodes": b.nodes, "exact": b.exact}
+    if key not in _CENTRALITY_CACHE and len(_CENTRALITY_CACHE) >= _CENTRALITY_CACHE_MAX:
+        _CENTRALITY_CACHE.pop(next(iter(_CENTRALITY_CACHE)), None)
+    _CENTRALITY_CACHE[key] = (view.edges, scores, how)
+    return scores, how
+
+
 @_tool(annotations=ToolAnnotations(title="God nodes", read_only_hint=True))
-def graphlore_god_nodes(top_n: int = 10, as_json: bool = False, scope: str = "") -> str:
-    """List the highest-degree (most connected) 'god nodes'.
+def graphlore_god_nodes(
+    top_n: int = 10, as_json: bool = False, scope: str = "", rank: str = "degree",
+    samples: int = _BETWEENNESS_SAMPLES,
+) -> str:
+    """List the most central 'god nodes': by degree (most connected, the
+    default), by PageRank or by betweenness.
+
+    ``rank="degree"`` counts every edge, containment included. ``"pagerank"``
+    ranks a node by what depends on it and by how central that is in turn
+    (rank flows from a node to what it calls, imports, extends or references),
+    so a small utility everything leans on outranks a big module few use.
+    ``"betweenness"`` ranks by how many shortest dependency paths between two
+    other nodes pass through a node: the brokers between parts of the code.
+    Both read dependency edges only (no containment, documents, docstrings or
+    coupling pairs). Betweenness is estimated from ``samples`` source nodes
+    (picked by a hash of their id) when the scope has more, and says so
+    (``betweenness.exact``); ``samples=0`` counts from every node, which on a
+    large graph takes minutes.
 
     Degree is counted inside the scope. By default that leaves out vendored and
     minified files and nodes standing for external packages (``typing``, ``pytest``),
@@ -2639,10 +2807,16 @@ def graphlore_god_nodes(top_n: int = 10, as_json: bool = False, scope: str = "")
             prefix or glob keeps only those files (``src/pkg``), ``!pattern`` leaves
             files out, ``-tests`` leaves test code out, ``+external`` / ``+vendored``
             bring those back, ``all`` ranks the whole graph.
+        rank: "degree" | "pagerank" | "betweenness".
+        samples: Source nodes an estimated betweenness counts paths from.
     """
     graph = _load_graph()
     if isinstance(graph, str):
         return _err(graph, as_json)
+    ranking = rank.strip().lower()
+    if ranking not in _GOD_RANKINGS:
+        return _err(f"ERROR: rank must be one of {', '.join(_GOD_RANKINGS)}.", as_json,
+                    code="bad_rank")
     nodes, edges = _nodes_edges(graph)
     view = _scope_view(nodes, edges, scope, as_json)
     if isinstance(view, str):
@@ -2654,19 +2828,185 @@ def graphlore_god_nodes(top_n: int = 10, as_json: bool = False, scope: str = "")
         degree[t] += 1
     labels = _display_labels(nodes)
     types = {_node_id(n): _node_type(n) for n in view.nodes}
-    items = [
-        {"node": labels.get(nid, nid), "type": types.get(nid, ""), "degree": d}
-        for nid, d in degree.most_common(top_n)
-    ]
-    text = [f"Total {len(nodes)} nodes, {len(edges)} edges. Top {top_n} god nodes:\n"]
+    how: dict[str, Any] = {}
+    if ranking == "degree":
+        order = [nid for nid, _d in degree.most_common(top_n)]
+        total = len(degree)
+        scores: dict[str, float] = {}
+    else:
+        scores, how = _centrality(view, ranking, max(0, samples))
+        order = sorted(scores, key=lambda nid: (-scores[nid], -degree[nid], nid))[:top_n]
+        total = len(scores)
+    items = []
+    for nid in order:
+        item: dict[str, Any] = {"node": labels.get(nid, nid), "type": types.get(nid, ""),
+                                "degree": degree[nid]}
+        if ranking != "degree":
+            item[ranking] = round(scores[nid], 6 if ranking == "pagerank" else 1)
+        items.append(item)
+    title = {"degree": "god nodes", "pagerank": "nodes by PageRank",
+             "betweenness": "nodes by betweenness"}[ranking]
+    text = [f"Total {len(nodes)} nodes, {len(edges)} edges. Top {top_n} {title}:\n"]
     for it in items:
         t = f" [{it['type']}]" if it["type"] else ""
-        text.append(f"  {it['node']}{t} — degree {it['degree']}")
-    payload = {
-        "god_nodes": items, "total": len(degree), "truncated": len(degree) > len(items),
+        score = {"pagerank": lambda v: f"PageRank {v:.6f}",
+                 "betweenness": lambda v: f"betweenness {v:,.1f}"}.get(ranking)
+        text.append(f"  {it['node']}{t} — " + (f"{score(it[ranking])} (degree {it['degree']})"
+                                               if score else f"degree {it['degree']}"))
+    if ranking == "betweenness" and not how.get("exact"):
+        text.append(f"\n(Estimated from {how['sources']} of {how['nodes']} source nodes; "
+                    "raise samples= for a closer estimate, samples=0 for the exact count.)")
+    payload: dict[str, Any] = {
+        "god_nodes": items, "rank": ranking, "total": total, "truncated": total > len(items),
         "scope": view.payload(),
     }
+    if how:
+        payload[ranking] = how
     _cut_hint(payload, "Raise top_n for more of the `total` nodes, or narrow with scope=.")
+    return _fmt(payload, as_json, _with_note("\n".join(text), view))
+
+
+_BRIDGE_LEVELS = ("file", "directory", "node")
+
+
+def _bridge_graph(
+    view: ScopeView, level: str, checker: ImportChecker,
+) -> tuple[dict[str, set[str]], Counter[tuple[str, str]]]:
+    """The scope's dependency edges as an undirected simple graph at ``level``:
+    ``(neighbours, how many edges of the graph join each pair)``. At file and
+    directory level an import edge goes through the ImportChecker, so one the
+    source contradicts joins nothing; an edge inside one file (or directory)
+    joins nothing either."""
+    byid = {_node_id(n): n for n in view.nodes}
+
+    def unit(n: dict) -> str:
+        if level == "node":
+            return _node_id(n)
+        f = _norm_relpath(_node_file(n))
+        if not f or level == "file":
+            return f
+        return posixpath.dirname(f) or "."
+
+    nb: dict[str, set[str]] = {}
+    weight: Counter[tuple[str, str]] = Counter()
+
+    def join(a: str, b: str) -> None:
+        if not a or not b or a == b:
+            return
+        nb.setdefault(a, set()).add(b)
+        nb.setdefault(b, set()).add(a)
+        weight[(a, b) if a < b else (b, a)] += 1
+
+    for e in view.edges:
+        rel = _rel(e)
+        if rel in _NON_DEPENDENCY_RELATIONS or (level != "node" and rel in _IMPORT_RELATIONS):
+            continue
+        s, t = _edge_ends(e)
+        if s in byid and t in byid:
+            join(unit(byid[s]), unit(byid[t]))
+    if level != "node":
+        for sf, tf, _e, _target, _kind in _file_import_edges(view.nodes, view.edges, checker.kind):
+            a, b = _norm_relpath(sf), _norm_relpath(tf)
+            if level == "directory":
+                a, b = posixpath.dirname(a) or ".", posixpath.dirname(b) or "."
+            join(a, b)
+    return nb, weight
+
+
+@_tool(annotations=ToolAnnotations(title="Bridges and cut points", read_only_hint=True))
+def graphlore_bridges(
+    level: str = "file", top_n: int = 10, min_size: int = 2, as_json: bool = False,
+    scope: str = "",
+) -> str:
+    """Where the dependency graph hangs by a thread: bridges and cut points.
+
+    The scope's dependency edges (no containment, documents, docstrings or
+    coupling pairs) are read as an undirected graph of files (``level="file"``,
+    the default), directories or nodes. A **bridge** is a link whose removal
+    splits its part of the graph in two: the only connection between them, a
+    seam to keep, to cut deliberately, or to put an interface on. A **cut
+    point** is a file (directory, node) whose removal splits it: everything on
+    the far side reaches the rest only through it. Each is listed with what it
+    cuts off (``cuts_off``, the nodes of the smaller side or of everything but
+    the largest piece), largest first; one that cuts off fewer than
+    ``min_size`` (a leaf hanging off its one user) is only counted. Tarjan's
+    low-link algorithm, one linear pass.
+
+    At file and directory level import edges go through the same import checks
+    as the other file-level tools (``import_edges_rejected``). The default scope
+    leaves vendored files and external packages out: a package everything
+    imports would join every part to every other.
+
+    Args:
+        level: "file" | "directory" | "node".
+        top_n: How many bridges and how many cut points to list.
+        min_size: Smallest cut-off size listed.
+        scope: Which part of the graph to read (see graphlore_god_nodes).
+    """
+    graph = _load_graph()
+    if isinstance(graph, str):
+        return _err(graph, as_json)
+    lv = level.strip().lower()
+    if lv not in _BRIDGE_LEVELS:
+        return _err(f"ERROR: level must be one of {', '.join(_BRIDGE_LEVELS)}.", as_json,
+                    code="bad_level")
+    nodes, edges = _nodes_edges(graph)
+    view = _scope_view(nodes, edges, scope, as_json)
+    if isinstance(view, str):
+        return view
+    checker = ImportChecker()
+    nb, weight = _bridge_graph(view, lv, checker)
+    ids = sorted(nb)
+    cs = cut_structure(ids, nb)
+    labels = _display_labels(nodes)
+    name = (lambda u: labels.get(u, u)) if lv == "node" else (lambda u: u)
+    floor = max(1, min_size)
+    bridges: list[dict[str, Any]] = []
+    for u, v, side, comp in cs.bridges:
+        small = min(side, comp - side)
+        if small < floor:
+            continue
+        # the end that is on the smaller side
+        near = v if side <= comp - side else u
+        bridges.append({"between": [name(u), name(v)], "cuts_off": small, "with": name(near),
+                        "component": comp, "edges": weight[(u, v) if u < v else (v, u)]})
+    bridges.sort(key=lambda b: (-b["cuts_off"], b["between"]))
+    cuts: list[dict[str, Any]] = [
+        {"node": name(c), "cuts_off": lost, "pieces": pieces, "component": comp}
+        for c, (lost, pieces, comp) in cs.cuts.items() if lost >= floor]
+    cuts.sort(key=lambda c: (-c["cuts_off"], -c["pieces"], c["node"]))
+    shown_b, shown_c = bridges[:max(0, top_n)], cuts[:max(0, top_n)]
+    payload: dict[str, Any] = {
+        "level": lv, "units": len(ids), "links": sum(len(x) for x in nb.values()) // 2,
+        "bridges": shown_b, "cut_points": shown_c,
+        "counts": {"bridges": len(cs.bridges), "bridges_listed": len(bridges),
+                   "cut_points": len(cs.cuts), "cut_points_listed": len(cuts)},
+        "min_size": floor,
+        "truncated": len(bridges) > len(shown_b) or len(cuts) > len(shown_c),
+        "import_edges_rejected": len(checker.rejected),
+        "scope": view.payload(),
+    }
+    _cut_hint(payload, "Raise top_n for more of the counted bridges and cut points, or "
+                       "lower min_size for the small ones.")
+    unit = {"file": "files", "directory": "directories", "node": "nodes"}[lv]
+    text = [f"{len(ids)} {unit} joined by {payload['links']} dependency link(s): "
+            f"{len(cs.bridges)} bridge(s), {len(cs.cuts)} cut point(s); listed: those "
+            f"cutting off {floor} or more."]
+    if shown_b:
+        text.append(f"\nBridges ({len(shown_b)} of {len(bridges)}): "
+                    "the only link between two parts")
+        for b in shown_b:
+            text.append(f"  {b['between'][0]} — {b['between'][1]}  cuts off {b['cuts_off']} "
+                        f"of {b['component']} (the side of {b['with']}); {b['edges']} edge(s)")
+    if shown_c:
+        text.append(f"\nCut points ({len(shown_c)} of {len(cuts)}): the only way between parts")
+        for c in shown_c:
+            text.append(f"  {c['node']}  cuts off {c['cuts_off']} of {c['component']}, "
+                        f"{c['pieces']} pieces")
+    if not shown_b and not shown_c:
+        text.append("Nothing hangs by a single link above that size.")
+    if checker.rejected:
+        text.append(f"({len(checker.rejected)} import edge(s) the source contradicts left out.)")
     return _fmt(payload, as_json, _with_note("\n".join(text), view))
 
 
@@ -3690,6 +4030,12 @@ def graphlore_impact(
         shared_state: True -> also walk from a writer through what it writes to
             its readers (and back): code that affects other code through a
             variable, a field or a resource without calling it.
+
+    ``chokepoints`` (one direction only) names where the walk funnels: a node
+    every path to (or from) the start runs through for many of the others, with
+    how many it stands in front of (``shields``), from the dominator tree of the
+    walked nodes over the edges walked. Keeping such a node's interface stable
+    shields everything behind it.
     """
     graph = _load_graph()
     if isinstance(graph, str):
@@ -3797,6 +4143,13 @@ def graphlore_impact(
         if nid == sid or edge is None:
             continue
         hits.append((nid, d, via, edge))
+    # Where the walk funnels: a dependent every path to many others runs
+    # through (one direction only; "both" mixes two walks).
+    chokepoints: list[tuple[str, int]] | None = None
+    if direction != "both":
+        chokepoints = _impact_chokepoints(
+            reverse if direction == "dependents" else forward, recs, sid, seeds,
+            rel_filter, skip, edge_ok)
     def _in_test(nid: str) -> bool:
         n = byid.get(nid)
         return n is not None and _is_test_node(n)
@@ -3883,6 +4236,11 @@ def graphlore_impact(
     }
     if matched:
         payload["matched"] = matched
+    if chokepoints is not None:
+        payload["chokepoints"] = [
+            {"node": labels.get(nid, nid), "shields": n} for nid, n in chokepoints[:_CHOKEPOINTS]]
+        if len(chokepoints) > _CHOKEPOINTS:
+            payload["chokepoints_total"] = len(chokepoints)
     hint = (
         ("Raise budget_tokens or narrow with relations=/scope= for the rows not "
          "shown. " if truncated else "")
@@ -3917,6 +4275,16 @@ def graphlore_impact(
         rationale_note += "\n" + drift_text
     if matched_text:
         rationale_note += "\n" + matched_text
+    if chokepoints:
+        others = len(hits)
+        rationale_note += (
+            "\nChokepoints (every path " + ("to the start from" if direction == "dependents"
+                                            else "from the start to")
+            + f" these many of the {others} walked runs through them): "
+            + ", ".join(f"{labels.get(nid, nid)} ({n})" for nid, n in chokepoints[:_CHOKEPOINTS])
+            + (f", +{len(chokepoints) - _CHOKEPOINTS} more" if len(chokepoints) > _CHOKEPOINTS
+               else "")
+        )
     verb = {
         "dependents": "depend on",
         "dependencies": "are used by",
@@ -7343,13 +7711,17 @@ def review() -> str:
             (("graphlore_layers", "graphlore_layers(rules={...}) — state the intended "
               "layering (from the README, the directory layout or an existing architecture "
               "test) and list what breaks it."),),
+            (("graphlore_bridges", "graphlore_bridges(level=\"directory\") — the parts "
+              "joined by one link only (bridges) and the directories or files everything on "
+              "one side goes through (cut points): seams to keep or to cut on purpose."),),
             (("graphlore_unreferenced", "graphlore_unreferenced — dead-code candidates; "
               "confirm each with graphlore_fetch before calling it dead."),),
             (("graphlore_same_names", "graphlore_same_names — classes and functions defined "
               "twice under one name."),),
             (("graphlore_god_nodes", "graphlore_god_nodes — the most connected modules and "
-              "symbols are the maintainability hotspots; graphlore_skeleton shows how large "
-              "they are."),),
+              "symbols are the maintainability hotspots; rank=\"pagerank\" ranks by what "
+              "leans on them, rank=\"betweenness\" finds the brokers between parts; "
+              "graphlore_skeleton shows how large they are."),),
             (("graphlore_surprises", "graphlore_surprises last, as leads to check, not "
               "findings."),),
         ],

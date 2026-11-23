@@ -26,7 +26,7 @@ cargo test --manifest-path engine/Cargo.toml
 ```
 graphlore/
 ├── src/graphlore/          # package
-│   ├── server.py           #   MCP server: 33 tools, prompts, resources, transports
+│   ├── server.py           #   MCP server: 34 tools, prompts, resources, transports
 │   ├── graph.py            #   graph.json loading, node/edge accessors, BFS, adjacency
 │   ├── spans.py            #   span engine: ast + tree-sitter, chunk→node join, structural diff
 │   ├── scope.py            #   analysis scope: vendored / external / test filtering

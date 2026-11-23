@@ -574,7 +574,8 @@ def test_tool_and_prompt_registration(project):
     assert "graphlore_routes" in names
     assert {"graphlore_project", "graphlore_unreferenced", "graphlore_layers",
             "graphlore_same_names", "graphlore_tests_for"} <= names
-    assert len(names) == 33
+    assert len(names) == 34
+    assert "graphlore_bridges" in names
     assert prompts == {"onboard", "trace_bug", "explain_flow", "review"}
 
 
@@ -7050,7 +7051,7 @@ def test_no_output_schema_advertised():
             return (await client.list_tools()).tools
 
     tools = asyncio.run(_go())
-    assert len(tools) == 33
+    assert len(tools) == 34
     assert all(t.output_schema is None for t in tools)
     by_name = {t.name: t for t in tools}
     # The wrapper keeps the real signature: parameters and docstrings survive.
@@ -9350,3 +9351,130 @@ def test_semantic_backend_dispatch(tmp_path, monkeypatch):
     monkeypatch.delenv("GRAPHLORE_SEMANTIC_BACKEND")
     data = json.loads(server.graphlore_locate("apply_discount", as_json=True))
     assert data["backend"]["name"] == "builtin" and "403 Forbidden" in data["backend"]["note"]
+
+
+# --- graph algorithms: most certain path, PageRank, betweenness, dominators,
+# bridges and cut points ----------------------------------------------------
+
+def test_graph_algorithms_on_small_graphs():
+    from graphlore import algorithms as alg
+    # the path with fewer guessed steps wins over the shorter one
+    adj = {"a": [("b", "calls"), ("c", "calls")], "b": [("d", "calls")],
+           "c": [("e", "calls")], "e": [("d", "calls")]}
+    assert alg.certain_route(adj, "a", "d", lambda s, t, r: (s, t) == ("b", "d")) == [
+        ("a", "c", "calls"), ("c", "e", "calls"), ("e", "d", "calls")]
+    assert alg.certain_route(adj, "a", "d", lambda *x: False) == [
+        ("a", "b", "calls"), ("b", "d", "calls")]
+    assert alg.certain_route(adj, "d", "a", lambda *x: False) is None
+    # PageRank sums to 1 and favours what is depended on
+    pr = alg.pagerank(list("abcd"), {"a": ["c"], "b": ["c"], "d": ["c"], "c": []})
+    assert abs(sum(pr.values()) - 1) < 1e-9 and max(pr, key=pr.get) == "c"
+    # betweenness: b is on the one path a -> c; sampled says so
+    b = alg.betweenness(list("abc"), {"a": ["b"], "b": ["c"]})
+    assert b.scores == {"a": 0.0, "b": 1.0, "c": 0.0} and b.exact
+    assert not alg.betweenness(list("abcd"), {"a": ["b"]}, samples=2).exact
+    # dominators: every path from r to x, y, z runs through m
+    idom = alg.dominators("r", {"r": ["m", "q"], "m": ["x", "y"], "x": ["z"], "y": ["z"],
+                                "q": ["w"]})
+    assert idom == {"r": "r", "m": "r", "q": "r", "x": "m", "y": "m", "z": "m", "w": "q"}
+    assert alg.dominated_counts(idom) == {"r": 6, "m": 3, "q": 1, "x": 0, "y": 0, "z": 0,
+                                          "w": 0}
+    # bridges and cut points: two triangles joined by c - d
+    nb = {"a": ["b", "c"], "b": ["a", "c"], "c": ["a", "b", "d"],
+          "d": ["c", "e", "f"], "e": ["d", "f"], "f": ["d", "e"]}
+    cs = alg.cut_structure(list("abcdef"), nb)
+    assert [(frozenset((u, v)), side, comp) for u, v, side, comp in cs.bridges] == [
+        (frozenset(("c", "d")), 3, 6)]
+    # without c: {a, b} and {d, e, f}; the two cut off from the larger piece
+    assert cs.cuts == {"c": (2, 2, 6), "d": (2, 2, 6)}
+
+
+def _algo_graph(tmp_path, monkeypatch):
+    """Files a.py ... f.py: a cluster {a, b, c} and a cluster {d, e, f} joined only
+    by c -> d; a short inferred shortcut x -> z beside a certain x -> y -> z, and
+    w, which only an inferred w -> z reaches."""
+    def node(i, f):
+        return {"id": i, "label": f"{i}()", "source_file": f, "source_location": "L1"}
+    nodes = [node(i, f"{i}.py") for i in "abcdef"] + [
+        node("x", "x.py"), node("y", "y.py"), node("z", "z.py"), node("w", "w.py"),
+        {"id": "doc", "label": "Usage", "source_file": "README.md", "source_location": "L1",
+         "file_type": "document"}]
+    calls = [("a", "b"), ("b", "c"), ("c", "a"), ("c", "d"), ("d", "e"), ("e", "f"),
+             ("f", "d"), ("x", "y"), ("y", "z")]
+    links = [{"source": s, "target": t, "relation": "calls", "confidence": "EXTRACTED"}
+             for s, t in calls]
+    links += [{"source": s, "target": t, "relation": "calls", "confidence": "INFERRED"}
+              for s, t in (("x", "z"), ("w", "z"))]
+    # a page naming a and f is no link between them
+    links += [{"source": "doc", "target": t, "relation": "documents"} for t in ("a", "f")]
+    _write_graph(tmp_path, {"nodes": nodes, "links": links})
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    server._GRAPH_CACHE.clear()
+
+
+def test_path_prefers_the_most_certain_route(tmp_path, monkeypatch):
+    _algo_graph(tmp_path, monkeypatch)
+    got = json.loads(server.graphlore_path("x", "z", as_json=True))
+    assert [s["to"] for s in got["path"]] == ["y()", "z()"] and got["inferred_steps"] == 0
+    assert got["shortest"] == {"hops": 1, "inferred_steps": 1}
+    assert "shorter path of 1 hops" in server.graphlore_path("x", "z")
+    # walked against its edges, the certain way still
+    back = json.loads(server.graphlore_path("z", "x", as_json=True))
+    assert back["direction"] == "backward" and back["hops"] == 2 and back["inferred_steps"] == 0
+    # an inferred step that is the only way is taken, and says so
+    only = json.loads(server.graphlore_path("w", "z", as_json=True))
+    assert only["inferred_steps"] == 1 and only["path"][0]["confidence"] == "INFERRED"
+    assert "shortest" not in only
+    # no path through a document between two definitions it names...
+    assert not any(s["relation"] == "documents"
+                   for s in json.loads(server.graphlore_path("a", "f", as_json=True))["path"])
+    # ...but from the document itself
+    doc = json.loads(server.graphlore_path("Usage", "f", as_json=True))
+    assert doc["found"] and doc["path"][0]["relation"] == "documents"
+
+
+def test_god_nodes_rank_by_pagerank_and_betweenness(tmp_path, monkeypatch):
+    _algo_graph(tmp_path, monkeypatch)
+    deg = json.loads(server.graphlore_god_nodes(as_json=True))
+    assert deg["rank"] == "degree" and "pagerank" not in deg["god_nodes"][0]
+    pr = json.loads(server.graphlore_god_nodes(rank="pagerank", top_n=20, as_json=True))
+    scores = [r["pagerank"] for r in pr["god_nodes"]]
+    assert scores == sorted(scores, reverse=True) and pr["pagerank"] == {"damping": 0.85}
+    bt = json.loads(server.graphlore_god_nodes(rank="betweenness", top_n=2, as_json=True))
+    # c and d carry every path between the two clusters
+    assert {r["node"] for r in bt["god_nodes"]} == {"c()", "d()"}
+    assert bt["betweenness"]["exact"] is True
+    est = json.loads(server.graphlore_god_nodes(rank="betweenness", samples=3, as_json=True))
+    assert est["betweenness"] == {"sources": 3, "nodes": 11, "exact": False}
+    assert "Estimated from 3 of 11" in server.graphlore_god_nodes(rank="betweenness", samples=3)
+    bad = json.loads(server.graphlore_god_nodes(rank="fame", as_json=True))
+    assert bad["code"] == "bad_rank"
+
+
+def test_impact_names_its_chokepoints(tmp_path, monkeypatch):
+    _algo_graph(tmp_path, monkeypatch)
+    # what depends on d: c (and through it a, b), f (and through it e): every
+    # path from a and b to d runs through c
+    got = json.loads(server.graphlore_impact("d", as_json=True))
+    assert {"node": "c()", "shields": 2} in got["chokepoints"]
+    assert "Chokepoints" in server.graphlore_impact("d")
+    assert "chokepoints" not in json.loads(
+        server.graphlore_impact("d", direction="both", as_json=True))
+
+
+def test_bridges_find_the_one_link_between_two_parts(tmp_path, monkeypatch):
+    _algo_graph(tmp_path, monkeypatch)
+    got = json.loads(server.graphlore_bridges(as_json=True))
+    assert got["level"] == "file" and got["bridges"][0]["between"] == ["c.py", "d.py"]
+    assert got["bridges"][0]["cuts_off"] == 3 and got["bridges"][0]["component"] == 6
+    assert {c["node"] for c in got["cut_points"]} == {"c.py", "d.py"}
+    # z, the one link of w, cuts off one file only: counted, not listed
+    assert got["counts"] == {"bridges": 2, "bridges_listed": 1, "cut_points": 3,
+                             "cut_points_listed": 2}
+    small = json.loads(server.graphlore_bridges(min_size=1, as_json=True))
+    assert small["counts"]["cut_points_listed"] == 3 and small["counts"]["bridges_listed"] == 2
+    # one directory: nothing to split
+    assert json.loads(server.graphlore_bridges(level="directory", as_json=True))["units"] == 0
+    node = json.loads(server.graphlore_bridges(level="node", as_json=True))
+    assert node["bridges"][0]["between"] == ["c()", "d()"]
+    assert json.loads(server.graphlore_bridges(level="module", as_json=True))["code"] == "bad_level"

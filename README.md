@@ -117,7 +117,7 @@ helps a model pick the right tool.
 | `graphlore_search` | Which nodes match this name or id |
 | `graphlore_neighbors` | The direct neighbors of a node |
 | `graphlore_subgraph` | The neighborhood around a node, under a token budget |
-| `graphlore_impact` | Blast radius: what depends on a node, or what it depends on |
+| `graphlore_impact` | Blast radius: what depends on a node, or what it depends on, and the chokepoints it funnels through |
 | `graphlore_node_details` | A node's type, `file:line`, docstring and community |
 | `graphlore_fetch` | A node's source code: the exact span, under a token budget |
 | `graphlore_communities` | The subsystems (Leiden communities) of the codebase |
@@ -125,14 +125,15 @@ helps a model pick the right tool.
 | `graphlore_build` | Build or update the graph with graphlore's native engine (graphify when the engine is not installed) |
 | `graphlore_project` | Show or switch the project directory the server reads |
 
-`GRAPHLORE_TOOLSET=full` exposes all 33: structure review (import and call
-cycles, layer rules, dead-code candidates, same-named symbols, duplication),
+`GRAPHLORE_TOOLSET=full` exposes all 34: structure review (import and call
+cycles, layer rules, bridges and cut points, dead-code candidates, same-named
+symbols, duplication, PageRank and betweenness),
 framework routes and package API usage, tests for a symbol, signatures, git
 diffs, community naming, natural-language queries and paths between nodes. The Claude Code
 plugin runs on `full`.
 
 → [Tool reference](https://github.com/yasinyaman/graphlore/blob/master/docs/tools.md)
-(all 33 tools, resources, prompts) ·
+(all 34 tools, resources, prompts) ·
 [choosing a toolset](https://github.com/yasinyaman/graphlore/blob/master/docs/configuration.md#which-toolset)
 
 ## Benchmark
@@ -236,7 +237,7 @@ says which search answered.
 
 ### Why do I see only 12 tools?
 
-`lean` is the default surface. Set `GRAPHLORE_TOOLSET=full` for all 33.
+`lean` is the default surface. Set `GRAPHLORE_TOOLSET=full` for all 34.
 
 ### How does the graph stay up to date?
 
@@ -265,7 +266,7 @@ own. The old `GRAPHIFY_*` environment variables still work.
 
 ## Documentation
 
-- [Tool reference](https://github.com/yasinyaman/graphlore/blob/master/docs/tools.md): all 33 tools, resources, prompts, what a result carries
+- [Tool reference](https://github.com/yasinyaman/graphlore/blob/master/docs/tools.md): all 34 tools, resources, prompts, what a result carries
 - [How graphlore works](https://github.com/yasinyaman/graphlore/blob/master/docs/concepts.md): resolved edges, import checks, analysis scope, freshness, the search bridge, naming communities
 - [Configuration](https://github.com/yasinyaman/graphlore/blob/master/docs/configuration.md): toolsets, HTTP transport and security, offline mode, environment variables
 - [Benchmark](https://github.com/yasinyaman/graphlore/blob/master/docs/benchmark.md): method, cross-language results, caveats
