@@ -9478,3 +9478,109 @@ def test_bridges_find_the_one_link_between_two_parts(tmp_path, monkeypatch):
     node = json.loads(server.graphlore_bridges(level="node", as_json=True))
     assert node["bridges"][0]["between"] == ["c()", "d()"]
     assert json.loads(server.graphlore_bridges(level="module", as_json=True))["code"] == "bad_level"
+
+
+# --- tool definitions every client and model can take -----------------------
+
+def _listed_tools():
+    import asyncio
+
+    from mcp import Client
+
+    async def _go():
+        async with Client(server.mcp) as client:
+            return (await client.list_tools()).tools
+    return asyncio.run(_go())
+
+
+def test_every_parameter_has_a_description_and_descriptions_stay_short():
+    tools = _listed_tools()
+    for t in tools:
+        assert "Args:" not in (t.description or ""), t.name
+        # Claude Code cuts an upfront description at 4,096 characters
+        assert len(t.description or "") <= 900, (t.name, len(t.description))
+        for name, prop in (t.input_schema.get("properties") or {}).items():
+            assert prop.get("description"), (t.name, name)
+        # Codex compacts an input schema over 5,000 bytes
+        assert len(json.dumps(t.input_schema).encode()) < 5000, t.name
+        # Gemini CLI names a tool mcp_<server>_<tool>, at most 63 characters
+        assert len(f"mcp_graphlore_{t.name}") <= 63, t.name
+    total = sum(len(json.dumps({"name": t.name, "description": t.description,
+                                "inputSchema": t.input_schema})) for t in tools)
+    # what the full surface costs a client's context (~12k tokens); a new tool
+    # or a longer description has to fit in it or move the budget on purpose
+    assert total <= 52_000, total
+
+
+def test_instructions_stay_under_what_clients_keep():
+    every = server._registered_tool_names()
+    for names in (every, set(server.LEAN_TOOLS), set(server.LOCATE_TOOLS)):
+        assert len(server._instructions(names)) <= 4000
+
+
+def test_input_schemas_use_what_every_function_calling_api_takes():
+    rejected = ("anyOf", "oneOf", "allOf", "additionalProperties", "$ref", "$defs",
+                "not", "if")
+
+    def walk(x, where):
+        if isinstance(x, dict):
+            for k in rejected:
+                assert k not in x, (where, k)
+            assert not isinstance(x.get("type"), list), where
+            assert x.get("type") != "null", where
+            assert not ("default" in x and x["default"] is None), where
+            for k, v in x.items():
+                walk(v, f"{where}/{k}")
+        elif isinstance(x, list):
+            for v in x:
+                walk(v, where)
+    for t in _listed_tools():
+        walk(t.input_schema, t.name)
+
+
+def test_doc_args_splits_the_block_onto_parameters():
+    doc = """Summary line.
+
+    More text.
+
+    Args:
+        a: First one,
+            continued.
+        b: Second.
+
+    After the block.
+    """
+    text, args = server._doc_args(doc)
+    assert args == {"a": "First one, continued.", "b": "Second."}
+    assert text == "Summary line.\n\nMore text.\n\nAfter the block."
+    assert server._doc_args("No args here.") == ("No args here.", {})
+
+
+def test_mapping_arguments_take_a_json_string(tmp_path, monkeypatch):
+    assert server._json_object('{"0": "Auth"}', "names") == ({"0": "Auth"}, None)
+    assert server._json_object({"0": "Auth"}, "names") == ({"0": "Auth"}, None)
+    assert server._json_object("", "names") == (None, None)
+    value, err = server._json_object("{nope", "names")
+    assert value is None and err.startswith("ERROR: names is not valid JSON")
+    assert "must be a JSON object" in server._json_object("[1]", "names")[1]
+    # layers: the same rules as a JSON string or an object
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    _write_graph(tmp_path, {"nodes": [], "links": []})
+    server._GRAPH_CACHE.clear()
+    as_text = json.loads(server.graphlore_layers(rules='{"a": []}', as_json=True))
+    as_dict = json.loads(server.graphlore_layers(rules={"a": []}, as_json=True))
+    assert as_text == as_dict
+    bad = json.loads(server.graphlore_layers(rules="{nope", as_json=True))
+    assert "not valid JSON" in bad["error"]
+
+
+def test_set_labels_takes_its_names_as_a_json_string(tmp_path, monkeypatch):
+    (tmp_path / "graphify-out").mkdir()
+    (tmp_path / "graphify-out" / "graph.json").write_text(json.dumps(_viz_graph()),
+                                                         encoding="utf-8")
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    server._GRAPH_CACHE.clear()
+    got = json.loads(server.graphlore_set_labels('{"0": "Core"}', regenerate=False,
+                                                 as_json=True))
+    assert got["names"] == {"0": "Core"} and got["labeled"] == 1
+    assert "not valid JSON" in json.loads(server.graphlore_set_labels("{x", as_json=True))["error"]

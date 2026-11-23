@@ -8,6 +8,15 @@ registers 12 of them: `build`, `overview`, `locate`, `search`, `neighbors`,
 Back to the [README](../README.md) · [Concepts](concepts.md) ·
 [Configuration](configuration.md) · [Benchmark](benchmark.md)
 
+What a client loads: each tool's description (at most 900 characters: what it
+is for and what its reply carries) and an input schema in which every
+parameter has its own `description`, taken from the tool's `Args:` block. The
+schemas use only plain types (no `anyOf`, no free-key objects, no `null`), so
+every function-calling API takes them as they are; the two mapping arguments,
+`graphlore_layers`' `rules` and `graphlore_set_labels`' `names`, are JSON
+strings there (an object still works). The `full` surface is about 48,000
+characters (~12k tokens), `lean` about 16,000 (~4k), `locate` about 7,000.
+
 ## Tools
 
 See [Which toolset](configuration.md#which-toolset) for choosing a surface.

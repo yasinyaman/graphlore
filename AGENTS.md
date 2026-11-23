@@ -124,6 +124,7 @@ A tool is registered with `@_tool(annotations=ToolAnnotations(...))` in `server.
 - `_instructions(active)` and the prompts (`_render_prompt` steps) if the tool belongs in the recommended flow: they name a tool only when it is registered. A reply that points to another tool wraps the pointer in `_tool_hint(name, text)`
 - `test_tool_and_prompt_registration` in `tests/test_tools.py`, which asserts the exact tool count (34)
 - the tool tables in `docs/tools.md`, the README's table of the 12 `lean` tools if the tool is in that set, and the "34" / "12" counts in both
+- its docstring: a description of at most 900 characters (what it is for, what the reply carries) and an `Args:` entry for every parameter, which `_describe_parameters` moves onto the input schema as each parameter's `description` (`_doc_args`); parameters stay plain types (a mapping is a JSON string with `_JSON_OBJECT_ARG` and `_json_object`, an optional number a sentinel default, never `X | None`). `test_every_parameter_has_a_description_and_descriptions_stay_short` and `test_input_schemas_use_what_every_function_calling_api_takes` hold the limits (Claude Code cuts a description at 4,096 characters, Codex compacts a schema over 5,000 bytes, Gemini CLI caps a tool name at 63)
 - `.claude/skills/graphlore-explore/SKILL.md` (shipped to users by the plugin)
 - `CHANGELOG.md` under `[Unreleased]` — every behavior change gets an entry there (Keep a Changelog format)
 
