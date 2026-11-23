@@ -4,7 +4,15 @@
 
 use std::collections::BTreeSet;
 
-use graphlore_engine::{file_facts, file_spans, DefKind};
+use graphlore_engine::{definition_spans, file_facts, DefKind};
+
+/// `file_spans`, checked against `definition_spans` (the same answer without
+/// the rest of the facts) on every golden.
+fn file_spans(src: &[u8], rel: &str) -> Vec<(u32, u32, u32, String)> {
+    let spans = graphlore_engine::file_spans(src, rel);
+    assert_eq!(definition_spans(src, rel), spans, "definition_spans differs on {rel}");
+    spans
+}
 
 fn quals(rel: &str, src: &str) -> BTreeSet<String> {
     file_spans(src.as_bytes(), rel).into_iter().map(|s| s.3).collect()

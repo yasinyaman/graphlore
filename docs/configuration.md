@@ -23,7 +23,7 @@ script `graphifyy` ships for its own embedded server.
 
 The plugin starts the server with [`uvx`](https://docs.astral.sh/uv/) from its
 own copy of this repository, so **`uv` must be installed**. It installs the
-`engine`, `graphify`, `treesitter`, `semble` and `embed` extras into an isolated
+`engine`, `graphify`, `treesitter` and `embed` extras into an isolated
 environment — graphlore's native engine included, as a prebuilt wheel — and points `GRAPHLORE_PROJECT_DIR` at the project you
 opened. The first start downloads the dependencies and can take a while; later
 starts come from uv's cache. Without `uv`, use the manual setup below. The plugin
@@ -172,7 +172,7 @@ search index's BM25 tier. These are the exceptions:
 |---|---|---|
 | `graphlore_add` | Always: it fetches the URL | Refused |
 | `graphlore_build` | `mode="deep"`, and a default build of doc/paper/image files, which graphify extracts with an LLM backend when a key is set | `mode` refused; `code_only` forced (local AST only) unless `cluster_only`, and the result says so |
-| Semantic search (`[semble]`: `graphlore_locate`, `graphlore_query`, `graphlore_duplication_scan`) | First use: semble downloads its embedding model from the Hugging Face Hub, then caches it | `HF_HUB_OFFLINE=1` / `TRANSFORMERS_OFFLINE=1` are set before semble is imported, so only a cached model loads; otherwise the built-in index answers (backend unset), or the error says how to prefetch it (`GRAPHLORE_SEMANTIC_BACKEND=semble`) |
+| Semantic search (`[semble]`: `graphlore_locate`, `graphlore_query`, `graphlore_duplication_scan`) | First use: semble downloads its embedding model from the Hugging Face Hub, then caches it; only with `GRAPHLORE_SEMANTIC_BACKEND=semble` | `HF_HUB_OFFLINE=1` / `TRANSFORMERS_OFFLINE=1` are set before semble is imported, so only a cached model loads; otherwise the error says how to prefetch it |
 | Built-in search, dense tier (`[embed]`: the same three tools) | First use: model2vec downloads `GRAPHLORE_EMBED_MODEL` (default `minishlab/potion-code-16M-v2`) from the Hugging Face Hub, then caches it | The same flags are set before model2vec is imported, so only a cached model loads; otherwise the index answers with BM25 alone and `backend.dense_unavailable` says why |
 | `GRAPHLORE_TOKENIZER=tiktoken` | First use: tiktoken fetches its encoding file unless cached | Not loaded; the chars/3.5 estimate is used |
 | tree-sitter grammars (`[treesitter]`) | First use of a language: the grammar is downloaded from GitHub releases and cached | Only grammars already in the cache are used; other files get no spans, unless the native engine is installed: its compiled-in grammars answer instead (not with `GRAPHLORE_ENGINE=graphify`) |
@@ -261,10 +261,10 @@ has the results on 31 repositories and the roadmap.
 | `GRAPHLORE_ALLOWED_HOSTS` | _(unset)_ | DNS-rebinding `Host` allowlist for HTTP (comma-separated, `:*` port wildcards; `*` disables). Unset = SDK default: loopback-only when bound to loopback |
 | `GRAPHLORE_TOOLSET` | `lean` | `lean` (12 core exploration tools) \| `full` (all 34) \| `locate` (minimal locate-first surface; falls back to `lean` when the configured backend is unavailable). See [Which toolset](#which-toolset) |
 | `GRAPHLORE_TOKENIZER` | _(heuristic)_ | `tiktoken` → exact token counts (needs the `[tiktoken]` extra); else chars/3.5 estimate |
-| `GRAPHLORE_SEMANTIC_BACKEND` | _(auto)_ | Search backend of `graphlore_locate` and the duplication scan: unset / `auto` → semble when installed and loadable, else the built-in index; `semble` → semble only; `builtin` → the built-in index only; or `module.path:Factory` implementing `search`/`find_related` (its module is checked at boot, the factory at the first call) |
+| `GRAPHLORE_SEMANTIC_BACKEND` | _(auto)_ | Search backend of `graphlore_locate` and the duplication scan: unset / `auto` / `builtin` → the built-in index, whether or not semble is installed; `semble` → semble only (the one way to use it); or `module.path:Factory` implementing `search`/`find_related` (its module is checked at boot, the factory at the first call) |
 | `GRAPHLORE_EMBED_MODEL` | `minishlab/potion-code-16M-v2` | The built-in index's dense tier (`[embed]` extra): a Hugging Face model id, a local model directory, or `off` for BM25 only |
 | `GRAPHLORE_CACHE_DIR` | `$XDG_CACHE_HOME/graphlore` (`~/.cache/graphlore`) | Where the built-in index keeps chunk vectors between runs (one folder per project; never inside the project); `off` keeps them in memory only |
-| `GRAPHLORE_SEARCH_KERNEL` | _(auto)_ | `python` forces the built-in index's reference kernel even when an accelerator (`graphlore_accel`) is installed |
+| `GRAPHLORE_SEARCH_KERNEL` | _(auto)_ | `python` forces the built-in index's reference kernel even when the native engine's (graphlore-engine 0.5.80 or later) is installed |
 | `GRAPHLORE_RESOLVE` | `1` | Resolve calls and imports made through a module object (`mod.func()`) from the source at read time; `0` reads graph.json as it is |
 | `GRAPHLORE_WATCH` | `0` | Filesystem watcher: auto re-sync on structural changes (`[watch]` extra) |
 | `GRAPHLORE_WATCH_DEBOUNCE` | `2.0` | Watcher debounce window (seconds) |

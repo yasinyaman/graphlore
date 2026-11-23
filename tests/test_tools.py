@@ -1563,6 +1563,7 @@ def test_locate_seed_qualname_names_resolved_node_not_inner_closure(tmp_path, mo
 
 
 def test_locate_seed_qualname_suppressed_and_module_top_safe(tmp_path, monkeypatch):
+    monkeypatch.setenv("GRAPHLORE_SEMANTIC_BACKEND", "semble")  # the fake stands in for semble
     _span_project(tmp_path, monkeypatch)
     _write_graph(tmp_path, {"nodes": _SPAN_NODES, "edges": []})
     server._GRAPH_CACHE.clear()
@@ -1673,6 +1674,7 @@ class _FakeIndex:
 
 
 def test_locate_cross_check_flags_hidden_link(tmp_path, monkeypatch):
+    monkeypatch.setenv("GRAPHLORE_SEMANTIC_BACKEND", "semble")  # the fake stands in for semble
     # A--B connected; C is semantically similar (find_related) but structurally disconnected.
     _write_graph(tmp_path, {
         "nodes": [
@@ -1708,6 +1710,7 @@ def test_locate_without_semble_degrades(project, monkeypatch):
 
 
 def test_duplication_scan_flags_distant_cousins(tmp_path, monkeypatch):
+    monkeypatch.setenv("GRAPHLORE_SEMANTIC_BACKEND", "semble")  # the fake stands in for semble
     # A--B connected; C is semantically related to A but structurally unreachable.
     _write_graph(tmp_path, {
         "nodes": [
@@ -1791,11 +1794,17 @@ def test_diff_handles_delete_and_pure_rename(tmp_path, monkeypatch):
 
 # --- pluggable semantic backend (#6) -------------------------------------------
 
-def test_semantic_index_defaults_to_semble(monkeypatch):
+def test_semantic_index_defaults_to_the_builtin_one_even_with_semble(tmp_path, monkeypatch):
     monkeypatch.delenv("GRAPHIFY_SEMANTIC_BACKEND", raising=False)
+    monkeypatch.delenv("GRAPHLORE_SEMANTIC_BACKEND", raising=False)
+    _search_project(tmp_path)
+    _builtin(tmp_path, monkeypatch)
     sentinel = object()
     monkeypatch.setattr(server, "_semble_index", lambda: sentinel)
-    assert server._semantic_index() is sentinel  # default path routes through semble
+    # semble is opt-in: installed or not, the default never asks it
+    assert isinstance(server._semantic_index(), server._CodeIndex)
+    monkeypatch.setenv("GRAPHLORE_SEMANTIC_BACKEND", "semble")
+    assert server._semantic_index() is sentinel
 
 
 def test_semantic_index_loads_custom_backend(monkeypatch, tmp_path):
@@ -2146,11 +2155,13 @@ def test_surprises_ignores_uncommunitied_target(tmp_path, monkeypatch):
 
 
 def test_locate_no_semantic_matches(project, monkeypatch):
+    monkeypatch.setenv("GRAPHLORE_SEMANTIC_BACKEND", "semble")  # the fake stands in for semble
     monkeypatch.setattr(server, "_semble_index", lambda: _FakeIndex([], []))
     assert "No semantic matches" in server.graphlore_locate("nothing here")
 
 
 def test_locate_seed_not_in_graph(project, monkeypatch):
+    monkeypatch.setenv("GRAPHLORE_SEMANTIC_BACKEND", "semble")  # the fake stands in for semble
     fake = _FakeIndex(search_hits=[_FakeHit("not_in_graph.py", 1)], related_hits=[])
     monkeypatch.setattr(server, "_semble_index", lambda: fake)
     data = json.loads(server.graphlore_locate("x", as_json=True))
@@ -2191,6 +2202,7 @@ def test_validate_with_label_fallback_ids(tmp_path, monkeypatch):
 
 
 def test_locate_hidden_links_ordered_nearest_first(tmp_path, monkeypatch):
+    monkeypatch.setenv("GRAPHLORE_SEMANTIC_BACKEND", "semble")  # the fake stands in for semble
     # seed A (hops=2); B reachable at dist 3, C at dist 4, D unreachable.
     # hidden order must be nearest reachable first, unreachable last: B, C, D.
     _write_graph(tmp_path, {
@@ -5638,6 +5650,7 @@ class _ScoredHit(_FakeHit):
 
 
 def test_duplication_scan_compares_definitions_and_reports_scores(tmp_path, monkeypatch):
+    monkeypatch.setenv("GRAPHLORE_SEMANTIC_BACKEND", "semble")  # the fake stands in for semble
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     body = "".join(f"    x{i} = {i}\n" for i in range(8))
     (tmp_path / "a.py").write_text(
@@ -6238,6 +6251,8 @@ def test_duplication_scan_reports_identical_bodies_without_a_model(tmp_path, mon
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     monkeypatch.setenv("GRAPHLORE_SEMANTIC_BACKEND", "semble")
     monkeypatch.setattr(server, "_semble_index", lambda: None)
+    # what an earlier test's semble left behind is not this one's state
+    monkeypatch.setattr(server, "_SEMBLE_LOAD_ERROR", "")
     _quote_project(tmp_path)
     data = json.loads(server.graphlore_duplication_scan(as_json=True))
     # one group: docstring, comment, layout and the function's own name aside.
@@ -6259,6 +6274,7 @@ def test_duplication_scan_reports_identical_bodies_without_a_model(tmp_path, mon
 
 
 def test_duplication_scan_drops_low_scores_on_semble_by_default(tmp_path, monkeypatch):
+    monkeypatch.setenv("GRAPHLORE_SEMANTIC_BACKEND", "semble")  # the fake stands in for semble
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     _write_graph(tmp_path, {
         "nodes": [
@@ -6674,6 +6690,7 @@ def test_validate_reports_what_the_graph_does_not_carry(tmp_path, monkeypatch):
 
 
 def test_locate_lists_the_other_top_hits_under_the_seed(tmp_path, monkeypatch):
+    monkeypatch.setenv("GRAPHLORE_SEMANTIC_BACKEND", "semble")  # the fake stands in for semble
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     _write_graph(tmp_path, {
         "nodes": [
@@ -6895,6 +6912,7 @@ def test_identical_bodies_in_other_languages(tmp_path, monkeypatch):
 
 
 def test_locate_skips_file_headers_and_names_what_the_seed_calls(tmp_path, monkeypatch):
+    monkeypatch.setenv("GRAPHLORE_SEMANTIC_BACKEND", "semble")  # the fake stands in for semble
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     _write(tmp_path, "pkg/__init__.py", "")
     _write(tmp_path, "pkg/graph.py",
@@ -7740,6 +7758,7 @@ def test_scope_payload_summarizes_vendored_files(tmp_path, monkeypatch):
 
 
 def test_locate_lists_each_cousin_once(tmp_path, monkeypatch):
+    monkeypatch.setenv("GRAPHLORE_SEMANTIC_BACKEND", "semble")  # the fake stands in for semble
     _write_graph(tmp_path, {
         "nodes": [{"id": x, "label": x, "source_file": f"{x.lower()}.py",
                    "source_location": "L1"} for x in "ABCD"],
@@ -8179,6 +8198,7 @@ def test_node_type_falls_back_to_file_type(tmp_path, monkeypatch):
 
 
 def test_locate_clamps_a_top_k_the_backend_would_refuse(tmp_path, monkeypatch):
+    monkeypatch.setenv("GRAPHLORE_SEMANTIC_BACKEND", "semble")  # the fake stands in for semble
     _write_graph(tmp_path, {
         "nodes": [{"id": "A", "label": "A", "source_file": "a.py", "source_location": "L1"}],
         "edges": [],
@@ -9133,6 +9153,14 @@ def test_builtin_search_kernel_matches_the_golden_contract():
         search._B_NAME, search._B_PATH, search._B_BODY)
 
 
+def test_builtin_search_kernel_takes_any_str():
+    """A str with a lone surrogate (a file read with surrogateescape) is not
+    UTF-8: the engine's kernel leaves it to the reference, never fails."""
+    from graphlore import search
+    text = "getUser\udcffName parse_\udc80json"
+    assert search._kernel().tokenize(text) == search._PyKernel().tokenize(text)
+
+
 def test_builtin_search_chunks_are_definitions_that_join_exactly(tmp_path, monkeypatch):
     _search_project(tmp_path)
     search, nodes, edges = _builtin(tmp_path, monkeypatch)
@@ -9396,19 +9424,19 @@ def test_semantic_backend_dispatch(tmp_path, monkeypatch):
     real_semble_index = server._semble_index
     sentinel = object()
     monkeypatch.setattr(server, "_semble_index", lambda: sentinel)
-    for value in ("", "auto", "semble"):
+    monkeypatch.setenv("GRAPHLORE_SEMANTIC_BACKEND", "semble")
+    assert server._semantic_backend() == (sentinel, "semble", "")
+    for value in ("", "auto", "builtin"):
         monkeypatch.setenv("GRAPHLORE_SEMANTIC_BACKEND", value)
-        assert server._semantic_backend() == (sentinel, "semble", "")
-    monkeypatch.setenv("GRAPHLORE_SEMANTIC_BACKEND", "builtin")
-    b = server._semantic_backend()
-    assert b.name == "builtin" and isinstance(b.index, server._CodeIndex)
+        b = server._semantic_backend()
+        assert b.name == "builtin" and isinstance(b.index, server._CodeIndex) and not b.note
     # a custom spec that fails is an error, never answered by another backend
     monkeypatch.setenv("GRAPHLORE_SEMANTIC_BACKEND", "no_such_module:Nope")
     assert server._semantic_backend() == (None, "custom", "")
     assert "failed to load" in json.loads(server.graphlore_locate("x", as_json=True))["error"]
 
-    # the default, with a semble that cannot build its index: the built-in one
-    # answers, and says why
+    # a semble that cannot build its index: asked for, it is an error that says
+    # why; the default never touches it
     class _Broken:
         @staticmethod
         def from_path(path):
@@ -9419,9 +9447,14 @@ def test_semantic_backend_dispatch(tmp_path, monkeypatch):
     fake.__spec__ = importlib.machinery.ModuleSpec("semble", None)
     monkeypatch.setitem(sys.modules, "semble", fake)
     monkeypatch.setattr(server, "_semble_index", real_semble_index)
+    monkeypatch.setenv("GRAPHLORE_SEMANTIC_BACKEND", "semble")
+    assert "403 Forbidden" in json.loads(
+        server.graphlore_locate("apply_discount", as_json=True))["error"]
     monkeypatch.delenv("GRAPHLORE_SEMANTIC_BACKEND")
+    monkeypatch.setattr(server, "_SEMBLE_LOAD_ERROR", "")
     data = json.loads(server.graphlore_locate("apply_discount", as_json=True))
-    assert data["backend"]["name"] == "builtin" and "403 Forbidden" in data["backend"]["note"]
+    assert data["backend"]["name"] == "builtin" and not data["backend"].get("note")
+    assert server._SEMBLE_LOAD_ERROR == ""  # semble was not asked
 
 
 # --- graph algorithms: most certain path, PageRank, betweenness, dominators,
@@ -10128,11 +10161,11 @@ def test_plugin_manifests_stay_in_sync():
     # every manifest builds the same package with the same extras from its own copy
     sources = {k: s["args"][1] for k, s in servers.items()}
     assert sources == {
-        "claude": "graphlore[engine,graphify,treesitter,semble,embed] @ ${CLAUDE_PLUGIN_ROOT}",
-        "agent": "graphlore[engine,graphify,treesitter,semble,embed] @ .",
-        "gemini": "graphlore[engine,graphify,treesitter,semble,embed] @ ${extensionPath}"}
+        "claude": "graphlore[engine,graphify,treesitter,embed] @ ${CLAUDE_PLUGIN_ROOT}",
+        "agent": "graphlore[engine,graphify,treesitter,embed] @ .",
+        "gemini": "graphlore[engine,graphify,treesitter,embed] @ ${extensionPath}"}
     pyproject = (root / "pyproject.toml").read_text()
-    for extra in ("engine", "graphify", "treesitter", "semble", "embed"):
+    for extra in ("engine", "graphify", "treesitter", "embed"):
         assert f"\n{extra} = [" in pyproject, extra
     for s in servers.values():
         assert s["command"] == "uvx" and s["args"][0] == "--from" and s["args"][2] == "graphlore"

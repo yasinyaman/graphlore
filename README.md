@@ -98,7 +98,7 @@ Each client's file, key and limits (tool caps, output truncation, prompts):
 Optional extras, installed as `graphlore[extra]`: `engine` (graphlore's native
 extractor, which builds the graph), `embed` (static code
 embeddings for the built-in search behind `graphlore_locate`), `semble` (semble
-as that search instead), `treesitter` (spans for non-Python
+as that search instead, with `GRAPHLORE_SEMANTIC_BACKEND=semble`), `treesitter` (spans for non-Python
 languages; without it the native engine's compiled-in grammars give them), `tiktoken` (exact token
 counts), `watch` (re-sync on file changes). Until the first PyPI release, use
 the GitHub form wherever a message says `pip install "graphlore[extra]"`:
@@ -260,8 +260,9 @@ No. graphlore has its own search index: one chunk per function, method or
 class, ranked with identifier-aware BM25, so `graphlore_locate` works in a
 default install and every hit lands on its graph node. The `[embed]` extra adds
 static code embeddings, which match a question to code that uses other words;
-with the `[semble]` extra, semble answers instead. Each reply's `backend` field
-says which search answered.
+semble answers instead only when asked for (the `[semble]` extra and
+`GRAPHLORE_SEMANTIC_BACKEND=semble`). Each reply's `backend` field says which
+search answered.
 → [The search bridge](https://github.com/yasinyaman/graphlore/blob/master/docs/concepts.md#search-bridge-built-in-index-or-semble)
 
 ### Why do I see only 12 tools?

@@ -167,9 +167,8 @@ reply says what did:
 
 | Setting | Backend |
 |---|---|
-| unset / `auto` (default) | [semble](https://github.com/MinishLab/semble) when it is installed and builds its index, else the built-in index |
-| `builtin` | the built-in index only |
-| `semble` | semble only; without the extra, `graphlore_locate` returns an install hint |
+| unset / `auto` (default), `builtin` | the built-in index, whether or not semble is installed |
+| `semble` | [semble](https://github.com/MinishLab/semble) only; without the extra, `graphlore_locate` returns an install hint |
 | `module.path:Factory` | your own backend implementing `search` / `find_related`; a failure is an error, never answered by another backend |
 
 ### The built-in index
@@ -218,14 +217,24 @@ How it compares with semble, on semble's own query set (NDCG@10, index time,
 query latency): [benchmark](benchmark.md#search-quality-built-in-index-and-semble).
 
 The tokenizer and the BM25F loop sit behind a small kernel interface with a
-pure-Python reference. An optional compiled accelerator (a `graphlore_accel`
-module, not shipped) can replace it; `tests/fixtures/search_golden.json` holds
-the terms and bit-exact scores it must reproduce.
+pure-Python reference. With the native engine installed (graphlore-engine
+0.5.80 or later), its port of the two (`engine/src/search.rs`) answers instead;
+`tests/fixtures/search_golden.json` holds the terms and bit-exact scores both
+must give, and on the 45 audit repositories the two agree on every file. The
+port tokenizes about 2.5× and scores about 1.4× faster, which a whole index
+build or query does not show: reading definitions dominates the build, and a
+query takes 0.3–2.5 ms either way. Spans stay with `spans.py`'s reader, which
+on those repositories is as fast as the engine's.
 
 ### semble
 
-With the `[semble]` extra, semble answers by default: static embeddings plus
-BM25 and its own reranking. **The first call downloads a model.** semble, like
+With the `[semble]` extra and `GRAPHLORE_SEMANTIC_BACKEND=semble`, semble
+answers: static embeddings plus BM25 and its own reranking. It is not the
+default (until graphlore 0.7 it was, when installed): on semble's own query set
+it ranks a little better (NDCG@10 0.852 against the built-in index's 0.814,
+[benchmark](benchmark.md#search-quality-built-in-index-and-semble)), but its
+hits join to the graph through a chunk of lines rather than a definition, and
+its first call cannot answer without the network. **The first call downloads a model.** semble, like
 the built-in dense tier, fetches `minishlab/potion-code-16M-v2` from the Hugging
 Face Hub on first use and caches it; later calls need no network. To fetch it
 ahead of time:

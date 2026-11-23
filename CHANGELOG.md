@@ -7,9 +7,40 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **The built-in search's kernel runs in the native engine** (graphlore-engine
+  0.5.80, not yet published: `SearchKernel`, `KERNEL_ABI = 1`). When the
+  engine is installed, its port of `search.py`'s tokenizer and BM25F loop
+  replaces the Python reference (`GRAPHLORE_SEARCH_KERNEL=python` forces the
+  reference); `tests/fixtures/search_golden.json` holds both to the same terms
+  and bit-identical scores, with new cases for non-ASCII capitals, `İ`, `ß`,
+  final sigma and Unicode digits. On every file of the 45 audit repositories
+  the two agree. Tokenizing is about 2.5× faster and scoring about 1.4×; a
+  whole index build or query is not measurably faster, since reading the
+  definitions dominates.
+- **`graphlore_engine.definition_spans`** (engine 0.5.80): `file_spans`
+  without the rest of the file's facts, the same spans on all 5,073 source
+  files of the audit repositories in a fifth of the time. graphlore's span
+  engine uses it where Python tree-sitter is missing. With Python tree-sitter
+  installed `spans.py` keeps its own reader, which is as fast or faster in
+  most languages.
 - **`publish.yml` can be run by hand** (`workflow_dispatch`): it uploads the
   `pyproject.toml` version to PyPI, then creates the `v<version>` tag and
   release. A published release still starts it as before.
+
+### Changed
+- **The built-in search index is the default, semble is opt-in.**
+  `GRAPHLORE_SEMANTIC_BACKEND` unset (or `auto`) now means graphlore's own
+  index whether or not semble is installed; semble answers only with
+  `GRAPHLORE_SEMANTIC_BACKEND=semble`, and the plugins (Claude Code, Agent
+  Plugins, Gemini CLI) no longer install the `semble` extra (`[semble]` stays
+  for those who set it). The built-in index joins every hit to its definition
+  and needs no network for BM25; semble downloaded its model on the first call
+  whenever it was installed, and a blocked download held every call that
+  tried it. The cost is ranking: on semble's own query set the built-in index
+  scores NDCG@10 0.814 (BM25) / 0.809 (with `[embed]`) against semble's
+  0.852. With `[embed]`, which the plugins still install, the dense tier
+  downloads `minishlab/potion-code-16M-v2` on first use as before, and falls
+  back to BM25 once when it cannot.
 
 ### Fixed
 - **`graphlore_package_apis(package=…)` fits the 35,000-character reply
@@ -26,6 +57,21 @@ All notable changes to this project are documented here. The format is based on
   now 25,100 characters (52 of 211 symbols with their files), gson 29,600,
   and `benchmarks/polyglot.py --engine native --set 2` no longer reports
   `REPLY-TOO-LARGE` for either.
+- **`benchmarks/polyglot.py` no longer reports three artefacts of its own
+  checks.** `BUILD-SMALL-GRAPH` compared every node of the graph
+  `graphify update` built, external names and the `.json`, `.yml` and
+  `.csproj` files graphify counts as code included, with the native build
+  `graphlore_build(code_only=True)` writes now that `GRAPHLORE_ENGINE=auto`
+  picks the engine (aspnetcore-realworld 1,652 against 598, symfony-demo 937
+  against 375); both counts now take only the nodes of source files of the
+  14 languages the audit reads, none external (637 against 598, 338 against
+  375). `FETCH-SHADOW-SPAN` read
+  a googletest `TEST(Suite, Name)` span named `Suite.Name` (engine 0.5.76) as
+  another symbol's on graphify's `TEST()` node (cpr, 29 rows); a C / C++ test
+  macro's span named so is the node's own, by the rule
+  `graphlore_unreferenced` skips such tests by. `SKELETON-HEADER-NO-NAME`
+  looked for a Rust macro's name with its `!` (engine 0.5.75's `debug!`) in
+  `macro_rules! debug {` (ripgrep); the `!` is stripped first.
 
 ## [0.7.0] - 2026-11-23
 

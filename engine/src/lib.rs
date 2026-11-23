@@ -28,6 +28,8 @@ pub mod refs;
 pub mod report;
 pub mod resolve;
 pub mod resources;
+pub mod search;
+mod search_digits;
 pub mod state;
 pub mod versions;
 pub mod walk;
@@ -530,6 +532,16 @@ pub fn file_spans(src: &[u8], rel: &str) -> Vec<(u32, u32, u32, String)> {
         .into_iter()
         // (a block is a scope of the resolver's, no definition; nor is a
         // variable only this grammar took for a function's declaration)
+        .filter(|d| !d.extra && !d.block && !d.unspanned)
+        .map(|d| (d.region_start, d.end_line, d.def_line, d.qualname))
+        .collect()
+}
+
+/// `file_spans`'s answer without the rest of the file's facts: the same
+/// spans, for a caller that wants only them (graphlore's span engine).
+pub fn definition_spans(src: &[u8], rel: &str) -> Vec<(u32, u32, u32, String)> {
+    parse::defs_for_source(rel, src, Some(DEFAULT_PARSE_TIMEOUT))
+        .into_iter()
         .filter(|d| !d.extra && !d.block && !d.unspanned)
         .map(|d| (d.region_start, d.end_line, d.def_line, d.qualname))
         .collect()

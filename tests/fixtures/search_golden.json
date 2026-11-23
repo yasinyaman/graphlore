@@ -70,6 +70,64 @@
     "http2",
     "http"
    ]
+  },
+  {
+   "text": "Äpfel ÄPFEL İstanbul straße STRASSE ΟΔΟΣ Σ σ",
+   "terms": [
+    "äpfel",
+    "äpfel",
+    "pfel",
+    "i̇stanbul",
+    "straß",
+    "strass",
+    "οδος"
+   ]
+  },
+  {
+   "text": "XMLHttpRequest IOError ABCdef aB Ab A1b2 a_b$c __x__ $$ _",
+   "terms": [
+    "xmlhttprequest",
+    "xml",
+    "http",
+    "request",
+    "ioerror",
+    "io",
+    "error",
+    "abcdef",
+    "ab",
+    "cdef",
+    "ab",
+    "ab",
+    "a1b2",
+    "abc"
+   ]
+  },
+  {
+   "text": "x²³ ²³ ٣٣ a٣ 12²³ ½ ①② v2 v10 2fa 404",
+   "terms": [
+    "x²³",
+    "a٣",
+    "v2",
+    "v10",
+    "2fa",
+    "fa"
+   ]
+  },
+  {
+   "text": "studies passed indexing class glasses bus analysis cases use uses user",
+   "terms": [
+    "study",
+    "pass",
+    "index",
+    "class",
+    "glass",
+    "bus",
+    "analysis",
+    "cas",
+    "use",
+    "use",
+    "user"
+   ]
   }
  ],
  "bm25f": {

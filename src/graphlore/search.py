@@ -24,11 +24,11 @@ The index is built once per project and refreshed incrementally: each call stats
 the project's files and re-chunks only the ones whose (mtime, size) changed.
 
 The hot loop sits behind :class:`_Kernel` (``tokenize`` and ``bm25f``), whose
-reference is :class:`_PyKernel`. An optional accelerator module
-(``graphlore_accel``, not shipped) that exposes ``KERNEL_ABI == 1`` and a
-``Kernel`` class with the same two methods replaces it; every logarithm is
-computed here, so a port does only additions, multiplications and divisions and
-can return bit-identical scores (``tests/fixtures/search_golden.json``).
+reference is :class:`_PyKernel`. The native engine (``graphlore_engine`` 0.5.80,
+``engine/src/search.rs``) exposes ``KERNEL_ABI == 1`` and a ``SearchKernel``
+with the same two methods, which replaces it when installed; every logarithm is
+computed here, so the port does only additions, multiplications and divisions
+and returns bit-identical scores (``tests/fixtures/search_golden.json``).
 
 Depends on config, graph, spans, scope, review (the walk's skip lists) and embed.
 """
@@ -253,21 +253,39 @@ class _PyKernel:
         return out
 
 
+class _EngineKernel:
+    """The native engine's kernel. A text Rust cannot take (a lone surrogate,
+    which a str may hold and UTF-8 may not) is tokenized by the reference."""
+
+    name = "engine"
+
+    def __init__(self, native: Any) -> None:
+        self._native = native
+        self._py = _PyKernel()
+        self.bm25f = native.bm25f
+
+    def tokenize(self, text: str) -> list[str]:
+        try:
+            return self._native.tokenize(text)  # type: ignore[no-any-return]
+        except UnicodeEncodeError:
+            return self._py.tokenize(text)
+
+
 _KERNEL: _Kernel | None = None
 
 
 def _kernel() -> _Kernel:
-    """The accelerator when installed and ABI-compatible, else the Python kernel.
-    ``GRAPHLORE_SEARCH_KERNEL=python`` forces the reference."""
+    """The native engine's kernel when installed and of this ABI, else the Python
+    one. ``GRAPHLORE_SEARCH_KERNEL=python`` forces the reference."""
     global _KERNEL
     if _KERNEL is None:
         kernel: _Kernel = _PyKernel()
         if (config.env("SEARCH_KERNEL", "") or "").strip().lower() != "python":
             try:
-                import graphlore_accel  # type: ignore[import-not-found]
+                import graphlore_engine
 
-                if getattr(graphlore_accel, "KERNEL_ABI", None) == _KERNEL_ABI:
-                    kernel = graphlore_accel.Kernel()
+                if getattr(graphlore_engine, "KERNEL_ABI", None) == _KERNEL_ABI:
+                    kernel = _EngineKernel(graphlore_engine.SearchKernel())
             except Exception:  # noqa: BLE001 - a broken accelerator is no accelerator
                 pass
         _KERNEL = kernel
