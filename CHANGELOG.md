@@ -43,6 +43,20 @@ All notable changes to this project are documented here. The format is based on
   back to BM25 once when it cannot.
 
 ### Fixed
+- **`graphlore_package_apis(package=…)` fits the 35,000-character reply
+  budget.** It cut each symbol's file list (down to three files) but not the
+  number of symbols, so a package used for hundreds of names was still over:
+  on native graphs (engine 0.5.79) zod's own name in its repository was 44,600
+  characters as JSON (29,700 as text, 211 symbols), gson's `java.util` 36,500.
+  The reply is now measured in both forms and cut further until it fits
+  30,000 characters at the default `limit` (a larger `limit` is a
+  proportionally larger budget): the file lists first, then which symbols have
+  one (the most used keep theirs; `symbol_files_left_out` counts the rest,
+  whose names stay in `symbols` and in the text), then the `files` and
+  `qualified_paths` lists, the symbol names last (`symbols_left_out`). zod is
+  now 25,100 characters (52 of 211 symbols with their files), gson 29,600,
+  and `benchmarks/polyglot.py --engine native --set 2` no longer reports
+  `REPLY-TOO-LARGE` for either.
 - **`benchmarks/polyglot.py` no longer reports three artefacts of its own
   checks.** `BUILD-SMALL-GRAPH` compared every node of the graph
   `graphify update` built, external names and the `.json`, `.yml` and
