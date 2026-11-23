@@ -140,6 +140,7 @@ The version is duplicated in `pyproject.toml`, `server.__version__`, `.claude-pl
 - `docs/tools.md` — all 34 tools, resources, prompts, what a result carries
 - `docs/concepts.md` — resolved edges, import checks, analysis scope, freshness, the search bridge (built-in index or semble), naming communities
 - `docs/configuration.md` — running, the plugin, toolsets, transports, the network table, environment variables
+- `docs/benchmark-agents.md` — coding agents (Claude Code, Codex, Gemini CLI, Kimi, Cursor) on 16 checked questions about httpx, with and without the `agents-md` guide: `benchmarks/agents/run.py` (one adapter per agent's headless mode; `fake` replays a transcript, what the tests run), `score.py` (the table). Run by hand with each agent's own login, never in CI
 - `docs/clients.md` — each MCP client's config file, key, add command and limits (tool caps, output truncation, prompts, instructions), with the page each was read from; `graphlore setup` and `graphlore agents-md`
 - `docs/benchmark.md` — method and results (`docs/benchmark*.html` are the rendered reports)
 - `docs/benchmark-polyglot.md` — every tool run on 31 real repositories in 14 languages: what works per language, what does not, and the findings (`benchmarks/polyglot.py` reruns it), and the second set of 14 (`--set 2`), chosen to be unlike the first. `benchmarks/results-polyglot.json` is the first set's baseline

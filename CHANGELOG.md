@@ -151,6 +151,16 @@ All notable changes to this project are documented here. The format is based on
   pairs to 68.
 
 ### Added
+- **A cross-model evaluation** (`benchmarks/agents/`, `docs/benchmark-agents.md`):
+  16 questions about httpx at a pinned commit, each answer checked in its
+  source, asked headless of Claude Code, Codex CLI, Gemini CLI, Kimi Code CLI
+  and Cursor's agent with graphlore set up as `graphlore setup` writes it,
+  with and without the `agents-md` guide; `score.py` gives per agent the
+  tasks solved, graphlore calls, runs that used none of the task's suited
+  tools, tokens and time. Each agent needs its own login, so it is run by
+  hand, not in CI; a `fake` client replays a transcript of real tool calls
+  over stdio, and the tests run the whole pipeline with it. Not run on the
+  real agents yet.
 - **`graphlore setup <client>`, `graphlore clients` and `graphlore agents-md`.**
   graphlore's setup docs were Claude's only. `graphlore setup` prints, or with
   `--write` merges, the block that starts graphlore in Claude Code, Claude
