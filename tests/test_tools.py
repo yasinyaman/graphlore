@@ -8639,6 +8639,31 @@ def test_unreferenced_skips_anonymous_classes(tmp_path, monkeypatch):
     assert [r["node"] for r in rows] == ["Lonely"]
 
 
+def test_unreferenced_skips_googletest_cases_the_native_engine_names(tmp_path, monkeypatch):
+    # cpr: the native engine names `TEST_F(Fixture, Name)` `Fixture.Name`, not `TEST`
+    (tmp_path / "test").mkdir()
+    (tmp_path / "test" / "a_tests.cpp").write_text(
+        "TEST(ErrorTests, Timeout) {\n}\n"
+        "TEST_F(Fixture, Works) {\n}\n"
+        "static int helper(int a, int b) { return a; }\n", encoding="utf-8")
+    (tmp_path / "src.cpp").write_text("TEST(Not, Test) {\n}\n", encoding="utf-8")
+    _write_graph(tmp_path, {"nodes": [
+        {"id": "t", "label": ".Timeout()", "qualname": "ErrorTests.Timeout", "kind": "method",
+         "source_file": "test/a_tests.cpp", "source_location": "L1"},
+        {"id": "f", "label": ".Works()", "qualname": "Fixture.Works", "kind": "method",
+         "source_file": "test/a_tests.cpp", "source_location": "L3"},
+        {"id": "h", "label": "helper()", "qualname": "helper", "kind": "function",
+         "source_file": "test/a_tests.cpp", "source_location": "L5"},
+        # outside a test directory the macro shape proves nothing
+        {"id": "p", "label": ".Test()", "qualname": "Not.Test", "kind": "method",
+         "source_file": "src.cpp", "source_location": "L1"},
+    ], "edges": []})
+    server._GRAPH_CACHE.clear()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    rows = json.loads(server.graphlore_unreferenced(as_json=True))["unreferenced"]
+    assert sorted(r["node"] for r in rows) == [".Test()", "helper()"]
+
+
 def test_package_api_readers_of_eight_more_languages():
     _skip_without_treesitter()
     from graphlore.apis import api_uses_for_source as uses

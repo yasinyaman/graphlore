@@ -7,6 +7,15 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Fixed
+- **`graphlore_unreferenced` no longer lists googletest cases as dead code
+  on native graphs.** Since engine 0.5.76 a `TEST(Suite, Name)` /
+  `TEST_F(Fixture, Name)` is the method `Suite.Name`, not a function called
+  `TEST`, so the rule that skipped tests by name stopped matching: on cpr
+  112 of its 220 rows were tests. A C / C++ definition in a test file whose
+  line is a test macro (a name in capitals given two bare names, the
+  engine's own rule) is skipped. `benchmarks/polyglot.py` now expects 34
+  tools, knows the `documents` relation and runs `graphlore_bridges` and
+  `graphlore_god_nodes`' `rank=` modes.
 - **`benchmarks/polyglot.py --setup --engine native` no longer needs
   graphify.** Setup ran `graphify update .` whatever the engine and stopped
   at the first repository without the deprecated CLI; with `--engine native`

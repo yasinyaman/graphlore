@@ -2,7 +2,7 @@
 """Polyglot audit: run every graphlore tool on real repositories in 14 languages.
 
 benchmarks/multilang.py measures one tool (graphlore_locate) on six libraries.
-This script exercises the whole surface — all 33 tools, the resources and the
+This script exercises the whole surface — all 34 tools, the resources and the
 prompts — on real code in Python, JavaScript, TypeScript/TSX, Go, Java, Kotlin,
 Scala, C#, Rust, Swift, C, C++, Ruby and PHP, and turns what it sees into a
 list of findings. It needs no ground truth per repository: every check is an
@@ -202,7 +202,7 @@ NODE_TOOLS = ("neighbors", "subgraph", "impact", "tests_for", "node_details", "s
 # Tools the conventions say carry the analysis scope in their payload.
 SCOPED_TOOLS = frozenset({
     "overview", "god_nodes", "surprises", "duplication_scan", "validate", "cycles",
-    "unreferenced", "same_names", "neighbors", "subgraph", "impact",
+    "unreferenced", "same_names", "neighbors", "subgraph", "impact", "bridges",
 })
 QUOTING_TOOLS = frozenset({"node_details", "fetch", "skeleton"})
 # The list a tool exists to return: empty means the tool had nothing to say.
@@ -554,6 +554,24 @@ def check_orientation(a: Audit, sub: Subject) -> None:
                     a.finding("SUGGESTS-UNKNOWN-TOOL", "medium", "bug", "overview",
                               "suggested_next names a tool that does not exist", hint)
     a.call("god_nodes", top_n=3, scope="all", expect_error=True)
+    for rank in ("pagerank", "betweenness"):
+        ranked = a.call("god_nodes", rank=rank)
+        if ranked and "error" not in ranked:
+            scores = [g.get(rank, 0) for g in ranked.get("god_nodes", [])]
+            if scores != sorted(scores, reverse=True):
+                a.finding("GOD-NODES-UNSORTED", "medium", "bug", "god_nodes",
+                          f"not sorted by {rank}")
+    for level in ("file", "directory", "node"):
+        br = a.call("bridges", level=level)
+        if br and "error" not in br:
+            # what a cut leaves is a proper part of its component, on one side of it
+            rows = br.get("bridges", []) + br.get("cut_points", [])
+            bad = [r for r in rows
+                   if not 0 < (r.get("cuts_off") or 0) < (r.get("component") or 0)
+                   or ("between" in r and r.get("with") not in r["between"])]
+            if bad:
+                a.finding("BRIDGE-SIDES", "low", "bug", "bridges",
+                          "a cut that cuts off nothing, or its whole component", bad[0])
     sp = a.call("surprises")
     if sp and "error" not in sp and sp.get("basis") not in ("flagged", "computed", "none"):
         a.finding("SURPRISES-BASIS", "low", "bug", "surprises", "unexpected basis",
@@ -1037,7 +1055,7 @@ def check_languages(a: Audit, sub: Subject, repo: dict[str, Any]) -> None:
     not_code = {"rationale_for", "declares", "depends_on", "includes", "cites"}
     known = (s._IMPORT_RELATIONS | s._CALL_RELATIONS | gl_graph._CONTAINMENT_RELATIONS
              | s._IMPACT_CODE_RELATIONS | s._STATE_RELATIONS | s._HTTP_RELATIONS
-             | s._COUPLING_RELATIONS
+             | s._COUPLING_RELATIONS | gl_graph._DOCUMENT_RELATIONS
              | not_code)
     rels = Counter(s._rel(e) for e in sub.edges)
     m["relations"] = dict(rels.most_common())
@@ -1293,9 +1311,9 @@ def check_protocol(a: Audit, sub: Subject) -> None:
     async def go() -> None:
         async with Client(s.mcp) as client:
             tools = (await client.list_tools()).tools
-            if len(tools) != 33:
+            if len(tools) != 34:
                 a.finding("TOOL-COUNT", "high", "bug", "protocol",
-                          "list_tools does not return 33 tools", len(tools))
+                          "list_tools does not return 34 tools", len(tools))
             for tool in tools:
                 if not (tool.description or "").strip():
                     a.finding("TOOL-NO-DESCRIPTION", "medium", "bug", "protocol",
