@@ -7,6 +7,10 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Fixed
+- **`benchmarks/polyglot.py --setup --engine native` no longer needs
+  graphify.** Setup ran `graphify update .` whatever the engine and stopped
+  at the first repository without the deprecated CLI; with `--engine native`
+  it now only clones and the native engine builds the graphs.
 - **A reply with default arguments stays under 35,000 characters (~10k
   tokens)**, what Claude Code, Codex and Gemini CLI all keep; the result's
   `structuredContent` carries the same payload, so a large JSON payload was a
