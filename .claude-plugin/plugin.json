@@ -1,7 +1,7 @@
 {
   "name": "graphlore",
   "displayName": "graphlore",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Let Claude navigate a codebase through its knowledge graph instead of grepping: an MCP server (semantic locate, impact analysis, token-budgeted subgraphs, exact source spans) plus an exploration skill. The graph is built by its own Rust engine, in 14 languages.",
   "author": {
     "name": "yasinyaman",
@@ -11,7 +11,7 @@
   "repository": "https://github.com/yasinyaman/graphlore",
   "license": "MIT",
   "keywords": ["mcp", "mcp-server", "graphify", "knowledge-graph", "codebase", "code-search", "code-navigation", "impact-analysis", "semantic-search"],
-  "skills": ["./.claude/skills/"],
+  "skills": ["./skills/"],
   "mcpServers": {
     "graphlore": {
       "command": "uvx",

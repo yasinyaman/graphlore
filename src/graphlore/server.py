@@ -280,7 +280,7 @@ from .spans import (  # noqa: F401
 # Configuration
 # ---------------------------------------------------------------------------
 
-__version__ = "0.6.0"
+__version__ = "0.7.0"
 
 # Printed by graphlore_project and graphlore_overview. A client keeps the tool
 # schemas it loaded before a plugin update; an agent that reads "graphlore 0.5.1"
@@ -406,6 +406,11 @@ def _instructions(active: set[str] | frozenset[str] | None = None) -> str:
             "graph.json lacks; an empty answer from them means no edge was indexed, not "
             "that the code has none."
         )
+    if config.PROJECT_FROM_CLIENT and _has(active, "graphlore_project"):
+        lines.append(
+            "This server was started as a plugin: it reads the client's first workspace "
+            "root, and when a tool answers code project_unknown, call "
+            "graphlore_project(path=<absolute path of the repository you work in>) once.")
     lines.append(
         "The server reads ONE project directory"
         + ("; graphlore_project shows it and switches it (for a second repository, or "
@@ -457,6 +462,18 @@ def _instructions(active: set[str] | frozenset[str] | None = None) -> str:
 
 
 mcp = MCPServer("graphlore", version=__version__, instructions=_instructions())
+_sdk_call_tool = mcp.call_tool
+
+
+async def _call_tool(name: str, arguments: dict[str, Any], context: Any = None) -> Any:
+    """The SDK's call_tool, after asking a plugin client for its roots the first
+    time a tool is called (GRAPHLORE_PROJECT_FROM_CLIENT)."""
+    if config.project_pending and context is not None:
+        await _project_from_roots(context)
+    return await _sdk_call_tool(name, arguments, context)
+
+
+mcp.call_tool = _call_tool  # type: ignore[method-assign]
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -654,6 +671,71 @@ def _describe_parameters(name: str, fn: Callable[..., Any]) -> None:
     tool.description = description
 
 
+# Tools that answer before the client has named a project (GRAPHLORE_PROJECT_FROM_CLIENT).
+_PROJECT_FREE_TOOLS = frozenset({"graphlore_project", "graphlore_sampling_status"})
+
+
+def _waits_for_project(fn: Callable[..., Any]) -> bool:
+    return config.project_pending and fn.__name__ not in _PROJECT_FREE_TOOLS
+
+
+def _project_unknown(kwargs: dict[str, Any]) -> str:
+    """The reply of every project tool while a plugin client has named no project."""
+    return _err(
+        "ERROR: graphlore was started as a plugin and has not been told which "
+        "repository to read (the client gave no workspace root). Call "
+        "graphlore_project(path=\"<absolute path of the repository you are working "
+        "in>\") once, then call this tool again.",
+        bool(kwargs.get("as_json")), code="project_unknown")
+
+
+def _root_directory(uri: str) -> Path | None:
+    """A ``file://`` root as a directory, or None."""
+    from urllib.parse import unquote, urlsplit
+    from urllib.request import url2pathname
+
+    parts = urlsplit(uri)
+    if parts.scheme != "file":
+        return None
+    path = Path(url2pathname(unquote(parts.path))).expanduser()
+    return path.resolve() if path.is_dir() else None
+
+
+_ROOTS_ASKED = False
+
+
+async def _project_from_roots(context: Any) -> None:
+    """Ask the client for its roots once and take the first directory as the
+    project (GRAPHLORE_PROJECT_FROM_CLIENT). A client without roots, or one that
+    fails the request, leaves the project to graphlore_project."""
+    global _ROOTS_ASKED
+    if _ROOTS_ASKED or not config.project_pending:
+        return
+    _ROOTS_ASKED = True
+    import warnings
+
+    from mcp.types import ClientCapabilities, RootsCapability
+
+    try:
+        session = context.session
+        if not session.check_client_capability(ClientCapabilities(roots=RootsCapability())):
+            return
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")  # roots is deprecated in 2026-07-28, still served
+            result = await session.list_roots()
+    except Exception as e:  # noqa: BLE001 - no back-channel, an error answer: fall back
+        print(f"graphlore: the client's roots could not be read ({type(e).__name__}); "
+              "waiting for graphlore_project", file=sys.stderr)
+        return
+    for root in result.roots:
+        found = _root_directory(str(root.uri))
+        if found is not None and config.project_pending:
+            config.PROJECT_DIR = found
+            config.project_pending = False
+            print(f"graphlore: project from the client's roots: {found}", file=sys.stderr)
+            return
+
+
 def _tool(*, annotations: ToolAnnotations) -> Callable[[_F], _F]:
     """Register a tool whose MCP result carries structuredContent and isError.
 
@@ -673,7 +755,8 @@ def _tool(*, annotations: ToolAnnotations) -> Callable[[_F], _F]:
                 rec = _CallRecord()
                 token = _CALL.set(rec)
                 try:
-                    out = await fn(*args, **kwargs)
+                    out = (_project_unknown(kwargs) if _waits_for_project(fn)
+                           else await fn(*args, **kwargs))
                 finally:
                     _CALL.reset(token)
                 return _tool_result(out, rec)
@@ -684,7 +767,8 @@ def _tool(*, annotations: ToolAnnotations) -> Callable[[_F], _F]:
                 rec = _CallRecord()
                 token = _CALL.set(rec)
                 try:
-                    out = fn(*args, **kwargs)
+                    out = (_project_unknown(kwargs) if _waits_for_project(fn)
+                           else fn(*args, **kwargs))
                 finally:
                     _CALL.reset(token)
                 return _tool_result(out, rec)
@@ -1734,9 +1818,16 @@ def graphlore_project(path: str = "", as_json: bool = False) -> str:
             target = target.parent  # handed the output directory: use its project
         if not target.is_dir():
             return _err(f"ERROR: '{path}' is not a directory ({target}).", as_json)
-        if target != previous.resolve():
+        if target != previous.resolve() or config.project_pending:
             config.PROJECT_DIR = target
-            switched = True
+            switched = not config.project_pending
+            config.project_pending = False
+    if config.project_pending:
+        msg = ("No project yet: graphlore was started as a plugin and the client named "
+               "no workspace root. Call graphlore_project(path=\"<absolute path of the "
+               "repository you are working in>\").")
+        return _fmt({"server": _SERVER, "project_dir": None, "project_known": False,
+                     "note": msg}, as_json, msg)
     graph = _load_graph()
     counts = None
     if isinstance(graph, dict):
@@ -7791,6 +7882,8 @@ def _apply_toolset() -> None:
     keep = _effective_toolset_tools()
     if keep is None:
         return
+    if config.PROJECT_FROM_CLIENT:
+        keep = set(keep) | {"graphlore_project"}  # the way to name the project
     for name in _lean_removals(list(_registered_tool_names()), keep):
         mcp.remove_tool(name)
     _set_instructions(_instructions(_registered_tool_names()))
@@ -7885,6 +7978,10 @@ def _start_watch() -> Any:
     (``GRAPHLORE_WATCH_DEBOUNCE`` seconds, default 2) and only structural changes regraph.
     """
     if config.env("WATCH", "").strip().lower() not in ("1", "true", "yes"):
+        return None
+    if config.project_pending:
+        print("GRAPHLORE_WATCH is set but the project comes from the client "
+              "(GRAPHLORE_PROJECT_FROM_CLIENT): not watching.", file=sys.stderr)
         return None
     try:
         from watchdog.events import FileSystemEventHandler
@@ -7984,7 +8081,8 @@ def main() -> None:
         f"graphlore v{__version__} | transport={transport}{where} | "
         f"toolset={toolset} ({len(_registered_tool_names())} tools) | "
         f"egress={'offline' if config.offline() else 'on-demand'} | "
-        f"project={config.PROJECT_DIR}",
+        "project=" + ("(from the client)" if config.project_pending
+                      else str(config.PROJECT_DIR)),
         file=sys.stderr,
         flush=True,
     )

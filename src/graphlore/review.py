@@ -542,6 +542,25 @@ def _is_test_definition(name: str, file: str) -> bool:
     )
 
 
+# googletest's `TEST(Suite, Name)` / `TEST_F(Fixture, Name)` / `TYPED_TEST(…)`:
+# the native engine's rule for a test macro (a name in capitals given two bare
+# names, `generic::test_macro_name`), which names the test `Suite.Name`
+_TEST_MACRO_LINE = re.compile(r"^\s*[A-Z][A-Z0-9_]*\s*\(\s*\w+\s*,\s*\w+\s*\)")
+_C_FAMILY_SUFFIXES = (".c", ".cc", ".cpp", ".cxx", ".c++", ".h", ".hh", ".hpp", ".hxx")
+
+
+def _is_test_macro_case(n: dict, lines: _SourceLines) -> bool:
+    """A C / C++ test written with a test macro, which the native engine names
+    after the test (`Suite.Name`) rather than after the macro: the runner
+    registers it, nothing calls it by name."""
+    file = _node_file(n)
+    if not file.lower().endswith(_C_FAMILY_SUFFIXES) or not _is_test_path(file):
+        return False
+    text = lines.get(file)
+    line = _int_line(n)
+    return 0 < line <= len(text) and bool(_TEST_MACRO_LINE.match(text[line - 1]))
+
+
 _TYPE_ARGUMENTS = re.compile(r"<[^<>]*>")
 
 
@@ -610,7 +629,7 @@ def _unreferenced(
             # Python dunders and PHP magic methods (`__invoke`, `__get`) are
             # called by the language, not by name
             continue
-        if _is_test_definition(name, file):
+        if _is_test_definition(name, file) or _is_test_macro_case(n, lines):
             continue
         owner = defs.byid.get(defs.parent.get(nid, ""))
         if _never_called_by_name(name, _node_label(n), _node_label(owner) if owner else ""):
