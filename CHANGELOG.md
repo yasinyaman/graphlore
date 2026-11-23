@@ -14,11 +14,13 @@ All notable changes to this project are documented here. The format is based on
 ### Fixed
 - **`benchmarks/polyglot.py` no longer reports three artefacts of its own
   checks.** `BUILD-SMALL-GRAPH` compared every node of the graph
-  `graphify update` built, external names and namespaces with no file
-  included, with the native build `graphlore_build(code_only=True)` writes
-  now that `GRAPHLORE_ENGINE=auto` picks the engine (aspnetcore-realworld
-  1,652 against 598, symfony-demo 937 against 375); both counts now take only
-  nodes with a source file that are not external. `FETCH-SHADOW-SPAN` read
+  `graphify update` built, external names and the `.json`, `.yml` and
+  `.csproj` files graphify counts as code included, with the native build
+  `graphlore_build(code_only=True)` writes now that `GRAPHLORE_ENGINE=auto`
+  picks the engine (aspnetcore-realworld 1,652 against 598, symfony-demo 937
+  against 375); both counts now take only the nodes of source files of the
+  14 languages the audit reads, none external (637 against 598, 338 against
+  375). `FETCH-SHADOW-SPAN` read
   a googletest `TEST(Suite, Name)` span named `Suite.Name` (engine 0.5.76) as
   another symbol's on graphify's `TEST()` node (cpr, 29 rows); a C / C++ test
   macro's span named so is the node's own, by the rule

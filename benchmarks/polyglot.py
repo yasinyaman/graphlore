@@ -1289,12 +1289,14 @@ def check_sandbox(a: Audit, sub: Subject, repo_dir: Path, keep: bool) -> None:
         # build through graphlore's own argv, from nothing; code_only=True skips
         # the docs, so the code nodes are what the two builds must agree on. With
         # the engine installed `auto` builds natively, while `graphify update`
-        # also writes nodes for external names and namespaces with no file: count
-        # only the nodes that stand for code in the repository, in both graphs
+        # also writes nodes for external names, and counts `.json`, `.yml` and
+        # `.csproj` files as code: count, in both graphs, only the nodes of the
+        # source files of the languages the audit reads (EXT_LANG)
         def code_nodes(nodes: list[dict]) -> int:
             return sum(1 for n in nodes
                        if str(n.get("file_type") or "code") == "code"
-                       and gl_graph._node_file(n) and not gl_graph._is_external_node(n))
+                       and not gl_graph._is_external_node(n)
+                       and _ext(gl_graph._node_file(n)) in EXT_LANG)
 
         before = code_nodes(sub.nodes)
         plain = a.text("build", path=".", expect_error=True)
