@@ -748,6 +748,22 @@ def check_hostile(a: Audit, sub: Subject) -> None:
     a.call("locate", query="", expect_error=True)
 
 
+# googletest's `TEST(Suite, Name)`, with its parts: since engine 0.5.76
+# (`generic::test_macro_name`, `spans._ts_test_macro_name`) its span is named
+# `Suite.Name` while graphify's node is the macro, `TEST()`
+_TEST_MACRO_PARTS = re.compile(r"^\s*([A-Z][A-Z0-9_]*)\s*\(\s*(\w+)\s*,\s*(\w+)\s*\)")
+
+
+def _test_macro_case(file: str, text: str) -> tuple[str, str] | None:
+    """``(macro, "Suite.Name")`` when the line is a C / C++ test macro by the
+    rule ``graphlore_unreferenced`` skips them by (``review._TEST_MACRO_LINE``)."""
+    if not file.lower().endswith(gl_review._C_FAMILY_SUFFIXES) \
+            or not gl_review._TEST_MACRO_LINE.match(text):
+        return None
+    m = _TEST_MACRO_PARTS.match(text)
+    return (m.group(1), f"{m.group(2)}.{m.group(3)}") if m else None
+
+
 def check_source(a: Audit, sub: Subject, sample: int) -> None:
     """fetch + skeleton across a sample of definitions per extension."""
     span = a.metrics[a.repo].setdefault("span", {})
@@ -781,7 +797,12 @@ def check_source(a: Audit, sub: Subject, sample: int) -> None:
             qual = re.split(r"\.|::", row.get("qualname") or "")[-1]
             starts_here = [sp for sp in s._spans_for_file(row.get("file", ""))
                            if sp[2] == row.get("line")]
-            if row.get("spanned") and qual and qual != name and starts_here:
+            at = row.get("line")
+            case = (_test_macro_case(row.get("file", ""), lines[at - 1])
+                    if isinstance(at, int) and 0 < at <= len(lines) else None)
+            if row.get("spanned") and case and case == (name, row.get("qualname")):
+                m["test_macro"] += 1
+            elif row.get("spanned") and qual and qual != name and starts_here:
                 m["shadow_span"] += 1
                 a.finding("FETCH-SHADOW-SPAN", "high", "bug", "fetch",
                           "a span that starts on the node's line belongs to another symbol",
@@ -817,7 +838,9 @@ def check_source(a: Audit, sub: Subject, sample: int) -> None:
                           "a file with definition nodes yields no symbols", rel, ext)
             for sym in symbols:
                 m["skeleton_symbols"] += 1
-                last_seg = sym.get("qualname", "").rsplit(".", 1)[-1]
+                # a Rust macro is `name!` (engine 0.5.75's `NAME_SUFFIX`); its
+                # header reads `macro_rules! name {`
+                last_seg = sym.get("qualname", "").rsplit(".", 1)[-1].removesuffix("!")
                 header = sym.get("header", "")
                 if last_seg and last_seg not in header:
                     m["header_without_name"] += 1
@@ -1264,9 +1287,14 @@ def check_sandbox(a: Audit, sub: Subject, repo_dir: Path, keep: bool) -> None:
                               "graphlore_communities nor graphlore_overview")
             a.call("set_labels", names={"999999": "x"}, expect_error=True)
         # build through graphlore's own argv, from nothing; code_only=True skips
-        # the docs, so the code nodes are what the two builds must agree on
+        # the docs, so the code nodes are what the two builds must agree on. With
+        # the engine installed `auto` builds natively, while `graphify update`
+        # also writes nodes for external names and namespaces with no file: count
+        # only the nodes that stand for code in the repository, in both graphs
         def code_nodes(nodes: list[dict]) -> int:
-            return sum(1 for n in nodes if str(n.get("file_type") or "code") == "code")
+            return sum(1 for n in nodes
+                       if str(n.get("file_type") or "code") == "code"
+                       and gl_graph._node_file(n) and not gl_graph._is_external_node(n))
 
         before = code_nodes(sub.nodes)
         plain = a.text("build", path=".", expect_error=True)
