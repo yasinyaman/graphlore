@@ -7,6 +7,19 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Fixed
+- **graph.html's Show filters left test code on screen.** Unticking *tests*
+  (and likewise *external packages*, *vendored files*) filtered the node views
+  but not the overview, the page's first screen: its community bubbles were
+  sized and linked over every node, and communities of test code only stayed
+  drawn — 1,661 of Django's 3,444. The overview now counts, sizes and links
+  each community by what the filters leave (`visibleCommunities`, the page's
+  `overview:begin` block, checked under node against `page_data`), leaves out
+  the empty ones and says how many (with tests off on Django: 1,893 of test,
+  external or vendored code only). The panel's lists follow the filters too —
+  a community's members, a node's edges, the impact rows and the findings —
+  each with a line counting what it hid. Since external packages are off by
+  default, the overview's sizes now leave them out from the start, as the
+  community views always did. Search still finds a hidden node by name.
 - **graph.html printed "null" under a node's name** in its details panel, for
   every node without a finding badge: the panel handed the missing badge row to
   `append()`, which writes `null` as text. Parts left out are dropped now.

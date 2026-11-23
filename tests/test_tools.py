@@ -4750,6 +4750,51 @@ def _viewer_impact(data, hops=3):
     return json.loads(run.stdout)
 
 
+def _viewer_overview(data, hidden_ids):
+    """The page's overview counts (its overview:begin / overview:end block) under
+    node, with the nodes whose ids are in ``hidden_ids`` filtered out; None
+    without node."""
+    import shutil as _sh
+    import subprocess as _sp
+    node = _sh.which("node")
+    if node is None:
+        return None
+    page = server.viz.TEMPLATE.read_text(encoding="utf-8")
+    block = page.split("// overview:begin", 1)[1].split("// overview:end", 1)[0]
+    script = block + (
+        "\nconst [data, hidden] = JSON.parse(require('fs').readFileSync(0, 'utf8'));"
+        "\nconst out = visibleCommunities(data, i => !hidden.includes(data.nodes[i][0]));"
+        "\nprocess.stdout.write(JSON.stringify(out));"
+    )
+    run = _sp.run([node, "-e", script], input=json.dumps([data, hidden_ids]),
+                  capture_output=True, text=True, timeout=60)
+    assert run.returncode == 0, run.stderr
+    return json.loads(run.stdout)
+
+
+def test_the_overview_counts_what_the_show_filters_leave():
+    import pytest
+    graph = _viz_graph()
+    data = server.viz.page_data(graph)
+    everything = _viewer_overview(data, [])
+    if everything is None:
+        pytest.skip("node is not installed")
+    # nothing hidden: the communities and links page_data counted
+    assert everything["sizes"] == [c[2] for c in data["comms"]]
+    assert everything["cedges"] == data["cedges"] and everything["hidden"] == 0
+    tests = [r[0] for r in data["nodes"] if r[6] & 1]
+    assert tests == ["t"]
+    no_tests = _viewer_overview(data, tests)
+    comm = {r[0]: r[4] for r in data["nodes"]}
+    assert no_tests["sizes"][comm["t"]] == everything["sizes"][comm["t"]] - 1
+    assert sum(no_tests["sizes"]) == sum(everything["sizes"]) - 1
+    # a community whose every member is hidden counts nothing and is reported
+    alone = [r[0] for r in data["nodes"] if r[4] == comm["t"]]
+    gone = _viewer_overview(data, alone)
+    assert gone["sizes"][comm["t"]] == 0 and gone["hidden"] == 1
+    assert all(comm["t"] not in gone["cedges"][j:j + 2] for j in range(0, len(gone["cedges"]), 3))
+
+
 def _graph_html_data(page):
     text = page.read_text(encoding="utf-8")
     raw = text.split('<script id="graph-data" type="application/json">', 1)[1]

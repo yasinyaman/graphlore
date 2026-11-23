@@ -425,19 +425,63 @@ const nodeColour = i => colourBy === "kind" ? kindColour(nKind(i)) : commColour(
 let view = null, route = { v: "o" };
 const byRank = (a, b) => (nTest(a) ? 1 : 0) - (nTest(b) ? 1 : 0) || nDeg(b) - nDeg(a);
 
+// overview:begin
+// The communities as the Show filters leave them: each one's shown members, the
+// edges between two of them with both ends shown (viz.page_data's `between`,
+// over the shown nodes only), and how many have no shown member left.
+function visibleCommunities(data, shown) {
+  const n = data.comms.length, sizes = new Array(n).fill(0);
+  const comm = i => data.nodes[i][4];
+  for (let i = 0; i < data.nodes.length; i++) if (comm(i) >= 0 && shown(i)) sizes[comm(i)] += 1;
+  const between = new Map();
+  for (let j = 0; j < data.edges.length; j += 4) {
+    const s = data.edges[j], t = data.edges[j + 1], a = comm(s), b = comm(t);
+    if (a < 0 || b < 0 || a === b || !shown(s) || !shown(t)) continue;
+    const key = a < b ? a * n + b : b * n + a;
+    between.set(key, (between.get(key) || 0) + 1);
+  }
+  const cedges = [];
+  for (const [key, w] of [...between].sort((x, y) => x[0] - y[0])) cedges.push(Math.floor(key / n), key % n, w);
+  return { sizes, cedges, hidden: sizes.filter((size, c) => size === 0 && data.comms[c][2] > 0).length };
+}
+// overview:end
+
+// the overview's counts under the current filters, worked out once per filter state
+let visibleMemo = null;
+function visible() {
+  const key = `${show.tests}|${show.ext}|${show.vend}`;
+  if (!visibleMemo || visibleMemo.key !== key) visibleMemo = { key, v: visibleCommunities(D, nodeShown) };
+  return visibleMemo.v;
+}
+const commSize = c => visible().sizes[c];
+// what the filters hide, in words ("test / external"): only kinds the page has
+let present = null;
+function hiddenKinds() {
+  if (!present) {
+    present = { tests: false, ext: false, vend: false };
+    for (let i = 0; i < N; i++) {
+      present.tests = present.tests || nTest(i); present.ext = present.ext || nExt(i);
+      present.vend = present.vend || !!vendored[i];
+    }
+  }
+  return [present.tests && !show.tests ? "test" : "", present.ext && !show.ext ? "external" : "",
+    present.vend && !show.vend ? "vendored" : ""].filter(Boolean).join(" / ") || "filtered";
+}
+
 function overview() {
-  const order = D.comms.map((c, k) => k).sort((a, b) => D.comms[b][2] - D.comms[a][2]);
+  const vis = visible();
+  const order = D.comms.map((c, k) => k).filter(k => vis.sizes[k] > 0).sort((a, b) => vis.sizes[b] - vis.sizes[a]);
   const shownComms = order.slice(0, D.maxComms);
   const pos = new Map(shownComms.map((k, i) => [k, i]));
-  const items = shownComms.map(k => ({ comm: k, r: Math.min(46, 6 + Math.sqrt(D.comms[k][2]) * 2.2),
+  const items = shownComms.map(k => ({ comm: k, r: Math.min(46, 6 + Math.sqrt(vis.sizes[k]) * 2.2),
     label: D.comms[k][1], colour: commColour(k) }));
   // every pair of communities some edge joins would be a hairball: each keeps
   // its strongest links, and the panel lists them all
   const all = [], per = new Map();
-  for (let j = 0; j < D.cedges.length; j += 3) {
-    const a = pos.get(D.cedges[j]), b = pos.get(D.cedges[j + 1]);
+  for (let j = 0; j < vis.cedges.length; j += 3) {
+    const a = pos.get(vis.cedges[j]), b = pos.get(vis.cedges[j + 1]);
     if (a === undefined || b === undefined) continue;
-    const l = { a, b, w: D.cedges[j + 2], colour: null };
+    const l = { a, b, w: vis.cedges[j + 2], colour: null };
     all.push(l);
     for (const k of [a, b]) { if (!per.has(k)) per.set(k, []); per.get(k).push(l); }
   }
@@ -446,6 +490,7 @@ function overview() {
   const links = all.filter(l => kept.has(l));
   const left = order.length - shownComms.length;
   const notes = [];
+  if (vis.hidden) notes.push(`${vis.hidden} communities of ${hiddenKinds()} code only hidden by the filters`);
   if (left > 0) notes.push(`${left} smaller communities not drawn`);
   if (links.length < all.length) notes.push(`the ${OVERVIEW_LINKS} strongest links of each community drawn, of ${all.length}`);
   return { kind: "overview", items, links, note: notes.join(" · "), title: "All communities" };
@@ -989,7 +1034,7 @@ function showTip(k, sx, sy) {
   const p = view.items[k];
   tip.textContent = p.node !== undefined
     ? `${nLabel(p.node)} — ${nKind(p.node)}${site(p.node) ? " · " + site(p.node) : ""}`
-    : `${D.comms[p.comm][1]} — ${D.comms[p.comm][2]} nodes`;
+    : `${D.comms[p.comm][1]} — ${commSize(p.comm)} nodes`;
   tip.style.display = "block";
   tip.style.left = Math.max(4, Math.min(sx + 14, cv.clientWidth - 300)) + "px";
   tip.style.top = Math.max(4, sy + 14) + "px";
@@ -1269,8 +1314,10 @@ function nodeDetails(i) {
     if (cp[3].length < cp[1]) out.push(el("div", { class: "muted" }, `${cp[1] - cp[3].length} more pairs not listed in graph.json`));
   }
   const groups = new Map();           // "calls →" -> rows
+  let hiddenRows = 0;
   for (const j of adj[i]) {
     const outward = eS(j) === i, other = outward ? eT(j) : eS(j);
+    if (!nodeShown(other)) { hiddenRows += 1; continue; }
     const key = `${relName(eR(j))} ${outward ? "→" : "←"}`;
     if (!groups.has(key)) groups.set(key, { g: relGroup(eR(j)), rows: [] });
     const notes = [eRes(j) ? "resolved by graphlore" : eInf(j) ? "inferred" : "",
@@ -1283,23 +1330,33 @@ function nodeDetails(i) {
       `${key} (${rows.length})`));
     out.push(listOf(rows));
   }
+  out.push(hiddenNote(hiddenRows, "edges to"));
   return out;
+}
+
+// the line a list carries when the Show filters left some of its rows out
+function hiddenNote(n, what) {
+  return n > 0 ? el("div", { class: "muted" },
+    `${n} ${what ? what + " " : ""}${hiddenKinds()} node${n === 1 ? "" : "s"} hidden by the filters (Show)`) : null;
 }
 
 function communityDetails(c) {
   const cid = D.comms[c][0];
-  const out = [el("h2", {}, `${D.comms[c][1]} — ${D.comms[c][2]} nodes`),
+  const shownMembers = members[c].filter(nodeShown);
+  const out = [el("h2", {}, `${D.comms[c][1]} — ${shownMembers.length < D.comms[c][2]
+    ? `${shownMembers.length} of ${D.comms[c][2]}` : D.comms[c][2]} nodes`),
     el("div", { class: "row", style: "margin-bottom:6px" },
       copyButton("signatures", `graphlore_skeleton(community=${JSON.stringify(cid)})`,
         "Copy graphlore_skeleton(community=…) for the assistant"),
       copyButton("community id", cid))];
   // a member drawn in this view is selected where it is; the others open
   const drawnAt = new Map(view.items.map((it, k) => [it.node, k]));
-  out.push(listOf(members[c].map(i => [nLabel(i), `${nDeg(i)} edges`,
+  out.push(listOf(shownMembers.map(i => [nLabel(i), `${nDeg(i)} edges`,
     () => (drawnAt.has(i) ? (select(drawnAt.get(i)), panTo(drawnAt.get(i))) : openNode(i)), null])));
-  const peers = new Map();
-  for (let j = 0; j < D.cedges.length; j += 3) {
-    const a = D.cedges[j], b = D.cedges[j + 1], w = D.cedges[j + 2];
+  out.push(hiddenNote(members[c].length - shownMembers.length));
+  const peers = new Map(), ce = visible().cedges;
+  for (let j = 0; j < ce.length; j += 3) {
+    const a = ce[j], b = ce[j + 1], w = ce[j + 2];
     if (a === c) peers.set(b, w); else if (b === c) peers.set(a, w);
   }
   if (peers.size) {
@@ -1311,10 +1368,12 @@ function communityDetails(c) {
 }
 
 function overviewDetails() {
-  const order = D.comms.map((c, k) => k).sort((a, b) => D.comms[b][2] - D.comms[a][2]);
+  const vis = visible();
+  const order = D.comms.map((c, k) => k).filter(k => vis.sizes[k] > 0).sort((a, b) => vis.sizes[b] - vis.sizes[a]);
   return [...findingsSummary(),
     el("h2", {}, "Largest communities"),
-    listOf(order.map(k => [D.comms[k][1], `${D.comms[k][2]} nodes`, () => openComm(k), commColour(k)]))];
+    listOf(order.map(k => [D.comms[k][1], `${vis.sizes[k]} nodes`, () => openComm(k), commColour(k)])),
+    vis.hidden ? el("div", { class: "muted" }, `${vis.hidden} communities of ${hiddenKinds()} code only, hidden by the filters (Show)`) : null];
 }
 
 function findingsSummary() {
@@ -1348,9 +1407,16 @@ const TOOL_OF = { cycles: "graphlore_cycles()", coupling: "graphlore_surprises()
 function findingsDetails(key) {
   if (key === "all") return findingsSummary();
   const f = findingKind(key), rows = f.rows();
+  // a row is listed while one of its nodes is shown (or none is in the graph)
+  const listed = rows.map((row, k) => [row, k]).filter(([row]) => {
+    const ids = f.nodes(row).filter(i => i >= 0);
+    return !ids.length || ids.some(nodeShown);
+  });
   const out = [el("h2", {}, `${f.title} (${rows.length})`), el("div", { class: "muted" }, findingCounts(key)),
     el("div", { class: "row", style: "margin:6px 0" }, copyButton("ask the tool", TOOL_OF[key])),
-    listOf(rows.map((row, k) => [f.label(row), f.tag(row), () => openFinding(key, k), null]))];
+    listOf(listed.map(([row, k]) => [f.label(row), f.tag(row), () => openFinding(key, k), null]))];
+  if (listed.length < rows.length) out.push(el("div", { class: "muted" },
+    `${rows.length - listed.length} of ${hiddenKinds()} code only, hidden by the filters (Show)`));
   return out;
 }
 
@@ -1372,8 +1438,10 @@ function findingDetails(fd) {
   if (fd.kind === "co_change") out.push(el("div", { class: "muted" }, `${row.commits} commits together, degree ${row.degree}`));
   if (why.length) out.push(el("ul", { class: "why" }, ...why.map(w => el("li", {}, w))));
   const nodes = f.nodes(row), labels = row.labels || [row.label];
-  out.push(el("h2", {}, "Nodes"), listOf(nodes.map((i, n) => [i >= 0 ? nLabel(i) : String(labels[n] || "?"),
-    i >= 0 ? (nFile(i) || nKind(i)) : "not found in the graph", () => (i >= 0 ? openNode(i) : null), i >= 0 ? commColour(nComm(i)) : null])));
+  const listed = nodes.map((i, n) => [i, n]).filter(([i]) => i < 0 || nodeShown(i));
+  out.push(el("h2", {}, "Nodes"), listOf(listed.map(([i, n]) => [i >= 0 ? nLabel(i) : String(labels[n] || "?"),
+    i >= 0 ? (nFile(i) || nKind(i)) : "not found in the graph", () => (i >= 0 ? openNode(i) : null), i >= 0 ? commColour(nComm(i)) : null])),
+    hiddenNote(nodes.length - listed.length));
   out.push(el("div", { class: "row", style: "margin-top:6px" },
     el("button", { onclick: () => openFinding(fd.kind) }, `All ${f.title.toLowerCase()}`),
     copyButton("ask the tool", TOOL_OF[fd.kind]),
@@ -1398,10 +1466,14 @@ function impactDetails(v) {
     el("div", { class: "muted" }, "The edges graphlore_impact walks by default; it also ranks the rows and cuts them to a budget. "
       + "graphlore_tests_for finds tests by more than edges.")];
   out.push(el("h2", {}, `Test code among them (${testRows.length})`));
-  out.push(listOf(testRows.map(([n, h]) => [nLabel(n), `${h} hop${h === 1 ? "" : "s"} · ${nFile(n)}`, () => openNode(n), commColour(nComm(n))])));
+  const shownTests = testRows.filter(([n]) => nodeShown(n));
+  out.push(listOf(shownTests.map(([n, h]) => [nLabel(n), `${h} hop${h === 1 ? "" : "s"} · ${nFile(n)}`, () => openNode(n), commColour(nComm(n))])));
+  out.push(hiddenNote(testRows.length - shownTests.length));
   const prod = [...deps].filter(([n]) => !nTest(n)).sort((a, b) => a[1] - b[1] || byRank(a[0], b[0]));
+  const shownProd = prod.filter(([n]) => nodeShown(n));
   out.push(el("h2", {}, `Production code (${prod.length})`));
-  out.push(listOf(prod.map(([n, h]) => [nLabel(n), `${h} hop${h === 1 ? "" : "s"} · ${nFile(n) || nKind(n)}`, () => openNode(n), commColour(nComm(n))])));
+  out.push(listOf(shownProd.map(([n, h]) => [nLabel(n), `${h} hop${h === 1 ? "" : "s"} · ${nFile(n) || nKind(n)}`, () => openNode(n), commColour(nComm(n))])));
+  out.push(hiddenNote(prod.length - shownProd.length));
   return out;
 }
 
@@ -1484,6 +1556,7 @@ function renderLegend() {
 function load(data, title, fresh) {
   D = data; N = D.nodes.length;
   A = D.analysis || null;
+  visibleMemo = null; present = null;  // another graph: its own counts
   resolvedFrom = withResolved(D);
   E = D.edges.length / 4;
   adj = Array.from({ length: N }, () => []);
