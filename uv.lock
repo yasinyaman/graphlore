@@ -853,7 +853,7 @@ wheels = [
 
 [[package]]
 name = "graphlore"
-version = "0.6.0"
+version = "0.7.0"
 source = { editable = "." }
 dependencies = [
     { name = "mcp" },
@@ -862,10 +862,12 @@ dependencies = [
 [package.optional-dependencies]
 all = [
     { name = "graphifyy" },
+    { name = "graphlore-engine" },
     { name = "model2vec" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
     { name = "numpy", version = "2.5.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "pyjwt", extra = ["crypto"] },
     { name = "semble" },
     { name = "tiktoken" },
     { name = "tree-sitter" },
@@ -886,8 +888,14 @@ embed = [
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
     { name = "numpy", version = "2.5.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
 ]
+engine = [
+    { name = "graphlore-engine" },
+]
 graphify = [
     { name = "graphifyy" },
+]
+remote = [
+    { name = "pyjwt", extra = ["crypto"] },
 ]
 semble = [
     { name = "semble" },
@@ -909,12 +917,16 @@ watch = [
 requires-dist = [
     { name = "graphifyy", marker = "extra == 'all'" },
     { name = "graphifyy", marker = "extra == 'graphify'" },
+    { name = "graphlore-engine", marker = "extra == 'all'", specifier = ">=0.5.79,<0.6" },
+    { name = "graphlore-engine", marker = "extra == 'engine'", specifier = ">=0.5.79,<0.6" },
     { name = "mcp", specifier = ">=2.1,<3.0" },
     { name = "model2vec", marker = "extra == 'all'", specifier = ">=0.10" },
     { name = "model2vec", marker = "extra == 'embed'", specifier = ">=0.10" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.12" },
     { name = "numpy", marker = "extra == 'all'", specifier = ">=1.24" },
     { name = "numpy", marker = "extra == 'embed'", specifier = ">=1.24" },
+    { name = "pyjwt", extras = ["crypto"], marker = "extra == 'all'", specifier = ">=2.8" },
+    { name = "pyjwt", extras = ["crypto"], marker = "extra == 'remote'", specifier = ">=2.8" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=5.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6" },
@@ -929,7 +941,20 @@ requires-dist = [
     { name = "watchdog", marker = "extra == 'all'", specifier = ">=4.0" },
     { name = "watchdog", marker = "extra == 'watch'", specifier = ">=4.0" },
 ]
-provides-extras = ["graphify", "semble", "embed", "treesitter", "tiktoken", "watch", "all", "dev"]
+provides-extras = ["engine", "graphify", "semble", "embed", "treesitter", "tiktoken", "watch", "all", "remote", "dev"]
+
+[[package]]
+name = "graphlore-engine"
+version = "0.5.79"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/14/46/dc512f313c41cfc486bce233efdae5312987054de743c31e136f00f13af8/graphlore_engine-0.5.79.tar.gz", hash = "sha256:852201d9356d8e97663730309526c739ebcfd1bd825732f56ddfb8cfca247415", size = 409030, upload-time = "2026-11-23T12:09:40.241Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/2a/1a/57540ca968b39de983e6c2a63446f7035d87c457628d31f2051f407d5885/graphlore_engine-0.5.79-cp310-abi3-macosx_10_12_universal2.macosx_10_12_x86_64.macosx_11_0_arm64.whl", hash = "sha256:bf2253193fd135bfc00e29998d63140da2043782c3961f36ac9f16aa9af3ad32", size = 11198788, upload-time = "2026-11-23T12:09:30.008Z" },
+    { url = "https://files.pythonhosted.org/packages/f7/97/4d4f91653af655c76ce260e7f9298f8e43e18ffb9ccddad6a3e0452726a3/graphlore_engine-0.5.79-cp310-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:7c49f04051ee03318272a8721054e84c6b4a38545e8bcf1f24fc58c1c5a6cb41", size = 5496594, upload-time = "2026-11-23T12:09:33.028Z" },
+    { url = "https://files.pythonhosted.org/packages/4c/6d/22ca96fccff151789843cf15729a9104e46231133f900a12eb095ca92f2c/graphlore_engine-0.5.79-cp310-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:e085aa3160ad69a636965d17a45750c26d9fb7fc8f4deb705975f34e03952ac6", size = 5708375, upload-time = "2026-11-23T12:09:34.912Z" },
+    { url = "https://files.pythonhosted.org/packages/44/6c/a9ed4db11437ce468f2ac52617f8c2541c189d34918807f656b413f3a418/graphlore_engine-0.5.79-cp310-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:10ab9c219afb8299103bf281ae4c89b30cbfcaeb1eac60e75aae68b07debfee8", size = 5953775, upload-time = "2026-11-23T12:09:36.638Z" },
+    { url = "https://files.pythonhosted.org/packages/d3/c4/46594a13ee7711c14ce56ba74faca7ca360f01baec3931e5c4e200993809/graphlore_engine-0.5.79-cp310-abi3-win_amd64.whl", hash = "sha256:52057272330a48129242f307dcf516ff2d330b144f0d65bcb2a6d1457bf29930", size = 5667682, upload-time = "2026-11-23T12:09:38.342Z" },
+]
 
 [[package]]
 name = "h11"
