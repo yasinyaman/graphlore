@@ -882,6 +882,39 @@ framework adds (`MapIdentityApi`, `devise_for`), named-route helpers (Rails
 `*_path`, Symfony `path('name')`), template links (`href`, `action`), and
 GraphQL / gRPC.
 
+### Spans alone, and the search kernel
+
+Two calls serve graphlore outside a build (engine 0.5.80):
+
+- **`definition_spans(src, rel)`** is `file_spans` without reading the rest of
+  the file's facts (references, requests, test regions): the parse and the
+  definition walk only. C++ still reads them all, because whether a
+  declaration is a misread variable (`Def::unspanned`) depends on the
+  function's locals. On the 5,073 source files of the 45 audit repositories
+  the two give the same spans on every file, and `definition_spans` takes
+  15.0 s against `file_spans`' 73.9 s. graphlore's span engine uses it where
+  Python tree-sitter is missing. Where Python tree-sitter is there,
+  `spans.py`'s own reader stays: it took 12.3 s on the same files, faster per
+  language than the engine's but for Kotlin (0.77×), C# (0.81×), C, Python
+  and Scala (about even); C++ is 2.8× slower on the engine's full path.
+  Both spend most of the time in tree-sitter's C parser. On 45 of those
+  files the two readers do not agree, from grammar versions as much as rules
+  (C# 14 `extension(…)` blocks in restsharp, which the engine's grammar reads
+  as a constructor; C++ destructors and function-pointer fields in leveldb
+  and cJSON), which keeps `spans.py`'s answer the one graphlore's tools see.
+- **`SearchKernel`** (`src/search.rs`, `KERNEL_ABI = 1`) is the port of the
+  built-in search's kernel, `search.py`'s tokenizer and BM25F loop, which
+  graphlore uses in place of its Python reference when the engine is
+  installed. `tests/fixtures/search_golden.json` is the contract: the same
+  terms, and scores equal to the bit (Python computes every logarithm, the
+  loop keeps Python's order of operations). On every file of the 45
+  repositories (8,892) the two tokenizers give the same terms, and BM25F
+  gives the same scores in the same order on real indexes. Tokenizing is
+  about 2.5× faster (4.3 s against 10.5 s with a cold term cache) and
+  scoring about 1.4×; a whole index build (0.7–0.9 s) or a query
+  (0.3–2.5 ms) does not show it, since reading the definitions dominates the
+  build and Python's term cache makes repeated words cheap.
+
 ## Compared with graphify on 31 repositories
 
 `benchmarks/compare_engines.py` builds both graphs of a repository, pairs

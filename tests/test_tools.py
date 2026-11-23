@@ -9117,6 +9117,14 @@ def test_builtin_search_kernel_matches_the_golden_contract():
         search._B_NAME, search._B_PATH, search._B_BODY)
 
 
+def test_builtin_search_kernel_takes_any_str():
+    """A str with a lone surrogate (a file read with surrogateescape) is not
+    UTF-8: the engine's kernel leaves it to the reference, never fails."""
+    from graphlore import search
+    text = "getUser\udcffName parse_\udc80json"
+    assert search._kernel().tokenize(text) == search._PyKernel().tokenize(text)
+
+
 def test_builtin_search_chunks_are_definitions_that_join_exactly(tmp_path, monkeypatch):
     _search_project(tmp_path)
     search, nodes, edges = _builtin(tmp_path, monkeypatch)

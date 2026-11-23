@@ -7,6 +7,22 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **The built-in search's kernel runs in the native engine** (graphlore-engine
+  0.5.80, not yet published: `SearchKernel`, `KERNEL_ABI = 1`). When the
+  engine is installed, its port of `search.py`'s tokenizer and BM25F loop
+  replaces the Python reference (`GRAPHLORE_SEARCH_KERNEL=python` forces the
+  reference); `tests/fixtures/search_golden.json` holds both to the same terms
+  and bit-identical scores, with new cases for non-ASCII capitals, `İ`, `ß`,
+  final sigma and Unicode digits. On every file of the 45 audit repositories
+  the two agree. Tokenizing is about 2.5× faster and scoring about 1.4×; a
+  whole index build or query is not measurably faster, since reading the
+  definitions dominates.
+- **`graphlore_engine.definition_spans`** (engine 0.5.80): `file_spans`
+  without the rest of the file's facts, the same spans on all 5,073 source
+  files of the audit repositories in a fifth of the time. graphlore's span
+  engine uses it where Python tree-sitter is missing. With Python tree-sitter
+  installed `spans.py` keeps its own reader, which is as fast or faster in
+  most languages.
 - **`publish.yml` can be run by hand** (`workflow_dispatch`): it uploads the
   `pyproject.toml` version to PyPI, then creates the `v<version>` tag and
   release. A published release still starts it as before.

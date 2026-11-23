@@ -1,6 +1,7 @@
 //! Parsing one file: a per-thread parser per language, a deadline per parse,
 //! and the facts the language module extracts.
 
+use std::borrow::Cow;
 use std::cell::{Cell, RefCell};
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
@@ -106,27 +107,8 @@ pub fn file_facts(
     }
     let mut facts = FileFacts::new(rel.to_string(), lang, false, src);
     let Some(lang) = lang else { return facts };
-    // C, C++: the branches of an `#if` that each leave a brace open are one
-    // piece of code written twice; the parser is given the first
-    // (C#: an `#if` in the middle of an expression is parsed once)
-    // (C, C++: `class EXPORT_MACRO Name {` is read without the macro)
-    let unmarked = match lang {
-        Lang::C | Lang::Cpp => blank_class_macros(src),
-        _ => None,
-    };
-    let src = unmarked.as_deref().unwrap_or(src);
-    // (and `int n GUARDED_BY(mu);` without the macro)
-    let unannotated = match lang {
-        Lang::C | Lang::Cpp => blank_annotation_macros(src),
-        _ => None,
-    };
-    let src = unannotated.as_deref().unwrap_or(src);
-    let blanked = match lang {
-        Lang::C | Lang::Cpp => blank_duplicate_branches(src),
-        Lang::CSharp => blank_expression_branches(src),
-        _ => None,
-    };
-    let src = blanked.as_deref().unwrap_or(src);
+    let prepared = prepare(lang, src);
+    let src = &prepared[..];
     match parse(lang, src, deadline) {
         Ok(tree) => {
             let root = tree.root_node();
@@ -149,6 +131,55 @@ pub fn file_facts(
 }
 
 /// The facts of a file given only its path and contents (detects the language).
+/// The source as the parser is given it: unchanged, or with what would
+/// mislead the grammar blanked.
+fn prepare(lang: Lang, src: &[u8]) -> Cow<'_, [u8]> {
+    // C, C++: the branches of an `#if` that each leave a brace open are one
+    // piece of code written twice; the parser is given the first
+    // (C#: an `#if` in the middle of an expression is parsed once)
+    // (C, C++: `class EXPORT_MACRO Name {` is read without the macro)
+    let mut out = Cow::Borrowed(src);
+    if matches!(lang, Lang::C | Lang::Cpp) {
+        if let Some(b) = blank_class_macros(&out) {
+            out = Cow::Owned(b);
+        }
+        // (and `int n GUARDED_BY(mu);` without the macro)
+        if let Some(b) = blank_annotation_macros(&out) {
+            out = Cow::Owned(b);
+        }
+    }
+    let blanked = match lang {
+        Lang::C | Lang::Cpp => blank_duplicate_branches(&out),
+        Lang::CSharp => blank_expression_branches(&out),
+        _ => None,
+    };
+    if let Some(b) = blanked {
+        out = Cow::Owned(b);
+    }
+    out
+}
+
+/// The definitions of one source file and nothing else: `file_facts`'s
+/// `defs` without reading references, requests or tests. C++ reads them all,
+/// because whether a declaration is a misread variable (`Def::unspanned`)
+/// depends on the function's locals.
+pub fn defs_for_source(rel: &str, src: &[u8], deadline: Option<Duration>) -> Vec<crate::Def> {
+    if docs::detect(rel).is_some() {
+        return Vec::new();
+    }
+    let Some(lang) = lang::detect(rel, Some(src)) else {
+        return Vec::new();
+    };
+    if lang == Lang::Cpp {
+        return file_facts(rel, src, Some(lang), None, deadline).defs;
+    }
+    let prepared = prepare(lang, src);
+    match parse(lang, &prepared, deadline) {
+        Ok(tree) => generic::walk_defs(lang.module(), tree.root_node(), &prepared),
+        Err(_) => Vec::new(),
+    }
+}
+
 pub fn facts_for_source(rel: &str, src: &[u8], deadline: Option<Duration>) -> FileFacts {
     if let Some(kind) = docs::detect(rel) {
         return file_facts(rel, src, None, Some(kind), deadline);

@@ -217,9 +217,14 @@ How it compares with semble, on semble's own query set (NDCG@10, index time,
 query latency): [benchmark](benchmark.md#search-quality-built-in-index-and-semble).
 
 The tokenizer and the BM25F loop sit behind a small kernel interface with a
-pure-Python reference. An optional compiled accelerator (a `graphlore_accel`
-module, not shipped) can replace it; `tests/fixtures/search_golden.json` holds
-the terms and bit-exact scores it must reproduce.
+pure-Python reference. With the native engine installed (graphlore-engine
+0.5.80 or later), its port of the two (`engine/src/search.rs`) answers instead;
+`tests/fixtures/search_golden.json` holds the terms and bit-exact scores both
+must give, and on the 45 audit repositories the two agree on every file. The
+port tokenizes about 2.5× and scores about 1.4× faster, which a whole index
+build or query does not show: reading definitions dominates the build, and a
+query takes 0.3–2.5 ms either way. Spans stay with `spans.py`'s reader, which
+on those repositories is as fast as the engine's.
 
 ### semble
 

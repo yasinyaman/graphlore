@@ -211,6 +211,9 @@ def test_native_spans_match_spans_py(name, monkeypatch):
     if parser is None:
         pytest.skip("Python tree-sitter (the [treesitter] extra) is not installed")
     assert graphlore_engine.file_spans(src, name) == spans._spans_treesitter(src, name)
+    if hasattr(graphlore_engine, "definition_spans"):  # engine 0.5.80: spans alone
+        fast = graphlore_engine.definition_spans(src, name)
+        assert fast == graphlore_engine.file_spans(src, name)
 
 
 def test_native_python_spans_match_ast():

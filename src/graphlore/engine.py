@@ -373,7 +373,10 @@ def file_spans(src: bytes, rel: str) -> list[tuple[int, int, int, str]] | None:
         import graphlore_engine
     except ImportError:
         return None
+    # `definition_spans` (engine 0.5.80) is the same answer without reading the
+    # rest of the file's facts, about five times faster
+    read = getattr(graphlore_engine, "definition_spans", None) or graphlore_engine.file_spans
     try:
-        return [tuple(s) for s in graphlore_engine.file_spans(src, rel)]  # type: ignore[misc]
+        return [tuple(s) for s in read(src, rel)]  # type: ignore[misc]
     except Exception:  # noqa: BLE001 - a span backend that fails reads as "no spans"
         return None
