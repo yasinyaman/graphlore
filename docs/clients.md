@@ -46,6 +46,34 @@ Back to the [README](../README.md) · [Tools](tools.md) ·
 "—": not documented by the client. Where a client caps the tools of all its
 servers together (Cursor, Windsurf, Copilot), keep the `lean` toolset.
 
+## Install as a plugin
+
+The repository root is a plugin in three formats, so these clients install the
+server and the `graphlore-explore` skill in one step, with no config to write
+(each needs [`uv`](https://docs.astral.sh/uv/); see
+[configuration](configuration.md#plugins-for-other-clients)):
+
+| Client | Format it reads | Install |
+|---|---|---|
+| Claude Code | `.claude-plugin/` (plugin and marketplace) | `/plugin install graphlore --marketplace yasinyaman/graphlore` |
+| OpenAI Codex CLI | [Agent Plugins 1.0](https://github.com/agentplugins/agent-plugins-spec) (`plugin.json`, `mcp.json`, `skills/`), listed by `.claude-plugin/marketplace.json` | `codex plugin marketplace add yasinyaman/graphlore`, then `codex plugin add graphlore@graphlore` |
+| GitHub Copilot CLI | Agent Plugins 1.0, listed by `.claude-plugin/marketplace.json` | `copilot plugin marketplace add yasinyaman/graphlore`, then `copilot plugin install graphlore@graphlore` |
+| Google Gemini CLI | `gemini-extension.json`, `skills/`, `.gemini-extension/GRAPHLORE.md` | `gemini extensions install https://github.com/yasinyaman/graphlore` |
+| Cursor | Agent Plugins 1.0, by Cursor's documentation | not tried |
+| Kimi Code CLI | its own `kimi.plugin.json`, which graphlore does not ship | `graphlore setup kimi` |
+
+Codex 0.171, Copilot CLI 1.0.114 and Gemini CLI 0.70 were checked with a local
+copy of the repository (November 2026): each installs the plugin and finds the
+skill; Codex and Copilot resolve the server to `uvx --from "graphlore[…] @ ."`
+in the installed copy, and Gemini connects to it.
+Codex and Copilot start it in the plugin's directory and name no project, so
+graphlore takes the client's first workspace root, or asks the agent to call
+`graphlore_project` with the repository's path (`GRAPHLORE_PROJECT_FROM_CLIENT`);
+Gemini names the workspace itself. Copilot warns that a direct install (a path
+or URL) is deprecated: install through the marketplace. The Gemini extension
+gallery lists a public repository with the `gemini-cli-extension` topic and a
+`gemini-extension.json` at its root, crawled once a day after a tag.
+
 ## Telling the agent to use graphlore
 
 A client gives its model the server's tool descriptions; few pass on the
