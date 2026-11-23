@@ -7992,7 +7992,31 @@ def main() -> None:
         global RESTRICT_PATHS
         RESTRICT_PATHS = True
         security = _transport_security()
-        if API_KEY:
+        from . import oauth  # lazily: pyjwt only when OAuth is asked for
+
+        try:
+            auth_conf = oauth.settings()
+            if auth_conf and API_KEY:
+                raise oauth.AuthConfigError(
+                    "GRAPHLORE_API_KEY and GRAPHLORE_AUTH_ISSUER are both set: pick the "
+                    "static bearer key or OAuth, not both.")
+            if auth_conf:
+                oauth.apply(mcp, auth_conf)
+        except oauth.AuthConfigError as e:
+            print(f"ERROR: {e}", file=sys.stderr)
+            sys.exit(2)
+        if auth_conf:
+            import uvicorn
+
+            print(f"OAuth: tokens of {auth_conf['issuer']} for {auth_conf['resource']}"
+                  + (f", scopes {', '.join(auth_conf['scopes'])}" if auth_conf["scopes"] else ""),
+                  file=sys.stderr)
+            app = (mcp.sse_app(host=HTTP_HOST, transport_security=security)
+                   if transport == "sse"
+                   else mcp.streamable_http_app(host=HTTP_HOST, transport_security=security))
+            uvicorn.run(app, host=HTTP_HOST, port=HTTP_PORT,
+                        log_level=mcp.settings.log_level.lower())
+        elif API_KEY:
             import uvicorn
 
             # host= must match the uvicorn bind host: the SDK auto-enables DNS

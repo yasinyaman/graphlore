@@ -151,6 +151,19 @@ All notable changes to this project are documented here. The format is based on
   pairs to 68.
 
 ### Added
+- **OAuth for the HTTP transport**, for remote clients (claude.ai and ChatGPT
+  connectors, Claude Code or Codex over HTTP): graphlore as a resource server
+  (`oauth.py`, the new `remote` extra: pyjwt). `GRAPHLORE_AUTH_ISSUER` and
+  `GRAPHLORE_AUTH_RESOURCE_URL` (and `GRAPHLORE_AUTH_SCOPES`) turn it on:
+  tokens your OAuth / OpenID provider signs are checked against its keys
+  (RFC 8414 / OpenID discovery, asymmetric algorithms only) and for their
+  issuer, audience (the resource URL exactly) and expiry; the MCP SDK's
+  middleware answers 401 with `WWW-Authenticate: Bearer resource_metadata=…`,
+  403 for a missing scope, and serves the RFC 9728 Protected Resource
+  Metadata. graphlore issues no token. It excludes `GRAPHLORE_API_KEY`, and
+  `GRAPHLORE_OFFLINE` refuses it (the keys come from the provider: a row in
+  the network table). Tested end to end over the streamable-HTTP app with a
+  locally generated key.
 - **A cross-model evaluation** (`benchmarks/agents/`, `docs/benchmark-agents.md`):
   16 questions about httpx at a pinned commit, each answer checked in its
   source, asked headless of Claude Code, Codex CLI, Gemini CLI, Kimi Code CLI

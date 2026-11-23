@@ -9841,3 +9841,120 @@ def test_agent_evaluation_reads_codex_and_gemini_output():
     got = run._parse_generic(gemini)
     assert got.tools == ["graphlore_locate"] and got.answer == "GZipDecoder"
     assert (got.input_tokens, got.output_tokens) == (1200, 30)
+
+
+# --- OAuth for the HTTP transport (oauth.py) ---------------------------------
+
+def _oauth_keys():
+    """A signing key and what the verifier reads keys through."""
+    import jwt
+    from cryptography.hazmat.primitives.asymmetric import rsa
+
+    private = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+
+    class Keys:
+        def get_signing_key_from_jwt(self, token):
+            return jwt.PyJWK.from_dict(json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(
+                private.public_key())), algorithm="RS256")
+    return private, Keys()
+
+
+def _token(private, **claims):
+    import time
+
+    import jwt
+    body = {"iss": "https://idp.example.com", "aud": "http://127.0.0.1:8000/mcp",
+            "sub": "u1", "client_id": "c1", "exp": int(time.time()) + 600,
+            "scope": "graphlore.read"}
+    body.update(claims)
+    return jwt.encode({k: v for k, v in body.items() if v is not None}, private,
+                      algorithm="RS256")
+
+
+def test_oauth_settings_come_from_the_environment(monkeypatch):
+    from graphlore import oauth
+    for k in ("AUTH_ISSUER", "AUTH_RESOURCE_URL", "AUTH_SCOPES"):
+        monkeypatch.delenv(f"GRAPHLORE_{k}", raising=False)
+    assert oauth.settings() is None
+    monkeypatch.setenv("GRAPHLORE_AUTH_ISSUER", "https://idp.example.com/")
+    import pytest
+    with pytest.raises(oauth.AuthConfigError, match="both"):
+        oauth.settings()
+    monkeypatch.setenv("GRAPHLORE_AUTH_RESOURCE_URL", "https://graphlore.example.com/mcp")
+    monkeypatch.setenv("GRAPHLORE_AUTH_SCOPES", "graphlore.read, graphlore.write")
+    assert oauth.settings() == {"issuer": "https://idp.example.com",
+                                "resource": "https://graphlore.example.com/mcp",
+                                "scopes": ["graphlore.read", "graphlore.write"]}
+    monkeypatch.setenv("GRAPHLORE_AUTH_ISSUER", "http://idp.example.com")
+    with pytest.raises(oauth.AuthConfigError, match="https"):
+        oauth.settings()
+    # RFC 8414 puts the well-known path before the issuer's own path
+    assert oauth.discovery_urls("https://idp.example.com/tenant") == [
+        "https://idp.example.com/.well-known/oauth-authorization-server/tenant",
+        "https://idp.example.com/tenant/.well-known/openid-configuration"]
+
+
+def test_oauth_verifier_checks_signature_issuer_audience_and_expiry():
+    import time
+
+    from cryptography.hazmat.primitives.asymmetric import rsa
+
+    from graphlore import oauth
+    private, keys = _oauth_keys()
+    v = oauth.JwtVerifier("https://idp.example.com", "http://127.0.0.1:8000/mcp", keys)
+    good = v.verify(_token(private))
+    assert good.client_id == "c1" and good.scopes == ["graphlore.read"] and good.subject == "u1"
+    assert v.verify(_token(private, aud="https://other.example.com")) is None
+    assert v.verify(_token(private, iss="https://evil.example.com")) is None
+    assert v.verify(_token(private, exp=int(time.time()) - 10)) is None
+    assert v.verify(_token(private, exp=None)) is None          # exp is required
+    other = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    assert v.verify(_token(other)) is None                     # not the provider's key
+    assert v.verify("not-a-jwt") is None
+    assert v.verify(_token(private, scope=None, scp=["a", "b"])).scopes == ["a", "b"]
+
+
+def test_oauth_guards_the_http_app_end_to_end(monkeypatch):
+    """The streamable-HTTP app with OAuth on: the RFC 9728 metadata route, 401
+    with resource_metadata without a token, 403 for a missing scope."""
+    from starlette.testclient import TestClient
+
+    from graphlore import oauth
+    private, keys = _oauth_keys()
+    saved = (server.mcp.settings.auth, server.mcp._token_verifier)
+    try:
+        oauth.apply(server.mcp, {"issuer": "https://idp.example.com",
+                                 "resource": "http://127.0.0.1:8000/mcp",
+                                 "scopes": ["graphlore.read"]}, keys)
+        app = server.mcp.streamable_http_app(host="127.0.0.1")
+        with TestClient(app, base_url="http://127.0.0.1:8000") as client:
+            meta = client.get("/.well-known/oauth-protected-resource/mcp").json()
+            assert meta["resource"] == "http://127.0.0.1:8000/mcp"
+            assert meta["authorization_servers"] == ["https://idp.example.com/"] or \
+                meta["authorization_servers"] == ["https://idp.example.com"]
+            body = {"jsonrpc": "2.0", "id": 1, "method": "ping"}
+            headers = {"accept": "application/json, text/event-stream"}
+            none = client.post("/mcp", json=body, headers=headers)
+            assert none.status_code == 401
+            assert "resource_metadata=" in none.headers["www-authenticate"]
+            bad = client.post("/mcp", json=body, headers={
+                **headers, "authorization": "Bearer " + _token(private, aud="https://x.example")})
+            assert bad.status_code == 401
+            narrow = client.post("/mcp", json=body, headers={
+                **headers, "authorization": "Bearer " + _token(private, scope="other")})
+            assert narrow.status_code == 403
+            ok = client.post("/mcp", json=body, headers={
+                **headers, "authorization": "Bearer " + _token(private)})
+            assert ok.status_code not in (401, 403)
+    finally:
+        server.mcp.settings.auth, server.mcp._token_verifier = saved
+
+
+def test_oauth_is_refused_offline(monkeypatch):
+    import pytest
+
+    from graphlore import oauth
+    monkeypatch.setenv("GRAPHLORE_OFFLINE", "1")
+    with pytest.raises(oauth.AuthConfigError, match="OFFLINE"):
+        oauth.apply(server.mcp, {"issuer": "https://idp.example.com",
+                                 "resource": "https://g.example.com/mcp", "scopes": []})
