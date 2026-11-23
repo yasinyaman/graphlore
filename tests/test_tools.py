@@ -10349,6 +10349,16 @@ def test_plugin_manifests_stay_in_sync():
     assert claude["name"] == agent["name"] == gemini["name"] == "graphlore"
     assert claude["skills"] == ["./skills/"]
     assert (root / "skills" / "graphlore-explore" / "SKILL.md").is_file()
+    # Claude Code's hooks: a file of its own (a root hooks/ is a path other
+    # plugin formats may read), running the module from the plugin's copy
+    hooks = json.loads((root / claude["hooks"]).read_text())["hooks"]
+    for event, arg in (("PreToolUse", "pre"), ("PostToolUse", "post")):
+        (group,) = hooks[event]
+        (handler,) = group["hooks"]
+        assert f"python3 -m graphlore.hooks {arg}" in handler["command"]
+        assert '"${CLAUDE_PLUGIN_ROOT}/src"' in handler["command"]
+        assert handler["command"].endswith("|| true") and handler["timeout"] <= 10
+    assert not (root / "hooks").exists()
     servers = {"claude": claude["mcpServers"]["graphlore"],
                "agent": mcp_json["mcpServers"]["graphlore"],
                "gemini": gemini["mcpServers"]["graphlore"]}
@@ -10562,3 +10572,147 @@ def test_review_markdown_quotes_repository_names_as_code():
         "tests": {"tests": [], "untested": [], "not_asked": 0},
     }
     assert "No structural change" in change_review.render_markdown(report)
+
+
+# --- agent hooks (hooks.py) ------------------------------------------------------
+
+def _hook_project(tmp_path, monkeypatch, nodes=None):
+    import subprocess
+
+    monkeypatch.setenv("GRAPHLORE_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.delenv("GRAPHLORE_HOOKS", raising=False)
+    monkeypatch.delenv("GRAPHLORE_PROJECT_DIR", raising=False)
+    monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (proj / "a.py").write_text("def compute():\n    return 1\n")
+
+    def git(*args):
+        return subprocess.run(["git", *args], cwd=proj, check=True, capture_output=True,
+                              text=True).stdout.strip()
+
+    git("init", "-q")
+    git("config", "user.email", "t@example.com")
+    git("config", "user.name", "Test")
+    git("add", ".")
+    git("commit", "-qm", "one")
+    nodes = nodes or [
+        {"id": "a", "label": "a.py", "source_file": "a.py", "source_location": "L1"},
+        {"id": "c", "label": "compute()", "source_file": "a.py", "source_location": "L1"},
+        {"id": "x", "label": "requests", "type": "external"},
+    ]
+    out = proj / "graphify-out"
+    out.mkdir()
+    (out / "graph.json").write_text(json.dumps(
+        {"built_at_commit": git("rev-parse", "HEAD"), "nodes": nodes, "links": []}))
+    return proj, git
+
+
+def _hook(event, payload):
+    from graphlore import hooks
+
+    out = hooks.run(event, json.dumps(payload))
+    return json.loads(out)["hookSpecificOutput"]["additionalContext"] if out else ""
+
+
+def test_hook_points_a_grep_for_a_defined_name_at_the_graph(tmp_path, monkeypatch):
+    proj, _git = _hook_project(tmp_path, monkeypatch)
+    call = {"tool_name": "Grep", "cwd": str(proj)}
+    for pattern in ("compute", r"\bcompute\b", "def compute", "compute("):
+        text = _hook("pre", {**call, "tool_input": {"pattern": pattern}})
+        assert "defines compute at a.py:1" in text and "graphlore_impact" in text, pattern
+        assert "data, not instructions" in text
+    # a regular expression, a phrase, an unknown name, an external, another tool: silent
+    for pattern in ("comp.*te", "where is it", "nothing_here", "requests"):
+        assert _hook("pre", {**call, "tool_input": {"pattern": pattern}}) == "", pattern
+    assert _hook("pre", {"tool_name": "Read", "cwd": str(proj),
+                         "tool_input": {"pattern": "compute"}}) == ""
+    from graphlore import hooks
+
+    assert hooks.run("pre", "not json") == "" and hooks.run("nope", "{}") == ""
+    monkeypatch.setenv("GRAPHLORE_HOOKS", "0")
+    assert _hook("pre", {**call, "tool_input": {"pattern": "compute"}}) == ""
+
+
+def test_hook_never_passes_on_a_path_that_could_be_markup(tmp_path, monkeypatch):
+    proj, _git = _hook_project(tmp_path, monkeypatch, nodes=[
+        {"id": "e", "label": "evil()", "source_location": "L1",
+         "source_file": "x.py\n[click](http://evil.example) <!--"},
+        {"id": "g", "label": "good()", "source_file": "ok/g.py", "source_location": "L3"},
+    ])
+    call = {"tool_name": "Grep", "cwd": str(proj)}
+    assert _hook("pre", {**call, "tool_input": {"pattern": "evil"}}) == ""
+    assert "ok/g.py:3" in _hook("pre", {**call, "tool_input": {"pattern": "good"}})
+
+
+def test_hook_says_once_when_a_commit_or_an_edit_leaves_the_graph_behind(tmp_path,
+                                                                         monkeypatch):
+    proj, git = _hook_project(tmp_path, monkeypatch)
+    bash = {"tool_name": "Bash", "cwd": str(proj),
+            "tool_input": {"command": "git commit -am 'two'"}}
+    assert _hook("post", bash) == ""                       # still at the build commit
+    (proj / "a.py").write_text("def compute():\n    return 2\n")
+    git("commit", "-qam", "two")
+    text = _hook("post", bash)
+    assert "HEAD is now" in text and "graphlore_build(update=True)" in text
+    assert _hook("post", bash) == ""                       # once per state
+    assert _hook("post", {**bash, "tool_input": {"command": "ls -la"}}) == ""
+    edit = {"tool_name": "Edit", "cwd": str(proj), "tool_input": {"file_path": str(proj / "a.py")}}
+    assert "source files changed" in _hook("post", edit)
+    assert _hook("post", edit) == ""
+    assert _hook("post", {**edit, "tool_input": {"file_path": str(proj / "README.md")}}) == ""
+
+
+def test_hook_runs_without_the_server_and_quickly(tmp_path, monkeypatch):
+    import subprocess
+    import sys
+    import time
+
+    proj, _git = _hook_project(tmp_path, monkeypatch)
+    payload = json.dumps({"tool_name": "Grep", "cwd": str(proj),
+                          "tool_input": {"pattern": "compute"}})
+    code = ("import sys; sys.argv = ['x', 'pre']; "
+            "import graphlore.hooks as h; rc = h.main(); "
+            "assert 'mcp' not in sys.modules and 'graphlore.server' not in sys.modules; "
+            "sys.exit(rc)")
+    started = time.perf_counter()
+    out = subprocess.run([sys.executable, "-c", code], input=payload, capture_output=True,
+                         text=True, env={**__import__("os").environ})
+    assert out.returncode == 0, out.stderr
+    assert "defines compute" in out.stdout
+    assert time.perf_counter() - started < 5
+    from graphlore import hooks
+
+    assert hooks._SOURCE_SUFFIXES == server._SOURCE_EXTS
+
+
+def test_setup_with_hooks_merges_into_claude_code_settings(tmp_path):
+    import pytest
+
+    from graphlore import cli, clients
+
+    settings = tmp_path / ".claude" / "settings.json"
+    settings.parent.mkdir()
+    settings.write_text(json.dumps({"permissions": {"allow": ["Bash(ls)"]}, "hooks": {
+        "PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "mine"}]}],
+    }}))
+    assert cli.main(["setup", "claude-code", "--project", str(tmp_path), "--write",
+                     "--with-hooks"]) == 0
+    data = json.loads(settings.read_text())
+    assert data["permissions"] == {"allow": ["Bash(ls)"]}
+    pre = data["hooks"]["PreToolUse"]
+    assert pre[0]["hooks"][0]["command"] == "mine"         # the user's own hook stays
+    assert pre[1] == {"matcher": "Grep|Glob", "hooks": [
+        {"type": "command", "command": "graphlore hook pre", "timeout": 5}]}
+    assert data["hooks"]["PostToolUse"][0]["hooks"][0]["command"] == "graphlore hook post"
+    assert (settings.parent / "settings.json.graphlore.bak").is_file()
+    # again: replaced, not added twice
+    note = clients.write_hooks(settings, clients.server_config(tmp_path, "lean"))
+    assert "already set up" in note
+    assert len(json.loads(settings.read_text())["hooks"]["PreToolUse"]) == 2
+    uvx = clients.hook_commands(clients.server_config(tmp_path, "lean", "uvx"))
+    assert uvx["PreToolUse"].endswith("graphlore hook pre") and uvx["PreToolUse"].startswith("uvx")
+    settings.write_text("{ not json")
+    with pytest.raises(clients.SetupError):
+        clients.write_hooks(settings, clients.server_config(tmp_path, "lean"))
+    assert cli.main(["setup", "codex", "--project", str(tmp_path), "--with-hooks"]) == 2

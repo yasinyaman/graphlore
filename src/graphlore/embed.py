@@ -123,13 +123,7 @@ def _encode(model: Any, texts: list[str]) -> Any:
 def _cache_root() -> Path | None:
     """Where vectors are kept between runs, or None when disabled
     (``GRAPHLORE_CACHE_DIR=off``)."""
-    raw = (config.env("CACHE_DIR", "") or "").strip()
-    if raw.lower() in _OFF:
-        return None
-    if raw:
-        return Path(raw).expanduser()
-    base = os.environ.get("XDG_CACHE_HOME") or os.path.join(os.path.expanduser("~"), ".cache")
-    return Path(base) / "graphlore"
+    return config.cache_root()
 
 
 class VectorStore:

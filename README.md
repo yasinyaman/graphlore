@@ -294,7 +294,8 @@ search answered.
 `graphlore_freshness` says whether to update or rebuild, and
 `graphlore_build(".", update=True)` re-extracts changed files. Answers also flag
 their own files that changed since the build. A git post-commit hook or the
-opt-in watcher automates it.
+opt-in watcher automates it, and in Claude Code the plugin's hooks say when a
+commit or an edit leaves the graph behind.
 → [Keeping the graph fresh](https://github.com/yasinyaman/graphlore/blob/master/docs/concepts.md#keeping-the-graph-fresh)
 
 ### Was this project called graphify-mcp?
