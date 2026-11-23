@@ -590,8 +590,18 @@ def test_version_reported_over_mcp():
 def test_main_module_wired():
     import importlib
 
+    from graphlore import cli
     mod = importlib.import_module("graphlore.__main__")  # must not run main()
-    assert mod.main is server.main
+    assert mod.main is cli.main
+
+
+def test_bare_graphlore_still_runs_the_server(monkeypatch):
+    """Every client config and the plugin start `graphlore` with no argument:
+    that must stay the server."""
+    from graphlore import cli
+    ran = []
+    monkeypatch.setattr(server, "main", lambda: ran.append(True))
+    assert cli.main([]) is None and ran == [True]
 
 
 def test_claude_plugin_manifests_stay_in_sync():
@@ -9584,3 +9594,140 @@ def test_set_labels_takes_its_names_as_a_json_string(tmp_path, monkeypatch):
                                                  as_json=True))
     assert got["names"] == {"0": "Core"} and got["labeled"] == 1
     assert "not valid JSON" in json.loads(server.graphlore_set_labels("{x", as_json=True))["error"]
+
+
+# --- `graphlore setup <client>` and `graphlore agents-md` --------------------
+
+def _rendered_body(client, text):
+    """The config block of `clients.render`'s text, parsed."""
+    body = text.split("\n", 1)[1].split("\n\n# or with", 1)[0].split("\n\n# ", 1)[0]
+    if client.fmt == "toml":
+        import tomllib
+        return tomllib.loads(body)
+    return json.loads(body)
+
+
+def test_setup_renders_a_valid_block_for_every_client(tmp_path):
+    import sys
+
+    from graphlore import clients
+    cfg = clients.server_config(tmp_path, "full", "uvx")
+    assert clients.server_config(tmp_path, "lean")["command"] == "graphlore"
+    for client in clients.CLIENTS.values():
+        text = clients.render(client, cfg, tmp_path)
+        if client.fmt == "toml" and sys.version_info < (3, 11):
+            continue
+        data = _rendered_body(client, text)
+        entry = data[client.key]["graphlore"]
+        assert entry["args"][-1] == "graphlore" and entry["env"]["GRAPHLORE_TOOLSET"] == "full"
+        assert entry.get("type", "stdio") == "stdio"
+        # a project file names no absolute path where the client can say "here"
+        if client.project_file and client.project_dir_value:
+            assert entry["env"]["GRAPHLORE_PROJECT_DIR"] == client.project_dir_value
+    # the lean default sets no toolset
+    lean = clients.server_config(tmp_path, "lean")
+    assert "GRAPHLORE_TOOLSET" not in lean["env"]
+    assert clients.server_config(tmp_path, "lean", "/opt/bin/graphlore")["command"] == \
+        "/opt/bin/graphlore"
+
+
+def test_setup_write_merges_keeps_other_servers_and_refuses_what_it_cannot_parse(tmp_path):
+    import pytest
+
+    from graphlore import clients
+    cursor = clients.CLIENTS["cursor"]
+    path = tmp_path / ".cursor" / "mcp.json"
+    path.parent.mkdir()
+    path.write_text(json.dumps({"mcpServers": {"other": {"command": "x"}}}), encoding="utf-8")
+    cfg = clients.server_config(tmp_path, "lean")
+    note = clients.write(cursor, path, cfg)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert set(data["mcpServers"]) == {"other", "graphlore"} and "updated" in note
+    assert (path.parent / "mcp.json.graphlore.bak").is_file()
+    assert "already set up" in clients.write(cursor, path, cfg)
+    path.write_text("{ // a comment\n}", encoding="utf-8")
+    with pytest.raises(clients.SetupError, match="not plain JSON"):
+        clients.write(cursor, path, cfg)
+    assert path.read_text(encoding="utf-8") == "{ // a comment\n}"   # untouched
+
+
+def test_setup_write_merges_codex_toml(tmp_path):
+    import sys
+
+    from graphlore import clients
+    codex = clients.CLIENTS["codex"]
+    path = tmp_path / "config.toml"
+    path.write_text('model = "o4"\n\n[mcp_servers.other]\ncommand = "x"\n\n'
+                    '[mcp_servers.graphlore]\ncommand = "old"\n'
+                    '[mcp_servers.graphlore.env]\nA = "1"\n\n[profiles.p]\nmodel = "m"\n',
+                    encoding="utf-8")
+    clients.write(codex, path, clients.server_config(tmp_path, "lean"))
+    text = path.read_text(encoding="utf-8")
+    assert text.count("[mcp_servers.graphlore]") == 1 and '"old"' not in text
+    assert "[mcp_servers.other]" in text and "[profiles.p]" in text
+    if sys.version_info >= (3, 11):
+        import tomllib
+        data = tomllib.loads(text)
+        assert data["mcp_servers"]["graphlore"]["command"] == "graphlore"
+        assert data["mcp_servers"]["graphlore"]["env"] == {"GRAPHLORE_PROJECT_DIR": str(tmp_path)}
+        assert data["profiles"]["p"]["model"] == "m" and data["model"] == "o4"
+
+
+def test_agents_md_names_only_the_toolset_s_tools_and_merges_between_markers():
+    import re
+
+    from graphlore import agents_md
+    every = server._registered_tool_names()
+    for keep in (set(server.LEAN_TOOLS), set(server.LOCATE_TOOLS), every):
+        text = agents_md.render(keep)
+        named = set(re.findall(r"graphlore_[a-z_]+", text))
+        assert named and named <= keep, named - keep
+    lean = agents_md.render(server.LEAN_TOOLS)
+    assert "graphlore_cycles" not in lean and "graphlore_impact" in lean
+    assert len(agents_md.render(every)) < 6000   # well under Codex's 32 KiB for AGENTS.md
+    merged = agents_md.merge("# Project\n\nOwn text.\n", lean)
+    assert merged.startswith("# Project\n\nOwn text.\n\n" + agents_md.BEGIN)
+    again = agents_md.merge(merged.replace("graphlore_impact", "OLD"), lean)
+    assert again == merged and agents_md.merge("", lean) == lean
+
+
+def test_cli_subcommands(tmp_path, capsys):
+    from graphlore import cli
+    assert cli.main(["clients"]) == 0 and "codex" in capsys.readouterr().out
+    assert cli.main(["setup", "nope"]) == 2
+    assert cli.main(["setup", "gemini", "--project", str(tmp_path), "--write",
+                     "--with-agents-md"]) == 0
+    out = capsys.readouterr().out
+    assert (tmp_path / ".gemini" / "settings.json").is_file() and "GEMINI.md" in out
+    assert "graphlore:begin" in (tmp_path / "GEMINI.md").read_text(encoding="utf-8")
+    assert cli.main(["agents-md", "--toolset", "full"]) == 0
+    assert "graphlore_bridges" in capsys.readouterr().out
+    # a client with no file graphlore writes prints the block and says so
+    assert cli.main(["setup", "claude-desktop", "--project", str(tmp_path)]) == 0
+
+
+def test_a_written_config_starts_the_server(tmp_path):
+    """graphlore setup --write, then the server started from what it wrote."""
+    import asyncio
+    import shutil
+
+    import pytest
+    from mcp import Client
+    from mcp.client.stdio import StdioServerParameters
+
+    from graphlore import clients
+    exe = shutil.which("graphlore")
+    if exe is None:
+        pytest.skip("the graphlore command is not installed")
+    path = tmp_path / ".cursor" / "mcp.json"
+    clients.write(clients.CLIENTS["cursor"], path,
+                  clients.server_config(tmp_path, "lean", exe), user=True)
+    entry = json.loads(path.read_text(encoding="utf-8"))["mcpServers"]["graphlore"]
+
+    async def _go():
+        params = StdioServerParameters(command=entry["command"], args=entry["args"],
+                                       env={**__import__("os").environ, **entry["env"]})
+        async with Client(params) as client:
+            return [t.name for t in (await client.list_tools()).tools]
+    names = asyncio.run(_go())
+    assert set(names) == set(server.LEAN_TOOLS)

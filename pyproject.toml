@@ -86,7 +86,7 @@ Changelog = "https://github.com/yasinyaman/graphlore/blob/master/CHANGELOG.md"
 # The rename from graphify-mcp freed us to claim the bare name: `graphifyy`
 # ships a `graphify-mcp` script (its embedded server), which is why the old
 # entry point had to be the clunky `graphify-mcp-server`. No collision now.
-graphlore = "graphlore.server:main"
+graphlore = "graphlore.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/graphlore"]

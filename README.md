@@ -51,6 +51,18 @@ the graph (prebuilt wheels, no Rust toolchain), then register the server.
 pip install "graphlore[engine] @ git+https://github.com/yasinyaman/graphlore"
 ```
 
+Then let graphlore write your client's config, and the usage guide its agent
+reads (`AGENTS.md`, `GEMINI.md`, Copilot's instructions):
+
+```bash
+graphlore setup codex --write --with-agents-md
+```
+
+`graphlore clients` lists the clients it knows: Claude Code, Claude Desktop,
+OpenAI Codex CLI, Google Gemini CLI, Cursor, VS Code (GitHub Copilot), Kimi
+Code CLI, Zed, Windsurf and Cline. Without `--write` it prints the block and
+where it goes. For any other MCP client the block is:
+
 ```json
 {
   "mcpServers": {
@@ -62,9 +74,8 @@ pip install "graphlore[engine] @ git+https://github.com/yasinyaman/graphlore"
 }
 ```
 
-- Claude Code: save this as `.mcp.json` in the project root (`"."` works as the path).
-- Claude Desktop: add it to `claude_desktop_config.json`
-  (macOS `~/Library/Application Support/Claude/`, Windows `%APPDATA%\Claude\`).
+Each client's file, key and limits (tool caps, output truncation, prompts):
+[docs/clients.md](https://github.com/yasinyaman/graphlore/blob/master/docs/clients.md).
 
 Optional extras, installed as `graphlore[extra]`: `engine` (graphlore's native
 extractor, which builds the graph), `embed` (static code
@@ -267,6 +278,7 @@ own. The old `GRAPHIFY_*` environment variables still work.
 ## Documentation
 
 - [Tool reference](https://github.com/yasinyaman/graphlore/blob/master/docs/tools.md): all 34 tools, resources, prompts, what a result carries
+- [MCP clients](https://github.com/yasinyaman/graphlore/blob/master/docs/clients.md): setting up Codex, Gemini CLI, Cursor, Copilot, Kimi, Zed, Windsurf, Cline and Claude, and what each one shows the model
 - [How graphlore works](https://github.com/yasinyaman/graphlore/blob/master/docs/concepts.md): resolved edges, import checks, analysis scope, freshness, the search bridge, naming communities
 - [Configuration](https://github.com/yasinyaman/graphlore/blob/master/docs/configuration.md): toolsets, HTTP transport and security, offline mode, environment variables
 - [Benchmark](https://github.com/yasinyaman/graphlore/blob/master/docs/benchmark.md): method, cross-language results, caveats
