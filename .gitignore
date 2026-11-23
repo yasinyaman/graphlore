@@ -35,3 +35,6 @@ graphify-out/
 engine/target/
 engine/python/graphlore_engine/*.so
 engine/python/graphlore_engine/*.pyd
+
+# benchmarks/agents/run.py's raw runs and transcripts (score.py makes the table)
+benchmarks/agents/results/

@@ -9763,3 +9763,81 @@ def test_default_replies_stay_under_what_clients_keep(tmp_path, monkeypatch):
         for as_json in (False, True):
             out = fn(**kw, as_json=as_json) if "as_json" in params else fn(**kw)
             assert len(out) <= 35_000, (name, as_json, len(out))
+
+
+# --- the cross-model evaluation (benchmarks/agents) --------------------------
+
+def _agents_module(name):
+    import importlib.util
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parent.parent / "benchmarks" / "agents" / f"{name}.py"
+    import sys
+
+    spec = importlib.util.spec_from_file_location(f"agents_{name}", path)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = mod   # dataclasses look their module up there
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_agent_evaluation_runs_and_scores_with_the_fake_client(tmp_path):
+    """run.py with the fake client (a fixed transcript of real tool calls over
+    stdio), then score.py: what a real run with codex / claude / gemini does."""
+    import shutil
+    from pathlib import Path
+
+    run, score = _agents_module("run"), _agents_module("score")
+    repo = tmp_path / "proj"
+    shutil.copytree(Path(__file__).parent / "fixtures" / "polyglot", repo)
+    (repo / "graphify-out").mkdir()
+    shutil.move(str(repo / "graph.json"), repo / "graphify-out" / "graph.json")
+    tasks = {
+        "repos": {"proj": {"path": str(repo)}},
+        "tasks": [
+            {"id": "a", "repo": "proj", "prompt": "Which class does HTTPTransport inherit from?",
+             "expect": {"all": ["BaseTransport"]}, "tools": ["graphlore_node_details"]},
+            {"id": "b", "repo": "proj", "prompt": "Which test file tests URL.copy_with?",
+             "expect": {"all": ["tests/models/test_url.py"]}, "tools": ["graphlore_tests_for"]},
+        ],
+    }
+    tasks_file = tmp_path / "tasks.json"
+    tasks_file.write_text(json.dumps(tasks), encoding="utf-8")
+    out = tmp_path / "out"
+    assert run.main(["--clients", "fake", "--variants", "plain,agents-md", "--tasks",
+                     str(tasks_file), "--out", str(out), "--root", str(tmp_path)]) == 0
+    rows = [json.loads(x) for x in (out / "runs.jsonl").read_text().splitlines()]
+    assert len(rows) == 4 and all(r["exit"] == 0 for r in rows)
+    first = next(r for r in rows if r["task"] == "a")
+    assert first["tools"] == ["graphlore_search", "graphlore_node_details"]
+    assert first["input_tokens"] > 0
+    # the agents-md variant leaves the repository as it found it
+    assert not (repo / "AGENTS.md").exists()
+    table = score.score(rows, {t["id"]: t for t in tasks["tasks"]})
+    assert [(t["variant"], t["solved"], t["no_suited_tool"]) for t in table] == [
+        ("agents-md", 1, 1), ("plain", 1, 1)]
+    assert table[0]["unsolved"] == ["b"]
+    assert "| fake | plain | 1/2 |" in score.markdown(table)
+
+
+def test_agent_evaluation_reads_codex_and_gemini_output():
+    run = _agents_module("run")
+    codex = "\n".join(json.dumps(x) for x in [
+        {"type": "thread.started"},
+        {"type": "item.completed", "item": {"type": "mcp_tool_call", "server": "graphlore",
+                                            "tool": "graphlore_impact", "arguments": {}}},
+        {"type": "item.completed",
+         "item": {"type": "agent_message", "text": "It is _send_handling_auth."}},
+        {"type": "turn.completed", "usage": {"input_tokens": 900, "output_tokens": 40}},
+    ])
+    got = run._parse_codex(codex)
+    assert (got.answer, got.tools, got.input_tokens, got.output_tokens) == (
+        "It is _send_handling_auth.", ["graphlore_impact"], 900, 40)
+    gemini = "\n".join(json.dumps(x) for x in [
+        {"type": "tool_use", "tool_name": "mcp_graphlore_graphlore_locate"},
+        {"type": "result", "response": "GZipDecoder",
+         "stats": {"input_tokens": 1200, "output_tokens": 30}},
+    ])
+    got = run._parse_generic(gemini)
+    assert got.tools == ["graphlore_locate"] and got.answer == "GZipDecoder"
+    assert (got.input_tokens, got.output_tokens) == (1200, 30)
