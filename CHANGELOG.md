@@ -7,6 +7,14 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **A GitHub Action for `graphlore review`** (`action.yml` at the root,
+  `uses: yasinyaman/graphlore@<tag>`): it installs graphlore with the native
+  engine from its own copy, reviews the pull request against its base commit,
+  writes the report to the job summary and posts it as one comment it updates
+  on each push (a fork's read-only token: the summary only). `fail-on` fails
+  the step on a gate. graphlore's own pull requests run it
+  (`.github/workflows/review.yml`). `docs/review.md` covers the command, the
+  Action and a GitLab CI job.
 - **`graphlore review`: what a commit range changes, read off the code
   graph.** `graphlore review --base origin/main` (or `--base HEAD~1`, the
   default) compares the checked-out commit with its merge base and reports

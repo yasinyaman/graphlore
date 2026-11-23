@@ -24,6 +24,10 @@ where a behavior lives.
   `file:line`.
 - **Read only the code you need.** `graphlore_fetch` returns a symbol's exact
   span under a token budget.
+- **Review a pull request without a model.** `graphlore review` (and its
+  [GitHub Action](https://github.com/yasinyaman/graphlore/blob/master/docs/review.md))
+  lists the definitions a change touches, what depends on them, the tests that
+  reach them and the import cycles it brings in.
 - **Know how far to trust an answer.** Results say how a name was matched, what
   a budget cut left out, and which files changed since the graph was built.
 - **Local by default.** The analysis tools read local files and need no API
@@ -206,8 +210,8 @@ duplicated code).
 
 graphlore builds its own graph (its native engine, in Rust), so it does not
 need graphify installed, and it reads a graph Graphify built too. Graphify's embedded server has graph navigation,
-token-budgeted subgraphs, an HTTP transport, multi-project serving and PR
-triage tools graphlore lacks. graphlore adds the span engine and
+token-budgeted subgraphs, an HTTP transport and multi-project serving, which
+graphlore lacks. graphlore adds the span engine and
 what it makes possible: semantic `locate` joined to the enclosing symbol,
 source hydration (`fetch`, `skeleton`), route and package-API extraction,
 cosmetic-vs-structural freshness, and calls through a module object
@@ -290,7 +294,8 @@ own. The old `GRAPHIFY_*` environment variables still work.
   languages, resolved from the source, with its own communities and incremental
   updates. Without it the `graphify` CLI builds it; graphify, and with it
   `graphlore_add` and `mode="deep"`, goes in the next release.
-- No PR or review-thread tooling.
+- `graphlore review` reports on a change; it does not read or answer review
+  threads.
 - Calls through an object, a callback or dynamic dispatch are not in the graph,
   so an empty answer means "no edge was indexed", not "nothing calls this".
 
@@ -300,6 +305,7 @@ own. The old `GRAPHIFY_*` environment variables still work.
 - [MCP clients](https://github.com/yasinyaman/graphlore/blob/master/docs/clients.md): setting up Codex, Gemini CLI, Cursor, Copilot, Kimi, Zed, Windsurf, Cline and Claude, and what each one shows the model
 - [How graphlore works](https://github.com/yasinyaman/graphlore/blob/master/docs/concepts.md): resolved edges, import checks, analysis scope, freshness, the search bridge, naming communities
 - [Configuration](https://github.com/yasinyaman/graphlore/blob/master/docs/configuration.md): toolsets, HTTP transport and security, offline mode, environment variables
+- [Reviewing a change](https://github.com/yasinyaman/graphlore/blob/master/docs/review.md): `graphlore review` and the GitHub Action, what the report holds
 - [Benchmark](https://github.com/yasinyaman/graphlore/blob/master/docs/benchmark.md): method, cross-language results, caveats
 - [Native engine](https://github.com/yasinyaman/graphlore/blob/master/docs/native-engine.md): graphlore's own extractor in Rust, compared with graphify on 31 repositories, and the roadmap
 - [Changelog](https://github.com/yasinyaman/graphlore/blob/master/CHANGELOG.md) · [Contributing](https://github.com/yasinyaman/graphlore/blob/master/CONTRIBUTING.md) · [Guidance for coding agents](https://github.com/yasinyaman/graphlore/blob/master/AGENTS.md)

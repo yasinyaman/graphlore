@@ -141,6 +141,7 @@ The version is duplicated in `pyproject.toml`, `server.__version__`, `.claude-pl
 
 - `docs/tools.md` — all 34 tools, resources, prompts, what a result carries
 - `docs/concepts.md` — resolved edges, import checks, analysis scope, freshness, the search bridge (built-in index or semble), naming communities
+- `docs/review.md` — `graphlore review` (what the report holds, `--fail-on`, exit codes), the root `action.yml` (a composite GitHub Action: installs graphlore from its own copy, posts or updates one comment found by `<!-- graphlore-review -->`) and a GitLab CI job
 - `docs/configuration.md` — running, the plugins, toolsets, transports, the network table, environment variables
 - `docs/benchmark-agents.md` — coding agents (Claude Code, Codex, Gemini CLI, Kimi, Cursor) on 16 checked questions about httpx, with and without the `agents-md` guide: `benchmarks/agents/run.py` (one adapter per agent's headless mode; `fake` replays a transcript, what the tests run), `score.py` (the table). Run by hand with each agent's own login, never in CI
 - `docs/clients.md` — each MCP client's config file, key, add command and limits (tool caps, output truncation, prompts, instructions), with the page each was read from; `graphlore setup` and `graphlore agents-md`

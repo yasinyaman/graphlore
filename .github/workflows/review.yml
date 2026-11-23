@@ -1,0 +1,17 @@
+# graphlore reviewing its own pull requests with the Action at the root
+# (action.yml): the report is in the job summary and, for a pull request from
+# this repository, a comment it updates on each push.
+name: graphlore review
+on:
+  pull_request:
+permissions:
+  contents: read
+  pull-requests: write
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: ./

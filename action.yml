@@ -1,0 +1,118 @@
+name: graphlore review
+description: >-
+  What a pull request changes, read off its code graph: the definitions it
+  touches, what depends on them, the tests that reach them, and the import
+  cycles and layer rules it brings in. Deterministic and offline: no model.
+author: yasinyaman
+branding:
+  icon: git-pull-request
+  color: purple
+
+inputs:
+  base:
+    description: >-
+      The commit the change is compared with, through its merge base. Default:
+      the pull request's base commit, else HEAD~1.
+    required: false
+    default: ""
+  fail-on:
+    description: >-
+      Comma-separated gates that fail the step: cycle (a runtime import cycle
+      introduced), layer (a .graphlore-layers.json rule broken on a changed
+      line), untested (a changed definition no test reaches). Empty: report only.
+    required: false
+    default: ""
+  hops:
+    description: How far dependents are followed.
+    required: false
+    default: "3"
+  project:
+    description: The project directory inside the repository.
+    required: false
+    default: "."
+  comment:
+    description: >-
+      "true": post the report on the pull request, updating its own earlier
+      comment. Needs `pull-requests: write`; a pull request from a fork gets
+      the job summary only.
+    required: false
+    default: "true"
+  python-version:
+    description: The Python that runs graphlore.
+    required: false
+    default: "3.12"
+  token:
+    description: The token that posts the comment.
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  exit-code:
+    description: 0 clean, 1 a fail-on gate failed, 2 no review could be made.
+    value: ${{ steps.review.outputs.exit-code }}
+  report:
+    description: The path of the Markdown report.
+    value: ${{ steps.review.outputs.report }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install graphlore
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+      run: python -m pip install --quiet "${ACTION_PATH}[engine]"
+
+    - name: Review
+      id: review
+      shell: bash
+      working-directory: ${{ inputs.project }}
+      env:
+        BASE: ${{ inputs.base || github.event.pull_request.base.sha }}
+        FAIL_ON: ${{ inputs.fail-on }}
+        HOPS: ${{ inputs.hops }}
+      run: |
+        report="$RUNNER_TEMP/graphlore-review.md"
+        set +e
+        graphlore review --base "${BASE:-HEAD~1}" --fail-on "$FAIL_ON" --hops "$HOPS" \
+          --output "$report"
+        code=$?
+        set -e
+        echo "exit-code=$code" >> "$GITHUB_OUTPUT"
+        echo "report=$report" >> "$GITHUB_OUTPUT"
+        if [ -f "$report" ]; then cat "$report" >> "$GITHUB_STEP_SUMMARY"; fi
+        if [ "$code" = 2 ]; then
+          echo "::error::graphlore review could not run (see the log above). A pull request" \
+               "needs the history of both commits: actions/checkout with fetch-depth: 0."
+        fi
+
+    - name: Comment on the pull request
+      if: inputs.comment == 'true' && github.event.pull_request.number && steps.review.outputs.exit-code != '2'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        REPO: ${{ github.repository }}
+        PR: ${{ github.event.pull_request.number }}
+        REPORT: ${{ steps.review.outputs.report }}
+      run: |
+        marker='<!-- graphlore-review -->'
+        id=$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
+               --jq ".[] | select(.body | startswith(\"$marker\")) | .id" | head -n 1) || id=""
+        if [ -n "$id" ]; then
+          gh api --method PATCH "repos/$REPO/issues/comments/$id" -F "body=@$REPORT" >/dev/null \
+            || echo "::warning::could not update the review comment (a read-only token?)"
+        else
+          gh api --method POST "repos/$REPO/issues/$PR/comments" -F "body=@$REPORT" >/dev/null \
+            || echo "::warning::could not post the review comment (a pull request from a fork has a read-only token; the job summary has the report)"
+        fi
+
+    - name: Gate
+      if: steps.review.outputs.exit-code != '0'
+      shell: bash
+      env:
+        CODE: ${{ steps.review.outputs.exit-code }}
+      run: exit "$CODE"
