@@ -133,6 +133,25 @@ All notable changes to this project are documented here. The format is based on
   pairs to 68.
 
 ### Added
+- **`graphlore setup <client>`, `graphlore clients` and `graphlore agents-md`.**
+  graphlore's setup docs were Claude's only. `graphlore setup` prints, or with
+  `--write` merges, the block that starts graphlore in Claude Code, Claude
+  Desktop, OpenAI Codex CLI (TOML), Google Gemini CLI, Cursor, VS Code with
+  GitHub Copilot (`.mcp.json`, the current format), Kimi Code CLI, Zed,
+  Windsurf or Cline. A merge keeps the file's other servers, saves the old
+  file as `<name>.graphlore.bak` and refuses a file it cannot parse (Zed's
+  settings with comments). A project file names no absolute path where the
+  client can say "here" (`${workspaceFolder}`, `${CLAUDE_PROJECT_DIR:-.}`).
+  `graphlore agents-md` writes the usage guide for agents that read a project
+  file rather than MCP prompts or server instructions (Codex and Copilot show
+  no prompts): between `<!-- graphlore:begin -->` markers in `AGENTS.md`,
+  `GEMINI.md` or Copilot's instructions, naming only the toolset's tools;
+  `setup --with-agents-md` writes it into the file that client reads. The
+  console script is now `graphlore.cli:main`: with no arguments it runs the
+  server as before. New page `docs/clients.md`: each client's files, key, add
+  command and limits (tool caps, output truncation, prompts, instructions),
+  each read from the client's own documentation (Codex's from its source,
+  its documentation site being unreachable here).
 - **Graph algorithms beyond the breadth-first walk** (`src/graphlore/algorithms.py`,
   checked against networkx on 300 random graphs; on Django's 77,766 nodes each
   answers in seconds):

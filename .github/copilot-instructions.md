@@ -11,7 +11,7 @@ graphlore is a Python MCP server (MCP Python SDK v2: `mcp.server.mcpserver.MCPSe
 
 ## Layout
 
-`src/graphlore/` is layered `config.py` → `engine.py` → `graph.py` → `algorithms.py` → `spans.py` → `scope.py` → `apis.py` / `routes.py` → `imports.py` → `resolve.py` → `review.py` → `server.py`. `server.py` holds the whole MCP surface (34 tools, resources, prompts, `main()`). Tests are in `tests/test_tools.py` (plus `tests/test_engine.py`, which needs the engine installed) and call tool functions directly.
+`src/graphlore/` is layered `config.py` → `engine.py` → `graph.py` → `algorithms.py` → `spans.py` → `scope.py` → `apis.py` / `routes.py` → `imports.py` → `resolve.py` → `review.py` → `server.py`. `server.py` holds the whole MCP surface (34 tools, resources, prompts, `main()`). Apart from the layers: `cli.py` is the `graphlore` command (no arguments runs the server, never require one; `setup`, `clients`, `agents-md`), `clients.py` the client config table behind `graphlore setup` (formats as `docs/clients.md` cites them), `agents_md.py` the usage guide for AGENTS.md and the like. Tests are in `tests/test_tools.py` (plus `tests/test_engine.py`, which needs the engine installed) and call tool functions directly.
 
 ## Rules
 
