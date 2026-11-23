@@ -124,6 +124,41 @@ The registry verifies ownership by looking for `mcp-name: io.github.yasinyaman/g
 
 One-time setup, before the first release: on PyPI, add a *pending trusted publisher* for the project name `graphlore` with owner `yasinyaman`, repository `graphlore`, workflow `publish.yml` and environment `pypi`. No API token is needed.
 
+### The first PyPI release
+
+graphlore has not been on PyPI yet (0.7.0 was never tagged or uploaded), and
+the README is PyPI's long description, so the release commit and the upload
+go together. In order:
+
+1. Once: the pending trusted publisher for `graphlore` (above) and an
+   environment named `pypi` in the repository's settings (Settings →
+   Environments).
+2. Decide the engine: `graphlore-engine` 0.5.79 is on PyPI and the `engine`
+   extra (`>=0.5.79,<0.6`) installs it; push `engine-v0.5.80` first only to
+   ship the engine's search kernel with this release.
+3. The release commit, merged only when the upload follows at once:
+   - the version (steps 1–2 of *Releasing*: 0.8.0, since `[Unreleased]`
+     holds everything after 0.7.0) and `uv lock`;
+   - `README.md`: the quick start's "not on PyPI yet" comment and GitHub
+     install line become `pip install "graphlore[engine]"` /
+     `uvx --from "graphlore[engine]" graphlore`, and the paragraph "Until the
+     first PyPI release…" goes;
+   - `docs/clients.md`: "Once graphlore is on PyPI, …" becomes a plain
+     statement;
+   - `docs/review.md`: the GitLab job installs `graphlore[engine]` from PyPI,
+     and the Action can install from PyPI (`action.yml`'s install step) or
+     keep its own copy.
+4. Run *Publish to PyPI* by hand on `master`: it uploads and creates the
+   `v0.8.0` tag and release, which is also the tag the Action's users pin.
+5. From a clean machine or container: `uvx --from "graphlore[engine]"
+   graphlore --help`, then `pip install "graphlore[engine]"` and
+   `graphlore review --help`, on Linux, macOS and Windows if you can.
+6. `mcp-publisher publish` (*MCP Registry*, above); then the directories
+   that read the registry or take a submission.
+7. If the upload fails after the merge, revert the README hunk until it
+   succeeds: PyPI's page and the README must not promise an install that
+   fails.
+
 ## Reporting bugs / requesting features
 
 Use the issue templates under `.github/ISSUE_TEMPLATE/`.
