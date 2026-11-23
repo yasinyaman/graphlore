@@ -288,8 +288,10 @@ def _graphify() -> str:
     return str(beside) if beside.exists() else (shutil.which("graphify") or "graphify")
 
 
-def setup(root: Path, repos: list[dict[str, Any]]) -> None:
-    """Fetch each pinned commit and build its graph (local AST extraction)."""
+def setup(root: Path, repos: list[dict[str, Any]], graphify: bool = True) -> None:
+    """Fetch each pinned commit and build its graph (local AST extraction).
+    With ``graphify=False`` (``--engine native``) only fetch: `build_native`
+    builds the graphs, and graphify need not be installed."""
     root.mkdir(parents=True, exist_ok=True)
     for repo in repos:
         d = root / repo["key"]
@@ -301,7 +303,9 @@ def setup(root: Path, repos: list[dict[str, Any]]) -> None:
             _git(d, "checkout", "-q", "FETCH_HEAD")
         with (d / ".git" / "info" / "exclude").open("a", encoding="utf-8") as fh:
             fh.write("graphify-out/\n")
-        if not (d / "graphify-out" / "graph.json").exists():
+        if not graphify:
+            print(f"fetched {repo['key']}")
+        elif not (d / "graphify-out" / "graph.json").exists():
             res = subprocess.run([_graphify(), "update", "."], cwd=str(d),
                                  capture_output=True, text=True)
             tail = (res.stdout + res.stderr).strip().splitlines()[-3:]
@@ -1530,7 +1534,9 @@ def main(argv: list[str] | None = None) -> None:
         repos = [r for r in repos if r.get("set", 1) == opts.repo_set]
     root = Path(opts.root)
     if opts.setup:
-        setup(root, repos)
+        setup(root, repos, graphify=opts.engine != "native")
+        if opts.engine == "native":
+            build_native(root, repos, opts.rebuild)
         return
     for key in s._BACKEND_ENV:  # no tool may reach an LLM backend from here
         os.environ.pop(key, None)
