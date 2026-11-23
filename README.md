@@ -43,6 +43,24 @@ server, graphlore's native engine and an exploration skill, with nothing to conf
 On Claude Code older than 2.1.275, run `/plugin marketplace add yasinyaman/graphlore`
 and then `/plugin install graphlore@graphlore`.
 
+**Codex, GitHub Copilot CLI and Gemini CLI plugins** (also need `uv`): the same
+repository installs there as a plugin, with the server and the skill.
+
+```bash
+codex plugin marketplace add yasinyaman/graphlore && codex plugin add graphlore@graphlore
+```
+
+```bash
+copilot plugin marketplace add yasinyaman/graphlore && copilot plugin install graphlore@graphlore
+```
+
+```bash
+gemini extensions install https://github.com/yasinyaman/graphlore
+```
+
+The other clients and what each plugin carries are in
+[clients](https://github.com/yasinyaman/graphlore/blob/master/docs/clients.md#install-as-a-plugin).
+
 **Any other MCP client**: install graphlore with its native engine, which builds
 the graph (prebuilt wheels, no Rust toolchain), then register the server.
 

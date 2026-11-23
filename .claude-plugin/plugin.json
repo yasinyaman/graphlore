@@ -11,7 +11,7 @@
   "repository": "https://github.com/yasinyaman/graphlore",
   "license": "MIT",
   "keywords": ["mcp", "mcp-server", "graphify", "knowledge-graph", "codebase", "code-search", "code-navigation", "impact-analysis", "semantic-search"],
-  "skills": ["./.claude/skills/"],
+  "skills": ["./skills/"],
   "mcpServers": {
     "graphlore": {
       "command": "uvx",

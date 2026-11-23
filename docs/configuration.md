@@ -38,6 +38,25 @@ before the update still show the old ones — no `scope`, no `verbose`.
 mismatch can be seen: a schema that lacks a parameter the docs describe,
 next to a current version number, means the session predates the update.
 
+## Plugins for other clients
+
+The repository root is also an [Agent Plugins 1.0](https://github.com/agentplugins/agent-plugins-spec)
+plugin (`plugin.json`, `mcp.json`, `skills/`), which Codex and Copilot CLI
+install, and a Gemini CLI extension (`gemini-extension.json`); the commands are
+in [clients](clients.md#install-as-a-plugin). Each starts the server as the
+Claude Code plugin does, with `uvx` from its own copy and the same extras and
+toolset, so the same requirements hold: `uv` installed, a first start that
+downloads the dependencies.
+
+An Agent Plugins client starts the server in the plugin's own directory and has
+no variable that names the project. `mcp.json` therefore sets
+`GRAPHLORE_PROJECT_FROM_CLIENT=1`: graphlore asks the client for its workspace
+roots on the first tool call and reads the first directory among them. A client
+that gives none gets a `project_unknown` answer that tells the agent to call
+`graphlore_project` with the repository's absolute path, once per session. Gemini
+CLI names the workspace (`${workspacePath}`), so its extension sets
+`GRAPHLORE_PROJECT_DIR` directly.
+
 ## Which toolset
 
 The server starts on the **`lean`** surface: 12 tools (11 when
@@ -226,6 +245,7 @@ has the results on 31 repositories and the roadmap.
 | Variable | Default | Description |
 |---|---|---|
 | `GRAPHLORE_PROJECT_DIR` | `.` | Project root to extract the graph from |
+| `GRAPHLORE_PROJECT_FROM_CLIENT` | off | `1`: the project is not the working directory but the client's: its first workspace root (MCP `roots/list`, asked on the first tool call), else the directory `graphlore_project` is given; until then every other tool answers `code: project_unknown`. Ignored when `GRAPHLORE_PROJECT_DIR` is set. The [plugin](#plugins-for-other-clients) of a client that starts the server in the plugin's own directory sets it |
 | `GRAPHLORE_OUT_DIR` | `graphify-out` | Output folder name |
 | `GRAPHLORE_BIN` | `graphify` | CLI path |
 | `GRAPHLORE_ENGINE` | `auto` | What `graphlore_build` extracts with: `auto` (graphlore's native engine when it is installed, else graphify; graphify also for `mode` and for `update` / `cluster_only` of a graphify-built graph), `native` (the engine, the `graphlore-engine` package; an error when it is not installed) or `graphify` (the CLI; deprecated, goes in the next release). Another value is an error. See [The native engine](#the-native-engine) |

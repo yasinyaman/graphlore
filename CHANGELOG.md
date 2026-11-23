@@ -164,6 +164,25 @@ All notable changes to this project are documented here. The format is based on
   pairs to 68.
 
 ### Added
+- **graphlore installs as a plugin in Codex, GitHub Copilot CLI and Gemini CLI**,
+  as it does in Claude Code: the repository root is also an
+  [Agent Plugins 1.0](https://github.com/agentplugins/agent-plugins-spec) plugin
+  (`plugin.json`, `mcp.json`, `skills/`), which Codex and Copilot CLI read
+  through the existing `.claude-plugin/marketplace.json`, and a Gemini CLI
+  extension (`gemini-extension.json`, with `.gemini-extension/GRAPHLORE.md` as
+  its context file). Each starts the same server with `uvx` from its own copy and
+  ships the `graphlore-explore` skill, which moved to `skills/` (the fixed place
+  the standard reads; Claude Code's manifest points there too). Checked with
+  Codex 0.171, Copilot CLI 1.0.114 and Gemini CLI 0.70. The root `mcp.json`, an
+  example config, is now the plugin's server.
+- **`GRAPHLORE_PROJECT_FROM_CLIENT=1`: the project comes from the client.** An
+  Agent Plugins client starts the server in the plugin's own directory and names
+  no project. With this set (and no `GRAPHLORE_PROJECT_DIR`), graphlore asks the
+  client for its workspace roots on the first tool call and reads the first
+  directory; a client that gives none gets `code: project_unknown` from every
+  tool but `graphlore_project` and `graphlore_sampling_status`, with the call
+  that names the project. The server instructions say so, the `locate` and
+  `lean` surfaces keep `graphlore_project`, and the watcher does not start.
 - **OAuth for the HTTP transport**, for remote clients (claude.ai and ChatGPT
   connectors, Claude Code or Codex over HTTP): graphlore as a resource server
   (`oauth.py`, the new `remote` extra: pyjwt). `GRAPHLORE_AUTH_ISSUER` and

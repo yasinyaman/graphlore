@@ -1,9 +1,18 @@
 {
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
   "mcpServers": {
     "graphlore": {
-      "command": "graphlore",
+      "type": "stdio",
+      "command": "uvx",
+      "args": [
+        "--from",
+        "graphlore[engine,graphify,treesitter,semble,embed] @ .",
+        "graphlore"
+      ],
+      "cwd": "./",
       "env": {
-        "GRAPHLORE_PROJECT_DIR": "."
+        "GRAPHLORE_PROJECT_FROM_CLIENT": "1",
+        "GRAPHLORE_TOOLSET": "full"
       }
     }
   }

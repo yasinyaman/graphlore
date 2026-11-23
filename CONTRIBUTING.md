@@ -46,11 +46,15 @@ graphlore/
 ├── tests/                  # pytest suite (in-process MCP client + unit tests)
 ├── benchmarks/             # multilang benchmark, polyglot audit + committed results JSON
 ├── docs/                   # tool reference, concepts, configuration, benchmark reports
-├── .claude-plugin/         # Claude Code plugin + marketplace manifests (the repo root is the plugin)
-├── .claude/skills/         # graphlore-explore skill for Claude Code (shipped by the plugin)
+├── .claude-plugin/         # Claude Code plugin + marketplace manifests (Codex and Copilot read the marketplace)
+├── .gemini-extension/      # GRAPHLORE.md, the Gemini CLI extension's context file
+├── skills/                 # graphlore-explore skill, shipped by every plugin
+├── .claude/skills/         # a link to skills/graphlore-explore, for this repository's sessions
 ├── .github/workflows/      # CI: ruff + mypy + pytest on py 3.10–3.12, the engine job; PyPI publish on release
 ├── server.json             # MCP Registry manifest (see "Releasing")
-├── mcp.json                # Claude Code example config
+├── plugin.json             # Agent Plugins 1.0 manifest (Codex, Copilot CLI)
+├── mcp.json                # the Agent Plugins plugin's MCP server
+├── gemini-extension.json   # Gemini CLI extension manifest
 └── claude_desktop_config.json
 ```
 
@@ -87,7 +91,7 @@ Please:
 
 ## Releasing
 
-1. Bump the version in `pyproject.toml`, `src/graphlore/server.py` (`__version__`), `.claude-plugin/plugin.json` and `server.json` (twice: the top-level `version` and the package's), then run `uv lock`.
+1. Bump the version in `pyproject.toml`, `src/graphlore/server.py` (`__version__`), `.claude-plugin/plugin.json`, `plugin.json`, `gemini-extension.json` and `server.json` (twice: the top-level `version` and the package's), then run `uv lock`.
 2. In `CHANGELOG.md`, move the `[Unreleased]` entries under a new version heading.
 3. Merge, then publish a GitHub release whose tag is the version (`v0.3.0` or `0.3.0`).
 

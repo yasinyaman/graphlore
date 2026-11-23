@@ -98,7 +98,7 @@ Optional dependencies (`semble`, `model2vec`/`numpy` for `[embed]`, `tree-sitter
 
 ## Conventions that span files
 
-- **Read `config.PROJECT_DIR` by attribute**, never `from .config import PROJECT_DIR`: tests repoint it with `monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)`, and `graphlore_project` reassigns it at runtime. For the same reason nothing may cache a value derived from it without keying on it.
+- **Read `config.PROJECT_DIR` by attribute**, never `from .config import PROJECT_DIR`: tests repoint it with `monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)`, and `graphlore_project` reassigns it at runtime. For the same reason nothing may cache a value derived from it without keying on it. Under `GRAPHLORE_PROJECT_FROM_CLIENT` (a plugin started in its own directory) `config.project_pending` is True until the client's roots or `graphlore_project` name the project, and `_tool`'s wrapper answers every tool but `_PROJECT_FREE_TOOLS` with `code: project_unknown` meanwhile (a direct call of the function skips that check).
 - **Settings go through `config.env("NAME")`** so the legacy `GRAPHIFY_*` fallback applies. Several are captured once at import as `server.py` module constants (`TOOLSET`, `TRANSPORT`, `RESTRICT_PATHS`, `API_KEY`, `GRAPHIFY_BIN`, …) and tests patch the attribute; others (`SEMANTIC_BACKEND`, `WATCH`, `ALLOWED_HOSTS`, `TOKENIZER`, `OFFLINE` via `config.offline()`, `STRUCTURED`, `ENGINE` via `engine.requested()`) are read at call time.
 - **Network egress:** every path that can reach the network checks `config.offline()` (refuse, or degrade to a local-only variant and say so); the "What reaches the network, and when" table in `docs/configuration.md` lists them and must stay in step. `_run_cli` passes `_cli_env()`, which strips the `_BACKEND_ENV` keys offline. A new optional dependency that downloads on first use gets a row there and a gate. The native engine never reaches the network (its grammars are compiled in); keep it that way.
 - **Repository text is framed:** a tool whose text reply quotes source, docstrings or CLI output derived from them wraps it in `_frame_repo_text(...)` and puts `content_trust: _CONTENT_TRUST` and `untrusted_fields` in the payload. graphlore's own notes go outside the frame; errors are never framed.
@@ -129,10 +129,10 @@ A tool is registered with `@_tool(annotations=ToolAnnotations(...))` in `server.
 - `test_tool_and_prompt_registration` in `tests/test_tools.py`, which asserts the exact tool count (34)
 - the tool tables in `docs/tools.md`, the README's table of the 12 `lean` tools if the tool is in that set, and the "34" / "12" counts in both
 - its docstring: a description of at most 900 characters (what it is for, what the reply carries) and an `Args:` entry for every parameter, which `_describe_parameters` moves onto the input schema as each parameter's `description` (`_doc_args`); parameters stay plain types (a mapping is a JSON string with `_JSON_OBJECT_ARG` and `_json_object`, an optional number a sentinel default, never `X | None`). `test_every_parameter_has_a_description_and_descriptions_stay_short` and `test_input_schemas_use_what_every_function_calling_api_takes` hold the limits (Claude Code cuts a description at 4,096 characters, Codex compacts a schema over 5,000 bytes, Gemini CLI caps a tool name at 63)
-- `.claude/skills/graphlore-explore/SKILL.md` (shipped to users by the plugin)
+- `skills/graphlore-explore/SKILL.md` (shipped to users by every plugin; `.claude/skills/graphlore-explore` is a link to it for this repository's own sessions)
 - `CHANGELOG.md` under `[Unreleased]` — every behavior change gets an entry there (Keep a Changelog format)
 
-The version is duplicated in `pyproject.toml`, `server.__version__`, `.claude-plugin/plugin.json` and `server.json` (twice there; tests compare the last three), and recorded in `uv.lock`; run `uv lock` after a bump. The release steps, including the PyPI publish workflow, are under "Releasing" in `CONTRIBUTING.md`.
+The version is duplicated in `pyproject.toml`, `server.__version__`, `.claude-plugin/plugin.json`, `plugin.json`, `gemini-extension.json` and `server.json` (twice there; tests compare all but the first), and recorded in `uv.lock`; run `uv lock` after a bump. The release steps, including the PyPI publish workflow, are under "Releasing" in `CONTRIBUTING.md`.
 
 ## Documentation layout
 
@@ -140,7 +140,7 @@ The version is duplicated in `pyproject.toml`, `server.__version__`, `.claude-pl
 
 - `docs/tools.md` — all 34 tools, resources, prompts, what a result carries
 - `docs/concepts.md` — resolved edges, import checks, analysis scope, freshness, the search bridge (built-in index or semble), naming communities
-- `docs/configuration.md` — running, the plugin, toolsets, transports, the network table, environment variables
+- `docs/configuration.md` — running, the plugins, toolsets, transports, the network table, environment variables
 - `docs/benchmark-agents.md` — coding agents (Claude Code, Codex, Gemini CLI, Kimi, Cursor) on 16 checked questions about httpx, with and without the `agents-md` guide: `benchmarks/agents/run.py` (one adapter per agent's headless mode; `fake` replays a transcript, what the tests run), `score.py` (the table). Run by hand with each agent's own login, never in CI
 - `docs/clients.md` — each MCP client's config file, key, add command and limits (tool caps, output truncation, prompts, instructions), with the page each was read from; `graphlore setup` and `graphlore agents-md`
 - `docs/benchmark.md` — method and results (`docs/benchmark*.html` are the rendered reports)
@@ -155,13 +155,20 @@ Links from the README into the repository are absolute (`https://github.com/yasi
 
 `server.json` at the root is the manifest for the official MCP Registry (schema `2025-12-11`). Its `name` (`io.github.yasinyaman/graphlore`) must also appear as `mcp-name: ...` in `README.md`: the registry verifies PyPI ownership by finding that string in the package's README, so the HTML comment under the README title is load-bearing. The description is limited to 100 characters, the environment variables it lists must be ones the server reads, and its toolset choices must match `TOOLSETS`; `test_mcp_registry_manifest_stays_in_sync` checks all of this. Publishing is a manual step after a PyPI release (see "Releasing" in `CONTRIBUTING.md`).
 
-## Claude Code plugin
+## Plugins
 
-The repository root is itself a Claude Code plugin and its own marketplace (`.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json` with `"source": "./"`). Consequences:
+The repository root is itself a plugin, in three formats, and its own marketplace:
 
-- `.claude/skills/` is what the plugin ships to users, not only a project-local skill directory. Anything added there is installed for everyone.
-- The plugin's MCP server runs `uvx --from "graphlore[graphify,treesitter,semble,embed] @ ${CLAUDE_PLUGIN_ROOT}" graphlore`, i.e. it builds this package from the installed copy of the repo. Renaming the console script, the package or those extras breaks the plugin.
-- Users stay on the manifest's `version` until it changes, so a fix reaches plugin users only with a version bump.
+- **Claude Code:** `.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json` (`"source": "./"`). Codex and Copilot CLI read that marketplace file too.
+- **Agent Plugins 1.0** (Codex, Copilot CLI; Cursor by its documentation): `plugin.json` at the root (a closed schema: `$schema`, `name`, `version`, `description`, `author`, `homepage`, `repository`, `license`, `keywords`, `extensions` only), `mcp.json` (the spec's format, `type: stdio`, started in the plugin root, so `uvx --from "graphlore[…] @ ."`) and `skills/`, a fixed location. The spec is `agentplugins/agent-plugins-spec` on GitHub.
+- **Gemini CLI:** `gemini-extension.json` (`${extensionPath}`, `${workspacePath}`) with `.gemini-extension/GRAPHLORE.md` as its context file, which is `agents_md.render` of the full toolset. Without `contextFileName` Gemini would load the root `GEMINI.md`, this repository's own guide, into every user's session.
+
+Consequences:
+
+- `skills/` is what every plugin ships to users. Anything added there is installed for everyone.
+- Every manifest's MCP server runs `uvx --from "graphlore[engine,graphify,treesitter,semble,embed] @ <its own copy>" graphlore`, i.e. it builds this package from the installed copy of the repo. Renaming the console script, the package or those extras breaks the plugins. `test_plugin_manifests_stay_in_sync` holds the versions, the extras, the skill path and the Gemini context file together.
+- An Agent Plugins client names no project: `mcp.json` sets `GRAPHLORE_PROJECT_FROM_CLIENT=1` and never `GRAPHLORE_PROJECT_DIR` (see the conventions above).
+- Users stay on a manifest's `version` until it changes, so a fix reaches plugin users only with a version bump.
 - Check manifest changes with `claude plugin validate --strict .`; it passes clean.
 - Claude Code's project instructions live in `.claude/CLAUDE.md`, not at the root. A `CLAUDE.md` at a plugin root is not loaded as plugin context and makes the validator warn, so don't add one there.
 

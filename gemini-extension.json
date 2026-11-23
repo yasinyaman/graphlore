@@ -1,0 +1,20 @@
+{
+  "name": "graphlore",
+  "version": "0.6.0",
+  "description": "Navigate a codebase through its knowledge graph: semantic locate, impact analysis, token-budgeted subgraphs and exact source spans, in 14 languages.",
+  "mcpServers": {
+    "graphlore": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "graphlore[engine,graphify,treesitter,semble,embed] @ ${extensionPath}",
+        "graphlore"
+      ],
+      "env": {
+        "GRAPHLORE_PROJECT_DIR": "${workspacePath}",
+        "GRAPHLORE_TOOLSET": "full"
+      }
+    }
+  },
+  "contextFileName": ".gemini-extension/GRAPHLORE.md"
+}
