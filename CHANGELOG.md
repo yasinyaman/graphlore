@@ -7,6 +7,24 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Fixed
+- **Every tool parameter has a description, and the tool definitions fit
+  every client.** All 141 parameters had none: each tool's whole docstring,
+  `Args:` block included, went out as its description, and function-calling
+  APIs (Codex, Kimi and other OpenAI-style clients) read a parameter's own
+  `description`. `_tool` now moves the `Args:` block onto the input schema
+  (`_doc_args`, `_describe_parameters`). The 16 descriptions over 900
+  characters were cut to what a model needs to pick and call the tool (the
+  detail is in `docs/tools.md`): `graphlore_impact`'s was 4,151 characters,
+  past the 4,096 at which Claude Code cuts one. What a client loads: `full`
+  60,400 → 48,400 characters (~15k → ~12k tokens), `lean` 20,400 → 16,200,
+  `locate` 6,900. The schemas take only plain types now: `graphlore_layers`'
+  `rules` and `graphlore_set_labels`' `names` are published as JSON strings
+  (an object still works; `_json_object`), `graphlore_duplication_scan`'s
+  `min_score` defaults to `-1` (the backend's floor) instead of `null` — no
+  `anyOf`, free-key object or `null` left, which strict function-calling
+  modes and Gemini's function declarations reject. Tests hold each limit
+  (900 characters, a schema under Codex's 5,000 bytes, a tool name Gemini CLI
+  keeps, instructions under 4,000 characters).
 - **graph.html's Show filters left test code on screen.** Unticking *tests*
   (and likewise *external packages*, *vendored files*) filtered the node views
   but not the overview, the page's first screen: its community bubbles were
