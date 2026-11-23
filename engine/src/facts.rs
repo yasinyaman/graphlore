@@ -298,6 +298,41 @@ pub struct Heading {
     pub end_line: u32,
 }
 
+/// A name of code written in a document: a Markdown code span (`` `Client` ``),
+/// a reStructuredText role (``:class:`Client` ``), inline literal
+/// (``` ``Client`` ```) or object directive (`.. class:: Client`). `docs::link`
+/// turns the ones that name one project definition into `documents` edges.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DocMention {
+    /// As written, without decoration: `httpx.Client.send`, `Model.save`.
+    pub name: String,
+    pub line: u32,
+    pub form: MentionForm,
+    /// reST: the module a `.. module::` / `.. currentmodule::` above it names,
+    /// which a name relative to it is read under first.
+    pub module: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MentionForm {
+    /// A code span or inline literal: something written as code.
+    Literal,
+    /// A role naming an object (`:func:`, `:class:`, `:meth:` …).
+    Role,
+    /// A directive describing an object (`.. class::`, `.. autofunction::`).
+    Directive,
+}
+
+impl MentionForm {
+    pub fn context(self) -> &'static str {
+        match self {
+            MentionForm::Literal => "literal",
+            MentionForm::Role => "role",
+            MentionForm::Directive => "directive",
+        }
+    }
+}
+
 /// When an import runs: what graphlore's `ImportChecker` calls its kind.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Runs {
@@ -641,6 +676,8 @@ pub struct FileFacts {
     pub package: Option<String>,
     pub defs: Vec<Def>,
     pub headings: Vec<Heading>,
+    /// The names of code a document writes (`DocMention`).
+    pub doc_mentions: Vec<DocMention>,
     pub test_regions: Vec<(u32, u32)>,
     pub imports: Vec<ImportFact>,
     /// `(local name, exported name)` for names a module exports under another
@@ -723,6 +760,7 @@ impl FileFacts {
             package: None,
             defs: Vec::new(),
             headings: Vec::new(),
+            doc_mentions: Vec::new(),
             test_regions: Vec::new(),
             imports: Vec::new(),
             exports: Vec::new(),

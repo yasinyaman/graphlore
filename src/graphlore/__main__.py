@@ -1,13 +1,12 @@
-"""Enable ``python -m graphlore``.
+"""Enable ``python -m graphlore``: the same as the ``graphlore`` command.
 
-This is the collision-proof way to launch this server. ``graphifyy`` ships its
-own ``graphlore`` console script (its embedded server), so this package
-deliberately does NOT declare a bare ``graphlore`` of its own — it would be
-shadowed by whichever installed last. Use the ``graphlore`` script or
-``python -m graphlore``; both always run this package.
+With no arguments it runs the MCP server; ``python -m graphlore setup codex``
+and the other subcommands are those of ``graphlore.cli``.
 """
 
-from graphlore.server import main
+import sys
+
+from graphlore.cli import main
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

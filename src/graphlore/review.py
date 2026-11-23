@@ -99,6 +99,9 @@ class _Definitions:
             elif s != t and rel not in _NON_DEPENDENCY_RELATIONS:
                 self.incoming.setdefault(t, []).append((s, e))
         self._classes: dict[str, list[str]] | None = None
+        self._member_names: dict[str, frozenset[str]] = {}
+        # _hook_base's answers, per (method name, bases, depth), for this graph
+        self.hooks: dict[tuple[str, tuple[str, ...], int], str | None] = {}
         self.kind: dict[str, str] = {}
         for nid, n in self.byid.items():
             k = self._kind(n, nid in has_methods, nid in contained)
@@ -138,6 +141,15 @@ class _Definitions:
                         _bare_name(_node_label(self.byid[nid])), []
                     ).append(nid)
         return self._classes.get(name, [])
+
+    def member_names(self, nid: str) -> frozenset[str]:
+        """Bare names of the members (``method`` edges) of ``nid``."""
+        got = self._member_names.get(nid)
+        if got is None:
+            got = frozenset(_bare_name(_node_label(self.byid[m]))
+                            for m in self.members.get(nid, ()) if m in self.byid)
+            self._member_names[nid] = got
+        return got
 
     def is_top_level(self, nid: str) -> bool:
         """Defined directly in a file (not a method, not nested in a function)."""
@@ -259,10 +271,11 @@ def _enclosing_class_bases(file: str, line: int, lines: _SourceLines) -> list[st
     gives no node to a class nested in a function — exactly where visitor and
     event-handler subclasses tend to live.
     """
-    spans = _spans_for_file(file)
-    own = next((s for s in spans if s[2] == line), None)
-    if own is None:
+    at = lines.spans_at(file, line)
+    if not at:
         return None
+    own = at[0]
+    spans = lines.spans(file)
     outer = [s for s in spans if s[0] <= own[0] and s[1] >= own[1] and s is not own]
     if not outer:
         return None
@@ -283,6 +296,18 @@ def _hook_base(
     defines or mentions a method of that name, or one of ITS bases may. Marker
     and data bases (``ABC``, ``Protocol``, ``BaseModel``, exceptions) never do.
     """
+    # Memoized per call (``defs`` is): a popular base (Django's ``TestCase``,
+    # ``Model``) is asked about once per method of every subclass, and the same
+    # base chain is reached again through each class that shares a name.
+    key = (name, tuple(bases), depth)
+    if key not in defs.hooks:
+        defs.hooks[key] = _hook_base_uncached(name, bases, defs, lines, depth)
+    return defs.hooks[key]
+
+
+def _hook_base_uncached(
+    name: str, bases: list[str], defs: _Definitions, lines: _SourceLines, depth: int
+) -> str | None:
     for base in bases:
         if _is_non_hook_base(base):
             continue
@@ -292,15 +317,12 @@ def _hook_base(
         for nid in project:
             n = defs.byid[nid]
             file, line = _node_file(n), _int_line(n)
-            if any(_bare_name(_node_label(defs.byid[m])) == name
-                   for m in defs.members.get(nid, ()) if m in defs.byid):
+            if name in defs.member_names(nid):
                 return base
-            span = _span_for(file, line)
+            span = _span_for(file, line, lines)
+            if span is not None and name in lines.tokens(file, span):
+                return base
             text = lines.get(file)
-            if span is not None and any(
-                tok == name for tok in _IDENT.findall("\n".join(text[span[0] - 1:span[1]]))
-            ):
-                return base
             if depth < 4 and 0 < line <= len(text):
                 above = _hook_base(name, _class_bases(text[line - 1]), defs, lines, depth + 1)
                 if above:
@@ -308,12 +330,21 @@ def _hook_base(
     return None
 
 
-def _span_for(file: str, line: int) -> tuple[int, int] | None:
-    """(region_start, end) of the definition at ``line``, from the span engine."""
+def _span_for(
+    file: str, line: int, lines: _SourceLines | None = None
+) -> tuple[int, int] | None:
+    """(region_start, end) of the definition at ``line``, from the span engine.
+
+    With ``lines``, the file's spans come from that per-call index.
+    """
     if line <= 0:
         return None
-    spans = _spans_for_file(file)
-    exact = [s for s in spans if s[2] == line]
+    if lines is not None:
+        exact = lines.spans_at(file, line)
+        spans = lines.spans(file) if not exact else []
+    else:
+        spans = _spans_for_file(file)
+        exact = [s for s in spans if s[2] == line]
     here = exact or [s for s in spans if s[0] <= line <= s[1]]
     if not here:
         return None
@@ -322,10 +353,62 @@ def _span_for(file: str, line: int) -> tuple[int, int] | None:
 
 
 class _SourceLines:
-    """Per-call cache of file lines, read through the project confinement."""
+    """Per-call cache of file lines and spans, read through the project confinement.
+
+    An analysis asks for the same file's spans once per candidate it holds, and the
+    same class body once per subclass method: on a graph of Django's size that is
+    hundreds of thousands of asks. Each file's spans are read once here (indexed by
+    definition line), and each span's identifiers tokenized once.
+    """
 
     def __init__(self) -> None:
         self._files: dict[str, list[str]] = {}
+        self._spans: dict[str, tuple[
+            list[tuple[int, int, int, str]], dict[int, list[tuple[int, int, int, str]]]
+        ]] = {}
+        self._tokens: dict[tuple[str, int, int], frozenset[str]] = {}
+        self._children: dict[str, dict[str, list[str]]] = {}
+
+    def spans(self, file: str) -> list[tuple[int, int, int, str]]:
+        return self._indexed(file)[0]
+
+    def spans_at(self, file: str, line: int) -> list[tuple[int, int, int, str]]:
+        """The spans whose definition line is ``line``, in the file's span order."""
+        return self._indexed(file)[1].get(line, [])
+
+    def _indexed(self, file: str) -> tuple[
+        list[tuple[int, int, int, str]], dict[int, list[tuple[int, int, int, str]]]
+    ]:
+        got = self._spans.get(file)
+        if got is None:
+            spans = _spans_for_file(file)
+            by_line: dict[int, list[tuple[int, int, int, str]]] = {}
+            for s in spans:
+                by_line.setdefault(s[2], []).append(s)
+            got = (spans, by_line)
+            self._spans[file] = got
+        return got
+
+    def children(self, file: str) -> dict[str, list[str]]:
+        """Qualified name -> the last names of the spans directly under it."""
+        got = self._children.get(file)
+        if got is None:
+            got = {}
+            for _rs, _e, _dl, q in self.spans(file):
+                if "." in q:
+                    parent, last = q.rsplit(".", 1)
+                    got.setdefault(parent, []).append(last)
+            self._children[file] = got
+        return got
+
+    def tokens(self, file: str, span: tuple[int, int]) -> frozenset[str]:
+        """The identifiers written in lines ``span[0]..span[1]`` of ``file``."""
+        key = (file, span[0], span[1])
+        got = self._tokens.get(key)
+        if got is None:
+            got = frozenset(_IDENT.findall("\n".join(self.get(file)[span[0] - 1:span[1]])))
+            self._tokens[key] = got
+        return got
 
     def get(self, file: str) -> list[str]:
         got = self._files.get(file)
@@ -357,7 +440,7 @@ def _decorators(
             t = byid.get(target)
             found.append(_node_label(t) if t else target)
     file, line = _node_file(n), _int_line(n)
-    span = _span_for(file, line)
+    span = _span_for(file, line, lines)
     if span is not None:
         text_lines = lines.get(file)
         # Above the definition (Python, JS, Rust: decorators are siblings) and from
@@ -578,11 +661,9 @@ def _unreferenced(
         if cls_span is None:
             continue
         cls_qual = cls_span[3]
-        depth = cls_qual.count(".") + 1
         members_of[nid] = sorted({
-            q.rsplit(".", 1)[-1] for _rs, _e, _dl, q in _spans_for_file(_node_file(n))
-            if q.startswith(cls_qual + ".") and q.count(".") == depth
-            and len(q.rsplit(".", 1)[-1]) >= 4 and q.rsplit(".", 1)[-1] not in names
+            m for m in lines.children(_node_file(n)).get(cls_qual, ())
+            if len(m) >= 4 and m not in names
         })
     member_names = {m for ms in members_of.values() for m in ms}
     per_file, per_file_attrs, files_scanned, capped = _count_mentions(names | member_names)
@@ -609,10 +690,12 @@ def _unreferenced(
                 _int_line(on)
             )
     items: list[dict[str, Any]] = []
+    homes_sorted: dict[str, list[tuple[str, str, int]]] = {}
+    has_referencing_files: dict[str, bool] = {}
     for nid, n, kind, name in remaining:
         file, line = _node_file(n), _int_line(n)
         own = 1
-        span = _span_for(file, line)
+        span = _span_for(file, line, lines)
         if span is not None:
             body = "\n".join(lines.get(file)[span[0] - 1:span[1]])
             own = max(1, sum(1 for tok in _IDENT.findall(body) if tok == name))
@@ -639,12 +722,21 @@ def _unreferenced(
         }
         if via and mentions:
             item["used_through_members"] = via[:5]
-        namesakes = sorted(
-            f"{f}:{ln}" for f, lns in homes.items() for ln in lns
-            if (f, ln) != (file, line)
-        )
+        # sorted once per name: a name defined in hundreds of files (Django's
+        # `get_queryset`) is a candidate in many of them
+        everywhere = homes_sorted.get(name)
+        if everywhere is None:
+            everywhere = homes_sorted[name] = sorted(
+                (f"{f}:{ln}", f, ln) for f, lns in homes.items() for ln in lns
+            )
+        namesakes = []
+        for where_at, f, ln in everywhere:
+            if (f, ln) != (file, line):
+                namesakes.append(where_at)
+                if len(namesakes) == 5:
+                    break
         if namesakes:
-            item["also_defined"] = namesakes[:5]
+            item["also_defined"] = namesakes
         parent = defs.parent.get(nid, "")
         bases = list(graph_bases.get(parent, ()))
         bases += _enclosing_class_bases(file, line, lines) or []
@@ -655,7 +747,10 @@ def _unreferenced(
                 f"method of a subclass of {hook}: may override a hook its base class calls"
             )
         elif kind == "method" and not name.startswith("_") and parent in defs.byid:
-            if defs.referencing_files(parent):
+            used = has_referencing_files.get(parent)
+            if used is None:
+                used = has_referencing_files[parent] = bool(defs.referencing_files(parent))
+            if used:
                 item["note"] = "public method of a class used elsewhere: unused here, may be API"
         items.append(item)
     items.sort(key=lambda it: (it["mentions"], "note" in it, it["file"], it["line"] or 0))
@@ -699,7 +794,7 @@ def _used_in_own_file(nid: str, n: dict, defs: _Definitions, lines: _SourceLines
                 return True
     name = _bare_name(_node_label(n))
     text = lines.get(file)
-    span = _span_for(file, line)
+    span = _span_for(file, line, lines)
     if not text or span is None:
         return False
     outside = text[:span[0] - 1] + text[span[1]:]

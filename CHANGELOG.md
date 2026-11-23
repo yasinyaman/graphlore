@@ -7,6 +7,73 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Fixed
+- **A reply with default arguments stays under 35,000 characters (~10k
+  tokens)**, what Claude Code, Codex and Gemini CLI all keep; the result's
+  `structuredContent` carries the same payload, so a large JSON payload was a
+  large reply even for a text call. Measured on graphlore, httpx, nginx and
+  Django, every read-only tool now fits in both forms (it was 522,600
+  characters for `graphlore_surprises` on nginx, 75,000 on Django, 47,000 for
+  `graphlore_cycles` on Django):
+  - JSON replies are compact (no indentation: a third fewer characters);
+  - `graphlore_surprises` lists 10 writers, 10 readers and 5 pairs per shared
+    state (`writers_total`, `readers_total`, `pairs_left_out` count the rest)
+    and its `limit` defaults to 10 instead of 20;
+  - `graphlore_cycles` lists at most 50 members per group (`size` counts them
+    all; `path` is still the whole loop);
+  - `graphlore_skeleton` cuts its first file by symbol past
+    `max(budget_tokens, 6000)` tokens and says how many it left out
+    (`symbols_left_out`), where a module of thousands of lines came whole.
+  `benchmarks/polyglot.py`'s `MAX_REPLY_CHARS` goes from 90,000 to 35,000, and
+  a test holds the budget on the polyglot fixture.
+- **Every tool parameter has a description, and the tool definitions fit
+  every client.** All 141 parameters had none: each tool's whole docstring,
+  `Args:` block included, went out as its description, and function-calling
+  APIs (Codex, Kimi and other OpenAI-style clients) read a parameter's own
+  `description`. `_tool` now moves the `Args:` block onto the input schema
+  (`_doc_args`, `_describe_parameters`). The 16 descriptions over 900
+  characters were cut to what a model needs to pick and call the tool (the
+  detail is in `docs/tools.md`): `graphlore_impact`'s was 4,151 characters,
+  past the 4,096 at which Claude Code cuts one. What a client loads: `full`
+  60,400 → 48,400 characters (~15k → ~12k tokens), `lean` 20,400 → 16,200,
+  `locate` 6,900. The schemas take only plain types now: `graphlore_layers`'
+  `rules` and `graphlore_set_labels`' `names` are published as JSON strings
+  (an object still works; `_json_object`), `graphlore_duplication_scan`'s
+  `min_score` defaults to `-1` (the backend's floor) instead of `null` — no
+  `anyOf`, free-key object or `null` left, which strict function-calling
+  modes and Gemini's function declarations reject. Tests hold each limit
+  (900 characters, a schema under Codex's 5,000 bytes, a tool name Gemini CLI
+  keeps, instructions under 4,000 characters).
+- **graph.html's Show filters left test code on screen.** Unticking *tests*
+  (and likewise *external packages*, *vendored files*) filtered the node views
+  but not the overview, the page's first screen: its community bubbles were
+  sized and linked over every node, and communities of test code only stayed
+  drawn — 1,661 of Django's 3,444. The overview now counts, sizes and links
+  each community by what the filters leave (`visibleCommunities`, the page's
+  `overview:begin` block, checked under node against `page_data`), leaves out
+  the empty ones and says how many (with tests off on Django: 1,893 of test,
+  external or vendored code only). The panel's lists follow the filters too —
+  a community's members, a node's edges, the impact rows and the findings —
+  each with a line counting what it hid. Since external packages are off by
+  default, the overview's sizes now leave them out from the start, as the
+  community views always did. Search still finds a hidden node by name.
+- **graph.html printed "null" under a node's name** in its details panel, for
+  every node without a finding badge: the panel handed the missing badge row to
+  `append()`, which writes `null` as text. Parts left out are dropped now.
+- **`graphlore_unreferenced` no longer grows faster than the graph.** On
+  Django's graph (70,195 nodes) it ran for over 15 minutes and did not finish;
+  it now answers in 9 s (`limit=200`, spans parsed cold), and in 1.2 s instead
+  of 4.3 s on graphlore's own graph (4,630 nodes). The hook check
+  (`_hook_base`) re-read and re-tokenized a base class's whole body for every
+  method of every subclass, and walked the base chain again for each class of
+  the same name: Django's `SimpleTestCase(unittest.TestCase)` leads back to
+  its own `TestCase`, so each helper of each test class scanned the test
+  case bodies four times over. Its answers are now kept per call, and a
+  file's spans (indexed by definition line), a span's identifiers, a class's
+  members, a name's other definitions and a class's referencing files are
+  each worked out once per call. The answers are unchanged (the same JSON on
+  graphlore, httpx and nginx before and after). With that, `graph.html`'s
+  findings carry unreferenced code whatever the graph's size:
+  `VIZ_UNREFERENCED_MAX` (20,000 nodes) is gone.
 - **Native engine: a build no longer panics on a multibyte character**
   (engine 0.5.78). `state.rs`'s `holds_container` and `resources.rs`'s data-model
   detection capped how much of a value they scanned by slicing it at a byte
@@ -14,8 +81,8 @@ All notable changes to this project are documented here. The format is based on
   UTF-8 character — a curly quote, an emoji. Found by building the graph of
   Django, where it killed the whole build (`src/state.rs:269 ... is not a char
   boundary; it is inside '”'`). A new `generic::prefix` cuts back to a char
-  boundary; both sites use it. The engine release to publish is **0.5.78**, not
-  0.5.77.
+  boundary; both sites use it. The engine release to publish is **0.5.79**
+  (this fix and the `documents` edges under Added), not 0.5.77.
 
 ### Deprecated
 - **graphify as graphlore's extractor**, going in the next release with what
@@ -33,6 +100,14 @@ All notable changes to this project are documented here. The format is based on
   failed on it before this change too.
 
 ### Changed
+- **The documentation describes the native engine as the default.** The
+  agent instructions, the exploration skill, `docs/concepts.md`,
+  `docs/native-engine.md` (its introduction and the roadmap's release A, now
+  done), the README and CONTRIBUTING no longer speak of a "Graphify-built"
+  graph or of an experimental, opt-in engine; graphify is described as the
+  deprecated fallback. The post-commit hook example runs the native engine
+  (`python -m graphlore_engine build . --incremental`), whose update also drops
+  the nodes of deleted files.
 - **The native engine builds the graph by default.** `GRAPHLORE_ENGINE`
   defaults to `auto`: graphlore's own extractor when it is installed, graphify
   only when it is not (and for `mode`, and for `update` / `cluster_only` of a
@@ -76,6 +151,142 @@ All notable changes to this project are documented here. The format is based on
   pairs to 68.
 
 ### Added
+- **OAuth for the HTTP transport**, for remote clients (claude.ai and ChatGPT
+  connectors, Claude Code or Codex over HTTP): graphlore as a resource server
+  (`oauth.py`, the new `remote` extra: pyjwt). `GRAPHLORE_AUTH_ISSUER` and
+  `GRAPHLORE_AUTH_RESOURCE_URL` (and `GRAPHLORE_AUTH_SCOPES`) turn it on:
+  tokens your OAuth / OpenID provider signs are checked against its keys
+  (RFC 8414 / OpenID discovery, asymmetric algorithms only) and for their
+  issuer, audience (the resource URL exactly) and expiry; the MCP SDK's
+  middleware answers 401 with `WWW-Authenticate: Bearer resource_metadata=…`,
+  403 for a missing scope, and serves the RFC 9728 Protected Resource
+  Metadata. graphlore issues no token. It excludes `GRAPHLORE_API_KEY`, and
+  `GRAPHLORE_OFFLINE` refuses it (the keys come from the provider: a row in
+  the network table). Tested end to end over the streamable-HTTP app with a
+  locally generated key.
+- **A cross-model evaluation** (`benchmarks/agents/`, `docs/benchmark-agents.md`):
+  16 questions about httpx at a pinned commit, each answer checked in its
+  source, asked headless of Claude Code, Codex CLI, Gemini CLI, Kimi Code CLI
+  and Cursor's agent with graphlore set up as `graphlore setup` writes it,
+  with and without the `agents-md` guide; `score.py` gives per agent the
+  tasks solved, graphlore calls, runs that used none of the task's suited
+  tools, tokens and time. Each agent needs its own login, so it is run by
+  hand, not in CI; a `fake` client replays a transcript of real tool calls
+  over stdio, and the tests run the whole pipeline with it. Not run on the
+  real agents yet.
+- **`graphlore setup <client>`, `graphlore clients` and `graphlore agents-md`.**
+  graphlore's setup docs were Claude's only. `graphlore setup` prints, or with
+  `--write` merges, the block that starts graphlore in Claude Code, Claude
+  Desktop, OpenAI Codex CLI (TOML), Google Gemini CLI, Cursor, VS Code with
+  GitHub Copilot (`.mcp.json`, the current format), Kimi Code CLI, Zed,
+  Windsurf or Cline. A merge keeps the file's other servers, saves the old
+  file as `<name>.graphlore.bak` and refuses a file it cannot parse (Zed's
+  settings with comments). A project file names no absolute path where the
+  client can say "here" (`${workspaceFolder}`, `${CLAUDE_PROJECT_DIR:-.}`).
+  `graphlore agents-md` writes the usage guide for agents that read a project
+  file rather than MCP prompts or server instructions (Codex and Copilot show
+  no prompts): between `<!-- graphlore:begin -->` markers in `AGENTS.md`,
+  `GEMINI.md` or Copilot's instructions, naming only the toolset's tools;
+  `setup --with-agents-md` writes it into the file that client reads. The
+  console script is now `graphlore.cli:main`: with no arguments it runs the
+  server as before. New page `docs/clients.md`: each client's files, key, add
+  command and limits (tool caps, output truncation, prompts, instructions),
+  each read from the client's own documentation (Codex's from its source,
+  its documentation site being unreachable here).
+- **Graph algorithms beyond the breadth-first walk** (`src/graphlore/algorithms.py`,
+  checked against networkx on 300 random graphs; on Django's 77,766 nodes each
+  answers in seconds):
+  - **`graphlore_path` takes the most certain path**: the fewest edges inferred
+    by name (`INFERRED` / `AMBIGUOUS`), then the fewest steps (Dijkstra on that
+    pair of costs). Each such step carries `confidence`, `inferred_steps`
+    counts them, and `shortest` gives the length of a shorter but less certain
+    path when one exists. On a graph with no inferred edge the answer is the
+    breadth-first one it was. It no longer walks a document's `documents`
+    edges unless one end is a document: of 150 random pairs of Django
+    functions, 26 had been "joined" only by a page naming both.
+  - **`graphlore_god_nodes(rank="pagerank" | "betweenness")`**: PageRank over
+    the dependency edges (a utility everything leans on outranks a big module
+    few use: on Django, `Model`, `gettext_lazy`, `SimpleTestCase`, `Field`,
+    `AltersData`), and Brandes' betweenness, estimated from `samples` (64)
+    hash-picked sources and saying so, exact with `samples=0` (on Django, app
+    loading and connection setup: `Apps.populate()`, `ensure_connection()`).
+    `rank="degree"` stays the default and its answer is unchanged. 2.5 s and
+    1.3 s on Django.
+  - **`graphlore_impact` names its `chokepoints`**: from the dominator tree of
+    the walked nodes (Cooper, Harvey and Kennedy), the nodes every path to the
+    start runs through for many of the others, with how many each `shields`.
+    `QuerySet`'s 2,024 dependents within 3 hops: 354 reach it only through
+    `django/db/models/__init__.py`, 116 only through `Manager`. 0.07 s.
+  - **New tool `graphlore_bridges`** (34 tools): the scope's dependency edges as
+    an undirected graph of files, directories or nodes; the bridges (the only
+    link between two parts) and cut points (what one side goes through), each
+    with what it cuts off, by Tarjan's low-link in one pass. Import edges go
+    through the import checks. In the `review` prompt after the layer rules.
+- **graph.html opens a node's lines on GitHub.** A node's panel has an
+  *On GitHub ↗* link (GitLab and Bitbucket alike) to its `start..end` lines at
+  the commit the graph was built from (HEAD when the graph names none), in a
+  new tab: GitHub refuses to sit in a frame (`X-Frame-Options: deny`), and the
+  page keeps making no request of its own. The repository comes from the
+  folder's `git remote` (`origin`, else `upstream`, else the first), read
+  locally; only the host and the repository's path reach the page, never a
+  user name, token or port, and a host it has no link form for gets no link.
+  A Markdown or reST page opens with `?plain=1`, so its line anchors work.
+- **Documents link to the code they name** (native engine 0.5.79, schema 7).
+  A name of code a document writes — a Markdown code span, a reStructuredText
+  object role (`:class:`, `:meth:`, `:func:` …), inline literal or object
+  directive (`.. class::`, `.. autofunction::`; a method directive is named
+  under its class, a name under `.. currentmodule::` is tried in that module
+  first) — is a `documents` edge from the heading it is written under to the
+  one definition the name means: its last segments end the definition's
+  qualified name and the ones before them are a run of its module path. No
+  edge when several definitions answer, for test code, for a module or package
+  path, for a code span of one plain word, or from a bare code span to a
+  variable or field. 12,278 edges on Django, 263 on httpx; a sample of 30 of
+  Django's read right but for one, which the variable rule then removed.
+  Before, a document's only edges were the `contains` between its headings.
+  - `documents` is in the new `graph._DOCUMENT_RELATIONS`, part of
+    `_NON_DEPENDENCY_RELATIONS`: cycles, surprises, layers and
+    `graphlore_unreferenced` (same answers on httpx and Django) leave it out,
+    and the engine's community detection skips it, so communities stay where
+    they were. `graphlore_impact` walks it: the pages that describe a
+    definition are what a change to it may need to update.
+  - The build reply says `documents: N headings, M links …`.
+- **Sphinx documentation written in `.txt` files is read.** A `.txt` file is
+  reStructuredText under a `conf.py` whose `source_suffix` names `.txt`
+  (`requirements*.txt`, `robots.txt` aside). Django's graph went from 8
+  documents to 689, and 14 headings to 6,904.
+- **graph.html: a `documents` relation group, and document outlines always
+  drawn.** The group has its own colour and filter. A document's page and
+  headings are joined by `contains`, which is in the structure group that is
+  off by default (it would draw a star around every source file): a community
+  of headings read "42 nodes · 0 links". Containment between two document
+  nodes (flag 8 in the page data, `file_type: document`) is now drawn whatever
+  the structure filter says.
+- **`graph.html` shows what graphlore's tools find, not only the graph.**
+  - *Findings* (`G`, `#f=`): the cycles `graphlore_cycles` reports (runtime
+    import cycles first), the shared state and surprising links of
+    `graphlore_surprises`, files that change together, and the candidates of
+    `graphlore_unreferenced`. Each row opens its nodes, with the cycle's path
+    drawn, and each node carries badges for the findings it is in.
+  - The server works them out for the active project's graph, from the tools'
+    own JSON, so the page and the tools agree; once per graph.json (path,
+    mtime). A tool that fails costs its finding, never the page.
+  - A page written for another path than the active project has no findings
+    and says why.
+  - *Impact* (`I`, `#i=`): what depends on a node, by hop (1–3), in columns,
+    with test code counted apart, walked as `graphlore_impact` walks by default
+    (the page's `impact:begin` block; a test checks the two on every node).
+  - *Details*: a node's span, qualified name, language, route method and
+    pattern, and a state node's coupling pairs (hidden ones first); each edge
+    row says when an import runs, the edge's context and the line it is
+    written at.
+  - On a graphify graph: the calls and imports graphlore resolves from the
+    source are drawn dotted, and vendored or minified files are hidden behind
+    a "vendored files" filter.
+  - A resource node (an environment variable, a table) is no longer drawn as an
+    external package.
+  - Django's page grows from 14.3 to 19.3 MB, and its build from 0 to 15 s of
+    analysis.
 - **`graph.html`, graphlore's own view of the graph.** Every build writes it
   beside graph.json, whichever engine built the graph (`no_viz=True` skips
   it; graphify is always run with `--no-viz` now), and `cluster_only`,

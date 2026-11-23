@@ -18,6 +18,9 @@ pub struct Assembled {
     pub def_ids: Vec<Vec<Option<String>>>,
     /// The definition each definition hangs off (see `resolve_parents`), per file.
     pub parents: Vec<Vec<Option<usize>>>,
+    /// The node id of each heading (`FileFacts::headings` order), per file;
+    /// empty for a source file.
+    pub headings: Vec<Vec<String>>,
     /// The ids handed out, so that the nodes added later stay unique.
     pub ids: IdAllocator,
 }
@@ -97,6 +100,7 @@ pub fn assemble(files: &[FileFacts]) -> Assembled {
     let mut hubs = Vec::with_capacity(files.len());
     let mut all_def_ids = Vec::with_capacity(files.len());
     let mut all_parents = Vec::with_capacity(files.len());
+    let mut all_headings = Vec::with_capacity(files.len());
     for (facts, file_slug) in files.iter().zip(&slugs) {
         let rel = facts.path.as_str();
         let hub = ids.claim(file_slug.clone());
@@ -121,6 +125,7 @@ pub fn assemble(files: &[FileFacts]) -> Assembled {
 
         if facts.is_document {
             let mut heading_ids: Vec<(u32, String)> = Vec::new(); // open (level, id)
+            let mut these = Vec::with_capacity(facts.headings.len());
             for h in &facts.headings {
                 while heading_ids.last().is_some_and(|(lvl, _)| *lvl >= h.level) {
                     heading_ids.pop();
@@ -140,12 +145,15 @@ pub fn assemble(files: &[FileFacts]) -> Assembled {
                     "end_line": h.end_line,
                 }));
                 links.push(link(&parent, &id, "contains", rel, h.line));
+                these.push(id.clone());
                 heading_ids.push((h.level, id));
             }
             all_def_ids.push(Vec::new());
             all_parents.push(Vec::new());
+            all_headings.push(these);
             continue;
         }
+        all_headings.push(Vec::new());
 
         let Some(lang) = facts.lang else {
             all_def_ids.push(vec![None; facts.defs.len()]);
@@ -237,6 +245,7 @@ pub fn assemble(files: &[FileFacts]) -> Assembled {
         hubs,
         def_ids: all_def_ids,
         parents: all_parents,
+        headings: all_headings,
         ids,
     }
 }

@@ -101,6 +101,7 @@ pub fn file_facts(
     if let Some(kind) = doc {
         let mut facts = FileFacts::new(rel.to_string(), None, true, src);
         facts.headings = docs::headings(kind, src);
+        facts.doc_mentions = docs::mentions(kind, src);
         return facts;
     }
     let mut facts = FileFacts::new(rel.to_string(), lang, false, src);

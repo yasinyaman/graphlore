@@ -257,7 +257,9 @@ pub fn detect(
         // a pair sharing state is derived from the edges already counted, and
         // a method written for a base's method repeats what the type's
         // `inherits` / `implements` edge weighs
+        // (a document naming code describes it: it is no part of it)
         let derived = rel == crate::coupling::RELATION
+            || rel == crate::docs::link::RELATION
             || (rel == "dispatches_to"
                 && e.get("context").and_then(Value::as_str) == Some("override"));
         if derived {

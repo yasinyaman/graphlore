@@ -2,11 +2,12 @@
 
 `engine/` is graphlore's own extractor: a Rust library, shipped as the Python
 package `graphlore-engine`, that walks a project and writes a
-graphify-compatible `graph.json`. It exists so that graphlore can stop depending
-on the graphify CLI. Today it is experimental and opt-in
-(`GRAPHLORE_ENGINE=native`, see [configuration](configuration.md#the-native-engine));
-this page says what it does, how it compares with graphify on real code, and
-what is left before it can be the default.
+graphify-compatible `graph.json`. It is graphlore's default extractor
+(`GRAPHLORE_ENGINE=auto`, the `engine` extra, see
+[configuration](configuration.md#the-native-engine)); the graphify CLI is the
+deprecated fallback when the engine is not installed, and goes in the next
+release. This page says what the engine does, how it compares with graphify on
+real code, and what is left before graphify can go.
 
 ## What it extracts
 
@@ -47,7 +48,26 @@ what is left before it can be the default.
   is a node with `type: external`, `source_file: ""` and its `ecosystem`
   (`py`, `npm`, `go`, `jvm`, `dotnet`, `crate`, `php`, `gem`, `swift`, `c`).
 - **Documents.** A page node per Markdown / reStructuredText file and a node per
-  heading, nested by level (`code_only` skips them).
+  heading, nested by level (`code_only` skips them). A `.txt` file is
+  reStructuredText under a Sphinx project whose `conf.py` makes `.txt` a
+  `source_suffix` (Django's 689 pages), unless its name says otherwise
+  (`requirements.txt`). A name of code a document writes — a Markdown code
+  span, a reST object role (`:class:`, `:meth:`, `:func:` …), inline literal
+  or object directive (`.. class::`, `.. autofunction::`, a method directive
+  named under its class, a name under `.. currentmodule::`) — is a `documents`
+  edge from the heading it is written under (the page above the first) to the
+  one definition the name means: its last segments end the definition's
+  qualified name and the ones before them are a run of its module path
+  (`httpx.Client`, `django.db.models.Model`). No edge when several definitions
+  answer, for test code, for a module or package path (`django.contrib.auth`),
+  for a code span of one plain word (`client`), or from a bare code span to a
+  variable or field (`update_fields`). A qualified directive is `EXTRACTED`,
+  the rest `INFERRED` (`context`: `literal`, `role`, `directive`). The edge is
+  no dependency (`_NON_DEPENDENCY_RELATIONS`: cycles, surprises, layers and
+  `graphlore_unreferenced` leave it out, the last still counting the name as
+  a mention in the text), community detection skips it, and
+  `graphlore_impact` walks it: the pages that describe a definition are what
+  a change to it may need to update. On Django: 12,278 edges; on httpx: 263.
 - **Shared state.** Variables, fields and constants are nodes
   (`kind: variable | property | constant`), and so are the environment
   variables, files, tables, events and cache keys code uses by a literal key
@@ -74,7 +94,7 @@ what is left before it can be the default.
   `.name()` / bare, and the node-link layout is graphify's, so every graphlore
   tool — and graphify's own `query` / `path` / `explain` — reads the graph
   unchanged. `built_at_commit` is recorded for freshness. The graph says
-  `graph.engine: graphlore` and `schema_version: 6`, and graphlore then trusts
+  `graph.engine: graphlore` and `schema_version: 7` (7: `documents` edges), and graphlore then trusts
   its edges: `ImportChecker` reads `runs` instead of re-checking an import
   against the source, and the edges `resolve.py` adds to graphify's graphs are
   already there.
@@ -2317,12 +2337,13 @@ two nodes reference each other. `path` and `explain` read the CLI's default
    from graph.json. Left: the package-API extractors moved into the language
    modules (not a graphify dependency; `apis.py` reads either graph).
 7. **Native by default, in three releases.**
-   - **A:** the `graphlore-engine` wheels on PyPI
+   - **A (done):** the `graphlore-engine` wheels on PyPI
      (`.github/workflows/engine-wheels.yml`: Linux x86-64 and ARM on glibc,
      x86-64 on musl, macOS universal2, Windows x64), an `engine` extra the
      plugin installs, and `auto` the default: native when the engine is
      installed, graphify otherwise. `graphlore_add`, `mode="deep"` and
-     `no_viz` say they are going.
+     `no_viz` say they are going, and graphlore writes its own `graph.html`.
+     Each engine release is published by pushing its `engine-vX.Y.Z` tag.
    - **B:** graphify goes: `_run_cli`, the `graphify` extra, `graphlore_add`,
      `mode`, `no_viz` and `GRAPHLORE_BIN`. Builds write `graphlore-out/` and
      `.graphlore_labels.json`, and a `graphify-out/` graph is still read.

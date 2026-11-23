@@ -52,7 +52,7 @@ turn. Choose with `GRAPHLORE_TOOLSET`:
 | Value | Tools | Use when |
 |---|---|---|
 | `lean` (default) | 12 | Exploring, debugging, answering "where/how is X" |
-| `full` | all 33 | Reviewing structure (cycles, layers, dead or duplicated code), routes and package APIs, naming communities, diffs, the CLI passthroughs (`query`, `path`, `explain`, `add`) |
+| `full` | all 34 | Reviewing structure (cycles, layers, dead or duplicated code), routes and package APIs, naming communities, diffs, the CLI passthroughs (`query`, `path`, `explain`, `add`) |
 | `locate` | 5 | One way in (`graphlore_locate`), one way to the code (`graphlore_fetch`), plus `overview` / `build` / `freshness`; falls back to `lean` only when `GRAPHLORE_SEMANTIC_BACKEND` names a backend that is not available |
 
 An unknown value falls back to `lean` with a warning on stderr; the boot banner
@@ -68,6 +68,18 @@ tools for the same verbs — Graphify's `query` / node lookup / `neighbors` /
 server per project. If you need both (Graphify's PR triage, its multi-project
 serving), keep graphlore on `lean`, which leaves out its `query` / `path` /
 `explain` passthroughs, and tell the model which server answers what.
+
+## How large a reply gets
+
+A tool called with its default arguments answers in at most 35,000 characters
+(about 10,000 tokens), JSON or text: under Claude Code's warning (10,000
+tokens; it stops at `MAX_MCP_OUTPUT_TOKENS`, 25,000), Codex's usual
+`tool_output_token_limit` and Gemini CLI's 40,000-character truncation (see
+[clients](clients.md)). A list cut to fit says so (`truncated`, a count of
+what was left out, a `hint`), and the arguments that ask for more are the
+tool's `limit`, `top_n`, `budget_tokens` or `max_cycles`. JSON replies are
+compact (no indentation). `test_default_replies_stay_under_what_clients_keep`
+and `benchmarks/polyglot.py` (`MAX_REPLY_CHARS`) hold the budget.
 
 ## Transport (stdio default, optional HTTP)
 
@@ -106,6 +118,32 @@ GRAPHLORE_TRANSPORT=streamable-http GRAPHLORE_HOST=0.0.0.0 GRAPHLORE_API_KEY=$(o
   GRAPHLORE_PROJECT_DIR=/path/to/repo graphlore
 ```
 
+### OAuth for remote clients
+
+Remote MCP clients — claude.ai and ChatGPT connectors, Claude Code or Codex
+over HTTP — sign in with OAuth, as the MCP specification describes. graphlore
+is the resource server: it checks the tokens your own OAuth / OpenID provider
+issues (Auth0, Keycloak, Entra ID, Okta, Google…) and issues none itself; the
+clients register with the provider. Install the `remote` extra and set:
+
+```bash
+GRAPHLORE_TRANSPORT=streamable-http GRAPHLORE_HOST=0.0.0.0 \
+  GRAPHLORE_AUTH_ISSUER=https://your-tenant.example.com \
+  GRAPHLORE_AUTH_RESOURCE_URL=https://graphlore.example.com/mcp \
+  GRAPHLORE_AUTH_SCOPES=graphlore.read \
+  GRAPHLORE_PROJECT_DIR=/path/to/repo graphlore
+```
+
+graphlore then publishes `/.well-known/oauth-protected-resource/<path>`
+(RFC 9728: the resource and its authorization server), answers a request
+without a valid token with 401 and `WWW-Authenticate: Bearer
+resource_metadata=…`, and one whose token lacks a required scope with 403. A
+token is valid when the provider signed it (keys found by RFC 8414 or OpenID
+discovery, asymmetric algorithms only), its `iss` is the issuer, its `aud` is
+`GRAPHLORE_AUTH_RESOURCE_URL` exactly and it has not expired. Both URLs must be
+`https` (or localhost). OAuth and `GRAPHLORE_API_KEY` exclude each other, and
+`GRAPHLORE_OFFLINE` refuses OAuth (the keys come from the provider).
+
 ## What reaches the network, and when
 
 The graph.json analysis tools read local files only, and so does the built-in
@@ -123,6 +161,7 @@ search index's BM25 tier. These are the exceptions:
 | Native engine (`graphlore-engine`, the `engine` extra) | Never: its grammars are compiled into the wheel and a build reads local files only | Unchanged |
 | A custom `GRAPHLORE_SEMANTIC_BACKEND` | Whatever that code does | **Not constrained** — graphlore cannot see inside it |
 | HTTP transports | Inbound only (the server listens) | Unchanged |
+| OAuth on HTTP (`GRAPHLORE_AUTH_ISSUER`, the `remote` extra) | At the first token: the provider's metadata (RFC 8414 / OpenID discovery) and its signing keys (JWKS), then the keys again when they change (cached an hour) | Refused at start-up: the server exits with the reason |
 
 What graphlore enforces is its own side: it refuses the calls above, strips the
 `*_API_KEY` variables it knows (`GEMINI_API_KEY`, `OPENAI_API_KEY`,
@@ -142,7 +181,8 @@ Scala, C#, Rust, Swift, C, C++, Ruby and PHP. It builds the graph by default
 goes in the next release. A native graph
 has a node per file, per definition (with its `start..end` span, `kind` and
 `qualname`), property, module-level constant and Markdown / reStructuredText
-heading; containment; and the imports (with when each runs), calls, bases and
+heading (Sphinx `.txt` sources included), with a `documents` edge from a heading
+to the definition a name of code under it means; containment; and the imports (with when each runs), calls, bases and
 type references it resolves from the source, each `EXTRACTED` or, when found
 by name alone, `INFERRED`. It is written in graphify's id and label conventions,
 so every tool reads it. It also has shared state: variables, fields and
@@ -195,8 +235,11 @@ has the results on 31 repositories and the roadmap.
 | `GRAPHLORE_HOST` | `127.0.0.1` | Bind host for HTTP transports |
 | `GRAPHLORE_PORT` | `8000` | Bind port for HTTP transports |
 | `GRAPHLORE_API_KEY` | _(unset)_ | Require `Authorization: Bearer <key>` on HTTP transports |
+| `GRAPHLORE_AUTH_ISSUER` | _(unset)_ | OAuth on HTTP transports: the provider's issuer URL ([OAuth for remote clients](#oauth-for-remote-clients)) |
+| `GRAPHLORE_AUTH_RESOURCE_URL` | _(unset)_ | OAuth: this server's public URL, which a token's `aud` must be |
+| `GRAPHLORE_AUTH_SCOPES` | _(unset)_ | OAuth: scopes every token must carry, comma-separated |
 | `GRAPHLORE_ALLOWED_HOSTS` | _(unset)_ | DNS-rebinding `Host` allowlist for HTTP (comma-separated, `:*` port wildcards; `*` disables). Unset = SDK default: loopback-only when bound to loopback |
-| `GRAPHLORE_TOOLSET` | `lean` | `lean` (12 core exploration tools) \| `full` (all 33) \| `locate` (minimal locate-first surface; falls back to `lean` when the configured backend is unavailable). See [Which toolset](#which-toolset) |
+| `GRAPHLORE_TOOLSET` | `lean` | `lean` (12 core exploration tools) \| `full` (all 34) \| `locate` (minimal locate-first surface; falls back to `lean` when the configured backend is unavailable). See [Which toolset](#which-toolset) |
 | `GRAPHLORE_TOKENIZER` | _(heuristic)_ | `tiktoken` → exact token counts (needs the `[tiktoken]` extra); else chars/3.5 estimate |
 | `GRAPHLORE_SEMANTIC_BACKEND` | _(auto)_ | Search backend of `graphlore_locate` and the duplication scan: unset / `auto` → semble when installed and loadable, else the built-in index; `semble` → semble only; `builtin` → the built-in index only; or `module.path:Factory` implementing `search`/`find_related` (its module is checked at boot, the factory at the first call) |
 | `GRAPHLORE_EMBED_MODEL` | `minishlab/potion-code-16M-v2` | The built-in index's dense tier (`[embed]` extra): a Hugging Face model id, a local model directory, or `off` for BM25 only |

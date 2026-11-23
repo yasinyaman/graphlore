@@ -1,12 +1,12 @@
 ---
 name: graphlore-explore
-description: Explore, understand, review or debug a codebase through its Graphify knowledge graph using the graphlore MCP tools. Use when onboarding to an unfamiliar repository, tracing how a named flow or feature works end-to-end, finding likely root-cause locations for a bug, reviewing a codebase's structure (import cycles, layering, dead or duplicated code), or answering "where/how is X implemented" — especially when a graphify-out/graph.json exists. Favors token-budgeted subgraph extraction over opening many files.
+description: Explore, understand, review or debug a codebase through its code knowledge graph using the graphlore MCP tools. Use when onboarding to an unfamiliar repository, tracing how a named flow or feature works end-to-end, finding likely root-cause locations for a bug, reviewing a codebase's structure (import cycles, layering, dead or duplicated code), or answering "where/how is X implemented" — especially when a graphify-out/graph.json exists. Favors token-budgeted subgraph extraction over opening many files.
 ---
 
-# Exploring a codebase with Graphify
+# Exploring a codebase with graphlore
 
 The `graphlore` MCP server (tools are named `graphlore_*`; they read the
-Graphify-built graph) exposes a codebase knowledge
+code graph graphlore builds) exposes a codebase knowledge
 graph as tools. Reach for it **before** grepping or reading many files: it
 answers structural questions ("what connects to X", "which subsystems exist",
 "where does this flow run") cheaply, returning just the relevant slice instead
@@ -33,13 +33,16 @@ and communities of its own, as the build result says); only when the engine is
 not installed does it fall back to the `graphify` CLI. The build writes
 `graphify-out/` inside the folder it reads, so after
 `graphlore_build("/path/to/other/repo")` the build result tells you to switch
-before the read tools can see that graph.
+before the read tools can see that graph. The build also writes `graph.html`, a
+page for the user: the graph, the tools' findings (cycles, shared state,
+surprises, unreferenced code) and a node's impact. Point the user to it when a
+picture helps; the tools remain your way in.
 
 ## Preconditions: make sure the graph exists and is fresh
 
 1. `graphlore_freshness()` — is `graph.json` stale vs. the current git HEAD?
-2. If missing or stale: `graphlore_build(".", update=True)` (AST-only update needs
-   no API key; `mode="deep"` adds semantic edges but needs a backend key). Read
+2. If missing or stale: `graphlore_build(".", update=True)` (needs no API key;
+   `mode="deep"` is graphify's, deprecated and going in the next release). Read
    the result: it carries the build's warnings (a missing extractor for a file
    type, files skipped as sensitive) and notes on vendored files and an
    unignored `graphify-out/`.
@@ -84,9 +87,14 @@ network access the built-in index answers with BM25 until the model is fetched.
 
 Supporting tools: `graphlore_search` (find nodes by name), `graphlore_neighbors`
 (1-hop), `graphlore_tests_for("<symbol>")` (which tests exercise it: direct,
-through one caller, weak hints), `graphlore_god_nodes` (most connected), `graphlore_surprises`
-(unexpected cross-domain couplings), `graphlore_path(a, b)` (shortest route between
-two nodes, along the edges' direction when there is one), `graphlore_explain(node)`
+through one caller, weak hints), `graphlore_god_nodes` (most connected;
+`rank="pagerank"` for what the most leans on, `rank="betweenness"` for the brokers
+between parts), `graphlore_surprises`
+(unexpected cross-domain couplings), `graphlore_path(a, b)` (the most certain route
+between two nodes: fewest inferred edges, then fewest steps, along the edges'
+direction when there is one), `graphlore_bridges()` (the one link between two parts
+of the code, and the files or directories one side goes through),
+`graphlore_explain(node)`
 (a node's details and its connections by relation),
 `graphlore_cycles()` (import cycles between modules — runtime first — then call cycles),
 `graphlore_routes()` (framework route → handler table, joined to graph nodes),
@@ -139,7 +147,7 @@ issues — gauge how much to trust the graph).
 
 ## Scope: whose code is being analysed
 
-`graphlore_god_nodes`, `graphlore_validate`, `graphlore_cycles`,
+`graphlore_god_nodes`, `graphlore_bridges`, `graphlore_validate`, `graphlore_cycles`,
 `graphlore_surprises`, `graphlore_duplication_scan`, `graphlore_unreferenced` and
 `graphlore_same_names` take a `scope` string. By default they leave out vendored
 and minified files and nodes standing for external packages, and each result
@@ -187,6 +195,8 @@ many): list its members with `graphlore_skeleton` and fetch the one you need.
   3. `graphlore_layers(rules={"<layer>": ["<what it may import>"]})` — write the
      intended layering down (from the README, the directory layout, or the
      project's own architecture test) and list the imports that break it.
+     `graphlore_bridges(level="directory")` shows the parts joined by a single
+     link and the directories one side reaches the rest through.
   4. `graphlore_unreferenced()` — dead-code candidates with `file:line`;
      `graphlore_fetch` each one before calling it dead (dynamic dispatch is
      invisible to the graph). A row "name shared with file:line" is the unused
@@ -197,10 +207,13 @@ many): list its members with `graphlore_skeleton` and fetch the one you need.
      tier — function bodies that are the same code, whatever they are called
      (exact, no model).
   6. `graphlore_god_nodes()` — the most connected modules and symbols are the
-     maintainability hotspots; `graphlore_skeleton` shows how large they are.
+     maintainability hotspots; `rank="pagerank"` ranks by what leans on them,
+     `rank="betweenness"` by how many paths between parts run through them;
+     `graphlore_skeleton` shows how large they are.
   7. `graphlore_surprises()` last — leads to check, not findings.
 - **Before a refactor** → `graphlore_impact("<node>")` — the reverse-dependency
-  **blast radius**, ordered by hop distance: what breaks if this changes — then
+  **blast radius**, ordered by hop distance: what breaks if this changes, and its
+  `chokepoints`, the dependents everything further out reaches it through — then
   `graphlore_tests_for("<node>")` for the tests to run afterwards. On a native
   graph, `graphlore_impact("<node>", shared_state=True)` adds the code it
   affects without a call: what reads the variables, fields, environment
