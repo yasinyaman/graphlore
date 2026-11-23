@@ -1,12 +1,15 @@
 # How graphlore works
 
-What graphlore adds on top of the Graphify graph, how it checks what it reads,
+What graphlore adds on top of the graph it reads, how it checks what it reads,
 and how it keeps answers honest when the code moves.
 
 Back to the [README](../README.md) · [Tool reference](tools.md) ·
 [Configuration](configuration.md) · [Benchmark](benchmark.md)
 
 ## What graphlore adds to the graph it reads
+
+This section is about graphs the graphify CLI built (the deprecated fallback);
+a native graph, the default, has these edges already (see below).
 
 graphify's local extractor links `from pkg import helper; helper()` to the
 function, but not `from pkg import mod; mod.helper()` — and often not the import
@@ -56,7 +59,7 @@ linked to a first-party `yaml.py`, or a bare JS specifier (`'yaml'`) linked to
 `lib/yaml.js`. A tsconfig path alias cannot be told from a scoped package
 without the config, so those edges are kept.
 
-A graph the native engine built (`GRAPHLORE_ENGINE=native`) needs none of this:
+A graph the native engine built (the default) needs none of this:
 it resolves each import by path when it reads the statement, and records when it
 runs on the edge (`runs`), so the check takes that and rejects nothing. The calls
 and imports through a module object that graphlore adds to graphify's graphs
@@ -123,12 +126,14 @@ hook** — the recommended first-class auto-update flow:
 ```sh
 # .git/hooks/post-commit   (then: chmod +x .git/hooks/post-commit)
 #!/bin/sh
-# incremental, viz-free, backgrounded so the commit returns immediately
-graphify . --update --no-viz >/dev/null 2>&1 &
+# incremental (only changed files are parsed), backgrounded so the commit returns immediately
+python -m graphlore_engine build . --incremental --commit "$(git rev-parse HEAD)" >/dev/null 2>&1 &
 ```
 
-Incremental `--update` only re-extracts changed files — it can't *drop* nodes for
-deleted/renamed code on its own. `graphlore_prune` closes that gap: it surgically
+The native update drops the nodes of deleted files itself. On a graph graphify
+built (`graphify . --update --no-viz`), an incremental update only re-extracts
+changed files — it can't *drop* nodes for deleted/renamed code on its own.
+`graphlore_prune` closes that gap: it surgically
 removes the phantom nodes (and their edges) for source files that are gone from the
 working tree, so after a delete/rename you can `graphlore_prune` (preview with
 `dry_run=True`) + `graphlore_build(update=True)` instead of a full rebuild.
@@ -144,7 +149,7 @@ debounces via `GRAPHLORE_WATCH_DEBOUNCE`.
 
 ## Search bridge (built-in index or semble)
 
-`graphlore_locate` joins code search to the graph in one call. Graphify gives
+`graphlore_locate` joins code search to the graph in one call. The graph gives
 **structure** (how code connects); search gives **retrieval** (which code is
 relevant to a question) — they're complementary.
 
@@ -240,8 +245,9 @@ The chunk→node join and the freshness cosmetic-vs-structural check work
 **across languages**: Python uses the stdlib `ast` (no extra deps), and every
 other language (JS/TS, Go, Rust, Java, Kotlin, Scala, C#, Swift, Ruby, PHP,
 C/C++, …) is handled by an optional **tree-sitter** backend —
-`pip install "graphlore[treesitter]"`, also pulled in by graphify. Without it,
-non-Python files fall back to nearest-line matching. A `.h` file that reads as
+`pip install "graphlore[treesitter]"`; when the native engine is installed, its
+compiled-in grammars give the spans instead. Without either, non-Python files
+fall back to nearest-line matching. A `.h` file that reads as
 C++ (a `class`, a `namespace`, a `template<`) is parsed as C++.
 [What was measured per language](benchmark-polyglot.md), on real repositories.
 

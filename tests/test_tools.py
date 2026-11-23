@@ -574,7 +574,8 @@ def test_tool_and_prompt_registration(project):
     assert "graphlore_routes" in names
     assert {"graphlore_project", "graphlore_unreferenced", "graphlore_layers",
             "graphlore_same_names", "graphlore_tests_for"} <= names
-    assert len(names) == 33
+    assert len(names) == 34
+    assert "graphlore_bridges" in names
     assert prompts == {"onboard", "trace_bug", "explain_flow", "review"}
 
 
@@ -589,8 +590,18 @@ def test_version_reported_over_mcp():
 def test_main_module_wired():
     import importlib
 
+    from graphlore import cli
     mod = importlib.import_module("graphlore.__main__")  # must not run main()
-    assert mod.main is server.main
+    assert mod.main is cli.main
+
+
+def test_bare_graphlore_still_runs_the_server(monkeypatch):
+    """Every client config and the plugin start `graphlore` with no argument:
+    that must stay the server."""
+    from graphlore import cli
+    ran = []
+    monkeypatch.setattr(server, "main", lambda: ran.append(True))
+    assert cli.main([]) is None and ran == [True]
 
 
 def test_claude_plugin_manifests_stay_in_sync():
@@ -4577,12 +4588,72 @@ def _viz_graph():
     }
 
 
+def _viz_native_graph():
+    """What the native engine adds: spans, qualnames, languages, a route, a state
+    node's coupling, a resource, edges with their site, context and when an
+    import runs."""
+    return {
+        "graph": {"engine": "graphlore", "schema_version": 6},
+        "nodes": [
+            {"id": "f", "label": "app.py", "source_file": "app.py", "language": "python"},
+            {"id": "run", "label": "run()", "source_file": "app.py", "source_location": "L3-L9",
+             "region_start": 2, "end_line": 9, "qualname": "App.run", "language": "python",
+             "kind": "method"},
+            {"id": "cfg", "label": "CONFIG", "source_file": "app.py", "source_location": "L1",
+             "end_line": "1", "kind": "variable", "language": "python", "qualname": "CONFIG",
+             "coupling": {"pairs": 3, "hidden": 1, "edges": 1,
+                          "listed": [["run", "load", None, True], ["run", "gone", 2, None],
+                                     ["bad"]]}},
+            {"id": "load", "label": "load()", "source_file": "lib.py", "end_line": 4.0},
+            {"id": "env", "label": "HOME", "type": "resource", "resource": "env", "key": "HOME",
+             "source_file": ""},
+            {"id": "r1", "label": "GET /items", "type": "route", "method": "GET",
+             "pattern": "/items", "framework": "fastapi", "source_file": "app.py",
+             "source_location": "L12"},
+            {"id": "x", "label": "Runs the app.", "file_type": "rationale"},
+        ],
+        "links": [
+            {"source": "f", "target": "run", "relation": "contains"},
+            {"source": "run", "target": "cfg", "relation": "writes", "source_location": "L5",
+             "context": "assign"},
+            {"source": "load", "target": "cfg", "relation": "reads", "source_location": "L2"},
+            {"source": "f", "target": "load", "relation": "imports", "runs": "deferred",
+             "source_location": "L7-L7", "confidence": "EXTRACTED"},
+            {"source": "load", "target": "env", "relation": "reads"},
+            {"source": "r1", "target": "run", "relation": "handles", "context": "route"},
+            {"source": "x", "target": "run", "relation": "rationale_for"},
+        ],
+    }
+
+
+def test_graph_html_carries_what_the_native_engine_writes():
+    data = server.viz.page_data(_viz_native_graph())
+    rows = {r[0]: r for r in data["nodes"]}
+    assert rows["run"][8:] == [9, "App.run", data["langs"].index("python")]
+    assert rows["cfg"][9] == ""                    # a qualname that is its label is not repeated
+    assert rows["cfg"][8] == 1 and rows["load"][8] == 4 and rows["load"][10] == -1
+    assert rows["cfg"][6] & 4 and rows["env"][6] & 4 and not rows["run"][6] & 4   # state nodes
+    # a resource is the project's own, not an external package
+    assert not rows["env"][6] & 2 and data["kinds"][rows["env"][5]] != "external"
+    pos = {r[0]: i for i, r in enumerate(data["nodes"])}
+    assert data["routes"] == [[pos["r1"], "GET", "/items", "fastapi"]]
+    assert data["coupling"] == [[pos["cfg"], 3, 1, [[pos["run"], pos["load"], None, True],
+                                                   [pos["run"], -1, 2, None]]]]
+    attrs = [data["eattrs"][k:k + 3] for k in range(0, len(data["eattrs"]), 3)]
+    assert attrs[1] == [5, data["ctxs"].index("assign"), -1]
+    assert attrs[3] == [7, -1, data["runs"].index("deferred")]
+    walks = {name: walk for name, _g, walk in data["rels"]}
+    assert walks["writes"] == 2 and walks["rationale_for"] == 0 and walks["handles"] == 1
+
+
 def test_graph_html_data_is_compact_and_complete():
     viz = server.viz
     data = viz.page_data(_viz_graph(), {"1": "Tests"})
     assert data["meta"] == {"engine": "graphlore", "commit": "abc123", "nodes": 5, "edges": 3}
-    rels = {name: data["groups"][g] for name, g in data["rels"]}
+    rels = {name: data["groups"][g] for name, g, _walk in data["rels"]}
     assert rels == {"contains": "structure", "calls": "calls", "imports": "imports"}
+    walks = {name: walk for name, _g, walk in data["rels"]}
+    assert walks == {"contains": 1, "calls": 1, "imports": 1}
     assert [c[1] for c in data["comms"]] == ["Community 0", "Tests"]
     rows = {r[0]: r for r in data["nodes"]}
     assert data["kinds"][rows["f"][5]] == "file" and data["kinds"][rows["a"][5]] == "function"
@@ -4590,6 +4661,8 @@ def test_graph_html_data_is_compact_and_complete():
     assert rows["t"][6] & 1 and rows["a"][3] == 3 and rows["a"][7] == 3      # test, line, degree
     flat = data["edges"]
     assert len(flat) == 12 and flat[-1] == 1                                  # inferred flag
+    assert len(data["eattrs"]) == 9 and "analysis" not in data
+    assert rows["a"][8:] == [0, "", -1]                       # no span end, qualname, language
     assert data["cedges"] == [0, 1, 1]          # test_run (1) calls run (0): one edge between
     assert viz.relation_group("couples_with") == "state"
     assert viz.relation_group("handles") == "http" and viz.relation_group("odd") == "other"
@@ -4624,7 +4697,7 @@ def _viewer_compact(graphs, names=None):
         "\nconst input = JSON.parse(require('fs').readFileSync(0, 'utf8'));"
         "\nprocess.stdout.write(JSON.stringify({"
         "out: input.graphs.map(g => compact(g, input.names)), groups: RELATION_GROUPS,"
-        " order: GROUPS }));"
+        " order: GROUPS, never: IMPACT_NEVER, from_state: IMPACT_FROM_STATE }));"
     )
     run = _sp.run([node, "-e", script], input=json.dumps({"graphs": graphs, "names": names or {}}),
                   capture_output=True, text=True, timeout=60)
@@ -4639,7 +4712,7 @@ def test_the_viewer_reads_a_raw_graph_as_python_does():
 
     import pytest
     fixtures = Path(__file__).parent / "fixtures"
-    graphs = [_viz_graph(),
+    graphs = [_viz_graph(), _viz_native_graph(),
               json.loads((fixtures / "graph.json").read_text(encoding="utf-8")),
               json.loads((fixtures / "polyglot" / "graph.json").read_text(encoding="utf-8")),
               {"vertices": [{"name": 0, "file": "a/tests/x.py", "line": "7", "cluster": 2},
@@ -4657,8 +4730,207 @@ def test_the_viewer_reads_a_raw_graph_as_python_does():
         assert all(server.viz.relation_group(r) == group for r in rels), group
     every = (server._CONTAINMENT_RELATIONS | server._IMPORT_RELATIONS | server._CALL_RELATIONS
              | server._STATE_RELATIONS | server._COUPLING_RELATIONS | server._HTTP_RELATIONS
-             | server.viz._INHERITANCE | {"dispatches_to", "references"})
+             | server.viz._INHERITANCE | server._DOCUMENT_RELATIONS
+             | {"dispatches_to", "references"})
     assert set().union(*map(set, got["groups"].values())) == every
+    # and it walks impact as graphlore_impact does by default
+    assert set(got["never"]) == set(server._IMPACT_SKIPPED_RELATIONS)
+    assert set(got["from_state"]) == set(server._STATE_RELATIONS | server._COUPLING_RELATIONS)
+
+
+def _viewer_impact(data, hops=3):
+    """The page's impact walk (its impact:begin / impact:end block) from every
+    node of ``data`` under node: {node id: {dependent id: hops}}; None without node."""
+    import shutil as _sh
+    import subprocess as _sp
+    node = _sh.which("node")
+    if node is None:
+        return None
+    page = server.viz.TEMPLATE.read_text(encoding="utf-8")
+    block = page.split("// impact:begin", 1)[1].split("// impact:end", 1)[0]
+    script = block + (
+        "\nconst data = JSON.parse(require('fs').readFileSync(0, 'utf8'));"
+        "\nwithResolved(data);"
+        f"\nconst out = {{}}; data.nodes.forEach((r, i) => {{ out[r[0]] = Object.fromEntries("
+        f"[...impactOf(data, i, {hops})].map(([k, h]) => [data.nodes[k][0], h])); }});"
+        "\nprocess.stdout.write(JSON.stringify(out));"
+    )
+    run = _sp.run([node, "-e", script], input=json.dumps(data), capture_output=True,
+                  text=True, timeout=60)
+    assert run.returncode == 0, run.stderr
+    return json.loads(run.stdout)
+
+
+def _viewer_overview(data, hidden_ids):
+    """The page's overview counts (its overview:begin / overview:end block) under
+    node, with the nodes whose ids are in ``hidden_ids`` filtered out; None
+    without node."""
+    import shutil as _sh
+    import subprocess as _sp
+    node = _sh.which("node")
+    if node is None:
+        return None
+    page = server.viz.TEMPLATE.read_text(encoding="utf-8")
+    block = page.split("// overview:begin", 1)[1].split("// overview:end", 1)[0]
+    script = block + (
+        "\nconst [data, hidden] = JSON.parse(require('fs').readFileSync(0, 'utf8'));"
+        "\nconst out = visibleCommunities(data, i => !hidden.includes(data.nodes[i][0]));"
+        "\nprocess.stdout.write(JSON.stringify(out));"
+    )
+    run = _sp.run([node, "-e", script], input=json.dumps([data, hidden_ids]),
+                  capture_output=True, text=True, timeout=60)
+    assert run.returncode == 0, run.stderr
+    return json.loads(run.stdout)
+
+
+def test_the_overview_counts_what_the_show_filters_leave():
+    import pytest
+    graph = _viz_graph()
+    data = server.viz.page_data(graph)
+    everything = _viewer_overview(data, [])
+    if everything is None:
+        pytest.skip("node is not installed")
+    # nothing hidden: the communities and links page_data counted
+    assert everything["sizes"] == [c[2] for c in data["comms"]]
+    assert everything["cedges"] == data["cedges"] and everything["hidden"] == 0
+    tests = [r[0] for r in data["nodes"] if r[6] & 1]
+    assert tests == ["t"]
+    no_tests = _viewer_overview(data, tests)
+    comm = {r[0]: r[4] for r in data["nodes"]}
+    assert no_tests["sizes"][comm["t"]] == everything["sizes"][comm["t"]] - 1
+    assert sum(no_tests["sizes"]) == sum(everything["sizes"]) - 1
+    # a community whose every member is hidden counts nothing and is reported
+    alone = [r[0] for r in data["nodes"] if r[4] == comm["t"]]
+    gone = _viewer_overview(data, alone)
+    assert gone["sizes"][comm["t"]] == 0 and gone["hidden"] == 1
+    assert all(comm["t"] not in gone["cedges"][j:j + 2] for j in range(0, len(gone["cedges"]), 3))
+
+
+def _graph_html_data(page):
+    text = page.read_text(encoding="utf-8")
+    raw = text.split('<script id="graph-data" type="application/json">', 1)[1]
+    raw = raw.split("</script>", 1)[0]
+    return json.loads(raw)
+
+
+def test_graph_html_shows_what_graphlore_s_tools_find(tmp_path, monkeypatch):
+    # the active project's page carries the tools' own findings, each node named
+    # by its place in graph.json, and the edges graphlore resolves for graphify
+    _module_call_project(tmp_path)
+    _write(tmp_path, "node_modules/lib/x.js", "module.exports = 1;\n")
+    gp = tmp_path / "graphify-out" / "graph.json"
+    graph = json.loads(gp.read_text(encoding="utf-8"))
+    graph["nodes"].append({"id": "vend", "label": "x.js", "source_file": "node_modules/lib/x.js",
+                           "source_location": "L1", "file_type": "code"})
+    gp.write_text(json.dumps(graph), encoding="utf-8")
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    server._GRAPH_CACHE.clear()
+    server._VIZ_ANALYSIS.clear()
+    assert server._write_viz(gp).startswith("graph.html written")
+    data = _graph_html_data(gp.with_name("graph.html"))
+    a = data["analysis"]
+    pos = {r[0]: i for i, r in enumerate(data["nodes"])}
+    assert {"cycles", "surprises", "shared_state", "co_change", "unreferenced"} <= set(a)
+    assert a["notes"] == [] and a["vendored_files"] == ["node_modules/lib/x.js"]
+    assert [pos["main"], pos["fn_tool"], "calls"] in [r[:3] for r in a["resolved"]]
+    for row in a["unreferenced"]["rows"]:
+        assert row["node"] >= 0 and data["nodes"][row["node"]][1] == row["label"]
+    # the page's impact walk is graphlore_impact's, resolved edges and all
+    walked = _viewer_impact(data)
+    if walked is None:
+        import pytest
+        pytest.skip("node is not installed")
+    assert any(walked.values())
+    for nid in pos:
+        tool = json.loads(server.graphlore_impact(nid, budget_tokens=10**6, as_json=True))
+        want = {r["node"]: r["distance"] for r in tool["impacted"]}
+        labels = {data["nodes"][pos[k]][1]: h for k, h in walked[nid].items()}
+        assert labels == want, nid
+    # set_labels rewrites the page from the same findings, not a second run
+    monkeypatch.setattr(server, "graphlore_cycles", lambda **kw: 1 / 0)
+    server._write_viz(gp)
+    assert "cycles" in _graph_html_data(gp.with_name("graph.html"))["analysis"]
+
+
+def test_graph_html_links_a_node_to_its_lines_on_the_repository_host():
+    sha = "0123456789abcdef0123456789abcdef01234567"
+    src = server.viz.source_of_remote
+    assert src("https://github.com/encode/httpx.git", sha) == {
+        "host": "github", "web": "https://github.com/encode/httpx", "commit": sha, "prefix": ""}
+    # a token, a user name or a port in the remote never reaches the page
+    got = src("https://x-access-token:ghp_secret@github.com:443/o/r", sha, "sub/dir")
+    assert got == {"host": "github", "web": "https://github.com/o/r", "commit": sha,
+                   "prefix": "sub/dir/"}
+    assert "secret" not in json.dumps(got)
+    assert src("git@gitlab.com:group/sub/proj.git", sha)["web"] == "https://gitlab.com/group/sub/proj"
+    assert src("ssh://git@bitbucket.org/team/repo.git", sha)["host"] == "bitbucket"
+    # hosts it has no link form for, malformed remotes and commits: no link
+    assert src("https://git.example.com/o/r", sha) is None
+    assert src("http://local_proxy@127.0.0.1:8080/git/o/r", sha) is None
+    assert src("https://github.com/o", sha) is None
+    assert src("https://github.com/o/r\"onclick=x", sha) is None
+    assert src("https://github.com/o/r", "HEAD") is None
+    assert src("https://github.com/o/r", sha, "../up") is None
+    page = server.viz.TEMPLATE.read_text(encoding="utf-8")
+    assert 'rel: "noopener noreferrer"' in page and "?plain=1" in page
+
+
+def test_graph_html_carries_the_remote_of_its_repository(tmp_path, monkeypatch):
+    import subprocess
+
+    import pytest
+    (tmp_path / "graphify-out").mkdir()
+    gp = tmp_path / "graphify-out" / "graph.json"
+    gp.write_text(json.dumps(_viz_graph()), encoding="utf-8")
+    git = ["git", "-C", str(tmp_path), "-c", "user.name=t", "-c", "user.email=t@example.com"]
+    try:
+        subprocess.run([*git, "init", "-q"], check=True)
+    except (OSError, subprocess.CalledProcessError):
+        pytest.skip("git is not installed")
+    subprocess.run([*git, "remote", "add", "origin", "https://tok@github.com/o/r.git"], check=True)
+    (tmp_path / "a.py").write_text("x = 1\n", encoding="utf-8")
+    subprocess.run([*git, "add", "a.py"], check=True)
+    subprocess.run([*git, "commit", "-qm", "c"], check=True)
+    head = subprocess.run([*git, "rev-parse", "HEAD"], capture_output=True, text=True,
+                          check=True).stdout.strip()
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    server._GRAPH_CACHE.clear()
+    server._VIZ_ANALYSIS.clear()
+    server._write_viz(tmp_path / "graphify-out" / "graph.json")
+    data = _graph_html_data(tmp_path / "graphify-out" / "graph.html")
+    assert data["source"] == {"host": "github", "web": "https://github.com/o/r",
+                              "commit": head, "prefix": ""}
+    # no remote: no link, and the page says nothing of one
+    subprocess.run([*git, "remote", "remove", "origin"], check=True)
+    server._write_viz(tmp_path / "graphify-out" / "graph.json")
+    assert "source" not in _graph_html_data(tmp_path / "graphify-out" / "graph.html")
+
+
+def test_graph_html_says_when_it_has_no_findings(tmp_path, monkeypatch):
+    project, other = tmp_path / "proj", tmp_path / "other"
+    for d in (project, other):
+        (d / "graphify-out").mkdir(parents=True)
+        (d / "graphify-out" / "graph.json").write_text(json.dumps(_viz_graph()), encoding="utf-8")
+    monkeypatch.setattr(server.config, "PROJECT_DIR", project)
+    server._GRAPH_CACHE.clear()
+    server._VIZ_ANALYSIS.clear()
+    # a graph the tools do not read (a build of another path) has none, and says so
+    note = server._write_viz(other / "graphify-out" / "graph.json")
+    assert "no findings" in note and "graphlore_project" in note
+    assert "analysis" not in _graph_html_data(other / "graphify-out" / "graph.html")
+    # whatever the graph's size, the page carries unreferenced code
+    server._write_viz(project / "graphify-out" / "graph.json")
+    a = _graph_html_data(project / "graphify-out" / "graph.html")["analysis"]
+    assert "rows" in a["unreferenced"] and "skipped" not in a["unreferenced"]
+    # a tool that fails costs its finding, never the page
+    server._VIZ_ANALYSIS.clear()
+    monkeypatch.setattr(server, "graphlore_surprises", lambda **kw: 1 / 0)
+    note = server._write_viz(project / "graphify-out" / "graph.json")
+    a = _graph_html_data(project / "graphify-out" / "graph.html")["analysis"]
+    assert "surprises" not in a and "ZeroDivisionError" in a["notes"][0] and "missing" in note
+    page = server.viz.TEMPLATE.read_text(encoding="utf-8")
+    assert "come with the" in page and '"#f=" + encodeURIComponent' in page
+    assert '"#i=" + encodeURIComponent' in page and "graphlore_tests_for(" in page
 
 
 def test_the_viewer_without_data_asks_for_a_file():
@@ -6789,7 +7061,7 @@ def test_no_output_schema_advertised():
             return (await client.list_tools()).tools
 
     tools = asyncio.run(_go())
-    assert len(tools) == 33
+    assert len(tools) == 34
     assert all(t.output_schema is None for t in tools)
     by_name = {t.name: t for t in tools}
     # The wrapper keeps the real signature: parameters and docstrings survive.
@@ -9089,3 +9361,600 @@ def test_semantic_backend_dispatch(tmp_path, monkeypatch):
     monkeypatch.delenv("GRAPHLORE_SEMANTIC_BACKEND")
     data = json.loads(server.graphlore_locate("apply_discount", as_json=True))
     assert data["backend"]["name"] == "builtin" and "403 Forbidden" in data["backend"]["note"]
+
+
+# --- graph algorithms: most certain path, PageRank, betweenness, dominators,
+# bridges and cut points ----------------------------------------------------
+
+def test_graph_algorithms_on_small_graphs():
+    from graphlore import algorithms as alg
+    # the path with fewer guessed steps wins over the shorter one
+    adj = {"a": [("b", "calls"), ("c", "calls")], "b": [("d", "calls")],
+           "c": [("e", "calls")], "e": [("d", "calls")]}
+    assert alg.certain_route(adj, "a", "d", lambda s, t, r: (s, t) == ("b", "d")) == [
+        ("a", "c", "calls"), ("c", "e", "calls"), ("e", "d", "calls")]
+    assert alg.certain_route(adj, "a", "d", lambda *x: False) == [
+        ("a", "b", "calls"), ("b", "d", "calls")]
+    assert alg.certain_route(adj, "d", "a", lambda *x: False) is None
+    # PageRank sums to 1 and favours what is depended on
+    pr = alg.pagerank(list("abcd"), {"a": ["c"], "b": ["c"], "d": ["c"], "c": []})
+    assert abs(sum(pr.values()) - 1) < 1e-9 and max(pr, key=pr.get) == "c"
+    # betweenness: b is on the one path a -> c; sampled says so
+    b = alg.betweenness(list("abc"), {"a": ["b"], "b": ["c"]})
+    assert b.scores == {"a": 0.0, "b": 1.0, "c": 0.0} and b.exact
+    assert not alg.betweenness(list("abcd"), {"a": ["b"]}, samples=2).exact
+    # dominators: every path from r to x, y, z runs through m
+    idom = alg.dominators("r", {"r": ["m", "q"], "m": ["x", "y"], "x": ["z"], "y": ["z"],
+                                "q": ["w"]})
+    assert idom == {"r": "r", "m": "r", "q": "r", "x": "m", "y": "m", "z": "m", "w": "q"}
+    assert alg.dominated_counts(idom) == {"r": 6, "m": 3, "q": 1, "x": 0, "y": 0, "z": 0,
+                                          "w": 0}
+    # bridges and cut points: two triangles joined by c - d
+    nb = {"a": ["b", "c"], "b": ["a", "c"], "c": ["a", "b", "d"],
+          "d": ["c", "e", "f"], "e": ["d", "f"], "f": ["d", "e"]}
+    cs = alg.cut_structure(list("abcdef"), nb)
+    assert [(frozenset((u, v)), side, comp) for u, v, side, comp in cs.bridges] == [
+        (frozenset(("c", "d")), 3, 6)]
+    # without c: {a, b} and {d, e, f}; the two cut off from the larger piece
+    assert cs.cuts == {"c": (2, 2, 6), "d": (2, 2, 6)}
+
+
+def _algo_graph(tmp_path, monkeypatch):
+    """Files a.py ... f.py: a cluster {a, b, c} and a cluster {d, e, f} joined only
+    by c -> d; a short inferred shortcut x -> z beside a certain x -> y -> z, and
+    w, which only an inferred w -> z reaches."""
+    def node(i, f):
+        return {"id": i, "label": f"{i}()", "source_file": f, "source_location": "L1"}
+    nodes = [node(i, f"{i}.py") for i in "abcdef"] + [
+        node("x", "x.py"), node("y", "y.py"), node("z", "z.py"), node("w", "w.py"),
+        {"id": "doc", "label": "Usage", "source_file": "README.md", "source_location": "L1",
+         "file_type": "document"}]
+    calls = [("a", "b"), ("b", "c"), ("c", "a"), ("c", "d"), ("d", "e"), ("e", "f"),
+             ("f", "d"), ("x", "y"), ("y", "z")]
+    links = [{"source": s, "target": t, "relation": "calls", "confidence": "EXTRACTED"}
+             for s, t in calls]
+    links += [{"source": s, "target": t, "relation": "calls", "confidence": "INFERRED"}
+              for s, t in (("x", "z"), ("w", "z"))]
+    # a page naming a and f is no link between them
+    links += [{"source": "doc", "target": t, "relation": "documents"} for t in ("a", "f")]
+    _write_graph(tmp_path, {"nodes": nodes, "links": links})
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    server._GRAPH_CACHE.clear()
+
+
+def test_path_prefers_the_most_certain_route(tmp_path, monkeypatch):
+    _algo_graph(tmp_path, monkeypatch)
+    got = json.loads(server.graphlore_path("x", "z", as_json=True))
+    assert [s["to"] for s in got["path"]] == ["y()", "z()"] and got["inferred_steps"] == 0
+    assert got["shortest"] == {"hops": 1, "inferred_steps": 1}
+    assert "shorter path of 1 hops" in server.graphlore_path("x", "z")
+    # walked against its edges, the certain way still
+    back = json.loads(server.graphlore_path("z", "x", as_json=True))
+    assert back["direction"] == "backward" and back["hops"] == 2 and back["inferred_steps"] == 0
+    # an inferred step that is the only way is taken, and says so
+    only = json.loads(server.graphlore_path("w", "z", as_json=True))
+    assert only["inferred_steps"] == 1 and only["path"][0]["confidence"] == "INFERRED"
+    assert "shortest" not in only
+    # no path through a document between two definitions it names...
+    assert not any(s["relation"] == "documents"
+                   for s in json.loads(server.graphlore_path("a", "f", as_json=True))["path"])
+    # ...but from the document itself
+    doc = json.loads(server.graphlore_path("Usage", "f", as_json=True))
+    assert doc["found"] and doc["path"][0]["relation"] == "documents"
+
+
+def test_god_nodes_rank_by_pagerank_and_betweenness(tmp_path, monkeypatch):
+    _algo_graph(tmp_path, monkeypatch)
+    deg = json.loads(server.graphlore_god_nodes(as_json=True))
+    assert deg["rank"] == "degree" and "pagerank" not in deg["god_nodes"][0]
+    pr = json.loads(server.graphlore_god_nodes(rank="pagerank", top_n=20, as_json=True))
+    scores = [r["pagerank"] for r in pr["god_nodes"]]
+    assert scores == sorted(scores, reverse=True) and pr["pagerank"] == {"damping": 0.85}
+    bt = json.loads(server.graphlore_god_nodes(rank="betweenness", top_n=2, as_json=True))
+    # c and d carry every path between the two clusters
+    assert {r["node"] for r in bt["god_nodes"]} == {"c()", "d()"}
+    assert bt["betweenness"]["exact"] is True
+    est = json.loads(server.graphlore_god_nodes(rank="betweenness", samples=3, as_json=True))
+    assert est["betweenness"] == {"sources": 3, "nodes": 11, "exact": False}
+    assert "Estimated from 3 of 11" in server.graphlore_god_nodes(rank="betweenness", samples=3)
+    bad = json.loads(server.graphlore_god_nodes(rank="fame", as_json=True))
+    assert bad["code"] == "bad_rank"
+
+
+def test_impact_names_its_chokepoints(tmp_path, monkeypatch):
+    _algo_graph(tmp_path, monkeypatch)
+    # what depends on d: c (and through it a, b), f (and through it e): every
+    # path from a and b to d runs through c
+    got = json.loads(server.graphlore_impact("d", as_json=True))
+    assert {"node": "c()", "shields": 2} in got["chokepoints"]
+    assert "Chokepoints" in server.graphlore_impact("d")
+    assert "chokepoints" not in json.loads(
+        server.graphlore_impact("d", direction="both", as_json=True))
+
+
+def test_bridges_find_the_one_link_between_two_parts(tmp_path, monkeypatch):
+    _algo_graph(tmp_path, monkeypatch)
+    got = json.loads(server.graphlore_bridges(as_json=True))
+    assert got["level"] == "file" and got["bridges"][0]["between"] == ["c.py", "d.py"]
+    assert got["bridges"][0]["cuts_off"] == 3 and got["bridges"][0]["component"] == 6
+    assert {c["node"] for c in got["cut_points"]} == {"c.py", "d.py"}
+    # z, the one link of w, cuts off one file only: counted, not listed
+    assert got["counts"] == {"bridges": 2, "bridges_listed": 1, "cut_points": 3,
+                             "cut_points_listed": 2}
+    small = json.loads(server.graphlore_bridges(min_size=1, as_json=True))
+    assert small["counts"]["cut_points_listed"] == 3 and small["counts"]["bridges_listed"] == 2
+    # one directory: nothing to split
+    assert json.loads(server.graphlore_bridges(level="directory", as_json=True))["units"] == 0
+    node = json.loads(server.graphlore_bridges(level="node", as_json=True))
+    assert node["bridges"][0]["between"] == ["c()", "d()"]
+    assert json.loads(server.graphlore_bridges(level="module", as_json=True))["code"] == "bad_level"
+
+
+# --- tool definitions every client and model can take -----------------------
+
+def _listed_tools():
+    import asyncio
+
+    from mcp import Client
+
+    async def _go():
+        async with Client(server.mcp) as client:
+            return (await client.list_tools()).tools
+    return asyncio.run(_go())
+
+
+def test_every_parameter_has_a_description_and_descriptions_stay_short():
+    tools = _listed_tools()
+    for t in tools:
+        assert "Args:" not in (t.description or ""), t.name
+        # Claude Code cuts an upfront description at 4,096 characters
+        assert len(t.description or "") <= 900, (t.name, len(t.description))
+        for name, prop in (t.input_schema.get("properties") or {}).items():
+            assert prop.get("description"), (t.name, name)
+        # Codex compacts an input schema over 5,000 bytes
+        assert len(json.dumps(t.input_schema).encode()) < 5000, t.name
+        # Gemini CLI names a tool mcp_<server>_<tool>, at most 63 characters
+        assert len(f"mcp_graphlore_{t.name}") <= 63, t.name
+    total = sum(len(json.dumps({"name": t.name, "description": t.description,
+                                "inputSchema": t.input_schema})) for t in tools)
+    # what the full surface costs a client's context (~12k tokens); a new tool
+    # or a longer description has to fit in it or move the budget on purpose
+    assert total <= 52_000, total
+
+
+def test_instructions_stay_under_what_clients_keep():
+    every = server._registered_tool_names()
+    for names in (every, set(server.LEAN_TOOLS), set(server.LOCATE_TOOLS)):
+        assert len(server._instructions(names)) <= 4000
+
+
+def test_input_schemas_use_what_every_function_calling_api_takes():
+    rejected = ("anyOf", "oneOf", "allOf", "additionalProperties", "$ref", "$defs",
+                "not", "if")
+
+    def walk(x, where):
+        if isinstance(x, dict):
+            for k in rejected:
+                assert k not in x, (where, k)
+            assert not isinstance(x.get("type"), list), where
+            assert x.get("type") != "null", where
+            assert not ("default" in x and x["default"] is None), where
+            for k, v in x.items():
+                walk(v, f"{where}/{k}")
+        elif isinstance(x, list):
+            for v in x:
+                walk(v, where)
+    for t in _listed_tools():
+        walk(t.input_schema, t.name)
+
+
+def test_doc_args_splits_the_block_onto_parameters():
+    doc = """Summary line.
+
+    More text.
+
+    Args:
+        a: First one,
+            continued.
+        b: Second.
+
+    After the block.
+    """
+    text, args = server._doc_args(doc)
+    assert args == {"a": "First one, continued.", "b": "Second."}
+    assert text == "Summary line.\n\nMore text.\n\nAfter the block."
+    assert server._doc_args("No args here.") == ("No args here.", {})
+
+
+def test_mapping_arguments_take_a_json_string(tmp_path, monkeypatch):
+    assert server._json_object('{"0": "Auth"}', "names") == ({"0": "Auth"}, None)
+    assert server._json_object({"0": "Auth"}, "names") == ({"0": "Auth"}, None)
+    assert server._json_object("", "names") == (None, None)
+    value, err = server._json_object("{nope", "names")
+    assert value is None and err.startswith("ERROR: names is not valid JSON")
+    assert "must be a JSON object" in server._json_object("[1]", "names")[1]
+    # layers: the same rules as a JSON string or an object
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    _write_graph(tmp_path, {"nodes": [], "links": []})
+    server._GRAPH_CACHE.clear()
+    as_text = json.loads(server.graphlore_layers(rules='{"a": []}', as_json=True))
+    as_dict = json.loads(server.graphlore_layers(rules={"a": []}, as_json=True))
+    assert as_text == as_dict
+    bad = json.loads(server.graphlore_layers(rules="{nope", as_json=True))
+    assert "not valid JSON" in bad["error"]
+
+
+def test_set_labels_takes_its_names_as_a_json_string(tmp_path, monkeypatch):
+    (tmp_path / "graphify-out").mkdir()
+    (tmp_path / "graphify-out" / "graph.json").write_text(json.dumps(_viz_graph()),
+                                                         encoding="utf-8")
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    server._GRAPH_CACHE.clear()
+    got = json.loads(server.graphlore_set_labels('{"0": "Core"}', regenerate=False,
+                                                 as_json=True))
+    assert got["names"] == {"0": "Core"} and got["labeled"] == 1
+    assert "not valid JSON" in json.loads(server.graphlore_set_labels("{x", as_json=True))["error"]
+
+
+# --- `graphlore setup <client>` and `graphlore agents-md` --------------------
+
+def _rendered_body(client, text):
+    """The config block of `clients.render`'s text, parsed."""
+    body = text.split("\n", 1)[1].split("\n\n# or with", 1)[0].split("\n\n# ", 1)[0]
+    if client.fmt == "toml":
+        import tomllib
+        return tomllib.loads(body)
+    return json.loads(body)
+
+
+def test_setup_renders_a_valid_block_for_every_client(tmp_path):
+    import sys
+
+    from graphlore import clients
+    cfg = clients.server_config(tmp_path, "full", "uvx")
+    assert clients.server_config(tmp_path, "lean")["command"] == "graphlore"
+    for client in clients.CLIENTS.values():
+        text = clients.render(client, cfg, tmp_path)
+        if client.fmt == "toml" and sys.version_info < (3, 11):
+            continue
+        data = _rendered_body(client, text)
+        entry = data[client.key]["graphlore"]
+        assert entry["args"][-1] == "graphlore" and entry["env"]["GRAPHLORE_TOOLSET"] == "full"
+        assert entry.get("type", "stdio") == "stdio"
+        # a project file names no absolute path where the client can say "here"
+        if client.project_file and client.project_dir_value:
+            assert entry["env"]["GRAPHLORE_PROJECT_DIR"] == client.project_dir_value
+    # the lean default sets no toolset
+    lean = clients.server_config(tmp_path, "lean")
+    assert "GRAPHLORE_TOOLSET" not in lean["env"]
+    assert clients.server_config(tmp_path, "lean", "/opt/bin/graphlore")["command"] == \
+        "/opt/bin/graphlore"
+
+
+def test_setup_write_merges_keeps_other_servers_and_refuses_what_it_cannot_parse(tmp_path):
+    import pytest
+
+    from graphlore import clients
+    cursor = clients.CLIENTS["cursor"]
+    path = tmp_path / ".cursor" / "mcp.json"
+    path.parent.mkdir()
+    path.write_text(json.dumps({"mcpServers": {"other": {"command": "x"}}}), encoding="utf-8")
+    cfg = clients.server_config(tmp_path, "lean")
+    note = clients.write(cursor, path, cfg)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert set(data["mcpServers"]) == {"other", "graphlore"} and "updated" in note
+    assert (path.parent / "mcp.json.graphlore.bak").is_file()
+    assert "already set up" in clients.write(cursor, path, cfg)
+    path.write_text("{ // a comment\n}", encoding="utf-8")
+    with pytest.raises(clients.SetupError, match="not plain JSON"):
+        clients.write(cursor, path, cfg)
+    assert path.read_text(encoding="utf-8") == "{ // a comment\n}"   # untouched
+
+
+def test_setup_write_merges_codex_toml(tmp_path):
+    import sys
+
+    from graphlore import clients
+    codex = clients.CLIENTS["codex"]
+    path = tmp_path / "config.toml"
+    path.write_text('model = "o4"\n\n[mcp_servers.other]\ncommand = "x"\n\n'
+                    '[mcp_servers.graphlore]\ncommand = "old"\n'
+                    '[mcp_servers.graphlore.env]\nA = "1"\n\n[profiles.p]\nmodel = "m"\n',
+                    encoding="utf-8")
+    clients.write(codex, path, clients.server_config(tmp_path, "lean"))
+    text = path.read_text(encoding="utf-8")
+    assert text.count("[mcp_servers.graphlore]") == 1 and '"old"' not in text
+    assert "[mcp_servers.other]" in text and "[profiles.p]" in text
+    if sys.version_info >= (3, 11):
+        import tomllib
+        data = tomllib.loads(text)
+        assert data["mcp_servers"]["graphlore"]["command"] == "graphlore"
+        assert data["mcp_servers"]["graphlore"]["env"] == {"GRAPHLORE_PROJECT_DIR": str(tmp_path)}
+        assert data["profiles"]["p"]["model"] == "m" and data["model"] == "o4"
+
+
+def test_agents_md_names_only_the_toolset_s_tools_and_merges_between_markers():
+    import re
+
+    from graphlore import agents_md
+    every = server._registered_tool_names()
+    for keep in (set(server.LEAN_TOOLS), set(server.LOCATE_TOOLS), every):
+        text = agents_md.render(keep)
+        named = set(re.findall(r"graphlore_[a-z_]+", text))
+        assert named and named <= keep, named - keep
+    lean = agents_md.render(server.LEAN_TOOLS)
+    assert "graphlore_cycles" not in lean and "graphlore_impact" in lean
+    assert len(agents_md.render(every)) < 6000   # well under Codex's 32 KiB for AGENTS.md
+    merged = agents_md.merge("# Project\n\nOwn text.\n", lean)
+    assert merged.startswith("# Project\n\nOwn text.\n\n" + agents_md.BEGIN)
+    again = agents_md.merge(merged.replace("graphlore_impact", "OLD"), lean)
+    assert again == merged and agents_md.merge("", lean) == lean
+
+
+def test_cli_subcommands(tmp_path, capsys):
+    from graphlore import cli
+    assert cli.main(["clients"]) == 0 and "codex" in capsys.readouterr().out
+    assert cli.main(["setup", "nope"]) == 2
+    assert cli.main(["setup", "gemini", "--project", str(tmp_path), "--write",
+                     "--with-agents-md"]) == 0
+    out = capsys.readouterr().out
+    assert (tmp_path / ".gemini" / "settings.json").is_file() and "GEMINI.md" in out
+    assert "graphlore:begin" in (tmp_path / "GEMINI.md").read_text(encoding="utf-8")
+    assert cli.main(["agents-md", "--toolset", "full"]) == 0
+    assert "graphlore_bridges" in capsys.readouterr().out
+    # a client with no file graphlore writes prints the block and says so
+    assert cli.main(["setup", "claude-desktop", "--project", str(tmp_path)]) == 0
+
+
+def test_a_written_config_starts_the_server(tmp_path):
+    """graphlore setup --write, then the server started from what it wrote."""
+    import asyncio
+    import shutil
+
+    import pytest
+    from mcp import Client
+    from mcp.client.stdio import StdioServerParameters
+
+    from graphlore import clients
+    exe = shutil.which("graphlore")
+    if exe is None:
+        pytest.skip("the graphlore command is not installed")
+    path = tmp_path / ".cursor" / "mcp.json"
+    clients.write(clients.CLIENTS["cursor"], path,
+                  clients.server_config(tmp_path, "lean", exe), user=True)
+    entry = json.loads(path.read_text(encoding="utf-8"))["mcpServers"]["graphlore"]
+
+    async def _go():
+        params = StdioServerParameters(command=entry["command"], args=entry["args"],
+                                       env={**__import__("os").environ, **entry["env"]})
+        async with Client(params) as client:
+            return [t.name for t in (await client.list_tools()).tools]
+    names = asyncio.run(_go())
+    assert set(names) == set(server.LEAN_TOOLS)
+
+
+def test_default_replies_stay_under_what_clients_keep(tmp_path, monkeypatch):
+    """Every read-only tool with its default arguments, in both forms, on the
+    polyglot fixture: under 35,000 characters (~10k tokens), which Claude Code,
+    Codex and Gemini CLI all keep (docs/clients.md)."""
+    import inspect
+    import shutil
+    from pathlib import Path
+
+    fixture = tmp_path / "polyglot"
+    shutil.copytree(Path(__file__).parent / "fixtures" / "polyglot", fixture)
+    (fixture / "graphify-out").mkdir()
+    shutil.move(str(fixture / "graph.json"), fixture / "graphify-out" / "graph.json")
+    monkeypatch.setattr(server.config, "PROJECT_DIR", fixture)
+    server._GRAPH_CACHE.clear()
+    graph = server._load_graph()
+    nodes, _ = server._nodes_edges(graph)
+    some = next(server._node_id(n) for n in nodes if server._node_label(n).endswith("()"))
+    needs = {"node": some, "node_a": some, "node_b": some, "nodes": [some],
+             "pattern": "a", "query": "parse", "question": "parse"}
+    skip = {"graphlore_build", "graphlore_add", "graphlore_prune", "graphlore_set_labels",
+            "graphlore_label_communities", "graphlore_project", "graphlore_locate",
+            "graphlore_duplication_scan", "graphlore_query", "graphlore_diff",
+            "graphlore_sampling_status"}
+    for name in sorted(server._registered_tool_names() - skip):
+        fn = getattr(server, name)
+        params = inspect.signature(fn).parameters
+        kw = {k: v for k, v in needs.items() if k in params}
+        for as_json in (False, True):
+            out = fn(**kw, as_json=as_json) if "as_json" in params else fn(**kw)
+            assert len(out) <= 35_000, (name, as_json, len(out))
+
+
+# --- the cross-model evaluation (benchmarks/agents) --------------------------
+
+def _agents_module(name):
+    import importlib.util
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parent.parent / "benchmarks" / "agents" / f"{name}.py"
+    import sys
+
+    spec = importlib.util.spec_from_file_location(f"agents_{name}", path)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = mod   # dataclasses look their module up there
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_agent_evaluation_runs_and_scores_with_the_fake_client(tmp_path):
+    """run.py with the fake client (a fixed transcript of real tool calls over
+    stdio), then score.py: what a real run with codex / claude / gemini does."""
+    import shutil
+    from pathlib import Path
+
+    run, score = _agents_module("run"), _agents_module("score")
+    repo = tmp_path / "proj"
+    shutil.copytree(Path(__file__).parent / "fixtures" / "polyglot", repo)
+    (repo / "graphify-out").mkdir()
+    shutil.move(str(repo / "graph.json"), repo / "graphify-out" / "graph.json")
+    tasks = {
+        "repos": {"proj": {"path": str(repo)}},
+        "tasks": [
+            {"id": "a", "repo": "proj", "prompt": "Which class does HTTPTransport inherit from?",
+             "expect": {"all": ["BaseTransport"]}, "tools": ["graphlore_node_details"]},
+            {"id": "b", "repo": "proj", "prompt": "Which test file tests URL.copy_with?",
+             "expect": {"all": ["tests/models/test_url.py"]}, "tools": ["graphlore_tests_for"]},
+        ],
+    }
+    tasks_file = tmp_path / "tasks.json"
+    tasks_file.write_text(json.dumps(tasks), encoding="utf-8")
+    out = tmp_path / "out"
+    assert run.main(["--clients", "fake", "--variants", "plain,agents-md", "--tasks",
+                     str(tasks_file), "--out", str(out), "--root", str(tmp_path)]) == 0
+    rows = [json.loads(x) for x in (out / "runs.jsonl").read_text().splitlines()]
+    assert len(rows) == 4 and all(r["exit"] == 0 for r in rows)
+    first = next(r for r in rows if r["task"] == "a")
+    assert first["tools"] == ["graphlore_search", "graphlore_node_details"]
+    assert first["input_tokens"] > 0
+    # the agents-md variant leaves the repository as it found it
+    assert not (repo / "AGENTS.md").exists()
+    table = score.score(rows, {t["id"]: t for t in tasks["tasks"]})
+    assert [(t["variant"], t["solved"], t["no_suited_tool"]) for t in table] == [
+        ("agents-md", 1, 1), ("plain", 1, 1)]
+    assert table[0]["unsolved"] == ["b"]
+    assert "| fake | plain | 1/2 |" in score.markdown(table)
+
+
+def test_agent_evaluation_reads_codex_and_gemini_output():
+    run = _agents_module("run")
+    codex = "\n".join(json.dumps(x) for x in [
+        {"type": "thread.started"},
+        {"type": "item.completed", "item": {"type": "mcp_tool_call", "server": "graphlore",
+                                            "tool": "graphlore_impact", "arguments": {}}},
+        {"type": "item.completed",
+         "item": {"type": "agent_message", "text": "It is _send_handling_auth."}},
+        {"type": "turn.completed", "usage": {"input_tokens": 900, "output_tokens": 40}},
+    ])
+    got = run._parse_codex(codex)
+    assert (got.answer, got.tools, got.input_tokens, got.output_tokens) == (
+        "It is _send_handling_auth.", ["graphlore_impact"], 900, 40)
+    gemini = "\n".join(json.dumps(x) for x in [
+        {"type": "tool_use", "tool_name": "mcp_graphlore_graphlore_locate"},
+        {"type": "result", "response": "GZipDecoder",
+         "stats": {"input_tokens": 1200, "output_tokens": 30}},
+    ])
+    got = run._parse_generic(gemini)
+    assert got.tools == ["graphlore_locate"] and got.answer == "GZipDecoder"
+    assert (got.input_tokens, got.output_tokens) == (1200, 30)
+
+
+# --- OAuth for the HTTP transport (oauth.py) ---------------------------------
+
+def _oauth_keys():
+    """A signing key and what the verifier reads keys through."""
+    import jwt
+    from cryptography.hazmat.primitives.asymmetric import rsa
+
+    private = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+
+    class Keys:
+        def get_signing_key_from_jwt(self, token):
+            return jwt.PyJWK.from_dict(json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(
+                private.public_key())), algorithm="RS256")
+    return private, Keys()
+
+
+def _token(private, **claims):
+    import time
+
+    import jwt
+    body = {"iss": "https://idp.example.com", "aud": "http://127.0.0.1:8000/mcp",
+            "sub": "u1", "client_id": "c1", "exp": int(time.time()) + 600,
+            "scope": "graphlore.read"}
+    body.update(claims)
+    return jwt.encode({k: v for k, v in body.items() if v is not None}, private,
+                      algorithm="RS256")
+
+
+def test_oauth_settings_come_from_the_environment(monkeypatch):
+    from graphlore import oauth
+    for k in ("AUTH_ISSUER", "AUTH_RESOURCE_URL", "AUTH_SCOPES"):
+        monkeypatch.delenv(f"GRAPHLORE_{k}", raising=False)
+    assert oauth.settings() is None
+    monkeypatch.setenv("GRAPHLORE_AUTH_ISSUER", "https://idp.example.com/")
+    import pytest
+    with pytest.raises(oauth.AuthConfigError, match="both"):
+        oauth.settings()
+    monkeypatch.setenv("GRAPHLORE_AUTH_RESOURCE_URL", "https://graphlore.example.com/mcp")
+    monkeypatch.setenv("GRAPHLORE_AUTH_SCOPES", "graphlore.read, graphlore.write")
+    assert oauth.settings() == {"issuer": "https://idp.example.com",
+                                "resource": "https://graphlore.example.com/mcp",
+                                "scopes": ["graphlore.read", "graphlore.write"]}
+    monkeypatch.setenv("GRAPHLORE_AUTH_ISSUER", "http://idp.example.com")
+    with pytest.raises(oauth.AuthConfigError, match="https"):
+        oauth.settings()
+    # RFC 8414 puts the well-known path before the issuer's own path
+    assert oauth.discovery_urls("https://idp.example.com/tenant") == [
+        "https://idp.example.com/.well-known/oauth-authorization-server/tenant",
+        "https://idp.example.com/tenant/.well-known/openid-configuration"]
+
+
+def test_oauth_verifier_checks_signature_issuer_audience_and_expiry():
+    import time
+
+    from cryptography.hazmat.primitives.asymmetric import rsa
+
+    from graphlore import oauth
+    private, keys = _oauth_keys()
+    v = oauth.JwtVerifier("https://idp.example.com", "http://127.0.0.1:8000/mcp", keys)
+    good = v.verify(_token(private))
+    assert good.client_id == "c1" and good.scopes == ["graphlore.read"] and good.subject == "u1"
+    assert v.verify(_token(private, aud="https://other.example.com")) is None
+    assert v.verify(_token(private, iss="https://evil.example.com")) is None
+    assert v.verify(_token(private, exp=int(time.time()) - 10)) is None
+    assert v.verify(_token(private, exp=None)) is None          # exp is required
+    other = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    assert v.verify(_token(other)) is None                     # not the provider's key
+    assert v.verify("not-a-jwt") is None
+    assert v.verify(_token(private, scope=None, scp=["a", "b"])).scopes == ["a", "b"]
+
+
+def test_oauth_guards_the_http_app_end_to_end(monkeypatch):
+    """The streamable-HTTP app with OAuth on: the RFC 9728 metadata route, 401
+    with resource_metadata without a token, 403 for a missing scope."""
+    from starlette.testclient import TestClient
+
+    from graphlore import oauth
+    private, keys = _oauth_keys()
+    saved = (server.mcp.settings.auth, server.mcp._token_verifier)
+    try:
+        oauth.apply(server.mcp, {"issuer": "https://idp.example.com",
+                                 "resource": "http://127.0.0.1:8000/mcp",
+                                 "scopes": ["graphlore.read"]}, keys)
+        app = server.mcp.streamable_http_app(host="127.0.0.1")
+        with TestClient(app, base_url="http://127.0.0.1:8000") as client:
+            meta = client.get("/.well-known/oauth-protected-resource/mcp").json()
+            assert meta["resource"] == "http://127.0.0.1:8000/mcp"
+            assert meta["authorization_servers"] == ["https://idp.example.com/"] or \
+                meta["authorization_servers"] == ["https://idp.example.com"]
+            body = {"jsonrpc": "2.0", "id": 1, "method": "ping"}
+            headers = {"accept": "application/json, text/event-stream"}
+            none = client.post("/mcp", json=body, headers=headers)
+            assert none.status_code == 401
+            assert "resource_metadata=" in none.headers["www-authenticate"]
+            bad = client.post("/mcp", json=body, headers={
+                **headers, "authorization": "Bearer " + _token(private, aud="https://x.example")})
+            assert bad.status_code == 401
+            narrow = client.post("/mcp", json=body, headers={
+                **headers, "authorization": "Bearer " + _token(private, scope="other")})
+            assert narrow.status_code == 403
+            ok = client.post("/mcp", json=body, headers={
+                **headers, "authorization": "Bearer " + _token(private)})
+            assert ok.status_code not in (401, 403)
+    finally:
+        server.mcp.settings.auth, server.mcp._token_verifier = saved
+
+
+def test_oauth_is_refused_offline(monkeypatch):
+    import pytest
+
+    from graphlore import oauth
+    monkeypatch.setenv("GRAPHLORE_OFFLINE", "1")
+    with pytest.raises(oauth.AuthConfigError, match="OFFLINE"):
+        oauth.apply(server.mcp, {"issuer": "https://idp.example.com",
+                                 "resource": "https://g.example.com/mcp", "scopes": []})

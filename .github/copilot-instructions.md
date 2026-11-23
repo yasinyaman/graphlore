@@ -2,7 +2,7 @@
 
 This is a condensed copy of `AGENTS.md` at the repository root, which is the full and authoritative guidance. Read it when you can; if the two disagree, `AGENTS.md` wins.
 
-graphlore is a Python MCP server (MCP Python SDK v2: `mcp.server.mcpserver.MCPServer`, not v1 `FastMCP`) that makes a Graphify-built `graphify-out/graph.json` navigable and joins it to real source spans. By default `engine/`, graphlore's native extractor in Rust (a separate `graphlore-engine` wheel, the `engine` extra), builds the graph (`GRAPHLORE_ENGINE=auto`); the external `graphify` CLI is the deprecated fallback when the engine is not installed.
+graphlore is a Python MCP server (MCP Python SDK v2: `mcp.server.mcpserver.MCPServer`, not v1 `FastMCP`) that makes a code knowledge graph (`graphify-out/graph.json`, built by its own native engine or, deprecated, by the graphify CLI) navigable and joins it to real source spans. By default `engine/`, graphlore's native extractor in Rust (a separate `graphlore-engine` wheel, the `engine` extra), builds the graph (`GRAPHLORE_ENGINE=auto`); the external `graphify` CLI is the deprecated fallback when the engine is not installed.
 
 ## Checks
 
@@ -11,7 +11,7 @@ graphlore is a Python MCP server (MCP Python SDK v2: `mcp.server.mcpserver.MCPSe
 
 ## Layout
 
-`src/graphlore/` is layered `config.py` → `engine.py` → `graph.py` → `spans.py` → `scope.py` → `apis.py` / `routes.py` → `imports.py` → `resolve.py` → `review.py` → `server.py`. `server.py` holds the whole MCP surface (33 tools, resources, prompts, `main()`). Tests are in `tests/test_tools.py` (plus `tests/test_engine.py`, which needs the engine installed) and call tool functions directly.
+`src/graphlore/` is layered `config.py` → `engine.py` → `graph.py` → `algorithms.py` → `spans.py` → `scope.py` → `apis.py` / `routes.py` → `imports.py` → `resolve.py` → `review.py` → `server.py`. `server.py` holds the whole MCP surface (34 tools, resources, prompts, `main()`). Apart from the layers: `cli.py` is the `graphlore` command (no arguments runs the server, never require one; `setup`, `clients`, `agents-md`), `clients.py` the client config table behind `graphlore setup` (formats as `docs/clients.md` cites them), `agents_md.py` the usage guide for AGENTS.md and the like. Tests are in `tests/test_tools.py` (plus `tests/test_engine.py`, which needs the engine installed) and call tool functions directly.
 
 ## Rules
 
@@ -42,4 +42,4 @@ graphlore is a Python MCP server (MCP Python SDK v2: `mcp.server.mcpserver.MCPSe
 
 ## When a tool is added or changed
 
-Also update: the tool list in the `server.py` docstring, `LEAN_TOOLS` / `LOCATE_TOOLS` if relevant (`lean` is the default surface), `_instructions` / the prompt steps if the tool belongs in the recommended flow, `test_tool_and_prompt_registration` (asserts exactly 33 tools), the tool tables in `docs/tools.md` (and the README's `lean` table and "33" counts), `.claude/skills/graphlore-explore/SKILL.md`, and `CHANGELOG.md` under `[Unreleased]`.
+A tool's docstring is a description of at most 900 characters plus an `Args:` entry for every parameter (moved onto the input schema by `_describe_parameters`); parameters stay plain types (a mapping is a JSON string via `_JSON_OBJECT_ARG`). Also update: the tool list in the `server.py` docstring, `LEAN_TOOLS` / `LOCATE_TOOLS` if relevant (`lean` is the default surface), `_instructions` / the prompt steps if the tool belongs in the recommended flow, `test_tool_and_prompt_registration` (asserts exactly 34 tools), the tool tables in `docs/tools.md` (and the README's `lean` table and "34" counts), `.claude/skills/graphlore-explore/SKILL.md`, and `CHANGELOG.md` under `[Unreleased]`.

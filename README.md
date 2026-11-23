@@ -9,8 +9,8 @@
 **graphlore is a Model Context Protocol (MCP) server that lets AI coding
 assistants navigate a codebase through its knowledge graph, instead of grepping
 and reading file after file.** It builds the graph with its own extractor
-(Rust and tree-sitter, 14 languages) or reads one built by
-[Graphify](https://graphify.net), joins every node to its real `start..end`
+(Rust and tree-sitter, 14 languages), and still reads one built by
+[Graphify](https://graphify.net); it joins every node to its real `start..end`
 source span (Python via `ast`, other languages via tree-sitter), and answers
 the questions text search cannot: who calls this, what breaks if it changes,
 where a behavior lives.
@@ -51,6 +51,18 @@ the graph (prebuilt wheels, no Rust toolchain), then register the server.
 pip install "graphlore[engine] @ git+https://github.com/yasinyaman/graphlore"
 ```
 
+Then let graphlore write your client's config, and the usage guide its agent
+reads (`AGENTS.md`, `GEMINI.md`, Copilot's instructions):
+
+```bash
+graphlore setup codex --write --with-agents-md
+```
+
+`graphlore clients` lists the clients it knows: Claude Code, Claude Desktop,
+OpenAI Codex CLI, Google Gemini CLI, Cursor, VS Code (GitHub Copilot), Kimi
+Code CLI, Zed, Windsurf and Cline. Without `--write` it prints the block and
+where it goes. For any other MCP client the block is:
+
 ```json
 {
   "mcpServers": {
@@ -62,9 +74,8 @@ pip install "graphlore[engine] @ git+https://github.com/yasinyaman/graphlore"
 }
 ```
 
-- Claude Code: save this as `.mcp.json` in the project root (`"."` works as the path).
-- Claude Desktop: add it to `claude_desktop_config.json`
-  (macOS `~/Library/Application Support/Claude/`, Windows `%APPDATA%\Claude\`).
+Each client's file, key and limits (tool caps, output truncation, prompts):
+[docs/clients.md](https://github.com/yasinyaman/graphlore/blob/master/docs/clients.md).
 
 Optional extras, installed as `graphlore[extra]`: `engine` (graphlore's native
 extractor, which builds the graph), `embed` (static code
@@ -100,6 +111,9 @@ reads the file you drop in your browser and uploads nothing
 ([demo](https://yasinyaman.github.io/graphlore/viewer/demo.html)). A node's page copies
 the `graphlore_explain` / `graphlore_fetch` call for it, so what you find there goes
 straight to the assistant, and the address bar keeps the view, so a link opens it again.
+The page also shows what graphlore's tools find: import and call cycles, shared
+state with no call path, surprising links and unreferenced code (**Findings**, `G`),
+and a node's blast radius as `graphlore_impact` walks it (**Impact**, `I`).
 
 ## Tools
 
@@ -114,7 +128,7 @@ helps a model pick the right tool.
 | `graphlore_search` | Which nodes match this name or id |
 | `graphlore_neighbors` | The direct neighbors of a node |
 | `graphlore_subgraph` | The neighborhood around a node, under a token budget |
-| `graphlore_impact` | Blast radius: what depends on a node, or what it depends on |
+| `graphlore_impact` | Blast radius: what depends on a node, or what it depends on, and the chokepoints it funnels through |
 | `graphlore_node_details` | A node's type, `file:line`, docstring and community |
 | `graphlore_fetch` | A node's source code: the exact span, under a token budget |
 | `graphlore_communities` | The subsystems (Leiden communities) of the codebase |
@@ -122,14 +136,15 @@ helps a model pick the right tool.
 | `graphlore_build` | Build or update the graph with graphlore's native engine (graphify when the engine is not installed) |
 | `graphlore_project` | Show or switch the project directory the server reads |
 
-`GRAPHLORE_TOOLSET=full` exposes all 33: structure review (import and call
-cycles, layer rules, dead-code candidates, same-named symbols, duplication),
+`GRAPHLORE_TOOLSET=full` exposes all 34: structure review (import and call
+cycles, layer rules, bridges and cut points, dead-code candidates, same-named
+symbols, duplication, PageRank and betweenness),
 framework routes and package API usage, tests for a symbol, signatures, git
 diffs, community naming, natural-language queries and paths between nodes. The Claude Code
 plugin runs on `full`.
 
 → [Tool reference](https://github.com/yasinyaman/graphlore/blob/master/docs/tools.md)
-(all 33 tools, resources, prompts) ·
+(all 34 tools, resources, prompts) ·
 [choosing a toolset](https://github.com/yasinyaman/graphlore/blob/master/docs/configuration.md#which-toolset)
 
 ## Benchmark
@@ -171,8 +186,8 @@ duplicated code).
 
 ### How is it different from Graphify's own MCP server?
 
-graphlore builds its own graph (its native engine, in Rust) and reads one
-Graphify built too. Graphify's embedded server has graph navigation,
+graphlore builds its own graph (its native engine, in Rust), so it does not
+need graphify installed, and it reads a graph Graphify built too. Graphify's embedded server has graph navigation,
 token-budgeted subgraphs, an HTTP transport, multi-project serving and PR
 triage tools graphlore lacks. graphlore adds the span engine and
 what it makes possible: semantic `locate` joined to the enclosing symbol,
@@ -233,7 +248,7 @@ says which search answered.
 
 ### Why do I see only 12 tools?
 
-`lean` is the default surface. Set `GRAPHLORE_TOOLSET=full` for all 33.
+`lean` is the default surface. Set `GRAPHLORE_TOOLSET=full` for all 34.
 
 ### How does the graph stay up to date?
 
@@ -262,7 +277,8 @@ own. The old `GRAPHIFY_*` environment variables still work.
 
 ## Documentation
 
-- [Tool reference](https://github.com/yasinyaman/graphlore/blob/master/docs/tools.md): all 33 tools, resources, prompts, what a result carries
+- [Tool reference](https://github.com/yasinyaman/graphlore/blob/master/docs/tools.md): all 34 tools, resources, prompts, what a result carries
+- [MCP clients](https://github.com/yasinyaman/graphlore/blob/master/docs/clients.md): setting up Codex, Gemini CLI, Cursor, Copilot, Kimi, Zed, Windsurf, Cline and Claude, and what each one shows the model
 - [How graphlore works](https://github.com/yasinyaman/graphlore/blob/master/docs/concepts.md): resolved edges, import checks, analysis scope, freshness, the search bridge, naming communities
 - [Configuration](https://github.com/yasinyaman/graphlore/blob/master/docs/configuration.md): toolsets, HTTP transport and security, offline mode, environment variables
 - [Benchmark](https://github.com/yasinyaman/graphlore/blob/master/docs/benchmark.md): method, cross-language results, caveats

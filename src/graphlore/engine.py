@@ -31,7 +31,7 @@ from . import config
 ENGINES = ("graphify", "native", "auto")
 DEFAULT_ENGINE = "auto"
 # graph.json schema versions of the native engine this graphlore reads.
-SUPPORTED_SCHEMAS = frozenset({1, 2, 3, 4, 5, 6})
+SUPPORTED_SCHEMAS = frozenset({1, 2, 3, 4, 5, 6, 7})
 INSTALL_HINT = (
     'Install it with: pip install "graphlore[engine]" (or pip install graphlore-engine; '
     "from a checkout of graphlore: pip install maturin && maturin develop -m "
@@ -46,8 +46,9 @@ GRAPHIFY_DEPRECATED = (
 # empty answer is not mistaken for a codebase without structure.
 NATIVE_GAPS = (
     "Built by graphlore's native engine: this graph has files, definitions with "
-    "their spans, containment, document headings, the imports, calls, bases and "
-    "type references it could resolve from the source, and communities by its own "
+    "their spans, containment, document headings and the code they name, the "
+    "imports, calls, bases and type references it could resolve from the source, "
+    "and communities by its own "
     "weighting (edge kind, confidence and directory), not graphify's. "
     "update=True parses only the files that changed."
 )
@@ -292,6 +293,12 @@ def render_report(report: dict[str, Any], verbose: bool = False, update: bool = 
         if rows:
             lines.append("  resolved: " + " · ".join(rows if verbose else rows[:8])
                          + ("" if verbose or len(rows) <= 8 else f" · +{len(rows) - 8} more"))
+    if report.get("documents"):
+        line = f"  documents: {_plural(report.get('headings', 0), 'heading')}"
+        if "doc_links" in report:
+            line += (f", {_plural(report['doc_links'], 'link')} to the definition a name "
+                     "of code in them means")
+        lines.append(line)
     inc = report.get("incremental")
     if isinstance(inc, dict) and inc.get("cache"):
         line = (f"  update: {_plural(inc.get('parsed', 0), 'file')} parsed, "

@@ -1,0 +1,24 @@
+{
+  "about": "Questions about httpx at a pinned commit, each with an answer checked in its source. `expect.all`: every string must appear in the agent's final answer (case-insensitive). `tools`: the graphlore tools that answer the question best (a run that uses none of them is counted as a wrong choice, not a wrong answer).",
+  "repos": {
+    "httpx": {"url": "https://github.com/encode/httpx", "commit": "7cff5f79bc78649bbcd3fd9aa7a74c86e0f63016"}
+  },
+  "tasks": [
+    {"id": "send-single", "repo": "httpx", "prompt": "In this repository, which method of Client sends one request through its transport, with no redirect or authentication handling? Answer with the method name.", "expect": {"all": ["_send_single_request"]}, "tools": ["graphlore_locate", "graphlore_search"]},
+    {"id": "caller-of-send-single", "repo": "httpx", "prompt": "Which method of Client calls Client._send_single_request? Answer with the method name.", "expect": {"all": ["_send_handling_redirects"]}, "tools": ["graphlore_impact", "graphlore_neighbors"]},
+    {"id": "caller-of-redirects", "repo": "httpx", "prompt": "Which method of Client calls Client._send_handling_redirects? Answer with the method name.", "expect": {"all": ["_send_handling_auth"]}, "tools": ["graphlore_impact", "graphlore_neighbors"]},
+    {"id": "digest-file", "repo": "httpx", "prompt": "In which file is DigestAuth defined? Answer with the path.", "expect": {"all": ["httpx/_auth.py"]}, "tools": ["graphlore_search", "graphlore_node_details", "graphlore_locate"]},
+    {"id": "raises-too-many-redirects", "repo": "httpx", "prompt": "Which method of Client raises TooManyRedirects? Answer with the method name.", "expect": {"all": ["_send_handling_redirects"]}, "tools": ["graphlore_locate", "graphlore_impact"]},
+    {"id": "transport-base", "repo": "httpx", "prompt": "Which class does HTTPTransport inherit from?", "expect": {"all": ["BaseTransport"]}, "tools": ["graphlore_node_details", "graphlore_neighbors"]},
+    {"id": "default-timeout", "repo": "httpx", "prompt": "What is the name of the constant that holds the default timeout configuration, and how many seconds is it?", "expect": {"all": ["DEFAULT_TIMEOUT_CONFIG", "5"]}, "tools": ["graphlore_locate", "graphlore_search"]},
+    {"id": "gzip-decoder", "repo": "httpx", "prompt": "Which class decodes gzip-encoded response bodies?", "expect": {"all": ["GZipDecoder"]}, "tools": ["graphlore_locate", "graphlore_search"]},
+    {"id": "netrc-auth", "repo": "httpx", "prompt": "Which class implements authentication from a .netrc file?", "expect": {"all": ["NetRCAuth"]}, "tools": ["graphlore_locate", "graphlore_search"]},
+    {"id": "status-error", "repo": "httpx", "prompt": "What exception does Response.raise_for_status raise?", "expect": {"all": ["HTTPStatusError"]}, "tools": ["graphlore_fetch", "graphlore_neighbors"]},
+    {"id": "multipart-stream", "repo": "httpx", "prompt": "Which class streams a multipart/form-data request body?", "expect": {"all": ["MultipartStream"]}, "tools": ["graphlore_locate", "graphlore_search"]},
+    {"id": "copy-with-tests", "repo": "httpx", "prompt": "Which test file tests URL.copy_with? Answer with the path.", "expect": {"all": ["tests/models/test_url.py"]}, "tools": ["graphlore_tests_for", "graphlore_impact"]},
+    {"id": "copy-with-test-name", "repo": "httpx", "prompt": "If you change URL.copy_with, which test function exercises it directly? Answer with the function name.", "expect": {"all": ["test_copy_with"]}, "tools": ["graphlore_tests_for", "graphlore_impact"]},
+    {"id": "env-proxies", "repo": "httpx", "prompt": "Which function reads proxy settings from environment variables?", "expect": {"all": ["get_environment_proxies"]}, "tools": ["graphlore_locate", "graphlore_search"]},
+    {"id": "url-pattern", "repo": "httpx", "prompt": "Which class matches a URL against a mount pattern such as 'all://' or 'https://example.com'?", "expect": {"all": ["URLPattern"]}, "tools": ["graphlore_locate", "graphlore_search"]},
+    {"id": "cli-entry", "repo": "httpx", "prompt": "Where is the command-line entry point defined? Answer with the file and the function.", "expect": {"all": ["httpx/_main.py", "main"]}, "tools": ["graphlore_search", "graphlore_locate"]}
+  ]
+}

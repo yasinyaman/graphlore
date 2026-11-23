@@ -69,8 +69,11 @@ watch = ["watchdog>=4.0"]
 all = [
     "graphlore-engine>=0.5.77,<0.6", "graphifyy", "semble>=0.3", "model2vec>=0.10", "numpy>=1.24",
     "tree-sitter>=0.23,<1.0", "tree-sitter-language-pack>=1.11,<2.0",
-    "tiktoken>=0.7", "watchdog>=4.0",
+    "tiktoken>=0.7", "watchdog>=4.0", "pyjwt[crypto]>=2.8",
 ]
+# OAuth for the HTTP transport (GRAPHLORE_AUTH_ISSUER): verifying the provider's
+# signed tokens (oauth.py). Not needed for stdio or the static GRAPHLORE_API_KEY.
+remote = ["pyjwt[crypto]>=2.8"]
 # mypy 1.11 crashes reading mcp's own sources; 1.12 is the oldest that checks the package.
 dev = ["pytest>=8.0", "ruff>=0.6", "pytest-cov>=5.0", "mypy>=1.12"]
 
@@ -86,7 +89,7 @@ Changelog = "https://github.com/yasinyaman/graphlore/blob/master/CHANGELOG.md"
 # The rename from graphify-mcp freed us to claim the bare name: `graphifyy`
 # ships a `graphify-mcp` script (its embedded server), which is why the old
 # entry point had to be the clunky `graphify-mcp-server`. No collision now.
-graphlore = "graphlore.server:main"
+graphlore = "graphlore.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/graphlore"]

@@ -125,6 +125,62 @@ fn tracked_but_ignored(
     more
 }
 
+/// The directories of the Sphinx projects whose `conf.py` makes `.txt` a
+/// source suffix (`source_suffix = ".txt"`, or `.txt` in its list or dict):
+/// Django writes its whole documentation so. `""` is the root.
+fn sphinx_txt_roots(found: &[(String, PathBuf, u64)]) -> Vec<String> {
+    let mut roots = Vec::new();
+    for (rel, path, _) in found {
+        let (dir, base) = rel.rsplit_once('/').unwrap_or(("", rel.as_str()));
+        if base != "conf.py" {
+            continue;
+        }
+        let Ok(text) = std::fs::read_to_string(path) else { continue };
+        if source_suffix_has_txt(&text) {
+            roots.push(dir.to_string());
+        }
+    }
+    roots
+}
+
+/// Whether a `conf.py`'s `source_suffix` assignment names `.txt`. The value is
+/// read from the `=` to the end of its line, or past it to the bracket that
+/// closes a list, tuple or dict.
+fn source_suffix_has_txt(conf: &str) -> bool {
+    let mut lines = conf.lines();
+    while let Some(line) = lines.next() {
+        let Some(rest) = line.strip_prefix("source_suffix") else { continue };
+        let Some(value) = rest.trim_start().strip_prefix('=') else { continue };
+        let mut value = value.to_string();
+        let depth = |v: &str| {
+            v.chars().filter(|c| "[({".contains(*c)).count() as i64
+                - v.chars().filter(|c| "])}".contains(*c)).count() as i64
+        };
+        while depth(&value) > 0 {
+            let Some(more) = lines.next() else { break };
+            value.push('\n');
+            value.push_str(more);
+        }
+        if value.contains("'.txt'") || value.contains("\".txt\"") {
+            return true;
+        }
+    }
+    false
+}
+
+/// A `.txt` file under one of `roots` is a reStructuredText document, unless
+/// its name says it is something else (`requirements.txt`, `robots.txt`).
+fn sphinx_txt_doc(rel: &str, roots: &[String]) -> Option<DocKind> {
+    if !rel.to_ascii_lowercase().ends_with(".txt") {
+        return None;
+    }
+    let base = rel.rsplit('/').next().unwrap_or(rel).to_ascii_lowercase();
+    if base.starts_with("requirements") || base == "robots.txt" || base == "cmakelists.txt" {
+        return None;
+    }
+    roots.iter().any(|r| r.is_empty() || rel.starts_with(&format!("{r}/"))).then_some(DocKind::Rst)
+}
+
 pub fn discover(root: &Path, out_dir_name: &str, documents: bool, max_bytes: u64) -> WalkResult {
     let mut result = WalkResult::default();
     let out_dir = out_dir_name.to_string();
@@ -181,6 +237,7 @@ pub fn discover(root: &Path, out_dir_name: &str, documents: bool, max_bytes: u64
             found.push((rel, path, meta.len()));
         }
     }
+    let sphinx_txt = sphinx_txt_roots(&found);
     for (rel, path, size) in found {
         let path = path.as_path();
         let base = rel.rsplit('/').next().unwrap_or(&rel);
@@ -189,7 +246,7 @@ pub fn discover(root: &Path, out_dir_name: &str, documents: bool, max_bytes: u64
         }
         let kind = if let Some(lang) = lang::detect(&rel, None) {
             FileKind::Code(lang)
-        } else if let Some(doc) = docs::detect(&rel) {
+        } else if let Some(doc) = docs::detect(&rel).or_else(|| sphinx_txt_doc(&rel, &sphinx_txt)) {
             if !documents {
                 continue;
             }
@@ -214,4 +271,21 @@ pub fn discover(root: &Path, out_dir_name: &str, documents: bool, max_bytes: u64
     result.manifests.sort();
     result.too_large.sort();
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_sphinx_source_suffix_naming_txt_is_read() {
+        assert!(source_suffix_has_txt("source_suffix = '.txt'\n"));
+        assert!(source_suffix_has_txt("source_suffix = {\n    '.rst': 'restructuredtext',\n    \".txt\": 'restructuredtext',\n}\n"));
+        assert!(!source_suffix_has_txt("source_suffix = '.rst'\n# '.txt'\n"));
+        assert!(!source_suffix_has_txt("html_extra = ['.txt']\n"));
+        let roots = vec!["docs".to_string()];
+        assert_eq!(sphinx_txt_doc("docs/ref/models.txt", &roots), Some(DocKind::Rst));
+        assert_eq!(sphinx_txt_doc("docs/requirements.txt", &roots), None);
+        assert_eq!(sphinx_txt_doc("tests/data.txt", &roots), None);
+    }
 }

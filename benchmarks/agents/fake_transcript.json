@@ -1,0 +1,12 @@
+[
+  {"match": "sends one request through its transport",
+   "calls": [["graphlore_search", {"pattern": "_send_single_request"}]],
+   "answer": "Client._send_single_request"},
+  {"match": "Which class does HTTPTransport inherit from",
+   "calls": [["graphlore_search", {"pattern": "HTTPTransport"}],
+             ["graphlore_node_details", {"node": "HTTPTransport"}]],
+   "answer": "It inherits from BaseTransport."},
+  {"match": "Which test file tests URL.copy_with",
+   "calls": [["graphlore_overview", {}]],
+   "answer": "tests/test_urls.py"}
+]
