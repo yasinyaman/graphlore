@@ -243,7 +243,7 @@ number of times the check fired.
 | `EXT-TABLE-GAP` — an extension graphify indexes is missing from graphlore's tables | medium / bug | 2 | 0 |
 | `FETCH-NO-SPAN` — a definition has no span: fetch falls back to a line window | medium / gap | 404 | 94 |
 | `IMPORTS-REJECTED` — over 5% of this language's import edges are rejected as contradicted by the source | medium / bug | 3 | 0 |
-| `REPLY-TOO-LARGE` — a reply over 90 KB with default-sized arguments (some 25,000 tokens and up) | medium / bug | 36 | 0 |
+| `REPLY-TOO-LARGE` — a reply over 90 KB with default-sized arguments (some 25,000 tokens and up; the audit's threshold is 35,000 characters since, and these counts are from before) | medium / bug | 36 | 0 |
 | `ROUTES-SILENT-EMPTY` — the source registers routes in an idiom the extractor does not read; the reply lists none | medium / gap | 10 | 1 |
 | `SET-LABELS-INVISIBLE` — a name written by set_labels shows up in neither graphlore_communities nor graphlore_overview | medium / bug | 31 | 0 |
 | `SKELETON-EMPTY` — a file with definition nodes yields no symbols | medium / gap | 23 | 6 |

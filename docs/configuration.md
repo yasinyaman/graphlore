@@ -69,6 +69,18 @@ server per project. If you need both (Graphify's PR triage, its multi-project
 serving), keep graphlore on `lean`, which leaves out its `query` / `path` /
 `explain` passthroughs, and tell the model which server answers what.
 
+## How large a reply gets
+
+A tool called with its default arguments answers in at most 35,000 characters
+(about 10,000 tokens), JSON or text: under Claude Code's warning (10,000
+tokens; it stops at `MAX_MCP_OUTPUT_TOKENS`, 25,000), Codex's usual
+`tool_output_token_limit` and Gemini CLI's 40,000-character truncation (see
+[clients](clients.md)). A list cut to fit says so (`truncated`, a count of
+what was left out, a `hint`), and the arguments that ask for more are the
+tool's `limit`, `top_n`, `budget_tokens` or `max_cycles`. JSON replies are
+compact (no indentation). `test_default_replies_stay_under_what_clients_keep`
+and `benchmarks/polyglot.py` (`MAX_REPLY_CHARS`) hold the budget.
+
 ## Transport (stdio default, optional HTTP)
 
 stdio is the default and the right choice for a per-developer local server. To

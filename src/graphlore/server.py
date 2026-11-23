@@ -515,7 +515,9 @@ def _fmt(payload: Any, as_json: bool, text: str, *, is_error: bool = False) -> s
     whichever form the text takes; ``is_error=True`` marks a failure that still
     has a payload worth returning.
     """
-    out = json.dumps(payload, ensure_ascii=False, indent=2) if as_json else text
+    # compact: a model reads JSON without the indentation, which costs a reply
+    # about a third more characters (and tokens)
+    out = json.dumps(payload, ensure_ascii=False) if as_json else text
     _record(payload, out, is_error)
     return out
 
@@ -2145,8 +2147,8 @@ def _viz_analysis(gp: Path) -> tuple[dict[str, Any] | None, str]:
                       "state": find.find(r.get("state", ""), r.get("file", "")),
                       "kind": r.get("kind", ""), "score": r.get("score"),
                       "strength": r.get("strength", ""), "why": r.get("why", []),
-                      "writers": len(r.get("writers") or []),
-                      "readers": len(r.get("readers") or []),
+                      "writers": r.get("writers_total", len(r.get("writers") or [])),
+                      "readers": r.get("readers_total", len(r.get("readers") or [])),
                       "hidden": r.get("hidden_pairs"), "co_changing": r.get("co_changing_pairs")}
                      for r in s.get("shared_state", [])],
             "total": s.get("shared_state_total"),
@@ -2418,6 +2420,16 @@ def graphlore_query(
     return _fmt(payload, as_json, _with_note("\n".join(text), view))
 
 
+# graphlore_skeleton shows its first file whole up to this many tokens (or the
+# budget, when larger), then cuts it by symbol and says how many it left out.
+_SKELETON_FIRST_FILE_TOKENS = 6000
+# Members of one cycle group graphlore_cycles lists (`size` counts them all).
+_CYCLE_NODES_LISTED = 50
+# Names of writers and of readers, and pairs, graphlore_surprises lists per
+# shared state in its reply (each name carries its file:line: twenty rows of
+# twenty names and ten pairs ran past what a client keeps of a reply).
+_STATE_NAMES_LISTED = 10
+_STATE_PAIRS_LISTED = 5
 # Chokepoints graphlore_impact lists, and how many walked nodes one must stand in
 # front of to be one.
 _CHOKEPOINTS = 5
@@ -3083,7 +3095,7 @@ def _hidden_co_change(
 
 
 @_tool(annotations=ToolAnnotations(title="Surprise edges", read_only_hint=True))
-def graphlore_surprises(limit: int = 20, as_json: bool = False, scope: str = "") -> str:
+def graphlore_surprises(limit: int = 10, as_json: bool = False, scope: str = "") -> str:
     """Unexpected couplings: cross-file edges, shared state and co-changing files.
 
     ``basis`` says how edges were found: ``flagged`` (the graph marks surprises),
@@ -3127,8 +3139,24 @@ def graphlore_surprises(limit: int = 20, as_json: bool = False, scope: str = "")
     co_change = _hidden_co_change(all_nodes, all_edges, view, hist) if hist.usable else []
     co_rows = co_change[:max(0, limit)]
 
+    def capped(r: dict[str, Any]) -> dict[str, Any]:
+        """A row with its writers and readers cut to _STATE_NAMES_LISTED (a
+        variable everything reads would fill a reply on its own); the totals
+        say how many there are."""
+        out = dict(r)
+        for key in ("writers", "readers"):
+            names = r.get(key) or []
+            if len(names) > _STATE_NAMES_LISTED:
+                out[key] = names[:_STATE_NAMES_LISTED]
+                out[f"{key}_total"] = len(names)
+        pairs = r.get("pairs") or []
+        if len(pairs) > _STATE_PAIRS_LISTED:
+            out["pairs"] = pairs[:_STATE_PAIRS_LISTED]
+            out["pairs_left_out"] = r.get("pairs_left_out", 0) + len(pairs) - _STATE_PAIRS_LISTED
+        return out
+
     def with_shared(payload: dict[str, Any], text: list[str]) -> None:
-        payload["shared_state"] = shared_rows
+        payload["shared_state"] = [capped(r) for r in shared_rows]
         payload["shared_state_total"] = len(shared)
         if len(shared) > len(shared_rows):
             payload["truncated"] = True
@@ -5585,11 +5613,29 @@ def graphlore_skeleton(
             truncated = True
             left_out.append(_norm_relpath(tf))
             continue
+        cap = max(budget_tokens, _SKELETON_FIRST_FILE_TOKENS)
+        cut = 0
+        if not sections and toks > cap:
+            # the first file is always shown, but one the size of a module of
+            # thousands of lines is cut by symbol: a reply must stay readable
+            kept: list[tuple[str, list[str]]] = []
+            used = 0
+            for q, h in entries:
+                t = _count_tokens("\n".join(h))
+                if kept and used + t > cap:
+                    break
+                kept.append((q, h))
+                used += t
+            cut, entries, toks = len(entries) - len(kept), kept, used
+            truncated = True
         running += toks
-        sections.append({
+        section: dict[str, Any] = {
             "file": _norm_relpath(tf),
             "symbols": [{"qualname": q, "header": "\n".join(h)} for q, h in entries],
-        })
+        }
+        if cut:
+            section["symbols_left_out"] = cut
+        sections.append(section)
 
     payload: dict[str, Any] = {
         "scope": file or node or f"community {community}",
@@ -5601,7 +5647,8 @@ def graphlore_skeleton(
         payload["files_left_out"] = left_out[:_LEFT_OUT_LISTED]
         payload["files_left_out_count"] = len(left_out)
         payload["hint"] = (
-            "Raise budget_tokens, or call again with file= for a file left out."
+            "Raise budget_tokens, or call again with file= for a file left out, or "
+            "node= for one symbol of a file cut short."
         )
     if node and matched:
         payload["matched"] = matched
@@ -5616,7 +5663,13 @@ def graphlore_skeleton(
         parts.append(f"# {section['file']}")
         parts += [sym["header"] for sym in section["symbols"]]
     parts = [_frame_repo_text("\n".join(parts))]
-    if truncated:
+    for section in sections:
+        if section.get("symbols_left_out"):
+            parts.append(
+                f"\n… {section['file']} cut short: {section['symbols_left_out']} more "
+                "symbol(s) not shown. Call again with node= for one of them, or raise "
+                "budget_tokens.")
+    if left_out:
         listed = ", ".join(left_out[:_LEFT_OUT_LISTED])
         more = len(left_out) - _LEFT_OUT_LISTED
         parts.append(
@@ -6313,7 +6366,8 @@ def graphlore_cycles(
         found[name] = [
             {
                 "kind": name, "size": len(c),
-                "nodes": [show(n) for n in c],
+                # `size` counts them all; one concrete loop is `path`
+                "nodes": [show(n) for n in c][:_CYCLE_NODES_LISTED],
                 "path": [show(n) for n in _cycle_path(forward, c)],
             }
             for c in groups[:max(0, max_cycles)]
@@ -6339,7 +6393,8 @@ def graphlore_cycles(
             found["imports"] += [
                 {
                     "kind": "imports", "import_kind": tier, "size": len(g["nodes"]),
-                    "nodes": g["nodes"], "path": g["path"], "hops": g["hops"],
+                    "nodes": g["nodes"][:_CYCLE_NODES_LISTED], "path": g["path"],
+                    "hops": g["hops"],
                 }
                 for g in groups[:max(0, max_cycles)]
             ]

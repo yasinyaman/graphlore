@@ -219,7 +219,9 @@ COUNT_KEYS = frozenset({
 STATUS_RANK = {"skipped": 0, "ok": 1, "empty": 2, "degraded": 3, "error": 4, "crash": 5}
 SEVERITY_RANK = {"high": 0, "medium": 1, "low": 2, "info": 3}
 SLOW_MS = 5000
-MAX_REPLY_CHARS = 90_000
+# what a client keeps of a reply: Claude Code warns at 10k tokens, Codex's usual
+# limit is 12k, Gemini CLI truncates at 40,000 characters (docs/clients.md)
+MAX_REPLY_CHARS = 35_000
 
 # --- per-language oracles: crude on purpose, they only have to disagree loudly ---
 TEST_MARKERS = {

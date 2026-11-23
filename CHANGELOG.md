@@ -7,6 +7,24 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Fixed
+- **A reply with default arguments stays under 35,000 characters (~10k
+  tokens)**, what Claude Code, Codex and Gemini CLI all keep; the result's
+  `structuredContent` carries the same payload, so a large JSON payload was a
+  large reply even for a text call. Measured on graphlore, httpx, nginx and
+  Django, every read-only tool now fits in both forms (it was 522,600
+  characters for `graphlore_surprises` on nginx, 75,000 on Django, 47,000 for
+  `graphlore_cycles` on Django):
+  - JSON replies are compact (no indentation: a third fewer characters);
+  - `graphlore_surprises` lists 10 writers, 10 readers and 5 pairs per shared
+    state (`writers_total`, `readers_total`, `pairs_left_out` count the rest)
+    and its `limit` defaults to 10 instead of 20;
+  - `graphlore_cycles` lists at most 50 members per group (`size` counts them
+    all; `path` is still the whole loop);
+  - `graphlore_skeleton` cuts its first file by symbol past
+    `max(budget_tokens, 6000)` tokens and says how many it left out
+    (`symbols_left_out`), where a module of thousands of lines came whole.
+  `benchmarks/polyglot.py`'s `MAX_REPLY_CHARS` goes from 90,000 to 35,000, and
+  a test holds the budget on the polyglot fixture.
 - **Every tool parameter has a description, and the tool definitions fit
   every client.** All 141 parameters had none: each tool's whole docstring,
   `Args:` block included, went out as its description, and function-calling
