@@ -7,6 +7,24 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **`graphlore review`: what a commit range changes, read off the code
+  graph.** `graphlore review --base origin/main` (or `--base HEAD~1`, the
+  default) compares the checked-out commit with its merge base and reports
+  the definitions the change touches (each changed line of a source file
+  given to the innermost definition around it, a line no definition holds to
+  the file's top level), what depends on any of them within `--hops` (one
+  walk, nearest first, production before tests, cut at 60 rows with the rest
+  counted), the tests that reach the changed definitions (direct or through
+  one caller) and the ones no test reaches, the import cycles through changed
+  files and the `.graphlore-layers.json` violations in them, each marked
+  `introduced` when the import is written on a changed line. Cosmetic-only
+  files are left out. It builds the graph at the head commit with the native
+  engine when it is missing or older (`--no-build` refuses instead), writes
+  Markdown for a pull-request comment (repository names as code spans, at
+  most 20,000 characters) or `--format json`, and exits 1 when a
+  `--fail-on cycle,layer,untested` gate fails, 2 when no review can be made
+  (an unknown ref, a shallow clone, another commit checked out). No model and
+  no network.
 - **The agent evaluation has a baseline and repeats** (`benchmarks/agents`).
   `--variants baseline` runs each agent with no graphlore, in a copy of the
   repository without `graphify-out/`; `--repeat N` asks each task N times (no

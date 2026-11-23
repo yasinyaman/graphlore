@@ -534,3 +534,37 @@ def test_native_documents_name_code_end_to_end(tmp_path, monkeypatch):
     flagged = {row[1] for row in data["nodes"] if row[6] & 8}
     assert {"README.md", "Usage", "api.txt", "API"} <= flagged
     assert "Client" not in flagged
+
+
+def test_review_builds_the_graph_at_the_head_commit(tmp_path, monkeypatch):
+    """With no graph, `graphlore review` builds one with the native engine at the
+    commit checked out, then reads the change off it."""
+    from graphlore import change_review
+
+    def git(*args):
+        subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
+
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "core.py").write_text(
+        "def helper(x):\n    return x + 1\n\n\ndef compute(x):\n    return helper(x) * 2\n")
+    (tmp_path / "pkg" / "api.py").write_text(
+        "from pkg.core import compute\n\n\ndef handle(x):\n    return compute(x)\n")
+    (tmp_path / ".gitignore").write_text("graphify-out/\n")
+    git("init", "-q")
+    git("config", "user.email", "t@example.com")
+    git("config", "user.name", "Test")
+    git("add", ".")
+    git("commit", "-qm", "base")
+    (tmp_path / "pkg" / "core.py").write_text(
+        "def helper(x):\n    return x + 2\n\n\ndef compute(x):\n    return helper(x) * 2\n")
+    git("commit", "-qam", "change")
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    monkeypatch.setenv("GRAPHLORE_ENGINE", "native")
+    server._GRAPH_CACHE.clear()
+    server._SPAN_CACHE.clear()
+
+    r = change_review.analyze("HEAD~1", "HEAD")
+    assert _graph(tmp_path)["built_at_commit"].startswith(r["head_commit"])
+    assert [c["node"] for c in r["changed"]] == ["helper()"]
+    deps = {d["node"] for d in r["dependents"]["rows"]}
+    assert {"compute()", "handle()"} <= deps

@@ -85,11 +85,25 @@ def _cmd_agents_md(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_review(args: argparse.Namespace) -> int:
+    if args.project:
+        import os
+
+        os.environ["GRAPHLORE_PROJECT_DIR"] = str(Path(args.project).resolve())
+    from . import change_review, config
+
+    if args.project:
+        config.PROJECT_DIR = Path(args.project).resolve()
+    fail_on = tuple(x.strip() for x in args.fail_on.split(",") if x.strip())
+    return change_review.run(args.base, args.head, fmt=args.format, fail_on=fail_on,
+                             build=not args.no_build, hops=args.hops, output=args.output)
+
+
 def _parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="graphlore",
         description="With no arguments: run the graphlore MCP server (stdio). "
-                    "The subcommands set an MCP client up for it.")
+                    "The subcommands set an MCP client up for it, or review a change.")
     sub = p.add_subparsers(dest="cmd")
     s = sub.add_parser("setup", help="the MCP config block for a client, printed or merged")
     s.add_argument("client", help="see `graphlore clients`")
@@ -112,6 +126,25 @@ def _parser() -> argparse.ArgumentParser:
     a.add_argument("--write", metavar="PATH",
                    help="merge it into this file (between its graphlore markers)")
     a.set_defaults(fn=_cmd_agents_md)
+    r = sub.add_parser("review", help="what a commit range changes, read off the code graph",
+                       description="A deterministic report of a commit range: the definitions "
+                                   "it touches, what depends on them, the tests that reach them, "
+                                   "and the import cycles and layer rules it brings in. Exit 0 "
+                                   "clean, 1 a --fail-on gate failed, 2 no review possible.")
+    r.add_argument("--base", default="HEAD~1",
+                   help="the commit the change is compared with, through its merge base")
+    r.add_argument("--head", default="HEAD", help="the changed commit; it must be checked out")
+    r.add_argument("--project", default="", help="the project directory (default: here)")
+    r.add_argument("--format", default="markdown", choices=("markdown", "json"))
+    r.add_argument("--fail-on", default="",
+                   help="comma-separated gates that exit 1: cycle (a runtime import cycle "
+                        "introduced), layer (a layer rule broken on a changed line), untested "
+                        "(a changed definition no test reaches)")
+    r.add_argument("--hops", type=int, default=3, help="how far dependents are followed")
+    r.add_argument("--no-build", action="store_true",
+                   help="refuse instead of building the graph when it is not at the head commit")
+    r.add_argument("--output", default="", help="write the report to this file")
+    r.set_defaults(fn=_cmd_review)
     return p
 
 

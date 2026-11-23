@@ -10375,3 +10375,190 @@ def test_plugin_manifests_stay_in_sync():
     guide = (root / gemini["contextFileName"]).read_text()
     assert gemini["contextFileName"] != "GEMINI.md"
     assert guide == agents_md.render(sorted(server._registered_tool_names()))
+
+
+# --- graphlore review (change_review.py) ---------------------------------------
+
+_REVIEW_BASE = {
+    "pkg/__init__.py": "",
+    "pkg/core.py": ("def helper(x):\n    return x + 1\n\n\n"
+                    "def compute(x):\n    return helper(x) * 2\n"),
+    "pkg/api.py": "from pkg.core import compute\n\n\ndef handle(x):\n    return compute(x)\n",
+    "pkg/util.py": "def tidy(x):\n    return x\n",
+    "tests/test_core.py": ("from pkg.core import compute\n\n\n"
+                           "def test_compute():\n    assert compute(1) == 4\n"),
+}
+
+
+def _review_repo(tmp_path, monkeypatch, changes, extra_nodes=(), extra_edges=(), built="HEAD"):
+    """A git repository with two commits (the base files, then ``changes``) and a
+    hand-written graph of the head, recorded as built at ``built``."""
+    import subprocess
+
+    def git(*args):
+        return subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True,
+                              text=True).stdout.strip()
+
+    for rel, text in _REVIEW_BASE.items():
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_text(text, encoding="utf-8")
+    (tmp_path / ".gitignore").write_text("graphify-out/\n", encoding="utf-8")
+    git("init", "-q")
+    git("config", "user.email", "t@example.com")
+    git("config", "user.name", "Test")
+    git("add", ".")
+    git("commit", "-qm", "base")
+    for rel, text in changes.items():
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_text(text, encoding="utf-8")
+    git("add", ".")
+    git("commit", "-qm", "change")
+
+    def node(nid, label, file, line):
+        return {"id": nid, "label": label, "source_file": file, "source_location": f"L{line}",
+                "file_type": "code"}
+
+    nodes = [
+        node("core", "core.py", "pkg/core.py", 1), node("api", "api.py", "pkg/api.py", 1),
+        node("util", "util.py", "pkg/util.py", 1),
+        node("tcore", "test_core.py", "tests/test_core.py", 1),
+        node("helper", "helper()", "pkg/core.py", 1),
+        node("compute", "compute()", "pkg/core.py", 5),
+        node("handle", "handle()", "pkg/api.py", 4), node("tidy", "tidy()", "pkg/util.py", 1),
+        node("test_compute", "test_compute()", "tests/test_core.py", 4),
+        *extra_nodes,
+    ]
+
+    def edge(a, b, rel, file="", line=None):
+        e = {"source": a, "target": b, "relation": rel, "confidence": "EXTRACTED"}
+        if file:
+            e["source_file"], e["source_location"] = file, f"L{line}"
+        return e
+
+    edges = [
+        edge("core", "helper", "contains"), edge("core", "compute", "contains"),
+        edge("api", "handle", "contains"), edge("util", "tidy", "contains"),
+        edge("tcore", "test_compute", "contains"),
+        edge("compute", "helper", "calls", "pkg/core.py", 6),
+        edge("handle", "compute", "calls", "pkg/api.py", 5),
+        edge("test_compute", "compute", "calls", "tests/test_core.py", 5),
+        edge("api", "core", "imports_from", "pkg/api.py", 1),
+        edge("tcore", "core", "imports_from", "tests/test_core.py", 1),
+        *extra_edges,
+    ]
+    sha = git("rev-parse", built)
+    _write_graph(tmp_path, {"built_at_commit": sha, "nodes": nodes, "links": edges})
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    server._GRAPH_CACHE.clear()
+    server._SPAN_CACHE.clear()
+
+
+def test_review_maps_changed_lines_to_definitions_and_what_depends_on_them(tmp_path, monkeypatch):
+    from graphlore import change_review
+
+    _review_repo(tmp_path, monkeypatch, {
+        "pkg/core.py": ("LIMIT = 3\n\n\ndef helper(x):\n    return x + LIMIT\n\n\n"
+                        "def compute(x):\n    return helper(x) * 2\n"),
+        "pkg/util.py": "def tidy(x):\n    # a comment only\n    return x\n",
+    }, built="HEAD")
+    # the head graph's lines: the edit moved helper to 4 and compute to 8
+    graph = json.loads((tmp_path / "graphify-out" / "graph.json").read_text())
+    for n in graph["nodes"]:
+        if n["id"] == "helper":
+            n["source_location"] = "L4"
+        if n["id"] == "compute":
+            n["source_location"] = "L8"
+    (tmp_path / "graphify-out" / "graph.json").write_text(json.dumps(graph))
+    server._GRAPH_CACHE.clear()
+
+    r = change_review.analyze("HEAD~1", "HEAD", build=False)
+    assert [f["path"] for f in r["files"]] == ["pkg/core.py"]
+    assert r["cosmetic_files"] == ["pkg/util.py"]          # comments only: left out
+    changed = {(c["node"] or "(top)"): c["lines"] for c in r["changed"]}
+    # `def helper(x):` itself is unchanged, only moved: git gives its body line
+    assert changed == {"helper()": "5", "(top)": "1-3"}
+    deps = {d["node"]: d for d in r["dependents"]["rows"]}
+    assert deps["compute()"]["distance"] == 1 and deps["handle()"]["distance"] == 2
+    assert deps["test_compute()"]["test"] is True
+    # production before tests at one distance
+    names = [d["node"] for d in r["dependents"]["rows"]]
+    assert names.index("handle()") < names.index("test_compute()")
+    assert [t["test"] for t in r["tests"]["tests"]] == ["test_compute()"]
+    assert r["tests"]["untested"] == [] and r["failed"] == []
+    md = change_review.render_markdown(r)
+    assert md.startswith(change_review.MARKER)
+    assert "| `helper()` | `pkg/core.py` | 5 |" in md and "(top level)" in md
+
+
+def test_review_gates_an_introduced_import_cycle_and_an_untested_definition(tmp_path,
+                                                                            monkeypatch):
+    from graphlore import change_review
+
+    _review_repo(
+        tmp_path, monkeypatch,
+        {"pkg/core.py": ("from pkg import api\n\n\ndef helper(x):\n    return x + 1\n\n\n"
+                         "def compute(x):\n    return helper(x) * 2\n"),
+         "pkg/api.py": ("from pkg.core import compute\n\n\ndef handle(x):\n    return compute(x)\n"
+                        "\n\ndef orphan():\n    return 1\n")},
+        extra_nodes=[{"id": "orphan", "label": "orphan()", "source_file": "pkg/api.py",
+                      "source_location": "L8", "file_type": "code"}],
+        extra_edges=[{"source": "core", "target": "api", "relation": "imports_from",
+                      "source_file": "pkg/core.py", "source_location": "L1"},
+                     {"source": "api", "target": "orphan", "relation": "contains"}])
+    graph = json.loads((tmp_path / "graphify-out" / "graph.json").read_text())
+    for n in graph["nodes"]:
+        n["source_location"] = {"helper": "L4", "compute": "L8"}.get(n["id"], n["source_location"])
+    (tmp_path / "graphify-out" / "graph.json").write_text(json.dumps(graph))
+    (tmp_path / ".graphlore-layers.json").write_text(json.dumps(
+        {"pkg/core.py": [], "pkg/api.py": ["pkg/core.py"]}))
+    server._GRAPH_CACHE.clear()
+
+    r = change_review.analyze("HEAD~1", "HEAD", build=False,
+                              fail_on=("cycle", "layer", "untested"))
+    (cycle,) = r["cycles"]
+    assert cycle["introduced"] is True and cycle["runs"] == "runtime"
+    assert set(cycle["files"]) == {"pkg/core.py", "pkg/api.py"}
+    (violation,) = r["layers"]["violations"]
+    assert violation["introduced"] is True and violation["site"] == "pkg/core.py:L1"
+    assert "orphan()" in r["tests"]["untested"]
+    assert r["failed"] == ["cycle", "layer", "untested"]
+    md = change_review.render_markdown(r)
+    assert "**Gate failed:** cycle, layer, untested" in md and "**introduced**" in md
+    out = tmp_path / "review.md"
+    assert change_review.run("HEAD~1", "HEAD", build=False, fail_on=("cycle",),
+                             output=str(out)) == 1
+    assert out.read_text().startswith(change_review.MARKER)
+    assert change_review.run("HEAD~1", "HEAD", build=False, fmt="json",
+                             output=str(out)) == 0
+    assert json.loads(out.read_text())["cycles"][0]["introduced"] is True
+
+
+def test_review_refuses_what_it_cannot_review(tmp_path, monkeypatch, capsys):
+    from graphlore import change_review, cli
+
+    _review_repo(tmp_path, monkeypatch, {"pkg/util.py": "def tidy(x):\n    return x * 1\n"},
+                 built="HEAD~1")
+    # the graph is a commit behind, and --no-build says not to build it
+    assert change_review.run("HEAD~1", "HEAD", build=False) == 2
+    assert "not built at the head commit" in capsys.readouterr().err
+    assert change_review.run("nope", "HEAD", build=False) == 2
+    assert "fetch-depth: 0" in capsys.readouterr().err
+    assert change_review.run("HEAD~1", "HEAD~1", build=False) == 2
+    assert "not the commit checked out" in capsys.readouterr().err
+    assert change_review.run("HEAD~1", "HEAD", build=False, fail_on=("bogus",)) == 2
+    # through the console script, with the same codes
+    assert cli.main(["review", "--project", str(tmp_path), "--no-build"]) == 2
+
+
+def test_review_markdown_quotes_repository_names_as_code():
+    from graphlore import change_review
+
+    assert change_review._code("a`b\n[x](http://e) @someone") == "`aˋb [x](http://e) @someone`"
+    report = {
+        "merge_base": "a" * 12, "head_commit": "b" * 12, "cosmetic_files": [],
+        "dirty_worktree": False, "failed": [], "files": [], "changed": [], "source_files": 0,
+        "changed_total": 0, "hops": 3, "cycles": [], "layers": None,
+        "dependents": {"rows": [], "total": 0},
+        "tests": {"tests": [], "untested": [], "not_asked": 0},
+    }
+    assert "No structural change" in change_review.render_markdown(report)
