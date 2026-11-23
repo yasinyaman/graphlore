@@ -3145,7 +3145,9 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
             for p in decos {
                 push(&mut refs, n, RefKind::Decorator, p, "decorator", Some(di));
             }
-            if is_callable(def.kind) {
+            // (a scope with parameters is one for them too: C# 14
+            // `extension(RestRequest request) { … }`, whose members use `request`)
+            if is_callable(def.kind) || def.block {
                 let mut types = Vec::new();
                 signature_types(n, src, &mut types);
                 for (p, ctx) in types {

@@ -1447,7 +1447,8 @@ fn a_method_named_on_what_a_test_file_cannot_type() {
 
 #[test]
 fn csharp_extensions_through_blocks_bases_and_library_types() {
-    // an `extension(T x) { … }` block's members are written for `T`; a
+    // an `extension(T x) { … }` block's members are written for `T`, and are
+    // the class's (no node for the block, no `extension` in their ids); a
     // receiver has the extensions of its bases, a partial type the bases and
     // members of all its declarations, and a namespace sees the ones around
     // it. A field or property of a type the project does not define is
@@ -1467,15 +1468,15 @@ fn csharp_extensions_through_blocks_bases_and_library_types() {
             .map(|(_, to, conf)| (to.as_str(), conf.as_str()))
             .collect()
     };
-    let block = "shop_clientextensions_clientextensions_extension_builduri";
-    let two = "shop_clientextensions_clientextensions_extension_builduri_2";
+    let block = "shop_clientextensions_clientextensions_builduri";
+    let two = "shop_clientextensions_clientextensions_builduri_2";
     let want: BTreeSet<(&str, &str)> = [
         (block, "EXTRACTED"),
         (two, "EXTRACTED"),
         ("shop_clientextensions_clientextensions_count", "EXTRACTED"),
         ("shop_wireextensions_wireextensions_capture", "EXTRACTED"),
         ("shop_clientextensions_stringextensions_isnotempty", "EXTRACTED"),
-        ("shop_clientextensions_stringextensions_extension_isblank", "EXTRACTED"),
+        ("shop_clientextensions_stringextensions_isblank", "EXTRACTED"),
     ]
     .into_iter()
     .collect();

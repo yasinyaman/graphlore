@@ -43,7 +43,7 @@ All notable changes to this project are documented here. The format is based on
   back to BM25 once when it cannot.
 
 ### Fixed
-- **`spans.py` and the native engine read the same definitions on 16 more
+- **`spans.py` and the native engine read the same definitions on 44 more
   files of the audit repositories** (engine 0.5.80). Compared on all 5,073
   source files of the 45, they disagreed on 45; each case was read against the
   source and the wrong side fixed. `spans.py`: a Python file its `ast` cannot
@@ -57,8 +57,15 @@ All notable changes to this project are documented here. The format is based on
   function declaration, and `Env::Entry` an `indirect_call` (leveldb); Kotlin
   is parsed with `external` among a declaration's modifiers blanked, so
   `internal external interface RegExpMatch { … }` is no longer lost
-  (kotlinpoet). On the other 43 repositories the native graph is unchanged.
-  restsharp's C# 14 `extension(…)` blocks (29 files) still differ.
+  (kotlinpoet); and a C# 14 `extension(RestRequest request) { … }` block,
+  which its grammar reads as a constructor named `extension`, is a scope
+  only: restsharp loses 31 `.extension()` nodes, and the 194 members of the
+  blocks are the class's (`BodyExtensions.HasFiles`, not
+  `BodyExtensions.extension.HasFiles`) with every call, read and write they
+  had, the block's parameter still typing their bodies. On the other 42
+  repositories the native graph is unchanged. One file still differs: a
+  generic block (`extension<T>(…)`, restsharp's `ResponseThrowExtension.cs`)
+  the engine's grammar cannot read ends its class a line early.
 - **`graphlore_package_apis(package=…)` fits the 35,000-character reply
   budget.** It cut each symbol's file list (down to three files) but not the
   number of symbols, so a package used for hundreds of names was still over:

@@ -437,3 +437,20 @@ fn kotlin_an_external_declaration_keeps_its_name() {
     assert_eq!(blanked.len(), src.len());
     assert!(!String::from_utf8(blanked).unwrap().contains("external"));
 }
+
+#[test]
+fn csharp_an_extension_block_is_a_scope_of_the_class() {
+    // C# 14 `extension(RestRequest request) { … }` (restsharp): the members
+    // are the class's, written for the block's parameter, which their bodies
+    // use; the block is no definition (the grammar reads a constructor)
+    let src = "static class BodyExtensions {\n    extension(RestRequest request) {\n        public bool HasFiles() => request.Files.Count > 0;\n        public static int Zero() => 0;\n    }\n}\n";
+    assert_eq!(
+        quals("BodyExtensions.cs", src),
+        set(&["BodyExtensions", "BodyExtensions.HasFiles", "BodyExtensions.Zero"])
+    );
+    let facts = file_facts(src.as_bytes(), "BodyExtensions.cs");
+    let has = facts.defs.iter().find(|d| d.name == "HasFiles").expect("the member");
+    assert_eq!(has.receiver.as_deref(), Some("RestRequest"));
+    assert!(facts.defs[has.parent.expect("in the block")].block);
+    assert!(facts.locals.iter().any(|l| l.name == "request" && l.path == ["RestRequest"]));
+}

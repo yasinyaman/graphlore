@@ -910,15 +910,19 @@ Two calls serve graphlore outside a build (engine 0.5.80):
   | cpr `api.h` | `std::function<R(T)> execFn{[…](T p) { … }};` | engine | both: a `function_definition` with a bare name and one lambda for a body is a variable (`braced_initializer`) |
   | leveldb (2) | `std::thread background_thread(PosixEnv::Entry, this);` | `spans.py` | engine: a `this` among the "parameters" makes a misread variable, the qualified name an `indirect_call` |
   | kotlinpoet `Util.wasmJs.kt` | `internal external interface RegExpMatch { … }` before another `internal external` declaration | `spans.py` | both: `external` among a declaration's modifiers is blanked (`blank_kotlin_external`, `_blank_kotlin_external`) |
+  | restsharp (29) | C# 14 `extension(RestRequest request) { … }` | `spans.py` | engine: the block, which its grammar (tree-sitter-c-sharp 0.23) reads as a constructor named `extension`, is a scope only (`Def::block`): no node, its members the class's (`BodyExtensions.HasFiles`), its parameter a local they see |
 
-  The native graphs of 43 of the 45 repositories are unchanged by these
-  fixes; kotlinpoet gains `RegExpMatch` and the edge from `RegExp.exec` to
-  it, and leveldb loses two false `background_thread` definitions for an
-  `indirect_call` to the function the thread runs. What still differs is
-  the 29 files of restsharp's C# 14 `extension(…)` blocks, which the
-  engine's grammar (tree-sitter-c-sharp 0.23) reads as a constructor named
-  `extension` holding local functions; `spans.py`'s grammar reads the
-  members as the class's, which is what C# means.
+  The native graphs of 42 of the 45 repositories are unchanged by these
+  fixes. kotlinpoet gains `RegExpMatch` and the edge from `RegExp.exec` to
+  it; leveldb loses two false `background_thread` definitions for an
+  `indirect_call` to the function the thread runs; restsharp loses its 31
+  `.extension()` nodes, and the 194 members of the blocks lose the
+  `extension` in their ids, with every `calls`, `reads` and `writes` edge
+  they had (the block's own reference to its receiver type now leaves from
+  the class). One file still differs: in restsharp's
+  `ResponseThrowExtension.cs` the engine's grammar cannot read a generic
+  block (`extension<T>(RestResponse<T> response)`) and ends the class a
+  line early.
 - **`SearchKernel`** (`src/search.rs`, `KERNEL_ABI = 1`) is the port of the
   built-in search's kernel, `search.py`'s tokenizer and BM25F loop, which
   graphlore uses in place of its Python reference when the engine is

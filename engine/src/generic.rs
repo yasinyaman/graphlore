@@ -613,7 +613,15 @@ pub fn walk_defs(m: &dyn LanguageModule, root: Node, src: &[u8]) -> Vec<Def> {
                 let (name_owner, bare) = split_qualified(&name);
                 let owner = owner.or(name_owner).or_else(|| item.owner.clone());
                 let def_line = line(node);
-                let mut kind = kind.unwrap_or_else(|| m.kind_of(node, src));
+                // a scope and no definition: its definitions are named as if
+                // it were not there (C# 14 `extension(T x) { … }`)
+                let scope_only = item.parent.is_some_and(|p| defs[p].kind.is_class_like())
+                    && m.scope_only(node, src);
+                let mut kind = if scope_only {
+                    DefKind::Other
+                } else {
+                    kind.unwrap_or_else(|| m.kind_of(node, src))
+                };
                 let parent_class =
                     item.parent.map(|p| defs[p].kind.is_class_like()).unwrap_or(false);
                 if kind == DefKind::Function && (parent_class || owner.is_some()) {
@@ -678,16 +686,19 @@ pub fn walk_defs(m: &dyn LanguageModule, root: Node, src: &[u8]) -> Vec<Def> {
                     end_byte: node.end_byte(),
                 });
                 let idx = defs.len() - 1;
+                defs[idx].block = scope_only;
                 for other in more_names(node) {
                     let mut d = defs[idx].clone();
                     d.name = text(other, src);
                     d.qualname = format!("{}{}", item.prefix, d.name);
                     defs.push(d);
                 }
+                let children_prefix =
+                    if scope_only { item.prefix.clone() } else { format!("{qualname}.") };
                 push_children(
                     &mut stack,
                     descend,
-                    &format!("{qualname}."),
+                    &children_prefix,
                     Some(idx),
                     &children_owner,
                     item.depth,
