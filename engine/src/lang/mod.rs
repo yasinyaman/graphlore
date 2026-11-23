@@ -245,6 +245,15 @@ pub trait LanguageModule: Send + Sync {
         None
     }
 
+    /// Whether a definition the generic rule finds is only a scope: no node,
+    /// no name and no span (`Def::block`), whose definitions are named as if
+    /// it were not there and see its parameters as a function's nested ones
+    /// do (C# 14 `extension(T x) { … }`, which the grammar reads as a
+    /// constructor named `extension`).
+    fn scope_only(&self, _node: Node, _src: &[u8]) -> bool {
+        false
+    }
+
     /// Classify one node. The default is the `spans.py` rule.
     fn classify<'t>(&self, node: Node<'t>, src: &[u8]) -> Step<'t> {
         generic::classify(self, node, src)

@@ -288,6 +288,25 @@ fn declarator_name(node: Node, src: &[u8]) -> Option<String> {
     None
 }
 
+/// `_ts_braced_initializer`: a `function_definition` whose declarator is a
+/// bare name (no parameter list) and whose "body" is one function, the
+/// lambda of `std::function<R(T)> f{[…](T x) { … }};`: a variable with a brace
+/// initializer. A real function the parser misread keeps its body of
+/// statements.
+fn braced_initializer(node: Node) -> bool {
+    let (Some(decl), Some(body)) =
+        (node.child_by_field_name("declarator"), node.child_by_field_name("body"))
+    else {
+        return false;
+    };
+    if decl.kind() != "identifier" {
+        return false;
+    }
+    let stmts: Vec<Node> =
+        kids(body).into_iter().filter(|c| !c.kind().contains("comment")).collect();
+    stmts.len() == 1 && matches!(stmts[0].kind(), "function_definition" | "lambda_expression")
+}
+
 /// `_ts_macro_statement`: a `declaration` whose type is a macro call the
 /// parser could not read (`TEST_ASSERT_EQUAL(p0, p1, 4);` followed by another
 /// in a function the parser lost): two statements, no declaration.
@@ -425,6 +444,11 @@ pub fn classify<'t, M: LanguageModule + ?Sized>(m: &M, node: Node<'t>, src: &[u8
                 return Step::Scope { prefix: t.clone(), owner: Some(t), descend: node };
             }
         }
+    }
+    if kind == "function_definition" && braced_initializer(node) {
+        // C++ `std::function<R(T)> f{[…](T x) { … }};`: a variable whose
+        // value is a lambda, read as a definition by `spans.py`'s grammar
+        return Step::Descend;
     }
     let prototype =
         PROTOTYPE_TYPES.contains(&kind) && declares_function(node) && !macro_statement(node);
@@ -589,7 +613,15 @@ pub fn walk_defs(m: &dyn LanguageModule, root: Node, src: &[u8]) -> Vec<Def> {
                 let (name_owner, bare) = split_qualified(&name);
                 let owner = owner.or(name_owner).or_else(|| item.owner.clone());
                 let def_line = line(node);
-                let mut kind = kind.unwrap_or_else(|| m.kind_of(node, src));
+                // a scope and no definition: its definitions are named as if
+                // it were not there (C# 14 `extension(T x) { … }`)
+                let scope_only = item.parent.is_some_and(|p| defs[p].kind.is_class_like())
+                    && m.scope_only(node, src);
+                let mut kind = if scope_only {
+                    DefKind::Other
+                } else {
+                    kind.unwrap_or_else(|| m.kind_of(node, src))
+                };
                 let parent_class =
                     item.parent.map(|p| defs[p].kind.is_class_like()).unwrap_or(false);
                 if kind == DefKind::Function && (parent_class || owner.is_some()) {
@@ -654,16 +686,19 @@ pub fn walk_defs(m: &dyn LanguageModule, root: Node, src: &[u8]) -> Vec<Def> {
                     end_byte: node.end_byte(),
                 });
                 let idx = defs.len() - 1;
+                defs[idx].block = scope_only;
                 for other in more_names(node) {
                     let mut d = defs[idx].clone();
                     d.name = text(other, src);
                     d.qualname = format!("{}{}", item.prefix, d.name);
                     defs.push(d);
                 }
+                let children_prefix =
+                    if scope_only { item.prefix.clone() } else { format!("{qualname}.") };
                 push_children(
                     &mut stack,
                     descend,
-                    &format!("{qualname}."),
+                    &children_prefix,
                     Some(idx),
                     &children_owner,
                     item.depth,

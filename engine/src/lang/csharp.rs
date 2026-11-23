@@ -21,6 +21,12 @@ pub(crate) fn extension_block(n: Node, src: &[u8]) -> bool {
 }
 
 impl LanguageModule for CSharp {
+    /// C# 14 `extension(RestRequest request) { … }`: its members are the
+    /// class's (`BodyExtensions.HasFiles`), written for the block's parameter.
+    fn scope_only(&self, node: Node, src: &[u8]) -> bool {
+        extension_block(node, src)
+    }
+
     /// `static bool IsEmpty(this string? value)`: the type of the `this`
     /// parameter, bare (`string`, `IEnumerable`).
     fn receiver_of(&self, node: Node, src: &[u8]) -> Option<String> {

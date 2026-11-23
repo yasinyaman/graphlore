@@ -897,11 +897,32 @@ Two calls serve graphlore outside a build (engine 0.5.80):
   `spans.py`'s own reader stays: it took 12.3 s on the same files, faster per
   language than the engine's but for Kotlin (0.77×), C# (0.81×), C, Python
   and Scala (about even); C++ is 2.8× slower on the engine's full path.
-  Both spend most of the time in tree-sitter's C parser. On 45 of those
-  files the two readers do not agree, from grammar versions as much as rules
-  (C# 14 `extension(…)` blocks in restsharp, which the engine's grammar reads
-  as a constructor; C++ destructors and function-pointer fields in leveldb
-  and cJSON), which keeps `spans.py`'s answer the one graphlore's tools see.
+  Both spend most of the time in tree-sitter's C parser.
+
+  The two readers disagreed on 45 of those files. Each case was read against
+  the source and fixed on the side that was wrong:
+
+  | Files | What | Right | Fix |
+  |---|---|---|---|
+  | fastapi-template `deps.py` | Python 3.14's `except A, B:` | engine | `spans.py`: source the running `ast` cannot parse takes the engine's spans (its Python rule equals `ast` on all 84 files of httpx and fastapi-template) |
+  | cJSON (2), leveldb `db_bench.cc` | `void *(CJSON_CDECL *allocate)(…)`, `void (Bench::*method)(…)` fields | engine | `spans.py`: in a `parenthesized_declarator` a declarator comes before an `ERROR`, the engine's order |
+  | leveldb (8), cpr | `Env::~Env() = default;` out of a class | engine | `spans.py`: its grammar reads an assignment there; read as the definition it is |
+  | cpr `api.h` | `std::function<R(T)> execFn{[…](T p) { … }};` | engine | both: a `function_definition` with a bare name and one lambda for a body is a variable (`braced_initializer`) |
+  | leveldb (2) | `std::thread background_thread(PosixEnv::Entry, this);` | `spans.py` | engine: a `this` among the "parameters" makes a misread variable, the qualified name an `indirect_call` |
+  | kotlinpoet `Util.wasmJs.kt` | `internal external interface RegExpMatch { … }` before another `internal external` declaration | `spans.py` | both: `external` among a declaration's modifiers is blanked (`blank_kotlin_external`, `_blank_kotlin_external`) |
+  | restsharp (29) | C# 14 `extension(RestRequest request) { … }` | `spans.py` | engine: the block, which its grammar (tree-sitter-c-sharp 0.23) reads as a constructor named `extension`, is a scope only (`Def::block`): no node, its members the class's (`BodyExtensions.HasFiles`), its parameter a local they see |
+
+  The native graphs of 42 of the 45 repositories are unchanged by these
+  fixes. kotlinpoet gains `RegExpMatch` and the edge from `RegExp.exec` to
+  it; leveldb loses two false `background_thread` definitions for an
+  `indirect_call` to the function the thread runs; restsharp loses its 31
+  `.extension()` nodes, and the 194 members of the blocks lose the
+  `extension` in their ids, with every `calls`, `reads` and `writes` edge
+  they had (the block's own reference to its receiver type now leaves from
+  the class). One file still differs: in restsharp's
+  `ResponseThrowExtension.cs` the engine's grammar cannot read a generic
+  block (`extension<T>(RestResponse<T> response)`) and ends the class a
+  line early.
 - **`SearchKernel`** (`src/search.rs`, `KERNEL_ABI = 1`) is the port of the
   built-in search's kernel, `search.py`'s tokenizer and BM25F loop, which
   graphlore uses in place of its Python reference when the engine is

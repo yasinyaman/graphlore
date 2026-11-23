@@ -1082,7 +1082,10 @@ fn template_args(t: Node, src: &[u8]) -> Vec<String> {
 
 /// A C++ variable the grammar took for a function's declaration: its name,
 /// its type's path, the names passed and the calls passed.
-type Misread<'t> = (String, Vec<String>, Vec<Node<'t>>, Vec<Node<'t>>);
+/// A misread variable: its name, its type, the bare names and calls passed
+/// to it, the qualified names passed beside a `this` (`std::thread
+/// t(Env::Entry, this);`), and whether a `this` was passed.
+type Misread<'t> = (String, Vec<String>, Vec<Node<'t>>, Vec<Node<'t>>, Vec<Node<'t>>, bool);
 
 /// C++ `Pool pool(context);` where every "parameter type" is a name the
 /// function has as a local or parameter, or `Random rnd(seed());` with a
@@ -1104,9 +1107,27 @@ fn misread_variable<'t>(
     // `Random rnd(test::RandomSeed());`: a call where a parameter's type
     // would be written, which only a variable's arguments have
     let mut calls = Vec::new();
+    // `std::thread t(PosixEnv::Entry, this);`: `this` is no type, so what it
+    // is passed with are arguments, a qualified name among them
+    let mut this_arg = false;
+    let mut qualified = Vec::new();
     for p in kids(params).into_iter().filter(|c| !is_comment(c)) {
         if p.kind() != "parameter_declaration" {
             return None;
+        }
+        let ty = p.child_by_field_name("type");
+        if p.named_child_count() == 1 {
+            match ty {
+                Some(t) if t.kind() == "type_identifier" && text(t, src) == "this" => {
+                    this_arg = true;
+                    continue;
+                }
+                Some(t) if t.kind() == "qualified_identifier" => {
+                    qualified.push(t);
+                    continue;
+                }
+                _ => {}
+            }
         }
         match p.child_by_field_name("declarator") {
             Some(d)
@@ -1127,7 +1148,10 @@ fn misread_variable<'t>(
         }
         args.push(ty);
     }
-    if args.is_empty() && calls.is_empty() {
+    if !this_arg && !qualified.is_empty() {
+        return None; // `Pool pool(std::string);` declares a function
+    }
+    if args.is_empty() && calls.is_empty() && !this_arg {
         return None; // `Pool pool();` declares a function
     }
     let func = anc
@@ -1160,12 +1184,12 @@ fn misread_variable<'t>(
         let t = text(*a, src);
         params_of.contains(&t) || locals.iter().any(|l| l.name == t && lo <= l.byte && l.byte < at)
     };
-    if !args.iter().all(known) {
+    if !this_arg && !args.iter().all(known) {
         return None;
     }
     // (as a declared local's type is written: `first_type`)
     let ty = first_type(n.child_by_field_name("type")?, src)?;
-    Some((text(name, src), ty, args, calls))
+    Some((text(name, src), ty, args, calls, qualified, this_arg))
 }
 
 /// A construction whose type is written on the declaration and not at the
@@ -3121,7 +3145,9 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
             for p in decos {
                 push(&mut refs, n, RefKind::Decorator, p, "decorator", Some(di));
             }
-            if is_callable(def.kind) {
+            // (a scope with parameters is one for them too: C# 14
+            // `extension(RestRequest request) { … }`, whose members use `request`)
+            if is_callable(def.kind) || def.block {
                 let mut types = Vec::new();
                 signature_types(n, src, &mut types);
                 for (p, ctx) in types {
@@ -4474,22 +4500,33 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
         // reads a declaration of a function `pool`, the language a variable
         // (a local hides a type of its name)
         if facts.lang == Some(crate::lang::Lang::Cpp) {
-            if let Some((name, ty, args, calls)) = misread_variable(n, src, &anc, &locals) {
+            if let Some((name, ty, args, calls, qualified, this_arg)) =
+                misread_variable(n, src, &anc, &locals)
+            {
                 let (lo, hi) = (n.start_byte(), n.end_byte());
                 for d in facts.defs.iter_mut() {
                     if d.name == name && lo <= d.start_byte && d.end_byte <= hi {
                         d.misread = true;
-                        d.unspanned = !calls.is_empty();
+                        // (`spans.py`'s grammar reads a call or a `this`
+                        // among the arguments as the variable it is)
+                        d.unspanned = !calls.is_empty() || this_arg;
                     }
                 }
                 misread.push((lo, hi));
                 let at = refs.len();
                 push(&mut refs, n, RefKind::New, ty.clone(), "constructor", None);
                 if let Some(r) = refs.get_mut(at) {
-                    r.args = u8::try_from(args.len() + calls.len()).ok();
+                    r.args = u8::try_from(
+                        args.len() + calls.len() + qualified.len() + usize::from(this_arg),
+                    )
+                    .ok();
                 }
                 for a in args {
                     push(&mut refs, a, RefKind::Indirect, vec![text(a, src)], "argument", None);
+                }
+                for q in qualified {
+                    let path = text(q, src).split("::").map(str::to_string).collect();
+                    push(&mut refs, q, RefKind::Indirect, path, "argument", None);
                 }
                 for c in calls {
                     if let Some(path) = path_of(c, src) {

@@ -398,3 +398,59 @@ fn ts_a_namespace_constant_is_a_definition() {
         facts.defs.iter().filter(|d| d.extra).map(|d| (d.qualname.as_str(), d.kind)).collect();
     assert_eq!(extra, [("util.keys", DefKind::Constant), ("util.count", DefKind::Variable)].into());
 }
+
+#[test]
+fn cpp_a_this_among_the_arguments_makes_a_variable() {
+    // `std::thread worker(Env::Entry, this);`: the grammar reads a function
+    // declaration, but `this` is no parameter type (leveldb's `env_posix.cc`)
+    let src =
+        "void Env::Schedule() {\n  std::thread worker(Env::Entry, this);\n  worker.detach();\n}\n";
+    assert_eq!(quals("env.cc", src), set(&["Env.Schedule"]));
+    let facts = file_facts(src.as_bytes(), "env.cc");
+    let worker = facts.defs.iter().find(|d| d.name == "worker").expect("the misread");
+    assert!(worker.misread && worker.unspanned);
+    assert!(facts.refs.iter().any(|r| r.path == ["Env", "Entry"]));
+}
+
+#[test]
+fn cpp_a_lambda_held_in_braces_is_no_function() {
+    // `std::function<R(T)> f{[…](T x) { … }};` (cpr's `api.h`): a variable
+    let src = "void setup() {\n    std::function<R(int)> execFn{[s](int p) {\n        return R{};\n    }};\n}\n";
+    assert_eq!(quals("api.h", src), set(&["setup"]));
+}
+
+#[test]
+fn c_a_macro_in_a_function_pointer_field_is_looked_past() {
+    // cJSON's `void *(CJSON_CDECL *allocate)(size_t size);`
+    let src = "typedef struct H\n{\n    void *(CDECL *allocate)(int n);\n    void (CDECL *release)(void *p);\n} H;\n";
+    has_all(&quals("hooks.c", src), &["H.H.allocate", "H.H.release"]);
+}
+
+#[test]
+fn kotlin_an_external_declaration_keeps_its_name() {
+    // kotlinpoet's `Util.wasmJs.kt`: the grammar reads `internal external
+    // interface A { … }` before another such declaration as infix expressions;
+    // `external` is blanked
+    let src = "internal external interface RegExpMatch {\n  val index: Int\n}\n\ninternal external class RegExp(pattern: String) : JsAny {\n  fun exec(str: String): RegExpMatch?\n}\n";
+    assert_eq!(quals("Util.kt", src), set(&["RegExpMatch", "RegExp", "RegExp.exec"]));
+    let blanked = graphlore_engine::parse::blank_kotlin_external(src.as_bytes()).expect("blanked");
+    assert_eq!(blanked.len(), src.len());
+    assert!(!String::from_utf8(blanked).unwrap().contains("external"));
+}
+
+#[test]
+fn csharp_an_extension_block_is_a_scope_of_the_class() {
+    // C# 14 `extension(RestRequest request) { … }` (restsharp): the members
+    // are the class's, written for the block's parameter, which their bodies
+    // use; the block is no definition (the grammar reads a constructor)
+    let src = "static class BodyExtensions {\n    extension(RestRequest request) {\n        public bool HasFiles() => request.Files.Count > 0;\n        public static int Zero() => 0;\n    }\n}\n";
+    assert_eq!(
+        quals("BodyExtensions.cs", src),
+        set(&["BodyExtensions", "BodyExtensions.HasFiles", "BodyExtensions.Zero"])
+    );
+    let facts = file_facts(src.as_bytes(), "BodyExtensions.cs");
+    let has = facts.defs.iter().find(|d| d.name == "HasFiles").expect("the member");
+    assert_eq!(has.receiver.as_deref(), Some("RestRequest"));
+    assert!(facts.defs[has.parent.expect("in the block")].block);
+    assert!(facts.locals.iter().any(|l| l.name == "request" && l.path == ["RestRequest"]));
+}

@@ -1927,11 +1927,12 @@ impl<'a> Project<'a> {
     }
 
     /// Whether `c` is a member of a C# 14 `extension(T x) { … }` block: the
-    /// grammar reads the block as a constructor named `extension`.
+    /// grammar reads the block as a constructor named `extension`, which the
+    /// engine keeps as a scope only (`LanguageModule::scope_only`).
     fn in_extension_block(&self, c: DefRef) -> bool {
         self.def(c).parent.is_some_and(|p| {
             let block = &self.files[c.0].defs[p];
-            block.kind == DefKind::Constructor && block.name == "extension"
+            block.block && block.name == "extension"
         })
     }
 
