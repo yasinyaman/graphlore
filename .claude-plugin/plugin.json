@@ -2,7 +2,7 @@
   "name": "graphlore",
   "displayName": "graphlore",
   "version": "0.7.0",
-  "description": "Let Claude navigate a codebase through its knowledge graph instead of grepping: an MCP server (semantic locate, impact analysis, token-budgeted subgraphs, exact source spans) plus an exploration skill. The graph is built by its own Rust engine, in 14 languages.",
+  "description": "Let Claude navigate a codebase through its knowledge graph, for questions that need the whole repository: an MCP server (semantic locate, impact analysis, token-budgeted subgraphs, exact source spans) plus an exploration skill. The graph is built by its own Rust engine, in 14 languages.",
   "author": {
     "name": "yasinyaman",
     "url": "https://github.com/yasinyaman"

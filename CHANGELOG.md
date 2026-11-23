@@ -71,6 +71,16 @@ All notable changes to this project are documented here. The format is based on
   release. A published release still starts it as before.
 
 ### Changed
+- **The README says what graphlore is for beside a language server and
+  built-in code search**: the questions that need the whole repository at once
+  (what a change breaks, cycles, layers, routes, shared state), one budgeted
+  reply each. A new FAQ entry and `docs/comparison.md` place it beside Claude
+  Code's LSP tool, code search and other code-graph MCP servers, each claim
+  from the project's own page, dated. Graphify is linked at its source
+  repository (`Graphify-Labs/graphify`, which its PyPI page names as the
+  official one) instead of graphify.net, in the README, `pyproject.toml` and
+  the server's docstring; the plugin descriptions no longer say "instead of
+  grepping".
 - **`import graphlore` no longer loads the server.** The package's exports
   (`main`, `mcp`, `__version__`, `api_uses_for_source`, `routes_for_source`)
   load on first use, so `graphlore setup`, `clients` and `agents-md` start in

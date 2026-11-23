@@ -83,7 +83,7 @@ Repository = "https://github.com/yasinyaman/graphlore"
 Issues = "https://github.com/yasinyaman/graphlore/issues"
 Documentation = "https://github.com/yasinyaman/graphlore/tree/master/docs"
 Changelog = "https://github.com/yasinyaman/graphlore/blob/master/CHANGELOG.md"
-"Graphify" = "https://graphify.net"
+"Graphify" = "https://github.com/Graphify-Labs/graphify"
 
 [project.scripts]
 # The rename from graphify-mcp freed us to claim the bare name: `graphifyy`

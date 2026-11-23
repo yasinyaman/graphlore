@@ -3,7 +3,7 @@
 
 Lets an AI assistant query the codebase knowledge graph during development. The
 graph is built by graphlore's native engine (engine/, the graphlore-engine
-package), or by the graphify CLI (https://graphify.net) when the engine is not
+package), or by the graphify CLI (https://github.com/Graphify-Labs/graphify) when the engine is not
 installed; what this module adds is the span engine (ast + tree-sitter
 ``start..end`` ranges) and the tools that read the graph — locate/hidden links,
 fetch, skeleton, routes, package_apis, and cosmetic-vs-structural freshness.
