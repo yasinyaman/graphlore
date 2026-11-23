@@ -9731,3 +9731,35 @@ def test_a_written_config_starts_the_server(tmp_path):
             return [t.name for t in (await client.list_tools()).tools]
     names = asyncio.run(_go())
     assert set(names) == set(server.LEAN_TOOLS)
+
+
+def test_default_replies_stay_under_what_clients_keep(tmp_path, monkeypatch):
+    """Every read-only tool with its default arguments, in both forms, on the
+    polyglot fixture: under 35,000 characters (~10k tokens), which Claude Code,
+    Codex and Gemini CLI all keep (docs/clients.md)."""
+    import inspect
+    import shutil
+    from pathlib import Path
+
+    fixture = tmp_path / "polyglot"
+    shutil.copytree(Path(__file__).parent / "fixtures" / "polyglot", fixture)
+    (fixture / "graphify-out").mkdir()
+    shutil.move(str(fixture / "graph.json"), fixture / "graphify-out" / "graph.json")
+    monkeypatch.setattr(server.config, "PROJECT_DIR", fixture)
+    server._GRAPH_CACHE.clear()
+    graph = server._load_graph()
+    nodes, _ = server._nodes_edges(graph)
+    some = next(server._node_id(n) for n in nodes if server._node_label(n).endswith("()"))
+    needs = {"node": some, "node_a": some, "node_b": some, "nodes": [some],
+             "pattern": "a", "query": "parse", "question": "parse"}
+    skip = {"graphlore_build", "graphlore_add", "graphlore_prune", "graphlore_set_labels",
+            "graphlore_label_communities", "graphlore_project", "graphlore_locate",
+            "graphlore_duplication_scan", "graphlore_query", "graphlore_diff",
+            "graphlore_sampling_status"}
+    for name in sorted(server._registered_tool_names() - skip):
+        fn = getattr(server, name)
+        params = inspect.signature(fn).parameters
+        kw = {k: v for k, v in needs.items() if k in params}
+        for as_json in (False, True):
+            out = fn(**kw, as_json=as_json) if "as_json" in params else fn(**kw)
+            assert len(out) <= 35_000, (name, as_json, len(out))
