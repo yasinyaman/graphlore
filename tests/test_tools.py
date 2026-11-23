@@ -2551,6 +2551,61 @@ def test_main_http_allowed_hosts_wires_transport_security(monkeypatch):
     server.main()
     assert seen["host"] == server.HTTP_HOST
     assert seen["transport_security"].allowed_hosts == ["graphify.example.com:*"]
+    assert seen["stateless_http"] is False and seen["json_response"] is False
+
+
+def test_streamable_http_options_env(monkeypatch, capsys):
+    for name in ("STATELESS_HTTP", "JSON_RESPONSE"):
+        monkeypatch.delenv(f"GRAPHLORE_{name}", raising=False)
+        monkeypatch.delenv(f"GRAPHIFY_{name}", raising=False)
+    assert server._streamable_http_options("streamable-http") == (False, False)
+    monkeypatch.setenv("GRAPHLORE_STATELESS_HTTP", "1")
+    assert server._streamable_http_options("streamable-http") == (True, False)
+    monkeypatch.setenv("GRAPHLORE_JSON_RESPONSE", "yes")
+    assert server._streamable_http_options("streamable-http") == (True, True)
+    # SSE takes neither: said once on stderr, then ignored
+    assert server._streamable_http_options("sse") == (False, False)
+    assert "ignored for sse" in capsys.readouterr().err
+
+
+def test_main_http_passes_the_stateless_options(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(server, "TRANSPORT", "streamable-http")
+    monkeypatch.setattr(server, "API_KEY", "")
+    monkeypatch.setattr(server, "HTTP_HOST", "127.0.0.1")
+    monkeypatch.setenv("GRAPHLORE_STATELESS_HTTP", "1")
+    monkeypatch.setattr(server.mcp, "run", lambda **kw: seen.update(kw))
+    server.main()
+    assert seen["transport"] == "streamable-http" and seen["stateless_http"] is True
+
+
+def test_main_http_refuses_a_project_from_the_client(monkeypatch, capsys):
+    import pytest
+
+    monkeypatch.setattr(server, "TRANSPORT", "streamable-http")
+    monkeypatch.setattr(server.config, "project_pending", True)
+    monkeypatch.setattr(server.mcp, "run", lambda **kw: None)
+    with pytest.raises(SystemExit) as exc:
+        server.main()
+    assert exc.value.code == 2
+    assert "GRAPHLORE_PROJECT_DIR" in capsys.readouterr().err
+
+
+def test_stateless_http_answers_a_tool_call_without_a_session(project):
+    """No initialize, no Mcp-Session-Id: a stateless server answers each POST on
+    its own, which is what lets replicas behind a load balancer share traffic."""
+    from starlette.testclient import TestClient
+
+    app = server.mcp.streamable_http_app(host="127.0.0.1", stateless_http=True,
+                                         json_response=True)
+    with TestClient(app, base_url="http://127.0.0.1:8000") as client:
+        reply = client.post("/mcp", headers={"accept": "application/json, text/event-stream"},
+                            json={"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                                  "params": {"name": "graphlore_overview",
+                                             "arguments": {"as_json": True}}})
+    assert reply.status_code == 200 and "mcp-session-id" not in reply.headers
+    result = reply.json()["result"]
+    assert not result.get("isError") and json.loads(result["content"][0]["text"])["nodes"]
 
 
 def test_main_http_no_apikey_nonloopback_warns(monkeypatch, capsys):
@@ -9614,6 +9669,16 @@ def test_every_parameter_has_a_description_and_descriptions_stay_short():
     # what the full surface costs a client's context (~12k tokens); a new tool
     # or a longer description has to fit in it or move the budget on purpose
     assert total <= 52_000, total
+
+
+def test_lean_tools_say_when_to_use_them_and_when_not():
+    # a client that defers tools (Claude Code's tool search) picks one by its
+    # name and description alone: the default surface says what each is for
+    # and what another tool, or grep, does better
+    for t in _listed_tools():
+        if t.name in server.LEAN_TOOLS:
+            assert "Use for:" in t.description, t.name
+            assert "Not for:" in t.description, t.name
 
 
 def test_instructions_stay_under_what_clients_keep():

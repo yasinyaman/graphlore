@@ -112,6 +112,15 @@ Claude Code cuts a tool description and the server instructions at 4,096
 characters (graphlore's stay under 900 and 4,000), warns at 10,000 tokens of
 output and stops at 25,000 (`MAX_MCP_OUTPUT_TOKENS`). Headless:
 `claude -p "<prompt>" --output-format json`.
+
+Claude Code defers MCP tools behind its tool search: until it searches, the
+model sees a tool's name and description only, which is why every `lean`
+tool's description says what it is for and what it is not for. To have
+graphlore's tools loaded from the start instead, set `"alwaysLoad": true` in
+the server's entry of `.mcp.json` (all of a server's tools load then, and
+startup waits up to 5 seconds for them), or turn deferral off for every server
+with `ENABLE_TOOL_SEARCH=false`. The 12 `lean` tools' definitions are about
+17,000 characters (~5k tokens), the 34 of `full` about 50,000.
 Source: [code.claude.com/docs/en/mcp](https://code.claude.com/docs/en/mcp).
 
 ## Claude Desktop

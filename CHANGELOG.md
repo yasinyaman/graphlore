@@ -7,6 +7,14 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **Stateless streamable HTTP** (`GRAPHLORE_STATELESS_HTTP=1`): each request
+  is answered on its own, with no `Mcp-Session-Id`, so replicas behind a load
+  balancer can share the traffic; `GRAPHLORE_JSON_RESPONSE=1` answers with a
+  JSON body instead of an SSE stream. Both are passed to the SDK's
+  streamable-HTTP app on every HTTP path (plain, API key, OAuth) and ignored,
+  with a warning, for `sse`. Over HTTP, `GRAPHLORE_PROJECT_FROM_CLIENT` now
+  stops the server at boot with exit code 2: `graphlore_project` is refused
+  there, so no project could ever be set.
 - **The built-in search's kernel runs in the native engine** (graphlore-engine
   0.5.80, not yet published: `SearchKernel`, `KERNEL_ABI = 1`). When the
   engine is installed, its port of `search.py`'s tokenizer and BM25F loop
@@ -28,6 +36,12 @@ All notable changes to this project are documented here. The format is based on
   release. A published release still starts it as before.
 
 ### Changed
+- **Every `lean` tool's description says what it is for and what it is not
+  for** ("Use for: … Not for: … (use X)"). Claude Code defers MCP tools behind
+  its tool search, where a tool is picked by its name and description alone;
+  the guidance was only in the server instructions. `graphlore_impact`'s and
+  `graphlore_locate`'s descriptions are shorter to make room. `docs/clients.md`
+  says how to load graphlore's tools up front (`"alwaysLoad": true`).
 - **The built-in search index is the default, semble is opt-in.**
   `GRAPHLORE_SEMANTIC_BACKEND` unset (or `auto`) now means graphlore's own
   index whether or not semble is installed; semble answers only with

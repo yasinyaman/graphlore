@@ -124,6 +124,19 @@ reverse proxy in front (nginx/caddy on a public name forwarding to
 `GRAPHLORE_ALLOWED_HOSTS` to the public name(s) (comma-separated, `:*` port
 wildcards allowed; `*` disables the protection for a trusted proxy).
 
+**Stateless HTTP.** By default a streamable-HTTP client opens a session
+(`Mcp-Session-Id`) and every request of it must reach the same process. Set
+`GRAPHLORE_STATELESS_HTTP=1` to answer each request on its own, with no session,
+so several replicas behind a load balancer can share the traffic, as the MCP
+specification's 2026-07-28 revision assumes; `GRAPHLORE_JSON_RESPONSE=1` answers
+with one JSON body instead of an SSE stream. Both are streamable-HTTP options
+(ignored, with a warning, for `sse`). A stateless server has no session to ask
+the client anything, so it reads no workspace roots and cannot sample the
+client's model: `graphlore_label_communities` names communities without it. One
+process serves one project, the one `GRAPHLORE_PROJECT_DIR` names:
+`graphlore_project` is refused over HTTP, and `GRAPHLORE_PROJECT_FROM_CLIENT`
+stops the server at boot.
+
 The CLI is always invoked as an argument list with **no shell** (`subprocess.run`
 with `shell=False`), so a build `path` or query string can't inject shell commands.
 Per-file analyzers (spans/APIs/routes/fetch) are confined to the project
@@ -258,6 +271,8 @@ has the results on 31 repositories and the roadmap.
 | `GRAPHLORE_AUTH_ISSUER` | _(unset)_ | OAuth on HTTP transports: the provider's issuer URL ([OAuth for remote clients](#oauth-for-remote-clients)) |
 | `GRAPHLORE_AUTH_RESOURCE_URL` | _(unset)_ | OAuth: this server's public URL, which a token's `aud` must be |
 | `GRAPHLORE_AUTH_SCOPES` | _(unset)_ | OAuth: scopes every token must carry, comma-separated |
+| `GRAPHLORE_STATELESS_HTTP` | off | `1`: streamable HTTP with no session, each request answered on its own (no roots, no sampling). See [Transport](#transport-stdio-default-optional-http) |
+| `GRAPHLORE_JSON_RESPONSE` | off | `1`: streamable HTTP answers with a JSON body instead of an SSE stream |
 | `GRAPHLORE_ALLOWED_HOSTS` | _(unset)_ | DNS-rebinding `Host` allowlist for HTTP (comma-separated, `:*` port wildcards; `*` disables). Unset = SDK default: loopback-only when bound to loopback |
 | `GRAPHLORE_TOOLSET` | `lean` | `lean` (12 core exploration tools) \| `full` (all 34) \| `locate` (minimal locate-first surface; falls back to `lean` when the configured backend is unavailable). See [Which toolset](#which-toolset) |
 | `GRAPHLORE_TOKENIZER` | _(heuristic)_ | `tiktoken` → exact token counts (needs the `[tiktoken]` extra); else chars/3.5 estimate |
