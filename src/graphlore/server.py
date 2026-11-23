@@ -7122,6 +7122,11 @@ _API_SURFACE_NOTE = (
     "invisible; zero visible symbols means no visibility, not no usage"
 )
 
+# What `graphlore_package_apis(package=...)` answers in at the default `limit`
+# (both the text and the JSON payload): under the 35,000 characters a client
+# keeps, with room for the scope note and the protocol's wrapping.
+_APIS_REPLY_CHARS = 30_000
+
 
 @_tool(annotations=ToolAnnotations(title="External package API surface", read_only_hint=True))
 def graphlore_package_apis(
@@ -7141,7 +7146,8 @@ def graphlore_package_apis(
 
     Args:
         package: One package in detail (files per symbol). Empty -> all packages.
-        limit: Cap on packages listed, or with ``package`` on files per symbol.
+        limit: Cap on packages listed, or with ``package`` on files per symbol
+            and the reply's size (the default keeps it under 35,000 characters).
         scope: Files to read: path prefixes / globs, "!pattern", "-tests",
             "+vendored".
     """
@@ -7192,43 +7198,80 @@ def graphlore_package_apis(
         # lists are shortened together until they fit some 20 per `limit`)
         while cap > 3 and sum(min(len(fs), cap) for fs in every.values()) > wide * 2:
             cap = max(3, cap // 2)
-        per_symbol = {s: fs[:cap] for s, fs in every.items()}
-        cut_symbols = {s: len(fs) for s, fs in every.items() if len(fs) > cap}
+        all_syms = sorted(pkg_syms.get(match, ()))
+        # the symbols most files use keep their file lists, and their names,
+        # longest when the reply has to be cut further
+        by_use = sorted(all_syms, key=lambda s: (-len(every.get(s, ())), s))
         all_files = sorted(pkg_files[match])
         all_paths = sorted(pkg_paths.get(match, ()))
-        payload: dict[str, Any] = {
-            "package": match,
-            "files": all_files[:wide],
-            "file_count": len(all_files),
-            "symbols": sorted(pkg_syms.get(match, ())),
-            "qualified_paths": all_paths[:wide],
-            "symbol_files": per_symbol,
-            "note": _API_SURFACE_NOTE,
-            "scope": view.payload(),
-        }
-        if cut_symbols or len(all_files) > wide or len(all_paths) > wide:
-            payload["truncated"] = True
-            payload["symbol_file_counts"] = cut_symbols
-            payload["files_left_out"] = max(0, len(all_files) - wide)
-            payload["qualified_paths_left_out"] = max(0, len(all_paths) - wide)
-            _cut_hint(payload, "Raise limit for more files per symbol, or narrow with scope= "
-                               "(a directory) to list the files of one part.")
-        lines = [
-            f"{match} — {len(payload['symbols'])} symbol(s) across "
-            f"{len(all_files)} file(s) ({_API_SURFACE_NOTE}):"
-        ]
-        for s, fs in per_symbol.items():
-            more = f" (+{cut_symbols[s] - len(fs)} more)" if s in cut_symbols else ""
-            lines.append(f"  {s}: {', '.join(fs)}{more}")
-        if not per_symbol:
-            lines.append("  no symbols visible (package-level import only)")
-        if payload["qualified_paths"]:
-            left = payload.get("qualified_paths_left_out", 0)
-            lines.append("qualified paths: " + ", ".join(payload["qualified_paths"])
-                         + (f" (+{left} more)" if left else ""))
-        if payload.get("truncated"):
-            lines.append(f"… {payload['hint']}")
-        return _fmt(payload, as_json, _with_note("\n".join(lines), view))
+
+        def build(cap: int, listed: int, wide: int, named: int) -> tuple[dict[str, Any], str]:
+            keep = set(by_use[:listed])
+            per_symbol = {s: fs[:cap] for s, fs in every.items() if s in keep}
+            cut_symbols = {s: len(fs) for s, fs in every.items() if s in keep and len(fs) > cap}
+            names = sorted(by_use[:named])
+            unlisted = [s for s in names if s in every and s not in keep]
+            payload: dict[str, Any] = {
+                "package": match,
+                "files": all_files[:wide],
+                "file_count": len(all_files),
+                "symbols": names,
+                "qualified_paths": all_paths[:wide],
+                "symbol_files": per_symbol,
+                "note": _API_SURFACE_NOTE,
+                "scope": view.payload(),
+            }
+            files_out = len(every) - len(per_symbol)
+            if (cut_symbols or files_out or len(names) < len(all_syms)
+                    or len(all_files) > wide or len(all_paths) > wide):
+                payload["truncated"] = True
+                payload["symbol_file_counts"] = cut_symbols
+                payload["symbol_files_left_out"] = files_out
+                payload["symbols_left_out"] = len(all_syms) - len(names)
+                payload["files_left_out"] = max(0, len(all_files) - wide)
+                payload["qualified_paths_left_out"] = max(0, len(all_paths) - wide)
+                _cut_hint(payload, "Raise limit for more symbols and files per symbol, or "
+                                   "narrow with scope= (a directory) to list the files of "
+                                   "one part.")
+            lines = [
+                f"{match} — {len(all_syms)} symbol(s) across "
+                f"{len(all_files)} file(s) ({_API_SURFACE_NOTE}):"
+            ]
+            for s, fs in per_symbol.items():
+                more = f" (+{cut_symbols[s] - len(fs)} more)" if s in cut_symbols else ""
+                lines.append(f"  {s}: {', '.join(fs)}{more}")
+            if unlisted:
+                lines.append(f"  {len(unlisted)} more symbol(s), files not listed: "
+                             + ", ".join(unlisted))
+            if len(names) < len(all_syms):
+                lines.append(f"  (+{len(all_syms) - len(names)} more symbol(s))")
+            if not all_syms:
+                lines.append("  no symbols visible (package-level import only)")
+            if payload["qualified_paths"]:
+                left = payload.get("qualified_paths_left_out", 0)
+                lines.append("qualified paths: " + ", ".join(payload["qualified_paths"])
+                             + (f" (+{left} more)" if left else ""))
+            if payload.get("truncated"):
+                lines.append(f"… {payload['hint']}")
+            return payload, _with_note("\n".join(lines), view)
+
+        # Hundreds of symbols, 3 files each, are still a book (zod's own name in
+        # its repository; `java.util` in a Java one): the reply is measured, in
+        # both forms, and cut further until it fits — the file lists first, then
+        # which symbols have one, the file and path lists, the names last.
+        budget = _APIS_REPLY_CHARS * max(limit, 20) // 20
+        floor = max(1, limit)
+        knobs = {"cap": cap, "listed": len(by_use), "wide": wide, "named": len(by_use)}
+        floors = {"cap": 3, "listed": 0, "wide": floor, "named": floor}
+        while True:
+            payload, text = build(**knobs)
+            if max(len(text), len(json.dumps(payload, ensure_ascii=False))) <= budget:
+                break
+            knob = next((k for k in knobs if knobs[k] > floors[k]), None)
+            if knob is None:
+                break
+            knobs[knob] = max(floors[knob], knobs[knob] // 2)
+        return _fmt(payload, as_json, text)
 
     ranked = sorted(
         pkg_files,
