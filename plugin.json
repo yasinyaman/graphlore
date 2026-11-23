@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "graphlore",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Navigate a codebase through its knowledge graph instead of grepping: an MCP server (semantic locate, impact analysis, token-budgeted subgraphs, exact source spans) plus an exploration skill. The graph is built by its own Rust engine, in 14 languages.",
   "author": {
     "name": "yasinyaman",

@@ -1,6 +1,6 @@
 {
   "name": "graphlore",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Navigate a codebase through its knowledge graph: semantic locate, impact analysis, token-budgeted subgraphs and exact source spans, in 14 languages.",
   "mcpServers": {
     "graphlore": {

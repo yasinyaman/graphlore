@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-23
+
 ### Fixed
 - **`graphlore_unreferenced` no longer lists googletest cases as dead code
   on native graphs.** Since engine 0.5.76 a `TEST(Suite, Name)` /
@@ -113,6 +115,8 @@ All notable changes to this project are documented here. The format is based on
   failed on it before this change too.
 
 ### Changed
+- **The `engine` extra needs `graphlore-engine` 0.5.79** (`>=0.5.79,<0.6`), the
+  first engine release on PyPI: graph.json schema 7, with `documents` edges.
 - **The documentation describes the native engine as the default.** The
   agent instructions, the exploration skill, `docs/concepts.md`,
   `docs/native-engine.md` (its introduction and the roadmap's release A, now
