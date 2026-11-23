@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+- **`publish.yml` can be run by hand** (`workflow_dispatch`): it uploads the
+  `pyproject.toml` version to PyPI, then creates the `v<version>` tag and
+  release. A published release still starts it as before.
+
 ## [0.7.0] - 2026-11-23
 
 ### Fixed
