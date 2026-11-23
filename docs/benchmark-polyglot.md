@@ -465,9 +465,11 @@ raised that is not the orphan-node note:
   - `SKELETON-HEADER-NO-NAME`, commandline: a test method under twenty
     `[InlineData(…)]` lines. `graphlore_skeleton` looked twelve lines below
     the first line of a definition for its name; it looks forty.
-- **Three are left.** `REPLY-TOO-LARGE`: `graphlore_package_apis(package="zod")`
-  in zod's own repository is 136 KB, every use of the package in 520 files,
-  with no cut. `TEST-PATH-MISSED` for swift-argument-parser
+- **Three were left.** `REPLY-TOO-LARGE`: `graphlore_package_apis(package="zod")`
+  in zod's own repository was 136 KB, every use of the package in 520 files,
+  with no cut (fixed: 0.7.0 cut each symbol's file list, and the reply is now
+  measured and cut until it fits 35,000 characters — 25 KB as JSON on engine
+  0.5.79, with gson's `java.util` at 30 KB). `TEST-PATH-MISSED` for swift-argument-parser
   (`Sources/ArgumentParserTestHelpers/`, a library of test helpers no path
   rule names) and for zod (`packages/bench/memory/`, where `.describe()` is
   zod's own method and the audit's marker for a test: the audit's mistake).

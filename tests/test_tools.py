@@ -3624,6 +3624,42 @@ def test_package_apis_detail_cuts_long_file_lists_and_says_so(tmp_path, monkeypa
     assert "truncated" not in whole and len(whole["symbol_files"]["Depends"]) == 40
 
 
+def test_package_apis_detail_fits_the_reply_budget(tmp_path, monkeypatch):
+    """Hundreds of symbols, three files each, were still a book (zod's own name
+    in its repository: 43 KB): the reply is measured and cut until both forms
+    fit under the 35,000 characters a client keeps, the most used symbols
+    keeping their file lists."""
+    src = tmp_path / "packages" / "core" / "src" / "v4" / "classic" / "tests"
+    src.mkdir(parents=True)
+    nodes = []
+    for i in range(150):
+        names = [f"s{k:03}" for k in range(20)]                       # in every file
+        names += [f"s{20 + (i * 40 + k) % 380:03}" for k in range(40)]  # spread over the rest
+        rel = f"packages/core/src/v4/classic/tests/some_rather_long_module_name_{i:03}.py"
+        (tmp_path / rel).write_text(f"from bigpkg import {', '.join(names)}\n", encoding="utf-8")
+        nodes.append({"id": f"n{i}", "label": f"n{i}", "file": rel, "line": 1})
+    _write_graph(tmp_path, {"nodes": nodes, "edges": []})
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    server._API_CACHE.clear()
+    server._GRAPH_CACHE.clear()
+
+    out = server.graphlore_package_apis(package="bigpkg", as_json=True)
+    text = server.graphlore_package_apis(package="bigpkg")
+    assert len(out) <= 35_000 and len(text) <= 35_000, (len(out), len(text))
+    data = json.loads(out)
+    assert data["truncated"] is True and "limit" in data["hint"]
+    assert len(data["symbols"]) == 400 and data["symbols_left_out"] == 0
+    listed = set(data["symbol_files"])
+    assert data["symbol_files_left_out"] == 400 - len(listed) > 0
+    assert {f"s{k:03}" for k in range(20)} <= listed      # the most used come first
+    assert all(len(fs) <= 3 for fs in data["symbol_files"].values())
+    assert data["file_count"] == 150
+    assert "more symbol(s), files not listed: " in text and "limit" in text
+    # a larger limit is a larger budget, and lists more
+    more = json.loads(server.graphlore_package_apis(package="bigpkg", limit=200, as_json=True))
+    assert len(more["symbol_files"]) > len(listed)
+
+
 def test_package_apis_unknown_package_lists_known(tmp_path, monkeypatch):
     _api_project(tmp_path, monkeypatch)
     out = server.graphlore_package_apis(package="django")
