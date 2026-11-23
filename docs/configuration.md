@@ -118,6 +118,32 @@ GRAPHLORE_TRANSPORT=streamable-http GRAPHLORE_HOST=0.0.0.0 GRAPHLORE_API_KEY=$(o
   GRAPHLORE_PROJECT_DIR=/path/to/repo graphlore
 ```
 
+### OAuth for remote clients
+
+Remote MCP clients — claude.ai and ChatGPT connectors, Claude Code or Codex
+over HTTP — sign in with OAuth, as the MCP specification describes. graphlore
+is the resource server: it checks the tokens your own OAuth / OpenID provider
+issues (Auth0, Keycloak, Entra ID, Okta, Google…) and issues none itself; the
+clients register with the provider. Install the `remote` extra and set:
+
+```bash
+GRAPHLORE_TRANSPORT=streamable-http GRAPHLORE_HOST=0.0.0.0 \
+  GRAPHLORE_AUTH_ISSUER=https://your-tenant.example.com \
+  GRAPHLORE_AUTH_RESOURCE_URL=https://graphlore.example.com/mcp \
+  GRAPHLORE_AUTH_SCOPES=graphlore.read \
+  GRAPHLORE_PROJECT_DIR=/path/to/repo graphlore
+```
+
+graphlore then publishes `/.well-known/oauth-protected-resource/<path>`
+(RFC 9728: the resource and its authorization server), answers a request
+without a valid token with 401 and `WWW-Authenticate: Bearer
+resource_metadata=…`, and one whose token lacks a required scope with 403. A
+token is valid when the provider signed it (keys found by RFC 8414 or OpenID
+discovery, asymmetric algorithms only), its `iss` is the issuer, its `aud` is
+`GRAPHLORE_AUTH_RESOURCE_URL` exactly and it has not expired. Both URLs must be
+`https` (or localhost). OAuth and `GRAPHLORE_API_KEY` exclude each other, and
+`GRAPHLORE_OFFLINE` refuses OAuth (the keys come from the provider).
+
 ## What reaches the network, and when
 
 The graph.json analysis tools read local files only, and so does the built-in
@@ -135,6 +161,7 @@ search index's BM25 tier. These are the exceptions:
 | Native engine (`graphlore-engine`, the `engine` extra) | Never: its grammars are compiled into the wheel and a build reads local files only | Unchanged |
 | A custom `GRAPHLORE_SEMANTIC_BACKEND` | Whatever that code does | **Not constrained** — graphlore cannot see inside it |
 | HTTP transports | Inbound only (the server listens) | Unchanged |
+| OAuth on HTTP (`GRAPHLORE_AUTH_ISSUER`, the `remote` extra) | At the first token: the provider's metadata (RFC 8414 / OpenID discovery) and its signing keys (JWKS), then the keys again when they change (cached an hour) | Refused at start-up: the server exits with the reason |
 
 What graphlore enforces is its own side: it refuses the calls above, strips the
 `*_API_KEY` variables it knows (`GEMINI_API_KEY`, `OPENAI_API_KEY`,
@@ -208,6 +235,9 @@ has the results on 31 repositories and the roadmap.
 | `GRAPHLORE_HOST` | `127.0.0.1` | Bind host for HTTP transports |
 | `GRAPHLORE_PORT` | `8000` | Bind port for HTTP transports |
 | `GRAPHLORE_API_KEY` | _(unset)_ | Require `Authorization: Bearer <key>` on HTTP transports |
+| `GRAPHLORE_AUTH_ISSUER` | _(unset)_ | OAuth on HTTP transports: the provider's issuer URL ([OAuth for remote clients](#oauth-for-remote-clients)) |
+| `GRAPHLORE_AUTH_RESOURCE_URL` | _(unset)_ | OAuth: this server's public URL, which a token's `aud` must be |
+| `GRAPHLORE_AUTH_SCOPES` | _(unset)_ | OAuth: scopes every token must carry, comma-separated |
 | `GRAPHLORE_ALLOWED_HOSTS` | _(unset)_ | DNS-rebinding `Host` allowlist for HTTP (comma-separated, `:*` port wildcards; `*` disables). Unset = SDK default: loopback-only when bound to loopback |
 | `GRAPHLORE_TOOLSET` | `lean` | `lean` (12 core exploration tools) \| `full` (all 34) \| `locate` (minimal locate-first surface; falls back to `lean` when the configured backend is unavailable). See [Which toolset](#which-toolset) |
 | `GRAPHLORE_TOKENIZER` | _(heuristic)_ | `tiktoken` → exact token counts (needs the `[tiktoken]` extra); else chars/3.5 estimate |

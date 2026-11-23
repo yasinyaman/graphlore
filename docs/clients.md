@@ -184,6 +184,18 @@ environment, so add `GRAPHLORE_PROJECT_DIR` to the entry); the extension's
 file opens from its MCP panel (Configure MCP Servers). Cline reads `AGENTS.md`.
 Source: [docs.cline.bot/mcp](https://docs.cline.bot/mcp/mcp-overview).
 
+## Remote clients
+
+claude.ai's custom connectors and ChatGPT's connectors reach graphlore over
+HTTPS (`GRAPHLORE_TRANSPORT=streamable-http` behind a public name) and sign in
+with OAuth: set `GRAPHLORE_AUTH_ISSUER` and `GRAPHLORE_AUTH_RESOURCE_URL` as
+[configuration](configuration.md#oauth-for-remote-clients) says, and register
+the connector with your provider (claude.ai's callback is
+`https://claude.ai/api/mcp/auth_callback`; both clients use a Client ID
+Metadata Document or dynamic registration). claude.ai takes only the first
+authorization server graphlore names, and the resource must equal the server's
+URL exactly.
+
 ## Limits graphlore keeps
 
 Every tool description is at most 900 characters, every parameter has its own
