@@ -891,34 +891,37 @@ file pairs). The native graph has definitions graphify folds into the one
 around them (a function nested in a method, the setter beside a getter of the
 same name); an edge from one of those is compared as an edge from the paired
 definition it belongs to, as graphify records it. On the 31 repositories of the
-[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.62,
-measured 2026-11-21), as native / graphify edges and the share of graphify's
+[polyglot audit](benchmark-polyglot.md) (graphify 0.9.111, engine 0.5.79,
+measured 2026-11-23), as native / graphify edges and the share of graphify's
 that the native graph has too:
 
 | Language | same definition | imports (file pairs) | calls | bases | type references |
 |---|--:|--:|--:|--:|--:|
-| Python | 100% | 212 / 219 (96%) | 2,976 / 834 (94%) | 73 / 62 (100%) | 546 / 494 (93%) |
-| JavaScript | 93.5% | 250 / 305 (59%) | 1,047 / 2,058 (37%) | 1 / 1 (100%) | 99 / 0 |
-| TypeScript | 99.4% | 527 / 634 (83%) | 793 / 687 (98%) | 25 / 20 (100%) | 1,093 / 156 (94%) |
+| Python | 100% | 212 / 219 (96%) | 3,004 / 834 (95%) | 73 / 62 (100%) | 917 / 494 (97%) |
+| JavaScript | 93.5% | 250 / 305 (59%) | 1,050 / 2,058 (38%) | 1 / 1 (100%) | 104 / 0 |
+| TypeScript | 99.4% | 527 / 634 (83%) | 790 / 687 (98%) | 25 / 20 (100%) | 1,163 / 156 (94%) |
 | TSX | 99.7% | 253 / 316 (80%) | 435 / 456 (95%) | – | 51 / 4 (100%) |
-| Go | 100% | 538 / 950 (47%) | 6,769 / 3,167 (100%) | 19 / 14 (100%) | 914 / 355 (100%) |
-| Java | 100% | 1,112 / 1,010 (100%) | 5,760 / 5,123 (85%) | 415 / 168 (94%) | 4,245 / 1,930 (98%) |
-| Kotlin | 99.4% | 368 / 333 (95%) | 4,616 / 2,108 (68%) | 96 / 56 (93%) | 1,466 / 673 (94%) |
-| Scala | 100% | 2 / 0 | 77 / 20 (50%) | 21 / 22 (95%) | 48 / 32 (100%) |
-| C# | 92.9% | 338 / 280 (29%) | 3,472 / 2,467 (97%) | 92 / 86 (99%) | 1,667 / 929 (96%) |
-| Rust | 93.3% | 314 / 370 (75%) | 2,101 / 853 (86%) | 53 / 41 (93%) | 1,621 / 895 (88%) |
-| Swift | 95.9% | 174 / 166 (0%) | 5,615 / 2,141 (83%) | 190 / 164 (100%) | 1,751 / 580 (79%) |
-| C | 100% | 89 / 77 (99%) | 864 / 791 (100%) | – | 439 / 130 (100%) |
-| C++ | 98.7% | 215 / 228 (93%) | 987 / 281 (57%) | 30 / 5 (100%) | 698 / 234 (93%) |
-| C/C++ headers | 91.4% | 164 / 172 (95%) | 426 / 348 (87%) | 12 / 12 (92%) | 816 / 312 (89%) |
-| Ruby | 99.7% | 42 / 0 | 455 / 375 (69%) | 47 / 15 (93%) | 71 / 0 |
-| PHP | 80.6% | 509 / 505 (100%) | 8,936 / 6,140 (90%) | 65 / 60 (98%) | 1,610 / 213 (100%) |
-| **All** | **94.4%** | **5,107 / 5,565 (76%)** | **45,329 / 27,849 (85%)** | **1,139 / 726 (97%)** | **17,135 / 6,937 (94%)** |
+| Go | 100% | 538 / 950 (47%) | 6,770 / 3,167 (100%) | 19 / 14 (100%) | 914 / 355 (100%) |
+| Java | 100% | 1,112 / 1,010 (100%) | 5,766 / 5,123 (85%) | 415 / 168 (94%) | 4,243 / 1,930 (98%) |
+| Kotlin | 99.4% | 368 / 333 (95%) | 4,619 / 2,108 (68%) | 96 / 56 (93%) | 1,466 / 673 (94%) |
+| Scala | 100% | 2 / 0 | 83 / 20 (50%) | 21 / 22 (95%) | 48 / 32 (100%) |
+| C# | 93.2% | 338 / 280 (29%) | 3,639 / 2,468 (97%) | 92 / 86 (99%) | 1,704 / 944 (96%) |
+| Rust | 93.3% | 314 / 370 (75%) | 2,103 / 853 (86%) | 53 / 41 (93%) | 1,626 / 895 (88%) |
+| Swift | 96.6% | 174 / 166 (0%) | 5,616 / 2,141 (83%) | 190 / 164 (100%) | 1,855 / 581 (79%) |
+| C | 100% | 89 / 77 (99%) | 864 / 791 (100%) | – | 452 / 142 (100%) |
+| C++ | 92.2% | 215 / 228 (93%) | 424 / 254 (52%) | 30 / 5 (100%) | 461 / 228 (93%) |
+| C/C++ headers | 91.9% | 164 / 172 (95%) | 426 / 348 (87%) | 12 / 12 (92%) | 824 / 318 (89%) |
+| Ruby | 99.7% | 42 / 0 | 456 / 375 (69%) | 47 / 15 (93%) | 71 / 0 |
+| PHP | 80.6% | 509 / 505 (100%) | 8,900 / 6,140 (90%) | 65 / 60 (98%) | 1,482 / 213 (100%) |
+| **All** | **94.4%** | **5,107 / 5,565 (76%)** | **44,945 / 27,823 (85%)** | **1,139 / 726 (97%)** | **17,381 / 6,965 (94%)** |
 
-⁶ Swift's type references are engine 0.5.44's, which reads the type of a
-stored property (62% before; see [the second set](#a-second-set-of-repositories)).
+The C++ row fell with engine 0.5.76 (it was 98.7% of the definitions and 57%
+of the calls with 0.5.62): a googletest `TEST(Suite, Name)` is the method
+`Suite.Name` now, which pairs with none of graphify's `TEST()` definitions
+(36 of the 43 cpr definitions left unpaired), and the calls from those tests
+are compared as calls of no paired definition.
 
-Of the native calls, 13,000 (29%) are `INFERRED`, against 47% of graphify's.
+Of the native calls, 12,600 (28%) are `INFERRED`, against 47% of graphify's.
 A type reference counts as found when the native graph states it another way:
 graphify writes a type a method uses on the method's *class* and a
 construction as a `uses` edge, the native graph an edge from the method and a
@@ -2317,6 +2320,18 @@ unreferenced. The first run of the day found 112 googletest cases in cpr's
 `graphlore_unreferenced`: since engine 0.5.76 names `TEST_F(Fixture, Name)`
 `Fixture.Name`, the rule that skipped a test named `TEST` no longer matched.
 A test file's definition written as a test macro is skipped now.
+
+Rerun the same day on all 45 repositories (graphlore 0.7.0, engine 0.5.79,
+semble 0.7.3; 120 s of tool time for the first set and 94 s for the second,
+builds left out, on a 4-core machine): the first set raises only the
+orphan-node note and `SLOW` builds of retrofit (9.5 s) and Alamofire (5.6 s);
+guzzle's data provider is listed on graphify's graph only. The second set
+raises, besides the note, what [its section](benchmark-polyglot.md#a-second-set-14-more-repositories)
+leaves open (`graphlore_package_apis(package="zod")` in zod's own repository,
+43 KB now instead of 136 KB but still over the limit; the two
+`TEST-PATH-MISSED`), and two more: `graphlore_package_apis(package="java.util")`
+on gson at 35 KB, and ripgrep's `macro_rules! debug`, whose span is named
+`debug!` since engine 0.5.75 while the skeleton's header writes `debug`.
 
 An earlier version of this page reported a rerun "with engine 0.5.2" that had
 in fact read graphs engine 0.5.1 built: the audit kept a native graph it found

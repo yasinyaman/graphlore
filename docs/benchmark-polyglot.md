@@ -476,6 +476,27 @@ raised that is not the orphan-node note:
   rule names) and for zod (`packages/bench/memory/`, where `.describe()` is
   zod's own method and the audit's marker for a test: the audit's mistake).
 
+Rerun on 2026-11-23 with graphlore 0.7.0, graphify 0.9.111, graphlore-engine
+0.5.79 and semble 0.7.3 (the semantic tools ran): on graphify's graphs the
+first set raises 59 findings (26 of them the orphan-node note), 4 new against
+the baseline and 5 gone. Gone: express's routes (`ROUTES-SILENT-EMPTY`), the
+`SLOW` builds of got, guzzle and restsharp, ureq's `TEST-PATH-MISSED`. New, and
+none of them graphlore's answers being wrong:
+
+- `BUILD-SMALL-GRAPH` on aspnetcore-realworld and symfony-demo: with the
+  engine installed, `graphlore_build` builds natively, and the check counts
+  graphify's external and namespace nodes as code (on aspnetcore the two
+  engines have 532 and 492 definitions, 84% the same);
+- `FETCH-SHADOW-SPAN` on 29 of cpr's googletest cases: graphify's node is
+  `TEST()`, the span is named `Suite.Name` since 0.7.0, and it is the body the
+  node stands for;
+- `SLOW` for httpx's `graphlore_duplication_scan` (436 s), semble retrying a
+  model download this machine's network refused.
+
+`benchmarks/results-polyglot.json` is left as it was: these are the audit's
+own checks and this machine's network, not changes to keep. The native graphs
+of both sets are in [native-engine.md](native-engine.md#the-polyglot-audit-on-native-graphs).
+
 What the second set found in the native engine itself — its spans, its
 namespaces, its macros — is in [native-engine.md](native-engine.md#a-second-set-of-repositories).
 

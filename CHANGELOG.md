@@ -39,6 +39,21 @@ All notable changes to this project are documented here. The format is based on
   engine's rules moved to `engine/AGENTS.md`, which Codex reads when it works
   under `engine/`; `.claude/CLAUDE.md` and `GEMINI.md` import both, and
   `.github/copilot-instructions.md` and `CONTRIBUTING.md` list every module.
+- **The benchmarks were measured again with 0.7.0 and engine 0.5.79**
+  (2026-11-23):
+  - search on semble's 1,251 queries: the same rankings (BM25 NDCG@10 0.813,
+    hybrid 0.810, semble 0.852), a built-in index a third faster to build
+    (median 443 ms, from 630; `benchmarks/results-search.json`);
+  - the cross-language `locate` table, now on native-engine graphs: 76–96% of
+    semantic hits inside the resolved symbol's span, 154–614× fewer tokens
+    than grep + read (`benchmarks/results-multilang.json`, the SVG and both
+    HTML reports);
+  - `docs/native-engine.md`'s comparison with graphify on 31 repositories
+    (94.4% of the definitions, 85% of the calls; C++ lower since 0.5.76 named
+    googletest cases `Suite.Name`), and the polyglot audit on both engines'
+    graphs of all 45 repositories;
+  - the 666 name-resolution cases all hold (`docs/resolution-rules.md`,
+    unchanged but for the engine version).
 
 ## [0.7.0] - 2026-11-23
 

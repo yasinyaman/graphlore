@@ -5,42 +5,42 @@
    "bm25": {
     "language": "cpp",
     "queries": 20,
-    "ndcg10": 0.7649,
+    "ndcg10": 0.7752968226739916,
     "recall10": 0.925,
-    "index_ms": 13608.3,
-    "query_p50_ms": 18.165,
+    "index_ms": 11512.6,
+    "query_p50_ms": 18.67,
     "by_category": {
-     "architecture": 0.8155,
-     "semantic": 0.7111,
+     "architecture": 0.8154648767857288,
+     "semantic": 0.7250004466605583,
      "symbol": 1.0
     },
-    "chunks": 24851
+    "chunks": 27171
    },
    "hybrid": {
     "language": "cpp",
     "queries": 20,
-    "ndcg10": 0.905,
+    "ndcg10": 0.9239651592918066,
     "recall10": 1.0,
-    "index_ms": 16048.1,
-    "query_p50_ms": 20.624,
+    "index_ms": 14282.0,
+    "query_p50_ms": 29.437,
     "by_category": {
-     "architecture": 0.8155,
-     "semantic": 0.8979,
+     "architecture": 0.8154648767857288,
+     "semantic": 0.9232248954843115,
      "symbol": 1.0
     },
-    "chunks": 24851
+    "chunks": 27171
    },
    "semble": {
     "language": "cpp",
     "queries": 20,
-    "ndcg10": 0.88,
+    "ndcg10": 0.8799670676678575,
     "recall10": 1.0,
-    "index_ms": 12797.3,
-    "query_p50_ms": 4.064,
+    "index_ms": 12838.6,
+    "query_p50_ms": 3.824,
     "by_category": {
      "architecture": 1.0,
-     "semantic": 0.8733,
-     "symbol": 0.8333
+     "semantic": 0.8732894235571432,
+     "symbol": 0.8333333333333334
     }
    }
   },
@@ -48,39 +48,39 @@
    "bm25": {
     "language": "haskell",
     "queries": 20,
-    "ndcg10": 0.8254,
+    "ndcg10": 0.825400047100102,
     "recall10": 0.95,
-    "index_ms": 987.5,
-    "query_p50_ms": 1.508,
+    "index_ms": 721.5,
+    "query_p50_ms": 1.399,
     "by_category": {
-     "architecture": 0.6893,
-     "semantic": 0.8708
+     "architecture": 0.6892789260714373,
+     "semantic": 0.8707737541096566
     },
     "chunks": 1841
    },
    "hybrid": {
     "language": "haskell",
     "queries": 20,
-    "ndcg10": 0.8771,
+    "ndcg10": 0.8770936627802964,
     "recall10": 0.975,
-    "index_ms": 1114.4,
-    "query_p50_ms": 1.883,
+    "index_ms": 710.1,
+    "query_p50_ms": 3.994,
     "by_category": {
-     "architecture": 0.8123,
-     "semantic": 0.8987
+     "architecture": 0.8123212623289702,
+     "semantic": 0.8986844629307386
     },
     "chunks": 1841
    },
    "semble": {
     "language": "haskell",
     "queries": 20,
-    "ndcg10": 0.7683,
+    "ndcg10": 0.768292886614028,
     "recall10": 0.975,
-    "index_ms": 574.2,
-    "query_p50_ms": 6.332,
+    "index_ms": 801.4,
+    "query_p50_ms": 5.705,
     "by_category": {
-     "architecture": 0.6297,
-     "semantic": 0.8145
+     "architecture": 0.6297424628754913,
+     "semantic": 0.81447636119354
     }
    }
   },
@@ -88,13 +88,13 @@
    "bm25": {
     "language": "python",
     "queries": 21,
-    "ndcg10": 0.9145,
-    "recall10": 0.9762,
-    "index_ms": 554.9,
-    "query_p50_ms": 0.956,
+    "ndcg10": 0.9144517216822299,
+    "recall10": 0.9761904761904762,
+    "index_ms": 388.4,
+    "query_p50_ms": 0.704,
     "by_category": {
-     "architecture": 0.8988,
-     "semantic": 0.8791,
+     "architecture": 0.8988074735559133,
+     "semantic": 0.8790926489372706,
      "symbol": 1.0
     },
     "chunks": 1955
@@ -102,13 +102,13 @@
    "hybrid": {
     "language": "python",
     "queries": 21,
-    "ndcg10": 0.8429,
-    "recall10": 0.9762,
-    "index_ms": 1020.1,
-    "query_p50_ms": 1.132,
+    "ndcg10": 0.8429463344098642,
+    "recall10": 0.9761904761904762,
+    "index_ms": 1000.5,
+    "query_p50_ms": 1.516,
     "by_category": {
-     "architecture": 0.8834,
-     "semantic": 0.7242,
+     "architecture": 0.8833984159601113,
+     "semantic": 0.7242315678762634,
      "symbol": 1.0
     },
     "chunks": 1955
@@ -116,13 +116,13 @@
    "semble": {
     "language": "python",
     "queries": 21,
-    "ndcg10": 0.8551,
-    "recall10": 0.9524,
-    "index_ms": 759.2,
-    "query_p50_ms": 1.819,
+    "ndcg10": 0.8550948458996863,
+    "recall10": 0.9523809523809523,
+    "index_ms": 840.0,
+    "query_p50_ms": 1.753,
     "by_category": {
-     "architecture": 0.8634,
-     "semantic": 0.7681,
+     "architecture": 0.8634033929769788,
+     "semantic": 0.7681297792282846,
      "symbol": 1.0
     }
    }
@@ -131,41 +131,41 @@
    "bm25": {
     "language": "swift",
     "queries": 20,
-    "ndcg10": 0.9215,
+    "ndcg10": 0.9214592067543205,
     "recall10": 1.0,
-    "index_ms": 609.7,
-    "query_p50_ms": 1.07,
+    "index_ms": 295.5,
+    "query_p50_ms": 0.894,
     "by_category": {
-     "architecture": 0.8569,
-     "semantic": 0.8962,
+     "architecture": 0.8568805729851068,
+     "semantic": 0.8962311287391898,
      "symbol": 1.0
     },
-    "chunks": 1518
+    "chunks": 1525
    },
    "hybrid": {
     "language": "swift",
     "queries": 20,
-    "ndcg10": 0.911,
+    "ndcg10": 0.9109677016666389,
     "recall10": 1.0,
-    "index_ms": 1239.0,
-    "query_p50_ms": 1.502,
+    "index_ms": 810.8,
+    "query_p50_ms": 1.538,
     "by_category": {
-     "architecture": 0.7339,
-     "semantic": 0.9107,
+     "architecture": 0.7338571575089259,
+     "semantic": 0.9107075055278181,
      "symbol": 1.0
     },
-    "chunks": 1518
+    "chunks": 1525
    },
    "semble": {
     "language": "swift",
     "queries": 20,
-    "ndcg10": 0.9775,
+    "ndcg10": 0.9775325271359823,
     "recall10": 1.0,
-    "index_ms": 734.4,
-    "query_p50_ms": 2.117,
+    "index_ms": 640.4,
+    "query_p50_ms": 1.845,
     "by_category": {
      "architecture": 1.0,
-     "semantic": 0.9592,
+     "semantic": 0.9591500493381495,
      "symbol": 1.0
     }
    }
@@ -174,13 +174,13 @@
    "bm25": {
     "language": "javascript",
     "queries": 20,
-    "ndcg10": 0.8491,
+    "ndcg10": 0.8491296468067462,
     "recall10": 1.0,
-    "index_ms": 206.6,
-    "query_p50_ms": 0.493,
+    "index_ms": 100.1,
+    "query_p50_ms": 0.44,
     "by_category": {
-     "architecture": 0.7175,
-     "semantic": 0.8217,
+     "architecture": 0.7175190119981754,
+     "semantic": 0.821666430682672,
      "symbol": 1.0
     },
     "chunks": 388
@@ -188,13 +188,13 @@
    "hybrid": {
     "language": "javascript",
     "queries": 20,
-    "ndcg10": 0.9342,
+    "ndcg10": 0.9341590520502334,
     "recall10": 1.0,
-    "index_ms": 271.4,
-    "query_p50_ms": 0.7,
+    "index_ms": 182.1,
+    "query_p50_ms": 0.692,
     "by_category": {
-     "architecture": 0.7666,
-     "semantic": 0.9834,
+     "architecture": 0.7665672270939827,
+     "semantic": 0.9833716561705282,
      "symbol": 1.0
     },
     "chunks": 388
@@ -202,13 +202,13 @@
    "semble": {
     "language": "javascript",
     "queries": 20,
-    "ndcg10": 0.8666,
+    "ndcg10": 0.866577731479181,
     "recall10": 0.95,
-    "index_ms": 184.0,
-    "query_p50_ms": 1.929,
+    "index_ms": 160.7,
+    "query_p50_ms": 1.834,
     "by_category": {
-     "architecture": 0.6276,
-     "semantic": 0.9104,
+     "architecture": 0.6276256451932702,
+     "semantic": 0.91038071151303,
      "symbol": 1.0
     }
    }
@@ -217,42 +217,42 @@
    "bm25": {
     "language": "rust",
     "queries": 20,
-    "ndcg10": 0.7354,
+    "ndcg10": 0.7365098467511022,
     "recall10": 0.85,
-    "index_ms": 620.1,
-    "query_p50_ms": 1.086,
+    "index_ms": 326.5,
+    "query_p50_ms": 0.951,
     "by_category": {
-     "architecture": 0.6712,
-     "semantic": 0.7793,
-     "symbol": 0.6667
+     "architecture": 0.6712414374216045,
+     "semantic": 0.7811658123261686,
+     "symbol": 0.6666666666666666
     },
-    "chunks": 1659
+    "chunks": 1668
    },
    "hybrid": {
     "language": "rust",
     "queries": 20,
-    "ndcg10": 0.7806,
+    "ndcg10": 0.7806265322552827,
     "recall10": 0.9,
-    "index_ms": 1119.8,
-    "query_p50_ms": 1.584,
+    "index_ms": 845.9,
+    "query_p50_ms": 1.898,
     "by_category": {
-     "architecture": 0.7102,
-     "semantic": 0.8385,
-     "symbol": 0.6667
+     "architecture": 0.7101848666921606,
+     "semantic": 0.8384671926370708,
+     "symbol": 0.6666666666666666
     },
-    "chunks": 1659
+    "chunks": 1668
    },
    "semble": {
     "language": "rust",
     "queries": 20,
-    "ndcg10": 0.8151,
+    "ndcg10": 0.8151300908732605,
     "recall10": 0.95,
-    "index_ms": 641.5,
-    "query_p50_ms": 2.278,
+    "index_ms": 610.7,
+    "query_p50_ms": 2.517,
     "by_category": {
      "architecture": 0.8,
-     "semantic": 0.8289,
-     "symbol": 0.7854
+     "semantic": 0.8288662191964322,
+     "symbol": 0.7854023957026741
     }
    }
   },
@@ -260,42 +260,42 @@
    "bm25": {
     "language": "bash",
     "queries": 20,
-    "ndcg10": 0.6235,
+    "ndcg10": 0.6235205952716565,
     "recall10": 0.775,
-    "index_ms": 928.2,
-    "query_p50_ms": 0.993,
+    "index_ms": 522.3,
+    "query_p50_ms": 0.911,
     "by_category": {
-     "architecture": 0.6934,
-     "semantic": 0.5921,
-     "symbol": 0.6774
+     "architecture": 0.6934264036172708,
+     "semantic": 0.5920543300741574,
+     "symbol": 0.6773705614469083
     },
     "chunks": 1326
    },
    "hybrid": {
     "language": "bash",
     "queries": 20,
-    "ndcg10": 0.7238,
+    "ndcg10": 0.723798547465998,
     "recall10": 0.85,
-    "index_ms": 1388.8,
-    "query_p50_ms": 2.143,
+    "index_ms": 958.4,
+    "query_p50_ms": 1.546,
     "by_category": {
-     "architecture": 0.8155,
-     "semantic": 0.6831,
-     "symbol": 0.7929
+     "architecture": 0.8154648767857288,
+     "semantic": 0.6831367776033624,
+     "symbol": 0.7928526173809581
     },
     "chunks": 1326
    },
    "semble": {
     "language": "bash",
     "queries": 20,
-    "ndcg10": 0.6525,
+    "ndcg10": 0.6525424269728921,
     "recall10": 0.825,
-    "index_ms": 892.6,
-    "query_p50_ms": 2.267,
+    "index_ms": 783.1,
+    "query_p50_ms": 2.108,
     "by_category": {
-     "architecture": 0.8155,
-     "semantic": 0.6045,
-     "symbol": 0.7123
+     "architecture": 0.8154648767857288,
+     "semantic": 0.6044855749416566,
+     "symbol": 0.7123212623289701
     }
    }
   },
@@ -303,39 +303,39 @@
    "bm25": {
     "language": "bash",
     "queries": 20,
-    "ndcg10": 0.9346,
+    "ndcg10": 0.9346268032608155,
     "recall10": 1.0,
-    "index_ms": 45.6,
-    "query_p50_ms": 0.254,
+    "index_ms": 31.0,
+    "query_p50_ms": 0.199,
     "by_category": {
-     "architecture": 0.9473,
-     "semantic": 0.9278
+     "architecture": 0.9472756790816368,
+     "semantic": 0.9278158701265269
     },
     "chunks": 81
    },
    "hybrid": {
     "language": "bash",
     "queries": 20,
-    "ndcg10": 0.7753,
+    "ndcg10": 0.7752502698613541,
     "recall10": 1.0,
-    "index_ms": 128.8,
-    "query_p50_ms": 0.457,
+    "index_ms": 56.2,
+    "query_p50_ms": 0.428,
     "by_category": {
      "architecture": 1.0,
-     "semantic": 0.6542
+     "semantic": 0.6542311844020834
     },
     "chunks": 81
    },
    "semble": {
     "language": "bash",
     "queries": 20,
-    "ndcg10": 0.8662,
+    "ndcg10": 0.8661732909393883,
     "recall10": 1.0,
-    "index_ms": 55.7,
-    "query_p50_ms": 1.559,
+    "index_ms": 51.9,
+    "query_p50_ms": 1.198,
     "by_category": {
-     "architecture": 0.7231,
-     "semantic": 0.9432
+     "architecture": 0.7230866159492644,
+     "semantic": 0.9432199620879166
     }
    }
   },
@@ -343,13 +343,13 @@
    "bm25": {
     "language": "scala",
     "queries": 20,
-    "ndcg10": 0.8465,
+    "ndcg10": 0.8464730651015235,
     "recall10": 0.9,
-    "index_ms": 1860.0,
-    "query_p50_ms": 1.567,
+    "index_ms": 1325.1,
+    "query_p50_ms": 2.192,
     "by_category": {
-     "architecture": 0.6053,
-     "semantic": 0.8508,
+     "architecture": 0.6053290582802409,
+     "semantic": 0.8508145068909506,
      "symbol": 1.0
     },
     "chunks": 7034
@@ -357,13 +357,13 @@
    "hybrid": {
     "language": "scala",
     "queries": 20,
-    "ndcg10": 0.8517,
+    "ndcg10": 0.85165630510552,
     "recall10": 0.9,
-    "index_ms": 3764.2,
-    "query_p50_ms": 2.205,
+    "index_ms": 2990.2,
+    "query_p50_ms": 2.766,
     "by_category": {
-     "architecture": 0.6312,
-     "semantic": 0.8508,
+     "architecture": 0.6312452583002234,
+     "semantic": 0.8508145068909506,
      "symbol": 1.0
     },
     "chunks": 7034
@@ -371,12 +371,12 @@
    "semble": {
     "language": "scala",
     "queries": 20,
-    "ndcg10": 0.9113,
+    "ndcg10": 0.9113147192765458,
     "recall10": 0.9,
-    "index_ms": 2062.1,
-    "query_p50_ms": 3.572,
+    "index_ms": 1816.0,
+    "query_p50_ms": 4.45,
     "by_category": {
-     "architecture": 0.8066,
+     "architecture": 0.8065735963827292,
      "semantic": 0.9,
      "symbol": 1.0
     }
@@ -386,42 +386,42 @@
    "bm25": {
     "language": "go",
     "queries": 18,
-    "ndcg10": 0.8156,
-    "recall10": 0.9722,
-    "index_ms": 419.4,
-    "query_p50_ms": 0.764,
+    "ndcg10": 0.8155909731224064,
+    "recall10": 0.9722222222222222,
+    "index_ms": 177.7,
+    "query_p50_ms": 0.501,
     "by_category": {
-     "architecture": 0.8595,
-     "semantic": 0.7659,
-     "symbol": 0.877
+     "architecture": 0.8594864169862473,
+     "semantic": 0.765865473412708,
+     "symbol": 0.8769765845238192
     },
     "chunks": 533
    },
    "hybrid": {
     "language": "go",
     "queries": 18,
-    "ndcg10": 0.8383,
+    "ndcg10": 0.8382648056552924,
     "recall10": 1.0,
-    "index_ms": 666.8,
-    "query_p50_ms": 1.034,
+    "index_ms": 345.1,
+    "query_p50_ms": 1.099,
     "by_category": {
-     "architecture": 0.8045,
-     "semantic": 0.8479,
-     "symbol": 0.877
+     "architecture": 0.8044844991087247,
+     "semantic": 0.847881083730162,
+     "symbol": 0.8769765845238192
     },
     "chunks": 533
    },
    "semble": {
     "language": "go",
     "queries": 18,
-    "ndcg10": 0.8699,
+    "ndcg10": 0.8699498574344997,
     "recall10": 1.0,
-    "index_ms": 348.2,
-    "query_p50_ms": 1.938,
+    "index_ms": 257.6,
+    "query_p50_ms": 1.727,
     "by_category": {
-     "architecture": 0.7547,
-     "semantic": 0.9444,
-     "symbol": 0.877
+     "architecture": 0.7546946133749227,
+     "semantic": 0.9444444444444444,
+     "symbol": 0.8769765845238192
     }
    }
   },
@@ -429,13 +429,13 @@
    "bm25": {
     "language": "scala",
     "queries": 19,
-    "ndcg10": 0.8728,
+    "ndcg10": 0.8727541990081962,
     "recall10": 1.0,
-    "index_ms": 405.4,
-    "query_p50_ms": 1.499,
+    "index_ms": 182.8,
+    "query_p50_ms": 1.05,
     "by_category": {
-     "architecture": 0.7236,
-     "semantic": 0.9058,
+     "architecture": 0.7236133388501875,
+     "semantic": 0.9058420988095265,
      "symbol": 1.0
     },
     "chunks": 1211
@@ -443,13 +443,13 @@
    "hybrid": {
     "language": "scala",
     "queries": 19,
-    "ndcg10": 0.866,
+    "ndcg10": 0.8660208195978539,
     "recall10": 1.0,
-    "index_ms": 584.4,
-    "query_p50_ms": 1.683,
+    "index_ms": 401.8,
+    "query_p50_ms": 1.745,
     "by_category": {
-     "architecture": 0.7524,
-     "semantic": 0.8811,
+     "architecture": 0.752371901428583,
+     "semantic": 0.8811396422923916,
      "symbol": 1.0
     },
     "chunks": 1211
@@ -457,13 +457,13 @@
    "semble": {
     "language": "scala",
     "queries": 19,
-    "ndcg10": 0.898,
-    "recall10": 0.9474,
-    "index_ms": 296.7,
-    "query_p50_ms": 1.994,
+    "ndcg10": 0.8979792795602554,
+    "recall10": 0.9473684210526315,
+    "index_ms": 303.7,
+    "query_p50_ms": 2.28,
     "by_category": {
-     "architecture": 0.7262,
-     "semantic": 0.9482,
+     "architecture": 0.7261859507142916,
+     "semantic": 0.9482433234612176,
      "symbol": 1.0
     }
    }
@@ -472,28 +472,28 @@
    "bm25": {
     "language": "python",
     "queries": 20,
-    "ndcg10": 0.9446,
+    "ndcg10": 0.9446394630357187,
     "recall10": 1.0,
-    "index_ms": 178.4,
-    "query_p50_ms": 0.553,
+    "index_ms": 276.8,
+    "query_p50_ms": 0.5,
     "by_category": {
      "architecture": 1.0,
-     "semantic": 0.9631,
-     "symbol": 0.8155
+     "semantic": 0.9630929753571458,
+     "symbol": 0.8154648767857288
     },
     "chunks": 634
    },
    "hybrid": {
     "language": "python",
     "queries": 20,
-    "ndcg10": 0.9077,
+    "ndcg10": 0.9077324383928644,
     "recall10": 1.0,
-    "index_ms": 586.1,
-    "query_p50_ms": 1.327,
+    "index_ms": 353.1,
+    "query_p50_ms": 0.753,
     "by_category": {
-     "architecture": 0.9385,
-     "semantic": 0.9262,
-     "symbol": 0.8155
+     "architecture": 0.9384882922619097,
+     "semantic": 0.9261859507142916,
+     "symbol": 0.8154648767857288
     },
     "chunks": 634
    },
@@ -502,8 +502,8 @@
     "queries": 20,
     "ndcg10": 1.0,
     "recall10": 1.0,
-    "index_ms": 337.8,
-    "query_p50_ms": 1.506,
+    "index_ms": 298.4,
+    "query_p50_ms": 1.496,
     "by_category": {
      "architecture": 1.0,
      "semantic": 1.0,
@@ -515,41 +515,41 @@
    "bm25": {
     "language": "go",
     "queries": 20,
-    "ndcg10": 0.9068,
+    "ndcg10": 0.9068433103525644,
     "recall10": 1.0,
-    "index_ms": 539.0,
-    "query_p50_ms": 0.75,
+    "index_ms": 210.4,
+    "query_p50_ms": 0.492,
     "by_category": {
      "architecture": 1.0,
-     "semantic": 0.8642,
-     "symbol": 0.877
+     "semantic": 0.8641760412254392,
+     "symbol": 0.8769765845238192
     },
     "chunks": 663
    },
    "hybrid": {
     "language": "go",
     "queries": 20,
-    "ndcg10": 0.9007,
+    "ndcg10": 0.9007040761194668,
     "recall10": 1.0,
-    "index_ms": 990.9,
-    "query_p50_ms": 1.118,
+    "index_ms": 478.6,
+    "query_p50_ms": 1.335,
     "by_category": {
-     "architecture": 0.877,
-     "semantic": 0.9201,
-     "symbol": 0.877
+     "architecture": 0.8769765845238192,
+     "semantic": 0.9201174783340877,
+     "symbol": 0.8769765845238192
     },
     "chunks": 663
    },
    "semble": {
     "language": "go",
     "queries": 20,
-    "ndcg10": 0.971,
+    "ndcg10": 0.9709860394574094,
     "recall10": 1.0,
-    "index_ms": 510.2,
-    "query_p50_ms": 1.85,
+    "index_ms": 541.8,
+    "query_p50_ms": 2.075,
     "by_category": {
      "architecture": 1.0,
-     "semantic": 0.9472,
+     "semantic": 0.947247344468017,
      "symbol": 1.0
     }
    }
@@ -558,13 +558,13 @@
    "bm25": {
     "language": "java",
     "queries": 21,
-    "ndcg10": 0.7714,
-    "recall10": 0.9286,
-    "index_ms": 1921.1,
-    "query_p50_ms": 2.152,
+    "ndcg10": 0.7713558342236256,
+    "recall10": 0.9285714285714286,
+    "index_ms": 1149.3,
+    "query_p50_ms": 2.153,
     "by_category": {
-     "architecture": 0.748,
-     "semantic": 0.711,
+     "architecture": 0.748025648778972,
+     "semantic": 0.711028255168516,
      "symbol": 1.0
     },
     "chunks": 5164
@@ -572,13 +572,13 @@
    "hybrid": {
     "language": "java",
     "queries": 21,
-    "ndcg10": 0.8059,
-    "recall10": 0.9762,
-    "index_ms": 4220.4,
-    "query_p50_ms": 2.685,
+    "ndcg10": 0.805892854868224,
+    "recall10": 0.9761904761904762,
+    "index_ms": 3147.8,
+    "query_p50_ms": 3.265,
     "by_category": {
-     "architecture": 0.871,
-     "semantic": 0.7365,
+     "architecture": 0.8710490642551528,
+     "semantic": 0.7364716256762318,
      "symbol": 1.0
     },
     "chunks": 5164
@@ -586,13 +586,13 @@
    "semble": {
     "language": "java",
     "queries": 21,
-    "ndcg10": 0.8829,
-    "recall10": 0.9762,
-    "index_ms": 3315.9,
-    "query_p50_ms": 2.865,
+    "ndcg10": 0.8829368269797638,
+    "recall10": 0.9761904761904762,
+    "index_ms": 3186.3,
+    "query_p50_ms": 2.463,
     "by_category": {
-     "architecture": 0.871,
-     "semantic": 0.852,
+     "architecture": 0.8710490642551528,
+     "semantic": 0.8520375838435416,
      "symbol": 1.0
     }
    }
@@ -601,39 +601,39 @@
    "bm25": {
     "language": "c",
     "queries": 20,
-    "ndcg10": 0.6942,
+    "ndcg10": 0.6937204713941475,
     "recall10": 0.95,
-    "index_ms": 4946.4,
-    "query_p50_ms": 2.51,
+    "index_ms": 4842.1,
+    "query_p50_ms": 2.635,
     "by_category": {
-     "architecture": 0.6434,
-     "semantic": 0.7357
+     "architecture": 0.6424323618826542,
+     "semantic": 0.7356834700853695
     },
-    "chunks": 7743
+    "chunks": 7754
    },
    "hybrid": {
     "language": "c",
     "queries": 20,
-    "ndcg10": 0.6711,
+    "ndcg10": 0.6645362153090512,
     "recall10": 0.85,
-    "index_ms": 8424.8,
-    "query_p50_ms": 3.072,
+    "index_ms": 7662.4,
+    "query_p50_ms": 7.285,
     "by_category": {
-     "architecture": 0.4699,
-     "semantic": 0.8357
+     "architecture": 0.4699019993929079,
+     "semantic": 0.8237823919677136
     },
-    "chunks": 7743
+    "chunks": 7754
    },
    "semble": {
     "language": "c",
     "queries": 20,
-    "ndcg10": 0.7051,
+    "ndcg10": 0.7051303483604954,
     "recall10": 0.875,
-    "index_ms": 5262.3,
-    "query_p50_ms": 3.038,
+    "index_ms": 5035.3,
+    "query_p50_ms": 3.964,
     "by_category": {
-     "architecture": 0.6285,
-     "semantic": 0.7679
+     "architecture": 0.6284680374280802,
+     "semantic": 0.7678540573051987
     }
    }
   },
@@ -641,41 +641,41 @@
    "bm25": {
     "language": "csharp",
     "queries": 20,
-    "ndcg10": 0.8643,
+    "ndcg10": 0.8642789260714373,
     "recall10": 1.0,
-    "index_ms": 595.9,
-    "query_p50_ms": 0.833,
+    "index_ms": 459.6,
+    "query_p50_ms": 1.049,
     "by_category": {
-     "architecture": 0.8155,
-     "semantic": 0.848,
+     "architecture": 0.8154648767857288,
+     "semantic": 0.8479783857142947,
      "symbol": 1.0
     },
-    "chunks": 862
+    "chunks": 873
    },
    "hybrid": {
     "language": "csharp",
     "queries": 20,
-    "ndcg10": 0.798,
+    "ndcg10": 0.7980310148798686,
     "recall10": 0.95,
-    "index_ms": 852.5,
-    "query_p50_ms": 1.181,
+    "index_ms": 583.0,
+    "query_p50_ms": 1.143,
     "by_category": {
-     "architecture": 0.5434,
-     "semantic": 0.9067,
-     "symbol": 0.6667
+     "architecture": 0.5434341381039892,
+     "semantic": 0.906683365013955,
+     "symbol": 0.6666666666666666
     },
-    "chunks": 862
+    "chunks": 873
    },
    "semble": {
     "language": "csharp",
     "queries": 20,
-    "ndcg10": 0.8419,
+    "ndcg10": 0.8419126417409407,
     "recall10": 1.0,
-    "index_ms": 499.5,
-    "query_p50_ms": 4.754,
+    "index_ms": 476.0,
+    "query_p50_ms": 4.787,
     "by_category": {
-     "architecture": 0.5878,
-     "semantic": 0.8836,
+     "architecture": 0.5877789735348331,
+     "semantic": 0.8836259185138062,
      "symbol": 1.0
     }
    }
@@ -684,42 +684,42 @@
    "bm25": {
     "language": "elixir",
     "queries": 19,
-    "ndcg10": 0.8794,
+    "ndcg10": 0.8793817967105317,
     "recall10": 1.0,
-    "index_ms": 967.4,
-    "query_p50_ms": 0.852,
+    "index_ms": 790.8,
+    "query_p50_ms": 0.725,
     "by_category": {
-     "architecture": 0.877,
-     "semantic": 0.9048,
-     "symbol": 0.7718
+     "architecture": 0.8769765845238192,
+     "semantic": 0.9047584236263781,
+     "symbol": 0.7718216255952429
     },
     "chunks": 847
    },
    "hybrid": {
     "language": "elixir",
     "queries": 19,
-    "ndcg10": 0.9085,
-    "recall10": 0.9474,
-    "index_ms": 1530.5,
-    "query_p50_ms": 1.265,
+    "ndcg10": 0.9085189214285745,
+    "recall10": 0.9473684210526315,
+    "index_ms": 1259.4,
+    "query_p50_ms": 1.707,
     "by_category": {
      "architecture": 1.0,
-     "semantic": 0.9716,
-     "symbol": 0.5436
+     "semantic": 0.9716099810439582,
+     "symbol": 0.5436432511904858
     },
     "chunks": 847
    },
    "semble": {
     "language": "elixir",
     "queries": 19,
-    "ndcg10": 0.9026,
+    "ndcg10": 0.9025638060198661,
     "recall10": 1.0,
-    "index_ms": 1163.7,
-    "query_p50_ms": 1.932,
+    "index_ms": 1446.4,
+    "query_p50_ms": 1.743,
     "by_category": {
      "architecture": 1.0,
-     "semantic": 0.8961,
-     "symbol": 0.8333
+     "semantic": 0.8960547934136506,
+     "symbol": 0.8333333333333334
     }
    }
   },
@@ -727,13 +727,13 @@
    "bm25": {
     "language": "kotlin",
     "queries": 20,
-    "ndcg10": 0.6392,
+    "ndcg10": 0.6391620372015472,
     "recall10": 0.875,
-    "index_ms": 817.6,
-    "query_p50_ms": 1.261,
+    "index_ms": 511.4,
+    "query_p50_ms": 1.84,
     "by_category": {
-     "architecture": 0.582,
-     "semantic": 0.5741,
+     "architecture": 0.5820471449530406,
+     "semantic": 0.5740785220837016,
      "symbol": 1.0
     },
     "chunks": 1777
@@ -741,13 +741,13 @@
    "hybrid": {
     "language": "kotlin",
     "queries": 20,
-    "ndcg10": 0.7012,
+    "ndcg10": 0.701213587007219,
     "recall10": 0.875,
-    "index_ms": 1297.7,
-    "query_p50_ms": 1.622,
+    "index_ms": 1082.7,
+    "query_p50_ms": 2.161,
     "by_category": {
-     "architecture": 0.2439,
-     "semantic": 0.7352,
+     "architecture": 0.24390218457912474,
+     "semantic": 0.7351832276005005,
      "symbol": 1.0
     },
     "chunks": 1777
@@ -755,13 +755,13 @@
    "semble": {
     "language": "kotlin",
     "queries": 20,
-    "ndcg10": 0.6478,
+    "ndcg10": 0.6477744920631954,
     "recall10": 0.925,
-    "index_ms": 858.6,
-    "query_p50_ms": 2.726,
+    "index_ms": 784.4,
+    "query_p50_ms": 2.248,
     "by_category": {
-     "architecture": 0.4266,
-     "semantic": 0.6197,
+     "architecture": 0.42657598789683987,
+     "semantic": 0.6196972769695278,
      "symbol": 1.0
     }
    }
@@ -770,40 +770,40 @@
    "bm25": {
     "language": "javascript",
     "queries": 20,
-    "ndcg10": 0.8797,
+    "ndcg10": 0.8796707068363269,
     "recall10": 0.95,
-    "index_ms": 63.0,
-    "query_p50_ms": 0.29,
+    "index_ms": 40.6,
+    "query_p50_ms": 0.203,
     "by_category": {
-     "architecture": 0.8331,
-     "semantic": 0.9631,
-     "symbol": 0.7103
+     "architecture": 0.8330792327976603,
+     "semantic": 0.9630929753571458,
+     "symbol": 0.7103099178571526
     },
     "chunks": 172
    },
    "hybrid": {
     "language": "javascript",
     "queries": 20,
-    "ndcg10": 0.8744,
+    "ndcg10": 0.8744076946336916,
     "recall10": 0.95,
-    "index_ms": 93.2,
-    "query_p50_ms": 0.53,
+    "index_ms": 69.1,
+    "query_p50_ms": 0.479,
     "by_category": {
-     "architecture": 0.8342,
-     "semantic": 0.9018,
-     "symbol": 0.877
+     "architecture": 0.834205939756625,
+     "semantic": 0.9017782560805999,
+     "symbol": 0.8769765845238192
     },
     "chunks": 172
    },
    "semble": {
     "language": "javascript",
     "queries": 20,
-    "ndcg10": 0.9491,
+    "ndcg10": 0.9491237779695378,
     "recall10": 1.0,
-    "index_ms": 89.8,
-    "query_p50_ms": 1.356,
+    "index_ms": 56.7,
+    "query_p50_ms": 1.16,
     "by_category": {
-     "architecture": 0.9261,
+     "architecture": 0.9260679370558221,
      "semantic": 0.95,
      "symbol": 1.0
     }
@@ -813,13 +813,13 @@
    "bm25": {
     "language": "python",
     "queries": 20,
-    "ndcg10": 0.8166,
-    "recall10": 0.9333,
-    "index_ms": 288.7,
-    "query_p50_ms": 0.829,
+    "ndcg10": 0.8166214265488021,
+    "recall10": 0.9333333333333333,
+    "index_ms": 167.0,
+    "query_p50_ms": 0.364,
     "by_category": {
-     "architecture": 0.7897,
-     "semantic": 0.7255,
+     "architecture": 0.7897194048425941,
+     "semantic": 0.7255490871347356,
      "symbol": 1.0
     },
     "chunks": 455
@@ -827,13 +827,13 @@
    "hybrid": {
     "language": "python",
     "queries": 20,
-    "ndcg10": 0.7786,
+    "ndcg10": 0.7786480240779856,
     "recall10": 0.95,
-    "index_ms": 419.8,
-    "query_p50_ms": 0.928,
+    "index_ms": 344.2,
+    "query_p50_ms": 0.735,
     "by_category": {
-     "architecture": 0.6293,
-     "semantic": 0.771,
+     "architecture": 0.6293055217719786,
+     "semantic": 0.7709777286444829,
      "symbol": 1.0
     },
     "chunks": 455
@@ -841,13 +841,13 @@
    "semble": {
     "language": "python",
     "queries": 20,
-    "ndcg10": 0.7862,
-    "recall10": 0.9167,
-    "index_ms": 660.9,
-    "query_p50_ms": 1.808,
+    "ndcg10": 0.7861529966468048,
+    "recall10": 0.9166666666666666,
+    "index_ms": 536.7,
+    "query_p50_ms": 1.594,
     "by_category": {
-     "architecture": 0.7371,
-     "semantic": 0.6954,
+     "architecture": 0.7371388825012577,
+     "semantic": 0.6953859694284116,
      "symbol": 1.0
     }
    }
@@ -856,13 +856,13 @@
    "bm25": {
     "language": "python",
     "queries": 21,
-    "ndcg10": 0.8655,
-    "recall10": 0.9286,
-    "index_ms": 255.7,
-    "query_p50_ms": 0.743,
+    "ndcg10": 0.865472279479649,
+    "recall10": 0.9285714285714286,
+    "index_ms": 111.7,
+    "query_p50_ms": 0.314,
     "by_category": {
-     "architecture": 0.8105,
-     "semantic": 0.8638,
+     "architecture": 0.8105217191043917,
+     "semantic": 0.8637514395765351,
      "symbol": 1.0
     },
     "chunks": 478
@@ -870,28 +870,28 @@
    "hybrid": {
     "language": "python",
     "queries": 21,
-    "ndcg10": 0.8145,
-    "recall10": 0.9762,
-    "index_ms": 398.7,
-    "query_p50_ms": 0.881,
+    "ndcg10": 0.814454344448601,
+    "recall10": 0.9761904761904762,
+    "index_ms": 266.9,
+    "query_p50_ms": 0.631,
     "by_category": {
-     "architecture": 0.8041,
-     "semantic": 0.8056,
-     "symbol": 0.871
+     "architecture": 0.8040701048671227,
+     "semantic": 0.8056275733259368,
+     "symbol": 0.8710490642551528
     },
     "chunks": 478
    },
    "semble": {
     "language": "python",
     "queries": 21,
-    "ndcg10": 0.8879,
+    "ndcg10": 0.8878534827452375,
     "recall10": 1.0,
-    "index_ms": 389.5,
-    "query_p50_ms": 1.616,
+    "index_ms": 312.1,
+    "query_p50_ms": 1.482,
     "by_category": {
-     "architecture": 0.8304,
-     "semantic": 0.929,
-     "symbol": 0.871
+     "architecture": 0.8304380615499182,
+     "semantic": 0.9289735921850092,
+     "symbol": 0.8710490642551528
     }
    }
   },
@@ -899,42 +899,42 @@
    "bm25": {
     "language": "cpp",
     "queries": 20,
-    "ndcg10": 0.7986,
+    "ndcg10": 0.8170624189796882,
     "recall10": 1.0,
-    "index_ms": 1009.4,
-    "query_p50_ms": 1.513,
+    "index_ms": 752.2,
+    "query_p50_ms": 1.161,
     "by_category": {
-     "architecture": 0.754,
-     "semantic": 0.8007,
-     "symbol": 0.8333
+     "architecture": 0.7539531690476383,
+     "semantic": 0.8270992051750606,
+     "symbol": 0.8333333333333334
     },
-    "chunks": 2378
+    "chunks": 2603
    },
    "hybrid": {
     "language": "cpp",
     "queries": 20,
-    "ndcg10": 0.8162,
+    "ndcg10": 0.8377071188430578,
     "recall10": 1.0,
-    "index_ms": 1513.8,
-    "query_p50_ms": 1.758,
+    "index_ms": 1169.8,
+    "query_p50_ms": 4.003,
     "by_category": {
-     "architecture": 0.8333,
-     "semantic": 0.8088,
-     "symbol": 0.8333
+     "architecture": 0.8769765845238192,
+     "semantic": 0.8302294730921215,
+     "symbol": 0.8333333333333334
     },
-    "chunks": 2378
+    "chunks": 2603
    },
    "semble": {
     "language": "cpp",
     "queries": 20,
-    "ndcg10": 0.9162,
+    "ndcg10": 0.9161732909393884,
     "recall10": 1.0,
-    "index_ms": 1138.1,
-    "query_p50_ms": 1.782,
+    "index_ms": 931.7,
+    "query_p50_ms": 1.472,
     "by_category": {
-     "architecture": 0.877,
-     "semantic": 0.933,
-     "symbol": 0.877
+     "architecture": 0.8769765845238192,
+     "semantic": 0.9329718794032036,
+     "symbol": 0.8769765845238192
     }
    }
   },
@@ -942,13 +942,13 @@
    "bm25": {
     "language": "go",
     "queries": 20,
-    "ndcg10": 0.8412,
+    "ndcg10": 0.8411541826142483,
     "recall10": 0.975,
-    "index_ms": 1083.7,
-    "query_p50_ms": 0.791,
+    "index_ms": 538.2,
+    "query_p50_ms": 0.88,
     "by_category": {
-     "architecture": 0.8975,
-     "semantic": 0.7671,
+     "architecture": 0.8975464962160701,
+     "semantic": 0.7670731522716863,
      "symbol": 1.0
     },
     "chunks": 1720
@@ -956,13 +956,13 @@
    "hybrid": {
     "language": "go",
     "queries": 20,
-    "ndcg10": 0.8696,
-    "recall10": 0.9583,
-    "index_ms": 1573.9,
-    "query_p50_ms": 1.914,
+    "ndcg10": 0.8696348428860066,
+    "recall10": 0.9583333333333334,
+    "index_ms": 1108.8,
+    "query_p50_ms": 1.32,
     "by_category": {
-     "architecture": 0.8125,
-     "semantic": 0.8653,
+     "architecture": 0.8124857161523553,
+     "semantic": 0.8652529600732727,
      "symbol": 1.0
     },
     "chunks": 1720
@@ -970,13 +970,13 @@
    "semble": {
     "language": "go",
     "queries": 20,
-    "ndcg10": 0.8899,
+    "ndcg10": 0.8898537750647378,
     "recall10": 0.975,
-    "index_ms": 894.6,
-    "query_p50_ms": 1.985,
+    "index_ms": 664.3,
+    "query_p50_ms": 1.805,
     "by_category": {
-     "architecture": 0.8729,
-     "semantic": 0.869,
+     "architecture": 0.8729222796953519,
+     "semantic": 0.8690492566475132,
      "symbol": 1.0
     }
    }
@@ -985,13 +985,13 @@
    "bm25": {
     "language": "java",
     "queries": 20,
-    "ndcg10": 0.8154,
+    "ndcg10": 0.8153711414431006,
     "recall10": 0.9,
-    "index_ms": 1757.6,
-    "query_p50_ms": 3.026,
+    "index_ms": 865.9,
+    "query_p50_ms": 5.092,
     "by_category": {
-     "architecture": 0.5181,
-     "semantic": 0.8235,
+     "architecture": 0.5180592907320241,
+     "semantic": 0.8235185665933915,
      "symbol": 1.0
     },
     "chunks": 4286
@@ -999,13 +999,13 @@
    "hybrid": {
     "language": "java",
     "queries": 20,
-    "ndcg10": 0.8469,
+    "ndcg10": 0.8468761681331515,
     "recall10": 0.975,
-    "index_ms": 3074.6,
-    "query_p50_ms": 4.917,
+    "index_ms": 2272.4,
+    "query_p50_ms": 6.113,
     "by_category": {
-     "architecture": 0.8135,
-     "semantic": 0.7684,
+     "architecture": 0.8134696444624298,
+     "semantic": 0.7683644784813308,
      "symbol": 1.0
     },
     "chunks": 4286
@@ -1013,13 +1013,13 @@
    "semble": {
     "language": "java",
     "queries": 20,
-    "ndcg10": 0.8921,
+    "ndcg10": 0.8920725120838435,
     "recall10": 1.0,
-    "index_ms": 2101.4,
-    "query_p50_ms": 2.759,
+    "index_ms": 1613.4,
+    "query_p50_ms": 2.312,
     "by_category": {
-     "architecture": 0.6776,
-     "semantic": 0.9131,
+     "architecture": 0.6776301220263529,
+     "semantic": 0.9130929753571457,
      "symbol": 1.0
     }
    }
@@ -1028,13 +1028,13 @@
    "bm25": {
     "language": "php",
     "queries": 20,
-    "ndcg10": 0.9145,
+    "ndcg10": 0.9144956484528578,
     "recall10": 0.975,
-    "index_ms": 203.2,
-    "query_p50_ms": 0.532,
+    "index_ms": 143.3,
+    "query_p50_ms": 0.424,
     "by_category": {
      "architecture": 1.0,
-     "semantic": 0.8685,
+     "semantic": 0.8684548437736275,
      "symbol": 1.0
     },
     "chunks": 353
@@ -1042,13 +1042,13 @@
    "hybrid": {
     "language": "php",
     "queries": 20,
-    "ndcg10": 0.864,
+    "ndcg10": 0.8640006986754513,
     "recall10": 0.925,
-    "index_ms": 370.3,
-    "query_p50_ms": 0.713,
+    "index_ms": 275.0,
+    "query_p50_ms": 0.675,
     "by_category": {
      "architecture": 1.0,
-     "semantic": 0.7908,
+     "semantic": 0.7907703056545403,
      "symbol": 1.0
     },
     "chunks": 353
@@ -1056,13 +1056,13 @@
    "semble": {
     "language": "php",
     "queries": 20,
-    "ndcg10": 0.9232,
+    "ndcg10": 0.9232405187664463,
     "recall10": 0.975,
-    "index_ms": 197.7,
-    "query_p50_ms": 2.836,
+    "index_ms": 177.6,
+    "query_p50_ms": 1.543,
     "by_category": {
      "architecture": 1.0,
-     "semantic": 0.8819,
+     "semantic": 0.8819084904099175,
      "symbol": 1.0
     }
    }
@@ -1071,13 +1071,13 @@
    "bm25": {
     "language": "scala",
     "queries": 20,
-    "ndcg10": 0.8304,
+    "ndcg10": 0.8303801796023356,
     "recall10": 0.9,
-    "index_ms": 1249.7,
-    "query_p50_ms": 1.358,
+    "index_ms": 716.9,
+    "query_p50_ms": 1.256,
     "by_category": {
-     "architecture": 0.9355,
-     "semantic": 0.7715,
+     "architecture": 0.9355245321275764,
+     "semantic": 0.7715021425474272,
      "symbol": 1.0
     },
     "chunks": 2790
@@ -1085,13 +1085,13 @@
    "hybrid": {
     "language": "scala",
     "queries": 20,
-    "ndcg10": 0.8205,
+    "ndcg10": 0.820496327502006,
     "recall10": 0.95,
-    "index_ms": 1910.9,
-    "query_p50_ms": 1.879,
+    "index_ms": 1336.3,
+    "query_p50_ms": 2.239,
     "by_category": {
-     "architecture": 0.8684,
-     "semantic": 0.7718,
+     "architecture": 0.8684200813509019,
+     "semantic": 0.771761878999101,
      "symbol": 1.0
     },
     "chunks": 2790
@@ -1099,13 +1099,13 @@
    "semble": {
     "language": "scala",
     "queries": 20,
-    "ndcg10": 0.9547,
+    "ndcg10": 0.9546707068363268,
     "recall10": 1.0,
-    "index_ms": 1333.2,
-    "query_p50_ms": 5.454,
+    "index_ms": 1118.1,
+    "query_p50_ms": 5.024,
     "by_category": {
-     "architecture": 0.9439,
-     "semantic": 0.9473,
+     "architecture": 0.9438515431945408,
+     "semantic": 0.9472756790816368,
      "symbol": 1.0
     }
    }
@@ -1114,13 +1114,13 @@
    "bm25": {
     "language": "python",
     "queries": 21,
-    "ndcg10": 0.9056,
-    "recall10": 0.9762,
-    "index_ms": 166.6,
-    "query_p50_ms": 0.586,
+    "ndcg10": 0.9055559196049349,
+    "recall10": 0.9761904761904762,
+    "index_ms": 136.9,
+    "query_p50_ms": 0.411,
     "by_category": {
-     "architecture": 0.8022,
-     "semantic": 0.9334,
+     "architecture": 0.8022398376356047,
+     "semantic": 0.9334439386949333,
      "symbol": 1.0
     },
     "chunks": 573
@@ -1128,13 +1128,13 @@
    "hybrid": {
     "language": "python",
     "queries": 21,
-    "ndcg10": 0.8867,
-    "recall10": 0.9762,
-    "index_ms": 404.0,
-    "query_p50_ms": 0.877,
+    "ndcg10": 0.8867010077191084,
+    "recall10": 0.9761904761904762,
+    "index_ms": 383.3,
+    "query_p50_ms": 0.789,
     "by_category": {
-     "architecture": 0.7922,
-     "semantic": 0.8973,
+     "architecture": 0.7921556551686769,
+     "semantic": 0.8972923973245044,
      "symbol": 1.0
     },
     "chunks": 573
@@ -1142,14 +1142,14 @@
    "semble": {
     "language": "python",
     "queries": 21,
-    "ndcg10": 0.9043,
-    "recall10": 0.9762,
-    "index_ms": 281.4,
-    "query_p50_ms": 1.66,
+    "ndcg10": 0.9042955482416433,
+    "recall10": 0.9761904761904762,
+    "index_ms": 234.1,
+    "query_p50_ms": 1.703,
     "by_category": {
-     "architecture": 0.8796,
-     "semantic": 0.9114,
-     "symbol": 0.9262
+     "architecture": 0.8795597859882119,
+     "semantic": 0.9113731397317297,
+     "symbol": 0.9261859507142916
     }
    }
   },
@@ -1157,42 +1157,42 @@
    "bm25": {
     "language": "java",
     "queries": 20,
-    "ndcg10": 0.7557,
+    "ndcg10": 0.7557232734897086,
     "recall10": 0.875,
-    "index_ms": 4130.6,
-    "query_p50_ms": 7.865,
+    "index_ms": 2031.4,
+    "query_p50_ms": 7.94,
     "by_category": {
-     "architecture": 0.5981,
-     "semantic": 0.7019,
-     "symbol": 0.9678
+     "architecture": 0.5980725016207015,
+     "semantic": 0.7019477072564372,
+     "symbol": 0.9677622660637882
     },
     "chunks": 10756
    },
    "hybrid": {
     "language": "java",
     "queries": 20,
-    "ndcg10": 0.6974,
+    "ndcg10": 0.6973801229789609,
     "recall10": 0.9,
-    "index_ms": 4854.0,
-    "query_p50_ms": 9.991,
+    "index_ms": 3351.3,
+    "query_p50_ms": 7.642,
     "by_category": {
-     "architecture": 0.5302,
-     "semantic": 0.61,
-     "symbol": 0.9678
+     "architecture": 0.5301725847374555,
+     "semantic": 0.6100184377232458,
+     "symbol": 0.9677622660637882
     },
     "chunks": 10756
    },
    "semble": {
     "language": "java",
     "queries": 20,
-    "ndcg10": 0.7085,
+    "ndcg10": 0.7085306436511662,
     "recall10": 0.9,
-    "index_ms": 5270.5,
-    "query_p50_ms": 3.322,
+    "index_ms": 3984.0,
+    "query_p50_ms": 2.855,
     "by_category": {
-     "architecture": 0.6666,
-     "semantic": 0.5512,
-     "symbol": 0.9795
+     "architecture": 0.6665640929851019,
+     "semantic": 0.5511752325288628,
+     "symbol": 0.9795358858896749
     }
    }
   },
@@ -1200,13 +1200,13 @@
    "bm25": {
     "language": "kotlin",
     "queries": 20,
-    "ndcg10": 0.8696,
+    "ndcg10": 0.8696394630357187,
     "recall10": 1.0,
-    "index_ms": 943.2,
-    "query_p50_ms": 1.06,
+    "index_ms": 624.7,
+    "query_p50_ms": 0.966,
     "by_category": {
      "architecture": 1.0,
-     "semantic": 0.8138,
+     "semantic": 0.8137706614795981,
      "symbol": 1.0
     },
     "chunks": 1584
@@ -1214,13 +1214,13 @@
    "hybrid": {
     "language": "kotlin",
     "queries": 20,
-    "ndcg10": 0.8505,
+    "ndcg10": 0.8505427977482656,
     "recall10": 1.0,
-    "index_ms": 1437.0,
-    "query_p50_ms": 1.559,
+    "index_ms": 1285.3,
+    "query_p50_ms": 1.574,
     "by_category": {
-     "architecture": 0.877,
-     "semantic": 0.8129,
+     "architecture": 0.8769765845238192,
+     "semantic": 0.8128518715281323,
      "symbol": 1.0
     },
     "chunks": 1584
@@ -1228,13 +1228,13 @@
    "semble": {
     "language": "kotlin",
     "queries": 20,
-    "ndcg10": 0.9074,
+    "ndcg10": 0.9074356157188728,
     "recall10": 1.0,
-    "index_ms": 1117.5,
-    "query_p50_ms": 3.758,
+    "index_ms": 1007.2,
+    "query_p50_ms": 4.485,
     "by_category": {
-     "architecture": 0.8333,
-     "semantic": 0.9035,
+     "architecture": 0.8333333333333334,
+     "semantic": 0.9034794510269613,
      "symbol": 1.0
     }
    }
@@ -1243,13 +1243,13 @@
    "bm25": {
     "language": "kotlin",
     "queries": 20,
-    "ndcg10": 0.7887,
+    "ndcg10": 0.788669643006908,
     "recall10": 0.95,
-    "index_ms": 400.5,
-    "query_p50_ms": 1.251,
+    "index_ms": 293.0,
+    "query_p50_ms": 1.032,
     "by_category": {
-     "architecture": 0.6416,
-     "semantic": 0.7546,
+     "architecture": 0.6416488823942241,
+     "semantic": 0.7545500976255128,
      "symbol": 1.0
     },
     "chunks": 831
@@ -1257,13 +1257,13 @@
    "hybrid": {
     "language": "kotlin",
     "queries": 20,
-    "ndcg10": 0.7929,
+    "ndcg10": 0.7928970165772532,
     "recall10": 0.9,
-    "index_ms": 675.7,
-    "query_p50_ms": 1.708,
+    "index_ms": 623.8,
+    "query_p50_ms": 1.737,
     "by_category": {
-     "architecture": 0.6648,
-     "semantic": 0.7435,
+     "architecture": 0.6647939905652256,
+     "semantic": 0.743483199655498,
      "symbol": 1.0
     },
     "chunks": 831
@@ -1271,13 +1271,13 @@
    "semble": {
     "language": "kotlin",
     "queries": 20,
-    "ndcg10": 0.8524,
+    "ndcg10": 0.8524483785913294,
     "recall10": 0.95,
-    "index_ms": 558.3,
-    "query_p50_ms": 2.544,
+    "index_ms": 456.9,
+    "query_p50_ms": 2.41,
     "by_category": {
-     "architecture": 0.7987,
-     "semantic": 0.7797,
+     "architecture": 0.7987170106064461,
+     "semantic": 0.7797069282259236,
      "symbol": 1.0
     }
    }
@@ -1286,42 +1286,42 @@
    "bm25": {
     "language": "php",
     "queries": 20,
-    "ndcg10": 0.7815,
+    "ndcg10": 0.7815071218078142,
     "recall10": 0.95,
-    "index_ms": 6886.5,
-    "query_p50_ms": 2.957,
+    "index_ms": 3623.0,
+    "query_p50_ms": 2.722,
     "by_category": {
-     "architecture": 0.7833,
-     "semantic": 0.7796,
-     "symbol": 0.7827
+     "architecture": 0.7832746492522592,
+     "semantic": 0.7795877930910016,
+     "symbol": 0.7827324383928644
     },
     "chunks": 17183
    },
    "hybrid": {
     "language": "php",
     "queries": 20,
-    "ndcg10": 0.5673,
+    "ndcg10": 0.567317480426293,
     "recall10": 0.925,
-    "index_ms": 7895.8,
-    "query_p50_ms": 3.743,
+    "index_ms": 5505.8,
+    "query_p50_ms": 4.151,
     "by_category": {
-     "architecture": 0.5025,
-     "semantic": 0.522,
-     "symbol": 0.7827
+     "architecture": 0.5025207213464775,
+     "semantic": 0.5219749783921179,
+     "symbol": 0.7827324383928644
     },
     "chunks": 17183
    },
    "semble": {
     "language": "php",
     "queries": 20,
-    "ndcg10": 0.7881,
+    "ndcg10": 0.7880925927638007,
     "recall10": 1.0,
-    "index_ms": 6880.3,
-    "query_p50_ms": 3.252,
+    "index_ms": 5692.8,
+    "query_p50_ms": 2.617,
     "by_category": {
-     "architecture": 0.7281,
-     "semantic": 0.7816,
-     "symbol": 0.9077
+     "architecture": 0.7280655251168765,
+     "semantic": 0.7816070473207135,
+     "symbol": 0.9077324383928644
     }
    }
   },
@@ -1329,39 +1329,39 @@
    "bm25": {
     "language": "lua",
     "queries": 20,
-    "ndcg10": 0.7232,
+    "ndcg10": 0.7231514849263501,
     "recall10": 0.975,
-    "index_ms": 568.0,
-    "query_p50_ms": 0.79,
+    "index_ms": 264.4,
+    "query_p50_ms": 0.599,
     "by_category": {
-     "architecture": 0.7892,
-     "semantic": 0.6691
+     "architecture": 0.7891741023090196,
+     "semantic": 0.6691329797950748
     },
     "chunks": 699
    },
    "hybrid": {
     "language": "lua",
     "queries": 20,
-    "ndcg10": 0.8221,
+    "ndcg10": 0.8221397265976883,
     "recall10": 0.975,
-    "index_ms": 667.1,
-    "query_p50_ms": 1.104,
+    "index_ms": 471.9,
+    "query_p50_ms": 1.026,
     "by_category": {
-     "architecture": 0.9724,
-     "semantic": 0.6992
+     "architecture": 0.9723639354146455,
+     "semantic": 0.6992290102929051
     },
     "chunks": 699
    },
    "semble": {
     "language": "lua",
     "queries": 20,
-    "ndcg10": 0.7621,
+    "ndcg10": 0.7621084827970801,
     "recall10": 0.975,
-    "index_ms": 359.0,
-    "query_p50_ms": 1.874,
+    "index_ms": 384.0,
+    "query_p50_ms": 1.84,
     "by_category": {
-     "architecture": 0.8382,
-     "semantic": 0.6998
+     "architecture": 0.8382026389820946,
+     "semantic": 0.6998496277366136
     }
    }
   },
@@ -1369,41 +1369,41 @@
    "bm25": {
     "language": "c",
     "queries": 20,
-    "ndcg10": 0.6398,
+    "ndcg10": 0.6463080212262834,
     "recall10": 0.925,
-    "index_ms": 1664.5,
-    "query_p50_ms": 0.812,
+    "index_ms": 1654.6,
+    "query_p50_ms": 0.785,
     "by_category": {
      "architecture": 0.5,
-     "semantic": 0.6553,
-     "symbol": 0.5
+     "semantic": 0.6552905928307894,
+     "symbol": 0.6309297535714575
     },
-    "chunks": 2758
+    "chunks": 2756
    },
    "hybrid": {
     "language": "c",
     "queries": 20,
-    "ndcg10": 0.6322,
+    "ndcg10": 0.6137875159954732,
     "recall10": 0.9,
-    "index_ms": 2594.4,
-    "query_p50_ms": 1.137,
+    "index_ms": 2566.8,
+    "query_p50_ms": 1.107,
     "by_category": {
      "architecture": 1.0,
-     "semantic": 0.6119,
-     "symbol": 0.6309
+     "semantic": 0.5913789203521115,
+     "symbol": 0.6309297535714575
     },
-    "chunks": 2758
+    "chunks": 2756
    },
    "semble": {
     "language": "c",
     "queries": 20,
-    "ndcg10": 0.6238,
+    "ndcg10": 0.623763115451377,
     "recall10": 0.9,
-    "index_ms": 1718.8,
-    "query_p50_ms": 2.976,
+    "index_ms": 1594.5,
+    "query_p50_ms": 1.875,
     "by_category": {
      "architecture": 0.5,
-     "semantic": 0.6097,
+     "semantic": 0.6097367949459744,
      "symbol": 1.0
     }
    }
@@ -1412,41 +1412,41 @@
    "bm25": {
     "language": "csharp",
     "queries": 20,
-    "ndcg10": 0.765,
+    "ndcg10": 0.7661105227234355,
     "recall10": 0.875,
-    "index_ms": 1898.9,
-    "query_p50_ms": 2.058,
+    "index_ms": 1010.0,
+    "query_p50_ms": 1.74,
     "by_category": {
-     "architecture": 0.2394,
-     "semantic": 0.879,
-     "symbol": 0.9187
+     "architecture": 0.23937363154746544,
+     "semantic": 0.8815599300228283,
+     "symbol": 0.9186680797247704
     },
-    "chunks": 2372
+    "chunks": 2386
    },
    "hybrid": {
     "language": "csharp",
     "queries": 20,
-    "ndcg10": 0.8266,
-    "recall10": 0.925,
-    "index_ms": 2406.7,
-    "query_p50_ms": 1.91,
+    "ndcg10": 0.8207676362320522,
+    "recall10": 0.9,
+    "index_ms": 1961.9,
+    "query_p50_ms": 1.931,
     "by_category": {
-     "architecture": 0.4421,
-     "semantic": 0.926,
-     "symbol": 0.9187
+     "architecture": 0.41273023245178314,
+     "semantic": 0.9259728040845019,
+     "symbol": 0.9186680797247704
     },
-    "chunks": 2372
+    "chunks": 2386
    },
    "semble": {
     "language": "csharp",
     "queries": 20,
-    "ndcg10": 0.8811,
-    "recall10": 0.9333,
-    "index_ms": 1516.7,
-    "query_p50_ms": 4.759,
+    "ndcg10": 0.8810595925213971,
+    "recall10": 0.9333333333333333,
+    "index_ms": 1413.3,
+    "query_p50_ms": 6.293,
     "by_category": {
-     "architecture": 0.7099,
-     "semantic": 0.8646,
+     "architecture": 0.7098603945740938,
+     "semantic": 0.8646389191257297,
      "symbol": 1.0
     }
    }
@@ -1457,37 +1457,37 @@
     "queries": 20,
     "ndcg10": 0.975,
     "recall10": 1.0,
-    "index_ms": 2766.2,
-    "query_p50_ms": 1.574,
+    "index_ms": 1259.6,
+    "query_p50_ms": 2.073,
     "by_category": {
      "architecture": 1.0,
-     "semantic": 0.9688
+     "semantic": 0.96875
     },
     "chunks": 2428
    },
    "hybrid": {
     "language": "lua",
     "queries": 20,
-    "ndcg10": 0.9181,
+    "ndcg10": 0.9180676558073394,
     "recall10": 1.0,
-    "index_ms": 4852.0,
-    "query_p50_ms": 2.153,
+    "index_ms": 2869.6,
+    "query_p50_ms": 2.273,
     "by_category": {
      "architecture": 1.0,
-     "semantic": 0.8976
+     "semantic": 0.8975845697591741
     },
     "chunks": 2428
    },
    "semble": {
     "language": "lua",
     "queries": 20,
-    "ndcg10": 0.9815,
+    "ndcg10": 0.9815464876785729,
     "recall10": 1.0,
-    "index_ms": 2834.7,
-    "query_p50_ms": 1.853,
+    "index_ms": 2575.8,
+    "query_p50_ms": 1.646,
     "by_category": {
      "architecture": 1.0,
-     "semantic": 0.9769
+     "semantic": 0.9769331095982161
     }
    }
   },
@@ -1495,13 +1495,13 @@
    "bm25": {
     "language": "python",
     "queries": 20,
-    "ndcg10": 0.7938,
+    "ndcg10": 0.7938187778118025,
     "recall10": 0.975,
-    "index_ms": 125.8,
-    "query_p50_ms": 0.528,
+    "index_ms": 109.8,
+    "query_p50_ms": 0.218,
     "by_category": {
-     "architecture": 0.739,
-     "semantic": 0.7703,
+     "architecture": 0.7390298056766424,
+     "semantic": 0.7703166916499554,
      "symbol": 1.0
     },
     "chunks": 138
@@ -1509,13 +1509,13 @@
    "hybrid": {
     "language": "python",
     "queries": 20,
-    "ndcg10": 0.8046,
+    "ndcg10": 0.8045504308588965,
     "recall10": 0.975,
-    "index_ms": 138.3,
-    "query_p50_ms": 0.692,
+    "index_ms": 138.0,
+    "query_p50_ms": 0.539,
     "by_category": {
-     "architecture": 0.8135,
-     "semantic": 0.7396,
+     "architecture": 0.8135349865274276,
+     "semantic": 0.7396263711485935,
      "symbol": 1.0
     },
     "chunks": 138
@@ -1523,14 +1523,14 @@
    "semble": {
     "language": "python",
     "queries": 20,
-    "ndcg10": 0.7376,
+    "ndcg10": 0.7375795011044113,
     "recall10": 0.975,
-    "index_ms": 121.8,
-    "query_p50_ms": 2.418,
+    "index_ms": 120.3,
+    "query_p50_ms": 1.734,
     "by_category": {
-     "architecture": 0.6905,
-     "semantic": 0.7287,
-     "symbol": 0.877
+     "architecture": 0.6905456754532798,
+     "semantic": 0.7286840540343809,
+     "symbol": 0.8769765845238192
     }
    }
   },
@@ -1538,13 +1538,13 @@
    "bm25": {
     "language": "php",
     "queries": 20,
-    "ndcg10": 0.8846,
+    "ndcg10": 0.8846291414044224,
     "recall10": 0.95,
-    "index_ms": 441.7,
-    "query_p50_ms": 2.23,
+    "index_ms": 256.6,
+    "query_p50_ms": 1.086,
     "by_category": {
-     "architecture": 0.6804,
-     "semantic": 0.929,
+     "architecture": 0.6804392697077886,
+     "semantic": 0.9290386479549506,
      "symbol": 1.0
     },
     "chunks": 1108
@@ -1552,13 +1552,13 @@
    "hybrid": {
     "language": "php",
     "queries": 20,
-    "ndcg10": 0.8276,
+    "ndcg10": 0.8276377914926579,
     "recall10": 0.875,
-    "index_ms": 953.1,
-    "query_p50_ms": 2.6,
+    "index_ms": 738.8,
+    "query_p50_ms": 1.534,
     "by_category": {
-     "architecture": 0.4617,
-     "semantic": 0.9244,
+     "architecture": 0.4617357767032484,
+     "semantic": 0.9244076946336917,
      "symbol": 1.0
     },
     "chunks": 1108
@@ -1566,13 +1566,13 @@
    "semble": {
     "language": "php",
     "queries": 20,
-    "ndcg10": 0.8802,
+    "ndcg10": 0.8801754850434482,
     "recall10": 0.925,
-    "index_ms": 531.6,
-    "query_p50_ms": 2.488,
+    "index_ms": 392.3,
+    "query_p50_ms": 2.703,
     "by_category": {
-     "architecture": 0.6981,
-     "semantic": 0.9113,
+     "architecture": 0.6980725016207016,
+     "semantic": 0.9113147192765458,
      "symbol": 1.0
     }
    }
@@ -1581,41 +1581,41 @@
    "bm25": {
     "language": "csharp",
     "queries": 20,
-    "ndcg10": 0.9007,
+    "ndcg10": 0.8693622829997812,
     "recall10": 1.0,
-    "index_ms": 2847.8,
-    "query_p50_ms": 4.157,
+    "index_ms": 1431.2,
+    "query_p50_ms": 3.951,
     "by_category": {
-     "architecture": 0.9866,
-     "semantic": 0.8268,
+     "architecture": 0.9489044006028785,
+     "semantic": 0.790347205125305,
      "symbol": 1.0
     },
-    "chunks": 4016
+    "chunks": 4114
    },
    "hybrid": {
     "language": "csharp",
     "queries": 20,
-    "ndcg10": 0.8272,
+    "ndcg10": 0.854865778008216,
     "recall10": 1.0,
-    "index_ms": 4194.6,
-    "query_p50_ms": 4.557,
+    "index_ms": 3243.7,
+    "query_p50_ms": 8.3,
     "by_category": {
-     "architecture": 0.6831,
-     "semantic": 0.8588,
+     "architecture": 0.7751534883011888,
+     "semantic": 0.8587631482142897,
      "symbol": 1.0
     },
-    "chunks": 4016
+    "chunks": 4114
    },
    "semble": {
     "language": "csharp",
     "queries": 20,
-    "ndcg10": 0.8915,
+    "ndcg10": 0.8915189253205081,
     "recall10": 1.0,
-    "index_ms": 2593.4,
-    "query_p50_ms": 15.676,
+    "index_ms": 2394.2,
+    "query_p50_ms": 10.653,
     "by_category": {
-     "architecture": 0.9251,
-     "semantic": 0.8436,
+     "architecture": 0.9251084237866075,
+     "semantic": 0.8436116330627744,
      "symbol": 1.0
     }
    }
@@ -1624,41 +1624,41 @@
    "bm25": {
     "language": "cpp",
     "queries": 20,
-    "ndcg10": 0.8101,
+    "ndcg10": 0.8165607625873565,
     "recall10": 1.0,
-    "index_ms": 1071.4,
-    "query_p50_ms": 1.39,
+    "index_ms": 1102.1,
+    "query_p50_ms": 1.61,
     "by_category": {
-     "architecture": 0.7608,
-     "semantic": 0.7877,
+     "architecture": 0.7733431075706084,
+     "semantic": 0.7917813498752873,
      "symbol": 1.0
     },
-    "chunks": 1599
+    "chunks": 1891
    },
    "hybrid": {
     "language": "cpp",
     "queries": 20,
-    "ndcg10": 0.8685,
+    "ndcg10": 0.8569755831549208,
     "recall10": 1.0,
-    "index_ms": 1633.1,
-    "query_p50_ms": 2.01,
+    "index_ms": 1309.4,
+    "query_p50_ms": 2.034,
     "by_category": {
-     "architecture": 0.9126,
-     "semantic": 0.7981,
+     "architecture": 0.8698373029112535,
+     "semantic": 0.8050650542719644,
      "symbol": 1.0
     },
-    "chunks": 1599
+    "chunks": 1891
    },
    "semble": {
     "language": "cpp",
     "queries": 20,
-    "ndcg10": 0.8481,
+    "ndcg10": 0.8481244099790952,
     "recall10": 0.975,
-    "index_ms": 1232.8,
-    "query_p50_ms": 2.349,
+    "index_ms": 885.3,
+    "query_p50_ms": 1.67,
     "by_category": {
-     "architecture": 0.777,
-     "semantic": 0.8524,
+     "architecture": 0.7769670264708678,
+     "semantic": 0.8523719014285831,
      "symbol": 1.0
     }
    }
@@ -1669,8 +1669,8 @@
     "queries": 20,
     "ndcg10": 1.0,
     "recall10": 1.0,
-    "index_ms": 160.5,
-    "query_p50_ms": 0.461,
+    "index_ms": 74.8,
+    "query_p50_ms": 0.326,
     "by_category": {
      "architecture": 1.0,
      "semantic": 1.0
@@ -1680,13 +1680,13 @@
    "hybrid": {
     "language": "bash",
     "queries": 20,
-    "ndcg10": 0.9262,
+    "ndcg10": 0.9261859507142916,
     "recall10": 1.0,
-    "index_ms": 219.1,
-    "query_p50_ms": 0.671,
+    "index_ms": 224.0,
+    "query_p50_ms": 0.586,
     "by_category": {
-     "architecture": 0.8155,
-     "semantic": 0.9385
+     "architecture": 0.8154648767857288,
+     "semantic": 0.9384882922619097
     },
     "chunks": 164
    },
@@ -1695,8 +1695,8 @@
     "queries": 20,
     "ndcg10": 1.0,
     "recall10": 1.0,
-    "index_ms": 265.4,
-    "query_p50_ms": 1.611,
+    "index_ms": 197.5,
+    "query_p50_ms": 1.396,
     "by_category": {
      "architecture": 1.0,
      "semantic": 1.0
@@ -1707,39 +1707,39 @@
    "bm25": {
     "language": "haskell",
     "queries": 20,
-    "ndcg10": 0.6731,
+    "ndcg10": 0.6730732729054256,
     "recall10": 0.95,
-    "index_ms": 6598.0,
-    "query_p50_ms": 3.692,
+    "index_ms": 2818.5,
+    "query_p50_ms": 4.704,
     "by_category": {
-     "architecture": 0.7061,
-     "semantic": 0.6511
+     "architecture": 0.7060890392971821,
+     "semantic": 0.6510627619775881
     },
     "chunks": 12277
    },
    "hybrid": {
     "language": "haskell",
     "queries": 20,
-    "ndcg10": 0.6846,
+    "ndcg10": 0.6845722032253624,
     "recall10": 0.95,
-    "index_ms": 7447.3,
-    "query_p50_ms": 6.652,
+    "index_ms": 3563.3,
+    "query_p50_ms": 4.09,
     "by_category": {
-     "architecture": 0.7404,
-     "semantic": 0.6474
+     "architecture": 0.7403699284739546,
+     "semantic": 0.6473737197263009
     },
     "chunks": 12277
    },
    "semble": {
     "language": "haskell",
     "queries": 20,
-    "ndcg10": 0.7091,
+    "ndcg10": 0.7090900678784487,
     "recall10": 0.95,
-    "index_ms": 4310.7,
-    "query_p50_ms": 2.99,
+    "index_ms": 3646.6,
+    "query_p50_ms": 3.004,
     "by_category": {
-     "architecture": 0.6696,
-     "semantic": 0.7354
+     "architecture": 0.6696315434523954,
+     "semantic": 0.7353957508291509
     }
    }
   },
@@ -1747,41 +1747,41 @@
    "bm25": {
     "language": "elixir",
     "queries": 19,
-    "ndcg10": 0.811,
+    "ndcg10": 0.810955182766483,
     "recall10": 1.0,
-    "index_ms": 629.7,
-    "query_p50_ms": 0.777,
+    "index_ms": 442.6,
+    "query_p50_ms": 0.523,
     "by_category": {
-     "architecture": 0.9355,
-     "semantic": 0.7628,
-     "symbol": 0.5496
+     "architecture": 0.9355245321275762,
+     "semantic": 0.7628164812910762,
+     "symbol": 0.5495707714591522
     },
     "chunks": 623
    },
    "hybrid": {
     "language": "elixir",
     "queries": 19,
-    "ndcg10": 0.8108,
+    "ndcg10": 0.8108376289336778,
     "recall10": 1.0,
-    "index_ms": 1068.9,
-    "query_p50_ms": 1.027,
+    "index_ms": 941.7,
+    "query_p50_ms": 0.924,
     "by_category": {
-     "architecture": 0.8868,
-     "semantic": 0.7724,
-     "symbol": 0.6726
+     "architecture": 0.8868082954562458,
+     "semantic": 0.7724082471182382,
+     "symbol": 0.6725941869353331
     },
     "chunks": 623
    },
    "semble": {
     "language": "elixir",
     "queries": 19,
-    "ndcg10": 0.8891,
+    "ndcg10": 0.8890941716165459,
     "recall10": 1.0,
-    "index_ms": 707.9,
-    "query_p50_ms": 2.067,
+    "index_ms": 656.9,
+    "query_p50_ms": 1.879,
     "by_category": {
-     "architecture": 0.8624,
-     "semantic": 0.8758,
+     "architecture": 0.8624288341269906,
+     "semantic": 0.8758471076530654,
      "symbol": 1.0
     }
    }
@@ -1790,41 +1790,41 @@
    "bm25": {
     "language": "elixir",
     "queries": 20,
-    "ndcg10": 0.8258,
+    "ndcg10": 0.8258000942002036,
     "recall10": 1.0,
-    "index_ms": 398.4,
-    "query_p50_ms": 0.591,
+    "index_ms": 227.1,
+    "query_p50_ms": 0.42,
     "by_category": {
      "architecture": 1.0,
-     "semantic": 0.8182,
-     "symbol": 0.6872
+     "semantic": 0.8181711123113731,
+     "symbol": 0.6872021038816168
     },
     "chunks": 282
    },
    "hybrid": {
     "language": "elixir",
     "queries": 20,
-    "ndcg10": 0.8358,
+    "ndcg10": 0.8358127539751068,
     "recall10": 1.0,
-    "index_ms": 543.7,
-    "query_p50_ms": 0.881,
+    "index_ms": 416.6,
+    "query_p50_ms": 1.179,
     "by_category": {
-     "architecture": 0.877,
-     "semantic": 0.8182,
-     "symbol": 0.877
+     "architecture": 0.8769765845238192,
+     "semantic": 0.8181711123113731,
+     "symbol": 0.8769765845238192
     },
     "chunks": 282
    },
    "semble": {
     "language": "elixir",
     "queries": 20,
-    "ndcg10": 0.9262,
+    "ndcg10": 0.9261859507142916,
     "recall10": 1.0,
-    "index_ms": 474.5,
-    "query_p50_ms": 1.747,
+    "index_ms": 407.2,
+    "query_p50_ms": 1.553,
     "by_category": {
      "architecture": 1.0,
-     "semantic": 0.8946,
+     "semantic": 0.8945513581632737,
      "symbol": 1.0
     }
    }
@@ -1833,41 +1833,41 @@
    "bm25": {
     "language": "python",
     "queries": 20,
-    "ndcg10": 0.678,
+    "ndcg10": 0.6780050874796058,
     "recall10": 0.825,
-    "index_ms": 1007.1,
-    "query_p50_ms": 1.507,
+    "index_ms": 892.6,
+    "query_p50_ms": 2.076,
     "by_category": {
-     "architecture": 0.4581,
-     "semantic": 0.7153,
-     "symbol": 0.9262
+     "architecture": 0.4581257954741815,
+     "semantic": 0.7152864284626734,
+     "symbol": 0.9261859507142916
     },
     "chunks": 2585
    },
    "hybrid": {
     "language": "python",
     "queries": 20,
-    "ndcg10": 0.6576,
+    "ndcg10": 0.6576033820199323,
     "recall10": 0.85,
-    "index_ms": 2005.6,
-    "query_p50_ms": 3.124,
+    "index_ms": 1879.7,
+    "query_p50_ms": 2.821,
     "by_category": {
-     "architecture": 0.4618,
-     "semantic": 0.6611,
-     "symbol": 0.9262
+     "architecture": 0.46178837753338114,
+     "semantic": 0.6610774055116899,
+     "symbol": 0.9261859507142916
     },
     "chunks": 2585
    },
    "semble": {
     "language": "python",
     "queries": 20,
-    "ndcg10": 0.7838,
+    "ndcg10": 0.78378040151892,
     "recall10": 0.9,
-    "index_ms": 1586.7,
-    "query_p50_ms": 3.077,
+    "index_ms": 1694.1,
+    "query_p50_ms": 2.696,
     "by_category": {
-     "architecture": 0.6492,
-     "semantic": 0.7664,
+     "architecture": 0.6492397538295632,
+     "semantic": 0.7663662191964322,
      "symbol": 1.0
     }
    }
@@ -1876,41 +1876,41 @@
    "bm25": {
     "language": "ruby",
     "queries": 18,
-    "ndcg10": 0.7842,
+    "ndcg10": 0.7841941940559969,
     "recall10": 1.0,
-    "index_ms": 406.6,
-    "query_p50_ms": 0.633,
+    "index_ms": 355.9,
+    "query_p50_ms": 0.44,
     "by_category": {
-     "architecture": 0.877,
-     "semantic": 0.7054,
-     "symbol": 0.8861
+     "architecture": 0.8769765845238192,
+     "semantic": 0.7053889181363094,
+     "symbol": 0.8861353116146786
     },
     "chunks": 728
    },
    "hybrid": {
     "language": "ruby",
     "queries": 18,
-    "ndcg10": 0.8322,
+    "ndcg10": 0.8321899894665402,
     "recall10": 1.0,
-    "index_ms": 524.0,
-    "query_p50_ms": 1.278,
+    "index_ms": 308.5,
+    "query_p50_ms": 0.814,
     "by_category": {
-     "architecture": 0.8333,
-     "semantic": 0.8049,
-     "symbol": 0.8861
+     "architecture": 0.8333333333333334,
+     "semantic": 0.8048743252324331,
+     "symbol": 0.8861353116146786
     },
     "chunks": 728
    },
    "semble": {
     "language": "ruby",
     "queries": 18,
-    "ndcg10": 0.8902,
+    "ndcg10": 0.8902066119047684,
     "recall10": 1.0,
-    "index_ms": 457.7,
-    "query_p50_ms": 1.948,
+    "index_ms": 339.2,
+    "query_p50_ms": 2.299,
     "by_category": {
      "architecture": 1.0,
-     "semantic": 0.8024,
+     "semantic": 0.8023719014285831,
      "symbol": 1.0
     }
    }
@@ -1919,42 +1919,42 @@
    "bm25": {
     "language": "ruby",
     "queries": 20,
-    "ndcg10": 0.6113,
+    "ndcg10": 0.6112816506817516,
     "recall10": 0.85,
-    "index_ms": 973.7,
-    "query_p50_ms": 2.352,
+    "index_ms": 362.0,
+    "query_p50_ms": 1.431,
     "by_category": {
-     "architecture": 0.5666,
-     "semantic": 0.6314,
-     "symbol": 0.6766
+     "architecture": 0.5665651490114344,
+     "semantic": 0.6314277971270493,
+     "symbol": 0.6766380231606942
     },
     "chunks": 1847
    },
    "hybrid": {
     "language": "ruby",
     "queries": 20,
-    "ndcg10": 0.6341,
+    "ndcg10": 0.6341262847765168,
     "recall10": 0.875,
-    "index_ms": 1468.8,
-    "query_p50_ms": 1.624,
+    "index_ms": 712.6,
+    "query_p50_ms": 1.301,
     "by_category": {
-     "architecture": 0.587,
-     "semantic": 0.6704,
-     "symbol": 0.6766
+     "architecture": 0.5870486152968055,
+     "semantic": 0.6703622950309012,
+     "symbol": 0.6766380231606942
     },
     "chunks": 1847
    },
    "semble": {
     "language": "ruby",
     "queries": 20,
-    "ndcg10": 0.854,
+    "ndcg10": 0.8540441468268698,
     "recall10": 0.925,
-    "index_ms": 476.8,
-    "query_p50_ms": 2.02,
+    "index_ms": 478.5,
+    "query_p50_ms": 2.152,
     "by_category": {
-     "architecture": 0.8455,
-     "semantic": 0.8495,
-     "symbol": 0.8812
+     "architecture": 0.845500808108813,
+     "semantic": 0.8494849471938838,
+     "symbol": 0.8812452583002233
     }
    }
   },
@@ -1962,39 +1962,39 @@
    "bm25": {
     "language": "c",
     "queries": 20,
-    "ndcg10": 0.8385,
+    "ndcg10": 0.8384930224572477,
     "recall10": 1.0,
-    "index_ms": 8306.5,
-    "query_p50_ms": 2.776,
+    "index_ms": 7443.0,
+    "query_p50_ms": 3.633,
     "by_category": {
-     "architecture": 0.8377,
-     "semantic": 0.8393
+     "architecture": 0.8377071188430578,
+     "semantic": 0.8392789260714373
     },
-    "chunks": 10927
+    "chunks": 10938
    },
    "hybrid": {
     "language": "c",
     "queries": 20,
-    "ndcg10": 0.8378,
+    "ndcg10": 0.8377712784011603,
     "recall10": 1.0,
-    "index_ms": 10338.9,
-    "query_p50_ms": 3.639,
+    "index_ms": 8499.7,
+    "query_p50_ms": 3.744,
     "by_category": {
-     "architecture": 0.8932,
-     "semantic": 0.7823
+     "architecture": 0.8931959749235439,
+     "semantic": 0.7823465818787765
     },
-    "chunks": 10927
+    "chunks": 10938
    },
    "semble": {
     "language": "c",
     "queries": 20,
-    "ndcg10": 0.9224,
+    "ndcg10": 0.9224229559439696,
     "recall10": 1.0,
-    "index_ms": 8707.3,
-    "query_p50_ms": 2.284,
+    "index_ms": 8357.3,
+    "query_p50_ms": 3.239,
     "by_category": {
-     "architecture": 0.9431,
-     "semantic": 0.9018
+     "architecture": 0.9430676558073394,
+     "semantic": 0.9017782560805999
     }
    }
   },
@@ -2002,13 +2002,13 @@
    "bm25": {
     "language": "javascript",
     "queries": 20,
-    "ndcg10": 0.8152,
+    "ndcg10": 0.815180938472978,
     "recall10": 0.9,
-    "index_ms": 130.0,
-    "query_p50_ms": 0.306,
+    "index_ms": 175.1,
+    "query_p50_ms": 0.327,
     "by_category": {
-     "architecture": 0.871,
-     "semantic": 0.6753,
+     "architecture": 0.8710490642551528,
+     "semantic": 0.6752582648809604,
      "symbol": 1.0
     },
     "chunks": 129
@@ -2016,13 +2016,13 @@
    "hybrid": {
     "language": "javascript",
     "queries": 20,
-    "ndcg10": 0.8889,
+    "ndcg10": 0.8888994916753052,
     "recall10": 1.0,
-    "index_ms": 76.4,
-    "query_p50_ms": 0.555,
+    "index_ms": 84.5,
+    "query_p50_ms": 0.736,
     "by_category": {
-     "architecture": 0.8767,
-     "semantic": 0.8353,
+     "architecture": 0.8767012121166844,
+     "semantic": 0.8353091734228888,
      "symbol": 1.0
     },
     "chunks": 129
@@ -2030,13 +2030,13 @@
    "semble": {
     "language": "javascript",
     "queries": 20,
-    "ndcg10": 0.9176,
+    "ndcg10": 0.9175840269191813,
     "recall10": 0.975,
-    "index_ms": 54.8,
-    "query_p50_ms": 1.532,
+    "index_ms": 76.6,
+    "query_p50_ms": 1.352,
     "by_category": {
-     "architecture": 0.9033,
-     "semantic": 0.8813,
+     "architecture": 0.9032867981913646,
+     "semantic": 0.8813288610261599,
      "symbol": 1.0
     }
    }
@@ -2045,41 +2045,41 @@
    "bm25": {
     "language": "python",
     "queries": 20,
-    "ndcg10": 0.9137,
+    "ndcg10": 0.913749721650882,
     "recall10": 1.0,
-    "index_ms": 84.6,
-    "query_p50_ms": 0.429,
+    "index_ms": 83.7,
+    "query_p50_ms": 0.281,
     "by_category": {
-     "architecture": 0.9885,
-     "semantic": 0.8405,
-     "symbol": 0.9262
+     "architecture": 0.9885315413068839,
+     "semantic": 0.8405429862872493,
+     "symbol": 0.9261859507142916
     },
     "chunks": 317
    },
    "hybrid": {
     "language": "python",
     "queries": 20,
-    "ndcg10": 0.9476,
+    "ndcg10": 0.9475822995487022,
     "recall10": 1.0,
-    "index_ms": 210.6,
-    "query_p50_ms": 0.707,
+    "index_ms": 185.3,
+    "query_p50_ms": 0.71,
     "by_category": {
-     "architecture": 0.9771,
-     "semantic": 0.9352,
-     "symbol": 0.9262
+     "architecture": 0.9770630826137678,
+     "semantic": 0.9351593323882765,
+     "symbol": 0.9261859507142916
     },
     "chunks": 317
    },
    "semble": {
     "language": "python",
     "queries": 20,
-    "ndcg10": 0.9674,
+    "ndcg10": 0.9673793323602942,
     "recall10": 1.0,
-    "index_ms": 173.4,
-    "query_p50_ms": 1.553,
+    "index_ms": 157.1,
+    "query_p50_ms": 1.423,
     "by_category": {
-     "architecture": 0.9771,
-     "semantic": 0.9385,
+     "architecture": 0.9770630826137678,
+     "semantic": 0.9385181336136883,
      "symbol": 1.0
     }
    }
@@ -2088,42 +2088,42 @@
    "bm25": {
     "language": "rust",
     "queries": 20,
-    "ndcg10": 0.7799,
+    "ndcg10": 0.7614050593414153,
     "recall10": 0.925,
-    "index_ms": 1477.7,
-    "query_p50_ms": 1.875,
+    "index_ms": 802.2,
+    "query_p50_ms": 1.584,
     "by_category": {
-     "architecture": 0.8036,
-     "semantic": 0.5936,
+     "architecture": 0.7666494875183456,
+     "semantic": 0.5936010519408085,
      "symbol": 1.0
     },
-    "chunks": 3727
+    "chunks": 3736
    },
    "hybrid": {
     "language": "rust",
     "queries": 20,
-    "ndcg10": 0.8018,
+    "ndcg10": 0.8130929753571458,
     "recall10": 0.975,
-    "index_ms": 2240.8,
-    "query_p50_ms": 2.296,
+    "index_ms": 1768.3,
+    "query_p50_ms": 2.473,
     "by_category": {
-     "architecture": 0.7518,
-     "semantic": 0.753,
+     "architecture": 0.7744076946336916,
+     "semantic": 0.7529637601343332,
      "symbol": 1.0
     },
-    "chunks": 3727
+    "chunks": 3736
    },
    "semble": {
     "language": "rust",
     "queries": 20,
-    "ndcg10": 0.7269,
+    "ndcg10": 0.7269401880127724,
     "recall10": 0.975,
-    "index_ms": 1249.7,
-    "query_p50_ms": 3.081,
+    "index_ms": 1163.9,
+    "query_p50_ms": 3.281,
     "by_category": {
-     "architecture": 0.7886,
-     "semantic": 0.7007,
-     "symbol": 0.6121
+     "architecture": 0.7885962468833579,
+     "semantic": 0.7007303620904127,
+     "symbol": 0.6121147797198481
     }
    }
   },
@@ -2131,40 +2131,40 @@
    "bm25": {
     "language": "ruby",
     "queries": 20,
-    "ndcg10": 0.8571,
+    "ndcg10": 0.8570892854268383,
     "recall10": 1.0,
-    "index_ms": 114.6,
-    "query_p50_ms": 0.343,
+    "index_ms": 94.5,
+    "query_p50_ms": 0.273,
     "by_category": {
-     "architecture": 0.7974,
-     "semantic": 0.836,
-     "symbol": 0.9385
+     "architecture": 0.797427388135896,
+     "semantic": 0.8359687793650923,
+     "symbol": 0.9384882922619097
     },
     "chunks": 271
    },
    "hybrid": {
     "language": "ruby",
     "queries": 20,
-    "ndcg10": 0.8771,
+    "ndcg10": 0.8770750787545915,
     "recall10": 1.0,
-    "index_ms": 148.1,
-    "query_p50_ms": 0.649,
+    "index_ms": 144.0,
+    "query_p50_ms": 0.794,
     "by_category": {
-     "architecture": 0.7297,
-     "semantic": 0.918,
-     "symbol": 0.9385
+     "architecture": 0.7297424628754914,
+     "semantic": 0.9179843896825461,
+     "symbol": 0.9384882922619097
     },
     "chunks": 271
    },
    "semble": {
     "language": "ruby",
     "queries": 20,
-    "ndcg10": 0.9815,
+    "ndcg10": 0.9815464876785729,
     "recall10": 1.0,
-    "index_ms": 92.6,
-    "query_p50_ms": 1.751,
+    "index_ms": 82.6,
+    "query_p50_ms": 1.521,
     "by_category": {
-     "architecture": 0.9262,
+     "architecture": 0.9261859507142916,
      "semantic": 1.0,
      "symbol": 1.0
     }
@@ -2174,13 +2174,13 @@
    "bm25": {
     "language": "swift",
     "queries": 13,
-    "ndcg10": 0.8379,
-    "recall10": 0.9231,
-    "index_ms": 108.4,
-    "query_p50_ms": 0.632,
+    "ndcg10": 0.8378572878012844,
+    "recall10": 0.9230769230769231,
+    "index_ms": 61.9,
+    "query_p50_ms": 0.524,
     "by_category": {
-     "architecture": 0.7769,
-     "semantic": 0.7945,
+     "architecture": 0.7768636238195574,
+     "semantic": 0.7945076957082893,
      "symbol": 1.0
     },
     "chunks": 250
@@ -2188,13 +2188,13 @@
    "hybrid": {
     "language": "swift",
     "queries": 13,
-    "ndcg10": 0.7231,
-    "recall10": 0.9231,
-    "index_ms": 177.0,
-    "query_p50_ms": 0.845,
+    "ndcg10": 0.723095834869694,
+    "recall10": 0.9230769230769231,
+    "index_ms": 127.1,
+    "query_p50_ms": 0.877,
     "by_category": {
-     "architecture": 0.5586,
-     "semantic": 0.6749,
+     "architecture": 0.5586339876693419,
+     "semantic": 0.6749062700425706,
      "symbol": 1.0
     },
     "chunks": 250
@@ -2202,13 +2202,13 @@
    "semble": {
     "language": "swift",
     "queries": 13,
-    "ndcg10": 0.8005,
-    "recall10": 0.9231,
-    "index_ms": 124.3,
-    "query_p50_ms": 4.458,
+    "ndcg10": 0.8004579900088664,
+    "recall10": 0.9230769230769231,
+    "index_ms": 134.1,
+    "query_p50_ms": 4.659,
     "by_category": {
-     "architecture": 0.708,
-     "semantic": 0.7546,
+     "architecture": 0.7080343955788911,
+     "semantic": 0.7545500976255128,
      "symbol": 1.0
     }
    }
@@ -2217,12 +2217,12 @@
    "bm25": {
     "language": "python",
     "queries": 21,
-    "ndcg10": 0.9134,
-    "recall10": 0.9762,
-    "index_ms": 137.9,
-    "query_p50_ms": 0.483,
+    "ndcg10": 0.9134085855376716,
+    "recall10": 0.9761904761904762,
+    "index_ms": 173.1,
+    "query_p50_ms": 0.584,
     "by_category": {
-     "architecture": 0.8347,
+     "architecture": 0.8346891178446456,
      "semantic": 1.0,
      "symbol": 1.0
     },
@@ -2231,13 +2231,13 @@
    "hybrid": {
     "language": "python",
     "queries": 21,
-    "ndcg10": 0.9197,
-    "recall10": 0.9762,
-    "index_ms": 313.7,
-    "query_p50_ms": 0.793,
+    "ndcg10": 0.9197115291549823,
+    "recall10": 0.9761904761904762,
+    "index_ms": 302.0,
+    "query_p50_ms": 0.666,
     "by_category": {
-     "architecture": 0.8613,
-     "semantic": 0.9679,
+     "architecture": 0.8613182303598413,
+     "semantic": 0.967888315659275,
      "symbol": 1.0
     },
     "chunks": 648
@@ -2245,12 +2245,12 @@
    "semble": {
     "language": "python",
     "queries": 21,
-    "ndcg10": 0.9632,
-    "recall10": 0.9524,
-    "index_ms": 240.7,
-    "query_p50_ms": 2.262,
+    "ndcg10": 0.9631568755014722,
+    "recall10": 0.9523809523809523,
+    "index_ms": 204.5,
+    "query_p50_ms": 1.592,
     "by_category": {
-     "architecture": 0.9297,
+     "architecture": 0.9296631259573561,
      "semantic": 1.0,
      "symbol": 1.0
     }
@@ -2260,39 +2260,39 @@
    "bm25": {
     "language": "lua",
     "queries": 20,
-    "ndcg10": 0.8311,
+    "ndcg10": 0.8311135034123961,
     "recall10": 0.95,
-    "index_ms": 606.1,
-    "query_p50_ms": 0.998,
+    "index_ms": 333.2,
+    "query_p50_ms": 0.686,
     "by_category": {
-     "architecture": 0.8712,
-     "semantic": 0.8095
+     "architecture": 0.8712215791374417,
+     "semantic": 0.8095168472527562
     },
     "chunks": 1020
    },
    "hybrid": {
     "language": "lua",
     "queries": 20,
-    "ndcg10": 0.7609,
+    "ndcg10": 0.7608791016737273,
     "recall10": 0.95,
-    "index_ms": 1042.8,
-    "query_p50_ms": 1.429,
+    "index_ms": 726.2,
+    "query_p50_ms": 1.947,
     "by_category": {
-     "architecture": 0.708,
-     "semantic": 0.7894
+     "architecture": 0.7079603609045186,
+     "semantic": 0.7893738082417627
     },
     "chunks": 1020
    },
    "semble": {
     "language": "lua",
     "queries": 20,
-    "ndcg10": 0.7627,
+    "ndcg10": 0.7626626019230098,
     "recall10": 0.975,
-    "index_ms": 635.4,
-    "query_p50_ms": 1.931,
+    "index_ms": 670.6,
+    "query_p50_ms": 1.813,
     "by_category": {
-     "architecture": 0.7955,
-     "semantic": 0.745
+     "architecture": 0.7954904433608062,
+     "semantic": 0.7449860719180423
     }
    }
   },
@@ -2300,41 +2300,41 @@
    "bm25": {
     "language": "rust",
     "queries": 20,
-    "ndcg10": 0.8468,
-    "recall10": 0.95,
-    "index_ms": 2946.0,
-    "query_p50_ms": 2.287,
+    "ndcg10": 0.8402933979227267,
+    "recall10": 0.9,
+    "index_ms": 1611.0,
+    "query_p50_ms": 2.215,
     "by_category": {
-     "architecture": 0.7821,
-     "semantic": 0.843,
-     "symbol": 0.9167
+     "architecture": 0.8436318353529363,
+     "semantic": 0.7805096182921145,
+     "symbol": 0.9166666666666666
     },
-    "chunks": 5852
+    "chunks": 5879
    },
    "hybrid": {
     "language": "rust",
     "queries": 20,
-    "ndcg10": 0.7707,
-    "recall10": 0.975,
-    "index_ms": 5574.8,
-    "query_p50_ms": 2.898,
+    "ndcg10": 0.7558233601792755,
+    "recall10": 0.925,
+    "index_ms": 3887.0,
+    "query_p50_ms": 2.841,
     "by_category": {
-     "architecture": 0.6262,
-     "semantic": 0.7783,
-     "symbol": 0.9051
+     "architecture": 0.626189667065939,
+     "semantic": 0.7410815803895605,
+     "symbol": 0.9051127596788988
     },
-    "chunks": 5852
+    "chunks": 5879
    },
    "semble": {
     "language": "rust",
     "queries": 20,
-    "ndcg10": 0.9369,
+    "ndcg10": 0.9368625189751066,
     "recall10": 0.95,
-    "index_ms": 3426.1,
-    "query_p50_ms": 2.815,
+    "index_ms": 3370.4,
+    "query_p50_ms": 3.019,
     "by_category": {
-     "architecture": 0.8029,
-     "semantic": 0.99,
+     "architecture": 0.8029215983923241,
+     "semantic": 0.9899650986435234,
      "symbol": 1.0
     }
    }
@@ -2343,41 +2343,41 @@
    "bm25": {
     "language": "typescript",
     "queries": 20,
-    "ndcg10": 0.8458,
+    "ndcg10": 0.8458334299094845,
     "recall10": 0.95,
-    "index_ms": 471.8,
-    "query_p50_ms": 1.175,
+    "index_ms": 300.5,
+    "query_p50_ms": 0.794,
     "by_category": {
-     "architecture": 0.697,
-     "semantic": 0.9059,
+     "architecture": 0.6969539469900673,
+     "semantic": 0.9058624317527358,
      "symbol": 1.0
     },
-    "chunks": 1239
+    "chunks": 1238
    },
    "hybrid": {
     "language": "typescript",
     "queries": 20,
-    "ndcg10": 0.8324,
+    "ndcg10": 0.8324356157188728,
     "recall10": 0.925,
-    "index_ms": 879.0,
-    "query_p50_ms": 1.452,
+    "index_ms": 754.6,
+    "query_p50_ms": 1.308,
     "by_category": {
-     "architecture": 0.5811,
+     "architecture": 0.5810890392971821,
      "semantic": 1.0,
      "symbol": 1.0
     },
-    "chunks": 1239
+    "chunks": 1238
    },
    "semble": {
     "language": "typescript",
     "queries": 20,
-    "ndcg10": 0.8492,
+    "ndcg10": 0.8491912748284915,
     "recall10": 0.925,
-    "index_ms": 402.6,
-    "query_p50_ms": 4.422,
+    "index_ms": 453.9,
+    "query_p50_ms": 5.542,
     "by_category": {
-     "architecture": 0.7767,
-     "semantic": 0.8243,
+     "architecture": 0.7767199752358612,
+     "semantic": 0.8242950992404203,
      "symbol": 1.0
     }
    }
@@ -2386,41 +2386,41 @@
    "bm25": {
     "language": "swift",
     "queries": 20,
-    "ndcg10": 0.6518,
+    "ndcg10": 0.6534159662162732,
     "recall10": 0.95,
-    "index_ms": 1138.7,
-    "query_p50_ms": 1.071,
+    "index_ms": 643.5,
+    "query_p50_ms": 1.048,
     "by_category": {
-     "architecture": 0.5827,
-     "semantic": 0.7041,
-     "symbol": 0.4769
+     "architecture": 0.5827353828091125,
+     "semantic": 0.7063883298446239,
+     "symbol": 0.47689218602446437
     },
-    "chunks": 2182
+    "chunks": 2202
    },
    "hybrid": {
     "language": "swift",
     "queries": 20,
-    "ndcg10": 0.6885,
+    "ndcg10": 0.6976771978259344,
     "recall10": 0.95,
-    "index_ms": 1704.6,
-    "query_p50_ms": 1.27,
+    "index_ms": 1052.6,
+    "query_p50_ms": 2.091,
     "by_category": {
-     "architecture": 0.5228,
-     "semantic": 0.7746,
-     "symbol": 0.4521
+     "architecture": 0.584351374160507,
+     "semantic": 0.774591617637796,
+     "symbol": 0.4520690623693407
     },
-    "chunks": 2182
+    "chunks": 2202
    },
    "semble": {
     "language": "swift",
     "queries": 20,
-    "ndcg10": 0.7654,
+    "ndcg10": 0.7653556218129065,
     "recall10": 0.95,
-    "index_ms": 932.0,
-    "query_p50_ms": 2.282,
+    "index_ms": 1037.8,
+    "query_p50_ms": 2.746,
     "by_category": {
-     "architecture": 0.4909,
-     "semantic": 0.7739,
+     "architecture": 0.49091435506199194,
+     "semantic": 0.7738835265051539,
      "symbol": 1.0
     }
    }
@@ -2429,42 +2429,42 @@
    "bm25": {
     "language": "typescript",
     "queries": 20,
-    "ndcg10": 0.729,
+    "ndcg10": 0.7289694436225425,
     "recall10": 0.85,
-    "index_ms": 1465.8,
-    "query_p50_ms": 1.446,
+    "index_ms": 965.1,
+    "query_p50_ms": 1.189,
     "by_category": {
      "architecture": 0.75,
-     "semantic": 0.6436,
+     "semantic": 0.6435808065864409,
      "symbol": 1.0
     },
-    "chunks": 2322
+    "chunks": 2321
    },
    "hybrid": {
     "language": "typescript",
     "queries": 20,
-    "ndcg10": 0.6459,
+    "ndcg10": 0.6459103175756977,
     "recall10": 0.875,
-    "index_ms": 2170.4,
-    "query_p50_ms": 1.878,
+    "index_ms": 1325.2,
+    "query_p50_ms": 1.656,
     "by_category": {
-     "architecture": 0.4797,
-     "semantic": 0.64,
+     "architecture": 0.4797257299321042,
+     "semantic": 0.6399865429019391,
      "symbol": 1.0
     },
-    "chunks": 2322
+    "chunks": 2321
    },
    "semble": {
     "language": "typescript",
     "queries": 20,
-    "ndcg10": 0.684,
+    "ndcg10": 0.6839836502947894,
     "recall10": 0.925,
-    "index_ms": 1234.8,
-    "query_p50_ms": 2.276,
+    "index_ms": 1146.0,
+    "query_p50_ms": 2.246,
     "by_category": {
-     "architecture": 0.753,
-     "semantic": 0.6511,
-     "symbol": 0.6667
+     "architecture": 0.7529637601343332,
+     "semantic": 0.6510809495536172,
+     "symbol": 0.6666666666666666
     }
    }
   },
@@ -2472,39 +2472,39 @@
    "bm25": {
     "language": "haskell",
     "queries": 20,
-    "ndcg10": 0.7913,
+    "ndcg10": 0.7912787310128773,
     "recall10": 1.0,
-    "index_ms": 287.4,
-    "query_p50_ms": 0.504,
+    "index_ms": 124.6,
+    "query_p50_ms": 0.366,
     "by_category": {
-     "architecture": 0.8057,
-     "semantic": 0.7817
+     "architecture": 0.8057060523579617,
+     "semantic": 0.781660516782821
     },
     "chunks": 438
    },
    "hybrid": {
     "language": "haskell",
     "queries": 20,
-    "ndcg10": 0.7859,
+    "ndcg10": 0.785928862762458,
     "recall10": 1.0,
-    "index_ms": 288.4,
-    "query_p50_ms": 0.8,
+    "index_ms": 180.2,
+    "query_p50_ms": 0.766,
     "by_category": {
-     "architecture": 0.8572,
-     "semantic": 0.7384
+     "architecture": 0.8571530173877968,
+     "semantic": 0.7384460930122322
     },
     "chunks": 438
    },
    "semble": {
     "language": "haskell",
     "queries": 20,
-    "ndcg10": 0.8487,
+    "ndcg10": 0.8486778764412228,
     "recall10": 1.0,
-    "index_ms": 166.0,
-    "query_p50_ms": 2.323,
+    "index_ms": 163.5,
+    "query_p50_ms": 1.959,
     "by_category": {
-     "architecture": 0.8476,
-     "semantic": 0.8494
+     "architecture": 0.8476276829510184,
+     "semantic": 0.8493780054346923
     }
    }
   },
@@ -2512,39 +2512,39 @@
    "bm25": {
     "language": "zig",
     "queries": 20,
-    "ndcg10": 0.9275,
+    "ndcg10": 0.9275462166730402,
     "recall10": 1.0,
-    "index_ms": 18489.0,
-    "query_p50_ms": 20.177,
+    "index_ms": 9877.9,
+    "query_p50_ms": 8.513,
     "by_category": {
-     "architecture": 0.877,
-     "semantic": 0.9365
+     "architecture": 0.8769765845238192,
+     "semantic": 0.9364702694052556
     },
     "chunks": 19177
    },
    "hybrid": {
     "language": "zig",
     "queries": 20,
-    "ndcg10": 0.879,
+    "ndcg10": 0.8790336031806447,
     "recall10": 1.0,
-    "index_ms": 20832.3,
-    "query_p50_ms": 8.192,
+    "index_ms": 11365.3,
+    "query_p50_ms": 10.516,
     "by_category": {
      "architecture": 1.0,
-     "semantic": 0.8577
+     "semantic": 0.8576865919772292
     },
     "chunks": 19177
    },
    "semble": {
     "language": "zig",
     "queries": 20,
-    "ndcg10": 0.8881,
+    "ndcg10": 0.8880929753571458,
     "recall10": 1.0,
-    "index_ms": 17635.7,
-    "query_p50_ms": 4.228,
+    "index_ms": 16008.2,
+    "query_p50_ms": 6.264,
     "by_category": {
-     "architecture": 0.7103,
-     "semantic": 0.9195
+     "architecture": 0.7103099178571526,
+     "semantic": 0.9194664560924387
     }
    }
   },
@@ -2552,39 +2552,39 @@
    "bm25": {
     "language": "zig",
     "queries": 20,
-    "ndcg10": 0.9196,
+    "ndcg10": 0.9196394630357186,
     "recall10": 1.0,
-    "index_ms": 250.9,
-    "query_p50_ms": 0.465,
+    "index_ms": 309.3,
+    "query_p50_ms": 0.377,
     "by_category": {
-     "architecture": 0.8155,
-     "semantic": 0.9312
+     "architecture": 0.8154648767857288,
+     "semantic": 0.9312144170634953
     },
     "chunks": 126
    },
    "hybrid": {
     "language": "zig",
     "queries": 20,
-    "ndcg10": 0.9262,
+    "ndcg10": 0.9261859507142916,
     "recall10": 1.0,
-    "index_ms": 159.5,
-    "query_p50_ms": 0.686,
+    "index_ms": 105.7,
+    "query_p50_ms": 0.587,
     "by_category": {
-     "architecture": 0.8155,
-     "semantic": 0.9385
+     "architecture": 0.8154648767857288,
+     "semantic": 0.9384882922619097
     },
     "chunks": 126
    },
    "semble": {
     "language": "zig",
     "queries": 20,
-    "ndcg10": 0.9381,
+    "ndcg10": 0.9380929753571458,
     "recall10": 1.0,
-    "index_ms": 113.7,
-    "query_p50_ms": 1.839,
+    "index_ms": 98.7,
+    "query_p50_ms": 3.137,
     "by_category": {
      "architecture": 1.0,
-     "semantic": 0.9312
+     "semantic": 0.9312144170634953
     }
    }
   },
@@ -2592,39 +2592,39 @@
    "bm25": {
     "language": "zig",
     "queries": 20,
-    "ndcg10": 0.7886,
+    "ndcg10": 0.7885962468833579,
     "recall10": 0.95,
-    "index_ms": 1475.6,
-    "query_p50_ms": 0.776,
+    "index_ms": 631.9,
+    "query_p50_ms": 0.608,
     "by_category": {
-     "architecture": 0.8044,
-     "semantic": 0.7801
+     "architecture": 0.804418536224494,
+     "semantic": 0.7800765526227462
     },
     "chunks": 1364
    },
    "hybrid": {
     "language": "zig",
     "queries": 20,
-    "ndcg10": 0.8056,
+    "ndcg10": 0.8056265322552827,
     "recall10": 1.0,
-    "index_ms": 2186.3,
-    "query_p50_ms": 1.912,
+    "index_ms": 1507.1,
+    "query_p50_ms": 1.196,
     "by_category": {
-     "architecture": 0.7556,
-     "semantic": 0.8326
+     "architecture": 0.7555806894739839,
+     "semantic": 0.832574293752905
     },
     "chunks": 1364
    },
    "semble": {
     "language": "zig",
     "queries": 20,
-    "ndcg10": 0.871,
+    "ndcg10": 0.870954834495746,
     "recall10": 1.0,
-    "index_ms": 1430.6,
-    "query_p50_ms": 1.95,
+    "index_ms": 1549.9,
+    "query_p50_ms": 2.767,
     "by_category": {
-     "architecture": 0.8082,
-     "semantic": 0.9048
+     "architecture": 0.8081767403960004,
+     "semantic": 0.9047584236263781
     }
    }
   },
@@ -2632,42 +2632,42 @@
    "bm25": {
     "language": "typescript",
     "queries": 20,
-    "ndcg10": 0.7051,
+    "ndcg10": 0.7050650542719645,
     "recall10": 0.9,
-    "index_ms": 2980.0,
-    "query_p50_ms": 4.994,
+    "index_ms": 1587.5,
+    "query_p50_ms": 8.43,
     "by_category": {
-     "architecture": 0.8266,
-     "semantic": 0.6765,
-     "symbol": 0.6667
+     "architecture": 0.8266433990956823,
+     "semantic": 0.6765174991581969,
+     "symbol": 0.6666666666666666
     },
-    "chunks": 5510
+    "chunks": 5508
    },
    "hybrid": {
     "language": "typescript",
     "queries": 20,
-    "ndcg10": 0.6879,
+    "ndcg10": 0.6878613675247058,
     "recall10": 0.95,
-    "index_ms": 4044.9,
-    "query_p50_ms": 5.318,
+    "index_ms": 2962.9,
+    "query_p50_ms": 5.882,
     "by_category": {
-     "architecture": 0.6008,
-     "semantic": 0.7195,
-     "symbol": 0.6667
+     "architecture": 0.6007857362633888,
+     "semantic": 0.7195449542646586,
+     "symbol": 0.6666666666666666
     },
-    "chunks": 5510
+    "chunks": 5508
    },
    "semble": {
     "language": "typescript",
     "queries": 20,
-    "ndcg10": 0.6427,
+    "ndcg10": 0.6427209624222499,
     "recall10": 0.925,
-    "index_ms": 2365.0,
-    "query_p50_ms": 6.238,
+    "index_ms": 2150.3,
+    "query_p50_ms": 5.8,
     "by_category": {
-     "architecture": 0.5263,
-     "semantic": 0.6629,
-     "symbol": 0.7103
+     "architecture": 0.5263150610131765,
+     "semantic": 0.6629407116016026,
+     "symbol": 0.7103099178571526
     }
    }
   }
@@ -2675,15 +2675,15 @@
  "summary": {
   "repos": 63,
   "bm25": {
-   "ndcg10": 0.8135,
-   "recall10": 0.9518,
-   "index_ms_median": 629.7,
-   "query_p50_ms_median": 1.06,
+   "ndcg10": 0.8133,
+   "recall10": 0.951,
+   "index_ms_median": 442.6,
+   "query_p50_ms_median": 0.911,
    "by_language": {
     "bash": 0.8527,
-    "c": 0.7241,
-    "cpp": 0.7912,
-    "csharp": 0.8433,
+    "c": 0.7262,
+    "cpp": 0.803,
+    "csharp": 0.8333,
     "elixir": 0.8387,
     "go": 0.8545,
     "haskell": 0.7633,
@@ -2694,28 +2694,28 @@
     "php": 0.8602,
     "python": 0.8606,
     "ruby": 0.7509,
-    "rust": 0.7874,
+    "rust": 0.7794,
     "scala": 0.8499,
-    "swift": 0.8037,
+    "swift": 0.8042,
     "typescript": 0.76,
     "zig": 0.8786
    },
    "by_category": {
     "architecture": 0.7852,
-    "semantic": 0.8021,
-    "symbol": 0.901
+    "semantic": 0.8013,
+    "symbol": 0.9036
    }
   },
   "hybrid": {
-   "ndcg10": 0.8092,
-   "recall10": 0.9589,
-   "index_ms_median": 1119.8,
-   "query_p50_ms_median": 1.559,
+   "ndcg10": 0.8098,
+   "recall10": 0.9577,
+   "index_ms_median": 845.9,
+   "query_p50_ms_median": 1.538,
    "by_language": {
     "bash": 0.8084,
-    "c": 0.7137,
-    "cpp": 0.8632,
-    "csharp": 0.8173,
+    "c": 0.7054,
+    "cpp": 0.8729,
+    "csharp": 0.8246,
     "elixir": 0.8517,
     "go": 0.8695,
     "haskell": 0.7825,
@@ -2726,23 +2726,23 @@
     "php": 0.753,
     "python": 0.84,
     "ruby": 0.7811,
-    "rust": 0.7844,
+    "rust": 0.7832,
     "scala": 0.8461,
-    "swift": 0.7742,
+    "swift": 0.7772,
     "typescript": 0.7221,
     "zig": 0.8703
    },
    "by_category": {
-    "architecture": 0.7574,
-    "semantic": 0.8091,
+    "architecture": 0.7597,
+    "semantic": 0.8089,
     "symbol": 0.901
    }
   },
   "semble": {
    "ndcg10": 0.8516,
    "recall10": 0.9667,
-   "index_ms_median": 707.9,
-   "query_p50_ms_median": 2.278,
+   "index_ms_median": 664.3,
+   "query_p50_ms_median": 2.246,
    "by_language": {
     "bash": 0.8396,
     "c": 0.7504,
@@ -2771,91 +2771,5 @@
    }
   }
  },
- "overrides": [],
- "dev_repos": [
-  "aiohttp",
-  "axios",
-  "gin",
-  "gson",
-  "guzzle",
-  "sinatra",
-  "tokio",
-  "trpc",
-  "messagepack-csharp",
-  "ktor",
-  "cats",
-  "alamofire",
-  "nlohmann-json",
-  "phoenix",
-  "curl",
-  "bats-core",
-  "aeson",
-  "telescope.nvim",
-  "zig"
- ],
- "calibration": {
-  "tfidf": {
-   "pairs": 719,
-   "clone": {
-    "p5": 0.343,
-    "p10": 0.444,
-    "p25": 0.59,
-    "p50": 0.716
-   },
-   "other": {
-    "p50": 0.024,
-    "p90": 0.096,
-    "p99": 0.219,
-    "p99.5": 0.285
-   },
-   "at_0.5": {
-    "clones_kept": 0.865,
-    "others_kept": 0.0028
-   },
-   "at_0.6": {
-    "clones_kept": 0.733,
-    "others_kept": 0.0028
-   },
-   "at_0.7": {
-    "clones_kept": 0.54,
-    "others_kept": 0.0028
-   },
-   "at_0.8": {
-    "clones_kept": 0.317,
-    "others_kept": 0.0014
-   }
-  },
-  "dense": {
-   "pairs": 719,
-   "clone": {
-    "p5": 0.61,
-    "p10": 0.686,
-    "p25": 0.806,
-    "p50": 0.892
-   },
-   "other": {
-    "p50": 0.162,
-    "p90": 0.403,
-    "p99": 0.634,
-    "p99.5": 0.758
-   },
-   "at_0.5": {
-    "clones_kept": 0.978,
-    "others_kept": 0.0431
-   },
-   "at_0.6": {
-    "clones_kept": 0.955,
-    "others_kept": 0.0167
-   },
-   "at_0.7": {
-    "clones_kept": 0.889,
-    "others_kept": 0.007
-   },
-   "at_0.8": {
-    "clones_kept": 0.766,
-    "others_kept": 0.0042
-   }
-  }
- },
- "measured": "2026-11-18, semble 0.7.3, model2vec 0.10.0, Python 3.12, 4 CPU cores, CPU only"
+ "overrides": []
 }

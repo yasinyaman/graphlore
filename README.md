@@ -180,7 +180,7 @@ queries on `encode/httpx` (2,101-node graph):
 That is 263× fewer tokens than grep + read and 11.6× fewer than running the two
 tools separately. Those 235 tokens are a map (`file:line` plus neighborhood),
 not the code; the code is fetched only where needed. Across Python, JS/TS, Go,
-Java, Rust and C++ repositories, 70–96% of semantic hits land inside the
+Java, Rust and C++ repositories, 76–96% of semantic hits land inside the
 resolved symbol's real span.
 
 Every repository measured is an HTTP-client library and the baseline is a naive
@@ -188,8 +188,8 @@ grep, so treat the numbers as indicative.
 
 The search behind `locate` was measured on its own on semble's published query
 set (1,251 queries, 63 repositories, 19 languages, semble's scoring): the
-built-in BM25 index, with no extra installed, reaches NDCG@10 0.814 against
-semble's 0.852, with a median cold index of 0.6 s and a median query of 1 ms.
+built-in BM25 index, with no extra installed, reaches NDCG@10 0.813 against
+semble's 0.852, with a median cold index of 0.4 s and a median query of 1 ms.
 → [Method, per-language results and caveats](https://github.com/yasinyaman/graphlore/blob/master/docs/benchmark.md)
 
 ## FAQ

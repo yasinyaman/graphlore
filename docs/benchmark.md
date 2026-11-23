@@ -60,44 +60,47 @@ would. The far-distance bucket also held test files (related, not refactor targe
 the `distance` field separates production parallels (3–4) from that noise.
 
 **Across languages — real HTTP-client repos.** The span join and freshness check aren't
-Python-only. I built AST-only graphs for an HTTP client in five more languages and ran the
-same kind of queries (send · redirects · timeout/retry · headers/auth · transport):
+Python-only. graphlore's native engine built the graphs of an HTTP client in five more
+languages, and the same kind of queries ran on each (send · redirects · timeout/retry ·
+headers/auth · transport):
 
-![Span-join precision across languages — Python 96%, Go 93%, JS/TS 89%, Java 85%](benchmark-multilang.svg)
+![Span-join precision across languages — Python 96%, Go 93%, Java 91%, JS/TS 85%](benchmark-multilang.svg)
 
 | Language | Repo | Span-join precision | Qualname | Hidden / q | locate vs grep | Calls (locate vs naive) |
 |---|---|---|---|---|---|---|
-| **Python** (ast) | `encode/httpx` | **96%** (52/54) | 67% | 3.2 | 272× | 1 vs 15 (0 vs 14 reads) |
-| JavaScript / TS | `sindresorhus/got` | 89% (48/54) | 67% | 2.3 | 583× | 1 vs 9 (0 vs 8 reads) |
-| Go | `go-resty/resty` | 93% (50/54) | 100% | 1.8 | 911× | 1 vs 17 (0 vs 16 reads) |
-| Java | `square/retrofit` | 85% (46/54) | 50% | 2.3 | 217× | 1 vs 18 (0 vs 17 reads) |
-| Rust | `algesten/ureq` | 70% (38/54) | 83% | 3.7 | 577× | 1 vs 22 (0 vs 21 reads) |
-| C++ | `libcpr/cpr` | 72% (39/54) | 100% | 4.3 | 195× | 1 vs 16 (0 vs 15 reads) |
+| **Python** (ast) | `encode/httpx` | **96%** (52/54) | 67% | 2.7 | 195× | 1 vs 15 (0 vs 14 reads) |
+| JavaScript / TS | `sindresorhus/got` | 85% (46/54) | 83% | 1.2 | 348× | 1 vs 8 (0 vs 7 reads) |
+| Go | `go-resty/resty` | 93% (50/54) | 100% | 1.2 | 614× | 1 vs 19 (0 vs 18 reads) |
+| Java | `square/retrofit` | 91% (49/54) | 33% | 2.2 | 163× | 1 vs 18 (0 vs 17 reads) |
+| Rust | `algesten/ureq` | 78% (42/54) | 83% | 2.2 | 587× | 1 vs 26 (0 vs 25 reads) |
+| C++ | `libcpr/cpr` | 76% (41/54) | 100% | 4.0 | 154× | 1 vs 18 (0 vs 17 reads) |
 
 Python uses the stdlib `ast`; JS/TS · Go · Java · Rust · C++ go through tree-sitter with
 automatic language detection — **one tool, zero per-language config**. *Span-join precision* =
 share of semantic hits landing inside the resolved symbol's real span (any overload of it —
 C++ collapses same-name overloads into one graph node while each keeps its own span; cpr's
-`Session::SetOption` has 46). It's **70–96%** across six 350–2,095-node graphs, hidden-links
-keep surfacing 2–4/query, and locate stays **195–911× cheaper** than grep+read. Orientation is
+`Session::SetOption` has 46). It's **76–96%** across six 512–2,215-node graphs, hidden-links
+keep surfacing 1–4/query, and locate stays **154–614× cheaper** than grep+read. Orientation is
 also **one tool call with zero file reads** by construction, where the grep-driven baseline
-spends 9–22 calls opening 8–21 files per query — **89–95% fewer calls**, on the same grep
+spends 8–26 calls opening 7–25 files per query — **88–96% fewer calls**, on the same grep
 baseline as the token numbers. Rust and C++
-trail at 70–72% — their misses are mostly file-top/whole-file chunks and namespace-level free
+trail at 76–78% — their misses are mostly file-top/whole-file chunks and namespace-level free
 functions where the resolution is still correct (they recover qualified names at 83–100%).
 `graphlore_freshness`'s cosmetic-vs-structural check is correct in every language too
-(comment/reformat → cosmetic; operator/rename → structural). Re-measured 2026-08 on the MCP v2
-SDK, Python 3.14, fresh repo HEADs. Reproduce with
+(comment/reformat → cosmetic; operator/rename → structural). Re-measured 2026-11-23 with
+graphlore 0.7.0, graphlore-engine 0.5.79 graphs and semble 0.7.3 at the repositories'
+HEADs of that day (it was 70–96% precision on graphify graphs, 2026-08; the queries and the
+grep baseline are the same, the repositories have moved on). Reproduce with
 [`benchmarks/multilang.py`](../benchmarks/multilang.py) (`--json` persists a run;
-[`benchmarks/results-multilang.json`](../benchmarks/results-multilang.json) is the committed
-record of the call/token baseline — its span-join counts predate the overload-family
-re-count above).
+[`benchmarks/results-multilang.json`](../benchmarks/results-multilang.json) is this run's
+record).
 
 → **[Full benchmark report](https://htmlpreview.github.io/?https://github.com/yasinyaman/graphlore/blob/master/docs/benchmark.html)** (interactive HTML, per-query breakdown + the cross-language tables) — or open [`docs/benchmark.html`](benchmark.html) locally. ([Türkçe](https://htmlpreview.github.io/?https://github.com/yasinyaman/graphlore/blob/master/docs/benchmark.tr.html))
 
 <sub>httpx headline measured 2026-06 with semble 0.3.4 (6 queries, per-query locate 189–286
-tokens); cross-language table re-measured 2026-08 with semble 0.5.5 + the tree-sitter span
-backend — 6 queries × 54 hits each on `httpx` / `got` / `resty` / `retrofit` / `ureq` / `cpr`,
+tokens) on a graph graphify built, and not re-measured since (the "graphify alone" rows are
+graphify's own output); cross-language table re-measured 2026-11-23 with semble 0.7.3 on
+native-engine graphs — 6 queries × 54 hits each on `httpx` / `got` / `resty` / `retrofit` / `ureq` / `cpr`,
 call counts from the same run. **Sample bias:** every repo benchmarked here is
 an HTTP-client library — a deliberately uniform family chosen for cross-language comparability.
 Token savings and span-join precision will differ on other architectures (data pipelines, GUI
@@ -138,9 +141,9 @@ against the 0.855 it publishes, so the harness reproduces its setup.
 
 | System | NDCG@10 | held-out 44 | recall@10 | semantic | architecture | symbol | index (median) | query p50 (median) |
 |---|---|---|---|---|---|---|---|---|
-| **built-in, BM25** (no extra) | **0.814** | 0.799 | 0.952 | 0.802 | 0.785 | 0.901 | 630 ms | 1.1 ms |
-| built-in, hybrid (`[embed]`) | 0.809 | 0.797 | 0.959 | 0.809 | 0.757 | 0.901 | 1,120 ms | 1.6 ms |
-| semble 0.7.3 | 0.852 | 0.842 | 0.967 | 0.847 | 0.808 | 0.947 | 708 ms | 2.3 ms |
+| **built-in, BM25** (no extra) | **0.813** | 0.799 | 0.951 | 0.801 | 0.785 | 0.904 | 443 ms | 0.9 ms |
+| built-in, hybrid (`[embed]`) | 0.810 | 0.798 | 0.958 | 0.809 | 0.760 | 0.901 | 846 ms | 1.5 ms |
+| semble 0.7.3 | 0.852 | 0.842 | 0.967 | 0.847 | 0.808 | 0.947 | 664 ms | 2.2 ms |
 | _semble's published figures_ | _0.855_ | | | | | | | |
 | _its BM25 alone, its BM25 + its ranking_ | _0.686, 0.838_ | | | | | | | |
 
@@ -150,7 +153,9 @@ language in semble's `repos.json`; "held-out 44" is the mean over the other 44,
 which played no part in the choice. Index time is a cold build (the span engine
 parses every file); query p50 is the median over a repository's queries on a
 warm index, then the median over repositories. 4 CPU cores, no GPU, measured
-2026-11-18 with semble 0.7.3 and model2vec 0.10.0.
+2026-11-23 with graphlore 0.7.0, semble 0.7.3 and model2vec 0.10.0 (first
+measured 2026-11-18: the rankings are the same to within 0.001, the built-in
+index builds a third faster since 0.7.0's span walk).
 
 **What this says.**
 
@@ -160,19 +165,17 @@ warm index, then the median over repositories. 4 CPU cores, no GPU, measured
   name as its own field, the file path, and a prior that ranks tests and
   examples below the implementation.
 - **On this query set the dense tier does not pay for itself**: hybrid and BM25
-  are level overall. It helps semantic queries (0.809 against 0.802) and some
-  languages (C++ 0.86 against 0.79, JavaScript 0.90 against 0.85), and hurts
+  are level overall. It helps semantic queries (0.809 against 0.801) and some
+  languages (C++ 0.87 against 0.80, JavaScript 0.90 against 0.85), and hurts
   others (PHP 0.75 against 0.86, bash 0.81 against 0.85). semble's lead is in
   ranking more than in the embedding: the same model, fused differently.
 - Symbol lookups (`Engine`, `Client._send`) are where semble is furthest ahead
-  (0.947 against 0.901).
-- A cold index of a large repository is slow in both: the slowest builds were
-  18 s (BM25) and 21 s (hybrid) against semble's 18 s; most of graphlore's time
-  is the span engine's tree-sitter walk, which later tools reuse. The index is
-  then kept and refreshed per file, so this is paid once per session. These
-  index times were measured before the span walk was made 3–5× faster
-  (CHANGELOG, 0.7.0); the built-in index builds faster now than this table
-  says, and its rankings are unchanged, since the spans are the same.
+  (0.947 against 0.904).
+- A cold index of a large repository takes seconds in both: the slowest builds
+  were 12 s (BM25) and 14 s (hybrid), both on abseil-cpp's 25,000 chunks,
+  against semble's 16 s on zig; most of graphlore's time is the span engine's tree-sitter walk,
+  which later tools reuse. The index is then kept and refreshed per file, so
+  this is paid once per session.
 - The graph overlay (docstrings, call-neighbour names) is not measured here: the
   benchmark runs on the repositories without building a graph of them.
 
@@ -181,12 +184,12 @@ Per language, NDCG@10 (BM25 / hybrid / semble):
 | Language | BM25 | hybrid | semble | Language | BM25 | hybrid | semble |
 |---|---|---|---|---|---|---|---|
 | bash | 0.85 | 0.81 | 0.84 | lua | 0.84 | 0.83 | 0.84 |
-| c | 0.72 | 0.71 | 0.75 | php | 0.86 | 0.75 | 0.86 |
-| cpp | 0.79 | 0.86 | 0.88 | python | 0.86 | 0.84 | 0.88 |
-| csharp | 0.84 | 0.82 | 0.87 | ruby | 0.75 | 0.78 | 0.91 |
-| elixir | 0.84 | 0.85 | 0.91 | rust | 0.79 | 0.78 | 0.83 |
+| c | 0.73 | 0.71 | 0.75 | php | 0.86 | 0.75 | 0.86 |
+| cpp | 0.80 | 0.87 | 0.88 | python | 0.86 | 0.84 | 0.88 |
+| csharp | 0.83 | 0.82 | 0.87 | ruby | 0.75 | 0.78 | 0.91 |
+| elixir | 0.84 | 0.85 | 0.91 | rust | 0.78 | 0.78 | 0.83 |
 | go | 0.85 | 0.87 | 0.91 | scala | 0.85 | 0.85 | 0.92 |
-| haskell | 0.76 | 0.78 | 0.78 | swift | 0.80 | 0.77 | 0.85 |
+| haskell | 0.76 | 0.78 | 0.78 | swift | 0.80 | 0.78 | 0.85 |
 | java | 0.78 | 0.78 | 0.83 | typescript | 0.76 | 0.72 | 0.73 |
 | javascript | 0.85 | 0.90 | 0.91 | zig | 0.88 | 0.87 | 0.90 |
 | kotlin | 0.77 | 0.78 | 0.80 | | | | |
