@@ -24,6 +24,8 @@ user-level file instead of the project's) and `--command` (`graphlore`, the
 default: the command on PATH; `uvx`; or a path). `--write` keeps every other
 server in the file, saves the old file as `<name>.graphlore.bak`, and refuses
 a file it cannot parse (a JSON file with comments) rather than rewrite it.
+With `--user`, the block carries the project's absolute path instead of the
+project file's placeholder.
 
 Back to the [README](../README.md) · [Tools](tools.md) ·
 [Configuration](configuration.md)
@@ -32,7 +34,7 @@ Back to the [README](../README.md) · [Tools](tools.md) ·
 
 | Client | Project file | User file | Key | Tools it shows | MCP prompts | Server instructions |
 |---|---|---|---|---|---|---|
-| Claude Code | `.mcp.json` | `~/.claude.json` | `mcpServers` | all (deferred by tool search) | yes | yes, up to 4,096 characters |
+| Claude Code | `.mcp.json` | `~/.claude.json` (by `claude mcp add --scope user`; `setup --user` prints the block, never writes this file) | `mcpServers` | all (deferred by tool search) | yes | yes, up to 4,096 characters |
 | Claude Desktop | — | `claude_desktop_config.json` | `mcpServers` | — | yes | — |
 | OpenAI Codex CLI | `.codex/config.toml` (trusted projects) | `~/.codex/config.toml` | `[mcp_servers.<name>]` | — | no | — |
 | Google Gemini CLI | `.gemini/settings.json` | `~/.gemini/settings.json` | `mcpServers` | — | yes, as slash commands | yes, appended to the system prompt |
@@ -107,7 +109,7 @@ Or `.mcp.json` at the project root (`graphlore setup claude-code`). An option
 must stand between `--env` and the server's name, or the name is read as one
 more `KEY=value`. Claude Code passes `CLAUDE_PROJECT_DIR` to the server, so
 `${CLAUDE_PROJECT_DIR:-.}` points it at the project. The plugin
-(`/plugin install graphlore@graphlore`) does all of this and adds the skill.
+(`/plugin install graphlore --marketplace yasinyaman/graphlore`) does all of this and adds the skill.
 Claude Code cuts a tool description and the server instructions at 4,096
 characters (graphlore's stay under 900 and 4,000), warns at 10,000 tokens of
 output and stops at 25,000 (`MAX_MCP_OUTPUT_TOKENS`). Headless:
@@ -154,7 +156,7 @@ its documentation site was not readable from where this page was written.
 `mcpServers`, fields `command`, `args`, `env`, `cwd`, `timeout`, `trust`,
 `includeTools`. Gemini starts a project's stdio servers only in a trusted
 folder (`GEMINI_CLI_TRUST_WORKSPACE=true` for a headless run), names the tools
-`mcp_graphlore_<tool>` (at most 63 characters: graphlore's longest is 40),
+`mcp_graphlore_<tool>` (at most 63 characters: graphlore's longest, `mcp_graphlore_graphlore_label_communities`, is 41),
 strips `additionalProperties` and `anyOf` defaults from schemas (graphlore's
 use neither), truncates a reply at 40,000 characters, appends the server's
 instructions to its system prompt and turns MCP prompts into slash commands.

@@ -11,6 +11,35 @@ All notable changes to this project are documented here. The format is based on
   `pyproject.toml` version to PyPI, then creates the `v<version>` tag and
   release. A published release still starts it as before.
 
+### Fixed
+- **`graphlore setup <client> --user --write` writes what `--user` prints.**
+  The written block carried the project file's placeholder
+  (`${workspaceFolder}`, `${CLAUDE_PROJECT_DIR:-.}`) instead of the project's
+  absolute path, so a user-level Cursor or VS Code config pointed at whatever
+  folder the editor had open.
+
+### Changed
+- **The documentation describes 0.7.0 as it is.** Every page was checked
+  against the code:
+  - `README.md` installs from PyPI (`pip install "graphlore[engine]"`), lists
+    the `remote` extra and the OAuth key fetch among the network paths;
+  - `docs/configuration.md`: `no_viz` works with the native engine too, `query`
+    / `path` / `explain` are graph.json tools rather than CLI passthroughs, and
+    `GRAPHLORE_PROJECT_FROM_CLIENT`, `GRAPHLORE_RESTRICT_PATHS` and
+    `GRAPHLORE_TRANSPORT` say all they do;
+  - `docs/concepts.md`: which tools read resolved edges and import checks and
+    take a `scope`, the `-external` / `-vendored` tokens, `.graphloreignore`, a
+    post-commit hook that also rewrites `graph.html`, the hidden-link fields
+    as the reply names them; `docs/tools.md`, `docs/clients.md`,
+    `docs/benchmark-agents.md`, `docs/rule-sources.md` and the benchmark pages
+    likewise;
+  - the skill points at `graphlore setup` when the server is not connected.
+- **`AGENTS.md` fits in Codex's 32 KiB.** It was 105 KB, so Codex never read
+  its last two thirds (the plugins, the native engine, the tests). The native
+  engine's rules moved to `engine/AGENTS.md`, which Codex reads when it works
+  under `engine/`; `.claude/CLAUDE.md` and `GEMINI.md` import both, and
+  `.github/copilot-instructions.md` and `CONTRIBUTING.md` list every module.
+
 ## [0.7.0] - 2026-11-23
 
 ### Fixed

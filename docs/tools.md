@@ -88,7 +88,8 @@ Search bridge (code search joined to graph structure; semble when installed, els
 3. `graphlore_impact("Response")` — blast radius of a change; with `GRAPHLORE_TOOLSET=full`,
    `graphlore_cycles()` / `graphlore_routes()` for targeted analysis
    (reviewing a codebase: `graphlore_validate` → `graphlore_cycles` → `graphlore_layers` →
-   `graphlore_unreferenced` → `graphlore_same_names`; the `review` prompt scripts it)
+   `graphlore_bridges` → `graphlore_unreferenced` → `graphlore_same_names` →
+   `graphlore_god_nodes` (with `rank=`) → `graphlore_surprises`; the `review` prompt scripts it)
 4. `graphlore_query("how does the auth flow work?")` — a free-form question, answered with the part of the graph it is about (`full`)
 5. After code changes: `graphlore_freshness()` → `graphlore_build(update=True)`
    (plus `graphlore_prune()` after deletes/renames)
@@ -121,5 +122,5 @@ where `graphlore_path` is off).
 - **Token budgeting on source, not just structure** — budgeted subgraph rendering is Graphify's own (its embedded server does the same); graphlore extends the discipline to *code*: `graphlore_fetch` and `graphlore_skeleton` hydrate real spans under a cap, so escalating map → signatures → source never blows the context.
 - **A cut says how to get the rest** — a result that reports `truncated` carries a count of what a limit or budget dropped and a one-line `hint` naming the argument to raise or the filter to add.
 - **Unambiguous names** — when several nodes share a bare label (five `.auth_flow()`s across auth classes), rendered output qualifies them with the span-recovered FQN (`DigestAuth.auth_flow()`) or a `file:line` suffix, so an arrow always names exactly one symbol.
-- **Repository text is framed as data.** `graphlore_fetch`, `graphlore_skeleton`, `graphlore_node_details` and `graphlore_explain` (the docstring) and `graphlore_add`'s CLI output put the code and text they quote between `=== repo text <nonce> ===` markers, with a per-call random nonce redrawn if it occurs in the text, so a comment in the repository cannot close the frame and pose as graphlore. JSON replies say `content_trust: "untrusted_repo_text"` and name the `untrusted_fields`. A docstring that says "ignore previous instructions" is still a docstring.
+- **Repository text is framed as data.** `graphlore_fetch`, `graphlore_skeleton`, `graphlore_node_details` and `graphlore_explain` (the docstring) put the code and text they quote between `=== repo text <nonce> ===` markers, with a per-call random nonce redrawn if it occurs in the text, so a comment in the repository cannot close the frame and pose as graphlore. JSON replies say `content_trust: "untrusted_repo_text"` and name the `untrusted_fields`. A docstring that says "ignore previous instructions" is still a docstring.
 - **Host-LLM sampling** (`graphlore_label_communities`) lets the server borrow the client's model via MCP `sampling/createMessage`, so semantic naming works with no server-side API key — with a capability test (`graphlore_sampling_status`); without sampling, `graphlore_set_labels` takes names the assistant writes itself.

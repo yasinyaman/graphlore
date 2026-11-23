@@ -52,7 +52,7 @@ semble = ["semble>=0.3"]
 # builtin): static code embeddings, fused with its always-on BM25 tier. The first
 # use downloads the model (minishlab/potion-code-16M-v2) from the Hugging Face Hub.
 embed = ["model2vec>=0.10", "numpy>=1.24"]
-# Multi-language span/structure backend for graphify_locate and graphify_freshness
+# Multi-language span/structure backend for graphlore_locate and graphlore_freshness
 # (Python works without it via stdlib ast; without it the native engine gives the spans).
 # Bounds: the floors are the oldest pair the suite passes with (Python 3.10,
 # mcp 2.1). Language-pack 1.9 and 1.10 hand back a Language that
@@ -61,9 +61,9 @@ embed = ["model2vec>=0.10", "numpy>=1.24"]
 # should not regress silently on a grammar update.
 treesitter = ["tree-sitter>=0.23,<1.0", "tree-sitter-language-pack>=1.11,<2.0"]
 # Exact token counting for the budgeted subgraph tools (opt-in via
-# GRAPHIFY_TOKENIZER=tiktoken); without it the conservative chars/3.5 estimate is used.
+# GRAPHLORE_TOKENIZER=tiktoken); without it the conservative chars/3.5 estimate is used.
 tiktoken = ["tiktoken>=0.7"]
-# Opt-in filesystem watcher (GRAPHIFY_WATCH=1) that re-syncs the graph on structural
+# Opt-in filesystem watcher (GRAPHLORE_WATCH=1) that re-syncs the graph on structural
 # source changes. Off by default so the stdio server stays light.
 watch = ["watchdog>=4.0"]
 all = [

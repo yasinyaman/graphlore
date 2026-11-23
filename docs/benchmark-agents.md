@@ -18,8 +18,13 @@ Back to the [README](../README.md) · [Clients](clients.md) · [Benchmark](bench
   names the graphlore tools that answer it best.
 - **Runs** (`benchmarks/agents/run.py`): each agent through its documented
   headless mode (`claude -p`, `codex exec --json`, `gemini -p`, `kimi -p`,
-  `agent -p`), with graphlore set up the way `graphlore setup <client>`
-  writes it, in two variants: `plain` (the tools only) and `agents-md` (also
+  `agent -p`), with the server block `graphlore setup <client>` writes (Gemini,
+  Kimi and Cursor run `setup` itself; Claude Code gets the block through
+  `--mcp-config` and `--strict-mcp-config`, Codex through `-c mcp_servers.…`
+  overrides, so neither touches your own config), on the `lean` toolset unless
+  `--toolset` says otherwise (`lean` has no `graphlore_tests_for`, the suited
+  tool of the two test questions, so there `graphlore_impact` is the one to
+  find), in two variants: `plain` (the tools only) and `agents-md` (also
   the usage guide `graphlore agents-md` writes into the file that agent reads).
   Each run is logged (`results/<time>/<client>-<variant>-<task>.log`).
 - **Score** (`benchmarks/agents/score.py`): a task is solved when every

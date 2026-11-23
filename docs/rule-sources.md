@@ -17,7 +17,7 @@ then implemented. Running on repositories stays, as the test that the rules
 were read right, not as the way to find them.
 
 - [`docs/resolution-rules.md`](resolution-rules.md) is the checklist as it
-  stands (510 cases); [`docs/native-engine.md`](native-engine.md) has the
+  stands (666 cases); [`docs/native-engine.md`](native-engine.md) has the
   measurements.
 - `benchmarks/rule_sources.py` fetches what this document names.
 
@@ -192,7 +192,11 @@ What a session has, and what it needs (measured in the cloud environment
 ## Where the work stands
 
 Phase 0 is done (engine 0.5.61; no rule changed, and the 45 audit graphs
-have the same edges as before):
+have the same edges as before). The counts in this list are phase 0's, when
+the checklist had 510 cases; with engine 0.5.79 it has 666 — 425 from the
+specification, 71 shown by a compiler, 14 by comparison, 31 from the grammar
+and 125 read from the language's own tools, each of those with its `source` —
+and all 666 compile in their own language:
 
 - **The cases say how they were found**: 425 from the specification, 71
   shown by a compiler, 14 by comparison (and, since, 26 from the grammar). None has a `source` yet: that
@@ -1023,12 +1027,15 @@ Every language of the plan has been read. What the reading left:
 | java | 30 | 26 | 4 | 14 of 62 |
 | kotlin | 24 | 20 | 4 | 13 of 53 |
 | swift | 16 | 13 | 3 | 9 of 52 |
-| cpp | 21 | 17 | 4 | 9 of 45 |
+| cpp | 21 | 17 | 4 | 10 of 46 |
 | python | 15 | 14 | 1 | 8 of 46 |
 | php | 12 | 10 | 2 | 3 of 37 |
 | ruby | 10 | 9 | 1 | 5 of 34 |
 | scala | 12 | 9 | 3 | 5 of 37 |
 | **all** | **292** | **245** | **47** | |
+
+C (1 of 17 cases from its own tools) and JavaScript (2 of 31) have no
+inventory of their own: their rules are read with C++'s and TypeScript's.
 
 The 47 rules not followed are of four kinds, each written down in the
 inventory with its reason: errors (an ambiguity is no binding), access
@@ -1097,8 +1104,8 @@ protocol). It is a node today; whether it should be is a span decision, and
 
 **Phase 0: the frame** (no rule changes).
 `source` / `since` / `until` / `found` on the cases, shown in
-`docs/resolution-rules.md`. The version tables read out of the six compilers
-that have one into `benchmarks/versions/<language>.json`, with the script
+`docs/resolution-rules.md`. The version tables read out of the compilers
+that have one (eight tables, C and C++ in one) into `benchmarks/versions/<language>.json`, with the script
 that regenerates each from the checkout. `lang_version` read from manifests
 into the facts (unused by any rule yet), with a golden per manifest kind.
 `verify_cases.py` passing a case's version to the compiler.
@@ -1107,7 +1114,7 @@ repositories each report a version per language. (Done: see above. A
 `source` per case is phase 2's work, language by language.)
 
 **Phase 1: positions, from the grammars.**
-`benchmarks/positions.py`: for each of the 14 grammars, every node kind of
+`benchmarks/positions.py`: for the grammar of each of the 14 languages (TSX has its own), every node kind of
 `node-types.json` with a field that can hold a type or an expression, against
 what the reader visits; the output is the list of positions not read, per
 language. Each is then decided: read it (a case, then code) or leave it out

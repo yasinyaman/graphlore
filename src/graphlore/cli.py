@@ -65,7 +65,7 @@ def _cmd_setup(args: argparse.Namespace) -> int:
             return 1
     else:
         try:
-            note = clients.write(client, target, server_cfg)
+            note = clients.write(client, target, server_cfg, user=args.user)
         except clients.SetupError as e:
             print(f"ERROR: {e}", file=sys.stderr)
             return 1

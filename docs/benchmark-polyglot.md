@@ -1,8 +1,8 @@
 # graphlore on 14 languages: every tool, on real repositories
 
 `benchmark.md` measures one tool, `graphlore_locate`, on six HTTP-client
-libraries. This is the other half: **all 33 tools, the resources and the
-prompts**, run on 31 real repositories in 14 languages (and since on
+libraries. This is the other half: **every tool (33 when the audit was
+written, 34 since `graphlore_bridges`), the resources and the prompts**, run on 31 real repositories in 14 languages (and since on
 [14 more](#a-second-set-14-more-repositories)), to find
 what breaks, what answers wrongly and what stays silent — and what was fixed as
 a result.
@@ -69,7 +69,10 @@ python benchmarks/polyglot.py --root /tmp/polyglot --json out.json --baseline be
 ```
 
 Graphs are built with `graphify update .`: local AST extraction, clustering
-included, no API key. With `--engine native` (and `--rebuild`) the audit runs
+included, no API key. The audit stays on graphify's graphs by default on purpose:
+`benchmarks/results-polyglot.json` is the baseline of findings on those graphs,
+kept comparable from run to run while graphify is still a fallback. With
+`--engine native` (and `--rebuild`) the audit runs
 on the graphs graphlore's [native engine](native-engine.md) builds into
 `graphlore-native/` instead (`--setup --engine native` clones and builds
 those, without graphify); its results are in
@@ -414,7 +417,8 @@ The first version of this report ended with ten open items. All ten are closed:
   `#[test]` functions are test regions of the span engine, and every
   node-level test decision uses them.
 - **PHP imports** are module-level.
-- **The CLI tools resolve a shared name** before graphify sees it.
+- **`query`, `path` and `explain` resolve a shared name** before answering (then
+  through the graphify CLI; since 0.7.0 they read graph.json in Python).
 - **`graphlore_build()` without a key** falls back to `--code-only` and says so.
 - **Spans** for JS functions wrapped in one call (`exports.x = async(function* …)`),
   anonymous Java and Kotlin classes, Ruby `X = Struct.new(…) do`; the skeleton of
@@ -480,7 +484,10 @@ namespaces, its macros — is in [native-engine.md](native-engine.md#a-second-se
 1. **Prefixes applied in another file.** Laravel adds `/api` to
    `routes/api.php` in a service provider, NestJS has a global prefix in
    `main.ts`, axum and actix routers are often built in one function and
-   mounted in another. The rows carry the pattern as written in their file.
+   mounted in another. On a graphify graph the rows carry the pattern as written
+   in their file; the native engine composes these paths across files
+   ([native-engine.md](native-engine.md#http-routes-and-requests)), and
+   `graphlore_routes` reads its route nodes.
 2. **Routes in Scala and Swift** (Play, http4s, Akka HTTP; Vapor) and in the
    Kotlin `router { }` DSL: no reader, and the reply says so in `not_read`.
 3. **Package APIs outside Python, JS/TS, Go and Java are import-level.** They
@@ -496,8 +503,9 @@ namespaces, its macros — is in [native-engine.md](native-engine.md#a-second-se
    `#[DataProvider('…')]` string, and Scala case classes next to a companion
    object of the same name (seen in requests-scala, not confirmed as a false
    positive).
-7. **Ruby imports** are not classified, because graphify records no file-level
-   import edge for `require`: there is nothing to read.
+7. **Ruby imports on a graphify graph** are not classified, because graphify
+   records no file-level import edge for `require`: there is nothing to read.
+   The native engine resolves `require` and `require_relative` to files.
 
 ### From the graph, not from graphlore
 

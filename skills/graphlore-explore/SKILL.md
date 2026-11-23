@@ -17,8 +17,9 @@ exact; use graphlore when the question is about relations (callers, dependents,
 what breaks), impact, or orientation in code you don't know yet. Every answer
 carries `file:line` — confirm an edge with Read or `rg` before acting on it.
 
-If the graphlore_* tools are not available, the MCP server isn't connected — see
-the project README for the `.mcp.json` / Claude Desktop config. If only some are
+If the graphlore_* tools are not available, the MCP server isn't connected —
+`graphlore setup <client>` prints (or, with `--write`, writes) the config for the
+client in use; graphlore's `docs/clients.md` lists each client's file. If only some are
 (no `graphlore_cycles`, `graphlore_tests_for`, `graphlore_skeleton`…), the server
 runs a trimmed toolset: `lean` is the default outside this plugin, which sets
 `GRAPHLORE_TOOLSET=full`. Say which tool is missing instead of working around it
@@ -61,9 +62,9 @@ the lines under the seed: a question often has two homes (the tool that exposes
 a behavior and the module that implements it). "Seed calls into" lists what the
 seed calls in other files — where the implementation lives when the seed is a thin
 wrapper — and "Also matched" lists the other top hits by definition. Works
-across Python, JS/TS, Go, Java, Rust, C++ and 165+ languages, with no extra
-installed: it runs on semble when present, else on graphlore's built-in index
-(`backend` in the reply says which). The built-in index without the `[embed]`
+across Python, JS/TS, Go, Java, Rust, C++ and about 40 other languages with no
+extra installed (more with semble): it runs on semble when present, else on
+graphlore's built-in index (`backend` in the reply says which). The built-in index without the `[embed]`
 extra is BM25 only (`mode: "bm25"`): phrase the query in the words the code would
 use (`retry backoff timeout`, a function name) rather than a paraphrase. With
 `[embed]` or semble, the first call downloads an embedding model from the Hugging
@@ -153,7 +154,8 @@ issues — gauge how much to trust the graph).
 and minified files and nodes standing for external packages, and each result
 ends with what was left out. Narrow or widen it with comma/space separated
 tokens: a path prefix or glob to keep (`src/pkg`), `!pattern` to drop, `-tests`,
-`+external`, `+vendored`, or `all`. If a result looks dominated by code that is
+`+tests`, `+external`, `+vendored` (or `-external`, `-vendored` for the navigation
+tools, which keep them), or `all`. If a result looks dominated by code that is
 not the project's own, check that line before drawing conclusions.
 
 ## Token discipline

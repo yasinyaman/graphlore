@@ -77,19 +77,24 @@ Prompts:
   - explain_flow : explain how a named flow/feature works
   - review       : review structure — cycles, layering, dead and duplicated code
 
-Internal layout: config.py (shared PROJECT_DIR), engine.py (graphify CLI or the
-native graphlore_engine extractor), graph.py (graph.json load +
-node/edge/traversal helpers), spans.py (tree-sitter/ast span engine + structural
-diff), scope.py (the analysis scope: vendored / external / test filtering),
-apis.py and routes.py (per-file extractors), imports.py (import statements read
-from source, per language: what they can mean and when they run), resolve.py (calls and imports
-through a module object, added at read time), review.py (unreferenced
-code, same-named symbols, identical bodies, layer rules), embed.py (the optional
+Internal layout: config.py (settings, the shared PROJECT_DIR, offline),
+oauth.py (OAuth for the HTTP transport), engine.py (the native graphlore_engine
+extractor or the graphify CLI), graph.py (graph.json load +
+node/edge/traversal helpers), algorithms.py (PageRank, betweenness, dominators,
+bridges, the certain route), history.py (co-change from local git), spans.py
+(tree-sitter/ast span engine + structural diff), scope.py (the analysis scope:
+vendored / external / test filtering), apis.py and routes.py (per-file
+extractors), imports.py (import statements read from source, per language: what
+they can mean and when they run), resolve.py (calls and imports through a module
+object, added at read time), review.py (unreferenced code, same-named symbols,
+identical bodies, layer rules), viz.py (graph.html), embed.py (the optional
 static-embedding tier), search.py (the built-in code search index), and this
-module (the MCPServer surface: tools, resources, prompts, main).
+module (the MCPServer surface: tools, resources, prompts, main). cli.py is the
+`graphlore` command around it (`setup <client>` with clients.py, `agents-md`
+with agents_md.py).
 
 Usage:
-  GRAPHLORE_PROJECT_DIR=/path/to/repo python server.py
+  GRAPHLORE_PROJECT_DIR=/path/to/repo graphlore     # or: python -m graphlore
 """
 
 from __future__ import annotations

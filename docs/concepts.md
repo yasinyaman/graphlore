@@ -27,10 +27,17 @@ out, and nothing more:
 | Python | every call through a module object, and the module import |
 | JS / TS | calls through a default import (`import api from './api'`) and through a dynamically imported module (`const m = await import(...)`) — graphify already links namespace imports and `require` |
 | Go, Java | nothing — graphify links package-selector and static calls itself |
- `graphlore_impact`, `graphlore_neighbors`,
-`graphlore_subgraph`, `graphlore_tests_for`, `graphlore_unreferenced`,
-`graphlore_cycles` and `graphlore_layers` read these edges; `graphlore_validate`
-says how many there are. graph.json is never modified.
+
+On a graph the native engine built, graphlore adds nothing: the engine resolves
+these calls from the source itself (the graph says so in its header).
+
+`graphlore_impact`, `graphlore_neighbors`, `graphlore_subgraph`,
+`graphlore_tests_for`, `graphlore_query`, `graphlore_path`, `graphlore_explain`,
+`graphlore_locate` (its "seed calls into"), `graphlore_unreferenced`,
+`graphlore_same_names`, `graphlore_cycles`, `graphlore_layers` and
+`graphlore_surprises` (the call paths between code that shares state) read these
+edges; `graphlore_validate` says how many there are. graph.json is never
+modified.
 
 Python is read with the stdlib `ast`, JS/TS with the `[treesitter]` extra. It
 costs one parse per Python and JS/TS file of the graph, once per process (about
@@ -41,7 +48,7 @@ calls this".
 
 ## Import edges, checked against the source
 
-`graphlore_cycles`, `graphlore_layers` and `graphlore_surprises` read each import
+`graphlore_cycles`, `graphlore_layers`, `graphlore_bridges` and `graphlore_surprises` read each import
 back from the importing file before they trust it — which file it can mean, and
 when it runs:
 
@@ -74,10 +81,13 @@ importer asked for.
 
 ## Analysis scope
 
-`graphlore_god_nodes`, `graphlore_validate`, `graphlore_cycles`,
-`graphlore_surprises`, `graphlore_duplication_scan`, `graphlore_unreferenced` and
-`graphlore_same_names` take one `scope` string. By default it leaves out what is
-not the project's own code, and each result says how many nodes that was:
+`graphlore_god_nodes`, `graphlore_bridges`, `graphlore_validate`,
+`graphlore_cycles`, `graphlore_layers`, `graphlore_surprises`,
+`graphlore_duplication_scan`, `graphlore_unreferenced`, `graphlore_same_names`,
+`graphlore_package_apis` and `graphlore_routes` take one `scope` string. By
+default it leaves out what is not the project's own code, and each result says
+how many nodes that was (`graphlore_same_names` and `graphlore_routes` also
+leave test code out by default; `+tests` brings it back):
 
 - **vendored and minified files** — under `vendor/`, `node_modules/`,
   `third_party/`; named `*.min.js` or with a build hash (`decorate-BgofJUJ5.js`);
@@ -91,6 +101,7 @@ not the project's own code, and each result says how many nodes that was:
 | `!docs` | leave these files out |
 | `-tests` / `+tests` | leave out / include test code |
 | `+external`, `+vendored` | bring those back |
+| `-external`, `-vendored` | leave those out (for the navigation tools below, which keep them) |
 | `all` | the whole graph |
 
 What was left out comes back in every result as `scope.left_out`: node counts,
@@ -98,12 +109,14 @@ What was left out comes back in every result as `scope.left_out`: node counts,
 holding most of them (`vendored_dirs`), plus a one-line note in the text.
 `graphlore_validate` lists every vendored file.
 
-`graphlore_impact`, `graphlore_subgraph` and `graphlore_neighbors` take the same
+`graphlore_impact`, `graphlore_subgraph`, `graphlore_neighbors`,
+`graphlore_tests_for`, `graphlore_query` and `graphlore_path` take the same
 `scope` string but leave nothing out by default: they walk out from a node you
 named, and `scope="-tests"` or `scope="src"` is how to narrow the walk.
 
 Tokens are separated by commas or spaces: `scope="src/pkg -tests"`. To keep
-vendored files out of the graph itself, list them in `.graphifyignore` —
+vendored files out of the graph itself, list them in `.graphloreignore` (the
+native engine also reads `.graphifyignore`, the only one graphify reads) —
 `graphlore_build` names them when it finds any.
 
 ## Keeping the graph fresh
@@ -114,8 +127,8 @@ The analysis tools surface staleness for you: `graphlore_overview` and
 The answers themselves say which of *their* files changed: when the graph records
 the commit it was built from, `graphlore_fetch` flags each entry
 (`file_changed_since_build`, plus `span_mismatch` when the graph's line now lands
-in a different symbol), and `graphlore_locate`, `graphlore_impact` and
-`graphlore_subgraph` carry a `build_drift` block listing the changed files the
+in a different symbol), and `graphlore_locate`, `graphlore_impact`,
+`graphlore_subgraph` and `graphlore_fetch` carry a `build_drift` block listing the changed files the
 answer rests on. The comparison is the build commit against the working tree
 (committed, staged and unstaged changes and untracked files, two git calls per
 answer); a file that was already dirty when the graph was built reads as
@@ -127,8 +140,14 @@ hook** — the recommended first-class auto-update flow:
 # .git/hooks/post-commit   (then: chmod +x .git/hooks/post-commit)
 #!/bin/sh
 # incremental (only changed files are parsed), backgrounded so the commit returns immediately
-python -m graphlore_engine build . --incremental --commit "$(git rev-parse HEAD)" >/dev/null 2>&1 &
+python -c "from graphlore import server; server.graphlore_build('.', update=True)" >/dev/null 2>&1 &
 ```
+
+This is the same build the tool runs: it honours `GRAPHLORE_ENGINE` and
+`GRAPHLORE_OUT_DIR`, records the commit and rewrites `graph.html`. Calling the
+engine directly (`python -m graphlore_engine build . --incremental --commit
+"$(git rev-parse HEAD)"`) is faster to start but writes only graph.json, always
+to `graphify-out/`.
 
 The native update drops the nodes of deleted files itself. On a graph graphify
 built (`graphify . --update --no-viz`), an incremental update only re-extracts
@@ -158,8 +177,9 @@ relevant to a question) — they're complementary.
    enclosing graph node (better than label matching).
 2. returns the token-budgeted subgraph around it (**structure**).
 3. runs `find_related` on the top hit and cross-checks: a cousin that is similar
-   but **not** within the seed's structural neighborhood is flagged as a
-   `hidden_link` (with its hop distance) — a duplication / missing-abstraction /
+   but **not** within the seed's structural neighborhood is a hidden link: it
+   is listed in `semantic_cousins` with `linked: false` and its `distance`, and
+   counted in `hidden_link_count` — a duplication / missing-abstraction /
    implicit-coupling candidate that neither tool surfaces alone.
 
 **Which search answers** is `GRAPHLORE_SEMANTIC_BACKEND`, and `backend` in every
@@ -169,7 +189,7 @@ reply says what did:
 |---|---|
 | unset / `auto` (default) | [semble](https://github.com/MinishLab/semble) when it is installed and builds its index, else the built-in index |
 | `builtin` | the built-in index only |
-| `semble` | semble only; without the extra, `graphlore_locate` returns an install hint |
+| `semble` | semble only; without the extra, `graphlore_locate` is not registered on `lean` / `locate` (the server falls back to the reduced lean set) and returns an install hint on `full` |
 | `module.path:Factory` | your own backend implementing `search` / `find_related`; a failure is an error, never answered by another backend |
 
 ### The built-in index
@@ -212,7 +232,8 @@ hash under `GRAPHLORE_CACHE_DIR` (default `~/.cache/graphlore`, never inside the
 project), so a restart or an edit re-embeds only the definitions whose text
 changed. Hidden directories, dependency and build trees, vendored or minified
 files, files over 1 MB and binaries are skipped, and `backend.skipped` counts
-them; past 20,000 files or 200,000 chunks the index stops and says so.
+them; past 20,000 files or 200,000 chunks the index stops and says so, and past
+100,000 chunks the dense tier is turned off (BM25 alone, `backend` says so).
 
 How it compares with semble, on semble's own query set (NDCG@10, index time,
 query latency): [benchmark](benchmark.md#search-quality-built-in-index-and-semble).
@@ -245,8 +266,9 @@ The chunk→node join and the freshness cosmetic-vs-structural check work
 **across languages**: Python uses the stdlib `ast` (no extra deps), and every
 other language (JS/TS, Go, Rust, Java, Kotlin, Scala, C#, Swift, Ruby, PHP,
 C/C++, …) is handled by an optional **tree-sitter** backend —
-`pip install "graphlore[treesitter]"`; when the native engine is installed, its
-compiled-in grammars give the spans instead. Without either, non-Python files
+`pip install "graphlore[treesitter]"`. Without that extra (or offline, for a
+grammar not yet downloaded) the native engine's compiled-in grammars give the
+spans, when it is installed and `GRAPHLORE_ENGINE` is not `graphify`. Without either, non-Python files
 fall back to nearest-line matching. A `.h` file that reads as
 C++ (a `class`, a `namespace`, a `template<`) is parsed as C++.
 [What was measured per language](benchmark-polyglot.md), on real repositories.

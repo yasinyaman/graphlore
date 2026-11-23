@@ -926,7 +926,7 @@ construction as a `uses` edge, the native graph an edge from the method and a
 comparison read those as the same statement).
 (Engine 0.5.42 had 44,960 calls in this table and the same 85% of graphify's;
 the C++ row was 29% before the comparison folded a definition written out of
-its class into the declaration graphify hangs its calls on, footnote ⁴.)
+its class into the declaration graphify hangs its calls on, footnote ⁴ below.)
 (Engine 0.5.37 had 44,556 calls in this table; the 404 more are C# 427,
 Rust 49, Kotlin 33, Swift 8 and JavaScript 112 fewer, the last in the
 vendored bundles whose one-letter names 0.5.40's scopes no longer take for
@@ -2353,10 +2353,11 @@ two nodes reference each other. `path` and `explain` read the CLI's default
      x86-64 on musl, macOS universal2, Windows x64), an `engine` extra the
      plugin installs, and `auto` the default: native when the engine is
      installed, graphify otherwise. `graphlore_add`, `mode="deep"` and
-     `no_viz` say they are going, and graphlore writes its own `graph.html`.
+     `GRAPHLORE_ENGINE=graphify` say they are going, and graphlore writes its
+     own `graph.html` (`no_viz=True` still skips it, for either engine).
      Each engine release is published by pushing its `engine-vX.Y.Z` tag.
    - **B:** graphify goes: `_run_cli`, the `graphify` extra, `graphlore_add`,
-     `mode`, `no_viz` and `GRAPHLORE_BIN`. Builds write `graphlore-out/` and
+     `mode`, `GRAPHLORE_ENGINE=graphify` and `GRAPHLORE_BIN`. Builds write `graphlore-out/` and
      `.graphlore_labels.json`, and a `graphify-out/` graph is still read.
    - **C:** what reads graphify's graphs goes: `resolve.py`'s added edges,
      `ImportChecker`'s rejection of name-resolved imports, the

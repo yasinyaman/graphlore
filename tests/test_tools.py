@@ -9731,6 +9731,22 @@ def test_cli_subcommands(tmp_path, capsys):
     assert cli.main(["setup", "claude-desktop", "--project", str(tmp_path)]) == 0
 
 
+def test_cli_setup_user_write_puts_the_absolute_project_in_the_user_file(
+        tmp_path, monkeypatch, capsys):
+    """--user --write writes what --user prints: the project's path, not the
+    project file's placeholder (${workspaceFolder})."""
+    from graphlore import cli
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
+    project = tmp_path / "proj"
+    project.mkdir()
+    assert cli.main(["setup", "cursor", "--project", str(project), "--user", "--write"]) == 0
+    capsys.readouterr()
+    entry = json.loads((home / ".cursor" / "mcp.json").read_text(encoding="utf-8"))
+    env = entry["mcpServers"]["graphlore"]["env"]
+    assert env["GRAPHLORE_PROJECT_DIR"] == str(project.resolve())
+
+
 def test_a_written_config_starts_the_server(tmp_path):
     """graphlore setup --write, then the server started from what it wrote."""
     import asyncio

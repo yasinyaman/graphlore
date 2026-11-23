@@ -25,7 +25,7 @@ python benchmarks/conformance.py --baseline benchmarks/results-conformance.json 
 python benchmarks/conformance.py --markdown      # the tables below
 ```
 
-Measured 2026-11-22 with graphlore-engine 0.5.76: **666 of 666 rules hold**
+Measured 2026-11-23 with graphlore-engine 0.5.79: **666 of 666 rules hold**
 (356 of the first 406 with 0.5.45). Ten came from the Go type checker and
 rust-analyzer run on whole repositories; fifteen from the Kotlin and Swift
 compilers' tests (type checks, casts, `catch`, aliases); thirty-nine from two

@@ -26,8 +26,17 @@ cargo test --manifest-path engine/Cargo.toml
 ```
 graphlore/
 ├── src/graphlore/          # package
-│   ├── server.py           #   MCP server: 34 tools, prompts, resources, transports
-│   ├── graph.py            #   graph.json loading, node/edge accessors, BFS, adjacency
+│   ├── server.py           #   MCP server: 34 tools, prompts, resources, transports, main()
+│   ├── cli.py              #   the `graphlore` command: the server, `setup <client>`, `clients`, `agents-md`
+│   ├── __main__.py         #   `python -m graphlore`, the same as the command
+│   ├── clients.py          #   the MCP clients `graphlore setup` writes config for
+│   ├── agents_md.py        #   the usage guide `graphlore agents-md` writes into AGENTS.md and the like
+│   ├── config.py           #   settings (GRAPHLORE_* with the GRAPHIFY_* fallback), project dir, offline
+│   ├── oauth.py            #   OAuth for the HTTP transport (the `remote` extra)
+│   ├── engine.py           #   which extractor builds the graph (native engine / graphify CLI)
+│   ├── graph.py            #   graph.json loading, node/edge accessors, BFS, adjacency, shared state
+│   ├── algorithms.py       #   PageRank, betweenness, dominators, bridges, the certain route
+│   ├── history.py          #   files that change together, from local git
 │   ├── spans.py            #   span engine: ast + tree-sitter, chunk→node join, structural diff
 │   ├── scope.py            #   analysis scope: vendored / external / test filtering
 │   ├── apis.py             #   symbol-level external-API extraction
@@ -35,22 +44,25 @@ graphlore/
 │   ├── imports.py          #   import statements read from source: what they can mean, when they run
 │   ├── resolve.py          #   calls and imports through a module object, resolved from source
 │   ├── review.py           #   unreferenced code, same-named symbols, identical bodies, layer rules
-│   ├── engine.py           #   which extractor builds the graph (graphify CLI / native engine)
-│   └── config.py           #   project dir / out dir
-├── engine/                 # the native extractor in Rust (separate package graphlore-engine)
+│   ├── viz.py              #   graph.html, the offline viewer (fills viewer.html)
+│   ├── embed.py            #   the built-in search's optional dense tier (the `embed` extra)
+│   └── search.py           #   the built-in code search behind graphlore_locate
+├── engine/                 # the native extractor in Rust (separate package graphlore-engine; engine/AGENTS.md)
 │   ├── src/generic.rs      #   the definition rule, ported from spans.py
 │   ├── src/lang/           #   one module per language: only what differs from the generic rule
-│   ├── src/docs/           #   Markdown / reStructuredText headings
+│   ├── src/resolve/        #   imports, calls, bases and types resolved from the source
+│   ├── src/docs/           #   Markdown / reStructuredText headings, `documents` edges
 │   ├── src/graph/          #   ids, labels, containment edges, atomic graph.json write
 │   └── tests/              #   grammar ABI check, span goldens, a build of the polyglot fixture
 ├── tests/                  # pytest suite (in-process MCP client + unit tests)
-├── benchmarks/             # multilang benchmark, polyglot audit + committed results JSON
+├── benchmarks/             # locate / search benchmarks, polyglot audit, engine checks + committed results JSON
 ├── docs/                   # tool reference, concepts, configuration, benchmark reports
 ├── .claude-plugin/         # Claude Code plugin + marketplace manifests (Codex and Copilot read the marketplace)
 ├── .gemini-extension/      # GRAPHLORE.md, the Gemini CLI extension's context file
 ├── skills/                 # graphlore-explore skill, shipped by every plugin
 ├── .claude/skills/         # a link to skills/graphlore-explore, for this repository's sessions
-├── .github/workflows/      # CI: ruff + mypy + pytest on py 3.10–3.12, the engine job; PyPI publish on release
+├── .github/workflows/      # ci.yml (ruff, mypy, pytest on py 3.10–3.12, the engine job), publish.yml (PyPI),
+│                           #   engine-wheels.yml (graphlore-engine wheels), pages.yml (the viewer on GitHub Pages)
 ├── server.json             # MCP Registry manifest (see "Releasing")
 ├── plugin.json             # Agent Plugins 1.0 manifest (Codex, Copilot CLI)
 ├── mcp.json                # the Agent Plugins plugin's MCP server
@@ -58,11 +70,11 @@ graphlore/
 └── claude_desktop_config.json
 ```
 
-`src/graphlore/` is layered bottom → top (`config.py` → `engine.py` → `graph.py` → `spans.py` →
-`scope.py` → `apis.py` / `routes.py` → `imports.py` → `resolve.py` → `review.py` →
-`server.py`); each module imports only from earlier ones. `server.py` re-exports
-the helpers tests reach as `server._x`. [`AGENTS.md`](AGENTS.md) describes each
-layer and the conventions that span files.
+`src/graphlore/` is layered bottom → top: each module imports only from the
+ones below it, and `server.py` re-exports the helpers tests reach as
+`server._x`. [`AGENTS.md`](AGENTS.md) gives the order, describes each module
+and the conventions that span files; [`engine/AGENTS.md`](engine/AGENTS.md)
+does the same for the native engine.
 
 ## Before opening a PR
 
@@ -73,6 +85,7 @@ pytest -q         # tests
 # when engine/ changed:
 cargo fmt --manifest-path engine/Cargo.toml --check
 cargo clippy --manifest-path engine/Cargo.toml --all-targets -- -D warnings
+cargo clippy --manifest-path engine/Cargo.toml --all-targets --features python -- -D warnings
 cargo test --manifest-path engine/Cargo.toml
 ```
 
@@ -91,9 +104,9 @@ Please:
 
 ## Releasing
 
-1. Bump the version in `pyproject.toml`, `src/graphlore/server.py` (`__version__`), `.claude-plugin/plugin.json`, `plugin.json`, `gemini-extension.json` and `server.json` (twice: the top-level `version` and the package's), then run `uv lock`.
+1. Bump the version in `pyproject.toml`, `src/graphlore/server.py` (`__version__`), `.claude-plugin/plugin.json`, `plugin.json`, `gemini-extension.json` and `server.json` (twice: the top-level `version` and the package's), then run `uv lock`. When the release needs a newer native engine, publish that first (below), then raise the `engine` extra's pin in `pyproject.toml` (`graphlore-engine>=X.Y.Z,<0.6`, in both the `engine` and `all` extras) before `uv lock`.
 2. In `CHANGELOG.md`, move the `[Unreleased]` entries under a new version heading.
-3. Merge, then publish a GitHub release whose tag is the version (`v0.3.0` or `0.3.0`).
+3. Merge, then publish a GitHub release whose tag is `v` and the version (`v0.7.0`). A bare `0.7.0` passes the tag check too, but a later run by hand only looks for `v<version>` and would not see it.
 
 Publishing the release runs `.github/workflows/publish.yml`, which builds the package and uploads it to PyPI. It refuses to upload when the tag and the `pyproject.toml` version differ.
 

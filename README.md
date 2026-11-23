@@ -29,7 +29,7 @@ where a behavior lives.
 - **Local by default.** The analysis tools read local files and need no API
   key; `GRAPHLORE_OFFLINE=1` refuses every network path graphlore knows.
 
-It works with any MCP client. Setup for Claude Code and Claude Desktop is below.
+It works with any MCP client. Setup for each one is below.
 
 ## Quick start
 
@@ -65,8 +65,7 @@ The other clients and what each plugin carries are in
 the graph (prebuilt wheels, no Rust toolchain), then register the server.
 
 ```bash
-# graphlore is not on PyPI yet: install from GitHub
-pip install "graphlore[engine] @ git+https://github.com/yasinyaman/graphlore"
+pip install "graphlore[engine]"    # or: uv tool install "graphlore[engine]"
 ```
 
 Then let graphlore write your client's config, and the usage guide its agent
@@ -100,9 +99,9 @@ extractor, which builds the graph), `embed` (static code
 embeddings for the built-in search behind `graphlore_locate`), `semble` (semble
 as that search instead), `treesitter` (spans for non-Python
 languages; without it the native engine's compiled-in grammars give them), `tiktoken` (exact token
-counts), `watch` (re-sync on file changes). Until the first PyPI release, use
-the GitHub form wherever a message says `pip install "graphlore[extra]"`:
-`pip install "graphlore[semble] @ git+https://github.com/yasinyaman/graphlore"`.
+counts), `watch` (re-sync on file changes), `remote` (OAuth for the HTTP
+transport). The latest code is
+`pip install "graphlore[engine] @ git+https://github.com/yasinyaman/graphlore"`.
 
 **Then ask.** The assistant builds the graph once and explores from there
 (output from the repository's small test fixture):
@@ -120,7 +119,7 @@ graphlore_impact("Response", hops=1)
 A misspelled name gets a suggestion, not a guess:
 `No node matching 'Clinet'. Did you mean: Client (httpx/_client.py:50)?`
 
-**Or look at it.** Every build also writes `graphify-out/graph.html`, one file
+**Or look at it.** Every build also writes `graphify-out/graph.html` (unless `no_viz=True`, or the graph has over 150,000 nodes), one file
 that opens in any browser with no network: the communities first, then one
 community or one symbol's neighbourhood, with search and a details panel. The
 same page opens any graph.json, graphlore's or Graphify's, without graphlore
@@ -205,9 +204,10 @@ duplicated code).
 ### How is it different from Graphify's own MCP server?
 
 graphlore builds its own graph (its native engine, in Rust), so it does not
-need graphify installed, and it reads a graph Graphify built too. Graphify's embedded server has graph navigation,
-token-budgeted subgraphs, an HTTP transport, multi-project serving and PR
-triage tools graphlore lacks. graphlore adds the span engine and
+need graphify installed, and it reads a graph Graphify built too. Both serve
+graph navigation, token-budgeted subgraphs and an HTTP transport; Graphify's
+server also has multi-project serving and PR triage tools graphlore lacks.
+graphlore adds the span engine and
 what it makes possible: semantic `locate` joined to the enclosing symbol,
 source hydration (`fetch`, `skeleton`), route and package-API extraction,
 cosmetic-vs-structural freshness, and calls through a module object
@@ -232,9 +232,10 @@ names.
 The analysis tools read local files and need no key. A few paths can reach the
 network: the first embedding search (`[embed]` or `[semble]`) downloads a model, the first use
 of a language downloads its tree-sitter grammar (the native engine's grammars
-are compiled in and download nothing), graphify, where it still builds the
-graph, can call an LLM backend when you set its key, and `graphlore_add`
-fetches a URL.
+are compiled in and download nothing), `GRAPHLORE_TOKENIZER=tiktoken` fetches
+its encoding once, OAuth on the HTTP transport (`GRAPHLORE_AUTH_ISSUER`) fetches
+the provider's signing keys, graphify, where it still builds the graph, can
+call an LLM backend when you set its key, and `graphlore_add` fetches a URL.
 `GRAPHLORE_OFFLINE=1` refuses or restricts the ones graphlore controls; the
 table linked below also lists what it cannot constrain.
 → [What reaches the network, and when](https://github.com/yasinyaman/graphlore/blob/master/docs/configuration.md#what-reaches-the-network-and-when)

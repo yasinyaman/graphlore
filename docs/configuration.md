@@ -71,7 +71,7 @@ turn. Choose with `GRAPHLORE_TOOLSET`:
 | Value | Tools | Use when |
 |---|---|---|
 | `lean` (default) | 12 | Exploring, debugging, answering "where/how is X" |
-| `full` | all 34 | Reviewing structure (cycles, layers, dead or duplicated code), routes and package APIs, naming communities, diffs, the CLI passthroughs (`query`, `path`, `explain`, `add`) |
+| `full` | all 34 | Reviewing structure (cycles, layers, dead or duplicated code), routes and package APIs, naming communities, diffs, graph questions (`query`, `path`, `explain`), the deprecated `add` |
 | `locate` | 5 | One way in (`graphlore_locate`), one way to the code (`graphlore_fetch`), plus `overview` / `build` / `freshness`; falls back to `lean` only when `GRAPHLORE_SEMANTIC_BACKEND` names a backend that is not available |
 
 An unknown value falls back to `lean` with a warning on stderr; the boot banner
@@ -86,7 +86,7 @@ tools for the same verbs — Graphify's `query` / node lookup / `neighbors` /
 `node_details`, `neighbors`, `communities`, `god_nodes` and `path`. Prefer one
 server per project. If you need both (Graphify's PR triage, its multi-project
 serving), keep graphlore on `lean`, which leaves out its `query` / `path` /
-`explain` passthroughs, and tell the model which server answers what.
+`explain`, and tell the model which server answers what.
 
 ## How large a reply gets
 
@@ -171,7 +171,7 @@ search index's BM25 tier. These are the exceptions:
 | Path | When it goes out | With `GRAPHLORE_OFFLINE=1` |
 |---|---|---|
 | `graphlore_add` | Always: it fetches the URL | Refused |
-| `graphlore_build` | `mode="deep"`, and a default build of doc/paper/image files, which graphify extracts with an LLM backend when a key is set | `mode` refused; `code_only` forced (local AST only) unless `cluster_only`, and the result says so |
+| `graphlore_build` (graphify builds) | `mode="deep"`, and a default build of doc/paper/image files, which graphify extracts with an LLM backend when a key is set | `mode` refused; `code_only` forced (local AST only) unless `cluster_only`, and the result says so. A native build is unaffected: it reads document headings locally, offline or not |
 | Semantic search (`[semble]`: `graphlore_locate`, `graphlore_query`, `graphlore_duplication_scan`) | First use: semble downloads its embedding model from the Hugging Face Hub, then caches it | `HF_HUB_OFFLINE=1` / `TRANSFORMERS_OFFLINE=1` are set before semble is imported, so only a cached model loads; otherwise the built-in index answers (backend unset), or the error says how to prefetch it (`GRAPHLORE_SEMANTIC_BACKEND=semble`) |
 | Built-in search, dense tier (`[embed]`: the same three tools) | First use: model2vec downloads `GRAPHLORE_EMBED_MODEL` (default `minishlab/potion-code-16M-v2`) from the Hugging Face Hub, then caches it | The same flags are set before model2vec is imported, so only a cached model loads; otherwise the index answers with BM25 alone and `backend.dense_unavailable` says why |
 | `GRAPHLORE_TOKENIZER=tiktoken` | First use: tiktoken fetches its encoding file unless cached | Not loaded; the chars/3.5 estimate is used |
@@ -233,7 +233,7 @@ changed since the last native build (a facts cache in
 `graphify-out/cache/graphlore-native.bin`; resolution and communities still run
 over the whole project, so the graph is the one a full build writes, and the
 nodes of deleted files go), `cluster_only` detects the communities of the graph
-on disk again, `code_only` skips the document headings, `no_viz` has no effect,
+on disk again, `code_only` skips the document headings, `no_viz` skips `graph.html` as it does for graphify,
 and `mode` is refused (`auto` sends it to graphify, and so it does `update` /
 `cluster_only` on a graph graphify built). The build runs in a child process bounded by
 `GRAPHLORE_TIMEOUT`. `benchmarks/compare_engines.py REPO` compares its graph of
@@ -245,13 +245,13 @@ has the results on 31 repositories and the roadmap.
 | Variable | Default | Description |
 |---|---|---|
 | `GRAPHLORE_PROJECT_DIR` | `.` | Project root to extract the graph from |
-| `GRAPHLORE_PROJECT_FROM_CLIENT` | off | `1`: the project is not the working directory but the client's: its first workspace root (MCP `roots/list`, asked on the first tool call), else the directory `graphlore_project` is given; until then every other tool answers `code: project_unknown`. Ignored when `GRAPHLORE_PROJECT_DIR` is set. The [plugin](#plugins-for-other-clients) of a client that starts the server in the plugin's own directory sets it |
+| `GRAPHLORE_PROJECT_FROM_CLIENT` | off | `1`: the project is not the working directory but the client's: its first workspace root (MCP `roots/list`, asked on the first tool call), else the directory `graphlore_project` is given; until then every tool but `graphlore_project` and `graphlore_sampling_status` answers `code: project_unknown`. `graphlore_project` is added to any toolset (`locate` then has 6 tools), and `GRAPHLORE_WATCH` does not start. Ignored when `GRAPHLORE_PROJECT_DIR` is set. The [plugin](#plugins-for-other-clients) of a client that starts the server in the plugin's own directory sets it |
 | `GRAPHLORE_OUT_DIR` | `graphify-out` | Output folder name |
 | `GRAPHLORE_BIN` | `graphify` | CLI path |
 | `GRAPHLORE_ENGINE` | `auto` | What `graphlore_build` extracts with: `auto` (graphlore's native engine when it is installed, else graphify; graphify also for `mode` and for `update` / `cluster_only` of a graphify-built graph), `native` (the engine, the `graphlore-engine` package; an error when it is not installed) or `graphify` (the CLI; deprecated, goes in the next release). Another value is an error. See [The native engine](#the-native-engine) |
 | `GRAPHLORE_TIMEOUT` | `600` | CLI and native build timeout (seconds) |
-| `GRAPHLORE_RESTRICT_PATHS` | `0` | Confine `graphlore_build`'s `path` to the project dir (auto-on for HTTP) |
-| `GRAPHLORE_TRANSPORT` | `stdio` | `stdio` \| `streamable-http` \| `sse` |
+| `GRAPHLORE_RESTRICT_PATHS` | `0` | Confine `graphlore_build`'s `path` to the project dir and refuse `graphlore_project`'s switch to another one (auto-on for HTTP) |
+| `GRAPHLORE_TRANSPORT` | `stdio` | `stdio` \| `streamable-http` (or `http`) \| `sse`; any other value runs stdio |
 | `GRAPHLORE_HOST` | `127.0.0.1` | Bind host for HTTP transports |
 | `GRAPHLORE_PORT` | `8000` | Bind port for HTTP transports |
 | `GRAPHLORE_API_KEY` | _(unset)_ | Require `Authorization: Bearer <key>` on HTTP transports |
@@ -261,7 +261,7 @@ has the results on 31 repositories and the roadmap.
 | `GRAPHLORE_ALLOWED_HOSTS` | _(unset)_ | DNS-rebinding `Host` allowlist for HTTP (comma-separated, `:*` port wildcards; `*` disables). Unset = SDK default: loopback-only when bound to loopback |
 | `GRAPHLORE_TOOLSET` | `lean` | `lean` (12 core exploration tools) \| `full` (all 34) \| `locate` (minimal locate-first surface; falls back to `lean` when the configured backend is unavailable). See [Which toolset](#which-toolset) |
 | `GRAPHLORE_TOKENIZER` | _(heuristic)_ | `tiktoken` → exact token counts (needs the `[tiktoken]` extra); else chars/3.5 estimate |
-| `GRAPHLORE_SEMANTIC_BACKEND` | _(auto)_ | Search backend of `graphlore_locate` and the duplication scan: unset / `auto` → semble when installed and loadable, else the built-in index; `semble` → semble only; `builtin` → the built-in index only; or `module.path:Factory` implementing `search`/`find_related` (its module is checked at boot, the factory at the first call) |
+| `GRAPHLORE_SEMANTIC_BACKEND` | _(auto)_ | Search backend of `graphlore_locate`, `graphlore_query`'s seeds and the duplication scan: unset / `auto` → semble when installed and loadable, else the built-in index; `semble` → semble only; `builtin` → the built-in index only; or `module.path:Factory` implementing `search`/`find_related` (its module is checked at boot, the factory at the first call) |
 | `GRAPHLORE_EMBED_MODEL` | `minishlab/potion-code-16M-v2` | The built-in index's dense tier (`[embed]` extra): a Hugging Face model id, a local model directory, or `off` for BM25 only |
 | `GRAPHLORE_CACHE_DIR` | `$XDG_CACHE_HOME/graphlore` (`~/.cache/graphlore`) | Where the built-in index keeps chunk vectors between runs (one folder per project; never inside the project); `off` keeps them in memory only |
 | `GRAPHLORE_SEARCH_KERNEL` | _(auto)_ | `python` forces the built-in index's reference kernel even when an accelerator (`graphlore_accel`) is installed |

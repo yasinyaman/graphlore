@@ -171,10 +171,10 @@ warm index, then the median over repositories. 4 CPU cores, no GPU, measured
   is the span engine's tree-sitter walk, which later tools reuse. The index is
   then kept and refreshed per file, so this is paid once per session. These
   index times were measured before the span walk was made 3–5× faster
-  (CHANGELOG, Unreleased); the built-in index builds faster now than this table
+  (CHANGELOG, 0.7.0); the built-in index builds faster now than this table
   says, and its rankings are unchanged, since the spans are the same.
 - The graph overlay (docstrings, call-neighbour names) is not measured here: the
-  benchmark repositories have no Graphify graph.
+  benchmark runs on the repositories without building a graph of them.
 
 Per language, NDCG@10 (BM25 / hybrid / semble):
 
