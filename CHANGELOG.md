@@ -7,6 +7,15 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **The agent evaluation has a baseline and repeats** (`benchmarks/agents`).
+  `--variants baseline` runs each agent with no graphlore, in a copy of the
+  repository without `graphify-out/`; `--repeat N` asks each task N times (no
+  agent CLI takes a seed). Every arm keeps the agent's own read and search
+  tools: the Claude Code adapter allowed only `mcp__graphlore` before, so its
+  `-p` runs had no Read or Grep. Rows record every tool called (`calls`),
+  and `score.py` reports solved per repetition as mean ± standard deviation,
+  tokens ± their deviation, and each graphlore arm's difference from the same
+  agent's baseline. Still not run: it needs each agent's own login.
 - **Stateless streamable HTTP** (`GRAPHLORE_STATELESS_HTTP=1`): each request
   is answered on its own, with no `Mcp-Session-Id`, so replicas behind a load
   balancer can share the traffic; `GRAPHLORE_JSON_RESPONSE=1` answers with a

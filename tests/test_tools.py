@@ -10045,6 +10045,69 @@ def test_agent_evaluation_runs_and_scores_with_the_fake_client(tmp_path):
     assert "| fake | plain | 1/2 |" in score.markdown(table)
 
 
+def test_agent_evaluation_baseline_has_no_graphlore_and_repeats_are_scored(tmp_path):
+    """The baseline arm runs without graphlore in a copy of the repository with
+    no graph; --repeat N gives N rows a task, scored as mean ± spread, and each
+    graphlore arm is compared with the same client's baseline."""
+    import shutil
+    from pathlib import Path
+
+    run, score = _agents_module("run"), _agents_module("score")
+    repo = tmp_path / "proj"
+    shutil.copytree(Path(__file__).parent / "fixtures" / "polyglot", repo)
+    (repo / "graphify-out").mkdir()
+    shutil.move(str(repo / "graph.json"), repo / "graphify-out" / "graph.json")
+    tasks = {"repos": {"proj": {"path": str(repo)}}, "tasks": [
+        {"id": "a", "repo": "proj", "prompt": "Which class does HTTPTransport inherit from?",
+         "expect": {"all": ["BaseTransport"]}, "tools": ["graphlore_node_details"]},
+        {"id": "b", "repo": "proj", "prompt": "Which test file tests URL.copy_with?",
+         "expect": {"all": ["tests/models/test_url.py"]}, "tools": ["graphlore_tests_for"]},
+    ]}
+    tasks_file = tmp_path / "tasks.json"
+    tasks_file.write_text(json.dumps(tasks), encoding="utf-8")
+    out = tmp_path / "out"
+    assert run.main(["--clients", "fake", "--variants", "baseline,plain", "--repeat", "2",
+                     "--tasks", str(tasks_file), "--out", str(out),
+                     "--root", str(tmp_path / "root")]) == 0
+    rows = [json.loads(x) for x in (out / "runs.jsonl").read_text().splitlines()]
+    assert len(rows) == 8 and sorted({r["rep"] for r in rows}) == [0, 1]
+    base = [r for r in rows if r["variant"] == "baseline"]
+    assert all(r["tools"] == [] and r["calls"] == ["Grep"] for r in base)
+    plain = next(r for r in rows if r["variant"] == "plain" and r["task"] == "a")
+    assert plain["calls"] == ["graphlore_search", "graphlore_node_details"]
+    # the baseline's copy has no graph to grep, and the repository keeps its own
+    assert not (tmp_path / "root" / "proj-baseline" / "graphify-out").exists()
+    assert (repo / "graphify-out" / "graph.json").is_file()
+    assert (out / "fake-plain-a-r1.log").is_file()
+    table = {t["variant"]: t for t in score.score(rows, {t["id"]: t for t in tasks["tasks"]})}
+    assert table["baseline"]["solved_per_repeat"] == [1, 1]
+    assert table["plain"]["solved_mean"] == 1 and table["plain"]["solved_sd"] == 0
+    assert table["plain"]["vs_baseline"]["solved"] == 0
+    assert table["plain"]["vs_baseline"]["input_tokens_ratio"] < 1
+    md = score.markdown(list(table.values()))
+    assert "| fake | plain | 1 ± 0 / 2 (1–1, 2 runs) |" in md and "× tokens" in md
+    import pytest
+
+    with pytest.raises(SystemExit):
+        run.main(["--clients", "fake", "--variants", "nope", "--tasks", str(tasks_file),
+                  "--out", str(out), "--root", str(tmp_path / "root")])
+
+
+def test_agent_evaluation_claude_baseline_has_no_server_but_the_same_reads(tmp_path):
+    run = _agents_module("run")
+    ctx = run.Ctx(tmp_path, tmp_path, "lean", "graphlore")
+    with_mcp = run.ADAPTERS["claude"].argv("q", ctx)
+    bare = run.ADAPTERS["claude"].argv("q", run.Ctx(tmp_path, tmp_path, "lean", "graphlore",
+                                                    mcp=False))
+    assert "--mcp-config" in with_mcp and "--mcp-config" not in bare
+    assert "--strict-mcp-config" in bare      # and none of the user's servers either
+    allowed = lambda argv: argv[argv.index("--allowedTools") + 1]  # noqa: E731
+    assert allowed(with_mcp) == "Read,Grep,Glob,LS,mcp__graphlore"
+    assert allowed(bare) == "Read,Grep,Glob,LS"
+    assert not any("graphlore" in a for a in run.ADAPTERS["codex"].argv(
+        "q", run.Ctx(tmp_path, tmp_path, "lean", "graphlore", mcp=False))[1:-1])
+
+
 def test_agent_evaluation_reads_codex_and_gemini_output():
     run = _agents_module("run")
     codex = "\n".join(json.dumps(x) for x in [

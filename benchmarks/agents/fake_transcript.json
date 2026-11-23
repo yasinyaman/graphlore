@@ -5,7 +5,8 @@
   {"match": "Which class does HTTPTransport inherit from",
    "calls": [["graphlore_search", {"pattern": "HTTPTransport"}],
              ["graphlore_node_details", {"node": "HTTPTransport"}]],
-   "answer": "It inherits from BaseTransport."},
+   "answer": "It inherits from BaseTransport.",
+   "baseline_answer": "BaseTransport, by reading _transports/default.py."},
   {"match": "Which test file tests URL.copy_with",
    "calls": [["graphlore_overview", {}]],
    "answer": "tests/test_urls.py"}
