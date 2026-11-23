@@ -97,6 +97,8 @@ Please:
 
 Publishing the release runs `.github/workflows/publish.yml`, which builds the package and uploads it to PyPI. It refuses to upload when the tag and the `pyproject.toml` version differ.
 
+Or, after step 2, run that workflow by hand on `master` (Actions → *Publish to PyPI* → *Run workflow*): it uploads the `pyproject.toml` version, then creates the `v<version>` tag and release with the built files attached. It refuses to run when that tag already exists.
+
 ### The native engine (`graphlore-engine`)
 
 The engine in `engine/` is its own distribution with its own version, kept only in `engine/Cargo.toml` (independent of graphlore's).
