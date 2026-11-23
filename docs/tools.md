@@ -74,7 +74,7 @@ Semantic naming (uses the **host model via MCP sampling** — no API key):
 | `graphlore_label_communities` | Give Leiden communities human-readable names. `method="auto"` (sampling → placeholder), `"sampling"` or `"placeholder"`; without sampling, name them yourself with `graphlore_set_labels` |
 | `graphlore_set_labels` | Persist **assistant-provided** community names (sampling-free fallback) to `.graphify_labels.json` and into `graph.html` (graphlore's own is written again; an older graphify one is patched) |
 
-Search bridge (code search joined to graph structure; semble when installed, else the built-in index — see [the search bridge](concepts.md#search-bridge-built-in-index-or-semble)):
+Search bridge (code search joined to graph structure; the built-in index, or semble when `GRAPHLORE_SEMANTIC_BACKEND=semble` — see [the search bridge](concepts.md#search-bridge-built-in-index-or-semble)):
 
 | Tool | Purpose |
 |---|---|

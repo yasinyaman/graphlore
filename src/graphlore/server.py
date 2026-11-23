@@ -1009,8 +1009,8 @@ def _files_of(nodes: list[dict], ids: Iterable[str]) -> list[str]:
 
 
 class SemanticIndex(Protocol):
-    """Pluggable search backend (semble when installed, else graphlore's built-in
-    index, :class:`search.CodeIndex`).
+    """Pluggable search backend (graphlore's built-in index, :class:`search.CodeIndex`,
+    by default; semble when ``GRAPHLORE_SEMANTIC_BACKEND=semble``).
 
     Implement this and point ``GRAPHLORE_SEMANTIC_BACKEND`` at ``your.module:Factory``
     to swap in a stronger backend — local sentence-transformers, an OpenAI-compatible
@@ -1089,8 +1089,8 @@ def _builtin_index(nodes: list[dict] | None = None, edges: list[dict] | None = N
 
 class _Backend(NamedTuple):
     """The search backend that answers a call: ``index`` (None when it could not
-    load), ``name`` (``builtin`` / ``semble`` / ``custom``) and a ``note`` when the
-    default fell back from semble to the built-in index."""
+    load), ``name`` (``builtin`` / ``semble`` / ``custom``) and a ``note`` graphlore
+    adds to the reply."""
 
     index: Any
     name: str
@@ -1102,10 +1102,11 @@ def _semantic_backend(
 ) -> _Backend:
     """The active search backend, dispatched by ``GRAPHLORE_SEMANTIC_BACKEND``.
 
-    - unset / ``auto``: semble when it is installed and builds its index, else the
-      built-in index (BM25, plus static embeddings with the ``[embed]`` extra).
-    - ``semble``: semble only. Not network-free on first use: semble downloads its
-      embedding model from the Hugging Face Hub once (``_MODEL_DOWNLOAD_NOTE``).
+    - unset / ``auto``: the built-in index (BM25, plus static embeddings with the
+      ``[embed]`` extra), whether or not semble is installed.
+    - ``semble``: semble only, the one way to use it. Not network-free on first
+      use: semble downloads its embedding model from the Hugging Face Hub once
+      (``_MODEL_DOWNLOAD_NOTE``).
     - ``builtin``: the built-in index only.
     - anything else: a ``module.path:Factory`` spec implementing
       :class:`SemanticIndex`; a failure is reported, never answered by another backend.
@@ -1115,21 +1116,10 @@ def _semantic_backend(
     """
     spec = config.env("SEMANTIC_BACKEND", "").strip()
     low = spec.lower()
-    if low in ("", "auto"):
-        index = _semble_index()
-        if index is not None:
-            return _Backend(index, "semble")
-        note = ""
-        if _SEMBLE_LOAD_ERROR and importlib.util.find_spec("semble") is not None:
-            note = (
-                f"semble is installed but could not build its index ({_SEMBLE_LOAD_ERROR}); "
-                "the built-in index answered instead."
-            )
-        return _Backend(_builtin_index(nodes, edges), "builtin", note)
+    if low in ("", "auto", "builtin"):
+        return _Backend(_builtin_index(nodes, edges), "builtin")
     if low == "semble":
         return _Backend(_semble_index(), "semble")
-    if low == "builtin":
-        return _Backend(_builtin_index(nodes, edges), "builtin")
     return _Backend(_load_custom_semantic_index(spec), "custom")
 
 
@@ -1178,7 +1168,7 @@ def _backend_line(payload: dict[str, Any]) -> str:
 # Appended to the semble-missing error so the first-run cost is known before
 # the install, and quoted in the locate / duplication_scan descriptions.
 _MODEL_DOWNLOAD_NOTE = (
-    "With the default semble backend the first call downloads semble's embedding "
+    "With the semble backend the first call downloads semble's embedding "
     "model from the Hugging Face Hub (minishlab/potion-code-16M-v2 as of semble 0.7) "
     "and caches it; later calls need no network. To fetch it ahead of time: "
     "python -c \"from model2vec import StaticModel; "
@@ -1212,7 +1202,7 @@ def _no_semantic_index_error(tool: str) -> str:
         return (
             f"ERROR: {tool}: semantic backend '{backend}' failed to load. Check the "
             "GRAPHLORE_SEMANTIC_BACKEND 'module.path:Factory' spec (or unset it to use "
-            "the default: semble when installed, else the built-in search)."
+            "the default, the built-in search)."
         )
     if config.offline() and importlib.util.find_spec("semble") is not None:
         return (
@@ -2417,7 +2407,7 @@ def graphlore_query(
     """Answer a natural-language question with the part of the graph it is about.
 
     The question is searched in the code (the same index as graphlore_locate:
-    semble when installed, else the built-in one), the best hits become the
+    the built-in one unless GRAPHLORE_SEMANTIC_BACKEND names another), the best hits become the
     seed nodes, and the graph is walked out from them until the token budget is
     spent. Without a search index the seeds are the nodes whose names share the
     most words with the question.
@@ -4628,9 +4618,8 @@ def graphlore_locate(
     similar code elsewhere, the ones with ``linked: false`` first (similar but not
     connected: duplication or hidden coupling). ``calls_into`` lists what the seed
     calls in other files, ``also_matched`` the other top hits by definition.
-    ``backend`` says which search answered: semble, else the built-in index
-    (BM25; the [embed] extra adds embeddings for questions in other words than
-    the code's). The first call
+    ``backend`` says which search answered: the built-in index (BM25; [embed]
+    adds embeddings for questions worded unlike the code), or semble if set. The first call
     may download minishlab/potion-code-16M-v2 from the Hugging Face Hub once and
     cache it; prefetch with ``python -c "from model2vec import StaticModel;
     StaticModel.from_pretrained('minishlab/potion-code-16M-v2')"``. Offline with no
@@ -4952,10 +4941,10 @@ def graphlore_duplication_scan(
     are of the same kind and size but far apart in the graph (>= min_distance
     hops), best ``score`` first, with ``score_kind``; pairs under the default
     floor (0.7 embeddings, 0.5 tf-idf) are left out. Tier 2 costs one search per
-    seed (``node_budget``). It runs on semble when installed, else on the built-in
-    index; the first embedding run may download minishlab/potion-code-16M-v2 from
-    the Hugging Face Hub once (see graphlore_locate). For names shared across
-    modules, see graphlore_same_names.
+    seed (``node_budget``). It runs on the built-in index (semble when
+    GRAPHLORE_SEMANTIC_BACKEND=semble); the first embedding run may download
+    minishlab/potion-code-16M-v2 from the Hugging Face Hub once (see
+    graphlore_locate). For names shared across modules, see graphlore_same_names.
 
     Args:
         node_budget: Seed definitions to scan, largest first.

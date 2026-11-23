@@ -62,8 +62,8 @@ a behavior and the module that implements it). "Seed calls into" lists what the
 seed calls in other files — where the implementation lives when the seed is a thin
 wrapper — and "Also matched" lists the other top hits by definition. Works
 across Python, JS/TS, Go, Java, Rust, C++ and 165+ languages, with no extra
-installed: it runs on semble when present, else on graphlore's built-in index
-(`backend` in the reply says which). The built-in index without the `[embed]`
+installed: it runs on graphlore's built-in index (semble only when
+`GRAPHLORE_SEMANTIC_BACKEND=semble`; `backend` in the reply says which). The built-in index without the `[embed]`
 extra is BM25 only (`mode: "bm25"`): phrase the query in the words the code would
 use (`retry backoff timeout`, a function name) rather than a paraphrase. With
 `[embed]` or semble, the first call downloads an embedding model from the Hugging

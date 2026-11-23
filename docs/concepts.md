@@ -167,9 +167,8 @@ reply says what did:
 
 | Setting | Backend |
 |---|---|
-| unset / `auto` (default) | [semble](https://github.com/MinishLab/semble) when it is installed and builds its index, else the built-in index |
-| `builtin` | the built-in index only |
-| `semble` | semble only; without the extra, `graphlore_locate` returns an install hint |
+| unset / `auto` (default), `builtin` | the built-in index, whether or not semble is installed |
+| `semble` | [semble](https://github.com/MinishLab/semble) only; without the extra, `graphlore_locate` returns an install hint |
 | `module.path:Factory` | your own backend implementing `search` / `find_related`; a failure is an error, never answered by another backend |
 
 ### The built-in index
@@ -224,8 +223,13 @@ the terms and bit-exact scores it must reproduce.
 
 ### semble
 
-With the `[semble]` extra, semble answers by default: static embeddings plus
-BM25 and its own reranking. **The first call downloads a model.** semble, like
+With the `[semble]` extra and `GRAPHLORE_SEMANTIC_BACKEND=semble`, semble
+answers: static embeddings plus BM25 and its own reranking. It is not the
+default (until graphlore 0.7 it was, when installed): on semble's own query set
+it ranks a little better (NDCG@10 0.852 against the built-in index's 0.814,
+[benchmark](benchmark.md#search-quality-built-in-index-and-semble)), but its
+hits join to the graph through a chunk of lines rather than a definition, and
+its first call cannot answer without the network. **The first call downloads a model.** semble, like
 the built-in dense tier, fetches `minishlab/potion-code-16M-v2` from the Hugging
 Face Hub on first use and caches it; later calls need no network. To fetch it
 ahead of time:

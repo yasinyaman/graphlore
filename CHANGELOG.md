@@ -11,6 +11,21 @@ All notable changes to this project are documented here. The format is based on
   `pyproject.toml` version to PyPI, then creates the `v<version>` tag and
   release. A published release still starts it as before.
 
+### Changed
+- **The built-in search index is the default, semble is opt-in.**
+  `GRAPHLORE_SEMANTIC_BACKEND` unset (or `auto`) now means graphlore's own
+  index whether or not semble is installed; semble answers only with
+  `GRAPHLORE_SEMANTIC_BACKEND=semble`, and the plugins (Claude Code, Agent
+  Plugins, Gemini CLI) no longer install the `semble` extra (`[semble]` stays
+  for those who set it). The built-in index joins every hit to its definition
+  and needs no network for BM25; semble downloaded its model on the first call
+  whenever it was installed, and a blocked download held every call that
+  tried it. The cost is ranking: on semble's own query set the built-in index
+  scores NDCG@10 0.814 (BM25) / 0.809 (with `[embed]`) against semble's
+  0.852. With `[embed]`, which the plugins still install, the dense tier
+  downloads `minishlab/potion-code-16M-v2` on first use as before, and falls
+  back to BM25 once when it cannot.
+
 ### Fixed
 - **`benchmarks/polyglot.py` no longer reports three artefacts of its own
   checks.** `BUILD-SMALL-GRAPH` compared every node of the graph

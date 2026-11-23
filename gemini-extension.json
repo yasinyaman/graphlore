@@ -7,7 +7,7 @@
       "command": "uvx",
       "args": [
         "--from",
-        "graphlore[engine,graphify,treesitter,semble,embed] @ ${extensionPath}",
+        "graphlore[engine,graphify,treesitter,embed] @ ${extensionPath}",
         "graphlore"
       ],
       "env": {
