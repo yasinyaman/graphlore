@@ -11,7 +11,7 @@ graphlore is a Python MCP server (MCP Python SDK v2: `mcp.server.mcpserver.MCPSe
 
 ## Layout
 
-`src/graphlore/` is layered `config.py` → `engine.py` → `graph.py` → `spans.py` → `scope.py` → `apis.py` / `routes.py` → `imports.py` → `resolve.py` → `review.py` → `server.py`. `server.py` holds the whole MCP surface (33 tools, resources, prompts, `main()`). Tests are in `tests/test_tools.py` (plus `tests/test_engine.py`, which needs the engine installed) and call tool functions directly.
+`src/graphlore/` is layered `config.py` → `engine.py` → `graph.py` → `algorithms.py` → `spans.py` → `scope.py` → `apis.py` / `routes.py` → `imports.py` → `resolve.py` → `review.py` → `server.py`. `server.py` holds the whole MCP surface (34 tools, resources, prompts, `main()`). Tests are in `tests/test_tools.py` (plus `tests/test_engine.py`, which needs the engine installed) and call tool functions directly.
 
 ## Rules
 
@@ -42,4 +42,4 @@ graphlore is a Python MCP server (MCP Python SDK v2: `mcp.server.mcpserver.MCPSe
 
 ## When a tool is added or changed
 
-Also update: the tool list in the `server.py` docstring, `LEAN_TOOLS` / `LOCATE_TOOLS` if relevant (`lean` is the default surface), `_instructions` / the prompt steps if the tool belongs in the recommended flow, `test_tool_and_prompt_registration` (asserts exactly 33 tools), the tool tables in `docs/tools.md` (and the README's `lean` table and "33" counts), `.claude/skills/graphlore-explore/SKILL.md`, and `CHANGELOG.md` under `[Unreleased]`.
+Also update: the tool list in the `server.py` docstring, `LEAN_TOOLS` / `LOCATE_TOOLS` if relevant (`lean` is the default surface), `_instructions` / the prompt steps if the tool belongs in the recommended flow, `test_tool_and_prompt_registration` (asserts exactly 34 tools), the tool tables in `docs/tools.md` (and the README's `lean` table and "33" counts), `.claude/skills/graphlore-explore/SKILL.md`, and `CHANGELOG.md` under `[Unreleased]`.

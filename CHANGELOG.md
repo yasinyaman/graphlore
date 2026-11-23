@@ -115,6 +115,35 @@ All notable changes to this project are documented here. The format is based on
   pairs to 68.
 
 ### Added
+- **Graph algorithms beyond the breadth-first walk** (`src/graphlore/algorithms.py`,
+  checked against networkx on 300 random graphs; on Django's 77,766 nodes each
+  answers in seconds):
+  - **`graphlore_path` takes the most certain path**: the fewest edges inferred
+    by name (`INFERRED` / `AMBIGUOUS`), then the fewest steps (Dijkstra on that
+    pair of costs). Each such step carries `confidence`, `inferred_steps`
+    counts them, and `shortest` gives the length of a shorter but less certain
+    path when one exists. On a graph with no inferred edge the answer is the
+    breadth-first one it was. It no longer walks a document's `documents`
+    edges unless one end is a document: of 150 random pairs of Django
+    functions, 26 had been "joined" only by a page naming both.
+  - **`graphlore_god_nodes(rank="pagerank" | "betweenness")`**: PageRank over
+    the dependency edges (a utility everything leans on outranks a big module
+    few use: on Django, `Model`, `gettext_lazy`, `SimpleTestCase`, `Field`,
+    `AltersData`), and Brandes' betweenness, estimated from `samples` (64)
+    hash-picked sources and saying so, exact with `samples=0` (on Django, app
+    loading and connection setup: `Apps.populate()`, `ensure_connection()`).
+    `rank="degree"` stays the default and its answer is unchanged. 2.5 s and
+    1.3 s on Django.
+  - **`graphlore_impact` names its `chokepoints`**: from the dominator tree of
+    the walked nodes (Cooper, Harvey and Kennedy), the nodes every path to the
+    start runs through for many of the others, with how many each `shields`.
+    `QuerySet`'s 2,024 dependents within 3 hops: 354 reach it only through
+    `django/db/models/__init__.py`, 116 only through `Manager`. 0.07 s.
+  - **New tool `graphlore_bridges`** (34 tools): the scope's dependency edges as
+    an undirected graph of files, directories or nodes; the bridges (the only
+    link between two parts) and cut points (what one side goes through), each
+    with what it cuts off, by Tarjan's low-link in one pass. Import edges go
+    through the import checks. In the `review` prompt after the layer rules.
 - **graph.html opens a node's lines on GitHub.** A node's panel has an
   *On GitHub ↗* link (GitLab and Bitbucket alike) to its `start..end` lines at
   the commit the graph was built from (HEAD when the graph names none), in a
