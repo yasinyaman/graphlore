@@ -1824,6 +1824,19 @@ fn bound_path(written: &str) -> Option<Vec<String>> {
         })?;
         rest = rest[close.0 + 1..].trim_start();
     }
+    // Go `G Getter[Item]`: the bound is the generic interface
+    if rest.starts_with('[') && crate::parse::current() == Some(crate::lang::Lang::Go) {
+        let mut depth = 0usize;
+        let close = rest.char_indices().find(|(_, c)| {
+            match c {
+                '[' => depth += 1,
+                ']' => depth -= 1,
+                _ => {}
+            }
+            depth == 0
+        })?;
+        rest = rest[close.0 + 1..].trim_start();
+    }
     if !(rest.is_empty() || rest.starts_with(['+', '&', ','])) {
         return None;
     }
@@ -3480,6 +3493,14 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                 facts.defs[di].lambda_receiver = lambda_receiver(n, src);
                 facts.defs[di].type_params = type_params(n, src);
                 facts.defs[di].type_bounds = type_params_bounds(n, src).1;
+                // Go `func (b Box[U]) Go(u U)`: the receiver's type arguments
+                // are the method's names for the type's parameters (bounded
+                // as the type's are: `type_param_around`)
+                if n.kind() == "method_declaration" {
+                    let named = go_receiver_type_params(n, src);
+                    facts.defs[di].type_bounds.extend(named.iter().map(|_| None));
+                    facts.defs[di].type_params.extend(named);
+                }
                 facts.defs[di].elem = return_elem(n, src);
                 facts.defs[di].keyed = return_keyed(n, src);
                 facts.defs[di].key = return_key(n, src);
@@ -6274,6 +6295,26 @@ fn destructured<'t>(n: Node<'t>, src: &[u8]) -> Option<(Vec<String>, Node<'t>)> 
         _ => return None,
     };
     Some((names_of(pattern)?, value))
+}
+
+/// Go: the names a method's receiver gives its type's parameters
+/// (`func (b *Box[K, V]) …`: `K`, `V`).
+fn go_receiver_type_params(n: Node, src: &[u8]) -> Vec<String> {
+    let Some(recv) = n.child_by_field_name("receiver") else { return Vec::new() };
+    let mut stack = vec![recv];
+    while let Some(x) = stack.pop() {
+        if x.kind() == "type_arguments" {
+            return kids(x)
+                .into_iter()
+                .filter_map(|a| {
+                    let id = if a.kind() == "type_elem" { kids(a).into_iter().next()? } else { a };
+                    (id.kind() == "type_identifier").then(|| text(id, src))
+                })
+                .collect();
+        }
+        stack.extend(kids(x));
+    }
+    Vec::new()
 }
 
 /// Go's predeclared types, which an index never is.

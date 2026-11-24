@@ -3874,7 +3874,16 @@ impl<'a> Project<'a> {
         let mut last = None;
         while let Some(x) = cur {
             if let Some(i) = defs[x].type_params.iter().position(|p| p == name) {
-                return Some((x, defs[x].type_bounds.get(i).cloned().flatten()));
+                let bound = defs[x].type_bounds.get(i).cloned().flatten();
+                // (Go: a receiver's name for the type's parameter has the
+                // type's bound)
+                let bound = bound.or_else(|| {
+                    (self.family[f] == Some(Family::Go) && defs[x].kind.is_callable())
+                        .then(|| self.class_of(f, Some(x)))
+                        .flatten()
+                        .and_then(|c| self.def(c).type_bounds.get(i).cloned().flatten())
+                });
+                return Some((x, bound));
             }
             last = Some(x);
             cur = defs[x].parent;
@@ -6931,9 +6940,18 @@ impl<'a> Project<'a> {
     ) -> Option<(DefRef, bool)> {
         let [name] = name else { return None };
         let def = self.def(member);
-        if def.type_params.contains(name) {
-            return None;
-        }
+        // (Go `func (s *Stack[U]) Top() U`: a receiver's name for the type's
+        // parameter, which the bindings answer by the type's own name)
+        let renamed;
+        let name = match def.type_params.iter().position(|p| p == name) {
+            Some(i) if self.family[member.0] == Some(Family::Go) && def.kind.is_callable() => {
+                let owner = self.class_of(member.0, Some(member.1))?;
+                renamed = self.def(owner).type_params.get(i)?.clone();
+                &renamed
+            }
+            Some(_) => return None,
+            None => name,
+        };
         let owner = self.class_of(member.0, Some(member.1))?;
         if let Some(b) = b.filter(|b| b.owner == owner) {
             return self.bound_param(b, name);

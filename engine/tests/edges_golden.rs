@@ -3769,3 +3769,13 @@ fn go_package_values_ranges_assigned_and_literal_keys() {
         ],
     );
 }
+
+#[test]
+fn go_receiver_type_parameters_and_generic_bounds() {
+    let got = edges("go-recv-tp", &[
+        ("go.mod", "module example.com/app\n\ngo 1.22\n"),
+        ("a.go", "package app\n\ntype Runner interface{ Run() int }\n\ntype Config struct{}\n\ntype Box[T Runner] struct{ v T }\n\nfunc (b Box[U]) Go(u U) int {\n\treturn u.Run()\n}\n\nfunc (b Box[Config]) Get() Config {\n\treturn b.v\n}\n\ntype Getter[V any] interface {\n\tGet() V\n}\n\nfunc Use[G Getter[Config]](g G) {\n\tg.Get()\n}\n\ntype Other struct{}\n\nfunc (Other) Run() int { return 2 }\n\nfunc (Other) Get() int { return 0 }\n"),
+    ]);
+    has(&got, &[(".Go()", "calls", ".Run()"), ("Use()", "calls", ".Get()")]);
+    assert!(!got.contains(&(".Get()".into(), "references".into(), "Config".into())), "{got:#?}");
+}

@@ -1,5 +1,5 @@
 {
- "passed": 924,
+ "passed": 927,
  "total": 945,
  "cases": [
   {
@@ -4294,14 +4294,8 @@
   },
   {
    "id": "go/receiver-type-parameter-renamed",
-   "ok": false,
-   "missing": [
-    [
-     "Box.Go",
-     "calls",
-     "Runner.Run"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -4414,15 +4408,9 @@
   },
   {
    "id": "go/receiver-type-parameter-hides",
-   "ok": false,
+   "ok": true,
    "missing": [],
-   "unwanted": [
-    [
-     "Box.Get",
-     "references",
-     "Config"
-    ]
-   ]
+   "unwanted": []
   },
   {
    "id": "go/constraint-forward-reference",
@@ -4432,14 +4420,8 @@
   },
   {
    "id": "go/instantiated-constraint",
-   "ok": false,
-   "missing": [
-    [
-     "Use",
-     "calls",
-     "Getter.Get"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {

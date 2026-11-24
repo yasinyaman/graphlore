@@ -292,7 +292,7 @@ Found by: the specification 30, a compiler 19, comparison 0, the grammar 2, the 
 | an import of a directory is the file its `package.json` names | `package-json-types-entry` | – | yes |
 | where a type is written, a value of the name does not hide the type around it | `type-meaning-skips-values` | – | yes |
 
-### go (296 of 317)
+### go (299 of 317)
 
 The Go Programming Language Specification, 'Declarations and scope', 'Selectors', 'Method sets'.
 
@@ -385,7 +385,7 @@ Found by: the specification 23, a compiler 13, comparison 2, the grammar 5, the 
 | `r, n := open()` in the function body redeclares the parameter r: it keeps the type Reader, so `r.Read()` is Reader's method | `short-var-redeclares-a-parameter` | – | yes |
 | in `func use(conf conf)` and `func (conf conf) Other()` the type is the package type conf and `conf.Run()` in the body is conf's method, not the package function Run | `parameter-named-like-its-type` | – | yes |
 | `err.Error()` on a parameter of type error is the universe interface's method: no project type's Error method is meant | `predeclared-error-method` | – | yes |
-| in `func (b Box[U]) Go(u U)` U is the receiver's own name for T: `u.Run()` is the method of T's constraint Runner | `receiver-type-parameter-renamed` | 1.18– | **no**: no Box.Go -calls-> Runner.Run |
+| in `func (b Box[U]) Go(u U)` U is the receiver's own name for T: `u.Run()` is the method of T's constraint Runner | `receiver-type-parameter-renamed` | 1.18– | yes |
 | `type A = B; type B = *T; func (a A) Go()` binds Go to T: `t.Go()` on a *T is T's method, not another type's Go | `receiver-alias-chain-and-pointer` | – | **no**: no Use -calls-> T.Go |
 | in `v, ok := m[k]` and `w, ok := <-ch` the first name has the value / element type | `comma-ok-map-and-receive` | – | yes |
 | `type S struct{ conf conf }`: the field's type is the package type conf, and `s.conf.Run()` is conf's method | `field-named-like-its-type` | – | yes |
@@ -403,9 +403,9 @@ Found by: the specification 23, a compiler 13, comparison 2, the grammar 5, the 
 | a method called on a value of an instantiated generic type is the generic type's method | `instance-local-method` | – | yes |
 | a method of a generic type does not see the type declaration's type parameters: a name its receiver does not declare is the package's | `receiver-redeclares-type-parameters` | – | yes |
 | a type parameter of a type declaration hides a package type of its name in the declaration | `type-declaration-parameter-hides` | – | yes |
-| a type parameter declared by a method's receiver hides a package type of its name in the method only: the method's other uses of the name are the package's | `receiver-type-parameter-hides` | – | **no**: has Box.Get -references-> Config |
+| a type parameter declared by a method's receiver hides a package type of its name in the method only: the method's other uses of the name are the package's | `receiver-type-parameter-hides` | – | yes |
 | the type parameters of one list are all in scope in each constraint of it, including those declared after | `constraint-forward-reference` | – | yes |
-| a value of a type parameter constrained by an instantiated generic interface has that interface's methods | `instantiated-constraint` | – | **no**: no Use -calls-> Getter.Get |
+| a value of a type parameter constrained by an instantiated generic interface has that interface's methods | `instantiated-constraint` | – | yes |
 | the interface a type parameter is constrained by, and the types of the union such an interface lists, are uses of those names | `constraint-names-are-uses` | – | yes |
 | a value of a type parameter has the methods of the interfaces its constraint embeds | `constraint-embeds-interface` | – | yes |
 | a generic type written with type arguments is a use of the generic type and of each argument | `generic-type-instance-is-a-use` | – | yes |
@@ -1195,4 +1195,4 @@ Found by: the specification 31, a compiler 2, comparison 0, the grammar 1, the l
 | `A::hello insteadof B` picks A's method of two used traits | `trait-insteadof` | – | yes |
 | a method a trait brings comes before an inherited one, and the class's own before both | `trait-before-inherited` | – | yes |
 
-924 of 945 rules hold
+927 of 945 rules hold
