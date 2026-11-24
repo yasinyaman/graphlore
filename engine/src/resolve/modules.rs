@@ -3,7 +3,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use super::{dir_of, normalize, Bind, Family, ModRes, Project, Target};
+use super::{dir_of, normalize, Bind, DefRef, Family, ModRes, Project, Target};
 use crate::facts::{DefKind, ImportFact, ImportForm};
 use crate::lang::Lang;
 
@@ -36,6 +36,9 @@ pub struct ModuleSystems {
     rs_mod: HashMap<usize, (String, Vec<String>)>,
     rs_files: HashMap<(String, Vec<String>), Vec<usize>>,
     pub(super) rs_crates: HashMap<String, String>,
+    /// The same by (workspace repository, name): two repositories may each
+    /// have a crate of one name.
+    pub(super) rs_crates_in: HashMap<(String, String), String>,
     // Swift: file -> module; module -> files
     swift_module: HashMap<usize, String>,
     swift_files: HashMap<String, Vec<usize>>,
@@ -198,7 +201,12 @@ impl ModuleSystems {
                             } else {
                                 format!("{dir}/src")
                             };
-                            m.rs_crates.insert(name.replace('-', "_"), key);
+                            let name = name.replace('-', "_");
+                            m.rs_crates_in.insert(
+                                (p.repo_of_path(&dir).to_string(), name.clone()),
+                                key.clone(),
+                            );
+                            m.rs_crates.insert(name, key);
                         }
                         for section in ["lib", "bin"] {
                             let Some(path) = toml_value(&src, section, "path") else { continue };
@@ -399,12 +407,25 @@ fn py_resolve(p: &Project, f: usize, module: &str) -> ModRes {
     }
     found.sort();
     found.dedup();
+    // In a workspace a module of the importer's own repository is the one
+    // meant; another repository's counts only as a package of its own
+    // (`common_lib.models`), never as a loose module (`utils`).
+    if found.iter().any(|g| p.repo[*g] != p.repo[f]) {
+        if found.iter().any(|g| p.repo[*g] == p.repo[f]) {
+            found.retain(|g| p.repo[*g] == p.repo[f]);
+        } else {
+            found.retain(|g| {
+                let parts = py_file_parts(p, *g);
+                n > 1 && py_package(p, &parts[..parts.len() + 1 - n].join("/"))
+            });
+        }
+    }
     match found.len() {
         1 => ModRes::Target(Target::Module(found)),
         0 => {
             // a namespace package: a directory of modules with no __init__.py
             let tail = dotted.join("/");
-            let dirs: Vec<&String> = m
+            let mut dirs: Vec<&String> = m
                 .py_dirs
                 .iter()
                 .filter(|d| {
@@ -417,6 +438,9 @@ fn py_resolve(p: &Project, f: usize, module: &str) -> ModRes {
                         && !py_package(p, d.as_str())
                 })
                 .collect();
+            // in a workspace, a namespace package of another repository
+            // is never the importer's
+            dirs.retain(|d| p.repo_of_path(d) == p.repo[f]);
             if dirs.len() == 1 {
                 ModRes::Target(Target::Dir(dirs[0].clone()))
             } else {
@@ -633,15 +657,28 @@ fn go_resolve(p: &Project, path: &str) -> ModRes {
 
 // ---- namespaces (JVM, C#, PHP) ---------------------------------------------
 
-fn ns_target(p: &Project, fam: Family, name: &str) -> Option<Target> {
+fn ns_target(p: &Project, fam: Family, f: usize, name: &str) -> Option<Target> {
     let dotted = name.replace('\\', ".").trim_start_matches('.').to_string();
     let is_package = p.namespaces.contains(&(fam, dotted.clone()));
     // (a Java `module com.acme { … }` in module-info.java declares no type:
     // where a package has the name, the import means the package)
-    let found = p.best(p.fqn.get(&dotted).into_iter().flatten().copied().filter(|r| {
-        p.family[r.0] == Some(fam)
-            && !(is_package && matches!(p.def(*r).kind, DefKind::Module | DefKind::Namespace))
-    }));
+    let mut cands: Vec<DefRef> = p
+        .fqn
+        .get(&dotted)
+        .into_iter()
+        .flatten()
+        .copied()
+        .filter(|r| {
+            p.family[r.0] == Some(fam)
+                && !(is_package && matches!(p.def(*r).kind, DefKind::Module | DefKind::Namespace))
+        })
+        .collect();
+    // two repositories of a workspace defining one fully qualified name:
+    // the importer's own
+    if cands.iter().any(|r| p.repo[r.0] == p.repo[f]) {
+        cands.retain(|r| p.repo[r.0] == p.repo[f]);
+    }
+    let found = p.best(cands);
     if let Some(d) = found {
         return Some(Target::Def(d));
     }
@@ -694,7 +731,12 @@ fn rust_path(p: &Project, f: usize, segs: &[String]) -> ModRes {
         name => {
             if let Some(t) = p.member(&Target::Module(vec![f]), name, 0) {
                 t
-            } else if let Some(k) = p.modsys.rs_crates.get(name) {
+            } else if let Some(k) = p
+                .modsys
+                .rs_crates_in
+                .get(&(p.repo[f].clone(), name.to_string()))
+                .or_else(|| p.modsys.rs_crates.get(name))
+            {
                 match p.modsys.rs_files.get(&(k.clone(), Vec::new())) {
                     Some(fs) => Target::Module(fs.clone()),
                     None => return ModRes::Missing,
@@ -762,7 +804,7 @@ pub fn resolve_import(p: &Project, fam: Family, f: usize, imp: &ImportFact) -> M
         Family::Python => py_resolve(p, f, &imp.module),
         Family::Ecma => js_resolve(p, f, &imp.module),
         Family::Go => go_resolve(p, &imp.module),
-        Family::Jvm | Family::CSharp => match ns_target(p, fam, &imp.module) {
+        Family::Jvm | Family::CSharp => match ns_target(p, fam, f, &imp.module) {
             Some(t) => ModRes::Target(t),
             None if imp.module.is_empty() => ModRes::Missing,
             None => ModRes::Ext(imp.module.clone()),
@@ -776,7 +818,7 @@ pub fn resolve_import(p: &Project, fam: Family, f: usize, imp: &ImportFact) -> M
                     .or_else(|| by_suffix(p, f, rel, fam));
                 return file_target(cand);
             }
-            match ns_target(p, fam, &imp.module) {
+            match ns_target(p, fam, f, &imp.module) {
                 Some(t) => ModRes::Target(t),
                 None if imp.module.is_empty() => ModRes::Target(Target::Ns(String::new())),
                 None => ModRes::Ext(imp.module.clone()),

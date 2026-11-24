@@ -235,6 +235,11 @@ many): list its members with `graphlore_skeleton` and fetch the one you need.
   graph shows.
 - **Reviewing a changeset** → `graphlore_diff(base, head)` — the file-level
   structural changes between two git refs, cosmetic-only edits separated.
+- **A workspace of several repositories** (`graphlore_overview()` lists them
+  under `workspace`) → `scope="<repo>"` narrows a tool to one repository;
+  `cross_repo_edges` counts what crosses between them (`http_calls`, imports),
+  and `graphlore_impact` follows a change into the repositories that call it.
+  `graphlore_diff(repo="<repo>")` takes that repository's own refs.
 - **Hunting duplication** → `graphlore_same_names()` and the `identical_bodies`
   tier of `graphlore_duplication_scan()` first (both exact, no model), then the
   scan's similarity `pairs` — definitions that are similar but structurally

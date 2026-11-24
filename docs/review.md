@@ -27,6 +27,9 @@ graphlore review --base HEAD~3 --format json --output review.json
   exists); `--no-build` refuses instead (exit 2). A graph built by graphify
   works when it records the head commit (`built_at_commit`).
 - `--hops` (default 3) is how far dependents are followed.
+- `--repo` names the repository of a [workspace](workspace.md) whose range it
+  is: git reads that repository, the dependents and tests are the whole
+  workspace graph's.
 - `--fail-on` takes gates that make the command exit 1:
   - `cycle`: a runtime import cycle introduced (one of its imports is written
     on a changed line);
@@ -44,9 +47,10 @@ graphlore review --base HEAD~3 --format json --output review.json
 | Part | How it is made |
 |---|---|
 | Files | `graphlore_diff`'s changeset: added, removed, renamed and structurally modified files. Cosmetic-only files (comments, formatting) are counted and left out |
-| Changed | Each changed line of a source file (`git diff -U0`) given to the innermost definition around it; a line no definition holds is the file's top level. A definition deleted from a file shows as a change to what held it. Documents and configuration files are listed with the files only |
-| What depends on it | One walk from all changed definitions over the graph's edges plus the ones graphlore resolves from the source, as `graphlore_impact` walks: nearest first, production code before tests, the most connected first; the first 60 rows, the rest counted. Shared state and docstrings are not walked |
-| Tests | `graphlore_tests_for` on each changed production definition (the first 40): tests that call it, or call something that calls it; and the definitions no test reaches |
+| Changed | Each changed line of a source file (`git diff -U0`), blank lines left out, given to the innermost definition around it; a line no definition holds is the file's top level. A definition deleted from a file shows as a change to what held it. Documents and configuration files are listed with the files only |
+| What depends on it | One walk from all changed definitions over the graph's edges plus the ones graphlore resolves from the source, as `graphlore_impact` walks: nearest first, production code before tests, the most connected first; the first 60 rows, the rest counted. Shared state, docstrings and documents (a heading naming the code) are not walked; containment is walked, so the files importing a changed file are reached, but the file or class holding a changed definition is not listed |
+| Removed | The definitions the base had and the head has not, by qualified name, read from both commits' sources with the span engine; a rename shows as the old name removed. The first 40, the rest counted |
+| Tests | `graphlore_tests_for` on each changed production function, method or type (the first 40; a variable, constant or field is read, not called, and is not looked up): tests that call it, or call something that calls it; and the ones no test reaches |
 | Import cycles | Cycles between files that pass through a changed file, each with when its imports run (runtime, deferred, type-only) and whether the change `introduced` it |
 | Layer rules | With a `.graphlore-layers.json`, the violations in changed files, `introduced` when the import is on a changed line |
 
@@ -84,7 +88,8 @@ updating its own earlier comment on each push. A pull request from a fork gets
 a read-only token: the report is then in the job summary only. Don't switch to
 `pull_request_target` to get around that; it runs with write access on code
 from the fork. Inputs: `base`, `fail-on`, `hops`, `project` (a directory inside
-the repository), `comment` (`"false"`: the summary only), `python-version`,
+the repository), `comment` (`"false"`: the summary only), `graphlore-version`
+(a release from PyPI instead of the Action's own copy), `python-version`,
 `token`. Outputs: `exit-code`, `report` (the Markdown file).
 
 Pin the Action to a release tag: the tag decides which graphlore runs.
@@ -115,7 +120,9 @@ and a call to the notes API; the job above keeps it as an artifact.
 - The graph is the graph: a call through an object, a callback or dynamic
   dispatch that the graph does not hold is not a dependent, and a test that
   reaches the code that way is not found.
-- A definition is mapped by its span at the head commit. Removed definitions
-  are not named one by one; their file is listed as changed.
+- A definition is mapped by its span at the head commit. A removed one (a
+  definition deleted or renamed, every definition of a removed file) is named
+  from the two commits' sources under "Removed", but its former callers are
+  not: the head graph has no node for it, so nothing depends on it there.
 - One project per run (`--project`); a monorepo with several graphs runs it
   once per project.

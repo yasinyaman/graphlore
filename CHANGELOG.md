@@ -6,29 +6,59 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
-## [0.8.0] - 2026-11-23
-
-The first release on PyPI: 0.7.0, below, was never uploaded, so `pip install graphlore` installs
-0.8.0 with the changes of both.
+## [0.8.0] - 2026-11-24
 
 ### Added
-- **Claude Code hooks** (`graphlore hook pre|post`). Before a `Grep` or
-  `Glob` for one identifier the graph defines, a line of context names where
+- **SCIP precision mode** (`GRAPHLORE_SCIP`, `src/graphlore/scip.py`). When
+  the project has a SCIP index (`index.scip`, made by `scip-python`,
+  `scip-typescript`, `rust-analyzer scip` and others), the edges the
+  navigation tools walk are checked against it at read time: an edge the index
+  agrees with is confirmed (`confidence: EXTRACTED`, `scip: "confirmed"`), a
+  pair the graph lacks is added (`calls` or `references`, `resolved_by:
+  "scip"`), and a call or reference it binds elsewhere is marked
+  `AMBIGUOUS` (`scip: "contradicted"`), never removed. The index is decoded
+  with the standard library (no `protobuf` package), cached on the file, and
+  nothing is run or fetched; an index made in another directory is read by
+  the project's own paths. Replies carry `resolved_edges.precision` and a
+  row's `scip`. On httpx: 3,594 edges confirmed, 935 added, 17 contradicted,
+  0.2 s. `benchmarks/oracle_scip.py` compares a whole native graph with an
+  index as the compiler oracles do (httpx: 99.0% precision, 76.8% recall
+  against scip-python).
+- **Workspaces: several repositories as one graph** (`docs/workspace.md`).
+  A project folder that is no git repository and holds repositories one or two
+  levels down (or a `.graphlore-workspace.json` naming them) is built as one
+  graph by the native engine: each repository's own tracked files, its commit
+  in the header (`graph.repos`), imports resolved to the importer's own
+  repository first (Python, JVM, C# and Rust crates), route ids led by their
+  repository, and a request to a host the workspace file gives a repository
+  linked to that repository's routes. `graphlore_freshness`, the graph age,
+  the changed-file notes, co-change and the watcher read each repository
+  against its own commit; `graphlore_diff` takes `repo`, `graphlore review`
+  takes `--repo`, `graphlore_overview` counts each repository and the edges
+  between them, and `graphlore_search` / `graphlore_locate` take a `scope`
+  (`scope="api"`). The post hook names the repository whose HEAD moved. A
+  project that is one repository is built and read as before.
+- **Claude Code and Codex hooks** (`graphlore hook pre|post`). Before a
+  `Grep` or `Glob`, or a shell search (`rg`, `grep`, `git grep`; Codex has
+  no Grep tool), for one identifier the graph defines, a line of context names where
   it is defined and that `graphlore_neighbors` / `graphlore_impact` answer
   the question such a search usually leads to; after a git command that moves
   HEAD past the graph's build commit, or an edit of a source file, a line says
   the graph is behind, once per state. The hook never blocks or changes a
   call, imports none of the server (about 50 ms a call), keeps an index of the
   graph's names under `GRAPHLORE_CACHE_DIR`, passes on only plain paths and is
-  silent on any error. The Claude Code plugin ships them
-  (`.claude-plugin/hooks.json`); `graphlore setup claude-code --write
-  --with-hooks` merges them into `.claude/settings.json`, keeping every other
-  hook. `GRAPHLORE_HOOKS=0` turns them off.
+  silent on any error. The plugin ships them in `hooks/hooks.json`, the
+  default place of Claude Code and Codex alike; `graphlore setup
+  claude-code|codex --with-hooks` merges them into `.claude/settings.json` or
+  `.codex/hooks.json`, keeping every other hook (Codex runs a hook once it is
+  trusted in `/hooks`). Codex's file edits (`apply_patch`) are read for the
+  files they name. `GRAPHLORE_HOOKS=0` turns them off.
 - **A GitHub Action for `graphlore review`** (`action.yml` at the root,
   `uses: yasinyaman/graphlore@<tag>`): it installs graphlore with the native
   engine from its own copy, reviews the pull request against its base commit,
   writes the report to the job summary and posts it as one comment it updates
-  on each push (a fork's read-only token: the summary only). `fail-on` fails
+  on each push (a fork's read-only token: the summary only); `graphlore-version`
+  installs a release from PyPI instead of its own copy. `fail-on` fails
   the step on a gate. graphlore's own pull requests run it
   (`.github/workflows/review.yml`). `docs/review.md` covers the command, the
   Action and a GitLab CI job.
@@ -43,7 +73,12 @@ The first release on PyPI: 0.7.0, below, was never uploaded, so `pip install gra
   one caller) and the ones no test reaches, the import cycles through changed
   files and the `.graphlore-layers.json` violations in them, each marked
   `introduced` when the import is written on a changed line. Cosmetic-only
-  files are left out. It builds the graph at the head commit with the native
+  files and blank lines are left out; a heading that names the code and the
+  file or class that holds it are not listed as dependents (the files that
+  import it still are), and a changed variable, constant or field is never
+  "untested". Definitions the change deletes or renames, and those of a
+  removed file, are named under "Removed" from the two commits' sources. It
+  builds the graph at the head commit with the native
   engine when it is missing or older (`--no-build` refuses instead), writes
   Markdown for a pull-request comment (repository names as code spans, at
   most 20,000 characters) or `--format json`, and exits 1 when a
@@ -88,6 +123,10 @@ The first release on PyPI: 0.7.0, below, was never uploaded, so `pip install gra
   release. A published release still starts it as before.
 
 ### Changed
+- **`graphlore_label_communities` is marked read-only** (`read_only_hint`):
+  it returns names and saves none (`graphlore_set_labels` does), and the
+  server instructions no longer list it among the tools that write under
+  `graphify-out/`.
 - **The README says what graphlore is for beside a language server and
   built-in code search**: the questions that need the whole repository at once
   (what a change breaks, cycles, layers, routes, shared state), one budgeted
@@ -135,6 +174,32 @@ The first release on PyPI: 0.7.0, below, was never uploaded, so `pip install gra
   back to BM25 once when it cannot.
 
 ### Fixed
+- **Seven name-resolution rules read off the compilers' answers on whole
+  repositories** (engine 0.5.80, `benchmarks/oracle_rust.py`,
+  `oracle_csharp.py`; each a case in `benchmarks/conformance.py` and a golden
+  in `engine/tests/edges_golden.rs`). Rust:
+  - a name after `::` or `.` in a macro's arguments is the end of a path or a
+    member, never a bare name (`assert!(f(Mode::Count))` read a struct
+    `Count` of the module);
+  - the bound of `impl<S: Sink> Core<S>` bounds `Core`'s parameter, and an
+    impl's own parameters are its methods': a method called on a field
+    typed `S`, and `S::Error` in a signature, are the trait's, not a blanket
+    `impl Sink for &mut S`'s;
+  - an item of another module is in scope only through a `use`: `Result` in
+    a file that imports none is the prelude's, not a module's `type Result`;
+  - `len` / `is_empty` after a call that returns a slice ask the slice, not
+    an element's method of the name;
+  - a path that starts at a primitive type (`usize::from`) is the
+    language's, and `as_str`, `parent`, `is_file`, `peek` and the like are
+    standard-library names no guess goes to.
+
+  C#: an argument that is the caller's parameter, declared with exactly the
+  type an overload's parameter is written with, picks that overload (an
+  identity conversion is the better one). Against rust-analyzer on ureq,
+  ripgrep, axum-realworld and actix-realworld the wrong edges go from 169 to
+  98 (precision 98.6% to 99.2%), against Roslyn on restsharp, commandline,
+  aspnetcore-realworld and todoapi from 224 to 213; no edge the compilers
+  confirm is lost, and the neutrality check finds no new leak.
 - **`spans.py` and the native engine read the same definitions on 44 more
   files of the audit repositories** (engine 0.5.80). Compared on all 5,073
   source files of the 45, they disagreed on 45; each case was read against the

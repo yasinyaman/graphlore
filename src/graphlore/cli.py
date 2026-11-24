@@ -15,7 +15,6 @@ The server module is imported only to run the server or to name its tools.
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 from pathlib import Path
 
@@ -72,14 +71,14 @@ def _cmd_setup(args: argparse.Namespace) -> int:
             return 1
         print(note)
     if args.with_hooks:
-        if client.name != "claude-code":
-            print("--with-hooks: only Claude Code's hooks are known (docs/clients.md)",
+        if client.name not in clients.HOOK_MATCHERS:
+            print("--with-hooks: hooks are known for "
+                  + " and ".join(sorted(clients.HOOK_MATCHERS)) + " (docs/clients.md)",
                   file=sys.stderr)
             return 2
-        settings = (Path(os.path.expanduser("~/.claude/settings.json")) if args.user
-                    else project / ".claude" / "settings.json")
+        settings = clients.hooks_file(client.name, project, user=args.user)
         try:
-            print(clients.write_hooks(settings, server_cfg))
+            print(clients.write_hooks(settings, server_cfg, client.name))
         except clients.SetupError as e:
             print(f"ERROR: {e}", file=sys.stderr)
             return 1
@@ -109,7 +108,8 @@ def _cmd_review(args: argparse.Namespace) -> int:
         config.PROJECT_DIR = Path(args.project).resolve()
     fail_on = tuple(x.strip() for x in args.fail_on.split(",") if x.strip())
     return change_review.run(args.base, args.head, fmt=args.format, fail_on=fail_on,
-                             build=not args.no_build, hops=args.hops, output=args.output)
+                             build=not args.no_build, hops=args.hops, output=args.output,
+                             repo=args.repo)
 
 
 def _cmd_hook(args: argparse.Namespace) -> int:
@@ -138,8 +138,9 @@ def _parser() -> argparse.ArgumentParser:
     s.add_argument("--with-agents-md", action="store_true",
                    help="also write the usage guide into the file this client reads")
     s.add_argument("--with-hooks", action="store_true",
-                   help="claude-code: also merge graphlore's hooks into .claude/settings.json "
-                        "(a pointer to the graph on a Grep for a name, a note when it goes stale)")
+                   help="claude-code / codex: also merge graphlore's hooks into "
+                        ".claude/settings.json or .codex/hooks.json (a pointer to the graph "
+                        "on a search for a name, a note when the graph goes stale)")
     s.set_defaults(fn=_cmd_setup)
     c = sub.add_parser("clients", help="the clients `setup` knows")
     c.set_defaults(fn=_cmd_clients)
@@ -157,6 +158,8 @@ def _parser() -> argparse.ArgumentParser:
                    help="the commit the change is compared with, through its merge base")
     r.add_argument("--head", default="HEAD", help="the changed commit; it must be checked out")
     r.add_argument("--project", default="", help="the project directory (default: here)")
+    r.add_argument("--repo", default="",
+                   help="in a workspace of several repositories, the one whose range it is")
     r.add_argument("--format", default="markdown", choices=("markdown", "json"))
     r.add_argument("--fail-on", default="",
                    help="comma-separated gates that exit 1: cycle (a runtime import cycle "

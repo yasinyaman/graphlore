@@ -1,6 +1,6 @@
 {
- "passed": 666,
- "total": 666,
+ "passed": 672,
+ "total": 672,
  "cases": [
   {
    "id": "python/module-function",
@@ -3994,6 +3994,42 @@
   },
   {
    "id": "scala/export-clause",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/path-in-macro-argument",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/impl-generics-bound-the-struct-parameter",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/item-of-another-module-needs-use",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/size-of-a-returned-slice",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "rust/primitive-type-path",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/identity-conversion-overload",
    "ok": true,
    "missing": [],
    "unwanted": []

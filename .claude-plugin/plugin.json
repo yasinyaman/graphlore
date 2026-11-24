@@ -12,7 +12,6 @@
   "license": "MIT",
   "keywords": ["mcp", "mcp-server", "graphify", "knowledge-graph", "codebase", "code-search", "code-navigation", "impact-analysis", "semantic-search"],
   "skills": ["./skills/"],
-  "hooks": "./.claude-plugin/hooks.json",
   "mcpServers": {
     "graphlore": {
       "command": "uvx",

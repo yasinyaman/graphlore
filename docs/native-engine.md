@@ -1994,6 +1994,37 @@ The uses with no edge are mostly positions the engine leaves out on purpose
 (a struct literal's field names, a method's own receiver type) and, in Rust,
 what only type inference names.
 
+Engine 0.5.80, measured on 2026-11-24 with these same commands, before and
+after the rules its wrong rows showed (each a case of `conformance.py`):
+
+| | Rust, before | Rust, after | C#, before | C#, after |
+|---|---:|---:|---:|---:|
+| edges whose site the compiler has an answer for | 12,271 | 12,727 | 10,961 | 10,956 |
+| of them, to the declaration it names | 12,102 (98.6%) | 12,629 (99.2%) | 10,737 (98.0%) | 10,743 (98.1%) |
+| wrong | 169 | 98 | 224 | 213 |
+| uses with an edge | 83.4% | 83.3% (25,921, from 25,079) | 80.0% | 80.0% |
+
+In Rust the wrong rows were, by size: a variant written `Mode::Count` in a
+macro's arguments read as a struct `Count` of the module (48); a guess by a
+method's name where the receiver was the standard library's (`as_str`,
+`parent`, `is_file`; 49, of which the standard-library names are now never
+guessed); a method called on a field typed by a parameter whose bound is
+written on the `impl` (`impl<S: Sink> Core<S>`), which went to a blanket
+`impl Sink for &mut S` beside it; `Result` linked to another module's `type
+Result` in a file that imports none; `len` / `is_empty` on a returned slice
+given to the element's method of the name; `usize::from`. Left: guesses by a
+name a library method shares (`is_match`, `find_iter` of `regex` beside
+ripgrep's own), a turbofish choosing between `impl RequestBuilder<WithBody>`
+and `impl RequestBuilder<WithoutBody>`, `#[cfg]` twins, diesel's `table!`
+columns, and a trait of the project implemented for a library type and
+called through a field of that type (most of the 16 confirmed edges
+`verify_graphify.py` still lists for Rust). In C# the overloads that differ
+only in a library type's arguments (`Func<object, IEnumerable<IFormattable>>`
+against `…<IConvertible>>`) now take the one the argument is declared with;
+most of what is left is commandline's `GetTypeInfo` polyfill (a definition
+under `#if` for old frameworks that Roslyn, compiling for a current one,
+does not see: 21 rows) and ties between generic overloads.
+
 **C#.** Roslyn is asked the same way (`benchmarks/oracle_csharp.py`: one
 compilation of every `.cs` file of a repository against the runtime's own
 assemblies; a name it cannot bind without the repository's NuGet packages

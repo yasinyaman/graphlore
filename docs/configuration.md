@@ -13,6 +13,9 @@ GRAPHLORE_PROJECT_DIR=/path/to/repo graphlore
 GRAPHLORE_PROJECT_DIR=/path/to/repo python -m graphlore
 ```
 
+A folder of several git checkouts can be the project too: see
+[Workspaces](workspace.md).
+
 The boot banner on stderr
 (`graphlore vX.Y.Z | transport=… | toolset=… | egress=… | project=…`) confirms
 which server, toolset and project directory you are running. The project was
@@ -190,6 +193,7 @@ search index's BM25 tier. These are the exceptions:
 | `GRAPHLORE_TOKENIZER=tiktoken` | First use: tiktoken fetches its encoding file unless cached | Not loaded; the chars/3.5 estimate is used |
 | tree-sitter grammars (`[treesitter]`) | First use of a language: the grammar is downloaded from GitHub releases and cached | Only grammars already in the cache are used; other files get no spans, unless the native engine is installed: its compiled-in grammars answer instead (not with `GRAPHLORE_ENGINE=graphify`) |
 | `graph.html` (written after a build) and the viewer (`viewer.html`, also on GitHub Pages) | Never: the page's code and data are in the file, a graph.json opened in it is read in the browser, and its Content Security Policy allows no request (the Pages copy is fetched once, like any web page, and sends nothing) | Unchanged |
+| A SCIP index (`GRAPHLORE_SCIP`) | Never: graphlore reads a local file an indexer made; it runs no indexer | Unchanged |
 | Native engine (`graphlore-engine`, the `engine` extra) | Never: its grammars are compiled into the wheel and a build reads local files only | Unchanged |
 | A custom `GRAPHLORE_SEMANTIC_BACKEND` | Whatever that code does | **Not constrained** — graphlore cannot see inside it |
 | HTTP transports | Inbound only (the server listens) | Unchanged |
@@ -281,6 +285,7 @@ has the results on 31 repositories and the roadmap.
 | `GRAPHLORE_CACHE_DIR` | `$XDG_CACHE_HOME/graphlore` (`~/.cache/graphlore`) | Where the built-in index keeps chunk vectors between runs, and `graphlore hook` its index of the graph's names (one file per project; never inside the project); `off` keeps them in memory only |
 | `GRAPHLORE_HOOKS` | on | `0`: `graphlore hook` (the Claude Code plugin's hooks, `graphlore setup claude-code --with-hooks`) says nothing. See [Claude Code](clients.md#claude-code) |
 | `GRAPHLORE_SEARCH_KERNEL` | _(auto)_ | `python` forces the built-in index's reference kernel even when the native engine's (graphlore-engine 0.5.80 or later) is installed |
+| `GRAPHLORE_SCIP` | `auto` | SCIP index files to check the graph against ([concepts](concepts.md#a-compilers-answer-scip-indexes)): `auto` reads `index.scip` at the project root or in the output directory, `off` none, or a comma-separated list of paths inside the project |
 | `GRAPHLORE_RESOLVE` | `1` | Resolve calls and imports made through a module object (`mod.func()`) from the source at read time; `0` reads graph.json as it is |
 | `GRAPHLORE_WATCH` | `0` | Filesystem watcher: auto re-sync on structural changes (`[watch]` extra) |
 | `GRAPHLORE_WATCH_DEBOUNCE` | `2.0` | Watcher debounce window (seconds) |

@@ -171,11 +171,39 @@ def _parse(log: str, tracked: set[str]) -> _Counts:
 
 
 def history(project_dir: Path | None = None) -> History:
-    """The co-change history of the project directory (cached on its HEAD)."""
+    """The co-change history of the project directory (cached on its HEAD).
+
+    In a workspace (``config.workspace_repos``) each repository's history is read
+    on its own and the two are put together, paths led by the repository: files
+    of two repositories never share a commit."""
     root = Path(project_dir or config.PROJECT_DIR)
     head = (_git(["rev-parse", "HEAD"], root, timeout=10) or "").strip()
     if not head:
+        repos = config.workspace_repos(root)
+        if repos:
+            return _workspace_history(root, repos)
         return History(reason="not a git repository, or no commit yet")
+    return _repo_history(root, head)
+
+
+def _workspace_history(root: Path, repos: list[str]) -> History:
+    parts = [(r, history(root / r)) for r in repos]
+    read = [(r, h) for r, h in parts if not h.reason]
+    if not read:
+        return History(reason="no repository of the workspace has a readable history")
+    out = History(
+        commits=sum(h.commits for _, h in read),
+        shallow=any(h.shallow for _, h in read),
+        skipped_bulk=sum(h.skipped_bulk for _, h in read),
+        head=",".join(f"{r}@{h.head[:10]}" for r, h in read),
+    )
+    for r, h in read:
+        out.revs.update({f"{r}/{f}": n for f, n in h.revs.items()})
+        out.shared.update({(f"{r}/{a}", f"{r}/{b}"): n for (a, b), n in h.shared.items()})
+    return out
+
+
+def _repo_history(root: Path, head: str) -> History:
     key = (str(root.resolve()), head)
     cached = _HISTORY_CACHE.get(key)
     if cached is not None:

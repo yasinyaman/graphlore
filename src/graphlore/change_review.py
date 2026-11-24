@@ -22,7 +22,7 @@ from typing import Any
 
 from . import config, engine
 from . import server as srv
-from .spans import _nodes_by_file
+from .spans import _nodes_by_file, _spans_python, _spans_treesitter
 
 MARKER = "<!-- graphlore-review -->"
 FAIL_ON = ("cycle", "layer", "untested")
@@ -32,6 +32,7 @@ _MAX_CHANGED = 80
 _MAX_DEPENDENTS = 60
 _MAX_TESTED = 40
 _MARKDOWN_CHARS = 20_000
+_MAX_REMOVED = 40
 
 
 class ReviewError(Exception):
@@ -49,8 +50,12 @@ class _Change:
 
 # --- git -------------------------------------------------------------------
 
+# the repository a workspace review reads (None: the project's own)
+_cwd: Path | None = None
+
+
 def _git(args: list[str]) -> str | None:
-    return srv._git(args)
+    return srv._git(args, _cwd)
 
 
 def _commit(ref: str) -> str:
@@ -92,11 +97,14 @@ def _changed_lines(base: str, head: str, files: list[str]) -> dict[str, set[int]
 
 # --- graph -------------------------------------------------------------------
 
-def _graph_at(head: str, build: bool) -> dict:
-    """The graph, built at ``head``. A missing or stale one is built (an update
-    when one exists) when ``build`` is on and the native engine is installed."""
+def _graph_at(head: str, build: bool, repo: str = "") -> dict:
+    """The graph, built at ``head`` (of ``repo`` in a workspace). A missing or
+    stale one is built (an update when one exists) when ``build`` is on and the
+    native engine is installed."""
     graph = srv._load_graph()
     built = str(graph.get("built_at_commit") or "") if isinstance(graph, dict) else ""
+    if repo and isinstance(graph, dict):
+        built = srv._graph_repos(graph).get(repo) or ""
     if built and (head.startswith(built) or built.startswith(head)):
         return graph  # type: ignore[return-value]
     if not build:
@@ -142,7 +150,14 @@ def _span(n: dict) -> tuple[int, int] | None:
 
 def _changes_in(file: str, lines: set[int], nodes: list[dict]) -> list[_Change]:
     """Each changed line to the innermost definition around it; a line no
-    definition holds is the file's top level."""
+    definition holds is the file's top level. A line left blank at the head
+    commit changes nothing anyone reads."""
+    if lines:
+        got = srv._read_source_lines(file, min(lines), max(lines))
+        if got is not None:
+            text, lo, _hi = got
+            lines = {ln for ln in lines
+                     if not (lo <= ln < lo + len(text) and not text[ln - lo].strip())}
     spans: list[tuple[int, int, dict]] = []
     for n in _nodes_by_file(nodes).get(file, []):
         if not srv._is_code_definition(n) or srv._is_file_hub_node(n):
@@ -164,6 +179,46 @@ def _changes_in(file: str, lines: set[int], nodes: list[dict]) -> list[_Change]:
     return out + ([top] if top.lines else [])
 
 
+def _definitions_at(commit: str, repo_path: str) -> dict[str, int] | None:
+    """Qualified name -> definition line of a source file at ``commit``, read
+    with the span engine from git (None when git or the span engine cannot)."""
+    text = _git(["show", f"{commit}:{repo_path}"])
+    if text is None:
+        return None
+    src = text.encode("utf-8", "replace")
+    try:
+        spans = (_spans_python(src) if repo_path.lower().endswith(".py")
+                 else _spans_treesitter(src, repo_path))
+    except Exception:  # noqa: BLE001 - a file the span engine cannot read names nothing
+        return None
+    out: dict[str, int] = {}
+    for _start, _end, line, qualname in spans:
+        out.setdefault(qualname, line)
+    return out
+
+
+def _removed_definitions(merge: str, head: str, files: list[dict]) -> list[dict]:
+    """Definitions the base had and the head has not: a file removed, or a
+    definition deleted or renamed in a file still there. The head graph has no
+    node for them, so they come from the two commits' sources."""
+    out: list[dict] = []
+    for f in files:
+        if Path(f["path"]).suffix.lower() not in srv._SOURCE_EXTS:
+            continue
+        old_path = f.get("from_repo_path") or f["repo_path"]
+        before = _definitions_at(merge, old_path)
+        if not before:
+            continue
+        after = {} if f["kind"] == "removed" else _definitions_at(head, f["repo_path"])
+        if after is None:
+            continue
+        for qualname, line in sorted(before.items(), key=lambda kv: kv[1]):
+            if qualname not in after:
+                out.append({"name": qualname, "file": f.get("from") or f["path"], "line": line,
+                            "file_removed": f["kind"] == "removed"})
+    return out
+
+
 def _ranges(lines: list[int]) -> str:
     out: list[str] = []
     for ln in sorted(set(lines)):
@@ -177,20 +232,28 @@ def _ranges(lines: list[int]) -> str:
 def _dependents(nodes: list[dict], edges: list[dict], seeds: list[str], hops: int,
                 labels: Any) -> dict[str, Any]:
     """What depends on any of ``seeds``, one walk from all of them: the nearest
-    first, production code before tests, the most connected first."""
+    first, production code before tests, the most connected first.
+
+    A heading that names the code documents it and depends on nothing
+    (``documents`` is not walked). Containment is walked, since the files that
+    import a changed definition's file are reached through the file's node,
+    but what holds a changed definition is not one of its dependents: a row
+    reached by a containment edge is left out of the list and the counts."""
     nav = srv._nav_view(nodes, edges, "", True)
     if isinstance(nav, str):
         return {"rows": [], "total": 0}
     view, _resolved = nav
     _forward, reverse = srv._directed_edge_adjacency(view.edges)
-    skip = srv._IMPACT_SKIPPED_RELATIONS | srv._STATE_RELATIONS | srv._COUPLING_RELATIONS
+    skip = (srv._IMPACT_SKIPPED_RELATIONS | srv._STATE_RELATIONS | srv._COUPLING_RELATIONS
+            | srv._DOCUMENT_RELATIONS)
     if not seeds:
         return {"rows": [], "total": 0}
     recs = srv._hop_records(reverse, seeds[0], hops, None, seeds[1:], skip)
     byid = {str(srv._node_id(n)): n for n in nodes}
     seed_set = set(seeds)
     hits = [(nid, d, via, e) for nid, (d, via, e) in recs.items()
-            if nid not in seed_set and e is not None]
+            if nid not in seed_set and e is not None
+            and srv._edge_rel(e).strip().lower() not in srv._CONTAINMENT_RELATIONS]
 
     def in_test(nid: str) -> bool:
         n = byid.get(nid)
@@ -223,7 +286,10 @@ def _tests_of(changes: list[_Change]) -> dict[str, Any]:
     reached: dict[str, dict] = {}
     untested: list[str] = []
     asked = 0
-    candidates = [c for c in changes if c.node is not None and not srv._is_test_node(c.node)]
+    # a variable, a constant or a field is read, not called: no test "reaches"
+    # one by a call, so only callables and types are looked up
+    candidates = [c for c in changes if c.node is not None and not srv._is_test_node(c.node)
+                  and not srv._is_state_node(c.node)]
     for c in candidates[:_MAX_TESTED]:
         asked += 1
         nid = str(srv._node_id(c.node or {}))
@@ -293,19 +359,42 @@ def _layer_violations(touched: dict[str, set[int]]) -> dict[str, Any] | None:
 # --- the review ----------------------------------------------------------------
 
 def analyze(base: str = "HEAD~1", head: str = "HEAD", *, build: bool = True, hops: int = 3,
-            fail_on: tuple[str, ...] = ()) -> dict[str, Any]:
+            fail_on: tuple[str, ...] = (), repo: str = "") -> dict[str, Any]:
     """The review of ``base``..``head`` as a dict (``render_markdown`` prints it).
 
     ``base`` is compared through its merge base with ``head``: what the branch
     changed, not what the target branch did meanwhile. ``head`` must be the
     commit checked out, since the graph and the spans are read from the files.
+    In a workspace, ``repo`` names the repository whose range it is; the
+    dependents and tests are the whole workspace graph's.
     """
+    global _cwd
+    repo = repo.strip().strip("/")
+    if repo:
+        repos = srv._workspace()
+        if repo not in repos:
+            listed = ", ".join(sorted(repos)) or "none"
+            raise ReviewError(f"'{repo}' is no repository of this workspace "
+                              f"(its repositories: {listed}).")
+    _cwd = srv._repo_dir(repo) if repo else None
+    try:
+        return _analyze(base, head, build=build, hops=hops, fail_on=fail_on, repo=repo)
+    finally:
+        _cwd = None
+
+
+def _analyze(base: str, head: str, *, build: bool, hops: int, fail_on: tuple[str, ...],
+             repo: str) -> dict[str, Any]:
     bad = sorted(set(fail_on) - set(FAIL_ON))
     if bad:
         raise ReviewError(f"unknown --fail-on value(s) {', '.join(bad)}: "
                           f"use {', '.join(FAIL_ON)}")
     if _git(["rev-parse", "HEAD"]) is None:
-        raise ReviewError(f"{config.PROJECT_DIR} is not in a git repository.")
+        where = srv._repo_dir(repo)
+        hint = ""
+        if not repo and srv._workspace():
+            hint = " It is a workspace: name the repository with --repo."
+        raise ReviewError(f"{where} is not in a git repository.{hint}")
     head_sha, base_sha = _commit(head), _commit(base)
     if head_sha != _commit("HEAD"):
         raise ReviewError(f"'{head}' is not the commit checked out: check it out first "
@@ -314,24 +403,35 @@ def analyze(base: str = "HEAD~1", head: str = "HEAD", *, build: bool = True, hop
     if not merge:
         raise ReviewError(f"'{base}' and '{head}' share no history.")
     dirty = bool((_git(["status", "--porcelain", "--untracked-files=no"]) or "").strip())
-    graph = _graph_at(head_sha, build)
+    graph = _graph_at(head_sha, build, repo)
     nodes, edges = srv._nodes_edges(graph)
     labels = srv._display_labels(nodes)
 
-    diff = json.loads(srv.graphlore_diff(merge, head_sha, budget_tokens=10**7, as_json=True))
+    diff = json.loads(srv.graphlore_diff(merge, head_sha, budget_tokens=10**7, as_json=True,
+                                         repo=repo))
     if "error" in diff:
         raise ReviewError(diff["error"])
     prefix = _project_prefix()
+    # a workspace's diff leads each path with the repository; git reads it without
+    lead = f"{repo}/" if repo else ""
+
+    def in_repo(path: str) -> str:
+        return path[len(lead):] if lead and path.startswith(lead) else path
 
     def local(path: str) -> str | None:
-        return path[len(prefix):] if path.startswith(prefix) else None
+        inner = in_repo(path)
+        return lead + inner[len(prefix):] if inner.startswith(prefix) else None
 
     files: list[dict] = []
     for rec in diff.get("structural", []):
         path = rec.get("to") or rec.get("path") or ""
         rel = local(path)
         if rel is not None:
-            files.append({**rec, "repo_path": path, "path": rel})
+            f = {**rec, "repo_path": in_repo(path), "path": rel}
+            if rec.get("from"):
+                f["from_repo_path"] = in_repo(rec["from"])
+                f["from"] = local(rec["from"]) or rec["from"]
+            files.append(f)
     cosmetic = [local(r.get("to") or r.get("path") or "") for r in diff.get("cosmetic", [])]
     present = [f for f in files if f["kind"] != "removed"]
     # definitions are read in source files; a document's or a config file's change
@@ -349,6 +449,7 @@ def analyze(base: str = "HEAD~1", head: str = "HEAD", *, build: bool = True, hop
     tests = _tests_of(defs)
     cycles = _import_cycles(nodes, edges, touched)
     layers = _layer_violations(touched)
+    removed = _removed_definitions(merge, head_sha, files)
 
     def show(c: _Change) -> dict[str, Any]:
         if c.node is None:
@@ -366,12 +467,15 @@ def analyze(base: str = "HEAD~1", head: str = "HEAD", *, build: bool = True, hop
     failed = [g for g in fail_on if gates[g]]
     return {
         "base": base, "head": head, "merge_base": merge[:12], "head_commit": head_sha[:12],
+        **({"repo": repo} if repo else {}),
         "dirty_worktree": dirty,
-        "files": [{k: v for k, v in f.items() if k != "repo_path"} for f in files],
+        "files": [{k: v for k, v in f.items() if k not in ("repo_path", "from_repo_path")}
+                  for f in files],
         "source_files": len(source),
         "cosmetic_files": [p for p in cosmetic if p],
         "changed": [show(c) for c in changes[:_MAX_CHANGED]],
         "changed_total": len(changes),
+        "removed": removed[:_MAX_REMOVED], "removed_total": len(removed),
         "dependents": deps, "hops": hops,
         "tests": {**tests, "untested": [labels.get(n, n) for n in tests["untested"]]},
         "cycles": cycles, "layers": layers,
@@ -400,7 +504,8 @@ def render_markdown(r: dict[str, Any]) -> str:
                f"{r['hops']} hop(s) ({deps.get('production', 0)} production, "
                f"{deps.get('tests', 0)} test) in {deps.get('files', 0)} file(s).")
     out.append(summary)
-    out.append(f"Range: {_code(r['merge_base'])}..{_code(r['head_commit'])}"
+    out.append(("Repository: " + _code(r["repo"]) + ". " if r.get("repo") else "")
+               + f"Range: {_code(r['merge_base'])}..{_code(r['head_commit'])}"
                + (f", {len(r['cosmetic_files'])} cosmetic-only file(s) left out"
                   if r["cosmetic_files"] else ""))
     if r["dirty_worktree"]:
@@ -425,6 +530,17 @@ def render_markdown(r: dict[str, Any]) -> str:
         if r["changed_total"] > len(r["changed"]):
             out.append(f"\n…and {r['changed_total'] - len(r['changed'])} more "
                        "(`--format json` lists the first ones too; narrow the range for the rest).")
+        out.append("")
+    removed = r.get("removed") or []
+    if removed:
+        out.append(f"#### Removed ({r.get('removed_total', len(removed))})")
+        out.append("| Definition | File | Line (base) |\n|---|---|---|")
+        for d in removed:
+            gone = " (file removed)" if d.get("file_removed") else ""
+            out.append(f"| {_code(d['name'])} | {_code(d['file'])}{gone} | {d['line']} |")
+        if r.get("removed_total", 0) > len(removed):
+            out.append(f"\n…and {r['removed_total'] - len(removed)} more "
+                       "(`--format json` lists the first ones).")
         out.append("")
     if deps["rows"]:
         out.append(f"#### What depends on it ({deps['total']})")
@@ -481,12 +597,12 @@ def render_markdown(r: dict[str, Any]) -> str:
 
 
 def run(base: str, head: str, *, fmt: str = "markdown", fail_on: tuple[str, ...] = (),
-        build: bool = True, hops: int = 3, output: str = "") -> int:
+        build: bool = True, hops: int = 3, output: str = "", repo: str = "") -> int:
     """The CLI's entry: 0 clean, 1 a gate in ``fail_on`` failed, 2 no review."""
     import sys
 
     try:
-        report = analyze(base, head, build=build, hops=hops, fail_on=fail_on)
+        report = analyze(base, head, build=build, hops=hops, fail_on=fail_on, repo=repo)
     except ReviewError as e:
         print(f"graphlore review: {e}", file=sys.stderr)
         return 2

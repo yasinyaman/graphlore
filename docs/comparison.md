@@ -41,9 +41,14 @@ graphlore's edges come from name and scope rules applied to the source, not a
 type checker, so a call through an object it cannot type, a callback or
 dynamic dispatch can be missing. It is checked against the compilers where
 they can be asked (`benchmarks/oracle_*.py`: TypeScript, Scala, Kotlin, Swift,
-Go, Rust, C#; see [the native engine](native-engine.md)). What it adds is the
-walk: a language server answers one hop per call, graphlore the blast radius,
-the cycles or the routes of the whole repository in one.
+Go, Rust, C#; Python and TypeScript through a SCIP index; see
+[the native engine](native-engine.md)). A project that has a SCIP index
+(`index.scip`, made by `scip-python`, `scip-typescript`, `rust-analyzer scip`
+and others) gets the indexer's answer at read time: the graph's edges it agrees
+with are confirmed, the ones it lacks added, the ones it disagrees with marked
+(see [concepts](concepts.md#a-compilers-answer-scip-indexes)). What graphlore
+adds is the walk: a language server answers one hop per call, graphlore the
+blast radius, the cycles or the routes of the whole repository in one.
 
 ## Beside built-in code search
 
@@ -72,8 +77,9 @@ what they cut; its edges carry their confidence; it reads shared state and
 HTTP routes into the graph; its review is deterministic (no model, no risk
 score from a model); and it is MIT with no service behind it. Where others go
 further: more languages (codebase-memory-mcp), editing and memory (Serena),
-multi-repository graphs (GitNexus's enterprise offer), and compiler precision
-(any language server).
+and compiler precision without an index made first (any language server).
+graphlore reads several repositories as one graph too
+([workspaces](workspace.md)), as GitNexus's enterprise offer does.
 
 ## Measured, and not yet
 

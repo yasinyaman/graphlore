@@ -10366,16 +10366,24 @@ def test_plugin_manifests_stay_in_sync():
     assert claude["name"] == agent["name"] == gemini["name"] == "graphlore"
     assert claude["skills"] == ["./skills/"]
     assert (root / "skills" / "graphlore-explore" / "SKILL.md").is_file()
-    # Claude Code's hooks: a file of its own (a root hooks/ is a path other
-    # plugin formats may read), running the module from the plugin's copy
-    hooks = json.loads((root / claude["hooks"]).read_text())["hooks"]
+    # the hooks: hooks/hooks.json, the default place of Claude Code and Codex
+    # alike (Codex sets CLAUDE_PLUGIN_ROOT too); no manifest key, which Claude
+    # Code would merge with the default file and run every hook twice
+    assert "hooks" not in claude
+    hooks = json.loads((root / "hooks" / "hooks.json").read_text())["hooks"]
     for event, arg in (("PreToolUse", "pre"), ("PostToolUse", "post")):
         (group,) = hooks[event]
         (handler,) = group["hooks"]
         assert f"python3 -m graphlore.hooks {arg}" in handler["command"]
         assert '"${CLAUDE_PLUGIN_ROOT}/src"' in handler["command"]
         assert handler["command"].endswith("|| true") and handler["timeout"] <= 10
-    assert not (root / "hooks").exists()
+    from graphlore import clients as _clients
+
+    for client, matchers in _clients.HOOK_MATCHERS.items():
+        for event, matcher in matchers.items():
+            # every tool a client gives either event is in the plugin's matcher
+            assert set(matcher.split("|")) <= set(hooks[event][0]["matcher"].split("|")), \
+                (client, event)
     servers = {"claude": claude["mcpServers"]["graphlore"],
                "agent": mcp_json["mcpServers"]["graphlore"],
                "gemini": gemini["mcpServers"]["graphlore"]}
@@ -10495,6 +10503,16 @@ def test_review_maps_changed_lines_to_definitions_and_what_depends_on_them(tmp_p
             n["source_location"] = "L4"
         if n["id"] == "compute":
             n["source_location"] = "L8"
+    # a constant the change adds, and a heading of a document that names helper
+    graph["nodes"] += [
+        {"id": "limit", "label": "LIMIT", "source_file": "pkg/core.py",
+         "source_location": "L1", "file_type": "code", "kind": "constant",
+         "region_start": 1, "end_line": 1},
+        {"id": "doc", "label": "Helpers", "source_file": "README.md",
+         "source_location": "L1", "file_type": "document"}]
+    graph["links"] += [
+        {"source": "core", "target": "limit", "relation": "contains"},
+        {"source": "doc", "target": "helper", "relation": "documents"}]
     (tmp_path / "graphify-out" / "graph.json").write_text(json.dumps(graph))
     server._GRAPH_CACHE.clear()
 
@@ -10502,19 +10520,26 @@ def test_review_maps_changed_lines_to_definitions_and_what_depends_on_them(tmp_p
     assert [f["path"] for f in r["files"]] == ["pkg/core.py"]
     assert r["cosmetic_files"] == ["pkg/util.py"]          # comments only: left out
     changed = {(c["node"] or "(top)"): c["lines"] for c in r["changed"]}
-    # `def helper(x):` itself is unchanged, only moved: git gives its body line
-    assert changed == {"helper()": "5", "(top)": "1-3"}
+    # `def helper(x):` itself is unchanged, only moved: git gives its body line;
+    # the two blank lines the change adds after LIMIT are no change of anything
+    assert changed == {"helper()": "5", "LIMIT": "1"}
     deps = {d["node"]: d for d in r["dependents"]["rows"]}
     assert deps["compute()"]["distance"] == 1 and deps["handle()"]["distance"] == 2
     assert deps["test_compute()"]["test"] is True
+    # what holds a changed definition, and a heading that names it, are not
+    # its dependents; the file that imports the module still is, through it
+    assert "core.py" not in deps and "Helpers" not in deps
+    assert deps["api.py"]["relation"] == "imports_from"
+    assert r["dependents"]["total"] == len(deps)
     # production before tests at one distance
     names = [d["node"] for d in r["dependents"]["rows"]]
     assert names.index("handle()") < names.index("test_compute()")
     assert [t["test"] for t in r["tests"]["tests"]] == ["test_compute()"]
+    # a constant is read, not called: it is never "untested"
     assert r["tests"]["untested"] == [] and r["failed"] == []
     md = change_review.render_markdown(r)
     assert md.startswith(change_review.MARKER)
-    assert "| `helper()` | `pkg/core.py` | 5 |" in md and "(top level)" in md
+    assert "| `helper()` | `pkg/core.py` | 5 |" in md and "| `LIMIT` |" in md
 
 
 def test_review_gates_an_introduced_import_cycle_and_an_untested_definition(tmp_path,
@@ -10719,7 +10744,7 @@ def test_setup_with_hooks_merges_into_claude_code_settings(tmp_path):
     assert data["permissions"] == {"allow": ["Bash(ls)"]}
     pre = data["hooks"]["PreToolUse"]
     assert pre[0]["hooks"][0]["command"] == "mine"         # the user's own hook stays
-    assert pre[1] == {"matcher": "Grep|Glob", "hooks": [
+    assert pre[1] == {"matcher": "Grep|Glob|Bash", "hooks": [
         {"type": "command", "command": "graphlore hook pre", "timeout": 5}]}
     assert data["hooks"]["PostToolUse"][0]["hooks"][0]["command"] == "graphlore hook post"
     assert (settings.parent / "settings.json.graphlore.bak").is_file()
@@ -10732,4 +10757,401 @@ def test_setup_with_hooks_merges_into_claude_code_settings(tmp_path):
     settings.write_text("{ not json")
     with pytest.raises(clients.SetupError):
         clients.write_hooks(settings, clients.server_config(tmp_path, "lean"))
-    assert cli.main(["setup", "codex", "--project", str(tmp_path), "--with-hooks"]) == 2
+    assert cli.main(["setup", "cursor", "--project", str(tmp_path), "--with-hooks"]) == 2
+
+
+def test_setup_with_hooks_writes_codex_s_hooks_file(tmp_path, monkeypatch):
+    from graphlore import cli, clients
+
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex-home"))
+    assert cli.main(["setup", "codex", "--project", str(tmp_path), "--with-hooks"]) == 0
+    data = json.loads((tmp_path / ".codex" / "hooks.json").read_text())
+    assert data["hooks"]["PreToolUse"] == [{"matcher": "Bash", "hooks": [
+        {"type": "command", "command": "graphlore hook pre", "timeout": 5}]}]
+    assert data["hooks"]["PostToolUse"][0]["matcher"] == "Bash|apply_patch"
+    assert clients.hooks_file("codex", tmp_path, user=True) == (
+        tmp_path / "codex-home" / "hooks.json")
+
+
+def test_review_names_the_definitions_a_change_removes(tmp_path, monkeypatch):
+    """The head graph has no node for a deleted definition: the review reads
+    the two commits' sources to name it, and every definition of a removed file."""
+    import subprocess
+
+    from graphlore import change_review
+
+    _review_repo(tmp_path, monkeypatch, {
+        "pkg/core.py": "def helper(x):\n    return x + 1\n",   # compute() is gone
+    })
+
+    def git(*args):
+        return subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True,
+                              text=True).stdout.strip()
+
+    git("rm", "-q", "pkg/util.py")
+    git("commit", "-qm", "drop util")
+    graph = json.loads((tmp_path / "graphify-out" / "graph.json").read_text())
+    graph["built_at_commit"] = git("rev-parse", "HEAD")
+    (tmp_path / "graphify-out" / "graph.json").write_text(json.dumps(graph))
+    server._GRAPH_CACHE.clear()
+
+    r = change_review.analyze("HEAD~2", "HEAD", build=False)
+    removed = {(d["name"], d["file"], d["file_removed"]) for d in r["removed"]}
+    assert removed == {("compute", "pkg/core.py", False), ("tidy", "pkg/util.py", True)}
+    assert r["removed_total"] == 2
+    md = change_review.render_markdown(r)
+    assert "#### Removed (2)" in md and "| `tidy` | `pkg/util.py` (file removed) | 1 |" in md
+
+
+def test_hook_reads_a_search_run_in_a_shell(tmp_path, monkeypatch):
+    """Codex has no Grep tool: it searches with rg or grep in a shell, and
+    Claude Code's agents do too."""
+    proj, _git = _hook_project(tmp_path, monkeypatch)
+    for command in ("rg -n compute src", "rg -t py -e compute", "git grep -w compute",
+                    "grep -rn 'def compute' ."):
+        text = _hook("pre", {"tool_name": "Bash", "cwd": str(proj),
+                             "tool_input": {"command": command}})
+        assert "defines compute at a.py:1" in text, command
+    for command in ("ls | grep compute", "cat a.py", "rg 'comp.*'", "echo compute"):
+        assert _hook("pre", {"tool_name": "Bash", "cwd": str(proj),
+                             "tool_input": {"command": command}}) == "", command
+
+
+def test_hook_reads_the_files_a_codex_patch_edits(tmp_path, monkeypatch):
+    proj, _git = _hook_project(tmp_path, monkeypatch)
+    patch = {"tool_name": "apply_patch", "cwd": str(proj), "tool_input": {
+        "command": "*** Begin Patch\n*** Update File: README.md\n*** End Patch"}}
+    assert _hook("post", patch) == ""                       # no source file
+    patch["tool_input"]["command"] = "*** Begin Patch\n*** Update File: a.py\n*** End Patch"
+    assert "source files changed" in _hook("post", patch)
+
+
+# --- workspaces: a folder of repositories -------------------------------------------
+
+def _workspace(tmp_path, monkeypatch):
+    """Two git repositories under one folder that is none, and a graph of both
+    whose header records each one's build commit (``graph.repos``)."""
+    import subprocess
+
+    def git(repo, *args):
+        return subprocess.run(["git", *args], cwd=tmp_path / repo, check=True,
+                              capture_output=True, text=True).stdout.strip()
+
+    files = {
+        "svc-a/app.py": "def handle(x):\n    return x + 1\n",
+        "svc-b/api.py": "def serve(x):\n    return x * 2\n",
+    }
+    for rel, text in files.items():
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_text(text, encoding="utf-8")
+    for repo in ("svc-a", "svc-b"):
+        git(repo, "init", "-q")
+        git(repo, "config", "user.email", "t@example.com")
+        git(repo, "config", "user.name", "Test")
+        git(repo, "add", ".")
+        git(repo, "commit", "-qm", "one")
+    # svc-a has a second commit: HEAD~1 exists there only
+    (tmp_path / "svc-a/app.py").write_text("def handle(x):\n    return x + 2\n")
+    git("svc-a", "commit", "-qam", "two")
+
+    def node(nid, label, file, line=1):
+        return {"id": nid, "label": label, "source_file": file, "source_location": f"L{line}",
+                "file_type": "code"}
+
+    graph = {
+        "graph": {"engine": "graphlore", "repos": {
+            "svc-a": {"commit": git("svc-a", "rev-parse", "HEAD")},
+            "svc-b": {"commit": git("svc-b", "rev-parse", "HEAD")}}},
+        "nodes": [node("a", "app.py", "svc-a/app.py"), node("h", "handle()", "svc-a/app.py"),
+                  node("b", "api.py", "svc-b/api.py"), node("s", "serve()", "svc-b/api.py")],
+        "links": [{"source": "a", "target": "h", "relation": "contains"},
+                  {"source": "b", "target": "s", "relation": "contains"},
+                  {"source": "h", "target": "s", "relation": "http_calls",
+                   "confidence": "EXTRACTED"}],
+    }
+    _write_graph(tmp_path, graph)
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    server._GRAPH_CACHE.clear()
+    return git
+
+
+def test_workspace_repositories_are_the_git_checkouts_or_the_workspace_file(tmp_path):
+    from graphlore import config
+
+    for repo in ("svc-a", "libs/common", ".hidden", "node_modules/x"):
+        (tmp_path / repo / ".git").mkdir(parents=True)
+    assert config.workspace_repos(tmp_path) == ["libs/common", "svc-a"]
+    (tmp_path / config.WORKSPACE_FILE).write_text(
+        json.dumps({"repos": {"svc-a": {}, "../outside": {}, "missing": {}}}))
+    assert config.workspace_repos(tmp_path) == ["svc-a"]
+    # a project that is one repository has none, whatever it holds
+    (tmp_path / config.WORKSPACE_FILE).unlink()
+    (tmp_path / ".git").mkdir()
+    assert config.workspace_repos(tmp_path) == []
+
+
+def test_workspace_freshness_age_and_drift_are_per_repository(tmp_path, monkeypatch):
+    import subprocess
+
+    _workspace(tmp_path, monkeypatch)
+    fresh = json.loads(server.graphlore_freshness(as_json=True))
+    assert fresh["workspace"] is True and fresh["recommended_action"] == "fresh"
+    assert set(fresh["repos"]) == {"svc-a", "svc-b"}
+    assert server._graph_age() == "built at HEAD"
+    (tmp_path / "svc-b/api.py").write_text("def serve(x, y=1):\n    return x * y\n")
+    r = json.loads(server.graphlore_freshness(as_json=True))
+    assert r["stale"] is True and r["recommended_action"] == "update"
+    assert r["structural_changes"] == ["svc-b/api.py"]
+    assert r["repos"]["svc-a"]["recommended_action"] == "fresh"
+    assert r["repos"]["svc-b"]["recommended_action"] == "update"
+    assert r["reason"].startswith("svc-b: ")
+    drift = server._build_drift()
+    assert drift.known and drift.changed == frozenset({"svc-b/api.py"})
+    assert "svc-a@" in server._since(drift)
+    subprocess.run(["git", "commit", "-qam", "three"], cwd=tmp_path / "svc-b", check=True,
+                   capture_output=True)
+    assert server._graph_age() == "svc-b: built 1 commit ago"
+
+
+def test_workspace_diff_is_each_repository_s_own_refs(tmp_path, monkeypatch):
+    _workspace(tmp_path, monkeypatch)
+    d = json.loads(server.graphlore_diff(as_json=True))
+    assert [r["path"] for r in d["structural"]] == ["svc-a/app.py"]
+    assert d["repos"] == ["svc-a"] and "svc-b" in d["skipped"]   # one commit: no HEAD~1
+    one = json.loads(server.graphlore_diff(as_json=True, repo="svc-a"))
+    assert one["repo"] == "svc-a" and one["structural_change_count"] == 1
+    err = json.loads(server.graphlore_diff(as_json=True, repo="nope"))
+    assert err["code"] == "not_found" and err["did_you_mean"] == ["svc-a", "svc-b"]
+    assert "not found" in json.loads(server.graphlore_diff(as_json=True, repo="svc-b"))["error"]
+
+
+def test_workspace_history_puts_each_repository_s_own_together(tmp_path, monkeypatch):
+    from graphlore import history
+
+    _workspace(tmp_path, monkeypatch)
+    h = history.history(tmp_path)
+    assert not h.reason and h.commits == 3
+    assert set(h.revs) == {"svc-a/app.py", "svc-b/api.py"}
+
+
+def test_workspace_overview_search_and_locate_scope_a_repository(tmp_path, monkeypatch):
+    _workspace(tmp_path, monkeypatch)
+    o = json.loads(server.graphlore_overview(as_json=True))
+    assert o["workspace"]["repos"]["svc-a"] == {"nodes": 2, "edges": 2}
+    assert o["workspace"]["cross_repo_edges"] == {"http_calls": 1}
+    assert "Workspace of 2 repositories" in server.graphlore_overview()
+    every = json.loads(server.graphlore_search("()", as_json=True))
+    assert {m["node"] for m in every["matches"]} == {"handle()", "serve()"}
+    mine = json.loads(server.graphlore_search("()", as_json=True, scope="svc-a"))
+    assert [m["node"] for m in mine["matches"]] == ["handle()"]
+    assert mine["scope"]["spec"] == "svc-a"
+
+
+def test_workspace_hook_names_the_repository_whose_head_moved(tmp_path, monkeypatch):
+    monkeypatch.setenv("GRAPHLORE_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.delenv("GRAPHLORE_HOOKS", raising=False)
+    monkeypatch.delenv("GRAPHLORE_PROJECT_DIR", raising=False)
+    git = _workspace(tmp_path, monkeypatch)
+    # the client names the workspace; the command ran in one repository of it
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    bash = {"tool_name": "Bash", "cwd": str(tmp_path / "svc-b"),
+            "tool_input": {"command": "git commit -am 'x'"}}
+    assert _hook("post", bash) == ""
+    (tmp_path / "svc-b/api.py").write_text("def serve(x):\n    return x * 3\n")
+    git("svc-b", "commit", "-qam", "two")
+    text = _hook("post", bash)
+    assert "svc-b is at" in text and "svc-a" not in text
+    assert _hook("post", bash) == ""
+
+
+def test_review_of_one_repository_of_a_workspace(tmp_path, monkeypatch):
+    import pytest
+
+    from graphlore import change_review
+
+    _workspace(tmp_path, monkeypatch)
+    r = change_review.analyze("HEAD~1", "HEAD", build=False, repo="svc-a")
+    assert r["repo"] == "svc-a"
+    assert [f["path"] for f in r["files"]] == ["svc-a/app.py"]
+    assert [c["node"] for c in r["changed"]] == ["handle()"]
+    assert "Repository: `svc-a`" in change_review.render_markdown(r)
+    with pytest.raises(change_review.ReviewError, match="no repository"):
+        change_review.analyze(build=False, repo="nope")
+    with pytest.raises(change_review.ReviewError, match="--repo"):
+        change_review.analyze(build=False)
+
+
+# --- SCIP: a compiler-grade index checks the graph ---------------------------------
+
+def _pb_varint(n):
+    out = bytearray()
+    n &= (1 << 64) - 1
+    while True:
+        b = n & 0x7F
+        n >>= 7
+        out.append(b | (0x80 if n else 0))
+        if not n:
+            return bytes(out)
+
+
+def _pb(num, value):
+    """One protobuf field: an int as a varint, str / bytes / a list of ints
+    (packed) length-delimited."""
+    if isinstance(value, int):
+        return _pb_varint(num << 3) + _pb_varint(value)
+    if isinstance(value, list):
+        value = b"".join(_pb_varint(v) for v in value)
+    if isinstance(value, str):
+        value = value.encode()
+    return _pb_varint(num << 3 | 2) + _pb_varint(len(value)) + value
+
+
+def _scip_occ(rng, symbol, roles=0, typed=False):
+    if typed:
+        r = _pb(8, _pb(1, rng[0]) + _pb(2, rng[1]) + _pb(3, rng[2]))
+    else:
+        r = _pb(1, list(rng))
+    return r + _pb(2, symbol) + (_pb(3, roles) if roles else b"")
+
+
+def _scip_index(root, docs):
+    meta = _pb(2, _pb(1, "scip-test")) + _pb(3, root.as_uri())
+    body = b"".join(_pb(2, _pb(1, path) + b"".join(_pb(2, o) for o in occs))
+                    for path, occs in docs.items())
+    return _pb(1, meta) + body
+
+
+_SYM = "scip-python python demo 1 `pkg.b`/"
+
+
+def _scip_project(tmp_path, monkeypatch):
+    files = {
+        "pkg/__init__.py": "",
+        "pkg/a.py": ("from pkg.b import helper, other\n\n\ndef run():\n    helper()\n"
+                     "    return other\n"),
+        "pkg/b.py": "def helper():\n    return 1\n\n\ndef other():\n    return 2\n",
+        "pkg/c.py": "def helper():\n    return 3\n",
+    }
+    for rel, text in files.items():
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_text(text, encoding="utf-8")
+
+    def node(nid, label, file, line):
+        return {"id": nid, "label": label, "source_file": file, "source_location": f"L{line}",
+                "file_type": "code"}
+
+    nodes = [node("a", "a.py", "pkg/a.py", 1), node("run", "run()", "pkg/a.py", 4),
+             node("b", "b.py", "pkg/b.py", 1), node("bh", "helper()", "pkg/b.py", 1),
+             node("bo", "other()", "pkg/b.py", 5),
+             node("c", "c.py", "pkg/c.py", 1), node("ch", "helper()", "pkg/c.py", 1)]
+    links = [
+        {"source": "a", "target": "run", "relation": "contains"},
+        {"source": "b", "target": "bh", "relation": "contains"},
+        {"source": "b", "target": "bo", "relation": "contains"},
+        {"source": "c", "target": "ch", "relation": "contains"},
+        {"source": "run", "target": "bh", "relation": "calls", "confidence": "INFERRED",
+         "source_file": "pkg/a.py", "source_location": "L5"},
+        {"source": "run", "target": "ch", "relation": "calls", "confidence": "INFERRED",
+         "source_file": "pkg/a.py", "source_location": "L5"},
+    ]
+    _write_graph(tmp_path, {"nodes": nodes, "links": links})
+    index = _scip_index(tmp_path, {
+        "pkg/a.py": [
+            _scip_occ([4, 4, 10], _SYM + "helper().", roles=8),
+            _scip_occ([5, 11, 16], _SYM + "other().", roles=8, typed=True),
+            _scip_occ([4, 4, 5], "local 3"),
+            _scip_occ([0, 18, 24], _SYM + "helper().", roles=2),   # the import: skipped
+        ],
+        "pkg/b.py": [
+            _scip_occ([0, 4, 10], _SYM + "helper().", roles=1),
+            _scip_occ([4, 4, 9], _SYM + "other().", roles=1),
+        ],
+    })
+    (tmp_path / "index.scip").write_bytes(index)
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    monkeypatch.delenv("GRAPHLORE_SCIP", raising=False)
+    server._GRAPH_CACHE.clear()
+    server._SPAN_CACHE.clear()
+
+
+def test_scip_reader_reads_ranges_roles_and_names(tmp_path, monkeypatch):
+    from graphlore import scip
+
+    _scip_project(tmp_path, monkeypatch)
+    idx = scip.load()
+    assert idx is not None and idx.tools == ["scip-test"] and idx.documents == 2
+    assert idx.defs[_SYM + "helper()."] == ("pkg/b.py", 1)
+    refs = [(o.file, o.line, o.char, o.end_char, scip.bare_name(o.symbol)) for o in idx.refs]
+    # the packed range and the typed one; the local symbol is not kept
+    assert ("pkg/a.py", 5, 4, 10, "helper") in refs and ("pkg/a.py", 6, 11, 16, "other") in refs
+    assert not any(o.symbol.startswith("local") for o in idx.refs)
+    assert scip.load() is idx                            # cached on the file
+    for sym, name in [("a b c 1 `x.y`/Cls#", "Cls"), ("a b c 1 m/Cls#run().", "run"),
+                      ("a b c 1 m/f().(x)", ""), ("a b c 1 m/Cls#[T]", ""),
+                      ("a b c 1 m/CONST.", "CONST"), ("a b c 1 m/`odd name`#", "odd name")]:
+        assert scip.bare_name(sym) == name, sym
+    # a path outside the project, and the switch
+    monkeypatch.setenv("GRAPHLORE_SCIP", "../elsewhere.scip")
+    assert scip.load() is None
+    monkeypatch.setenv("GRAPHLORE_SCIP", "off")
+    assert scip.load() is None
+    (tmp_path / "bad.scip").write_bytes(b"\xff\xff\xff")
+    monkeypatch.setenv("GRAPHLORE_SCIP", "bad.scip")
+    bad = scip.load()
+    assert bad is not None and bad.documents == 0 and "not a SCIP index" in bad.errors[0]
+
+
+def test_scip_confirms_adds_and_contradicts_edges(tmp_path, monkeypatch):
+    from graphlore import resolve
+
+    _scip_project(tmp_path, monkeypatch)
+    g = server._load_graph()
+    nodes, edges = server._nodes_edges(g)
+    r = resolve._resolved(nodes, edges)
+    assert r.precision is not None
+    p = r.precision
+    assert (p["confirmed"], p["added"], p["contradicted"]) == (1, 1, 1)
+    by = {(e["source"], e["target"], e["relation"]): e for e in r.edges}
+    assert by[("run", "bh", "calls")]["confidence"] == "EXTRACTED"
+    assert by[("run", "bh", "calls")]["scip"] == "confirmed"
+    wrong = by[("run", "ch", "calls")]
+    assert wrong["confidence"] == "AMBIGUOUS" and wrong["scip"] == "contradicted"
+    # `return other` names the function without calling it
+    assert by[("run", "bo", "references")]["resolved_by"] == "scip"
+    # the graph's own edges are untouched, and the list is the same object again
+    assert all("scip" not in e for e in edges)
+    assert resolve._resolved(nodes, edges) is r
+    assert "Checked against a SCIP index (scip-test)" in r.note()
+    # the tools carry it
+    imp = json.loads(server.graphlore_impact("other", direction="dependents", as_json=True))
+    assert imp["resolved_edges"]["precision"]["added"] == 1
+    text = server.graphlore_neighbors("run")
+    assert "scip disagrees" in text and "from scip" in text
+    # strict impact walks the edge scip confirmed, not the one it contradicts
+    strict = json.loads(server.graphlore_impact("helper", direction="dependents",
+                                                strict=True, as_json=True))
+    assert "run()" in json.dumps(strict)
+    monkeypatch.setenv("GRAPHLORE_SCIP", "off")
+    assert resolve._resolved(nodes, edges).precision is None
+
+
+def test_scip_paths_follow_the_index_s_project_root(tmp_path):
+    from graphlore import scip
+
+    proj = tmp_path / "proj"
+    (proj / "sub").mkdir(parents=True)
+    occ = [_scip_occ([0, 4, 5], _SYM + "f().", roles=1)]
+    below = scip.Index()
+    scip.read_index(_scip_index(proj / "sub", {"x.py": occ}), proj, below, "below")
+    assert below.defs[_SYM + "f()."] == ("sub/x.py", 1)
+    above = scip.Index()
+    scip.read_index(_scip_index(tmp_path, {"proj/y.py": occ, "other/z.py": occ}), proj,
+                    above, "above")
+    assert above.defs[_SYM + "f()."] == ("y.py", 1) and above.documents == 1
+    # made in another checkout: a path this project has is read as its own
+    (proj / "z.py").write_text("def f():\n    pass\n")
+    apart = scip.Index()
+    scip.read_index(_scip_index(tmp_path / "elsewhere", {"z.py": occ, "gone.py": occ}), proj,
+                    apart, "apart")
+    assert apart.documents == 1 and apart.defs[_SYM + "f()."] == ("z.py", 1)
+    assert "made in another directory" in apart.errors[0]

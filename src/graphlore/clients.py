@@ -260,18 +260,38 @@ def write(client: Client, path: Path, cfg: dict[str, Any], user: bool = False) -
     return f"{path}: graphlore {'updated' if old else 'added'}{kept}"
 
 
-# --- Claude Code hooks (`graphlore setup claude-code --with-hooks`) ------------
+# --- agent hooks (`graphlore setup claude-code|codex --with-hooks`) -----------
 
-HOOK_EVENTS = {"PreToolUse": ("Grep|Glob", "pre"),
-               "PostToolUse": ("Bash|Edit|Write|MultiEdit", "post")}
+# The tool names each client gives its calls (Claude Code: its hooks page;
+# Codex: its "Hooks" page, where a shell command is `Bash` and a file edit
+# `apply_patch`, and searching is a shell command). Both read the same file
+# shape: {"hooks": {event: [{matcher, hooks: [{type, command, timeout}]}]}}.
+HOOK_MATCHERS = {
+    "claude-code": {"PreToolUse": "Grep|Glob|Bash", "PostToolUse": "Bash|Edit|Write|MultiEdit"},
+    "codex": {"PreToolUse": "Bash", "PostToolUse": "Bash|apply_patch"},
+}
+HOOK_ARGS = {"PreToolUse": "pre", "PostToolUse": "post"}
 HOOK_TIMEOUT = 5  # seconds; the hook gives up on its own long before
+
+
+def hooks_file(client: str, project: Path, user: bool = False) -> Path:
+    """Where ``client`` reads hooks: Claude Code's settings file, Codex's
+    ``hooks.json`` (the project's ``.codex/``, or ``$CODEX_HOME``)."""
+    if client == "codex":
+        if user:
+            home = os.environ.get("CODEX_HOME") or os.path.expanduser("~/.codex")
+            return Path(home) / "hooks.json"
+        return project / ".codex" / "hooks.json"
+    if user:
+        return Path(os.path.expanduser("~/.claude/settings.json"))
+    return project / ".claude" / "settings.json"
 
 
 def hook_commands(cfg: dict[str, Any]) -> dict[str, str]:
     """The shell command each hook event runs: ``graphlore hook <event>``,
     started the way the server is (``cfg`` from :func:`server_config`)."""
     base = shlex.join([cfg["command"], *cfg["args"]])
-    return {event: f"{base} hook {arg}" for event, (_m, arg) in HOOK_EVENTS.items()}
+    return {event: f"{base} hook {arg}" for event, arg in HOOK_ARGS.items()}
 
 
 def _is_ours(handler: Any) -> bool:
@@ -279,10 +299,14 @@ def _is_ours(handler: Any) -> bool:
         and "graphlore" in str(handler.get("command", ""))
 
 
-def write_hooks(path: Path, cfg: dict[str, Any]) -> str:
-    """Merge graphlore's two hooks into a Claude Code settings file (a
-    ``.claude/settings.json``): an earlier graphlore entry is replaced, every
-    other hook and setting kept, a backup written first."""
+def write_hooks(path: Path, cfg: dict[str, Any], client: str = "claude-code") -> str:
+    """Merge graphlore's two hooks into ``client``'s hooks file (Claude Code's
+    ``.claude/settings.json``, Codex's ``.codex/hooks.json``): an earlier
+    graphlore entry is replaced, every other hook and setting kept, a backup
+    written first."""
+    if client not in HOOK_MATCHERS:
+        raise SetupError(f"no hooks are known for {client!r}: "
+                         + ", ".join(sorted(HOOK_MATCHERS)) + " have them")
     old = path.read_text(encoding="utf-8") if path.is_file() else ""
     try:
         data = json.loads(old) if old.strip() else {}
@@ -295,7 +319,7 @@ def write_hooks(path: Path, cfg: dict[str, Any]) -> str:
     if not isinstance(hooks, dict):
         raise SetupError(f"{path}: 'hooks' is not an object")
     commands = hook_commands(cfg)
-    for event, (matcher, _arg) in HOOK_EVENTS.items():
+    for event, matcher in HOOK_MATCHERS[client].items():
         groups = hooks.setdefault(event, [])
         if not isinstance(groups, list):
             raise SetupError(f"{path}: hooks.{event} is not a list")

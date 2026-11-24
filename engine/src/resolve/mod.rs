@@ -535,6 +535,23 @@ const RUST_CORE_METHODS: &[&str] = &[
     "split",
     "trim",
     "next",
+    // `str` / `String`, `Path`, `Peekable`, `fs::FileType` (rust-analyzer on
+    // ripgrep: a guess by these names went to a project method of the name
+    // where the receiver was the standard library's)
+    "as_str",
+    "as_bytes",
+    "parent",
+    "is_file",
+    "is_dir",
+    "is_symlink",
+    "file_name",
+    "peek",
+];
+
+/// Rust's primitive types: a path that starts at one is the language's.
+const RUST_PRIMITIVES: &[&str] = &[
+    "bool", "char", "str", "u8", "u16", "u32", "u64", "u128", "usize", "i8", "i16", "i32", "i64",
+    "i128", "isize", "f32", "f64",
 ];
 
 /// Methods of C++'s standard library (`std::string::c_str`).
@@ -773,8 +790,15 @@ const SWIFT_CORE_METHODS: &[&str] = &[
 
 /// Whether a path segment is something of collections: an element, a method
 /// that keeps the collection or one that gives an element.
+/// What a collection says of itself: its size, whether it is empty. After a
+/// name or call declared as a collection (`fn matches(&self) -> &[Match]`),
+/// `matches().is_empty()` asks the collection, never an element's method of
+/// the name (rust-analyzer on ripgrep: `[T]::is_empty`, not `Match::is_empty`).
+const SIZE_METHODS: &[&str] = &["len", "is_empty", "isEmpty", "size", "length", "Count", "Length"];
+
 fn is_collection_step(seg: &str) -> bool {
     seg == "partition"
+        || SIZE_METHODS.contains(&seg)
         || NESTING_METHODS.contains(&seg)
         || GROUPING_METHODS.contains(&seg)
         || ASSOCIATING_METHODS.contains(&seg)
@@ -1293,6 +1317,10 @@ pub struct Project<'a> {
     pub by_path: HashMap<&'a str, usize>,
     pub family: Vec<Option<Family>>,
     pub manifests: Vec<(String, PathBuf)>,
+    /// Per file: the workspace repository it is in (`""`: none, or the
+    /// project is one repository).
+    pub repo: Vec<String>,
+    repos: Vec<String>,
     hubs: &'a [String],
     def_ids: &'a [Vec<Option<String>>],
     /// Per file: top-level definitions (no definition encloses them, or only
@@ -1441,6 +1469,7 @@ impl<'a> Project<'a> {
         files: &'a [FileFacts],
         asm: &'a Assembled,
         manifests: Vec<(String, PathBuf)>,
+        repos: &[String],
     ) -> Project<'a> {
         let by_path = files.iter().enumerate().map(|(i, f)| (f.path.as_str(), i)).collect();
         let family: Vec<Option<Family>> = files.iter().map(|f| f.lang.map(Family::of)).collect();
@@ -1450,6 +1479,18 @@ impl<'a> Project<'a> {
             by_path,
             family,
             manifests,
+            repo: files
+                .iter()
+                .map(|f| {
+                    repos
+                        .iter()
+                        .filter(|r| f.path.starts_with(&format!("{r}/")))
+                        .max_by_key(|r| r.len())
+                        .cloned()
+                        .unwrap_or_default()
+                })
+                .collect(),
+            repos: repos.to_vec(),
             hubs: &asm.hubs,
             def_ids: &asm.def_ids,
             top: Vec::new(),
@@ -2023,6 +2064,28 @@ impl<'a> Project<'a> {
                 &param.ty
             };
             score += self.arg_fits(f, d, c, &a.kind, ty)?;
+            // an argument that is a parameter of the caller, declared with the
+            // very type this parameter is written with (type arguments and
+            // all), is an identity conversion: the better one (C# §12.6.4.5;
+            // `GetPopulateArray(getFormattables, …)` with `Func<object,
+            // IEnumerable<IFormattable>> getFormattables` beside an overload
+            // taking `Func<object, IEnumerable<IConvertible>>`)
+            if let crate::facts::Arg::Path(path) = &a.kind {
+                if let ([name], Some(di)) = (path.as_slice(), d) {
+                    let norm = |t: &str| -> String {
+                        t.chars().filter(|ch| !ch.is_whitespace()).collect::<String>()
+                    };
+                    let theirs = norm(param.written.trim_end_matches('?'));
+                    let given = self.files[f].defs[di]
+                        .plist
+                        .iter()
+                        .find(|x| x.name == *name)
+                        .map(|x| norm(x.written.trim_end_matches('?')));
+                    if !theirs.is_empty() && given.as_deref() == Some(theirs.as_str()) {
+                        score += 2;
+                    }
+                }
+            }
         }
         // a `params` member applicable only in its expanded form is worse than
         // one applicable in its normal form (C# §12.6.4.3)
@@ -3726,13 +3789,25 @@ impl<'a> Project<'a> {
     ) -> Option<(usize, Option<Vec<String>>)> {
         let defs = &self.files[f].defs;
         let mut cur = d;
+        let mut last = None;
         while let Some(x) = cur {
             if let Some(i) = defs[x].type_params.iter().position(|p| p == name) {
                 return Some((x, defs[x].type_bounds.get(i).cloned().flatten()));
             }
+            last = Some(x);
             cur = defs[x].parent;
         }
-        None
+        // Rust: a method of `impl<S: Sink> Core<S>` has no parent; the
+        // parameters of the type it is written for are in scope in it
+        let owner = defs[last?].owner.as_deref()?;
+        if self.family[f] != Some(Family::Rust) {
+            return None;
+        }
+        let x = defs.iter().position(|c| {
+            c.kind.is_class_like() && c.name == owner && c.type_params.iter().any(|p| p == name)
+        })?;
+        let i = defs[x].type_params.iter().position(|p| p == name)?;
+        Some((x, defs[x].type_bounds.get(i).cloned().flatten()))
     }
 
     /// Whether `path` is the value a local named like its head is declared
@@ -3973,6 +4048,15 @@ impl<'a> Project<'a> {
     // ---- lookups ---------------------------------------------------------
 
     /// The best of several definitions: one with a body over a prototype.
+    /// The workspace repository a root-relative path is in (`""`: none).
+    pub fn repo_of_path(&self, path: &str) -> &str {
+        self.repos
+            .iter()
+            .filter(|r| path == r.as_str() || path.starts_with(&format!("{r}/")))
+            .max_by_key(|r| r.len())
+            .map_or("", |r| r.as_str())
+    }
+
     fn best(&self, cands: impl IntoIterator<Item = DefRef>) -> Option<DefRef> {
         let mut v: Vec<DefRef> = cands.into_iter().collect();
         v.sort_by_key(|r| (self.def(*r).decl_only, *r));
@@ -5014,9 +5098,12 @@ impl<'a> Project<'a> {
             || name.starts_with('[')
             // (`self.name()` is a member of the type around, or nothing)
             || (of.len() == 1 && matches!(of[0].as_str(), "self" | "super"))
-            // (`HttpUtility.UrlEncode(s)`: a static call on a library's type)
+            // (`HttpUtility.UrlEncode(s)`: a static call on a library's type;
+            // Rust `usize::from(b)`: on a primitive)
             || (of.len() == 1
-                && of[0].chars().next().is_some_and(|c| c.is_uppercase())
+                && (of[0].chars().next().is_some_and(|c| c.is_uppercase())
+                    || (self.family[f] == Some(Family::Rust)
+                        && RUST_PRIMITIVES.contains(&of[0].as_str())))
                 && !self.is_local_name(f, d, &of[0]))
         {
             return None;
@@ -5668,6 +5755,11 @@ impl<'a> Project<'a> {
                     if upper {
                         conf = Confidence::Inferred;
                         Target::Def(self.type_named(f, head)?)
+                    } else if fam == Family::Rust && RUST_PRIMITIVES.contains(&head.as_str()) {
+                        // `usize::from(b)`, `str::len(s)`: a primitive's
+                        // associated function, the language's (a trait of the
+                        // project implemented for it is asked by its path)
+                        return None;
                     } else if !bases && (rest.len() == 1 || (rest.len() == 2 && rest[0] == "()")) {
                         return self.unknown_receiver(f, rest.last()?, None);
                     } else {
@@ -7391,6 +7483,18 @@ impl<'a> Project<'a> {
                             || self.crate_of(r.0) == self.crate_of(f)
                             || self.imports_name(f, &path[0])
                     })
+                    // (Rust: a qualname holds no module path, so a bare one
+                    // matches an item of every module of the crate; an item of
+                    // another module is in scope only through a `use`, the
+                    // file's own or a glob's: `Result` in `lib.rs` is the
+                    // prelude's, not `http::Result`)
+                    .filter(|r| {
+                        fam != Family::Rust
+                            || !pre.is_empty()
+                            || r.0 == f
+                            || self.scopes[f].imported.contains(&r.0)
+                            || self.imports_name(f, &path[0])
+                    })
                     // PHP: a global class is no name of a namespaced file
                     // written bare (only functions and constants fall back)
                     .filter(|r| {
@@ -7497,7 +7601,7 @@ impl<'a> Project<'a> {
     fn crate_of(&self, f: usize) -> &str {
         let path = self.files[f].path.as_str();
         self.modsys
-            .rs_crates
+            .rs_crates_in
             .values()
             .map(|src| src.strip_suffix("src").unwrap_or(src).trim_end_matches('/'))
             .filter(|dir| dir.is_empty() || path.starts_with(&format!("{dir}/")))
@@ -8550,6 +8654,7 @@ pub fn resolve(
     files: &[FileFacts],
     asm: &mut Assembled,
     manifests: Vec<(String, PathBuf)>,
+    repos: &[String],
     diagnose: bool,
 ) -> (Vec<Value>, Vec<Value>, BTreeMap<String, ResolveStats>, Vec<Value>) {
     let mut edges: Vec<EdgeOut> = Vec::new();
@@ -8560,7 +8665,7 @@ pub fn resolve(
     let mut resource_nodes: Vec<(String, String, ResourceKind)> = Vec::new();
     let route_nodes: Vec<http::RouteNode>;
     {
-        let p = Project::new(root, files, asm, manifests);
+        let p = Project::new(root, files, asm, manifests, repos);
         let mut ext_seen: HashSet<String> = HashSet::new();
         let mut ext_target = |e: usize, rest: &[String], symbol: bool| -> String {
             let (id, label, eco) = p.ext_node_id(e, rest, symbol);

@@ -1153,9 +1153,10 @@ _EDGE_FLAGS_CACHE: dict[int, tuple[list[dict], _EdgeFlags]] = {}
 
 
 def _edge_flags(edges: list[dict]) -> _EdgeFlags:
-    """``(source, target, relation) -> {"confidence"?, "resolved_by"?}`` for the
-    edges whose provenance is worth showing next to them: inferred or ambiguous
-    ones, and ones graphlore resolved from the source. An extracted graph edge is
+    """``(source, target, relation) -> {"confidence"?, "resolved_by"?, "scip"?}``
+    for the edges whose provenance is worth showing next to them: inferred or
+    ambiguous ones, ones graphlore resolved from the source, and what a SCIP index
+    said of one (``resolve._precise``). An extracted graph edge is
     the default and has no entry. Cached on list identity like _edge_set."""
     cached = _EDGE_FLAGS_CACHE.get(id(edges))
     if cached is not None and cached[0] is edges:
@@ -1168,6 +1169,9 @@ def _edge_flags(edges: list[dict]) -> _EdgeFlags:
             f["confidence"] = conf
         if e.get("resolved_by"):
             f["resolved_by"] = str(e["resolved_by"])
+        if e.get("scip"):
+            # what a SCIP index said of it: confirmed, added, contradicted
+            f["scip"] = str(e["scip"])
         if f:
             flags.setdefault((*_edge_ends(e), _edge_rel(e)), f)
     if id(edges) not in _EDGE_FLAGS_CACHE and len(_EDGE_FLAGS_CACHE) >= _ADJ_CACHE_MAX:
@@ -1183,8 +1187,12 @@ def _flag_suffix(flags: dict[str, str] | None) -> str:
     out = ""
     if flags.get("confidence"):
         out += ", " + flags["confidence"].lower()
-    if flags.get("resolved_by"):
+    if flags.get("resolved_by") == "scip":
+        out += ", from scip"
+    elif flags.get("resolved_by"):
         out += ", resolved"
+    if flags.get("scip") == "contradicted":
+        out += ", scip disagrees"
     return out
 
 

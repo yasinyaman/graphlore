@@ -39,6 +39,49 @@ A call through an object, a callback or dynamic dispatch stays invisible, which
 is why an empty answer from these tools says "no edge was indexed", not "nothing
 calls this".
 
+## A compiler's answer: SCIP indexes
+
+A [SCIP](https://github.com/sourcegraph/scip) index records, for every name in
+a repository, the symbol a compiler-grade indexer binds it to: `scip-python`,
+`scip-typescript`, `scip-java`, `rust-analyzer scip`, `scip-go`, `scip-clang`,
+`scip-dotnet` and others make one. When the project has one, graphlore checks
+its graph against it at read time. Nothing is installed or run for it: the
+index is a local file, read with graphlore's own decoder (no `protobuf`
+package), and nothing reaches the network.
+
+```bash
+npx @sourcegraph/scip-python index . --project-name myproject   # writes index.scip
+```
+
+Each use the index records (not a definition, not an import) is given to the
+graph node that encloses it, and its symbol to the node its definition is (by
+file, name and nearest line). Then, in the edges the navigation tools walk:
+
+- an edge the graph has between the two is **confirmed**: `confidence:
+  EXTRACTED`, `scip: "confirmed"`, so `graphlore_impact(strict=True)` walks it;
+- a pair the graph lacks is **added**: `calls` when a `(` follows the name,
+  else `references`, with `resolved_by: "scip"`;
+- a call or reference the graph has at a site where the index names the same
+  name as something else (another definition, or a library's symbol) is
+  **contradicted**: `confidence: AMBIGUOUS`, `scip: "contradicted"`. It is
+  kept, not removed: an indexer has blind spots of its own (a name defined
+  under a condition).
+
+The replies say so: `resolved_edges.precision` holds the index files, the
+indexer, and how many edges were confirmed, added and contradicted, and a row
+carries `scip` where the index said something of its edge. graph.json is never
+modified. `GRAPHLORE_SCIP` chooses the files: `auto` (the default) reads
+`index.scip` at the project root or in the output directory, `off` none, or a
+comma-separated list of paths inside the project. An index made in another
+directory (a CI container's `/src`) is read by the project's own paths.
+
+On httpx, scip-python's index (60 files, 15,828 uses) confirms 3,594 edges of
+the native graph, adds 935 (most of them type annotations and names read
+without a call) and contradicts 17, in a quarter of a second after the index
+is read. `benchmarks/oracle_scip.py` compares a whole graph with an index the
+way the compiler oracles do: on httpx, 99.0% of the edges the index has an
+answer for go where it says.
+
 ## Import edges, checked against the source
 
 `graphlore_cycles`, `graphlore_layers` and `graphlore_surprises` read each import

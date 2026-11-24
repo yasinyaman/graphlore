@@ -79,3 +79,57 @@ def cache_root() -> Path | None:
         return Path(raw).expanduser()
     base = os.environ.get("XDG_CACHE_HOME") or os.path.join(os.path.expanduser("~"), ".cache")
     return Path(base) / "graphlore"
+
+
+WORKSPACE_FILE = ".graphlore-workspace.json"
+_WORKSPACE_SKIP = ("node_modules", "__pycache__")
+
+
+def workspace_repos(project_dir: Path | None = None) -> list[str]:
+    """The repositories of a workspace, project-relative (``svc-a``,
+    ``libs/common``), the way the native engine finds them: the ``repos`` a
+    ``.graphlore-workspace.json`` names (an object's keys, or a list), else,
+    when the project directory is no git repository itself, every directory one
+    or two levels down holding a ``.git``. Empty for a project that is one
+    repository, with submodules or not."""
+    root = Path(project_dir or PROJECT_DIR)
+    try:
+        import json
+
+        data = json.loads((root / WORKSPACE_FILE).read_text(encoding="utf-8"))
+        raw = data.get("repos") if isinstance(data, dict) else None
+        names = list(raw) if isinstance(raw, (dict, list)) else []
+        named = sorted({
+            n.strip("/") for n in names
+            if isinstance(n, str) and n.strip("/")
+            and not any(p in ("", ".", "..") for p in n.strip("/").split("/"))
+            and (root / n.strip("/")).is_dir()
+        })
+        if named:
+            return named
+    except (OSError, ValueError):
+        pass
+    if (root / ".git").exists():
+        return []
+
+    def skip(p: Path) -> bool:
+        return (p.name.startswith(".") or p.name in _WORKSPACE_SKIP
+                or p.name == OUT_DIR_NAME or not p.is_dir() or p.is_symlink())
+
+    found: list[str] = []
+    try:
+        level1 = sorted(p for p in root.iterdir() if not skip(p))
+    except OSError:
+        return found
+    for d in level1:
+        if (d / ".git").exists():
+            found.append(d.name)
+            continue
+        if (d / "pyvenv.cfg").exists():
+            continue
+        try:
+            inner = sorted(p for p in d.iterdir() if not skip(p) and (p / ".git").exists())
+        except OSError:
+            continue
+        found += [f"{d.name}/{p.name}" for p in inner]
+    return found

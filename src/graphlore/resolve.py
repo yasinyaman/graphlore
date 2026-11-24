@@ -31,7 +31,9 @@ from typing import Any, NamedTuple
 from . import config
 from .graph import (
     _CALL_RELATIONS,
+    _CONTAINMENT_RELATIONS,
     _IMPORT_RELATIONS,
+    _NON_DEPENDENCY_RELATIONS,
     _bare_name,
     _edge_ends,
     _engine_resolved,
@@ -43,7 +45,14 @@ from .graph import (
     _rel,
 )
 from .imports import _JS_EXTS, ImportChecker, _js_for_file, _module_parts
-from .spans import _cached_file_analysis, _enclosing_spans, _norm_relpath
+from .spans import (
+    _cached_file_analysis,
+    _enclosing_spans,
+    _node_for_location,
+    _nodes_by_file,
+    _norm_relpath,
+    _resolve_in_project,
+)
 
 RESOLVED_BY = "graphlore"
 # How far a name is followed through re-exports (`from .graph import x` in the
@@ -142,23 +151,36 @@ class Resolved:
     edges: list[dict]
     calls: int = 0
     imports: int = 0
+    # what a SCIP index said of the edges (``_precise``): None when none was read
+    precision: dict[str, Any] | None = None
 
-    def payload(self) -> dict[str, int]:
-        return {"calls": self.calls, "imports": self.imports}
+    def payload(self) -> dict[str, Any]:
+        out: dict[str, Any] = {"calls": self.calls, "imports": self.imports}
+        if self.precision is not None:
+            out["precision"] = self.precision
+        return out
 
     def note(self) -> str:
         """One line naming what was added; "" when nothing was."""
-        if not (self.calls or self.imports):
-            return ""
-        bits = []
-        if self.calls:
-            bits.append(f"{self.calls} call(s) made through an imported module")
-        if self.imports:
-            bits.append(f"{self.imports} module import(s)")
-        return (
-            "Includes " + " and ".join(bits) + " that graph.json lacks, resolved by "
-            "graphlore from the source."
-        )
+        lines = []
+        if self.calls or self.imports:
+            bits = []
+            if self.calls:
+                bits.append(f"{self.calls} call(s) made through an imported module")
+            if self.imports:
+                bits.append(f"{self.imports} module import(s)")
+            lines.append(
+                "Includes " + " and ".join(bits) + " that graph.json lacks, resolved by "
+                "graphlore from the source."
+            )
+        p = self.precision
+        if p is not None:
+            lines.append(
+                f"Checked against a SCIP index ({', '.join(p['tools']) or 'unknown indexer'}): "
+                f"{p['confirmed']} edge(s) confirmed, {p['added']} added, "
+                f"{p['contradicted']} contradicted (marked AMBIGUOUS, kept)."
+            )
+        return "\n".join(lines)
 
 
 def _enabled() -> bool:
@@ -311,11 +333,16 @@ _RESOLVED_CACHE_MAX = 8
 
 
 def _resolved(nodes: list[dict], edges: list[dict]) -> Resolved:
-    """``edges`` plus the calls and imports graphlore can prove from the source.
+    """``edges`` plus the calls and imports graphlore can prove from the source,
+    then checked against a SCIP index when the project has one (``_precise``).
 
     Off with ``GRAPHLORE_RESOLVE=0``. Costs one parse per Python and JS/TS file
     of the graph (cached per file by mtime), once per loaded graph.
     """
+    return _precise(nodes, _from_source(nodes, edges))
+
+
+def _from_source(nodes: list[dict], edges: list[dict]) -> Resolved:
     if not _enabled() or _engine_resolved(nodes):
         # graphlore's native engine resolved these calls and imports itself
         return Resolved(edges)
@@ -330,3 +357,221 @@ def _resolved(nodes: list[dict], edges: list[dict]) -> Resolved:
         _RESOLVED_CACHE.pop(next(iter(_RESOLVED_CACHE)), None)  # FIFO
     _RESOLVED_CACHE[ident] = (nodes, edges, project, result)
     return result
+
+
+# --- a compiler's answer: a SCIP index ------------------------------------------------
+
+SCIP_BY = "scip"
+# how far a SCIP definition's line may be from the node's (a decorator, a comment
+# the extractor counted in) and still be that node
+_DEF_LINE_SLACK = 3
+# (id(nodes), id(base edges), id(index)) -> (nodes, edges, index, Resolved)
+_PRECISE_CACHE: dict[tuple[int, int, int], tuple[list[dict], list[dict], Any, Resolved]] = {}
+_PRECISE_CACHE_MAX = 4
+
+
+def _precise(nodes: list[dict], base: Resolved) -> Resolved:
+    """``base`` checked against the project's SCIP index (``scip.py``).
+
+    Each use the index records, other than a definition or an import, is given
+    to the node whose span holds it (the source) and the node its symbol's
+    definition is (the target, by file, name and nearest line). Then:
+
+    * an edge the graph has between the two is **confirmed**: a copy with
+      ``confidence: EXTRACTED`` and ``scip: "confirmed"``;
+    * a pair the graph lacks is **added**: ``calls`` when a ``(`` follows the
+      name in the source, else ``references``, ``resolved_by: "scip"``;
+    * a call or reference the graph has at a site where the index names the
+      same name as something else (another node, or a library's symbol) is
+      **contradicted**: a copy with ``confidence: AMBIGUOUS`` and
+      ``scip: "contradicted"``. It is never removed.
+
+    Nothing changes without an index; the result is cached on the identity of
+    the lists and of the index (which ``scip.load`` caches on its files)."""
+    from . import scip
+
+    index = scip.load()
+    if index is None or not index.documents:
+        return base
+    ident = (id(nodes), id(base.edges), id(index))
+    hit = _PRECISE_CACHE.get(ident)
+    if hit is not None and hit[0] is nodes and hit[1] is base.edges and hit[2] is index:
+        return hit[3]
+    result = _apply_scip(nodes, base, index)
+    if ident not in _PRECISE_CACHE and len(_PRECISE_CACHE) >= _PRECISE_CACHE_MAX:
+        _PRECISE_CACHE.pop(next(iter(_PRECISE_CACHE)), None)
+    _PRECISE_CACHE[ident] = (nodes, base.edges, index, result)
+    return result
+
+
+def _site_line(e: dict) -> int | None:
+    raw = str(e.get("source_location") or "")
+    digits = raw.lstrip("Ll").split("-")[0].split(":")[0]
+    return int(digits) if digits.isdigit() else None
+
+
+def _apply_scip(nodes: list[dict], base: Resolved, index: Any) -> Resolved:
+    from . import scip
+
+    by_file = _nodes_by_file(nodes)
+    def_node: dict[str, str | None] = {}
+
+    def node_of(symbol: str) -> str | None:
+        if symbol in def_node:
+            return def_node[symbol]
+        got = None
+        where = index.defs.get(symbol)
+        name = scip.bare_name(symbol)
+        if where and name:
+            file, line = where
+            best = None
+            for n in by_file.get(file, []):
+                if _is_file_hub_node(n) or _bare_name(_node_label(n)) != name:
+                    continue
+                try:
+                    d = abs(int(_node_line(n)) - line)
+                except (TypeError, ValueError):
+                    continue
+                if d <= _DEF_LINE_SLACK and (best is None or d < best[0]):
+                    best = (d, _node_id(n))
+            got = best[1] if best else None
+        def_node[symbol] = got
+        return got
+
+    owners: dict[tuple[str, int], str | None] = {}
+    # a native graph's nodes carry their spans: (start, end, id) per file, and
+    # the file's own node for what no definition holds
+    regions: dict[str, tuple[list[tuple[int, int, str]], str | None] | None] = {}
+
+    def spans_of(file: str) -> tuple[list[tuple[int, int, str]], str | None] | None:
+        if file not in regions:
+            rows, hub = [], None
+            for n in by_file.get(file, []):
+                if _is_file_hub_node(n):
+                    hub = _node_id(n)
+                    continue
+                try:
+                    end = int(n.get("end_line") or 0)
+                    start = int(n.get("region_start") or _node_line(n))
+                except (TypeError, ValueError):
+                    continue
+                if end >= start > 0:
+                    rows.append((start, end, _node_id(n)))
+            regions[file] = (rows, hub) if rows else None
+        return regions[file]
+
+    def owner(file: str, line: int) -> str | None:
+        key = (file, line)
+        if key not in owners:
+            known = spans_of(file)
+            if known is not None:
+                rows, hub = known
+                inside = [r for r in rows if r[0] <= line <= r[1]]
+                owners[key] = min(inside, key=lambda r: (r[1] - r[0], -r[0]))[2] if inside else hub
+            else:
+                n = _node_for_location(nodes, file, line, line) if by_file.get(file) else None
+                owners[key] = _node_id(n) if n is not None else None
+        return owners[key]
+
+    lines_of: dict[str, list[str] | None] = {}
+
+    def called(occ: Any) -> bool:
+        if occ.file not in lines_of:
+            path = _resolve_in_project(occ.file)
+            try:
+                lines_of[occ.file] = (path.read_text(encoding="utf-8", errors="replace")
+                                      .splitlines() if path else None)
+            except OSError:
+                lines_of[occ.file] = None
+        text = lines_of[occ.file]
+        if not text or occ.line > len(text):
+            return False
+        rest = text[occ.line - 1][occ.end_char:].lstrip()
+        return rest.startswith(("(", "!(", "::<"))
+
+    dependency = [
+        i for i, e in enumerate(base.edges)
+        if _rel(e) not in _NON_DEPENDENCY_RELATIONS and _rel(e) not in _CONTAINMENT_RELATIONS
+    ]
+    pairs: dict[tuple[str, str], list[int]] = {}
+    for i in dependency:
+        s, t = _edge_ends(base.edges[i])
+        pairs.setdefault((s, t), []).append(i)
+
+    # what the index names at each site: (file, line) -> [(name, node or None, outside)]
+    sites: dict[tuple[str, int], list[tuple[str, str | None, bool]]] = {}
+    confirmed: set[int] = set()
+    added: dict[tuple[str, str], dict] = {}
+    names: dict[str, str] = {}
+    for occ in index.refs:
+        if occ.roles & (scip.DEFINITION | scip.IMPORT):
+            continue
+        name = names.get(occ.symbol)
+        if name is None:
+            name = names[occ.symbol] = scip.bare_name(occ.symbol)
+        if not name:
+            continue
+        tgt = node_of(occ.symbol)
+        sites.setdefault((occ.file, occ.line), []).append(
+            (name, tgt, occ.symbol not in index.defs))
+        if tgt is None:
+            continue
+        src = owner(occ.file, occ.line)
+        if src is None or src == tgt:
+            continue
+        have = pairs.get((src, tgt))
+        if have:
+            confirmed.update(have)
+        elif (src, tgt) not in added:
+            added[(src, tgt)] = {
+                "source": src, "target": tgt,
+                "relation": "calls" if called(occ) else "references",
+                "confidence": "EXTRACTED", "source_file": occ.file,
+                "source_location": f"L{occ.line}", "resolved_by": SCIP_BY, "scip": "added",
+            }
+
+    labels = {_node_id(n): _bare_name(_node_label(n)) for n in nodes}
+    # only an edge to the project's own code can be contradicted: one to an
+    # external node already says "the library's", as the index does
+    own = {_node_id(n) for n in nodes if _node_file(n) and n.get("type") != "external"}
+    contradicted: set[int] = set()
+    for i in dependency:
+        if i in confirmed:
+            continue
+        e = base.edges[i]
+        if _rel(e) not in _CALL_RELATIONS and _rel(e) != "references":
+            continue
+        line = _site_line(e)
+        file = _norm_relpath(str(e.get("source_file") or ""))
+        said = sites.get((file, line)) if line is not None else None
+        if not said:
+            continue
+        s, t = _edge_ends(e)
+        if t not in own:
+            continue
+        name = labels.get(t, "")
+        same = [x for x in said if x[0] == name]
+        # the index names this name here as something else: another node of the
+        # graph, or a symbol defined outside the project
+        if same and all((x[1] is not None and x[1] != t) or (x[1] is None and x[2])
+                        for x in same):
+            contradicted.add(i)
+
+    precision = {
+        "source": index.sources, "tools": index.tools, "documents": index.documents,
+        "confirmed": len(confirmed), "added": len(added), "contradicted": len(contradicted),
+    }
+    if index.errors:
+        precision["errors"] = index.errors
+    if not (confirmed or added or contradicted):
+        return Resolved(base.edges, base.calls, base.imports, precision)
+    out: list[dict] = []
+    for i, e in enumerate(base.edges):
+        if i in confirmed:
+            out.append({**e, "confidence": "EXTRACTED", "scip": "confirmed"})
+        elif i in contradicted:
+            out.append({**e, "confidence": "AMBIGUOUS", "scip": "contradicted"})
+        else:
+            out.append(e)
+    out += added.values()
+    return Resolved(out, base.calls, base.imports, precision)

@@ -1,17 +1,18 @@
 """`graphlore hook <event>`: what an agent's hooks hear from the code graph.
 
-Claude Code runs a command hook before and after a tool call, with the call as
-JSON on stdin, and adds the ``hookSpecificOutput.additionalContext`` a hook
-prints to what the model sees (https://code.claude.com/docs/en/hooks). Two
-small notes come from here:
+Claude Code and Codex run a command hook before and after a tool call, with
+the call as JSON on stdin, and add the ``hookSpecificOutput.additionalContext``
+a hook prints to what the model sees (https://code.claude.com/docs/en/hooks,
+Codex's "Hooks" page). Two small notes come from here:
 
-- ``pre`` (PreToolUse, on Grep and Glob): when the pattern is one identifier
-  the graph defines, one line names where, and that graphlore answers the
-  question a search for a name usually leads to (who calls it, what a change
-  breaks) in one call.
-- ``post`` (PostToolUse, on Bash, Edit and Write): when a commit, a checkout
-  or an edit leaves the graph behind the code, one line says so, once per
-  state.
+- ``pre`` (PreToolUse, on Grep and Glob, and on a Bash command that is a
+  search: ``rg``, ``grep``, ``git grep``, ``ag``, ``ack``; Codex searches only
+  that way): when the pattern is one identifier the graph defines, one line
+  names where, and that graphlore answers the question a search for a name
+  usually leads to (who calls it, what a change breaks) in one call.
+- ``post`` (PostToolUse, on Bash, Edit, Write and Codex's ``apply_patch``):
+  when a commit, a checkout or an edit leaves the graph behind the code, one
+  line says so, once per state.
 
 A hook runs on every tool call, so this module imports only ``config`` and the
 standard library (``import graphlore`` loads nothing else), reads graph.json
@@ -33,7 +34,7 @@ from typing import Any
 
 from . import config
 
-INDEX_VERSION = 1
+INDEX_VERSION = 2
 # a name worth pointing at: an identifier, not a regular expression or a phrase
 _IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]{2,79}")
 # what a search for a definition often wraps the name in
@@ -51,6 +52,16 @@ _SOURCE_SUFFIXES = frozenset({
 })
 _GIT_CHANGERS = re.compile(
     r"\bgit\s+(?:commit|merge|rebase|pull|checkout|switch|reset|cherry-pick|am)\b")
+_SEARCHERS = frozenset({"rg", "grep", "egrep", "fgrep", "ag", "ack"})
+# options of those that take a value as the next word (not the pattern)
+_VALUE_OPTIONS = frozenset({
+    "-g", "--glob", "-t", "--type", "-T", "--type-not", "-A", "-B", "-C", "-m",
+    "--max-count", "--include", "--exclude", "--exclude-dir", "-f", "--file", "-d",
+    "--max-depth", "--context", "--before-context", "--after-context", "--color",
+    "--colour", "-j", "--threads", "-M", "--max-columns",
+})
+# the files an apply_patch (Codex) touches
+_PATCH_FILE = re.compile(r"^\*\*\* (?:Update|Add|Delete) File: (.+)$", re.M)
 _MAX_NAMES = 200_000
 _SITES_PER_NAME = 3
 
@@ -125,7 +136,14 @@ def _build_index(graph_path: Path) -> dict[str, Any]:
             break
     header = graph.get("graph") if isinstance(graph.get("graph"), dict) else {}
     built = str(graph.get("built_at_commit") or header.get("built_at_commit") or "")
-    return {"version": INDEX_VERSION, "built_at_commit": built, "names": names}
+    # a workspace: each repository's build commit (plain relative names only)
+    repos = {
+        str(r): str(v.get("commit") or "")
+        for r, v in (header.get("repos") or {}).items()
+        if isinstance(v, dict) and _SAFE_PATH.fullmatch(str(r)) and ".." not in str(r)
+    } if isinstance(header.get("repos"), dict) else {}
+    return {"version": INDEX_VERSION, "built_at_commit": built, "repos": repos,
+            "names": names}
 
 
 def _index(project: Path) -> dict[str, Any] | None:
@@ -164,15 +182,52 @@ def _pattern_name(pattern: str) -> str | None:
     return name if _IDENT.fullmatch(name) else None
 
 
+def _shell_search_pattern(command: str) -> str | None:
+    """The pattern of a shell command that is a text search (``rg -n foo src``,
+    ``git grep -w foo``), or None for any other command, a pipeline or a list."""
+    import shlex
+
+    if any(c in command for c in ("|", ";", "&&", "||", "`", "$(", "\n")):
+        return None
+    try:
+        words = shlex.split(command)
+    except ValueError:
+        return None
+    if words[:2] == ["git", "grep"]:
+        words = words[1:]
+    if not words or Path(words[0]).name not in _SEARCHERS:
+        return None
+    args = iter(words[1:])
+    for w in args:
+        if w in ("-e", "--regexp"):
+            return next(args, None)
+        if w.startswith("--regexp="):
+            return w.split("=", 1)[1]
+        if w == "--":
+            return next(args, None)
+        if w in _VALUE_OPTIONS:
+            next(args, None)
+            continue
+        if w.startswith("-"):
+            continue
+        return w
+    return None
+
+
 def _context(event: str, text: str) -> dict[str, Any]:
     return {"hookSpecificOutput": {"hookEventName": event, "additionalContext": text}}
 
 
 def pre_tool_use(payload: dict) -> dict[str, Any] | None:
-    if payload.get("tool_name") not in ("Grep", "Glob"):
-        return None
+    tool = payload.get("tool_name")
     tool_input = payload.get("tool_input") or {}
-    name = _pattern_name(str(tool_input.get("pattern") or ""))
+    if tool in ("Grep", "Glob"):
+        pattern: str | None = str(tool_input.get("pattern") or "")
+    elif tool == "Bash":
+        pattern = _shell_search_pattern(str(tool_input.get("command") or ""))
+    else:
+        return None
+    name = _pattern_name(pattern or "")
     if name is None:
         return None
     index = _index(_project(payload))
@@ -215,11 +270,14 @@ def post_tool_use(payload: dict) -> dict[str, Any] | None:
         return None
     index = _index(project)
     built = str((index or {}).get("built_at_commit") or "")
-    if not built:
+    repos = {r: c for r, c in ((index or {}).get("repos") or {}).items() if c}
+    if not built and not repos:
         return None
     if tool == "Bash":
         if not _GIT_CHANGERS.search(str(tool_input.get("command") or "")):
             return None
+        if not built:
+            return _workspace_moved(project, payload, repos)
         head = _git(project, "rev-parse", "HEAD")
         if not head or head.startswith(built) or built.startswith(head):
             return None
@@ -229,9 +287,12 @@ def post_tool_use(payload: dict) -> dict[str, Any] | None:
             f"graphlore: HEAD is now {head[:10]}; the code graph was built at {built[:10]}. "
             "graphlore_build(update=True) brings it up to date (graphlore_freshness says "
             "whether a full rebuild is needed)."))
-    if tool in ("Edit", "Write", "MultiEdit"):
-        path = str(tool_input.get("file_path") or "")
-        if Path(path).suffix.lower() not in _SOURCE_SUFFIXES:
+    if not built:
+        built = ",".join(f"{r}@{c[:10]}" for r, c in sorted(repos.items()))
+    if tool in ("Edit", "Write", "MultiEdit", "apply_patch"):
+        paths = ([str(tool_input.get("file_path") or "")] if tool != "apply_patch"
+                 else _PATCH_FILE.findall(str(tool_input.get("command") or "")))
+        if not any(Path(p.strip()).suffix.lower() in _SOURCE_SUFFIXES for p in paths):
             return None
         if not _once(project, f"edit:{built}"):
             return None
@@ -241,12 +302,35 @@ def post_tool_use(payload: dict) -> dict[str, Any] | None:
     return None
 
 
+def _workspace_moved(project: Path, payload: dict, repos: dict[str, str]) -> dict | None:
+    """After a git command in a workspace: the repository the command ran in
+    (its ``cwd``), else every one, whose HEAD left the commit it was built at."""
+    cwd = Path(str(payload.get("cwd") or project)).expanduser()
+    try:
+        here = cwd.resolve().relative_to(project).as_posix()
+    except (OSError, ValueError):
+        here = ""
+    asked = [r for r in repos if here == r or here.startswith(r + "/")] or sorted(repos)
+    moved = []
+    for r in asked[:8]:
+        head = _git(project / r, "rev-parse", "HEAD")
+        built = repos[r]
+        if head and not (head.startswith(built) or built.startswith(head)):
+            moved.append((r, head, built))
+    if not moved or not _once(project, "head:" + ",".join(f"{r}:{h}" for r, h, _ in moved)):
+        return None
+    shown = "; ".join(f"{r} is at {h[:10]}, built at {b[:10]}" for r, h, b in moved)
+    return _context("PostToolUse", (
+        f"graphlore: {shown}. graphlore_build(update=True) brings the code graph up to "
+        "date (graphlore_freshness says whether a full rebuild is needed)."))
+
+
 _EVENTS = {"pre": pre_tool_use, "post": post_tool_use,
            "PreToolUse": pre_tool_use, "PostToolUse": post_tool_use}
 
 
 def run(event: str, stdin: str) -> str:
-    """The hook's stdout for ``event`` and the JSON Claude Code sent: a JSON
+    """The hook's stdout for ``event`` and the JSON the client sent: a JSON
     object, or "" for nothing to say."""
     handler = _EVENTS.get(event)
     if handler is None or not _enabled():
