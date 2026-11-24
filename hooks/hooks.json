@@ -1,9 +1,9 @@
 {
-  "description": "graphlore: a pointer to the code graph when Grep looks for a name it defines, and a note when a commit or an edit leaves the graph behind. GRAPHLORE_HOOKS=0 turns them off.",
+  "description": "graphlore: a pointer to the code graph when a search (Grep, Glob, or rg / grep in a shell) looks for a name it defines, and a note when a commit or an edit leaves the graph behind. Read by Claude Code and Codex. GRAPHLORE_HOOKS=0 turns them off.",
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Grep|Glob",
+        "matcher": "Grep|Glob|Bash",
         "hooks": [
           {
             "type": "command",
@@ -15,7 +15,7 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "Bash|Edit|Write|MultiEdit",
+        "matcher": "Bash|Edit|Write|MultiEdit|apply_patch",
         "hooks": [
           {
             "type": "command",

@@ -125,12 +125,14 @@ Source: [code.claude.com/docs/en/mcp](https://code.claude.com/docs/en/mcp).
 
 **Hooks.** An agent asked to find a name often greps for it, then reads file
 after file to learn who calls it. The plugin adds two command hooks
-(`.claude-plugin/hooks.json`; outside the plugin,
+(`hooks/hooks.json`; outside the plugin,
 `graphlore setup claude-code --write --with-hooks` merges the same two into
 `.claude/settings.json`, keeping every other hook, after a `.graphlore.bak`):
 
-- before a `Grep` or `Glob` whose pattern is one identifier the graph defines
-  (`compute`, `\bcompute\b`, `def compute`), a line of context names where
+- before a `Grep` or `Glob`, or a `Bash` command that is a search (`rg`,
+  `grep`, `git grep`, `ag`, `ack`, not part of a pipeline), whose pattern is
+  one identifier the graph defines (`compute`, `\bcompute\b`,
+  `def compute`), a line of context names where
   (`a.py:12`, at most three places) and that `graphlore_neighbors` /
   `graphlore_impact` answer who calls it and what a change breaks;
 - after a `git commit`, `checkout`, `merge`, `pull` or `rebase` that moves
@@ -182,6 +184,22 @@ it), reads `AGENTS.md`, and has no MCP prompts. Headless: `codex exec --json
 ([`mcp_cmd.rs`](https://github.com/openai/codex/blob/main/codex-rs/cli/src/mcp_cmd.rs),
 [`mcp_types.rs`](https://github.com/openai/codex/blob/main/codex-rs/config/src/mcp_types.rs));
 its documentation site was not readable from where this page was written.
+
+**Hooks.** Codex runs the same two hooks as Claude Code (above), in the same
+file shape. The plugin's `hooks/hooks.json` is Codex's default place for a
+plugin's hooks, and Codex sets `CLAUDE_PLUGIN_ROOT` for it; outside the plugin,
+`graphlore setup codex --with-hooks` writes them into the project's
+`.codex/hooks.json` (`--user`: `$CODEX_HOME/hooks.json`, `~/.codex/hooks.json`
+by default), keeping every other hook. Codex has no Grep tool: it searches in
+a shell, so the `pre` hook reads a `Bash` command that is a search (`rg -n
+compute src`); a file edit is `apply_patch`, whose patch names the files the
+`post` hook checks. Codex runs a hook only after it is reviewed and trusted:
+open `/hooks` once after installing. Hooks are on by default
+(`[features] hooks = false` turns them all off). Source: Codex's "Hooks"
+documentation page (event names, `hooks.json` locations, the
+`additionalContext` output of `PreToolUse` and `PostToolUse`, tool names
+`Bash` and `apply_patch`, plugin-bundled hooks), read from a copy, November
+2026.
 
 ## Google Gemini CLI
 

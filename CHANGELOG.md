@@ -9,18 +9,21 @@ All notable changes to this project are documented here. The format is based on
 ## [0.8.0] - 2026-11-24
 
 ### Added
-- **Claude Code hooks** (`graphlore hook pre|post`). Before a `Grep` or
-  `Glob` for one identifier the graph defines, a line of context names where
+- **Claude Code and Codex hooks** (`graphlore hook pre|post`). Before a
+  `Grep` or `Glob`, or a shell search (`rg`, `grep`, `git grep`; Codex has
+  no Grep tool), for one identifier the graph defines, a line of context names where
   it is defined and that `graphlore_neighbors` / `graphlore_impact` answer
   the question such a search usually leads to; after a git command that moves
   HEAD past the graph's build commit, or an edit of a source file, a line says
   the graph is behind, once per state. The hook never blocks or changes a
   call, imports none of the server (about 50 ms a call), keeps an index of the
   graph's names under `GRAPHLORE_CACHE_DIR`, passes on only plain paths and is
-  silent on any error. The Claude Code plugin ships them
-  (`.claude-plugin/hooks.json`); `graphlore setup claude-code --write
-  --with-hooks` merges them into `.claude/settings.json`, keeping every other
-  hook. `GRAPHLORE_HOOKS=0` turns them off.
+  silent on any error. The plugin ships them in `hooks/hooks.json`, the
+  default place of Claude Code and Codex alike; `graphlore setup
+  claude-code|codex --with-hooks` merges them into `.claude/settings.json` or
+  `.codex/hooks.json`, keeping every other hook (Codex runs a hook once it is
+  trusted in `/hooks`). Codex's file edits (`apply_patch`) are read for the
+  files they name. `GRAPHLORE_HOOKS=0` turns them off.
 - **A GitHub Action for `graphlore review`** (`action.yml` at the root,
   `uses: yasinyaman/graphlore@<tag>`): it installs graphlore with the native
   engine from its own copy, reviews the pull request against its base commit,

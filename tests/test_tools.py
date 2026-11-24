@@ -10366,16 +10366,24 @@ def test_plugin_manifests_stay_in_sync():
     assert claude["name"] == agent["name"] == gemini["name"] == "graphlore"
     assert claude["skills"] == ["./skills/"]
     assert (root / "skills" / "graphlore-explore" / "SKILL.md").is_file()
-    # Claude Code's hooks: a file of its own (a root hooks/ is a path other
-    # plugin formats may read), running the module from the plugin's copy
-    hooks = json.loads((root / claude["hooks"]).read_text())["hooks"]
+    # the hooks: hooks/hooks.json, the default place of Claude Code and Codex
+    # alike (Codex sets CLAUDE_PLUGIN_ROOT too); no manifest key, which Claude
+    # Code would merge with the default file and run every hook twice
+    assert "hooks" not in claude
+    hooks = json.loads((root / "hooks" / "hooks.json").read_text())["hooks"]
     for event, arg in (("PreToolUse", "pre"), ("PostToolUse", "post")):
         (group,) = hooks[event]
         (handler,) = group["hooks"]
         assert f"python3 -m graphlore.hooks {arg}" in handler["command"]
         assert '"${CLAUDE_PLUGIN_ROOT}/src"' in handler["command"]
         assert handler["command"].endswith("|| true") and handler["timeout"] <= 10
-    assert not (root / "hooks").exists()
+    from graphlore import clients as _clients
+
+    for client, matchers in _clients.HOOK_MATCHERS.items():
+        for event, matcher in matchers.items():
+            # every tool a client gives either event is in the plugin's matcher
+            assert set(matcher.split("|")) <= set(hooks[event][0]["matcher"].split("|")), \
+                (client, event)
     servers = {"claude": claude["mcpServers"]["graphlore"],
                "agent": mcp_json["mcpServers"]["graphlore"],
                "gemini": gemini["mcpServers"]["graphlore"]}
@@ -10736,7 +10744,7 @@ def test_setup_with_hooks_merges_into_claude_code_settings(tmp_path):
     assert data["permissions"] == {"allow": ["Bash(ls)"]}
     pre = data["hooks"]["PreToolUse"]
     assert pre[0]["hooks"][0]["command"] == "mine"         # the user's own hook stays
-    assert pre[1] == {"matcher": "Grep|Glob", "hooks": [
+    assert pre[1] == {"matcher": "Grep|Glob|Bash", "hooks": [
         {"type": "command", "command": "graphlore hook pre", "timeout": 5}]}
     assert data["hooks"]["PostToolUse"][0]["hooks"][0]["command"] == "graphlore hook post"
     assert (settings.parent / "settings.json.graphlore.bak").is_file()
@@ -10749,7 +10757,20 @@ def test_setup_with_hooks_merges_into_claude_code_settings(tmp_path):
     settings.write_text("{ not json")
     with pytest.raises(clients.SetupError):
         clients.write_hooks(settings, clients.server_config(tmp_path, "lean"))
-    assert cli.main(["setup", "codex", "--project", str(tmp_path), "--with-hooks"]) == 2
+    assert cli.main(["setup", "cursor", "--project", str(tmp_path), "--with-hooks"]) == 2
+
+
+def test_setup_with_hooks_writes_codex_s_hooks_file(tmp_path, monkeypatch):
+    from graphlore import cli, clients
+
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex-home"))
+    assert cli.main(["setup", "codex", "--project", str(tmp_path), "--with-hooks"]) == 0
+    data = json.loads((tmp_path / ".codex" / "hooks.json").read_text())
+    assert data["hooks"]["PreToolUse"] == [{"matcher": "Bash", "hooks": [
+        {"type": "command", "command": "graphlore hook pre", "timeout": 5}]}]
+    assert data["hooks"]["PostToolUse"][0]["matcher"] == "Bash|apply_patch"
+    assert clients.hooks_file("codex", tmp_path, user=True) == (
+        tmp_path / "codex-home" / "hooks.json")
 
 
 def test_review_names_the_definitions_a_change_removes(tmp_path, monkeypatch):
@@ -10780,3 +10801,26 @@ def test_review_names_the_definitions_a_change_removes(tmp_path, monkeypatch):
     assert r["removed_total"] == 2
     md = change_review.render_markdown(r)
     assert "#### Removed (2)" in md and "| `tidy` | `pkg/util.py` (file removed) | 1 |" in md
+
+
+def test_hook_reads_a_search_run_in_a_shell(tmp_path, monkeypatch):
+    """Codex has no Grep tool: it searches with rg or grep in a shell, and
+    Claude Code's agents do too."""
+    proj, _git = _hook_project(tmp_path, monkeypatch)
+    for command in ("rg -n compute src", "rg -t py -e compute", "git grep -w compute",
+                    "grep -rn 'def compute' ."):
+        text = _hook("pre", {"tool_name": "Bash", "cwd": str(proj),
+                             "tool_input": {"command": command}})
+        assert "defines compute at a.py:1" in text, command
+    for command in ("ls | grep compute", "cat a.py", "rg 'comp.*'", "echo compute"):
+        assert _hook("pre", {"tool_name": "Bash", "cwd": str(proj),
+                             "tool_input": {"command": command}}) == "", command
+
+
+def test_hook_reads_the_files_a_codex_patch_edits(tmp_path, monkeypatch):
+    proj, _git = _hook_project(tmp_path, monkeypatch)
+    patch = {"tool_name": "apply_patch", "cwd": str(proj), "tool_input": {
+        "command": "*** Begin Patch\n*** Update File: README.md\n*** End Patch"}}
+    assert _hook("post", patch) == ""                       # no source file
+    patch["tool_input"]["command"] = "*** Begin Patch\n*** Update File: a.py\n*** End Patch"
+    assert "source files changed" in _hook("post", patch)
