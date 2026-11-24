@@ -643,3 +643,37 @@ def test_a_workspace_of_two_repositories_builds_as_one_graph(tmp_path, monkeypat
     assert fresh["workspace"] and fresh["recommended_action"] == "fresh", fresh
     o = json.loads(server.graphlore_overview(as_json=True))
     assert o["workspace"]["cross_repo_edges"].get("http_calls") == 1
+
+
+def test_a_scip_index_of_the_project_checks_the_native_graph(tmp_path, monkeypatch):
+    """scip-python's index of a small project, read with graphlore's own reader:
+    every edge it has an answer for is confirmed, none contradicted."""
+    indexer = shutil.which("scip-python")
+    if indexer is None:
+        pytest.skip("scip-python is not installed (npm install -g @sourcegraph/scip-python)")
+    files = {
+        "pkg/__init__.py": "",
+        "pkg/store.py": ("class Store:\n    def save(self, x):\n        return x\n\n\n"
+                         "def make():\n    return Store()\n"),
+        "pkg/app.py": ("from pkg.store import make\n\n\ndef run(x):\n    s = make()\n"
+                       "    return s.save(x)\n"),
+    }
+    for rel, text in files.items():
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_text(text, encoding="utf-8")
+    # scip-python asks git for the project's version
+    for args in (["init", "-q"], ["add", "-A"], ["commit", "-qm", "one"]):
+        subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.com", *args],
+                       cwd=tmp_path, check=True, capture_output=True)
+    done = subprocess.run([indexer, "index", ".", "--project-name", "demo", "--output",
+                           "index.scip"], cwd=tmp_path, capture_output=True, text=True)
+    if done.returncode != 0:
+        pytest.skip(f"scip-python failed: {done.stderr[-300:]}")
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    monkeypatch.setenv("GRAPHLORE_ENGINE", "native")
+    monkeypatch.delenv("GRAPHLORE_SCIP", raising=False)
+    server._GRAPH_CACHE.clear()
+    assert not server.graphlore_build(".").startswith("ERROR")
+    imp = json.loads(server.graphlore_impact("save", direction="dependents", as_json=True))
+    p = imp["resolved_edges"]["precision"]
+    assert p["tools"] == ["scip-python"] and p["confirmed"] >= 3 and p["contradicted"] == 0

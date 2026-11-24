@@ -9,6 +9,21 @@ All notable changes to this project are documented here. The format is based on
 ## [0.8.0] - 2026-11-24
 
 ### Added
+- **SCIP precision mode** (`GRAPHLORE_SCIP`, `src/graphlore/scip.py`). When
+  the project has a SCIP index (`index.scip`, made by `scip-python`,
+  `scip-typescript`, `rust-analyzer scip` and others), the edges the
+  navigation tools walk are checked against it at read time: an edge the index
+  agrees with is confirmed (`confidence: EXTRACTED`, `scip: "confirmed"`), a
+  pair the graph lacks is added (`calls` or `references`, `resolved_by:
+  "scip"`), and a call or reference it binds elsewhere is marked
+  `AMBIGUOUS` (`scip: "contradicted"`), never removed. The index is decoded
+  with the standard library (no `protobuf` package), cached on the file, and
+  nothing is run or fetched; an index made in another directory is read by
+  the project's own paths. Replies carry `resolved_edges.precision` and a
+  row's `scip`. On httpx: 3,594 edges confirmed, 935 added, 17 contradicted,
+  0.2 s. `benchmarks/oracle_scip.py` compares a whole native graph with an
+  index as the compiler oracles do (httpx: 99.0% precision, 76.8% recall
+  against scip-python).
 - **Workspaces: several repositories as one graph** (`docs/workspace.md`).
   A project folder that is no git repository and holds repositories one or two
   levels down (or a `.graphlore-workspace.json` naming them) is built as one

@@ -10979,3 +10979,179 @@ def test_review_of_one_repository_of_a_workspace(tmp_path, monkeypatch):
         change_review.analyze(build=False, repo="nope")
     with pytest.raises(change_review.ReviewError, match="--repo"):
         change_review.analyze(build=False)
+
+
+# --- SCIP: a compiler-grade index checks the graph ---------------------------------
+
+def _pb_varint(n):
+    out = bytearray()
+    n &= (1 << 64) - 1
+    while True:
+        b = n & 0x7F
+        n >>= 7
+        out.append(b | (0x80 if n else 0))
+        if not n:
+            return bytes(out)
+
+
+def _pb(num, value):
+    """One protobuf field: an int as a varint, str / bytes / a list of ints
+    (packed) length-delimited."""
+    if isinstance(value, int):
+        return _pb_varint(num << 3) + _pb_varint(value)
+    if isinstance(value, list):
+        value = b"".join(_pb_varint(v) for v in value)
+    if isinstance(value, str):
+        value = value.encode()
+    return _pb_varint(num << 3 | 2) + _pb_varint(len(value)) + value
+
+
+def _scip_occ(rng, symbol, roles=0, typed=False):
+    if typed:
+        r = _pb(8, _pb(1, rng[0]) + _pb(2, rng[1]) + _pb(3, rng[2]))
+    else:
+        r = _pb(1, list(rng))
+    return r + _pb(2, symbol) + (_pb(3, roles) if roles else b"")
+
+
+def _scip_index(root, docs):
+    meta = _pb(2, _pb(1, "scip-test")) + _pb(3, root.as_uri())
+    body = b"".join(_pb(2, _pb(1, path) + b"".join(_pb(2, o) for o in occs))
+                    for path, occs in docs.items())
+    return _pb(1, meta) + body
+
+
+_SYM = "scip-python python demo 1 `pkg.b`/"
+
+
+def _scip_project(tmp_path, monkeypatch):
+    files = {
+        "pkg/__init__.py": "",
+        "pkg/a.py": ("from pkg.b import helper, other\n\n\ndef run():\n    helper()\n"
+                     "    return other\n"),
+        "pkg/b.py": "def helper():\n    return 1\n\n\ndef other():\n    return 2\n",
+        "pkg/c.py": "def helper():\n    return 3\n",
+    }
+    for rel, text in files.items():
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_text(text, encoding="utf-8")
+
+    def node(nid, label, file, line):
+        return {"id": nid, "label": label, "source_file": file, "source_location": f"L{line}",
+                "file_type": "code"}
+
+    nodes = [node("a", "a.py", "pkg/a.py", 1), node("run", "run()", "pkg/a.py", 4),
+             node("b", "b.py", "pkg/b.py", 1), node("bh", "helper()", "pkg/b.py", 1),
+             node("bo", "other()", "pkg/b.py", 5),
+             node("c", "c.py", "pkg/c.py", 1), node("ch", "helper()", "pkg/c.py", 1)]
+    links = [
+        {"source": "a", "target": "run", "relation": "contains"},
+        {"source": "b", "target": "bh", "relation": "contains"},
+        {"source": "b", "target": "bo", "relation": "contains"},
+        {"source": "c", "target": "ch", "relation": "contains"},
+        {"source": "run", "target": "bh", "relation": "calls", "confidence": "INFERRED",
+         "source_file": "pkg/a.py", "source_location": "L5"},
+        {"source": "run", "target": "ch", "relation": "calls", "confidence": "INFERRED",
+         "source_file": "pkg/a.py", "source_location": "L5"},
+    ]
+    _write_graph(tmp_path, {"nodes": nodes, "links": links})
+    index = _scip_index(tmp_path, {
+        "pkg/a.py": [
+            _scip_occ([4, 4, 10], _SYM + "helper().", roles=8),
+            _scip_occ([5, 11, 16], _SYM + "other().", roles=8, typed=True),
+            _scip_occ([4, 4, 5], "local 3"),
+            _scip_occ([0, 18, 24], _SYM + "helper().", roles=2),   # the import: skipped
+        ],
+        "pkg/b.py": [
+            _scip_occ([0, 4, 10], _SYM + "helper().", roles=1),
+            _scip_occ([4, 4, 9], _SYM + "other().", roles=1),
+        ],
+    })
+    (tmp_path / "index.scip").write_bytes(index)
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    monkeypatch.delenv("GRAPHLORE_SCIP", raising=False)
+    server._GRAPH_CACHE.clear()
+    server._SPAN_CACHE.clear()
+
+
+def test_scip_reader_reads_ranges_roles_and_names(tmp_path, monkeypatch):
+    from graphlore import scip
+
+    _scip_project(tmp_path, monkeypatch)
+    idx = scip.load()
+    assert idx is not None and idx.tools == ["scip-test"] and idx.documents == 2
+    assert idx.defs[_SYM + "helper()."] == ("pkg/b.py", 1)
+    refs = [(o.file, o.line, o.char, o.end_char, scip.bare_name(o.symbol)) for o in idx.refs]
+    # the packed range and the typed one; the local symbol is not kept
+    assert ("pkg/a.py", 5, 4, 10, "helper") in refs and ("pkg/a.py", 6, 11, 16, "other") in refs
+    assert not any(o.symbol.startswith("local") for o in idx.refs)
+    assert scip.load() is idx                            # cached on the file
+    for sym, name in [("a b c 1 `x.y`/Cls#", "Cls"), ("a b c 1 m/Cls#run().", "run"),
+                      ("a b c 1 m/f().(x)", ""), ("a b c 1 m/Cls#[T]", ""),
+                      ("a b c 1 m/CONST.", "CONST"), ("a b c 1 m/`odd name`#", "odd name")]:
+        assert scip.bare_name(sym) == name, sym
+    # a path outside the project, and the switch
+    monkeypatch.setenv("GRAPHLORE_SCIP", "../elsewhere.scip")
+    assert scip.load() is None
+    monkeypatch.setenv("GRAPHLORE_SCIP", "off")
+    assert scip.load() is None
+    (tmp_path / "bad.scip").write_bytes(b"\xff\xff\xff")
+    monkeypatch.setenv("GRAPHLORE_SCIP", "bad.scip")
+    bad = scip.load()
+    assert bad is not None and bad.documents == 0 and "not a SCIP index" in bad.errors[0]
+
+
+def test_scip_confirms_adds_and_contradicts_edges(tmp_path, monkeypatch):
+    from graphlore import resolve
+
+    _scip_project(tmp_path, monkeypatch)
+    g = server._load_graph()
+    nodes, edges = server._nodes_edges(g)
+    r = resolve._resolved(nodes, edges)
+    assert r.precision is not None
+    p = r.precision
+    assert (p["confirmed"], p["added"], p["contradicted"]) == (1, 1, 1)
+    by = {(e["source"], e["target"], e["relation"]): e for e in r.edges}
+    assert by[("run", "bh", "calls")]["confidence"] == "EXTRACTED"
+    assert by[("run", "bh", "calls")]["scip"] == "confirmed"
+    wrong = by[("run", "ch", "calls")]
+    assert wrong["confidence"] == "AMBIGUOUS" and wrong["scip"] == "contradicted"
+    # `return other` names the function without calling it
+    assert by[("run", "bo", "references")]["resolved_by"] == "scip"
+    # the graph's own edges are untouched, and the list is the same object again
+    assert all("scip" not in e for e in edges)
+    assert resolve._resolved(nodes, edges) is r
+    assert "Checked against a SCIP index (scip-test)" in r.note()
+    # the tools carry it
+    imp = json.loads(server.graphlore_impact("other", direction="dependents", as_json=True))
+    assert imp["resolved_edges"]["precision"]["added"] == 1
+    text = server.graphlore_neighbors("run")
+    assert "scip disagrees" in text and "from scip" in text
+    # strict impact walks the edge scip confirmed, not the one it contradicts
+    strict = json.loads(server.graphlore_impact("helper", direction="dependents",
+                                                strict=True, as_json=True))
+    assert "run()" in json.dumps(strict)
+    monkeypatch.setenv("GRAPHLORE_SCIP", "off")
+    assert resolve._resolved(nodes, edges).precision is None
+
+
+def test_scip_paths_follow_the_index_s_project_root(tmp_path):
+    from graphlore import scip
+
+    proj = tmp_path / "proj"
+    (proj / "sub").mkdir(parents=True)
+    occ = [_scip_occ([0, 4, 5], _SYM + "f().", roles=1)]
+    below = scip.Index()
+    scip.read_index(_scip_index(proj / "sub", {"x.py": occ}), proj, below, "below")
+    assert below.defs[_SYM + "f()."] == ("sub/x.py", 1)
+    above = scip.Index()
+    scip.read_index(_scip_index(tmp_path, {"proj/y.py": occ, "other/z.py": occ}), proj,
+                    above, "above")
+    assert above.defs[_SYM + "f()."] == ("y.py", 1) and above.documents == 1
+    # made in another checkout: a path this project has is read as its own
+    (proj / "z.py").write_text("def f():\n    pass\n")
+    apart = scip.Index()
+    scip.read_index(_scip_index(tmp_path / "elsewhere", {"z.py": occ, "gone.py": occ}), proj,
+                    apart, "apart")
+    assert apart.documents == 1 and apart.defs[_SYM + "f()."] == ("z.py", 1)
+    assert "made in another directory" in apart.errors[0]
