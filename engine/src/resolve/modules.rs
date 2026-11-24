@@ -594,7 +594,12 @@ fn js_resolve(p: &Project, f: usize, spec: &str) -> ModRes {
     }
     // a workspace package of the repository
     let root = js_package_root(spec);
-    for (name, dir) in &p.modsys.js_packages {
+    // (two repositories of a workspace may each have a package of the name:
+    // the importer's own first)
+    let mut packages: Vec<&(String, String)> =
+        p.modsys.js_packages.iter().filter(|(name, _)| *name == root).collect();
+    packages.sort_by_key(|(_, dir)| p.repo_of_path(dir) != p.repo[f]);
+    for (name, dir) in packages {
         if *name == root {
             let rest = spec[root.len()..].trim_start_matches('/');
             let cands: Vec<String> = if rest.is_empty() {
@@ -627,8 +632,14 @@ fn js_resolve(p: &Project, f: usize, spec: &str) -> ModRes {
 
 // ---- Go -------------------------------------------------------------------
 
-fn go_resolve(p: &Project, path: &str) -> ModRes {
-    for (module, dir) in &p.modsys.go_modules {
+fn go_resolve(p: &Project, f: usize, path: &str) -> ModRes {
+    // (the longest module path first; of one path in two repositories of a
+    // workspace, the importer's own)
+    let mut modules: Vec<&(String, String)> = p.modsys.go_modules.iter().collect();
+    modules.sort_by_key(|(module, dir)| {
+        (std::cmp::Reverse(module.len()), p.repo_of_path(dir) != p.repo[f])
+    });
+    for (module, dir) in modules {
         let rest = if path == module {
             ""
         } else if let Some(r) = path.strip_prefix(&format!("{module}/")) {
@@ -803,7 +814,7 @@ pub fn resolve_import(p: &Project, fam: Family, f: usize, imp: &ImportFact) -> M
     match fam {
         Family::Python => py_resolve(p, f, &imp.module),
         Family::Ecma => js_resolve(p, f, &imp.module),
-        Family::Go => go_resolve(p, &imp.module),
+        Family::Go => go_resolve(p, f, &imp.module),
         Family::Jvm | Family::CSharp => match ns_target(p, fam, f, &imp.module) {
             Some(t) => ModRes::Target(t),
             None if imp.module.is_empty() => ModRes::Missing,

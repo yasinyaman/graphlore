@@ -3293,6 +3293,14 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
             // `type Either<L, A> = …`: its parameters are names of its own
             if facts.defs[di].kind == crate::facts::DefKind::TypeAlias {
                 facts.defs[di].type_params = type_params(n, src);
+                // Go `type byName []*Command`, `type Header map[string][]string`:
+                // a defined collection type holds its element (and keys)
+                if n.kind() == "type_spec" {
+                    facts.defs[di].elem = written_elem(n, src)
+                        .or_else(|| n.child_by_field_name("type").and_then(|t| map_value(t, src)));
+                    facts.defs[di].keyed = written_keyed(n, src);
+                    facts.defs[di].key = written_key(n, src);
+                }
             }
             if facts.defs[di].kind.is_callable() {
                 facts.defs[di].lambda_receiver = lambda_receiver(n, src);

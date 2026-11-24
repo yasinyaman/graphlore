@@ -228,3 +228,95 @@ fn a_url_to_a_repository_s_host_reaches_its_routes() {
     assert!(routes.contains(&"route_svc_c_get_users"), "{routes:?}");
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+/// One file `$repo/$rel` of each repository, and an importer in the second:
+/// the second is the one a first-match rule would miss.
+fn importer_s_own(name: &str, files: &[(&str, &str)], importer: &str, relation: &str) {
+    let dir = workspace(name, &["svc-a", "svc-b"], files);
+    let g = build(&dir);
+    let edges = links(&g, relation);
+    assert!(
+        edges.iter().any(|(s, t)| s.starts_with(importer) && t.starts_with("svc-b/")),
+        "{edges:#?}"
+    );
+    assert!(
+        !edges.iter().any(|(s, t)| s.starts_with("svc-b/") && t.starts_with("svc-a/")),
+        "nothing of svc-b reaches svc-a: {edges:#?}"
+    );
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn a_js_package_name_means_the_importer_s_own_repository() {
+    importer_s_own(
+        "js",
+        &[
+            ("svc-a/shared/package.json", "{\"name\": \"shared\", \"main\": \"index.js\"}\n"),
+            ("svc-a/shared/index.js", "export function run() { return 1; }\n"),
+            ("svc-b/shared/package.json", "{\"name\": \"shared\", \"main\": \"index.js\"}\n"),
+            ("svc-b/shared/index.js", "export function run() { return 2; }\n"),
+            (
+                "svc-b/app/main.js",
+                "import { run } from 'shared';\n\nexport function go() {\n  return run();\n}\n",
+            ),
+        ],
+        "svc-b/app/main.js ",
+        "calls",
+    );
+}
+
+#[test]
+fn a_go_module_path_means_the_importer_s_own_repository() {
+    importer_s_own(
+        "go",
+        &[
+            ("svc-a/go.mod", "module example.com/shop\n\ngo 1.21\n"),
+            ("svc-a/util/util.go", "package util\n\nfunc Run() int { return 1 }\n"),
+            ("svc-b/go.mod", "module example.com/shop\n\ngo 1.21\n"),
+            ("svc-b/util/util.go", "package util\n\nfunc Run() int { return 2 }\n"),
+            (
+                "svc-b/main.go",
+                "package main\n\nimport \"example.com/shop/util\"\n\nfunc main() {\n\tutil.Run()\n}\n",
+            ),
+        ],
+        "svc-b/main.go ",
+        "calls",
+    );
+}
+
+#[test]
+fn a_ruby_require_means_the_importer_s_own_repository() {
+    importer_s_own(
+        "rb",
+        &[
+            ("svc-a/lib/models/user.rb", "class User\n  def name\n    1\n  end\nend\n"),
+            ("svc-b/lib/models/user.rb", "class User\n  def name\n    2\n  end\nend\n"),
+            ("svc-b/lib/app.rb", "require 'models/user'\n\ndef go\n  User.new.name\nend\n"),
+        ],
+        "svc-b/lib/app.rb ",
+        "calls",
+    );
+}
+
+#[test]
+fn a_php_namespace_means_the_importer_s_own_repository() {
+    importer_s_own(
+        "php",
+        &[
+            (
+                "svc-a/src/Models/User.php",
+                "<?php\nnamespace App\\Models;\n\nclass User {\n    public function name() { return 1; }\n}\n",
+            ),
+            (
+                "svc-b/src/Models/User.php",
+                "<?php\nnamespace App\\Models;\n\nclass User {\n    public function name() { return 2; }\n}\n",
+            ),
+            (
+                "svc-b/src/App.php",
+                "<?php\nnamespace App;\n\nuse App\\Models\\User;\n\nfunction go() {\n    return (new User())->name();\n}\n",
+            ),
+        ],
+        "svc-b/src/App.php ",
+        "calls",
+    );
+}

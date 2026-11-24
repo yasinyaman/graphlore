@@ -1,6 +1,6 @@
 {
- "passed": 678,
- "total": 678,
+ "passed": 686,
+ "total": 686,
  "cases": [
   {
    "id": "python/module-function",
@@ -4066,6 +4066,54 @@
   },
   {
    "id": "python/field-typed-by-its-parameter",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/element-of-a-named-slice-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/element-of-a-slice-field",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/embedded-field-by-its-type-name",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/named-result-type-method",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/function-typed-field-types",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/extension-result-in-a-chain",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "kotlin/extension-result-through-typealias",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/extension-result-in-a-chain",
    "ok": true,
    "missing": [],
    "unwanted": []

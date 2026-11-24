@@ -59,10 +59,12 @@ or a directory that is not there is left out.
   single repository.
 - **Imports that stay home.** An import means a module of the importer's own
   repository first: two services that both have an `app.models`, a crate
-  named `shared` in each repository, one fully qualified Java or C# name
-  defined twice. Another repository's module answers only when the importer's
-  has none, and in Python only as a package of its own
-  (`common_lib.models`), never as a loose module (`import utils`).
+  named `shared` in each repository, one fully qualified Java, C# or PHP name
+  defined twice, a JavaScript or TypeScript package name (`package.json`'s
+  `name`) or a Go module path (`go.mod`, a fork) in both, a Ruby constant or
+  `require` path each repository defines. Another repository's module answers
+  only when the importer's has none, and in Python only as a package of its
+  own (`common_lib.models`), never as a loose module (`import utils`).
 - **Requests between repositories.** A request to a relative path, to
   `localhost` or to an unknown base (`${API_URL}/users`) is linked to a route
   of any repository, as in one repository, the nearest first. A request to a
@@ -102,6 +104,5 @@ or a directory that is not there is left out.
   and `update=True` re-reads the files that changed in any of them.
 - A repository's untracked files that an ignore rule of the folder above it
   matches are not read (its tracked files are).
-- Imports in JavaScript and TypeScript, Go, PHP and Ruby are resolved as in
-  one repository: by relative path, module path or package name, which seldom
-  collide between repositories.
+- A Swift module name two repositories share means the files of both (a C
+  or C++ include path means the importer's own header, the nearest file).

@@ -32,7 +32,8 @@ All notable changes to this project are documented here. The format is based on
   levels down (or a `.graphlore-workspace.json` naming them) is built as one
   graph by the native engine: each repository's own tracked files, its commit
   in the header (`graph.repos`), imports resolved to the importer's own
-  repository first (Python, JVM, C# and Rust crates), route ids led by their
+  repository first (Python, Java and Kotlin, C#, PHP, Rust crates, JavaScript
+  and TypeScript package names, Go module paths, Ruby), route ids led by their
   repository, and a request to a host the workspace file gives a repository
   linked to that repository's routes. `graphlore_freshness`, the graph age,
   the changed-file notes, co-change and the watcher read each repository
@@ -233,6 +234,28 @@ All notable changes to this project are documented here. The format is based on
   91.3%; fastapi-template 100% → 100%, 87.6% → 92.4%. What remains wrong is
   mostly the indexer's own (a function defined under `try`, two local classes
   of one name taken for one symbol).
+- **Go and Kotlin name-resolution rules read off `go/types` and the
+  unresolved calls** (engine 0.5.80; each a case in
+  `benchmarks/conformance.py` and a golden in `engine/tests/edges_golden.rs`).
+  Go:
+  - an element of a named slice or map type (`type byName []*Command`,
+    `c[i].Name()`, a `range` over it) and of a slice field
+    (`n.children[i].Sort()`) is the element type's;
+  - an embedded field read by its type's name (`f.basicWriter.flush()`) is
+    the embedded type, and a bare read of it writes no edge to the struct;
+  - a function that returns a named non-struct type (`func Chain(…)
+    Middlewares`) gives that type to a chain (`Chain(…).Handler(h)`);
+  - the parameter and result types of a function-typed struct field
+    (`RunE func(cmd *Command, args []string) error`) are references.
+
+  Kotlin and C#: an extension's result in the middle of a chain
+  (`x.ext().member()`, also through a `typealias`) is its declared type,
+  `EXTRACTED`. Against `go/types` on chi, cobra, gin-examples and resty, with
+  `benchmarks/oracle_go.py` now counting a method receiver's type as the
+  declaration it is: recall 85.2% → 85.4%, missed method calls 91 → 53,
+  12,311 of 12,317 judged edges right. Kotlin's real unresolved calls
+  (`benchmarks/unresolved.py --real`, kotlinpoet, clikt and two realworld
+  apps) 129 → 110.
 - **`spans.py` and the native engine read the same definitions on 44 more
   files of the audit repositories** (engine 0.5.80). Compared on all 5,073
   source files of the 45, they disagreed on 45; each case was read against the

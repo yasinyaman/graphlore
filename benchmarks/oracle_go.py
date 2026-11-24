@@ -35,6 +35,7 @@ DUMP = r'''package main
 import (
 	"encoding/json"
 	"go/ast"
+	"go/token"
 	"go/types"
 	"os"
 	"path/filepath"
@@ -50,6 +51,7 @@ type use struct {
 	To   string `json:"to_file"`
 	At   int    `json:"to_line"`
 	Kind string `json:"what"`
+	Recv bool   `json:"receiver,omitempty"`
 }
 
 func main() {
@@ -67,6 +69,25 @@ func main() {
 	for _, p := range pkgs {
 		if p.TypesInfo == nil {
 			continue
+		}
+		// the type a method is declared on (`func (c *Client) Scheme()`):
+		// a declaration of the method, no use of the type
+		recv := map[token.Pos]bool{}
+		for _, f := range p.Syntax {
+			for _, d := range f.Decls {
+				fd, ok := d.(*ast.FuncDecl)
+				if !ok || fd.Recv == nil {
+					continue
+				}
+				for _, field := range fd.Recv.List {
+					ast.Inspect(field.Type, func(n ast.Node) bool {
+						if id, ok := n.(*ast.Ident); ok {
+							recv[id.Pos()] = true
+						}
+						return true
+					})
+				}
+			}
 		}
 		for id, obj := range p.TypesInfo.Uses {
 			if obj == nil || obj.Pkg() == nil {
@@ -93,7 +114,7 @@ func main() {
 				continue
 			}
 			to := p.Fset.Position(obj.Pos())
-			u := use{File: at.Filename[len(root)+1:], Line: at.Line, Name: id.Name, Kind: kind}
+			u := use{File: at.Filename[len(root)+1:], Line: at.Line, Name: id.Name, Kind: kind, Recv: recv[id.Pos()]}
 			if strings.HasPrefix(to.Filename, root+"/") {
 				u.To, u.At = to.Filename[len(root)+1:], to.Line
 			}
@@ -102,7 +123,6 @@ func main() {
 				continue
 			}
 			seen[key] = true
-			_ = ast.Inspect
 			out.Encode(u)
 		}
 	}
@@ -125,7 +145,7 @@ def uses_of(root: Path, tool: Path) -> list[dict[str, Any]]:
         decls = [(u["to_file"], u["to_line"])] if u.get("to_file") else []
         uses.append({"file": u["file"], "line": u["line"], "expr": u["expr"], "symbol": u["expr"],
                      "decls": decls, "lib": not decls, "alias": False,
-                     "declares": (u["file"], u["line"]) in decls})
+                     "declares": (u["file"], u["line"]) in decls or bool(u.get("receiver"))})
     return uses
 
 

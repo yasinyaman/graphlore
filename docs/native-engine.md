@@ -2025,6 +2025,27 @@ most of what is left is commandline's `GetTypeInfo` polyfill (a definition
 under `#if` for old frameworks that Roslyn, compiling for a current one,
 does not see: 21 rows) and ties between generic overloads.
 
+Go, the same day: `oracle_go.py` now counts a method receiver's type
+(`func (c *Client) Scheme()`) as the declaration it is, not a use the graph
+missed (the method's `Client → method` containment is the edge), and four
+rules its missed method calls showed went in: the element of a named slice or
+map type and of a slice field, an embedded field read by its type's name, the
+named non-struct type a function returns (`Chain(…).Handler(h)`), and the
+types of a function-typed field.
+
+| | Go, before | Go, after |
+|---|---:|---:|
+| edges whose site the compiler has an answer for | 12,284 | 12,317 |
+| of them, to the declaration it names | 12,279 (99.96%) | 12,311 (99.95%) |
+| uses with an edge | 85.2% (19,860) | 85.4% (19,912) |
+| missed method calls | 91 | 53 |
+
+Of the 6 wrong, 4 are `INFERRED` reads of a library value's field that the
+project's type also has (`cur.URL` on a `*http.Request`), and one is a call
+the oracle places on the first line of a multi-line expression. Most of what
+is missed is still a struct literal's field names (`&Command{Use: …}`, left
+out on purpose) and the fields of anonymous structs in test tables.
+
 **C#.** Roslyn is asked the same way (`benchmarks/oracle_csharp.py`: one
 compilation of every `.cs` file of a repository against the runtime's own
 assemblies; a name it cannot bind without the repository's NuGet packages

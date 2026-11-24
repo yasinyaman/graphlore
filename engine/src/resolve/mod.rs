@@ -1386,6 +1386,9 @@ pub struct Project<'a> {
     /// Whether the reference being resolved was answered by a name alone
     /// (`fallback_method`, a single extension in sight): no scope said so.
     guessed: std::cell::Cell<bool>,
+    /// The Go type an embedded field's name was taken for (`member`): a
+    /// read that ends there is of the field, which has no node
+    embedded_hit: std::cell::Cell<Option<DefRef>>,
     /// The bindings a local's value gives, per local (`local_value_binds`).
     value_binds: RefCell<HashMap<(usize, usize), Option<Binds>>>,
     /// The bindings the last path walked ended with.
@@ -1523,6 +1526,7 @@ impl<'a> Project<'a> {
             tuple_locals: RefCell::new(HashMap::new()),
             call_targets: RefCell::new(HashMap::new()),
             guessed: std::cell::Cell::new(false),
+            embedded_hit: std::cell::Cell::new(None),
             value_binds: RefCell::new(HashMap::new()),
             end_binds: RefCell::new(None),
             typing_value: RefCell::new(false),
@@ -2639,7 +2643,7 @@ impl<'a> Project<'a> {
             } else {
                 self.type_of_path(r.0, self.def(r).parent, inner, true)?
             };
-            return self.def(t).kind.is_class_like().then_some((t, true));
+            return self.is_type_like(t).then_some((t, true));
         }
         let declared = self.files[r.0].refs.iter().find(|x| {
             x.from_def == Some(r.1) && x.kind == RefKind::Type && x.context == "return_type"
@@ -2658,7 +2662,7 @@ impl<'a> Project<'a> {
                     _ => {}
                 }
             }
-            return found.filter(|t| self.def(*t).kind.is_class_like()).map(|t| (t, false));
+            return found.filter(|t| self.is_type_like(*t)).map(|t| (t, false));
         };
         let path = rt.path.clone();
         if path == ["self"] {
@@ -2666,7 +2670,15 @@ impl<'a> Project<'a> {
             return self.class_of(r.0, Some(r.1)).map(|t| (t, true));
         }
         let t = self.type_of_path(r.0, self.def(r).parent, &path, true)?;
-        self.def(t).kind.is_class_like().then_some((t, true))
+        self.is_type_like(t).then_some((t, true))
+    }
+
+    /// A type a value can have: a class-like, or a Go defined type that is
+    /// no struct or interface (`type Middlewares []func(…)`, `type nodes
+    /// []*node`), which has methods of its own.
+    fn is_type_like(&self, t: DefRef) -> bool {
+        let k = self.def(t).kind;
+        k.is_class_like() || (k == DefKind::TypeAlias && self.family[t.0] == Some(Family::Go))
     }
 
     /// The type of a local name or parameter seen from `d`.
@@ -2977,7 +2989,7 @@ impl<'a> Project<'a> {
     ) -> Option<(DefRef, Confidence)> {
         let typed = |file: usize, scope: Option<usize>, elem: &[String]| {
             self.type_of_path(file, scope, elem, true)
-                .filter(|t| self.def(*t).kind.is_class_like())
+                .filter(|t| self.is_type_like(*t))
                 .map(|t| (t, Confidence::Extracted))
         };
         if let [name] = path {
@@ -2990,6 +3002,26 @@ impl<'a> Project<'a> {
                     let param = defs[x].plist.iter().find(|p| p.name == *name);
                     let elem = l.elem.clone().or_else(|| param.and_then(|p| p.elem.clone()));
                     let keyed = l.keyed || param.is_some_and(|p| p.keyed);
+                    // Go `c byName` with `type byName []*Command`: the defined
+                    // type holds the element, in the file it is written in
+                    if elem.is_none() && l.declared && !l.path.is_empty() {
+                        if let Some(t) = self.type_of_path(f, Some(x), &l.path, true) {
+                            let td = self.def(t);
+                            if td.kind == DefKind::TypeAlias && td.elem.is_some() {
+                                let e = td.elem.clone()?;
+                                let fits = match how {
+                                    crate::refs::ITERATED | crate::refs::KEY => !td.keyed,
+                                    crate::refs::VALUE => td.keyed,
+                                    _ => true,
+                                };
+                                if how == crate::refs::KEY && td.keyed {
+                                    let k = td.key.clone()?;
+                                    return typed(t.0, td.parent, &k);
+                                }
+                                return if fits { typed(t.0, td.parent, &e) } else { None };
+                            }
+                        }
+                    }
                     if let Some(e) = elem {
                         // (the first of a map's pair is its key)
                         if how == crate::refs::KEY && keyed {
@@ -3054,7 +3086,7 @@ impl<'a> Project<'a> {
     fn elem_type_of(&self, p: DefRef) -> Option<DefRef> {
         let def = self.def(p);
         self.type_of_path(p.0, def.parent, def.elem.as_ref()?, true)
-            .filter(|t| self.def(*t).kind.is_class_like())
+            .filter(|t| self.is_type_like(*t))
     }
 
     /// `val x = xs.first()`: an element of the collection `xs`.
@@ -4031,6 +4063,7 @@ impl<'a> Project<'a> {
     fn scope_of(&self, f: usize) -> Scope {
         let mut s = Scope::default();
         let Some(fam) = self.family[f] else { return s };
+        let _asking = Asking(&self.asking, self.asking.replace(Some(f)));
         for (i, imp) in self.files[f].imports.iter().enumerate() {
             let res = modules::resolve_import(self, fam, f, imp);
             let target = match &res {
@@ -4077,6 +4110,16 @@ impl<'a> Project<'a> {
         let mut v: Vec<DefRef> = cands.into_iter().collect();
         v.sort_by_key(|r| (self.def(*r).decl_only, *r));
         v.dedup();
+        // (two repositories of a workspace each defining the name: the
+        // asking file's own, as an import means the importer's module)
+        if v.len() > 1 {
+            if let Some(f) = *self.asking.borrow() {
+                let home = &self.repo[f];
+                if !home.is_empty() && v.iter().any(|c| self.repo[c.0] == *home) {
+                    v.retain(|c| self.repo[c.0] == *home);
+                }
+            }
+        }
         let first = *v.first()?;
         // A prototype stands for the definition with the same qualname.
         if self.def(first).decl_only {
@@ -4511,6 +4554,18 @@ impl<'a> Project<'a> {
         match t {
             Target::Def(c) => {
                 let d = self.def(*c);
+                // Go: an embedded field is named by its type (`f.basicWriter`
+                // of `struct { basicWriter }`), which the struct embeds
+                if self.family[c.0] == Some(Family::Go)
+                    && d.kind == DefKind::Struct
+                    && self.members(*c, name).is_empty()
+                {
+                    let embedded = self.bases(*c).into_iter().find(|b| self.def(*b).name == name);
+                    if let Some(b) = embedded {
+                        self.embedded_hit.set(Some(b));
+                        return Some(Target::Def(b));
+                    }
+                }
                 if d.kind == DefKind::Namespace {
                     let all = self.namespace_members(*c, name);
                     // (two files can each define the name in the namespace:
@@ -6543,6 +6598,28 @@ impl<'a> Project<'a> {
                     // written for it (`typeSpec.trimmedToString()`)
                     if self.def(c).kind.is_class_like() && i + 1 == rest.len() && !bases {
                         return self.extension_for(f, seg, c);
+                    }
+                    // … and one called in the middle of a chain, whose result
+                    // the walk goes on from (`c.argument().optional()`)
+                    if self.def(c).kind.is_class_like()
+                        && !bases
+                        && i + 2 < rest.len()
+                        && rest[i + 1] == "()"
+                    {
+                        if let Some((Target::Def(x), cf)) = self.extension_for(f, seg, c) {
+                            if self.def(x).kind.is_callable() {
+                                if let Some((rt, declared)) = self.return_type(x) {
+                                    conf = conf.max(cf);
+                                    if !declared {
+                                        conf = conf.max(Confidence::Inferred);
+                                    }
+                                    binds = None;
+                                    t = Target::Def(rt);
+                                    skip = 1;
+                                    continue;
+                                }
+                            }
+                        }
                     }
                     if !self.def(c).kind.is_class_like() || i + 1 == rest.len() {
                         return None;
@@ -8771,6 +8848,7 @@ pub fn resolve(
                 *p.site.borrow_mut() = Some((f, r.byte));
                 *p.ref_kind.borrow_mut() = Some(r.kind);
                 p.guessed.set(false);
+                p.embedded_hit.set(None);
                 let found = if let Some(place) = &r.implicit {
                     // Swift `.status(301)`: a static member of the type the
                     // place it stands in asks for
@@ -8804,6 +8882,20 @@ pub fn resolve(
                     }
                     other => other,
                 };
+                // `io.Copy(&f.basicWriter, r)`: the embedded field itself,
+                // no use of its type
+                if let Some(e) = p.embedded_hit.take() {
+                    if matches!(&found, Some((Target::Def(t), _)) if *t == e)
+                        && matches!(r.kind, RefKind::Read | RefKind::Attr)
+                    {
+                        *p.args.borrow_mut() = None;
+                        *p.self_arg.borrow_mut() = false;
+                        *p.cur.borrow_mut() = None;
+                        *p.site.borrow_mut() = None;
+                        *p.ref_kind.borrow_mut() = None;
+                        continue;
+                    }
+                }
                 *p.args.borrow_mut() = None;
                 *p.self_arg.borrow_mut() = false;
                 *p.cur.borrow_mut() = None;

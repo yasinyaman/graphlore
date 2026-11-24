@@ -3594,3 +3594,51 @@ fn python_a_field_is_typed_by_its_parameter_and_a_union_by_the_member() {
     assert!(calls.contains(&("a_response_aclose".into(), "a_async_aclose".into())), "{calls:?}");
     assert!(!calls.iter().any(|(s, t)| s == t), "no definition calls itself: {calls:?}");
 }
+
+#[test]
+fn go_an_element_of_a_named_slice_type_or_a_slice_field_is_the_element_type_s() {
+    let got = edges("go-elem", &[
+        ("go.mod", "module example.com/app\n\ngo 1.21\n"),
+        ("a.go", "package app\n\ntype Command struct{ use string }\n\nfunc (c *Command) Name() string {\n\treturn c.use\n}\n\ntype byName []*Command\n\nfunc (c byName) Less(i, j int) bool {\n\treturn c[i].Name() < c[j].Name()\n}\n"),
+        ("b.go", "package app\n\ntype group struct{ n int }\n\nfunc (g group) inverse() group {\n\treturn group{-g.n}\n}\n\ntype window struct {\n\tvalues []group\n\tidx    int\n}\n\nfunc (w *window) flip() group {\n\treturn w.values[w.idx].inverse()\n}\n"),
+    ]);
+    has(&got, &[(".Less()", "calls", ".Name()"), (".flip()", "calls", ".inverse()")]);
+}
+
+#[test]
+fn go_an_embedded_field_is_named_by_its_type() {
+    let got = edges("go-embedded", &[
+        ("go.mod", "module example.com/app\n\ngo 1.21\n"),
+        ("a.go", "package app\n\ntype basicWriter struct{ n int }\n\nfunc (b *basicWriter) flush() {\n\tb.n = 0\n}\n\ntype flushWriter struct {\n\tbasicWriter\n}\n\nfunc (f *flushWriter) Flush() {\n\tf.basicWriter.flush()\n}\n\nfunc (f *flushWriter) Raw() any {\n\treturn &f.basicWriter\n}\n"),
+    ]);
+    has(&got, &[(".Flush()", "calls", ".flush()")]);
+    // (a bare read of the embedded field is no reference to the struct)
+    assert!(
+        !got.contains(&(".Raw()".into(), "references".into(), "basicWriter".into())),
+        "{got:#?}"
+    );
+}
+
+#[test]
+fn go_a_named_result_type_and_a_function_typed_field() {
+    let got = edges("go-named-result", &[
+        ("go.mod", "module example.com/app\n\ngo 1.21\n"),
+        ("a.go", "package app\n\ntype Middlewares []func(int) int\n\nfunc (ms Middlewares) Handler(h int) int {\n\treturn h\n}\n\nfunc Chain(ms ...func(int) int) Middlewares {\n\treturn Middlewares(ms)\n}\n\nfunc Use(h int) int {\n\treturn Chain().Handler(h)\n}\n"),
+        ("b.go", "package app\n\ntype Command struct {\n\tRunE func(cmd *Command, args []string) error\n\tHook func() *Result\n}\n\ntype Result struct{ ok bool }\n"),
+    ]);
+    has(&got, &[("Use()", "calls", ".Handler()"), ("Command", "references", "Result")]);
+}
+
+#[test]
+fn kotlin_and_csharp_an_extension_s_result_in_a_chain() {
+    let got = edges("kt-ext-chain", &[(
+        "src/app/A.kt",
+        "package app\n\nclass Processed<A, V>(val name: String)\n\ntypealias RawArgument = Processed<String, String>\n\nclass Command\n\nfun Command.argument(name: String = \"\"): RawArgument = Processed(name)\n\nfun <A : Any, V> Processed<A, V>.optional(): Processed<A?, V> = Processed(name)\n\nclass Tool {\n    fun build(c: Command) {\n        c.argument().optional()\n    }\n}\n",
+    )]);
+    has(&got, &[(".build()", "calls", "optional()"), (".build()", "calls", "argument()")]);
+    let got = edges("cs-ext-chain", &[(
+        "A.cs",
+        "namespace App\n{\n    public class Request { }\n\n    public class Command { }\n\n    public static class Ext\n    {\n        public static Request Build(this Command c) => new Request();\n\n        public static Request Signed(this Request r) => r;\n    }\n\n    public class Tool\n    {\n        public Request Run(Command c) => c.Build().Signed();\n    }\n}\n",
+    )]);
+    has(&got, &[(".Run()", "calls", ".Signed()"), (".Run()", "calls", ".Build()")]);
+}

@@ -2859,6 +2859,57 @@ case("python", "field-typed-by-its-parameter", "`self.request = request` in `__i
      [("Compat.add", "writes", "Request.headers")], [("Compat.add", "writes", "Response.headers")],
      source=PY + " 3.2 (an instance attribute is created by assignment; its value is the parameter's)")
 
+# Go, from go/types on chi, cobra, gin-examples and resty (benchmarks/oracle_go.py,
+# engine 0.5.80): the uses it binds that the graph had no edge for.
+case("go", "element-of-a-named-slice-type", "an element of a named slice type (`type byName []*Command`) is of the element type: `c[i].Name()` is Command's",
+     GO, {"go.mod": GOMOD, "a.go": "package app\n\ntype Command struct{ use string }\n\nfunc (c *Command) Name() string {\n\treturn c.use\n}\n\n"
+          "type byName []*Command\n\nfunc (c byName) Less(i, j int) bool {\n\treturn c[i].Name() < c[j].Name()\n}\n"},
+     [("byName.Less", "calls", "Command.Name")],
+     source=GO + " ('Index expressions': a[x] of a slice type is the element at x)")
+case("go", "element-of-a-slice-field", "an element of a field declared as a slice of a named type is of that type: `w.values[i].inverse()`",
+     GO, {"go.mod": GOMOD, "a.go": "package app\n\ntype group struct{ n int }\n\nfunc (g group) inverse() group {\n\treturn group{-g.n}\n}\n\n"
+          "type window struct {\n\tvalues []group\n\tidx    int\n}\n\nfunc (w *window) flip() group {\n\treturn w.values[w.idx].inverse()\n}\n"},
+     [("window.flip", "calls", "group.inverse")],
+     source=GO + " ('Index expressions')")
+case("go", "embedded-field-by-its-type-name", "an embedded field is named by its type: `f.basicWriter.flush()` is basicWriter's method",
+     GO, {"go.mod": GOMOD, "a.go": "package app\n\ntype basicWriter struct{ n int }\n\nfunc (b *basicWriter) flush() {\n\tb.n = 0\n}\n\n"
+          "type flushWriter struct {\n\tbasicWriter\n}\n\nfunc (f *flushWriter) Flush() {\n\tf.basicWriter.flush()\n}\n"},
+     [("flushWriter.Flush", "calls", "basicWriter.flush")],
+     source=GO + " ('Struct types': the unqualified type name acts as the field name of an embedded field)")
+case("go", "named-result-type-method", "a call's result typed by a named type answers its method: `Chain(m).Handler(h)` is Middlewares.Handler",
+     GO, {"go.mod": GOMOD, "a.go": "package app\n\ntype Middlewares []func(int) int\n\nfunc (ms Middlewares) Handler(h int) int {\n\treturn h\n}\n\n"
+          "func Chain(ms ...func(int) int) Middlewares {\n\treturn Middlewares(ms)\n}\n\nfunc Use(h int) int {\n\treturn Chain().Handler(h)\n}\n"},
+     [("Use", "calls", "Middlewares.Handler")],
+     source=GO + " ('Method sets', 'Calls')")
+case("go", "function-typed-field-types", "the parameter and result types of a struct field's function type are references of the struct",
+     GO, {"go.mod": GOMOD, "a.go": "package app\n\ntype Command struct {\n\tRunE func(cmd *Command, args []string) error\n\tHook func() *Result\n}\n\ntype Result struct{ ok bool }\n"},
+     [("Command", "references", "Result")],
+     source=GO + " ('Function types')")
+
+# Kotlin, from the calls clikt and kotlinpoet left without an edge
+# (benchmarks/unresolved.py, engine 0.5.80): an extension's result in a chain.
+case("kotlin", "extension-result-in-a-chain", "an extension called in the middle of a chain gives its declared result, which the next call is made on: `c.argument().optional()`",
+     KT, {"src/app/A.kt": "package app\n\nclass Processed<A, V>(val name: String)\n\nclass Command\n\n"
+          "fun Command.argument(name: String = \"\"): Processed<String, String> = Processed(name)\n\n"
+          "fun <A : Any, V> Processed<A, V>.optional(): Processed<A?, V> = Processed(name)\n\n"
+          "class Tool {\n    fun build(c: Command) {\n        c.argument().optional()\n    }\n}\n"},
+     [("Tool.build", "calls", "optional"), ("Tool.build", "calls", "argument")],
+     source="Kotlin Language Specification, 'Extension declaration' and 'Call with an explicit receiver' (the receiver of a call is the value of the expression before it)")
+case("kotlin", "extension-result-through-typealias", "an extension whose result is written as a type alias gives the aliased type to the next call",
+     KT, {"src/app/A.kt": "package app\n\nclass Processed<A, V>(val name: String)\n\ntypealias RawArgument = Processed<String, String>\n\nclass Command\n\n"
+          "fun Command.argument(name: String = \"\"): RawArgument = Processed(name)\n\n"
+          "fun <A : Any, V> Processed<A, V>.optional(): Processed<A?, V> = Processed(name)\n\n"
+          "class Tool {\n    fun build(c: Command) {\n        c.argument().optional()\n    }\n}\n"},
+     [("Tool.build", "calls", "optional")],
+     source="Kotlin Language Specification, 'Type alias' (an alias stands for the type it names)")
+case("csharp", "extension-result-in-a-chain", "an extension method called in the middle of a chain gives its result, which the next extension is called on",
+     CS, {"A.cs": "namespace App\n{\n    public class Request { }\n\n    public class Command { }\n\n"
+          "    public static class Ext\n    {\n        public static Request Build(this Command c) => new Request();\n\n"
+          "        public static Request Signed(this Request r) => r;\n    }\n\n"
+          "    public class Tool\n    {\n        public Request Run(Command c) => c.Build().Signed();\n    }\n}\n"},
+     [("Tool.Run", "calls", "Ext.Signed"), ("Tool.Run", "calls", "Ext.Build")],
+     source="C# Language Specification 12.8.10.3 'Extension method invocations'")
+
 # --- running ------------------------------------------------------------------
 
 def _matches(node: dict[str, Any], want: str) -> bool:

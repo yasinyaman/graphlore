@@ -292,11 +292,11 @@ Found by: the specification 30, a compiler 19, comparison 0, the grammar 2, the 
 | an import of a directory is the file its `package.json` names | `package-json-types-entry` | – | yes |
 | where a type is written, a value of the name does not hide the type around it | `type-meaning-skips-values` | – | yes |
 
-### go (53 of 53)
+### go (58 of 58)
 
 The Go Programming Language Specification, 'Declarations and scope', 'Selectors', 'Method sets'.
 
-Found by: the specification 23, a compiler 8, comparison 2, the grammar 5, the language's own tools 15. With the place it was read in the language's own tools: 15.
+Found by: the specification 23, a compiler 13, comparison 2, the grammar 5, the language's own tools 15. With the place it was read in the language's own tools: 20.
 
 | Rule | Case | Versions | Engine |
 |---|---|---|---|
@@ -353,6 +353,11 @@ Found by: the specification 23, a compiler 8, comparison 2, the grammar 5, the l
 | `T.M` is a method expression: a use of T's method | `method-expression` | – | yes |
 | `x.M` without a call is a method value: a use of the method | `method-value` | – | yes |
 | a method of `*T` is called on an addressable `T` | `pointer-method-on-a-value` | – | yes |
+| an element of a named slice type (`type byName []*Command`) is of the element type: `c[i].Name()` is Command's | `element-of-a-named-slice-type` | – | yes |
+| an element of a field declared as a slice of a named type is of that type: `w.values[i].inverse()` | `element-of-a-slice-field` | – | yes |
+| an embedded field is named by its type: `f.basicWriter.flush()` is basicWriter's method | `embedded-field-by-its-type-name` | – | yes |
+| a call's result typed by a named type answers its method: `Chain(m).Handler(h)` is Middlewares.Handler | `named-result-type-method` | – | yes |
+| the parameter and result types of a struct field's function type are references of the struct | `function-typed-field-types` | – | yes |
 
 ### java (62 of 62)
 
@@ -425,11 +430,11 @@ Found by: the specification 41, a compiler 3, comparison 0, the grammar 4, the l
 | an overload applicable without boxing is chosen before one that needs it | `no-boxing-before-boxing` | – | yes |
 | a class declared in a block is a name of the block | `local-class` | – | yes |
 
-### kotlin (53 of 53)
+### kotlin (55 of 55)
 
 Kotlin Language Specification, 'Scopes and identifiers', 'Overload resolution' (receivers).
 
-Found by: the specification 31, a compiler 9, comparison 0, the grammar 0, the language's own tools 13. With the place it was read in the language's own tools: 13.
+Found by: the specification 31, a compiler 11, comparison 0, the grammar 0, the language's own tools 13. With the place it was read in the language's own tools: 15.
 
 | Rule | Case | Versions | Engine |
 |---|---|---|---|
@@ -486,6 +491,8 @@ Found by: the specification 31, a compiler 9, comparison 0, the grammar 0, the l
 | of two applicable overloads, the one with the more specific parameter type | `most-specific-type` | – | yes |
 | a candidate that needs no `vararg` expansion is more specific | `non-vararg-before-vararg` | – | yes |
 | a property of a function type called is the property, not a function of its name | `property-invoke` | – | yes |
+| an extension called in the middle of a chain gives its declared result, which the next call is made on: `c.argument().optional()` | `extension-result-in-a-chain` | – | yes |
+| an extension whose result is written as a type alias gives the aliased type to the next call | `extension-result-through-typealias` | – | yes |
 
 ### scala (37 of 37)
 
@@ -533,11 +540,11 @@ Found by: the specification 20, a compiler 8, comparison 0, the grammar 4, the l
 | a member of the receiver's type comes before an extension method of the name | `member-before-extension` | – | yes |
 | `export inner.f` makes f a member of the object that writes it | `export-clause` | – | yes |
 
-### csharp (71 of 71)
+### csharp (72 of 72)
 
 C# Language Specification, 'Namespace and type names', 'Member lookup', 'Extension method invocations'.
 
-Found by: the specification 39, a compiler 7, comparison 6, the grammar 1, the language's own tools 18. With the place it was read in the language's own tools: 19.
+Found by: the specification 39, a compiler 8, comparison 6, the grammar 1, the language's own tools 18. With the place it was read in the language's own tools: 20.
 
 | Rule | Case | Versions | Engine |
 |---|---|---|---|
@@ -612,6 +619,7 @@ Found by: the specification 39, a compiler 7, comparison 6, the grammar 1, the l
 | a member of a base of the base class is a member of the class | `inherited-from-a-grandparent` | – | yes |
 | `Outer.Inner` names the nested type | `qualified-nested-type` | – | yes |
 | an argument declared with exactly a parameter's type picks that overload over one taking another constructed type | `identity-conversion-overload` | – | yes |
+| an extension method called in the middle of a chain gives its result, which the next extension is called on | `extension-result-in-a-chain` | – | yes |
 
 ### rust (75 of 75)
 
@@ -928,4 +936,4 @@ Found by: the specification 31, a compiler 2, comparison 0, the grammar 1, the l
 | `A::hello insteadof B` picks A's method of two used traits | `trait-insteadof` | – | yes |
 | a method a trait brings comes before an inherited one, and the class's own before both | `trait-before-inherited` | – | yes |
 
-678 of 678 rules hold
+686 of 686 rules hold
