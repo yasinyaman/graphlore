@@ -2826,6 +2826,39 @@ case("csharp", "identity-conversion-overload", "an argument declared with exactl
      [("P.Go", "calls", "P.cs:App.P.Run@8")], [("P.Go", "calls", "P.cs:App.P.Run@10")],
      source="C# Language Specification 12.6.4.5 'Better conversion from expression' (an identity conversion is better than any other)")
 
+# Python, from scip-python's answers on httpx and click (benchmarks/oracle_scip.py,
+# engine 0.5.80): the rules its wrong and missed rows showed.
+case("python", "name-of-another-module-needs-import", "a bare name a module neither defines nor imports is a builtin or nothing: never a definition of another module",
+     PY, {"a/x.py": "def f(p):\n    return opener(p)\n\n\ndef g(p):\n    return open(p)\n",
+          "b/y.py": "def opener(url):\n    pass\n\n\ndef open(url):\n    pass\n"},
+     [], [("f", "calls", "opener"), ("g", "calls", "open")],
+     source=PY + " 4.2.2 'Resolution of names' (a name is looked up in the local, enclosing, global and builtin namespaces; the global one is the module's)")
+case("python", "enum-member-names-its-enum", "`State.CLOSED` of an `enum.Enum` subclass is a member of the enum: a reference to the enum",
+     PY, {"a.py": "import enum\n\n\nclass State(enum.Enum):\n    OPEN = 1\n    CLOSED = 2\n\n\ndef closed(s):\n    return s == State.CLOSED\n"},
+     [("closed", "references", "State")],
+     source="Python standard library 'enum' (the class attributes of an Enum subclass are its members)")
+case("python", "default-value-reads-the-name", "a parameter's default value is read where the function is defined: a module variable written there is read by the method",
+     PY, {"a.py": "class UseDefault:\n    pass\n\n\nUSE_DEFAULT = UseDefault()\n\n\n"
+          "class Client:\n    def get(self, url: str, *, timeout: float | UseDefault = USE_DEFAULT) -> None:\n        return None\n"},
+     [("Client.get", "reads", "USE_DEFAULT")],
+     source=PY + " 8.7 'Function definitions' (default parameter values are evaluated when the definition is executed)")
+case("python", "type-alias-in-annotation", "a module variable assigned a type (`Number = Union[int, float]`) written as an annotation is a reference to the alias",
+     PY, {"a.py": "import typing\n\nNumber = typing.Union[int, float]\n\n\ndef double(x: Number) -> Number:\n    return x\n"},
+     [("double", "references", "Number")],
+     source="typing documentation 'Type aliases' (a type alias is defined by assigning the type to the alias)")
+case("python", "union-annotated-field-member", "a member of a field annotated `A | B | None` is the one type of the union that has it; never the class's own method of the name",
+     PY, {"a.py": "class Sync:\n    def close(self):\n        pass\n\n\nclass Async:\n    async def aclose(self):\n        pass\n\n\n"
+          "class Response:\n    def __init__(self, stream: Sync | Async | None = None):\n        self.stream = stream\n\n    def close(self):\n        self.stream.close()\n"},
+     [("Response.close", "calls", "Sync.close")], [("Response.close", "calls", "Response.close")],
+     source="PEP 604 (`X | Y` is a union: a value of it is one of its members' types)")
+case("python", "field-typed-by-its-parameter", "`self.request = request` in `__init__` with `request: Request` types the field, also in a class with a library base",
+     PY, {"a.py": "import urllib.request\n\n\nclass Request:\n    def __init__(self):\n        self.headers = {}\n\n\n"
+          "class Response:\n    def __init__(self):\n        self.headers = {}\n\n\n"
+          "class Compat(urllib.request.Request):\n    def __init__(self, request: Request) -> None:\n        super().__init__(url=\"x\")\n        self.request = request\n\n"
+          "    def add(self, key, value):\n        self.request.headers[key] = value\n"},
+     [("Compat.add", "writes", "Request.headers")], [("Compat.add", "writes", "Response.headers")],
+     source=PY + " 3.2 (an instance attribute is created by assignment; its value is the parameter's)")
+
 # --- running ------------------------------------------------------------------
 
 def _matches(node: dict[str, Any], want: str) -> bool:

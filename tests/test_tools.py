@@ -11060,6 +11060,8 @@ def _scip_project(tmp_path, monkeypatch):
             _scip_occ([4, 4, 10], _SYM + "helper().", roles=8),
             _scip_occ([5, 11, 16], _SYM + "other().", roles=8, typed=True),
             _scip_occ([4, 4, 5], "local 3"),
+            # the source writes `helper` here: an index binding it to `other` slipped
+            _scip_occ([4, 4, 10], _SYM + "other().", roles=8),
             _scip_occ([0, 18, 24], _SYM + "helper().", roles=2),   # the import: skipped
         ],
         "pkg/b.py": [
@@ -11085,6 +11087,8 @@ def test_scip_reader_reads_ranges_roles_and_names(tmp_path, monkeypatch):
     # the packed range and the typed one; the local symbol is not kept
     assert ("pkg/a.py", 5, 4, 10, "helper") in refs and ("pkg/a.py", 6, 11, 16, "other") in refs
     assert not any(o.symbol.startswith("local") for o in idx.refs)
+    assert idx.mismatched == 1 and not any(
+        o.line == 5 and o.symbol.endswith("other().") for o in idx.refs)
     assert scip.load() is idx                            # cached on the file
     for sym, name in [("a b c 1 `x.y`/Cls#", "Cls"), ("a b c 1 m/Cls#run().", "run"),
                       ("a b c 1 m/f().(x)", ""), ("a b c 1 m/Cls#[T]", ""),
@@ -11155,3 +11159,20 @@ def test_scip_paths_follow_the_index_s_project_root(tmp_path):
                     apart, "apart")
     assert apart.documents == 1 and apart.defs[_SYM + "f()."] == ("z.py", 1)
     assert "made in another directory" in apart.errors[0]
+
+
+def test_scip_matches_a_symbol_by_its_descriptors():
+    from graphlore import scip
+
+    idx = scip.Index(defs={
+        "scip-python python click 08b8 `src.click.utils`/echo().": ("src/click/utils.py", 236),
+        "scip-python python click 08b8 `src.click.a`/run().": ("src/click/a.py", 1),
+        "scip-python python click 08b8 `src.other.a`/run().": ("src/other/a.py", 1),
+    })
+    # the installed copy a test imports names the project's own definition
+    assert idx.def_of("scip-python python click 8.5.0 `click.utils`/echo().") == (
+        "src/click/utils.py", 236)
+    # two candidates: none
+    assert idx.def_of("scip-python python x 1.0 `a`/run().") is None
+    assert idx.def_of("scip-python python click 8.5.0 `click.utils`/missing().") is None
+    assert scip.descriptor("local 3") == ""

@@ -565,8 +565,11 @@ impl State {
         if pk == "generic_name" {
             return;
         }
+        // (Python `timeout: float = DEFAULT`: the default is a value, the
+        // node's kind only says the parameter is typed)
+        let typed_default = is_typed_default(p, n);
         if pk.contains("import")
-            || pk.contains("type")
+            || (pk.contains("type") && !typed_default)
             || pk.contains("label")
             || pk.contains("decorator")
             || pk.contains("annotation")
@@ -633,7 +636,7 @@ impl State {
         if is_callee(p, n) || is_write_target(n, anc) {
             return;
         }
-        if p.kind().contains("import") || p.kind().contains("type") {
+        if p.kind().contains("import") || (p.kind().contains("type") && !is_typed_default(p, n)) {
             return;
         }
         if is_object(p, n) {
@@ -1001,4 +1004,11 @@ fn calls_mutator<'t>(n: Node<'t>, src: &[u8], anc: &[Node<'t>]) -> bool {
         i += 2;
     }
     false
+}
+
+/// `n` is the default value of a typed parameter (Python
+/// `typed_default_parameter`'s `value`): a value read, not a type.
+fn is_typed_default(p: Node, n: Node) -> bool {
+    p.kind() == "typed_default_parameter"
+        && p.child_by_field_name("value").is_some_and(|v| v.id() == n.id())
 }

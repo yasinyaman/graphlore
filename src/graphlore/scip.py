@@ -61,6 +61,36 @@ class Index:
     defs: dict[str, tuple[str, int]] = field(default_factory=dict)
     refs: list[Occurrence] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    # uses left out because the source text at their range is not the name of
+    # their symbol: an indexer's slip (scip-python binds a name re-exported by a
+    # package to a neighbour of it), an alias (`import numpy as np`), or a file
+    # that changed since the index was made
+    mismatched: int = 0
+    _by_descriptor: dict[str, list[tuple[str, tuple[str, int]]]] | None = field(
+        default=None, repr=False)
+
+    def def_of(self, symbol: str) -> tuple[str, int] | None:
+        """Where a symbol is defined in the project: by the symbol itself, else
+        by its descriptors alone. An indexer may name one definition two ways:
+        the project's own package (``click <commit>``, and a module named from
+        its path, ``src.click.utils``) where it is defined, the installed copy
+        (``click 8.5.0``, ``click.utils``) where a test imports it. The module
+        may be longer on the definition's side; one candidate only."""
+        got = self.defs.get(symbol)
+        if got is not None:
+            return got
+        if self._by_descriptor is None:
+            self._by_descriptor = {}
+            for sym, where in self.defs.items():
+                module, rest = _module_and_rest(descriptor(sym))
+                if rest:
+                    self._by_descriptor.setdefault(rest, []).append((module, where))
+        module, rest = _module_and_rest(descriptor(symbol))
+        if not rest:
+            return None
+        cands = {where for m, where in self._by_descriptor.get(rest, [])
+                 if m == module or (module and m.endswith("." + module))}
+        return next(iter(cands)) if len(cands) == 1 else None
 
 
 # --- protobuf ------------------------------------------------------------------
@@ -200,11 +230,14 @@ def read_index(data: bytes, project: Path, into: Index, source: str) -> None:
 def _read_document(doc: bytes, prefix: str, into: Index, project: Path) -> None:
     rel = ""
     occs: list[bytes] = []
+    encoding = 0
     for num, wire, v in _fields(doc):
         if num == 1 and wire == 2:
             rel = _str(v)
         elif num == 2 and wire == 2:
             occs.append(v)  # type: ignore[arg-type]
+        elif num == 6 and wire == 0:
+            encoding = int(v)  # type: ignore[call-overload]
     rel = rel.lstrip("./").replace("\\", "/")
     if not rel or ".." in rel.split("/"):
         return
@@ -219,6 +252,7 @@ def _read_document(doc: bytes, prefix: str, into: Index, project: Path) -> None:
     else:
         rel = prefix + rel
     into.documents += 1
+    lines = _lines(project / rel)
     for occ in occs:
         fs = list(_fields(occ))
         rng = _range(fs)
@@ -231,8 +265,44 @@ def _read_document(doc: bytes, prefix: str, into: Index, project: Path) -> None:
         line, char, end = rng
         if roles & DEFINITION:
             into.defs.setdefault(symbol, (rel, line + 1))
+        elif lines is not None and not _names(lines, line, char, end, encoding, symbol):
+            into.mismatched += 1
         else:
             into.refs.append(Occurrence(rel, line + 1, char, end, symbol, roles))
+
+
+def _lines(path: Path) -> list[str] | None:
+    """A source file's lines, split on ``\n`` only (as an indexer counts them;
+    ``str.splitlines`` also splits on form feeds and line separators)."""
+    try:
+        return path.read_text(encoding="utf-8", errors="replace").split("\n")
+    except OSError:
+        return None
+
+
+def _slice(text: str, start: int, end: int, encoding: int) -> set[str]:
+    """What ``[start, end)`` of a line is under the document's position
+    encoding (1 UTF-8, 2 UTF-16, 3 UTF-32 code units); every reading when the
+    document does not say."""
+    out = set()
+    if encoding in (0, 3):
+        out.add(text[start:end])
+    for enc, code in (("utf-8", 1), ("utf-16-le", 2)):
+        if encoding in (0, code):
+            raw = text.encode(enc, "replace")
+            unit = 2 if code == 2 else 1
+            out.add(raw[start * unit:end * unit].decode(enc, "replace"))
+    return out
+
+
+def _names(lines: list[str], line: int, char: int, end: int, encoding: int,
+           symbol: str) -> bool:
+    """Whether the source writes the symbol's name where the index says it
+    does. A symbol whose name cannot be read is kept."""
+    name = bare_name(symbol)
+    if not name or line >= len(lines) or end <= char:
+        return True
+    return name in _slice(lines[line], char, end, encoding)
 
 
 # --- symbols ---------------------------------------------------------------------
@@ -241,6 +311,27 @@ _LAST_DESCRIPTOR = re.compile(
     r"(?:`(?P<q>[^`]+)`|(?P<n>[^\s`/#.:!()\[\]]+))"
     r"(?P<kind>\([^)]*\)\.|[#.:!/]|\([^)]*\)|\[[^\]]*\])$"
 )
+
+
+def descriptor(symbol: str) -> str:
+    """A global symbol without its scheme, manager, package and version:
+    ``scip-python python click 8.5.0 `click.utils`/echo().`` is
+    ``` `click.utils`/echo().``` ("" for a local symbol)."""
+    parts = symbol.split(" ", 4)
+    return parts[4] if len(parts) == 5 and not symbol.startswith("local ") else ""
+
+
+def _module_and_rest(desc: str) -> tuple[str, str]:
+    """`` `click.utils`/echo().`` -> (``click.utils``, ``echo().``); a
+    descriptor with no namespace first is all rest."""
+    if desc.startswith("`"):
+        end = desc.find("`/", 1)
+        if end > 0:
+            return desc[1:end], desc[end + 2:]
+    head, sep, rest = desc.partition("/")
+    if sep and not any(c in head for c in "#.():![]`"):
+        return head, rest
+    return "", desc
 
 
 def bare_name(symbol: str) -> str:

@@ -820,6 +820,69 @@ fn wrapper_named(t: Node, src: &[u8]) -> bool {
 
 /// Whether a type position is a wrapper that holds its value closed, or one
 /// around such a wrapper (`Arc<Mutex<Pool>>`), around a type it names.
+/// The types of a Python union a parameter is written with, `None` left out:
+/// `A | B | None`, `Union[A, B]`, `Optional[A]`, a forward reference
+/// `"Timeout"` as its name. Empty when the type is no union (or not Python).
+fn union_alts(param: Node, src: &[u8]) -> Vec<Vec<String>> {
+    if param.language().name() != Some("python") {
+        return Vec::new();
+    }
+    let Some(t) = param.child_by_field_name("type") else { return Vec::new() };
+    let t = if t.kind() == "type" { kids(t).into_iter().next().unwrap_or(t) } else { t };
+    let mut members = Vec::new();
+    let mut stack = vec![t];
+    let mut union = false;
+    while let Some(n) = stack.pop() {
+        match n.kind() {
+            "binary_operator"
+                if n.child_by_field_name("operator").is_some_and(|o| o.kind() == "|") =>
+            {
+                union = true;
+                stack.extend(
+                    [n.child_by_field_name("right"), n.child_by_field_name("left")]
+                        .into_iter()
+                        .flatten(),
+                );
+            }
+            "subscript"
+                if n.child_by_field_name("value").is_some_and(|v| {
+                    matches!(
+                        path_of(v, src).as_ref().and_then(|p| p.last()).map(String::as_str),
+                        Some("Union" | "Optional")
+                    )
+                }) =>
+            {
+                union = true;
+                let mut args: Vec<Node> =
+                    kids(n).into_iter().skip(1).filter(|c| c.is_named()).collect();
+                args.reverse();
+                stack.extend(args);
+            }
+            "type" => stack.extend(kids(n)),
+            "none" => {}
+            "string" => {
+                let name = text(n, src).trim_matches(|c| c == '"' || c == '\'').to_string();
+                if !name.is_empty()
+                    && name.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '.')
+                {
+                    members.push(name.split('.').map(String::from).collect());
+                }
+            }
+            "identifier" | "attribute" => {
+                if let Some(p) = path_of(n, src) {
+                    members.push(p);
+                }
+            }
+            _ => {}
+        }
+    }
+    if union {
+        members
+    } else {
+        Vec::new()
+    }
+}
+
 fn sealed_type(t: Node, src: &[u8]) -> bool {
     // the type written is itself the wrapper (a tuple of one is not)
     if !wrapper_named(t, src) {
@@ -831,7 +894,11 @@ fn sealed_type(t: Node, src: &[u8]) -> bool {
     if v.len() < 2 {
         return false;
     }
-    let sealed = |name: &str| SEALED.contains(&name) && is_wrapper(name, t);
+    // (Python's `Optional[X]` is X or None, no wrapper of it)
+    let python = t.language().name() == Some("python");
+    let sealed = |name: &str| {
+        SEALED.contains(&name) && is_wrapper(name, t) && !(python && name == "Optional")
+    };
     v[..v.len() - 1].iter().any(|(p, _)| sealed(&last(p)))
 }
 
@@ -2056,6 +2123,14 @@ fn params_in(holder: Node, only_parameters: bool, src: &[u8]) -> Vec<crate::fact
         }
         // a function type names no type of its own: `Function` stands for it
         let mut ty = typed.map(|(_, ty, ..)| ty).unwrap_or_default();
+        // (Python `stream: Sync | None`: the one type of the union; of
+        // several, the first, with all of them kept)
+        let mut alts = union_alts(c, src);
+        if alts.len() == 1 {
+            ty = alts.remove(0);
+        } else if let Some(first) = alts.first() {
+            ty = first.clone();
+        }
         if ty.is_empty() {
             let mut stack = kids(c);
             let mut hops = 0;
@@ -2090,6 +2165,7 @@ fn params_in(holder: Node, only_parameters: bool, src: &[u8]) -> Vec<crate::fact
                 .child_by_field_name("type")
                 .map(|ty| text(ty, src).split_whitespace().collect())
                 .unwrap_or_default(),
+            alts,
         });
     }
     out
@@ -4780,10 +4856,15 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
     // (and a name declared in two blocks is two locals: `if (a) { const x =
     // new A() } else { const x = new B() }`; an assignment's hint is never
     // one beside a declaration)
+    // (Python: a field and a local of one name are two names, `self.request
+    // = request` in `__init__(self, request: Request)`: the field never takes
+    // the parameter's place)
     let redeclares = facts.lang == Some(crate::lang::Lang::Rust);
+    let apart = facts.lang == Some(crate::lang::Lang::Python);
     locals.dedup_by(|b, a| {
         a.from_def == b.from_def
             && a.name == b.name
+            && !(apart && a.field != b.field)
             && !(redeclares && !a.field && !b.field)
             && (a.field || b.field || b.assigned || a.until == b.until)
     });

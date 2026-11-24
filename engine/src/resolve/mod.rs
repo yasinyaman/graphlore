@@ -3964,6 +3964,22 @@ impl<'a> Project<'a> {
         own(&c).or_else(|| self.partials(c).iter().find_map(own))
     }
 
+    /// The types of the union a field is assigned from: the parameter of the
+    /// method that assigns it (`self.stream = stream`, `stream: A | B`).
+    fn field_alts(&self, c: DefRef, name: &str) -> Vec<DefRef> {
+        let Some((fi, li)) = self.field_of(c, name) else { return Vec::new() };
+        let l = &self.files[fi].locals[li];
+        let (Some(m), [param]) = (l.from_def, l.path.as_slice()) else { return Vec::new() };
+        let Some(p) = self.files[fi].defs[m].plist.iter().find(|p| p.name == *param) else {
+            return Vec::new();
+        };
+        p.alts
+            .iter()
+            .filter_map(|a| self.type_of_path(fi, Some(m), a, true))
+            .filter(|t| self.def(*t).kind.is_class_like())
+            .collect()
+    }
+
     /// The type of a field of a type (through its bases).
     fn field_type(&self, c: DefRef, name: &str, depth: usize) -> Option<(DefRef, Confidence)> {
         if let Some((fi, li)) = self.field_of(c, name) {
@@ -6437,8 +6453,26 @@ impl<'a> Project<'a> {
                         }
                         _ => None,
                     };
-                    if let Some((ft, cf)) = self.field_type(c, seg, 3).or_else(declared) {
+                    if let Some((mut ft, cf)) = self.field_type(c, seg, 3).or_else(declared) {
                         conf = conf.max(cf);
+                        // a field assigned a union-typed parameter (`stream:
+                        // Sync | Async`): a member the first type lacks is of
+                        // the one type of the union that has it
+                        if let Some(next) =
+                            rest.get(i + 1).filter(|s| !s.starts_with('[') && *s != "()")
+                        {
+                            if self.member(&Target::Def(ft), next, 3).is_none() {
+                                let alts: Vec<DefRef> = self
+                                    .field_alts(c, seg)
+                                    .into_iter()
+                                    .filter(|a| self.member(&Target::Def(*a), next, 3).is_some())
+                                    .collect();
+                                if let [one] = alts.as_slice() {
+                                    ft = *one;
+                                    conf = Confidence::Inferred;
+                                }
+                            }
+                        }
                         sealed = self.member_sealed(c, seg, found.as_ref()) && !opened_after(i + 1);
                         binds = match &found {
                             Some(Target::Def(p)) => {
@@ -7488,8 +7522,11 @@ impl<'a> Project<'a> {
                     // another module is in scope only through a `use`, the
                     // file's own or a glob's: `Result` in `lib.rs` is the
                     // prelude's, not `http::Result`)
+                    // (Python too: a module's names are its own, its imports'
+                    // and the builtins, Reference 4.2.2; a qualname holds no
+                    // module path either)
                     .filter(|r| {
-                        fam != Family::Rust
+                        !matches!(fam, Family::Rust | Family::Python)
                             || !pre.is_empty()
                             || r.0 == f
                             || self.scopes[f].imported.contains(&r.0)
@@ -7616,6 +7653,13 @@ impl<'a> Project<'a> {
         // (Rust: a name of another crate is in reach only through a `use`)
         if self.family[f] == Some(Family::Rust) {
             return self.crate_of(f) == self.crate_of(r.0)
+                || self.imports_name(f, &self.def(r).name);
+        }
+        // (Python: a bare name is the module's, an import's or a builtin; a
+        // definition of a module the file does not import is none of them)
+        if self.family[f] == Some(Family::Python) {
+            return r.0 == f
+                || self.scopes[f].imported.contains(&r.0)
                 || self.imports_name(f, &self.def(r).name);
         }
         if !matches!(self.family[f], Some(Family::Jvm | Family::Php)) {

@@ -420,7 +420,7 @@ def _apply_scip(nodes: list[dict], base: Resolved, index: Any) -> Resolved:
         if symbol in def_node:
             return def_node[symbol]
         got = None
-        where = index.defs.get(symbol)
+        where = index.def_of(symbol)
         name = scip.bare_name(symbol)
         if where and name:
             file, line = where
@@ -480,7 +480,7 @@ def _apply_scip(nodes: list[dict], base: Resolved, index: Any) -> Resolved:
             path = _resolve_in_project(occ.file)
             try:
                 lines_of[occ.file] = (path.read_text(encoding="utf-8", errors="replace")
-                                      .splitlines() if path else None)
+                                      .split("\n") if path else None)
             except OSError:
                 lines_of[occ.file] = None
         text = lines_of[occ.file]
@@ -513,7 +513,7 @@ def _apply_scip(nodes: list[dict], base: Resolved, index: Any) -> Resolved:
             continue
         tgt = node_of(occ.symbol)
         sites.setdefault((occ.file, occ.line), []).append(
-            (name, tgt, occ.symbol not in index.defs))
+            (name, tgt, index.def_of(occ.symbol) is None))
         if tgt is None:
             continue
         src = owner(occ.file, occ.line)
@@ -560,6 +560,8 @@ def _apply_scip(nodes: list[dict], base: Resolved, index: Any) -> Resolved:
     precision = {
         "source": index.sources, "tools": index.tools, "documents": index.documents,
         "confirmed": len(confirmed), "added": len(added), "contradicted": len(contradicted),
+        # uses whose source text is not their symbol's name: not read
+        "mismatched": index.mismatched,
     }
     if index.errors:
         precision["errors"] = index.errors

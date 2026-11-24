@@ -124,11 +124,11 @@ name to the engine, so the case names it `fetchAll`.
 
 ## The rules
 
-### python (46 of 46)
+### python (52 of 52)
 
 The Python Language Reference, 'Naming and binding' (4.2) and 'The import system'.
 
-Found by: the specification 36, a compiler 1, comparison 0, the grammar 1, the language's own tools 8. With the place it was read in the language's own tools: 8.
+Found by: the specification 36, a compiler 7, comparison 0, the grammar 1, the language's own tools 8. With the place it was read in the language's own tools: 14.
 
 | Rule | Case | Versions | Engine |
 |---|---|---|---|
@@ -178,6 +178,12 @@ Found by: the specification 36, a compiler 1, comparison 0, the grammar 1, the l
 | a lambda's parameter is a name of the lambda: it hides a function of its name there | `lambda-parameter-hides` | – | yes |
 | a type parameter (`def f[T](x: T)`) hides a class of its name in the function | `pep695-type-parameter` | 3.12– | yes |
 | `self.x` of a class attribute is the class's attribute | `class-attribute-through-self` | – | yes |
+| a bare name a module neither defines nor imports is a builtin or nothing: never a definition of another module | `name-of-another-module-needs-import` | – | yes |
+| `State.CLOSED` of an `enum.Enum` subclass is a member of the enum: a reference to the enum | `enum-member-names-its-enum` | – | yes |
+| a parameter's default value is read where the function is defined: a module variable written there is read by the method | `default-value-reads-the-name` | – | yes |
+| a module variable assigned a type (`Number = Union[int, float]`) written as an annotation is a reference to the alias | `type-alias-in-annotation` | – | yes |
+| a member of a field annotated `A \| B \| None` is the one type of the union that has it; never the class's own method of the name | `union-annotated-field-member` | – | yes |
+| `self.request = request` in `__init__` with `request: Request` types the field, also in a class with a library base | `field-typed-by-its-parameter` | – | yes |
 
 ### javascript (31 of 31)
 
@@ -922,4 +928,4 @@ Found by: the specification 31, a compiler 2, comparison 0, the grammar 1, the l
 | `A::hello insteadof B` picks A's method of two used traits | `trait-insteadof` | – | yes |
 | a method a trait brings comes before an inherited one, and the class's own before both | `trait-before-inherited` | – | yes |
 
-672 of 672 rules hold
+678 of 678 rules hold
