@@ -145,6 +145,32 @@ All notable changes to this project are documented here. The format is based on
   back to BM25 once when it cannot.
 
 ### Fixed
+- **Seven name-resolution rules read off the compilers' answers on whole
+  repositories** (engine 0.5.80, `benchmarks/oracle_rust.py`,
+  `oracle_csharp.py`; each a case in `benchmarks/conformance.py` and a golden
+  in `engine/tests/edges_golden.rs`). Rust:
+  - a name after `::` or `.` in a macro's arguments is the end of a path or a
+    member, never a bare name (`assert!(f(Mode::Count))` read a struct
+    `Count` of the module);
+  - the bound of `impl<S: Sink> Core<S>` bounds `Core`'s parameter, and an
+    impl's own parameters are its methods': a method called on a field
+    typed `S`, and `S::Error` in a signature, are the trait's, not a blanket
+    `impl Sink for &mut S`'s;
+  - an item of another module is in scope only through a `use`: `Result` in
+    a file that imports none is the prelude's, not a module's `type Result`;
+  - `len` / `is_empty` after a call that returns a slice ask the slice, not
+    an element's method of the name;
+  - a path that starts at a primitive type (`usize::from`) is the
+    language's, and `as_str`, `parent`, `is_file`, `peek` and the like are
+    standard-library names no guess goes to.
+
+  C#: an argument that is the caller's parameter, declared with exactly the
+  type an overload's parameter is written with, picks that overload (an
+  identity conversion is the better one). Against rust-analyzer on ureq,
+  ripgrep, axum-realworld and actix-realworld the wrong edges go from 169 to
+  98 (precision 98.6% to 99.2%), against Roslyn on restsharp, commandline,
+  aspnetcore-realworld and todoapi from 224 to 213; no edge the compilers
+  confirm is lost, and the neutrality check finds no new leak.
 - **`spans.py` and the native engine read the same definitions on 44 more
   files of the audit repositories** (engine 0.5.80). Compared on all 5,073
   source files of the 45, they disagreed on 45; each case was read against the

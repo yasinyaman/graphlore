@@ -3421,7 +3421,7 @@ fn cpp_the_class_before_its_constructor_and_gtest_fixtures() {
     has(&got, &[("Status.Copy", "calls", "Status.OK"), ("DbTest.Writes", "calls", "Db.Write")]);
 }
 
-/// Rust (engine 0.5.81, from rust-analyzer on ripgrep): in a macro's
+/// Rust (engine 0.5.80, from rust-analyzer on ripgrep): in a macro's
 /// arguments, `Mode::Count` is a path to the variant, and `c.n` a member;
 /// the last name is never read as a bare name of the module (a struct
 /// `Count` beside the enum's variant).
@@ -3441,7 +3441,7 @@ fn rust_a_path_in_a_macro_argument_is_no_bare_name() {
     );
 }
 
-/// Rust (engine 0.5.81, from rust-analyzer on ripgrep's searcher): the bound
+/// Rust (engine 0.5.80, from rust-analyzer on ripgrep's searcher): the bound
 /// of `impl<X: Sink> Core<X>` is the bound of `Core`'s parameter, so a method
 /// called on a field typed by it is the trait's own, not the method of a
 /// blanket `impl Sink for &mut S` beside it.
@@ -3458,7 +3458,7 @@ fn rust_an_impl_bound_types_the_struct_parameter() {
     assert!(!got.contains(&("Core.run".into(), "calls".into(), "S.matched".into())));
 }
 
-/// Rust (engine 0.5.81, from rust-analyzer on axum and actix): an item of
+/// Rust (engine 0.5.80, from rust-analyzer on axum and actix): an item of
 /// another module of the crate is no name of a file that does not `use` it;
 /// `Result` there is the prelude's, not a module's `type Result`.
 #[test]
@@ -3481,7 +3481,7 @@ fn rust_an_item_of_another_module_needs_a_use() {
     }
 }
 
-/// Rust (engine 0.5.81, from rust-analyzer on ripgrep's printer): the size of
+/// Rust (engine 0.5.80, from rust-analyzer on ripgrep's printer): the size of
 /// a slice a method returns is the slice's, not an element's method of the
 /// name; an element taken from it (`[0]`) is asked as before.
 #[test]
@@ -3494,7 +3494,7 @@ fn rust_the_size_of_a_returned_slice_is_the_slice_s() {
     assert!(!got.contains(&("none".into(), "calls".into(), "Match.is_empty".into())), "{got:?}");
 }
 
-/// Rust (engine 0.5.81, from rust-analyzer on ripgrep's matcher): a path that
+/// Rust (engine 0.5.80, from rust-analyzer on ripgrep's matcher): a path that
 /// starts at a primitive type (`usize::from(b)`) is the language's; no guess
 /// goes to a project's `impl From<…> for std::io::Error`.
 #[test]
@@ -3507,4 +3507,17 @@ fn rust_a_primitive_type_path_is_the_language_s() {
         ),
     ]);
     assert!(!got.iter().any(|(s, r, _)| s == "index" && r == "calls"), "{got:?}");
+}
+
+/// C# (engine 0.5.80, from Roslyn on restsharp): an argument that is the
+/// caller's parameter, declared with the very type an overload's parameter is
+/// written with, picks that overload over one taking another constructed type.
+#[test]
+fn csharp_an_identity_conversion_picks_the_overload() {
+    let got = quals("csidentity", &[("P.cs", "using System;\nusing System.Collections.Generic;\n\nnamespace App\n{\n    public static class P\n    {\n        static int Run(Func<object, IEnumerable<IFormattable>> get) => 1;\n\n        static int Run(Func<object, IEnumerable<IConvertible>> get) => 2;\n\n        static int Go(Func<object, IEnumerable<IFormattable>> getFormattables) => Run(getFormattables);\n    }\n}\n")]);
+    let runs: Vec<_> = got
+        .iter()
+        .filter(|(s, r, t)| s == "App.P.Go" && r == "calls" && t == "App.P.Run")
+        .collect();
+    assert_eq!(runs.len(), 1, "{got:?}");
 }

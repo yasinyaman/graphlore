@@ -2047,6 +2047,28 @@ impl<'a> Project<'a> {
                 &param.ty
             };
             score += self.arg_fits(f, d, c, &a.kind, ty)?;
+            // an argument that is a parameter of the caller, declared with the
+            // very type this parameter is written with (type arguments and
+            // all), is an identity conversion: the better one (C# §12.6.4.5;
+            // `GetPopulateArray(getFormattables, …)` with `Func<object,
+            // IEnumerable<IFormattable>> getFormattables` beside an overload
+            // taking `Func<object, IEnumerable<IConvertible>>`)
+            if let crate::facts::Arg::Path(path) = &a.kind {
+                if let ([name], Some(di)) = (path.as_slice(), d) {
+                    let norm = |t: &str| -> String {
+                        t.chars().filter(|ch| !ch.is_whitespace()).collect::<String>()
+                    };
+                    let theirs = norm(param.written.trim_end_matches('?'));
+                    let given = self.files[f].defs[di]
+                        .plist
+                        .iter()
+                        .find(|x| x.name == *name)
+                        .map(|x| norm(x.written.trim_end_matches('?')));
+                    if !theirs.is_empty() && given.as_deref() == Some(theirs.as_str()) {
+                        score += 2;
+                    }
+                }
+            }
         }
         // a `params` member applicable only in its expanded form is worse than
         // one applicable in its normal form (C# §12.6.4.3)

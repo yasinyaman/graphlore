@@ -2820,6 +2820,11 @@ case("rust", "primitive-type-path", "`usize::from(b)` is the primitive's associa
      RS, {"Cargo.toml": CARGO21, "src/lib.rs": "pub struct Wrapper(u8);\n\nimpl From<Wrapper> for std::io::Error {\n    fn from(_w: Wrapper) -> Self {\n        std::io::Error::other(\"x\")\n    }\n}\n\npub fn index(b: u8) -> usize {\n    usize::from(b)\n}\n"},
      [], [("index", "calls", "from")],
      source=REF_RS + "types/numeric.md and paths.md r[paths.qualifiers.type-to-trait] (a primitive's path names the language's type)")
+# C#, from Roslyn's answers on restsharp (benchmarks/oracle_csharp.py, engine 0.5.80)
+case("csharp", "identity-conversion-overload", "an argument declared with exactly a parameter's type picks that overload over one taking another constructed type",
+     CS, {"P.cs": "using System;\nusing System.Collections.Generic;\n\nnamespace App\n{\n    public static class P\n    {\n        static int Run(Func<object, IEnumerable<IFormattable>> get) => 1;\n\n        static int Run(Func<object, IEnumerable<IConvertible>> get) => 2;\n\n        static int Go(Func<object, IEnumerable<IFormattable>> getFormattables) => Run(getFormattables);\n    }\n}\n"},
+     [("P.Go", "calls", "P.cs:App.P.Run@8")], [("P.Go", "calls", "P.cs:App.P.Run@10")],
+     source="C# Language Specification 12.6.4.5 'Better conversion from expression' (an identity conversion is better than any other)")
 
 # --- running ------------------------------------------------------------------
 

@@ -527,11 +527,11 @@ Found by: the specification 20, a compiler 8, comparison 0, the grammar 4, the l
 | a member of the receiver's type comes before an extension method of the name | `member-before-extension` | – | yes |
 | `export inner.f` makes f a member of the object that writes it | `export-clause` | – | yes |
 
-### csharp (70 of 70)
+### csharp (71 of 71)
 
 C# Language Specification, 'Namespace and type names', 'Member lookup', 'Extension method invocations'.
 
-Found by: the specification 39, a compiler 6, comparison 6, the grammar 1, the language's own tools 18. With the place it was read in the language's own tools: 18.
+Found by: the specification 39, a compiler 7, comparison 6, the grammar 1, the language's own tools 18. With the place it was read in the language's own tools: 19.
 
 | Rule | Case | Versions | Engine |
 |---|---|---|---|
@@ -605,12 +605,13 @@ Found by: the specification 39, a compiler 6, comparison 6, the grammar 1, the l
 | of two candidates with the same parameter types, the one that is not generic is better | `overload-non-generic-first` | – | yes |
 | a member of a base of the base class is a member of the class | `inherited-from-a-grandparent` | – | yes |
 | `Outer.Inner` names the nested type | `qualified-nested-type` | – | yes |
+| an argument declared with exactly a parameter's type picks that overload over one taking another constructed type | `identity-conversion-overload` | – | yes |
 
-### rust (70 of 70)
+### rust (75 of 75)
 
 The Rust Reference, 'Names' (name resolution, scopes, paths), 'Method call expressions', 'Field access expressions'.
 
-Found by: the specification 37, a compiler 10, comparison 6, the grammar 2, the language's own tools 15. With the place it was read in the language's own tools: 15.
+Found by: the specification 37, a compiler 15, comparison 6, the grammar 2, the language's own tools 15. With the place it was read in the language's own tools: 20.
 
 | Rule | Case | Versions | Engine |
 |---|---|---|---|
@@ -684,6 +685,11 @@ Found by: the specification 37, a compiler 10, comparison 6, the grammar 2, the 
 | `Self` in a struct's own fields is the struct | `self-type-in-a-struct` | – | yes |
 | a tuple struct's name called is its constructor, in the value namespace | `tuple-struct-constructor` | – | yes |
 | a binding of a `match` arm is a name of the arm: it hides a function of its name there only | `match-arm-binding` | – | yes |
+| a macro's argument `E::V` is a path: its last name is the variant, never a bare name of the module | `path-in-macro-argument` | – | yes |
+| in `impl<S: Sink> Core<S>`, a field typed `S` is a `Sink`: a method called on it is the trait's, never a blanket impl's | `impl-generics-bound-the-struct-parameter` | – | yes |
+| an item of another module is in scope only through a `use`: `Result` in the crate root is the prelude's, not `http::Result` | `item-of-another-module-needs-use` | – | yes |
+| `xs().is_empty()` where `xs` returns `&[T]` is the slice's method; `xs()[0].is_empty()` is the element's | `size-of-a-returned-slice` | – | yes |
+| `usize::from(b)` is the primitive's associated function: no guess goes to a project method of the name | `primitive-type-path` | – | yes |
 
 ### swift (52 of 52)
 
@@ -916,4 +922,4 @@ Found by: the specification 31, a compiler 2, comparison 0, the grammar 1, the l
 | `A::hello insteadof B` picks A's method of two used traits | `trait-insteadof` | – | yes |
 | a method a trait brings comes before an inherited one, and the class's own before both | `trait-before-inherited` | – | yes |
 
-666 of 666 rules hold
+672 of 672 rules hold
