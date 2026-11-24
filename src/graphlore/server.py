@@ -429,8 +429,7 @@ def _instructions(active: set[str] | frozenset[str] | None = None) -> str:
     if graph_writers:
         writers.append(" and ".join(graph_writers)
                        + (" change" if len(graph_writers) > 1 else " changes") + " the graph")
-    under_out = _any_of(active, "graphlore_prune", "graphlore_set_labels",
-                        "graphlore_label_communities")
+    under_out = _any_of(active, "graphlore_prune", "graphlore_set_labels")
     if under_out:
         named = ["graphlore_prune(dry_run=False)" if t == "graphlore_prune" else t
                  for t in under_out]
@@ -3650,8 +3649,8 @@ def _names_from_sampling(
 @_tool(
     annotations=ToolAnnotations(
         title="Name communities",
-        read_only_hint=False,
-        destructive_hint=False,
+        # it returns names and saves none: graphlore_set_labels persists them
+        read_only_hint=True,
     )
 )
 async def graphlore_label_communities(

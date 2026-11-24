@@ -25,7 +25,8 @@ All notable changes to this project are documented here. The format is based on
   `uses: yasinyaman/graphlore@<tag>`): it installs graphlore with the native
   engine from its own copy, reviews the pull request against its base commit,
   writes the report to the job summary and posts it as one comment it updates
-  on each push (a fork's read-only token: the summary only). `fail-on` fails
+  on each push (a fork's read-only token: the summary only); `graphlore-version`
+  installs a release from PyPI instead of its own copy. `fail-on` fails
   the step on a gate. graphlore's own pull requests run it
   (`.github/workflows/review.yml`). `docs/review.md` covers the command, the
   Action and a GitLab CI job.
@@ -43,7 +44,9 @@ All notable changes to this project are documented here. The format is based on
   files and blank lines are left out; a heading that names the code and the
   file or class that holds it are not listed as dependents (the files that
   import it still are), and a changed variable, constant or field is never
-  "untested". It builds the graph at the head commit with the native
+  "untested". Definitions the change deletes or renames, and those of a
+  removed file, are named under "Removed" from the two commits' sources. It
+  builds the graph at the head commit with the native
   engine when it is missing or older (`--no-build` refuses instead), writes
   Markdown for a pull-request comment (repository names as code spans, at
   most 20,000 characters) or `--format json`, and exits 1 when a
@@ -88,6 +91,10 @@ All notable changes to this project are documented here. The format is based on
   release. A published release still starts it as before.
 
 ### Changed
+- **`graphlore_label_communities` is marked read-only** (`read_only_hint`):
+  it returns names and saves none (`graphlore_set_labels` does), and the
+  server instructions no longer list it among the tools that write under
+  `graphify-out/`.
 - **The README says what graphlore is for beside a language server and
   built-in code search**: the questions that need the whole repository at once
   (what a change breaks, cycles, layers, routes, shared state), one budgeted

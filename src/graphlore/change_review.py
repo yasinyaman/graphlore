@@ -22,7 +22,7 @@ from typing import Any
 
 from . import config, engine
 from . import server as srv
-from .spans import _nodes_by_file
+from .spans import _nodes_by_file, _spans_python, _spans_treesitter
 
 MARKER = "<!-- graphlore-review -->"
 FAIL_ON = ("cycle", "layer", "untested")
@@ -32,6 +32,7 @@ _MAX_CHANGED = 80
 _MAX_DEPENDENTS = 60
 _MAX_TESTED = 40
 _MARKDOWN_CHARS = 20_000
+_MAX_REMOVED = 40
 
 
 class ReviewError(Exception):
@@ -169,6 +170,46 @@ def _changes_in(file: str, lines: set[int], nodes: list[dict]) -> list[_Change]:
         by_id.setdefault(nid, _Change(file, n)).lines.append(ln)
     out = sorted(by_id.values(), key=lambda c: (min(c.lines), str(srv._node_id(c.node or {}))))
     return out + ([top] if top.lines else [])
+
+
+def _definitions_at(commit: str, repo_path: str) -> dict[str, int] | None:
+    """Qualified name -> definition line of a source file at ``commit``, read
+    with the span engine from git (None when git or the span engine cannot)."""
+    text = _git(["show", f"{commit}:{repo_path}"])
+    if text is None:
+        return None
+    src = text.encode("utf-8", "replace")
+    try:
+        spans = (_spans_python(src) if repo_path.lower().endswith(".py")
+                 else _spans_treesitter(src, repo_path))
+    except Exception:  # noqa: BLE001 - a file the span engine cannot read names nothing
+        return None
+    out: dict[str, int] = {}
+    for _start, _end, line, qualname in spans:
+        out.setdefault(qualname, line)
+    return out
+
+
+def _removed_definitions(merge: str, head: str, files: list[dict]) -> list[dict]:
+    """Definitions the base had and the head has not: a file removed, or a
+    definition deleted or renamed in a file still there. The head graph has no
+    node for them, so they come from the two commits' sources."""
+    out: list[dict] = []
+    for f in files:
+        if Path(f["path"]).suffix.lower() not in srv._SOURCE_EXTS:
+            continue
+        old_path = f.get("from_repo_path") or f["repo_path"]
+        before = _definitions_at(merge, old_path)
+        if not before:
+            continue
+        after = {} if f["kind"] == "removed" else _definitions_at(head, f["repo_path"])
+        if after is None:
+            continue
+        for qualname, line in sorted(before.items(), key=lambda kv: kv[1]):
+            if qualname not in after:
+                out.append({"name": qualname, "file": f.get("from") or f["path"], "line": line,
+                            "file_removed": f["kind"] == "removed"})
+    return out
 
 
 def _ranges(lines: list[int]) -> str:
@@ -349,7 +390,11 @@ def analyze(base: str = "HEAD~1", head: str = "HEAD", *, build: bool = True, hop
         path = rec.get("to") or rec.get("path") or ""
         rel = local(path)
         if rel is not None:
-            files.append({**rec, "repo_path": path, "path": rel})
+            f = {**rec, "repo_path": path, "path": rel}
+            if rec.get("from"):
+                f["from_repo_path"] = rec["from"]
+                f["from"] = local(rec["from"]) or rec["from"]
+            files.append(f)
     cosmetic = [local(r.get("to") or r.get("path") or "") for r in diff.get("cosmetic", [])]
     present = [f for f in files if f["kind"] != "removed"]
     # definitions are read in source files; a document's or a config file's change
@@ -367,6 +412,7 @@ def analyze(base: str = "HEAD~1", head: str = "HEAD", *, build: bool = True, hop
     tests = _tests_of(defs)
     cycles = _import_cycles(nodes, edges, touched)
     layers = _layer_violations(touched)
+    removed = _removed_definitions(merge, head_sha, files)
 
     def show(c: _Change) -> dict[str, Any]:
         if c.node is None:
@@ -385,11 +431,13 @@ def analyze(base: str = "HEAD~1", head: str = "HEAD", *, build: bool = True, hop
     return {
         "base": base, "head": head, "merge_base": merge[:12], "head_commit": head_sha[:12],
         "dirty_worktree": dirty,
-        "files": [{k: v for k, v in f.items() if k != "repo_path"} for f in files],
+        "files": [{k: v for k, v in f.items() if k not in ("repo_path", "from_repo_path")}
+                  for f in files],
         "source_files": len(source),
         "cosmetic_files": [p for p in cosmetic if p],
         "changed": [show(c) for c in changes[:_MAX_CHANGED]],
         "changed_total": len(changes),
+        "removed": removed[:_MAX_REMOVED], "removed_total": len(removed),
         "dependents": deps, "hops": hops,
         "tests": {**tests, "untested": [labels.get(n, n) for n in tests["untested"]]},
         "cycles": cycles, "layers": layers,
@@ -443,6 +491,17 @@ def render_markdown(r: dict[str, Any]) -> str:
         if r["changed_total"] > len(r["changed"]):
             out.append(f"\n…and {r['changed_total'] - len(r['changed'])} more "
                        "(`--format json` lists the first ones too; narrow the range for the rest).")
+        out.append("")
+    removed = r.get("removed") or []
+    if removed:
+        out.append(f"#### Removed ({r.get('removed_total', len(removed))})")
+        out.append("| Definition | File | Line (base) |\n|---|---|---|")
+        for d in removed:
+            gone = " (file removed)" if d.get("file_removed") else ""
+            out.append(f"| {_code(d['name'])} | {_code(d['file'])}{gone} | {d['line']} |")
+        if r.get("removed_total", 0) > len(removed):
+            out.append(f"\n…and {r['removed_total'] - len(removed)} more "
+                       "(`--format json` lists the first ones).")
         out.append("")
     if deps["rows"]:
         out.append(f"#### What depends on it ({deps['total']})")

@@ -10750,3 +10750,33 @@ def test_setup_with_hooks_merges_into_claude_code_settings(tmp_path):
     with pytest.raises(clients.SetupError):
         clients.write_hooks(settings, clients.server_config(tmp_path, "lean"))
     assert cli.main(["setup", "codex", "--project", str(tmp_path), "--with-hooks"]) == 2
+
+
+def test_review_names_the_definitions_a_change_removes(tmp_path, monkeypatch):
+    """The head graph has no node for a deleted definition: the review reads
+    the two commits' sources to name it, and every definition of a removed file."""
+    import subprocess
+
+    from graphlore import change_review
+
+    _review_repo(tmp_path, monkeypatch, {
+        "pkg/core.py": "def helper(x):\n    return x + 1\n",   # compute() is gone
+    })
+
+    def git(*args):
+        return subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True,
+                              text=True).stdout.strip()
+
+    git("rm", "-q", "pkg/util.py")
+    git("commit", "-qm", "drop util")
+    graph = json.loads((tmp_path / "graphify-out" / "graph.json").read_text())
+    graph["built_at_commit"] = git("rev-parse", "HEAD")
+    (tmp_path / "graphify-out" / "graph.json").write_text(json.dumps(graph))
+    server._GRAPH_CACHE.clear()
+
+    r = change_review.analyze("HEAD~2", "HEAD", build=False)
+    removed = {(d["name"], d["file"], d["file_removed"]) for d in r["removed"]}
+    assert removed == {("compute", "pkg/core.py", False), ("tidy", "pkg/util.py", True)}
+    assert r["removed_total"] == 2
+    md = change_review.render_markdown(r)
+    assert "#### Removed (2)" in md and "| `tidy` | `pkg/util.py` (file removed) | 1 |" in md

@@ -37,6 +37,12 @@ inputs:
       the job summary only.
     required: false
     default: "true"
+  graphlore-version:
+    description: >-
+      Empty (default): graphlore from this Action's own copy, the tag you pin.
+      A version (e.g. "0.8.0"): that release from PyPI instead.
+    required: false
+    default: ""
   python-version:
     description: The Python that runs graphlore.
     required: false
@@ -65,7 +71,13 @@ runs:
       shell: bash
       env:
         ACTION_PATH: ${{ github.action_path }}
-      run: python -m pip install --quiet "${ACTION_PATH}[engine]"
+        VERSION: ${{ inputs.graphlore-version }}
+      run: |
+        if [ -n "$VERSION" ]; then
+          python -m pip install --quiet "graphlore[engine]==${VERSION}"
+        else
+          python -m pip install --quiet "${ACTION_PATH}[engine]"
+        fi
 
     - name: Review
       id: review
