@@ -3734,3 +3734,20 @@ fn go_aliases_defined_types_type_switches_and_ranges() {
         );
     }
 }
+
+#[test]
+fn go_instantiations_constants_and_function_fields() {
+    let src = "package app\n\ntype Color int\n\nfunc (c Color) Name() string { return \"c\" }\n\nconst (\n\tRed Color = iota\n\tGreen\n)\n\nconst Default = Red\n\nfunc Map[T any](x T) T { return x }\n\ntype Stack[T any] struct{ xs []T }\n\nfunc NewStack[T any]() *Stack[T] { return &Stack[T]{} }\n\nfunc (s *Stack[T]) Push(x T) {}\n\ntype Server struct {\n\trun func() int\n}\n\nfunc run() int { return 1 }\n\nfunc (s *Server) Start() int {\n\treturn s.run()\n}\n\nfunc Use() string {\n\tMap[int](1)\n\tNewStack[int]().Push(1)\n\treturn Green.Name() + Default.Name()\n}\n";
+    let got = edges("go-inst", &[("go.mod", "module example.com/app\n\ngo 1.22\n"), ("a.go", src)]);
+    has(
+        &got,
+        &[
+            ("Use()", "calls", "Map()"),
+            ("Use()", "calls", "NewStack()"),
+            ("Use()", "calls", ".Push()"),
+            ("Use()", "calls", ".Name()"),
+            (".Start()", "reads", "run"),
+        ],
+    );
+    assert!(!got.contains(&(".Start()".into(), "calls".into(), "run()".into())), "{got:#?}");
+}

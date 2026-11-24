@@ -1,5 +1,5 @@
 {
- "passed": 903,
+ "passed": 914,
  "total": 945,
  "cases": [
   {
@@ -4216,26 +4216,14 @@
   },
   {
    "id": "go/constant-takes-the-type-of-its-value",
-   "ok": false,
-   "missing": [
-    [
-     "Run",
-     "calls",
-     "Color.Name"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
    "id": "go/implicitly-repeated-constant-has-the-type",
-   "ok": false,
-   "missing": [
-    [
-     "Run",
-     "calls",
-     "Color.Name"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -4264,14 +4252,8 @@
   },
   {
    "id": "go/generic-function-instantiation",
-   "ok": false,
-   "missing": [
-    [
-     "Run",
-     "calls",
-     "Map"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -4491,11 +4473,6 @@
     [
      "Use",
      "calls",
-     "Zero"
-    ],
-    [
-     "Use",
-     "calls",
      "Item.Run"
     ]
    ],
@@ -4503,26 +4480,14 @@
   },
   {
    "id": "go/explicit-function-instantiation",
-   "ok": false,
-   "missing": [
-    [
-     "Run",
-     "calls",
-     "util/u.go:Map"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
    "id": "go/method-expression-on-instance",
-   "ok": false,
-   "missing": [
-    [
-     "Run",
-     "references",
-     "Box.Get"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -4598,14 +4563,8 @@
   },
   {
    "id": "go/explicit-type-argument-of-a-call",
-   "ok": false,
-   "missing": [
-    [
-     "Use",
-     "calls",
-     "Conv"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -5342,14 +5301,8 @@
   },
   {
    "id": "go/instantiated-generic-call",
-   "ok": false,
-   "missing": [
-    [
-     "Run",
-     "calls",
-     "Ident"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -5402,26 +5355,14 @@
   },
   {
    "id": "go/generic-type-instance-method",
-   "ok": false,
-   "missing": [
-    [
-     "use",
-     "calls",
-     "Stack.Push"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
    "id": "go/func-field-call-is-no-function",
-   "ok": false,
-   "missing": [
-    [
-     "Server.Start",
-     "reads",
-     "Server.run"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -5858,14 +5799,8 @@
   },
   {
    "id": "go/function-typed-field-called",
-   "ok": false,
-   "missing": [
-    [
-     "Fire",
-     "reads",
-     "Hook.run"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -5882,14 +5817,8 @@
   },
   {
    "id": "go/method-expression-on-an-instance",
-   "ok": false,
-   "missing": [
-    [
-     "Use",
-     "references",
-     "Box.Get"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {

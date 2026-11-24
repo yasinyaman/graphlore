@@ -292,7 +292,7 @@ Found by: the specification 30, a compiler 19, comparison 0, the grammar 2, the 
 | an import of a directory is the file its `package.json` names | `package-json-types-entry` | – | yes |
 | where a type is written, a value of the name does not hide the type around it | `type-meaning-skips-values` | – | yes |
 
-### go (275 of 317)
+### go (286 of 317)
 
 The Go Programming Language Specification, 'Declarations and scope', 'Selectors', 'Method sets'.
 
@@ -372,13 +372,13 @@ Found by: the specification 23, a compiler 13, comparison 2, the grammar 5, the 
 | a function of the package named like a predeclared one hides it: `max(a, b)` is the package function | `predeclared-name-redeclared-in-the-package` | – | yes |
 | a dot-import declares only the exported names of the package: an unexported name of its own is the file's own | `dot-import-takes-only-exported-names` | – | yes |
 | an unexported name of another package is a different identifier: a selector finds the one of its own package at the same depth | `unexported-names-of-two-packages-differ` | – | **no**: no Run -calls-> L.helper has Run -calls-> util/u.go:A.helper |
-| a constant declared without a type takes the type of its expression | `constant-takes-the-type-of-its-value` | – | **no**: no Run -calls-> Color.Name |
-| a constant whose expression list is omitted repeats the previous list and its type: it has the type of the first | `implicitly-repeated-constant-has-the-type` | – | **no**: no Run -calls-> Color.Name |
+| a constant declared without a type takes the type of its expression | `constant-takes-the-type-of-its-value` | – | yes |
+| a constant whose expression list is omitted repeats the previous list and its type: it has the type of the first | `implicitly-repeated-constant-has-the-type` | – | yes |
 | a variable declared with a type has that type, whatever its value: a method called on it is the declared type's | `declared-type-wins-over-the-value` | – | yes |
 | `var a, b = f()` gives each name its result's type | `var-multiple-results` | – | yes |
 | `var t, ok = x.(T)` gives t the type T | `var-comma-ok-assertion` | – | yes |
 | a short variable declaration redeclaring a variable of the block assigns it: the variable keeps its declared type | `short-var-redeclaration-keeps-the-variable` | – | yes |
-| a generic function written with type arguments, `Map[int](x)`, is a call of that function | `generic-function-instantiation` | 1.18– | **no**: no Run -calls-> Map |
+| a generic function written with type arguments, `Map[int](x)`, is a call of that function | `generic-function-instantiation` | 1.18– | yes |
 | a method is bound to its receiver base type wherever in the package it is declared | `method-in-another-file` | – | yes |
 | a method declared for a generic type `S[T]` is a method of S on every instantiation | `method-of-a-generic-type` | 1.18– | yes |
 | a method declared on an alias's name is a method of the aliased defined type | `method-on-an-alias-receiver` | 1.9– | yes |
@@ -410,9 +410,9 @@ Found by: the specification 23, a compiler 13, comparison 2, the grammar 5, the 
 | a value of a type parameter has the methods of the interfaces its constraint embeds | `constraint-embeds-interface` | – | yes |
 | a generic type written with type arguments is a use of the generic type and of each argument | `generic-type-instance-is-a-use` | – | yes |
 | instantiating substitutes the type arguments: a field or result typed by the type parameter is the argument's type | `instance-field-and-result-substituted` | – | yes |
-| a call of a generic function with an explicit type argument gives the argument's type as result | `explicit-instantiation-result` | – | **no**: no Use -calls-> Zero; Use -calls-> Item.Run |
-| a generic function of another package called with explicit type arguments is that function, not the same-named one of the importing package | `explicit-function-instantiation` | – | **no**: no Run -calls-> util/u.go:Map |
-| `Box[T].M` is a method expression of the generic type's method | `method-expression-on-instance` | – | **no**: no Run -references-> Box.Get |
+| a call of a generic function with an explicit type argument gives the argument's type as result | `explicit-instantiation-result` | – | **no**: no Use -calls-> Item.Run |
+| a generic function of another package called with explicit type arguments is that function, not the same-named one of the importing package | `explicit-function-instantiation` | – | yes |
+| `Box[T].M` is a method expression of the generic type's method | `method-expression-on-instance` | – | yes |
 | a generic function handed over uninstantiated is a use of that function | `generic-function-as-argument` | – | yes |
 | a generic type of another package, instantiated, gives that type's methods: not those of the importing package's same-named type | `imported-generic-type-instance` | – | yes |
 | an embedded instance of a generic type is a field named by the type's name; its methods are promoted | `embedded-instance` | – | yes |
@@ -422,7 +422,7 @@ Found by: the specification 23, a compiler 13, comparison 2, the grammar 5, the 
 | a value of an alias of pkg.T answers T's methods | `alias-of-an-imported-type` | – | yes |
 | a value of a type parameter constrained by pkg.I has I's methods | `constraint-of-an-imported-package` | – | yes |
 | ranging over a value of S ~[]E gives E, whose constraint's methods are called on it | `core-type-element-of-a-type-parameter` | – | **no**: no Total -calls-> Shape.Area |
-| the type argument written in `Conv[Celsius](1)` is a use of Celsius, the call is of Conv | `explicit-type-argument-of-a-call` | – | **no**: no Use -calls-> Conv |
+| the type argument written in `Conv[Celsius](1)` is a use of Celsius, the call is of Conv | `explicit-type-argument-of-a-call` | – | yes |
 | `f := Conv[int]` names Conv: a use of it, and `f(1)` is a call of Conv | `instantiated-function-value` | – | yes |
 | `func (b Box[_]) Size()` is Box's method, found on a Box[int] value | `blank-receiver-type-parameter` | – | yes |
 | `l.Next().Len()` where Next returns `*List[T]` is List.Len | `generic-method-result-chain` | – | yes |
@@ -531,7 +531,7 @@ Found by: the specification 23, a compiler 13, comparison 2, the grammar 5, the 
 | `store.Default.Find()` is the method of the type of the imported variable `Default`, never another type's method of that name | `imported-variable-member` | – | **no**: no Run -calls-> Repo.Find |
 | the call inside `var handler = func() int { return helper() }` is made by `handler` | `package-level-function-literal` | – | yes |
 | a call whose function expression is a type is a conversion: a use of the type, not a call of a function of the same name | `conversion-is-a-use-of-the-type` | – | yes |
-| `Ident[int](1)` calls the generic function Ident; a method Ident of a type is not that function | `instantiated-generic-call` | – | **no**: no Run -calls-> Ident |
+| `Ident[int](1)` calls the generic function Ident; a method Ident of a type is not that function | `instantiated-generic-call` | – | yes |
 | a call that is the only argument of another call binds like any call: a package-qualified name is the imported package's, not a same-named function of this package | `call-as-the-only-argument` | – | yes |
 | a package-level function named like a built-in (`min`) hides the universe's: the bare call is the project's function, not a method of that name | `package-function-hides-a-builtin` | – | yes |
 | `new(T)` is a use of the type T | `new-type-argument` | – | yes |
@@ -540,8 +540,8 @@ Found by: the specification 23, a compiler 13, comparison 2, the grammar 5, the 
 | the result of a conversion `T(x)` is of type T: `Celsius(x).String()` and `HandlerFunc(f).Serve()` are those types' methods | `conversion-result-is-the-type` | – | yes |
 | a local assigned `new(T)` is a *T: `p.Run()` is T's method, not another type's of the same name | `new-gives-a-pointer-local` | – | yes |
 | a local made by `make([]*T, n)` or `append(s, x)` is a slice of *T: its elements' methods are T's | `make-and-append-keep-the-slice-type` | – | yes |
-| `NewStack[int]()` gives a *Stack[int] and `var q Queue[string]` a Queue: `Push` is the method of the generic type of the value | `generic-type-instance-method` | – | **no**: no use -calls-> Stack.Push |
-| `s.run()` where run is a field of function type selects the field, not the package function run | `func-field-call-is-no-function` | – | **no**: no Server.Start -reads-> Server.run |
+| `NewStack[int]()` gives a *Stack[int] and `var q Queue[string]` a Queue: `Push` is the method of the generic type of the value | `generic-type-instance-method` | – | yes |
+| `s.run()` where run is a field of function type selects the field, not the package function run | `func-field-call-is-no-function` | – | yes |
 | the type of a composite literal is the type written, so a method called on it is that type's method | `composite-literal-receiver` | – | yes |
 | `err.Error()` on a value typed by the predeclared `error` is no call of a project type's Error method | `error-value-is-no-project-type` | – | yes |
 | calls written inside a built-in's arguments are calls, bound like any other | `call-inside-builtin-argument` | – | yes |
@@ -605,9 +605,9 @@ Found by: the specification 23, a compiler 13, comparison 2, the grammar 5, the 
 | type ItemBox Box[Item]: the field v of an ItemBox is an Item, so b.v.Size() is Item.Size | `defined-from-an-instance-has-its-fields` | – | **no**: no Run -calls-> Item.Size |
 | for it := range All() with All returning func(yield func(Item) bool): it is an Item, so it.Size() is Item.Size | `range-over-a-function-iterator` | 1.23– | **no**: no Run -calls-> Item.Size |
 | the embedded field of `util.Base` is named Base: `Svc{Base: b}` and `s.Base.Touch()` are the type's, not the importing package's variable Base | `embedded-field-named-by-its-type` | – | yes |
-| h.run() on a field of function type reads the field Hook.run; a method run of another type is not called | `function-typed-field-called` | – | **no**: no Fire -reads-> Hook.run |
+| h.run() on a field of function type reads the field Hook.run; a method run of another type is not called | `function-typed-field-called` | – | yes |
 | a literal assigned with := does not see the variable it initializes: its own name inside the body is the outer (package) one | `short-var-literal-sees-outer-name` | – | **no**: no Walk -calls-> step |
-| `Box[int].Get` is a use of Box.Get, not of Other.Get | `method-expression-on-an-instance` | – | **no**: no Use -references-> Box.Get |
+| `Box[int].Get` is a use of Box.Get, not of Other.Get | `method-expression-on-an-instance` | – | yes |
 | an import name is a name of its file block: the same name in two files of a package means two packages | `go-import-name-is-per-file` | – | yes |
 | a call of a method promoted from an interface embedded in a struct is the interface's method | `go-embedded-interface-in-struct` | – | yes |
 | a parameter hides an imported package's name in the function body only | `go-parameter-hides-an-import-name` | – | yes |
@@ -1195,4 +1195,4 @@ Found by: the specification 31, a compiler 2, comparison 0, the grammar 1, the l
 | `A::hello insteadof B` picks A's method of two used traits | `trait-insteadof` | – | yes |
 | a method a trait brings comes before an inherited one, and the class's own before both | `trait-before-inherited` | – | yes |
 
-903 of 945 rules hold
+914 of 945 rules hold

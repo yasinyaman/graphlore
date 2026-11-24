@@ -2270,7 +2270,7 @@ impl<'a> Project<'a> {
             .declared_type
             .as_ref()
             .and_then(|ty| self.type_of_path(p.0, def.parent, ty, true))
-            .filter(|t| self.def(*t).kind.is_class_like());
+            .filter(|t| self.is_type_like(*t));
         declared.or_else(|| {
             self.class_of(p.0, def.parent)
                 .and_then(|owner| self.field_type(owner, &def.name, 3))
@@ -2286,8 +2286,7 @@ impl<'a> Project<'a> {
 
     /// The project type a parameter of `c` is written with.
     fn param_type(&self, c: DefRef, ty: &[String]) -> Option<DefRef> {
-        self.type_of_path(c.0, self.def(c).parent, ty, true)
-            .filter(|t| self.def(*t).kind.is_class_like())
+        self.type_of_path(c.0, self.def(c).parent, ty, true).filter(|t| self.is_type_like(*t))
     }
 
     /// Whether every type that is a `base` says so where it is declared, so
@@ -8584,7 +8583,7 @@ impl<'a> Project<'a> {
         let def = self.def(p);
         let ty = def.declared_type.as_ref()?;
         let t = self.type_of_path(p.0, def.parent, ty, true)?;
-        self.def(t).kind.is_class_like().then_some((t, Confidence::Extracted))
+        self.is_type_like(t).then_some((t, Confidence::Extracted))
     }
 
     /// The type of a variable from what constructs its value
@@ -8593,7 +8592,7 @@ impl<'a> Project<'a> {
         let d = self.def(p);
         let path = d.value_path.as_ref()?;
         let t = self.type_of_path(p.0, d.parent, path, false)?;
-        self.def(t).kind.is_class_like().then_some((t, Confidence::Inferred))
+        self.is_type_like(t).then_some((t, Confidence::Inferred))
     }
 
     /// Whether a variable is assigned something of the project's that the
@@ -9086,7 +9085,11 @@ pub fn resolve(
                                 // or writes
                                 if tk.is_state() && r.kind == RefKind::Call {
                                     let called = r.path.last().map(String::as_str).unwrap_or("");
-                                    if called != p.def(t).name {
+                                    // (Go `s.run()` on a field of function
+                                    // type: the field is read)
+                                    if fam == Family::Go && called == p.def(t).name {
+                                        "reads"
+                                    } else if called != p.def(t).name {
                                         if called.starts_with("set") {
                                             "writes"
                                         } else {

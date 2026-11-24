@@ -192,6 +192,11 @@ pub fn path_of(n: Node, src: &[u8]) -> Option<Vec<String>> {
             .iter()
             .find_map(|f| n.child_by_field_name(f))
             .or_else(|| kids(n).into_iter().next())?;
+        // Go `NewStack[int]()`, `Box[Item].Get`: an instantiation, the
+        // generic thing itself
+        if k == "index_expression" && go_instantiation(n, object, src) {
+            return path_of(object, src);
+        }
         let mut p = path_of(object, src).filter(|p| p[0] != UNKNOWN)?;
         p.push(ELEMENT.into());
         return Some(p);
@@ -378,6 +383,12 @@ pub fn path_of(n: Node, src: &[u8]) -> Option<Vec<String>> {
 }
 
 pub fn is_call_kind(k: &str) -> bool {
+    // (Go `Map[int](x)`: what the grammar reads as a conversion to a generic
+    // type is most often a call of a generic function; a conversion of a
+    // type is read as one where the name resolves to a type)
+    if k == "type_conversion_expression" {
+        return true;
+    }
     (k.contains("call") || k.contains("invocation"))
         && !k.contains("signature")
         && !k.contains("suffix")
@@ -450,6 +461,9 @@ pub fn callee(n: Node, src: &[u8]) -> Option<(RefKind, Vec<String>)> {
             p.extend(path_of(name, src)?);
             return Some((RefKind::Call, p));
         }
+    }
+    if k == "type_conversion_expression" {
+        return Some((RefKind::Call, path_of(n.child_by_field_name("type")?, src)?));
     }
     let f = n
         .child_by_field_name("function")
@@ -4923,6 +4937,36 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
         }
     }
     add_extras(&mut facts.defs, &extras, m, src);
+    // Go `const ( A Color = iota; B )`: a spec with no type and no value
+    // repeats the one before it, type and all (the spec's "Constant
+    // declarations")
+    if facts.lang == Some(crate::lang::Lang::Go) {
+        for decl in kids(root).into_iter().filter(|c| c.kind() == "const_declaration") {
+            // (the type and the value of the spec before)
+            type Repeated = (Option<Vec<String>>, Option<Vec<String>>);
+            let mut prev: Option<Repeated> = None;
+            for spec in kids(decl).into_iter().filter(|c| c.kind() == "const_spec") {
+                let (lo, hi) = (spec.start_byte(), spec.end_byte());
+                let repeats = spec.child_by_field_name("type").is_none()
+                    && spec.child_by_field_name("value").is_none();
+                let mine = facts.defs.iter_mut().filter(|d| {
+                    d.kind == crate::facts::DefKind::Constant
+                        && lo <= d.start_byte
+                        && d.start_byte < hi
+                });
+                if repeats {
+                    if let Some((ty, value)) = &prev {
+                        for d in mine {
+                            d.declared_type.clone_from(ty);
+                            d.value_path.clone_from(value);
+                        }
+                    }
+                } else if let Some(d) = mine.into_iter().next() {
+                    prev = Some((d.declared_type.clone(), d.value_path.clone()));
+                }
+            }
+        }
+    }
     if rust {
         rust_impl_bounds(root, src, &mut facts.defs);
     }
@@ -6219,6 +6263,67 @@ fn destructured<'t>(n: Node<'t>, src: &[u8]) -> Option<(Vec<String>, Node<'t>)> 
         _ => return None,
     };
     Some((names_of(pattern)?, value))
+}
+
+/// Go's predeclared types, which an index never is.
+const GO_PREDECLARED_TYPES: &[&str] = &[
+    "any",
+    "bool",
+    "byte",
+    "comparable",
+    "complex64",
+    "complex128",
+    "error",
+    "float32",
+    "float64",
+    "int",
+    "int8",
+    "int16",
+    "int32",
+    "int64",
+    "rune",
+    "string",
+    "uint",
+    "uint8",
+    "uint16",
+    "uint32",
+    "uint64",
+    "uintptr",
+];
+
+/// Go: whether `x[i]` is an instantiation with type arguments (`Map[int]`,
+/// `NewStack[Item]`) rather than an index: every index is a type written as
+/// one (`*T`, `[]T`, `map[K]V`, `pkg.T`), a predeclared type, or a
+/// capitalized name after a capitalized operand (an index of a variable is
+/// most often a lowercase name or a literal).
+fn go_instantiation(n: Node, object: Node, src: &[u8]) -> bool {
+    if crate::parse::current() != Some(crate::lang::Lang::Go) {
+        return false;
+    }
+    let mut cursor = n.walk();
+    let index: Vec<Node> = n.children_by_field_name("index", &mut cursor).collect();
+    let capital = |x: &str| x.chars().next().is_some_and(|c| c.is_ascii_uppercase());
+    let operand = text(object, src);
+    let last = operand.rsplit('.').next().unwrap_or(&operand).to_string();
+    !index.is_empty()
+        && index.iter().all(|i| {
+            let t = text(*i, src);
+            matches!(
+                i.kind(),
+                "pointer_type"
+                    | "slice_type"
+                    | "array_type"
+                    | "map_type"
+                    | "channel_type"
+                    | "generic_type"
+                    | "qualified_type"
+                    | "function_type"
+                    | "interface_type"
+                    | "struct_type"
+                    | "type_elem"
+            ) || GO_PREDECLARED_TYPES.contains(&t.as_str())
+                || (i.kind() == "identifier" && capital(&t) && capital(&last))
+        })
 }
 
 /// Go: an expression that gives a value and a bool when two names take it
