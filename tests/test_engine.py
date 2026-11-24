@@ -606,3 +606,40 @@ def test_review_builds_the_graph_at_the_head_commit(tmp_path, monkeypatch):
     assert [c["node"] for c in r["changed"]] == ["helper()"]
     deps = {d["node"] for d in r["dependents"]["rows"]}
     assert {"compute()", "handle()"} <= deps
+
+
+def test_a_workspace_of_two_repositories_builds_as_one_graph(tmp_path, monkeypatch):
+    """A folder of git repositories: each repository's commit in the header, a
+    request to a host the workspace file gives a repository linked to its route,
+    and freshness answered per repository."""
+    files = {
+        "web/client.py": ("import httpx\n\n\ndef list_users():\n"
+                          "    return httpx.get(\"https://api.internal/users\")\n"),
+        "api/app.py": ("from fastapi import FastAPI\n\napp = FastAPI()\n\n\n"
+                       "@app.get(\"/users\")\ndef users():\n    return []\n"),
+        ".graphlore-workspace.json": json.dumps(
+            {"repos": {"web": {}, "api": {"hosts": ["api.internal"]}}}),
+    }
+    for rel, text in files.items():
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_text(text, encoding="utf-8")
+    for repo in ("web", "api"):
+        def git(*args, repo=repo):
+            subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.com",
+                            *args], cwd=tmp_path / repo, check=True, capture_output=True)
+        git("init", "-q")
+        git("add", ".")
+        git("commit", "-qm", "one")
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    monkeypatch.setenv("GRAPHLORE_ENGINE", "native")
+    server._GRAPH_CACHE.clear()
+    assert not server.graphlore_build(".").startswith("ERROR")
+    g = _graph(tmp_path)
+    assert set(g["graph"]["repos"]) == {"api", "web"}
+    assert "built_at_commit" not in g
+    calls = [(e["source"], e["target"]) for e in g["links"] if e["relation"] == "http_calls"]
+    assert calls == [("web_client_list_users", "route_api_get_users")]
+    fresh = json.loads(server.graphlore_freshness(as_json=True))
+    assert fresh["workspace"] and fresh["recommended_action"] == "fresh", fresh
+    o = json.loads(server.graphlore_overview(as_json=True))
+    assert o["workspace"]["cross_repo_edges"].get("http_calls") == 1

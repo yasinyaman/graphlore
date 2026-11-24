@@ -34,7 +34,7 @@ from typing import Any
 
 from . import config
 
-INDEX_VERSION = 1
+INDEX_VERSION = 2
 # a name worth pointing at: an identifier, not a regular expression or a phrase
 _IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]{2,79}")
 # what a search for a definition often wraps the name in
@@ -136,7 +136,14 @@ def _build_index(graph_path: Path) -> dict[str, Any]:
             break
     header = graph.get("graph") if isinstance(graph.get("graph"), dict) else {}
     built = str(graph.get("built_at_commit") or header.get("built_at_commit") or "")
-    return {"version": INDEX_VERSION, "built_at_commit": built, "names": names}
+    # a workspace: each repository's build commit (plain relative names only)
+    repos = {
+        str(r): str(v.get("commit") or "")
+        for r, v in (header.get("repos") or {}).items()
+        if isinstance(v, dict) and _SAFE_PATH.fullmatch(str(r)) and ".." not in str(r)
+    } if isinstance(header.get("repos"), dict) else {}
+    return {"version": INDEX_VERSION, "built_at_commit": built, "repos": repos,
+            "names": names}
 
 
 def _index(project: Path) -> dict[str, Any] | None:
@@ -263,11 +270,14 @@ def post_tool_use(payload: dict) -> dict[str, Any] | None:
         return None
     index = _index(project)
     built = str((index or {}).get("built_at_commit") or "")
-    if not built:
+    repos = {r: c for r, c in ((index or {}).get("repos") or {}).items() if c}
+    if not built and not repos:
         return None
     if tool == "Bash":
         if not _GIT_CHANGERS.search(str(tool_input.get("command") or "")):
             return None
+        if not built:
+            return _workspace_moved(project, payload, repos)
         head = _git(project, "rev-parse", "HEAD")
         if not head or head.startswith(built) or built.startswith(head):
             return None
@@ -277,6 +287,8 @@ def post_tool_use(payload: dict) -> dict[str, Any] | None:
             f"graphlore: HEAD is now {head[:10]}; the code graph was built at {built[:10]}. "
             "graphlore_build(update=True) brings it up to date (graphlore_freshness says "
             "whether a full rebuild is needed)."))
+    if not built:
+        built = ",".join(f"{r}@{c[:10]}" for r, c in sorted(repos.items()))
     if tool in ("Edit", "Write", "MultiEdit", "apply_patch"):
         paths = ([str(tool_input.get("file_path") or "")] if tool != "apply_patch"
                  else _PATCH_FILE.findall(str(tool_input.get("command") or "")))
@@ -288,6 +300,29 @@ def post_tool_use(payload: dict) -> dict[str, Any] | None:
             "graphlore: source files changed since the code graph was built; its answers "
             "about them may be out of date until graphlore_build(update=True)."))
     return None
+
+
+def _workspace_moved(project: Path, payload: dict, repos: dict[str, str]) -> dict | None:
+    """After a git command in a workspace: the repository the command ran in
+    (its ``cwd``), else every one, whose HEAD left the commit it was built at."""
+    cwd = Path(str(payload.get("cwd") or project)).expanduser()
+    try:
+        here = cwd.resolve().relative_to(project).as_posix()
+    except (OSError, ValueError):
+        here = ""
+    asked = [r for r in repos if here == r or here.startswith(r + "/")] or sorted(repos)
+    moved = []
+    for r in asked[:8]:
+        head = _git(project / r, "rev-parse", "HEAD")
+        built = repos[r]
+        if head and not (head.startswith(built) or built.startswith(head)):
+            moved.append((r, head, built))
+    if not moved or not _once(project, "head:" + ",".join(f"{r}:{h}" for r, h, _ in moved)):
+        return None
+    shown = "; ".join(f"{r} is at {h[:10]}, built at {b[:10]}" for r, h, b in moved)
+    return _context("PostToolUse", (
+        f"graphlore: {shown}. graphlore_build(update=True) brings the code graph up to "
+        "date (graphlore_freshness says whether a full rebuild is needed)."))
 
 
 _EVENTS = {"pre": pre_tool_use, "post": post_tool_use,

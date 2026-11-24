@@ -10824,3 +10824,158 @@ def test_hook_reads_the_files_a_codex_patch_edits(tmp_path, monkeypatch):
     assert _hook("post", patch) == ""                       # no source file
     patch["tool_input"]["command"] = "*** Begin Patch\n*** Update File: a.py\n*** End Patch"
     assert "source files changed" in _hook("post", patch)
+
+
+# --- workspaces: a folder of repositories -------------------------------------------
+
+def _workspace(tmp_path, monkeypatch):
+    """Two git repositories under one folder that is none, and a graph of both
+    whose header records each one's build commit (``graph.repos``)."""
+    import subprocess
+
+    def git(repo, *args):
+        return subprocess.run(["git", *args], cwd=tmp_path / repo, check=True,
+                              capture_output=True, text=True).stdout.strip()
+
+    files = {
+        "svc-a/app.py": "def handle(x):\n    return x + 1\n",
+        "svc-b/api.py": "def serve(x):\n    return x * 2\n",
+    }
+    for rel, text in files.items():
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_text(text, encoding="utf-8")
+    for repo in ("svc-a", "svc-b"):
+        git(repo, "init", "-q")
+        git(repo, "config", "user.email", "t@example.com")
+        git(repo, "config", "user.name", "Test")
+        git(repo, "add", ".")
+        git(repo, "commit", "-qm", "one")
+    # svc-a has a second commit: HEAD~1 exists there only
+    (tmp_path / "svc-a/app.py").write_text("def handle(x):\n    return x + 2\n")
+    git("svc-a", "commit", "-qam", "two")
+
+    def node(nid, label, file, line=1):
+        return {"id": nid, "label": label, "source_file": file, "source_location": f"L{line}",
+                "file_type": "code"}
+
+    graph = {
+        "graph": {"engine": "graphlore", "repos": {
+            "svc-a": {"commit": git("svc-a", "rev-parse", "HEAD")},
+            "svc-b": {"commit": git("svc-b", "rev-parse", "HEAD")}}},
+        "nodes": [node("a", "app.py", "svc-a/app.py"), node("h", "handle()", "svc-a/app.py"),
+                  node("b", "api.py", "svc-b/api.py"), node("s", "serve()", "svc-b/api.py")],
+        "links": [{"source": "a", "target": "h", "relation": "contains"},
+                  {"source": "b", "target": "s", "relation": "contains"},
+                  {"source": "h", "target": "s", "relation": "http_calls",
+                   "confidence": "EXTRACTED"}],
+    }
+    _write_graph(tmp_path, graph)
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    server._GRAPH_CACHE.clear()
+    return git
+
+
+def test_workspace_repositories_are_the_git_checkouts_or_the_workspace_file(tmp_path):
+    from graphlore import config
+
+    for repo in ("svc-a", "libs/common", ".hidden", "node_modules/x"):
+        (tmp_path / repo / ".git").mkdir(parents=True)
+    assert config.workspace_repos(tmp_path) == ["libs/common", "svc-a"]
+    (tmp_path / config.WORKSPACE_FILE).write_text(
+        json.dumps({"repos": {"svc-a": {}, "../outside": {}, "missing": {}}}))
+    assert config.workspace_repos(tmp_path) == ["svc-a"]
+    # a project that is one repository has none, whatever it holds
+    (tmp_path / config.WORKSPACE_FILE).unlink()
+    (tmp_path / ".git").mkdir()
+    assert config.workspace_repos(tmp_path) == []
+
+
+def test_workspace_freshness_age_and_drift_are_per_repository(tmp_path, monkeypatch):
+    import subprocess
+
+    _workspace(tmp_path, monkeypatch)
+    fresh = json.loads(server.graphlore_freshness(as_json=True))
+    assert fresh["workspace"] is True and fresh["recommended_action"] == "fresh"
+    assert set(fresh["repos"]) == {"svc-a", "svc-b"}
+    assert server._graph_age() == "built at HEAD"
+    (tmp_path / "svc-b/api.py").write_text("def serve(x, y=1):\n    return x * y\n")
+    r = json.loads(server.graphlore_freshness(as_json=True))
+    assert r["stale"] is True and r["recommended_action"] == "update"
+    assert r["structural_changes"] == ["svc-b/api.py"]
+    assert r["repos"]["svc-a"]["recommended_action"] == "fresh"
+    assert r["repos"]["svc-b"]["recommended_action"] == "update"
+    assert r["reason"].startswith("svc-b: ")
+    drift = server._build_drift()
+    assert drift.known and drift.changed == frozenset({"svc-b/api.py"})
+    assert "svc-a@" in server._since(drift)
+    subprocess.run(["git", "commit", "-qam", "three"], cwd=tmp_path / "svc-b", check=True,
+                   capture_output=True)
+    assert server._graph_age() == "svc-b: built 1 commit ago"
+
+
+def test_workspace_diff_is_each_repository_s_own_refs(tmp_path, monkeypatch):
+    _workspace(tmp_path, monkeypatch)
+    d = json.loads(server.graphlore_diff(as_json=True))
+    assert [r["path"] for r in d["structural"]] == ["svc-a/app.py"]
+    assert d["repos"] == ["svc-a"] and "svc-b" in d["skipped"]   # one commit: no HEAD~1
+    one = json.loads(server.graphlore_diff(as_json=True, repo="svc-a"))
+    assert one["repo"] == "svc-a" and one["structural_change_count"] == 1
+    err = json.loads(server.graphlore_diff(as_json=True, repo="nope"))
+    assert err["code"] == "not_found" and err["did_you_mean"] == ["svc-a", "svc-b"]
+    assert "not found" in json.loads(server.graphlore_diff(as_json=True, repo="svc-b"))["error"]
+
+
+def test_workspace_history_puts_each_repository_s_own_together(tmp_path, monkeypatch):
+    from graphlore import history
+
+    _workspace(tmp_path, monkeypatch)
+    h = history.history(tmp_path)
+    assert not h.reason and h.commits == 3
+    assert set(h.revs) == {"svc-a/app.py", "svc-b/api.py"}
+
+
+def test_workspace_overview_search_and_locate_scope_a_repository(tmp_path, monkeypatch):
+    _workspace(tmp_path, monkeypatch)
+    o = json.loads(server.graphlore_overview(as_json=True))
+    assert o["workspace"]["repos"]["svc-a"] == {"nodes": 2, "edges": 2}
+    assert o["workspace"]["cross_repo_edges"] == {"http_calls": 1}
+    assert "Workspace of 2 repositories" in server.graphlore_overview()
+    every = json.loads(server.graphlore_search("()", as_json=True))
+    assert {m["node"] for m in every["matches"]} == {"handle()", "serve()"}
+    mine = json.loads(server.graphlore_search("()", as_json=True, scope="svc-a"))
+    assert [m["node"] for m in mine["matches"]] == ["handle()"]
+    assert mine["scope"]["spec"] == "svc-a"
+
+
+def test_workspace_hook_names_the_repository_whose_head_moved(tmp_path, monkeypatch):
+    monkeypatch.setenv("GRAPHLORE_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.delenv("GRAPHLORE_HOOKS", raising=False)
+    monkeypatch.delenv("GRAPHLORE_PROJECT_DIR", raising=False)
+    git = _workspace(tmp_path, monkeypatch)
+    # the client names the workspace; the command ran in one repository of it
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    bash = {"tool_name": "Bash", "cwd": str(tmp_path / "svc-b"),
+            "tool_input": {"command": "git commit -am 'x'"}}
+    assert _hook("post", bash) == ""
+    (tmp_path / "svc-b/api.py").write_text("def serve(x):\n    return x * 3\n")
+    git("svc-b", "commit", "-qam", "two")
+    text = _hook("post", bash)
+    assert "svc-b is at" in text and "svc-a" not in text
+    assert _hook("post", bash) == ""
+
+
+def test_review_of_one_repository_of_a_workspace(tmp_path, monkeypatch):
+    import pytest
+
+    from graphlore import change_review
+
+    _workspace(tmp_path, monkeypatch)
+    r = change_review.analyze("HEAD~1", "HEAD", build=False, repo="svc-a")
+    assert r["repo"] == "svc-a"
+    assert [f["path"] for f in r["files"]] == ["svc-a/app.py"]
+    assert [c["node"] for c in r["changed"]] == ["handle()"]
+    assert "Repository: `svc-a`" in change_review.render_markdown(r)
+    with pytest.raises(change_review.ReviewError, match="no repository"):
+        change_review.analyze(build=False, repo="nope")
+    with pytest.raises(change_review.ReviewError, match="--repo"):
+        change_review.analyze(build=False)

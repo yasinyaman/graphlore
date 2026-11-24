@@ -9,6 +9,20 @@ All notable changes to this project are documented here. The format is based on
 ## [0.8.0] - 2026-11-24
 
 ### Added
+- **Workspaces: several repositories as one graph** (`docs/workspace.md`).
+  A project folder that is no git repository and holds repositories one or two
+  levels down (or a `.graphlore-workspace.json` naming them) is built as one
+  graph by the native engine: each repository's own tracked files, its commit
+  in the header (`graph.repos`), imports resolved to the importer's own
+  repository first (Python, JVM, C# and Rust crates), route ids led by their
+  repository, and a request to a host the workspace file gives a repository
+  linked to that repository's routes. `graphlore_freshness`, the graph age,
+  the changed-file notes, co-change and the watcher read each repository
+  against its own commit; `graphlore_diff` takes `repo`, `graphlore review`
+  takes `--repo`, `graphlore_overview` counts each repository and the edges
+  between them, and `graphlore_search` / `graphlore_locate` take a `scope`
+  (`scope="api"`). The post hook names the repository whose HEAD moved. A
+  project that is one repository is built and read as before.
 - **Claude Code and Codex hooks** (`graphlore hook pre|post`). Before a
   `Grep` or `Glob`, or a shell search (`rg`, `grep`, `git grep`; Codex has
   no Grep tool), for one identifier the graph defines, a line of context names where

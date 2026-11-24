@@ -297,6 +297,15 @@ opt-in watcher automates it, and in Claude Code the plugin's hooks say when a
 commit or an edit leaves the graph behind.
 → [Keeping the graph fresh](https://github.com/yasinyaman/graphlore/blob/master/docs/concepts.md#keeping-the-graph-fresh)
 
+### Can it read several repositories at once?
+
+Yes. Point it at a folder of git checkouts and build: the native engine builds
+them as one graph, resolves each import in its own repository, links requests
+to another repository's routes (a `.graphlore-workspace.json` names the hosts
+each one serves), and freshness, diffs and reviews work per repository.
+`scope="api"` narrows a tool to one of them.
+→ [Workspaces](https://github.com/yasinyaman/graphlore/blob/master/docs/workspace.md)
+
 ### Was this project called graphify-mcp?
 
 Yes. It was renamed because `graphifyy` ships a `graphify-mcp` command of its
@@ -305,6 +314,7 @@ own. The old `GRAPHIFY_*` environment variables still work.
 ## Known limits
 
 - One active project at a time; `graphlore_project` switches it (stdio only).
+  A folder of repositories can be that project (a workspace).
 - graphlore's own extractor (`engine/`, Rust, the `engine` extra) builds the
   graph: definitions, spans, imports, calls, bases and type references in 14
   languages, resolved from the source, with its own communities and incremental
@@ -322,6 +332,7 @@ own. The old `GRAPHIFY_*` environment variables still work.
 - [How graphlore works](https://github.com/yasinyaman/graphlore/blob/master/docs/concepts.md): resolved edges, import checks, analysis scope, freshness, the search bridge, naming communities
 - [Configuration](https://github.com/yasinyaman/graphlore/blob/master/docs/configuration.md): toolsets, HTTP transport and security, offline mode, environment variables
 - [Reviewing a change](https://github.com/yasinyaman/graphlore/blob/master/docs/review.md): `graphlore review` and the GitHub Action, what the report holds
+- [Workspaces](https://github.com/yasinyaman/graphlore/blob/master/docs/workspace.md): several repositories built and read as one graph
 - [Benchmark](https://github.com/yasinyaman/graphlore/blob/master/docs/benchmark.md): method, cross-language results, caveats
 - [Comparison](https://github.com/yasinyaman/graphlore/blob/master/docs/comparison.md): graphlore beside language servers, code search and other code-graph MCP servers, with sources
 - [Native engine](https://github.com/yasinyaman/graphlore/blob/master/docs/native-engine.md): graphlore's own extractor in Rust, compared with graphify on 31 repositories, and the roadmap

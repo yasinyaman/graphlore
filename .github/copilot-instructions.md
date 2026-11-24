@@ -16,6 +16,7 @@ graphlore is a Python MCP server (MCP Python SDK v2: `mcp.server.mcpserver.MCPSe
 ## Rules
 
 - Read `config.PROJECT_DIR` by attribute, never `from .config import PROJECT_DIR`; tests repoint it.
+- A project folder can be a workspace of several git repositories (`docs/workspace.md`): git calls run in the file's repository (`_repo_dir`, `_workspace`), not in `config.PROJECT_DIR` alone, and paths lead with the repository.
 - Read settings through `config.env("NAME")` so the legacy `GRAPHIFY_*` fallback applies.
 - A tool is a sync function returning `str`, registered with `@_tool(annotations=...)` (not `@mcp.tool`). `_load_graph()` returns the graph dict or an error string; return errors with `_err(msg, as_json)` and results with `_fmt(payload, as_json, text)`. With `as_json=True` every path, errors included, must return parseable JSON. Over MCP, the `_fmt`/`_err` payload becomes `structuredContent` and `_err` sets `isError`; an empty but valid answer uses `_fmt`.
 - `graph.json` shape varies: use `_node_id`, `_node_label`, `_node_file`, `_node_line`, `_edge_ends`, `_edge_rel`, `_nodes_edges`. Read other fields with `.get()` and a fallback; community is `n.get("community", n.get("cluster"))`.

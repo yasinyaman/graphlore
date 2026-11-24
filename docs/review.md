@@ -27,6 +27,9 @@ graphlore review --base HEAD~3 --format json --output review.json
   exists); `--no-build` refuses instead (exit 2). A graph built by graphify
   works when it records the head commit (`built_at_commit`).
 - `--hops` (default 3) is how far dependents are followed.
+- `--repo` names the repository of a [workspace](workspace.md) whose range it
+  is: git reads that repository, the dependents and tests are the whole
+  workspace graph's.
 - `--fail-on` takes gates that make the command exit 1:
   - `cycle`: a runtime import cycle introduced (one of its imports is written
     on a changed line);

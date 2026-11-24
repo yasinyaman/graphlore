@@ -13,6 +13,9 @@ GRAPHLORE_PROJECT_DIR=/path/to/repo graphlore
 GRAPHLORE_PROJECT_DIR=/path/to/repo python -m graphlore
 ```
 
+A folder of several git checkouts can be the project too: see
+[Workspaces](workspace.md).
+
 The boot banner on stderr
 (`graphlore vX.Y.Z | transport=… | toolset=… | egress=… | project=…`) confirms
 which server, toolset and project directory you are running. The project was

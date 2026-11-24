@@ -50,8 +50,12 @@ class _Change:
 
 # --- git -------------------------------------------------------------------
 
+# the repository a workspace review reads (None: the project's own)
+_cwd: Path | None = None
+
+
 def _git(args: list[str]) -> str | None:
-    return srv._git(args)
+    return srv._git(args, _cwd)
 
 
 def _commit(ref: str) -> str:
@@ -93,11 +97,14 @@ def _changed_lines(base: str, head: str, files: list[str]) -> dict[str, set[int]
 
 # --- graph -------------------------------------------------------------------
 
-def _graph_at(head: str, build: bool) -> dict:
-    """The graph, built at ``head``. A missing or stale one is built (an update
-    when one exists) when ``build`` is on and the native engine is installed."""
+def _graph_at(head: str, build: bool, repo: str = "") -> dict:
+    """The graph, built at ``head`` (of ``repo`` in a workspace). A missing or
+    stale one is built (an update when one exists) when ``build`` is on and the
+    native engine is installed."""
     graph = srv._load_graph()
     built = str(graph.get("built_at_commit") or "") if isinstance(graph, dict) else ""
+    if repo and isinstance(graph, dict):
+        built = srv._graph_repos(graph).get(repo) or ""
     if built and (head.startswith(built) or built.startswith(head)):
         return graph  # type: ignore[return-value]
     if not build:
@@ -352,19 +359,42 @@ def _layer_violations(touched: dict[str, set[int]]) -> dict[str, Any] | None:
 # --- the review ----------------------------------------------------------------
 
 def analyze(base: str = "HEAD~1", head: str = "HEAD", *, build: bool = True, hops: int = 3,
-            fail_on: tuple[str, ...] = ()) -> dict[str, Any]:
+            fail_on: tuple[str, ...] = (), repo: str = "") -> dict[str, Any]:
     """The review of ``base``..``head`` as a dict (``render_markdown`` prints it).
 
     ``base`` is compared through its merge base with ``head``: what the branch
     changed, not what the target branch did meanwhile. ``head`` must be the
     commit checked out, since the graph and the spans are read from the files.
+    In a workspace, ``repo`` names the repository whose range it is; the
+    dependents and tests are the whole workspace graph's.
     """
+    global _cwd
+    repo = repo.strip().strip("/")
+    if repo:
+        repos = srv._workspace()
+        if repo not in repos:
+            listed = ", ".join(sorted(repos)) or "none"
+            raise ReviewError(f"'{repo}' is no repository of this workspace "
+                              f"(its repositories: {listed}).")
+    _cwd = srv._repo_dir(repo) if repo else None
+    try:
+        return _analyze(base, head, build=build, hops=hops, fail_on=fail_on, repo=repo)
+    finally:
+        _cwd = None
+
+
+def _analyze(base: str, head: str, *, build: bool, hops: int, fail_on: tuple[str, ...],
+             repo: str) -> dict[str, Any]:
     bad = sorted(set(fail_on) - set(FAIL_ON))
     if bad:
         raise ReviewError(f"unknown --fail-on value(s) {', '.join(bad)}: "
                           f"use {', '.join(FAIL_ON)}")
     if _git(["rev-parse", "HEAD"]) is None:
-        raise ReviewError(f"{config.PROJECT_DIR} is not in a git repository.")
+        where = srv._repo_dir(repo)
+        hint = ""
+        if not repo and srv._workspace():
+            hint = " It is a workspace: name the repository with --repo."
+        raise ReviewError(f"{where} is not in a git repository.{hint}")
     head_sha, base_sha = _commit(head), _commit(base)
     if head_sha != _commit("HEAD"):
         raise ReviewError(f"'{head}' is not the commit checked out: check it out first "
@@ -373,26 +403,33 @@ def analyze(base: str = "HEAD~1", head: str = "HEAD", *, build: bool = True, hop
     if not merge:
         raise ReviewError(f"'{base}' and '{head}' share no history.")
     dirty = bool((_git(["status", "--porcelain", "--untracked-files=no"]) or "").strip())
-    graph = _graph_at(head_sha, build)
+    graph = _graph_at(head_sha, build, repo)
     nodes, edges = srv._nodes_edges(graph)
     labels = srv._display_labels(nodes)
 
-    diff = json.loads(srv.graphlore_diff(merge, head_sha, budget_tokens=10**7, as_json=True))
+    diff = json.loads(srv.graphlore_diff(merge, head_sha, budget_tokens=10**7, as_json=True,
+                                         repo=repo))
     if "error" in diff:
         raise ReviewError(diff["error"])
     prefix = _project_prefix()
+    # a workspace's diff leads each path with the repository; git reads it without
+    lead = f"{repo}/" if repo else ""
+
+    def in_repo(path: str) -> str:
+        return path[len(lead):] if lead and path.startswith(lead) else path
 
     def local(path: str) -> str | None:
-        return path[len(prefix):] if path.startswith(prefix) else None
+        inner = in_repo(path)
+        return lead + inner[len(prefix):] if inner.startswith(prefix) else None
 
     files: list[dict] = []
     for rec in diff.get("structural", []):
         path = rec.get("to") or rec.get("path") or ""
         rel = local(path)
         if rel is not None:
-            f = {**rec, "repo_path": path, "path": rel}
+            f = {**rec, "repo_path": in_repo(path), "path": rel}
             if rec.get("from"):
-                f["from_repo_path"] = rec["from"]
+                f["from_repo_path"] = in_repo(rec["from"])
                 f["from"] = local(rec["from"]) or rec["from"]
             files.append(f)
     cosmetic = [local(r.get("to") or r.get("path") or "") for r in diff.get("cosmetic", [])]
@@ -430,6 +467,7 @@ def analyze(base: str = "HEAD~1", head: str = "HEAD", *, build: bool = True, hop
     failed = [g for g in fail_on if gates[g]]
     return {
         "base": base, "head": head, "merge_base": merge[:12], "head_commit": head_sha[:12],
+        **({"repo": repo} if repo else {}),
         "dirty_worktree": dirty,
         "files": [{k: v for k, v in f.items() if k not in ("repo_path", "from_repo_path")}
                   for f in files],
@@ -466,7 +504,8 @@ def render_markdown(r: dict[str, Any]) -> str:
                f"{r['hops']} hop(s) ({deps.get('production', 0)} production, "
                f"{deps.get('tests', 0)} test) in {deps.get('files', 0)} file(s).")
     out.append(summary)
-    out.append(f"Range: {_code(r['merge_base'])}..{_code(r['head_commit'])}"
+    out.append(("Repository: " + _code(r["repo"]) + ". " if r.get("repo") else "")
+               + f"Range: {_code(r['merge_base'])}..{_code(r['head_commit'])}"
                + (f", {len(r['cosmetic_files'])} cosmetic-only file(s) left out"
                   if r["cosmetic_files"] else ""))
     if r["dirty_worktree"]:
@@ -558,12 +597,12 @@ def render_markdown(r: dict[str, Any]) -> str:
 
 
 def run(base: str, head: str, *, fmt: str = "markdown", fail_on: tuple[str, ...] = (),
-        build: bool = True, hops: int = 3, output: str = "") -> int:
+        build: bool = True, hops: int = 3, output: str = "", repo: str = "") -> int:
     """The CLI's entry: 0 clean, 1 a gate in ``fail_on`` failed, 2 no review."""
     import sys
 
     try:
-        report = analyze(base, head, build=build, hops=hops, fail_on=fail_on)
+        report = analyze(base, head, build=build, hops=hops, fail_on=fail_on, repo=repo)
     except ReviewError as e:
         print(f"graphlore review: {e}", file=sys.stderr)
         return 2

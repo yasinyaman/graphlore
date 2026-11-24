@@ -898,29 +898,65 @@ def _git(args: list[str], cwd: Path | None = None) -> str | None:
         return None
 
 
-def _graph_age() -> str | None:
-    """Lightweight 'how stale is the graph' note for embedding in frequent tool
-    outputs, so staleness is visible even without a separate graphlore_freshness
-    call. Git-only and cheap (no AST/structural diff). Returns None when it can't
-    be determined (no recorded build commit, or not a git repo)."""
-    g = _load_graph()
-    if not isinstance(g, dict):
-        return None
-    built_at = g.get("built_at_commit")
-    if not built_at or not isinstance(built_at, str):
-        return None
-    head = _git(["rev-parse", "HEAD"])
+def _graph_repos(g: Any) -> dict[str, str | None]:
+    """A workspace graph's repositories (``graph.repos`` of a native build) and
+    the commit each was built at; empty for a graph of one repository."""
+    header = g.get("graph") if isinstance(g, dict) else None
+    repos = header.get("repos") if isinstance(header, dict) else None
+    if not isinstance(repos, dict):
+        return {}
+    out: dict[str, str | None] = {}
+    for name, v in repos.items():
+        commit = v.get("commit") if isinstance(v, dict) else None
+        out[str(name)] = commit if isinstance(commit, str) and commit else None
+    return out
+
+
+def _workspace(g: Any = None) -> dict[str, str | None]:
+    """The repositories of the project and their build commits: the graph's
+    header first, else ``config.workspace_repos()`` (commits unknown). Empty
+    for a project that is one repository."""
+    repos = _graph_repos(_load_graph() if g is None else g)
+    return repos or {r: None for r in config.workspace_repos()}
+
+
+def _repo_dir(repo: str) -> Path:
+    return config.PROJECT_DIR / repo if repo else config.PROJECT_DIR
+
+
+def _age_at(built_at: str, cwd: Path | None = None) -> str | None:
+    head = _git(["rev-parse", "HEAD"], cwd)
     if head is None:
         return None
     if head.startswith(built_at) or built_at.startswith(head):
         return "built at HEAD"
-    if _git(["cat-file", "-e", f"{built_at}^{{commit}}"]) is None:
+    if _git(["cat-file", "-e", f"{built_at}^{{commit}}"], cwd) is None:
         return "built at an unreachable commit (rebuild recommended)"
-    ahead = _git(["rev-list", "--count", f"{built_at}..HEAD"])
+    ahead = _git(["rev-list", "--count", f"{built_at}..HEAD"], cwd)
     if ahead and ahead.isdigit() and int(ahead) > 0:
         n = int(ahead)
         return f"built {n} commit{'' if n == 1 else 's'} ago"
     return "built at a divergent commit"
+
+
+def _graph_age() -> str | None:
+    """Lightweight 'how stale is the graph' note for embedding in frequent tool
+    outputs, so staleness is visible even without a separate graphlore_freshness
+    call. Git-only and cheap (no AST/structural diff). Returns None when it can't
+    be determined (no recorded build commit, or not a git repo). In a workspace
+    it names each repository whose HEAD moved."""
+    g = _load_graph()
+    if not isinstance(g, dict):
+        return None
+    built_at = g.get("built_at_commit")
+    if built_at and isinstance(built_at, str):
+        return _age_at(built_at)
+    ages = {r: _age_at(c, _repo_dir(r)) for r, c in _graph_repos(g).items() if c}
+    known = {r: a for r, a in ages.items() if a}
+    if not known:
+        return None
+    behind = [f"{r}: {a}" for r, a in known.items() if a != "built at HEAD"]
+    return "; ".join(behind) if behind else "built at HEAD"
 
 
 class _Drift(NamedTuple):
@@ -938,31 +974,53 @@ class _Drift(NamedTuple):
     changed: frozenset[str]
 
 
+def _drift_at(built_at: str, repo: str = "") -> _Drift:
+    cwd = _repo_dir(repo)
+    lead = f"{repo}: " if repo else ""
+    diff = _git(["diff", "--relative", "--no-renames", "--name-only", "-z", built_at, "--"], cwd)
+    if diff is None:
+        reason = (
+            "not a git repository (or git unavailable)"
+            if _git(["rev-parse", "HEAD"], cwd) is None
+            else f"build commit {built_at[:10]} is not in this clone"
+        )
+        return _Drift(False, lead + reason, built_at, frozenset())
+    untracked = _git(["ls-files", "--others", "--exclude-standard", "-z"], cwd) or ""
+    out_dir = config.OUT_DIR_NAME.rstrip("/") + "/"
+    pre = f"{repo}/" if repo else ""
+    changed = frozenset(
+        pre + p for p in (*diff.split("\0"), *untracked.split("\0"))
+        if p and not (pre + p).startswith(out_dir)
+    )
+    return _Drift(True, "", built_at, changed)
+
+
 def _build_drift() -> _Drift:
     """Files changed since the graph's build commit (two git calls, not cached: a
-    cached answer could say "unchanged" right after an edit).
+    cached answer could say "unchanged" right after an edit). In a workspace,
+    two per repository, each against the commit that repository was built at;
+    ``commit`` then names them (``svc-a@1a2b3c4d``).
 
     graphify builds from the working tree, so a file already dirty at build time
     reads as changed — the safe direction for a "check before you trust it" flag.
     """
     g = _load_graph()
     built_at = g.get("built_at_commit") if isinstance(g, dict) else None
-    if not built_at or not isinstance(built_at, str):
+    if built_at and isinstance(built_at, str):
+        return _drift_at(built_at)
+    repos = _graph_repos(g)
+    if not repos:
         return _Drift(False, "the graph records no build commit", "", frozenset())
-    diff = _git(["diff", "--relative", "--no-renames", "--name-only", "-z", built_at, "--"])
-    if diff is None:
-        reason = (
-            "not a git repository (or git unavailable)" if _git(["rev-parse", "HEAD"]) is None
-            else f"build commit {built_at[:10]} is not in this clone"
-        )
-        return _Drift(False, reason, built_at, frozenset())
-    untracked = _git(["ls-files", "--others", "--exclude-standard", "-z"]) or ""
-    out_dir = config.OUT_DIR_NAME.rstrip("/") + "/"
-    changed = frozenset(
-        p for p in (*diff.split("\0"), *untracked.split("\0"))
-        if p and not p.startswith(out_dir)
-    )
-    return _Drift(True, "", built_at, changed)
+    unknown = [r for r, c in repos.items() if not c]
+    if unknown:
+        return _Drift(False, f"the graph records no build commit for {', '.join(unknown)}",
+                      "", frozenset())
+    parts = [_drift_at(c, r) for r, c in repos.items() if c]
+    failed = [d.reason for d in parts if not d.known]
+    commit = ", ".join(f"{r}@{c[:8]}" for r, c in repos.items() if c)
+    if failed:
+        return _Drift(False, "; ".join(failed), commit, frozenset())
+    return _Drift(True, "", commit, frozenset().union(*(d.changed for d in parts)))
 
 
 def _file_changed(drift: _Drift, file: str) -> bool | None:
@@ -970,6 +1028,11 @@ def _file_changed(drift: _Drift, file: str) -> bool | None:
     if not drift.known:
         return None
     return _norm_relpath(file) in drift.changed
+
+
+def _since(drift: _Drift) -> str:
+    """The build commit a drift is measured from, or a workspace's commits."""
+    return drift.commit if "@" in drift.commit else drift.commit[:10]
 
 
 def _drift_note(drift: _Drift, files: Iterable[str]) -> tuple[dict[str, Any], str]:
@@ -981,14 +1044,14 @@ def _drift_note(drift: _Drift, files: Iterable[str]) -> tuple[dict[str, Any], st
     rel = sorted({_norm_relpath(f) for f in files if f})
     changed = [f for f in rel if f in drift.changed]
     payload: dict[str, Any] = {
-        "known": True, "since": drift.commit[:10], "changed_files": changed,
+        "known": True, "since": _since(drift), "changed_files": changed,
     }
     if not changed:
         return payload, ""
     shown = ", ".join(changed[:_LEFT_OUT_LISTED])
     more = len(changed) - _LEFT_OUT_LISTED
     text = (
-        f"Changed since the graph was built ({drift.commit[:10]}): {shown}"
+        f"Changed since the graph was built ({_since(drift)}): {shown}"
         + (f", +{more} more" if more > 0 else "")
         + ". Edges and line numbers for these files may be out of date — "
         "graphlore_freshness says whether to update."
@@ -2832,6 +2895,7 @@ def graphlore_overview(top_n: int = 8, as_json: bool = False) -> str:
         if "graphlore_locate" in active:
             suggested.insert(0, 'graphlore_locate("<natural-language question>")')
     age = _graph_age()
+    workspace = _workspace_counts(graph, nodes, edges)
     payload = {
         "nodes": len(nodes),
         "edges": len(edges),
@@ -2851,6 +2915,8 @@ def graphlore_overview(top_n: int = 8, as_json: bool = False) -> str:
         "scope": view.payload(),
         "suggested_next": suggested,
     }
+    if workspace:
+        payload["workspace"] = workspace
     lines = [
         f"{len(nodes)} nodes, {len(edges)} edges, {len(comms)} communities, "
         + (
@@ -2862,6 +2928,15 @@ def graphlore_overview(top_n: int = 8, as_json: bool = False) -> str:
         f"Top {len(god)} god nodes:",
     ]
     lines += [f"  {g['node']} — degree {g['degree']}" for g in god]
+    if workspace:
+        lines.append(f"\nWorkspace of {len(workspace['repos'])} repositories "
+                     "(scope=\"<repo>\" narrows a tool to one):")
+        lines += [f"  {r} — {c['nodes']} nodes, {c['edges']} edges"
+                  for r, c in workspace["repos"].items()]
+        cross = workspace["cross_repo_edges"]
+        if cross:
+            lines.append("  between repositories: " + ", ".join(
+                f"{n} {rel}" for rel, n in cross.items()))
     if age:
         lines.append(f"\nGraph age: {age} (graphlore_freshness for detail).")
     if id_collisions:
@@ -2875,6 +2950,34 @@ def graphlore_overview(top_n: int = 8, as_json: bool = False) -> str:
         lines.append("\nSuggested next steps: " + "; ".join(suggested))
     lines.append(f"\nServer: {_SERVER}")
     return _fmt(payload, as_json, "\n".join(lines))
+
+
+def _workspace_counts(graph: Any, nodes: list[dict], edges: list[dict]) -> dict[str, Any]:
+    """A workspace graph's nodes and edges per repository and the edges between
+    repositories by relation (an edge counts for the repository of its source);
+    empty for a graph of one repository."""
+    repos = sorted(_graph_repos(graph), key=len, reverse=True)
+    if not repos:
+        return {}
+
+    def repo_of(f: str) -> str | None:
+        f = _norm_relpath(f)
+        return next((r for r in repos if f.startswith(r + "/")), None)
+
+    where = {_node_id(n): repo_of(_node_file(n)) for n in nodes if _node_file(n)}
+    counts = {r: {"nodes": 0, "edges": 0} for r in sorted(repos)}
+    for r in where.values():
+        if r is not None:
+            counts[r]["nodes"] += 1
+    cross: Counter[str] = Counter()
+    for e in edges:
+        s, t = _edge_ends(e)
+        rs, rt = where.get(s), where.get(t)
+        if rs is not None:
+            counts[rs]["edges"] += 1
+            if rt is not None and rt != rs:
+                cross[_edge_rel(e)] += 1
+    return {"repos": counts, "cross_repo_edges": dict(cross.most_common())}
 
 
 # What graphlore_god_nodes ranks by, and how many sources an estimated
@@ -3864,7 +3967,9 @@ def graphlore_set_labels(
 
 
 @_tool(annotations=ToolAnnotations(title="Search nodes", read_only_hint=True))
-def graphlore_search(pattern: str, limit: int = 25, as_json: bool = False) -> str:
+def graphlore_search(
+    pattern: str, limit: int = 25, as_json: bool = False, scope: str = "",
+) -> str:
     """Search nodes by text in their name/label (case-insensitive).
 
     Use for: a node's exact id from part of its name. Not for: text inside
@@ -3874,18 +3979,29 @@ def graphlore_search(pattern: str, limit: int = 25, as_json: bool = False) -> st
     Args:
         pattern: Text to find in node names and labels.
         limit: Cap on nodes listed; ``total`` counts them all.
+        scope: Where the nodes may be (path prefixes / globs, a workspace
+            repository's name, ``-tests``). Empty: the whole graph.
     """
     graph = _load_graph()
     if isinstance(graph, str):
         return _err(graph, as_json)
     nodes, edges = _nodes_edges(graph)
+    searched = nodes
+    scoped: dict[str, Any] = {}
+    if scope.strip():
+        view = _scoped(nodes, edges, scope, navigation=True)
+        if isinstance(view, str):
+            return _err(view, as_json)
+        searched = view.nodes
+        scoped = {"scope": view.payload()}
     p = pattern.lower()
-    hits = [n for n in nodes if p in _node_label(n).lower() or p in _node_id(n).lower()]
+    hits = [n for n in searched if p in _node_label(n).lower() or p in _node_id(n).lower()]
     if not hits:
         # An empty answer is a valid result, not a failure: no isError over MCP.
         msg = f"No nodes match '{pattern}'."
         return _fmt(
-            {"matches": [], "total": 0, "shown": 0, "truncated": False, "note": msg},
+            {"matches": [], "total": 0, "shown": 0, "truncated": False, "note": msg,
+             **scoped},
             as_json, msg,
         )
     degree: Counter[str] = Counter()
@@ -3907,6 +4023,7 @@ def graphlore_search(pattern: str, limit: int = 25, as_json: bool = False) -> st
         text.append(f"  {it['node']}{t} — degree {it['degree']}")
     payload = {
         "matches": items, "total": len(hits), "shown": len(items), "truncated": truncated,
+        **scoped,
     }
     _cut_hint(payload, "Raise limit or narrow the pattern for the rest of the `total` matches.")
     return _fmt(payload, as_json, "\n".join(text))
@@ -4720,6 +4837,7 @@ def graphlore_locate(
     budget_tokens: int = 1500,
     related_k: int = 8,
     as_json: bool = False,
+    scope: str = "",
 ) -> str:
     """Code search -> graph structure in one call: find code by what it does.
 
@@ -4742,11 +4860,19 @@ def graphlore_locate(
         hops: Graph hops of the subgraph around the top hit.
         budget_tokens: Approximate cap on the subgraph part of the reply.
         related_k: Semantic cousins to list.
+        scope: Where the hits may be (path prefixes / globs, a workspace
+            repository's name); cousins stay project-wide. Empty: anywhere.
     """
     graph = _load_graph()
     if isinstance(graph, str):
         return _err(graph, as_json)
     nodes, edges = _nodes_edges(graph)
+    view = None
+    if scope.strip():
+        scoped = _scoped(nodes, edges, scope, navigation=True)
+        if isinstance(scoped, str):
+            return _err(scoped, as_json)
+        view = scoped
 
     backend = _semantic_backend(nodes, edges)
     index = backend.index
@@ -4754,9 +4880,14 @@ def graphlore_locate(
         return _err(_no_semantic_index_error("graphlore_locate"), as_json)
     backend_info = _backend_payload(backend)
     backend_text = _backend_line(backend_info)
-    hits = index.search(query, top_k=max(1, top_k))
+    if view is None:
+        hits = index.search(query, top_k=max(1, top_k))
+    else:
+        hits = [h for h in index.search(query, top_k=min(200, max(1, top_k) * 20))
+                if view.keeps_file(str(h.chunk.file_path))][:max(1, top_k)]
     if not hits:
-        msg = f"No semantic matches for '{query}'."
+        msg = f"No semantic matches for '{query}'" + (
+            f" in scope '{scope.strip()}'." if view is not None else ".")
         return _fmt(
             {"query": query, "seed": None, "semantic_hits": [], "note": msg,
              "backend": backend_info},
@@ -5875,7 +6006,7 @@ def graphlore_skeleton(
     return _fmt(payload, as_json, "\n".join(parts))
 
 
-def _ast_equivalent(path: str, ref: str) -> bool | None:
+def _ast_equivalent(path: str, ref: str, cwd: Path | None = None) -> bool | None:
     """True if ``path``'s working tree differs only cosmetically from git ``ref``.
 
     A cosmetic change — comments, blank lines, reformatting — leaves graph
@@ -5894,25 +6025,27 @@ def _ast_equivalent(path: str, ref: str) -> bool | None:
     # `ref:./path` is CWD-relative (cwd is PROJECT_DIR) while bare `ref:path` is
     # repo-root-relative — the working-tree read below is PROJECT_DIR-relative, so
     # both sides must agree even when PROJECT_DIR is a subdirectory of the repo.
-    old_src = _git(["show", f"{ref}:./{path}"])
+    old_src = _git(["show", f"{ref}:./{path}"], cwd)
     if old_src is None:
         return None
     try:
-        new_src = (config.PROJECT_DIR / path).read_bytes()
+        new_src = ((cwd or config.PROJECT_DIR) / path).read_bytes()
     except OSError:
         return None
     return _structurally_equal(path, old_src, new_src)
 
 
-def _ast_equivalent_refs(path_a: str, ref_a: str, path_b: str, ref_b: str) -> bool | None:
+def _ast_equivalent_refs(
+    path_a: str, ref_a: str, path_b: str, ref_b: str, cwd: Path | None = None,
+) -> bool | None:
     """Like _ast_equivalent but between two git refs (no working tree).
 
     True if ``path_a@ref_a`` and ``path_b@ref_b`` differ only cosmetically. ``None``
     when either blob is absent/unreadable or the language has no structural backend
     (caller treats that as a structural change). Language is detected from ``path_b``.
     """
-    old_src = _git(["show", f"{ref_a}:{path_a}"])
-    new_src = _git(["show", f"{ref_b}:{path_b}"])
+    old_src = _git(["show", f"{ref_a}:{path_a}"], cwd)
+    new_src = _git(["show", f"{ref_b}:{path_b}"], cwd)
     if old_src is None or new_src is None:
         return None
     return _structurally_equal(path_b, old_src, new_src)
@@ -5923,33 +6056,13 @@ def _ast_equivalent_refs(path_a: str, ref_a: str, path_b: str, ref_b: str) -> bo
 _FRESHNESS_LIST_CAP = 50
 
 
-@_tool(annotations=ToolAnnotations(title="Graph freshness", read_only_hint=True))
-def graphlore_freshness(as_json: bool = False) -> str:
-    """Check whether graph.json is stale relative to the current git HEAD.
-
-    Prefers the commit graphify recorded the graph was built from
-    (``built_at_commit``) over the file mtime — robust across checkouts where
-    mtime is reset — and flags both modified and newly-added (untracked) files.
-
-    Returns a ``recommended_action`` (fresh / update / rebuild) with a ``reason``:
-    deletions, renames, or a large change set call for a full rebuild, since
-    incremental update can't drop nodes for code that no longer exists. If
-    ``built_at_commit`` is recorded but unreachable in this clone (shallow clone,
-    gc, rebase or squash), incremental update can't trust its base, so a full
-    rebuild is recommended rather than a crash or a misleading "older commit".
-    Use for: whether to trust the graph or rebuild it first. Not for: what
-    changed in the code itself (git diff shows that).
-    """
-    gp = _graph_path()
-    if not gp.exists():
-        return _err("graph.json missing. Run graphlore_build first.", as_json)
-    graph_mtime = gp.stat().st_mtime
-    head = _git(["rev-parse", "HEAD"])
-    payload: dict[str, Any] = {"graph_exists": True, "git": head is not None}
-    if head is None:
-        return _fmt(payload, as_json,
-                    "graph.json exists, but this is not a git repo (or git unavailable).")
-
+def _repo_freshness(
+    cwd: Path, lead: str, head: str, built_at: str | None, nodes: list[dict],
+    graph_mtime: float,
+) -> dict[str, Any] | str:
+    """graphlore_freshness for one git repository at ``cwd``: its pending changes
+    (paths led by ``lead``, a workspace repository's ``svc-a/``), whether the graph
+    is behind its HEAD, and the action that follows. A string when git failed."""
     # Modified AND untracked files — `git diff --name-only HEAD` misses new files.
     # Skip graphify's own output dir so an un-gitignored graphify-out/ doesn't
     # mark the graph perpetually stale.
@@ -5957,34 +6070,28 @@ def graphlore_freshness(as_json: bool = False) -> str:
     # paths containing spaces or non-ASCII bytes (e.g. `"my file.py"`), which would
     # leave the literal quotes in the path and break the `git show ref:path` AST
     # diff below (every such file would look structurally changed).
-    status = _git(["status", "--porcelain", "-z"])
+    status = _git(["status", "--porcelain", "-z"], cwd)
     if status is None:
         # A failed/timed-out `git status` must NOT read as a clean tree — that
         # would report "fresh" over real pending changes.
-        payload["error"] = "git status failed"
-        return _fmt(
-            payload, as_json,
-            "ERROR: `git status` failed or timed out — freshness cannot be "
-            "determined (not assuming the tree is clean).",
-            is_error=True,
-        )
+        return "git status failed"
 
     # Porcelain paths are REPO-ROOT-relative; PROJECT_DIR may be a subdirectory of
     # the repo, so re-anchor them (dropping changes outside the project) before
     # any working-tree read or node-path comparison.
     prefix = ""
-    top = _git(["rev-parse", "--show-toplevel"])
+    top = _git(["rev-parse", "--show-toplevel"], cwd)
     if top:
         try:
-            rel_root = config.PROJECT_DIR.resolve().relative_to(Path(top).resolve())
+            rel_root = cwd.resolve().relative_to(Path(top).resolve())
             prefix = "" if str(rel_root) == "." else rel_root.as_posix() + "/"
         except (ValueError, OSError):
             prefix = ""
 
     def _reanchor(p: str) -> str | None:
         if not prefix:
-            return p
-        return p[len(prefix):] if p.startswith(prefix) else None
+            return lead + p
+        return lead + p[len(prefix):] if p.startswith(prefix) else None
 
     changed_files: list[str] = []
     removed: list[str] = []  # deleted/renamed -> old nodes linger under incremental update
@@ -6010,14 +6117,6 @@ def graphlore_freshness(as_json: bool = False) -> str:
             removed.append(old)
 
     # Prefer the commit graphify built the graph from; fall back to mtime vs commit.
-    nodes: list[dict] = []
-    built_at = None
-    g = _load_graph()
-    if isinstance(g, dict):
-        built_at = g.get("built_at_commit")
-        if not isinstance(built_at, str):
-            built_at = None  # schema drift: a non-string commit is no provenance
-        nodes, _ = _nodes_edges(g)
     built_unreachable = False
     if built_at:
         # `built_at` has only been a string so far. Verify git actually knows the
@@ -6026,7 +6125,7 @@ def graphlore_freshness(as_json: bool = False) -> str:
         # an unknown base can't be trusted, so treat an unreachable build commit like
         # missing provenance and steer to a full rebuild (rather than reporting it as
         # merely "an older commit" and offering update).
-        reachable = _git(["cat-file", "-e", f"{built_at}^{{commit}}"]) is not None
+        reachable = _git(["cat-file", "-e", f"{built_at}^{{commit}}"], cwd) is not None
         if reachable:
             behind = not (head.startswith(built_at) or built_at.startswith(head))
             commit_reason = "graph was built from an older commit" if behind else None
@@ -6035,7 +6134,7 @@ def graphlore_freshness(as_json: bool = False) -> str:
             behind = True
             commit_reason = "build commit unknown or unreachable"
     else:
-        commit_ts = _git(["log", "-1", "--format=%ct"])
+        commit_ts = _git(["log", "-1", "--format=%ct"], cwd)
         commit_time = float(commit_ts) if commit_ts else 0.0
         behind = commit_time > graph_mtime
         commit_reason = "HEAD commit is newer than the graph" if behind else None
@@ -6058,7 +6157,8 @@ def graphlore_freshness(as_json: bool = False) -> str:
     if to_classify and len(to_classify) <= 25:
         cosmetic, structural = [], []
         for f in to_classify:
-            (cosmetic if _ast_equivalent(f, head) is True else structural).append(f)
+            same = _ast_equivalent(f[len(lead):], head, cwd) is True
+            (cosmetic if same else structural).append(f)
 
     # A deletion/rename only forces a rebuild while its phantom nodes still linger;
     # graphlore_prune drops them, after which the deletion no longer drives a rebuild.
@@ -6101,11 +6201,157 @@ def graphlore_freshness(as_json: bool = False) -> str:
             extra = f" ({len(cosmetic)} cosmetic skipped)" if cosmetic else ""
             bits.append(f"{len(structural)} file(s) changed structurally, no deletions{extra}")
         reason = "; ".join(bits) or "graph is behind HEAD"
-    command = {
-        "fresh": "graph is fresh",
-        "update": "graphlore_build(update=True)",
-        "rebuild": 'graphlore_build(".")  # full rebuild',
-    }[action]
+
+    return {
+        "head": head, "built_at": built_at, "built_unreachable": built_unreachable,
+        "changed_files": changed_files, "removed": removed, "structural": structural,
+        "cosmetic": cosmetic, "non_source": non_source, "phantom_removed": phantom_removed,
+        "stale": stale, "action": action, "reason": reason,
+    }
+
+
+_ACTION_RANK = {"fresh": 0, "update": 1, "rebuild": 2}
+_ACTION_COMMAND = {
+    "fresh": "graph is fresh",
+    "update": "graphlore_build(update=True)",
+    "rebuild": 'graphlore_build(".")  # full rebuild',
+}
+
+
+def _workspace_freshness(
+    repos: dict[str, str | None], nodes: list[dict], graph_mtime: float, as_json: bool,
+) -> str:
+    """graphlore_freshness of a workspace: each repository against the commit it
+    was built at, the lists put together (paths led by the repository) and the
+    strongest action of any of them."""
+    per: dict[str, dict[str, Any]] = {}
+    results: list[tuple[str, dict[str, Any]]] = []
+    for repo, commit in repos.items():
+        cwd = _repo_dir(repo)
+        head = _git(["rev-parse", "HEAD"], cwd)
+        if head is None:
+            per[repo] = {"git": False}
+            continue
+        r = _repo_freshness(cwd, f"{repo}/", head, commit, nodes, graph_mtime)
+        if isinstance(r, str):
+            per[repo] = {"git": True, "error": r}
+            continue
+        results.append((repo, r))
+        per[repo] = {
+            "git": True, "head": head[:10],
+            "built_at_commit": commit[:10] if commit else None,
+            "built_commit_reachable": (not r["built_unreachable"]) if commit else None,
+            "stale": r["stale"], "recommended_action": r["action"], "reason": r["reason"],
+        }
+    failed = [repo for repo, v in per.items() if v.get("error")]
+    keys = ("changed_files", "structural", "cosmetic", "non_source", "removed",
+            "phantom_removed")
+    lists = {k: [f for _, r in results for f in r[k]] for k in keys}
+    action = max((r["action"] for _, r in results), key=_ACTION_RANK.__getitem__,
+                 default="fresh")
+    stale = any(r["stale"] for _, r in results)
+    reason = "; ".join(f"{repo}: {r['reason']}" for repo, r in results if r["stale"]) or (
+        "every repository matches its HEAD with no structural changes")
+    cap = _FRESHNESS_LIST_CAP
+    payload: dict[str, Any] = {
+        "graph_exists": True, "git": bool(results) or any(v["git"] for v in per.values()),
+        "workspace": True, "repos": per,
+        "head": None, "built_at_commit": None, "graph_mtime": graph_mtime,
+        "stale": stale,
+        "uncommitted_or_untracked_files": lists["changed_files"][:cap],
+        "structural_changes": lists["structural"][:cap],
+        "cosmetic_changes": lists["cosmetic"][:cap],
+        "non_source_changes": lists["non_source"][:cap],
+        "deleted_or_renamed": lists["removed"][:cap],
+        "phantom_files": lists["phantom_removed"][:cap],
+        "counts": {
+            "uncommitted_or_untracked_files": len(lists["changed_files"]),
+            "structural_changes": len(lists["structural"]),
+            "cosmetic_changes": len(lists["cosmetic"]),
+            "non_source_changes": len(lists["non_source"]),
+            "deleted_or_renamed": len(lists["removed"]),
+            "phantom_files": len(lists["phantom_removed"]),
+        },
+        "truncated": any(len(v) > cap for v in lists.values()),
+        "recommended_action": action,
+        "reason": reason,
+        "recommendation": _ACTION_COMMAND[action],
+    }
+    _cut_hint(
+        payload,
+        f"Each list holds its first {cap} files; `counts` has the real lengths and "
+        "`git status` in each repository lists every file.",
+    )
+    lines = []
+    if stale:
+        lines.append(f"Graph is STALE: {reason}.\nRecommended: {_ACTION_COMMAND[action]}")
+    else:
+        lines.append(f"Graph is fresh in every repository of the workspace ({len(results)}).")
+    for repo, v in per.items():
+        if not v["git"]:
+            lines.append(f"  {repo}: not a git repository (or git unavailable)")
+        elif v.get("error"):
+            lines.append(f"  {repo}: {v['error']} — freshness unknown")
+        else:
+            lines.append(f"  {repo}: {v['recommended_action']} (HEAD {v['head']})")
+    if failed:
+        payload["error"] = f"git status failed in {', '.join(failed)}"
+        return _fmt(payload, as_json, "\n".join(lines), is_error=True)
+    return _fmt(payload, as_json, "\n".join(lines))
+
+
+@_tool(annotations=ToolAnnotations(title="Graph freshness", read_only_hint=True))
+def graphlore_freshness(as_json: bool = False) -> str:
+    """Check whether graph.json is stale relative to the current git HEAD.
+
+    Prefers the commit graphify recorded the graph was built from
+    (``built_at_commit``) over the file mtime — robust across checkouts where
+    mtime is reset — and flags both modified and newly-added (untracked) files.
+
+    Returns a ``recommended_action`` (fresh / update / rebuild) with a ``reason``:
+    deletions, renames, or a large change set call for a full rebuild, since
+    incremental update can't drop nodes for code that no longer exists. If
+    ``built_at_commit`` is recorded but unreachable in this clone (shallow clone,
+    gc, rebase or squash), incremental update can't trust its base, so a full
+    rebuild is recommended rather than a crash or a misleading "older commit".
+    Use for: whether to trust the graph or rebuild it first. Not for: what
+    changed in the code itself (git diff shows that).
+    """
+    gp = _graph_path()
+    if not gp.exists():
+        return _err("graph.json missing. Run graphlore_build first.", as_json)
+    graph_mtime = gp.stat().st_mtime
+    nodes: list[dict] = []
+    built_at = None
+    g = _load_graph()
+    if isinstance(g, dict):
+        built_at = g.get("built_at_commit")
+        if not isinstance(built_at, str):
+            built_at = None  # schema drift: a non-string commit is no provenance
+        nodes, _ = _nodes_edges(g)
+    repos = {} if built_at else _workspace(g)
+    if repos:
+        return _workspace_freshness(repos, nodes, graph_mtime, as_json)
+    head = _git(["rev-parse", "HEAD"])
+    payload: dict[str, Any] = {"graph_exists": True, "git": head is not None}
+    if head is None:
+        return _fmt(payload, as_json,
+                    "graph.json exists, but this is not a git repo (or git unavailable).")
+    r = _repo_freshness(config.PROJECT_DIR, "", head, built_at, nodes, graph_mtime)
+    if isinstance(r, str):
+        payload["error"] = r
+        return _fmt(
+            payload, as_json,
+            "ERROR: `git status` failed or timed out — freshness cannot be "
+            "determined (not assuming the tree is clean).",
+            is_error=True,
+        )
+    action, reason, stale = r["action"], r["reason"], r["stale"]
+    cosmetic, structural = r["cosmetic"], r["structural"]
+    built_unreachable = r["built_unreachable"]
+    changed_files, removed = r["changed_files"], r["removed"]
+    non_source, phantom_removed = r["non_source"], r["phantom_removed"]
+    command = _ACTION_COMMAND[action]
 
     payload.update({
         "head": head[:10],
@@ -6147,37 +6393,19 @@ def graphlore_freshness(as_json: bool = False) -> str:
     return _fmt(payload, as_json, text)
 
 
-@_tool(annotations=ToolAnnotations(title="Structural diff", read_only_hint=True))
-def graphlore_diff(
-    ref_a: str = "HEAD~1",
-    ref_b: str = "HEAD",
-    budget_tokens: int = 2000,
-    as_json: bool = False,
-) -> str:
-    """Structural changeset between two git refs: what changed in a PR / commit range.
-
-    Reuses the freshness engine (git + the comment-stripped ast / tree-sitter compare)
-    to classify every changed file between ``ref_a`` and ``ref_b`` as added, removed,
-    renamed, structurally-modified, or cosmetic-only (comments/formatting, which leave
-    the graph unchanged). Good for review and audit: "what structurally moved here?".
-
-    It is a FILE-level changeset, not a node/edge diff of two graphs: it says
-    which files changed structurally (to re-extract or review).
-
-    Args:
-        ref_a: The older git commit-ish (default HEAD~1); it must exist.
-        ref_b: The newer one (default HEAD).
-        budget_tokens: Approximate cap on the listed files; structural changes are kept
-            over cosmetic ones when trimming.
-    """
-    if _git(["rev-parse", "HEAD"]) is None:
-        return _err("ERROR: not a git repo (or git unavailable).", as_json)
+def _diff_records(
+    cwd: Path, lead: str, ref_a: str, ref_b: str,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]] | str:
+    """(structural, cosmetic) file changes of the repository at ``cwd`` between
+    two refs, paths led by ``lead``; an ``ERROR`` string when git cannot say."""
+    if _git(["rev-parse", "HEAD"], cwd) is None:
+        return "ERROR: not a git repo (or git unavailable)."
     for ref in (ref_a, ref_b):
-        if _git(["cat-file", "-e", f"{ref}^{{commit}}"]) is None:
-            return _err(f"ERROR: git ref '{ref}' not found in this repo.", as_json)
-    raw = _git(["diff", "--name-status", "-M", "-z", ref_a, ref_b])
+        if _git(["cat-file", "-e", f"{ref}^{{commit}}"], cwd) is None:
+            return f"ERROR: git ref '{ref}' not found in this repo."
+    raw = _git(["diff", "--name-status", "-M", "-z", ref_a, ref_b], cwd)
     if raw is None:
-        return _err(f"ERROR: could not diff {ref_a}..{ref_b}.", as_json)
+        return f"ERROR: could not diff {ref_a}..{ref_b}."
 
     out_prefix = config.OUT_DIR_NAME + "/"
     fields = iter(raw.split("\0"))
@@ -6196,17 +6424,69 @@ def graphlore_diff(
         path = new or old
         if path == config.OUT_DIR_NAME or path.startswith(out_prefix):
             continue
+        shown, shown_old = lead + new, lead + old
         if code == "A":
-            structural.append({"kind": "added", "path": new})
+            structural.append({"kind": "added", "path": shown})
         elif code == "D":
-            structural.append({"kind": "removed", "path": old})
+            structural.append({"kind": "removed", "path": shown_old})
         elif code in ("R", "C"):
-            same = _ast_equivalent_refs(old, ref_a, new, ref_b) is True
-            rec = {"kind": "renamed", "from": old, "to": new, "structural": not same}
+            same = _ast_equivalent_refs(old, ref_a, new, ref_b, cwd) is True
+            rec = {"kind": "renamed", "from": shown_old, "to": shown, "structural": not same}
             (cosmetic if same else structural).append(rec)
         else:  # M, T, U, ...
-            same = _ast_equivalent_refs(path, ref_a, path, ref_b) is True
-            (cosmetic if same else structural).append({"kind": "modified", "path": path})
+            same = _ast_equivalent_refs(path, ref_a, path, ref_b, cwd) is True
+            (cosmetic if same else structural).append({"kind": "modified", "path": lead + path})
+    return structural, cosmetic
+
+
+@_tool(annotations=ToolAnnotations(title="Structural diff", read_only_hint=True))
+def graphlore_diff(
+    ref_a: str = "HEAD~1",
+    ref_b: str = "HEAD",
+    budget_tokens: int = 2000,
+    as_json: bool = False,
+    repo: str = "",
+) -> str:
+    """Structural changeset between two git refs: what changed in a PR / commit range.
+
+    Reuses the freshness engine (git + the comment-stripped ast / tree-sitter compare)
+    to classify every changed file between ``ref_a`` and ``ref_b`` as added, removed,
+    renamed, structurally-modified, or cosmetic-only (comments/formatting, which leave
+    the graph unchanged). Good for review and audit: "what structurally moved here?".
+
+    It is a FILE-level changeset, not a node/edge diff of two graphs: it says
+    which files changed structurally (to re-extract or review). In a workspace
+    of several repositories the refs are each repository's own.
+
+    Args:
+        ref_a: The older git commit-ish (default HEAD~1); it must exist.
+        ref_b: The newer one (default HEAD).
+        budget_tokens: Approximate cap on the listed files; structural changes are kept
+            over cosmetic ones when trimming.
+        repo: In a workspace, the one repository to diff (``svc-a``); empty diffs
+            each repository that has both refs.
+    """
+    repo = repo.strip().strip("/")
+    single = _git(["rev-parse", "HEAD"]) is not None
+    repos = [] if single and not repo else list(_workspace())
+    if repo and repo not in repos:
+        return _err(f"ERROR: '{repo}' is no repository of this workspace.", as_json,
+                    code="not_found", did_you_mean=repos[:10])
+    if not single and not repos:
+        return _err("ERROR: not a git repo (or git unavailable).", as_json)
+    targets = [repo] if repo else ([""] if single else repos)
+    structural: list[dict[str, Any]] = []
+    cosmetic: list[dict[str, Any]] = []
+    skipped: dict[str, str] = {}
+    for r in targets:
+        got = _diff_records(_repo_dir(r), f"{r}/" if r else "", ref_a, ref_b)
+        if isinstance(got, str):
+            if len(targets) == 1:
+                return _err(got, as_json)
+            skipped[r] = got.removeprefix("ERROR: ")
+            continue
+        structural += got[0]
+        cosmetic += got[1]
 
     # ordered structural-first, so trimming to the budget drops cosmetic noise last
     max_files = max(10, budget_tokens // 20)
@@ -6223,6 +6503,12 @@ def graphlore_diff(
         "cosmetic": kept_cosmetic,
         "truncated": len(structural) + len(cosmetic) > len(kept),
     }
+    if repo:
+        payload["repo"] = repo
+    elif not single:
+        payload["repos"] = [r for r in targets if r not in skipped]
+        if skipped:
+            payload["skipped"] = skipped
     _cut_hint(
         payload,
         "Raise budget_tokens for the rest: structural_change_count and "
@@ -6236,8 +6522,10 @@ def graphlore_diff(
             return f"  renamed  {r['from']} -> {r['to']}{tail}"
         return f"  {r['kind']:8} {r['path']}"
 
+    left = (" Not diffed: " + "; ".join(f"{r} ({why})" for r, why in skipped.items()) + "."
+            if skipped else "")
     if not structural and not cosmetic:
-        return _fmt(payload, as_json, f"No changes between {ref_a} and {ref_b}.")
+        return _fmt(payload, as_json, f"No changes between {ref_a} and {ref_b}.{left}")
     lines = [
         f"{ref_a}..{ref_b}: {len(structural)} structural, {len(cosmetic)} cosmetic-only "
         f"file change(s)" + (" (TRUNCATED)" if truncated else "") + ":"
@@ -6248,6 +6536,8 @@ def graphlore_diff(
     if kept_cosmetic:
         lines.append("Cosmetic-only (graph unaffected):")
         lines += [_fmt_rec(r) for r in kept_cosmetic]
+    if left:
+        lines.append(left.strip())
     return _fmt(payload, as_json, "\n".join(lines))
 
 
@@ -8077,6 +8367,15 @@ _WATCH_SKIP_PARTS = frozenset({
 })
 
 
+def _in_repo(rel: str, repos: list[str]) -> tuple[str, Path | None]:
+    """(path inside its repository, the repository's directory) of a
+    project-relative path; the path itself and None outside every repository."""
+    for r in repos:
+        if rel.startswith(r + "/"):
+            return rel[len(r) + 1:], _repo_dir(r)
+    return rel, None
+
+
 def _structural_changes(paths: list[str], ref: str) -> tuple[list[str], list[str]]:
     """Split `paths` (PROJECT_DIR-relative) into (structural, removed) vs git ``ref``.
 
@@ -8095,6 +8394,9 @@ def _structural_changes(paths: list[str], ref: str) -> tuple[list[str], list[str
         {_norm_relpath(_node_file(n)) for n in _nodes_edges(g)[0] if _node_file(n)}
         if isinstance(g, dict) else set()
     )
+    # in a workspace, each file is compared in its own repository
+    repos = (sorted(_workspace(g), key=len, reverse=True)
+             if _git(["rev-parse", "HEAD"]) is None else [])
     for p in paths:
         rel = _norm_relpath(p)
         if not rel or rel == config.OUT_DIR_NAME or rel.startswith(out_prefix):
@@ -8105,7 +8407,7 @@ def _structural_changes(paths: list[str], ref: str) -> tuple[list[str], list[str
             continue
         if not (config.PROJECT_DIR / rel).exists():
             removed.append(rel)
-        elif _ast_equivalent(rel, ref) is not True:  # structural / new / unparseable
+        elif _ast_equivalent(_in_repo(rel, repos)[0], ref, _in_repo(rel, repos)[1]) is not True:
             structural.append(rel)
     return structural, removed
 

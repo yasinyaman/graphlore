@@ -108,7 +108,8 @@ def _cmd_review(args: argparse.Namespace) -> int:
         config.PROJECT_DIR = Path(args.project).resolve()
     fail_on = tuple(x.strip() for x in args.fail_on.split(",") if x.strip())
     return change_review.run(args.base, args.head, fmt=args.format, fail_on=fail_on,
-                             build=not args.no_build, hops=args.hops, output=args.output)
+                             build=not args.no_build, hops=args.hops, output=args.output,
+                             repo=args.repo)
 
 
 def _cmd_hook(args: argparse.Namespace) -> int:
@@ -157,6 +158,8 @@ def _parser() -> argparse.ArgumentParser:
                    help="the commit the change is compared with, through its merge base")
     r.add_argument("--head", default="HEAD", help="the changed commit; it must be checked out")
     r.add_argument("--project", default="", help="the project directory (default: here)")
+    r.add_argument("--repo", default="",
+                   help="in a workspace of several repositories, the one whose range it is")
     r.add_argument("--format", default="markdown", choices=("markdown", "json"))
     r.add_argument("--fail-on", default="",
                    help="comma-separated gates that exit 1: cycle (a runtime import cycle "
