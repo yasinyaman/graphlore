@@ -10495,6 +10495,16 @@ def test_review_maps_changed_lines_to_definitions_and_what_depends_on_them(tmp_p
             n["source_location"] = "L4"
         if n["id"] == "compute":
             n["source_location"] = "L8"
+    # a constant the change adds, and a heading of a document that names helper
+    graph["nodes"] += [
+        {"id": "limit", "label": "LIMIT", "source_file": "pkg/core.py",
+         "source_location": "L1", "file_type": "code", "kind": "constant",
+         "region_start": 1, "end_line": 1},
+        {"id": "doc", "label": "Helpers", "source_file": "README.md",
+         "source_location": "L1", "file_type": "document"}]
+    graph["links"] += [
+        {"source": "core", "target": "limit", "relation": "contains"},
+        {"source": "doc", "target": "helper", "relation": "documents"}]
     (tmp_path / "graphify-out" / "graph.json").write_text(json.dumps(graph))
     server._GRAPH_CACHE.clear()
 
@@ -10502,19 +10512,26 @@ def test_review_maps_changed_lines_to_definitions_and_what_depends_on_them(tmp_p
     assert [f["path"] for f in r["files"]] == ["pkg/core.py"]
     assert r["cosmetic_files"] == ["pkg/util.py"]          # comments only: left out
     changed = {(c["node"] or "(top)"): c["lines"] for c in r["changed"]}
-    # `def helper(x):` itself is unchanged, only moved: git gives its body line
-    assert changed == {"helper()": "5", "(top)": "1-3"}
+    # `def helper(x):` itself is unchanged, only moved: git gives its body line;
+    # the two blank lines the change adds after LIMIT are no change of anything
+    assert changed == {"helper()": "5", "LIMIT": "1"}
     deps = {d["node"]: d for d in r["dependents"]["rows"]}
     assert deps["compute()"]["distance"] == 1 and deps["handle()"]["distance"] == 2
     assert deps["test_compute()"]["test"] is True
+    # what holds a changed definition, and a heading that names it, are not
+    # its dependents; the file that imports the module still is, through it
+    assert "core.py" not in deps and "Helpers" not in deps
+    assert deps["api.py"]["relation"] == "imports_from"
+    assert r["dependents"]["total"] == len(deps)
     # production before tests at one distance
     names = [d["node"] for d in r["dependents"]["rows"]]
     assert names.index("handle()") < names.index("test_compute()")
     assert [t["test"] for t in r["tests"]["tests"]] == ["test_compute()"]
+    # a constant is read, not called: it is never "untested"
     assert r["tests"]["untested"] == [] and r["failed"] == []
     md = change_review.render_markdown(r)
     assert md.startswith(change_review.MARKER)
-    assert "| `helper()` | `pkg/core.py` | 5 |" in md and "(top level)" in md
+    assert "| `helper()` | `pkg/core.py` | 5 |" in md and "| `LIMIT` |" in md
 
 
 def test_review_gates_an_introduced_import_cycle_and_an_untested_definition(tmp_path,

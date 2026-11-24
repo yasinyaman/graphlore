@@ -44,9 +44,9 @@ graphlore review --base HEAD~3 --format json --output review.json
 | Part | How it is made |
 |---|---|
 | Files | `graphlore_diff`'s changeset: added, removed, renamed and structurally modified files. Cosmetic-only files (comments, formatting) are counted and left out |
-| Changed | Each changed line of a source file (`git diff -U0`) given to the innermost definition around it; a line no definition holds is the file's top level. A definition deleted from a file shows as a change to what held it. Documents and configuration files are listed with the files only |
-| What depends on it | One walk from all changed definitions over the graph's edges plus the ones graphlore resolves from the source, as `graphlore_impact` walks: nearest first, production code before tests, the most connected first; the first 60 rows, the rest counted. Shared state and docstrings are not walked |
-| Tests | `graphlore_tests_for` on each changed production definition (the first 40): tests that call it, or call something that calls it; and the definitions no test reaches |
+| Changed | Each changed line of a source file (`git diff -U0`), blank lines left out, given to the innermost definition around it; a line no definition holds is the file's top level. A definition deleted from a file shows as a change to what held it. Documents and configuration files are listed with the files only |
+| What depends on it | One walk from all changed definitions over the graph's edges plus the ones graphlore resolves from the source, as `graphlore_impact` walks: nearest first, production code before tests, the most connected first; the first 60 rows, the rest counted. Shared state, docstrings and documents (a heading naming the code) are not walked; containment is walked, so the files importing a changed file are reached, but the file or class holding a changed definition is not listed |
+| Tests | `graphlore_tests_for` on each changed production function, method or type (the first 40; a variable, constant or field is read, not called, and is not looked up): tests that call it, or call something that calls it; and the ones no test reaches |
 | Import cycles | Cycles between files that pass through a changed file, each with when its imports run (runtime, deferred, type-only) and whether the change `introduced` it |
 | Layer rules | With a `.graphlore-layers.json`, the violations in changed files, `introduced` when the import is on a changed line |
 

@@ -142,7 +142,14 @@ def _span(n: dict) -> tuple[int, int] | None:
 
 def _changes_in(file: str, lines: set[int], nodes: list[dict]) -> list[_Change]:
     """Each changed line to the innermost definition around it; a line no
-    definition holds is the file's top level."""
+    definition holds is the file's top level. A line left blank at the head
+    commit changes nothing anyone reads."""
+    if lines:
+        got = srv._read_source_lines(file, min(lines), max(lines))
+        if got is not None:
+            text, lo, _hi = got
+            lines = {ln for ln in lines
+                     if not (lo <= ln < lo + len(text) and not text[ln - lo].strip())}
     spans: list[tuple[int, int, dict]] = []
     for n in _nodes_by_file(nodes).get(file, []):
         if not srv._is_code_definition(n) or srv._is_file_hub_node(n):
@@ -177,20 +184,28 @@ def _ranges(lines: list[int]) -> str:
 def _dependents(nodes: list[dict], edges: list[dict], seeds: list[str], hops: int,
                 labels: Any) -> dict[str, Any]:
     """What depends on any of ``seeds``, one walk from all of them: the nearest
-    first, production code before tests, the most connected first."""
+    first, production code before tests, the most connected first.
+
+    A heading that names the code documents it and depends on nothing
+    (``documents`` is not walked). Containment is walked, since the files that
+    import a changed definition's file are reached through the file's node,
+    but what holds a changed definition is not one of its dependents: a row
+    reached by a containment edge is left out of the list and the counts."""
     nav = srv._nav_view(nodes, edges, "", True)
     if isinstance(nav, str):
         return {"rows": [], "total": 0}
     view, _resolved = nav
     _forward, reverse = srv._directed_edge_adjacency(view.edges)
-    skip = srv._IMPACT_SKIPPED_RELATIONS | srv._STATE_RELATIONS | srv._COUPLING_RELATIONS
+    skip = (srv._IMPACT_SKIPPED_RELATIONS | srv._STATE_RELATIONS | srv._COUPLING_RELATIONS
+            | srv._DOCUMENT_RELATIONS)
     if not seeds:
         return {"rows": [], "total": 0}
     recs = srv._hop_records(reverse, seeds[0], hops, None, seeds[1:], skip)
     byid = {str(srv._node_id(n)): n for n in nodes}
     seed_set = set(seeds)
     hits = [(nid, d, via, e) for nid, (d, via, e) in recs.items()
-            if nid not in seed_set and e is not None]
+            if nid not in seed_set and e is not None
+            and srv._edge_rel(e).strip().lower() not in srv._CONTAINMENT_RELATIONS]
 
     def in_test(nid: str) -> bool:
         n = byid.get(nid)
@@ -223,7 +238,10 @@ def _tests_of(changes: list[_Change]) -> dict[str, Any]:
     reached: dict[str, dict] = {}
     untested: list[str] = []
     asked = 0
-    candidates = [c for c in changes if c.node is not None and not srv._is_test_node(c.node)]
+    # a variable, a constant or a field is read, not called: no test "reaches"
+    # one by a call, so only callables and types are looked up
+    candidates = [c for c in changes if c.node is not None and not srv._is_test_node(c.node)
+                  and not srv._is_state_node(c.node)]
     for c in candidates[:_MAX_TESTED]:
         asked += 1
         nid = str(srv._node_id(c.node or {}))

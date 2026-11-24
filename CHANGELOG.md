@@ -40,7 +40,10 @@ All notable changes to this project are documented here. The format is based on
   one caller) and the ones no test reaches, the import cycles through changed
   files and the `.graphlore-layers.json` violations in them, each marked
   `introduced` when the import is written on a changed line. Cosmetic-only
-  files are left out. It builds the graph at the head commit with the native
+  files and blank lines are left out; a heading that names the code and the
+  file or class that holds it are not listed as dependents (the files that
+  import it still are), and a changed variable, constant or field is never
+  "untested". It builds the graph at the head commit with the native
   engine when it is missing or older (`--no-build` refuses instead), writes
   Markdown for a pull-request comment (repository names as code spans, at
   most 20,000 characters) or `--format json`, and exits 1 when a
