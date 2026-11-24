@@ -1196,8 +1196,9 @@ core types (`S ~[]E`), range over function iterators, anonymous struct
 types, unexported names of two packages, a name an `else if` declares
 again (the two blocks end at one byte, and the facts do not say where a
 block starts), a short variable's own value (tried: it cost 11 uses on chi)
-and a variable holding a function literal. Two rules a reader proposed were
-dropped after measuring.
+and a variable holding a function literal. Two engine changes tried for
+these were taken back after measuring (keeping every Go declaration of a
+name broke `v, ok := f()` redeclaring `v`; the own-value rule cost 11 uses).
 
 **Phase 3: inference, by the numbers.** (Measured: see 'Phase 3: inference, by the numbers' above; nothing built.) Per language, what one step of
 inference would add (a closure parameter typed by the collection it is
