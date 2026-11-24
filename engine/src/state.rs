@@ -607,9 +607,7 @@ impl State {
         // (`assert!(f(Mode::Count))`, `assert_eq!(c.n, 1)`), never a bare
         // name of its own; `macro_state_uses` reads the arguments as the
         // expression they are
-        if pk == "token_tree"
-            && n.prev_sibling().is_some_and(|s| matches!(s.kind(), "::" | "."))
-        {
+        if pk == "token_tree" && n.prev_sibling().is_some_and(|s| matches!(s.kind(), "::" | ".")) {
             return;
         }
         if is_write_target(n, anc) {

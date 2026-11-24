@@ -548,6 +548,12 @@ const RUST_CORE_METHODS: &[&str] = &[
     "peek",
 ];
 
+/// Rust's primitive types: a path that starts at one is the language's.
+const RUST_PRIMITIVES: &[&str] = &[
+    "bool", "char", "str", "u8", "u16", "u32", "u64", "u128", "usize", "i8", "i16", "i32", "i64",
+    "i128", "isize", "f32", "f64",
+];
+
 /// Methods of C++'s standard library (`std::string::c_str`).
 const CPP_CORE_METHODS: &[&str] = &[
     "c_str",
@@ -784,8 +790,15 @@ const SWIFT_CORE_METHODS: &[&str] = &[
 
 /// Whether a path segment is something of collections: an element, a method
 /// that keeps the collection or one that gives an element.
+/// What a collection says of itself: its size, whether it is empty. After a
+/// name or call declared as a collection (`fn matches(&self) -> &[Match]`),
+/// `matches().is_empty()` asks the collection, never an element's method of
+/// the name (rust-analyzer on ripgrep: `[T]::is_empty`, not `Match::is_empty`).
+const SIZE_METHODS: &[&str] = &["len", "is_empty", "isEmpty", "size", "length", "Count", "Length"];
+
 fn is_collection_step(seg: &str) -> bool {
     seg == "partition"
+        || SIZE_METHODS.contains(&seg)
         || NESTING_METHODS.contains(&seg)
         || GROUPING_METHODS.contains(&seg)
         || ASSOCIATING_METHODS.contains(&seg)
@@ -5037,9 +5050,12 @@ impl<'a> Project<'a> {
             || name.starts_with('[')
             // (`self.name()` is a member of the type around, or nothing)
             || (of.len() == 1 && matches!(of[0].as_str(), "self" | "super"))
-            // (`HttpUtility.UrlEncode(s)`: a static call on a library's type)
+            // (`HttpUtility.UrlEncode(s)`: a static call on a library's type;
+            // Rust `usize::from(b)`: on a primitive)
             || (of.len() == 1
-                && of[0].chars().next().is_some_and(|c| c.is_uppercase())
+                && (of[0].chars().next().is_some_and(|c| c.is_uppercase())
+                    || (self.family[f] == Some(Family::Rust)
+                        && RUST_PRIMITIVES.contains(&of[0].as_str())))
                 && !self.is_local_name(f, d, &of[0]))
         {
             return None;
@@ -5691,6 +5707,11 @@ impl<'a> Project<'a> {
                     if upper {
                         conf = Confidence::Inferred;
                         Target::Def(self.type_named(f, head)?)
+                    } else if fam == Family::Rust && RUST_PRIMITIVES.contains(&head.as_str()) {
+                        // `usize::from(b)`, `str::len(s)`: a primitive's
+                        // associated function, the language's (a trait of the
+                        // project implemented for it is asked by its path)
+                        return None;
                     } else if !bases && (rest.len() == 1 || (rest.len() == 2 && rest[0] == "()")) {
                         return self.unknown_receiver(f, rest.last()?, None);
                     } else {

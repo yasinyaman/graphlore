@@ -3474,6 +3474,37 @@ fn rust_an_item_of_another_module_needs_a_use() {
     ]);
     has(&got, &[("own", "references", "Result")]);
     for who in ["top", "child"] {
-        assert!(!got.contains(&(who.into(), "references".into(), "Result".into())), "{who}: {got:?}");
+        assert!(
+            !got.contains(&(who.into(), "references".into(), "Result".into())),
+            "{who}: {got:?}"
+        );
     }
+}
+
+/// Rust (engine 0.5.81, from rust-analyzer on ripgrep's printer): the size of
+/// a slice a method returns is the slice's, not an element's method of the
+/// name; an element taken from it (`[0]`) is asked as before.
+#[test]
+fn rust_the_size_of_a_returned_slice_is_the_slice_s() {
+    let got = quals("rsslicesize", &[
+        ("Cargo.toml", "[package]\nname = \"demo\"\nversion = \"0.1.0\"\nedition = \"2021\"\n"),
+        ("src/lib.rs", "pub struct Match {\n    start: usize,\n}\n\nimpl Match {\n    pub fn is_empty(&self) -> bool {\n        self.start == 0\n    }\n\n    pub fn len(&self) -> usize {\n        self.start\n    }\n}\n\npub struct Sunk {\n    matches: Vec<Match>,\n}\n\nimpl Sunk {\n    pub fn matches(&self) -> &[Match] {\n        &self.matches\n    }\n}\n\npub fn none(s: &Sunk) -> bool {\n    s.matches().is_empty()\n}\n\npub fn first_empty(s: &Sunk) -> bool {\n    s.matches()[0].is_empty()\n}\n"),
+    ]);
+    has(&got, &[("first_empty", "calls", "Match.is_empty")]);
+    assert!(!got.contains(&("none".into(), "calls".into(), "Match.is_empty".into())), "{got:?}");
+}
+
+/// Rust (engine 0.5.81, from rust-analyzer on ripgrep's matcher): a path that
+/// starts at a primitive type (`usize::from(b)`) is the language's; no guess
+/// goes to a project's `impl From<…> for std::io::Error`.
+#[test]
+fn rust_a_primitive_type_path_is_the_language_s() {
+    let got = quals("rsprimitive", &[
+        ("Cargo.toml", "[package]\nname = \"demo\"\nversion = \"0.1.0\"\nedition = \"2021\"\n"),
+        (
+            "src/lib.rs",
+            "pub struct Wrapper(u8);\n\nimpl From<Wrapper> for std::io::Error {\n    fn from(_w: Wrapper) -> Self {\n        std::io::Error::other(\"x\")\n    }\n}\n\npub fn index(b: u8) -> usize {\n    usize::from(b)\n}\n",
+        ),
+    ]);
+    assert!(!got.iter().any(|(s, r, _)| s == "index" && r == "calls"), "{got:?}");
 }

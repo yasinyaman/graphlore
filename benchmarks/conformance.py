@@ -2812,6 +2812,14 @@ case("rust", "item-of-another-module-needs-use", "an item of another module is i
           "src/http/extractor.rs": "pub fn child() -> Result<(), ()> {\n    Ok(())\n}\n"},
      [("own", "references", "Result")], [("top", "references", "Result"), ("child", "references", "Result")],
      source=REF_RS + "names/scopes.md r[names.scopes.item] (an item is in scope in the module it is declared in); names/preludes.md r[names.preludes.std]")
+case("rust", "size-of-a-returned-slice", "`xs().is_empty()` where `xs` returns `&[T]` is the slice's method; `xs()[0].is_empty()` is the element's",
+     RS, {"Cargo.toml": CARGO21, "src/lib.rs": "pub struct Match {\n    start: usize,\n}\n\nimpl Match {\n    pub fn is_empty(&self) -> bool {\n        self.start == 0\n    }\n\n    pub fn len(&self) -> usize {\n        self.start\n    }\n}\n\npub struct Sunk {\n    matches: Vec<Match>,\n}\n\nimpl Sunk {\n    pub fn matches(&self) -> &[Match] {\n        &self.matches\n    }\n}\n\npub fn none(s: &Sunk) -> bool {\n    s.matches().is_empty()\n}\n\npub fn first_empty(s: &Sunk) -> bool {\n    s.matches()[0].is_empty()\n}\n"},
+     [("first_empty", "calls", "Match.is_empty")], [("none", "calls", "Match.is_empty")],
+     source=REF_RS + "expressions/method-call-expr.md r[expr.method.candidate-receiver-types] (the receiver `&[Match]` is searched before any autoderef to an element)")
+case("rust", "primitive-type-path", "`usize::from(b)` is the primitive's associated function: no guess goes to a project method of the name",
+     RS, {"Cargo.toml": CARGO21, "src/lib.rs": "pub struct Wrapper(u8);\n\nimpl From<Wrapper> for std::io::Error {\n    fn from(_w: Wrapper) -> Self {\n        std::io::Error::other(\"x\")\n    }\n}\n\npub fn index(b: u8) -> usize {\n    usize::from(b)\n}\n"},
+     [], [("index", "calls", "from")],
+     source=REF_RS + "types/numeric.md and paths.md r[paths.qualifiers.type-to-trait] (a primitive's path names the language's type)")
 
 # --- running ------------------------------------------------------------------
 
