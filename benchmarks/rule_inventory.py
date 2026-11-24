@@ -16,6 +16,7 @@ many of the checklist's cases were found in the language's own tools
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -282,7 +283,7 @@ INVENTORY: dict[str, list[tuple[str, str, dict]]] = {
          held("go/dot-import")),
         ("spec Import_declarations", "`import _ \"p\"` binds nothing", not_followed("it binds no name to resolve")),
         # Selectors, method sets (go/types lookup.go)
-        ("spec Selectors; go/types LookupFieldOrMethod", "`x.f` is the field or method at the shallowest depth",
+        ("spec Selectors; go/types lookup.go LookupFieldOrMethod", "`x.f` is the field or method at the shallowest depth",
          held("go/shallowest-depth", "go/shallower-embedding-wins")),
         ("spec Selectors", "an embedded type's fields and methods are promoted",
          held("go/embedded-struct", "go/promoted-field", "go/embedded-interface")),
@@ -539,6 +540,129 @@ INVENTORY: dict[str, list[tuple[str, str, dict]]] = {
 }
 
 
+def no_binding_rule(reason: str) -> dict:
+    return {"none": reason}
+
+
+# The sections of each language's sources a sweep reads (docs/rule-sources.md,
+# 'Phase 2b: the sweep'): `(section, group)`. A section is read when a row of
+# INVENTORY names it (a part of its source, before or after a `;`, that is the
+# section or starts with it and a space), or when NO_RULE says why it holds no
+# rule of name binding. The group is the batch one extracting agent reads.
+SECTIONS: dict[str, list[tuple[str, str]]] = {
+    "go": [
+        *((f"spec {s}", "declarations") for s in (
+            "Blocks", "Declarations_and_scope", "Label_scopes", "Blank_identifier",
+            "Predeclared_identifiers", "Exported_identifiers", "Uniqueness_of_identifiers",
+            "Constant_declarations", "Iota", "Variable_declarations",
+            "Short_variable_declarations", "Function_declarations", "Method_declarations")),
+        *((f"go/types {s}", "declarations") for s in (
+            "resolver.go", "decl.go", "scope.go", "assignments.go", "object.go")),
+        *((f"spec {s}", "generics") for s in (
+            "Type_declarations", "Alias_declarations", "Type_definitions",
+            "Type_parameter_declarations", "Type_constraints", "Satisfying_a_type_constraint",
+            "Instantiations", "Type_inference", "Type_unification", "Type_unification_rules")),
+        *((f"go/types {s}", "generics") for s in (
+            "typexpr.go", "infer.go", "unify.go", "instantiate.go", "typeparam.go", "alias.go",
+            "named.go")),
+        *((f"spec {s}", "types") for s in (
+            "Types", "Array_types", "Slice_types", "Struct_types", "Pointer_types",
+            "Function_types", "Interface_types", "Basic_interfaces", "Embedded_interfaces",
+            "General_interfaces", "Implementing_an_interface", "Map_types", "Channel_types",
+            "Underlying_types", "Type_identity", "Assignability", "Method_sets")),
+        *((f"go/types {s}", "types") for s in (
+            "methodset.go", "interface.go", "struct.go", "signature.go", "typeset.go",
+            "under.go", "predicates.go")),
+        *((f"spec {s}", "expressions") for s in (
+            "Operands", "Qualified_identifiers", "Composite_literals",
+            "Address_of_composite_literals", "Omitting_composite_literal_types",
+            "Function_literals", "Primary_expressions", "Selectors", "Method_expressions",
+            "Method_values", "Index_expressions", "Slice_expressions", "Type_assertions",
+            "Conversions", "Address_operators", "Receive_operator")),
+        *((f"go/types {s}", "expressions") for s in (
+            "lookup.go", "selection.go", "expr.go", "index.go", "literals.go",
+            "conversions.go")),
+        *((f"spec {s}", "calls") for s in (
+            "Calls", "Passing_arguments_to_..._parameters", "Built-in_functions",
+            "Appending_and_copying_slices", "Clear", "Close", "Complex_numbers",
+            "Deletion_of_map_elements", "Length_and_capacity", "Making_slices_maps_and_channels",
+            "Min_and_max", "Allocation", "Handling_panics")),
+        *((f"go/types {s}", "calls") for s in ("call.go", "builtins.go", "universe.go")),
+        *((f"spec {s}", "statements") for s in (
+            "Statements", "Terminating_statements", "Labeled_statements", "Expression_statements",
+            "Send_statements", "IncDec_statements", "Assignment_statements", "If_statements",
+            "Switch_statements", "Expression_switches", "Type_switches", "For_statements",
+            "For_clause", "For_range", "Go_statements", "Select_statements",
+            "Return_statements", "Break_statements", "Continue_statements", "Goto_statements",
+            "Defer_statements")),
+        *((f"go/types {s}", "statements") for s in ("stmt.go", "range.go", "labels.go", "return.go")),
+        *((f"spec {s}", "packages") for s in (
+            "Packages", "Source_file_organization", "Package_clause", "Import_declarations",
+            "Package_initialization", "Program_initialization", "Package_unsafe",
+            "Language_versions")),
+        *((f"go/types {s}", "packages") for s in ("package.go", "version.go", "initorder.go")),
+        *((f"spec {s}", "no rule") for s in (
+            "Introduction", "Notation", "Source_code_representation", "Lexical_elements",
+            "Identifiers", "Keywords", "Constants", "Variables", "Boolean_types",
+            "Numeric_types", "String_types", "Representation_of_values", "Representability",
+            "Operators", "Constant_expressions", "Order_of_evaluation", "Empty_statements",
+            "Fallthrough_statements", "The_zero_value", "Program_execution", "Errors",
+            "Run_time_panics", "Size_and_alignment_guarantees")),
+    ],
+}
+
+NO_RULE: dict[str, dict[str, str]] = {
+    "go": {
+        "spec Introduction": "prose",
+        "spec Notation": "the grammar's notation",
+        "spec Source_code_representation": "characters and encoding",
+        "spec Lexical_elements": "tokens, literals and punctuation: no name is bound",
+        "spec Identifiers": "what an identifier is spelled with; what it names is Declarations_and_scope",
+        "spec Keywords": "reserved words, never names",
+        "spec Constants": "constant values and their kinds; declaring one is Constant_declarations",
+        "spec Variables": "what a variable is; declaring one is Variable_declarations",
+        "spec Boolean_types": "a predeclared type: Predeclared_identifiers",
+        "spec Numeric_types": "predeclared types: Predeclared_identifiers",
+        "spec String_types": "a predeclared type: Predeclared_identifiers",
+        "spec Representation_of_values": "the values a type holds",
+        "spec Representability": "whether a constant fits a type",
+        "spec Operators": "operators are not declared and cannot be overloaded in Go: no operator names a definition",
+        "spec Constant_expressions": "constant arithmetic",
+        "spec Order_of_evaluation": "when, not what",
+        "spec Empty_statements": "nothing is written",
+        "spec Fallthrough_statements": "control flow; it names nothing",
+        "spec The_zero_value": "values",
+        "spec Program_execution": "`main.main` runs: no use in the source names it",
+        "spec Errors": "the predeclared `error`: Predeclared_identifiers",
+        "spec Run_time_panics": "run time",
+        "spec Size_and_alignment_guarantees": "sizes",
+    },
+}
+
+
+def section_status(lang: str) -> list[tuple[str, str, str, int]]:
+    """Each section of `lang`: `(section, group, state, rows)`, state
+    `read`, `no rule` or `not read`, rows the INVENTORY rows that name it."""
+    parts = [p.strip() for where, _, _ in INVENTORY.get(lang, []) for p in where.split(";")]
+    out = []
+    for section, group in SECTIONS.get(lang, []):
+        rows = sum(1 for p in parts if p == section or p.startswith(section + " "))
+        state = "read" if rows else "no rule" if section in NO_RULE.get(lang, {}) else "not read"
+        out.append((section, group, state, rows))
+    return out
+
+
+def sweep_groups(lang: str) -> list[dict]:
+    """The groups a sweep hands to its extracting agents: every section of a
+    group but the ones NO_RULE settles, with the rows already held."""
+    groups: dict[str, dict] = {}
+    for section, group, state, _ in section_status(lang):
+        if state == "no rule":
+            continue
+        groups.setdefault(group, {"group": group, "sections": []})["sections"].append(section)
+    return list(groups.values())
+
+
 def _cases() -> dict[str, dict]:
     import conformance
     return {c["id"]: c for c in conformance.CASES}
@@ -548,7 +672,14 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     ap.add_argument("--lang", default="")
     ap.add_argument("--markdown", action="store_true")
+    ap.add_argument("--sections", action="store_true", help="each section of the sources and whether it is read")
+    ap.add_argument("--sweep-groups", action="store_true", help="the groups of --lang a sweep reads, as JSON")
     args = ap.parse_args()
+    if args.sweep_groups:
+        if not args.lang:
+            ap.error("--sweep-groups needs --lang")
+        print(json.dumps(sweep_groups(args.lang), indent=2))
+        return 0
     cases = _cases()
     missing = [(lang, cid) for lang, rows in INVENTORY.items() for _, _, st in rows
                for cid in st.get("cases", []) if cid not in cases]
@@ -569,8 +700,14 @@ def main() -> int:
                     else "not followed: " + st["reason"]
                 print(f"| {where} | {rule} | {what} |")
             print()
+        status = section_status(lang)
+        settled = sum(1 for *_, state, _ in status if state != "not read")
         print(f"{lang}: {len(rows)} rules, {kept} held by a case, {len(rows) - kept} not followed; "
-              f"{sourced} of {len(mine)} cases found in the language's own tools")
+              f"{sourced} of {len(mine)} cases found in the language's own tools"
+              + (f"; {settled} of {len(status)} sections read" if status else ""))
+        if args.sections:
+            for section, group, state, n in status:
+                print(f"  {state:<9} {group:<13} {section}" + (f"  ({n} rows)" if n else ""))
     return 0
 
 

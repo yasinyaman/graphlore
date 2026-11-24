@@ -23,11 +23,18 @@ where one is installed, and reports the ones it rejects:
     Swift       swiftc -typecheck
     C#          dotnet build (a library of every source)
 
-A language with no toolchain on this machine is listed as not checked. It
-compiles; it does not say which definition a call reaches: see `--binding` in
-the docs for what does.
+A language with no toolchain on this machine is listed as not checked.
+
+That a case compiles does not say which definition a name in it reaches.
+`--binding` asks that too, where a type checker answers (Go: go/types, through
+`oracle_go.py`'s program): for each edge a case expects, the compiler must bind
+a use inside the source definition to the target definition; for each edge it
+says is absent, it must not. A case whose expectation the compiler contradicts
+is wrong, whatever the engine does with it. Edges that are no binding of a name
+(imports, containment, dispatch, coupling, documents, HTTP) are not judged.
 
     python benchmarks/verify_cases.py
+    python benchmarks/verify_cases.py --binding --only go
     python benchmarks/verify_cases.py --only go,rust
     python benchmarks/verify_cases.py --json out.json
 """
@@ -164,6 +171,104 @@ def verify(c: dict[str, Any]) -> dict[str, Any]:
             "first": first[:200]}
 
 
+# relations that bind no name the compiler could be asked about
+NOT_BINDINGS = {"imports", "imports_from", "re_exports", "contains", "method", "defines",
+                "case_of", "dispatches_to", "couples_with", "documents", "handles", "http_calls"}
+BINDERS = {"go"}
+
+
+def _write(c: dict[str, Any], root: Path) -> None:
+    for rel, src in c["files"].items():
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(src, encoding="utf-8")
+
+
+def _span(n: dict[str, Any]) -> tuple[str, int, int, int]:
+    """A node's file, definition line and lines (a file node: all of it)."""
+    loc = str(n.get("source_location") or "").lstrip("L").split("-")[0]
+    line = int(loc) if loc.isdigit() else 0
+    if not line:
+        return str(n.get("source_file") or ""), 0, 0, 1 << 30
+    return (str(n.get("source_file") or ""), line, int(n.get("region_start") or line),
+            int(n.get("end_line") or line))
+
+
+def binding(c: dict[str, Any], tool: Path) -> dict[str, Any]:
+    """The compiler's answer to each edge of the case (`--binding`)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp) / "project"
+        _write(c, root)
+        out = Path(tmp) / "graph.json"
+        subprocess.run([sys.executable, "-m", "graphlore_engine", "build", str(root), "--out", str(out)],
+                       capture_output=True, text=True)
+        if not out.exists():
+            return {"id": c["id"], "wrong": [], "unjudged": [], "error": "the engine built no graph"}
+        nodes = json.loads(out.read_text(encoding="utf-8"))["nodes"]
+        done = subprocess.run([str(tool / "dump"), str(root)], capture_output=True, text=True,
+                              env={**os.environ, "GOFLAGS": "-mod=mod", "GOPROXY": "off"})
+        uses = [json.loads(ln) for ln in done.stdout.splitlines() if ln.startswith("{")]
+    if done.returncode != 0 and not uses:
+        return {"id": c["id"], "wrong": [], "unjudged": [], "error": done.stderr.strip()[-300:]}
+    uses = [u for u in uses if u.get("to_file") and not u.get("receiver")
+            and (u["file"], u["line"]) != (u["to_file"], u["to_line"])]
+
+    def bound(src: str, dst: str) -> bool | None:
+        srcs = [_span(n) for n in nodes if conformance._matches(n, src) and n.get("type") != "external"]
+        dsts = [_span(n) for n in nodes if conformance._matches(n, dst) and n.get("type") != "external"]
+        if not srcs or not dsts or not all(d[1] for d in dsts):
+            return None
+        return any(u["file"] == sf and lo <= u["line"] <= hi and (u["to_file"], u["to_line"]) == (df, dl)
+                   for u in uses for sf, _, lo, hi in srcs for df, dl, _, _ in dsts)
+
+    wrong, unjudged = [], []
+    for edges, want in ((c["expect"], True), (c["absent"], False)):
+        for e in edges:
+            if e[1] in NOT_BINDINGS:
+                continue
+            got = bound(e[0], e[2])
+            if got is None:
+                unjudged.append(list(e))
+            elif got != want:
+                wrong.append({"edge": list(e), "expected": "bound" if want else "not bound",
+                              "compiler": "bound" if got else "not bound"})
+    return {"id": c["id"], "wrong": wrong, "unjudged": unjudged, "error": ""}
+
+
+def check_bindings(cases: list[dict[str, Any]], jobs: int, json_out: str | None) -> int:
+    import oracle_go
+    todo = [c for c in cases if c["lang"] in BINDERS]
+    with tempfile.TemporaryDirectory() as tmp:
+        tool = Path(tmp)
+        failed = oracle_go.setup(tool)
+        if failed:
+            print(failed, file=sys.stderr)
+            return 2
+        built = subprocess.run(["go", "build", "-o", "dump", "."], cwd=tool, capture_output=True,
+                               text=True, env={**os.environ, "GOFLAGS": "-mod=mod"})
+        if built.returncode != 0:
+            print(built.stderr[-600:], file=sys.stderr)
+            return 2
+        with ThreadPoolExecutor(max_workers=jobs) as pool:
+            results = list(pool.map(lambda c: binding(c, tool), todo))
+    bad = 0
+    for r in results:
+        for w in r["wrong"]:
+            bad += 1
+            print(f"  WRONG    {r['id']:44} {tuple(w['edge'])}: the case says {w['expected']}, "
+                  f"the compiler {w['compiler']}")
+        if r["error"]:
+            print(f"  ERROR    {r['id']:44} {r['error'][:160]}")
+        for e in r["unjudged"]:
+            print(f"  unjudged {r['id']:44} {tuple(e)}")
+    judged = sum(1 for r in results if not r["error"])
+    print(f"\n{len(results)} cases asked, {judged} answered; {bad} edges the compiler contradicts, "
+          f"{sum(len(r['unjudged']) for r in results)} edges it could not be asked about")
+    if json_out:
+        Path(json_out).write_text(json.dumps(results, indent=1) + "\n", encoding="utf-8")
+    return 1 if bad else 0
+
+
 # The versions each installed compiler can be asked to compile as, oldest
 # first (its own flag: `--release`, `<LangVersion>`, `-std=`, `-swift-version`,
 # `-language-version`, `-source`). A language missing here has no such flag
@@ -219,9 +324,13 @@ def main() -> int:
     ap.add_argument("--min-version", action="store_true",
                     help="ask each compiler for the oldest version that accepts each case, and "
                          f"record it in {CASE_VERSIONS.name}")
+    ap.add_argument("--binding", action="store_true",
+                    help=f"ask the type checker what each edge's names are bound to ({', '.join(sorted(BINDERS))})")
     args = ap.parse_args()
     only = {x for x in args.only.split(",") if x}
     cases = [c for c in conformance.CASES if not only or c["lang"] in only or c["id"] in only]
+    if args.binding:
+        return check_bindings(cases, args.jobs, args.json)
     have = {lang for lang, tool in TOOL.items() if shutil.which(tool)}
     todo = [c for c in cases if c["lang"] in have]
     if args.min_version:
