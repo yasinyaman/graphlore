@@ -100,14 +100,21 @@ def main() -> int:
     problems: list[str] = []
     new: dict[str, dict[str, Any]] = {}
     counts: dict[str, int] = {}
+    swept = {f"{lang}/{r['new_case']['cid']}" for g in res["groups"] for r in g["rows"]
+             if r["status"] == "new" and r.get("new_case")}
     for g in res["groups"]:
         for row in g["rows"]:
             counts[row["status"]] = counts.get(row["status"], 0) + 1
+            # (a reader may drop the `spec ` of a section's name)
+            if row["section"] not in g["sections"] and f"spec {row['section']}" in g["sections"]:
+                row["section"] = f"spec {row['section']}"
             if row["section"] not in g["sections"]:
                 problems.append(f"{g['group']}: section {row['section']!r} is not one of the group's")
             if row["status"] == "held":
-                for cid in row.get("cases") or []:
-                    if cid not in existing:
+                # (a reader may name a case without its language)
+                row["cases"] = [c if "/" in c else f"{lang}/{c}" for c in row.get("cases") or []]
+                for cid in row["cases"]:
+                    if cid not in existing and cid not in swept:
                         problems.append(f"{g['group']}: held by {cid}, which is no case")
                 if not row.get("cases"):
                     problems.append(f"{g['group']}: held, but no case named: {row['rule']}")

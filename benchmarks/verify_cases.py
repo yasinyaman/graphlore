@@ -31,7 +31,9 @@ That a case compiles does not say which definition a name in it reaches.
 a use inside the source definition to the target definition; for each edge it
 says is absent, it must not. A case whose expectation the compiler contradicts
 is wrong, whatever the engine does with it. Edges that are no binding of a name
-(imports, containment, dispatch, coupling, documents, HTTP) are not judged.
+(imports, containment, dispatch, coupling, documents, HTTP) are not judged, nor
+an absent edge that only says which relation an expected pair has (`references`
+and not `calls`, `writes` and not `reads`): the compiler binds the name either way.
 
     python benchmarks/verify_cases.py
     python benchmarks/verify_cases.py --binding --only go
@@ -184,14 +186,16 @@ def _write(c: dict[str, Any], root: Path) -> None:
         path.write_text(src, encoding="utf-8")
 
 
-def _span(n: dict[str, Any]) -> tuple[str, int, int, int]:
-    """A node's file, definition line and lines (a file node: all of it)."""
+def _span(n: dict[str, Any]) -> tuple[str, int, int, int, str]:
+    """A node's file, definition line, lines (a file node: all of it) and
+    bare name (a type and its method can share a line: `type I interface{ Run() }`)."""
     loc = str(n.get("source_location") or "").lstrip("L").split("-")[0]
     line = int(loc) if loc.isdigit() else 0
+    name = str(n.get("qualname") or n.get("label") or "").split(".")[-1].strip("()")
     if not line:
-        return str(n.get("source_file") or ""), 0, 0, 1 << 30
+        return str(n.get("source_file") or ""), 0, 0, 1 << 30, name
     return (str(n.get("source_file") or ""), line, int(n.get("region_start") or line),
-            int(n.get("end_line") or line))
+            int(n.get("end_line") or line), name)
 
 
 def binding(c: dict[str, Any], tool: Path) -> dict[str, Any]:
@@ -219,12 +223,20 @@ def binding(c: dict[str, Any], tool: Path) -> dict[str, Any]:
         if not srcs or not dsts or not all(d[1] for d in dsts):
             return None
         return any(u["file"] == sf and lo <= u["line"] <= hi and (u["to_file"], u["to_line"]) == (df, dl)
-                   for u in uses for sf, _, lo, hi in srcs for df, dl, _, _ in dsts)
+                   and u["expr"] == dn
+                   for u in uses for sf, _, lo, hi, _ in srcs for df, dl, _, _, dn in dsts)
 
     wrong, unjudged = [], []
+    # (an absent edge between two definitions the case also expects an edge
+    # between says which relation it is, `references` and not `calls`, a
+    # write and not a read: the compiler binds the name either way)
+    expected_pairs = {(e[0], e[2]) for e in c["expect"]}
     for edges, want in ((c["expect"], True), (c["absent"], False)):
         for e in edges:
             if e[1] in NOT_BINDINGS:
+                continue
+            if not want and (e[0], e[2]) in expected_pairs:
+                unjudged.append(list(e))
                 continue
             got = bound(e[0], e[2])
             if got is None:

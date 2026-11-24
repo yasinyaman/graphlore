@@ -292,11 +292,11 @@ Found by: the specification 30, a compiler 19, comparison 0, the grammar 2, the 
 | an import of a directory is the file its `package.json` names | `package-json-types-entry` | – | yes |
 | where a type is written, a value of the name does not hide the type around it | `type-meaning-skips-values` | – | yes |
 
-### go (58 of 58)
+### go (211 of 299)
 
 The Go Programming Language Specification, 'Declarations and scope', 'Selectors', 'Method sets'.
 
-Found by: the specification 23, a compiler 13, comparison 2, the grammar 5, the language's own tools 15. With the place it was read in the language's own tools: 20.
+Found by: the specification 23, a compiler 13, comparison 2, the grammar 5, the language's own tools 15, a sweep of them 241. With the place it was read in the language's own tools: 261.
 
 | Rule | Case | Versions | Engine |
 |---|---|---|---|
@@ -358,6 +358,247 @@ Found by: the specification 23, a compiler 13, comparison 2, the grammar 5, the 
 | an embedded field is named by its type: `f.basicWriter.flush()` is basicWriter's method | `embedded-field-by-its-type-name` | – | yes |
 | a call's result typed by a named type answers its method: `Chain(m).Handler(h)` is Middlewares.Handler | `named-result-type-method` | – | yes |
 | the parameter and result types of a struct field's function type are references of the struct | `function-typed-field-types` | – | yes |
+| a name declared in an `if` statement's init is a name of that statement only, else-branch included | `if-init-is-scoped-to-the-if` | – | **no**: no Run -calls-> helper |
+| a name declared in a `for` statement's init is a name of that statement only | `for-init-is-scoped-to-the-for` | – | **no**: no Run -calls-> helper |
+| each clause of a `select` is a block of its own: a name its case declares is none after the statement | `select-clause-is-a-block` | – | **no**: no Run -calls-> T.Close |
+| the name of an import is a name of its file only: two files may bind one name to two packages | `import-name-is-a-name-of-its-file` | – | yes |
+| a receiver is a name of the method body: it hides a package function of its name | `receiver-hides-a-function` | – | yes |
+| a named result is a name of the function body: it hides a package function of its name | `result-variable-hides-a-function` | – | yes |
+| a type parameter declared by a receiver hides a package type of its name in the method | `receiver-type-parameter-hides-a-type` | 1.18– | yes |
+| a type parameter of a type is a name from the type's name to the end of its declaration: it hides a package type there | `type-parameter-of-a-type-hides-a-type` | 1.18– | yes |
+| a variable declared with `var` in a function is in scope after its VarSpec: its own value names the outer one | `var-spec-scope-starts-after` | – | yes |
+| a name used before a local of its name is declared means the outer one | `use-before-a-local-declaration-names-the-outer` | – | yes |
+| a label conflicts with no identifier: a call of a function named like a label is the function | `label-is-no-identifier` | – | yes |
+| a function of the package named like a predeclared one hides it: `max(a, b)` is the package function | `predeclared-name-redeclared-in-the-package` | – | yes |
+| a dot-import declares only the exported names of the package: an unexported name of its own is the file's own | `dot-import-takes-only-exported-names` | – | yes |
+| an unexported name of another package is a different identifier: a selector finds the one of its own package at the same depth | `unexported-names-of-two-packages-differ` | – | **no**: no Run -calls-> L.helper has Run -calls-> util/u.go:A.helper |
+| a constant declared without a type takes the type of its expression | `constant-takes-the-type-of-its-value` | – | **no**: no Run -calls-> Color.Name |
+| a constant whose expression list is omitted repeats the previous list and its type: it has the type of the first | `implicitly-repeated-constant-has-the-type` | – | **no**: no Run -calls-> Color.Name |
+| a variable declared with a type has that type, whatever its value: a method called on it is the declared type's | `declared-type-wins-over-the-value` | – | yes |
+| `var a, b = f()` gives each name its result's type | `var-multiple-results` | – | yes |
+| `var t, ok = x.(T)` gives t the type T | `var-comma-ok-assertion` | – | yes |
+| a short variable declaration redeclaring a variable of the block assigns it: the variable keeps its declared type | `short-var-redeclaration-keeps-the-variable` | – | yes |
+| a generic function written with type arguments, `Map[int](x)`, is a call of that function | `generic-function-instantiation` | 1.18– | **no**: no Run -calls-> Map |
+| a method is bound to its receiver base type wherever in the package it is declared | `method-in-another-file` | – | yes |
+| a method declared for a generic type `S[T]` is a method of S on every instantiation | `method-of-a-generic-type` | 1.18– | yes |
+| a method declared on an alias's name is a method of the aliased defined type | `method-on-an-alias-receiver` | 1.9– | **no**: no Run -calls-> A.M |
+| `r, n := open()` in the function body redeclares the parameter r: it keeps the type Reader, so `r.Read()` is Reader's method | `short-var-redeclares-a-parameter` | – | yes |
+| in `func use(conf conf)` and `func (conf conf) Other()` the type is the package type conf and `conf.Run()` in the body is conf's method, not the package function Run | `parameter-named-like-its-type` | – | yes |
+| `err.Error()` on a parameter of type error is the universe interface's method: no project type's Error method is meant | `predeclared-error-method` | – | yes |
+| in `func (b Box[U]) Go(u U)` U is the receiver's own name for T: `u.Run()` is the method of T's constraint Runner | `receiver-type-parameter-renamed` | 1.18– | **no**: no Box.Go -calls-> Runner.Run |
+| `type A = B; type B = *T; func (a A) Go()` binds Go to T: `t.Go()` on a *T is T's method, not another type's Go | `receiver-alias-chain-and-pointer` | – | **no**: no Use -calls-> T.Go |
+| in `v, ok := m[k]` and `w, ok := <-ch` the first name has the value / element type | `comma-ok-map-and-receive` | – | **no**: no Use -calls-> Item.Run |
+| `type S struct{ conf conf }`: the field's type is the package type conf, and `s.conf.Run()` is conf's method | `field-named-like-its-type` | – | yes |
+| a variable or parameter of a function hides an imported package's name inside the function: the selector is the value's method | `local-hides-an-imported-package` | – | yes |
+| a variable declared in a function hides a package type of its name: a selector on it is a method of the value's type | `local-hides-a-type-name` | – | yes |
+| a parameter of a function literal hides a package function of its name inside the literal | `function-literal-parameter-hides-a-function` | – | yes |
+| with as many values as names each name takes the type of the value at its position | `short-var-pairs-values-by-position` | – | yes |
+| an embedded `Base[int]` promotes the methods the receiver `Base[T]` declared | `embedded-generic-instantiation` | – | yes |
+| an alias declaration is a use of the type it names | `alias-names-its-type` | – | yes |
+| a method declared on an alias is a method of the aliased type: it is found on a value written with either name | `alias-method-call` | – | yes |
+| an alias of an instantiated generic type has that instance's methods | `alias-of-instance` | – | **no**: no Run -calls-> Box.Get |
+| a generic alias, instantiated, is the type it stands for: its methods are that type's | `generic-alias` | 1.24– | **no**: no Run -calls-> Box.Get |
+| a defined type does not inherit the methods of the type it is defined from: its own method of the name is the one called | `defined-type-does-not-inherit` | – | yes |
+| the method set of an interface type is unchanged by a type definition from it: its methods are the interface's | `defined-interface-keeps-methods` | – | **no**: no Use -calls-> Block.Encrypt |
+| a method called on a value of an instantiated generic type is the generic type's method | `instance-local-method` | – | yes |
+| a method of a generic type does not see the type declaration's type parameters: a name its receiver does not declare is the package's | `receiver-redeclares-type-parameters` | – | yes |
+| a type parameter of a type declaration hides a package type of its name in the declaration | `type-declaration-parameter-hides` | – | yes |
+| a type parameter declared by a method's receiver hides a package type of its name in the method only: the method's other uses of the name are the package's | `receiver-type-parameter-hides` | – | **no**: has Box.Get -references-> Config |
+| the type parameters of one list are all in scope in each constraint of it, including those declared after | `constraint-forward-reference` | – | yes |
+| a value of a type parameter constrained by an instantiated generic interface has that interface's methods | `instantiated-constraint` | – | **no**: no Use -calls-> Getter.Get |
+| the interface a type parameter is constrained by, and the types of the union such an interface lists, are uses of those names | `constraint-names-are-uses` | – | yes |
+| a value of a type parameter has the methods of the interfaces its constraint embeds | `constraint-embeds-interface` | – | yes |
+| a generic type written with type arguments is a use of the generic type and of each argument | `generic-type-instance-is-a-use` | – | yes |
+| instantiating substitutes the type arguments: a field or result typed by the type parameter is the argument's type | `instance-field-and-result-substituted` | – | yes |
+| a call of a generic function with an explicit type argument gives the argument's type as result | `explicit-instantiation-result` | – | **no**: no Use -calls-> Zero; Use -calls-> Item.Run |
+| a generic function of another package called with explicit type arguments is that function, not the same-named one of the importing package | `explicit-function-instantiation` | – | **no**: no Run -calls-> util/u.go:Map |
+| `Box[T].M` is a method expression of the generic type's method | `method-expression-on-instance` | – | **no**: no Run -references-> Box.Get |
+| a generic function handed over uninstantiated is a use of that function | `generic-function-as-argument` | – | yes |
+| a generic type of another package, instantiated, gives that type's methods: not those of the importing package's same-named type | `imported-generic-type-instance` | – | yes |
+| an embedded instance of a generic type is a field named by the type's name; its methods are promoted | `embedded-instance` | – | yes |
+| an array length written as a name is a use of the constant of that name in scope: a constant of the function hides the package's | `array-length-names-a-constant` | – | **no**: no Make -reads-> Size; Buf -reads-> Size |
+| a field of a struct is a field of a type defined from it | `defined-type-keeps-the-fields` | – | **no**: no Use -reads-> Point.x |
+| a type defined from a struct with an embedded field has the embedded type's promoted methods | `defined-type-keeps-the-embedding` | – | **no**: no Use -calls-> Mutex.Lock |
+| a value of an alias of pkg.T answers T's methods | `alias-of-an-imported-type` | – | **no**: no Use -calls-> Conn.Close |
+| a value of a type parameter constrained by pkg.I has I's methods | `constraint-of-an-imported-package` | – | yes |
+| ranging over a value of S ~[]E gives E, whose constraint's methods are called on it | `core-type-element-of-a-type-parameter` | – | **no**: no Total -calls-> Shape.Area |
+| the type argument written in `Conv[Celsius](1)` is a use of Celsius, the call is of Conv | `explicit-type-argument-of-a-call` | – | **no**: no Use -calls-> Conv |
+| `f := Conv[int]` names Conv: a use of it, and `f(1)` is a call of Conv | `instantiated-function-value` | – | yes |
+| `func (b Box[_]) Size()` is Box's method, found on a Box[int] value | `blank-receiver-type-parameter` | – | yes |
+| `l.Next().Len()` where Next returns `*List[T]` is List.Len | `generic-method-result-chain` | – | yes |
+| a struct embedding `Alias` (type Alias = Base) has a field Alias, and Base's methods | `embedded-alias-field` | – | **no**: no Use -calls-> Base.Hello |
+| `s.Conn.Close()` for an embedded `*util.Conn` is Conn's method | `embedded-imported-type-field` | – | yes |
+| a type parameter of a function hides a package function of its name: `Size(v)` in the function is a conversion, no call | `type-parameter-hides-a-function` | 1.18– | yes |
+| a field typed by the type parameter of a generic type, read in a method of it, has the methods of the parameter's constraint | `field-of-a-type-parameter-type` | 1.18– | yes |
+| a recursive generic type's field typed `*Node[T]` has the type's methods | `recursive-generic-type` | 1.18– | yes |
+| an alias of an alias names the final type, whatever the order of the declarations: its methods are the type's | `alias-chain` | – | **no**: no Use -calls-> T.Run |
+| a range over an alias of `[]*T`, and a value of an alias of `*T`, have T's methods | `alias-of-composite-type` | – | **no**: no Use -calls-> T.Run |
+| a field read on a value of a defined pointer type is the struct's field | `defined-pointer-type-field` | – | **no**: no Read -reads-> S.x |
+| a call on a conversion to a type parameter constrained by `interface{ *T; Set() }` is the constraint's method | `pointer-constraint-method` | 1.18– | **no**: no Make -calls-> Setter.Set |
+| the methods of an interface embedding an instantiated generic interface are the generic interface's | `embedded-generic-interface` | 1.18– | yes |
+| `b.Get` without a call, b of type `Box[int]`, is a use of Box's method | `method-value-of-an-instance` | 1.18– | yes |
+| `m[k].Get()` with m of type `map[string]Box[int]` calls the generic type's method | `map-value-of-an-instance` | 1.18– | yes |
+| a generic type's name and each of its type arguments are uses | `type-arguments-are-uses` | 1.18– | yes |
+| `b.Get()` on a `*Box[Item]` is an Item, so `.Run()` is Item.Run | `generic-result-is-the-argument` | 1.18– | yes |
+| a value of an alias type (also an alias of an alias) has the methods of the type the alias names | `alias-has-the-methods-of-its-type` | – | **no**: no Use -calls-> Real.Name |
+| `HandlerFunc(plain).Serve(1)` is the method of the converted-to type, and `plain` is a use | `conversion-gives-its-type` | – | **no**: no Use -calls-> HandlerFunc.Serve; Use -references-> plain |
+| an element of `[3]*Cell`, of `[2][2]*Cell` and of a pointer to an array is a *Cell | `array-element-type` | – | yes |
+| `grid[0][1]` of `[][]*Cell` is a *Cell | `slice-of-slices` | – | **no**: no Use -calls-> Cell.Touch |
+| a field of a local declared with an unnamed struct type is of its declared type | `anonymous-struct-field` | – | **no**: no Use -calls-> Repo.Find |
+| `*util.Tool` embedded is the field Tool, and `o.Tool.Run()` is util's Tool.Run | `embedded-pointer-and-qualified-field` | – | yes |
+| a method of an interface embedded in a struct is promoted: `c.Get()` is the interface's Get | `embedded-interface-in-a-struct` | – | yes |
+| `Box[int]` embedded is the field Box: `h.Get()` is Box.Get | `embedded-generic-type` | 1.18– | yes |
+| a local assigned `new(Repo)` or `*r` is of type Repo | `new-and-dereference` | – | **no**: no Use -calls-> Repo.Find |
+| `open().Find()` and `make2(1)().Find()` on parameters of function type are the result type's method | `function-typed-value-result` | – | yes |
+| `repos ...*Repo` is a []*Repo: `repos[0]` is a *Repo | `variadic-parameter-is-a-slice` | – | **no**: no Use -calls-> Repo.Find |
+| a parameter or receiver named like a type hides it in the body only, not in the signature | `parameter-hides-a-type` | – | **no**: no Use -references-> Config |
+| `util.Reader` embedded gives util's Reader.Read, not a local Reader's | `qualified-embedded-interface` | – | yes |
+| a value of type parameter T with constraint `Number` (embedding Labeled and `~int \| ~int64`) has Labeled.Label | `constraint-embeds-an-interface` | 1.18– | yes |
+| `for k := range m` over `map[Key]int` makes k a Key | `range-map-key` | – | **no**: no Use -calls-> Key.Label |
+| `<-jobs` and `range jobs` over a `<-chan *Job` give a *Job | `channel-element-type` | – | **no**: no Worker -calls-> Job.Run |
+| `type Source Reader` (Reader an interface): `s.Read()` is Reader.Read | `defined-interface-keeps-the-interface-methods` | – | **no**: no Use -calls-> Reader.Read |
+| an element of `S ~[]*Repo` is a *Repo | `core-type-of-a-type-parameter` | 1.18– | **no**: no First -calls-> Repo.Find |
+| `type Derived Base` does not inherit Base's methods: `d.Name()` is Derived.Name | `defined-type-has-only-its-own-methods` | – | yes |
+| a struct type defined from another struct type has its embedded fields, so a promoted method is called on it: `c.Close()` on a `Copy` is Base's | `defined-struct-keeps-promoted-methods` | – | **no**: no Run -calls-> Base.Close |
+| an interface embedding an instantiated generic interface has its methods: `r.Get()` is the generic interface's | `embedded-instantiated-interface` | – | yes |
+| a pointer method called on `&x` or `&T{}` is T's | `address-of-a-value-is-a-pointer` | – | yes |
+| the names inside map, channel and array type literals of a field are references | `type-literal-component-types` | – | yes |
+| a method whose receiver is written with an alias is a method of the aliased type: `t.Bump()` on a T is that method | `method-declared-on-an-alias` | – | **no**: no Run -calls-> A.Bump |
+| an embedded alias is a field named by the alias; the aliased type's methods are promoted: `f.Alias.Close()` and `f.Close()` are Base's | `embedded-alias` | – | **no**: no Run -calls-> Base.Close |
+| an embedded `*T` field promotes the methods of T and *T | `embedded-pointer-field-promotes` | – | yes |
+| the value variable of `for _, v := range m` is the map's element type, not its key type | `range-map-value` | – | yes |
+| a method declared on a defined function type is called on a value of that type | `method-of-a-defined-function-type` | – | yes |
+| `b.V` and `b.Vs[0]` of a `Box[Item]` are Items | `generic-field-has-the-type-argument` | 1.18– | yes |
+| `c.DB.Pool.Close()` goes through a field of anonymous struct type to Pool's method | `nested-anonymous-struct-field` | – | **no**: no Run -calls-> Pool.Close |
+| a defined type of a defined slice type is indexed to the element type | `underlying-through-a-chain` | – | **no**: no Run -calls-> Item.Name |
+| `util.Map[int, string](…)` and `Map[int, int](…)` are calls of the function written, qualified or not | `instantiated-generic-function` | – | yes |
+| `(helper)()` is a call of helper and `((r)).Find()` a call on r | `parenthesized-operand` | – | yes |
+| `util.Config` is the imported package's type; a bare `Config` is the importing package's | `qualified-type-is-the-packages` | – | yes |
+| `apply(util.Handler)` hands over the imported package's Handler, not the importing package's | `qualified-function-value` | – | yes |
+| `util.Limit` and `util.Max` are the imported package's variable and constant, not the importing package's of the same names | `qualified-variable-and-constant` | – | yes |
+| `Config{helper: 1}` names the field helper, not the function helper in scope | `struct-literal-key-is-a-field` | – | yes |
+| in `map[int]string{Key: "k"}` Key is the constant; in `Config{Key: 2}` it is the field | `literal-key-field-or-value` | – | **no**: no Table -reads-> a.go:Key |
+| a local assigned `&Repo{}` or `new(Repo)`, or the literal called directly, answers Repo's methods | `address-of-literal-types-the-value` | – | **no**: no Direct -calls-> Repo.Find; Fresh -calls-> Repo.Find |
+| in `[]*Pair{{Key: 1}}` the key is Pair's field, not the function Key in scope | `elided-element-type-keys` | – | yes |
+| `helper()` in a literal is the local helper of the surrounding function, not the package function | `closure-sees-the-enclosing-local` | – | yes |
+| `helper()` in a literal written before `helper := 2` is the package function | `closure-sees-only-earlier-locals` | – | yes |
+| in `func(helper func() int) int { return helper() }` helper is the parameter | `closure-parameter-hides-a-function` | – | yes |
+| a call inside `go func() { helper() }()` is a call of helper made by Run | `literal-invoked-in-place` | – | yes |
+| `repos()[0].Find()` is Repo's method: the call's result is a slice of *Repo | `index-of-a-call-result` | – | yes |
+| through `*T0` and `T1` embedded in T2, p.M0(), p.M1(), p.x and p.y are T0's and T1's | `embedded-pointer-is-promoted` | – | yes |
+| `s.Log()` on a struct embedding Logger is Logger's method | `struct-embeds-interface` | – | yes |
+| `o.Name()` on a struct with a func-typed field Name that embeds a type with method Name is the field | `field-at-a-shallower-depth-hides-a-method` | – | yes |
+| `util.Sin()` where util is a parameter is the parameter type's method, not the package's function | `local-hides-the-package-name` | – | yes |
+| `type Copy Base`: c.ID is Base's field; `type Wrapped Wrapper` (Wrapper embeds Base): w.Show() is Base's method | `defined-type-keeps-fields-and-promotions` | – | **no**: no Field -reads-> Base.ID; Promoted -calls-> Base.Show |
+| `type Alias = Repo`: a.Find() is Repo's method | `alias-has-the-methods` | – | **no**: no Run -calls-> Repo.Find |
+| V embeds util.T (unexported method run) and A (method run): `v.run()` is A's | `unexported-names-of-another-package` | – | **no**: no Run -calls-> A.run has Run -calls-> T.run |
+| `Counter.Value(c)`, `(Counter).Value(c)` and `(*Counter).Inc(&c)` are calls of the methods | `method-expression-called` | – | yes |
+| `(*Counter).Inc` and `(*Counter).Get` (Get has a value receiver) are uses of the methods | `pointer-method-expression` | – | yes |
+| `Wrapper.Value` with Counter embedded in Wrapper is Counter.Value | `method-expression-promoted` | – | yes |
+| `Reader.Read` is Reader's method, not another interface's of the same name | `interface-method-expression` | – | yes |
+| `(*util.Repo).Find` is util's method, not the importing package's Repo.Find | `imported-method-expression` | – | yes |
+| `s.M` with *T embedded in S is T.M | `method-value-through-embedding` | – | yes |
+| `r.Read` on an interface and `c.Inc` on an addressable Counter are uses of Reader.Read and Counter.Inc | `method-value-of-interface-and-pointer` | – | yes |
+| `a[0]` of `[3]*Repo` is a *Repo | `array-element` | – | yes |
+| `p[0]` of `*[3]*Repo` is a *Repo | `pointer-to-array-element` | – | yes |
+| `grid[0][1]` of `[][]*Repo` is a *Repo | `index-of-index` | – | **no**: no Run -calls-> Repo.Find |
+| `r, ok := m["a"]` types r as the map's *Repo | `map-comma-ok` | – | **no**: no Run -calls-> Repo.Find |
+| `repos[1:][0]` and `a[:2][0]` are *Repo | `slice-expression-keeps-the-type` | – | **no**: no Run -calls-> Repo.Find; Fixed -calls-> Repo.Find |
+| `n[1:].Count()` on `type Names []string` is Names.Count | `slice-of-a-named-slice-keeps-its-type` | – | **no**: no Run -calls-> Names.Count |
+| `r, ok := x.(*Repo)` types r as *Repo | `type-assertion-comma-ok` | – | **no**: no Run -calls-> Repo.Find |
+| `x.(Finder).Find()` is Finder's method | `type-assertion-to-an-interface` | – | yes |
+| in `case *Repo:` of `switch v := x.(type)`, v is a *Repo | `type-switch-binding` | – | **no**: no Run -calls-> Repo.Find |
+| `Celsius(f).String()` is Celsius's method and a reference to the type, never a call of it | `conversion-types-the-value` | – | **no**: no Run -calls-> Celsius.String; Run -references-> Celsius has Run -calls-> Celsius |
+| `(*Repo)(m).Find()` on a *Mid is Repo's method | `parenthesized-pointer-conversion` | – | yes |
+| `(*pp).Norm()` with pp **Point and `(&v).Norm()` are Point's method | `indirection-and-address-of` | – | yes |
+| `r := <-ch`, `v, ok := <-ch` and `(<-ch).Find()` on `chan *Repo` give a *Repo | `receive-element-type` | – | yes |
+| `for r := range ch` and `case s := <-ch:` on `<-chan *Repo` give *Repo | `channel-range-and-select` | – | **no**: no Run -calls-> Repo.Find |
+| in a type switch clause listing several types, the variable has the switched expression's type: v.M() is the interface's method | `type-switch-multi-type-clause` | – | **no**: no f -calls-> Shape.M |
+| x.Get() on a value of Box[int] is the method of the generic type Box | `instantiated-generic-method` | – | yes |
+| a named result is a typed local of the function body | `named-result-local` | – | yes |
+| util.F() with import "example.com/app/tools" (package util) is tools' F, not the importing package's F; an alias names the same package | `package-name-is-not-directory` | – | yes |
+| x := B{} inside a function literal hides the surrounding function's x, typed A | `closure-local-shadows-outer-local` | – | yes |
+| in `var v, ok = m[k]` v is the map's element type: `v.Find()` is Repo's, never Other's | `var-declaration-comma-ok-map` | – | yes |
+| in `var v, ok = x.(*T)` v is a *T: `v.Find()` is Repo's, never Other's | `var-declaration-comma-ok-assertion` | – | yes |
+| in `var v, ok = <-ch` v is the channel's element type: `v.Find()` is Repo's, never Other's | `var-declaration-comma-ok-receive` | – | yes |
+| `p[1:3]` of a `*[4]*Repo` is a []*Repo: `s[0].Find()` is Repo's, never Other's | `slice-of-a-pointer-to-an-array` | – | **no**: no Run -calls-> Repo.Find |
+| `a[1:2:3]` of a `[]*Repo` is a []*Repo: `a[1:2:3][0].Find()` is Repo's, never Other's | `full-slice-expression` | – | **no**: no Run -calls-> Repo.Find |
+| `p := &items[0]` is a *Repo: `p.Find()` is Repo's, never Other's | `address-of-an-element` | – | **no**: no Run -calls-> Repo.Find |
+| in `[]*Point{{x: 1}}` the key `x` is a field of Point: it reads no package variable `x` | `elided-pointer-element-literal` | – | yes |
+| in `map[Point]string{{x: 1}: "a"}` the inner `x` is a field of Point, the map's key type: it reads no package variable `x` | `elided-map-key-literal` | – | yes |
+| `(Repo).Find(r)` is a use of Repo's method, never of Other's | `parenthesized-method-expression` | – | yes |
+| `s.Find()` on a struct embedding `store.Base` is Base's method, never the other type's of the same name | `embedded-imported-type-promotes` | – | yes |
+| `store.Default.Find()` is the method of the type of the imported variable `Default`, never another type's method of that name | `imported-variable-member` | – | **no**: no Run -calls-> Repo.Find |
+| the call inside `var handler = func() int { return helper() }` is made by `handler` | `package-level-function-literal` | – | yes |
+| a call whose function expression is a type is a conversion: a use of the type, not a call of a function of the same name | `conversion-is-a-use-of-the-type` | – | **no**: no Run -references-> Celsius has Run -calls-> Celsius |
+| `Ident[int](1)` calls the generic function Ident; a method Ident of a type is not that function | `instantiated-generic-call` | – | **no**: no Run -calls-> Ident |
+| a call that is the only argument of another call binds like any call: a package-qualified name is the imported package's, not a same-named function of this package | `call-as-the-only-argument` | – | yes |
+| a package-level function named like a built-in (`min`) hides the universe's: the bare call is the project's function, not a method of that name | `package-function-hides-a-builtin` | – | yes |
+| `new(T)` is a use of the type T | `new-type-argument` | – | yes |
+| duplicate of conversion-is-a-use-of-the-type and instantiated-generic-call | `conversion-is-a-use-of-the-type-2` | – | yes |
+| `new(pkg.T)` is a use of the imported package's type, not of a same-named type of this package | `new-type-argument-of-another-package` | – | yes |
+| the result of a conversion `T(x)` is of type T: `Celsius(x).String()` and `HandlerFunc(f).Serve()` are those types' methods | `conversion-result-is-the-type` | – | **no**: no run -calls-> Celsius.String; run -calls-> HandlerFunc.Serve |
+| a local assigned `new(T)` is a *T: `p.Run()` is T's method, not another type's of the same name | `new-gives-a-pointer-local` | – | **no**: no use -calls-> T.Run |
+| a local made by `make([]*T, n)` or `append(s, x)` is a slice of *T: its elements' methods are T's | `make-and-append-keep-the-slice-type` | – | **no**: no use -calls-> T.Run |
+| `NewStack[int]()` gives a *Stack[int] and `var q Queue[string]` a Queue: `Push` is the method of the generic type of the value | `generic-type-instance-method` | – | **no**: no use -calls-> Stack.Push |
+| `s.run()` where run is a field of function type selects the field, not the package function run | `func-field-call-is-no-function` | – | **no**: no Server.Start -reads-> Server.run |
+| the type of a composite literal is the type written, so a method called on it is that type's method | `composite-literal-receiver` | – | **no**: no Use -calls-> Point.Norm |
+| `err.Error()` on a value typed by the predeclared `error` is no call of a project type's Error method | `error-value-is-no-project-type` | – | yes |
+| calls written inside a built-in's arguments are calls, bound like any other | `call-inside-builtin-argument` | – | yes |
+| `who ...util.Person` names util's Person, a use of that type by the function | `variadic-parameter-type-use` | – | yes |
+| a `var` declaration statement declares its name after its spec: `var helper = helper()` calls the package function, and a later use is the local | `var-declaration-scope-starts-after` | – | yes |
+| a label named like a package function is no use of it and hides nothing: `helper:` with `break helper` and `continue helper`, and `helper()` is the function | `label-is-no-name-of-the-block` | – | yes |
+| `h.out <- 1` reads the field `out` of Hub (the channel is an operand, the send changes the channel, not the field) | `send-evaluates-the-channel-field` | – | yes |
+| `r.n++` and `r.n += 2` use the field n of r's type, written (and read, as `x = x op 1` does) | `incdec-reads-and-writes-the-field` | – | yes |
+| `r.n = 1` writes the field n of r's type, `return r.n` reads it | `assignment-writes-the-field` | – | yes |
+| `var f Finder; f = &Repo{}; f.Find()` is the interface's method: the variable's type is the declared one | `assignment-keeps-the-declared-type` | – | yes |
+| a name declared by an `if`'s init statement hides a package function in the `if` and its `else`, and no longer after the statement | `if-init-var-is-seen-by-else` | – | **no**: no Run -calls-> helper |
+| `if r := load(); r == nil {...} else if r.Find() > 0` types r by load's result | `else-if-sees-the-init-var-of-the-if` | – | yes |
+| a name declared in a `switch` init statement hides a package function in the switch only | `switch-init-var-scope` | – | **no**: no Run -calls-> helper |
+| `case limit:` reads the constant and `case helper():` calls the function | `expression-switch-case-is-a-use` | – | yes |
+| in `switch v := f.(type)`, v is *Repo in `case *Repo` and the interface Finder in a clause with two types | `type-switch-binding-is-typed-by-its-clause` | – | **no**: no Run -calls-> Repo.Find; Run -calls-> Finder.Find |
+| `switch helper := helper().(type)` calls the package function in the guard and names the variable in the clauses | `type-switch-binding-hides-a-function` | – | **no**: has Run -indirect_call-> helper |
+| `for helper := 0; ...` hides a package function in the loop and `helper()` after the loop is the function | `for-clause-var-scope` | – | **no**: has Hidden -indirect_call-> helper |
+| the variable of `for r := range ch` over `chan *Repo` is a *Repo | `range-over-channel` | – | **no**: no Run -calls-> Repo.Find |
+| in `for k, v := range m` over `map[Key]*Val`, k is a Key and v a *Val | `range-over-map-key-and-value` | – | **no**: no Run -calls-> Key.Name |
+| the value of `for _, r := range a` with `a *[2]*Repo` is a *Repo | `range-over-array-pointer` | – | yes |
+| `for r := range t.All` where All takes `yield func(*Repo) bool`: r is a *Repo, and t.All is a method value | `range-over-function-yield-type` | 1.23– | **no**: no Run -calls-> Repo.Find |
+| `for _, current = range repos` writes the package variable current and keeps its type | `range-assignment-declares-nothing` | – | **no**: no Run -writes-> current |
+| `defer r.Find()`, `go r.Find()` and the calls in a `defer func() {...}()` are calls of the enclosing function | `defer-and-go-methods-and-closures` | – | yes |
+| `case r := <-ch:` over `chan *Repo` declares r as a *Repo | `select-receive-binding` | – | **no**: no Run -calls-> Repo.Find |
+| a result named like a package function hides it in the function body | `named-result-is-a-local` | – | yes |
+| `func Run() (r *Repo) { r.Find() }`: r.Find is Repo's method | `named-result-is-typed` | – | yes |
+| `goto helper` and a `helper:` label beside a package function `helper`: `helper()` is the function and the label is no reference to it | `goto-label-is-no-name-of-the-block` | – | yes |
+| `for _, helper := range helper()` calls the package function, and the body's `helper` is the variable | `range-expression-is-outside-its-variables` | – | yes |
+| `for i := range n` with `n Count` makes i a Count: i.Next() is Count's method | `range-over-integer-has-its-type` | 1.22– | **no**: no Run -calls-> Count.Next |
+| a plain assignment writes a variable without reading it; `x += y` reads and writes it; a local of that name is its own variable | `plain-assignment-is-no-read` | – | yes |
+| the blank identifier binds no name: `var _ I = T{}`, `_, v := f()` and `_ = g` are uses of I, T, f and g | `blank-identifier-declares-nothing` | – | yes |
+| assigning to an element `s.items[k] = v` writes the field `items` of s's type; reading `s.items[k]` reads it | `element-assignment-writes-the-field` | – | yes |
+| `p.hits++` through an embedded struct is a read and a write of the embedded type's field `hits` | `promoted-field-incdec` | – | yes |
+| a receive case written with `=` assigns an existing operand (a field is written) and declares nothing | `select-receive-assigns-a-field` | – | **no**: no Pool.Loop -writes-> Pool.last |
+| in `case nil` and `default` clauses the type switch variable has the guard expression's type (the interface), not the type of another clause | `type-switch-nil-and-default-keep-the-guard-type` | – | **no**: no Nil -calls-> Shape.Area; Default -calls-> Shape.Area |
+| a name redeclared by an `else if` init statement is a new variable there, with its own type | `else-if-redeclares-a-name` | – | **no**: no Run -calls-> B.Name has Run -calls-> A.Name |
+| the scope of a type declared in a function starts at its identifier: `next *node` inside the local `node` is the local type | `local-type-scope-starts-at-its-name` | – | yes |
+| a range value over `[3]*T` or over a named `map[K]*T` type is a *T | `range-over-an-array-and-a-named-map` | – | yes |
+| `range t.children` and `range t.Kids()` iterate the field's and the declared result's element type | `range-over-a-field-and-a-call-result` | – | yes |
+| `v, ok := f()` in the scope that declared `v` assigns it (v keeps its declared interface type); in a nested block it declares a new `v` of the value's type | `short-var-redeclaration-keeps-the-type` | – | yes |
+| in `case *Sq:` of a type switch the guard variable is a `*Sq`, so `v.Area()` is Sq.Area | `type-switch-pointer-clause-type` | – | **no**: no Run -calls-> Sq.Area |
+| an import's name is declared in the file block: two files of one package may import different packages under the same name | `import-name-is-file-scoped` | – | yes |
+| of two packages with the same clause name, `util.F()` is the F of the one whose path the file imports | `import-path-picks-the-package` | – | yes |
+| a local declared with the name of an imported package hides it inside its block only | `local-hides-an-import` | – | yes |
+| several `init` functions are declared in a package yet none is a name: `t.init()` is the method | `init-is-not-a-name` | – | yes |
+| a package variable's initializer is a use made by the variable: its calls and reads of other package variables | `package-variable-initializer-uses` | – | yes |
+| `import "unsafe"` names the built-in package: a project directory called unsafe is only reached by its full path | `unsafe-is-the-builtin-package` | – | yes |
+| files of one directory whose package clauses differ form two packages: a_test.go (package app_test) calls its own helper, and reaches app only through its import | `external-test-package-is-another-package` | – | yes |
+| a method is declared in any file of the package: s.Count() in a.go is the method written in b.go, not the package function Count | `method-declared-in-another-file` | – | yes |
+| a package-level max hides the builtin max of Go 1.21: the call binds to the package function | `package-function-hides-a-new-builtin` | 1.21– | yes |
+| a parameter named like an import hides the package only in the function body: its type in the signature still names the package | `go-parameter-named-like-import` | – | yes |
+| a field named like an imported package is no name of the file block: h.util.Run() is the field type's method | `go-field-named-like-import` | – | yes |
+| a local declared in a function hides a dot-imported name inside that function | `go-local-hides-dot-import` | – | yes |
+| a local named init is called as a local: the package init functions are no names | `go-local-named-init` | – | yes |
+| the calls inside a function literal assigned to a package-level variable belong to that variable | `go-func-literal-in-package-var` | – | yes |
+| a method called on a value of a generic alias is the aliased generic type's method | `go-generic-alias-method` | 1.24– | **no**: no Run -calls-> Box.Get |
+| in package app_test, app.Run is the package under test and a bare Run is app_test's own function | `go-external-test-package-qualifier` | – | yes |
 
 ### java (62 of 62)
 
@@ -936,4 +1177,4 @@ Found by: the specification 31, a compiler 2, comparison 0, the grammar 1, the l
 | `A::hello insteadof B` picks A's method of two used traits | `trait-insteadof` | – | yes |
 | a method a trait brings comes before an inherited one, and the class's own before both | `trait-before-inherited` | – | yes |
 
-686 of 686 rules hold
+839 of 927 rules hold

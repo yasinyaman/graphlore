@@ -9,6 +9,16 @@ All notable changes to this project are documented here. The format is based on
 ## [0.8.0] - 2026-11-24
 
 ### Added
+- **The sweep: a language's name-binding rules read section by section**
+  (`docs/rule-sources.md`, "Phase 2b"; `AGENTS.md`). A smaller model reads
+  the specification and the compiler's binder group by group
+  (`.claude/workflows/rule-sweep.js`) and returns rules, cases and reasons;
+  the strongest model checks every case before it is kept
+  (`benchmarks/sweep_check.py`) and fixes the engine.
+  `benchmarks/rule_inventory.py --sections` says which sections are read, and
+  `benchmarks/verify_cases.py --binding` asks go/types what each case's names
+  are bound to. Go first: all 156 sections read, 241 new cases (927 in all),
+  of which the engine holds 153.
 - **SCIP precision mode** (`GRAPHLORE_SCIP`, `src/graphlore/scip.py`). When
   the project has a SCIP index (`index.scip`, made by `scip-python`,
   `scip-typescript`, `rust-analyzer scip` and others), the edges the

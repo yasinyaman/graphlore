@@ -1140,6 +1140,38 @@ say is left and by how directly the compiler can check the result:
 case or a written "not followed, because", and the share of cases marked
 `found: source` is reported.
 
+**Phase 2b: the sweep.** Phase 2 read each language once, and the
+inventory it left (10 to 54 rules a language) said nothing of the sections it
+had not read: each round of measurements on repositories then found rules
+missing. A sweep reads every section to the end and splits the work by
+model. A smaller model reads (`.claude/workflows/rule-sweep.js`: one reader
+per group of `SECTIONS[lang]` in `benchmarks/rule_inventory.py`, then a second
+per group that looks for what the first left out, at most two rounds), and
+returns rows (a rule held by a case, a new case, a rule not followed with the
+reason, a section with no rule); it writes nothing into the repository. The
+strongest model checks every new case with `benchmarks/sweep_check.py`
+(compiled by the language's own compiler; asked of the type checker where one
+answers, `verify_cases.py --binding`; built by the engine), reads every
+reason, writes the cases under `found_by("sweep")` and the rows into the
+inventory, and fixes the engine for the broken ones.
+*Done per language when*: `rule_inventory.py --lang L --sections` lists no
+section as `not read`.
+
+Go, the first: 156 sections of the specification and of `go/types` (23 with
+no rule of name binding, settled by hand; 18 read before). 21 readers (7
+groups, two rounds of gap hunting each, and the second round still found rows
+in every group but one) returned 417 rows: 257 new cases, 87 held by a case,
+47 not followed, 26 sections with no rule. Of the 241 distinct new cases all
+compiled; the binding check first flagged 27 edges, of which 17 were its own
+blind spots (an absent edge that only names a relation, a type and its
+method declared on one line; both fixed in `verify_cases.py`) and 10 were
+names the case left ambiguous (`helper` both a function and a field),
+qualified by hand. The engine held 153 of the 241: the 88 it did not are
+locals typed by their expression (`new(T)`, `&T{}`, `T(x)`, comma-ok, `<-ch`,
+`range` over channels, maps, integers and functions, type-switch clauses),
+aliases, types defined from other types, explicit instantiation and the
+scope of `if` / `for` / `switch` / `select` initializers.
+
 **Phase 3: inference, by the numbers.** (Measured: see 'Phase 3: inference, by the numbers' above; nothing built.) Per language, what one step of
 inference would add (a closure parameter typed by the collection it is
 called on, a pattern binding), from the lists the oracles already produce,

@@ -46,7 +46,8 @@ CASES: list[dict[str, Any]] = []
 # How the cases that follow were found (docs/rule-sources.md): written from the
 # language's `specification`; shown missing by a `compiler` (its test suite, or
 # its answers on whole repositories); by `comparison` with graphify's graph; or
-# from the `grammar` (a place a name can be written that was not read).
+# from the `grammar` (a place a name can be written that was not read); or by a
+# `sweep` of the language's own tools, section by section.
 _FOUND = ["specification"]
 
 
@@ -2910,6 +2911,978 @@ case("csharp", "extension-result-in-a-chain", "an extension method called in the
      [("Tool.Run", "calls", "Ext.Signed"), ("Tool.Run", "calls", "Ext.Build")],
      source="C# Language Specification 12.8.10.3 'Extension method invocations'")
 
+# Go, the sweep (docs/rule-sources.md, 'Phase 2b: the sweep'): the
+# specification and go/types read section by section by a smaller model
+# (.claude/workflows/rule-sweep.js), each case then given to the compiler, to
+# go/types (`verify_cases.py --binding`) and to the engine
+# (`benchmarks/sweep_check.py`) before it was written here. A failing one is an
+# open defect.
+found_by("sweep")
+case('go', 'if-init-is-scoped-to-the-if', "a name declared in an `if` statement's init is a name of that statement only, else-branch included",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\nfunc helper() int { return 1 }\n\ntype T struct{}\n\nfunc (*T) Close() int { return 0 }\n\nfunc mk() *T { return &T{} }\n\nfunc Run() int {\n\tif helper := mk(); helper == nil {\n\t\treturn 0\n\t} else {\n\t\thelper.Close()\n\t}\n\treturn helper()\n}\n'},
+     [('Run', 'calls', 'T.Close'), ('Run', 'calls', 'helper')], [],
+     source='spec Blocks (each if, for and switch statement is in its own implicit block)')
+case('go', 'for-init-is-scoped-to-the-for', "a name declared in a `for` statement's init is a name of that statement only",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\nfunc helper() int { return 1 }\n\ntype T struct{}\n\nfunc (*T) Close() int { return 0 }\n\nfunc mk() *T { return &T{} }\n\nfunc Run() int {\n\tfor helper := mk(); helper != nil; helper = nil {\n\t\thelper.Close()\n\t}\n\treturn helper()\n}\n'},
+     [('Run', 'calls', 'T.Close'), ('Run', 'calls', 'helper')], [],
+     source='spec Blocks (each for statement is in its own implicit block)')
+case('go', 'select-clause-is-a-block', 'each clause of a `select` is a block of its own: a name its case declares is none after the statement',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\nfunc helper() int { return 1 }\n\ntype T struct{}\n\nfunc (*T) Close() int { return 0 }\n\nfunc Run(ch chan *T) int {\n\tselect {\n\tcase helper := <-ch:\n\t\thelper.Close()\n\tdefault:\n\t}\n\treturn helper()\n}\n'},
+     [('Run', 'calls', 'T.Close'), ('Run', 'calls', 'helper')], [],
+     source='spec Blocks (each clause in a select statement acts as an implicit block)')
+case('go', 'import-name-is-a-name-of-its-file', 'the name of an import is a name of its file only: two files may bind one name to two packages',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'util/u.go': 'package util\n\nfunc F() int { return 1 }\n', 'other/o.go': 'package other\n\nfunc F() int { return 2 }\n', 'a.go': 'package app\n\nimport "example.com/app/util"\n\nfunc A() int {\n\treturn util.F()\n}\n', 'b.go': 'package app\n\nimport util "example.com/app/other"\n\nfunc B() int {\n\treturn util.F()\n}\n'},
+     [('A', 'calls', 'util/u.go:F'), ('B', 'calls', 'other/o.go:F')], [('A', 'calls', 'other/o.go:F'), ('B', 'calls', 'util/u.go:F')],
+     source='spec Declarations_and_scope (scope of the package name of an imported package); go/types resolver.go collectObjects (fileScope per file)')
+case('go', 'receiver-hides-a-function', 'a receiver is a name of the method body: it hides a package function of its name',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\nfunc run() int { return 0 }\n\ntype T struct{}\n\nfunc (T) Step() int { return 1 }\n\nfunc (run T) Do() int {\n\treturn run.Step()\n}\n'},
+     [('T.Do', 'calls', 'T.Step')], [('T.Do', 'calls', 'run')],
+     source='spec Declarations_and_scope (receiver); go/types signature.go collectRecv')
+case('go', 'result-variable-hides-a-function', 'a named result is a name of the function body: it hides a package function of its name',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\nfunc helper() int { return 0 }\n\ntype T struct{}\n\nfunc (*T) Close() {}\n\nfunc Run() (helper *T) {\n\thelper = &T{}\n\thelper.Close()\n\treturn\n}\n'},
+     [('Run', 'calls', 'T.Close')], [('Run', 'calls', 'helper')],
+     source='spec Declarations_and_scope (result variable)')
+case('go', 'receiver-type-parameter-hides-a-type', 'a type parameter declared by a receiver hides a package type of its name in the method',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Runner interface{ Run() int }\n\ntype T struct{}\n\nfunc (T) Run() int { return 1 }\n\ntype Box[P Runner] struct{ v P }\n\nfunc (b Box[T]) Do() int {\n\treturn b.v.Run()\n}\n'},
+     [('Box.Do', 'calls', 'Runner.Run')], [('Box.Do', 'calls', 'T.Run')],
+     source='spec Declarations_and_scope (type parameter declared by a method receiver); go/types resolver.go unpackRecv', since='1.18')
+case('go', 'type-parameter-of-a-type-hides-a-type', "a type parameter of a type is a name from the type's name to the end of its declaration: it hides a package type there",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Runner interface{ Run() int }\n\ntype T struct{}\n\nfunc (T) Run() int { return 1 }\n\ntype Box[T Runner] struct{ v T }\n\nfunc Do(b Box[Runner]) int {\n\treturn b.v.Run()\n}\n'},
+     [('Do', 'calls', 'Runner.Run')], [('Do', 'calls', 'T.Run'), ('Box', 'references', 'a.go:T')],
+     source='spec Declarations_and_scope (type parameter of a type); go/types decl.go typeDecl (openScope "type parameters")', since='1.18')
+case('go', 'var-spec-scope-starts-after', 'a variable declared with `var` in a function is in scope after its VarSpec: its own value names the outer one',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\nfunc helper() int { return 1 }\n\nfunc Run() int {\n\tvar helper = helper()\n\treturn helper\n}\n'},
+     [('Run', 'calls', 'helper')], [],
+     source='spec Declarations_and_scope; go/types decl.go declStmt (scopePos := d.spec.End())')
+case('go', 'use-before-a-local-declaration-names-the-outer', 'a name used before a local of its name is declared means the outer one',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\nfunc helper() int { return 1 }\n\nfunc Run() int {\n\tn := helper()\n\thelper := 2\n\treturn n + helper\n}\n'},
+     [('Run', 'calls', 'helper')], [],
+     source='spec Declarations_and_scope; go/types scope.go LookupParent (an object is found only when its scopePos is at or before the use)')
+case('go', 'label-is-no-identifier', 'a label conflicts with no identifier: a call of a function named like a label is the function',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\nfunc helper() int { return 1 }\n\nfunc Run() int {\nhelper:\n\tfor {\n\t\tbreak helper\n\t}\n\treturn helper()\n}\n'},
+     [('Run', 'calls', 'helper')], [],
+     source="spec Label_scopes; go/types object.go Label (a label is its own kind of object, in the function's label scope)")
+case('go', 'predeclared-name-redeclared-in-the-package', 'a function of the package named like a predeclared one hides it: `max(a, b)` is the package function',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\nfunc max(a, b int) int {\n\tif a > b {\n\t\treturn a\n\t}\n\treturn b\n}\n\nfunc Run() int {\n\treturn max(1, 2)\n}\n'},
+     [('Run', 'calls', 'max')], [],
+     source='spec Declarations_and_scope (scope of a predeclared identifier is the universe block, outermost); spec Predeclared_identifiers')
+case('go', 'dot-import-takes-only-exported-names', "a dot-import declares only the exported names of the package: an unexported name of its own is the file's own",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'util/u.go': 'package util\n\nfunc helper() int { return 1 }\n\nfunc Public() int { return helper() }\n', 'a.go': 'package app\n\nimport . "example.com/app/util"\n\nfunc helper() int { return 2 }\n\nfunc Run() int {\n\treturn helper() + Public()\n}\n'},
+     [('Run', 'calls', 'a.go:helper'), ('Run', 'calls', 'Public')], [('Run', 'calls', 'util/u.go:helper')],
+     source='spec Exported_identifiers; go/types resolver.go collectObjects (if token.IsExported(name))')
+case('go', 'unexported-names-of-two-packages-differ', 'an unexported name of another package is a different identifier: a selector finds the one of its own package at the same depth',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'util/u.go': 'package util\n\ntype A struct{}\n\nfunc (A) helper() int { return 1 }\n\nfunc (a A) Public() int { return a.helper() }\n', 'a.go': 'package app\n\nimport "example.com/app/util"\n\ntype L struct{}\n\nfunc (L) helper() int { return 2 }\n\ntype B struct {\n\tutil.A\n\tL\n}\n\nfunc Run(b B) int {\n\treturn b.helper()\n}\n'},
+     [('Run', 'calls', 'L.helper')], [('Run', 'calls', 'util/u.go:A.helper')],
+     source='spec Uniqueness_of_identifiers; go/types object.go sameId / Id (an unexported name is qualified by its package)')
+case('go', 'constant-takes-the-type-of-its-value', 'a constant declared without a type takes the type of its expression',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Color int\n\nconst Red Color = 1\n\nconst Default = Red\n\nfunc (c Color) Name() string { return "c" }\n\nfunc Run() string {\n\treturn Default.Name()\n}\n'},
+     [('Run', 'calls', 'Color.Name')], [],
+     source='spec Constant_declarations; go/types decl.go constDecl (obj.typ from the init expression)')
+case('go', 'implicitly-repeated-constant-has-the-type', 'a constant whose expression list is omitted repeats the previous list and its type: it has the type of the first',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Color int\n\nconst (\n\tRed Color = iota\n\tGreen\n)\n\nfunc (c Color) Name() string { return "c" }\n\nfunc Run() string {\n\treturn Green.Name()\n}\n'},
+     [('Run', 'calls', 'Color.Name')], [],
+     source='spec Constant_declarations; go/types decl.go constDecl (inherited), resolver.go constDecl d.typ / d.inherited')
+case('go', 'declared-type-wins-over-the-value', "a variable declared with a type has that type, whatever its value: a method called on it is the declared type's",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Speaker interface{ Speak() int }\n\ntype Dog struct{}\n\nfunc (*Dog) Speak() int { return 1 }\n\nfunc Run() int {\n\tvar s Speaker = &Dog{}\n\treturn s.Speak()\n}\n'},
+     [('Run', 'calls', 'Speaker.Speak')], [('Run', 'calls', 'Dog.Speak')],
+     source="spec Variable_declarations; go/types decl.go varDecl (the declared type is used before the value's)")
+case('go', 'var-multiple-results', "`var a, b = f()` gives each name its result's type",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Conn struct{}\n\nfunc (*Conn) Close() error { return nil }\n\nfunc Open() (*Conn, error) { return &Conn{}, nil }\n\nfunc Run() error {\n\tvar c, err = Open()\n\tif err != nil {\n\t\treturn err\n\t}\n\treturn c.Close()\n}\n'},
+     [('Run', 'calls', 'Conn.Close')], [],
+     source='spec Variable_declarations; go/types decl.go declStmt (n:1 varDecl with lhs), assignments.go initVars')
+case('go', 'var-comma-ok-assertion', '`var t, ok = x.(T)` gives t the type T',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Dog struct{}\n\nfunc (*Dog) Bark() int { return 1 }\n\nfunc Run(x any) int {\n\tvar d, ok = x.(*Dog)\n\tif !ok {\n\t\treturn 0\n\t}\n\treturn d.Bark()\n}\n'},
+     [('Run', 'calls', 'Dog.Bark')], [],
+     source='spec Variable_declarations')
+case('go', 'short-var-redeclaration-keeps-the-variable', 'a short variable declaration redeclaring a variable of the block assigns it: the variable keeps its declared type',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Speaker interface{ Speak() int }\n\ntype Dog struct{}\n\nfunc (*Dog) Speak() int { return 1 }\n\nfunc Run() int {\n\tvar s Speaker\n\ts, n := &Dog{}, 1\n\treturn s.Speak() + n\n}\n'},
+     [('Run', 'calls', 'Speaker.Speak')], [('Run', 'calls', 'Dog.Speak')],
+     source='spec Short_variable_declarations; go/types assignments.go shortVarDecl (scope.Lookup, recordUse of the old variable)')
+case('go', 'generic-function-instantiation', 'a generic function written with type arguments, `Map[int](x)`, is a call of that function',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\nfunc Map[T any](xs []T, f func(T) T) []T {\n\treturn xs\n}\n\nfunc Run(xs []int) []int {\n\treturn Map[int](xs, func(x int) int { return x })\n}\n'},
+     [('Run', 'calls', 'Map')], [],
+     source='spec Function_declarations (a generic function must be instantiated before it can be called); spec Instantiations', since='1.18')
+case('go', 'method-in-another-file', 'a method is bound to its receiver base type wherever in the package it is declared',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype T struct{}\n\ntype U struct{}\n\nfunc (U) Go() int { return 0 }\n', 'b.go': 'package app\n\nfunc (T) Go() int { return 1 }\n', 'c.go': 'package app\n\nfunc Run(t T) int {\n\treturn t.Go()\n}\n'},
+     [('Run', 'calls', 'T.Go')], [('Run', 'calls', 'U.Go')],
+     source='spec Method_declarations; go/types resolver.go collectObjects (methods associated with base type names after all files)')
+case('go', 'method-of-a-generic-type', 'a method declared for a generic type `S[T]` is a method of S on every instantiation',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Stack[T any] struct{ items []T }\n\nfunc (s *Stack[T]) Push(x T) { s.items = append(s.items, x) }\n\ntype List[T any] struct{ items []T }\n\nfunc (l *List[T]) Push(x T) { l.items = append(l.items, x) }\n\nfunc Run() {\n\tvar s Stack[int]\n\ts.Push(1)\n}\n'},
+     [('Run', 'calls', 'Stack.Push')], [('Run', 'calls', 'List.Push')],
+     source='spec Method_declarations; go/types resolver.go unpackRecv', since='1.18')
+case('go', 'method-on-an-alias-receiver', "a method declared on an alias's name is a method of the aliased defined type",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype T struct{}\n\nfunc (T) M() int { return 1 }\n\ntype U struct{}\n\ntype A = U\n\nfunc (A) M() int { return 2 }\n\nfunc Run(u U) int {\n\treturn u.M()\n}\n'},
+     [('Run', 'calls', 'A.M')], [('Run', 'calls', 'T.M')],
+     source='go/types resolver.go resolveBaseTypeName', since='1.9')
+case('go', 'short-var-redeclares-a-parameter', "`r, n := open()` in the function body redeclares the parameter r: it keeps the type Reader, so `r.Read()` is Reader's method",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Reader interface{ Read() int }\n\ntype File struct{}\n\nfunc (File) Read() int { return 1 }\n\nfunc open() (File, int) { return File{}, 0 }\n\nfunc Run(r Reader) int {\n\tr, n := open()\n\treturn r.Read() + n\n}\n'},
+     [('Run', 'calls', 'Reader.Read')], [('Run', 'calls', 'File.Read')],
+     source='spec Short_variable_declarations')
+case('go', 'parameter-named-like-its-type', "in `func use(conf conf)` and `func (conf conf) Other()` the type is the package type conf and `conf.Run()` in the body is conf's method, not the package function Run",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype conf struct{}\n\nfunc (conf) Run() int { return 1 }\n\nfunc Run() int { return 2 }\n\nfunc use(conf conf) int {\n\treturn conf.Run()\n}\n\nfunc (conf conf) Other() int {\n\treturn conf.Run()\n}\n'},
+     [('use', 'references', 'conf'), ('use', 'calls', 'conf.Run'), ('conf.Other', 'calls', 'conf.Run')], [('use', 'calls', 'a.go:Run'), ('conf.Other', 'calls', 'a.go:Run')],
+     source='spec Declarations_and_scope')
+case('go', 'predeclared-error-method', "`err.Error()` on a parameter of type error is the universe interface's method: no project type's Error method is meant",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype MyErr struct{}\n\nfunc (MyErr) Error() string { return "x" }\n\nfunc Describe(err error) string {\n\treturn err.Error()\n}\n'},
+     [], [('Describe', 'calls', 'MyErr.Error')],
+     source='spec Predeclared_identifiers')
+case('go', 'receiver-type-parameter-renamed', "in `func (b Box[U]) Go(u U)` U is the receiver's own name for T: `u.Run()` is the method of T's constraint Runner",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Runner interface{ Run() int }\n\ntype Box[T Runner] struct{ v T }\n\nfunc (b Box[U]) Go(u U) int {\n\treturn u.Run()\n}\n\ntype Other struct{}\n\nfunc (Other) Run() int { return 2 }\n'},
+     [('Box.Go', 'calls', 'Runner.Run')], [('Box.Go', 'calls', 'Other.Run')],
+     source='spec Method_declarations; go/types resolver.go unpackRecv', since='1.18')
+case('go', 'receiver-alias-chain-and-pointer', "`type A = B; type B = *T; func (a A) Go()` binds Go to T: `t.Go()` on a *T is T's method, not another type's Go",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype T struct{}\n\nfunc (T) Run() int { return 1 }\n\ntype A = B\ntype B = *T\n\nfunc (a A) Go() int { return 2 }\n\nfunc Use(t *T) int {\n\treturn t.Go() + t.Run()\n}\n\ntype U struct{}\n\nfunc (U) Go() int { return 3 }\n'},
+     [('Use', 'calls', 'T.Go'), ('Use', 'calls', 'T.Run')], [('Use', 'calls', 'U.Go')],
+     source='go/types resolver.go resolveBaseTypeName')
+case('go', 'comma-ok-map-and-receive', 'in `v, ok := m[k]` and `w, ok := <-ch` the first name has the value / element type',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Item struct{}\n\nfunc (Item) Run() int { return 1 }\n\ntype Other struct{}\n\nfunc (Other) Run() int { return 2 }\n\nfunc Use(m map[string]Item, ch chan Item) int {\n\tv, ok := m["a"]\n\tw, ok2 := <-ch\n\tif ok && ok2 {\n\t\treturn v.Run() + w.Run()\n\t}\n\treturn 0\n}\n'},
+     [('Use', 'calls', 'Item.Run')], [('Use', 'calls', 'Other.Run')],
+     source='spec Variable_declarations; go/types assignments.go')
+case('go', 'field-named-like-its-type', "`type S struct{ conf conf }`: the field's type is the package type conf, and `s.conf.Run()` is conf's method",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype conf struct{}\n\nfunc (conf) Run() int { return 1 }\n\ntype S struct{ conf conf }\n\nfunc (s S) Go() int { return s.conf.Run() }\n\ntype Other struct{}\n\nfunc (Other) Run() int { return 2 }\n'},
+     [('S.Go', 'calls', 'conf.Run')], [('S.Go', 'calls', 'Other.Run')],
+     source='spec Declarations_and_scope; Selectors')
+case('go', 'local-hides-an-imported-package', "a variable or parameter of a function hides an imported package's name inside the function: the selector is the value's method",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'util/u.go': 'package util\n\nfunc Run() int { return 1 }\n', 'a.go': 'package app\n\nimport "example.com/app/util"\n\ntype Thing struct{}\n\nfunc (t Thing) Run() int { return 2 }\n\nfunc newThing() Thing { return Thing{} }\n\nfunc viaLocal() int {\n\tutil := newThing()\n\treturn util.Run()\n}\n\nfunc viaParam(util Thing) int {\n\treturn util.Run()\n}\n\nfunc viaImport() int {\n\treturn util.Run()\n}\n'},
+     [('viaLocal', 'calls', 'Thing.Run'), ('viaParam', 'calls', 'Thing.Run'), ('viaImport', 'calls', 'util/u.go:Run')], [('viaLocal', 'calls', 'util/u.go:Run'), ('viaParam', 'calls', 'util/u.go:Run'), ('viaImport', 'calls', 'Thing.Run')],
+     source='spec Declarations_and_scope (the scope of the package name of an imported package; an identifier declared in a block may be redeclared in an inner block)')
+case('go', 'local-hides-a-type-name', "a variable declared in a function hides a package type of its name: a selector on it is a method of the value's type",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Job struct{}\n\nfunc (j Job) Run() int { return 1 }\n\ntype Other struct{}\n\nfunc (o Other) Run() int { return 2 }\n\nfunc use() int {\n\tJob := Other{}\n\treturn Job.Run()\n}\n'},
+     [('use', 'calls', 'Other.Run')], [('use', 'calls', 'Job.Run')],
+     source='spec Declarations_and_scope (inner declaration denotes the inner entity)')
+case('go', 'function-literal-parameter-hides-a-function', 'a parameter of a function literal hides a package function of its name inside the literal',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\nfunc helper(n int) int { return n }\n\nfunc apply() int {\n\tf := func(helper func() int) int {\n\t\treturn helper()\n\t}\n\treturn f(nil)\n}\n'},
+     [], [('apply', 'calls', 'helper'), ('apply', 'references', 'helper')],
+     source='spec Declarations_and_scope (function parameter; function body of a function literal)')
+case('go', 'short-var-pairs-values-by-position', 'with as many values as names each name takes the type of the value at its position',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype A struct{}\n\nfunc (a A) Go() int { return 1 }\n\ntype B struct{}\n\nfunc (b B) Go() int { return 2 }\n\nfunc newA() A { return A{} }\nfunc newB() B { return B{} }\n\nfunc pair() int {\n\ta, b := newA(), newB()\n\treturn a.Go() + b.Go()\n}\n'},
+     [('pair', 'calls', 'A.Go'), ('pair', 'calls', 'B.Go')], [],
+     source='spec Short_variable_declarations (IdentifierList := ExpressionList, one value per name)')
+case('go', 'embedded-generic-instantiation', 'an embedded `Base[int]` promotes the methods the receiver `Base[T]` declared',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Base[T any] struct{ v T }\n\nfunc (b *Base[T]) Get() T { return b.v }\n\ntype Wrapper struct {\n\tBase[int]\n}\n\nfunc use(w *Wrapper) int {\n\treturn w.Get()\n}\n'},
+     [('use', 'calls', 'Base.Get')], [],
+     source='spec Struct_types (embedded field) with Method_declarations (receiver T[P])')
+case('go', 'alias-names-its-type', 'an alias declaration is a use of the type it names',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype polar struct{}\n\ntype Polar = polar\n\ntype Other struct{}\n'},
+     [('Polar', 'references', 'polar')], [],
+     source='spec Alias_declarations')
+case('go', 'alias-method-call', 'a method declared on an alias is a method of the aliased type: it is found on a value written with either name',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype New struct{}\n\ntype Old = New\n\nfunc (o Old) Hello() {}\n\ntype Other struct{}\n\nfunc (o Other) Hello() {}\n\nfunc Run() {\n\tvar n New\n\tn.Hello()\n\tvar o Old\n\to.Hello()\n}\n'},
+     [('Run', 'calls', 'Old.Hello')], [('Run', 'calls', 'Other.Hello')],
+     source='spec Alias_declarations; go/types alias.go Unalias')
+case('go', 'alias-of-instance', "an alias of an instantiated generic type has that instance's methods",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Box[T any] struct {\n\tv T\n}\n\nfunc (b Box[T]) Get() T {\n\treturn b.v\n}\n\ntype IntBox = Box[int]\n\ntype Other struct{}\n\nfunc (o Other) Get() int { return 0 }\n\nfunc Run(b IntBox) int {\n\treturn b.Get()\n}\n'},
+     [('Run', 'calls', 'Box.Get')], [('Run', 'calls', 'Other.Get')],
+     source='spec Alias_declarations; go/types alias.go')
+case('go', 'generic-alias', "a generic alias, instantiated, is the type it stands for: its methods are that type's",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.24\n', 'a.go': 'package app\n\ntype Item struct{}\n\ntype Box[T any] struct {\n\tv T\n}\n\nfunc (b Box[T]) Get() T {\n\treturn b.v\n}\n\ntype Pair[T any] = Box[T]\n\ntype Other struct{}\n\nfunc (o Other) Get() int { return 0 }\n\nfunc Run(p Pair[Item]) Item {\n\treturn p.Get()\n}\n'},
+     [('Run', 'calls', 'Box.Get'), ('Run', 'references', 'Pair')], [('Run', 'calls', 'Other.Get')],
+     source='spec Alias_declarations (generic aliases); go/types alias.go newAliasInstance', since='1.24')
+case('go', 'defined-type-does-not-inherit', 'a defined type does not inherit the methods of the type it is defined from: its own method of the name is the one called',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Base struct{}\n\nfunc (Base) Run() {}\n\ntype Derived Base\n\nfunc (Derived) Run() {}\n\nfunc Use(d Derived) {\n\td.Run()\n}\n'},
+     [('Use', 'calls', 'Derived.Run')], [('Use', 'calls', 'Base.Run')],
+     source='spec Type_definitions (it does not inherit any methods bound to the given type)')
+case('go', 'defined-interface-keeps-methods', "the method set of an interface type is unchanged by a type definition from it: its methods are the interface's",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Block interface {\n\tEncrypt()\n}\n\ntype MyBlock Block\n\ntype Other struct{}\n\nfunc (Other) Encrypt() {}\n\nfunc Use(b MyBlock) {\n\tb.Encrypt()\n}\n'},
+     [('Use', 'calls', 'Block.Encrypt')], [('Use', 'calls', 'Other.Encrypt')],
+     source='spec Type_definitions (MyBlock has the same method set as Block)')
+case('go', 'instance-local-method', "a method called on a value of an instantiated generic type is the generic type's method",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Item struct{}\n\ntype Box[T any] struct {\n\tv T\n}\n\nfunc (b *Box[T]) Get() T {\n\treturn b.v\n}\n\ntype Other struct{}\n\nfunc (o *Other) Get() int {\n\treturn 0\n}\n\nfunc Run() Item {\n\tb := Box[Item]{}\n\treturn b.Get()\n}\n'},
+     [('Run', 'calls', 'Box.Get')], [('Run', 'calls', 'Other.Get')],
+     source='spec Type_definitions (methods of a generic type); go/types named.go expandMethod')
+case('go', 'receiver-redeclares-type-parameters', "a method of a generic type does not see the type declaration's type parameters: a name its receiver does not declare is the package's",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype E struct{}\n\ntype Box[E any] struct {\n\tv E\n}\n\nfunc (b Box[K]) Set(x E) {}\n'},
+     [('Box.Set', 'references', 'E')], [('Box', 'references', 'E')],
+     source='spec Type_definitions (receivers declare the type parameters); Declarations_and_scope')
+case('go', 'type-declaration-parameter-hides', 'a type parameter of a type declaration hides a package type of its name in the declaration',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Config struct{}\n\ntype Box[Config any] struct {\n\tc Config\n}\n\ntype Plain struct {\n\tc Config\n}\n'},
+     [('Plain', 'references', 'Config')], [('Box', 'references', 'Config')],
+     source='spec Type_parameter_declarations; Declarations_and_scope')
+case('go', 'receiver-type-parameter-hides', "a type parameter declared by a method's receiver hides a package type of its name in the method only: the method's other uses of the name are the package's",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Config struct{}\n\ntype Box[T any] struct {\n\tv T\n}\n\nfunc (b Box[Config]) Get() Config {\n\treturn b.v\n}\n\nfunc (b Box[T]) Plain(c Config) {}\n'},
+     [('Box.Plain', 'references', 'Config')], [('Box.Get', 'references', 'Config')],
+     source='spec Type_parameter_declarations (receiver specification); Declarations_and_scope')
+case('go', 'constraint-forward-reference', 'the type parameters of one list are all in scope in each constraint of it, including those declared after',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype E struct{}\n\nfunc Each[S ~[]E, E any](s S) {}\n\nfunc Plain(e E) {}\n'},
+     [('Plain', 'references', 'E')], [('Each', 'references', 'E')],
+     source='spec Type_parameter_declarations ([S ~[]E, E any]); Declarations_and_scope')
+case('go', 'instantiated-constraint', "a value of a type parameter constrained by an instantiated generic interface has that interface's methods",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Item struct{}\n\ntype Getter[V any] interface {\n\tGet() V\n}\n\ntype Other struct{}\n\nfunc (Other) Get() int { return 0 }\n\nfunc Use[G Getter[Item]](g G) {\n\tg.Get()\n}\n'},
+     [('Use', 'references', 'Getter'), ('Use', 'calls', 'Getter.Get')], [('Use', 'calls', 'Other.Get')],
+     source='spec Type_parameter_declarations ([P Constraint[int]]); go/types typeparam.go iface')
+case('go', 'constraint-names-are-uses', 'the interface a type parameter is constrained by, and the types of the union such an interface lists, are uses of those names',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Int int\n\ntype Float float64\n\ntype Number interface {\n\tInt | Float\n}\n\nfunc Sum[T Number](xs []T) T {\n\tvar z T\n\treturn z\n}\n'},
+     [('Sum', 'references', 'Number'), ('Number', 'embeds', 'Int'), ('Number', 'embeds', 'Float')], [],
+     source='spec Type_constraints')
+case('go', 'constraint-embeds-interface', 'a value of a type parameter has the methods of the interfaces its constraint embeds',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Runner interface {\n\tRun()\n}\n\ntype Runnable interface {\n\tRunner\n\tcomparable\n}\n\ntype Other struct{}\n\nfunc (Other) Run() {}\n\nfunc Each[T Runnable](x T) {\n\tx.Run()\n}\n'},
+     [('Each', 'calls', 'Runner.Run')], [('Each', 'calls', 'Other.Run')],
+     source='spec Type_constraints; go/types typeparam.go iface')
+case('go', 'generic-type-instance-is-a-use', 'a generic type written with type arguments is a use of the generic type and of each argument',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Item struct{}\n\ntype Box[T any] struct {\n\tv T\n}\n\ntype Other struct{}\n\nfunc Make() int {\n\tvar b Box[Item]\n\t_ = b\n\treturn 0\n}\n'},
+     [('Make', 'references', 'Box'), ('Make', 'references', 'Item')], [],
+     source='spec Instantiations; go/types typexpr.go instantiatedType')
+case('go', 'instance-field-and-result-substituted', "instantiating substitutes the type arguments: a field or result typed by the type parameter is the argument's type",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Item struct{}\n\nfunc (Item) Run() {}\n\ntype Plain struct{}\n\nfunc (Plain) Run() {}\n\ntype Box[T any] struct {\n\tv T\n}\n\nfunc (b Box[T]) Get() T {\n\treturn b.v\n}\n\nfunc ViaField(b Box[Item]) {\n\tb.v.Run()\n}\n\nfunc ViaResult(b Box[Item]) {\n\tb.Get().Run()\n}\n'},
+     [('ViaField', 'calls', 'Item.Run'), ('ViaResult', 'calls', 'Item.Run'), ('ViaResult', 'calls', 'Box.Get')], [('ViaField', 'calls', 'Plain.Run'), ('ViaResult', 'calls', 'Plain.Run')],
+     source='spec Instantiations (each type argument is substituted for its type parameter)')
+case('go', 'explicit-instantiation-result', "a call of a generic function with an explicit type argument gives the argument's type as result",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Item struct{}\n\nfunc (Item) Run() {}\n\ntype Plain struct{}\n\nfunc (Plain) Run() {}\n\nfunc Zero[T any]() T {\n\tvar z T\n\treturn z\n}\n\nfunc Use() {\n\tZero[Item]().Run()\n}\n'},
+     [('Use', 'calls', 'Zero'), ('Use', 'calls', 'Item.Run')], [('Use', 'calls', 'Plain.Run')],
+     source='spec Instantiations; go/types instantiate.go')
+case('go', 'explicit-function-instantiation', 'a generic function of another package called with explicit type arguments is that function, not the same-named one of the importing package',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\nimport "example.com/app/util"\n\nfunc Map[T any](x T) T {\n\treturn x\n}\n\nfunc Run() int {\n\treturn util.Map[int](1)\n}\n\nfunc Value() func(int) int {\n\treturn util.Map[int]\n}\n', 'util/u.go': 'package util\n\nfunc Map[T any](x T) T {\n\treturn x\n}\n'},
+     [('Run', 'calls', 'util/u.go:Map')], [('Run', 'calls', 'a.go:Map')],
+     source='spec Instantiations (sum[float64](2.0, 3)); go/types typexpr.go ident, selector')
+case('go', 'method-expression-on-instance', "`Box[T].M` is a method expression of the generic type's method",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Item struct{}\n\ntype Box[T any] struct {\n\tv T\n}\n\nfunc (b Box[T]) Get() T {\n\treturn b.v\n}\n\ntype Other struct{}\n\nfunc (o Other) Get() int { return 0 }\n\nfunc Run() func(Box[Item]) Item {\n\treturn Box[Item].Get\n}\n'},
+     [('Run', 'references', 'Box.Get')], [('Run', 'references', 'Other.Get')],
+     source='spec Method_expressions; Instantiations')
+case('go', 'generic-function-as-argument', 'a generic function handed over uninstantiated is a use of that function',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\nfunc Double[T ~int](x T) T {\n\treturn x * 2\n}\n\nfunc apply(f func(int) int) int {\n\treturn f(1)\n}\n\nfunc Run() int {\n\treturn apply(Double)\n}\n'},
+     [('Run', 'indirect_call', 'Double')], [],
+     source='spec Type_inference (a generic function passed as an argument)')
+case('go', 'imported-generic-type-instance', "a generic type of another package, instantiated, gives that type's methods: not those of the importing package's same-named type",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\nimport "example.com/app/util"\n\ntype Box[T any] struct{}\n\ntype Item struct{}\n\nfunc Run() {\n\tb := util.Box[Item]{}\n\tb.Get()\n}\n', 'util/u.go': 'package util\n\ntype Box[T any] struct {\n\tv T\n}\n\nfunc (b Box[T]) Get() T {\n\treturn b.v\n}\n'},
+     [('Run', 'calls', 'util/u.go:Box.Get')], [('Run', 'calls', 'a.go:Box'), ('Run', 'references', 'a.go:Box')],
+     source='spec Instantiations; go/types typexpr.go instantiatedType (a selector as the generic type)')
+case('go', 'embedded-instance', "an embedded instance of a generic type is a field named by the type's name; its methods are promoted",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Item struct{}\n\ntype Box[T any] struct {\n\tv T\n}\n\nfunc (b Box[T]) Get() T {\n\treturn b.v\n}\n\ntype Wrap struct {\n\tBox[Item]\n}\n\nfunc Run(w Wrap) Item {\n\treturn w.Get()\n}\n'},
+     [('Wrap', 'embeds', 'Box'), ('Run', 'calls', 'Box.Get')], [],
+     source='spec Struct_types (embedded field named by the type name, without type arguments); Selectors')
+case('go', 'array-length-names-a-constant', "an array length written as a name is a use of the constant of that name in scope: a constant of the function hides the package's",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\nconst Size = 4\n\ntype Buf [Size]byte\n\nfunc Make() [Size]int {\n\tvar b [Size]int\n\treturn b\n}\n\nfunc Local() int {\n\tconst Size = 8\n\tvar b [Size]int\n\treturn len(b)\n}\n'},
+     [('Make', 'reads', 'Size'), ('Buf', 'reads', 'Size')], [('Local', 'reads', 'Size')],
+     source='go/types typexpr.go arrayLength')
+case('go', 'defined-type-keeps-the-fields', 'a field of a struct is a field of a type defined from it',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.24\n', 'a.go': 'package app\n\ntype Point struct{ x int }\n\ntype Other struct{ x int }\n\ntype polar Point\n\nfunc Use(p polar) int {\n\treturn p.x\n}\n'},
+     [('Use', 'reads', 'Point.x')], [('Use', 'reads', 'Other.x')],
+     source='spec Type_definitions (same underlying type and operations)')
+case('go', 'defined-type-keeps-the-embedding', "a type defined from a struct with an embedded field has the embedded type's promoted methods",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.24\n', 'a.go': 'package app\n\ntype Mutex struct{}\n\nfunc (m *Mutex) Lock() {}\n\ntype Other struct{}\n\nfunc (o *Other) Lock() {}\n\ntype Printable struct {\n\tMutex\n}\n\ntype Copy Printable\n\nfunc Use(c *Copy) {\n\tc.Lock()\n}\n'},
+     [('Use', 'calls', 'Mutex.Lock')], [('Use', 'calls', 'Other.Lock')],
+     source='spec Type_definitions (PrintableMutex embeds Mutex)')
+case('go', 'alias-of-an-imported-type', "a value of an alias of pkg.T answers T's methods",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.24\n', 'a.go': 'package app\n\nimport "example.com/app/util"\n\ntype Link = util.Conn\n\ntype Other struct{}\n\nfunc (o *Other) Close() {}\n\nfunc Use(l *Link) {\n\tl.Close()\n}\n', 'util/u.go': 'package util\n\ntype Conn struct{}\n\nfunc (c *Conn) Close() {}\n'},
+     [('Use', 'calls', 'Conn.Close')], [('Use', 'calls', 'Other.Close')],
+     source='spec Alias_declarations')
+case('go', 'constraint-of-an-imported-package', "a value of a type parameter constrained by pkg.I has I's methods",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.24\n', 'a.go': 'package app\n\nimport "example.com/app/util"\n\ntype Other struct{}\n\nfunc (o Other) Run() {}\n\nfunc Each[T util.Runner](x T) {\n\tx.Run()\n}\n', 'util/u.go': 'package util\n\ntype Runner interface {\n\tRun()\n}\n'},
+     [('Each', 'calls', 'Runner.Run'), ('Each', 'references', 'Runner')], [('Each', 'calls', 'Other.Run')],
+     source='spec Type_constraints; go/types typeparam.go iface')
+case('go', 'core-type-element-of-a-type-parameter', "ranging over a value of S ~[]E gives E, whose constraint's methods are called on it",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.24\n', 'a.go': 'package app\n\ntype Shape interface {\n\tArea() int\n}\n\ntype Sq struct{}\n\nfunc (Sq) Area() int { return 1 }\n\nfunc Total[S ~[]E, E Shape](s S) int {\n\tn := 0\n\tfor _, e := range s {\n\t\tn += e.Area()\n\t}\n\treturn n\n}\n'},
+     [('Total', 'calls', 'Shape.Area')], [('Total', 'calls', 'Sq.Area')],
+     source='spec Type_parameter_declarations; spec Type_constraints (core type)')
+case('go', 'explicit-type-argument-of-a-call', 'the type argument written in `Conv[Celsius](1)` is a use of Celsius, the call is of Conv',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.24\n', 'a.go': 'package app\n\ntype Celsius float64\n\ntype Fahrenheit float64\n\nfunc Conv[T any](x T) T {\n\treturn x\n}\n\nfunc Use() Celsius {\n\treturn Conv[Celsius](1)\n}\n'},
+     [('Use', 'calls', 'Conv'), ('Use', 'references', 'Celsius')], [('Use', 'references', 'Fahrenheit')],
+     source='spec Instantiations')
+case('go', 'instantiated-function-value', '`f := Conv[int]` names Conv: a use of it, and `f(1)` is a call of Conv',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.24\n', 'a.go': 'package app\n\nfunc Conv[T any](x T) T {\n\treturn x\n}\n\nfunc Other(x int) int {\n\treturn x\n}\n\nfunc Use() int {\n\tf := Conv[int]\n\treturn f(1)\n}\n'},
+     [('Use', 'references', 'Conv')], [('Use', 'calls', 'Other')],
+     source='spec Instantiations')
+case('go', 'blank-receiver-type-parameter', "`func (b Box[_]) Size()` is Box's method, found on a Box[int] value",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.24\n', 'a.go': 'package app\n\ntype Box[T any] struct{ v T }\n\nfunc (b Box[_]) Size() int { return 1 }\n\ntype Crate struct{}\n\nfunc (c Crate) Size() int { return 2 }\n\nfunc Use(b Box[int]) int {\n\treturn b.Size()\n}\n'},
+     [('Use', 'calls', 'Box.Size')], [('Use', 'calls', 'Crate.Size')],
+     source='spec Type_definitions; spec Type_parameter_declarations ([_ any])')
+case('go', 'generic-method-result-chain', '`l.Next().Len()` where Next returns `*List[T]` is List.Len',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.24\n', 'a.go': 'package app\n\ntype List[T any] struct{ next *List[T] }\n\nfunc (l *List[T]) Next() *List[T] { return l.next }\n\nfunc (l *List[T]) Len() int { return 1 }\n\ntype Other struct{}\n\nfunc (o *Other) Len() int { return 0 }\n\nfunc Use(l *List[int]) int {\n\treturn l.Next().Len()\n}\n'},
+     [('Use', 'calls', 'List.Len'), ('Use', 'calls', 'List.Next')], [('Use', 'calls', 'Other.Len')],
+     source='spec Type_definitions; spec Instantiations')
+case('go', 'embedded-alias-field', "a struct embedding `Alias` (type Alias = Base) has a field Alias, and Base's methods",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.24\n', 'a.go': 'package app\n\ntype Base struct{}\n\nfunc (Base) Hello() {}\n\ntype Alias = Base\n\ntype Other struct{}\n\nfunc (Other) Hello() {}\n\ntype S struct {\n\tAlias\n}\n\nfunc Use(s S) {\n\ts.Alias.Hello()\n}\n'},
+     [('Use', 'calls', 'Base.Hello')], [('Use', 'calls', 'Other.Hello')],
+     source='spec Alias_declarations; go/types typexpr.go (embedded field names)')
+case('go', 'embedded-imported-type-field', "`s.Conn.Close()` for an embedded `*util.Conn` is Conn's method",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.24\n', 'a.go': 'package app\n\nimport "example.com/app/util"\n\ntype Other struct{}\n\nfunc (o *Other) Close() {}\n\ntype S struct {\n\t*util.Conn\n}\n\nfunc Use(s S) {\n\ts.Conn.Close()\n}\n', 'util/u.go': 'package util\n\ntype Conn struct{}\n\nfunc (c *Conn) Close() {}\n'},
+     [('Use', 'calls', 'Conn.Close')], [('Use', 'calls', 'Other.Close')],
+     source='spec Type_definitions; go/types typexpr.go (embedded field names)')
+case('go', 'type-parameter-hides-a-function', 'a type parameter of a function hides a package function of its name: `Size(v)` in the function is a conversion, no call',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\nfunc Size() int { return 1 }\n\nfunc Conv[Size ~int](v int) Size {\n\treturn Size(v)\n}\n\nfunc Plain() int {\n\treturn Size()\n}\n'},
+     [('Plain', 'calls', 'Size')], [('Conv', 'calls', 'Size')],
+     source='spec Declarations_and_scope (a type parameter of a function)', since='1.18')
+case('go', 'field-of-a-type-parameter-type', "a field typed by the type parameter of a generic type, read in a method of it, has the methods of the parameter's constraint",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Runner interface{ Run() }\n\ntype Box[T Runner] struct{ v T }\n\nfunc (b Box[T]) Do() {\n\tb.v.Run()\n}\n'},
+     [('Box.Do', 'calls', 'Runner.Run'), ('Box.Do', 'reads', 'Box.v')], [],
+     source='spec Type_parameter_declarations (receiver type parameters)', since='1.18')
+case('go', 'recursive-generic-type', "a recursive generic type's field typed `*Node[T]` has the type's methods",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Node[T any] struct {\n\tnext *Node[T]\n\tval  T\n}\n\nfunc (n *Node[T]) Last() *Node[T] { return n }\n\nfunc (n *Node[T]) Walk() *Node[T] {\n\treturn n.next.Last()\n}\n'},
+     [('Node.Walk', 'calls', 'Node.Last'), ('Node.Walk', 'reads', 'Node.next')], [],
+     source='spec Type_definitions (TreeNode)', since='1.18')
+case('go', 'alias-chain', "an alias of an alias names the final type, whatever the order of the declarations: its methods are the type's",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype T struct{}\n\nfunc (T) Run() {}\n\ntype B = A\ntype A = T\n\nfunc Use(b B) {\n\tb.Run()\n}\n\ntype U struct{}\n\nfunc (U) Run() {}\n'},
+     [('Use', 'calls', 'T.Run')], [('Use', 'calls', 'U.Run')],
+     source='spec Alias_declarations; go/types alias.go (Unalias)')
+case('go', 'alias-of-composite-type', "a range over an alias of `[]*T`, and a value of an alias of `*T`, have T's methods",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype T struct{}\n\nfunc (*T) Run() {}\n\ntype List = []*T\ntype Ptr = *T\n\nfunc Use(l List, p Ptr) {\n\tfor _, x := range l {\n\t\tx.Run()\n\t}\n\tp.Run()\n}\n\ntype U struct{}\n\nfunc (*U) Run() {}\n'},
+     [('Use', 'calls', 'T.Run')], [('Use', 'calls', 'U.Run')],
+     source='spec Alias_declarations (nodeList)')
+case('go', 'defined-pointer-type-field', "a field read on a value of a defined pointer type is the struct's field",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype S struct{ x int }\n\ntype PS *S\n\nfunc Read(p PS) int {\n\treturn p.x\n}\n\ntype S2 struct{ x int }\n'},
+     [('Read', 'reads', 'S.x')], [('Read', 'reads', 'S2.x')],
+     source='spec Type_definitions (PtrMutex), Selectors')
+case('go', 'pointer-constraint-method', "a call on a conversion to a type parameter constrained by `interface{ *T; Set() }` is the constraint's method",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Setter[T any] interface {\n\t*T\n\tSet()\n}\n\ntype Cfg struct{}\n\nfunc (*Cfg) Set() {}\n\nfunc Make[T any, PT Setter[T]]() T {\n\tvar v T\n\tPT(&v).Set()\n\treturn v\n}\n\nfunc (*Cfg) Other() {}\n'},
+     [('Make', 'calls', 'Setter.Set')], [('Make', 'calls', 'Cfg.Set')],
+     source='spec Type_constraints; go/types typeparam.go', since='1.18')
+case('go', 'embedded-generic-interface', "the methods of an interface embedding an instantiated generic interface are the generic interface's",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Getter[T any] interface{ Get() T }\n\ntype IntGetter interface{ Getter[int] }\n\nfunc Read(g IntGetter) int {\n\treturn g.Get()\n}\n\ntype Other interface{ Get() string }\n'},
+     [('Read', 'calls', 'Getter.Get')], [('Read', 'calls', 'Other.Get')],
+     source='spec Instantiations; go/types named.go', since='1.18')
+case('go', 'method-value-of-an-instance', "`b.Get` without a call, b of type `Box[int]`, is a use of Box's method",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Box[T any] struct{ v T }\n\nfunc (b Box[T]) Get() T { return b.v }\n\nfunc Use(b Box[int]) func() int {\n\treturn b.Get\n}\n'},
+     [('Use', 'references', 'Box.Get')], [],
+     source='spec Instantiations; Method_values', since='1.18')
+case('go', 'map-value-of-an-instance', "`m[k].Get()` with m of type `map[string]Box[int]` calls the generic type's method",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Box[T any] struct{ v T }\n\nfunc (b Box[T]) Get() T { return b.v }\n\nfunc Use(m map[string]Box[int]) int {\n\treturn m["a"].Get()\n}\n'},
+     [('Use', 'calls', 'Box.Get')], [],
+     source='spec Instantiations; Index_expressions', since='1.18')
+case('go', 'type-arguments-are-uses', "a generic type's name and each of its type arguments are uses",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Box[T any] struct {\n\tv T\n}\n\ntype Item struct{}\n\ntype Key struct{}\n\nfunc Use() {\n\tvar b Box[Item]\n\tm := map[Key]Box[Item]{}\n\t_, _ = b, m\n}\n'},
+     [('Use', 'references', 'Box'), ('Use', 'references', 'Item'), ('Use', 'references', 'Key')], [],
+     source='spec Types (TypeName [ TypeArgs ])', since='1.18')
+case('go', 'generic-result-is-the-argument', '`b.Get()` on a `*Box[Item]` is an Item, so `.Run()` is Item.Run',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Box[T any] struct {\n\tv T\n}\n\nfunc (b *Box[T]) Get() T {\n\treturn b.v\n}\n\ntype Item struct{}\n\nfunc (Item) Run() int {\n\treturn 1\n}\n\ntype Other struct{}\n\nfunc (Other) Run() int {\n\treturn 2\n}\n\nfunc Use(b *Box[Item]) int {\n\treturn b.Get().Run()\n}\n'},
+     [('Use', 'calls', 'Box.Get'), ('Use', 'calls', 'Item.Run')], [('Use', 'calls', 'Other.Run')],
+     source='spec Types (instantiated types)', since='1.18')
+case('go', 'alias-has-the-methods-of-its-type', 'a value of an alias type (also an alias of an alias) has the methods of the type the alias names',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Real struct{}\n\nfunc (Real) Name() string {\n\treturn "real"\n}\n\ntype Other struct{}\n\nfunc (Other) Name() string {\n\treturn "other"\n}\n\ntype First = Real\n\ntype Second = First\n\nfunc Use(a Second) string {\n\treturn a.Name()\n}\n'},
+     [('Use', 'calls', 'Real.Name')], [('Use', 'calls', 'Other.Name')],
+     source='spec Types, Type_identity (A0, A1 and []string are identical)')
+case('go', 'conversion-gives-its-type', '`HandlerFunc(plain).Serve(1)` is the method of the converted-to type, and `plain` is a use',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype HandlerFunc func(int) int\n\nfunc (f HandlerFunc) Serve(x int) int {\n\treturn f(x)\n}\n\ntype Other struct{}\n\nfunc (Other) Serve(x int) int {\n\treturn x\n}\n\nfunc plain(x int) int {\n\treturn x\n}\n\nfunc Use() int {\n\treturn HandlerFunc(plain).Serve(1)\n}\n'},
+     [('Use', 'calls', 'HandlerFunc.Serve'), ('Use', 'references', 'plain')], [('Use', 'calls', 'Other.Serve')],
+     source='spec Types (a type may be denoted by a type name); go/types call.go conversion')
+case('go', 'array-element-type', 'an element of `[3]*Cell`, of `[2][2]*Cell` and of a pointer to an array is a *Cell',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Cell struct{}\n\nfunc (*Cell) Touch() int {\n\treturn 1\n}\n\ntype Other struct{}\n\nfunc (*Other) Touch() int {\n\treturn 2\n}\n\nfunc Use() int {\n\tvar row [3]*Cell\n\tgrid := [2][2]*Cell{}\n\tp := &row\n\treturn row[0].Touch() + grid[1][0].Touch() + p[2].Touch()\n}\n'},
+     [('Use', 'calls', 'Cell.Touch')], [('Use', 'calls', 'Other.Touch')],
+     source='spec Array_types (ElementType, composed arrays)')
+case('go', 'slice-of-slices', '`grid[0][1]` of `[][]*Cell` is a *Cell',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Cell struct{}\n\nfunc (*Cell) Touch() int {\n\treturn 1\n}\n\ntype Other struct{}\n\nfunc (*Other) Touch() int {\n\treturn 2\n}\n\nfunc Use(grid [][]*Cell) int {\n\treturn grid[0][1].Touch()\n}\n'},
+     [('Use', 'calls', 'Cell.Touch')], [('Use', 'calls', 'Other.Touch')],
+     source='spec Slice_types (composed slices)')
+case('go', 'anonymous-struct-field', 'a field of a local declared with an unnamed struct type is of its declared type',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Repo struct{}\n\nfunc (*Repo) Find() int {\n\treturn 1\n}\n\ntype Cache struct{}\n\nfunc (*Cache) Find() int {\n\treturn 2\n}\n\nfunc Use() int {\n\tvar s struct {\n\t\tr *Repo\n\t}\n\treturn s.r.Find()\n}\n'},
+     [('Use', 'calls', 'Repo.Find')], [('Use', 'calls', 'Cache.Find')],
+     source='spec Struct_types (type literal), Types (TypeLit)')
+case('go', 'embedded-pointer-and-qualified-field', "`*util.Tool` embedded is the field Tool, and `o.Tool.Run()` is util's Tool.Run",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'util/u.go': 'package util\n\ntype Tool struct{}\n\nfunc (*Tool) Run() int {\n\treturn 1\n}\n', 'a.go': 'package app\n\nimport "example.com/app/util"\n\ntype Tool struct{}\n\nfunc (*Tool) Run() int {\n\treturn 2\n}\n\ntype Outer struct {\n\t*util.Tool\n}\n\nfunc Use(o Outer) int {\n\treturn o.Tool.Run()\n}\n'},
+     [('Use', 'calls', 'util/u.go:Tool.Run')], [('Use', 'calls', 'a.go:Tool.Run')],
+     source='spec Struct_types (EmbeddedField); go/types struct.go embeddedFieldIdent')
+case('go', 'embedded-interface-in-a-struct', "a method of an interface embedded in a struct is promoted: `c.Get()` is the interface's Get",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Store interface {\n\tGet() int\n}\n\ntype Mem struct{}\n\nfunc (Mem) Get() int {\n\treturn 1\n}\n\ntype Cache struct {\n\tStore\n}\n\nfunc Use(c Cache) int {\n\treturn c.Get()\n}\n'},
+     [('Use', 'calls', 'Store.Get')], [('Use', 'calls', 'Mem.Get')],
+     source='spec Struct_types (promoted methods)')
+case('go', 'embedded-generic-type', '`Box[int]` embedded is the field Box: `h.Get()` is Box.Get',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Box[T any] struct {\n\tv T\n}\n\nfunc (b *Box[T]) Get() T {\n\treturn b.v\n}\n\ntype Other struct{}\n\nfunc (Other) Get() int {\n\treturn 0\n}\n\ntype Holder struct {\n\tBox[int]\n}\n\nfunc Use(h Holder) int {\n\treturn h.Get()\n}\n'},
+     [('Use', 'calls', 'Box.Get')], [('Use', 'calls', 'Other.Get')],
+     source='spec Struct_types (EmbeddedField with TypeArgs); go/types struct.go embeddedFieldIdent (IndexExpr)', since='1.18')
+case('go', 'new-and-dereference', 'a local assigned `new(Repo)` or `*r` is of type Repo',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Repo struct{}\n\nfunc (Repo) Find() int {\n\treturn 1\n}\n\ntype Cache struct{}\n\nfunc (Cache) Find() int {\n\treturn 2\n}\n\nfunc Use() int {\n\tr := new(Repo)\n\tv := *r\n\treturn r.Find() + v.Find()\n}\n'},
+     [('Use', 'calls', 'Repo.Find')], [('Use', 'calls', 'Cache.Find')],
+     source='spec Pointer_types (base type)')
+case('go', 'function-typed-value-result', "`open().Find()` and `make2(1)().Find()` on parameters of function type are the result type's method",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Repo struct{}\n\nfunc (*Repo) Find() int {\n\treturn 1\n}\n\ntype Other struct{}\n\nfunc (*Other) Find() int {\n\treturn 2\n}\n\nfunc Use(open func() *Repo, make2 func(n int) func() *Repo) int {\n\treturn open().Find() + make2(1)().Find()\n}\n'},
+     [('Use', 'calls', 'Repo.Find')], [('Use', 'calls', 'Other.Find')],
+     source='spec Function_types (Signature, Result)')
+case('go', 'variadic-parameter-is-a-slice', '`repos ...*Repo` is a []*Repo: `repos[0]` is a *Repo',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Repo struct{}\n\nfunc (*Repo) Find() int {\n\treturn 1\n}\n\ntype Other struct{}\n\nfunc (*Other) Find() int {\n\treturn 2\n}\n\nfunc Use(repos ...*Repo) int {\n\treturn repos[0].Find()\n}\n'},
+     [('Use', 'calls', 'Repo.Find')], [('Use', 'calls', 'Other.Find')],
+     source='spec Function_types (variadic)')
+case('go', 'parameter-hides-a-type', 'a parameter or receiver named like a type hides it in the body only, not in the signature',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Config struct{}\n\nfunc (Config) Run() int {\n\treturn 1\n}\n\ntype Real struct{}\n\nfunc (Real) Run() int {\n\treturn 2\n}\n\nfunc Use(Config Real) *Config {\n\t_ = Config.Run()\n\treturn nil\n}\n\nfunc (Config Real) Name() int {\n\treturn Config.Run()\n}\n'},
+     [('Use', 'calls', 'Real.Run'), ('Use', 'references', 'Config'), ('Real.Name', 'calls', 'Real.Run')], [('Use', 'calls', 'Config.Run'), ('Real.Name', 'calls', 'Config.Run')],
+     source='spec Declarations_and_scope (parameters: the scope is the function body); go/types signature.go funcType (scopePos)')
+case('go', 'qualified-embedded-interface', "`util.Reader` embedded gives util's Reader.Read, not a local Reader's",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'util/u.go': 'package util\n\ntype Reader interface {\n\tRead() int\n}\n', 'a.go': 'package app\n\nimport "example.com/app/util"\n\ntype Reader interface {\n\tRead() int\n}\n\ntype ReadWriter interface {\n\tutil.Reader\n\tWrite() int\n}\n\nfunc Use(rw ReadWriter) int {\n\treturn rw.Read()\n}\n'},
+     [('Use', 'calls', 'util/u.go:Reader.Read')], [('Use', 'calls', 'a.go:Reader.Read')],
+     source='spec Embedded_interfaces; go/types interface.go interfaceType, typeset.go computeInterfaceTypeSet')
+case('go', 'constraint-embeds-an-interface', 'a value of type parameter T with constraint `Number` (embedding Labeled and `~int | ~int64`) has Labeled.Label',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Labeled interface {\n\tLabel() string\n}\n\ntype Number interface {\n\tLabeled\n\t~int | ~int64\n}\n\ntype Other struct{}\n\nfunc (Other) Label() string {\n\treturn "o"\n}\n\nfunc Show[T Number](v T) string {\n\treturn v.Label()\n}\n'},
+     [('Show', 'calls', 'Labeled.Label')], [('Show', 'calls', 'Other.Label')],
+     source='spec General_interfaces; go/types typeset.go computeInterfaceTypeSet', since='1.18')
+case('go', 'range-map-key', '`for k := range m` over `map[Key]int` makes k a Key',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Key struct{}\n\nfunc (Key) Label() string {\n\treturn "k"\n}\n\ntype Other struct{}\n\nfunc (Other) Label() string {\n\treturn "o"\n}\n\nfunc Use(m map[Key]int) string {\n\ts := ""\n\tfor k := range m {\n\t\ts += k.Label()\n\t}\n\treturn s\n}\n'},
+     [('Use', 'calls', 'Key.Label')], [('Use', 'calls', 'Other.Label')],
+     source='spec Map_types (KeyType); spec For_range')
+case('go', 'channel-element-type', '`<-jobs` and `range jobs` over a `<-chan *Job` give a *Job',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Job struct{}\n\nfunc (*Job) Run() int {\n\treturn 1\n}\n\ntype Other struct{}\n\nfunc (*Other) Run() int {\n\treturn 2\n}\n\nfunc Worker(jobs <-chan *Job) int {\n\tn := 0\n\tfor j := range jobs {\n\t\tn += j.Run()\n\t}\n\treturn n\n}\n\nfunc Once(jobs <-chan *Job) int {\n\tj := <-jobs\n\treturn j.Run()\n}\n'},
+     [('Worker', 'calls', 'Job.Run'), ('Once', 'calls', 'Job.Run')], [('Worker', 'calls', 'Other.Run'), ('Once', 'calls', 'Other.Run')],
+     source='spec Channel_types (element type, direction)')
+case('go', 'defined-interface-keeps-the-interface-methods', '`type Source Reader` (Reader an interface): `s.Read()` is Reader.Read',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Reader interface {\n\tRead() int\n}\n\ntype Source Reader\n\ntype File struct{}\n\nfunc (File) Read() int {\n\treturn 1\n}\n\nfunc Use(s Source) int {\n\treturn s.Read()\n}\n'},
+     [('Use', 'calls', 'Reader.Read')], [('Use', 'calls', 'File.Read')],
+     source='spec Underlying_types, Method_sets (method set of an interface type); go/types under.go')
+case('go', 'core-type-of-a-type-parameter', 'an element of `S ~[]*Repo` is a *Repo',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Repo struct{}\n\nfunc (*Repo) Find() int {\n\treturn 1\n}\n\ntype Other struct{}\n\nfunc (*Other) Find() int {\n\treturn 2\n}\n\nfunc First[S ~[]*Repo](s S) int {\n\treturn s[0].Find()\n}\n'},
+     [('First', 'calls', 'Repo.Find')], [('First', 'calls', 'Other.Find')],
+     source='go/types under.go CommonUnderlying, commonUnder', since='1.18')
+case('go', 'defined-type-has-only-its-own-methods', "`type Derived Base` does not inherit Base's methods: `d.Name()` is Derived.Name",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Base struct{}\n\nfunc (Base) Name() string {\n\treturn "base"\n}\n\ntype Derived Base\n\nfunc (Derived) Name() string {\n\treturn "derived"\n}\n\nfunc Use(d Derived) string {\n\treturn d.Name()\n}\n'},
+     [('Use', 'calls', 'Derived.Name')], [('Use', 'calls', 'Base.Name')],
+     source='spec Method_sets, Type_declarations; go/types methodset.go NewMethodSet')
+case('go', 'defined-struct-keeps-promoted-methods', "a struct type defined from another struct type has its embedded fields, so a promoted method is called on it: `c.Close()` on a `Copy` is Base's",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Base struct{}\n\nfunc (b *Base) Close() int { return 1 }\n\ntype Other struct{}\n\nfunc (o *Other) Close() int { return 2 }\n\ntype File struct {\n\tBase\n}\n\ntype Copy File\n\nfunc Run(c *Copy) int {\n\treturn c.Close()\n}\n'},
+     [('Run', 'calls', 'Base.Close')], [('Run', 'calls', 'Other.Close')],
+     source='spec Underlying_types; spec Struct_types (promoted methods); go/types under.go')
+case('go', 'embedded-instantiated-interface', "an interface embedding an instantiated generic interface has its methods: `r.Get()` is the generic interface's",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Store[V any] interface {\n\tGet() V\n\tPut(v V)\n}\n\ntype Other interface{ Get() string }\n\ntype Repo interface {\n\tStore[int]\n}\n\nfunc Run(r Repo) int {\n\treturn r.Get()\n}\n'},
+     [('Repo', 'embeds', 'Store'), ('Run', 'calls', 'Store.Get')], [('Run', 'calls', 'Other.Get')],
+     source='spec Embedded_interfaces; go/types interface.go')
+case('go', 'address-of-a-value-is-a-pointer', "a pointer method called on `&x` or `&T{}` is T's",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Repo struct{ n int }\n\nfunc (r *Repo) Save() { r.n++ }\n\ntype Other struct{}\n\nfunc (o *Other) Save() {}\n\nfunc Run() {\n\tr := Repo{}\n\tp := &r\n\tp.Save()\n\t(&Repo{}).Save()\n}\n'},
+     [('Run', 'calls', 'Repo.Save')], [('Run', 'calls', 'Other.Save')],
+     source='spec Method_sets; spec Address_operators')
+case('go', 'type-literal-component-types', 'the names inside map, channel and array type literals of a field are references',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Key struct{}\ntype Val struct{}\ntype Msg struct{}\ntype Arr struct{}\n\ntype Index struct {\n\tm map[Key][]Val\n\tc chan Msg\n\ta [2]Arr\n}\n'},
+     [('Index', 'references', 'Key'), ('Index', 'references', 'Val'), ('Index', 'references', 'Msg'), ('Index', 'references', 'Arr')], [],
+     source='spec Map_types; spec Channel_types; spec Array_types')
+case('go', 'method-declared-on-an-alias', 'a method whose receiver is written with an alias is a method of the aliased type: `t.Bump()` on a T is that method',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype T struct{ n int }\n\ntype A = T\n\nfunc (a *A) Bump() { a.n++ }\n\ntype Other struct{}\n\nfunc (o *Other) Bump() {}\n\nfunc Run(t *T) {\n\tt.Bump()\n}\n'},
+     [('Run', 'calls', 'A.Bump')], [('Run', 'calls', 'Other.Bump')],
+     source='spec Types (alias denotes the same type); spec Method_declarations (receiver base type)')
+case('go', 'embedded-alias', "an embedded alias is a field named by the alias; the aliased type's methods are promoted: `f.Alias.Close()` and `f.Close()` are Base's",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Base struct{}\n\nfunc (b *Base) Close() int { return 1 }\n\ntype Other struct{}\n\nfunc (o *Other) Close() int { return 2 }\n\ntype Alias = Base\n\ntype File struct {\n\tAlias\n}\n\nfunc Run(f *File) int {\n\treturn f.Alias.Close() + f.Close()\n}\n'},
+     [('Run', 'calls', 'Base.Close')], [('Run', 'calls', 'Other.Close')],
+     source='spec Struct_types; spec Types (alias)')
+case('go', 'embedded-pointer-field-promotes', 'an embedded `*T` field promotes the methods of T and *T',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Base struct{ n int }\n\nfunc (b *Base) Close() int { return b.n }\n\nfunc (b Base) Size() int { return b.n }\n\ntype Other struct{}\n\nfunc (o *Other) Close() int { return 0 }\n\nfunc (o Other) Size() int { return 0 }\n\ntype File struct {\n\t*Base\n}\n\nfunc Run(f File) int {\n\treturn f.Close() + f.Size()\n}\n'},
+     [('Run', 'calls', 'Base.Close'), ('Run', 'calls', 'Base.Size')], [('Run', 'calls', 'Other.Close'), ('Run', 'calls', 'Other.Size')],
+     source='spec Struct_types (promoted methods of an embedded *T)')
+case('go', 'range-map-value', "the value variable of `for _, v := range m` is the map's element type, not its key type",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Item struct{ n int }\n\nfunc (i Item) Name() int { return i.n }\n\ntype Key struct{ k int }\n\nfunc (k Key) Name() int { return k.k }\n\nfunc Run(m map[Key]Item) int {\n\tt := 0\n\tfor _, v := range m {\n\t\tt += v.Name()\n\t}\n\treturn t\n}\n'},
+     [('Run', 'calls', 'Item.Name')], [('Run', 'calls', 'Key.Name')],
+     source='spec Map_types, For_statements (range over a map: key, element)')
+case('go', 'method-of-a-defined-function-type', 'a method declared on a defined function type is called on a value of that type',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype HandlerFunc func(int) int\n\nfunc (f HandlerFunc) Serve(x int) int { return f(x) }\n\ntype Router struct{}\n\nfunc (r Router) Serve(x int) int { return x }\n\nfunc Run(h HandlerFunc) int {\n\treturn h.Serve(1)\n}\n'},
+     [('Run', 'calls', 'HandlerFunc.Serve')], [('Run', 'calls', 'Router.Serve')],
+     source='spec Underlying_types, Method_declarations')
+case('go', 'generic-field-has-the-type-argument', '`b.V` and `b.Vs[0]` of a `Box[Item]` are Items',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Item struct{ n int }\n\nfunc (i Item) Name() int { return i.n }\n\ntype Other struct{ n int }\n\nfunc (o Other) Name() int { return o.n }\n\ntype Box[T any] struct {\n\tV  T\n\tVs []T\n}\n\nfunc Run(b Box[Item]) int {\n\treturn b.V.Name() + b.Vs[0].Name()\n}\n'},
+     [('Run', 'calls', 'Item.Name'), ('Run', 'references', 'Item')], [('Run', 'calls', 'Other.Name')],
+     source='spec Types (instantiation); go/types typexpr.go instantiatedType', since='1.18')
+case('go', 'nested-anonymous-struct-field', "`c.DB.Pool.Close()` goes through a field of anonymous struct type to Pool's method",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Pool struct{ n int }\n\nfunc (p *Pool) Close() int { return p.n }\n\ntype Config struct {\n\tDB struct {\n\t\tPool *Pool\n\t}\n}\n\nfunc Run(c *Config) int {\n\treturn c.DB.Pool.Close()\n}\n'},
+     [('Run', 'calls', 'Pool.Close'), ('Config', 'references', 'Pool')], [],
+     source='spec Struct_types')
+case('go', 'underlying-through-a-chain', 'a defined type of a defined slice type is indexed to the element type',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Item struct{ n int }\n\nfunc (i Item) Name() int { return i.n }\n\ntype Other struct{ n int }\n\nfunc (o Other) Name() int { return o.n }\n\ntype base []Item\n\ntype view base\n\nfunc Run(v view) int {\n\treturn v[0].Name()\n}\n'},
+     [('Run', 'calls', 'Item.Name')], [('Run', 'calls', 'Other.Name')],
+     source='spec Underlying_types; go/types under.go')
+case('go', 'instantiated-generic-function', '`util.Map[int, string](…)` and `Map[int, int](…)` are calls of the function written, qualified or not',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'util/u.go': 'package util\n\nfunc Map[T, U any](xs []T, f func(T) U) []U {\n\treturn nil\n}\n', 'a.go': 'package app\n\nimport "example.com/app/util"\n\nfunc Map[T, U any](xs []T, f func(T) U) []U {\n\treturn nil\n}\n\nfunc Run(xs []int) ([]string, func([]int, func(int) bool) []bool) {\n\treturn util.Map[int, string](xs, nil), util.Map[int, bool]\n}\n\nfunc Local(xs []int) []int {\n\treturn Map[int, int](xs, nil)\n}\n'},
+     [('Run', 'calls', 'util/u.go:Map'), ('Local', 'calls', 'a.go:Map')], [('Run', 'calls', 'a.go:Map'), ('Local', 'calls', 'util/u.go:Map')],
+     source='spec Operands (OperandName [ TypeArgs ]); go/types index.go indexExpr (function instantiation)')
+case('go', 'parenthesized-operand', '`(helper)()` is a call of helper and `((r)).Find()` a call on r',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Repo struct{}\n\nfunc (r *Repo) Find() int {\n\treturn 1\n}\n\ntype Other struct{}\n\nfunc (o *Other) Find() int {\n\treturn 2\n}\n\nfunc helper() int {\n\treturn 1\n}\n\nfunc Run(r *Repo) int {\n\treturn (helper)() + ((r)).Find()\n}\n'},
+     [('Run', 'calls', 'helper'), ('Run', 'calls', 'Repo.Find')], [('Run', 'calls', 'Other.Find')],
+     source='spec Operands (Operand = ... "(" Expression ")"); go/types expr.go exprInternal (case *ast.ParenExpr)')
+case('go', 'qualified-type-is-the-packages', "`util.Config` is the imported package's type; a bare `Config` is the importing package's",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'util/u.go': 'package util\n\ntype Config struct {\n\tName string\n}\n', 'a.go': 'package app\n\nimport "example.com/app/util"\n\ntype Config struct {\n\tName string\n}\n\nfunc Run() util.Config {\n\treturn util.Config{}\n}\n\nfunc Local() Config {\n\treturn Config{}\n}\n'},
+     [('Run', 'references', 'util/u.go:Config'), ('Local', 'references', 'a.go:Config')], [('Run', 'references', 'a.go:Config'), ('Local', 'references', 'util/u.go:Config')],
+     source='spec Qualified_identifiers; go/types selector in call.go (package-qualified identifier)')
+case('go', 'qualified-function-value', "`apply(util.Handler)` hands over the imported package's Handler, not the importing package's",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'util/u.go': 'package util\n\nfunc Handler(x int) int {\n\treturn x\n}\n', 'a.go': 'package app\n\nimport "example.com/app/util"\n\nfunc Handler(x int) int {\n\treturn x + 1\n}\n\nfunc apply(f func(int) int) int {\n\treturn f(1)\n}\n\nfunc Run() int {\n\treturn apply(util.Handler)\n}\n'},
+     [('Run', 'indirect_call', 'util/u.go:Handler')], [('Run', 'indirect_call', 'a.go:Handler')],
+     source='spec Qualified_identifiers (an identifier declared in the package block of that package)')
+case('go', 'qualified-variable-and-constant', "`util.Limit` and `util.Max` are the imported package's variable and constant, not the importing package's of the same names",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'util/u.go': 'package util\n\nvar Limit = 3\n\nconst Max = 9\n', 'a.go': 'package app\n\nimport "example.com/app/util"\n\nvar Limit = 1\n\nconst Max = 2\n\nfunc Run() int {\n\treturn util.Limit + util.Max\n}\n\nfunc Local() int {\n\treturn Limit + Max\n}\n'},
+     [('Run', 'reads', 'util/u.go:Limit'), ('Run', 'reads', 'util/u.go:Max'), ('Local', 'reads', 'a.go:Limit')], [('Run', 'reads', 'a.go:Limit'), ('Run', 'reads', 'a.go:Max')],
+     source='spec Qualified_identifiers')
+case('go', 'struct-literal-key-is-a-field', '`Config{helper: 1}` names the field helper, not the function helper in scope',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Config struct {\n\thelper int\n\tName   string\n}\n\nfunc helper() int {\n\treturn 1\n}\n\nfunc Run() Config {\n\treturn Config{helper: 1, Name: "x"}\n}\n'},
+     [('Run', 'references', 'Config')], [('Run', 'references', 'a.go:helper'), ('Run', 'calls', 'a.go:helper'), ('Run', 'indirect_call', 'a.go:helper')],
+     source='spec Composite_literals; go/types literals.go compositeLit (check.recordUse(key, fld))')
+case('go', 'literal-key-field-or-value', 'in `map[int]string{Key: "k"}` Key is the constant; in `Config{Key: 2}` it is the field',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\nconst Key = 1\n\ntype Config struct {\n\tKey int\n}\n\nfunc Field() Config {\n\treturn Config{Key: 2}\n}\n\nfunc Table() map[int]string {\n\treturn map[int]string{Key: "k"}\n}\n'},
+     [('Table', 'reads', 'a.go:Key')], [('Field', 'reads', 'a.go:Key')],
+     source='spec Composite_literals (Array and slice literals, Map literals); go/types literals.go compositeLit')
+case('go', 'address-of-literal-types-the-value', "a local assigned `&Repo{}` or `new(Repo)`, or the literal called directly, answers Repo's methods",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Repo struct{}\n\nfunc (r *Repo) Find() int {\n\treturn 1\n}\n\ntype Other struct{}\n\nfunc (o *Other) Find() int {\n\treturn 2\n}\n\nfunc Run() int {\n\tr := &Repo{}\n\treturn r.Find()\n}\n\nfunc Direct() int {\n\treturn (&Repo{}).Find()\n}\n\nfunc Fresh() int {\n\tr := new(Repo)\n\treturn r.Find()\n}\n'},
+     [('Run', 'calls', 'Repo.Find'), ('Direct', 'calls', 'Repo.Find'), ('Fresh', 'calls', 'Repo.Find')], [('Run', 'calls', 'Other.Find'), ('Direct', 'calls', 'Other.Find'), ('Fresh', 'calls', 'Other.Find')],
+     source='spec Address_of_composite_literals; Address_operators (typed composite literal); go/types expr.go unary (&)')
+case('go', 'elided-element-type-keys', "in `[]*Pair{{Key: 1}}` the key is Pair's field, not the function Key in scope",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Pair struct {\n\tKey int\n}\n\nfunc Key() int {\n\treturn 1\n}\n\nfunc Run() []*Pair {\n\treturn []*Pair{{Key: 1}}\n}\n'},
+     [('Run', 'references', 'Pair')], [('Run', 'calls', 'a.go:Key'), ('Run', 'indirect_call', 'a.go:Key'), ('Run', 'references', 'a.go:Key')],
+     source='spec Omitting_composite_literal_types (the element type of an array, slice or map literal); go/types literals.go compositeLit (isElem = T.hint)')
+case('go', 'closure-sees-the-enclosing-local', '`helper()` in a literal is the local helper of the surrounding function, not the package function',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\nfunc helper() int {\n\treturn 1\n}\n\nfunc Run() int {\n\thelper := func() int {\n\t\treturn 2\n\t}\n\tf := func() int {\n\t\treturn helper()\n\t}\n\treturn f()\n}\n'},
+     [], [('Run', 'calls', 'helper')],
+     source='spec Function_literals; go/types expr.go (case *ast.FuncLit: check.funcLit)')
+case('go', 'closure-sees-only-earlier-locals', '`helper()` in a literal written before `helper := 2` is the package function',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\nfunc helper() int {\n\treturn 1\n}\n\nfunc Run() int {\n\tf := func() int {\n\t\treturn helper()\n\t}\n\thelper := 2\n\treturn f() + helper\n}\n'},
+     [('Run', 'calls', 'helper')], [],
+     source='spec Function_literals; Declarations_and_scope (scope begins after the declaration); go/types scope.go LookupParent (pos)')
+case('go', 'closure-parameter-hides-a-function', 'in `func(helper func() int) int { return helper() }` helper is the parameter',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\nfunc helper() int {\n\treturn 1\n}\n\nfunc Run() int {\n\treturn func(helper func() int) int {\n\t\treturn helper()\n\t}(nil)\n}\n'},
+     [], [('Run', 'calls', 'helper'), ('Run', 'indirect_call', 'helper')],
+     source="spec Function_literals; Declarations_and_scope (a parameter's scope is the function body)")
+case('go', 'literal-invoked-in-place', 'a call inside `go func() { helper() }()` is a call of helper made by Run',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\nfunc helper() int {\n\treturn 1\n}\n\nfunc Run() {\n\tgo func() {\n\t\thelper()\n\t}()\n}\n'},
+     [('Run', 'calls', 'helper')], [],
+     source='spec Function_literals (A function literal can be assigned to a variable or invoked directly)')
+case('go', 'index-of-a-call-result', "`repos()[0].Find()` is Repo's method: the call's result is a slice of *Repo",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Repo struct{}\n\nfunc (r *Repo) Find() int {\n\treturn 1\n}\n\ntype Other struct{}\n\nfunc (o *Other) Find() int {\n\treturn 2\n}\n\nfunc repos() []*Repo {\n\treturn nil\n}\n\nfunc Run() int {\n\treturn repos()[0].Find()\n}\n'},
+     [('Run', 'calls', 'Repo.Find'), ('Run', 'calls', 'repos')], [('Run', 'calls', 'Other.Find')],
+     source='spec Primary_expressions (PrimaryExpr Index / Selector / Arguments)')
+case('go', 'embedded-pointer-is-promoted', "through `*T0` and `T1` embedded in T2, p.M0(), p.M1(), p.x and p.y are T0's and T1's",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype T0 struct {\n\tx int\n}\n\nfunc (*T0) M0() {}\n\ntype T1 struct {\n\ty int\n}\n\nfunc (T1) M1() {}\n\ntype T2 struct {\n\tz int\n\tT1\n\t*T0\n}\n\nfunc Run(p *T2) int {\n\tp.M0()\n\tp.M1()\n\treturn p.x + p.y + p.z\n}\n'},
+     [('Run', 'calls', 'T0.M0'), ('Run', 'calls', 'T1.M1'), ('Run', 'reads', 'T0.x'), ('Run', 'reads', 'T1.y'), ('Run', 'reads', 'T2.z')], [],
+     source='spec Selectors (the T0 / T1 / T2 example); go/types lookup.go lookupFieldOrMethodImpl (embedded types collected for the next depth)')
+case('go', 'struct-embeds-interface', "`s.Log()` on a struct embedding Logger is Logger's method",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Logger interface {\n\tLog() int\n}\n\ntype Other interface {\n\tLog() int\n}\n\ntype Service struct {\n\tLogger\n}\n\nfunc Run(s Service) int {\n\treturn s.Log()\n}\n'},
+     [('Run', 'calls', 'Logger.Log')], [('Run', 'calls', 'Other.Log')],
+     source='spec Selectors (embedded field of T); go/types lookup.go lookupFieldOrMethodImpl')
+case('go', 'field-at-a-shallower-depth-hides-a-method', '`o.Name()` on a struct with a func-typed field Name that embeds a type with method Name is the field',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Inner struct{}\n\nfunc (Inner) Name() string {\n\treturn "inner"\n}\n\ntype Outer struct {\n\tInner\n\tName func() string\n}\n\nfunc Run(o Outer) string {\n\treturn o.Name()\n}\n'},
+     [], [('Run', 'calls', 'Inner.Name')],
+     source='spec Selectors (depth); go/types lookup.go lookupFieldOrMethodImpl (fields and methods searched together at each depth)')
+case('go', 'local-hides-the-package-name', "`util.Sin()` where util is a parameter is the parameter type's method, not the package's function",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'util/u.go': 'package util\n\nfunc Sin() int {\n\treturn 1\n}\n', 'a.go': 'package app\n\nimport "example.com/app/util"\n\ntype Box struct{}\n\nfunc (b *Box) Sin() int {\n\treturn 2\n}\n\nfunc Run(util *Box) int {\n\treturn util.Sin()\n}\n\nfunc Other() int {\n\treturn util.Sin()\n}\n'},
+     [('Run', 'calls', 'Box.Sin'), ('Other', 'calls', 'util/u.go:Sin')], [('Run', 'calls', 'util/u.go:Sin')],
+     source='spec Selectors (x that is not a package name); Declarations_and_scope (the file block holds the import, the function block the parameter)')
+case('go', 'defined-type-keeps-fields-and-promotions', "`type Copy Base`: c.ID is Base's field; `type Wrapped Wrapper` (Wrapper embeds Base): w.Show() is Base's method",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Base struct {\n\tID int\n}\n\nfunc (Base) Show() int {\n\treturn 1\n}\n\ntype Copy Base\n\ntype Wrapper struct {\n\tBase\n}\n\ntype Wrapped Wrapper\n\nfunc Field(c Copy) int {\n\treturn c.ID\n}\n\nfunc Promoted(w Wrapped) int {\n\treturn w.Show()\n}\n'},
+     [('Field', 'reads', 'Base.ID'), ('Promoted', 'calls', 'Base.Show')], [],
+     source="go/types lookup.go lookupFieldOrMethodImpl (the underlying struct's embedded fields are searched after the named type's own methods)")
+case('go', 'alias-has-the-methods', "`type Alias = Repo`: a.Find() is Repo's method",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Repo struct{}\n\nfunc (r *Repo) Find() int {\n\treturn 1\n}\n\ntype Other struct{}\n\nfunc (o *Other) Find() int {\n\treturn 2\n}\n\ntype Alias = Repo\n\nfunc Run(a Alias) int {\n\treturn a.Find()\n}\n'},
+     [('Run', 'calls', 'Repo.Find')], [('Run', 'calls', 'Other.Find')],
+     source='go/types lookup.go lookupFieldOrMethodImpl (asNamed unwraps an alias)')
+case('go', 'unexported-names-of-another-package', "V embeds util.T (unexported method run) and A (method run): `v.run()` is A's",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'util/u.go': 'package util\n\ntype T struct{}\n\nfunc (T) run() int {\n\treturn 1\n}\n\nfunc (t T) Go() int {\n\treturn t.run()\n}\n', 'a.go': 'package app\n\nimport "example.com/app/util"\n\ntype A struct{}\n\nfunc (A) run() int {\n\treturn 2\n}\n\ntype V struct {\n\tutil.T\n\tA\n}\n\nfunc Run(v V) int {\n\treturn v.run()\n}\n'},
+     [('Run', 'calls', 'A.run')], [('Run', 'calls', 'T.run')],
+     source='go/types lookup.go lookupFieldOrMethodImpl (sameId(pkg, name)); spec Uniqueness_of_identifiers')
+case('go', 'method-expression-called', '`Counter.Value(c)`, `(Counter).Value(c)` and `(*Counter).Inc(&c)` are calls of the methods',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Counter struct{ n int }\n\nfunc (c Counter) Value() int {\n\treturn c.n\n}\n\nfunc (c *Counter) Inc() {\n\tc.n++\n}\n\nfunc Run(c Counter) int {\n\tCounter.Value(c)\n\t(*Counter).Inc(&c)\n\treturn (Counter).Value(c)\n}\n'},
+     [('Run', 'calls', 'Counter.Value'), ('Run', 'calls', 'Counter.Inc')], [],
+     source='spec Method_expressions (five equivalent invocations); go/types selection.go MethodExpr')
+case('go', 'pointer-method-expression', '`(*Counter).Inc` and `(*Counter).Get` (Get has a value receiver) are uses of the methods',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Counter struct{ n int }\n\nfunc (c *Counter) Inc() {\n\tc.n++\n}\n\nfunc (c Counter) Get() int {\n\treturn c.n\n}\n\nfunc Run() (func(*Counter), func(*Counter) int) {\n\treturn (*Counter).Inc, (*Counter).Get\n}\n'},
+     [('Run', 'references', 'Counter.Inc'), ('Run', 'references', 'Counter.Get')], [],
+     source='spec Method_expressions ((*T).Mv, (*T).Mp)')
+case('go', 'method-expression-promoted', '`Wrapper.Value` with Counter embedded in Wrapper is Counter.Value',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Counter struct{ n int }\n\nfunc (c Counter) Value() int {\n\treturn c.n\n}\n\ntype Wrapper struct {\n\tCounter\n}\n\nfunc Run() func(Wrapper) int {\n\treturn Wrapper.Value\n}\n'},
+     [('Run', 'references', 'Counter.Value')], [],
+     source='spec Method_expressions; go/types lookup.go (method sets)')
+case('go', 'interface-method-expression', "`Reader.Read` is Reader's method, not another interface's of the same name",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Reader interface {\n\tRead() int\n}\n\ntype Other interface {\n\tRead() int\n}\n\nfunc Run() func(Reader) int {\n\treturn Reader.Read\n}\n'},
+     [('Run', 'references', 'Reader.Read')], [('Run', 'references', 'Other.Read')],
+     source='spec Method_expressions (a method of an interface type)')
+case('go', 'imported-method-expression', "`(*util.Repo).Find` is util's method, not the importing package's Repo.Find",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'util/u.go': 'package util\n\ntype Repo struct{}\n\nfunc (r *Repo) Find() int {\n\treturn 1\n}\n', 'a.go': 'package app\n\nimport "example.com/app/util"\n\ntype Repo struct{}\n\nfunc (r *Repo) Find() int {\n\treturn 2\n}\n\nfunc Run() func(*util.Repo) int {\n\treturn (*util.Repo).Find\n}\n'},
+     [('Run', 'references', 'util/u.go:Repo.Find')], [('Run', 'references', 'a.go:Repo.Find')],
+     source='spec Method_expressions (ReceiverType is a Type, qualified or not)')
+case('go', 'method-value-through-embedding', '`s.M` with *T embedded in S is T.M',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype T int\n\nfunc (t T) M() {}\n\ntype Other int\n\nfunc (o Other) M() {}\n\ntype S struct {\n\t*T\n}\n\nfunc Run(s S) func() {\n\treturn s.M\n}\n'},
+     [('Run', 'references', 'T.M')], [('Run', 'references', 'Other.M')],
+     source='spec Method_values (type S struct { *T })')
+case('go', 'method-value-of-interface-and-pointer', '`r.Read` on an interface and `c.Inc` on an addressable Counter are uses of Reader.Read and Counter.Inc',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Reader interface {\n\tRead() int\n}\n\ntype Counter struct{ n int }\n\nfunc (c *Counter) Inc() {\n\tc.n++\n}\n\nfunc FromInterface(r Reader) func() int {\n\treturn r.Read\n}\n\nfunc FromValue() func() {\n\tvar c Counter\n\treturn c.Inc\n}\n'},
+     [('FromInterface', 'references', 'Reader.Read'), ('FromValue', 'references', 'Counter.Inc')], [],
+     source='spec Method_values (t.Mp is (&t).Mp; a value of interface type)')
+case('go', 'array-element', '`a[0]` of `[3]*Repo` is a *Repo',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Repo struct{}\n\nfunc (r *Repo) Find() int {\n\treturn 1\n}\n\ntype Other struct{}\n\nfunc (o *Other) Find() int {\n\treturn 2\n}\n\nfunc Run() int {\n\tvar a [3]*Repo\n\treturn a[0].Find()\n}\n'},
+     [('Run', 'calls', 'Repo.Find')], [('Run', 'calls', 'Other.Find')],
+     source='spec Index_expressions (a of array type A); go/types index.go indexExpr (case *Array)')
+case('go', 'pointer-to-array-element', '`p[0]` of `*[3]*Repo` is a *Repo',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Repo struct{}\n\nfunc (r *Repo) Find() int {\n\treturn 1\n}\n\ntype Other struct{}\n\nfunc (o *Other) Find() int {\n\treturn 2\n}\n\nfunc Run(p *[3]*Repo) int {\n\treturn p[0].Find()\n}\n'},
+     [('Run', 'calls', 'Repo.Find')], [('Run', 'calls', 'Other.Find')],
+     source='spec Index_expressions; go/types index.go indexExpr (case *Pointer)')
+case('go', 'index-of-index', '`grid[0][1]` of `[][]*Repo` is a *Repo',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Repo struct{}\n\nfunc (r *Repo) Find() int {\n\treturn 1\n}\n\ntype Other struct{}\n\nfunc (o *Other) Find() int {\n\treturn 2\n}\n\nfunc Run(grid [][]*Repo) int {\n\treturn grid[0][1].Find()\n}\n'},
+     [('Run', 'calls', 'Repo.Find')], [('Run', 'calls', 'Other.Find')],
+     source='spec Index_expressions (the type of a[x] is the element type)')
+case('go', 'map-comma-ok', '`r, ok := m["a"]` types r as the map\'s *Repo',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Repo struct{}\n\nfunc (r *Repo) Find() int {\n\treturn 1\n}\n\ntype Other struct{}\n\nfunc (o *Other) Find() int {\n\treturn 2\n}\n\nfunc Run(m map[string]*Repo) int {\n\tr, ok := m["a"]\n\tif !ok {\n\t\treturn 0\n\t}\n\treturn r.Find()\n}\n'},
+     [('Run', 'calls', 'Repo.Find')], [('Run', 'calls', 'Other.Find')],
+     source='spec Index_expressions (v, ok = a[x]); go/types index.go')
+case('go', 'slice-expression-keeps-the-type', '`repos[1:][0]` and `a[:2][0]` are *Repo',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Repo struct{}\n\nfunc (r *Repo) Find() int {\n\treturn 1\n}\n\ntype Other struct{}\n\nfunc (o *Other) Find() int {\n\treturn 2\n}\n\nfunc Run(repos []*Repo) int {\n\treturn repos[1:][0].Find()\n}\n\nfunc Fixed(a [4]*Repo) int {\n\treturn a[:2][0].Find()\n}\n'},
+     [('Run', 'calls', 'Repo.Find'), ('Fixed', 'calls', 'Repo.Find')], [('Run', 'calls', 'Other.Find'), ('Fixed', 'calls', 'Other.Find')],
+     source='spec Slice_expressions; go/types index.go sliceExpr')
+case('go', 'slice-of-a-named-slice-keeps-its-type', '`n[1:].Count()` on `type Names []string` is Names.Count',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Names []string\n\nfunc (n Names) Count() int {\n\treturn len(n)\n}\n\ntype Other []string\n\nfunc (n Other) Count() int {\n\treturn 0\n}\n\nfunc Run(n Names) int {\n\treturn n[1:].Count()\n}\n'},
+     [('Run', 'calls', 'Names.Count')], [('Run', 'calls', 'Other.Count')],
+     source='spec Slice_expressions (same type as the operand); go/types index.go sliceExpr')
+case('go', 'type-assertion-comma-ok', '`r, ok := x.(*Repo)` types r as *Repo',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Repo struct{}\n\nfunc (r *Repo) Find() int {\n\treturn 1\n}\n\ntype Other struct{}\n\nfunc (o *Other) Find() int {\n\treturn 2\n}\n\nfunc Run(x interface{}) int {\n\tr, ok := x.(*Repo)\n\tif !ok {\n\t\treturn 0\n\t}\n\treturn r.Find()\n}\n'},
+     [('Run', 'calls', 'Repo.Find')], [('Run', 'calls', 'Other.Find')],
+     source='spec Type_assertions (special form v, ok = x.(T))')
+case('go', 'type-assertion-to-an-interface', "`x.(Finder).Find()` is Finder's method",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Finder interface {\n\tFind() int\n}\n\ntype Other interface {\n\tFind() int\n}\n\nfunc Run(x interface{}) int {\n\treturn x.(Finder).Find()\n}\n'},
+     [('Run', 'calls', 'Finder.Find'), ('Run', 'references', 'Finder')], [('Run', 'calls', 'Other.Find')],
+     source='spec Type_assertions (the type of x.(T) is T)')
+case('go', 'type-switch-binding', 'in `case *Repo:` of `switch v := x.(type)`, v is a *Repo',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Repo struct{}\n\nfunc (r *Repo) Find() int {\n\treturn 1\n}\n\ntype Other struct{}\n\nfunc (o *Other) Find() int {\n\treturn 2\n}\n\nfunc Run(x interface{}) int {\n\tswitch v := x.(type) {\n\tcase *Repo:\n\t\treturn v.Find()\n\tcase *Other:\n\t\treturn 0\n\t}\n\treturn 0\n}\n'},
+     [('Run', 'calls', 'Repo.Find')], [('Run', 'calls', 'Other.Find')],
+     source='spec Type_switches (the variable has the type of the case); Type_assertions')
+case('go', 'conversion-types-the-value', "`Celsius(f).String()` is Celsius's method and a reference to the type, never a call of it",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Celsius float64\n\nfunc (c Celsius) String() string {\n\treturn "c"\n}\n\ntype Kelvin float64\n\nfunc (k Kelvin) String() string {\n\treturn "k"\n}\n\nfunc Run(f float64) string {\n\treturn Celsius(f).String()\n}\n'},
+     [('Run', 'calls', 'Celsius.String'), ('Run', 'references', 'Celsius')], [('Run', 'calls', 'Kelvin.String'), ('Run', 'calls', 'Celsius')],
+     source='spec Conversions; go/types conversions.go conversion (the result has type T)')
+case('go', 'parenthesized-pointer-conversion', "`(*Repo)(m).Find()` on a *Mid is Repo's method",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Repo struct{}\n\nfunc (r *Repo) Find() int {\n\treturn 1\n}\n\ntype Other struct{}\n\nfunc (o *Other) Find() int {\n\treturn 2\n}\n\ntype Mid Repo\n\nfunc Run(m *Mid) int {\n\treturn (*Repo)(m).Find()\n}\n'},
+     [('Run', 'calls', 'Repo.Find')], [('Run', 'calls', 'Other.Find')],
+     source='spec Conversions (*Point)(p)')
+case('go', 'indirection-and-address-of', "`(*pp).Norm()` with pp **Point and `(&v).Norm()` are Point's method",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Point struct{}\n\nfunc (Point) Norm() int {\n\treturn 1\n}\n\ntype Other struct{}\n\nfunc (Other) Norm() int {\n\treturn 2\n}\n\nfunc Run(pp **Point, v Point) int {\n\treturn (*pp).Norm() + (&v).Norm()\n}\n'},
+     [('Run', 'calls', 'Point.Norm')], [('Run', 'calls', 'Other.Norm')],
+     source='spec Address_operators; go/types expr.go unary (&) and StarExpr')
+case('go', 'receive-element-type', '`r := <-ch`, `v, ok := <-ch` and `(<-ch).Find()` on `chan *Repo` give a *Repo',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Repo struct{}\n\nfunc (r *Repo) Find() int {\n\treturn 1\n}\n\ntype Other struct{}\n\nfunc (o *Other) Find() int {\n\treturn 2\n}\n\nfunc Run(ch chan *Repo) int {\n\tr := <-ch\n\tv, ok := <-ch\n\tif ok {\n\t\tv.Find()\n\t}\n\treturn r.Find() + (<-ch).Find()\n}\n'},
+     [('Run', 'calls', 'Repo.Find')], [('Run', 'calls', 'Other.Find')],
+     source='spec Receive_operator; go/types expr.go unary (token.ARROW: the element type)')
+case('go', 'channel-range-and-select', '`for r := range ch` and `case s := <-ch:` on `<-chan *Repo` give *Repo',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Repo struct{}\n\nfunc (r *Repo) Find() int {\n\treturn 1\n}\n\ntype Other struct{}\n\nfunc (o *Other) Find() int {\n\treturn 2\n}\n\nfunc Run(ch <-chan *Repo) int {\n\tfor r := range ch {\n\t\tr.Find()\n\t}\n\tselect {\n\tcase s := <-ch:\n\t\treturn s.Find()\n\t}\n}\n'},
+     [('Run', 'calls', 'Repo.Find')], [('Run', 'calls', 'Other.Find')],
+     source="spec Receive_operator; For_range (a channel's element)")
+case('go', 'type-switch-multi-type-clause', "in a type switch clause listing several types, the variable has the switched expression's type: v.M() is the interface's method",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Shape interface{ M() }\n\ntype A struct{}\n\nfunc (A) M() {}\n\ntype B struct{}\n\nfunc (B) M() {}\n\nfunc f(x Shape) {\n\tswitch v := x.(type) {\n\tcase A, B:\n\t\tv.M()\n\t}\n}\n'},
+     [('f', 'calls', 'Shape.M')], [('f', 'calls', 'A.M'), ('f', 'calls', 'B.M')],
+     source='spec Type_switches')
+case('go', 'instantiated-generic-method', 'x.Get() on a value of Box[int] is the method of the generic type Box',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Box[T any] struct{ v T }\n\nfunc (b Box[T]) Get() T { return b.v }\n\ntype Other struct{}\n\nfunc (Other) Get() int { return 0 }\n\nfunc use(b Box[int]) int {\n\treturn b.Get()\n}\n'},
+     [('use', 'calls', 'Box.Get')], [('use', 'calls', 'Other.Get')],
+     source='spec Selectors')
+case('go', 'named-result-local', 'a named result is a typed local of the function body',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Repo struct{}\n\nfunc (r *Repo) Save() {}\n\ntype Other struct{}\n\nfunc (o *Other) Save() {}\n\nfunc build() (r *Repo, err error) {\n\tr = &Repo{}\n\tr.Save()\n\treturn\n}\n'},
+     [('build', 'calls', 'Repo.Save')], [('build', 'calls', 'Other.Save')],
+     source='spec Declarations_and_scope')
+case('go', 'package-name-is-not-directory', 'util.F() with import "example.com/app/tools" (package util) is tools\' F, not the importing package\'s F; an alias names the same package',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'tools/t.go': 'package util\n\nfunc F() {}\n', 'a.go': 'package app\n\nimport (\n\t"example.com/app/tools"\n\tali "example.com/app/tools"\n)\n\nfunc F() {}\n\nfunc g() {\n\tutil.F()\n}\n\nfunc h() {\n\tali.F()\n}\n'},
+     [('g', 'calls', 'tools/t.go:F'), ('h', 'calls', 'tools/t.go:F')], [('g', 'calls', 'a.go:F'), ('h', 'calls', 'a.go:F')],
+     source='spec Import_declarations')
+case('go', 'closure-local-shadows-outer-local', "x := B{} inside a function literal hides the surrounding function's x, typed A",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype A struct{}\n\nfunc (A) M() {}\n\ntype B struct{}\n\nfunc (B) M() {}\n\nfunc g() {\n\tx := A{}\n\tfunc() {\n\t\tx := B{}\n\t\tx.M()\n\t}()\n\t_ = x\n}\n'},
+     [('g', 'calls', 'B.M')], [('g', 'calls', 'A.M')],
+     source='go/types expr.go funcLit scope')
+case('go', 'var-declaration-comma-ok-map', "in `var v, ok = m[k]` v is the map's element type: `v.Find()` is Repo's, never Other's",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Repo struct{}\n\nfunc (r *Repo) Find() int { return 1 }\n\ntype Other struct{}\n\nfunc (o *Other) Find() int { return 2 }\n\nfunc Run(m map[string]*Repo) int {\n\tvar v, ok = m["a"]\n\tif !ok {\n\t\treturn 0\n\t}\n\treturn v.Find()\n}\n'},
+     [('Run', 'calls', 'Repo.Find')], [('Run', 'calls', 'Other.Find')],
+     source="spec Index_expressions ('var v, ok = a[x]')")
+case('go', 'var-declaration-comma-ok-assertion', "in `var v, ok = x.(*T)` v is a *T: `v.Find()` is Repo's, never Other's",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Repo struct{}\n\nfunc (r *Repo) Find() int { return 1 }\n\ntype Other struct{}\n\nfunc (o *Other) Find() int { return 2 }\n\nfunc Run(x interface{}) int {\n\tvar v, ok = x.(*Repo)\n\tif !ok {\n\t\treturn 0\n\t}\n\treturn v.Find()\n}\n'},
+     [('Run', 'calls', 'Repo.Find')], [('Run', 'calls', 'Other.Find')],
+     source="spec Type_assertions ('var v, ok = x.(T)')")
+case('go', 'var-declaration-comma-ok-receive', "in `var v, ok = <-ch` v is the channel's element type: `v.Find()` is Repo's, never Other's",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Repo struct{}\n\nfunc (r *Repo) Find() int { return 1 }\n\ntype Other struct{}\n\nfunc (o *Other) Find() int { return 2 }\n\nfunc Run(ch chan *Repo) int {\n\tvar v, ok = <-ch\n\tif !ok {\n\t\treturn 0\n\t}\n\treturn v.Find()\n}\n'},
+     [('Run', 'calls', 'Repo.Find')], [('Run', 'calls', 'Other.Find')],
+     source="spec Receive_operator ('var x, ok = <-ch')")
+case('go', 'slice-of-a-pointer-to-an-array', "`p[1:3]` of a `*[4]*Repo` is a []*Repo: `s[0].Find()` is Repo's, never Other's",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Repo struct{}\n\nfunc (r *Repo) Find() int { return 1 }\n\ntype Other struct{}\n\nfunc (o *Other) Find() int { return 2 }\n\nfunc Run(p *[4]*Repo) int {\n\ts := p[1:3]\n\treturn s[0].Find()\n}\n'},
+     [('Run', 'calls', 'Repo.Find')], [('Run', 'calls', 'Other.Find')],
+     source="spec Slice_expressions ('Simple slice expressions')")
+case('go', 'full-slice-expression', "`a[1:2:3]` of a `[]*Repo` is a []*Repo: `a[1:2:3][0].Find()` is Repo's, never Other's",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Repo struct{}\n\nfunc (r *Repo) Find() int { return 1 }\n\ntype Other struct{}\n\nfunc (o *Other) Find() int { return 2 }\n\nfunc Run(a []*Repo) int {\n\treturn a[1:2:3][0].Find()\n}\n'},
+     [('Run', 'calls', 'Repo.Find')], [('Run', 'calls', 'Other.Find')],
+     source="spec Slice_expressions ('Full slice expressions')")
+case('go', 'address-of-an-element', "`p := &items[0]` is a *Repo: `p.Find()` is Repo's, never Other's",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Repo struct{}\n\nfunc (r *Repo) Find() int { return 1 }\n\ntype Other struct{}\n\nfunc (o *Other) Find() int { return 2 }\n\nfunc Run(items []Repo) int {\n\tp := &items[0]\n\treturn p.Find()\n}\n'},
+     [('Run', 'calls', 'Repo.Find')], [('Run', 'calls', 'Other.Find')],
+     source="spec Address_operators ('For an operand x of type T, &x generates a pointer of type *T')")
+case('go', 'elided-pointer-element-literal', 'in `[]*Point{{x: 1}}` the key `x` is a field of Point: it reads no package variable `x`',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Point struct{ x, y int }\n\nvar x = 1\n\nfunc Run() []*Point {\n\treturn []*Point{{x: 1}}\n}\n'},
+     [('Run', 'references', 'Point')], [('Run', 'reads', 'a.go:x')],
+     source='spec Omitting_composite_literal_types; go/types literals.go compositeLit (hint: deref of a pointer type)')
+case('go', 'elided-map-key-literal', 'in `map[Point]string{{x: 1}: "a"}` the inner `x` is a field of Point, the map\'s key type: it reads no package variable `x`',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Point struct{ x, y int }\n\nvar x = 1\n\nfunc Run() map[Point]string {\n\treturn map[Point]string{{x: 1}: "a"}\n}\n'},
+     [('Run', 'references', 'Point')], [('Run', 'reads', 'a.go:x')],
+     source='spec Omitting_composite_literal_types; go/types literals.go compositeLit (case *Map: exprWithHint of the key)')
+case('go', 'parenthesized-method-expression', "`(Repo).Find(r)` is a use of Repo's method, never of Other's",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Repo struct{}\n\nfunc (r Repo) Find() int { return 1 }\n\ntype Other struct{}\n\nfunc (o Other) Find() int { return 2 }\n\nfunc Run(r Repo) int {\n\treturn (Repo).Find(r)\n}\n'},
+     [('Run', 'calls', 'Repo.Find')], [('Run', 'calls', 'Other.Find')],
+     source="spec Method_expressions ('(T).Mv(t, 7)')")
+case('go', 'embedded-imported-type-promotes', "`s.Find()` on a struct embedding `store.Base` is Base's method, never the other type's of the same name",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'store/s.go': 'package store\n\ntype Base struct{}\n\nfunc (b *Base) Find() int { return 1 }\n', 'a.go': 'package app\n\nimport "example.com/app/store"\n\ntype Other struct{}\n\nfunc (o *Other) Find() int { return 2 }\n\ntype Service struct {\n\tstore.Base\n}\n\nfunc Run(s *Service) int {\n\treturn s.Find()\n}\n'},
+     [('Run', 'calls', 'Base.Find')], [('Run', 'calls', 'Other.Find')],
+     source='spec Selectors; spec Struct_types (an embedded field is named by its unqualified type name)')
+case('go', 'imported-variable-member', "`store.Default.Find()` is the method of the type of the imported variable `Default`, never another type's method of that name",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'store/s.go': 'package store\n\ntype Repo struct{}\n\nfunc (r *Repo) Find() int { return 1 }\n\nvar Default = &Repo{}\n', 'a.go': 'package app\n\nimport "example.com/app/store"\n\ntype Other struct{}\n\nfunc (o *Other) Find() int { return 2 }\n\nfunc Run() int {\n\treturn store.Default.Find()\n}\n'},
+     [('Run', 'calls', 'Repo.Find')], [('Run', 'calls', 'Other.Find')],
+     source='spec Qualified_identifiers; spec Selectors (a selector on a primary expression is typed step by step)')
+case('go', 'package-level-function-literal', 'the call inside `var handler = func() int { return helper() }` is made by `handler`',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\nfunc helper() int { return 1 }\n\nfunc other() int { return 2 }\n\nvar handler = func() int {\n\treturn helper()\n}\n'},
+     [('handler', 'calls', 'helper')], [('other', 'calls', 'helper')],
+     source='spec Function_literals; spec Package_initialization (a package-level variable is initialized from its value)')
+case('go', 'conversion-is-a-use-of-the-type', 'a call whose function expression is a type is a conversion: a use of the type, not a call of a function of the same name',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Celsius float64\n\nfunc (c Celsius) Fahrenheit() float64 {\n\treturn float64(c)\n}\n\nfunc Fahrenheit(f float64) float64 {\n\treturn f\n}\n\nfunc Run(f float64) float64 {\n\treturn Celsius(f).Fahrenheit()\n}\n'},
+     [('Run', 'references', 'Celsius'), ('Run', 'calls', 'Celsius.Fahrenheit')], [('Run', 'calls', 'Celsius'), ('Run', 'calls', 'a.go:Fahrenheit')],
+     source='spec Calls; go/types call.go callExpr (case typexpr: conversion)')
+case('go', 'instantiated-generic-call', '`Ident[int](1)` calls the generic function Ident; a method Ident of a type is not that function',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Box struct{}\n\nfunc (b Box) Ident(x int) int {\n\treturn x\n}\n\nfunc Ident[T any](x T) T {\n\treturn x\n}\n\nfunc Run() int {\n\treturn Ident[int](1)\n}\n'},
+     [('Run', 'calls', 'Ident')], [('Run', 'calls', 'Box.Ident')],
+     source='spec Calls; go/types call.go funcInst, callExpr (unpackIndexedExpr)')
+case('go', 'call-as-the-only-argument', "a call that is the only argument of another call binds like any call: a package-qualified name is the imported package's, not a same-named function of this package",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'util/u.go': 'package util\n\nfunc Split(s string) (string, string) {\n\treturn s, s\n}\n\nfunc Join(a, b string) string {\n\treturn a + b\n}\n', 'a.go': 'package app\n\nimport "example.com/app/util"\n\nfunc Split(s string) (string, string) {\n\treturn s, s\n}\n\nfunc Run(v string) string {\n\treturn util.Join(util.Split(v))\n}\n'},
+     [('Run', 'calls', 'util/u.go:Join'), ('Run', 'calls', 'util/u.go:Split')], [('Run', 'calls', 'a.go:Split')],
+     source='spec Calls (f(g(parameters_of_g))); go/types call.go selector (PkgName: pkg.scope.Lookup(sel))')
+case('go', 'package-function-hides-a-builtin', "a package-level function named like a built-in (`min`) hides the universe's: the bare call is the project's function, not a method of that name",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype S struct{}\n\nfunc (s S) min(a, b int) int {\n\treturn a\n}\n\nfunc min(a, b int) int {\n\tif a < b {\n\t\treturn a\n\t}\n\treturn b\n}\n\nfunc Run() int {\n\treturn min(1, 2)\n}\n'},
+     [('Run', 'calls', 'min')], [('Run', 'calls', 'S.min')],
+     source='spec Built-in_functions, Declarations_and_scope; go/types universe.go (Universe is the outermost scope of any chain)')
+case('go', 'new-type-argument', '`new(T)` is a use of the type T',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Opt struct {\n\tn int\n}\n\ntype Other struct {\n\tn int\n}\n\nfunc Run() int {\n\tp := new(Opt)\n\treturn p.n\n}\n'},
+     [('Run', 'references', 'Opt')], [('Run', 'references', 'Other')],
+     source='spec Allocation; go/types builtins.go (_New: the argument is a type)')
+case('go', 'conversion-is-a-use-of-the-type-2', 'duplicate of conversion-is-a-use-of-the-type and instantiated-generic-call',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Celsius float64\n\nfunc Run(f float64) Celsius {\n\treturn Celsius(f)\n}\n'},
+     [('Run', 'references', 'Celsius')], [],
+     source='go/types call.go callExpr')
+case('go', 'new-type-argument-of-another-package', "`new(pkg.T)` is a use of the imported package's type, not of a same-named type of this package",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'store/s.go': 'package store\n\ntype Opt struct {\n\tN int\n}\n', 'a.go': 'package app\n\nimport "example.com/app/store"\n\ntype Opt struct {\n\tn int\n}\n\nfunc Run() int {\n\tp := new(store.Opt)\n\treturn p.N\n}\n'},
+     [('Run', 'references', 'store/s.go:Opt')], [('Run', 'references', 'a.go:Opt')],
+     source='go/types builtins.go _New, selector (PkgName)')
+case('go', 'conversion-result-is-the-type', "the result of a conversion `T(x)` is of type T: `Celsius(x).String()` and `HandlerFunc(f).Serve()` are those types' methods",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Celsius float64\n\nfunc (c Celsius) String() string { return "c" }\n\ntype Other float64\n\nfunc (o Other) String() string { return "o" }\n\ntype HandlerFunc func()\n\nfunc (h HandlerFunc) Serve() { h() }\n\ntype Plain func()\n\nfunc (p Plain) Serve() {}\n\nfunc run(f func(), x float64) string {\n\tHandlerFunc(f).Serve()\n\treturn Celsius(x).String()\n}\n'},
+     [('run', 'calls', 'Celsius.String'), ('run', 'calls', 'HandlerFunc.Serve')], [('run', 'calls', 'Other.String'), ('run', 'calls', 'Plain.Serve')],
+     source='spec Conversions / Calls; go/types call.go callExpr (conversion branch)')
+case('go', 'new-gives-a-pointer-local', "a local assigned `new(T)` is a *T: `p.Run()` is T's method, not another type's of the same name",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype T struct{}\n\nfunc (t *T) Run() {}\n\ntype U struct{}\n\nfunc (u *U) Run() {}\n\nfunc use() {\n\tp := new(T)\n\tp.Run()\n}\n'},
+     [('use', 'calls', 'T.Run')], [('use', 'calls', 'U.Run')],
+     source='spec Allocation; go/types builtins.go _New')
+case('go', 'make-and-append-keep-the-slice-type', "a local made by `make([]*T, n)` or `append(s, x)` is a slice of *T: its elements' methods are T's",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype T struct{}\n\nfunc (t *T) Run() {}\n\ntype U struct{}\n\nfunc (u *U) Run() {}\n\nfunc use(extra *T) {\n\ts := make([]*T, 0, 4)\n\ts = append(s, extra)\n\ts[0].Run()\n\tt := append(s, extra)\n\tt[1].Run()\n}\n'},
+     [('use', 'calls', 'T.Run')], [('use', 'calls', 'U.Run')],
+     source='spec Appending_and_copying_slices, Making_slices_maps_and_channels; go/types builtins.go _Append, _Make')
+case('go', 'generic-type-instance-method', '`NewStack[int]()` gives a *Stack[int] and `var q Queue[string]` a Queue: `Push` is the method of the generic type of the value',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Stack[E any] struct{ items []E }\n\nfunc (s *Stack[E]) Push(v E) { s.items = append(s.items, v) }\n\ntype Queue[E any] struct{ items []E }\n\nfunc (q *Queue[E]) Push(v E) { q.items = append(q.items, v) }\n\nfunc NewStack[E any]() *Stack[E] { return &Stack[E]{} }\n\nfunc use() {\n\ts := NewStack[int]()\n\ts.Push(1)\n}\n\nfunc other() {\n\tvar q Queue[string]\n\tq.Push("a")\n}\n'},
+     [('use', 'calls', 'Stack.Push'), ('other', 'calls', 'Queue.Push')], [('use', 'calls', 'Queue.Push'), ('other', 'calls', 'Stack.Push')],
+     source='spec Calls, Instantiations; go/types call.go funcInst / callExpr')
+case('go', 'func-field-call-is-no-function', '`s.run()` where run is a field of function type selects the field, not the package function run',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'b.go': 'package app\n\ntype Server struct {\n\trun func() int\n}\n\nfunc run() int { return 1 }\n\nfunc (s *Server) Start() int {\n\treturn s.run()\n}\n'},
+     [('Server.Start', 'reads', 'Server.run')], [('Server.Start', 'calls', 'b.go:run')],
+     source='spec Calls; go/types call.go selector (FieldVal)')
+case('go', 'composite-literal-receiver', "the type of a composite literal is the type written, so a method called on it is that type's method",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'd.go': 'package app\n\ntype Point struct{ X, Y int }\n\nfunc (p *Point) Scale(k int) { p.X *= k }\n\nfunc (p Point) Norm() int { return p.X + p.Y }\n\ntype Other struct{}\n\nfunc (Other) Norm() int { return 0 }\n\nfunc Use() int {\n\tn := Point{1, 2}.Norm()\n\t(&Point{3, 4}).Scale(2)\n\treturn n\n}\n'},
+     [('Use', 'calls', 'Point.Norm'), ('Use', 'calls', 'Point.Scale')], [('Use', 'calls', 'Other.Norm')],
+     source='spec Calls; go/types call.go selector, lookupFieldOrMethod')
+case('go', 'error-value-is-no-project-type', "`err.Error()` on a value typed by the predeclared `error` is no call of a project type's Error method",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'c.go': 'package app\n\ntype MyErr struct{}\n\nfunc (MyErr) Error() string { return "mine" }\n\nfunc fail() error { return nil }\n\nfunc Report() string {\n\terr := fail()\n\treturn err.Error()\n}\n'},
+     [('Report', 'calls', 'fail')], [('Report', 'calls', 'MyErr.Error')],
+     source='go/types universe.go (error); call.go selector')
+case('go', 'call-inside-builtin-argument', "calls written inside a built-in's arguments are calls, bound like any other",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Box struct{ items []int }\n\nfunc helper() []int { return nil }\n\nfunc size() int { return 3 }\n\nfunc (b *Box) Fill() {\n\t_ = len(helper())\n\tb.items = append(b.items, helper()...)\n\tcopy(b.items, helper())\n\tdefer close(make(chan int, size()))\n}\n\ntype Other struct{}\n\nfunc (Other) helper() []int { return nil }\n'},
+     [('Box.Fill', 'calls', 'helper'), ('Box.Fill', 'calls', 'size')], [('Box.Fill', 'calls', 'Other.helper')],
+     source='go/types builtins.go; call.go callExpr (builtin case)')
+case('go', 'variadic-parameter-type-use', "`who ...util.Person` names util's Person, a use of that type by the function",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'util/u.go': 'package util\n\ntype Person struct{ Name string }\n', 'g.go': 'package app\n\nimport "example.com/app/util"\n\ntype Person struct{}\n\nfunc Greet(prefix string, who ...util.Person) int {\n\treturn len(prefix) + len(who)\n}\n'},
+     [('Greet', 'references', 'util/u.go:Person')], [('Greet', 'references', 'g.go:Person')],
+     source='spec Passing_arguments_to_..._parameters; go/types signature parameter types')
+case('go', 'var-declaration-scope-starts-after', 'a `var` declaration statement declares its name after its spec: `var helper = helper()` calls the package function, and a later use is the local',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\nfunc helper() int { return 1 }\n\nfunc take(v interface{}) {}\n\nfunc Run() int {\n\tvar helper = helper()\n\treturn helper\n}\n\nfunc Hidden() {\n\tvar helper = 2\n\ttake(helper)\n}\n'},
+     [('Run', 'calls', 'helper')], [('Hidden', 'indirect_call', 'helper'), ('Hidden', 'calls', 'helper'), ('Hidden', 'references', 'helper'), ('Run', 'indirect_call', 'helper')],
+     source='spec Statements (Declaration is a Statement); go/types stmt.go `case *ast.DeclStmt`')
+case('go', 'label-is-no-name-of-the-block', 'a label named like a package function is no use of it and hides nothing: `helper:` with `break helper` and `continue helper`, and `helper()` is the function',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\nfunc helper() int { return 1 }\n\nfunc take(v interface{}) {}\n\nfunc Run(xs []int) int {\n\tn := 0\nhelper:\n\tfor _, x := range xs {\n\t\tfor _, y := range xs {\n\t\t\tif y > x {\n\t\t\t\tcontinue helper\n\t\t\t}\n\t\t\tif y < 0 {\n\t\t\t\tbreak helper\n\t\t\t}\n\t\t\tn += helper()\n\t\t}\n\t}\n\treturn n\n}\n'},
+     [('Run', 'calls', 'helper')], [('Run', 'indirect_call', 'helper'), ('Run', 'references', 'helper')],
+     source='spec Labeled_statements, Label_scopes (labels do not conflict with identifiers that are not labels); go/types labels.go `all := NewScope(nil, body.Pos(), body.End(), "label")`')
+case('go', 'send-evaluates-the-channel-field', '`h.out <- 1` reads the field `out` of Hub (the channel is an operand, the send changes the channel, not the field)',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Hub struct{ out chan int }\n\ntype Spare struct{ out chan int }\n\nfunc Run(h *Hub) {\n\th.out <- 1\n}\n'},
+     [('Run', 'reads', 'Hub.out')], [('Run', 'reads', 'Spare.out'), ('Run', 'writes', 'Hub.out')],
+     source='spec Send_statements (Channel = Expression)')
+case('go', 'incdec-reads-and-writes-the-field', "`r.n++` and `r.n += 2` use the field n of r's type, written (and read, as `x = x op 1` does)",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Repo struct{ n int }\n\nfunc (r *Repo) Find() int { return 1 }\n\ntype Other struct{ n int }\n\nfunc (o *Other) Find() int { return 2 }\n\nfunc Run(r *Repo) int {\n\tr.n++\n\treturn 0\n}\n\nfunc Add(r *Repo) {\n\tr.n += 2\n}\n'},
+     [('Run', 'writes', 'Repo.n'), ('Run', 'reads', 'Repo.n'), ('Add', 'writes', 'Repo.n')], [('Run', 'writes', 'Other.n'), ('Add', 'writes', 'Other.n')],
+     source='spec IncDec_statements, Assignment_statements (x op= y is x = x op (y))')
+case('go', 'assignment-writes-the-field', "`r.n = 1` writes the field n of r's type, `return r.n` reads it",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Repo struct{ n int }\n\nfunc (r *Repo) Find() int { return 1 }\n\ntype Other struct{ n int }\n\nfunc (o *Other) Find() int { return 2 }\n\nfunc Set(r *Repo) {\n\tr.n = 1\n}\n\nfunc Get(r *Repo) int {\n\treturn r.n\n}\n'},
+     [('Set', 'writes', 'Repo.n'), ('Get', 'reads', 'Repo.n')], [('Set', 'writes', 'Other.n'), ('Get', 'reads', 'Other.n'), ('Set', 'reads', 'Repo.n')],
+     source='spec Assignment_statements')
+case('go', 'assignment-keeps-the-declared-type', "`var f Finder; f = &Repo{}; f.Find()` is the interface's method: the variable's type is the declared one",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Finder interface{ Find() int }\n\ntype Repo struct{}\n\nfunc (r *Repo) Find() int { return 1 }\n\nfunc Run() int {\n\tvar f Finder\n\tf = &Repo{}\n\treturn f.Find()\n}\n'},
+     [('Run', 'calls', 'Finder.Find')], [('Run', 'calls', 'Repo.Find')],
+     source="spec Assignment_statements (assignability to the operand's type)")
+case('go', 'if-init-var-is-seen-by-else', "a name declared by an `if`'s init statement hides a package function in the `if` and its `else`, and no longer after the statement",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\nfunc helper() int { return 1 }\n\nfunc take(v interface{}) {}\n\nfunc Run(ok bool) int {\n\tif helper := 2; ok {\n\t\treturn helper\n\t} else {\n\t\ttake(helper)\n\t}\n\treturn helper()\n}\n\nfunc Hidden(ok bool) int {\n\tif helper := 2; ok {\n\t\treturn 0\n\t} else {\n\t\ttake(helper)\n\t\treturn helper\n\t}\n}\n'},
+     [('Run', 'calls', 'helper')], [('Hidden', 'indirect_call', 'helper'), ('Hidden', 'calls', 'helper'), ('Hidden', 'references', 'helper')],
+     source='spec If_statements, Blocks; go/types stmt.go `check.openScope(s, "if")`')
+case('go', 'else-if-sees-the-init-var-of-the-if', "`if r := load(); r == nil {...} else if r.Find() > 0` types r by load's result",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Repo struct{ n int }\n\nfunc (r *Repo) Find() int { return 1 }\n\ntype Other struct{ n int }\n\nfunc (o *Other) Find() int { return 2 }\n\nfunc load() *Repo { return &Repo{} }\n\nfunc Run() int {\n\tif r := load(); r == nil {\n\t\treturn 0\n\t} else if r.Find() > 0 {\n\t\treturn 1\n\t}\n\treturn 2\n}\n'},
+     [('Run', 'calls', 'Repo.Find'), ('Run', 'calls', 'load')], [('Run', 'calls', 'Other.Find')],
+     source='spec If_statements; go/types stmt.go IfStmt: `check.stmt(inner, s.Else)` inside the scope opened for the if')
+case('go', 'switch-init-var-scope', 'a name declared in a `switch` init statement hides a package function in the switch only',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\nfunc helper() int { return 1 }\n\nfunc take(v interface{}) {}\n\nfunc Run(n int) int {\n\tswitch helper := n + 1; helper {\n\tcase 1:\n\t\ttake(helper)\n\tdefault:\n\t\treturn helper\n\t}\n\treturn helper()\n}\n\nfunc Hidden(n int) {\n\tswitch helper := n + 1; helper {\n\tcase 1:\n\t\ttake(helper)\n\t}\n}\n'},
+     [('Run', 'calls', 'helper')], [('Hidden', 'indirect_call', 'helper'), ('Hidden', 'calls', 'helper'), ('Hidden', 'references', 'helper')],
+     source='spec Switch_statements; go/types stmt.go `check.openScope(s, "switch")`')
+case('go', 'expression-switch-case-is-a-use', '`case limit:` reads the constant and `case helper():` calls the function',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\nfunc helper() int { return 1 }\n\nfunc take(v interface{}) {}\n\nconst limit = 3\n\nfunc Run(n int) int {\n\tswitch n {\n\tcase limit:\n\t\treturn 1\n\tcase helper():\n\t\treturn 2\n\t}\n\treturn 0\n}\n'},
+     [('Run', 'calls', 'helper'), ('Run', 'reads', 'limit')], [],
+     source='spec Expression_switches')
+case('go', 'type-switch-binding-is-typed-by-its-clause', 'in `switch v := f.(type)`, v is *Repo in `case *Repo` and the interface Finder in a clause with two types',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Finder interface{ Find() int }\n\ntype Repo struct{ n int }\n\nfunc (r *Repo) Find() int { return 1 }\n\ntype Other struct{ n int }\n\nfunc (o *Other) Find() int { return 2 }\n\ntype Third struct{}\n\nfunc (t *Third) Find() int { return 3 }\n\nfunc Run(f Finder) int {\n\tswitch v := f.(type) {\n\tcase *Repo:\n\t\treturn v.Find()\n\tcase *Other, *Third:\n\t\treturn v.Find()\n\t}\n\treturn 0\n}\n'},
+     [('Run', 'calls', 'Repo.Find'), ('Run', 'calls', 'Finder.Find')], [('Run', 'calls', 'Other.Find'), ('Run', 'calls', 'Third.Find')],
+     source='spec Type_switches; go/types stmt.go typeSwitchStmt `obj := newVar(LocalVar, lhs.Pos(), check.pkg, lhs.Name, T)`')
+case('go', 'type-switch-binding-hides-a-function', '`switch helper := helper().(type)` calls the package function in the guard and names the variable in the clauses',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\nfunc helper() interface{} { return 1 }\n\nfunc take(v interface{}) {}\n\nfunc Run() {\n\tswitch helper := helper().(type) {\n\tcase int:\n\t\ttake(helper)\n\t}\n}\n'},
+     [('Run', 'calls', 'helper')], [('Run', 'indirect_call', 'helper')],
+     source='spec Type_switches; go/types stmt.go `check.declare(check.scope, nil, obj, clause.Colon)`')
+case('go', 'for-clause-var-scope', '`for helper := 0; ...` hides a package function in the loop and `helper()` after the loop is the function',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\nfunc helper() int { return 1 }\n\nfunc take(v interface{}) {}\n\nfunc Run() int {\n\tfor helper := 0; helper < 3; helper++ {\n\t\ttake(helper)\n\t}\n\treturn helper()\n}\n\nfunc Hidden() {\n\tfor helper := 0; helper < 3; helper++ {\n\t\ttake(helper)\n\t}\n}\n'},
+     [('Run', 'calls', 'helper')], [('Hidden', 'indirect_call', 'helper'), ('Hidden', 'calls', 'helper'), ('Hidden', 'references', 'helper')],
+     source='spec For_clause, Blocks; go/types stmt.go `check.openScope(s, "for")`')
+case('go', 'range-over-channel', 'the variable of `for r := range ch` over `chan *Repo` is a *Repo',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Repo struct{ n int }\n\nfunc (r *Repo) Find() int { return 1 }\n\ntype Other struct{ n int }\n\nfunc (o *Other) Find() int { return 2 }\n\nfunc Run(ch chan *Repo) int {\n\tn := 0\n\tfor r := range ch {\n\t\tn += r.Find()\n\t}\n\treturn n\n}\n'},
+     [('Run', 'calls', 'Repo.Find')], [('Run', 'calls', 'Other.Find')],
+     source='spec For_range (channel c: chan E, <-chan E: element e E)')
+case('go', 'range-over-map-key-and-value', 'in `for k, v := range m` over `map[Key]*Val`, k is a Key and v a *Val',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Key struct{}\n\nfunc (k Key) Name() string { return "k" }\nfunc (k Key) ID() int      { return 1 }\n\ntype Val struct{}\n\nfunc (v *Val) Name() string { return "v" }\nfunc (v *Val) ID() int      { return 2 }\n\nfunc Run(m map[Key]*Val) (string, int) {\n\tvar s string\n\tvar n int\n\tfor k, v := range m {\n\t\ts = k.Name()\n\t\tn = v.ID()\n\t}\n\treturn s, n\n}\n'},
+     [('Run', 'calls', 'Key.Name'), ('Run', 'calls', 'Val.ID')], [('Run', 'calls', 'Val.Name'), ('Run', 'calls', 'Key.ID')],
+     source='spec For_range (map m: key k K, value m[k] V)')
+case('go', 'range-over-array-pointer', 'the value of `for _, r := range a` with `a *[2]*Repo` is a *Repo',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Repo struct{ n int }\n\nfunc (r *Repo) Find() int { return 1 }\n\ntype Other struct{ n int }\n\nfunc (o *Other) Find() int { return 2 }\n\nfunc Run(a *[2]*Repo) int {\n\tn := 0\n\tfor _, r := range a {\n\t\tn += r.Find()\n\t}\n\treturn n\n}\n'},
+     [('Run', 'calls', 'Repo.Find')], [('Run', 'calls', 'Other.Find')],
+     source='spec For_range (*[n]E)')
+case('go', 'range-over-function-yield-type', '`for r := range t.All` where All takes `yield func(*Repo) bool`: r is a *Repo, and t.All is a method value',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.23\n', 'a.go': 'package app\n\ntype Repo struct{ n int }\n\nfunc (r *Repo) Find() int { return 1 }\n\ntype Other struct{ n int }\n\nfunc (o *Other) Find() int { return 2 }\n\ntype Tree struct{}\n\nfunc (t *Tree) All(yield func(*Repo) bool) {\n\tyield(&Repo{})\n}\n\nfunc Run(t *Tree) int {\n\tn := 0\n\tfor r := range t.All {\n\t\tn += r.Find()\n\t}\n\treturn n\n}\n'},
+     [('Run', 'calls', 'Repo.Find'), ('Run', 'references', 'Tree.All')], [('Run', 'calls', 'Other.Find')],
+     source='spec For_range (function, 1 value)', since='1.23')
+case('go', 'range-assignment-declares-nothing', '`for _, current = range repos` writes the package variable current and keeps its type',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Repo struct{ n int }\n\nfunc (r *Repo) Find() int { return 1 }\n\ntype Other struct{ n int }\n\nfunc (o *Other) Find() int { return 2 }\n\nvar current *Repo\n\nfunc Run(repos []*Repo) int {\n\tfor _, current = range repos {\n\t}\n\treturn current.Find()\n}\n'},
+     [('Run', 'writes', 'current'), ('Run', 'calls', 'Repo.Find')], [('Run', 'calls', 'Other.Find')],
+     source='spec For_range (RangeClause = [ ExpressionList "=" | IdentifierList ":=" ]); go/types range.go `ordinary assignment`')
+case('go', 'defer-and-go-methods-and-closures', '`defer r.Find()`, `go r.Find()` and the calls in a `defer func() {...}()` are calls of the enclosing function',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Repo struct{ n int }\n\nfunc (r *Repo) Find() int { return 1 }\n\ntype Other struct{ n int }\n\nfunc (o *Other) Find() int { return 2 }\n\nfunc work() {}\n\nfunc Run(r *Repo) {\n\tdefer r.Find()\n\tgo r.Find()\n\tdefer func() {\n\t\twork()\n\t}()\n}\n'},
+     [('Run', 'calls', 'Repo.Find'), ('Run', 'calls', 'work')], [('Run', 'calls', 'Other.Find')],
+     source='spec Go_statements, Defer_statements')
+case('go', 'select-receive-binding', '`case r := <-ch:` over `chan *Repo` declares r as a *Repo',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Repo struct{ n int }\n\nfunc (r *Repo) Find() int { return 1 }\n\ntype Other struct{ n int }\n\nfunc (o *Other) Find() int { return 2 }\n\nfunc Run(ch chan *Repo, quit chan bool) int {\n\tselect {\n\tcase r := <-ch:\n\t\treturn r.Find()\n\tcase <-quit:\n\t\treturn 0\n\t}\n}\n'},
+     [('Run', 'calls', 'Repo.Find')], [('Run', 'calls', 'Other.Find')],
+     source='spec Select_statements; go/types stmt.go SelectStmt `check.stmt(inner, clause.Comm)`')
+case('go', 'named-result-is-a-local', 'a result named like a package function hides it in the function body',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\nfunc helper() int { return 1 }\n\nfunc take(v interface{}) {}\n\nfunc Run() (helper int) {\n\ttake(helper)\n\treturn\n}\n\nfunc Other() int {\n\treturn helper()\n}\n'},
+     [('Other', 'calls', 'helper')], [('Run', 'indirect_call', 'helper'), ('Run', 'references', 'helper'), ('Run', 'calls', 'helper')],
+     source='spec Return_statements')
+case('go', 'named-result-is-typed', "`func Run() (r *Repo) { r.Find() }`: r.Find is Repo's method",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Repo struct{ n int }\n\nfunc (r *Repo) Find() int { return 1 }\n\ntype Other struct{ n int }\n\nfunc (o *Other) Find() int { return 2 }\n\nfunc Run() (r *Repo) {\n\tr = &Repo{}\n\tr.Find()\n\treturn\n}\n'},
+     [('Run', 'calls', 'Repo.Find')], [('Run', 'calls', 'Other.Find')],
+     source='spec Return_statements')
+case('go', 'goto-label-is-no-name-of-the-block', '`goto helper` and a `helper:` label beside a package function `helper`: `helper()` is the function and the label is no reference to it',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\nfunc helper() int { return 1 }\n\nfunc take(v interface{}) {}\n\nfunc Run(n int) int {\n\tif n > 0 {\n\t\tgoto helper\n\t}\n\tn = helper()\nhelper:\n\treturn n\n}\n'},
+     [('Run', 'calls', 'helper')], [('Run', 'indirect_call', 'helper'), ('Run', 'references', 'helper')],
+     source='spec Goto_statements, Label_scopes; go/types labels.go')
+case('go', 'range-expression-is-outside-its-variables', "`for _, helper := range helper()` calls the package function, and the body's `helper` is the variable",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\nfunc helper() []int { return nil }\n\nfunc take(v interface{}) {}\n\nfunc Run() {\n\tfor _, helper := range helper() {\n\t\ttake(helper)\n\t}\n}\n\nfunc Hidden(xs []int) {\n\tfor _, helper := range xs {\n\t\ttake(helper)\n\t}\n}\n'},
+     [('Run', 'calls', 'helper')], [('Hidden', 'indirect_call', 'helper'), ('Hidden', 'calls', 'helper'), ('Hidden', 'references', 'helper'), ('Run', 'indirect_call', 'helper')],
+     source='go/types range.go rangeStmt (`check.openScope(rangeStmt, "range")` after the range expression; `scopePos := rangeStmt.Body.Pos()`)')
+case('go', 'range-over-integer-has-its-type', "`for i := range n` with `n Count` makes i a Count: i.Next() is Count's method",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Count int\n\nfunc (c Count) Next() Count { return c + 1 }\n\ntype Step int\n\nfunc (s Step) Next() Step { return s + 1 }\n\nfunc Run(n Count) Count {\n\tvar last Count\n\tfor i := range n {\n\t\tlast = i.Next()\n\t}\n\treturn last\n}\n'},
+     [('Run', 'calls', 'Count.Next')], [('Run', 'calls', 'Step.Next')],
+     source='spec For_range (integer value); go/types range.go `rangeOverInt`', since='1.22')
+case('go', 'plain-assignment-is-no-read', 'a plain assignment writes a variable without reading it; `x += y` reads and writes it; a local of that name is its own variable',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\nvar total int\n\nfunc reset() {\n\ttotal = 0\n}\n\nfunc add(n int) {\n\ttotal += n\n}\n\nfunc local() int {\n\ttotal := 0\n\ttotal++\n\treturn total\n}\n'},
+     [('reset', 'writes', 'total'), ('add', 'writes', 'total'), ('add', 'reads', 'total')], [('reset', 'reads', 'total'), ('local', 'writes', 'total'), ('local', 'reads', 'total')],
+     source='spec Assignment_statements; go/types assignment.go lhsVar (an assigned identifier is not a use of the variable)')
+case('go', 'blank-identifier-declares-nothing', 'the blank identifier binds no name: `var _ I = T{}`, `_, v := f()` and `_ = g` are uses of I, T, f and g',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Doer interface {\n\tDo() int\n}\n\ntype Impl struct{}\n\nfunc (i Impl) Do() int {\n\treturn 1\n}\n\nfunc helper() int {\n\treturn 2\n}\n\nfunc pair() (int, int) {\n\treturn 1, 2\n}\n\nfunc Check() int {\n\tvar _ Doer = Impl{}\n\t_, v := pair()\n\t_ = helper\n\treturn v\n}\n\nfunc Other() int {\n\treturn helper()\n}\n'},
+     [('Check', 'references', 'Doer'), ('Check', 'calls', 'Impl'), ('Check', 'calls', 'pair'), ('Check', 'references', 'helper'), ('Other', 'calls', 'helper')], [],
+     source='spec Assignment_statements (blank identifier); spec Declarations_and_scope (the blank identifier is not introduced in any scope)')
+case('go', 'element-assignment-writes-the-field', "assigning to an element `s.items[k] = v` writes the field `items` of s's type; reading `s.items[k]` reads it",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Store struct {\n\titems map[string]int\n}\n\nfunc (s *Store) Put(k string, v int) {\n\ts.items[k] = v\n}\n\nfunc (s *Store) Get(k string) int {\n\treturn s.items[k]\n}\n'},
+     [('Store.Put', 'writes', 'Store.items'), ('Store.Get', 'reads', 'Store.items')], [('Store.Get', 'writes', 'Store.items')],
+     source='spec Assignment_statements; spec Index_expressions')
+case('go', 'promoted-field-incdec', "`p.hits++` through an embedded struct is a read and a write of the embedded type's field `hits`",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Base struct {\n\thits int\n}\n\ntype Page struct {\n\tBase\n}\n\ntype Other struct {\n\thits int\n}\n\nfunc Touch(p *Page) {\n\tp.hits++\n}\n\nfunc Count(o *Other) {\n\to.hits++\n}\n'},
+     [('Touch', 'writes', 'Base.hits'), ('Touch', 'reads', 'Base.hits'), ('Count', 'writes', 'Other.hits')], [('Touch', 'writes', 'Other.hits'), ('Count', 'writes', 'Base.hits')],
+     source='spec IncDec_statements; spec Selectors (promoted fields)')
+case('go', 'select-receive-assigns-a-field', 'a receive case written with `=` assigns an existing operand (a field is written) and declares nothing',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Job struct{}\n\nfunc (j *Job) Run() int {\n\treturn 1\n}\n\ntype Pool struct {\n\tjobs chan *Job\n\tlast *Job\n}\n\nfunc (p *Pool) Loop(out chan<- int) {\n\tselect {\n\tcase j := <-p.jobs:\n\t\tout <- j.Run()\n\tcase p.last = <-p.jobs:\n\t\tout <- p.last.Run()\n\t}\n}\n'},
+     [('Pool.Loop', 'writes', 'Pool.last'), ('Pool.Loop', 'reads', 'Pool.jobs'), ('Pool.Loop', 'calls', 'Job.Run')], [],
+     source="spec Select_statements; go/types stmt.go (SelectStmt: the RecvStmt's assignment)")
+case('go', 'type-switch-nil-and-default-keep-the-guard-type', "in `case nil` and `default` clauses the type switch variable has the guard expression's type (the interface), not the type of another clause",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Shape interface {\n\tArea() int\n}\n\ntype Square struct{}\n\nfunc (s Square) Area() int {\n\treturn 1\n}\n\nfunc Nil(s Shape) int {\n\tswitch v := s.(type) {\n\tcase nil:\n\t\treturn v.Area()\n\tcase Square:\n\t\treturn 0\n\t}\n\treturn 1\n}\n\nfunc Default(s Shape) int {\n\tswitch v := s.(type) {\n\tcase Square:\n\t\treturn 0\n\tdefault:\n\t\treturn v.Area()\n\t}\n}\n'},
+     [('Nil', 'calls', 'Shape.Area'), ('Default', 'calls', 'Shape.Area')], [('Nil', 'calls', 'Square.Area'), ('Default', 'calls', 'Square.Area')],
+     source="spec Type_switches; go/types stmt.go typeSwitchStmt (T == nil or several types: the variable gets x's type)")
+case('go', 'else-if-redeclares-a-name', 'a name redeclared by an `else if` init statement is a new variable there, with its own type',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype A struct{}\n\nfunc (a A) Name() string {\n\treturn "a"\n}\n\ntype B struct{}\n\nfunc (b B) Name() string {\n\treturn "b"\n}\n\nfunc makeA() A {\n\treturn A{}\n}\n\nfunc makeB() B {\n\treturn B{}\n}\n\nfunc Run(n int) string {\n\tif v := makeA(); n == 0 {\n\t\t_ = v\n\t} else if v := makeB(); n == 1 {\n\t\treturn v.Name()\n\t}\n\treturn ""\n}\n'},
+     [('Run', 'calls', 'B.Name'), ('Run', 'calls', 'makeA'), ('Run', 'calls', 'makeB')], [('Run', 'calls', 'A.Name')],
+     source='spec If_statements; spec Blocks; go/types stmt.go IfStmt (openScope, then the else statement is checked inside it)')
+case('go', 'local-type-scope-starts-at-its-name', 'the scope of a type declared in a function starts at its identifier: `next *node` inside the local `node` is the local type',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype node struct {\n\tnext *node\n\tsize int\n}\n\nfunc Run() int {\n\ttype node struct {\n\t\tnext *node\n\t\tsize int\n\t}\n\tn := &node{}\n\treturn n.next.size\n}\n\nfunc Other() int {\n\tn := &node{}\n\treturn n.next.size\n}\n'},
+     [('Run', 'reads', 'Run.node.size'), ('Other', 'reads', 'a.go:node.size')], [('Run', 'reads', 'a.go:node.size'), ('Other', 'reads', 'Run.node.size')],
+     source='spec Declarations_and_scope (type identifier declared inside a function); go/types decl.go declStmt TypeDecl (declared before its type is checked)')
+case('go', 'range-over-an-array-and-a-named-map', 'a range value over `[3]*T` or over a named `map[K]*T` type is a *T',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Repo struct{}\n\nfunc (r *Repo) Find() int {\n\treturn 1\n}\n\ntype Index map[string]*Repo\n\ntype Cache struct{}\n\nfunc (c *Cache) Find() int {\n\treturn 2\n}\n\nfunc Arr(rs [3]*Repo) int {\n\tn := 0\n\tfor _, r := range rs {\n\t\tn += r.Find()\n\t}\n\treturn n\n}\n\nfunc Named(ix Index) int {\n\tn := 0\n\tfor _, r := range ix {\n\t\tn += r.Find()\n\t}\n\treturn n\n}\n'},
+     [('Arr', 'calls', 'Repo.Find'), ('Named', 'calls', 'Repo.Find')], [('Arr', 'calls', 'Cache.Find'), ('Named', 'calls', 'Cache.Find')],
+     source='spec For_range (the table of range expressions); go/types range.go rangeKeyVal (core type of the range expression)')
+case('go', 'range-over-a-field-and-a-call-result', "`range t.children` and `range t.Kids()` iterate the field's and the declared result's element type",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Node struct{}\n\nfunc (n *Node) Visit() int {\n\treturn 1\n}\n\ntype Tree struct {\n\tchildren []*Node\n}\n\ntype Cache struct{}\n\nfunc (c *Cache) Visit() int {\n\treturn 2\n}\n\nfunc (t *Tree) Kids() []*Node {\n\treturn t.children\n}\n\nfunc (t *Tree) Walk() int {\n\tn := 0\n\tfor _, c := range t.children {\n\t\tn += c.Visit()\n\t}\n\tfor _, k := range t.Kids() {\n\t\tn += k.Visit()\n\t}\n\treturn n\n}\n'},
+     [('Tree.Walk', 'calls', 'Node.Visit'), ('Tree.Walk', 'calls', 'Tree.Kids'), ('Tree.Walk', 'reads', 'Tree.children')], [('Tree.Walk', 'calls', 'Cache.Visit')],
+     source='spec For_range; go/types range.go rangeStmt (the range expression is checked as an ordinary expression)')
+case('go', 'short-var-redeclaration-keeps-the-type', "`v, ok := f()` in the scope that declared `v` assigns it (v keeps its declared interface type); in a nested block it declares a new `v` of the value's type",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype I interface{ Run() int }\n\ntype T struct{}\n\nfunc (T) Run() int { return 1 }\n\nfunc make2() (T, bool) { return T{}, true }\n\nfunc Reuse(v I) int {\n\tv, ok := make2()\n\t_ = ok\n\treturn v.Run()\n}\n\nfunc Fresh(v I) int {\n\tif true {\n\t\tv, ok := make2()\n\t\t_ = ok\n\t\treturn v.Run()\n\t}\n\treturn 0\n}\n'},
+     [('Reuse', 'calls', 'I.Run'), ('Fresh', 'calls', 'T.Run')], [('Reuse', 'calls', 'T.Run'), ('Fresh', 'calls', 'I.Run')],
+     source='spec Short_variable_declarations (redeclaration); go/types assignments.go shortVarDecl')
+case('go', 'type-switch-pointer-clause-type', 'in `case *Sq:` of a type switch the guard variable is a `*Sq`, so `v.Area()` is Sq.Area',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Shape interface{ Area() int }\n\ntype Sq struct{}\n\nfunc (*Sq) Area() int { return 1 }\n\ntype Ci struct{}\n\nfunc (*Ci) Area() int { return 2 }\n\nfunc Run(s Shape) int {\n\tswitch v := s.(type) {\n\tcase *Sq:\n\t\treturn v.Area()\n\t}\n\treturn 0\n}\n'},
+     [('Run', 'calls', 'Sq.Area')], [('Run', 'calls', 'Shape.Area'), ('Run', 'calls', 'Ci.Area')],
+     source="spec Type_switches; go/types stmt.go typeSwitchStmt (T = the case's type when one type is listed)")
+case('go', 'import-name-is-file-scoped', "an import's name is declared in the file block: two files of one package may import different packages under the same name",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a/u.go': 'package util\n\nfunc F() int {\n\treturn 1\n}\n', 'b/u.go': 'package util\n\nfunc F() int {\n\treturn 2\n}\n', 'x.go': 'package app\n\nimport "example.com/app/a"\n\nfunc RunA() int {\n\treturn util.F()\n}\n', 'y.go': 'package app\n\nimport "example.com/app/b"\n\nfunc RunB() int {\n\treturn util.F()\n}\n'},
+     [('RunA', 'calls', 'a/u.go:F'), ('RunB', 'calls', 'b/u.go:F')], [('RunA', 'calls', 'b/u.go:F'), ('RunB', 'calls', 'a/u.go:F')],
+     source='spec Import_declarations (declared in the file block); go/types resolver.go collectObjects (fileScope)')
+case('go', 'import-path-picks-the-package', 'of two packages with the same clause name, `util.F()` is the F of the one whose path the file imports',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a/u.go': 'package util\n\nfunc F() int {\n\treturn 1\n}\n', 'b/u.go': 'package util\n\nfunc F() int {\n\treturn 2\n}\n', 'x.go': 'package app\n\nimport "example.com/app/b"\n\nfunc Run() int {\n\treturn util.F()\n}\n'},
+     [('Run', 'calls', 'b/u.go:F')], [('Run', 'calls', 'a/u.go:F')],
+     source='spec Import_declarations (ImportPath specifies the package to be imported)')
+case('go', 'local-hides-an-import', 'a local declared with the name of an imported package hides it inside its block only',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'util/u.go': 'package util\n\nfunc F() int {\n\treturn 1\n}\n', 'a.go': 'package app\n\nimport "example.com/app/util"\n\ntype T struct{}\n\nfunc (T) F() int {\n\treturn 2\n}\n\nfunc Run() int {\n\tutil := T{}\n\treturn util.F()\n}\n\nfunc Other() int {\n\treturn util.F()\n}\n'},
+     [('Run', 'calls', 'T.F'), ('Other', 'calls', 'util/u.go:F')], [('Run', 'calls', 'util/u.go:F')],
+     source='spec Import_declarations / Declarations_and_scope (file block encloses function blocks)')
+case('go', 'init-is-not-a-name', 'several `init` functions are declared in a package yet none is a name: `t.init()` is the method',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype T struct{}\n\nfunc (T) init() int {\n\treturn 1\n}\n\nfunc init() {\n\tprintln("a")\n}\n\nfunc init() {\n\tprintln("b")\n}\n\nfunc Run(t T) int {\n\treturn t.init()\n}\n', 'b.go': 'package app\n\nfunc init() {\n\tprintln("c")\n}\n'},
+     [('Run', 'calls', 'T.init')], [('Run', 'calls', 'a.go:init'), ('Run', 'calls', 'b.go:init')],
+     source='spec Package_initialization (init functions); go/types resolver.go collectObjects (init is not declared)')
+case('go', 'package-variable-initializer-uses', "a package variable's initializer is a use made by the variable: its calls and reads of other package variables",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\nfunc seed() int {\n\treturn 1\n}\n\nvar base = seed()\n\nvar total = base + 1\n\nfunc Run() int {\n\treturn total\n}\n'},
+     [('base', 'calls', 'seed'), ('total', 'reads', 'base'), ('Run', 'reads', 'total')], [],
+     source='spec Package_initialization (dependency analysis); go/types initorder.go dependencyGraph, check.go addDeclDep')
+case('go', 'unsafe-is-the-builtin-package', '`import "unsafe"` names the built-in package: a project directory called unsafe is only reached by its full path',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'unsafe/u.go': 'package unsafe\n\nfunc Sizeof(x int) int {\n\treturn x\n}\n', 'a.go': 'package app\n\nimport "unsafe"\n\nfunc Run(x int) uintptr {\n\treturn unsafe.Sizeof(x)\n}\n'},
+     [], [('Run', 'calls', 'unsafe/u.go:Sizeof')],
+     source='spec Package_unsafe; go/types resolver.go (importer for "unsafe" is Unsafe)')
+case('go', 'external-test-package-is-another-package', 'files of one directory whose package clauses differ form two packages: a_test.go (package app_test) calls its own helper, and reaches app only through its import',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\nfunc helper() int { return 1 }\n\nfunc Run() int { return helper() }\n', 'a_test.go': 'package app_test\n\nimport (\n\t"testing"\n\n\t"example.com/app"\n)\n\nfunc helper() int { return 2 }\n\nfunc TestRun(t *testing.T) {\n\tif helper() != 2 || app.Run() != 1 {\n\t\tt.Fatal("x")\n\t}\n}\n'},
+     [('Run', 'calls', 'a.go:helper'), ('TestRun', 'calls', 'a_test.go:helper'), ('TestRun', 'calls', 'Run')], [('TestRun', 'calls', 'a.go:helper'), ('Run', 'calls', 'a_test.go:helper')],
+     source='spec Package_clause')
+case('go', 'method-declared-in-another-file', 'a method is declared in any file of the package: s.Count() in a.go is the method written in b.go, not the package function Count',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Store struct{ n int }\n\nfunc Use(s *Store) int { return s.Count() }\n', 'b.go': 'package app\n\nfunc (s *Store) Count() int { return s.n }\n\nfunc Count() int { return 0 }\n'},
+     [('Use', 'calls', 'Store.Count')], [('Use', 'calls', 'b.go:Count')],
+     source='spec Packages')
+case('go', 'package-function-hides-a-new-builtin', 'a package-level max hides the builtin max of Go 1.21: the call binds to the package function',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.21\n', 'a.go': 'package app\n\nfunc max(a, b int) int {\n\tif a > b {\n\t\treturn a\n\t}\n\treturn b\n}\n\nfunc Top() int { return max(1, 2) }\n'},
+     [('Top', 'calls', 'max')], [],
+     source='spec Language_versions', since='1.21')
+case('go', 'go-parameter-named-like-import', 'a parameter named like an import hides the package only in the function body: its type in the signature still names the package',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'util/u.go': 'package util\n\ntype T struct{}\n\nfunc (t T) Method() int { return 1 }\n\nfunc Method() int { return 2 }\n', 'a.go': 'package app\n\nimport "example.com/app/util"\n\nfunc Run(util util.T) int {\n\treturn util.Method()\n}\n\nfunc Other() int {\n\treturn util.Method()\n}\n'},
+     [('Run', 'references', 'util/u.go:T'), ('Run', 'calls', 'util/u.go:T.Method'), ('Other', 'calls', 'util/u.go:Method')], [('Run', 'calls', 'util/u.go:Method'), ('Other', 'calls', 'util/u.go:T.Method')],
+     source='spec Import_declarations, Declarations_and_scope (parameter scope is the function body); go/types resolver.go collectObjects (file scope), stmt/signature scopes')
+case('go', 'go-field-named-like-import', "a field named like an imported package is no name of the file block: h.util.Run() is the field type's method",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'util/u.go': 'package util\n\nfunc Run() int { return 2 }\n', 'a.go': 'package app\n\nimport "example.com/app/util"\n\ntype Worker struct{}\n\nfunc (w *Worker) Run() int { return 1 }\n\ntype Host struct {\n\tutil *Worker\n}\n\nfunc (h *Host) Go() int {\n\treturn h.util.Run()\n}\n\nfunc Plain() int {\n\treturn util.Run()\n}\n'},
+     [('Host.Go', 'calls', 'a.go:Worker.Run'), ('Plain', 'calls', 'util/u.go:Run')], [('Host.Go', 'calls', 'util/u.go:Run'), ('Plain', 'calls', 'a.go:Worker.Run')],
+     source='spec Import_declarations, Selectors; go/types call.go selector (package qualifier only when the operand identifier denotes a PkgName)')
+case('go', 'go-local-hides-dot-import', 'a local declared in a function hides a dot-imported name inside that function',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'util/u.go': 'package util\n\nfunc Sin() int { return 1 }\n', 'a.go': 'package app\n\nimport . "example.com/app/util"\n\nfunc Run() int {\n\treturn Sin()\n}\n\nfunc Hidden() int {\n\tSin := func() int { return 2 }\n\treturn Sin()\n}\n'},
+     [('Run', 'calls', 'util/u.go:Sin')], [('Hidden', 'calls', 'util/u.go:Sin'), ('Hidden', 'references', 'util/u.go:Sin')],
+     source='spec Import_declarations, Declarations_and_scope (inner block redeclaration); go/types resolver.go dot-imports declared in the file scope')
+case('go', 'go-local-named-init', 'a local named init is called as a local: the package init functions are no names',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\nfunc init() {}\n\nfunc Run() int {\n\tinit := func() int { return 1 }\n\treturn init()\n}\n'},
+     [], [('Run', 'calls', 'init'), ('Run', 'references', 'init')],
+     source='spec Package_initialization; go/types resolver.go collectObjects (init functions are not declared in the package scope)')
+case('go', 'go-func-literal-in-package-var', 'the calls inside a function literal assigned to a package-level variable belong to that variable',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\nfunc helper() int { return 1 }\n\nvar handler = func() int {\n\treturn helper()\n}\n'},
+     [('handler', 'calls', 'helper')], [],
+     source="spec Package_initialization; go/types initorder.go dependencyGraph (uses recorded in the declaration's initializer, closures included)")
+case('go', 'go-generic-alias-method', "a method called on a value of a generic alias is the aliased generic type's method",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.24\n', 'a.go': 'package app\n\ntype Box[T any] struct{ v T }\n\nfunc (b Box[T]) Get() T { return b.v }\n\ntype Cell[T any] = Box[T]\n\nfunc Run(c Cell[int]) int {\n\treturn c.Get()\n}\n'},
+     [('Run', 'calls', 'Box.Get'), ('Run', 'references', 'Cell')], [],
+     source='spec Alias_declarations, Language_versions (Go 1.24 generic aliases); go/types decl.go aliasDecl', since='1.24')
+case('go', 'go-external-test-package-qualifier', "in package app_test, app.Run is the package under test and a bare Run is app_test's own function",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\nfunc Run() int { return 1 }\n', 'x_test.go': 'package app_test\n\nimport (\n\t"testing"\n\n\t"example.com/app"\n)\n\nfunc Run() int { return 2 }\n\nfunc TestA(t *testing.T) { _ = app.Run() }\n\nfunc TestB(t *testing.T) { _ = Run() }\n'},
+     [('TestA', 'calls', 'a.go:Run'), ('TestB', 'calls', 'x_test.go:Run')], [('TestA', 'calls', 'x_test.go:Run'), ('TestB', 'calls', 'a.go:Run')],
+     source='spec Package_clause, Import_declarations; go/types resolver.go collectObjects (each package clause name is its own package)')
+
 # --- running ------------------------------------------------------------------
 
 def _matches(node: dict[str, Any], want: str) -> bool:
@@ -2983,12 +3956,13 @@ def main() -> int:
         passed = sum(1 for c in mine if results[c["id"]]["ok"])
         if args.markdown:
             how = {h: sum(1 for c in mine if c["found"] == h)
-                   for h in ("specification", "compiler", "comparison", "grammar", "source")}
+                   for h in ("specification", "compiler", "comparison", "grammar", "source", "sweep")}
             read = sum(1 for c in mine if c["source"])
             print(f"\n### {lang} ({passed} of {len(mine)})\n\n{mine[0]['where']}.\n")
             print(f"Found by: the specification {how['specification']}, a compiler {how['compiler']}, "
                   f"comparison {how['comparison']}, the grammar {how['grammar']}, "
-                  f"the language's own tools {how['source']}. "
+                  f"the language's own tools {how['source']}"
+                  + (f", a sweep of them {how['sweep']}" if how["sweep"] else "") + ". "
                   f"With the place it was read in the language's own "
                   f"tools: {read}.\n")
             print("| Rule | Case | Versions | Engine |\n|---|---|---|---|")

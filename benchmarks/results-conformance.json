@@ -1,6 +1,6 @@
 {
- "passed": 686,
- "total": 686,
+ "passed": 839,
+ "total": 927,
  "cases": [
   {
    "id": "python/module-function",
@@ -4114,6 +4114,2060 @@
   },
   {
    "id": "csharp/extension-result-in-a-chain",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/if-init-is-scoped-to-the-if",
+   "ok": false,
+   "missing": [
+    [
+     "Run",
+     "calls",
+     "helper"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/for-init-is-scoped-to-the-for",
+   "ok": false,
+   "missing": [
+    [
+     "Run",
+     "calls",
+     "helper"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/select-clause-is-a-block",
+   "ok": false,
+   "missing": [
+    [
+     "Run",
+     "calls",
+     "T.Close"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/import-name-is-a-name-of-its-file",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/receiver-hides-a-function",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/result-variable-hides-a-function",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/receiver-type-parameter-hides-a-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/type-parameter-of-a-type-hides-a-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/var-spec-scope-starts-after",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/use-before-a-local-declaration-names-the-outer",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/label-is-no-identifier",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/predeclared-name-redeclared-in-the-package",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/dot-import-takes-only-exported-names",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/unexported-names-of-two-packages-differ",
+   "ok": false,
+   "missing": [
+    [
+     "Run",
+     "calls",
+     "L.helper"
+    ]
+   ],
+   "unwanted": [
+    [
+     "Run",
+     "calls",
+     "util/u.go:A.helper"
+    ]
+   ]
+  },
+  {
+   "id": "go/constant-takes-the-type-of-its-value",
+   "ok": false,
+   "missing": [
+    [
+     "Run",
+     "calls",
+     "Color.Name"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/implicitly-repeated-constant-has-the-type",
+   "ok": false,
+   "missing": [
+    [
+     "Run",
+     "calls",
+     "Color.Name"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/declared-type-wins-over-the-value",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/var-multiple-results",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/var-comma-ok-assertion",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/short-var-redeclaration-keeps-the-variable",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/generic-function-instantiation",
+   "ok": false,
+   "missing": [
+    [
+     "Run",
+     "calls",
+     "Map"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/method-in-another-file",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/method-of-a-generic-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/method-on-an-alias-receiver",
+   "ok": false,
+   "missing": [
+    [
+     "Run",
+     "calls",
+     "A.M"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/short-var-redeclares-a-parameter",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/parameter-named-like-its-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/predeclared-error-method",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/receiver-type-parameter-renamed",
+   "ok": false,
+   "missing": [
+    [
+     "Box.Go",
+     "calls",
+     "Runner.Run"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/receiver-alias-chain-and-pointer",
+   "ok": false,
+   "missing": [
+    [
+     "Use",
+     "calls",
+     "T.Go"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/comma-ok-map-and-receive",
+   "ok": false,
+   "missing": [
+    [
+     "Use",
+     "calls",
+     "Item.Run"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/field-named-like-its-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/local-hides-an-imported-package",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/local-hides-a-type-name",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/function-literal-parameter-hides-a-function",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/short-var-pairs-values-by-position",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/embedded-generic-instantiation",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/alias-names-its-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/alias-method-call",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/alias-of-instance",
+   "ok": false,
+   "missing": [
+    [
+     "Run",
+     "calls",
+     "Box.Get"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/generic-alias",
+   "ok": false,
+   "missing": [
+    [
+     "Run",
+     "calls",
+     "Box.Get"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/defined-type-does-not-inherit",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/defined-interface-keeps-methods",
+   "ok": false,
+   "missing": [
+    [
+     "Use",
+     "calls",
+     "Block.Encrypt"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/instance-local-method",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/receiver-redeclares-type-parameters",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/type-declaration-parameter-hides",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/receiver-type-parameter-hides",
+   "ok": false,
+   "missing": [],
+   "unwanted": [
+    [
+     "Box.Get",
+     "references",
+     "Config"
+    ]
+   ]
+  },
+  {
+   "id": "go/constraint-forward-reference",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/instantiated-constraint",
+   "ok": false,
+   "missing": [
+    [
+     "Use",
+     "calls",
+     "Getter.Get"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/constraint-names-are-uses",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/constraint-embeds-interface",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/generic-type-instance-is-a-use",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/instance-field-and-result-substituted",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/explicit-instantiation-result",
+   "ok": false,
+   "missing": [
+    [
+     "Use",
+     "calls",
+     "Zero"
+    ],
+    [
+     "Use",
+     "calls",
+     "Item.Run"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/explicit-function-instantiation",
+   "ok": false,
+   "missing": [
+    [
+     "Run",
+     "calls",
+     "util/u.go:Map"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/method-expression-on-instance",
+   "ok": false,
+   "missing": [
+    [
+     "Run",
+     "references",
+     "Box.Get"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/generic-function-as-argument",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/imported-generic-type-instance",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/embedded-instance",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/array-length-names-a-constant",
+   "ok": false,
+   "missing": [
+    [
+     "Make",
+     "reads",
+     "Size"
+    ],
+    [
+     "Buf",
+     "reads",
+     "Size"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/defined-type-keeps-the-fields",
+   "ok": false,
+   "missing": [
+    [
+     "Use",
+     "reads",
+     "Point.x"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/defined-type-keeps-the-embedding",
+   "ok": false,
+   "missing": [
+    [
+     "Use",
+     "calls",
+     "Mutex.Lock"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/alias-of-an-imported-type",
+   "ok": false,
+   "missing": [
+    [
+     "Use",
+     "calls",
+     "Conn.Close"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/constraint-of-an-imported-package",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/core-type-element-of-a-type-parameter",
+   "ok": false,
+   "missing": [
+    [
+     "Total",
+     "calls",
+     "Shape.Area"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/explicit-type-argument-of-a-call",
+   "ok": false,
+   "missing": [
+    [
+     "Use",
+     "calls",
+     "Conv"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/instantiated-function-value",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/blank-receiver-type-parameter",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/generic-method-result-chain",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/embedded-alias-field",
+   "ok": false,
+   "missing": [
+    [
+     "Use",
+     "calls",
+     "Base.Hello"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/embedded-imported-type-field",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/type-parameter-hides-a-function",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/field-of-a-type-parameter-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/recursive-generic-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/alias-chain",
+   "ok": false,
+   "missing": [
+    [
+     "Use",
+     "calls",
+     "T.Run"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/alias-of-composite-type",
+   "ok": false,
+   "missing": [
+    [
+     "Use",
+     "calls",
+     "T.Run"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/defined-pointer-type-field",
+   "ok": false,
+   "missing": [
+    [
+     "Read",
+     "reads",
+     "S.x"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/pointer-constraint-method",
+   "ok": false,
+   "missing": [
+    [
+     "Make",
+     "calls",
+     "Setter.Set"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/embedded-generic-interface",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/method-value-of-an-instance",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/map-value-of-an-instance",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/type-arguments-are-uses",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/generic-result-is-the-argument",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/alias-has-the-methods-of-its-type",
+   "ok": false,
+   "missing": [
+    [
+     "Use",
+     "calls",
+     "Real.Name"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/conversion-gives-its-type",
+   "ok": false,
+   "missing": [
+    [
+     "Use",
+     "calls",
+     "HandlerFunc.Serve"
+    ],
+    [
+     "Use",
+     "references",
+     "plain"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/array-element-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/slice-of-slices",
+   "ok": false,
+   "missing": [
+    [
+     "Use",
+     "calls",
+     "Cell.Touch"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/anonymous-struct-field",
+   "ok": false,
+   "missing": [
+    [
+     "Use",
+     "calls",
+     "Repo.Find"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/embedded-pointer-and-qualified-field",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/embedded-interface-in-a-struct",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/embedded-generic-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/new-and-dereference",
+   "ok": false,
+   "missing": [
+    [
+     "Use",
+     "calls",
+     "Repo.Find"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/function-typed-value-result",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/variadic-parameter-is-a-slice",
+   "ok": false,
+   "missing": [
+    [
+     "Use",
+     "calls",
+     "Repo.Find"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/parameter-hides-a-type",
+   "ok": false,
+   "missing": [
+    [
+     "Use",
+     "references",
+     "Config"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/qualified-embedded-interface",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/constraint-embeds-an-interface",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/range-map-key",
+   "ok": false,
+   "missing": [
+    [
+     "Use",
+     "calls",
+     "Key.Label"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/channel-element-type",
+   "ok": false,
+   "missing": [
+    [
+     "Worker",
+     "calls",
+     "Job.Run"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/defined-interface-keeps-the-interface-methods",
+   "ok": false,
+   "missing": [
+    [
+     "Use",
+     "calls",
+     "Reader.Read"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/core-type-of-a-type-parameter",
+   "ok": false,
+   "missing": [
+    [
+     "First",
+     "calls",
+     "Repo.Find"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/defined-type-has-only-its-own-methods",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/defined-struct-keeps-promoted-methods",
+   "ok": false,
+   "missing": [
+    [
+     "Run",
+     "calls",
+     "Base.Close"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/embedded-instantiated-interface",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/address-of-a-value-is-a-pointer",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/type-literal-component-types",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/method-declared-on-an-alias",
+   "ok": false,
+   "missing": [
+    [
+     "Run",
+     "calls",
+     "A.Bump"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/embedded-alias",
+   "ok": false,
+   "missing": [
+    [
+     "Run",
+     "calls",
+     "Base.Close"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/embedded-pointer-field-promotes",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/range-map-value",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/method-of-a-defined-function-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/generic-field-has-the-type-argument",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/nested-anonymous-struct-field",
+   "ok": false,
+   "missing": [
+    [
+     "Run",
+     "calls",
+     "Pool.Close"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/underlying-through-a-chain",
+   "ok": false,
+   "missing": [
+    [
+     "Run",
+     "calls",
+     "Item.Name"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/instantiated-generic-function",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/parenthesized-operand",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/qualified-type-is-the-packages",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/qualified-function-value",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/qualified-variable-and-constant",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/struct-literal-key-is-a-field",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/literal-key-field-or-value",
+   "ok": false,
+   "missing": [
+    [
+     "Table",
+     "reads",
+     "a.go:Key"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/address-of-literal-types-the-value",
+   "ok": false,
+   "missing": [
+    [
+     "Direct",
+     "calls",
+     "Repo.Find"
+    ],
+    [
+     "Fresh",
+     "calls",
+     "Repo.Find"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/elided-element-type-keys",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/closure-sees-the-enclosing-local",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/closure-sees-only-earlier-locals",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/closure-parameter-hides-a-function",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/literal-invoked-in-place",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/index-of-a-call-result",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/embedded-pointer-is-promoted",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/struct-embeds-interface",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/field-at-a-shallower-depth-hides-a-method",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/local-hides-the-package-name",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/defined-type-keeps-fields-and-promotions",
+   "ok": false,
+   "missing": [
+    [
+     "Field",
+     "reads",
+     "Base.ID"
+    ],
+    [
+     "Promoted",
+     "calls",
+     "Base.Show"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/alias-has-the-methods",
+   "ok": false,
+   "missing": [
+    [
+     "Run",
+     "calls",
+     "Repo.Find"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/unexported-names-of-another-package",
+   "ok": false,
+   "missing": [
+    [
+     "Run",
+     "calls",
+     "A.run"
+    ]
+   ],
+   "unwanted": [
+    [
+     "Run",
+     "calls",
+     "T.run"
+    ]
+   ]
+  },
+  {
+   "id": "go/method-expression-called",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/pointer-method-expression",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/method-expression-promoted",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/interface-method-expression",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/imported-method-expression",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/method-value-through-embedding",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/method-value-of-interface-and-pointer",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/array-element",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/pointer-to-array-element",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/index-of-index",
+   "ok": false,
+   "missing": [
+    [
+     "Run",
+     "calls",
+     "Repo.Find"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/map-comma-ok",
+   "ok": false,
+   "missing": [
+    [
+     "Run",
+     "calls",
+     "Repo.Find"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/slice-expression-keeps-the-type",
+   "ok": false,
+   "missing": [
+    [
+     "Run",
+     "calls",
+     "Repo.Find"
+    ],
+    [
+     "Fixed",
+     "calls",
+     "Repo.Find"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/slice-of-a-named-slice-keeps-its-type",
+   "ok": false,
+   "missing": [
+    [
+     "Run",
+     "calls",
+     "Names.Count"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/type-assertion-comma-ok",
+   "ok": false,
+   "missing": [
+    [
+     "Run",
+     "calls",
+     "Repo.Find"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/type-assertion-to-an-interface",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/type-switch-binding",
+   "ok": false,
+   "missing": [
+    [
+     "Run",
+     "calls",
+     "Repo.Find"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/conversion-types-the-value",
+   "ok": false,
+   "missing": [
+    [
+     "Run",
+     "calls",
+     "Celsius.String"
+    ],
+    [
+     "Run",
+     "references",
+     "Celsius"
+    ]
+   ],
+   "unwanted": [
+    [
+     "Run",
+     "calls",
+     "Celsius"
+    ]
+   ]
+  },
+  {
+   "id": "go/parenthesized-pointer-conversion",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/indirection-and-address-of",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/receive-element-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/channel-range-and-select",
+   "ok": false,
+   "missing": [
+    [
+     "Run",
+     "calls",
+     "Repo.Find"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/type-switch-multi-type-clause",
+   "ok": false,
+   "missing": [
+    [
+     "f",
+     "calls",
+     "Shape.M"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/instantiated-generic-method",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/named-result-local",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/package-name-is-not-directory",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/closure-local-shadows-outer-local",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/var-declaration-comma-ok-map",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/var-declaration-comma-ok-assertion",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/var-declaration-comma-ok-receive",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/slice-of-a-pointer-to-an-array",
+   "ok": false,
+   "missing": [
+    [
+     "Run",
+     "calls",
+     "Repo.Find"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/full-slice-expression",
+   "ok": false,
+   "missing": [
+    [
+     "Run",
+     "calls",
+     "Repo.Find"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/address-of-an-element",
+   "ok": false,
+   "missing": [
+    [
+     "Run",
+     "calls",
+     "Repo.Find"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/elided-pointer-element-literal",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/elided-map-key-literal",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/parenthesized-method-expression",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/embedded-imported-type-promotes",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/imported-variable-member",
+   "ok": false,
+   "missing": [
+    [
+     "Run",
+     "calls",
+     "Repo.Find"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/package-level-function-literal",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/conversion-is-a-use-of-the-type",
+   "ok": false,
+   "missing": [
+    [
+     "Run",
+     "references",
+     "Celsius"
+    ]
+   ],
+   "unwanted": [
+    [
+     "Run",
+     "calls",
+     "Celsius"
+    ]
+   ]
+  },
+  {
+   "id": "go/instantiated-generic-call",
+   "ok": false,
+   "missing": [
+    [
+     "Run",
+     "calls",
+     "Ident"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/call-as-the-only-argument",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/package-function-hides-a-builtin",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/new-type-argument",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/conversion-is-a-use-of-the-type-2",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/new-type-argument-of-another-package",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/conversion-result-is-the-type",
+   "ok": false,
+   "missing": [
+    [
+     "run",
+     "calls",
+     "Celsius.String"
+    ],
+    [
+     "run",
+     "calls",
+     "HandlerFunc.Serve"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/new-gives-a-pointer-local",
+   "ok": false,
+   "missing": [
+    [
+     "use",
+     "calls",
+     "T.Run"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/make-and-append-keep-the-slice-type",
+   "ok": false,
+   "missing": [
+    [
+     "use",
+     "calls",
+     "T.Run"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/generic-type-instance-method",
+   "ok": false,
+   "missing": [
+    [
+     "use",
+     "calls",
+     "Stack.Push"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/func-field-call-is-no-function",
+   "ok": false,
+   "missing": [
+    [
+     "Server.Start",
+     "reads",
+     "Server.run"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/composite-literal-receiver",
+   "ok": false,
+   "missing": [
+    [
+     "Use",
+     "calls",
+     "Point.Norm"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/error-value-is-no-project-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/call-inside-builtin-argument",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/variadic-parameter-type-use",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/var-declaration-scope-starts-after",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/label-is-no-name-of-the-block",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/send-evaluates-the-channel-field",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/incdec-reads-and-writes-the-field",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/assignment-writes-the-field",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/assignment-keeps-the-declared-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/if-init-var-is-seen-by-else",
+   "ok": false,
+   "missing": [
+    [
+     "Run",
+     "calls",
+     "helper"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/else-if-sees-the-init-var-of-the-if",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/switch-init-var-scope",
+   "ok": false,
+   "missing": [
+    [
+     "Run",
+     "calls",
+     "helper"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/expression-switch-case-is-a-use",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/type-switch-binding-is-typed-by-its-clause",
+   "ok": false,
+   "missing": [
+    [
+     "Run",
+     "calls",
+     "Repo.Find"
+    ],
+    [
+     "Run",
+     "calls",
+     "Finder.Find"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/type-switch-binding-hides-a-function",
+   "ok": false,
+   "missing": [],
+   "unwanted": [
+    [
+     "Run",
+     "indirect_call",
+     "helper"
+    ]
+   ]
+  },
+  {
+   "id": "go/for-clause-var-scope",
+   "ok": false,
+   "missing": [],
+   "unwanted": [
+    [
+     "Hidden",
+     "indirect_call",
+     "helper"
+    ]
+   ]
+  },
+  {
+   "id": "go/range-over-channel",
+   "ok": false,
+   "missing": [
+    [
+     "Run",
+     "calls",
+     "Repo.Find"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/range-over-map-key-and-value",
+   "ok": false,
+   "missing": [
+    [
+     "Run",
+     "calls",
+     "Key.Name"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/range-over-array-pointer",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/range-over-function-yield-type",
+   "ok": false,
+   "missing": [
+    [
+     "Run",
+     "calls",
+     "Repo.Find"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/range-assignment-declares-nothing",
+   "ok": false,
+   "missing": [
+    [
+     "Run",
+     "writes",
+     "current"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/defer-and-go-methods-and-closures",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/select-receive-binding",
+   "ok": false,
+   "missing": [
+    [
+     "Run",
+     "calls",
+     "Repo.Find"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/named-result-is-a-local",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/named-result-is-typed",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/goto-label-is-no-name-of-the-block",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/range-expression-is-outside-its-variables",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/range-over-integer-has-its-type",
+   "ok": false,
+   "missing": [
+    [
+     "Run",
+     "calls",
+     "Count.Next"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/plain-assignment-is-no-read",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/blank-identifier-declares-nothing",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/element-assignment-writes-the-field",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/promoted-field-incdec",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/select-receive-assigns-a-field",
+   "ok": false,
+   "missing": [
+    [
+     "Pool.Loop",
+     "writes",
+     "Pool.last"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/type-switch-nil-and-default-keep-the-guard-type",
+   "ok": false,
+   "missing": [
+    [
+     "Nil",
+     "calls",
+     "Shape.Area"
+    ],
+    [
+     "Default",
+     "calls",
+     "Shape.Area"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/else-if-redeclares-a-name",
+   "ok": false,
+   "missing": [
+    [
+     "Run",
+     "calls",
+     "B.Name"
+    ]
+   ],
+   "unwanted": [
+    [
+     "Run",
+     "calls",
+     "A.Name"
+    ]
+   ]
+  },
+  {
+   "id": "go/local-type-scope-starts-at-its-name",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/range-over-an-array-and-a-named-map",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/range-over-a-field-and-a-call-result",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/short-var-redeclaration-keeps-the-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/type-switch-pointer-clause-type",
+   "ok": false,
+   "missing": [
+    [
+     "Run",
+     "calls",
+     "Sq.Area"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/import-name-is-file-scoped",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/import-path-picks-the-package",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/local-hides-an-import",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/init-is-not-a-name",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/package-variable-initializer-uses",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/unsafe-is-the-builtin-package",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/external-test-package-is-another-package",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/method-declared-in-another-file",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/package-function-hides-a-new-builtin",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/go-parameter-named-like-import",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/go-field-named-like-import",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/go-local-hides-dot-import",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/go-local-named-init",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/go-func-literal-in-package-var",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/go-generic-alias-method",
+   "ok": false,
+   "missing": [
+    [
+     "Run",
+     "calls",
+     "Box.Get"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "go/go-external-test-package-qualifier",
    "ok": true,
    "missing": [],
    "unwanted": []
