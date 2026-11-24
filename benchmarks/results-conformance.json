@@ -1,5 +1,5 @@
 {
- "passed": 839,
+ "passed": 855,
  "total": 927,
  "cases": [
   {
@@ -4120,26 +4120,14 @@
   },
   {
    "id": "go/if-init-is-scoped-to-the-if",
-   "ok": false,
-   "missing": [
-    [
-     "Run",
-     "calls",
-     "helper"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
    "id": "go/for-init-is-scoped-to-the-for",
-   "ok": false,
-   "missing": [
-    [
-     "Run",
-     "calls",
-     "helper"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -4360,14 +4348,8 @@
   },
   {
    "id": "go/comma-ok-map-and-receive",
-   "ok": false,
-   "missing": [
-    [
-     "Use",
-     "calls",
-     "Item.Run"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -4824,11 +4806,6 @@
    "missing": [
     [
      "Use",
-     "calls",
-     "HandlerFunc.Serve"
-    ],
-    [
-     "Use",
      "references",
      "plain"
     ]
@@ -4885,14 +4862,8 @@
   },
   {
    "id": "go/new-and-dereference",
-   "ok": false,
-   "missing": [
-    [
-     "Use",
-     "calls",
-     "Repo.Find"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -5143,19 +5114,8 @@
   },
   {
    "id": "go/address-of-literal-types-the-value",
-   "ok": false,
-   "missing": [
-    [
-     "Direct",
-     "calls",
-     "Repo.Find"
-    ],
-    [
-     "Fresh",
-     "calls",
-     "Repo.Find"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -5333,14 +5293,8 @@
   },
   {
    "id": "go/map-comma-ok",
-   "ok": false,
-   "missing": [
-    [
-     "Run",
-     "calls",
-     "Repo.Find"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -5374,14 +5328,8 @@
   },
   {
    "id": "go/type-assertion-comma-ok",
-   "ok": false,
-   "missing": [
-    [
-     "Run",
-     "calls",
-     "Repo.Find"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -5404,26 +5352,9 @@
   },
   {
    "id": "go/conversion-types-the-value",
-   "ok": false,
-   "missing": [
-    [
-     "Run",
-     "calls",
-     "Celsius.String"
-    ],
-    [
-     "Run",
-     "references",
-     "Celsius"
-    ]
-   ],
-   "unwanted": [
-    [
-     "Run",
-     "calls",
-     "Celsius"
-    ]
-   ]
+   "ok": true,
+   "missing": [],
+   "unwanted": []
   },
   {
    "id": "go/parenthesized-pointer-conversion",
@@ -5535,14 +5466,8 @@
   },
   {
    "id": "go/address-of-an-element",
-   "ok": false,
-   "missing": [
-    [
-     "Run",
-     "calls",
-     "Repo.Find"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -5589,21 +5514,9 @@
   },
   {
    "id": "go/conversion-is-a-use-of-the-type",
-   "ok": false,
-   "missing": [
-    [
-     "Run",
-     "references",
-     "Celsius"
-    ]
-   ],
-   "unwanted": [
-    [
-     "Run",
-     "calls",
-     "Celsius"
-    ]
-   ]
+   "ok": true,
+   "missing": [],
+   "unwanted": []
   },
   {
    "id": "go/instantiated-generic-call",
@@ -5649,31 +5562,14 @@
   },
   {
    "id": "go/conversion-result-is-the-type",
-   "ok": false,
-   "missing": [
-    [
-     "run",
-     "calls",
-     "Celsius.String"
-    ],
-    [
-     "run",
-     "calls",
-     "HandlerFunc.Serve"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
    "id": "go/new-gives-a-pointer-local",
-   "ok": false,
-   "missing": [
-    [
-     "use",
-     "calls",
-     "T.Run"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -5714,14 +5610,8 @@
   },
   {
    "id": "go/composite-literal-receiver",
-   "ok": false,
-   "missing": [
-    [
-     "Use",
-     "calls",
-     "Point.Norm"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -5780,14 +5670,8 @@
   },
   {
    "id": "go/if-init-var-is-seen-by-else",
-   "ok": false,
-   "missing": [
-    [
-     "Run",
-     "calls",
-     "helper"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -5798,14 +5682,8 @@
   },
   {
    "id": "go/switch-init-var-scope",
-   "ok": false,
-   "missing": [
-    [
-     "Run",
-     "calls",
-     "helper"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -5845,15 +5723,9 @@
   },
   {
    "id": "go/for-clause-var-scope",
-   "ok": false,
+   "ok": true,
    "missing": [],
-   "unwanted": [
-    [
-     "Hidden",
-     "indirect_call",
-     "helper"
-    ]
-   ]
+   "unwanted": []
   },
   {
    "id": "go/range-over-channel",

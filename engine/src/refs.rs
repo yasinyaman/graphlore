@@ -196,6 +196,13 @@ pub fn path_of(n: Node, src: &[u8]) -> Option<Vec<String>> {
         p.push(ELEMENT.into());
         return Some(p);
     }
+    // Go `Point{1, 2}.Norm()`, `(&Point{}).Scale()`: a value of the type
+    // written, as a construction is
+    if k == "composite_literal" && crate::parse::current() == Some(crate::lang::Lang::Go) {
+        let (_, mut p) = callee(n, src)?;
+        p.push("()".into());
+        return Some(p);
+    }
     // `[x.owner for x in xs]`: a collection of what each element gives
     if matches!(k, "list_comprehension" | "set_comprehension" | "generator_expression") {
         let clause = kids(n).into_iter().find(|c| c.kind() == "for_in_clause")?;
@@ -988,8 +995,31 @@ fn value_type(v: Node, src: &[u8]) -> Option<Vec<String>> {
             .find(|c| c.kind() == "type_arguments")
             .and_then(|t| kids(t).into_iter().next())
             .and_then(|t| first_type(t, src)),
+        // Go `<-ch`: an element of the channel
+        "unary_expression" if go_received(v, src).is_some() => {
+            let mut p = path_of(go_received(v, src)?, src).filter(|p| p[0] != UNKNOWN)?;
+            p.push(ELEMENT.into());
+            Some(p)
+        }
+        // Go `new(T)`: a T (a pointer to one, which the walk does not tell apart)
+        "call_expression"
+            if crate::parse::current() == Some(crate::lang::Lang::Go)
+                && v.child_by_field_name("function").is_some_and(|f| text(f, src) == "new") =>
+        {
+            let args = v.child_by_field_name("arguments")?;
+            let t = kids(args).into_iter().find(|c| !is_comment(c))?;
+            first_type(t, src).or_else(|| path_of(t, src))
+        }
         "parenthesized_expression" | "reference_expression" | "unary_expression" => {
-            kids(v).into_iter().find_map(|c| value_type(c, src))
+            kids(v).into_iter().find_map(|c| {
+                value_type(c, src).or_else(|| {
+                    // (Go `&xs[i]`: the element's address)
+                    (c.kind() == "index_expression"
+                        && crate::parse::current() == Some(crate::lang::Lang::Go))
+                    .then(|| path_of(c, src))
+                    .flatten()
+                })
+            })
         }
         // `let x = load()?`, `val u = await find()`: what the wrapper holds
         "await_expression" | "try_expression" => {
@@ -3137,6 +3167,7 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
             crate::lang::Lang::JavaScript | crate::lang::Lang::TypeScript | crate::lang::Lang::Tsx
         )
     );
+    let go = facts.lang == Some(crate::lang::Lang::Go);
     let mut stamped = 0usize;
     let mut until = 0usize;
     let mut declared: Option<(usize, usize)> = None;
@@ -3166,7 +3197,15 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
             let around = std::iter::once(&n).chain(anc.iter().rev());
             until = around
                 .into_iter()
-                .find(|a| is_scope(a.kind()) || by_node.contains_key(&a.id()))
+                .find(|a| {
+                    // (Go `for x := …; …; … { … }`: the clause declares for
+                    // the whole statement, body included)
+                    let clause = go && matches!(a.kind(), "for_clause" | "range_clause");
+                    !clause
+                        && (is_scope(a.kind())
+                            || by_node.contains_key(&a.id())
+                            || (go && GO_STATEMENT_BLOCKS.contains(&a.kind())))
+                })
                 .map_or(0, |a| a.end_byte());
         }
         steps += 1;
@@ -5632,8 +5671,12 @@ fn elem_type(t: Node, src: &[u8]) -> Option<Vec<String>> {
     // an array or slice type, through a pointer, a reference or an annotation
     let mut stack = vec![(t, 0)];
     while let Some((n, depth)) = stack.pop() {
-        if matches!(n.kind(), "array_type" | "slice_type" | "variadic_parameter") {
-            let inner = n.child_by_field_name("element").or_else(|| kids(n).into_iter().next())?;
+        if matches!(n.kind(), "array_type" | "slice_type" | "variadic_parameter" | "channel_type") {
+            // (Go `chan *Job`, `<-chan *Job`: what is received)
+            let inner = n
+                .child_by_field_name("element")
+                .or_else(|| n.child_by_field_name("value"))
+                .or_else(|| kids(n).into_iter().find(|c| c.is_named()))?;
             return first_type(inner, src);
         }
         if depth < 3
@@ -6035,6 +6078,11 @@ fn destructured<'t>(n: Node<'t>, src: &[u8]) -> Option<(Vec<String>, Node<'t>)> 
             } else {
                 right
             };
+            // Go's comma-ok forms (`v, ok := m[k]`, `x.(T)`, `<-ch`) give a
+            // value and a bool, no tuple: the first name is the value
+            if go_comma_ok(right, src) {
+                return None;
+            }
             (n.child_by_field_name("left")?, right)
         }
         "variable_declarator" => {
@@ -6061,6 +6109,23 @@ fn destructured<'t>(n: Node<'t>, src: &[u8]) -> Option<(Vec<String>, Node<'t>)> 
         _ => return None,
     };
     Some((names_of(pattern)?, value))
+}
+
+/// Go: an expression that gives a value and a bool when two names take it
+/// (`m[k]`, `x.(T)`, `<-ch`).
+fn go_comma_ok(v: Node, src: &[u8]) -> bool {
+    crate::parse::current() == Some(crate::lang::Lang::Go)
+        && (matches!(v.kind(), "index_expression" | "type_assertion_expression")
+            || (v.kind() == "unary_expression" && text(v, src).trim_start().starts_with("<-")))
+}
+
+/// Go `<-ch`: the channel received from.
+fn go_received<'t>(v: Node<'t>, src: &[u8]) -> Option<Node<'t>> {
+    (crate::parse::current() == Some(crate::lang::Lang::Go)
+        && v.kind() == "unary_expression"
+        && text(v, src).trim_start().starts_with("<-"))
+    .then(|| v.child_by_field_name("operand"))
+    .flatten()
 }
 
 /// The type arguments of the type a callable declares it returns.
@@ -7000,6 +7065,12 @@ fn params_field<'t>(n: Node<'t>) -> Option<Node<'t>> {
 
 /// Whether a node of this kind is a scope of its own for what is declared
 /// in it: a block, a loop, a `catch`, a closure, one arm of a match.
+/// Go: each `if`, `for`, `switch` and `select` statement is an implicit
+/// block (the spec's "Blocks"), so what its init statement declares ends
+/// with the statement (`for` is a scope already, by its name).
+const GO_STATEMENT_BLOCKS: &[&str] =
+    &["if_statement", "expression_switch_statement", "type_switch_statement", "select_statement"];
+
 pub(crate) fn is_scope(kind: &str) -> bool {
     kind.ends_with("block")
         || kind.ends_with("_body")

@@ -2683,6 +2683,14 @@ impl<'a> Project<'a> {
 
     /// The type of a local name or parameter seen from `d`.
     fn local_type(&self, f: usize, d: Option<usize>, name: &str) -> Option<(DefRef, Confidence)> {
+        // Go: a local of a block the use is not written in (`if x := f();
+        // …` ended with the `if`) types nothing there
+        if self.family[f] == Some(Family::Go)
+            && (*self.site.borrow()).is_some_and(|(sf, _)| sf == f)
+            && !self.is_local_name(f, d, name)
+        {
+            return None;
+        }
         let defs = &self.files[f].defs;
         let mut cur = d;
         while let Some(x) = cur {
@@ -6260,7 +6268,9 @@ impl<'a> Project<'a> {
                 // the result of a call: constructing a type gives one of it;
                 // anything else returns what the walk cannot know
                 if let Target::Def(c) = t {
-                    if self.def(c).kind.is_class_like() {
+                    // (Go `Celsius(x)`: a conversion gives a value of the
+                    // type, a defined non-struct type as a struct)
+                    if self.is_type_like(c) {
                         continue;
                     }
                     // a function that declares it returns a collection, with
@@ -9020,6 +9030,13 @@ pub fn resolve(
                                     // a type alias called: a conversion (Go
                                     // `HandlerFunc(f)`)
                                     continue;
+                                } else if fam == Family::Go
+                                    && r.kind == RefKind::Call
+                                    && p.is_type_like(t)
+                                {
+                                    // Go: a type called is a conversion, a use
+                                    // of the type (`T{}` is the construction)
+                                    "references"
                                 } else {
                                     "calls"
                                 }

@@ -3642,3 +3642,55 @@ fn kotlin_and_csharp_an_extension_s_result_in_a_chain() {
     )]);
     has(&got, &[(".Run()", "calls", ".Signed()"), (".Run()", "calls", ".Build()")]);
 }
+
+#[test]
+fn go_locals_typed_by_their_expression_and_statement_scopes() {
+    let head = "package app\n\ntype Repo struct{}\n\nfunc (r *Repo) Find() int { return 1 }\n\ntype Other struct{}\n\nfunc (o *Other) Find() int { return 2 }\n\n";
+    let body = "func Assert(x interface{}) int {\n\tr, ok := x.(*Repo)\n\t_ = ok\n\treturn r.Find()\n}\n\nfunc Map(m map[string]*Repo) int {\n\tr, ok := m[\"a\"]\n\t_ = ok\n\treturn r.Find()\n}\n\nfunc New() int {\n\tr := new(Repo)\n\treturn r.Find()\n}\n\nfunc Addr(xs []Repo) int {\n\tp := &xs[0]\n\treturn p.Find()\n}\n\nfunc Lit() int {\n\treturn (&Repo{}).Find()\n}\n\nfunc Recv(ch chan *Repo) int {\n\tr := <-ch\n\treturn r.Find()\n}\n";
+    let src = format!("{head}{body}");
+    let got = edges(
+        "go-local-exprs",
+        &[("go.mod", "module example.com/app\n\ngo 1.22\n"), ("a.go", &src)],
+    );
+    for f in ["Assert()", "Map()", "New()", "Addr()", "Lit()", "Recv()"] {
+        assert!(
+            got.iter().any(|(s, r, t)| s == f && r == "calls" && t == ".Find()"),
+            "{f} calls a Find: {got:#?}"
+        );
+    }
+    // (which Find: the ids say)
+    let dir = project(
+        "go-local-exprs-ids",
+        &[("go.mod", "module example.com/app\n\ngo 1.22\n"), ("a.go", &src)],
+    );
+    let (g, _) = build_graph(&BuildOptions::new(&dir)).unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+    let calls: BTreeSet<(String, String)> = g["links"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|e| e["relation"] == "calls")
+        .map(|e| {
+            (e["source"].as_str().unwrap().to_string(), e["target"].as_str().unwrap().to_string())
+        })
+        .collect();
+    for f in ["assert", "map", "new", "addr", "lit", "recv"] {
+        assert!(calls.contains(&(format!("a_{f}"), "a_repo_find".into())), "{f}: {calls:?}");
+        assert!(!calls.contains(&(format!("a_{f}"), "a_other_find".into())), "{f}: {calls:?}");
+    }
+    // an `if`'s init declares for the `if` only; a conversion references its type
+    let got = edges("go-stmt-scope", &[
+        ("go.mod", "module example.com/app\n\ngo 1.22\n"),
+        ("a.go", "package app\n\nfunc helper() int { return 1 }\n\ntype T struct{}\n\nfunc (*T) Close() int { return 0 }\n\nfunc mk() *T { return &T{} }\n\nfunc Run() int {\n\tif helper := mk(); helper != nil {\n\t\thelper.Close()\n\t}\n\treturn helper()\n}\n\ntype Celsius float64\n\nfunc (c Celsius) String() string { return \"c\" }\n\nfunc Show(x float64) string {\n\treturn Celsius(x).String()\n}\n"),
+    ]);
+    has(
+        &got,
+        &[
+            ("Run()", "calls", ".Close()"),
+            ("Run()", "calls", "helper()"),
+            ("Show()", "references", "Celsius"),
+            ("Show()", "calls", ".String()"),
+        ],
+    );
+    assert!(!got.contains(&("Show()".into(), "calls".into(), "Celsius".into())), "{got:#?}");
+}

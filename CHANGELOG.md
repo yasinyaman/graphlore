@@ -18,7 +18,11 @@ All notable changes to this project are documented here. The format is based on
   `benchmarks/rule_inventory.py --sections` says which sections are read, and
   `benchmarks/verify_cases.py --binding` asks go/types what each case's names
   are bound to. Go first: all 156 sections read, 241 new cases (927 in all),
-  of which the engine holds 153.
+  of which the engine held 153 and, after the fixes they led to, 169 (Go's
+  comma-ok forms, `<-ch` and `chan` elements, `new(T)`, `&xs[i]`, a composite
+  literal in a chain, a conversion as a reference to its type that gives a
+  value of it, a statement's init ending with the statement). Against
+  `go/types` on four repositories: 12,336 of 12,342 judged edges right.
 - **SCIP precision mode** (`GRAPHLORE_SCIP`, `src/graphlore/scip.py`). When
   the project has a SCIP index (`index.scip`, made by `scip-python`,
   `scip-typescript`, `rust-analyzer scip` and others), the edges the

@@ -1162,15 +1162,22 @@ no rule of name binding, settled by hand; 18 read before). 21 readers (7
 groups, two rounds of gap hunting each, and the second round still found rows
 in every group but one) returned 417 rows: 257 new cases, 87 held by a case,
 47 not followed, 26 sections with no rule. Of the 241 distinct new cases all
-compiled; the binding check first flagged 27 edges, of which 17 were its own
-blind spots (an absent edge that only names a relation, a type and its
-method declared on one line; both fixed in `verify_cases.py`) and 10 were
-names the case left ambiguous (`helper` both a function and a field),
+compiled; the binding check first flagged 27 edges, of which 14 were its own
+blind spots (12 absent edges that only name a relation, 2 a type and its
+method declared on one line; both fixed in `verify_cases.py`) and 13, in 8
+cases, names the case left ambiguous (`helper` both a function and a field),
 qualified by hand. The engine held 153 of the 241: the 88 it did not are
 locals typed by their expression (`new(T)`, `&T{}`, `T(x)`, comma-ok, `<-ch`,
 `range` over channels, maps, integers and functions, type-switch clauses),
 aliases, types defined from other types, explicit instantiation and the
-scope of `if` / `for` / `switch` / `select` initializers.
+scope of `if` / `for` / `switch` / `select` initializers. The first fixes
+they led to (engine 0.5.80: Go's comma-ok forms are no tuple, `<-ch` and a
+`chan` type give the element, `new(T)` and `&xs[i]` type a local, a composite
+literal is a value of its type in a chain, a conversion is a `references` of
+its type and gives a value of it, and a name declared in a statement's init
+ends with the statement) hold 16 more: 169 of the 241, and on cobra, chi,
+resty and gin-examples `go/types` finds 12,336 of 12,342 judged edges right
+(12,311 of 12,317 before) and 85.5% of the uses with an edge (85.4%).
 
 **Phase 3: inference, by the numbers.** (Measured: see 'Phase 3: inference, by the numbers' above; nothing built.) Per language, what one step of
 inference would add (a closure parameter typed by the collection it is
