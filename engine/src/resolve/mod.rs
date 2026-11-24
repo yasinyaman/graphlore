@@ -3004,6 +3004,31 @@ impl<'a> Project<'a> {
                 .filter(|t| self.is_type_like(*t))
                 .map(|t| (t, Confidence::Extracted))
         };
+        // Go `for i := range n` with `n Count` (`type Count int`): i is a Count
+        if how == crate::refs::KEY && self.family[f] == Some(Family::Go) {
+            if let Some((t, conf)) = self.type_of_path_inner(f, d, path) {
+                let td = self.def(t);
+                let integer = td.value_path.as_ref().and_then(|v| v.last()).is_some_and(|u| {
+                    matches!(
+                        u.as_str(),
+                        "int"
+                            | "int8"
+                            | "int16"
+                            | "int32"
+                            | "int64"
+                            | "uint"
+                            | "uint8"
+                            | "uint16"
+                            | "uint32"
+                            | "uint64"
+                            | "uintptr"
+                    )
+                });
+                if td.kind == DefKind::TypeAlias && td.elem.is_none() && !td.keyed && integer {
+                    return Some((t, conf));
+                }
+            }
+        }
         if let [name] = path {
             let defs = &self.files[f].defs;
             let mut cur = d;
@@ -3017,7 +3042,20 @@ impl<'a> Project<'a> {
                     // Go `c byName` with `type byName []*Command`: the defined
                     // type holds the element, in the file it is written in
                     if elem.is_none() && l.declared && !l.path.is_empty() {
-                        if let Some(t) = self.type_of_path(f, Some(x), &l.path, true) {
+                        if let Some(mut t) = self.type_of_path(f, Some(x), &l.path, true) {
+                            // (`type More Items`, `type Items []Item`: through
+                            // the chain to the one written as a collection)
+                            for _ in 0..4 {
+                                let td = self.def(t);
+                                if td.kind != DefKind::TypeAlias || td.elem.is_some() {
+                                    break;
+                                }
+                                let Some(under) = td.value_path.clone() else { break };
+                                match self.type_of_path(t.0, td.parent, &under, true) {
+                                    Some(u) if u != t => t = u,
+                                    _ => break,
+                                }
+                            }
                             let td = self.def(t);
                             if td.kind == DefKind::TypeAlias && td.elem.is_some() {
                                 let e = td.elem.clone()?;
@@ -6550,6 +6588,22 @@ impl<'a> Project<'a> {
                             conf = conf.max(Confidence::Inferred);
                         }
                         found = Some(Target::Def(r));
+                    }
+                }
+            }
+            // Go `store.Default.Find()`: a variable or constant of another
+            // package, with more after it, is what it holds
+            if fam == Family::Go && !matches!(t, Target::Def(_)) && i + 1 < rest.len() {
+                if let Some(Target::Def(p)) = &found {
+                    let p = *p;
+                    if self.def(p).kind.is_state() {
+                        if let Some((ht, cf)) =
+                            self.declared_state_type(p).or_else(|| self.state_type(p))
+                        {
+                            conf = conf.max(cf);
+                            t = Target::Def(ht);
+                            continue;
+                        }
                     }
                 }
             }

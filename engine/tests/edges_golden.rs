@@ -3751,3 +3751,21 @@ fn go_instantiations_constants_and_function_fields() {
     );
     assert!(!got.contains(&(".Start()".into(), "calls".into(), "run()".into())), "{got:#?}");
 }
+
+#[test]
+fn go_package_values_ranges_assigned_and_literal_keys() {
+    let got = edges("go-values", &[
+        ("go.mod", "module example.com/app\n\ngo 1.22\n"),
+        ("store/s.go", "package store\n\ntype Repo struct{}\n\nfunc (r *Repo) Find() int { return 1 }\n\nvar Default = &Repo{}\n"),
+        ("a.go", "package app\n\nimport \"example.com/app/store\"\n\nconst Size = 4\n\nconst Key = 1\n\nvar current *store.Repo\n\nfunc Run(repos []*store.Repo) int {\n\tfor _, current = range repos {\n\t}\n\treturn store.Default.Find()\n}\n\nfunc Make() [Size]int {\n\tvar b [Size]int\n\treturn b\n}\n\nfunc Table() map[int]string {\n\treturn map[int]string{Key: \"k\"}\n}\n"),
+    ]);
+    has(
+        &got,
+        &[
+            ("Run()", "writes", "current"),
+            ("Run()", "calls", ".Find()"),
+            ("Make()", "reads", "Size"),
+            ("Table()", "reads", "Key"),
+        ],
+    );
+}

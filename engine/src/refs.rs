@@ -198,7 +198,14 @@ pub fn path_of(n: Node, src: &[u8]) -> Option<Vec<String>> {
             return path_of(object, src);
         }
         let mut p = path_of(object, src).filter(|p| p[0] != UNKNOWN)?;
-        p.push(ELEMENT.into());
+        // (Go `grid[i][j]` of a `[][]*Cell`: the element type the walk
+        // reads is the innermost, so a second index takes nothing off)
+        if !(k == "index_expression"
+            && crate::parse::current() == Some(crate::lang::Lang::Go)
+            && p.last().is_some_and(|s| s == ELEMENT))
+        {
+            p.push(ELEMENT.into());
+        }
         return Some(p);
     }
     // Go `xs[1:]`, `a[1:2:3]`: a slice keeps what it slices (of an array,
@@ -1015,6 +1022,10 @@ fn value_type(v: Node, src: &[u8]) -> Option<Vec<String>> {
             .find(|c| c.kind() == "type_arguments")
             .and_then(|t| kids(t).into_iter().next())
             .and_then(|t| first_type(t, src)),
+        // Go `xs[1:3]`: what it slices
+        "slice_expression" if crate::parse::current() == Some(crate::lang::Lang::Go) => {
+            path_of(v, src).filter(|p| p[0] != UNKNOWN)
+        }
         // Go `<-ch`: an element of the channel
         "unary_expression" if go_received(v, src).is_some() => {
             let mut p = path_of(go_received(v, src)?, src).filter(|p| p[0] != UNKNOWN)?;
@@ -7001,6 +7012,10 @@ fn loop_vars(n: Node, src: &[u8]) -> Option<Vec<(String, Vec<String>)>> {
         // a program that compiles uses no member of an int, so it names
         // nothing either way; of a channel it is the element.)
         "range_clause" => {
+            // (`for _, current = range repos`: assigns, declares nothing)
+            if !text(n, src).contains(":=") {
+                return None;
+            }
             let left: Vec<Node> = kids(n.child_by_field_name("left")?)
                 .into_iter()
                 .filter(|c| c.kind() == "identifier")

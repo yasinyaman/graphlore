@@ -1,5 +1,5 @@
 {
- "passed": 914,
+ "passed": 924,
  "total": 945,
  "cases": [
   {
@@ -4510,19 +4510,8 @@
   },
   {
    "id": "go/array-length-names-a-constant",
-   "ok": false,
-   "missing": [
-    [
-     "Make",
-     "reads",
-     "Size"
-    ],
-    [
-     "Buf",
-     "reads",
-     "Size"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -4701,14 +4690,8 @@
   },
   {
    "id": "go/slice-of-slices",
-   "ok": false,
-   "missing": [
-    [
-     "Use",
-     "calls",
-     "Cell.Touch"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -4893,14 +4876,8 @@
   },
   {
    "id": "go/underlying-through-a-chain",
-   "ok": false,
-   "missing": [
-    [
-     "Run",
-     "calls",
-     "Item.Name"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -4941,14 +4918,8 @@
   },
   {
    "id": "go/literal-key-field-or-value",
-   "ok": false,
-   "missing": [
-    [
-     "Table",
-     "reads",
-     "a.go:Key"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -5103,14 +5074,8 @@
   },
   {
    "id": "go/index-of-index",
-   "ok": false,
-   "missing": [
-    [
-     "Run",
-     "calls",
-     "Repo.Find"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -5229,14 +5194,8 @@
   },
   {
    "id": "go/slice-of-a-pointer-to-an-array",
-   "ok": false,
-   "missing": [
-    [
-     "Run",
-     "calls",
-     "Repo.Find"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -5277,14 +5236,8 @@
   },
   {
    "id": "go/imported-variable-member",
-   "ok": false,
-   "missing": [
-    [
-     "Run",
-     "calls",
-     "Repo.Find"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -5499,14 +5452,8 @@
   },
   {
    "id": "go/range-assignment-declares-nothing",
-   "ok": false,
-   "missing": [
-    [
-     "Run",
-     "writes",
-     "current"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -5547,14 +5494,8 @@
   },
   {
    "id": "go/range-over-integer-has-its-type",
-   "ok": false,
-   "missing": [
-    [
-     "Run",
-     "calls",
-     "Count.Next"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -5583,14 +5524,8 @@
   },
   {
    "id": "go/select-receive-assigns-a-field",
-   "ok": false,
-   "missing": [
-    [
-     "Pool.Loop",
-     "writes",
-     "Pool.last"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {

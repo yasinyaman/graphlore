@@ -292,7 +292,7 @@ Found by: the specification 30, a compiler 19, comparison 0, the grammar 2, the 
 | an import of a directory is the file its `package.json` names | `package-json-types-entry` | – | yes |
 | where a type is written, a value of the name does not hide the type around it | `type-meaning-skips-values` | – | yes |
 
-### go (286 of 317)
+### go (296 of 317)
 
 The Go Programming Language Specification, 'Declarations and scope', 'Selectors', 'Method sets'.
 
@@ -416,7 +416,7 @@ Found by: the specification 23, a compiler 13, comparison 2, the grammar 5, the 
 | a generic function handed over uninstantiated is a use of that function | `generic-function-as-argument` | – | yes |
 | a generic type of another package, instantiated, gives that type's methods: not those of the importing package's same-named type | `imported-generic-type-instance` | – | yes |
 | an embedded instance of a generic type is a field named by the type's name; its methods are promoted | `embedded-instance` | – | yes |
-| an array length written as a name is a use of the constant of that name in scope: a constant of the function hides the package's | `array-length-names-a-constant` | – | **no**: no Make -reads-> Size; Buf -reads-> Size |
+| an array length written as a name is a use of the constant of that name in scope: a constant of the function hides the package's | `array-length-names-a-constant` | – | yes |
 | a field of a struct is a field of a type defined from it | `defined-type-keeps-the-fields` | – | yes |
 | a type defined from a struct with an embedded field has the embedded type's promoted methods | `defined-type-keeps-the-embedding` | – | yes |
 | a value of an alias of pkg.T answers T's methods | `alias-of-an-imported-type` | – | yes |
@@ -443,7 +443,7 @@ Found by: the specification 23, a compiler 13, comparison 2, the grammar 5, the 
 | a value of an alias type (also an alias of an alias) has the methods of the type the alias names | `alias-has-the-methods-of-its-type` | – | yes |
 | `HandlerFunc(plain).Serve(1)` is the method of the converted-to type, and `plain` is a use | `conversion-gives-its-type` | – | **no**: no Use -references-> plain |
 | an element of `[3]*Cell`, of `[2][2]*Cell` and of a pointer to an array is a *Cell | `array-element-type` | – | yes |
-| `grid[0][1]` of `[][]*Cell` is a *Cell | `slice-of-slices` | – | **no**: no Use -calls-> Cell.Touch |
+| `grid[0][1]` of `[][]*Cell` is a *Cell | `slice-of-slices` | – | yes |
 | a field of a local declared with an unnamed struct type is of its declared type | `anonymous-struct-field` | – | **no**: no Use -calls-> Repo.Find |
 | `*util.Tool` embedded is the field Tool, and `o.Tool.Run()` is util's Tool.Run | `embedded-pointer-and-qualified-field` | – | yes |
 | a method of an interface embedded in a struct is promoted: `c.Get()` is the interface's Get | `embedded-interface-in-a-struct` | – | yes |
@@ -470,14 +470,14 @@ Found by: the specification 23, a compiler 13, comparison 2, the grammar 5, the 
 | a method declared on a defined function type is called on a value of that type | `method-of-a-defined-function-type` | – | yes |
 | `b.V` and `b.Vs[0]` of a `Box[Item]` are Items | `generic-field-has-the-type-argument` | 1.18– | yes |
 | `c.DB.Pool.Close()` goes through a field of anonymous struct type to Pool's method | `nested-anonymous-struct-field` | – | **no**: no Run -calls-> Pool.Close |
-| a defined type of a defined slice type is indexed to the element type | `underlying-through-a-chain` | – | **no**: no Run -calls-> Item.Name |
+| a defined type of a defined slice type is indexed to the element type | `underlying-through-a-chain` | – | yes |
 | `util.Map[int, string](…)` and `Map[int, int](…)` are calls of the function written, qualified or not | `instantiated-generic-function` | – | yes |
 | `(helper)()` is a call of helper and `((r)).Find()` a call on r | `parenthesized-operand` | – | yes |
 | `util.Config` is the imported package's type; a bare `Config` is the importing package's | `qualified-type-is-the-packages` | – | yes |
 | `apply(util.Handler)` hands over the imported package's Handler, not the importing package's | `qualified-function-value` | – | yes |
 | `util.Limit` and `util.Max` are the imported package's variable and constant, not the importing package's of the same names | `qualified-variable-and-constant` | – | yes |
 | `Config{helper: 1}` names the field helper, not the function helper in scope | `struct-literal-key-is-a-field` | – | yes |
-| in `map[int]string{Key: "k"}` Key is the constant; in `Config{Key: 2}` it is the field | `literal-key-field-or-value` | – | **no**: no Table -reads-> a.go:Key |
+| in `map[int]string{Key: "k"}` Key is the constant; in `Config{Key: 2}` it is the field | `literal-key-field-or-value` | – | yes |
 | a local assigned `&Repo{}` or `new(Repo)`, or the literal called directly, answers Repo's methods | `address-of-literal-types-the-value` | – | yes |
 | in `[]*Pair{{Key: 1}}` the key is Pair's field, not the function Key in scope | `elided-element-type-keys` | – | yes |
 | `helper()` in a literal is the local helper of the surrounding function, not the package function | `closure-sees-the-enclosing-local` | – | yes |
@@ -501,7 +501,7 @@ Found by: the specification 23, a compiler 13, comparison 2, the grammar 5, the 
 | `r.Read` on an interface and `c.Inc` on an addressable Counter are uses of Reader.Read and Counter.Inc | `method-value-of-interface-and-pointer` | – | yes |
 | `a[0]` of `[3]*Repo` is a *Repo | `array-element` | – | yes |
 | `p[0]` of `*[3]*Repo` is a *Repo | `pointer-to-array-element` | – | yes |
-| `grid[0][1]` of `[][]*Repo` is a *Repo | `index-of-index` | – | **no**: no Run -calls-> Repo.Find |
+| `grid[0][1]` of `[][]*Repo` is a *Repo | `index-of-index` | – | yes |
 | `r, ok := m["a"]` types r as the map's *Repo | `map-comma-ok` | – | yes |
 | `repos[1:][0]` and `a[:2][0]` are *Repo | `slice-expression-keeps-the-type` | – | yes |
 | `n[1:].Count()` on `type Names []string` is Names.Count | `slice-of-a-named-slice-keeps-its-type` | – | yes |
@@ -521,14 +521,14 @@ Found by: the specification 23, a compiler 13, comparison 2, the grammar 5, the 
 | in `var v, ok = m[k]` v is the map's element type: `v.Find()` is Repo's, never Other's | `var-declaration-comma-ok-map` | – | yes |
 | in `var v, ok = x.(*T)` v is a *T: `v.Find()` is Repo's, never Other's | `var-declaration-comma-ok-assertion` | – | yes |
 | in `var v, ok = <-ch` v is the channel's element type: `v.Find()` is Repo's, never Other's | `var-declaration-comma-ok-receive` | – | yes |
-| `p[1:3]` of a `*[4]*Repo` is a []*Repo: `s[0].Find()` is Repo's, never Other's | `slice-of-a-pointer-to-an-array` | – | **no**: no Run -calls-> Repo.Find |
+| `p[1:3]` of a `*[4]*Repo` is a []*Repo: `s[0].Find()` is Repo's, never Other's | `slice-of-a-pointer-to-an-array` | – | yes |
 | `a[1:2:3]` of a `[]*Repo` is a []*Repo: `a[1:2:3][0].Find()` is Repo's, never Other's | `full-slice-expression` | – | yes |
 | `p := &items[0]` is a *Repo: `p.Find()` is Repo's, never Other's | `address-of-an-element` | – | yes |
 | in `[]*Point{{x: 1}}` the key `x` is a field of Point: it reads no package variable `x` | `elided-pointer-element-literal` | – | yes |
 | in `map[Point]string{{x: 1}: "a"}` the inner `x` is a field of Point, the map's key type: it reads no package variable `x` | `elided-map-key-literal` | – | yes |
 | `(Repo).Find(r)` is a use of Repo's method, never of Other's | `parenthesized-method-expression` | – | yes |
 | `s.Find()` on a struct embedding `store.Base` is Base's method, never the other type's of the same name | `embedded-imported-type-promotes` | – | yes |
-| `store.Default.Find()` is the method of the type of the imported variable `Default`, never another type's method of that name | `imported-variable-member` | – | **no**: no Run -calls-> Repo.Find |
+| `store.Default.Find()` is the method of the type of the imported variable `Default`, never another type's method of that name | `imported-variable-member` | – | yes |
 | the call inside `var handler = func() int { return helper() }` is made by `handler` | `package-level-function-literal` | – | yes |
 | a call whose function expression is a type is a conversion: a use of the type, not a call of a function of the same name | `conversion-is-a-use-of-the-type` | – | yes |
 | `Ident[int](1)` calls the generic function Ident; a method Ident of a type is not that function | `instantiated-generic-call` | – | yes |
@@ -563,19 +563,19 @@ Found by: the specification 23, a compiler 13, comparison 2, the grammar 5, the 
 | in `for k, v := range m` over `map[Key]*Val`, k is a Key and v a *Val | `range-over-map-key-and-value` | – | yes |
 | the value of `for _, r := range a` with `a *[2]*Repo` is a *Repo | `range-over-array-pointer` | – | yes |
 | `for r := range t.All` where All takes `yield func(*Repo) bool`: r is a *Repo, and t.All is a method value | `range-over-function-yield-type` | 1.23– | **no**: no Run -calls-> Repo.Find |
-| `for _, current = range repos` writes the package variable current and keeps its type | `range-assignment-declares-nothing` | – | **no**: no Run -writes-> current |
+| `for _, current = range repos` writes the package variable current and keeps its type | `range-assignment-declares-nothing` | – | yes |
 | `defer r.Find()`, `go r.Find()` and the calls in a `defer func() {...}()` are calls of the enclosing function | `defer-and-go-methods-and-closures` | – | yes |
 | `case r := <-ch:` over `chan *Repo` declares r as a *Repo | `select-receive-binding` | – | yes |
 | a result named like a package function hides it in the function body | `named-result-is-a-local` | – | yes |
 | `func Run() (r *Repo) { r.Find() }`: r.Find is Repo's method | `named-result-is-typed` | – | yes |
 | `goto helper` and a `helper:` label beside a package function `helper`: `helper()` is the function and the label is no reference to it | `goto-label-is-no-name-of-the-block` | – | yes |
 | `for _, helper := range helper()` calls the package function, and the body's `helper` is the variable | `range-expression-is-outside-its-variables` | – | yes |
-| `for i := range n` with `n Count` makes i a Count: i.Next() is Count's method | `range-over-integer-has-its-type` | 1.22– | **no**: no Run -calls-> Count.Next |
+| `for i := range n` with `n Count` makes i a Count: i.Next() is Count's method | `range-over-integer-has-its-type` | 1.22– | yes |
 | a plain assignment writes a variable without reading it; `x += y` reads and writes it; a local of that name is its own variable | `plain-assignment-is-no-read` | – | yes |
 | the blank identifier binds no name: `var _ I = T{}`, `_, v := f()` and `_ = g` are uses of I, T, f and g | `blank-identifier-declares-nothing` | – | yes |
 | assigning to an element `s.items[k] = v` writes the field `items` of s's type; reading `s.items[k]` reads it | `element-assignment-writes-the-field` | – | yes |
 | `p.hits++` through an embedded struct is a read and a write of the embedded type's field `hits` | `promoted-field-incdec` | – | yes |
-| a receive case written with `=` assigns an existing operand (a field is written) and declares nothing | `select-receive-assigns-a-field` | – | **no**: no Pool.Loop -writes-> Pool.last |
+| a receive case written with `=` assigns an existing operand (a field is written) and declares nothing | `select-receive-assigns-a-field` | – | yes |
 | in `case nil` and `default` clauses the type switch variable has the guard expression's type (the interface), not the type of another clause | `type-switch-nil-and-default-keep-the-guard-type` | – | yes |
 | a name redeclared by an `else if` init statement is a new variable there, with its own type | `else-if-redeclares-a-name` | – | **no**: no Run -calls-> B.Name has Run -calls-> A.Name |
 | the scope of a type declared in a function starts at its identifier: `next *node` inside the local `node` is the local type | `local-type-scope-starts-at-its-name` | – | yes |
@@ -1195,4 +1195,4 @@ Found by: the specification 31, a compiler 2, comparison 0, the grammar 1, the l
 | `A::hello insteadof B` picks A's method of two used traits | `trait-insteadof` | – | yes |
 | a method a trait brings comes before an inherited one, and the class's own before both | `trait-before-inherited` | – | yes |
 
-914 of 945 rules hold
+924 of 945 rules hold

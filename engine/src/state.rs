@@ -371,7 +371,7 @@ impl State {
             && crate::parse::current() == Some(crate::lang::Lang::Scala)
         {
             // Scala `Local(a = 1)`: an argument given by name writes nothing
-        } else if ASSIGNMENTS.contains(&k) {
+        } else if ASSIGNMENTS.contains(&k) || go_assigning(n, k, src) {
             let target = n
                 .child_by_field_name("left")
                 .or_else(|| n.child_by_field_name("target"))
@@ -463,6 +463,10 @@ impl State {
         if !parameter && !DECLARATIONS.contains(&k) {
             return;
         }
+        // (Go `for _, x = range xs`, `case x = <-ch`: assigned, not declared)
+        if go_assigning(n, k, src) {
+            return;
+        }
         // JS `for ([a, b] of rows)` with no `let` / `const` / `var` assigns
         // names declared elsewhere
         if k == "for_in_statement"
@@ -533,9 +537,17 @@ impl State {
         }
         // the key of a Go composite literal (`S{n: 1}`) names a field of the
         // new value, it reads nothing
+        // (of a map, an array or a slice the key is a value: `map[int]string{
+        // Key: "k"}` reads the constant Key)
         if pk == "literal_element"
             && up(anc, 1)
                 .is_some_and(|k| k.kind() == "keyed_element" && first_named(k) == Some(p.id()))
+            && !up(anc, 3).is_some_and(|lit| {
+                lit.kind() == "composite_literal"
+                    && lit.child_by_field_name("type").is_some_and(|t| {
+                        matches!(t.kind(), "map_type" | "array_type" | "slice_type")
+                    })
+            })
         {
             return;
         }
@@ -568,8 +580,11 @@ impl State {
         // (Python `timeout: float = DEFAULT`: the default is a value, the
         // node's kind only says the parameter is typed)
         let typed_default = is_typed_default(p, n);
+        // (Go `[Size]int`: the length is a constant read)
+        let array_length =
+            pk == "array_type" && p.child_by_field_name("length").is_some_and(|l| l.id() == n.id());
         if pk.contains("import")
-            || (pk.contains("type") && !typed_default)
+            || (pk.contains("type") && !typed_default && !array_length)
             || pk.contains("label")
             || pk.contains("decorator")
             || pk.contains("annotation")
@@ -892,6 +907,15 @@ fn up<'t>(anc: &[Node<'t>], i: usize) -> Option<Node<'t>> {
 }
 
 /// Whether `n` is written: assigned to, updated or deleted.
+/// Go `for k, v = range xs` and `case x = <-ch`: assignments (written
+/// with `:=`, they declare).
+fn go_assigning(n: Node, k: &str, src: &[u8]) -> bool {
+    matches!(k, "range_clause" | "receive_statement")
+        && crate::parse::current() == Some(crate::lang::Lang::Go)
+        && n.child_by_field_name("left").is_some()
+        && !text(n, src).contains(":=")
+}
+
 pub fn writes_to<'t>(n: Node<'t>, anc: &[Node<'t>]) -> bool {
     is_write_target(n, anc)
 }
@@ -903,7 +927,10 @@ fn is_write_target<'t>(n: Node<'t>, anc: &[Node<'t>]) -> bool {
     for i in 0..MAX_CLIMB {
         let Some(p) = up(anc, i) else { return false };
         let pk = p.kind();
-        if ASSIGNMENTS.contains(&pk) {
+        // (Go's `range` / receive targets, `=` or `:=`: written, never read)
+        let go_target = matches!(pk, "range_clause" | "receive_statement")
+            && crate::parse::current() == Some(crate::lang::Lang::Go);
+        if ASSIGNMENTS.contains(&pk) || go_target {
             let target = p
                 .child_by_field_name("left")
                 .or_else(|| p.child_by_field_name("target"))
