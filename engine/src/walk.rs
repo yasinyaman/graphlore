@@ -65,6 +65,9 @@ pub struct WalkResult {
     pub too_large: Vec<String>,
     pub not_read: BTreeMap<String, usize>,
     pub non_utf8_paths: usize,
+    /// The repositories of a workspace, root-relative (`svc-a`,
+    /// `services/billing`): empty for a project that is one repository.
+    pub repos: Vec<String>,
 }
 
 /// `/`-separated, root-relative; `None` for a name that is not valid UTF-8.
@@ -83,12 +86,14 @@ fn rel_path(root: &Path, path: &Path) -> Option<String> {
 /// those are the engine's own rules, not git's.
 fn tracked_but_ignored(
     root: &Path,
+    repo: &str,
     out_dir: &str,
     seen: &std::collections::HashSet<String>,
 ) -> Vec<String> {
+    let at = if repo.is_empty() { root.to_path_buf() } else { root.join(repo) };
     let listed = std::process::Command::new("git")
         .arg("-C")
-        .arg(root)
+        .arg(&at)
         .args(["ls-files", "-z"])
         .stderr(std::process::Stdio::null())
         .output();
@@ -96,18 +101,32 @@ fn tracked_but_ignored(
     if !out.status.success() {
         return Vec::new();
     }
-    let mut own = ignore::gitignore::GitignoreBuilder::new(root);
-    for name in [".graphloreignore", ".graphifyignore"] {
-        let file = root.join(name);
-        if file.is_file() {
-            let _ = own.add(file);
+    // the root's own ignore files, and a workspace repository's
+    let mut ignores = Vec::new();
+    for dir in [root.to_path_buf(), at.clone()] {
+        if !ignores.is_empty() && dir == root {
+            break;
+        }
+        let mut own = ignore::gitignore::GitignoreBuilder::new(&dir);
+        for name in [".graphloreignore", ".graphifyignore"] {
+            let file = dir.join(name);
+            if file.is_file() {
+                let _ = own.add(file);
+            }
+        }
+        if let Ok(g) = own.build() {
+            ignores.push(g);
         }
     }
-    let own = own.build().ok();
     let mut more = Vec::new();
     for raw in out.stdout.split(|b| *b == 0) {
-        let Ok(rel) = std::str::from_utf8(raw) else { continue };
-        if rel.is_empty() || seen.contains(rel) {
+        let Ok(in_repo) = std::str::from_utf8(raw) else { continue };
+        if in_repo.is_empty() {
+            continue;
+        }
+        let full = if repo.is_empty() { in_repo.to_string() } else { format!("{repo}/{in_repo}") };
+        let rel = full.as_str();
+        if seen.contains(rel) {
             continue;
         }
         let parts: Vec<&str> = rel.split('/').collect();
@@ -117,12 +136,99 @@ fn tracked_but_ignored(
         {
             continue;
         }
-        if own.as_ref().is_some_and(|g| g.matched_path_or_any_parents(rel, false).is_ignore()) {
+        if ignores.iter().any(|g| {
+            let own = if g.path() == root { rel } else { in_repo };
+            g.matched_path_or_any_parents(own, false).is_ignore()
+        }) {
             continue;
         }
         more.push(rel.to_string());
     }
     more
+}
+
+/// The commit a workspace repository's HEAD is at (`None`: no git, or no
+/// commit yet).
+pub fn repo_commit(root: &Path, repo: &str) -> Option<String> {
+    let out = std::process::Command::new("git")
+        .arg("-C")
+        .arg(root.join(repo))
+        .args(["rev-parse", "HEAD"])
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    let sha = String::from_utf8(out.stdout).ok()?.trim().to_string();
+    (out.status.success() && !sha.is_empty()).then_some(sha)
+}
+
+/// The name of the file that lists a workspace's repositories.
+pub const WORKSPACE_FILE: &str = ".graphlore-workspace.json";
+
+/// The repositories of a workspace: the `repos` a `.graphlore-workspace.json`
+/// at the root names (keys of an object, or a list), else, when the root is
+/// no git repository itself, every directory one or two levels down that
+/// holds a `.git` (a checkout, a worktree, a submodule's file). A project
+/// that is one repository, with submodules or not, has none: its graph keeps
+/// its one `built_at_commit`.
+pub fn workspace_repos(root: &Path, out_dir: &str) -> Vec<String> {
+    if let Ok(text) = std::fs::read_to_string(root.join(WORKSPACE_FILE)) {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
+            let names: Vec<String> = match &v["repos"] {
+                serde_json::Value::Object(m) => m.keys().cloned().collect(),
+                serde_json::Value::Array(a) => {
+                    a.iter().filter_map(|x| x.as_str().map(String::from)).collect()
+                }
+                _ => Vec::new(),
+            };
+            let mut names: Vec<String> = names
+                .into_iter()
+                .map(|n| n.trim_matches('/').to_string())
+                .filter(|n| {
+                    !n.is_empty()
+                        && !n.split('/').any(|p| p == ".." || p == "." || p.is_empty())
+                        && root.join(n).is_dir()
+                })
+                .collect();
+            names.sort();
+            names.dedup();
+            if !names.is_empty() {
+                return names;
+            }
+        }
+    }
+    if root.join(".git").exists() {
+        return Vec::new();
+    }
+    let mut found = Vec::new();
+    let skip = |name: &str| name.starts_with('.') || name == out_dir || SKIP_DIRS.contains(&name);
+    let Ok(level1) = std::fs::read_dir(root) else { return found };
+    let mut dirs: Vec<(String, PathBuf)> = level1
+        .flatten()
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+        .filter_map(|e| Some((e.file_name().to_str()?.to_string(), e.path())))
+        .filter(|(n, _)| !skip(n))
+        .collect();
+    dirs.sort();
+    for (name, path) in dirs {
+        if path.join(".git").exists() {
+            found.push(name);
+            continue;
+        }
+        if path.join("pyvenv.cfg").exists() {
+            continue;
+        }
+        let Ok(level2) = std::fs::read_dir(&path) else { continue };
+        let mut inner: Vec<String> = level2
+            .flatten()
+            .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+            .filter_map(|e| e.file_name().to_str().map(String::from))
+            .filter(|n| !skip(n) && path.join(n).join(".git").exists())
+            .map(|n| format!("{name}/{n}"))
+            .collect();
+        inner.sort();
+        found.extend(inner);
+    }
+    found
 }
 
 /// The directories of the Sphinx projects whose `conf.py` makes `.txt` a
@@ -230,11 +336,18 @@ pub fn discover(root: &Path, out_dir_name: &str, documents: bool, max_bytes: u64
     // (`**/package.json` in a package's `.gitignore`, a line `test` beside a
     // committed `tests/unity/test/`). The walker cannot know what is tracked,
     // so git is asked; without git, or outside a repository, nothing is added.
-    for rel in tracked_but_ignored(root, out_dir_name, &seen) {
-        let path = root.join(&rel);
-        let Ok(meta) = std::fs::symlink_metadata(&path) else { continue };
-        if meta.is_file() {
-            found.push((rel, path, meta.len()));
+    // In a workspace each repository is asked for its own files: the root's
+    // `git ls-files` (when the root is a repository too) lists none of them.
+    result.repos = workspace_repos(root, out_dir_name);
+    let mut repos = vec![String::new()];
+    repos.extend(result.repos.iter().cloned());
+    for repo in &repos {
+        for rel in tracked_but_ignored(root, repo, out_dir_name, &seen) {
+            let path = root.join(&rel);
+            let Ok(meta) = std::fs::symlink_metadata(&path) else { continue };
+            if meta.is_file() && seen.insert(rel.clone()) {
+                found.push((rel, path, meta.len()));
+            }
         }
     }
     let sphinx_txt = sphinx_txt_roots(&found);

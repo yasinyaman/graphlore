@@ -1317,6 +1317,10 @@ pub struct Project<'a> {
     pub by_path: HashMap<&'a str, usize>,
     pub family: Vec<Option<Family>>,
     pub manifests: Vec<(String, PathBuf)>,
+    /// Per file: the workspace repository it is in (`""`: none, or the
+    /// project is one repository).
+    pub repo: Vec<String>,
+    repos: Vec<String>,
     hubs: &'a [String],
     def_ids: &'a [Vec<Option<String>>],
     /// Per file: top-level definitions (no definition encloses them, or only
@@ -1465,6 +1469,7 @@ impl<'a> Project<'a> {
         files: &'a [FileFacts],
         asm: &'a Assembled,
         manifests: Vec<(String, PathBuf)>,
+        repos: &[String],
     ) -> Project<'a> {
         let by_path = files.iter().enumerate().map(|(i, f)| (f.path.as_str(), i)).collect();
         let family: Vec<Option<Family>> = files.iter().map(|f| f.lang.map(Family::of)).collect();
@@ -1474,6 +1479,18 @@ impl<'a> Project<'a> {
             by_path,
             family,
             manifests,
+            repo: files
+                .iter()
+                .map(|f| {
+                    repos
+                        .iter()
+                        .filter(|r| f.path.starts_with(&format!("{r}/")))
+                        .max_by_key(|r| r.len())
+                        .cloned()
+                        .unwrap_or_default()
+                })
+                .collect(),
+            repos: repos.to_vec(),
             hubs: &asm.hubs,
             def_ids: &asm.def_ids,
             top: Vec::new(),
@@ -4031,6 +4048,15 @@ impl<'a> Project<'a> {
     // ---- lookups ---------------------------------------------------------
 
     /// The best of several definitions: one with a body over a prototype.
+    /// The workspace repository a root-relative path is in (`""`: none).
+    pub fn repo_of_path(&self, path: &str) -> &str {
+        self.repos
+            .iter()
+            .filter(|r| path == r.as_str() || path.starts_with(&format!("{r}/")))
+            .max_by_key(|r| r.len())
+            .map_or("", |r| r.as_str())
+    }
+
     fn best(&self, cands: impl IntoIterator<Item = DefRef>) -> Option<DefRef> {
         let mut v: Vec<DefRef> = cands.into_iter().collect();
         v.sort_by_key(|r| (self.def(*r).decl_only, *r));
@@ -7575,7 +7601,7 @@ impl<'a> Project<'a> {
     fn crate_of(&self, f: usize) -> &str {
         let path = self.files[f].path.as_str();
         self.modsys
-            .rs_crates
+            .rs_crates_in
             .values()
             .map(|src| src.strip_suffix("src").unwrap_or(src).trim_end_matches('/'))
             .filter(|dir| dir.is_empty() || path.starts_with(&format!("{dir}/")))
@@ -8628,6 +8654,7 @@ pub fn resolve(
     files: &[FileFacts],
     asm: &mut Assembled,
     manifests: Vec<(String, PathBuf)>,
+    repos: &[String],
     diagnose: bool,
 ) -> (Vec<Value>, Vec<Value>, BTreeMap<String, ResolveStats>, Vec<Value>) {
     let mut edges: Vec<EdgeOut> = Vec::new();
@@ -8638,7 +8665,7 @@ pub fn resolve(
     let mut resource_nodes: Vec<(String, String, ResourceKind)> = Vec::new();
     let route_nodes: Vec<http::RouteNode>;
     {
-        let p = Project::new(root, files, asm, manifests);
+        let p = Project::new(root, files, asm, manifests, repos);
         let mut ext_seen: HashSet<String> = HashSet::new();
         let mut ext_target = |e: usize, rest: &[String], symbol: bool| -> String {
             let (id, label, eco) = p.ext_node_id(e, rest, symbol);

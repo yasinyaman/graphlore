@@ -345,8 +345,14 @@ pub fn build_graph(opts: &BuildOptions) -> Result<(Value, BuildReport), String> 
                 .or_default() += 1;
         }
     }
-    let (ext_nodes, edges, resolution, unresolved) =
-        resolve::resolve(&root, &facts, &mut assembled, found.manifests, opts.unresolved.is_some());
+    let (ext_nodes, edges, resolution, unresolved) = resolve::resolve(
+        &root,
+        &facts,
+        &mut assembled,
+        found.manifests,
+        &found.repos,
+        opts.unresolved.is_some(),
+    );
     if let Some(path) = &opts.unresolved {
         let text = serde_json::to_string(&unresolved).map_err(|e| e.to_string())?;
         std::fs::write(path, text).map_err(|e| format!("cannot write {}: {e}", path.display()))?;
@@ -438,6 +444,18 @@ pub fn build_graph(opts: &BuildOptions) -> Result<(Value, BuildReport), String> 
     top.insert("hyperedges".into(), json!([]));
     if let Some(commit) = opts.commit.as_ref().filter(|c| !c.is_empty()) {
         top.insert("built_at_commit".into(), json!(commit));
+    }
+    if !found.repos.is_empty() {
+        // a workspace: each repository's own commit, where the one
+        // `built_at_commit` of a single repository cannot say it
+        let repos: Map<String, Value> = found
+            .repos
+            .iter()
+            .map(|r| (r.clone(), json!({ "commit": walk::repo_commit(&root, r) })))
+            .collect();
+        if let Some(Value::Object(g)) = top.get_mut("graph") {
+            g.insert("repos".into(), Value::Object(repos));
+        }
     }
     let graph = Value::Object(top);
     if let Some(out) = &opts.out {

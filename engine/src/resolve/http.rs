@@ -292,7 +292,18 @@ pub(super) fn compose(p: &Project, files: &[FileFacts]) -> Vec<RouteNode> {
                 }
                 at.insert((f, r.method.clone(), pattern.clone()), out.len());
                 out.push(RouteNode {
-                    id: format!("route_{}_{}", r.method.to_ascii_lowercase(), slug(&pattern)),
+                    // in a workspace the repository leads the id, so that a
+                    // route another repository adds never renames this one
+                    id: if p.repo[f].is_empty() {
+                        format!("route_{}_{}", r.method.to_ascii_lowercase(), slug(&pattern))
+                    } else {
+                        format!(
+                            "route_{}_{}_{}",
+                            slug(&p.repo[f]),
+                            r.method.to_ascii_lowercase(),
+                            slug(&pattern)
+                        )
+                    },
                     label: format!("{} {}", r.method, pattern),
                     key: format!("{} {}", r.method, crate::http::normalize(&pattern)),
                     method: r.method.clone(),
@@ -441,11 +452,46 @@ pub(super) struct CallStats {
 
 const LOCAL_HOSTS: &[&str] = &["localhost", "127.0.0.1", "0.0.0.0", "[::1]"];
 
+/// The hosts a workspace's `.graphlore-workspace.json` gives its
+/// repositories (`{"repos": {"svc-b": {"hosts": ["svc-b.internal"]}}}`), by
+/// host, lowercased, without a port.
+fn workspace_hosts(p: &Project) -> HashMap<String, String> {
+    let mut out = HashMap::new();
+    let Ok(text) = std::fs::read_to_string(p.root.join(crate::walk::WORKSPACE_FILE)) else {
+        return out;
+    };
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) else { return out };
+    let Some(repos) = v["repos"].as_object() else { return out };
+    for (repo, conf) in repos {
+        let repo = repo.trim_matches('/');
+        for h in conf["hosts"].as_array().into_iter().flatten().filter_map(|h| h.as_str()) {
+            let h = h.trim().trim_end_matches('/').to_ascii_lowercase();
+            let h = h.split_once("://").map_or(h.as_str(), |(_, x)| x);
+            let h = h.rsplit_once(':').map_or(h, |(x, port)| {
+                if port.chars().all(|c| c.is_ascii_digit()) {
+                    x
+                } else {
+                    h
+                }
+            });
+            if !h.is_empty() {
+                out.insert(h.to_string(), repo.to_string());
+            }
+        }
+    }
+    out
+}
+
 /// The path a request reaches on this project's own server: `None` for
 /// another host or a URL with no path the source spells out. The flag says a
-/// leading part was guessed away (an unknown base: `${API_URL}/users`).
-fn request_path(url: &str) -> Result<(String, bool), &'static str> {
+/// leading part was guessed away (an unknown base: `${API_URL}/users`); the
+/// repository is the one a workspace's host map gives the URL's host.
+fn request_path(
+    url: &str,
+    hosts: &HashMap<String, String>,
+) -> Result<(String, bool, Option<String>), &'static str> {
     let mut guessed = false;
+    let mut repo = None;
     let mut rest = url.trim();
     for scheme in ["http://", "https://", "ws://", "wss://", "//"] {
         if let Some(r) = rest.strip_prefix(scheme) {
@@ -458,6 +504,11 @@ fn request_path(url: &str) -> Result<(String, bool), &'static str> {
                 }
             });
             if LOCAL_HOSTS.contains(&bare) {
+                rest = path;
+                break;
+            }
+            if let Some(r) = hosts.get(&bare.to_ascii_lowercase()) {
+                repo = Some(r.clone());
                 rest = path;
                 break;
             }
@@ -483,7 +534,7 @@ fn request_path(url: &str) -> Result<(String, bool), &'static str> {
     if !ok || segs.is_empty() || segs.iter().all(|s| s.starts_with('{')) {
         return Err("dynamic");
     }
-    Ok((format!("/{}", segs.join("/")), guessed))
+    Ok((format!("/{}", segs.join("/")), guessed, repo))
 }
 
 fn common_dir(a: &str, b: &str) -> usize {
@@ -501,6 +552,7 @@ pub(super) fn link_calls(
     if !any_call {
         return (out, stats);
     }
+    let hosts = workspace_hosts(p);
     let mut bases: HashMap<Key, (usize, PathExpr)> = HashMap::new();
     for (f, facts) in files.iter().enumerate() {
         for b in &facts.http.bases {
@@ -530,7 +582,7 @@ pub(super) fn link_calls(
                     url = format!("{}/{}", base.trim_end_matches('/'), url.trim_start_matches('/'));
                 }
             }
-            let (path, guessed) = match request_path(&url) {
+            let (path, guessed, to_repo) = match request_path(&url, &hosts) {
                 Ok(v) => v,
                 Err("external") => {
                     stats.external += 1;
@@ -550,6 +602,9 @@ pub(super) fn link_calls(
             let mut best_score = 0usize;
             for (i, rsegs) in by_len.get(&segs.len()).map(Vec::as_slice).unwrap_or(&[]) {
                 let r = &routes[*i];
+                if to_repo.as_ref().is_some_and(|repo| p.repo[r.file] != *repo) {
+                    continue;
+                }
                 let method_ok = match &c.method {
                     Some(m) => r.method == *m || r.method == "ANY",
                     None => true,
