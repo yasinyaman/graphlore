@@ -3,10 +3,10 @@
 graphlore is a local stdio MCP server. Every client below starts it the same
 way, as the command `graphlore` (installed as the [README](../README.md#quick-start)
 says), with `GRAPHLORE_PROJECT_DIR` naming the repository it reads (and
-`GRAPHLORE_TOOLSET=full` for all 34 tools; the default `lean` has 12). Once
-graphlore is on PyPI, `uvx --from "graphlore[engine,treesitter]" graphlore`
-starts it with nothing installed (`--command uvx` below); the examples on this
-page use that form.
+`GRAPHLORE_TOOLSET=full` for all 34 tools; the default `lean` has 12).
+`uvx --from "graphlore[engine,treesitter]" graphlore` starts it from PyPI with
+nothing installed (`--command uvx` below); the examples on this page use that
+form.
 
 The quickest way is to let graphlore write the block:
 
@@ -112,7 +112,42 @@ Claude Code cuts a tool description and the server instructions at 4,096
 characters (graphlore's stay under 900 and 4,000), warns at 10,000 tokens of
 output and stops at 25,000 (`MAX_MCP_OUTPUT_TOKENS`). Headless:
 `claude -p "<prompt>" --output-format json`.
+
+Claude Code defers MCP tools behind its tool search: until it searches, the
+model sees a tool's name and description only, which is why every `lean`
+tool's description says what it is for and what it is not for. To have
+graphlore's tools loaded from the start instead, set `"alwaysLoad": true` in
+the server's entry of `.mcp.json` (all of a server's tools load then, and
+startup waits up to 5 seconds for them), or turn deferral off for every server
+with `ENABLE_TOOL_SEARCH=false`. The 12 `lean` tools' definitions are about
+17,000 characters (~5k tokens), the 34 of `full` about 50,000.
 Source: [code.claude.com/docs/en/mcp](https://code.claude.com/docs/en/mcp).
+
+**Hooks.** An agent asked to find a name often greps for it, then reads file
+after file to learn who calls it. The plugin adds two command hooks
+(`.claude-plugin/hooks.json`; outside the plugin,
+`graphlore setup claude-code --write --with-hooks` merges the same two into
+`.claude/settings.json`, keeping every other hook, after a `.graphlore.bak`):
+
+- before a `Grep` or `Glob` whose pattern is one identifier the graph defines
+  (`compute`, `\bcompute\b`, `def compute`), a line of context names where
+  (`a.py:12`, at most three places) and that `graphlore_neighbors` /
+  `graphlore_impact` answer who calls it and what a change breaks;
+- after a `git commit`, `checkout`, `merge`, `pull` or `rebase` that moves
+  HEAD past the graph's build commit, or an edit of a source file, a line says
+  the graph is behind and how to update it, once per state.
+
+The hook never blocks a call and never changes its input: it adds
+`hookSpecificOutput.additionalContext` or prints nothing (any error, no graph,
+a git that does not answer within a second). It reads `graph.json` once per
+build into an index under `GRAPHLORE_CACHE_DIR`, so a call costs about 50 ms,
+and imports none of the server. Paths from the graph are passed on only when
+they are plain paths, and the line says they are repository data.
+`GRAPHLORE_HOOKS=0` turns both off. The plugin's hooks run
+`python3 -m graphlore.hooks` from the plugin's own copy, and say nothing where
+there is no `python3`.
+Source: [code.claude.com/docs/en/hooks](https://code.claude.com/docs/en/hooks),
+[plugin manifest](https://code.claude.com/docs/en/plugins/manifest-reference).
 
 ## Claude Desktop
 

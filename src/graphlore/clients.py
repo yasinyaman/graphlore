@@ -258,3 +258,63 @@ def write(client: Client, path: Path, cfg: dict[str, Any], user: bool = False) -
     path.write_text(new, encoding="utf-8")
     kept = " (the previous file is kept as " + path.name + ".graphlore.bak)" if old else ""
     return f"{path}: graphlore {'updated' if old else 'added'}{kept}"
+
+
+# --- Claude Code hooks (`graphlore setup claude-code --with-hooks`) ------------
+
+HOOK_EVENTS = {"PreToolUse": ("Grep|Glob", "pre"),
+               "PostToolUse": ("Bash|Edit|Write|MultiEdit", "post")}
+HOOK_TIMEOUT = 5  # seconds; the hook gives up on its own long before
+
+
+def hook_commands(cfg: dict[str, Any]) -> dict[str, str]:
+    """The shell command each hook event runs: ``graphlore hook <event>``,
+    started the way the server is (``cfg`` from :func:`server_config`)."""
+    base = shlex.join([cfg["command"], *cfg["args"]])
+    return {event: f"{base} hook {arg}" for event, (_m, arg) in HOOK_EVENTS.items()}
+
+
+def _is_ours(handler: Any) -> bool:
+    return isinstance(handler, dict) and " hook " in f" {handler.get('command', '')} " \
+        and "graphlore" in str(handler.get("command", ""))
+
+
+def write_hooks(path: Path, cfg: dict[str, Any]) -> str:
+    """Merge graphlore's two hooks into a Claude Code settings file (a
+    ``.claude/settings.json``): an earlier graphlore entry is replaced, every
+    other hook and setting kept, a backup written first."""
+    old = path.read_text(encoding="utf-8") if path.is_file() else ""
+    try:
+        data = json.loads(old) if old.strip() else {}
+    except json.JSONDecodeError as e:
+        raise SetupError(f"{path} is not plain JSON ({e}); add the hooks by hand "
+                         "(docs/clients.md)") from e
+    if not isinstance(data, dict):
+        raise SetupError(f"{path} does not hold a JSON object")
+    hooks = data.setdefault("hooks", {})
+    if not isinstance(hooks, dict):
+        raise SetupError(f"{path}: 'hooks' is not an object")
+    commands = hook_commands(cfg)
+    for event, (matcher, _arg) in HOOK_EVENTS.items():
+        groups = hooks.setdefault(event, [])
+        if not isinstance(groups, list):
+            raise SetupError(f"{path}: hooks.{event} is not a list")
+        kept = []
+        for g in groups:
+            if isinstance(g, dict) and isinstance(g.get("hooks"), list):
+                rest = [h for h in g["hooks"] if not _is_ours(h)]
+                if not rest:
+                    continue
+                g = {**g, "hooks": rest}
+            kept.append(g)
+        kept.append({"matcher": matcher, "hooks": [
+            {"type": "command", "command": commands[event], "timeout": HOOK_TIMEOUT}]})
+        hooks[event] = kept
+    new = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+    if new == old:
+        return f"{path}: graphlore's hooks are already set up"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _backup(path)
+    path.write_text(new, encoding="utf-8")
+    kept_note = " (the previous file is kept as " + path.name + ".graphlore.bak)" if old else ""
+    return f"{path}: graphlore's hooks {'updated' if old else 'added'}{kept_note}"

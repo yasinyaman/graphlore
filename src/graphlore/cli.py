@@ -15,6 +15,7 @@ The server module is imported only to run the server or to name its tools.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -70,6 +71,18 @@ def _cmd_setup(args: argparse.Namespace) -> int:
             print(f"ERROR: {e}", file=sys.stderr)
             return 1
         print(note)
+    if args.with_hooks:
+        if client.name != "claude-code":
+            print("--with-hooks: only Claude Code's hooks are known (docs/clients.md)",
+                  file=sys.stderr)
+            return 2
+        settings = (Path(os.path.expanduser("~/.claude/settings.json")) if args.user
+                    else project / ".claude" / "settings.json")
+        try:
+            print(clients.write_hooks(settings, server_cfg))
+        except clients.SetupError as e:
+            print(f"ERROR: {e}", file=sys.stderr)
+            return 1
     if args.with_agents_md:
         guide = project / client.guide_file
         print(_write_guide(guide, agents_md.render(_tools_of(args.toolset))))
@@ -85,11 +98,31 @@ def _cmd_agents_md(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_review(args: argparse.Namespace) -> int:
+    if args.project:
+        import os
+
+        os.environ["GRAPHLORE_PROJECT_DIR"] = str(Path(args.project).resolve())
+    from . import change_review, config
+
+    if args.project:
+        config.PROJECT_DIR = Path(args.project).resolve()
+    fail_on = tuple(x.strip() for x in args.fail_on.split(",") if x.strip())
+    return change_review.run(args.base, args.head, fmt=args.format, fail_on=fail_on,
+                             build=not args.no_build, hops=args.hops, output=args.output)
+
+
+def _cmd_hook(args: argparse.Namespace) -> int:
+    from . import hooks
+
+    return hooks.main([args.event])
+
+
 def _parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="graphlore",
         description="With no arguments: run the graphlore MCP server (stdio). "
-                    "The subcommands set an MCP client up for it.")
+                    "The subcommands set an MCP client up for it, or review a change.")
     sub = p.add_subparsers(dest="cmd")
     s = sub.add_parser("setup", help="the MCP config block for a client, printed or merged")
     s.add_argument("client", help="see `graphlore clients`")
@@ -104,6 +137,9 @@ def _parser() -> argparse.ArgumentParser:
                    help="merge it into the config file (a backup is kept)")
     s.add_argument("--with-agents-md", action="store_true",
                    help="also write the usage guide into the file this client reads")
+    s.add_argument("--with-hooks", action="store_true",
+                   help="claude-code: also merge graphlore's hooks into .claude/settings.json "
+                        "(a pointer to the graph on a Grep for a name, a note when it goes stale)")
     s.set_defaults(fn=_cmd_setup)
     c = sub.add_parser("clients", help="the clients `setup` knows")
     c.set_defaults(fn=_cmd_clients)
@@ -112,6 +148,30 @@ def _parser() -> argparse.ArgumentParser:
     a.add_argument("--write", metavar="PATH",
                    help="merge it into this file (between its graphlore markers)")
     a.set_defaults(fn=_cmd_agents_md)
+    r = sub.add_parser("review", help="what a commit range changes, read off the code graph",
+                       description="A deterministic report of a commit range: the definitions "
+                                   "it touches, what depends on them, the tests that reach them, "
+                                   "and the import cycles and layer rules it brings in. Exit 0 "
+                                   "clean, 1 a --fail-on gate failed, 2 no review possible.")
+    r.add_argument("--base", default="HEAD~1",
+                   help="the commit the change is compared with, through its merge base")
+    r.add_argument("--head", default="HEAD", help="the changed commit; it must be checked out")
+    r.add_argument("--project", default="", help="the project directory (default: here)")
+    r.add_argument("--format", default="markdown", choices=("markdown", "json"))
+    r.add_argument("--fail-on", default="",
+                   help="comma-separated gates that exit 1: cycle (a runtime import cycle "
+                        "introduced), layer (a layer rule broken on a changed line), untested "
+                        "(a changed definition no test reaches)")
+    r.add_argument("--hops", type=int, default=3, help="how far dependents are followed")
+    r.add_argument("--no-build", action="store_true",
+                   help="refuse instead of building the graph when it is not at the head commit")
+    r.add_argument("--output", default="", help="write the report to this file")
+    r.set_defaults(fn=_cmd_review)
+    h = sub.add_parser("hook", help="a Claude Code hook: the call's JSON on stdin, a note on "
+                                    "stdout (`graphlore setup claude-code --with-hooks`)")
+    h.add_argument("event", choices=("pre", "post"),
+                   help="pre: PreToolUse on Grep/Glob; post: PostToolUse on Bash/Edit/Write")
+    h.set_defaults(fn=_cmd_hook)
     return p
 
 

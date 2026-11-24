@@ -66,3 +66,16 @@ PROJECT_DIR = Path(env("PROJECT_DIR", ".")).resolve()
 PROJECT_FROM_CLIENT = _truthy(env("PROJECT_FROM_CLIENT")) and env("PROJECT_DIR") is None
 project_pending = PROJECT_FROM_CLIENT
 OUT_DIR_NAME = env("OUT_DIR", "graphify-out")
+
+
+def cache_root() -> Path | None:
+    """graphlore's cache directory on this machine, never in a project:
+    ``GRAPHLORE_CACHE_DIR``, else ``$XDG_CACHE_HOME/graphlore`` or
+    ``~/.cache/graphlore``; None when ``GRAPHLORE_CACHE_DIR`` is off."""
+    raw = (env("CACHE_DIR", "") or "").strip()
+    if raw.lower() in ("off", "none", "0", "false", "no"):
+        return None
+    if raw:
+        return Path(raw).expanduser()
+    base = os.environ.get("XDG_CACHE_HOME") or os.path.join(os.path.expanduser("~"), ".cache")
+    return Path(base) / "graphlore"

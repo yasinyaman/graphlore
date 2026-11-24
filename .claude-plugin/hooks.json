@@ -1,0 +1,29 @@
+{
+  "description": "graphlore: a pointer to the code graph when Grep looks for a name it defines, and a note when a commit or an edit leaves the graph behind. GRAPHLORE_HOOKS=0 turns them off.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Grep|Glob",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "command -v python3 >/dev/null 2>&1 && PYTHONPATH=\"${CLAUDE_PLUGIN_ROOT}/src\" python3 -m graphlore.hooks pre || true",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash|Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "command -v python3 >/dev/null 2>&1 && PYTHONPATH=\"${CLAUDE_PLUGIN_ROOT}/src\" python3 -m graphlore.hooks post || true",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -2,7 +2,9 @@
 it starts graphlore over stdio, makes the tool calls its transcript lists for
 the prompt it is given, and prints Claude Code's stream-json shape (a
 `tool_use` per call, then a `result` with the transcript's answer and the
-characters the tools returned, /4, as input tokens).
+characters the tools returned, /4, as input tokens). With `--no-mcp` (the
+baseline) it has no graphlore: one `Grep` call and the transcript's
+`baseline_answer`, or "I do not know.".
 
     python fake_agent.py --project REPO --transcript fake_transcript.json --prompt "..."
 """
@@ -37,9 +39,17 @@ def main() -> int:
     p.add_argument("--project", required=True)
     p.add_argument("--transcript", required=True)
     p.add_argument("--prompt", required=True)
+    p.add_argument("--no-mcp", action="store_true")
     a = p.parse_args()
     script = json.load(open(a.transcript, encoding="utf-8"))
     step = next((s for s in script if s["match"] in a.prompt), None)
+    if a.no_mcp:
+        answer = (step or {}).get("baseline_answer", "I do not know.")
+        print(json.dumps({"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "name": "Grep", "input": {"pattern": a.prompt[:20]}}]}}))
+        print(json.dumps({"type": "result", "result": answer,
+                          "usage": {"input_tokens": 5000, "output_tokens": len(answer) // 4}}))
+        return 0
     if step is None:
         print(json.dumps({"type": "result", "result": "I do not know.",
                           "usage": {"input_tokens": 0, "output_tokens": 4}}))

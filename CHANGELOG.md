@@ -6,7 +6,67 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-23
+
+The first release on PyPI: 0.7.0, below, was never uploaded, so `pip install graphlore` installs
+0.8.0 with the changes of both.
+
 ### Added
+- **Claude Code hooks** (`graphlore hook pre|post`). Before a `Grep` or
+  `Glob` for one identifier the graph defines, a line of context names where
+  it is defined and that `graphlore_neighbors` / `graphlore_impact` answer
+  the question such a search usually leads to; after a git command that moves
+  HEAD past the graph's build commit, or an edit of a source file, a line says
+  the graph is behind, once per state. The hook never blocks or changes a
+  call, imports none of the server (about 50 ms a call), keeps an index of the
+  graph's names under `GRAPHLORE_CACHE_DIR`, passes on only plain paths and is
+  silent on any error. The Claude Code plugin ships them
+  (`.claude-plugin/hooks.json`); `graphlore setup claude-code --write
+  --with-hooks` merges them into `.claude/settings.json`, keeping every other
+  hook. `GRAPHLORE_HOOKS=0` turns them off.
+- **A GitHub Action for `graphlore review`** (`action.yml` at the root,
+  `uses: yasinyaman/graphlore@<tag>`): it installs graphlore with the native
+  engine from its own copy, reviews the pull request against its base commit,
+  writes the report to the job summary and posts it as one comment it updates
+  on each push (a fork's read-only token: the summary only). `fail-on` fails
+  the step on a gate. graphlore's own pull requests run it
+  (`.github/workflows/review.yml`). `docs/review.md` covers the command, the
+  Action and a GitLab CI job.
+- **`graphlore review`: what a commit range changes, read off the code
+  graph.** `graphlore review --base origin/main` (or `--base HEAD~1`, the
+  default) compares the checked-out commit with its merge base and reports
+  the definitions the change touches (each changed line of a source file
+  given to the innermost definition around it, a line no definition holds to
+  the file's top level), what depends on any of them within `--hops` (one
+  walk, nearest first, production before tests, cut at 60 rows with the rest
+  counted), the tests that reach the changed definitions (direct or through
+  one caller) and the ones no test reaches, the import cycles through changed
+  files and the `.graphlore-layers.json` violations in them, each marked
+  `introduced` when the import is written on a changed line. Cosmetic-only
+  files are left out. It builds the graph at the head commit with the native
+  engine when it is missing or older (`--no-build` refuses instead), writes
+  Markdown for a pull-request comment (repository names as code spans, at
+  most 20,000 characters) or `--format json`, and exits 1 when a
+  `--fail-on cycle,layer,untested` gate fails, 2 when no review can be made
+  (an unknown ref, a shallow clone, another commit checked out). No model and
+  no network.
+- **The agent evaluation has a baseline and repeats** (`benchmarks/agents`).
+  `--variants baseline` runs each agent with no graphlore, in a copy of the
+  repository without `graphify-out/`; `--repeat N` asks each task N times (no
+  agent CLI takes a seed). Every arm keeps the agent's own read and search
+  tools: the Claude Code adapter allowed only `mcp__graphlore` before, so its
+  `-p` runs had no Read or Grep. Rows record every tool called (`calls`),
+  and `score.py` reports solved per repetition as mean ± standard deviation,
+  tokens ± their deviation, and each graphlore arm's difference from the same
+  agent's baseline. Still not run: it needs each agent's own login.
+- **Stateless streamable HTTP** (`GRAPHLORE_STATELESS_HTTP=1`): each request
+  is answered on its own, with no `Mcp-Session-Id`, so replicas behind a load
+  balancer can share the traffic; `GRAPHLORE_JSON_RESPONSE=1` answers with a
+  JSON body instead of an SSE stream. Both are passed to the SDK's
+  streamable-HTTP app on every HTTP path (plain, API key, OAuth) and ignored,
+  with a warning, for `sse`. Over HTTP, `GRAPHLORE_PROJECT_FROM_CLIENT` now
+  stops the server at boot with exit code 2: `graphlore_project` is refused
+  there, so no project could ever be set.
 - **The built-in search's kernel runs in the native engine** (graphlore-engine
   0.5.80, not yet published: `SearchKernel`, `KERNEL_ABI = 1`). When the
   engine is installed, its port of `search.py`'s tokenizer and BM25F loop
@@ -28,6 +88,38 @@ All notable changes to this project are documented here. The format is based on
   release. A published release still starts it as before.
 
 ### Changed
+- **The README says what graphlore is for beside a language server and
+  built-in code search**: the questions that need the whole repository at once
+  (what a change breaks, cycles, layers, routes, shared state), one budgeted
+  reply each. A new FAQ entry and `docs/comparison.md` place it beside Claude
+  Code's LSP tool, code search and other code-graph MCP servers, each claim
+  from the project's own page, dated. Graphify is linked at its source
+  repository (`Graphify-Labs/graphify`, which its PyPI page names as the
+  official one) instead of graphify.net, in the README, `pyproject.toml` and
+  the server's docstring; the plugin descriptions no longer say "instead of
+  grepping".
+- **`import graphlore` no longer loads the server.** The package's exports
+  (`main`, `mcp`, `__version__`, `api_uses_for_source`, `routes_for_source`)
+  load on first use, so `graphlore setup`, `clients` and `agents-md` start in
+  about 25 ms instead of 0.6 s (the MCP SDK and the 34 tools were imported
+  first).
+- **Communities are named from the graph by default, with no model.**
+  `graphlore_label_communities(method="auto")` now returns derived names
+  (`method="derived"`): the build's own `community_name` on a native graph,
+  else the engine's rule applied in Python (the member with the most edges,
+  internal before external, after the directory more than 60% of the members
+  share), which `tests/test_engine.py` holds to the engine's names. `auto`
+  used to sample the client's model when it could and fall back to bare
+  `Community N` otherwise; MCP's 2026-07-28 revision deprecates sampling
+  (SEP-2577) and a stateless server has no session to sample through, so
+  `method="sampling"` is now only used when asked for.
+  `graphlore_sampling_status` reports `preferred_method: "derived"`.
+- **Every `lean` tool's description says what it is for and what it is not
+  for** ("Use for: … Not for: … (use X)"). Claude Code defers MCP tools behind
+  its tool search, where a tool is picked by its name and description alone;
+  the guidance was only in the server instructions. `graphlore_impact`'s and
+  `graphlore_locate`'s descriptions are shorter to make room. `docs/clients.md`
+  says how to load graphlore's tools up front (`"alwaysLoad": true`).
 - **The built-in search index is the default, semble is opt-in.**
   `GRAPHLORE_SEMANTIC_BACKEND` unset (or `auto`) now means graphlore's own
   index whether or not semble is installed; semble answers only with

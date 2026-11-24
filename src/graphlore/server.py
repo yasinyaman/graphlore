@@ -3,7 +3,7 @@
 
 Lets an AI assistant query the codebase knowledge graph during development. The
 graph is built by graphlore's native engine (engine/, the graphlore-engine
-package), or by the graphify CLI (https://graphify.net) when the engine is not
+package), or by the graphify CLI (https://github.com/Graphify-Labs/graphify) when the engine is not
 installed; what this module adds is the span engine (ast + tree-sitter
 ``start..end`` ranges) and the tools that read the graph — locate/hidden links,
 fetch, skeleton, routes, package_apis, and cosmetic-vs-structural freshness.
@@ -62,7 +62,7 @@ Project selection:
   - graphlore_project    : show / switch the project directory the server reads
 
 Community naming:
-  - graphlore_label_communities : name Leiden clusters (host-LLM sampling)
+  - graphlore_label_communities : name Leiden clusters (from the graph; sampling on request)
   - graphlore_sampling_status   : report which naming options are available
   - graphlore_set_labels        : assistant-pushed {id: name} (no key, no sampling)
 
@@ -280,7 +280,7 @@ from .spans import (  # noqa: F401
 # Configuration
 # ---------------------------------------------------------------------------
 
-__version__ = "0.7.0"
+__version__ = "0.8.0"
 
 # Printed by graphlore_project and graphlore_overview. A client keeps the tool
 # schemas it loaded before a plugin update; an agent that reads "graphlore 0.5.1"
@@ -1787,6 +1787,8 @@ def graphlore_project(path: str = "", as_json: bool = False) -> str:
     version: a schema that lacks a parameter this version documents means the
     client loaded it before an update. Refused while GRAPHLORE_RESTRICT_PATHS is on
     (always over HTTP). The opt-in watcher keeps syncing only the start directory.
+    Use for: which repository the tools read. Not for: building a graph (use
+    graphlore_build).
 
     Args:
         path: Directory to switch to, absolute or relative to the current
@@ -1932,7 +1934,8 @@ def graphlore_build(
     counts and warnings. GRAPHLORE_ENGINE picks the extractor: ``auto`` (default)
     uses graphlore's native engine when installed (14 languages, all local) and
     the deprecated graphify CLI otherwise. A graph.html view is written beside
-    graph.json unless ``no_viz``.
+    graph.json unless ``no_viz``. Use for: a missing or stale graph. Not for: a
+    question about the code (the other tools read the graph built here).
 
     Args:
         path: Folder to read, relative to the project or absolute.
@@ -2787,6 +2790,8 @@ def graphlore_overview(top_n: int = 8, as_json: bool = False) -> str:
 
     Returns graph size, top god nodes, community count, surprise-edge count and
     suggested starting questions — enough to plan further exploration cheaply.
+    Use for: the first look at a repository. Not for: one named symbol (use
+    graphlore_locate or graphlore_node_details).
 
     Args:
         top_n: How many god nodes and communities to list.
@@ -3370,8 +3375,9 @@ def graphlore_communities(limit: int = 30, members: int = 15, as_json: bool = Fa
 
     A community carries a ``name`` when it has one: set with
     graphlore_set_labels / graphlore_label_communities
-    (``graphify-out/.graphify_labels.json``), else the one graphify wrote on the
-    nodes.
+    (``graphify-out/.graphify_labels.json``), else the one the build wrote on the
+    nodes. Use for: the parts the code splits into and what each holds. Not for:
+    one symbol's neighbourhood (use graphlore_subgraph).
 
     Args:
         limit: Communities listed, largest first. ``total`` is how many there are.
@@ -3433,18 +3439,19 @@ def graphlore_sampling_status(ctx: Context, as_json: bool = False) -> str:
     """Capability test: how can semantic naming be produced in this session?
 
     Reports whether the connected client supports host-LLM **sampling** (so the
-    server needs no API key), and which method graphlore_label_communities will pick.
+    server needs no API key), and the method graphlore_label_communities uses by
+    default (``derived``: names from the graph, no model).
     """
     sampling = _client_supports_sampling(ctx)
+    method = "derived"
     if sampling:
-        method = "sampling"
-        advice = "graphlore_label_communities() will use the host LLM — no API key needed."
-    else:
-        method = "placeholder"
         advice = (
-            "No host sampling — names stay as 'Community N'. Name them yourself with "
-            "graphlore_set_labels (assistant-driven, no key)."
-        )
+            "graphlore_label_communities() derives names from the graph (no model); "
+            "method='sampling' asks the host LLM instead — no API key needed.")
+    else:
+        advice = (
+            "No host sampling. graphlore_label_communities() derives names from the "
+            "graph (no model); name them yourself with graphlore_set_labels.")
     payload = {
         "host_sampling_supported": sampling,
         "preferred_method": method,
@@ -3481,6 +3488,85 @@ def _communities_for_naming(limit: int) -> tuple[list[tuple[Any, list[str]]], in
     return sorted(comms.items(), key=lambda kv: -len(kv[1]))[:max(0, limit)], len(comms)
 
 
+# the engine's rule (engine/src/community/mod.rs, name_of): a directory names a
+# community when more than this share of its placed members sit in it
+_DIR_NAME_SHARE = 0.6
+
+
+def _derived_community_names(
+    nodes: list[dict], edges: list[dict], cids: list[Any]
+) -> dict[Any, str]:
+    """Names for communities without asking any model: the build's own.
+
+    A native graph carries the engine's ``community_name`` on every node; this
+    returns it. Otherwise (a graphify graph) it applies the same rule as the
+    engine: the member with the most edges names the community (internal nodes
+    before external ones, ties by id), and when most of the members sit in one
+    directory the directory comes first (``httpx/_transports: HTTPTransport``).
+    Deterministic for a given graph.json, free, and needs no session.
+    """
+    wanted = set(cids)
+    members: dict[Any, list[dict]] = {}
+    for n in nodes:
+        c = n.get("community", n.get("cluster"))
+        if c in wanted:
+            members.setdefault(c, []).append(n)
+    names: dict[Any, str] = {}
+    degree: dict[str, int] | None = None
+    for cid in cids:
+        group = members.get(cid) or []
+        given = next((str(n["community_name"]).strip() for n in group
+                      if str(n.get("community_name") or "").strip()), "")
+        if given:
+            names[cid] = given
+            continue
+        if not group:
+            names[cid] = f"Community {cid}"
+            continue
+        if degree is None:
+            degree = _naming_degrees(nodes, edges)
+        deg = degree
+        hub = min(group, key=lambda n: (n.get("type") in ("external", "resource"),
+                                        -deg.get(str(_node_id(n)), 0), str(_node_id(n))))
+        name = str(hub.get("label") or "").strip().lstrip(".")
+        if name.endswith("()"):
+            name = name[:-2]
+        name = name or str(_node_id(hub))
+        dirs: dict[str, int] = {}
+        placed = 0
+        for n in group:
+            f = str(n.get("source_file") or "")
+            if f:
+                placed += 1
+                d = f.rsplit("/", 1)[0] if "/" in f else ""
+                dirs[d] = dirs.get(d, 0) + 1
+        if dirs:
+            top, count = min(dirs.items(), key=lambda kv: (-kv[1], kv[0]))
+            if top and len(group) > 1 and count > _DIR_NAME_SHARE * placed:
+                name = f"{top}: {name}"
+        names[cid] = name
+    return names
+
+
+def _naming_degrees(nodes: list[dict], edges: list[dict]) -> dict[str, int]:
+    """Edges per node as the engine counts them for naming: between two known
+    nodes, no self-loop, and none of the derived relations (a shared-state
+    pair, a document naming code, a method written for a base's method)."""
+    known = {str(_node_id(n)) for n in nodes}
+    degree: dict[str, int] = {}
+    for e in edges:
+        a, b = (str(x) for x in _edge_ends(e))
+        if a == b or a not in known or b not in known:
+            continue
+        rel = _edge_rel(e)
+        if (rel in _COUPLING_RELATIONS or rel in _DOCUMENT_RELATIONS
+                or (rel == "dispatches_to" and e.get("context") == "override")):
+            continue
+        degree[a] = degree.get(a, 0) + 1
+        degree[b] = degree.get(b, 0) + 1
+    return degree
+
+
 def _naming_request(
     ordered: list[tuple[Any, list[str]]], sample_size: int
 ) -> tuple[list[SamplingMessage], str, int]:
@@ -3514,10 +3600,10 @@ def _resolve_host_naming(
     this returns None and the tool body samples directly instead: that path
     can catch a failing host model and degrade to placeholder names, which a
     resolver cannot (Sample has no error arm — a failure would error the whole
-    tool call). Also None when sampling isn't the (potential) method, the
+    tool call). Also None when sampling isn't the method asked for, the
     client can't sample, or there is nothing to name.
     """
-    if method not in ("auto", "sampling") or not _client_supports_sampling(ctx):
+    if method != "sampling" or not _client_supports_sampling(ctx):
         return None
     if ctx.session.can_send_request:
         return None
@@ -3563,7 +3649,7 @@ def _names_from_sampling(
 
 @_tool(
     annotations=ToolAnnotations(
-        title="Name communities (host LLM)",
+        title="Name communities",
         read_only_hint=False,
         destructive_hint=False,
     )
@@ -3584,11 +3670,17 @@ async def graphlore_label_communities(
 ) -> str:
     """Give the Leiden communities human-readable names.
 
+    By default the names are derived from the graph, with no model: the build's
+    own (``community_name``), else the same rule applied here (the most
+    connected member, after its directory when most members share one).
+    ``method="sampling"`` asks the client's model instead (MCP sampling,
+    deprecated in the 2026-07-28 revision). Nothing is saved: persist names
+    with graphlore_set_labels.
+
     Args:
-        method: "auto" -> host-LLM sampling if the client supports it, else
-            "Community N" placeholders (name them yourself with
-            graphlore_set_labels). "sampling" -> force host-LLM sampling (no API
-            key needed). "placeholder" -> no LLM at all.
+        method: "auto" or "derived" -> names from the graph, no model.
+            "sampling" -> the client's model (MCP sampling, no API key).
+            "placeholder" -> "Community N".
         limit: Only the largest `limit` communities are named, to stay cheap.
         sample_size: Member labels per community handed to the model.
     """
@@ -3606,11 +3698,11 @@ async def graphlore_label_communities(
             "yourself with graphlore_set_labels.",
             as_json, code="removed",
         )
-    if method not in ("auto", "sampling", "placeholder"):
-        return _err(f"Unknown method '{method}': use auto, sampling or placeholder.",
+    if method not in ("auto", "derived", "sampling", "placeholder"):
+        return _err(f"Unknown method '{method}': use auto, derived, sampling or placeholder.",
                     as_json, code="bad_argument")
     if method == "auto":
-        chosen = "sampling" if sampling_ok else "placeholder"
+        chosen = "derived"
 
     names: dict[Any, str] = {}
     note = ""
@@ -3643,6 +3735,10 @@ async def graphlore_label_communities(
         names, note = _names_from_sampling(host_naming, ordered)
         if fail_note:
             note = fail_note
+    elif chosen == "derived":
+        graph = _load_graph()
+        g_nodes, g_edges = _nodes_edges(graph) if isinstance(graph, dict) else ([], [])
+        names = _derived_community_names(g_nodes, g_edges, [cid for cid, _ in ordered])
     else:  # placeholder
         names = {cid: f"Community {cid}" for cid, _ in ordered}
 
@@ -3668,8 +3764,14 @@ async def graphlore_label_communities(
     ]
     if chosen == "placeholder":
         text.append(
-            "\nNo automatic naming available. Name these yourself and persist them with "
+            "\nPlaceholder names. Name these yourself and persist them with "
             'graphlore_set_labels({"<id>": "<name>", ...}).'
+        )
+    elif chosen == "derived":
+        text.append(
+            "\nDerived from each community's most connected member and its directory. "
+            + _tool_hint("graphlore_set_labels", "Better names: persist them with "
+                         'graphlore_set_labels({"<id>": "<name>", ...}).')
         )
     return _fmt(payload, as_json, "\n".join(text))
 
@@ -3766,6 +3868,10 @@ def graphlore_set_labels(
 def graphlore_search(pattern: str, limit: int = 25, as_json: bool = False) -> str:
     """Search nodes by text in their name/label (case-insensitive).
 
+    Use for: a node's exact id from part of its name. Not for: text inside
+    function bodies (grep is faster) or code described by what it does (use
+    graphlore_locate).
+
     Args:
         pattern: Text to find in node names and labels.
         limit: Cap on nodes listed; ``total`` counts them all.
@@ -3851,6 +3957,8 @@ def graphlore_neighbors(
     imported module, ``mod.func()``), which graph.json alone does not carry.
     A hub has more neighbors than fit a reply: past ``limit`` the result says
     how many there are (``total``) and how they split by relation (``counts``).
+    Use for: one hop around one symbol. Not for: what a change reaches further
+    away (use graphlore_impact).
 
     Args:
         node: The node (id, label or bare name). When several nodes match, the
@@ -3935,6 +4043,8 @@ def graphlore_subgraph(
     production code first, most connected first, so a hub function's budget goes
     to its real callers before its tests; when the budget cuts the walk short the
     result says how many direct neighbors were left out and how many were tests.
+    Use for: the structure around a symbol in one reply. Not for: its source
+    text (use graphlore_fetch).
 
     Args:
         node: Center node (id, label or bare name). When several nodes match, the
@@ -4100,16 +4210,17 @@ def graphlore_impact(
 ) -> str:
     """Blast radius: what is affected if ``node`` changes (or what it depends on).
 
-    direction="dependents" (default) walks what references the node, "dependencies"
-    what it references, "both" either way by nearest hop. Rows are ordered by hop
-    distance, production code before tests, under a token budget; each carries its
-    edge's ``relation``, ``confidence`` (INFERRED edges are included; ``strict=True``
-    walks only extracted ones) and one recorded ``site``. ``truncated`` /
-    ``dropped`` / ``beyond_hops`` say what was left out. Docstring nodes are not
-    dependents; shared state (``reads`` / ``writes``) is followed only with
-    ``shared_state=True``. ``chokepoints`` names the nodes every path to the start
-    runs through for many others (dominator tree), with how many each ``shields``.
+    direction="dependents" (default) walks what references the node,
+    "dependencies" what it references, "both" either way. Rows are ordered by hop,
+    production before tests, under a token budget, each with its edge's
+    ``relation``, ``confidence`` (``strict=True``: extracted edges only) and a
+    ``site``; ``truncated`` / ``dropped`` / ``beyond_hops`` say what was left out.
+    Shared state (``reads`` / ``writes``) is followed only with
+    ``shared_state=True``. ``chokepoints`` are the nodes every path to the start
+    runs through for many others (dominator tree), with what each ``shields``.
     An empty result means no edge was indexed, not that the code has none.
+    Use for: what a change reaches, transitively, in one call. Not for: one hop
+    (use graphlore_neighbors).
 
     Args:
         node: The node: an id, a label or a bare name (fuzzy match, reported).
@@ -4619,11 +4730,11 @@ def graphlore_locate(
     connected: duplication or hidden coupling). ``calls_into`` lists what the seed
     calls in other files, ``also_matched`` the other top hits by definition.
     ``backend`` says which search answered: the built-in index (BM25; [embed]
-    adds embeddings for questions worded unlike the code), or semble if set. The first call
-    may download minishlab/potion-code-16M-v2 from the Hugging Face Hub once and
-    cache it; prefetch with ``python -c "from model2vec import StaticModel;
-    StaticModel.from_pretrained('minishlab/potion-code-16M-v2')"``. Offline with no
-    cached model it answers with BM25 alone, and says so.
+    adds embeddings), or semble if set. A first call may download
+    minishlab/potion-code-16M-v2 from the Hugging Face Hub once (prefetch:
+    ``StaticModel.from_pretrained`` of model2vec); offline with no cached model it
+    answers with BM25 alone, and says so. Use for: code described by what it
+    does. Not for: an exact identifier or string (grep is faster).
 
     Args:
         query: A natural-language question or code phrase ("where are redirects
@@ -5200,7 +5311,8 @@ def graphlore_node_details(node: str, as_json: bool = False) -> str:
     fields, constants, resources) and ``shared_with`` the other definitions that
     touch the same state, each with how: the code this one affects, or is
     affected by, without a call between them. For a variable or field it lists
-    its readers and writers instead.
+    its readers and writers instead. Use for: everything known about one node.
+    Not for: its source (use graphlore_fetch).
 
     Args:
         node: The node: an id, a label or a bare name.
@@ -5413,6 +5525,8 @@ def graphlore_fetch(
     line and says so (``cut``). Names resolve like everywhere else (``matched``;
     a miss goes to ``not_found`` with ``did_you_mean``). ``file_changed_since_build``
     and ``span_mismatch`` warn when the file moved on since the graph was built.
+    Use for: the code of nodes already found. Not for: finding them (use
+    graphlore_locate or graphlore_search).
 
     Args:
         nodes: Node names, labels or ids (e.g. ["Client._send_single_request"]).
@@ -5824,6 +5938,8 @@ def graphlore_freshness(as_json: bool = False) -> str:
     ``built_at_commit`` is recorded but unreachable in this clone (shallow clone,
     gc, rebase or squash), incremental update can't trust its base, so a full
     rebuild is recommended rather than a crash or a misleading "older commit".
+    Use for: whether to trust the graph or rebuild it first. Not for: what
+    changed in the code itself (git diff shows that).
     """
     gp = _graph_path()
     if not gp.exists():
@@ -7757,6 +7873,25 @@ def review() -> str:
     )
 
 
+def _streamable_http_options(transport: str) -> tuple[bool, bool]:
+    """GRAPHLORE_STATELESS_HTTP / GRAPHLORE_JSON_RESPONSE -> (stateless, json).
+
+    Stateless: a fresh transport per request, no ``Mcp-Session-Id``, so any
+    replica behind a load balancer can answer any request; the server then has
+    no session to ask the client for roots or sampling. JSON response: one JSON
+    body instead of an SSE stream. Both are streamable-HTTP options; SSE takes
+    neither (a warning, then they are ignored).
+    """
+    stateless = config._truthy(config.env("STATELESS_HTTP", ""))
+    json_response = config._truthy(config.env("JSON_RESPONSE", ""))
+    if transport == "sse":
+        if stateless or json_response:
+            print("WARNING: GRAPHLORE_STATELESS_HTTP / GRAPHLORE_JSON_RESPONSE apply "
+                  "to streamable-http only; ignored for sse.", file=sys.stderr)
+        return False, False
+    return stateless, json_response
+
+
 def _transport_security() -> TransportSecuritySettings | None:
     """GRAPHLORE_ALLOWED_HOSTS -> the SDK's DNS-rebinding settings, or None.
 
@@ -8098,6 +8233,8 @@ def main() -> None:
     that re-syncs the graph on structural source changes (needs the [watch] extra).
     GRAPHLORE_ALLOWED_HOSTS tunes the SDK's DNS-rebinding Host allowlist ("*" disables
     it) — needed when a reverse proxy in front doesn't rewrite the Host header.
+    GRAPHLORE_STATELESS_HTTP=1 serves streamable HTTP with no session (any replica
+    answers any request); GRAPHLORE_JSON_RESPONSE=1 answers with plain JSON.
     """
     _export_offline_env()  # first: before anything can import a download-capable library
     _apply_toolset()
@@ -8121,7 +8258,15 @@ def main() -> None:
     if is_http:
         global RESTRICT_PATHS
         RESTRICT_PATHS = True
+        if config.project_pending:
+            # over HTTP graphlore_project is refused (RESTRICT_PATHS) and a
+            # stateless server has no roots to ask: no project could ever be set
+            print("ERROR: GRAPHLORE_PROJECT_FROM_CLIENT is for stdio plugins; over HTTP "
+                  "set GRAPHLORE_PROJECT_DIR to the project this server reads.",
+                  file=sys.stderr)
+            sys.exit(2)
         security = _transport_security()
+        stateless, json_response = _streamable_http_options(transport)
         from . import oauth  # lazily: pyjwt only when OAuth is asked for
 
         try:
@@ -8143,7 +8288,9 @@ def main() -> None:
                   file=sys.stderr)
             app = (mcp.sse_app(host=HTTP_HOST, transport_security=security)
                    if transport == "sse"
-                   else mcp.streamable_http_app(host=HTTP_HOST, transport_security=security))
+                   else mcp.streamable_http_app(host=HTTP_HOST, transport_security=security,
+                                            stateless_http=stateless,
+                                            json_response=json_response))
             uvicorn.run(app, host=HTTP_HOST, port=HTTP_PORT,
                         log_level=mcp.settings.log_level.lower())
         elif API_KEY:
@@ -8155,7 +8302,9 @@ def main() -> None:
             base = (
                 mcp.sse_app(host=HTTP_HOST, transport_security=security)
                 if transport == "sse"
-                else mcp.streamable_http_app(host=HTTP_HOST, transport_security=security)
+                else mcp.streamable_http_app(host=HTTP_HOST, transport_security=security,
+                                             stateless_http=stateless,
+                                             json_response=json_response)
             )
             app = _bearer_auth_asgi(base, API_KEY)
             uvicorn.run(
@@ -8170,12 +8319,13 @@ def main() -> None:
                     "GRAPHLORE_API_KEY to require bearer auth.",
                     file=sys.stderr,
                 )
-            mcp.run(
-                transport="sse" if TRANSPORT == "sse" else "streamable-http",
-                host=HTTP_HOST,
-                port=HTTP_PORT,
-                transport_security=security,
-            )
+            if transport == "sse":
+                mcp.run(transport="sse", host=HTTP_HOST, port=HTTP_PORT,
+                        transport_security=security)
+            else:
+                mcp.run(transport="streamable-http", host=HTTP_HOST, port=HTTP_PORT,
+                        transport_security=security, stateless_http=stateless,
+                        json_response=json_response)
     else:
         mcp.run(transport="stdio")
 

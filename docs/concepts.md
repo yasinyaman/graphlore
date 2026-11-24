@@ -377,27 +377,32 @@ a one-file change leaves almost every node where it was, the ids stay, and so
 do the names saved for them, which are dropped only when their community
 changed beyond recognition (the build says how many).
 
-## Naming communities without an API key (MCP sampling)
+## Naming communities without an API key
 
-The Leiden clustering is keyless, but turning `Community 7` into `Authentication`
-needs a model. Two ways, in `graphlore_label_communities`'s preference order:
+The Leiden clustering is keyless, and so is naming what it found.
+`graphlore_label_communities` has three ways:
 
-1. **Host-LLM sampling** — the server asks the *connected client* to run the
-   completion via MCP `sampling/createMessage`. The model the user already uses
-   (e.g. Claude in a sampling-capable client) does the naming; **the server holds
-   no API key**. Subject to client support — call `graphlore_sampling_status`
-   first; it degrades gracefully when unsupported. All communities are named in
-   a single batched request, carried over whichever transport the negotiated
-   protocol allows (the legacy back-channel, or input-required rounds on MCP
-   2026-07-28+), so it works with both older and modern clients.
-2. **Placeholders** — no model anywhere: names stay `Community N`.
+1. **Derived** (`auto`, the default, or `derived`) — no model anywhere. A
+   native graph carries the engine's own name on every node
+   (`community_name`): the member with the most edges, after the directory
+   most members share (`httpx/_transports: HTTPTransport`). On a graphify
+   graph graphlore applies the same rule itself; `tests/test_engine.py` holds
+   the two to the same names. Free, the same on every call, and it needs no
+   session, so it works over stateless HTTP too.
+2. **Host-LLM sampling** (`sampling`) — the server asks the *connected client*
+   to run the completion via MCP `sampling/createMessage`; **the server holds
+   no API key**. All communities are named in one batched request, carried
+   over whichever transport the negotiated protocol allows (the legacy
+   back-channel, or input-required rounds on MCP 2026-07-28+). The 2026-07-28
+   revision deprecates sampling (SEP-2577), so it is asked for, never chosen
+   by `auto`; `graphlore_sampling_status` says whether the client supports it.
+3. **Placeholders** (`placeholder`) — `Community N`.
 
 graphlore no longer runs graphify's own naming (`method="cli"`, a backend API
-key): it is refused, and the two ways above and below need no key.
+key): it is refused.
 
-If the client can't sample (e.g. **Claude Code**, which
-doesn't support sampling), use the **assistant-driven fallback**: the assistant
-is already a capable model in the loop, so it reads `graphlore_communities` and
-pushes names back via **`graphlore_set_labels({"0": "Authentication", ...})`** —
-no key, no sampling, works in any client. The names persist to
+None of these saves anything. For names a reader would choose, the assistant
+in the loop reads `graphlore_communities` and pushes names back via
+**`graphlore_set_labels({"0": "Authentication", ...})`** — no key, no
+sampling, works in any client. The names persist to
 `.graphify_labels.json` and go into `graph.html`.

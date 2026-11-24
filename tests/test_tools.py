@@ -587,6 +587,21 @@ def test_version_reported_over_mcp():
     assert server.mcp.version == server.__version__
 
 
+def test_the_cli_does_not_load_the_server_until_it_runs_it():
+    # `graphlore hook` runs on every tool call of an agent: the package and the
+    # CLI must import without the MCP SDK and the 34 tools behind it
+    import subprocess
+    import sys
+
+    code = ("import sys, graphlore, graphlore.cli; "
+            "assert 'graphlore.server' not in sys.modules, 'server loaded'; "
+            "assert 'mcp' not in sys.modules, 'mcp loaded'; "
+            "v = graphlore.__version__; assert 'graphlore.server' in sys.modules; print(v)")
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.strip() == server.__version__
+
+
 def test_main_module_wired():
     import importlib
 
@@ -1999,7 +2014,7 @@ def test_sampling_status_supported(project):
     )
     data = json.loads(out)
     assert data["host_sampling_supported"] is True
-    assert data["preferred_method"] == "sampling"
+    assert data["preferred_method"] == "derived"  # sampling only when asked for
 
 
 def test_sampling_status_unsupported(project):
@@ -2012,7 +2027,7 @@ def test_label_communities_via_sampling(project):
     # host naming must round-trip on both.
     for mode in ("auto", "legacy"):
         out = _run_in_memory(
-            project, "graphlore_label_communities", {"method": "auto", "as_json": True},
+            project, "graphlore_label_communities", {"method": "sampling", "as_json": True},
             sampling_callback=_first_member_host_llm, mode=mode,
         )
         data = json.loads(out)
@@ -2139,6 +2154,57 @@ def test_set_labels_persists_and_patches_html(tmp_path, monkeypatch):
 def test_set_labels_rejects_unknown_only(project):
     out = server.graphlore_set_labels({"999": "X"})
     assert "No valid community ids" in out
+
+
+def test_label_communities_derives_names_without_a_model(project):
+    """auto names communities from the graph, even when the client could sample:
+    no request reaches the host model, and no name is a bare placeholder."""
+    calls = {"n": 0}
+
+    async def _counting(context, params):
+        calls["n"] += 1
+        return await _first_member_host_llm(context, params)
+
+    for kw in ({}, {"sampling_callback": _counting}):
+        data = json.loads(_run_in_memory(
+            project, "graphlore_label_communities", {"as_json": True}, **kw))
+        assert data["method"] == "derived"
+        assert data["communities"]
+        assert all(not c["name"].startswith("Community ") for c in data["communities"])
+    assert calls["n"] == 0
+
+
+def test_derived_community_names_follow_the_engine_rule():
+    nodes = [
+        {"id": "a", "label": "Client()", "source_file": "pkg/http/client.py", "community": 0},
+        {"id": "b", "label": "send()", "source_file": "pkg/http/client.py", "community": 0},
+        {"id": "c", "label": ".helper()", "source_file": "pkg/http/util.py", "community": 0},
+        {"id": "x", "label": "requests", "type": "external", "community": 0},
+        {"id": "d", "label": "main()", "source_file": "app.py", "community": 1},
+        {"id": "e", "label": "cli()", "source_file": "tools/cli.py", "community": 1},
+        {"id": "f", "label": "Named", "source_file": "z.py", "community": 2,
+         "community_name": "z: Named by the engine"},
+    ]
+    edges = [
+        {"source": "a", "target": "b", "relation": "calls"},
+        {"source": "a", "target": "c", "relation": "calls"},
+        # an external's edges count, but an external never names the community
+        {"source": "x", "target": "b", "relation": "calls"},
+        {"source": "x", "target": "c", "relation": "calls"},
+        {"source": "x", "target": "a", "relation": "calls"},
+        {"source": "x", "target": "d", "relation": "calls"},
+        # derived relations and self-loops are not counted
+        {"source": "e", "target": "d", "relation": "couples_with"},
+        {"source": "e", "target": "e", "relation": "calls"},
+        {"source": "d", "target": "e", "relation": "calls"},
+    ]
+    names = server._derived_community_names(nodes, edges, [0, 1, 2, 3])
+    # 3 of 3 placed members in pkg/http -> the directory comes first; "()" dropped
+    assert names[0] == "pkg/http: Client"
+    # d and e tie on degree once x is counted for d: d has 2, e has 1
+    assert names[1] == "main"           # no directory holds more than 60%
+    assert names[2] == "z: Named by the engine"   # the build's own name wins
+    assert names[3] == "Community 3"    # nothing to name it after
 
 
 def test_label_communities_placeholder(project):
@@ -2568,6 +2634,61 @@ def test_main_http_allowed_hosts_wires_transport_security(monkeypatch):
     server.main()
     assert seen["host"] == server.HTTP_HOST
     assert seen["transport_security"].allowed_hosts == ["graphify.example.com:*"]
+    assert seen["stateless_http"] is False and seen["json_response"] is False
+
+
+def test_streamable_http_options_env(monkeypatch, capsys):
+    for name in ("STATELESS_HTTP", "JSON_RESPONSE"):
+        monkeypatch.delenv(f"GRAPHLORE_{name}", raising=False)
+        monkeypatch.delenv(f"GRAPHIFY_{name}", raising=False)
+    assert server._streamable_http_options("streamable-http") == (False, False)
+    monkeypatch.setenv("GRAPHLORE_STATELESS_HTTP", "1")
+    assert server._streamable_http_options("streamable-http") == (True, False)
+    monkeypatch.setenv("GRAPHLORE_JSON_RESPONSE", "yes")
+    assert server._streamable_http_options("streamable-http") == (True, True)
+    # SSE takes neither: said once on stderr, then ignored
+    assert server._streamable_http_options("sse") == (False, False)
+    assert "ignored for sse" in capsys.readouterr().err
+
+
+def test_main_http_passes_the_stateless_options(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(server, "TRANSPORT", "streamable-http")
+    monkeypatch.setattr(server, "API_KEY", "")
+    monkeypatch.setattr(server, "HTTP_HOST", "127.0.0.1")
+    monkeypatch.setenv("GRAPHLORE_STATELESS_HTTP", "1")
+    monkeypatch.setattr(server.mcp, "run", lambda **kw: seen.update(kw))
+    server.main()
+    assert seen["transport"] == "streamable-http" and seen["stateless_http"] is True
+
+
+def test_main_http_refuses_a_project_from_the_client(monkeypatch, capsys):
+    import pytest
+
+    monkeypatch.setattr(server, "TRANSPORT", "streamable-http")
+    monkeypatch.setattr(server.config, "project_pending", True)
+    monkeypatch.setattr(server.mcp, "run", lambda **kw: None)
+    with pytest.raises(SystemExit) as exc:
+        server.main()
+    assert exc.value.code == 2
+    assert "GRAPHLORE_PROJECT_DIR" in capsys.readouterr().err
+
+
+def test_stateless_http_answers_a_tool_call_without_a_session(project):
+    """No initialize, no Mcp-Session-Id: a stateless server answers each POST on
+    its own, which is what lets replicas behind a load balancer share traffic."""
+    from starlette.testclient import TestClient
+
+    app = server.mcp.streamable_http_app(host="127.0.0.1", stateless_http=True,
+                                         json_response=True)
+    with TestClient(app, base_url="http://127.0.0.1:8000") as client:
+        reply = client.post("/mcp", headers={"accept": "application/json, text/event-stream"},
+                            json={"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                                  "params": {"name": "graphlore_overview",
+                                             "arguments": {"as_json": True}}})
+    assert reply.status_code == 200 and "mcp-session-id" not in reply.headers
+    result = reply.json()["result"]
+    assert not result.get("isError") and json.loads(result["content"][0]["text"])["nodes"]
 
 
 def test_main_http_no_apikey_nonloopback_warns(monkeypatch, capsys):
@@ -7548,7 +7669,7 @@ def test_naming_never_runs_the_graphify_cli(project, monkeypatch):
     monkeypatch.setattr(server.shutil, "which", lambda _b: "/fake/graphify")
     monkeypatch.setattr(server, "_run_cli", lambda *a, **k: pytest.fail("ran the CLI"))
     auto = json.loads(_run_in_memory(project, "graphlore_label_communities", {"as_json": True}))
-    assert auto["method"] == "placeholder"
+    assert auto["method"] == "derived"
     res = _call_over_mcp("graphlore_label_communities", {"method": "cli"})
     assert res.is_error is True and res.structured_content["code"] == "removed"
     assert "graphlore_set_labels" in res.structured_content["error"]
@@ -7556,7 +7677,7 @@ def test_naming_never_runs_the_graphify_cli(project, monkeypatch):
     assert res.is_error is True and res.structured_content["code"] == "bad_argument"
     monkeypatch.setenv("GRAPHLORE_OFFLINE", "1")
     status = json.loads(_run_in_memory(project, "graphlore_sampling_status", {"as_json": True}))
-    assert status["preferred_method"] == "placeholder" and status["offline"] is True
+    assert status["preferred_method"] == "derived" and status["offline"] is True
     assert "graphify_cli_available" not in status and "backend_key_detected" not in status
 
 
@@ -9633,6 +9754,16 @@ def test_every_parameter_has_a_description_and_descriptions_stay_short():
     assert total <= 52_000, total
 
 
+def test_lean_tools_say_when_to_use_them_and_when_not():
+    # a client that defers tools (Claude Code's tool search) picks one by its
+    # name and description alone: the default surface says what each is for
+    # and what another tool, or grep, does better
+    for t in _listed_tools():
+        if t.name in server.LEAN_TOOLS:
+            assert "Use for:" in t.description, t.name
+            assert "Not for:" in t.description, t.name
+
+
 def test_instructions_stay_under_what_clients_keep():
     every = server._registered_tool_names()
     for names in (every, set(server.LEAN_TOOLS), set(server.LOCATE_TOOLS)):
@@ -9931,6 +10062,69 @@ def test_agent_evaluation_runs_and_scores_with_the_fake_client(tmp_path):
     assert "| fake | plain | 1/2 |" in score.markdown(table)
 
 
+def test_agent_evaluation_baseline_has_no_graphlore_and_repeats_are_scored(tmp_path):
+    """The baseline arm runs without graphlore in a copy of the repository with
+    no graph; --repeat N gives N rows a task, scored as mean ± spread, and each
+    graphlore arm is compared with the same client's baseline."""
+    import shutil
+    from pathlib import Path
+
+    run, score = _agents_module("run"), _agents_module("score")
+    repo = tmp_path / "proj"
+    shutil.copytree(Path(__file__).parent / "fixtures" / "polyglot", repo)
+    (repo / "graphify-out").mkdir()
+    shutil.move(str(repo / "graph.json"), repo / "graphify-out" / "graph.json")
+    tasks = {"repos": {"proj": {"path": str(repo)}}, "tasks": [
+        {"id": "a", "repo": "proj", "prompt": "Which class does HTTPTransport inherit from?",
+         "expect": {"all": ["BaseTransport"]}, "tools": ["graphlore_node_details"]},
+        {"id": "b", "repo": "proj", "prompt": "Which test file tests URL.copy_with?",
+         "expect": {"all": ["tests/models/test_url.py"]}, "tools": ["graphlore_tests_for"]},
+    ]}
+    tasks_file = tmp_path / "tasks.json"
+    tasks_file.write_text(json.dumps(tasks), encoding="utf-8")
+    out = tmp_path / "out"
+    assert run.main(["--clients", "fake", "--variants", "baseline,plain", "--repeat", "2",
+                     "--tasks", str(tasks_file), "--out", str(out),
+                     "--root", str(tmp_path / "root")]) == 0
+    rows = [json.loads(x) for x in (out / "runs.jsonl").read_text().splitlines()]
+    assert len(rows) == 8 and sorted({r["rep"] for r in rows}) == [0, 1]
+    base = [r for r in rows if r["variant"] == "baseline"]
+    assert all(r["tools"] == [] and r["calls"] == ["Grep"] for r in base)
+    plain = next(r for r in rows if r["variant"] == "plain" and r["task"] == "a")
+    assert plain["calls"] == ["graphlore_search", "graphlore_node_details"]
+    # the baseline's copy has no graph to grep, and the repository keeps its own
+    assert not (tmp_path / "root" / "proj-baseline" / "graphify-out").exists()
+    assert (repo / "graphify-out" / "graph.json").is_file()
+    assert (out / "fake-plain-a-r1.log").is_file()
+    table = {t["variant"]: t for t in score.score(rows, {t["id"]: t for t in tasks["tasks"]})}
+    assert table["baseline"]["solved_per_repeat"] == [1, 1]
+    assert table["plain"]["solved_mean"] == 1 and table["plain"]["solved_sd"] == 0
+    assert table["plain"]["vs_baseline"]["solved"] == 0
+    assert table["plain"]["vs_baseline"]["input_tokens_ratio"] < 1
+    md = score.markdown(list(table.values()))
+    assert "| fake | plain | 1 ± 0 / 2 (1–1, 2 runs) |" in md and "× tokens" in md
+    import pytest
+
+    with pytest.raises(SystemExit):
+        run.main(["--clients", "fake", "--variants", "nope", "--tasks", str(tasks_file),
+                  "--out", str(out), "--root", str(tmp_path / "root")])
+
+
+def test_agent_evaluation_claude_baseline_has_no_server_but_the_same_reads(tmp_path):
+    run = _agents_module("run")
+    ctx = run.Ctx(tmp_path, tmp_path, "lean", "graphlore")
+    with_mcp = run.ADAPTERS["claude"].argv("q", ctx)
+    bare = run.ADAPTERS["claude"].argv("q", run.Ctx(tmp_path, tmp_path, "lean", "graphlore",
+                                                    mcp=False))
+    assert "--mcp-config" in with_mcp and "--mcp-config" not in bare
+    assert "--strict-mcp-config" in bare      # and none of the user's servers either
+    allowed = lambda argv: argv[argv.index("--allowedTools") + 1]  # noqa: E731
+    assert allowed(with_mcp) == "Read,Grep,Glob,LS,mcp__graphlore"
+    assert allowed(bare) == "Read,Grep,Glob,LS"
+    assert not any("graphlore" in a for a in run.ADAPTERS["codex"].argv(
+        "q", run.Ctx(tmp_path, tmp_path, "lean", "graphlore", mcp=False))[1:-1])
+
+
 def test_agent_evaluation_reads_codex_and_gemini_output():
     run = _agents_module("run")
     codex = "\n".join(json.dumps(x) for x in [
@@ -10172,6 +10366,16 @@ def test_plugin_manifests_stay_in_sync():
     assert claude["name"] == agent["name"] == gemini["name"] == "graphlore"
     assert claude["skills"] == ["./skills/"]
     assert (root / "skills" / "graphlore-explore" / "SKILL.md").is_file()
+    # Claude Code's hooks: a file of its own (a root hooks/ is a path other
+    # plugin formats may read), running the module from the plugin's copy
+    hooks = json.loads((root / claude["hooks"]).read_text())["hooks"]
+    for event, arg in (("PreToolUse", "pre"), ("PostToolUse", "post")):
+        (group,) = hooks[event]
+        (handler,) = group["hooks"]
+        assert f"python3 -m graphlore.hooks {arg}" in handler["command"]
+        assert '"${CLAUDE_PLUGIN_ROOT}/src"' in handler["command"]
+        assert handler["command"].endswith("|| true") and handler["timeout"] <= 10
+    assert not (root / "hooks").exists()
     servers = {"claude": claude["mcpServers"]["graphlore"],
                "agent": mcp_json["mcpServers"]["graphlore"],
                "gemini": gemini["mcpServers"]["graphlore"]}
@@ -10198,3 +10402,334 @@ def test_plugin_manifests_stay_in_sync():
     guide = (root / gemini["contextFileName"]).read_text()
     assert gemini["contextFileName"] != "GEMINI.md"
     assert guide == agents_md.render(sorted(server._registered_tool_names()))
+
+
+# --- graphlore review (change_review.py) ---------------------------------------
+
+_REVIEW_BASE = {
+    "pkg/__init__.py": "",
+    "pkg/core.py": ("def helper(x):\n    return x + 1\n\n\n"
+                    "def compute(x):\n    return helper(x) * 2\n"),
+    "pkg/api.py": "from pkg.core import compute\n\n\ndef handle(x):\n    return compute(x)\n",
+    "pkg/util.py": "def tidy(x):\n    return x\n",
+    "tests/test_core.py": ("from pkg.core import compute\n\n\n"
+                           "def test_compute():\n    assert compute(1) == 4\n"),
+}
+
+
+def _review_repo(tmp_path, monkeypatch, changes, extra_nodes=(), extra_edges=(), built="HEAD"):
+    """A git repository with two commits (the base files, then ``changes``) and a
+    hand-written graph of the head, recorded as built at ``built``."""
+    import subprocess
+
+    def git(*args):
+        return subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True,
+                              text=True).stdout.strip()
+
+    for rel, text in _REVIEW_BASE.items():
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_text(text, encoding="utf-8")
+    (tmp_path / ".gitignore").write_text("graphify-out/\n", encoding="utf-8")
+    git("init", "-q")
+    git("config", "user.email", "t@example.com")
+    git("config", "user.name", "Test")
+    git("add", ".")
+    git("commit", "-qm", "base")
+    for rel, text in changes.items():
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_text(text, encoding="utf-8")
+    git("add", ".")
+    git("commit", "-qm", "change")
+
+    def node(nid, label, file, line):
+        return {"id": nid, "label": label, "source_file": file, "source_location": f"L{line}",
+                "file_type": "code"}
+
+    nodes = [
+        node("core", "core.py", "pkg/core.py", 1), node("api", "api.py", "pkg/api.py", 1),
+        node("util", "util.py", "pkg/util.py", 1),
+        node("tcore", "test_core.py", "tests/test_core.py", 1),
+        node("helper", "helper()", "pkg/core.py", 1),
+        node("compute", "compute()", "pkg/core.py", 5),
+        node("handle", "handle()", "pkg/api.py", 4), node("tidy", "tidy()", "pkg/util.py", 1),
+        node("test_compute", "test_compute()", "tests/test_core.py", 4),
+        *extra_nodes,
+    ]
+
+    def edge(a, b, rel, file="", line=None):
+        e = {"source": a, "target": b, "relation": rel, "confidence": "EXTRACTED"}
+        if file:
+            e["source_file"], e["source_location"] = file, f"L{line}"
+        return e
+
+    edges = [
+        edge("core", "helper", "contains"), edge("core", "compute", "contains"),
+        edge("api", "handle", "contains"), edge("util", "tidy", "contains"),
+        edge("tcore", "test_compute", "contains"),
+        edge("compute", "helper", "calls", "pkg/core.py", 6),
+        edge("handle", "compute", "calls", "pkg/api.py", 5),
+        edge("test_compute", "compute", "calls", "tests/test_core.py", 5),
+        edge("api", "core", "imports_from", "pkg/api.py", 1),
+        edge("tcore", "core", "imports_from", "tests/test_core.py", 1),
+        *extra_edges,
+    ]
+    sha = git("rev-parse", built)
+    _write_graph(tmp_path, {"built_at_commit": sha, "nodes": nodes, "links": edges})
+    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
+    server._GRAPH_CACHE.clear()
+    server._SPAN_CACHE.clear()
+
+
+def test_review_maps_changed_lines_to_definitions_and_what_depends_on_them(tmp_path, monkeypatch):
+    from graphlore import change_review
+
+    _review_repo(tmp_path, monkeypatch, {
+        "pkg/core.py": ("LIMIT = 3\n\n\ndef helper(x):\n    return x + LIMIT\n\n\n"
+                        "def compute(x):\n    return helper(x) * 2\n"),
+        "pkg/util.py": "def tidy(x):\n    # a comment only\n    return x\n",
+    }, built="HEAD")
+    # the head graph's lines: the edit moved helper to 4 and compute to 8
+    graph = json.loads((tmp_path / "graphify-out" / "graph.json").read_text())
+    for n in graph["nodes"]:
+        if n["id"] == "helper":
+            n["source_location"] = "L4"
+        if n["id"] == "compute":
+            n["source_location"] = "L8"
+    (tmp_path / "graphify-out" / "graph.json").write_text(json.dumps(graph))
+    server._GRAPH_CACHE.clear()
+
+    r = change_review.analyze("HEAD~1", "HEAD", build=False)
+    assert [f["path"] for f in r["files"]] == ["pkg/core.py"]
+    assert r["cosmetic_files"] == ["pkg/util.py"]          # comments only: left out
+    changed = {(c["node"] or "(top)"): c["lines"] for c in r["changed"]}
+    # `def helper(x):` itself is unchanged, only moved: git gives its body line
+    assert changed == {"helper()": "5", "(top)": "1-3"}
+    deps = {d["node"]: d for d in r["dependents"]["rows"]}
+    assert deps["compute()"]["distance"] == 1 and deps["handle()"]["distance"] == 2
+    assert deps["test_compute()"]["test"] is True
+    # production before tests at one distance
+    names = [d["node"] for d in r["dependents"]["rows"]]
+    assert names.index("handle()") < names.index("test_compute()")
+    assert [t["test"] for t in r["tests"]["tests"]] == ["test_compute()"]
+    assert r["tests"]["untested"] == [] and r["failed"] == []
+    md = change_review.render_markdown(r)
+    assert md.startswith(change_review.MARKER)
+    assert "| `helper()` | `pkg/core.py` | 5 |" in md and "(top level)" in md
+
+
+def test_review_gates_an_introduced_import_cycle_and_an_untested_definition(tmp_path,
+                                                                            monkeypatch):
+    from graphlore import change_review
+
+    _review_repo(
+        tmp_path, monkeypatch,
+        {"pkg/core.py": ("from pkg import api\n\n\ndef helper(x):\n    return x + 1\n\n\n"
+                         "def compute(x):\n    return helper(x) * 2\n"),
+         "pkg/api.py": ("from pkg.core import compute\n\n\ndef handle(x):\n    return compute(x)\n"
+                        "\n\ndef orphan():\n    return 1\n")},
+        extra_nodes=[{"id": "orphan", "label": "orphan()", "source_file": "pkg/api.py",
+                      "source_location": "L8", "file_type": "code"}],
+        extra_edges=[{"source": "core", "target": "api", "relation": "imports_from",
+                      "source_file": "pkg/core.py", "source_location": "L1"},
+                     {"source": "api", "target": "orphan", "relation": "contains"}])
+    graph = json.loads((tmp_path / "graphify-out" / "graph.json").read_text())
+    for n in graph["nodes"]:
+        n["source_location"] = {"helper": "L4", "compute": "L8"}.get(n["id"], n["source_location"])
+    (tmp_path / "graphify-out" / "graph.json").write_text(json.dumps(graph))
+    (tmp_path / ".graphlore-layers.json").write_text(json.dumps(
+        {"pkg/core.py": [], "pkg/api.py": ["pkg/core.py"]}))
+    server._GRAPH_CACHE.clear()
+
+    r = change_review.analyze("HEAD~1", "HEAD", build=False,
+                              fail_on=("cycle", "layer", "untested"))
+    (cycle,) = r["cycles"]
+    assert cycle["introduced"] is True and cycle["runs"] == "runtime"
+    assert set(cycle["files"]) == {"pkg/core.py", "pkg/api.py"}
+    (violation,) = r["layers"]["violations"]
+    assert violation["introduced"] is True and violation["site"] == "pkg/core.py:L1"
+    assert "orphan()" in r["tests"]["untested"]
+    assert r["failed"] == ["cycle", "layer", "untested"]
+    md = change_review.render_markdown(r)
+    assert "**Gate failed:** cycle, layer, untested" in md and "**introduced**" in md
+    out = tmp_path / "review.md"
+    assert change_review.run("HEAD~1", "HEAD", build=False, fail_on=("cycle",),
+                             output=str(out)) == 1
+    assert out.read_text().startswith(change_review.MARKER)
+    assert change_review.run("HEAD~1", "HEAD", build=False, fmt="json",
+                             output=str(out)) == 0
+    assert json.loads(out.read_text())["cycles"][0]["introduced"] is True
+
+
+def test_review_refuses_what_it_cannot_review(tmp_path, monkeypatch, capsys):
+    from graphlore import change_review, cli
+
+    _review_repo(tmp_path, monkeypatch, {"pkg/util.py": "def tidy(x):\n    return x * 1\n"},
+                 built="HEAD~1")
+    # the graph is a commit behind, and --no-build says not to build it
+    assert change_review.run("HEAD~1", "HEAD", build=False) == 2
+    assert "not built at the head commit" in capsys.readouterr().err
+    assert change_review.run("nope", "HEAD", build=False) == 2
+    assert "fetch-depth: 0" in capsys.readouterr().err
+    assert change_review.run("HEAD~1", "HEAD~1", build=False) == 2
+    assert "not the commit checked out" in capsys.readouterr().err
+    assert change_review.run("HEAD~1", "HEAD", build=False, fail_on=("bogus",)) == 2
+    # through the console script, with the same codes
+    assert cli.main(["review", "--project", str(tmp_path), "--no-build"]) == 2
+
+
+def test_review_markdown_quotes_repository_names_as_code():
+    from graphlore import change_review
+
+    assert change_review._code("a`b\n[x](http://e) @someone") == "`aˋb [x](http://e) @someone`"
+    report = {
+        "merge_base": "a" * 12, "head_commit": "b" * 12, "cosmetic_files": [],
+        "dirty_worktree": False, "failed": [], "files": [], "changed": [], "source_files": 0,
+        "changed_total": 0, "hops": 3, "cycles": [], "layers": None,
+        "dependents": {"rows": [], "total": 0},
+        "tests": {"tests": [], "untested": [], "not_asked": 0},
+    }
+    assert "No structural change" in change_review.render_markdown(report)
+
+
+# --- agent hooks (hooks.py) ------------------------------------------------------
+
+def _hook_project(tmp_path, monkeypatch, nodes=None):
+    import subprocess
+
+    monkeypatch.setenv("GRAPHLORE_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.delenv("GRAPHLORE_HOOKS", raising=False)
+    monkeypatch.delenv("GRAPHLORE_PROJECT_DIR", raising=False)
+    monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (proj / "a.py").write_text("def compute():\n    return 1\n")
+
+    def git(*args):
+        return subprocess.run(["git", *args], cwd=proj, check=True, capture_output=True,
+                              text=True).stdout.strip()
+
+    git("init", "-q")
+    git("config", "user.email", "t@example.com")
+    git("config", "user.name", "Test")
+    git("add", ".")
+    git("commit", "-qm", "one")
+    nodes = nodes or [
+        {"id": "a", "label": "a.py", "source_file": "a.py", "source_location": "L1"},
+        {"id": "c", "label": "compute()", "source_file": "a.py", "source_location": "L1"},
+        {"id": "x", "label": "requests", "type": "external"},
+    ]
+    out = proj / "graphify-out"
+    out.mkdir()
+    (out / "graph.json").write_text(json.dumps(
+        {"built_at_commit": git("rev-parse", "HEAD"), "nodes": nodes, "links": []}))
+    return proj, git
+
+
+def _hook(event, payload):
+    from graphlore import hooks
+
+    out = hooks.run(event, json.dumps(payload))
+    return json.loads(out)["hookSpecificOutput"]["additionalContext"] if out else ""
+
+
+def test_hook_points_a_grep_for_a_defined_name_at_the_graph(tmp_path, monkeypatch):
+    proj, _git = _hook_project(tmp_path, monkeypatch)
+    call = {"tool_name": "Grep", "cwd": str(proj)}
+    for pattern in ("compute", r"\bcompute\b", "def compute", "compute("):
+        text = _hook("pre", {**call, "tool_input": {"pattern": pattern}})
+        assert "defines compute at a.py:1" in text and "graphlore_impact" in text, pattern
+        assert "data, not instructions" in text
+    # a regular expression, a phrase, an unknown name, an external, another tool: silent
+    for pattern in ("comp.*te", "where is it", "nothing_here", "requests"):
+        assert _hook("pre", {**call, "tool_input": {"pattern": pattern}}) == "", pattern
+    assert _hook("pre", {"tool_name": "Read", "cwd": str(proj),
+                         "tool_input": {"pattern": "compute"}}) == ""
+    from graphlore import hooks
+
+    assert hooks.run("pre", "not json") == "" and hooks.run("nope", "{}") == ""
+    monkeypatch.setenv("GRAPHLORE_HOOKS", "0")
+    assert _hook("pre", {**call, "tool_input": {"pattern": "compute"}}) == ""
+
+
+def test_hook_never_passes_on_a_path_that_could_be_markup(tmp_path, monkeypatch):
+    proj, _git = _hook_project(tmp_path, monkeypatch, nodes=[
+        {"id": "e", "label": "evil()", "source_location": "L1",
+         "source_file": "x.py\n[click](http://evil.example) <!--"},
+        {"id": "g", "label": "good()", "source_file": "ok/g.py", "source_location": "L3"},
+    ])
+    call = {"tool_name": "Grep", "cwd": str(proj)}
+    assert _hook("pre", {**call, "tool_input": {"pattern": "evil"}}) == ""
+    assert "ok/g.py:3" in _hook("pre", {**call, "tool_input": {"pattern": "good"}})
+
+
+def test_hook_says_once_when_a_commit_or_an_edit_leaves_the_graph_behind(tmp_path,
+                                                                         monkeypatch):
+    proj, git = _hook_project(tmp_path, monkeypatch)
+    bash = {"tool_name": "Bash", "cwd": str(proj),
+            "tool_input": {"command": "git commit -am 'two'"}}
+    assert _hook("post", bash) == ""                       # still at the build commit
+    (proj / "a.py").write_text("def compute():\n    return 2\n")
+    git("commit", "-qam", "two")
+    text = _hook("post", bash)
+    assert "HEAD is now" in text and "graphlore_build(update=True)" in text
+    assert _hook("post", bash) == ""                       # once per state
+    assert _hook("post", {**bash, "tool_input": {"command": "ls -la"}}) == ""
+    edit = {"tool_name": "Edit", "cwd": str(proj), "tool_input": {"file_path": str(proj / "a.py")}}
+    assert "source files changed" in _hook("post", edit)
+    assert _hook("post", edit) == ""
+    assert _hook("post", {**edit, "tool_input": {"file_path": str(proj / "README.md")}}) == ""
+
+
+def test_hook_runs_without_the_server_and_quickly(tmp_path, monkeypatch):
+    import subprocess
+    import sys
+    import time
+
+    proj, _git = _hook_project(tmp_path, monkeypatch)
+    payload = json.dumps({"tool_name": "Grep", "cwd": str(proj),
+                          "tool_input": {"pattern": "compute"}})
+    code = ("import sys; sys.argv = ['x', 'pre']; "
+            "import graphlore.hooks as h; rc = h.main(); "
+            "assert 'mcp' not in sys.modules and 'graphlore.server' not in sys.modules; "
+            "sys.exit(rc)")
+    started = time.perf_counter()
+    out = subprocess.run([sys.executable, "-c", code], input=payload, capture_output=True,
+                         text=True, env={**__import__("os").environ})
+    assert out.returncode == 0, out.stderr
+    assert "defines compute" in out.stdout
+    assert time.perf_counter() - started < 5
+    from graphlore import hooks
+
+    assert hooks._SOURCE_SUFFIXES == server._SOURCE_EXTS
+
+
+def test_setup_with_hooks_merges_into_claude_code_settings(tmp_path):
+    import pytest
+
+    from graphlore import cli, clients
+
+    settings = tmp_path / ".claude" / "settings.json"
+    settings.parent.mkdir()
+    settings.write_text(json.dumps({"permissions": {"allow": ["Bash(ls)"]}, "hooks": {
+        "PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "mine"}]}],
+    }}))
+    assert cli.main(["setup", "claude-code", "--project", str(tmp_path), "--write",
+                     "--with-hooks"]) == 0
+    data = json.loads(settings.read_text())
+    assert data["permissions"] == {"allow": ["Bash(ls)"]}
+    pre = data["hooks"]["PreToolUse"]
+    assert pre[0]["hooks"][0]["command"] == "mine"         # the user's own hook stays
+    assert pre[1] == {"matcher": "Grep|Glob", "hooks": [
+        {"type": "command", "command": "graphlore hook pre", "timeout": 5}]}
+    assert data["hooks"]["PostToolUse"][0]["hooks"][0]["command"] == "graphlore hook post"
+    assert (settings.parent / "settings.json.graphlore.bak").is_file()
+    # again: replaced, not added twice
+    note = clients.write_hooks(settings, clients.server_config(tmp_path, "lean"))
+    assert "already set up" in note
+    assert len(json.loads(settings.read_text())["hooks"]["PreToolUse"]) == 2
+    uvx = clients.hook_commands(clients.server_config(tmp_path, "lean", "uvx"))
+    assert uvx["PreToolUse"].endswith("graphlore hook pre") and uvx["PreToolUse"].startswith("uvx")
+    settings.write_text("{ not json")
+    with pytest.raises(clients.SetupError):
+        clients.write_hooks(settings, clients.server_config(tmp_path, "lean"))
+    assert cli.main(["setup", "codex", "--project", str(tmp_path), "--with-hooks"]) == 2

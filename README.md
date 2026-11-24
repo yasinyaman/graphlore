@@ -6,14 +6,16 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 
-**graphlore is a Model Context Protocol (MCP) server that lets AI coding
-assistants navigate a codebase through its knowledge graph, instead of grepping
-and reading file after file.** It builds the graph with its own extractor
-(Rust and tree-sitter, 14 languages), and still reads one built by
-[Graphify](https://graphify.net); it joins every node to its real `start..end`
-source span (Python via `ast`, other languages via tree-sitter), and answers
-the questions text search cannot: who calls this, what breaks if it changes,
-where a behavior lives.
+**graphlore is a Model Context Protocol (MCP) server that gives AI coding
+assistants the knowledge graph of a codebase, for the questions that need the
+whole repository at once: what a change breaks, where a behavior lives, which
+imports form cycles, which route reaches which handler, which code shares
+state without calling each other.** Each answer is one reply under a token
+budget, with `file:line` on every row. It complements a language server and a
+client's built-in code search, which answer one symbol at a time. graphlore
+builds the graph with its own extractor (Rust and tree-sitter, 14 languages),
+still reads one built by [Graphify](https://github.com/Graphify-Labs/graphify), and joins every node to its real
+`start..end` source span (Python via `ast`, other languages via tree-sitter).
 
 - **Find code by what it does.** `graphlore_locate("where are failed requests retried?")`
   returns the enclosing symbol, its neighborhood and similar-but-unconnected
@@ -24,6 +26,10 @@ where a behavior lives.
   `file:line`.
 - **Read only the code you need.** `graphlore_fetch` returns a symbol's exact
   span under a token budget.
+- **Review a pull request without a model.** `graphlore review` (and its
+  [GitHub Action](https://github.com/yasinyaman/graphlore/blob/master/docs/review.md))
+  lists the definitions a change touches, what depends on them, the tests that
+  reach them and the import cycles it brings in.
 - **Know how far to trust an answer.** Results say how a name was matched, what
   a budget cut left out, and which files changed since the graph was built.
 - **Local by default.** The analysis tools read local files and need no API
@@ -65,9 +71,10 @@ The other clients and what each plugin carries are in
 the graph (prebuilt wheels, no Rust toolchain), then register the server.
 
 ```bash
-# graphlore is not on PyPI yet: install from GitHub
-pip install "graphlore[engine] @ git+https://github.com/yasinyaman/graphlore"
+pip install "graphlore[engine]"
 ```
+
+or run it with nothing installed: `uvx --from "graphlore[engine]" graphlore`.
 
 Then let graphlore write your client's config, and the usage guide its agent
 reads (`AGENTS.md`, `GEMINI.md`, Copilot's instructions):
@@ -100,9 +107,7 @@ extractor, which builds the graph), `embed` (static code
 embeddings for the built-in search behind `graphlore_locate`), `semble` (semble
 as that search instead, with `GRAPHLORE_SEMANTIC_BACKEND=semble`), `treesitter` (spans for non-Python
 languages; without it the native engine's compiled-in grammars give them), `tiktoken` (exact token
-counts), `watch` (re-sync on file changes). Until the first PyPI release, use
-the GitHub form wherever a message says `pip install "graphlore[extra]"`:
-`pip install "graphlore[semble] @ git+https://github.com/yasinyaman/graphlore"`.
+counts), `watch` (re-sync on file changes).
 
 **Then ask.** The assistant builds the graph once and explores from there
 (output from the repository's small test fixture):
@@ -206,8 +211,8 @@ duplicated code).
 
 graphlore builds its own graph (its native engine, in Rust), so it does not
 need graphify installed, and it reads a graph Graphify built too. Graphify's embedded server has graph navigation,
-token-budgeted subgraphs, an HTTP transport, multi-project serving and PR
-triage tools graphlore lacks. graphlore adds the span engine and
+token-budgeted subgraphs, an HTTP transport and multi-project serving, which
+graphlore lacks. graphlore adds the span engine and
 what it makes possible: semantic `locate` joined to the enclosing symbol,
 source hydration (`fetch`, `skeleton`), route and package-API extraction,
 cosmetic-vs-structural freshness, and calls through a module object
@@ -220,6 +225,20 @@ No. An exact identifier is found faster with `rg`. graphlore earns its place on
 multi-hop questions (who calls this, what breaks if it changes) and on
 orientation in unfamiliar code. Every answer carries `file:line`, so it can be
 checked with a plain read.
+
+### How is it different from a language server or built-in code search?
+
+A language server (Claude Code's LSP tool, an editor's "find references")
+answers one symbol at a time, with the compiler's precision: go to this
+definition, list these references. A client's semantic search finds code by
+what it says. graphlore answers what neither gives in one call: everything a
+change reaches several hops out, the import cycles and layer violations of the
+whole repository, which HTTP route reaches which handler and which code calls
+it, which definitions share state with no call between them, and a pull
+request's change set (`graphlore review`). Its edges are resolved from the
+source by name and scope rules, not by a compiler, and say so
+(`confidence`). Use them together.
+→ [How graphlore compares](https://github.com/yasinyaman/graphlore/blob/master/docs/comparison.md)
 
 ### Is it an agent memory?
 
@@ -274,7 +293,8 @@ search answered.
 `graphlore_freshness` says whether to update or rebuild, and
 `graphlore_build(".", update=True)` re-extracts changed files. Answers also flag
 their own files that changed since the build. A git post-commit hook or the
-opt-in watcher automates it.
+opt-in watcher automates it, and in Claude Code the plugin's hooks say when a
+commit or an edit leaves the graph behind.
 → [Keeping the graph fresh](https://github.com/yasinyaman/graphlore/blob/master/docs/concepts.md#keeping-the-graph-fresh)
 
 ### Was this project called graphify-mcp?
@@ -290,7 +310,8 @@ own. The old `GRAPHIFY_*` environment variables still work.
   languages, resolved from the source, with its own communities and incremental
   updates. Without it the `graphify` CLI builds it; graphify, and with it
   `graphlore_add` and `mode="deep"`, goes in the next release.
-- No PR or review-thread tooling.
+- `graphlore review` reports on a change; it does not read or answer review
+  threads.
 - Calls through an object, a callback or dynamic dispatch are not in the graph,
   so an empty answer means "no edge was indexed", not "nothing calls this".
 
@@ -300,7 +321,9 @@ own. The old `GRAPHIFY_*` environment variables still work.
 - [MCP clients](https://github.com/yasinyaman/graphlore/blob/master/docs/clients.md): setting up Codex, Gemini CLI, Cursor, Copilot, Kimi, Zed, Windsurf, Cline and Claude, and what each one shows the model
 - [How graphlore works](https://github.com/yasinyaman/graphlore/blob/master/docs/concepts.md): resolved edges, import checks, analysis scope, freshness, the search bridge, naming communities
 - [Configuration](https://github.com/yasinyaman/graphlore/blob/master/docs/configuration.md): toolsets, HTTP transport and security, offline mode, environment variables
+- [Reviewing a change](https://github.com/yasinyaman/graphlore/blob/master/docs/review.md): `graphlore review` and the GitHub Action, what the report holds
 - [Benchmark](https://github.com/yasinyaman/graphlore/blob/master/docs/benchmark.md): method, cross-language results, caveats
+- [Comparison](https://github.com/yasinyaman/graphlore/blob/master/docs/comparison.md): graphlore beside language servers, code search and other code-graph MCP servers, with sources
 - [Native engine](https://github.com/yasinyaman/graphlore/blob/master/docs/native-engine.md): graphlore's own extractor in Rust, compared with graphify on 31 repositories, and the roadmap
 - [Changelog](https://github.com/yasinyaman/graphlore/blob/master/CHANGELOG.md) · [Contributing](https://github.com/yasinyaman/graphlore/blob/master/CONTRIBUTING.md) · [Guidance for coding agents](https://github.com/yasinyaman/graphlore/blob/master/AGENTS.md)
 

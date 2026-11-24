@@ -124,6 +124,19 @@ reverse proxy in front (nginx/caddy on a public name forwarding to
 `GRAPHLORE_ALLOWED_HOSTS` to the public name(s) (comma-separated, `:*` port
 wildcards allowed; `*` disables the protection for a trusted proxy).
 
+**Stateless HTTP.** By default a streamable-HTTP client opens a session
+(`Mcp-Session-Id`) and every request of it must reach the same process. Set
+`GRAPHLORE_STATELESS_HTTP=1` to answer each request on its own, with no session,
+so several replicas behind a load balancer can share the traffic, as the MCP
+specification's 2026-07-28 revision assumes; `GRAPHLORE_JSON_RESPONSE=1` answers
+with one JSON body instead of an SSE stream. Both are streamable-HTTP options
+(ignored, with a warning, for `sse`). A stateless server has no session to ask
+the client anything, so it reads no workspace roots and cannot sample the
+client's model: `graphlore_label_communities` names communities without it. One
+process serves one project, the one `GRAPHLORE_PROJECT_DIR` names:
+`graphlore_project` is refused over HTTP, and `GRAPHLORE_PROJECT_FROM_CLIENT`
+stops the server at boot.
+
 The CLI is always invoked as an argument list with **no shell** (`subprocess.run`
 with `shell=False`), so a build `path` or query string can't inject shell commands.
 Per-file analyzers (spans/APIs/routes/fetch) are confined to the project
@@ -258,12 +271,15 @@ has the results on 31 repositories and the roadmap.
 | `GRAPHLORE_AUTH_ISSUER` | _(unset)_ | OAuth on HTTP transports: the provider's issuer URL ([OAuth for remote clients](#oauth-for-remote-clients)) |
 | `GRAPHLORE_AUTH_RESOURCE_URL` | _(unset)_ | OAuth: this server's public URL, which a token's `aud` must be |
 | `GRAPHLORE_AUTH_SCOPES` | _(unset)_ | OAuth: scopes every token must carry, comma-separated |
+| `GRAPHLORE_STATELESS_HTTP` | off | `1`: streamable HTTP with no session, each request answered on its own (no roots, no sampling). See [Transport](#transport-stdio-default-optional-http) |
+| `GRAPHLORE_JSON_RESPONSE` | off | `1`: streamable HTTP answers with a JSON body instead of an SSE stream |
 | `GRAPHLORE_ALLOWED_HOSTS` | _(unset)_ | DNS-rebinding `Host` allowlist for HTTP (comma-separated, `:*` port wildcards; `*` disables). Unset = SDK default: loopback-only when bound to loopback |
 | `GRAPHLORE_TOOLSET` | `lean` | `lean` (12 core exploration tools) \| `full` (all 34) \| `locate` (minimal locate-first surface; falls back to `lean` when the configured backend is unavailable). See [Which toolset](#which-toolset) |
 | `GRAPHLORE_TOKENIZER` | _(heuristic)_ | `tiktoken` → exact token counts (needs the `[tiktoken]` extra); else chars/3.5 estimate |
 | `GRAPHLORE_SEMANTIC_BACKEND` | _(auto)_ | Search backend of `graphlore_locate` and the duplication scan: unset / `auto` / `builtin` → the built-in index, whether or not semble is installed; `semble` → semble only (the one way to use it); or `module.path:Factory` implementing `search`/`find_related` (its module is checked at boot, the factory at the first call) |
 | `GRAPHLORE_EMBED_MODEL` | `minishlab/potion-code-16M-v2` | The built-in index's dense tier (`[embed]` extra): a Hugging Face model id, a local model directory, or `off` for BM25 only |
-| `GRAPHLORE_CACHE_DIR` | `$XDG_CACHE_HOME/graphlore` (`~/.cache/graphlore`) | Where the built-in index keeps chunk vectors between runs (one folder per project; never inside the project); `off` keeps them in memory only |
+| `GRAPHLORE_CACHE_DIR` | `$XDG_CACHE_HOME/graphlore` (`~/.cache/graphlore`) | Where the built-in index keeps chunk vectors between runs, and `graphlore hook` its index of the graph's names (one file per project; never inside the project); `off` keeps them in memory only |
+| `GRAPHLORE_HOOKS` | on | `0`: `graphlore hook` (the Claude Code plugin's hooks, `graphlore setup claude-code --with-hooks`) says nothing. See [Claude Code](clients.md#claude-code) |
 | `GRAPHLORE_SEARCH_KERNEL` | _(auto)_ | `python` forces the built-in index's reference kernel even when the native engine's (graphlore-engine 0.5.80 or later) is installed |
 | `GRAPHLORE_RESOLVE` | `1` | Resolve calls and imports made through a module object (`mod.func()`) from the source at read time; `0` reads graph.json as it is |
 | `GRAPHLORE_WATCH` | `0` | Filesystem watcher: auto re-sync on structural changes (`[watch]` extra) |
