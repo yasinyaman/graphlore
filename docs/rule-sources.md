@@ -1179,6 +1179,26 @@ ends with the statement) hold 16 more: 169 of the 241, and on cobra, chi,
 resty and gin-examples `go/types` finds 12,336 of 12,342 judged edges right
 (12,311 of 12,317 before) and 85.5% of the uses with an edge (85.4%).
 
+Go, finished as far as one pass of the engine goes: a third round of gap
+hunting (7 readers; generics found nothing new, the other groups 2 to 6 rows
+each, against 4 to 14 in the second) added 18 cases, all checked as above
+(317 Go cases, 425 rules, 156 of 156 sections). The fixes that followed
+(aliases and defined types, a type switch's variable per clause, `range`'s
+key, `select` bindings, slices, `make` / `append`, explicit instantiation,
+constants of defined types, package variables in a path, bounds written with
+type arguments, a receiver's type parameters, array lengths and map keys
+read as values) bring the engine to 299 of the 317. On cobra, chi, resty and
+gin-examples `go/types` finds 12,419 of 12,426 judged edges right and 86.0%
+of the uses with an edge (12,311 of 12,317 and 85.4% before the sweep).
+Open: the bindings of a generic instance (`type ItemBox Box[Item]`, an
+explicit type argument as a result, the instance's method behind a bound),
+core types (`S ~[]E`), range over function iterators, anonymous struct
+types, unexported names of two packages, a name an `else if` declares
+again (the two blocks end at one byte, and the facts do not say where a
+block starts), a short variable's own value (tried: it cost 11 uses on chi)
+and a variable holding a function literal. Two rules a reader proposed were
+dropped after measuring.
+
 **Phase 3: inference, by the numbers.** (Measured: see 'Phase 3: inference, by the numbers' above; nothing built.) Per language, what one step of
 inference would add (a closure parameter typed by the collection it is
 called on, a pattern binding), from the lists the oracles already produce,
