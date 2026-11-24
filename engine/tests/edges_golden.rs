@@ -3694,3 +3694,43 @@ fn go_locals_typed_by_their_expression_and_statement_scopes() {
     );
     assert!(!got.contains(&("Show()".into(), "calls".into(), "Celsius".into())), "{got:#?}");
 }
+
+#[test]
+fn go_aliases_defined_types_type_switches_and_ranges() {
+    let m = ("go.mod", "module example.com/app\n\ngo 1.22\n");
+    let head = "package app\n\ntype Repo struct{ n int }\n\nfunc (r *Repo) Find() int { return r.n }\n\ntype Other struct{}\n\nfunc (o *Other) Find() int { return 2 }\n\n";
+    let body = "type Alias = Repo\n\nfunc (a *Alias) Bump() int { return 1 }\n\ntype Copy Repo\n\nfunc Aliased(a *Alias) int {\n\treturn a.Find()\n}\n\nfunc Bumped(r *Repo) int {\n\treturn r.Bump()\n}\n\nfunc Field(c Copy) int {\n\treturn c.n\n}\n\nfunc Switch(x interface{}) int {\n\tswitch v := x.(type) {\n\tcase *Repo:\n\t\treturn v.Find()\n\t}\n\treturn 0\n}\n\nfunc Range(ch chan *Repo, m map[*Repo]int) int {\n\tfor r := range ch {\n\t\treturn r.Find()\n\t}\n\tfor k := range m {\n\t\treturn k.Find()\n\t}\n\treturn 0\n}\n\nfunc Select(ch chan *Repo) int {\n\tselect {\n\tcase r := <-ch:\n\t\treturn r.Find()\n\t}\n}\n\nfunc Slices(xs []*Repo, more ...*Repo) int {\n\ts := make([]*Repo, 0)\n\ts = append(s, more...)\n\treturn xs[1:][0].Find() + more[0].Find() + s[0].Find()\n}\n";
+    let src = format!("{head}{body}");
+    let dir = project("go-alias-switch", &[m, ("a.go", &src)]);
+    let (g, _) = build_graph(&BuildOptions::new(&dir)).unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+    let links: BTreeSet<(String, String, String)> = g["links"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| {
+            (
+                e["source"].as_str().unwrap().to_string(),
+                e["relation"].as_str().unwrap().to_string(),
+                e["target"].as_str().unwrap().to_string(),
+            )
+        })
+        .collect();
+    for (s, r, t) in [
+        ("a_aliased", "calls", "a_repo_find"),
+        ("a_bumped", "calls", "a_bump"),
+        ("a_field", "reads", "a_repo_n"),
+        ("a_switch", "calls", "a_repo_find"),
+        ("a_range", "calls", "a_repo_find"),
+        ("a_select", "calls", "a_repo_find"),
+        ("a_slices", "calls", "a_repo_find"),
+    ] {
+        assert!(links.contains(&(s.into(), r.into(), t.into())), "{s} {r} {t}: {links:#?}");
+    }
+    for s in ["a_aliased", "a_switch", "a_range", "a_select", "a_slices"] {
+        assert!(
+            !links.contains(&(s.into(), "calls".into(), "a_other_find".into())),
+            "{s}: {links:#?}"
+        );
+    }
+}

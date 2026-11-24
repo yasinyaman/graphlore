@@ -1410,6 +1410,8 @@ pub struct Project<'a> {
     /// The file the path being walked is written in: of several blocks of
     /// one namespace, its own and those it includes come first.
     asking: RefCell<Option<usize>>,
+    /// Go: each type's aliases (`go_aliases`), worked out on first use.
+    go_alias_map: RefCell<Option<HashMap<DefRef, Vec<DefRef>>>>,
     /// How many arguments the call being resolved passes.
     args: RefCell<Option<u8>>,
     /// One of them is `this`.
@@ -1535,6 +1537,7 @@ impl<'a> Project<'a> {
             site: RefCell::new(None),
             ref_kind: RefCell::new(None),
             asking: RefCell::new(None),
+            go_alias_map: RefCell::new(None),
             args: RefCell::new(None),
             self_arg: RefCell::new(false),
             recv_types: RefCell::new(HashMap::new()),
@@ -1884,8 +1887,10 @@ impl<'a> Project<'a> {
                 // `typedef struct conn conn_t;`: the type the alias names, and of
                 // a template's specializations the one its arguments fit
                 // (and Kotlin / Swift `typealias Store = Repo`)
+                // (and Go `type A = T`, the one alias form it has)
                 let c_alias = k == DefKind::TypeAlias
-                    && matches!(self.family[r.0], Some(Family::C | Family::Jvm | Family::Swift));
+                    && (matches!(self.family[r.0], Some(Family::C | Family::Jvm | Family::Swift))
+                        || (self.family[r.0] == Some(Family::Go) && def.declared_type.is_some()));
                 // `typedef struct reader { … } reader;`: the struct written
                 // inside the alias, which holds the members
                 let inside = c_alias
@@ -1904,7 +1909,7 @@ impl<'a> Project<'a> {
                         .then_some(def.declared_type.as_ref())
                         .flatten()
                         .and_then(|ty| self.type_of_path(r.0, def.parent, ty, true))
-                        .filter(|t| *t != r && self.def(*t).kind.is_class_like())
+                        .filter(|t| *t != r && self.is_type_like(*t))
                 });
                 if let Some(t) = aliased {
                     Some((self.specialization_for(t, &def.alias_args), conf))
@@ -4557,6 +4562,68 @@ impl<'a> Project<'a> {
             .filter(|t| matches!(t, Target::Def(_)))
     }
 
+    /// Go: a member a type has through what it is written as, when it has
+    /// none of the name itself. An alias (`type A = T`) is T; a defined type
+    /// (`type Copy Base`) has Base's fields and what Base's embedded fields
+    /// promote, and, when Base is an interface, its methods, but never the
+    /// methods declared for Base; a method declared on an alias of a type is
+    /// the type's (`func (a A) M()`).
+    fn go_type_member(&self, c: DefRef, name: &str, depth: usize) -> Option<Target> {
+        let d = self.def(c);
+        if !self.members(c, name).is_empty() {
+            return None;
+        }
+        if d.kind == DefKind::TypeAlias {
+            if let Some(ty) = &d.declared_type {
+                let t = self.type_of_path(c.0, d.parent, ty, true).filter(|t| *t != c)?;
+                return self.member(&Target::Def(t), name, depth - 1);
+            }
+            let under = d.value_path.as_ref()?;
+            let u = self.type_of_path(c.0, d.parent, under, true).filter(|u| *u != c)?;
+            let ud = self.def(u);
+            if ud.kind == DefKind::Interface || ud.kind == DefKind::TypeAlias {
+                return self.member(&Target::Def(u), name, depth - 1);
+            }
+            let found = self.member(&Target::Def(u), name, depth - 1)?;
+            // (Base's own methods are not Copy's)
+            if let Target::Def(m) = found {
+                if self.def(m).kind.is_callable() && self.members(u, name).contains(&m) {
+                    return None;
+                }
+            }
+            return Some(found);
+        }
+        // a method written on an alias of this type
+        self.go_aliases(c)
+            .into_iter()
+            .find_map(|a| self.members(a, name).first().map(|&m| Target::Def(m)))
+    }
+
+    /// Go: the aliases (`type A = T`) whose type is `c`.
+    fn go_aliases(&self, c: DefRef) -> Vec<DefRef> {
+        if self.go_alias_map.borrow().is_none() {
+            let mut map: HashMap<DefRef, Vec<DefRef>> = HashMap::new();
+            for (f, file) in self.files.iter().enumerate() {
+                if self.family[f] != Some(Family::Go) {
+                    continue;
+                }
+                for (i, def) in file.defs.iter().enumerate() {
+                    if def.kind != DefKind::TypeAlias {
+                        continue;
+                    }
+                    let Some(ty) = &def.declared_type else { continue };
+                    if let Some(t) = self.type_of_path(f, def.parent, ty, true) {
+                        if t != (f, i) {
+                            map.entry(t).or_default().push((f, i));
+                        }
+                    }
+                }
+            }
+            *self.go_alias_map.borrow_mut() = Some(map);
+        }
+        self.go_alias_map.borrow().as_ref().and_then(|m| m.get(&c).cloned()).unwrap_or_default()
+    }
+
     /// `name` looked up inside a target.
     fn member(&self, t: &Target, name: &str, depth: usize) -> Option<Target> {
         match t {
@@ -4572,6 +4639,11 @@ impl<'a> Project<'a> {
                     if let Some(b) = embedded {
                         self.embedded_hit.set(Some(b));
                         return Some(Target::Def(b));
+                    }
+                }
+                if self.family[c.0] == Some(Family::Go) && depth > 0 {
+                    if let Some(found) = self.go_type_member(*c, name, depth) {
+                        return Some(found);
                     }
                 }
                 if d.kind == DefKind::Namespace {

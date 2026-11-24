@@ -192,7 +192,7 @@ def _span(n: dict[str, Any]) -> tuple[str, int, int, int, str]:
     loc = str(n.get("source_location") or "").lstrip("L").split("-")[0]
     line = int(loc) if loc.isdigit() else 0
     name = str(n.get("qualname") or n.get("label") or "").split(".")[-1].strip("()")
-    if not line:
+    if not line or n.get("kind") == "file":
         return str(n.get("source_file") or ""), 0, 0, 1 << 30, name
     return (str(n.get("source_file") or ""), line, int(n.get("region_start") or line),
             int(n.get("end_line") or line), name)

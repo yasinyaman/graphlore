@@ -3883,6 +3883,80 @@ case('go', 'go-external-test-package-qualifier', "in package app_test, app.Run i
      [('TestA', 'calls', 'a.go:Run'), ('TestB', 'calls', 'x_test.go:Run')], [('TestA', 'calls', 'x_test.go:Run'), ('TestB', 'calls', 'a.go:Run')],
      source='spec Package_clause, Import_declarations; go/types resolver.go collectObjects (each package clause name is its own package)')
 
+# (the third round of gap hunting)
+case('go', 'blank-var-type-uses', "a blank variable declares no name, yet the types written in its declaration are uses of the project's types",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Iface interface{ Run() }\n\ntype Impl struct{}\n\nfunc (Impl) Run() {}\n\ntype Other struct{}\n\nfunc (Other) Run() {}\n\nvar _ Iface = (*Impl)(nil)\n'},
+     [('a.go', 'references', 'Iface'), ('a.go', 'references', 'Impl')], [('a.go', 'references', 'Other'), ('a.go', 'references', '_')],
+     source='spec Blank_identifier')
+case('go', 'alias-typed-value-call', 'a method called on a value of an alias type is a method of the aliased type',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Impl struct{}\n\nfunc (Impl) Run() {}\n\ntype Other struct{}\n\nfunc (Other) Run() {}\n\ntype Alias = Impl\n\nfunc useAlias(a Alias) { a.Run() }\n'},
+     [('useAlias', 'calls', 'Impl.Run'), ('useAlias', 'references', 'Alias')], [('useAlias', 'calls', 'Other.Run')],
+     source='spec Declarations_and_scope (alias declarations); go/types resolver.go')
+case('go', 'anonymous-struct-embeds-a-type', "a struct literal type that embeds a type promotes its methods: x.Hello() on a variable of it is Base.Hello, not another type's",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Base struct{}\n\nfunc (Base) Hello() int { return 1 }\n\ntype Other struct{}\n\nfunc (Other) Hello() int { return 2 }\n\nfunc Run() int {\n\tvar x struct {\n\t\tBase\n\t\tn int\n\t}\n\treturn x.Hello() + x.n\n}\n'},
+     [('Run', 'calls', 'Base.Hello')], [('Run', 'calls', 'Other.Hello')],
+     source='spec Struct_types (promoted methods); go/types lookup.go lookupFieldOrMethodImpl')
+case('go', 'defined-from-an-instance-has-its-fields', 'type ItemBox Box[Item]: the field v of an ItemBox is an Item, so b.v.Size() is Item.Size',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Item struct{}\n\nfunc (Item) Size() int { return 1 }\n\ntype Other struct{}\n\nfunc (Other) Size() int { return 2 }\n\ntype Box[T any] struct{ v T }\n\nfunc (b Box[T]) Get() T { return b.v }\n\ntype ItemBox Box[Item]\n\nfunc Run(b ItemBox) int {\n\treturn b.v.Size()\n}\n'},
+     [('Run', 'calls', 'Item.Size')], [('Run', 'calls', 'Other.Size')],
+     source='spec Underlying_types, Type_definitions; go/types under.go under')
+case('go', 'range-over-a-function-iterator', 'for it := range All() with All returning func(yield func(Item) bool): it is an Item, so it.Size() is Item.Size',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.23\n', 'a.go': 'package app\n\ntype Item struct{}\n\nfunc (Item) Size() int { return 1 }\n\ntype Other struct{}\n\nfunc (Other) Size() int { return 2 }\n\nfunc All() func(yield func(Item) bool) {\n\treturn func(yield func(Item) bool) { yield(Item{}) }\n}\n\nfunc Run() int {\n\tn := 0\n\tfor it := range All() {\n\t\tn += it.Size()\n\t}\n\treturn n\n}\n'},
+     [('Run', 'calls', 'Item.Size')], [('Run', 'calls', 'Other.Size')],
+     source='spec Function_types and For_range; go/types stmt.go rangeStmt (range over func, Go 1.23)', since='1.23')
+case('go', 'embedded-field-named-by-its-type', "the embedded field of `util.Base` is named Base: `Svc{Base: b}` and `s.Base.Touch()` are the type's, not the importing package's variable Base",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\nimport "example.com/app/util"\n\nvar Base = 1\n\ntype Svc struct {\n\tutil.Base\n}\n\nfunc Use(b util.Base) {\n\ts := Svc{Base: b}\n\ts.Base.Touch()\n}\n', 'util/u.go': 'package util\n\ntype Base struct{}\n\nfunc (b *Base) Touch() {}\n'},
+     [('Use', 'calls', 'Base.Touch')], [('Use', 'reads', 'a.go:Base')],
+     source='spec Struct_types, Selectors; go/types lookup.go lookupFieldOrMethodImpl')
+case('go', 'function-typed-field-called', 'h.run() on a field of function type reads the field Hook.run; a method run of another type is not called',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Hook struct {\n\trun func()\n}\n\ntype Other struct{}\n\nfunc (Other) run() {}\n\nfunc Fire(h Hook) {\n\th.run()\n}\n'},
+     [('Fire', 'reads', 'Hook.run')], [('Fire', 'calls', 'Other.run')],
+     source='spec Selectors; go/types lookup.go (a field found by LookupFieldOrMethod is a variable, a call of it is a call of a value)')
+case('go', 'short-var-literal-sees-outer-name', 'a literal assigned with := does not see the variable it initializes: its own name inside the body is the outer (package) one',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\nfunc step() {}\n\nfunc Walk() {\n\tstep := func() {\n\t\tstep()\n\t}\n\t_ = step\n}\n'},
+     [('Walk', 'calls', 'step')], [],
+     source='spec Declarations_and_scope; go/types stmt.go declStmt / assignment.go shortVarDecl (declared after the right-hand side is checked)')
+case('go', 'method-expression-on-an-instance', '`Box[int].Get` is a use of Box.Get, not of Other.Get',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Box[T any] struct{ v T }\n\nfunc (b Box[T]) Get() T { return b.v }\n\ntype Other struct{}\n\nfunc (Other) Get() int { return 0 }\n\nfunc Use() {\n\tf := Box[int].Get\n\t_ = f\n}\n'},
+     [('Use', 'references', 'Box.Get')], [('Use', 'references', 'Other.Get')],
+     source='spec Method_expressions; go/types call.go selector (method expression on an instantiated type)')
+case('go', 'go-import-name-is-per-file', 'an import name is a name of its file block: the same name in two files of a package means two packages',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'one/o.go': 'package one\n\nfunc F() int {\n\treturn 1\n}\n', 'two/t.go': 'package two\n\nfunc F() int {\n\treturn 2\n}\n', 'a.go': 'package app\n\nimport p "example.com/app/one"\n\nfunc RunA() int {\n\treturn p.F()\n}\n', 'b.go': 'package app\n\nimport p "example.com/app/two"\n\nfunc RunB() int {\n\treturn p.F()\n}\n'},
+     [('RunA', 'calls', 'one/o.go:F'), ('RunB', 'calls', 'two/t.go:F')], [('RunA', 'calls', 'two/t.go:F'), ('RunB', 'calls', 'one/o.go:F')],
+     source='spec Declarations_and_scope; go/types resolver.go collectObjects (file scope of imports)')
+case('go', 'go-embedded-interface-in-struct', "a call of a method promoted from an interface embedded in a struct is the interface's method",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Store interface {\n\tFind() int\n}\n\ntype Other struct{}\n\nfunc (o *Other) Find() int {\n\treturn 2\n}\n\ntype Svc struct {\n\tStore\n}\n\nfunc Run(s *Svc) int {\n\treturn s.Find()\n}\n'},
+     [('Run', 'calls', 'Store.Find')], [('Run', 'calls', 'Other.Find')],
+     source='spec Struct_types (promoted); go/types call.go selector -> lookupFieldOrMethod')
+case('go', 'go-parameter-hides-an-import-name', "a parameter hides an imported package's name in the function body only",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'util/u.go': 'package util\n\nfunc F() int {\n\treturn 1\n}\n', 'a.go': 'package app\n\nimport "example.com/app/util"\n\ntype Helper struct{}\n\nfunc (h Helper) F() int {\n\treturn 2\n}\n\nfunc Run(util Helper) int {\n\treturn util.F()\n}\n\nfunc Other() int {\n\treturn util.F()\n}\n'},
+     [('Run', 'calls', 'Helper.F'), ('Other', 'calls', 'util/u.go:F')], [('Run', 'calls', 'util/u.go:F'), ('Other', 'calls', 'Helper.F')],
+     source='spec Declarations_and_scope; go/types call.go selector (package-name branch only when the identifier denotes a PkgName)')
+case('go', 'go-call-of-function-typed-variable', 'a call through a package variable of function type is a use of the variable; a multi-value call forwarded as arguments is a call',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype T struct{}\n\nfunc (t T) handler() int {\n\treturn 2\n}\n\nvar handler = func() int {\n\treturn 1\n}\n\nfunc pair() (int, int) {\n\treturn 1, 2\n}\n\nfunc sum(a, b int) int {\n\treturn a + b\n}\n\nfunc Run() int {\n\treturn handler() + sum(pair())\n}\n'},
+     [('Run', 'reads', 'a.go:handler'), ('Run', 'calls', 'sum'), ('Run', 'calls', 'pair')], [('Run', 'calls', 'T.handler')],
+     source='spec Calls; go/types call.go callExpr (a variable of function type is an ordinary operand)')
+case('go', 'go-defer-closure-sees-named-result', "a function literal run by a defer statement sees the enclosing function's named result as the local it is: a method call on it is its type's method, not that of a package variable of the same name",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Tool struct{}\n\nfunc (Tool) Do() {}\n\ntype Other struct{}\n\nfunc (Other) Do() {}\n\nvar t Other\n\nfunc Run() (t Tool) {\n\tdefer func() { t.Do() }()\n\treturn\n}\n'},
+     [('Run', 'calls', 'Tool.Do')], [('Run', 'calls', 'Other.Do')],
+     source='spec Defer_statements, Return_statements: the function literal is in the scope of the result parameters')
+case('go', 'go-func-literal-param-hides-outer-local', 'a parameter of a function literal hides a local of the enclosing function with the same name and has its own declared type',
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype Tool struct{}\n\nfunc (Tool) Do() {}\n\ntype Other struct{}\n\nfunc (Other) Do() {}\n\nfunc Lit() {\n\tx := Other{}\n\tfunc(x Tool) { x.Do() }(Tool{})\n\t_ = x\n}\n'},
+     [('Lit', 'calls', 'Tool.Do')], [('Lit', 'calls', 'Other.Do')],
+     source='spec Declarations_and_scope: the scope of a parameter is the function body')
+case('go', 'same-clause-name-in-two-directories-is-two-packages', "two directories whose files share a package clause name are two packages: a bare helper() is the one of its own directory's package block",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'cmd/a/main.go': 'package main\n\nfunc helper() int { return 1 }\n\nfunc main() { helper() }\n', 'cmd/b/main.go': 'package main\n\nfunc helper() int { return 2 }\n\nfunc main() { helper() }\n'},
+     [('cmd/a/main.go:main', 'calls', 'cmd/a/main.go:helper'), ('cmd/b/main.go:main', 'calls', 'cmd/b/main.go:helper')], [('cmd/a/main.go:main', 'calls', 'cmd/b/main.go:helper'), ('cmd/b/main.go:main', 'calls', 'cmd/a/main.go:helper')],
+     source="spec Package_clause, Packages; go/types package.go (a package is one directory's files)")
+case('go', 'dot-imported-function-result-types-a-local', "a dot-imported function's declared result gives the local its type: r.Find() is the imported type's method",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'util/u.go': 'package util\n\ntype Repo struct{}\n\nfunc (r *Repo) Find() int { return 1 }\n\nfunc New() *Repo { return &Repo{} }\n', 'a.go': 'package app\n\nimport . "example.com/app/util"\n\ntype Other struct{}\n\nfunc (o *Other) Find() int { return 2 }\n\nfunc Run() int {\n\tr := New()\n\treturn r.Find()\n}\n'},
+     [('Run', 'calls', 'util/u.go:New'), ('Run', 'calls', 'Repo.Find')], [('Run', 'calls', 'Other.Find')],
+     source='spec Import_declarations; go/types resolver.go collectObjects (dot-imports into the file scope)')
+case('go', 'package-type-hides-the-predeclared-any', "a package type named any hides the universe's any: x.Run() on a parameter of type any is the package interface's method",
+     GO, {'go.mod': 'module example.com/app\n\ngo 1.22\n', 'a.go': 'package app\n\ntype any interface{ Run() int }\n\ntype Job struct{}\n\nfunc (Job) Run() int { return 1 }\n\nfunc Use(x any) int { return x.Run() }\n'},
+     [('Use', 'calls', 'any.Run'), ('Use', 'references', 'any')], [],
+     source='spec Language_versions, Predeclared_identifiers; go/types scope.go (package scope is inside Universe)', since='1.18')
+
 # --- running ------------------------------------------------------------------
 
 def _matches(node: dict[str, Any], want: str) -> bool:

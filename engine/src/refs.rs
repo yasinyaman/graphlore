@@ -196,6 +196,12 @@ pub fn path_of(n: Node, src: &[u8]) -> Option<Vec<String>> {
         p.push(ELEMENT.into());
         return Some(p);
     }
+    // Go `xs[1:]`, `a[1:2:3]`: a slice keeps what it slices (of an array,
+    // or a pointer to one, a slice of its elements: the walk does not tell
+    // the two apart)
+    if k == "slice_expression" && crate::parse::current() == Some(crate::lang::Lang::Go) {
+        return path_of(n.child_by_field_name("operand")?, src);
+    }
     // Go `Point{1, 2}.Norm()`, `(&Point{}).Scale()`: a value of the type
     // written, as a construction is
     if k == "composite_literal" && crate::parse::current() == Some(crate::lang::Lang::Go) {
@@ -999,6 +1005,22 @@ fn value_type(v: Node, src: &[u8]) -> Option<Vec<String>> {
         "unary_expression" if go_received(v, src).is_some() => {
             let mut p = path_of(go_received(v, src)?, src).filter(|p| p[0] != UNKNOWN)?;
             p.push(ELEMENT.into());
+            Some(p)
+        }
+        // Go `make([]*T, n)`, `make(chan *T)`: a collection of T; `append(s,
+        // x)` is s, grown
+        "call_expression"
+            if crate::parse::current() == Some(crate::lang::Lang::Go)
+                && v.child_by_field_name("function")
+                    .is_some_and(|f| matches!(text(f, src).as_str(), "make" | "append")) =>
+        {
+            let args = v.child_by_field_name("arguments")?;
+            let first = kids(args).into_iter().find(|c| !is_comment(c))?;
+            if text(v.child_by_field_name("function")?, src) == "append" {
+                return path_of(first, src).filter(|p| p[0] != UNKNOWN);
+            }
+            let mut p = elem_type(first, src)?;
+            p.push(MANY.into());
             Some(p)
         }
         // Go `new(T)`: a T (a pointer to one, which the walk does not tell apart)
@@ -2175,10 +2197,16 @@ fn params_in(holder: Node, only_parameters: bool, src: &[u8]) -> Vec<crate::fact
                 }
             }
         }
+        // (Go `repos ...*Repo` is a `[]*Repo`)
+        let elem = written_elem(c, src).or_else(|| {
+            (k == "variadic_parameter_declaration")
+                .then(|| c.child_by_field_name("type").and_then(|t| first_type(t, src)))
+                .flatten()
+        });
         out.push(ParamFact {
             name,
             ty,
-            elem: written_elem(c, src),
+            elem,
             keyed: written_keyed(c, src),
             key: written_key(c, src),
             optional: eq
@@ -2453,6 +2481,44 @@ type Bound = (String, Vec<String>, bool, Option<(usize, usize)>);
 /// arm's bindings are the arm's (r[names.scopes.pattern-bindings.match-arm]).
 fn bound_by_pattern(n: Node, src: &[u8]) -> Vec<Bound> {
     let mut out: Vec<Bound> = Vec::new();
+    // Go `switch v := x.(type) { case *Repo: … }`: in a clause of one type v
+    // is that type, in one of several, `nil` or `default` what x is (the
+    // spec's "Type switches"); each clause is a block of its own
+    if n.kind() == "type_switch_statement" && crate::parse::current() == Some(crate::lang::Lang::Go)
+    {
+        let Some(name) = n
+            .child_by_field_name("alias")
+            .and_then(|a| kids(a).into_iter().find(|c| c.kind() == "identifier"))
+            .map(|a| text(a, src))
+            .filter(|a| a != "_")
+        else {
+            return out;
+        };
+        let guard = n
+            .child_by_field_name("value")
+            .and_then(|v| path_of(v, src))
+            .filter(|p| p[0] != UNKNOWN);
+        for clause in kids(n) {
+            if !matches!(clause.kind(), "type_case" | "default_case") {
+                continue;
+            }
+            let mut cursor = clause.walk();
+            let types: Vec<Node> = clause.children_by_field_name("type", &mut cursor).collect();
+            let path = match types.as_slice() {
+                [one] if text(*one, src) != "nil" => first_type(*one, src),
+                _ => guard.clone(),
+            };
+            if let Some(path) = path {
+                out.push((
+                    name.clone(),
+                    path,
+                    false,
+                    Some((clause.start_byte(), clause.end_byte())),
+                ));
+            }
+        }
+        return out;
+    }
     let typed = |ty: Option<Node>, name: Option<Node>, out: &mut Vec<_>| {
         let ty = ty.and_then(|t| first_type(t, src));
         let name = name.filter(|x| x.kind() == "identifier").map(|x| text(x, src));
@@ -2923,6 +2989,26 @@ fn locals_of(n: Node, src: &[u8], in_params: bool) -> Vec<(String, Vec<String>, 
                 }
             }
         }
+        // Go `case r := <-ch:` in a `select`: a local of the clause, the
+        // channel's element (`case r = <-ch:` assigns and declares nothing)
+        "receive_statement" => {
+            let (Some(l), Some(r)) =
+                (n.child_by_field_name("left"), n.child_by_field_name("right"))
+            else {
+                return out;
+            };
+            if !text(n, src).contains(":=") {
+                return out;
+            }
+            let names: Vec<Node> =
+                kids(l).into_iter().filter(|c| c.kind() == "identifier").collect();
+            if let Some(first) = names.first().filter(|x| text(**x, src) != "_") {
+                out.push((text(*first, src), value_type(r, src).unwrap_or_default(), false, false));
+            }
+            for x in names.iter().skip(1).filter(|x| text(**x, src) != "_") {
+                out.push((text(*x, src), Vec::new(), false, false));
+            }
+        }
         // Go `x := Foo{}`, `a, b := …`
         "short_var_declaration" => {
             let (Some(l), Some(r)) =
@@ -3334,11 +3420,35 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                 facts.defs[di].type_params = type_params(n, src);
                 // Go `type byName []*Command`, `type Header map[string][]string`:
                 // a defined collection type holds its element (and keys)
-                if n.kind() == "type_spec" {
+                if matches!(n.kind(), "type_spec" | "type_alias")
+                    && crate::parse::current() == Some(crate::lang::Lang::Go)
+                {
                     facts.defs[di].elem = written_elem(n, src)
                         .or_else(|| n.child_by_field_name("type").and_then(|t| map_value(t, src)));
                     facts.defs[di].keyed = written_keyed(n, src);
                     facts.defs[di].key = written_key(n, src);
+                    // the type named on the right: an alias is that type
+                    // (`type A = T`: `declared_type`); a defined type has its
+                    // fields, embeddings and, of an interface, its methods
+                    // (`type Copy Base`: `value_path`)
+                    let named = n
+                        .child_by_field_name("type")
+                        .filter(|t| {
+                            matches!(
+                                t.kind(),
+                                "type_identifier"
+                                    | "qualified_type"
+                                    | "generic_type"
+                                    | "pointer_type"
+                                    | "parenthesized_type"
+                            )
+                        })
+                        .and_then(|t| first_type(t, src).or_else(|| path_of(t, src)));
+                    if n.kind() == "type_alias" {
+                        facts.defs[di].declared_type = named;
+                    } else {
+                        facts.defs[di].value_path = named;
+                    }
                 }
             }
             if facts.defs[di].kind.is_callable() {
@@ -6780,10 +6890,28 @@ fn loop_variable(n: Node, src: &[u8]) -> Vec<(String, Vec<String>)> {
 fn loop_vars(n: Node, src: &[u8]) -> Option<Vec<(String, Vec<String>)>> {
     let k = n.kind();
     let (var, iterable) = match k {
-        // Go `for _, x := range xs`: the second name is the element
+        // Go `for k, x := range xs`: the second name is the element (or a
+        // map's value), the first the key; one name alone is the first.
+        // (Of a slice the first is an index the walk types as an element:
+        // a program that compiles uses no member of an int, so it names
+        // nothing either way; of a channel it is the element.)
         "range_clause" => {
-            let left = kids(n.child_by_field_name("left")?);
-            (*left.get(1)?, n.child_by_field_name("right")?)
+            let left: Vec<Node> = kids(n.child_by_field_name("left")?)
+                .into_iter()
+                .filter(|c| c.kind() == "identifier")
+                .collect();
+            let of = path_of(n.child_by_field_name("right")?, src).filter(|p| p[0] != UNKNOWN)?;
+            let mut out = Vec::new();
+            for (i, var) in left.iter().enumerate().take(2) {
+                let name = text(*var, src);
+                if name == "_" {
+                    continue;
+                }
+                let mut path = of.clone();
+                path.push(if i == 0 { KEY.into() } else { ELEMENT.into() });
+                out.push((name, path));
+            }
+            return Some(out);
         }
         "for_statement"
         | "enhanced_for_statement"
@@ -6823,14 +6951,6 @@ fn loop_vars(n: Node, src: &[u8]) -> Option<Vec<(String, Vec<String>)>> {
         }
         _ => return None,
     };
-    // Go's `range` gives the pair itself: the second name is the element (of
-    // a slice) or the value (of a map)
-    if k == "range_clause" {
-        let name = bound_name(var, src).filter(|n| n != "_")?;
-        let mut path = path_of(iterable, src).filter(|p| p[0] != UNKNOWN)?;
-        path.push(ELEMENT.into());
-        return Some(vec![(name, path)]);
-    }
     if let Some((key, value)) = pair_names(var, src) {
         // `for ((a, b) in xs.zip(ys))`, Python `zip(xs, ys)`: one of each
         if let Some((left, right)) = zipped(iterable, src) {
