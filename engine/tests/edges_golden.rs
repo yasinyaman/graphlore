@@ -3420,3 +3420,60 @@ fn cpp_the_class_before_its_constructor_and_gtest_fixtures() {
     ]);
     has(&got, &[("Status.Copy", "calls", "Status.OK"), ("DbTest.Writes", "calls", "Db.Write")]);
 }
+
+/// Rust (engine 0.5.81, from rust-analyzer on ripgrep): in a macro's
+/// arguments, `Mode::Count` is a path to the variant, and `c.n` a member;
+/// the last name is never read as a bare name of the module (a struct
+/// `Count` beside the enum's variant).
+#[test]
+fn rust_a_path_in_a_macro_argument_is_no_bare_name() {
+    let got = quals("rsmacropath", &[
+        ("Cargo.toml", "[package]\nname = \"demo\"\nversion = \"0.1.0\"\nedition = \"2021\"\n"),
+        (
+            "src/lib.rs",
+            "pub struct Count;\n\npub enum Mode {\n    Count,\n    Json,\n}\n\npub fn is_count(m: Mode) -> bool {\n    matches!(m, Mode::Count)\n}\n\npub fn run() {\n    assert!(is_count(Mode::Count));\n    let all = vec![Mode::Count, Mode::Json];\n    drop(all);\n}\n",
+        ),
+    ]);
+    has(&got, &[("run", "references", "Mode"), ("run", "calls", "is_count")]);
+    assert!(
+        !got.iter().any(|(_, r, t)| r == "references" && t == "Count"),
+        "a variant read as the struct of its name: {got:?}"
+    );
+}
+
+/// Rust (engine 0.5.81, from rust-analyzer on ripgrep's searcher): the bound
+/// of `impl<X: Sink> Core<X>` is the bound of `Core`'s parameter, so a method
+/// called on a field typed by it is the trait's own, not the method of a
+/// blanket `impl Sink for &mut S` beside it.
+#[test]
+fn rust_an_impl_bound_types_the_struct_parameter() {
+    let got = quals("rsimplbound", &[
+        ("Cargo.toml", "[package]\nname = \"demo\"\nversion = \"0.1.0\"\nedition = \"2021\"\n"),
+        (
+            "src/lib.rs",
+            "pub trait Sink {\n    fn matched(&mut self, n: u64) -> bool;\n}\n\nimpl<'a, S: Sink> Sink for &'a mut S {\n    fn matched(&mut self, n: u64) -> bool {\n        (**self).matched(n)\n    }\n}\n\npub struct Core<S> {\n    sink: S,\n}\n\nimpl<X: Sink> Core<X> {\n    pub fn run(&mut self) -> bool {\n        self.sink.matched(1)\n    }\n}\n",
+        ),
+    ]);
+    has(&got, &[("Core.run", "calls", "Sink.matched")]);
+    assert!(!got.contains(&("Core.run".into(), "calls".into(), "S.matched".into())));
+}
+
+/// Rust (engine 0.5.81, from rust-analyzer on axum and actix): an item of
+/// another module of the crate is no name of a file that does not `use` it;
+/// `Result` there is the prelude's, not a module's `type Result`.
+#[test]
+fn rust_an_item_of_another_module_needs_a_use() {
+    let got = quals("rsmodscope", &[
+        ("Cargo.toml", "[package]\nname = \"demo\"\nversion = \"0.1.0\"\nedition = \"2021\"\n"),
+        ("src/lib.rs", "mod http;\n\npub fn top() -> Result<(), ()> {\n    Ok(())\n}\n"),
+        (
+            "src/http/mod.rs",
+            "mod extractor;\n\npub type Result<T, E = String> = std::result::Result<T, E>;\n\npub fn own() -> Result<()> {\n    Ok(())\n}\n",
+        ),
+        ("src/http/extractor.rs", "pub fn child() -> Result<(), ()> {\n    Ok(())\n}\n"),
+    ]);
+    has(&got, &[("own", "references", "Result")]);
+    for who in ["top", "child"] {
+        assert!(!got.contains(&(who.into(), "references".into(), "Result".into())), "{who}: {got:?}");
+    }
+}

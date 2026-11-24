@@ -2789,6 +2789,30 @@ case("scala", "export-clause", "`export inner.f` makes f a member of the object 
      [("Main.run", "calls", "Printer.print")],
      source="Scala 3 reference 'Export Clauses' (an export defines aliases of the members selected)")
 
+# Rust, from rust-analyzer's answers on whole repositories (benchmarks/oracle_rust.py
+# on ripgrep and ureq, engine 0.5.80): the rules its wrong rows showed.
+found_by("compiler")
+case("rust", "path-in-macro-argument", "a macro's argument `E::V` is a path: its last name is the variant, never a bare name of the module",
+     RS, {"Cargo.toml": CARGO21, "src/lib.rs": "pub struct Count;\n\npub enum Mode {\n    Count,\n    Json,\n}\n\n"
+          "pub fn is_count(m: Mode) -> bool {\n    matches!(m, Mode::Count)\n}\n\n"
+          "pub fn run() {\n    assert!(is_count(Mode::Count));\n    let all = vec![Mode::Count, Mode::Json];\n    drop(all);\n}\n"},
+     [("run", "references", "Mode"), ("run", "calls", "is_count")],
+     [("run", "references", "src/lib.rs:Count"), ("is_count", "references", "src/lib.rs:Count")],
+     source=REF_RS + "macros-by-example.md r[macro.decl.meta.specifier] (an `expr` fragment is parsed as an expression)")
+
+case("rust", "impl-generics-bound-the-struct-parameter", "in `impl<S: Sink> Core<S>`, a field typed `S` is a `Sink`: a method called on it is the trait's, never a blanket impl's",
+     RS, {"Cargo.toml": CARGO21, "src/lib.rs": "pub trait Sink {\n    fn matched(&mut self, n: u64) -> bool;\n}\n\n"
+          "impl<'a, S: Sink> Sink for &'a mut S {\n    fn matched(&mut self, n: u64) -> bool {\n        (**self).matched(n)\n    }\n}\n\n"
+          "pub struct Core<S> {\n    sink: S,\n}\n\nimpl<X: Sink> Core<X> {\n    pub fn run(&mut self) -> bool {\n        self.sink.matched(1)\n    }\n}\n"},
+     [("Core.run", "calls", "Sink.matched")], [("Core.run", "calls", "S.matched")],
+     source=REF_RS + "items/implementations.md r[items.impl.generics] (an impl's generic parameters are in scope for its items); " + RC_RS + "rustc_hir_typeck/src/method/probe.rs assemble_inherent_candidates_from_param")
+case("rust", "item-of-another-module-needs-use", "an item of another module is in scope only through a `use`: `Result` in the crate root is the prelude's, not `http::Result`",
+     RS, {"Cargo.toml": CARGO21, "src/lib.rs": "mod http;\n\npub fn top() -> Result<(), ()> {\n    Ok(())\n}\n",
+          "src/http/mod.rs": "mod extractor;\n\npub type Result<T, E = String> = std::result::Result<T, E>;\n\npub fn own() -> Result<()> {\n    Ok(())\n}\n",
+          "src/http/extractor.rs": "pub fn child() -> Result<(), ()> {\n    Ok(())\n}\n"},
+     [("own", "references", "Result")], [("top", "references", "Result"), ("child", "references", "Result")],
+     source=REF_RS + "names/scopes.md r[names.scopes.item] (an item is in scope in the module it is declared in); names/preludes.md r[names.preludes.std]")
+
 # --- running ------------------------------------------------------------------
 
 def _matches(node: dict[str, Any], want: str) -> bool:

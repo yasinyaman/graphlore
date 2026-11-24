@@ -2879,6 +2879,116 @@ pub fn read(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFact
 
 /// `read`, `depth` macros deep (a Rust macro's arguments are read again as
 /// expressions: `macro_refs`).
+/// Rust `impl<S: Sink> Core<S> { … }`: the bound is written on the `impl`,
+/// not on `struct Core<S>`, and a member asked of a field typed `S` in the
+/// impl's methods is a member of `Sink` (rustc reads the impl's generics for
+/// its items). The bound is given to the struct's parameter in the same
+/// position of the self type's arguments, when every `impl` of the struct in
+/// the file that bounds it agrees; a bound the struct writes itself stays.
+fn rust_impl_bounds(root: Node, src: &[u8], defs: &mut [Def]) {
+    let mut found: HashMap<(usize, usize), Option<Vec<String>>> = HashMap::new();
+    let mut stack = vec![root];
+    while let Some(n) = stack.pop() {
+        if n.kind() != "impl_item" {
+            stack.extend(kids(n));
+            continue;
+        }
+        let (names, bounds) = type_params_bounds(n, src);
+        if names.is_empty() {
+            continue;
+        }
+        let Some(ty) = n.child_by_field_name("type").filter(|t| t.kind() == "generic_type") else {
+            // a blanket impl (`impl<S: Sink> Sink for &mut S`): every
+            // parameter is its methods'
+            let own: Vec<(String, Option<Vec<String>>)> =
+                names.iter().cloned().zip(bounds.iter().cloned()).collect();
+            give_impl_params(n, &own, defs);
+            continue;
+        };
+        let Some(base) = ty.child_by_field_name("type").map(|b| text(b, src)) else { continue };
+        let args: Vec<String> = ty
+            .child_by_field_name("type_arguments")
+            .map(kids)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|a| !matches!(a.kind(), "lifetime" | "<" | ">" | ","))
+            .map(|a| text(a, src))
+            .collect();
+        let Some(si) = defs
+            .iter()
+            .position(|d| d.kind.is_class_like() && d.name == base && !d.type_params.is_empty())
+        else {
+            continue;
+        };
+        let struct_param = |pos: usize, name: &str| {
+            defs.iter().any(|d| {
+                d.kind.is_class_like()
+                    && d.name == base
+                    && d.type_params.get(pos).is_some_and(|p| p == name)
+            })
+        };
+        // the impl's parameters that are not the struct's own under the same
+        // name (`impl<'a, S: Sink> Sink for &'a mut S`, `impl<X: Sink> Core<X>`)
+        // are names of its methods: `S::Error` in a signature is the bound's
+        let own: Vec<(String, Option<Vec<String>>)> = names
+            .iter()
+            .zip(bounds.iter())
+            .filter(|(name, _)| {
+                !args.iter().enumerate().any(|(pos, a)| a == *name && struct_param(pos, name))
+            })
+            .map(|(name, b)| (name.clone(), b.clone()))
+            .collect();
+        give_impl_params(n, &own, defs);
+        for (pos, arg) in args.iter().enumerate() {
+            let Some(i) = names.iter().position(|x| x == arg) else { continue };
+            let Some(bound) = bounds.get(i).cloned().flatten() else { continue };
+            if pos >= defs[si].type_params.len() {
+                continue;
+            }
+            found
+                .entry((si, pos))
+                .and_modify(|b| {
+                    if b.as_ref() != Some(&bound) {
+                        *b = None; // two impls bound it differently
+                    }
+                })
+                .or_insert(Some(bound));
+        }
+    }
+    for ((si, pos), bound) in found {
+        let d = &mut defs[si];
+        if d.type_bounds.len() < d.type_params.len() {
+            d.type_bounds.resize(d.type_params.len(), None);
+        }
+        if d.type_bounds[pos].is_none() {
+            d.type_bounds[pos] = bound;
+        }
+    }
+}
+
+/// The callables an `impl` block holds get its parameters as their own,
+/// after any of theirs (a method's own parameter of the name comes first).
+fn give_impl_params(imp: Node, params: &[(String, Option<Vec<String>>)], defs: &mut [Def]) {
+    if params.is_empty() {
+        return;
+    }
+    let (lo, hi) = (imp.start_byte(), imp.end_byte());
+    for d in defs.iter_mut() {
+        if !d.kind.is_callable() || d.start_byte < lo || d.start_byte >= hi || d.block {
+            continue;
+        }
+        if d.type_bounds.len() < d.type_params.len() {
+            d.type_bounds.resize(d.type_params.len(), None);
+        }
+        for (name, bound) in params {
+            if !d.type_params.iter().any(|p| p == name) {
+                d.type_params.push(name.clone());
+                d.type_bounds.push(bound.clone());
+            }
+        }
+    }
+}
+
 fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts, depth: usize) {
     let rust = facts.lang == Some(crate::lang::Lang::Rust);
     // Rust macro invocations, for the calls in their arguments
@@ -4580,6 +4690,9 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
         }
     }
     add_extras(&mut facts.defs, &extras, m, src);
+    if rust {
+        rust_impl_bounds(root, src, &mut facts.defs);
+    }
     let hoisted = add_blocks(&mut facts.defs, blocks, &invoked);
     locals.retain(|l| !hoisted.iter().any(|(name, at)| *at == l.byte && *name == l.name));
     let defs = &facts.defs;

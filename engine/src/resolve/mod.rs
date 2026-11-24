@@ -535,6 +535,17 @@ const RUST_CORE_METHODS: &[&str] = &[
     "split",
     "trim",
     "next",
+    // `str` / `String`, `Path`, `Peekable`, `fs::FileType` (rust-analyzer on
+    // ripgrep: a guess by these names went to a project method of the name
+    // where the receiver was the standard library's)
+    "as_str",
+    "as_bytes",
+    "parent",
+    "is_file",
+    "is_dir",
+    "is_symlink",
+    "file_name",
+    "peek",
 ];
 
 /// Methods of C++'s standard library (`std::string::c_str`).
@@ -3726,13 +3737,25 @@ impl<'a> Project<'a> {
     ) -> Option<(usize, Option<Vec<String>>)> {
         let defs = &self.files[f].defs;
         let mut cur = d;
+        let mut last = None;
         while let Some(x) = cur {
             if let Some(i) = defs[x].type_params.iter().position(|p| p == name) {
                 return Some((x, defs[x].type_bounds.get(i).cloned().flatten()));
             }
+            last = Some(x);
             cur = defs[x].parent;
         }
-        None
+        // Rust: a method of `impl<S: Sink> Core<S>` has no parent; the
+        // parameters of the type it is written for are in scope in it
+        let owner = defs[last?].owner.as_deref()?;
+        if self.family[f] != Some(Family::Rust) {
+            return None;
+        }
+        let x = defs.iter().position(|c| {
+            c.kind.is_class_like() && c.name == owner && c.type_params.iter().any(|p| p == name)
+        })?;
+        let i = defs[x].type_params.iter().position(|p| p == name)?;
+        Some((x, defs[x].type_bounds.get(i).cloned().flatten()))
     }
 
     /// Whether `path` is the value a local named like its head is declared
@@ -7389,6 +7412,18 @@ impl<'a> Project<'a> {
                     .filter(|r| {
                         fam != Family::Rust
                             || self.crate_of(r.0) == self.crate_of(f)
+                            || self.imports_name(f, &path[0])
+                    })
+                    // (Rust: a qualname holds no module path, so a bare one
+                    // matches an item of every module of the crate; an item of
+                    // another module is in scope only through a `use`, the
+                    // file's own or a glob's: `Result` in `lib.rs` is the
+                    // prelude's, not `http::Result`)
+                    .filter(|r| {
+                        fam != Family::Rust
+                            || !pre.is_empty()
+                            || r.0 == f
+                            || self.scopes[f].imported.contains(&r.0)
                             || self.imports_name(f, &path[0])
                     })
                     // PHP: a global class is no name of a namespaced file
