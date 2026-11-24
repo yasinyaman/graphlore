@@ -75,12 +75,24 @@ modified. `GRAPHLORE_SCIP` chooses the files: `auto` (the default) reads
 comma-separated list of paths inside the project. An index made in another
 directory (a CI container's `/src`) is read by the project's own paths.
 
-On httpx, scip-python's index (60 files, 15,828 uses) confirms 3,594 edges of
-the native graph, adds 935 (most of them type annotations and names read
-without a call) and contradicts 17, in a quarter of a second after the index
-is read. `benchmarks/oracle_scip.py` compares a whole graph with an index the
-way the compiler oracles do: on httpx, 99.0% of the edges the index has an
-answer for go where it says.
+An index is checked before it is believed. A use whose source text is not its
+symbol's name is left out and counted (`precision.mismatched`): scip-python
+binds a name a package re-exports to a neighbour of it (`httpx.Client` to
+`AsyncClient`), and an alias (`import numpy as np`) names its module by another
+name. A symbol is matched to its definition by its descriptors too, so the
+installed copy of a package a test imports (`click 8.5.0`, module
+`click.utils`) finds the project's own definition (`src/click/utils.py`, which
+the indexer names `src.click.utils`).
+
+On httpx, scip-python's index (60 files) confirms 3,697 edges of the native
+graph, adds 333 and contradicts 15, in under a second; 1,002 uses are left out
+as mismatched. The 15 are the indexer's own blind spots (a `main` defined under
+`try`, `.set()` taken for the builtin `set`), which is why a contradicted edge
+is kept and marked, never removed. `benchmarks/oracle_scip.py` compares a whole
+graph with an index the way the compiler oracles do: on httpx 99.1% of the
+edges the index has an answer for go where it says, and 92.8% of the uses it
+binds to a definition of the graph have an edge (click 97.7% / 91.3%,
+fastapi-template 100% / 92.4%).
 
 ## Import edges, checked against the source
 

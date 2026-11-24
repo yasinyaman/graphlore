@@ -185,8 +185,29 @@ impl LanguageModule for Python {
         } else {
             Vec::new()
         };
+        // the class attributes of an `enum.Enum` subclass are its members
+        let enum_class = in_class
+            && scope
+                .parent()
+                .and_then(|c| c.child_by_field_name("superclasses"))
+                .is_some_and(|bases| is_enum_base_list(bases, _src));
+        // `TimeoutTypes = Union[float, Timeout]`, `Scope = MutableMapping[str,
+        // Any]`, `T = TypeVar("T")`, `X: TypeAlias = …`: a module-level name
+        // for a type, which annotations write
+        let alias = !in_class
+            && names.len() == 1
+            && (node.child_by_field_name("type").is_some_and(|t| {
+                let text = String::from_utf8_lossy(&_src[t.byte_range()]);
+                text.rsplit('.').next() == Some("TypeAlias")
+            }) || node
+                .child_by_field_name("right")
+                .is_some_and(|v| is_type_expression(v, _src)));
         for name in names {
-            let kind = if in_class {
+            let kind = if alias {
+                DefKind::TypeAlias
+            } else if enum_class {
+                DefKind::EnumMember
+            } else if in_class {
                 DefKind::Property
             } else if super::capitals(&String::from_utf8_lossy(&_src[name.byte_range()]))
                 && node.child_by_field_name("right").is_some_and(|v| {
@@ -304,5 +325,95 @@ impl LanguageModule for Python {
 
     fn builtins(&self) -> &'static [&'static str] {
         BUILTINS
+    }
+}
+
+/// The bases `enum` defines (`Enum`, `enum.IntEnum`, …): a class with one of
+/// them is an enumeration (also through a project's own `class Base(Enum)`,
+/// which this does not follow).
+const ENUM_BASES: &[&str] = &["Enum", "IntEnum", "StrEnum", "Flag", "IntFlag", "ReprEnum"];
+
+fn is_enum_base_list(bases: Node, src: &[u8]) -> bool {
+    kids(bases).into_iter().any(|b| {
+        let name = match b.kind() {
+            "identifier" => b,
+            "attribute" => match b.child_by_field_name("attribute") {
+                Some(a) => a,
+                None => return false,
+            },
+            _ => return false,
+        };
+        ENUM_BASES.contains(&String::from_utf8_lossy(&src[name.byte_range()]).as_ref())
+    })
+}
+
+/// The generics of `typing` / `collections.abc` whose subscript is a type.
+const TYPING_GENERICS: &[&str] = &[
+    "Union",
+    "Optional",
+    "Callable",
+    "Dict",
+    "List",
+    "Tuple",
+    "Type",
+    "Literal",
+    "Mapping",
+    "MutableMapping",
+    "Sequence",
+    "MutableSequence",
+    "Iterable",
+    "Iterator",
+    "AsyncIterable",
+    "AsyncIterator",
+    "Awaitable",
+    "Coroutine",
+    "Generator",
+    "AsyncGenerator",
+    "Set",
+    "FrozenSet",
+    "Annotated",
+    "ClassVar",
+    "Final",
+];
+/// The calls that make a type variable or a distinct type.
+const TYPE_MAKERS: &[&str] = &["TypeVar", "NewType", "ParamSpec", "TypeVarTuple"];
+
+/// Whether an assigned value is a type: a `typing` generic subscripted
+/// (`Union[…]`, `typing.Callable[…]`), `A | B` of names, subscripts and `None`
+/// with a capitalized name or a subscript among them, or a `TypeVar(…)`.
+fn is_type_expression(v: Node, src: &[u8]) -> bool {
+    let last = |n: Node| -> String {
+        let t = String::from_utf8_lossy(&src[n.byte_range()]).to_string();
+        t.rsplit('.').next().unwrap_or("").to_string()
+    };
+    match v.kind() {
+        "subscript" => v.child_by_field_name("value").is_some_and(|x| {
+            matches!(x.kind(), "identifier" | "attribute")
+                && TYPING_GENERICS.contains(&last(x).as_str())
+        }),
+        "call" => v.child_by_field_name("function").is_some_and(|x| {
+            matches!(x.kind(), "identifier" | "attribute")
+                && TYPE_MAKERS.contains(&last(x).as_str())
+        }),
+        "binary_operator" => {
+            let op = v.child_by_field_name("operator").map(|o| o.kind()) == Some("|");
+            let mut typed = false;
+            let mut sides = true;
+            for side in [v.child_by_field_name("left"), v.child_by_field_name("right")]
+                .into_iter()
+                .flatten()
+            {
+                match side.kind() {
+                    "none" => {}
+                    "identifier" | "attribute" => {
+                        typed |= last(side).chars().next().is_some_and(char::is_uppercase);
+                    }
+                    "subscript" | "binary_operator" => typed |= is_type_expression(side, src),
+                    _ => sides = false,
+                }
+            }
+            op && sides && typed
+        }
+        _ => false,
     }
 }

@@ -3521,3 +3521,76 @@ fn csharp_an_identity_conversion_picks_the_overload() {
         .collect();
     assert_eq!(runs.len(), 1, "{got:?}");
 }
+
+// Python, from scip-python's answers on httpx and click (benchmarks/oracle_scip.py)
+
+#[test]
+fn python_a_name_of_another_module_needs_an_import() {
+    let got = edges(
+        "py-own-names",
+        &[
+            ("a/x.py", "def f(p):\n    return opener(p)\n\n\ndef g(p):\n    return open(p)\n"),
+            ("b/y.py", "def opener(url):\n    pass\n\n\ndef open(url):\n    pass\n"),
+        ],
+    );
+    lacks(&got, &[("f()", "calls", "opener()"), ("g()", "calls", "open()")]);
+}
+
+#[test]
+fn python_an_enum_member_names_its_enum() {
+    let got = edges("py-enum", &[(
+        "a.py",
+        "import enum\n\n\nclass State(enum.Enum):\n    OPEN = 1\n    CLOSED = 2\n\n\nclass Plain:\n    LIMIT = 3\n\n\ndef closed(s):\n    return s == State.CLOSED\n",
+    )]);
+    has(&got, &[("closed()", "references", "State")]);
+}
+
+#[test]
+fn python_a_typed_default_value_is_read() {
+    let got = edges("py-default", &[(
+        "a.py",
+        "class UseDefault:\n    pass\n\n\nUSE_DEFAULT = UseDefault()\n\n\nclass Client:\n    def get(self, url: str, *, timeout: float | UseDefault = USE_DEFAULT) -> None:\n        return None\n",
+    )]);
+    has(&got, &[(".get()", "reads", "USE_DEFAULT")]);
+}
+
+#[test]
+fn python_a_type_alias_written_as_an_annotation_is_referenced() {
+    let got = edges("py-alias", &[(
+        "a.py",
+        "import typing\n\nNumber = typing.Union[int, float]\nLIMIT = 3\n\n\ndef double(x: Number) -> Number:\n    return x * LIMIT\n",
+    )]);
+    has(&got, &[("double()", "references", "Number"), ("double()", "reads", "LIMIT")]);
+}
+
+#[test]
+fn python_a_field_is_typed_by_its_parameter_and_a_union_by_the_member() {
+    let got = edges("py-fields", &[(
+        "a.py",
+        "import urllib.request\n\n\nclass Request:\n    def __init__(self):\n        self.headers = {}\n\n\nclass Sync:\n    def close(self):\n        pass\n\n\nclass Async:\n    async def aclose(self):\n        pass\n\n\nclass Response:\n    def __init__(self, request: Request, stream: Sync | Async | None = None):\n        self.request = request\n        self.stream = stream\n        self.headers = {}\n\n    def close(self):\n        self.stream.close()\n\n    async def aclose(self):\n        await self.stream.aclose()\n\n\nclass Compat(urllib.request.Request):\n    def __init__(self, request: Request) -> None:\n        self.request = request\n\n    def add(self, key, value):\n        self.request.headers[key] = value\n",
+    )]);
+    has(
+        &got,
+        &[
+            (".close()", "calls", ".close()"),
+            (".aclose()", "calls", ".aclose()"),
+            (".add()", "writes", "headers"),
+        ],
+    );
+    // (labels repeat: the targets are the union's types, never Response's own)
+    let dir = project("py-fields-ids", &[("a.py", "class Sync:\n    def close(self):\n        pass\n\n\nclass Async:\n    async def aclose(self):\n        pass\n\n\nclass Response:\n    def __init__(self, stream: Sync | Async | None = None):\n        self.stream = stream\n\n    def close(self):\n        self.stream.close()\n\n    async def aclose(self):\n        await self.stream.aclose()\n")]);
+    let (g, _) = build_graph(&BuildOptions::new(&dir)).unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+    let calls: BTreeSet<(String, String)> = g["links"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|e| e["relation"] == "calls")
+        .map(|e| {
+            (e["source"].as_str().unwrap().to_string(), e["target"].as_str().unwrap().to_string())
+        })
+        .collect();
+    assert!(calls.contains(&("a_response_close".into(), "a_sync_close".into())), "{calls:?}");
+    assert!(calls.contains(&("a_response_aclose".into(), "a_async_aclose".into())), "{calls:?}");
+    assert!(!calls.iter().any(|(s, t)| s == t), "no definition calls itself: {calls:?}");
+}

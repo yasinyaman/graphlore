@@ -2063,9 +2063,43 @@ symbol, reads none of that one and binds the name to .NET's. Neither is wrong
 about the source, and the edge is right for the configuration that defines
 the symbol.
 
-What this is not: Java, C, C++, Ruby, PHP, Python. javac and clang could be
-asked the same way; neither is yet. And a compiler finds a rule read wrong
-and a position never read, not a framework's convention.
+**Python.** CPython has no binder to ask, but scip-python (Pyright inside)
+writes a SCIP index of a repository, and `benchmarks/oracle_scip.py` reads it
+with graphlore's own reader (`src/graphlore/scip.py`) and compares the same
+way. The index needs reading with care: a use whose source text is not its
+symbol's name is left out (scip-python binds a name a package re-exports to a
+neighbour of it, `httpx.Client` to `AsyncClient`), a symbol is matched to its
+definition by its descriptors too (a test's `click 8.5.0` `click.utils` is the
+project's `src.click.utils`), and the names of an import statement, which
+scip-python marks a read, are left to the import edges.
+
+```bash
+npx @sourcegraph/scip-python index REPO --project-name x --output REPO/index.scip
+python benchmarks/oracle_scip.py /tmp/polyglot/httpx /tmp/polyglot/click /tmp/polyglot/fastapi-template
+```
+
+| | before | 0.5.80 |
+|---|---:|---:|
+| httpx: precision / recall | 99.0% / 88.7% | 99.1% / 92.8% |
+| click | 97.3% / 90.5% | 97.7% / 91.3% |
+| fastapi-template | 100% / 87.6% | 100% / 92.4% |
+
+Six rules came out of the rows (each a case and a golden): a bare name of
+another module that the file does not import is none of its names (`open(p)`
+in one example script was a call of another script's `def open`), an
+`Enum`'s class attributes are its members, a typed parameter's default value
+is read, a module variable assigned a type is a type alias, a field assigned a
+parameter has its type (the field and the parameter of one name were one
+local), and `Optional[X]` / `X | None` are X while a union picks the member's
+type. What the index still calls wrong is mostly its own: a function defined
+under `try` it does not see (`httpx.main`), two classes of one name local to
+two test functions taken for one symbol, `self.type` read as the builtin
+`type`.
+
+What this is not: Java, C, C++, Ruby, PHP. javac and clang could be asked the
+same way (and scip-java, scip-clang write SCIP indexes `oracle_scip.py`
+reads); neither is yet. And a compiler finds a rule read wrong and a position
+never read, not a framework's convention.
 
 ### graphify's edges, checked before they count
 

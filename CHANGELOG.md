@@ -20,10 +20,13 @@ All notable changes to this project are documented here. The format is based on
   with the standard library (no `protobuf` package), cached on the file, and
   nothing is run or fetched; an index made in another directory is read by
   the project's own paths. Replies carry `resolved_edges.precision` and a
-  row's `scip`. On httpx: 3,594 edges confirmed, 935 added, 17 contradicted,
-  0.2 s. `benchmarks/oracle_scip.py` compares a whole native graph with an
-  index as the compiler oracles do (httpx: 99.0% precision, 76.8% recall
-  against scip-python).
+  row's `scip`. On httpx: 3,697 edges confirmed, 333 added, 15 contradicted
+  (all 15 the indexer's own slips), under a second. A use whose source text is not its symbol's name (an indexer's slip,
+  an alias) is left out and counted (`mismatched`), and a symbol is matched to
+  its definition by its descriptors too, so the installed copy of a package
+  (`click 8.5.0`, module `click.utils`) finds the project's own (`src/click`).
+  `benchmarks/oracle_scip.py` compares a whole native graph with an index as
+  the compiler oracles do.
 - **Workspaces: several repositories as one graph** (`docs/workspace.md`).
   A project folder that is no git repository and holds repositories one or two
   levels down (or a `.graphlore-workspace.json` naming them) is built as one
@@ -200,6 +203,36 @@ All notable changes to this project are documented here. The format is based on
   98 (precision 98.6% to 99.2%), against Roslyn on restsharp, commandline,
   aspnetcore-realworld and todoapi from 224 to 213; no edge the compilers
   confirm is lost, and the neutrality check finds no new leak.
+- **Six Python name-resolution rules read off scip-python's answers** on
+  httpx, click and fastapi-template (engine 0.5.80, `benchmarks/oracle_scip.py`;
+  each a case in `benchmarks/conformance.py` and a golden in
+  `engine/tests/edges_golden.rs`):
+  - a bare name a module neither defines nor imports is a builtin or
+    nothing: `open(p)` in one example script was a call of another script's
+    `def open`, `EXTRACTED` (a qualname holds no module path, so the bare
+    lookup matched every module's; Rust had the same filter already);
+  - the class attributes of an `enum.Enum` / `IntEnum` / `StrEnum` / `Flag`
+    subclass are its members, and `State.CLOSED` is a reference to the enum;
+  - a typed parameter's default value (`timeout: float | UseDefault =
+    USE_CLIENT_DEFAULT`) is read by the function: the node's kind
+    (`typed_default_parameter`) was taken for a type position;
+  - a module variable assigned a type (`TimeoutTypes = Union[…]`,
+    `Scope = MutableMapping[…]`, `T = TypeVar("T")`, `X: TypeAlias = …`) is a
+    type alias, and an annotation that writes it references it;
+  - a field assigned a parameter in `__init__` (`self.request = request`,
+    `request: Request`) has the parameter's type: the field and the
+    parameter of one name were made one local and the parameter dropped;
+  - `Optional[X]` and `X | None` are X, no closed wrapper; a field assigned a
+    union-typed parameter (`stream: SyncByteStream | AsyncByteStream | None`)
+    answers a member with the one type of the union that has it, `INFERRED`
+    (`self.stream.close()` inside `Response.close` was a guess of
+    `Response.close` itself).
+
+  Against scip-python, with the same oracle before and after: httpx 99.0% →
+  99.1% precision, 88.7% → 92.8% recall; click 97.3% → 97.7%, 90.5% →
+  91.3%; fastapi-template 100% → 100%, 87.6% → 92.4%. What remains wrong is
+  mostly the indexer's own (a function defined under `try`, two local classes
+  of one name taken for one symbol).
 - **`spans.py` and the native engine read the same definitions on 44 more
   files of the audit repositories** (engine 0.5.80). Compared on all 5,073
   source files of the 45, they disagreed on 45; each case was read against the

@@ -606,6 +606,10 @@ pub struct ParamFact {
     /// (`IRequest<TResponse>`); empty where the grammar has no `type` field.
     #[serde(default)]
     pub written: String,
+    /// The types of the union it is written with, `None` left out (Python
+    /// `A | B | None`, `Union[A, B]`): what a member asked of it may be of.
+    #[serde(default)]
+    pub alts: Vec<Vec<String>>,
 }
 
 /// What an argument of a call is.

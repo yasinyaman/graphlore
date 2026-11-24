@@ -21,6 +21,7 @@ the others.
 from __future__ import annotations
 
 import argparse
+import ast
 import sys
 from pathlib import Path
 from typing import Any
@@ -36,16 +37,37 @@ MANIFESTS = ("pyproject.toml", "setup.py", "setup.cfg", "package.json", "tsconfi
              "go.mod", "Cargo.toml", "pom.xml", "build.gradle", "build.gradle.kts")
 
 
-def uses_of(index: scip.Index) -> list[dict[str, Any]]:
+def import_lines(root: Path, files: set[str]) -> dict[str, set[int]]:
+    """The lines of each Python file's import statements: a name written there
+    binds an import, which `compare` (calls, references, reads) does not
+    judge. scip-python marks it a read, not an import."""
+    out: dict[str, set[int]] = {}
+    for rel in files:
+        if not rel.endswith(".py"):
+            continue
+        try:
+            tree = ast.parse((root / rel).read_text(encoding="utf-8", errors="replace"))
+        except (OSError, SyntaxError, ValueError):
+            continue
+        lines: set[int] = set()
+        for n in ast.walk(tree):
+            if isinstance(n, (ast.Import, ast.ImportFrom)):
+                lines.update(range(n.lineno, (n.end_lineno or n.lineno) + 1))
+        out[rel] = lines
+    return out
+
+
+def uses_of(index: scip.Index, imports: dict[str, set[int]] | None = None) -> list[dict[str, Any]]:
     """The index's occurrences in the shape `oracle.compare` reads."""
     uses = []
+    imports = imports or {}
     for o in index.refs:
-        if o.roles & scip.IMPORT:
+        if o.roles & scip.IMPORT or o.line in imports.get(o.file, ()):
             continue
         name = scip.bare_name(o.symbol)
         if not name:
             continue
-        decl = index.defs.get(o.symbol)
+        decl = index.def_of(o.symbol)
         decls = [decl] if decl else []
         uses.append({"file": o.file, "line": o.line, "expr": name, "symbol": o.symbol,
                      "decls": decls, "lib": not decls, "alias": False,
@@ -63,14 +85,16 @@ def judge(root: Path, index_path: Path) -> dict[str, Any] | None:
     for rel in sorted(documents):
         p = root / rel
         if p.is_file():
-            files[rel] = p.read_text(encoding="utf-8", errors="replace").splitlines()
+            files[rel] = p.read_text(encoding="utf-8", errors="replace").split("\n")
     for p in sorted(root.rglob("*")):
         rel = p.relative_to(root).as_posix()
         if p.name in MANIFESTS and p.is_file() and "/." not in "/" + rel and "node_modules" not in rel:
-            files.setdefault(rel, p.read_text(encoding="utf-8", errors="replace").splitlines())
+            files.setdefault(rel, p.read_text(encoding="utf-8", errors="replace").split("\n"))
     print(f"{root.name}: {index.documents} documents ({', '.join(index.tools) or 'unknown indexer'}), "
-          f"{len(index.refs)} uses", file=sys.stderr)
-    result = oracle.compare(root.name, files, uses_of(index), slack=(-3, 3))
+          f"{len(index.refs)} uses, {index.mismatched} left out (the source does not write "
+          "their symbol's name there)", file=sys.stderr)
+    result = oracle.compare(root.name, files, uses_of(index, import_lines(root, set(files))),
+                            slack=(-3, 3))
     if result:
         for row in result["wrong"] + result["missed"]:
             row["case"] = f"{root.name}/{row['file']}"

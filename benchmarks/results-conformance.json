@@ -1,6 +1,6 @@
 {
- "passed": 672,
- "total": 672,
+ "passed": 678,
+ "total": 678,
  "cases": [
   {
    "id": "python/module-function",
@@ -4030,6 +4030,42 @@
   },
   {
    "id": "csharp/identity-conversion-overload",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "python/name-of-another-module-needs-import",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "python/enum-member-names-its-enum",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "python/default-value-reads-the-name",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "python/type-alias-in-annotation",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "python/union-annotated-field-member",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "python/field-typed-by-its-parameter",
    "ok": true,
    "missing": [],
    "unwanted": []

@@ -216,8 +216,13 @@ pub fn assemble(files: &[FileFacts]) -> Assembled {
 
             let (source, relation) = match parent {
                 Some(p) => {
-                    let rel = if kind == DefKind::EnumMember {
+                    // (a member of Python's `class State(Enum)` hangs off it
+                    // as a class attribute does: graphify's shape)
+                    let python_enum = lang == crate::lang::Lang::Python && class_parent;
+                    let rel = if kind == DefKind::EnumMember && !python_enum {
                         "case_of"
+                    } else if kind == DefKind::EnumMember {
+                        "defines"
                     } else if kind.is_callable() && class_parent {
                         "method"
                     } else if kind == DefKind::Property && class_parent {
