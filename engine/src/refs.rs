@@ -2027,6 +2027,15 @@ fn arg_kind(v: Node, src: &[u8]) -> crate::facts::Arg {
         Arg::Bool
     } else if matches!(k, "null" | "nil" | "none" | "null_literal" | "nullptr" | "undefined") {
         Arg::Null
+    } else if matches!(k, "lambda_expression" | "anonymous_method_expression")
+        && crate::parse::current() == Some(crate::lang::Lang::CSharp)
+    {
+        // (`delegate { … }` writes no list: it fits a delegate of any)
+        if k == "anonymous_method_expression" && v.child_by_field_name("parameters").is_none() {
+            Arg::Func
+        } else {
+            u8::try_from(closure_params(v, src).len()).map_or(Arg::Func, Arg::Lambda)
+        }
     } else if is_closure(k) || k == "annotated_lambda" || k == "block" {
         Arg::Func
     } else if matches!(k, "class_literal" | "typeof_expression")
@@ -2392,6 +2401,7 @@ fn closure_params(n: Node, src: &[u8]) -> Vec<Param> {
         "arrow_function"
         | "function_expression"
         | "lambda_expression"
+        | "anonymous_method_expression"
         | "anonymous_function"
         | "anonymous_function_creation_expression"
         | "func_literal"
@@ -2725,6 +2735,46 @@ fn held_by_pattern(
 fn locals_of(n: Node, src: &[u8], in_params: bool) -> Vec<(String, Vec<String>, bool, bool)> {
     let k = n.kind();
     let mut out = Vec::new();
+    // C# `TryGet(k, out var r)`, `out Item r`: a local of the block around
+    // the call, of the type the out parameter is declared with (the
+    // standard's 12.17)
+    if k == "invocation_expression" && crate::parse::current() == Some(crate::lang::Lang::CSharp) {
+        let callee = n
+            .child_by_field_name("function")
+            .and_then(|f| path_of(f, src))
+            .filter(|p| !p.iter().any(|s| s == UNKNOWN));
+        let args = n.child_by_field_name("arguments").map(kids).unwrap_or_default();
+        for (i, a) in args.into_iter().filter(|c| !is_comment(c)).enumerate() {
+            if !a.child(0).is_some_and(|c| c.kind() == "out") {
+                continue;
+            }
+            let Some(decl) = kids(a).into_iter().find(|c| c.kind() == "declaration_expression")
+            else {
+                continue;
+            };
+            let Some(name) = decl.child_by_field_name("name").and_then(|x| bound_name(x, src))
+            else {
+                continue;
+            };
+            if name == "_" {
+                continue;
+            }
+            let ty = decl.child_by_field_name("type");
+            match ty.filter(|t| t.kind() != "implicit_type").and_then(|t| first_type(t, src)) {
+                Some(t) => out.push((name, t, true, false)),
+                None => {
+                    let path = callee.clone().map(|mut p| {
+                        p.push(out_param(i));
+                        p
+                    });
+                    out.push((name, path.unwrap_or_default(), false, false));
+                }
+            }
+        }
+        if !out.is_empty() {
+            return out;
+        }
+    }
     // parameters: `x: Foo`, `Foo x`, `x Foo`, `$x: Foo`
     if in_params && k.contains("parameter") && !k.ends_with("parameters") && !k.ends_with("_list") {
         let ty = n.child_by_field_name("type").and_then(|t| first_type(t, src)).or_else(|| {
@@ -4172,7 +4222,23 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                     }
                 }
             }
-            params.retain(|(name, ..)| name != "_");
+            // C# `r => r.Find()` where a delegate type is written for it: the
+            // declared `Func<Repo, int>`, or the parameter the lambda is an
+            // argument for (the standard's 12.19.4)
+            if facts.lang == Some(crate::lang::Lang::CSharp)
+                && params.iter().any(|(_, path, _)| path.is_empty())
+            {
+                if let Some(types) = csharp_lambda_types(&anc, n, src) {
+                    for (j, p) in params.iter_mut().enumerate() {
+                        if let Some(t) = types.get(j).filter(|_| p.1.is_empty()) {
+                            p.1 = t.clone();
+                        }
+                    }
+                }
+            }
+            // (C#: a single `_` is a parameter; two or more are discards)
+            let sole_discard = facts.lang == Some(crate::lang::Lang::CSharp) && params.len() == 1;
+            params.retain(|(name, ..)| name != "_" || sole_discard);
             if !params.is_empty() {
                 // a parameter list stands for the block around it
                 let body = if n.kind().ends_with("_parameters") || n.kind() == "exception_variable"
@@ -6514,6 +6580,127 @@ fn csharp_deconstruction(n: Node, src: &[u8]) -> Option<(Vec<String>, usize)> {
         path.push(ITERATED.into());
     }
     Some((path, count))
+}
+
+/// The path segment for what the `i`th argument of a call is given back as,
+/// an `out` parameter (`[out i]`, after the callee's path).
+pub fn out_param(i: usize) -> String {
+    format!("[out {i}]")
+}
+
+/// Which argument an `out_param` segment names.
+pub fn out_param_index(seg: &str) -> Option<usize> {
+    seg.strip_prefix("[out ")?.strip_suffix(']')?.parse().ok()
+}
+
+/// The path segment for the `j`th parameter of the delegate the `i`th argument
+/// of a call is given as (`[λi.j]`, after the callee's path).
+pub fn lambda_param(i: usize, j: usize) -> String {
+    format!("[λ{i}.{j}]")
+}
+
+/// Which argument and which of its parameters a `lambda_param` segment names.
+pub fn lambda_param_index(seg: &str) -> Option<(usize, usize)> {
+    let (i, j) = seg.strip_prefix("[λ")?.strip_suffix(']')?.split_once('.')?;
+    Some((i.parse().ok()?, j.parse().ok()?))
+}
+
+/// A written generic type taken apart: `Func<Repo, int>` is `Func` and the
+/// paths `Repo`, `int` (a dotted argument split at its dots); a type with no
+/// type arguments is its name and none.
+pub fn split_generic(written: &str) -> (String, Vec<Vec<String>>) {
+    let written = written.trim().trim_end_matches('?');
+    let Some((name, inner)) = written.split_once('<') else {
+        return (written.to_string(), Vec::new());
+    };
+    let inner = inner.strip_suffix('>').unwrap_or(inner);
+    let mut args: Vec<Vec<String>> = Vec::new();
+    let (mut depth, mut start) = (0usize, 0usize);
+    let part = |s: &str| s.trim().split('.').map(String::from).collect::<Vec<_>>();
+    for (i, ch) in inner.char_indices() {
+        match ch {
+            '<' | '(' | '[' => depth += 1,
+            '>' | ')' | ']' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => {
+                args.push(part(&inner[start..i]));
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    args.push(part(&inner[start..]));
+    let bare = name.trim().rsplit('.').next().unwrap_or(name).to_string();
+    (bare, args)
+}
+
+/// How many parameters the library delegate a C# parameter is written as
+/// takes (`Func<int, int>`: 1, `Action`: 0), or None for any other type.
+pub fn csharp_delegate_arity(written: &str) -> Option<usize> {
+    let (name, args) = split_generic(written);
+    if args.is_empty() {
+        return (name == "Action").then_some(0);
+    }
+    csharp_delegate_params(&name, &args).map(|p| p.len())
+}
+
+/// The parameter types of the C# delegates the standard library writes with
+/// type arguments: `Func<A, B, R>` takes A and B, `Action<A>` and
+/// `Predicate<A>` take A.
+pub fn csharp_delegate_params(name: &str, args: &[Vec<String>]) -> Option<Vec<Vec<String>>> {
+    match name {
+        "Func" => Some(args[..args.len().saturating_sub(1)].to_vec()),
+        "Action" | "Predicate" | "Comparison" | "EventHandler" => Some(args.to_vec()),
+        "Converter" => Some(args.iter().take(1).cloned().collect()),
+        _ => None,
+    }
+}
+
+/// C#: the types of a lambda's (or an anonymous method's) parameters, where
+/// what it is given to writes them: a declaration's `Func<…>` / `Action<…>`
+/// type, or, as an argument of a call, the `lambda_param` path of each
+/// parameter of the callee's delegate parameter.
+fn csharp_lambda_types(anc: &[Node], n: Node, src: &[u8]) -> Option<Vec<Vec<String>>> {
+    if !matches!(n.kind(), "lambda_expression" | "anonymous_method_expression") {
+        return None;
+    }
+    let up = |i: usize| anc.len().checked_sub(i + 1).map(|j| anc[j]);
+    let parent = up(0)?;
+    match parent.kind() {
+        "variable_declarator" => {
+            let decl = up(1).filter(|d| d.kind() == "variable_declaration")?;
+            let ty = decl.child_by_field_name("type").filter(|t| t.kind() == "generic_name")?;
+            let ks = kids(ty);
+            let name = text(*ks.first()?, src);
+            let list = ks.iter().find(|c| c.kind() == "type_argument_list")?;
+            let args: Vec<Vec<String>> = kids(*list)
+                .into_iter()
+                .filter(|c| !is_comment(c))
+                .map(|a| first_type(a, src).unwrap_or_default())
+                .collect();
+            csharp_delegate_params(&name, &args)
+        }
+        "argument" => {
+            let list = up(1).filter(|l| l.kind() == "argument_list")?;
+            let call = up(2).filter(|c| c.kind() == "invocation_expression")?;
+            let at = kids(list)
+                .into_iter()
+                .filter(|c| !is_comment(c))
+                .position(|c| c.id() == parent.id())?;
+            let callee = path_of(call.child_by_field_name("function")?, src)
+                .filter(|p| !p.iter().any(|s| s == UNKNOWN))?;
+            let count = closure_params(n, src).len();
+            Some(
+                (0..count)
+                    .map(|j| {
+                        let mut p = callee.clone();
+                        p.push(lambda_param(at, j));
+                        p
+                    })
+                    .collect(),
+            )
+        }
+        _ => None,
+    }
 }
 
 /// The name a C# indexer is declared under (`generic::KEYWORD_NAMES`).

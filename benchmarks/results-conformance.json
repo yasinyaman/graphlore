@@ -1,5 +1,5 @@
 {
- "passed": 1119,
+ "passed": 1131,
  "total": 1270,
  "cases": [
   {
@@ -6069,15 +6069,9 @@
   },
   {
    "id": "csharp/csharp-out-variable-block-scope",
-   "ok": false,
+   "ok": true,
    "missing": [],
-   "unwanted": [
-    [
-     "Holder.Leaks",
-     "reads",
-     "Holder.x"
-    ]
-   ]
+   "unwanted": []
   },
   {
    "id": "csharp/global-namespace-type",
@@ -6433,39 +6427,21 @@
   },
   {
    "id": "csharp/lambda-parameter-from-declared-delegate",
-   "ok": false,
-   "missing": [
-    [
-     "C.Make",
-     "calls",
-     "Repo.Find"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
    "id": "csharp/lambda-parameter-from-method-parameter",
-   "ok": false,
-   "missing": [
-    [
-     "C.Run",
-     "calls",
-     "Repo.Find"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
    "id": "csharp/overload-by-lambda-arity",
-   "ok": false,
+   "ok": true,
    "missing": [],
-   "unwanted": [
-    [
-     "C.Run",
-     "calls",
-     "A.cs:App.Runner.Apply@7"
-    ]
-   ]
+   "unwanted": []
   },
   {
    "id": "csharp/method-group-picks-overload-by-delegate",
@@ -6552,14 +6528,8 @@
   },
   {
    "id": "csharp/lambda-parameter-from-generic-delegate",
-   "ok": false,
-   "missing": [
-    [
-     "Run.Make",
-     "calls",
-     "Item.Weigh"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -6701,14 +6671,8 @@
   },
   {
    "id": "csharp/out-variable-type",
-   "ok": false,
-   "missing": [
-    [
-     "C.Var",
-     "calls",
-     "Item.Id"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -7571,14 +7535,8 @@
   },
   {
    "id": "csharp/out-variable-declaration",
-   "ok": false,
-   "missing": [
-    [
-     "C.M",
-     "calls",
-     "Part.Size"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -8160,21 +8118,9 @@
   },
   {
    "id": "csharp/lambda-discard-parameters",
-   "ok": false,
-   "missing": [
-    [
-     "Use.Run2",
-     "calls",
-     "Item.Go"
-    ]
-   ],
-   "unwanted": [
-    [
-     "Use.Run2",
-     "calls",
-     "Other.Go"
-    ]
-   ]
+   "ok": true,
+   "missing": [],
+   "unwanted": []
   },
   {
    "id": "csharp/query-range-variable",
@@ -8324,14 +8270,8 @@
   },
   {
    "id": "csharp/out-var-has-parameter-type",
-   "ok": false,
-   "missing": [
-    [
-     "User.Run",
-     "calls",
-     "Num.Show"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -8382,14 +8322,8 @@
   },
   {
    "id": "csharp/lambda-parameter-hides-outer-local",
-   "ok": false,
-   "missing": [
-    [
-     "Host.Shadow",
-     "calls",
-     "B.Hit"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -8436,21 +8370,9 @@
   },
   {
    "id": "csharp/anonymous-method-parameter-type",
-   "ok": false,
-   "missing": [
-    [
-     "C.Run",
-     "calls",
-     "Foo.Go"
-    ]
-   ],
-   "unwanted": [
-    [
-     "C.Run",
-     "calls",
-     "Bar.Go"
-    ]
-   ]
+   "ok": true,
+   "missing": [],
+   "unwanted": []
   },
   {
    "id": "csharp/increment-operator-call",
@@ -8735,21 +8657,9 @@
   },
   {
    "id": "csharp/out-var-types-and-hides",
-   "ok": false,
-   "missing": [
-    [
-     "A.Run",
-     "calls",
-     "Repo.Find"
-    ]
-   ],
-   "unwanted": [
-    [
-     "A.Run",
-     "calls",
-     "Other.Find"
-    ]
-   ]
+   "ok": true,
+   "missing": [],
+   "unwanted": []
   },
   {
    "id": "csharp/is-not-pattern-variable",

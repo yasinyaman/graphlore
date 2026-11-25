@@ -33,7 +33,7 @@ All notable changes to this project are documented here. The format is based on
   edges right (12,311 of 12,317 before), recall 86.0% (85.4%).
   C# second: 190 clauses of the standard and Roslyn's binder, 325 new cases
   (397 in all, every one asked of Roslyn through `verify_cases.py
-  --binding`), of which the engine held 207 and now 264: block scopes,
+  --binding`), of which the engine held 207 and now 276: block scopes,
   attribute names (`[Cache]` is `CacheAttribute`), user-defined operators,
   object initializers writing the created type's members, the class a
   static member is reached through, indexers (`g[1]` reads or writes the
@@ -43,9 +43,12 @@ All notable changes to this project are documented here. The format is based on
   `T` of `IEnumerable<T>`), `Deconstruct` (by the number of names, an
   extension when the type's own does not take them, each name typed by its
   out parameter), `await`'s `GetAwaiter` (the value typed by `GetResult`),
-  a collection initializer's `Add`, and `with` writing the copy's members.
-  Against Roslyn on four repositories: 12,313 of 12,524 judged edges right
-  (10,731 of 10,944 before), recall 80.0% -> 89.4%.
+  a collection initializer's `Add`, `with` writing the copy's members, a
+  lambda's parameters typed by the delegate it is given as (a declared
+  `Func<…>` / `Action<…>`, or the callee's delegate parameter; an overload
+  taken by the lambda's parameter count), and `out var r` typed by the out
+  parameter. Against Roslyn on four repositories: 12,335 of 12,555 judged
+  edges right (10,731 of 10,944 before), recall 80.0% -> 89.6%.
 - **SCIP precision mode** (`GRAPHLORE_SCIP`, `src/graphlore/scip.py`). When
   the project has a SCIP index (`index.scip`, made by `scip-python`,
   `scip-typescript`, `rust-analyzer scip` and others), the edges the

@@ -2072,6 +2072,16 @@ impl<'a> Project<'a> {
             } else {
                 &param.ty
             };
+            // C# `r.Apply(x => x + 1)`: a lambda fits only a delegate of as
+            // many parameters (the standard's 10.7.1)
+            if let crate::facts::Arg::Lambda(k) = &a.kind {
+                if let Some(n) = crate::refs::csharp_delegate_arity(&param.written) {
+                    if n != usize::from(*k) {
+                        return None;
+                    }
+                    score += 1;
+                }
+            }
             score += self.arg_fits(f, d, c, &a.kind, ty)?;
             // an argument that is a parameter of the caller, declared with the
             // very type this parameter is written with (type arguments and
@@ -2165,7 +2175,7 @@ impl<'a> Project<'a> {
             // a lambda is something to call: no string, number, flag or
             // class (it may be an interface of one method, which a class of
             // the project can be)
-            Arg::Func => match prim {
+            Arg::Func | Arg::Lambda(_) => match prim {
                 Some(Prim::Func) => Some(1),
                 // a name the project gives a type (`typealias Validation =
                 // (…) -> Result`): what a lambda is passed for
@@ -6216,6 +6226,30 @@ impl<'a> Project<'a> {
             {
                 continue;
             }
+            // C# `TryGet(k, out var r)`: `r` has the out parameter's type
+            if let Some(arg) = crate::refs::out_param_index(seg) {
+                let Target::Def(c) = t else { return None };
+                let def = self.def(c);
+                if !def.kind.is_callable() {
+                    return None;
+                }
+                let skip = usize::from(def.receiver.is_some());
+                let p = def.plist.get(arg + skip).filter(|p| !p.ty.is_empty())?;
+                let ty = self
+                    .type_of_path(c.0, Some(c.1), &p.ty, true)
+                    .filter(|x| self.def(*x).kind.is_class_like())?;
+                t = Target::Def(ty);
+                binds = None;
+                continue;
+            }
+            // C# `Apply(r => r.Find())`: `r` is the parameter of the delegate
+            // the callee's parameter is declared as
+            if let Some((arg, j)) = crate::refs::lambda_param_index(seg) {
+                let Target::Def(c) = t else { return None };
+                t = Target::Def(self.csharp_lambda_param(c, arg, j)?);
+                binds = None;
+                continue;
+            }
             // `let (a, b) = f()`: `a` is `f`'s result's first part
             if let Some(part) = crate::refs::tuple_index(seg) {
                 // either half of `partition`: a collection of the same
@@ -8202,6 +8236,56 @@ impl<'a> Project<'a> {
             held = Some(t);
         }
         self.walk(Target::Def(held?), &rest[1..], conf.max(Confidence::Inferred))
+    }
+
+    /// The type of the `j`th parameter of the delegate the C# callable `c`'s
+    /// `arg`th parameter is declared as (`Func<Repo, int> f`: `Repo` for
+    /// `j` 0; a delegate the project declares: its own parameter), an
+    /// extension's receiver not counted.
+    fn csharp_lambda_param(&self, c: DefRef, arg: usize, j: usize) -> Option<DefRef> {
+        // (of overloads, the ones whose delegate has such a parameter, when
+        // they agree: `Apply(Func<int>)` beside `Apply(Func<Repo, int>)`)
+        let mut found: Option<DefRef> = None;
+        for o in self.overloads(c) {
+            if let Some(t) = self.csharp_lambda_param_of(o, arg, j) {
+                if found.is_some_and(|x| x != t) {
+                    return None;
+                }
+                found = Some(t);
+            }
+        }
+        found
+    }
+
+    fn csharp_lambda_param_of(&self, c: DefRef, arg: usize, j: usize) -> Option<DefRef> {
+        let def = self.def(c);
+        if !def.kind.is_callable() {
+            return None;
+        }
+        let skip = usize::from(def.receiver.is_some());
+        let param = def.plist.get(arg + skip)?;
+        let written = param.written.trim();
+        let typed = |path: &[String], file: usize, scope: Option<usize>| {
+            self.type_of_path(file, scope, path, true).filter(|t| self.def(*t).kind.is_class_like())
+        };
+        let (bare, args) = crate::refs::split_generic(written);
+        if !args.is_empty() {
+            if let Some(params) = crate::refs::csharp_delegate_params(&bare, &args) {
+                let p = params.get(j)?;
+                return typed(p, c.0, Some(c.1));
+            }
+        }
+        // a delegate the project declares
+        if param.ty.is_empty() {
+            return None;
+        }
+        let d = self.type_of_path(c.0, Some(c.1), &param.ty, true)?;
+        let dd = self.def(d);
+        if dd.kind.is_class_like() {
+            return None;
+        }
+        let p = dd.plist.get(j).filter(|p| !p.ty.is_empty())?;
+        typed(&p.ty, d.0, Some(d.1))
     }
 
     /// What C# `await` of a value of the project type `c` gives: the result

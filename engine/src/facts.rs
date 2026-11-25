@@ -633,6 +633,9 @@ pub enum Arg {
     /// the parameter's own type, so only a type that has one of that name
     /// takes it.
     Implicit(String),
+    /// A C# lambda or anonymous method, with how many parameters it writes:
+    /// only a delegate of as many fits it.
+    Lambda(u8),
 }
 
 /// An argument: the name it is passed under, if any, and what it is.

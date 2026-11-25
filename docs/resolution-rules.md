@@ -799,7 +799,7 @@ Found by: the specification 20, a compiler 8, comparison 0, the grammar 4, the l
 | a member of the receiver's type comes before an extension method of the name | `member-before-extension` | – | yes |
 | `export inner.f` makes f a member of the object that writes it | `export-clause` | – | yes |
 
-### csharp (264 of 397)
+### csharp (276 of 397)
 
 C# Language Specification, 'Namespace and type names', 'Member lookup', 'Extension method invocations'.
 
@@ -906,7 +906,7 @@ Found by: the specification 39, a compiler 8, comparison 6, the grammar 1, the l
 | an explicit interface implementation `void I.M()` is no member of its class by name: `M()` in the class means the inherited `B.M` | `explicit-interface-impl-not-found-by-name` | – | **no**: no C.Run -calls-> B.M has C.Run -calls-> C.M |
 | a local function hides a method of its name throughout its block, including a call written before its declaration | `local-function-hides-method-in-whole-block` | – | yes |
 | `if (o is Box x)` declares x for the if statement only: inside it x is the local, after it x is the field | `csharp-pattern-variable-if-scope` | – | yes |
-| `Make(out var x);` declares x in the enclosing block: a later `x.Open()` is the local, not the field x | `csharp-out-variable-block-scope` | – | **no**: has Holder.Leaks -reads-> Holder.x |
+| `Make(out var x);` declares x in the enclosing block: a later `x.Open()` is the local, not the field x | `csharp-out-variable-block-scope` | – | yes |
 | a type of the global namespace is visible from every namespace | `global-namespace-type` | – | yes |
 | the usings of a compilation unit have no effect on another | `using-is-per-file` | – | yes |
 | a namespace declared in several files is one: its types are visible before a `using`'s | `namespace-open-ended` | – | yes |
@@ -944,9 +944,9 @@ Found by: the specification 39, a compiler 8, comparison 6, the grammar 1, the l
 | an int constant in range converts implicitly to byte | `overload-constant-conversion` | – | yes |
 | the literal null converts to a reference type, never to a non-nullable value type | `overload-null-literal` | – | **no**: has C.Run -calls-> A.cs:App.Log.Write@5 |
 | a value of a type parameter converts implicitly to its effective base class | `overload-type-parameter-bound` | – | yes |
-| a lambda's untyped parameter has the type of the declared delegate it is assigned to | `lambda-parameter-from-declared-delegate` | – | **no**: no C.Make -calls-> Repo.Find |
-| a lambda passed as an argument takes its parameter types from the delegate type of the parameter | `lambda-parameter-from-method-parameter` | – | **no**: no C.Run -calls-> Repo.Find |
-| a lambda is compatible only with a delegate with as many parameters as it | `overload-by-lambda-arity` | – | **no**: has C.Run -calls-> A.cs:App.Runner.Apply@7 |
+| a lambda's untyped parameter has the type of the declared delegate it is assigned to | `lambda-parameter-from-declared-delegate` | – | yes |
+| a lambda passed as an argument takes its parameter types from the delegate type of the parameter | `lambda-parameter-from-method-parameter` | – | yes |
+| a lambda is compatible only with a delegate with as many parameters as it | `overload-by-lambda-arity` | – | yes |
 | a method group converted to a delegate is the overload applicable to the delegate's parameter types | `method-group-picks-overload-by-delegate` | – | **no**: no C.Make -indirect_call-> A.cs:App.C.Handle@9 |
 | an extension method named through an instance is a method group that converts to a delegate | `method-group-extension` | – | **no**: no C.Make -indirect_call-> RepoExt.Size |
 | a method group converted to a delegate is the overload applicable to the delegate's parameter types (passed as an argument) | `method-group-overload-by-delegate-roslyn` | – | yes |
@@ -956,7 +956,7 @@ Found by: the specification 39, a compiler 8, comparison 6, the grammar 1, the l
 | calling a parameter of a declared delegate type gives the delegate's return type | `delegate-invocation-result` | – | **no**: no Run.Go -calls-> Item.Weigh |
 | `xs[0].M()` on an `Item[]` is Item's M | `array-element-type` | – | yes |
 | `new Handler(OnData)` is a use of the OnData overload that takes the delegate's parameter type | `delegate-creation-method-group` | – | yes |
-| `Func<Item,int> f = x => x.Weigh();` has x of type Item | `lambda-parameter-from-generic-delegate` | – | **no**: no Run.Make -calls-> Item.Weigh |
+| `Func<Item,int> f = x => x.Weigh();` has x of type Item | `lambda-parameter-from-generic-delegate` | – | yes |
 | `(Op)Inc` is a use of the Inc overload that takes Op's parameter type | `cast-method-group-to-delegate` | – | **no**: no Run.Go -indirect_call-> A.cs:App.Run.Inc@4 |
 | members of `t` typed `T : IShape, ISized`, `T : Node` (member of its base) and `T : U` with `U : IShape` are the constraints' members | `type-parameter-several-constraints` | – | **no**: no Run.Go -calls-> ISized.Size; Run.Go3 -calls-> IShape.Draw |
 | `Write(i)` with an int variable is the overload taking `int?`, not the one taking string | `overload-nullable-conversion` | – | yes |
@@ -975,7 +975,7 @@ Found by: the specification 39, a compiler 8, comparison 6, the grammar 1, the l
 | a variable initializer is bound in the class: its names are members of the class before a `using static` import | `field-initializer-uses` | – | yes |
 | the expanded form of a params method is not considered when a method of that very signature is declared | `params-expanded-form-yields-to-declared` | – | **no**: has T.Two -calls-> A.cs:App.T.F@5 |
 | a default argument is an expression of the method's own scope | `default-argument-constant` | – | **no**: no C.N -reads-> C.Size |
-| an `out` argument given as `out var x` is a local of the parameter's type | `out-variable-type` | – | **no**: no C.Var -calls-> Item.Id |
+| an `out` argument given as `out var x` is a local of the parameter's type | `out-variable-type` | – | yes |
 | a non-virtual method is the one of the static type of the receiver, hiding or not | `static-type-picks-hidden-method` | – | yes |
 | a call of a virtual method is bound to the declaration of the receiver's static type, an override or a hiding `new virtual` | `override-call-binds-to-override` | – | yes |
 | a call of a partial method is a use of the one method its two parts declare | `partial-method-call` | – | yes |
@@ -1077,7 +1077,7 @@ Found by: the specification 39, a compiler 8, comparison 6, the grammar 1, the l
 | among the operators of one name, the one whose parameters fit the operand types is called | `operator-by-operand-types` | – | **no**: no C.M -calls-> A.cs:App.Money.operator+@7 |
 | `-a` calls the user-defined unary operator of its operand's type | `unary-operator` | – | **no**: no C.M -calls-> A.cs:App.Vec.operator-@5 |
 | `a ?? b` has the type of a (its underlying type when nullable), so a member of it is a member of that type | `coalesce-type` | – | **no**: no C.M -calls-> Part.Size |
-| an `out var` declared in an argument list has the declared type of the parameter | `out-variable-declaration` | – | **no**: no C.M -calls-> Part.Size |
+| an `out var` declared in an argument list has the declared type of the parameter | `out-variable-declaration` | – | yes |
 | a variable declared by `var (a, b) = ...` has the type of its tuple element | `deconstruction-variable-types` | – | **no**: no C.M -calls-> Part.Size |
 | `c ? x : y` has the type of its arms, so a member of it is a member of that type | `conditional-type` | – | **no**: no C.M -calls-> Part.Size |
 | `x.P = v` assigns the property or field the member lookup finds | `simple-assignment-writes-member` | – | yes |
@@ -1138,7 +1138,7 @@ Found by: the specification 39, a compiler 8, comparison 6, the grammar 1, the l
 | a parameter of an anonymous function written with its type has that type in the body | `lambda-explicit-parameter-type` | – | yes |
 | the parameter of an anonymous function hides a field of its name in the body only | `lambda-parameter-hides-member` | – | yes |
 | a name in the body of an anonymous function that is no parameter of it is looked up outward: an outer local hides a field | `lambda-uses-outer-local` | – | yes |
-| two or more parameters named `_` are discards that name nothing; a single `_` is a parameter | `lambda-discard-parameters` | 9– | **no**: no Use.Run2 -calls-> Item.Go has Use.Run2 -calls-> Other.Go |
+| two or more parameters named `_` are discards that name nothing; a single `_` is a parameter | `lambda-discard-parameters` | 9– | yes |
 | the range variable of a `from` clause has the element type of the source and hides a field of its name in the whole query | `query-range-variable` | – | **no**: no Use.Run -calls-> Customer.Active; Use.Run -calls-> Customer.Name has Use.Run -calls-> Other.Active; Use.Run -calls-> Other.Name; Use.Run -reads-> Use.c |
 | `from T x in e` gives the range variable the type T | `query-explicit-range-type` | – | **no**: no Use.Run -calls-> Customer.Active |
 | a `let` variable has the type of its expression, a second `from` ranges over the elements of its expression, and earlier range variables stay in scope | `query-let-and-second-from` | – | **no**: no Use.Run -calls-> Customer.Id; Use.Run -calls-> Dept.Title; Use.Run2 -calls-> Order.Total |
@@ -1147,16 +1147,16 @@ Found by: the specification 39, a compiler 8, comparison 6, the grammar 1, the l
 | a private method of the derived type is not a candidate from outside it; the accessible base method is called | `inaccessible-method-not-candidate` | – | **no**: no User.Run -calls-> Base.Put has User.Run -calls-> Box.Put |
 | t.Draw() with T : IShape is IShape.Draw | `type-parameter-receiver-constraint` | – | yes |
 | a + b on T : IAdd<T> is a use of IAdd.operator+, not of the implementing class's operator | `static-abstract-operator-via-constraint` | 11– | yes |
-| `if (s.TryGet(out var n)) n.Show();` is Num.Show | `out-var-has-parameter-type` | – | **no**: no User.Run -calls-> Num.Show |
+| `if (s.TryGet(out var n)) n.Show();` is Num.Show | `out-var-has-parameter-type` | – | yes |
 | `from x in s where .. orderby a, b select x` calls Where, OrderBy and ThenBy, and no Select | `query-trivial-select-omitted` | – | **no**: no User.Run -calls-> Src.Where; User.Run -calls-> Src.OrderBy; User.Run -calls-> Src.ThenBy |
 | x + y inside checked(...) is the `operator checked +`, inside unchecked(...) the plain `operator +` | `checked-operator-by-context` | 11– | **no**: no Host.Strict -calls-> Money.operator checked + has Host.Strict -calls-> Money.operator+ |
 | `T.Create()` with `where T : IMake<T>` binds to IMake.Create, never to the Create of an implementing class | `static-abstract-call-on-type-parameter` | 11– | yes |
-| in `x => x.Hit()` the `x` is the lambda's parameter (type B), not the enclosing method's local `x` (type A) | `lambda-parameter-hides-outer-local` | 8– | **no**: no Host.Shadow -calls-> B.Hit |
+| in `x => x.Hit()` the `x` is the lambda's parameter (type B), not the enclosing method's local `x` (type A) | `lambda-parameter-hides-outer-local` | 8– | yes |
 | a derived class's method of the name that does not take the arguments does not hide the base's that does | `derived-method-not-applicable-base-used` | – | **no**: no Derived.Run -calls-> Base.M has Derived.Run -calls-> Derived.M |
 | a field that is not of a delegate type does not hide a base method of its name when the name is invoked | `non-invocable-member-skipped` | – | **no**: no Derived.Run -calls-> Base.Size |
 | `var (x, y) = p` is a call of the two-out-parameter Deconstruct, not the three-out one | `deconstruct-by-arity` | – | yes |
 | `b?[0].Weight()` calls Weight of the indexer's type | `null-conditional-element-access-member` | – | yes |
-| `delegate (Foo f) { f.Go(); }` calls Foo.Go, not the Go of the field f's type | `anonymous-method-parameter-type` | – | **no**: no C.Run -calls-> Foo.Go has C.Run -calls-> Bar.Go |
+| `delegate (Foo f) { f.Go(); }` calls Foo.Go, not the Go of the field f's type | `anonymous-method-parameter-type` | – | yes |
 | `c++` is a call of `operator ++` of c's type | `increment-operator-call` | – | yes |
 | `x` after `into y` is the field x, not the range variable | `query-continuation-ends-range-variables` | – | yes |
 | `First(list).Go()` and `Head(array).Go()` call Foo.Go | `inference-through-interface-and-array` | – | **no**: no C.Run -calls-> Foo.Go |
@@ -1187,7 +1187,7 @@ Found by: the specification 39, a compiler 8, comparison 6, the grammar 1, the l
 | a public GetEnumerator method of the collection type wins over its IEnumerable<T> implementation: the iteration variable is the pattern enumerator's Current | `foreach-pattern-before-interface` | – | yes |
 | the iteration variable of an `await foreach` over IAsyncEnumerable<T> is a T | `await-foreach-variable` | – | yes |
 | in `var (a, b) = p;` a and b are typed by the out parameters of p's Deconstruct method | `deconstruction-declaration-types` | – | yes |
-| `s.TryGet(out var r)` declares r, typed by the out parameter, in the enclosing block; a later `r.Find()` is on that local, not on the field r | `out-var-types-and-hides` | – | **no**: no A.Run -calls-> Repo.Find has A.Run -calls-> Other.Find |
+| `s.TryGet(out var r)` declares r, typed by the out parameter, in the enclosing block; a later `r.Find()` is on that local, not on the field r | `out-var-types-and-hides` | – | yes |
 | `if (o is not Repo r) return;` leaves r, a Repo, in scope after the statement, hiding a field r | `is-not-pattern-variable` | – | yes |
 | `[Mark]` means `MarkAttribute`, not a non-attribute class `Mark` | `attribute-suffix-omitted` | – | yes |
 | `[Help(Topic = ..., Level = ...)]`: the names are members of the attribute class (own or inherited), not of the decorated type | `attribute-named-argument-member` | – | **no**: no Doc -writes-> BaseAttr.Topic; Doc -writes-> HelpAttribute.Level |
@@ -1520,4 +1520,4 @@ Found by: the specification 31, a compiler 2, comparison 0, the grammar 1, the l
 | `A::hello insteadof B` picks A's method of two used traits | `trait-insteadof` | – | yes |
 | a method a trait brings comes before an inherited one, and the class's own before both | `trait-before-inherited` | – | yes |
 
-1119 of 1270 rules hold
+1131 of 1270 rules hold

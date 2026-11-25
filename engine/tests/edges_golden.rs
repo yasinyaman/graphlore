@@ -3924,3 +3924,21 @@ fn csharp_patterns_called_by_name() {
         lacks(&got, &[(f, "calls", "App.Decoy.A")]);
     }
 }
+
+// C#: a lambda's untyped parameter has the type of the delegate it is given
+// as (a declared `Func<…>`, or the callee's delegate parameter), a lambda
+// fits only a delegate of as many parameters, and `out var r` is a local of
+// the out parameter's type
+#[test]
+fn csharp_lambda_parameters_and_out_variables() {
+    let got = call_ids("cs-lambdas", &[(
+        "A.cs",
+        "using System;\nnamespace App\n{\n    public class Repo { public int Find() { return 1; } }\n    public class Other { public int Find() { return 2; } }\n    public class Runner\n    {\n        public int Apply(Func<int> f) { return 1; }\n        public int Apply(Func<Repo, int> f) { return 2; }\n        public bool TryGet(out Repo r) { r = null; return true; }\n    }\n    public class C\n    {\n        Other r;\n        public int Declared() { Func<Repo, int> f = x => x.Find(); return 0; }\n        public int Passed(Runner run) { return run.Apply(x => x.Find()); }\n        public int Out(Runner run) { run.TryGet(out var r); return r.Find(); }\n    }\n}\n",
+    )]);
+    for f in [".Declared()", ".Passed()", ".Out()"] {
+        assert!(got.contains(&(f.to_string(), "a_repo_find".to_string())), "{f}: {got:?}");
+        assert!(!got.contains(&(f.to_string(), "a_other_find".to_string())), "{f}: {got:?}");
+    }
+    assert!(got.contains(&(".Passed()".to_string(), "a_runner_apply_2".to_string())), "{got:?}");
+    assert!(!got.contains(&(".Passed()".to_string(), "a_runner_apply".to_string())), "{got:?}");
+}
