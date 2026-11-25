@@ -176,7 +176,29 @@ def verify(c: dict[str, Any]) -> dict[str, Any]:
 # relations that bind no name the compiler could be asked about
 NOT_BINDINGS = {"imports", "imports_from", "re_exports", "contains", "method", "defines",
                 "case_of", "dispatches_to", "couples_with", "documents", "handles", "http_calls"}
-BINDERS = {"go"}
+BINDERS = {"go", "csharp"}
+
+
+def binder(lang: str, tmp: Path) -> list[str] | None:
+    """The command that prints a project's bindings in `oracle_go.py`'s
+    shape (`file`, `line`, `expr`, `to_file`, `to_line`), built once under
+    `tmp`: go/types for Go, Roslyn for C#. None when it cannot be built."""
+    if lang == "go":
+        import oracle_go
+        if oracle_go.setup(tmp):
+            return None
+        built = subprocess.run(["go", "build", "-o", "dump", "."], cwd=tmp, capture_output=True,
+                               text=True, env={**os.environ, "GOFLAGS": "-mod=mod"})
+        return [str(tmp / "dump")] if built.returncode == 0 else None
+    if lang == "csharp":
+        import oracle_csharp
+        tool = oracle_csharp.setup(tmp)
+        built = subprocess.run(["dotnet", "build", str(tool), "-c", "Release", "-o", str(tool / "out"),
+                                "--nologo", "-v", "q"], capture_output=True, text=True,
+                               env={**os.environ, "DOTNET_CLI_TELEMETRY_OPTOUT": "1", "DOTNET_NOLOGO": "1"})
+        dll = tool / "out" / "oracle.dll"
+        return ["dotnet", str(dll)] if built.returncode == 0 and dll.exists() else None
+    return None
 
 
 def _write(c: dict[str, Any], root: Path) -> None:
@@ -198,7 +220,7 @@ def _span(n: dict[str, Any]) -> tuple[str, int, int, int, str]:
             int(n.get("end_line") or line), name)
 
 
-def binding(c: dict[str, Any], tool: Path) -> dict[str, Any]:
+def binding(c: dict[str, Any], tool: Path | list[str]) -> dict[str, Any]:
     """The compiler's answer to each edge of the case (`--binding`)."""
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp) / "project"
@@ -209,22 +231,51 @@ def binding(c: dict[str, Any], tool: Path) -> dict[str, Any]:
         if not out.exists():
             return {"id": c["id"], "wrong": [], "unjudged": [], "error": "the engine built no graph"}
         nodes = json.loads(out.read_text(encoding="utf-8"))["nodes"]
-        done = subprocess.run([str(tool / "dump"), str(root)], capture_output=True, text=True,
-                              env={**os.environ, "GOFLAGS": "-mod=mod", "GOPROXY": "off"})
+        cmd = [str(tool / "dump")] if isinstance(tool, Path) else tool
+        done = subprocess.run([*cmd, str(root)], capture_output=True, text=True,
+                              env={**os.environ, "GOFLAGS": "-mod=mod", "GOPROXY": "off",
+                                   "DOTNET_CLI_TELEMETRY_OPTOUT": "1", "DOTNET_NOLOGO": "1"})
         uses = [json.loads(ln) for ln in done.stdout.splitlines() if ln.startswith("{")]
     if done.returncode != 0 and not uses:
         return {"id": c["id"], "wrong": [], "unjudged": [], "error": done.stderr.strip()[-300:]}
     uses = [u for u in uses if u.get("to_file") and not u.get("receiver")
             and (u["file"], u["line"]) != (u["to_file"], u["to_line"])]
 
+    # (a use belongs to the innermost definition around it, as the engine
+    # gives it: a property's body is the property's, not its class's)
+    # (but a type written in a field's or variable's declaration is its
+    # type's, as the engine gives it: `RunE func(cmd *Command)` in `Command`)
+    state = {"variable", "property", "constant"}
+    spans = [(id(n), _span(n), n.get("kind") in state) for n in nodes if n.get("type") != "external"]
+    types = {"type", "NamedType", "TypeParameter"}
+
+    def home(u: dict[str, Any]) -> int | None:
+        around = sorted((hi - lo, is_state, key) for key, (f, line, lo, hi, _), is_state in spans
+                        if f == u["file"] and lo <= u["line"] <= hi)
+        if not around:
+            return None
+        # (a field's type is its type's; a package constant's is its own)
+        if around[0][1] and u.get("what") in types:
+            outer = [a for a in around[1:] if not a[1] and a[0] < (1 << 29)]
+            if outer:
+                return outer[0][2]
+        return around[0][2]
+
+    homes = [home(u) for u in uses]
+
     def bound(src: str, dst: str) -> bool | None:
-        srcs = [_span(n) for n in nodes if conformance._matches(n, src) and n.get("type") != "external"]
+        srcs = {id(n) for n in nodes if conformance._matches(n, src) and n.get("type") != "external"}
         dsts = [_span(n) for n in nodes if conformance._matches(n, dst) and n.get("type") != "external"]
         if not srcs or not dsts or not all(d[1] for d in dsts):
             return None
-        return any(u["file"] == sf and lo <= u["line"] <= hi and (u["to_file"], u["to_line"]) == (df, dl)
-                   and u["expr"] == dn
-                   for u in uses for sf, _, lo, hi, _ in srcs for df, dl, _, _, dn in dsts)
+        names = {d[4] for d in dsts}
+        seen = [(u, h) for u, h in zip(uses, homes, strict=True) if h in srcs and u["expr"] in names]
+        if any((u["to_file"], u["to_line"]) == (df, dl) and u["expr"] == dn
+               for u, _ in seen for df, dl, _, _, dn in dsts):
+            return True
+        # (the compiler wrote nothing of the name there: no answer, as for
+        # Roslyn's `: base(…)`, which its dump does not list)
+        return False if seen else None
 
     wrong, unjudged = [], []
     # (an absent edge between two definitions the case also expects an edge
@@ -239,6 +290,11 @@ def binding(c: dict[str, Any], tool: Path) -> dict[str, Any]:
                 unjudged.append(list(e))
                 continue
             got = bound(e[0], e[2])
+            # (a name the compiler wrote nothing of is not bound, for an
+            # absent edge; for an expected one it is no answer)
+            if got is None and not want and any(
+                    conformance._matches(n, e[0]) for n in nodes):
+                got = False
             if got is None:
                 unjudged.append(list(e))
             elif got != want:
@@ -248,21 +304,18 @@ def binding(c: dict[str, Any], tool: Path) -> dict[str, Any]:
 
 
 def check_bindings(cases: list[dict[str, Any]], jobs: int, json_out: str | None) -> int:
-    import oracle_go
     todo = [c for c in cases if c["lang"] in BINDERS]
+    results: list[dict[str, Any]] = []
     with tempfile.TemporaryDirectory() as tmp:
-        tool = Path(tmp)
-        failed = oracle_go.setup(tool)
-        if failed:
-            print(failed, file=sys.stderr)
-            return 2
-        built = subprocess.run(["go", "build", "-o", "dump", "."], cwd=tool, capture_output=True,
-                               text=True, env={**os.environ, "GOFLAGS": "-mod=mod"})
-        if built.returncode != 0:
-            print(built.stderr[-600:], file=sys.stderr)
-            return 2
-        with ThreadPoolExecutor(max_workers=jobs) as pool:
-            results = list(pool.map(lambda c: binding(c, tool), todo))
+        for lang in dict.fromkeys(c["lang"] for c in todo):
+            (Path(tmp) / lang).mkdir()
+            cmd = binder(lang, Path(tmp) / lang)
+            if cmd is None:
+                print(f"{lang}: the type checker could not be built here", file=sys.stderr)
+                return 2
+            mine = [c for c in todo if c["lang"] == lang]
+            with ThreadPoolExecutor(max_workers=jobs) as pool:
+                results += list(pool.map(lambda c, cmd=cmd: binding(c, cmd), mine))
     bad = 0
     for r in results:
         for w in r["wrong"]:

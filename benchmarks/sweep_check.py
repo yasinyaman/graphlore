@@ -25,8 +25,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
-import subprocess
 import sys
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
@@ -51,7 +49,7 @@ def as_case(lang: str, nc: dict[str, Any], where: str) -> dict[str, Any]:
             "since": nc.get("since") or None, "until": None, "found": "sweep"}
 
 
-def check_one(c: dict[str, Any], tool: Path | None) -> dict[str, Any]:
+def check_one(c: dict[str, Any], tool: list[str] | None) -> dict[str, Any]:
     compiled = verify_cases.verify(c)
     out: dict[str, Any] = {"id": c["id"], "compiles": compiled["ok"], "compile_error": compiled["first"]}
     if compiled["ok"] and tool is not None:
@@ -66,16 +64,8 @@ def check_one(c: dict[str, Any], tool: Path | None) -> dict[str, Any]:
     return out
 
 
-def binder_tool(lang: str, tmp: Path) -> Path | None:
-    if lang != "go":
-        return None
-    import oracle_go
-    if oracle_go.setup(tmp):
-        return None
-    built = subprocess.run(["go", "build", "-o", "dump", "."], cwd=tmp, capture_output=True,
-                           text=True, env={**os.environ, "GOFLAGS": "-mod=mod"})
-    return tmp if built.returncode == 0 else None
-
+def binder_tool(lang: str, tmp: Path) -> list[str] | None:
+    return verify_cases.binder(lang, tmp) if lang in verify_cases.BINDERS else None
 
 def emit(c: dict[str, Any]) -> str:
     files = "{" + ", ".join(f"{k!r}: {v!r}" for k, v in c["files"].items()) + "}"

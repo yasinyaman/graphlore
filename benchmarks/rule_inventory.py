@@ -611,6 +611,49 @@ SECTIONS: dict[str, list[tuple[str, str]]] = {
     ],
 }
 
+
+def _cs(group: str, *clauses: str) -> list[tuple[str, str]]:
+    return [(f"{STD_CS} §{c}", group) for c in clauses]
+
+
+def _rs(group: str, *files: str) -> list[tuple[str, str]]:
+    return [(f"{RS_CS} {f}", group) for f in files]
+
+
+SECTIONS["csharp"] = [
+    *_cs("declarations", "7.3", "7.4", "7.5", "7.6", "7.7", "7.8"),
+    *_rs("declarations", "Binder_Lookup.cs", "Binder_Symbols.cs", "Binder_NameConflicts.cs"),
+    *_cs("namespaces", "14.1", "14.2", "14.3", "14.4", "14.5", "14.6", "14.7", "14.8"),
+    *_rs("namespaces", "Imports.cs"),
+    *_cs("types", "8.2", "8.3", "8.4", "8.5", "8.7", "8.9", "10.2", "10.3", "10.5", "10.7", "10.8"),
+    *_rs("types", "Binder_Conversions.cs", "Binder_Constraints.cs"),
+    *_cs("classes", "15.2", "15.3", "15.4", "15.5", "15.6", "15.7", "15.8", "15.9", "15.10",
+         "15.11", "15.12", "15.15"),
+    *_cs("interfaces", "16.2", "16.3", "16.4", "17.2", "17.3", "17.4", "19.2", "19.3", "19.4",
+         "19.5", "19.6", "20.2", "20.4", "20.6", "21.2", "21.3", "21.5", "21.6"),
+    *_cs("expressions", "12.5", "12.8.4", "12.8.5", "12.8.6", "12.8.7", "12.8.8", "12.8.12",
+         "12.8.13", "12.8.14", "12.8.15", "12.8.17", "12.8.18", "12.8.21", "12.8.23", "12.9.8",
+         "12.9.7", "12.9.9", "12.11", "12.12", "12.14.12", "12.14.13", "12.17", "12.19", "12.20", "12.23"),
+    *_rs("expressions", "Binder_Expressions.cs", "Binder_Operators.cs", "Binder_Deconstruct.cs",
+         "Binder_WithExpression.cs"),
+    *_cs("invocation", "12.4.3", "12.4.4", "12.4.5", "12.4.6", "12.6", "12.7", "12.8.10",
+         "12.8.11", "12.8.24", "12.21", "12.22"),
+    *_rs("invocation", "Binder_Invocation.cs", "OverloadResolution.cs", "Binder_Lambda.cs",
+         "Binder_Query.cs"),
+    *_cs("statements", "11.1", "11.2", "13.3", "13.5", "13.6", "13.8", "13.9", "13.10", "13.11",
+         "13.13", "13.14", "13.15"),
+    *_rs("statements", "Binder_Statements.cs", "Binder_Patterns.cs"),
+    *_cs("attributes", "22.4", "23.2", "23.3", "23.4", "23.5"),
+    *_rs("attributes", "Binder_Attributes.cs"),
+    *_cs("no rule", "7.1", "7.2", "7.9", "7.10", "8.1", "8.6", "8.8", "10.1", "10.4", "10.6",
+         "12.1", "12.2", "12.3", "12.4.1", "12.4.2", "12.4.7", "12.4.8", "12.8.1", "12.8.2",
+         "12.8.3", "12.8.9", "12.8.16", "12.8.19", "12.8.20", "12.8.22", "12.9.1", "12.9.2",
+         "12.9.3", "12.9.4", "12.9.5", "12.9.6", "12.10", "12.13", "12.14.1",
+         "12.15", "12.16", "12.18", "12.24", "12.25", "12.26", "13.1", "13.2", "13.4", "13.7",
+         "13.12", "15.1", "15.13", "15.14", "16.1", "17.1", "17.5", "17.6", "17.7", "19.1", "20.1",
+         "20.3", "20.5", "21.1", "21.4", "22.1", "22.2", "22.3", "22.5", "23.1", "23.6"),
+]
+
 NO_RULE: dict[str, dict[str, str]] = {
     "go": {
         "spec Introduction": "prose",
@@ -637,6 +680,73 @@ NO_RULE: dict[str, dict[str, str]] = {
         "spec Run_time_panics": "run time",
         "spec Size_and_alignment_guarantees": "sizes",
     },
+    "csharp": {f"{STD_CS} §{c}": why for c, why in (
+        ("7.1", "the entry point is found by the compiler, no written name"),
+        ("7.2", "run time"),
+        ("7.9", "memory management"),
+        ("7.10", "execution order"),
+        ("8.1", "the kinds of type; each kind's rules are in its own section"),
+        ("8.6", "expression trees: a conversion, no name bound"),
+        ("8.8", "unmanaged types: a constraint check"),
+        ("10.1", "what a conversion is"),
+        ("10.4", "the standard conversions among predefined types"),
+        ("10.6", "nullable value types' conversions"),
+        ("12.1", "what an expression is"),
+        ("12.2", "classifications of expressions"),
+        ("12.3", "binding time; a `dynamic` receiver is bound at run time, which no reader can follow"),
+        ("12.4.1", "operators in general; user-defined ones are 12.4.3 to 12.4.6"),
+        ("12.4.2", "precedence: syntax"),
+        ("12.4.7", "numeric promotions among predefined types"),
+        ("12.4.8", "lifted predefined operators"),
+        ("12.8.1", "the primary expressions in general"),
+        ("12.8.2", "literals name nothing"),
+        ("12.8.3", "interpolated strings: their holes are expressions read as any other"),
+        ("12.8.9", "`x!` is x"),
+        ("12.8.16", "`x++`: the operand is read and written as any variable"),
+        ("12.8.19", "sizeof of a predefined type"),
+        ("12.8.20", "checked / unchecked: arithmetic context"),
+        ("12.8.22", "stackalloc: memory"),
+        ("12.9.1", "unary operators in general"),
+        ("12.9.2", "predefined unary operator"),
+        ("12.9.3", "predefined unary operator"),
+        ("12.9.4", "predefined unary operator"),
+        ("12.9.5", "predefined unary operator"),
+        ("12.9.6", "index from end: a predefined operator"),
+        ("12.10", "the range operator: predefined"),
+        ("12.13", "predefined shifts"),
+        ("12.14.1", "predefined comparisons; a user-defined one is 12.4"),
+        ("12.15", "predefined logical operators"),
+        ("12.16", "predefined conditional logical operators; a user-defined `&&` binds `operator &` (12.4)"),
+        ("12.18", "throw expressions: the operand is read as any expression"),
+        ("12.24", "the expression grammar"),
+        ("12.25", "constant evaluation"),
+        ("12.26", "boolean expressions: `operator true`, a conversion"),
+        ("13.1", "statements in general"),
+        ("13.2", "reachability: control flow"),
+        ("13.4", "the empty statement"),
+        ("13.7", "expression statements are read as their expressions"),
+        ("13.12", "checked / unchecked blocks"),
+        ("15.1", "classes in general"),
+        ("15.13", "finalizers: no name is called"),
+        ("15.14", "async functions: evaluation"),
+        ("16.1", "structs in general"),
+        ("17.1", "arrays in general"),
+        ("17.5", "the members System.Array gives"),
+        ("17.6", "covariance: assignability"),
+        ("17.7", "array initializers: their elements are expressions read as any other"),
+        ("19.1", "interfaces in general"),
+        ("20.1", "enums in general"),
+        ("20.3", "enum modifiers"),
+        ("20.5", "System.Enum"),
+        ("21.1", "delegates in general"),
+        ("21.4", "delegate compatibility: a type check"),
+        ("22.1", "exceptions in general"),
+        ("22.2", "causes of exceptions"),
+        ("22.3", "System.Exception"),
+        ("22.5", "the common exception classes of the library"),
+        ("23.1", "attributes in general"),
+        ("23.6", "interop attributes of the library"),
+    )},
 }
 
 
@@ -1473,7 +1583,9 @@ def section_status(lang: str) -> list[tuple[str, str, str, int]]:
     parts = [p.strip() for where, _, _ in INVENTORY.get(lang, []) for p in where.split(";")]
     out = []
     for section, group in SECTIONS.get(lang, []):
-        rows = sum(1 for p in parts if p == section or p.startswith(section + " "))
+        # (a row of a subsection reads its clause: `§12.8.4` of `§12.8`)
+        rows = sum(1 for p in parts
+                   if p == section or p.startswith(section + " ") or p.startswith(section + "."))
         state = "read" if rows else "no rule" if section in NO_RULE.get(lang, {}) else "not read"
         out.append((section, group, state, rows))
     return out
