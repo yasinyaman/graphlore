@@ -1,5 +1,5 @@
 {
- "passed": 1091,
+ "passed": 1119,
  "total": 1270,
  "cases": [
   {
@@ -6807,36 +6807,14 @@
   },
   {
    "id": "csharp/indexer-use",
-   "ok": false,
-   "missing": [
-    [
-     "C.Read",
-     "reads",
-     "A.cs:App.Grid.this[]@7"
-    ],
-    [
-     "C.Write",
-     "writes",
-     "A.cs:App.Grid.this[]@7"
-    ],
-    [
-     "C.Two",
-     "reads",
-     "A.cs:App.Grid.this[]@13"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
    "id": "csharp/base-indexer-access",
-   "ok": false,
-   "missing": [
-    [
-     "B.this[]",
-     "reads",
-     "A.this[]"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -6959,31 +6937,14 @@
   },
   {
    "id": "csharp/await-getawaiter-pattern",
-   "ok": false,
-   "missing": [
-    [
-     "Runner.Run",
-     "calls",
-     "Job.GetAwaiter"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
    "id": "csharp/foreach-getenumerator-pattern",
-   "ok": false,
-   "missing": [
-    [
-     "Use.Sum",
-     "calls",
-     "Bag.GetEnumerator"
-    ],
-    [
-     "Use.Sum",
-     "reads",
-     "Item.V"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -7030,14 +6991,8 @@
   },
   {
    "id": "csharp/await-foreach-pattern",
-   "ok": false,
-   "missing": [
-    [
-     "U.F",
-     "calls",
-     "Bag.GetAsyncEnumerator"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -7502,43 +7457,20 @@
   },
   {
    "id": "csharp/indexer-by-argument",
-   "ok": false,
-   "missing": [
-    [
-     "C.M",
-     "reads",
-     "A.cs:App.Table.this[]@5"
-    ],
-    [
-     "C.N",
-     "reads",
-     "A.cs:App.Table.this[]@7"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
    "id": "csharp/null-conditional-element-access",
-   "ok": false,
-   "missing": [
-    [
-     "C.M",
-     "calls",
-     "Item.Weight"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
    "id": "csharp/base-indexer",
-   "ok": false,
-   "missing": [
-    [
-     "Derived.this[]",
-     "reads",
-     "Base.this[]"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -7555,14 +7487,8 @@
   },
   {
    "id": "csharp/collection-initializer-add",
-   "ok": false,
-   "missing": [
-    [
-     "C.M",
-     "calls",
-     "Bag.Add"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -7597,14 +7523,8 @@
   },
   {
    "id": "csharp/await-custom-awaitable",
-   "ok": false,
-   "missing": [
-    [
-     "C.M",
-     "calls",
-     "Reply.Code"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -7711,55 +7631,26 @@
   },
   {
    "id": "csharp/deconstruction-calls-deconstruct",
-   "ok": false,
-   "missing": [
-    [
-     "C.M",
-     "calls",
-     "Point.Deconstruct"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
    "id": "csharp/deconstruct-overload-by-count",
-   "ok": false,
-   "missing": [
-    [
-     "C.M",
-     "calls",
-     "A.cs:App.Point.Deconstruct@7"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
    "id": "csharp/deconstruct-extension",
-   "ok": false,
-   "missing": [
-    [
-     "C.M",
-     "calls",
-     "PointExtensions.Deconstruct"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
    "id": "csharp/with-expression-members",
-   "ok": false,
-   "missing": [
-    [
-     "C.M",
-     "writes",
-     "Person.Age"
-    ],
-    [
-     "C.M",
-     "calls",
-     "Person.Years"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -7817,14 +7708,8 @@
   },
   {
    "id": "csharp/object-initializer-indexer",
-   "ok": false,
-   "missing": [
-    [
-     "Use.Make",
-     "references",
-     "Bag.this[]"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -7847,14 +7732,8 @@
   },
   {
    "id": "csharp/deconstruction-declaration",
-   "ok": false,
-   "missing": [
-    [
-     "Use.Go",
-     "calls",
-     "P.Deconstruct"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -7948,14 +7827,8 @@
   },
   {
    "id": "csharp/cs-foreach-deconstruct",
-   "ok": false,
-   "missing": [
-    [
-     "Use.Run",
-     "calls",
-     "Pair.Deconstruct"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -8050,21 +7923,9 @@
   },
   {
    "id": "csharp/extension-when-the-instance-method-is-inapplicable",
-   "ok": false,
-   "missing": [
-    [
-     "Use.Run",
-     "calls",
-     "RepoExt.Find"
-    ]
-   ],
-   "unwanted": [
-    [
-     "Use.Run",
-     "calls",
-     "Repo.Find"
-    ]
-   ]
+   "ok": true,
+   "missing": [],
+   "unwanted": []
   },
   {
    "id": "csharp/extension-better-this-type",
@@ -8204,19 +8065,8 @@
   },
   {
    "id": "csharp/indexer-overload",
-   "ok": false,
-   "missing": [
-    [
-     "Use.Run",
-     "reads",
-     "A.cs:App.Table.this[]@6"
-    ],
-    [
-     "Use.Run2",
-     "reads",
-     "A.cs:App.Table.this[]@7"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -8253,21 +8103,6 @@
    "ok": false,
    "missing": [
     [
-     "Use.Run",
-     "calls",
-     "Pair.Deconstruct"
-    ],
-    [
-     "Use.Run",
-     "calls",
-     "Item.Go"
-    ],
-    [
-     "Use.Run2",
-     "calls",
-     "Pair.Deconstruct"
-    ],
-    [
      "Use.Run2",
      "calls",
      "Thing.Go"
@@ -8277,19 +8112,8 @@
   },
   {
    "id": "csharp/deconstruct-extension-method",
-   "ok": false,
-   "missing": [
-    [
-     "Use.Run",
-     "calls",
-     "PairExt.Deconstruct"
-    ],
-    [
-     "Use.Run",
-     "calls",
-     "Thing.Go"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -8600,26 +8424,14 @@
   },
   {
    "id": "csharp/deconstruct-by-arity",
-   "ok": false,
-   "missing": [
-    [
-     "C.Run",
-     "calls",
-     "A.cs:App.P.Deconstruct@5"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
    "id": "csharp/null-conditional-element-access-member",
-   "ok": false,
-   "missing": [
-    [
-     "C.Run",
-     "calls",
-     "Item.Weight"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -8730,19 +8542,8 @@
   },
   {
    "id": "csharp/positional-pattern-deconstruct",
-   "ok": false,
-   "missing": [
-    [
-     "Checker.Two",
-     "calls",
-     "P.Deconstruct"
-    ],
-    [
-     "Checker.Three",
-     "calls",
-     "Ext.Deconstruct"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -8858,38 +8659,20 @@
   },
   {
    "id": "csharp/foreach-project-ienumerable",
-   "ok": false,
-   "missing": [
-    [
-     "C.Run",
-     "calls",
-     "Item.A"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
    "id": "csharp/foreach-extension-getenumerator",
-   "ok": false,
-   "missing": [
-    [
-     "C.Run",
-     "calls",
-     "Item.A"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
    "id": "csharp/foreach-deconstruct",
-   "ok": false,
-   "missing": [
-    [
-     "C.Run",
-     "calls",
-     "Alpha.Go"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -8934,14 +8717,8 @@
   },
   {
    "id": "csharp/foreach-pattern-before-interface",
-   "ok": false,
-   "missing": [
-    [
-     "A.Run",
-     "calls",
-     "Repo.Find"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -8952,14 +8729,8 @@
   },
   {
    "id": "csharp/deconstruction-declaration-types",
-   "ok": false,
-   "missing": [
-    [
-     "A.Run",
-     "calls",
-     "Repo.Find"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {

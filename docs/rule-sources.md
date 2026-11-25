@@ -1218,13 +1218,18 @@ nothing of whose a use is. The inventory has 587 rules (492 held by a case,
 `Binder_Deconstruct.cs` got no row). The engine held 207 of the 397 cases.
 The first fixes (block scopes, as in Go; `[Cache]` as `CacheAttribute`;
 user-defined operators; an object initializer writing the created type's
-members; the class a static member is reached through) bring it to 236, and
-on todoapi, restsharp, commandline and aspnetcore-realworld Roslyn finds
-12,307 of 12,520 judged edges right (10,731 of 10,944 before, 98.3% from
-98.1%) and 89.4% of the uses with an edge (80.0%). Open: implicit calls
-(`GetEnumerator`, `Deconstruct`, `GetAwaiter`, collection `Add`), indexers,
-query expressions, lambda parameters typed by their delegate, conversion
-operators, and the finer points of overload resolution.
+members; the class a static member is reached through) brought it to 236;
+the second round (indexers; the calls the language makes by name:
+`GetEnumerator`, `Deconstruct`, `GetAwaiter`, a collection initializer's
+`Add`; `with`; an extension when the type's own method does not take the
+arguments) to 264. On todoapi, restsharp, commandline and
+aspnetcore-realworld Roslyn finds 12,313 of 12,524 judged edges right
+(10,731 of 10,944 before, 98.3% from 98.1%) and 89.4% of the uses with an
+edge (80.0%): the patterns of the second round are rare there, and they
+added no wrong edge. Open: query expressions, lambda parameters typed by
+their delegate, conversion operators, `operator true` / `false`, `out var`,
+the predefined types extensions are written for (`await 3`), and the finer
+points of overload resolution.
 
 **Phase 3: inference, by the numbers.** (Measured: see 'Phase 3: inference, by the numbers' above; nothing built.) Per language, what one step of
 inference would add (a closure parameter typed by the collection it is

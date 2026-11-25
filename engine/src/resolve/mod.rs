@@ -2492,8 +2492,49 @@ impl<'a> Project<'a> {
                 Vec::new()
             }
         };
+        // C#: no method of the type takes these arguments; an extension of
+        // the name for the type that does is what is called (the standard's
+        // 12.8.10.3: extensions are looked for when no instance method is
+        // applicable)
+        let applicable_extensions = || -> Vec<DefRef> {
+            if self.family[m.0] != Some(Family::CSharp) || r.args.is_none() {
+                return Vec::new();
+            }
+            let Some(owner) = self.def(m).parent.map(|o| (m.0, o)) else { return Vec::new() };
+            if !self.def(owner).kind.is_class_like() {
+                return Vec::new();
+            }
+            let mut names = vec![self.def(owner).name.clone()];
+            names.extend(self.bases(owner).into_iter().map(|b| self.def(b).name.clone()));
+            let found: Vec<DefRef> = self
+                .extensions
+                .get(&self.def(m).name)
+                .into_iter()
+                .flatten()
+                .copied()
+                .filter(|e| {
+                    self.family[e.0] == Some(Family::CSharp)
+                        && self.def(*e).receiver.as_ref().is_some_and(|t| {
+                            let bare = t.split('<').next().unwrap_or(t);
+                            names.iter().any(|n| bare.rsplit('.').next() == Some(n.as_str()))
+                        })
+                        && self.fit(f, d, *e, r).is_some()
+                })
+                .collect();
+            if found.len() <= 4 {
+                found
+            } else {
+                Vec::new()
+            }
+        };
         let all = self.overloads(m);
         if all.len() < 2 {
+            if self.fit(f, d, m, r).is_none() {
+                let ext = applicable_extensions();
+                if !ext.is_empty() {
+                    return ext;
+                }
+            }
             if self.def(m).type_params.len() != usize::from(r.targs) {
                 let wider = wider();
                 if !wider.is_empty() {
@@ -2506,6 +2547,10 @@ impl<'a> Project<'a> {
             all.iter().filter_map(|c| self.fit(f, d, *c, r).map(|s| (*c, s))).collect();
         let mut best = self.exact_first(self.top_fits(&fits), r);
         if best.is_empty() {
+            let ext = applicable_extensions();
+            if !ext.is_empty() {
+                return ext;
+            }
             let wider = wider();
             if !wider.is_empty() {
                 return wider;
@@ -3100,12 +3145,18 @@ impl<'a> Project<'a> {
                     let opened_optional = matches!(l.path.as_slice(),
                         [of, mark] if mark == crate::refs::OPENED
                             && self.local_sealed(f, Some(x), of));
-                    return if alias && !opened_optional {
-                        self.elem_of_as(f, Some(x), &l.path, how)
-                            .map(|(t, _)| (t, Confidence::Inferred))
-                    } else {
-                        None
-                    };
+                    if alias && !opened_optional {
+                        return self
+                            .elem_of_as(f, Some(x), &l.path, how)
+                            .map(|(t, _)| (t, Confidence::Inferred));
+                    }
+                    // C#: a value of a project type with an enumerator or an
+                    // indexer of its own, which the walk below asks
+                    if !(l.declared && !l.path.is_empty() && self.family[f] == Some(Family::CSharp))
+                    {
+                        return None;
+                    }
+                    break;
                 }
                 cur = defs[x].parent;
             }
@@ -6137,7 +6188,16 @@ impl<'a> Project<'a> {
         // a wrapper was just opened, and what it gave may be another
         // (`lock().unwrap()`): only unwrappers are skipped, it is no optional
         let mut unwrapping = false;
+        let csharp = fam == Family::CSharp;
         for (i, seg) in rest.iter().enumerate() {
+            // C# `await c` of a project type: what its awaiter gives
+            if csharp && opened_after(i) {
+                if let Target::Def(c) = t {
+                    if let Some(x) = self.csharp_awaited(f, c) {
+                        t = Target::Def(x);
+                    }
+                }
+            }
             if skip > 0 {
                 skip -= 1;
                 if skip == 0 && opened_after(i + 1) {
@@ -6164,6 +6224,16 @@ impl<'a> Project<'a> {
                 }
                 let Target::Def(c) = t else { return None };
                 let def = self.def(c);
+                // C# `var (a, b) = p`: the out parameters of the type's
+                // `Deconstruct`
+                if def.kind.is_class_like()
+                    && def.rets.is_empty()
+                    && self.family[c.0] == Some(Family::CSharp)
+                {
+                    t = Target::Def(self.csharp_deconstructed(f, c, part)?);
+                    binds = None;
+                    continue;
+                }
                 // Rust `self.0` on `struct Script(Arc<Mutex<State>>)`
                 if def.kind.is_class_like() {
                     let p = def.rets.get(part).filter(|p| !p.is_empty())?;
@@ -6205,6 +6275,40 @@ impl<'a> Project<'a> {
                 // at the callable, and its result is the collection
                 if !many && !one && !sealed {
                     let Target::Def(c) = t else { return None };
+                    // C# `foreach (var x in bag)` over a project type: the
+                    // `Current` of what its `GetEnumerator` gives, else the
+                    // `IEnumerable<T>` it is written with (the standard's
+                    // 13.9.5)
+                    if self.def(c).kind.is_class_like()
+                        && seg == crate::refs::ITERATED
+                        && self.family[c.0] == Some(Family::CSharp)
+                    {
+                        if let Some(x) = self.csharp_iterated(f, c) {
+                            t = Target::Def(x);
+                            continue;
+                        }
+                    }
+                    // C# `shelf[0]` of a type with an indexer: what the
+                    // indexer gives (of several, the first that says)
+                    if self.def(c).kind.is_class_like() && seg == crate::refs::ELEMENT {
+                        let mut given = None;
+                        let mut at = vec![c];
+                        for _ in 0..4 {
+                            given = at.iter().find_map(|k| {
+                                self.members(*k, crate::refs::INDEXER)
+                                    .into_iter()
+                                    .find_map(|x| self.return_type(x).map(|(r, _)| r))
+                            });
+                            if given.is_some() {
+                                break;
+                            }
+                            at = at.iter().flat_map(|k| self.bases(*k)).collect();
+                        }
+                        if let Some(r) = given {
+                            t = Target::Def(r);
+                            continue;
+                        }
+                    }
                     if !self.def(c).kind.is_callable() {
                         return None;
                     }
@@ -6235,6 +6339,27 @@ impl<'a> Project<'a> {
                         many = false;
                         keyed = false;
                         nest = 0;
+                        continue;
+                    }
+                }
+                // C# `foreach (var (k, v) in m)` over a map: the key and the
+                // value of each `KeyValuePair` it gives
+                if many
+                    && keyed
+                    && !indexed
+                    && fam == Family::CSharp
+                    && seg == crate::refs::ITERATED
+                {
+                    if let Some(part) = rest.get(i + 1).and_then(|s| crate::refs::tuple_index(s)) {
+                        if nest > 0 || part > 1 {
+                            return None;
+                        }
+                        if part == 0 {
+                            t = Target::Def(keys?);
+                        }
+                        many = false;
+                        keyed = false;
+                        skip = 1;
                         continue;
                     }
                 }
@@ -6810,6 +6935,13 @@ impl<'a> Project<'a> {
             }
             if opened_after(i + 1) {
                 sealed = false;
+            }
+        }
+        if csharp && opened_after(rest.len()) {
+            if let Target::Def(c) = t {
+                if let Some(x) = self.csharp_awaited(f, c) {
+                    t = Target::Def(x);
+                }
             }
         }
         // a collection is no definition; one thing is no collection (an
@@ -8072,6 +8204,113 @@ impl<'a> Project<'a> {
         self.walk(Target::Def(held?), &rest[1..], conf.max(Confidence::Inferred))
     }
 
+    /// What C# `await` of a value of the project type `c` gives: the result
+    /// of the `GetResult` of what its `GetAwaiter` (its own, a base's, or an
+    /// extension for it) returns (the standard's 12.9.8.2).
+    fn csharp_awaited(&self, f: usize, c: DefRef) -> Option<DefRef> {
+        if !self.def(c).kind.is_class_like() {
+            return None;
+        }
+        let awaiter = self
+            .class_member(c, "GetAwaiter", 4)
+            .filter(|m| self.def(*m).kind.is_callable())
+            .or_else(|| match self.extension_for(f, "GetAwaiter", c) {
+                Some((Target::Def(m), Confidence::Extracted)) => Some(m),
+                _ => None,
+            })?;
+        let w = self.return_type(awaiter).map(|(r, _)| r)?;
+        let result = self.class_member(w, "GetResult", 4)?;
+        self.return_type(result).map(|(r, _)| r).filter(|r| self.def(*r).kind.is_class_like())
+    }
+
+    /// The type of the `part`th out parameter of the `Deconstruct` a C#
+    /// deconstruction of a value of type `c` calls: its own or a base's, else
+    /// an extension for it; of several, only a type they agree on.
+    fn csharp_deconstructed(&self, f: usize, c: DefRef, part: usize) -> Option<DefRef> {
+        let typed = |m: DefRef, skip: usize| {
+            let d = self.def(m);
+            let p = d.plist.get(part + skip).filter(|p| !p.ty.is_empty())?;
+            self.type_of_path(m.0, Some(m.1), &p.ty, true)
+                .filter(|t| self.def(*t).kind.is_class_like())
+        };
+        let mut at = vec![c];
+        for _ in 0..4 {
+            let found: Vec<DefRef> = at
+                .iter()
+                .flat_map(|k| self.members(*k, "Deconstruct"))
+                .filter(|m| self.def(*m).plist.len() > part)
+                .collect();
+            if !found.is_empty() {
+                let types: Vec<Option<DefRef>> = found.iter().map(|m| typed(*m, 0)).collect();
+                return types.windows(2).all(|w| w[0] == w[1]).then(|| types[0]).flatten();
+            }
+            at = at.iter().flat_map(|k| self.bases(*k)).collect();
+            if at.is_empty() {
+                break;
+            }
+        }
+        match self.extension_for(f, "Deconstruct", c) {
+            Some((Target::Def(m), Confidence::Extracted)) => typed(m, 1),
+            _ => None,
+        }
+    }
+
+    /// What a C# `foreach` over a value of the project type `c` gives: the
+    /// type of the `Current` of what `c`'s `GetEnumerator` (or
+    /// `GetAsyncEnumerator`, or such an extension for `c`) returns, the
+    /// method before an interface (`IEnumerable<T>`, whose `T` it is
+    /// otherwise).
+    fn csharp_iterated(&self, f: usize, c: DefRef) -> Option<DefRef> {
+        let value_of = |x: DefRef| {
+            let k = self.def(x).kind;
+            if k.is_callable() {
+                self.return_type(x).map(|(r, _)| r)
+            } else if k.is_state() {
+                self.held_type(x)
+            } else {
+                None
+            }
+        };
+        let current = |e: DefRef| {
+            let cur = self.class_member(e, "Current", 4)?;
+            value_of(cur).filter(|t| self.def(*t).kind.is_class_like())
+        };
+        for name in ["GetEnumerator", "GetAsyncEnumerator"] {
+            let mut at = vec![c];
+            for _ in 0..4 {
+                let found = at.iter().find_map(|k| {
+                    self.members(*k, name).into_iter().find_map(|m| {
+                        let e = self.return_type(m).map(|(r, _)| r)?;
+                        self.def(e).kind.is_class_like().then(|| current(e)).flatten()
+                    })
+                });
+                if found.is_some() {
+                    return found;
+                }
+                at = at.iter().flat_map(|k| self.bases(*k)).collect();
+                if at.is_empty() {
+                    break;
+                }
+            }
+            if let Some((Target::Def(m), Confidence::Extracted)) = self.extension_for(f, name, c) {
+                if let Some(x) = self.return_type(m).map(|(r, _)| r).and_then(&current) {
+                    return Some(x);
+                }
+            }
+        }
+        // `class Bag : IEnumerable<Item>`
+        let def = self.def(c);
+        def.base_targs.iter().find_map(|(base, args)| {
+            let last = base.last()?;
+            if !matches!(last.as_str(), "IEnumerable" | "IAsyncEnumerable") {
+                return None;
+            }
+            let [arg] = args.as_slice() else { return None };
+            self.type_of_path(c.0, def.parent, arg, true)
+                .filter(|t| self.def(*t).kind.is_class_like())
+        })
+    }
+
     /// An extension named `name` written for type `c`, or for one of its
     /// bases (`client.BuildUri(r)` on a `RestClient`, written for
     /// `IRestClient`): that is what the language calls. Else what
@@ -9141,7 +9380,8 @@ pub fn resolve(
                 }
                 // a Kotlin operator (`a + b`) is the operator of a's type, never
                 // a guess by its name (`plus` of some other type)
-                if r.context == "operator"
+                if (matches!(r.context, "operator" | "language_call")
+                    || r.context.starts_with("indexer"))
                     && !matches!(
                         &found,
                         Some((Target::Def(t), Confidence::Extracted)) if p.def(*t).kind.is_callable()
@@ -9228,9 +9468,20 @@ pub fn resolve(
                         let tk = p.def(t).kind;
                         let rel = match kind {
                             RefKind::Call | RefKind::New => {
+                                // a C# indexer: read, written, or named by an
+                                // object initializer
+                                if r.context.starts_with("indexer") {
+                                    if p.def(t).name != crate::refs::INDEXER {
+                                        continue;
+                                    }
+                                    match r.context {
+                                        "indexer=" => "writes",
+                                        "indexer{}" => "references",
+                                        _ => "reads",
+                                    }
                                 // a Lombok accessor called: the field it reads
                                 // or writes
-                                if tk.is_state() && r.kind == RefKind::Call {
+                                } else if tk.is_state() && r.kind == RefKind::Call {
                                     let called = r.path.last().map(String::as_str).unwrap_or("");
                                     // (Go `s.run()` on a field of function
                                     // type: the field is read)

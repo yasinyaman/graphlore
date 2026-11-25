@@ -279,6 +279,10 @@ pub fn path_of(n: Node, src: &[u8]) -> Option<Vec<String>> {
                 None
             }
         }
+        // C# `p with { … }`: a copy of `p`
+        "with_expression" => path_of(kids(n).into_iter().find(|c| !is_comment(c))?, src),
+        // `s?[0]`: an element of `s`
+        "element_binding_expression" => Some(vec![BOUND.to_string(), ELEMENT.to_string()]),
         "member_binding_expression" => {
             let mut p = vec![BOUND.to_string()];
             p.extend(path_of(n.child_by_field_name("name")?, src)?);
@@ -2094,8 +2098,13 @@ fn arg_kind(v: Node, src: &[u8]) -> crate::facts::Arg {
 /// (Kotlin `name = x`, Swift `with: x`, C# `name: x`, Python `name=x`), and
 /// what it is.
 fn arg_facts(n: Node, src: &[u8]) -> Vec<crate::facts::ArgFact> {
-    use crate::facts::{Arg, ArgFact};
     let Some((list, lambdas)) = argument_list(n) else { return Vec::new() };
+    arg_facts_of(list, lambdas, src)
+}
+
+/// `arg_facts` of an argument list itself (and the trailing lambdas after it).
+fn arg_facts_of(list: Option<Node>, lambdas: usize, src: &[u8]) -> Vec<crate::facts::ArgFact> {
+    use crate::facts::{Arg, ArgFact};
     let mut out = Vec::new();
     for a in list.into_iter().flat_map(kids).filter(|c| !is_comment(c)) {
         let ks = kids(a);
@@ -4371,6 +4380,95 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                 }
             }
         }
+        // (C# `g[1]`, `base[i]`, `s?[0]`, `new Bag { ["x"] = 1 }`: the indexer of
+        // the receiver's type, picked by the arguments, the standard's
+        // 12.8.12.4; kept only where it resolves to one)
+        if facts.lang == Some(crate::lang::Lang::CSharp) {
+            if let Some((mut path, list, uses)) = csharp_indexer(n, src) {
+                path.push(INDEXER.into());
+                let args = u8::try_from(kids(list).iter().filter(|c| !is_comment(c)).count()).ok();
+                for context in uses {
+                    let at = refs.len();
+                    push(&mut refs, n, RefKind::Call, path.clone(), context, None);
+                    if let Some(r) = refs.get_mut(at) {
+                        r.args = args;
+                        r.hints = arg_facts_of(Some(list), 0, src);
+                    }
+                }
+            }
+        }
+        // (C# `var (a, b) = p`, `(a, b) = p`, `foreach (var (a, b) in xs)`,
+        // `p is (var a, var b)`: the `Deconstruct` of the value's type with as
+        // many out parameters as names, the standard's 12.7 and 11.2.5;
+        // context `language_call`, kept only where it resolves to one)
+        if facts.lang == Some(crate::lang::Lang::CSharp) {
+            if let Some((mut path, count)) = csharp_deconstruction(n, src) {
+                path.push("Deconstruct".into());
+                let at = refs.len();
+                push(&mut refs, n, RefKind::Call, path, "language_call", None);
+                if let Some(r) = refs.get_mut(at) {
+                    r.args = u8::try_from(count).ok();
+                }
+            }
+        }
+        // (C# `new Bag { 1, { 2, 3 } }`: each element is a call of the `Add`
+        // of the type created, the standard's 12.8.17.4; context `language_call`,
+        // kept only where it resolves to one)
+        if facts.lang == Some(crate::lang::Lang::CSharp) && n.kind() == "initializer_expression" {
+            let made = n
+                .parent()
+                .filter(|m| m.kind() == "object_creation_expression")
+                .and_then(|m| m.child_by_field_name("type"))
+                .and_then(|t| path_of(t, src))
+                .filter(|p| !p.iter().any(|s| s == UNKNOWN));
+            if let Some(ty) = made {
+                for e in kids(n).into_iter().filter(|c| !is_comment(c)) {
+                    if matches!(e.kind(), "assignment_expression") {
+                        continue;
+                    }
+                    let args = if e.kind() == "initializer_expression" {
+                        kids(e).iter().filter(|c| !is_comment(c)).count()
+                    } else {
+                        1
+                    };
+                    let mut path = ty.clone();
+                    path.push("Add".into());
+                    let at = refs.len();
+                    push(&mut refs, e, RefKind::Call, path, "language_call", None);
+                    if let Some(r) = refs.get_mut(at) {
+                        r.args = u8::try_from(args).ok();
+                    }
+                }
+            }
+        }
+        // (C# `await c` calls the `GetAwaiter` of c's type, the standard's
+        // 12.9.8.2; context `language_call`, kept only where it resolves to one)
+        if facts.lang == Some(crate::lang::Lang::CSharp) && n.kind() == "await_expression" {
+            let of = kids(n).into_iter().find(|c| !is_comment(c)).and_then(|x| path_of(x, src));
+            if let Some(mut path) = of.filter(|p| !p.iter().any(|s| s == UNKNOWN)) {
+                path.push("GetAwaiter".into());
+                let at = refs.len();
+                push(&mut refs, n, RefKind::Call, path, "language_call", None);
+                if let Some(r) = refs.get_mut(at) {
+                    r.args = Some(0);
+                }
+            }
+        }
+        // (C# `foreach (var x in bag)` calls the `GetEnumerator` of bag's type,
+        // `await foreach` its `GetAsyncEnumerator`: the standard's 13.9.5;
+        // context `language_call`, kept only where it resolves to one)
+        if facts.lang == Some(crate::lang::Lang::CSharp) && n.kind() == "foreach_statement" {
+            let of = n.child_by_field_name("right").and_then(|r| path_of(r, src));
+            if let Some(mut path) = of.filter(|p| !p.iter().any(|s| s == UNKNOWN)) {
+                let awaited = n.child(0).is_some_and(|c| c.kind() == "await");
+                path.push(if awaited { "GetAsyncEnumerator" } else { "GetEnumerator" }.into());
+                let at = refs.len();
+                push(&mut refs, n, RefKind::Call, path, "language_call", None);
+                if let Some(r) = refs.get_mut(at) {
+                    r.args = Some(0);
+                }
+            }
+        }
         if facts.lang == Some(crate::lang::Lang::Kotlin) {
             let named = kids(n);
             let method = match n.kind() {
@@ -6293,7 +6391,17 @@ fn destructured<'t>(n: Node<'t>, src: &[u8]) -> Option<(Vec<String>, Node<'t>)> 
                     callee(*c, src).is_some()
                         || matches!(c.kind(), "await_expression" | "try_expression")
                 })
-            })?;
+            });
+            // (C# `var (a, b) = p`: whatever p is, its parts)
+            let v = match v {
+                Some(v) => v,
+                None if p.kind() == "tuple_pattern"
+                    && crate::parse::current() == Some(crate::lang::Lang::CSharp) =>
+                {
+                    kids(n).into_iter().skip(1).find(|c| !is_comment(c))?
+                }
+                None => return None,
+            };
             (p, v)
         }
         "property_declaration" => {
@@ -6359,6 +6467,130 @@ fn csharp_operator<'t>(n: Node<'t>, src: &[u8]) -> Option<(Node<'t>, String)> {
         }
         _ => None,
     }
+}
+
+/// C#: the value a deconstruction takes apart (the path of what it is, an
+/// element of it in a `foreach`) and how many names it gives.
+fn csharp_deconstruction(n: Node, src: &[u8]) -> Option<(Vec<String>, usize)> {
+    let named = |x: Node| kids(x).into_iter().filter(|c| !is_comment(c)).count();
+    let (value, count, iterated) = match n.kind() {
+        "variable_declarator" => {
+            let ks = kids(n);
+            let pattern = ks.first().filter(|c| c.kind() == "tuple_pattern")?;
+            let value = ks.iter().skip(1).find(|c| !is_comment(c))?;
+            (*value, named(*pattern), false)
+        }
+        "assignment_expression" => {
+            let left = n.child_by_field_name("left").filter(|l| l.kind() == "tuple_expression")?;
+            let op = n.child_by_field_name("operator").map(|o| text(o, src))?;
+            if op != "=" {
+                return None;
+            }
+            (n.child_by_field_name("right")?, named(left), false)
+        }
+        "foreach_statement" => {
+            let left = n.child_by_field_name("left").filter(|l| l.kind() == "tuple_pattern")?;
+            (n.child_by_field_name("right")?, named(left), true)
+        }
+        "is_pattern_expression" => {
+            let pattern = n.child_by_field_name("pattern")?;
+            if pattern.kind() != "recursive_pattern"
+                || pattern.child_by_field_name("type").is_some()
+            {
+                return None;
+            }
+            let clause =
+                kids(pattern).into_iter().find(|c| c.kind() == "positional_pattern_clause")?;
+            let subs = kids(clause).into_iter().filter(|c| c.kind() == "subpattern").count();
+            (n.child_by_field_name("expression")?, subs, false)
+        }
+        _ => return None,
+    };
+    if count < 2 || matches!(value.kind(), "tuple_expression") {
+        return None;
+    }
+    let mut path = path_of(value, src).filter(|p| !p.iter().any(|s| s == UNKNOWN))?;
+    if iterated {
+        path.push(ITERATED.into());
+    }
+    Some((path, count))
+}
+
+/// The name a C# indexer is declared under (`generic::KEYWORD_NAMES`).
+pub const INDEXER: &str = "this[]";
+
+/// C# element access as a use of an indexer: the receiver's path, the list of
+/// arguments, and how it is used (`indexer` read, `indexer=` written, both
+/// for `+=` and `++`, `indexer{}` named by an object initializer). An access
+/// of a receiver the reader cannot name is none.
+fn csharp_indexer<'t>(
+    n: Node<'t>,
+    src: &[u8],
+) -> Option<(Vec<String>, Node<'t>, Vec<crate::facts::Context>)> {
+    let up = n.parent();
+    let (path, list) = match n.kind() {
+        "element_access_expression" => {
+            let list = n.child_by_field_name("subscript")?;
+            let path = match n.child_by_field_name("expression") {
+                Some(e) => path_of(e, src)?,
+                // `base[i]`: the keyword is no named node
+                None if kids(n).len() == 1
+                    && src.get(n.start_byte()..n.start_byte() + 4) == Some(b"base".as_slice()) =>
+                {
+                    vec!["super".into()]
+                }
+                None => return None,
+            };
+            (path, list)
+        }
+        // `s?[0]`: the element of what the access is conditional on
+        "element_binding_expression" => {
+            let up = up?;
+            if up.kind() == "conditional_access_expression" {
+                (path_of(kids(up).into_iter().next()?, src)?, n)
+            } else if up.kind() == "assignment_expression"
+                && up.child_by_field_name("left").is_some_and(|l| l.id() == n.id())
+            {
+                // `new Bag { ["x"] = 1 }`
+                let init = up.parent().filter(|i| i.kind() == "initializer_expression")?;
+                let made = init.parent().filter(|m| m.kind() == "object_creation_expression")?;
+                let ty = made.child_by_field_name("type")?;
+                return Some((path_of(ty, src)?, n, vec!["indexer{}"]));
+            } else {
+                return None;
+            }
+        }
+        _ => return None,
+    };
+    if path.iter().any(|s| s == UNKNOWN) {
+        return None;
+    }
+    let uses = match up {
+        Some(a)
+            if a.kind() == "assignment_expression"
+                && a.child_by_field_name("left").is_some_and(|l| l.id() == n.id()) =>
+        {
+            let op = a.child_by_field_name("operator").map(|o| text(o, src)).unwrap_or_default();
+            if op == "=" {
+                vec!["indexer="]
+            } else {
+                vec!["indexer", "indexer="]
+            }
+        }
+        Some(a)
+            if matches!(a.kind(), "prefix_unary_expression" | "postfix_unary_expression") && {
+                let mut cursor = a.walk();
+                let incremented = a
+                    .children(&mut cursor)
+                    .any(|c| !c.is_named() && matches!(c.kind(), "++" | "--"));
+                incremented
+            } =>
+        {
+            vec!["indexer", "indexer="]
+        }
+        _ => vec!["indexer"],
+    };
+    Some((path, list, uses))
 }
 
 /// Go's predeclared types, which an index never is.
@@ -7168,6 +7400,16 @@ fn loop_vars(n: Node, src: &[u8]) -> Option<Vec<(String, Vec<String>)>> {
             return Some(out);
         }
         let of = path_of(iterable, src).filter(|p| p[0] != UNKNOWN)?;
+        // C# `foreach (var (a, b) in xs)`: the parts of each element
+        if crate::parse::current() == Some(crate::lang::Lang::CSharp) {
+            let out = [key, value].into_iter().enumerate().map(|(i, name)| {
+                let mut p = of.clone();
+                p.push(ITERATED.into());
+                p.push(tuple_part(i));
+                (name, p)
+            });
+            return Some(out.filter(|(n, _)| n != "_").collect());
+        }
         let mut first = of.clone();
         first.push(KEY.into());
         let mut path = of;

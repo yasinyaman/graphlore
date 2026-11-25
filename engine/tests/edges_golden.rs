@@ -3848,3 +3848,79 @@ fn csharp_a_static_member_s_type_is_used_too() {
         ],
     );
 }
+
+// C# element access is a use of the indexer of the receiver's type, picked by
+// its arguments: read, written, through `base`, after `?`, in an object
+// initializer; and what follows it is a member of the indexer's type
+#[test]
+fn csharp_element_access_uses_the_indexer() {
+    let got = edges("cs-indexers", &[(
+        "A.cs",
+        "namespace App\n{\n    public class Item { public int Weight() { return 1; } }\n    public class Decoy { public int Weight() { return 2; } }\n    public class Shelf\n    {\n        public Item this[int i] { get { return null; } set { } }\n        public Decoy this[string k] { get { return null; } }\n    }\n    public class Bag { public virtual int this[string k] { get { return 0; } set { } } }\n    public class Sub : Bag { public override int this[string k] { get { return base[k]; } } }\n    public class C\n    {\n        public int Read(Shelf s) { return s?[0].Weight() ?? 0; }\n        public void Write(Shelf s) { s[1] = null; }\n        public Bag Make() { return new Bag { [\"x\"] = 1 }; }\n    }\n}\n",
+    )]);
+    has(
+        &got,
+        &[
+            (".Read()", "reads", ".this[]()"),
+            (".Read()", "calls", ".Weight()"),
+            (".Write()", "writes", ".this[]()"),
+            (".Make()", "references", ".this[]()"),
+            (".this[]()", "reads", ".this[]()"),
+        ],
+    );
+    lacks(&got, &[(".Write()", "reads", ".this[]()")]);
+}
+
+// C# patterns the language calls by name: `foreach` calls `GetEnumerator` and
+// its variable is the enumerator's `Current`; a deconstruction calls the
+// `Deconstruct` of as many out parameters (an extension when the type's own
+// does not take them) and its names have their types; `await` calls
+// `GetAwaiter` and gives its `GetResult`; a collection initializer calls
+// `Add`; `with` writes the copy's members
+#[test]
+fn csharp_patterns_called_by_name() {
+    let dir = project("cs-patterns", &[(
+        "A.cs",
+        "using System;\nusing System.Runtime.CompilerServices;\nnamespace App\n{\n    public class Item { public int A() { return 1; } }\n    public class Decoy { public int A() { return 2; } }\n    public class Cursor { public Item Current { get { return null; } } public bool MoveNext() { return false; } }\n    public class Bag { public Cursor GetEnumerator() { return null; } public void Add(int n) { } }\n    public class Pair { public void Deconstruct(out Item a, out Decoy b) { a = null; b = null; } }\n    public static class Ext { public static void Deconstruct(this Pair p, out int a, out int b, out int c) { a = 0; b = 0; c = 0; } }\n    public class Waiter : INotifyCompletion { public bool IsCompleted => true; public Item GetResult() { return null; } public void OnCompleted(Action a) { } }\n    public class Job { public Waiter GetAwaiter() { return null; } }\n    public record Person { public int Age { get; init; } }\n    public class C\n    {\n        public int Loop(Bag b) { int n = 0; foreach (var x in b) { n += x.A(); } return n; }\n        public int Split(Pair p) { var (a, b) = p; return a.A(); }\n        public int Three(Pair p) { var (a, b, c) = p; return a; }\n        public async System.Threading.Tasks.Task<int> Wait(Job j) { var r = await j; return r.A(); }\n        public Bag Fill() { return new Bag { 1, 2 }; }\n        public Person Older(Person p) { return p with { Age = 3 }; }\n    }\n}\n",
+    )]);
+    let (g, _) = build_graph(&BuildOptions::new(&dir)).unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+    let qual = |id: &str| {
+        g["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|n| n["id"] == id)
+            .and_then(|n| n["qualname"].as_str())
+            .unwrap_or_default()
+            .to_string()
+    };
+    let got: BTreeSet<(String, String, String)> = g["links"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| {
+            (
+                qual(e["source"].as_str().unwrap()),
+                e["relation"].as_str().unwrap().to_string(),
+                qual(e["target"].as_str().unwrap()),
+            )
+        })
+        .collect();
+    has(
+        &got,
+        &[
+            ("App.C.Loop", "calls", "App.Bag.GetEnumerator"),
+            ("App.C.Split", "calls", "App.Pair.Deconstruct"),
+            ("App.C.Three", "calls", "App.Ext.Deconstruct"),
+            ("App.C.Wait", "calls", "App.Job.GetAwaiter"),
+            ("App.C.Fill", "calls", "App.Bag.Add"),
+            ("App.C.Older", "writes", "App.Person.Age"),
+        ],
+    );
+    lacks(&got, &[("App.C.Three", "calls", "App.Pair.Deconstruct")]);
+    for f in ["App.C.Loop", "App.C.Split", "App.C.Wait"] {
+        has(&got, &[(f, "calls", "App.Item.A")]);
+        lacks(&got, &[(f, "calls", "App.Decoy.A")]);
+    }
+}

@@ -536,6 +536,24 @@ impl State {
         {
             return;
         }
+        // C# `p with { Age = 3 }`: the copy's member written (the grammar
+        // gives the names and values as children of the initializer, in turn)
+        if pk == "with_initializer" && crate::parse::current() == Some(crate::lang::Lang::CSharp) {
+            let named: Vec<Node> =
+                kids(p).into_iter().filter(|c| !c.kind().contains("comment")).collect();
+            if named.iter().position(|c| c.id() == n.id()).is_some_and(|i| i % 2 == 0) {
+                let copied = up(anc, 1)
+                    .filter(|w| w.kind() == "with_expression")
+                    .and_then(|w| kids(w).into_iter().next())
+                    .and_then(|v| path_of(v, src))
+                    .filter(|v| !v.iter().any(|s| s == crate::refs::UNKNOWN));
+                if let Some(mut path) = copied {
+                    path.push(text(n, src));
+                    self.push(n, RefKind::Write, path, "assign");
+                }
+                return;
+            }
+        }
         // (a parameter's name; its default value is read like any other)
         let default_value = ["value", "default_value"]
             .iter()
