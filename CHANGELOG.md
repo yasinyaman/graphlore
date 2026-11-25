@@ -9,6 +9,12 @@ All notable changes to this project are documented here. The format is based on
 ## [0.8.0] - 2026-11-24
 
 ### Added
+- **The native engine against graphify, before graphify goes**
+  (`docs/native-engine.md`, "Before graphify goes"): the 31 repositories
+  compared again, with the share of graphify's `EXTRACTED` calls the native
+  graph has (84%), and the ones it lacks read at their sites: minified
+  bundles, names matched to the wrong definition, a comparison artifact of
+  overloads written out of their class, and one real gap, closed below.
 - **The sweep: a language's name-binding rules read section by section**
   (`docs/rule-sources.md`, "Phase 2b"; `AGENTS.md`). A smaller model reads
   the specification and the compiler's binder group by group
@@ -226,6 +232,9 @@ All notable changes to this project are documented here. The format is based on
   back to BM25 once when it cannot.
 
 ### Fixed
+- **Ruby: a bare name as a hash's value is a method call**
+  (`{ status: status }`); the key names nothing. faraday's `Response#to_hash`
+  had no edge at all (12 calls more in faraday, 6 in thor).
 - **Seven name-resolution rules read off the compilers' answers on whole
   repositories** (engine 0.5.80, `benchmarks/oracle_rust.py`,
   `oracle_csharp.py`; each a case in `benchmarks/conformance.py` and a golden

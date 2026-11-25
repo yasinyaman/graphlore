@@ -2470,6 +2470,68 @@ in `spans.py` as well as in `generic.rs`. `neighbors` listed one row where
 two nodes reference each other. `path` and `explain` read the CLI's default
 `graphify-out/` when `GRAPHLORE_OUT_DIR` named another directory.
 
+### Before graphify goes: the comparison again
+
+Measured again on 2026-11-25 (graphify 0.9.111, engine 0.5.80 with the C#
+and Go sweeps' rules) before the release that drops graphify, with one more
+column: of the calls graphify itself marks `EXTRACTED`, the share the native
+graph has.
+
+| Language | same definition | imports (file pairs) | calls | of graphify's `EXTRACTED` calls | bases | type references |
+|---|--:|--:|--:|--:|--:|--:|
+| Python | 100.0% | 212 / 219 (96%) | 2,947 / 830 (95%) | 639 / 647 (99%) | 73 / 62 (100%) | 944 / 494 (97%) |
+| JavaScript | 93.5% | 250 / 305 (59%) | 1,050 / 2,057 (38%) | 723 / 1,493 (48%) | 1 / 1 (100%) | 104 / 0 |
+| TypeScript | 99.4% | 527 / 634 (83%) | 790 / 687 (98%) | 611 / 623 (98%) | 25 / 20 (100%) | 1,163 / 156 (94%) |
+| TSX | 99.7% | 253 / 316 (80%) | 435 / 456 (95%) | 435 / 456 (95%) | – | 51 / 4 (100%) |
+| Go | 100.0% | 538 / 950 (47%) | 6,772 / 3,167 (99%) | 390 / 416 (94%) | 19 / 14 (100%) | 960 / 355 (100%) |
+| Java | 98.0% | 1,112 / 1,010 (100%) | 6,209 / 5,191 (80%) | 868 / 986 (88%) | 415 / 168 (94%) | 4,293 / 1,962 (98%) |
+| Kotlin | 99.5% | 368 / 333 (95%) | 4,696 / 2,228 (76%) | 1,332 / 1,734 (77%) | 96 / 56 (93%) | 1,449 / 674 (94%) |
+| Scala | 100.0% | 2 / 0 | 83 / 20 (50%) | 10 / 20 (50%) | 21 / 22 (95%) | 48 / 32 (100%) |
+| C# | 93.2% | 337 / 280 (29%) | 3,630 / 2,468 (96%) | 603 / 630 (96%) | 92 / 86 (99%) | 2,357 / 944 (96%) |
+| Rust | 93.3% | 314 / 367 (74%) | 2,098 / 853 (86%) | 635 / 744 (85%) | 51 / 38 (95%) | 1,638 / 898 (89%) |
+| Swift | 96.6% | 174 / 166 (0%) | 5,616 / 2,142 (83%) | 674 / 708 (95%) | 190 / 164 (100%) | 1,855 / 581 (79%) |
+| C | 100.0% | 89 / 76 (100%) | 864 / 791 (100%) | 340 / 340 (100%) | – | 452 / 142 (100%) |
+| C++ | 92.2% | 215 / 217 (99%) | 424 / 255 (52%) | 35 / 156 (22%) | 30 / 5 (100%) | 461 / 224 (95%) |
+| C/C++ headers | 91.9% | 164 / 168 (97%) | 426 / 348 (87%) | 229 / 273 (84%) | 12 / 12 (92%) | 824 / 314 (90%) |
+| Ruby | 99.7% | 42 / 0 | 456 / 375 (69%) | 234 / 330 (71%) | 47 / 15 (93%) | 71 / 0 |
+| PHP | 80.6% | 509 / 505 (100%) | 8,900 / 6,362 (90%) | 4,525 / 4,987 (91%) | 65 / 60 (98%) | 1,482 / 213 (100%) |
+| **All** | **94.2%** | **5,106 / 5,546 (77%)** | **45,396 / 28,230 (84%)** | **12,283 / 14,543 (84%)** | **1,137 / 723 (97%)** | **18,152 / 6,993 (94%)** |
+
+The totals moved little since 0.5.62 (calls 85% → 84%, imports 76% → 77%):
+what the sweeps added are edges graphify does not have either. A call only
+graphify has is a gap only when it is right, so the `EXTRACTED` ones the
+native graph lacks were read at their sites in the six repositories that hold
+most of them:
+
+- **retrofit's JavaScript (725 of the 770 JavaScript ones):** the minified
+  bundles of its documentation site (`website/public/…/scripts`, `Ac() ->
+  Gn()`), which the analysis scope leaves out as vendored.
+- **guzzle (458) and kotlinpoet (384):** names matched to the wrong
+  definition. A `$handler->close()` or `$f->create(…)` in one test is linked
+  to the method of an anonymous class written in another test; `toString(x)`
+  to a local function of another test, `assertThat(ANY.reflectionName())` to
+  the test itself, `Character.isJavaIdentifierPart(code)` to the project's
+  function of that name, `super.addKdoc(…)` to the method it is written in.
+- **retrofit's Java (116), ureq (109):** the same kind: `new
+  ToStringConverterFactory()` to a class nested in another test method, `new
+  ParameterHandler.PartMap<>(…)` to the annotation `@PartMap`,
+  `Request::builder().uri(…)` (the `http` crate's) to ureq's own `uri`.
+  (`verify_graphify.py` checks Rust's with rust-analyzer: none is a confirmed
+  edge the native graph lacks.)
+- **cpr (121 + 44):** the comparison's, not the graph's. `Session::SetOption`
+  has 92 overloads written out of the class; graphify hangs the calls on the
+  declarations in the header and the pairing lands on another overload. Read
+  in the native graph, `SetOption → SetUnixSocket`, `Get → PrepareGet`, `Put →
+  makeRequest` and `prepareCommonShared → prepareProxy` are there, `EXTRACTED`.
+- **faraday (80):** mostly receivers the engine types and graphify guesses
+  (`stack.delete(stub)` on an array, `@names.include?` on a set, `env.body`),
+  and one real gap: a bare name as a hash's value (`{ status: status, body:
+  body }` in `Response#to_hash`) was read as no call at all. It is a case now
+  (`ruby/bare-name-as-a-hash-value`, `found_by("comparison")`) and the engine
+  reads it (12 calls more in faraday, 6 in thor).
+
+So no language keeps graphify for its edges: the switch can come.
+
 ## Roadmap
 
 1. **Phase 1: definitions, spans, containment, headings.** Done.

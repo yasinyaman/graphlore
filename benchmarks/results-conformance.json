@@ -1,6 +1,6 @@
 {
- "passed": 1149,
- "total": 1270,
+ "passed": 1150,
+ "total": 1271,
  "cases": [
   {
    "id": "python/module-function",
@@ -8618,6 +8618,12 @@
      "MarkAttribute"
     ]
    ]
+  },
+  {
+   "id": "ruby/bare-name-as-a-hash-value",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
   }
  ]
 }

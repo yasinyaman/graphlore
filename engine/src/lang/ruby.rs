@@ -175,13 +175,15 @@ impl LanguageModule for Ruby {
                     | "setter"
                     | "call"
                     | "argument_list"
-                    | "pair"
                     | "exception_variable"
                     | "for"
                     | "alias"
                     | "undef"
             )
-            || p.kind().ends_with("_parameters");
+            || p.kind().ends_with("_parameters")
+            // (a hash's key names nothing; its value is a value like any other:
+            // `{ status: status }` calls `status`)
+            || (p.kind() == "pair" && p.child_by_field_name("value").is_none_or(|v| v.id() != n.id()));
         if is_target {
             // `call` children are its receiver / method name (read by the
             // generic rule); arguments are values, not calls

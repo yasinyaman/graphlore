@@ -1431,11 +1431,11 @@ Found by: the specification 32, a compiler 0, comparison 0, the grammar 4, the l
 | a member of an inline namespace is a member of the namespace around | `inline-namespace` | – | yes |
 | `T::f()` in a member of T: the name before `::` is the class, not the constructor of its name | `class-before-its-constructor` | – | yes |
 
-### ruby (34 of 34)
+### ruby (34 of 35)
 
 Ruby documentation, 'Calling Methods' and Module#ancestors (method lookup), 'Modules and Classes' (constant lookup).
 
-Found by: the specification 29, a compiler 0, comparison 0, the grammar 0, the language's own tools 5. With the place it was read in the language's own tools: 5.
+Found by: the specification 29, a compiler 0, comparison 1, the grammar 0, the language's own tools 5. With the place it was read in the language's own tools: 6.
 
 | Rule | Case | Versions | Engine |
 |---|---|---|---|
@@ -1473,6 +1473,7 @@ Found by: the specification 29, a compiler 0, comparison 0, the grammar 0, the l
 | a constant of a module around the use comes before one of the class's ancestors | `lexical-constant-before-ancestor` | – | yes |
 | a block's parameter is a name of the block: it hides a method of its name there | `block-parameter-hides-a-method` | – | yes |
 | a name is a local only after the assignment that makes it one: before it, it is a method call | `local-only-after-assignment` | – | yes |
+| a bare name that is no local is a method call as a hash's value too (`{ status: status }`); the key names nothing | `bare-name-as-a-hash-value` | – | **no**: no Resp.to_hash -calls-> Resp.status; Resp.to_hash -calls-> Resp.body |
 
 ### php (37 of 37)
 
@@ -1520,4 +1521,4 @@ Found by: the specification 31, a compiler 2, comparison 0, the grammar 1, the l
 | `A::hello insteadof B` picks A's method of two used traits | `trait-insteadof` | – | yes |
 | a method a trait brings comes before an inherited one, and the class's own before both | `trait-before-inherited` | – | yes |
 
-1149 of 1270 rules hold
+1149 of 1271 rules hold

@@ -5283,6 +5283,16 @@ def _matches(node: dict[str, Any], want: str) -> bool:
     return bool(node.get("label") == want)
 
 
+# Found comparing the two engines again before graphify goes (compare_engines.py
+# on the 31 audit repositories, graphify's EXTRACTED calls the native graph
+# lacked, read at their sites): faraday's `Response#to_hash`.
+found_by("comparison")
+case("ruby", "bare-name-as-a-hash-value", "a bare name that is no local is a method call as a hash's value too (`{ status: status }`); the key names nothing",
+     RB, {"a.rb": "class Resp\n  def status\n    1\n  end\n\n  def body\n    2\n  end\n\n  def to_hash\n    { status: status, :body => body }\n  end\nend\n\nclass Other\n  def status\n    3\n  end\nend\n"},
+     [("Resp.to_hash", "calls", "Resp.status"), ("Resp.to_hash", "calls", "Resp.body")], [("Resp.to_hash", "calls", "Other.status")],
+     source="Ruby documentation 'Calling Methods' (a method called with no receiver and no arguments needs no parentheses); faraday lib/faraday/response.rb to_hash")
+
+
 def run_case(c: dict[str, Any]) -> dict[str, Any]:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp) / "project"

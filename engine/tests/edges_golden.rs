@@ -3999,3 +3999,16 @@ fn csharp_query_expressions() {
         assert!(!got.contains(&(from.to_string(), to.to_string())), "{from} -> {to}: {got:?}");
     }
 }
+
+// Ruby: a bare name that is no local is a method call as a hash's value too;
+// the key names nothing (faraday's `Response#to_hash`)
+#[test]
+fn ruby_a_bare_name_as_a_hash_value_is_a_call() {
+    let got = call_ids("rb-hash-value", &[(
+        "a.rb",
+        "class Resp\n  def status\n    1\n  end\n\n  def body\n    2\n  end\n\n  def to_hash\n    { status: status, :body => body }\n  end\nend\n",
+    )]);
+    for to in ["a_resp_status", "a_resp_body"] {
+        assert!(got.contains(&(".to_hash()".to_string(), to.to_string())), "{to}: {got:?}");
+    }
+}
