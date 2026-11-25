@@ -104,6 +104,51 @@ Token savings and span-join precision will differ on other architectures (data p
 apps, sprawling monorepos), so treat these as indicative, not guarantees. Numbers vary by
 codebase and query.</sub>
 
+## Scale: kubernetes
+
+One large repository, measured on 2026-11-25 on a 4-core, 15 GB machine with
+engine 0.5.80 (`benchmarks/scale.py`): kubernetes at `3596eb6`, 18,946 files
+read (13,980 Go files outside `vendor/`, 4.2 million lines), giving 508,099
+nodes and 2.44 million edges (a 1.1 GB `graph.json`).
+
+| Build | seconds | peak memory | of which |
+|---|--:|--:|---|
+| full | 736 | 11.3 GB | parse 619 s, resolve 72 s, communities 24 s |
+| update, nothing changed | 140 | 11.0 GB | resolve 78 s, communities 24 s |
+| update, one file changed | 145 | 11.1 GB | resolve 80 s, communities 25 s |
+
+An update parses only what changed, but resolution and communities run over
+the whole project (so that an update writes the graph a full build would),
+which is two minutes here. Reading the graph takes 16 s and 7.2 GB in the
+server. Query latency, over 39 definitions sampled with a fixed seed after one
+call that fills the per-graph caches:
+
+| Tool | first call | p50 | p95 |
+|---|--:|--:|--:|
+| `graphlore_neighbors` | 16.6 s | 2 ms | 130 ms |
+| `graphlore_subgraph` | 0.01 s | 5 ms | 21 ms |
+| `graphlore_node_details` | 2.1 s | 4 ms | 39 ms |
+| `graphlore_impact` | 12.7 s | 250 ms | 293 ms |
+| `graphlore_tests_for` | 6.0 s | 818 ms | 1,002 ms |
+
+and the tools that read the whole graph, a second time: `graphlore_god_nodes`
+1.9 s, `graphlore_overview` 2.4 s, `graphlore_cycles` 8.4 s. Before this
+measurement every call of the node tools asked every node of the graph whether
+it is test code, and `node_details` and `tests_for` indexed every edge again:
+`neighbors` took 1.7 s at p50, `subgraph` 1.6 s, `node_details` 2.1 s and
+`tests_for` 5.2 s. Those indexes are now kept per graph, as the adjacency
+already was.
+
+What this says: a graph of this size is served, the node tools answer in well
+under a second, and the cost is on the build side — the parse, the memory a
+build holds, and an update that resolves the whole project again. `graph.json`
+itself is not the bottleneck (16 s to read once per server); a change of
+storage is not called for by these numbers.
+
+```bash
+python benchmarks/scale.py /path/to/kubernetes --out /tmp/scale-out --touch pkg/kubelet/kubelet.go --json /tmp/scale.json
+```
+
 ## One call beats running semble and graphify separately
 
 semble finds **what's relevant**; graphify gives **how it connects**. They're complementary — but stitching them by hand means four calls, ~2.7k tokens, and manually aligning semble's line ranges to graph nodes. graphlore does that join *for* you, in one call:

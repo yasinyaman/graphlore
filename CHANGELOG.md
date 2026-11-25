@@ -6,6 +6,22 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+- **Scale, measured on kubernetes** (`docs/benchmark.md`, "Scale: kubernetes";
+  `benchmarks/scale.py`): 4.2 million lines of Go, 508,099 nodes and 2.44
+  million edges; a full build in 736 s and 11.3 GB, an update in 140–145 s,
+  the graph read in 16 s, and the node tools at a p50 of 2–818 ms.
+
+### Changed
+- **The node tools keep their indexes per graph** instead of rebuilding them on
+  every call: the test nodes (`_test_node_ids`, for the production-first order
+  of `graphlore_neighbors`, `graphlore_subgraph` and `graphlore_impact`), the
+  importers of each file (`graphlore_tests_for`) and the HTTP and state indexes
+  (`graphlore_node_details`), each on the identity of its list as the adjacency
+  already was. On kubernetes, p50 per call: `neighbors` 1,671 → 2 ms,
+  `subgraph` 1,621 → 5 ms, `node_details` 2,139 → 4 ms, `tests_for` 5,239 →
+  818 ms.
+
 ### Removed
 - **graphify as graphlore's extractor** (`docs/native-engine.md`, roadmap
   release B). The native engine builds every graph: `graphlore-engine` is a

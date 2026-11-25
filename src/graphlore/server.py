@@ -1350,6 +1350,44 @@ def _display_labels(nodes: list[dict]) -> _DisplayLabels:
     return labels
 
 
+# The ids of a node list's test nodes (`_is_test_node`), on the list's identity:
+# a node-centric tool orders its rows production first, and asking every node of
+# a large graph on each call costs seconds (kubernetes: 508,000 nodes).
+_TEST_IDS_CACHE: dict[int, tuple[list[dict], frozenset[str]]] = {}
+
+
+def _test_node_ids(nodes: list[dict]) -> frozenset[str]:
+    """The ids of the test nodes of ``nodes``, cached on the list's identity."""
+    cached = _TEST_IDS_CACHE.get(id(nodes))
+    if cached is not None and cached[0] is nodes:
+        return cached[1]
+    ids = frozenset(_node_id(m) for m in nodes if _is_test_node(m))
+    if id(nodes) not in _TEST_IDS_CACHE and len(_TEST_IDS_CACHE) >= _LABELS_CACHE_MAX:
+        _TEST_IDS_CACHE.pop(next(iter(_TEST_IDS_CACHE)), None)
+    _TEST_IDS_CACHE[id(nodes)] = (nodes, ids)
+    return ids
+
+
+# Per (nodes, edges) identity: target file -> the files that import it, as
+# `_file_import_edges` lifts them with no import checker (graphlore_tests_for).
+_IMPORTERS_CACHE: dict[tuple[int, int], tuple[list[dict], list[dict], dict[str, set[str]]]] = {}
+
+
+def _importers_by_file(nodes: list[dict], edges: list[dict]) -> dict[str, set[str]]:
+    """Target file -> the files with a file-level import edge to it."""
+    key = (id(nodes), id(edges))
+    cached = _IMPORTERS_CACHE.get(key)
+    if cached is not None and cached[0] is nodes and cached[1] is edges:
+        return cached[2]
+    out: dict[str, set[str]] = {}
+    for sf, tf, _e, _dst, _kind in _file_import_edges(nodes, edges):
+        out.setdefault(tf, set()).add(sf)
+    if key not in _IMPORTERS_CACHE and len(_IMPORTERS_CACHE) >= _LABELS_CACHE_MAX:
+        _IMPORTERS_CACHE.pop(next(iter(_IMPORTERS_CACHE)), None)
+    _IMPORTERS_CACHE[key] = (nodes, edges, out)
+    return out
+
+
 def _client_supports_sampling(ctx: Context) -> bool:
     """Capability test: does the connected MCP client offer host-LLM sampling?
 
@@ -2316,7 +2354,7 @@ def graphlore_query(
 
     labels = _display_labels(nodes)
     adj = _adjacency(view.edges)
-    tests = {_node_id(m) for m in view.nodes if _is_test_node(m)}
+    tests = _test_node_ids(view.nodes)
     seed_ids = [_node_id(n) for n, _how in seeds]
     visited, sub_edges, truncated, tokens = _bfs_subgraph(
         adj, labels, seed_ids[0], hops, budget, edge_set=_edge_set(view.edges),
@@ -3800,7 +3838,7 @@ def _neighbor_rows(view: ScopeView, nid: str, labels: Any) -> list[dict[str, Any
     direction: production code before tests, most connected first."""
     adj = _adjacency(view.edges)
     es = _edge_set(view.edges)
-    tests = {_node_id(m) for m in view.nodes if _is_test_node(m)}
+    tests = _test_node_ids(view.nodes)
     # The adjacency is undirected; recover each edge's true orientation so an
     # incoming "calls" edge isn't drawn as if this node were the caller.
     ranked = sorted(
@@ -3955,7 +3993,7 @@ def graphlore_subgraph(
     labels = _display_labels(nodes)
     adj = _adjacency(view.edges)
     sid = _node_id(start)
-    tests = {_node_id(m) for m in view.nodes if _is_test_node(m)}
+    tests = _test_node_ids(view.nodes)
 
     visited, collected_edges, truncated, approx_tokens = _bfs_subgraph(
         adj, labels, sid, hops, budget_tokens, edge_set=_edge_set(view.edges),
@@ -4527,8 +4565,8 @@ def graphlore_tests_for(
     weak: list[dict[str, Any]] = []
     if target_file:
         for sf in sorted({
-            sf for sf, tf, _e, _dst, _kind in _file_import_edges(view.nodes, edges)
-            if tf == target_file and _is_test_path(sf)
+            sf for sf in _importers_by_file(view.nodes, edges).get(target_file, ())
+            if _is_test_path(sf)
         } - covered_files):
             weak.append({"file": sf, "why": f"imports {target_file}"})
     name = _bare_name(_node_label(start)).strip("_").lower()
@@ -4536,13 +4574,13 @@ def graphlore_tests_for(
         seen = set(direct) | set(through)
         for n in view.nodes:
             nid = _node_id(n)
-            if nid in seen or not is_test(n):
+            # (the name first: asking every node whether it is a test is slow)
+            if nid in seen or name not in _bare_name(_node_label(n)).lower() or not is_test(n):
                 continue
-            if name in _bare_name(_node_label(n)).lower():
-                weak.append({
-                    "test": labels.name(nid, nid), "file": _node_file(n),
-                    "line": _node_line(n) or None, "why": "named after it",
-                })
+            weak.append({
+                "test": labels.name(nid, nid), "file": _node_file(n),
+                "line": _node_line(n) or None, "why": "named after it",
+            })
 
     cap = max(0, limit)
     matched, matched_text = _matched(node, picked)
@@ -5301,13 +5339,28 @@ def _co_change_of(
     return rows, [f"  changes with: {shown}"]
 
 
-def _http_of(nodes: list[dict], edges: list[dict], nid: str) -> tuple[dict[str, Any], list[str]]:
-    """The routes a handler serves and who requests them; for a route, its
-    handlers and callers; for client code, the routes it requests. Empty on a
-    graph with no `handles` / `http_calls` edges."""
-    labels = _display_labels(nodes)
-    handlers: dict[str, list[str]] = {}   # route -> handlers
-    callers: dict[str, list[str]] = {}    # route -> requesting definitions
+# Indexes of an edge list built once per list identity (`_edge_index`): a
+# node-centric tool asking them on every call scans every edge of the graph.
+_EDGE_INDEX_CACHE: dict[tuple[str, int], tuple[list[dict], Any]] = {}
+
+
+def _edge_index(edges: list[dict], kind: str, build: Callable[[list[dict]], Any]) -> Any:
+    """``build(edges)``, cached on ``kind`` and the identity of ``edges``."""
+    key = (kind, id(edges))
+    cached = _EDGE_INDEX_CACHE.get(key)
+    if cached is not None and cached[0] is edges:
+        return cached[1]
+    value = build(edges)
+    if key not in _EDGE_INDEX_CACHE and len(_EDGE_INDEX_CACHE) >= 4 * _LABELS_CACHE_MAX:
+        _EDGE_INDEX_CACHE.pop(next(iter(_EDGE_INDEX_CACHE)), None)
+    _EDGE_INDEX_CACHE[key] = (edges, value)
+    return value
+
+
+def _http_index(edges: list[dict]) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
+    """Route -> its handlers, and route -> the definitions requesting it."""
+    handlers: dict[str, list[str]] = {}
+    callers: dict[str, list[str]] = {}
     for e in edges:
         rel = _rel(e)
         if rel not in _HTTP_RELATIONS:
@@ -5317,6 +5370,32 @@ def _http_of(nodes: list[dict], edges: list[dict], nid: str) -> tuple[dict[str, 
             handlers.setdefault(s, []).append(t)
         else:
             callers.setdefault(t, []).append(s)
+    return handlers, callers
+
+
+def _state_index(
+    edges: list[dict],
+) -> tuple[dict[str, dict[str, set[str]]], dict[str, dict[str, set[str]]]]:
+    """State -> relation -> the definitions touching it, and definition ->
+    relation -> the states it touches."""
+    touches: dict[str, dict[str, set[str]]] = {}
+    touched: dict[str, dict[str, set[str]]] = {}
+    for e in edges:
+        rel = _rel(e)
+        if rel in _STATE_RELATIONS:
+            s, t = _edge_ends(e)
+            touches.setdefault(t, {}).setdefault(rel, set()).add(s)
+            touched.setdefault(s, {}).setdefault(rel, set()).add(t)
+    return touches, touched
+
+
+def _http_of(nodes: list[dict], edges: list[dict], nid: str) -> tuple[dict[str, Any], list[str]]:
+    """The routes a handler serves and who requests them; for a route, its
+    handlers and callers; for client code, the routes it requests. Empty on a
+    graph with no `handles` / `http_calls` edges."""
+    labels = _display_labels(nodes)
+    # route -> handlers, route -> requesting definitions
+    handlers, callers = _edge_index(edges, "http", _http_index)
     if not handlers and not callers:
         return {}, []
     name = lambda i: labels.get(i, i)  # noqa: E731
@@ -5351,13 +5430,8 @@ def _state_of(nodes: list[dict], edges: list[dict], nid: str) -> tuple[dict[str,
     for a state node, its readers and writers. Empty on a graph with no
     ``reads`` / ``writes`` edges."""
     labels = _display_labels(nodes)
-    byid = {_node_id(n): n for n in nodes}
-    touches: dict[str, dict[str, set[str]]] = {}   # state -> relation -> definitions
-    for e in edges:
-        rel = _rel(e)
-        if rel in _STATE_RELATIONS:
-            s, t = _edge_ends(e)
-            touches.setdefault(t, {}).setdefault(rel, set()).add(s)
+    # state -> relation -> definitions, and definition -> relation -> states
+    touches, touched = _edge_index(edges, "state", _state_index)
     if nid in touches:
         got = touches[nid]
         rows = {rel: sorted(labels.get(i, i) for i in got.get(rel, ()))
@@ -5366,8 +5440,7 @@ def _state_of(nodes: list[dict], edges: list[dict], nid: str) -> tuple[dict[str,
         text = [f"  written by: {', '.join(rows['writes']) or '(nothing)'}",
                 f"  read by   : {', '.join(rows['reads']) or '(nothing)'}"]
         return out, text
-    mine = {rel: sorted(t for t, by in touches.items() if nid in by.get(rel, ()))
-            for rel in ("reads", "writes")}
+    mine = {rel: sorted(touched.get(nid, {}).get(rel, ())) for rel in ("reads", "writes")}
     if not (mine["reads"] or mine["writes"]):
         return {}, []
     shared: list[dict[str, Any]] = []
@@ -5401,7 +5474,6 @@ def _state_of(nodes: list[dict], edges: list[dict], nid: str) -> tuple[dict[str,
         if len(shared) > _STATE_SHARED_LIMIT:
             text.append(f"    … {len(shared) - _STATE_SHARED_LIMIT} more: "
                         "graphlore_impact(node, shared_state=True)")
-    _ = byid
     return out, text
 
 
