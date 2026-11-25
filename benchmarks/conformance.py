@@ -3957,6 +3957,1312 @@ case('go', 'package-type-hides-the-predeclared-any', "a package type named any h
      [('Use', 'calls', 'any.Run'), ('Use', 'references', 'any')], [],
      source='spec Language_versions, Predeclared_identifiers; go/types scope.go (package scope is inside Universe)', since='1.18')
 
+# C#, the sweep (docs/rule-sources.md, 'Phase 2b: the sweep'): the standard and
+# Roslyn's binder read section by section by a smaller model, each case then
+# given to the compiler, to Roslyn (`verify_cases.py --binding`) and to the
+# engine before it was written here. A failing one is an open defect.
+found_by("sweep")
+case('csharp', 'namespace-and-generic-type-of-one-name', 'a namespace and a generic type share a name: `Result.Item` goes through the namespace, `Result<int>` is the type',
+     CS, {'Result.cs': 'namespace App\n{\n    public class Result<T>\n    {\n        public int Get() { return 1; }\n    }\n}\n', 'Item.cs': 'namespace App.Result\n{\n    public class Item\n    {\n        public int Run() { return 2; }\n    }\n}\n', 'C.cs': 'namespace App\n{\n    public class C\n    {\n        public int M(Result<int> r) { return r.Get(); }\n\n        public int N(Result.Item i) { return i.Run(); }\n    }\n}\n'},
+     [('C.M', 'calls', 'Result.Get'), ('C.N', 'calls', 'Item.Run')], [('C.N', 'calls', 'Result.Get')],
+     source='csharpstandard basic-concepts.md §7.3 (last exception), §7.8.1 (x zero: a namespace of that name; else a type with x type parameters); Roslyn Binder_Symbols.cs BindNonGenericSimpleNamespaceOrTypeOrAliasSymbol, LookupGenericTypeName')
+case('csharp', 'lambda-parameter-hides-local', 'a lambda parameter of a name hides a local of the method around, inside the lambda',
+     CS, {'A.cs': 'using System;\n\nnamespace App\n{\n    public class A\n    {\n        public int Run() { return 1; }\n    }\n\n    public class B\n    {\n        public int Run() { return 2; }\n    }\n\n    public class C\n    {\n        public Func<B, int> M()\n        {\n            A x = new A();\n            Func<B, int> f = (B x) => x.Run();\n            return f;\n        }\n    }\n}\n'},
+     [('C.M', 'calls', 'B.Run')], [('C.M', 'calls', 'A.Run')],
+     source='csharpstandard basic-concepts.md §7.3 (declaration spaces of anonymous functions), §7.7.2.2 (HidingNesting1: the lambda parameter i hides the float i); Roslyn Binder_NameConflicts.cs ValidateNameConflictsInScope (IDS_FeatureNameShadowingInNestedFunctions)')
+case('csharp', 'switch-section-local-scope', 'a local declared in one switch section is in scope in a later section, and hides a field of its name',
+     CS, {'A.cs': 'namespace App\n{\n    public class A\n    {\n        public int Run() { return 1; }\n    }\n\n    public class B\n    {\n        public int Run() { return 2; }\n    }\n\n    public class C\n    {\n        private B y;\n\n        public int M(int k)\n        {\n            switch (k)\n            {\n                case 0:\n                    A y = null;\n                    break;\n                default:\n                    y = new A();\n                    return y.Run();\n            }\n            return 0;\n        }\n    }\n}\n'},
+     [('C.M', 'calls', 'A.Run')], [('C.M', 'calls', 'B.Run')],
+     source='csharpstandard basic-concepts.md §7.3 (the SwitchSurprise note: y is in scope within the default section)')
+case('csharp', 'inaccessible-base-member-skipped', 'a private member of a base is not accessible in a derived class outside it, so a bare name is the member of the class around',
+     CS, {'A.cs': 'namespace App\n{\n    public class Outer\n    {\n        private static int Helper() { return 1; }\n\n        public class Base\n        {\n            private static int Helper(string s) { return 2; }\n        }\n\n        public class Derived : Base\n        {\n            public int M() { return Helper(); }\n        }\n    }\n}\n'},
+     [('Derived.M', 'calls', 'Outer.Helper')], [('Derived.M', 'calls', 'Base.Helper')],
+     source="csharpstandard basic-concepts.md §7.7.1 (a class member's scope reaches derived classes in its accessibility domain), §7.5.3; Roslyn Binder_Lookup.cs CheckViability, LookupSymbolsInternal (the search goes on while the result is not viable)")
+case('csharp', 'inaccessible-hider-hides-nothing', "a private member that hides an inherited one hides it only inside its own class: a further derived class names the base's",
+     CS, {'A.cs': 'namespace App\n{\n    public class Base\n    {\n        public static int F(int x) { return 1; }\n    }\n\n    public class Derived : Base\n    {\n        private new static int F(string s) { return 2; }\n    }\n\n    public class MoreDerived : Derived\n    {\n        public static int G() { return F(1); }\n    }\n}\n'},
+     [('MoreDerived.G', 'calls', 'Base.F')], [('MoreDerived.G', 'calls', 'Derived.F')],
+     source='csharpstandard basic-concepts.md §7.7.2.3 (HidingInherit3); Roslyn Binder_Lookup.cs CheckViability')
+case('csharp', 'inaccessible-nested-type-of-a-base', "a private nested type of a base class is not a meaning of a type name in the derived class: the namespace's type is",
+     CS, {'A.cs': 'namespace App\n{\n    public class Item\n    {\n        public int Run() { return 1; }\n    }\n\n    public class Base\n    {\n        private class Item\n        {\n        }\n    }\n\n    public class Derived : Base\n    {\n        public int M(Item i) { return i.Run(); }\n    }\n}\n'},
+     [('Derived.M', 'references', 'A.cs:App.Item'), ('Derived.M', 'calls', 'Item.Run')], [('Derived.M', 'references', 'Base.Item')],
+     source='csharpstandard basic-concepts.md §7.8.1 (R0: a nested accessible type having name I); Roslyn Binder_Lookup.cs CheckViability')
+case('csharp', 'derived-overload-of-another-signature', 'a derived method hides base methods of the same signature only: a base overload of another signature is still called',
+     CS, {'A.cs': 'namespace App\n{\n    public class Base\n    {\n        public int Show(int n) { return 1; }\n    }\n\n    public class Derived : Base\n    {\n        public int Show(string s) { return 2; }\n\n        public int UseInt() { return Show(1); }\n\n        public int UseText() { return Show("x"); }\n    }\n}\n'},
+     [('Derived.UseInt', 'calls', 'Base.Show'), ('Derived.UseText', 'calls', 'Derived.Show')], [('Derived.UseInt', 'calls', 'Derived.Show'), ('Derived.UseText', 'calls', 'Base.Show')],
+     source='csharpstandard basic-concepts.md §7.7.2.3 (a method hides base methods of the same signature, §7.6); Roslyn Binder_Lookup.cs MergeHidingLookupResults (hiding by signature is left to overload lookup)')
+case('csharp', 'class-type-parameter-hides-type', "a class's type parameter hides a namespace type of its name in the class, and only there",
+     CS, {'A.cs': 'namespace App\n{\n    public interface IRunner\n    {\n        int Run();\n    }\n\n    public class T\n    {\n        public int Run() { return 1; }\n    }\n\n    public class Box<T> where T : IRunner\n    {\n        public int M(T t) { return t.Run(); }\n    }\n\n    public class Plain\n    {\n        public int N(T t) { return t.Run(); }\n    }\n}\n'},
+     [('Box.M', 'calls', 'IRunner.Run'), ('Plain.N', 'calls', 'App.T.Run')], [('Box.M', 'calls', 'App.T.Run'), ('Plain.N', 'calls', 'IRunner.Run')],
+     source="csharpstandard basic-concepts.md §7.7.1 (scope of a class's type parameter), §7.8.1 (R0: a type parameter of T first); Roslyn Binder_Lookup.cs LookupSymbolsInSingleBinder")
+case('csharp', 'type-parameter-scope-ends-with-its-class', "a base class's type parameter is no name in a derived class: `T` there is the namespace's type",
+     CS, {'A.cs': 'namespace App\n{\n    public class T\n    {\n        public int Run() { return 1; }\n    }\n\n    public class Base<T>\n    {\n        public T Value;\n    }\n\n    public class Derived : Base<int>\n    {\n        public int M(T t) { return t.Run(); }\n    }\n}\n'},
+     [('Derived.M', 'calls', 'App.T.Run'), ('Derived.M', 'references', 'App.T')], [],
+     source="csharpstandard basic-concepts.md §7.7.1 (note to the scope of a class's type parameter)")
+case('csharp', 'local-scope-ends-with-its-block', "a local's scope ends with its block or its `for`: after it the name is the field again",
+     CS, {'A.cs': 'namespace App\n{\n    public class A\n    {\n        public int Run() { return 1; }\n    }\n\n    public class B\n    {\n        public int Run() { return 2; }\n    }\n\n    public class C\n    {\n        private B x = new B();\n\n        public int M()\n        {\n            {\n                A x = new A();\n            }\n            return x.Run();\n        }\n\n        public int N()\n        {\n            for (A x = new A(); x == null; x = null)\n            {\n            }\n            return x.Run();\n        }\n    }\n}\n'},
+     [('C.M', 'calls', 'B.Run'), ('C.N', 'calls', 'B.Run')], [('C.M', 'calls', 'A.Run'), ('C.N', 'calls', 'A.Run')],
+     source='csharpstandard basic-concepts.md §7.7.1 (a local: the block; a for_initializer variable: the for statement); Roslyn Binder_Lookup.cs LookupSymbolsInternal (one binder per scope)')
+case('csharp', 'local-hides-field-in-its-block', 'a local of a name hides the field of that name in its whole block, its own declarator included',
+     CS, {'A.cs': 'namespace App\n{\n    public class A\n    {\n        public int Run() { return 1; }\n    }\n\n    public class B\n    {\n        public int Run() { return 2; }\n    }\n\n    public class C\n    {\n        private B x = new B();\n\n        public int M()\n        {\n            A x = new A();\n            int j = (j = 1);\n            return x.Run() + j;\n        }\n    }\n}\n'},
+     [('C.M', 'calls', 'A.Run')], [('C.M', 'calls', 'B.Run')],
+     source="csharpstandard basic-concepts.md §7.7.1 (ScopeGeneral2: G's use of j in its initializer is valid)")
+case('csharp', 'field-named-like-a-type-is-no-type', 'where a type is written, a field of the same name is ignored',
+     CS, {'A.cs': 'namespace App\n{\n    public class Item\n    {\n        public int Run() { return 1; }\n    }\n\n    public class C\n    {\n        public string Item;\n\n        public int M(Item i) { return i.Run(); }\n    }\n}\n'},
+     [('C.M', 'calls', 'Item.Run'), ('C.M', 'references', 'App.Item')], [('C.M', 'reads', 'C.Item')],
+     source='csharpstandard basic-concepts.md §7.8.1 (R0, the Note); Roslyn Binder_Lookup.cs LookupSymbolsInSingleBinder (LookupOptions.NamespacesOrTypesOnly), CheckViability')
+case('csharp', 'inner-member-hides-outer-overloads', "a member of a nested type hides every overload of the outer type's of its name: `F(1)` is the inner `F(long)`, not the outer `F(int)`",
+     CS, {'A.cs': 'namespace App\n{\n    public class Outer\n    {\n        public static int F(int i) { return 1; }\n\n        public class Inner\n        {\n            public static int F(long l) { return 3; }\n\n            public int G() { return F(1); }\n        }\n    }\n}\n'},
+     [('Inner.G', 'calls', 'Inner.F')], [('Inner.G', 'calls', 'Outer.F')],
+     source='csharpstandard basic-concepts.md §7.7.2.2 (HidingNesting2); Roslyn Binder_Lookup.cs LookupSymbolsInternal (the first scope with a viable result ends the search)')
+case('csharp', 'interface-member-hides-base-interface-member', "an interface's `new` member hides the base interface's of its signature for a value typed by the derived interface",
+     CS, {'A.cs': 'namespace App\n{\n    public interface IA\n    {\n        int Run();\n    }\n\n    public interface IB : IA\n    {\n        new int Run();\n    }\n\n    public class C\n    {\n        public int M(IB b) { return b.Run(); }\n\n        public int N(IA a) { return a.Run(); }\n    }\n}\n'},
+     [('C.M', 'calls', 'IB.Run'), ('C.N', 'calls', 'IA.Run')], [('C.M', 'calls', 'IA.Run'), ('C.N', 'calls', 'IB.Run')],
+     source='csharpstandard basic-concepts.md §7.7.2.3; Roslyn Binder_Lookup.cs MergeHidingLookupResults (hidingContainerIsInterface, IsDerivedType)')
+case('csharp', 'namespace-before-outer-type', 'inside a namespace, `Sub` is its nested namespace, not a global type of that name',
+     CS, {'Helper.cs': 'namespace App.Sub\n{\n    public class Helper\n    {\n        public static int Run() { return 1; }\n    }\n}\n', 'Sub.cs': 'public class Sub\n{\n    public class Helper\n    {\n        public static int Run() { return 2; }\n    }\n}\n', 'C.cs': 'namespace App\n{\n    public class C\n    {\n        public int M() { return Sub.Helper.Run(); }\n    }\n}\n'},
+     [('C.M', 'calls', 'Helper.cs:App.Sub.Helper.Run')], [('C.M', 'calls', 'Sub.cs:Sub.Helper.Run')],
+     source='csharpstandard basic-concepts.md §7.8.1 (for each namespace N: a namespace named I); Roslyn Binder_Symbols.cs BindNonGenericSimpleNamespaceOrTypeOrAliasSymbol, Binder_Lookup.cs LookupMembersInNamespace')
+case('csharp', 'global-alias-qualifier', "`global::Item` is the global namespace's type, `Item` the one of the namespace around",
+     CS, {'Item.cs': 'public class Item\n{\n    public int Run() { return 1; }\n}\n', 'A.cs': 'namespace App\n{\n    public class Item\n    {\n        public int Run() { return 2; }\n    }\n\n    public class C\n    {\n        public int M(global::Item i) { return i.Run(); }\n\n        public int N(Item i) { return i.Run(); }\n    }\n}\n'},
+     [('C.M', 'calls', 'Item.cs:Item.Run'), ('C.N', 'calls', 'A.cs:App.Item.Run')], [('C.M', 'calls', 'A.cs:App.Item.Run'), ('C.N', 'calls', 'Item.cs:Item.Run')],
+     source='csharpstandard basic-concepts.md §7.8.1 (leading part: a qualified_alias_member), namespaces.md §14.8; Roslyn Binder_Symbols.cs BindNamespaceAliasSymbol, BindQualifiedName')
+case('csharp', 'using-alias-of-a-namespace', '`using L = Lib;` makes `L.Repo` the type of Lib, though `using Other;` imports another Repo',
+     CS, {'Lib.cs': 'namespace Lib\n{\n    public class Repo\n    {\n        public int Find() { return 1; }\n    }\n}\n', 'Other.cs': 'namespace Other\n{\n    public class Repo\n    {\n        public int Find() { return 2; }\n    }\n}\n', 'A.cs': 'using L = Lib;\nusing Other;\n\nnamespace App\n{\n    public class C\n    {\n        public int M(L.Repo r) { return r.Find(); }\n    }\n}\n'},
+     [('C.M', 'calls', 'Lib.Repo.Find')], [('C.M', 'calls', 'Other.Repo.Find')],
+     source='csharpstandard basic-concepts.md §7.8.1 (R0 and the trailing part: a namespace containing an accessible type I); Roslyn Binder_Symbols.cs BindQualifiedName')
+case('csharp', 'nested-type-of-a-constructed-type', "`G<int>.H` is the type nested in G, not the namespace's `H`",
+     CS, {'A.cs': 'namespace App\n{\n    public class H\n    {\n        public int Go() { return 1; }\n    }\n\n    public class G<T>\n    {\n        public class H\n        {\n            public int Go() { return 2; }\n        }\n    }\n\n    public class C\n    {\n        public int M(G<int>.H h) { return h.Go(); }\n    }\n}\n'},
+     [('C.M', 'references', 'G.H'), ('C.M', 'calls', 'G.H.Go')], [('C.M', 'references', 'A.cs:App.H'), ('C.M', 'calls', 'A.cs:App.H.Go')],
+     source='csharpstandard basic-concepts.md §7.8.1 (trailing repetition on a constructed type); Roslyn Binder_Symbols.cs BindQualifiedName, Binder_Lookup.cs LookupMembersInType')
+case('csharp', 'base-list-ignores-inherited-nested-types', "a name in a type's base list is looked up outside the type: an inherited nested type is not a meaning",
+     CS, {'A.cs': 'namespace App\n{\n    public interface IHolder<T> where T : class\n    {\n    }\n\n    public class Inner\n    {\n    }\n\n    public class Base\n    {\n        public struct Inner\n        {\n        }\n    }\n\n    public class Derived : Base, IHolder<Inner>\n    {\n    }\n}\n'},
+     [('Derived', 'references', 'A.cs:App.Inner')], [('Derived', 'references', 'Base.Inner')],
+     source='csharpstandard basic-concepts.md §7.8.1 (the Note at the nested-type step); Roslyn Binder_Lookup.cs LookupMembersInClass (basesBeingResolved), Binder_Symbols.cs BindNamespaceOrTypeSymbol')
+case('csharp', 'type-parameter-constraint-member', 'a member of a value typed by a type parameter is a member of its constraint (interface or base class)',
+     CS, {'A.cs': 'namespace App\n{\n    public interface IA\n    {\n        int Run();\n    }\n\n    public interface IB\n    {\n        int Run();\n    }\n\n    public class Base\n    {\n        public int Id() { return 1; }\n    }\n\n    public class Svc\n    {\n        public int M<T>(T t) where T : IA { return t.Run(); }\n\n        public int N<T>(T t) where T : Base { return t.Id(); }\n    }\n}\n'},
+     [('Svc.M', 'calls', 'IA.Run'), ('Svc.N', 'calls', 'Base.Id')], [('Svc.M', 'calls', 'IB.Run')],
+     source='csharpstandard expressions.md §12.5 (member lookup in a type parameter); Roslyn Binder_Lookup.cs LookupMembersInTypeParameter')
+case('csharp', 'attribute-suffix', '`[Cache]` names the attribute class `CacheAttribute`, not a class `Cache` that is no attribute',
+     CS, {'A.cs': 'using System;\n\nnamespace App\n{\n    public class Cache\n    {\n    }\n\n    public class CacheAttribute : Attribute\n    {\n    }\n\n    public class C\n    {\n        [Cache]\n        public int M() { return 1; }\n    }\n}\n'},
+     [('C.M', 'references', 'CacheAttribute')], [('C.M', 'references', 'A.cs:App.Cache')],
+     source='csharpstandard attributes.md §22.3 (attribute names); Roslyn Binder_Lookup.cs LookupAttributeType, IsSingleViableAttributeType')
+case('csharp', 'local-function-local-hides-outer-local', 'a local declared in a local function hides a local of the method around, inside the function only',
+     CS, {'A.cs': 'namespace App\n{\n    public class A\n    {\n        public int Run() { return 1; }\n    }\n\n    public class B\n    {\n        public int Run() { return 2; }\n    }\n\n    public class C\n    {\n        public int M()\n        {\n            A x = new A();\n\n            int Inner()\n            {\n                B x = new B();\n                return x.Run();\n            }\n\n            return Inner() + x.Run();\n        }\n    }\n}\n'},
+     [('C.M', 'calls', 'A.Run'), ('C.M.Inner', 'calls', 'B.Run')], [('C.M.Inner', 'calls', 'A.Run')],
+     source='Roslyn Binder_NameConflicts.cs ValidateNameConflictsInScope (IDS_FeatureNameShadowingInNestedFunctions); csharpstandard basic-concepts.md §7.7.2.2 (HidingNesting1: inside the local function M1 the float i hides the immediate-outer i)')
+case('csharp', 'setter-value-hides-field', "in a `set` accessor `value` is the property's implicit parameter, not a field of that name",
+     CS, {'A.cs': 'namespace App\n{\n    public class A\n    {\n        public int Run() { return 1; }\n    }\n\n    public class B\n    {\n        public int Run() { return 2; }\n    }\n\n    public class C\n    {\n        private B value = new B();\n\n        public A Prop\n        {\n            set { value.Run(); }\n        }\n    }\n}\n'},
+     [('C.Prop', 'calls', 'A.Run')], [('C.Prop', 'calls', 'B.Run')],
+     source='csharpstandard basic-concepts.md §7.3 (local variable declaration space of a property accessor: the name value)')
+case('csharp', 'using-static-nested-type', 'a `using static N.Outer;` makes the nested type Inner a name of the file',
+     CS, {'A.cs': 'namespace Lib { public class Outer { public class Inner { public static void Go() { } } } }\nnamespace Elsewhere { public class Inner { public static void Go() { } } }\n', 'B.cs': 'using static Lib.Outer;\nnamespace App { class Use { void Run() { Inner.Go(); } } }\n'},
+     [('Use.Run', 'calls', 'Outer.Inner.Go')], [('Use.Run', 'calls', 'Elsewhere.Inner.Go')],
+     source='csharpstandard §7.8 / §14.5.4 using static directives')
+case('csharp', 'explicit-interface-impl-not-found-by-name', 'an explicit interface implementation `void I.M()` is no member of its class by name: `M()` in the class means the inherited `B.M`',
+     CS, {'A.cs': 'namespace App {\n  public interface I { void M(); }\n  public class B { public void M() {} }\n  public class C : B, I {\n    void I.M() {}\n    public void Run() { M(); }\n  }\n}\n'},
+     [('C.Run', 'calls', 'B.M')], [('C.Run', 'calls', 'C.M'), ('C.Run', 'calls', 'I.M')],
+     source='csharpstandard §7.4 / Roslyn Binder_Lookup.cs LookupMembersInClass (explicit implementations are not looked up by name)')
+case('csharp', 'local-function-hides-method-in-whole-block', 'a local function hides a method of its name throughout its block, including a call written before its declaration',
+     CS, {'A.cs': 'namespace App {\n  public class E {\n    public void Helper() {}\n    public void Run() { Helper(); void Helper() {} }\n  }\n}\n'},
+     [('E.Run', 'calls', 'Run.Helper')], [('E.Run', 'calls', 'E.Helper')],
+     source='csharpstandard §7.7 (block scope), Roslyn Binder_NameConflicts.cs')
+case('csharp', 'csharp-pattern-variable-if-scope', '`if (o is Box x)` declares x for the if statement only: inside it x is the local, after it x is the field',
+     CS, {'A.cs': 'namespace App {\n  public class Box { public void Open() {} }\n  public class Holder {\n    Box x;\n    public void Inside(object o) { if (o is Box x) { x.Open(); } }\n    public void After(object o) { if (o is Box b) { } x.Open(); }\n  }\n}\n'},
+     [('Holder.After', 'reads', 'Holder.x'), ('Holder.Inside', 'calls', 'Box.Open')], [('Holder.Inside', 'reads', 'Holder.x')],
+     source='csharpstandard §7.7 (scopes of local variables and expression variables)')
+case('csharp', 'csharp-out-variable-block-scope', '`Make(out var x);` declares x in the enclosing block: a later `x.Open()` is the local, not the field x',
+     CS, {'A.cs': 'namespace App {\n  public class Box { public void Open() {} }\n  public class Holder {\n    Box x;\n    static void Make(out Box b) { b = new Box(); }\n    public void Leaks() { Make(out var x); x.Open(); }\n  }\n}\n'},
+     [('Holder.Leaks', 'calls', 'Holder.Make'), ('Holder.Leaks', 'calls', 'Box.Open')], [('Holder.Leaks', 'reads', 'Holder.x')],
+     source='csharpstandard §7.7 (scope of expression variables)')
+case('csharp', 'global-namespace-type', 'a type of the global namespace is visible from every namespace',
+     CS, {'G.cs': 'public class Tool\n{\n    public int Use() { return 1; }\n}\n', 'App/A.cs': 'namespace App.Core\n{\n    public class A\n    {\n        public int Run(Tool t) { return t.Use(); }\n    }\n}\n', 'Other/T.cs': 'namespace Other\n{\n    public class Tool\n    {\n        public int Use() { return 2; }\n    }\n}\n'},
+     [('A.Run', 'calls', 'Tool.Use')], [('A.Run', 'calls', 'Other.Tool.Use')],
+     source='csharpstandard §14.2 (namespaces.md)')
+case('csharp', 'using-is-per-file', 'the usings of a compilation unit have no effect on another',
+     CS, {'A.cs': 'using Lib;\n\nnamespace App\n{\n    public class A\n    {\n        public int Run(Repo r) { return r.Find(); }\n    }\n}\n', 'B.cs': 'using Elsewhere;\n\nnamespace App\n{\n    public class B\n    {\n        public int Run(Repo r) { return r.Find(); }\n    }\n}\n', 'Lib/Repo.cs': 'namespace Lib\n{\n    public class Repo\n    {\n        public int Find() { return 1; }\n        public static int Make() { return 1; }\n    }\n}\n', 'Elsewhere/Repo.cs': 'namespace Elsewhere\n{\n    public class Repo\n    {\n        public int Find() { return 2; }\n        public static int Make() { return 2; }\n    }\n}\n'},
+     [('A.Run', 'calls', 'Lib.Repo.Find'), ('B.Run', 'calls', 'Elsewhere.Repo.Find')], [('A.Run', 'calls', 'Elsewhere.Repo.Find'), ('B.Run', 'calls', 'Lib.Repo.Find')],
+     source='csharpstandard §14.2 (namespaces.md)')
+case('csharp', 'namespace-open-ended', "a namespace declared in several files is one: its types are visible before a `using`'s",
+     CS, {'Lib/Repo.cs': 'namespace Lib\n{\n    public class Repo\n    {\n        public int Find() { return 1; }\n        public static int Make() { return 1; }\n    }\n}\n', 'App/A.cs': 'using Lib;\n\nnamespace App\n{\n    public class A\n    {\n        public int Run(Repo r) { return r.Find(); }\n    }\n}\n', 'App/Repo.cs': 'namespace App\n{\n    public class Repo\n    {\n        public int Find() { return 2; }\n        public static int Make() { return 2; }\n    }\n}\n'},
+     [('A.Run', 'calls', 'App.Repo.Find')], [('A.Run', 'calls', 'Lib.Repo.Find')],
+     source='csharpstandard §14.3 (namespaces.md)')
+case('csharp', 'alias-to-namespace', "a `using` alias names a namespace, and `R.Repo` is that namespace's type",
+     CS, {'Lib/Repo.cs': 'namespace Lib.Data\n{\n    public class Repo\n    {\n        public int Find() { return 1; }\n        public static int Make() { return 1; }\n    }\n}\n', 'App/A.cs': 'using R = Lib.Data;\n\nnamespace App\n{\n    public class A\n    {\n        public int Run(R.Repo r)\n        {\n            return r.Find();\n        }\n    }\n}\n', 'Other/Repo.cs': 'namespace Other.Data\n{\n    public class Repo\n    {\n        public int Find() { return 2; }\n        public static int Make() { return 2; }\n    }\n}\n'},
+     [('A.Run', 'calls', 'Lib/Repo.cs:Lib.Data.Repo.Find')], [('A.Run', 'calls', 'Other/Repo.cs:Other.Data.Repo.Find')],
+     source='csharpstandard §14.5.2 (namespaces.md)')
+case('csharp', 'alias-hidden-by-namespace-member', 'a using alias is hidden by a type of the same name in a nested namespace',
+     CS, {'Lib/Repo.cs': 'namespace Lib\n{\n    public class Repo\n    {\n        public int Find() { return 1; }\n        public static int Make() { return 1; }\n    }\n}\n', 'App/A.cs': 'using R = Lib.Repo;\n\nnamespace App\n{\n    public class R\n    {\n        public static int Find() { return 2; }\n    }\n\n    public class A\n    {\n        public int Run()\n        {\n            return R.Find();\n        }\n    }\n}\n'},
+     [('A.Run', 'calls', 'App.R.Find')], [('A.Run', 'calls', 'Lib.Repo.Find')],
+     source='csharpstandard §14.5.2 (namespaces.md)')
+case('csharp', 'alias-innermost-first', 'an alias of an inner namespace body hides one of the same name of the file, which holds elsewhere',
+     CS, {'A.cs': 'using R = Lib.Repo;\n\nnamespace App\n{\n    using R = Other.Repo;\n\n    public class A\n    {\n        public int Run(R r) { return r.Find(); }\n    }\n}\n\nnamespace Elsewhere\n{\n    public class B\n    {\n        public int Run(R r) { return r.Find(); }\n    }\n}\n', 'Lib/Repo.cs': 'namespace Lib\n{\n    public class Repo\n    {\n        public int Find() { return 1; }\n        public static int Make() { return 1; }\n    }\n}\n', 'Other/Repo.cs': 'namespace Other\n{\n    public class Repo\n    {\n        public int Find() { return 2; }\n        public static int Make() { return 2; }\n    }\n}\n'},
+     [('A.Run', 'calls', 'Other/Repo.cs:Other.Repo.Find'), ('B.Run', 'calls', 'Lib/Repo.cs:Lib.Repo.Find')], [('A.Run', 'calls', 'Lib/Repo.cs:Lib.Repo.Find'), ('B.Run', 'calls', 'Other/Repo.cs:Other.Repo.Find')],
+     source='csharpstandard §14.5.2 (namespaces.md)')
+case('csharp', 'alias-per-partial-part', 'each part of a partial type sees the aliases of its own namespace body',
+     CS, {'A.cs': 'namespace App\n{\n    using Store = Lib.Repo;\n\n    public partial class A\n    {\n        public int First(Store s) { return s.Find(); }\n    }\n}\n', 'B.cs': 'namespace App\n{\n    using Store = Other.Repo;\n\n    public partial class A\n    {\n        public int Second(Store s) { return s.Find(); }\n    }\n}\n', 'Lib/Repo.cs': 'namespace Lib\n{\n    public class Repo\n    {\n        public int Find() { return 1; }\n        public static int Make() { return 1; }\n    }\n}\n', 'Other/Repo.cs': 'namespace Other\n{\n    public class Repo\n    {\n        public int Find() { return 1; }\n        public static int Make() { return 1; }\n    }\n}\n'},
+     [('A.First', 'calls', 'Lib.Repo.Find'), ('A.Second', 'calls', 'Other.Repo.Find')], [('A.First', 'calls', 'Other.Repo.Find'), ('A.Second', 'calls', 'Lib.Repo.Find')],
+     source='csharpstandard §14.5.2 (namespaces.md)')
+case('csharp', 'alias-closed-generic', 'a using alias of a closed constructed type is that type',
+     CS, {'A.cs': 'using IntBox = Lib.Box<int>;\n\nnamespace App\n{\n    public class A\n    {\n        public int Run(IntBox b) { return b.Get(); }\n    }\n}\n', 'Lib/Box.cs': 'namespace Lib\n{\n    public class Box<T>\n    {\n        public T Get() { return default(T); }\n    }\n\n    public class Other\n    {\n        public int Get() { return 1; }\n    }\n}\n'},
+     [('A.Run', 'calls', 'Box.Get')], [('A.Run', 'calls', 'Other.Get')],
+     source='csharpstandard §14.5.2 (namespaces.md)')
+case('csharp', 'using-does-not-import-namespaces', '`using N;` imports no namespace of N: `Inner.Part` is the global Inner',
+     CS, {'A.cs': 'using Lib;\n\nnamespace App\n{\n    public class A\n    {\n        public int Run(Inner.Part p) { return p.Find(); }\n    }\n}\n', 'Inner.cs': 'namespace Inner\n{\n    public class Part\n    {\n        public int Find() { return 2; }\n    }\n}\n', 'Lib/Inner.cs': 'namespace Lib.Inner\n{\n    public class Part\n    {\n        public int Find() { return 1; }\n    }\n}\n'},
+     [('A.Run', 'calls', 'Inner.cs:Inner.Part.Find')], [('A.Run', 'calls', 'Lib/Inner.cs:Lib.Inner.Part.Find')],
+     source='csharpstandard §14.5.3 (namespaces.md)')
+case('csharp', 'inner-using-before-outer-type', 'a using of the inner namespace body comes before a type of the namespace around',
+     CS, {'A.cs': 'namespace Outer\n{\n    public class Repo\n    {\n        public int Find() { return 2; }\n    }\n\n    namespace Inner\n    {\n        using Lib;\n\n        public class C\n        {\n            public int Run(Repo r) { return r.Find(); }\n        }\n    }\n}\n', 'Lib/Repo.cs': 'namespace Lib\n{\n    public class Repo\n    {\n        public int Find() { return 1; }\n        public static int Make() { return 1; }\n    }\n}\n'},
+     [('C.Run', 'calls', 'Lib.Repo.Find')], [('C.Run', 'calls', 'Outer.Repo.Find')],
+     source='csharpstandard §14.5.3 (namespaces.md)')
+case('csharp', 'using-static-extension', "`using static C;` makes C's extension methods callable as extensions",
+     CS, {'Lib/E.cs': 'namespace Lib\n{\n    public static class Ext\n    {\n        public static string Shout(this string s) { return s; }\n    }\n}\n', 'App/A.cs': 'using static Lib.Ext;\n\nnamespace App\n{\n    public class A\n    {\n        public string Run()\n        {\n            return "b".Shout();\n        }\n    }\n}\n', 'Other/E.cs': 'namespace Other\n{\n    public static class Ext2\n    {\n        public static string Shout(this string s) { return s + s; }\n    }\n}\n'},
+     [('A.Run', 'calls', 'Ext.Shout')], [('A.Run', 'calls', 'Ext2.Shout')],
+     source='csharpstandard §14.5.4 (namespaces.md)')
+case('csharp', 'using-static-not-inherited', '`using static T;` imports what T declares, not what its bases declare',
+     CS, {'Lib/A.cs': 'namespace Lib\n{\n    public class Base\n    {\n        public static int Twice(int x) { return 2 * x; }\n    }\n\n    public class Derived : Base\n    {\n        public static int Thrice(int x) { return 3 * x; }\n    }\n}\n', 'App/A.cs': 'using static Lib.Derived;\nusing static Other.Util;\n\nnamespace App\n{\n    public class A\n    {\n        public int Run()\n        {\n            return Twice(2) + Thrice(2);\n        }\n    }\n}\n', 'Other/U.cs': 'namespace Other\n{\n    public static class Util\n    {\n        public static int Twice(int x) { return 4 * x; }\n    }\n}\n'},
+     [('A.Run', 'calls', 'Util.Twice'), ('A.Run', 'calls', 'Derived.Thrice')], [('A.Run', 'calls', 'Base.Twice')],
+     source='csharpstandard §14.5.4 (namespaces.md)')
+case('csharp', 'global-qualifier', '`global::Repo` is the type of the global namespace, not the one of the namespace around',
+     CS, {'A.cs': 'namespace App\n{\n    public class Repo\n    {\n        public int Find() { return 2; }\n    }\n\n    public class A\n    {\n        public int Run(global::Repo r)\n        {\n            return r.Find();\n        }\n    }\n}\n', 'G.cs': 'public class Repo\n{\n    public int Find() { return 1; }\n}\n'},
+     [('A.Run', 'calls', 'Repo.Find')], [('A.Run', 'calls', 'App.Repo.Find')],
+     source='csharpstandard §14.8.1 (namespaces.md)')
+case('csharp', 'alias-qualifier', '`S::Repo` looks S up only as an alias, never as the type S of the namespace',
+     CS, {'A.cs': 'using S = Lib;\n\nnamespace App\n{\n    public class S\n    {\n        public static int Find() { return 2; }\n        public int Find2() { return 3; }\n    }\n\n    public class A\n    {\n        public int Run(S::Repo r)\n        {\n            return r.Find();\n        }\n    }\n}\n', 'Lib/Repo.cs': 'namespace Lib\n{\n    public class Repo\n    {\n        public int Find() { return 1; }\n        public static int Make() { return 1; }\n    }\n}\n'},
+     [('A.Run', 'references', 'Lib.Repo')], [('A.Run', 'references', 'App.S')],
+     source='csharpstandard §14.8.1 (namespaces.md)')
+case('csharp', 'alias-named-global', "`global.Tool` is the alias named global; `global::Tool` is still the global namespace's",
+     CS, {'A.cs': 'using global = MyGlobalTypes;\n\nnamespace App\n{\n    public class A\n    {\n        public int Run(global.Tool t) { return t.Use(); }\n\n        public int Run2(global::Tool t) { return t.Use(); }\n    }\n}\n', 'Tool.cs': 'public class Tool\n{\n    public int Use() { return 2; }\n}\n', 'G/T.cs': 'namespace MyGlobalTypes\n{\n    public class Tool\n    {\n        public int Use() { return 1; }\n    }\n}\n'},
+     [('A.Run', 'calls', 'MyGlobalTypes.Tool.Use'), ('A.Run2', 'calls', 'Tool.cs:Tool.Use')], [('A.Run', 'calls', 'Tool.cs:Tool.Use'), ('A.Run2', 'calls', 'MyGlobalTypes.Tool.Use')],
+     source='csharpstandard §14.8.1 (namespaces.md)')
+case('csharp', 'file-scoped-using-before-outer-namespace', 'a `using` after a file-scoped `namespace App.Sub;` is read before a type of the namespace App around it',
+     CS, {'Lib.cs': 'namespace Lib\n{\n    public class Repo { public int Find() { return 1; } }\n}\n', 'Outer.cs': 'namespace App\n{\n    public class Repo { public string Other() { return ""; } }\n}\n', 'A.cs': 'namespace App.Sub;\n\nusing Lib;\n\npublic class C\n{\n    public int M(Repo r) { return r.Find(); }\n}\n'},
+     [('C.M', 'references', 'Lib.Repo'), ('C.M', 'calls', 'Lib.Repo.Find')], [('C.M', 'references', 'App.Repo')],
+     source='csharpstandard namespaces.md §14.3 and §14.5.1 (the scope of a using directive is the namespace body that contains it); Roslyn Imports.cs / InContainerBinder (usings of the inner namespace body come before types of the enclosing namespace)', since='10')
+case('csharp', 'using-alias-as-qualifier', 'an alias is the type it names as the qualifier of a static call and in `new`',
+     CS, {'Lib.cs': 'namespace Lib\n{\n    public class Repo\n    {\n        public static Repo Make() { return new Repo(); }\n        public int Find() { return 1; }\n    }\n}\n', 'Other.cs': 'namespace Other\n{\n    public class Repo\n    {\n        public static Repo Make() { return new Repo(); }\n        public int Find() { return 2; }\n    }\n}\n', 'A.cs': 'using Lib;\nusing R = Other.Repo;\n\nnamespace App\n{\n    public class C\n    {\n        public int M()\n        {\n            var a = R.Make();\n            var b = new R();\n            return a.Find() + b.Find();\n        }\n    }\n}\n'},
+     [('C.M', 'calls', 'Other.cs:Other.Repo.Make'), ('C.M', 'calls', 'Other.cs:Other.Repo.Find')], [('C.M', 'calls', 'Lib.cs:Lib.Repo.Make'), ('C.M', 'calls', 'Lib.cs:Lib.Repo.Find')],
+     source='csharpstandard namespaces.md §14.5.2 (a using_alias_directive makes an alias available within its compilation unit or namespace body); Roslyn Imports.cs')
+case('csharp', 'using-static-fields-and-properties', "`using static T;` imports T's static fields and properties as simple names",
+     CS, {'Lib.cs': 'namespace Lib\n{\n    public static class Defaults\n    {\n        public static int Limit = 10;\n\n        public static int Size { get { return 1; } }\n    }\n}\n\nnamespace Other\n{\n    public static class Defaults\n    {\n        public static int Limit = 20;\n\n        public static int Size { get { return 2; } }\n    }\n}\n', 'A.cs': 'using static Lib.Defaults;\n\nnamespace App\n{\n    public class C\n    {\n        public int M() { return Limit + Size; }\n    }\n}\n'},
+     [('C.M', 'reads', 'Lib.Defaults.Limit'), ('C.M', 'reads', 'Lib.Defaults.Size')], [('C.M', 'reads', 'Other.Defaults.Limit'), ('C.M', 'reads', 'Other.Defaults.Size')],
+     source='csharpstandard namespaces.md §14.5.4; Roslyn WithUsingNamespacesAndTypesBinder.cs LookupSymbolsInSingleBinder', since='6')
+case('csharp', 'using-static-hidden-by-own-member', 'a member of the enclosing class comes before a name imported by `using static`',
+     CS, {'Lib.cs': 'namespace Lib\n{\n    public static class Defaults\n    {\n        public static int Limit = 10;\n\n        public static int Size { get { return 1; } }\n    }\n}\n', 'B.cs': 'using static Lib.Defaults;\n\nnamespace App\n{\n    public class D\n    {\n        public static int Limit = 5;\n\n        public int M() { return Limit; }\n\n        public int N() { return Size; }\n    }\n}\n'},
+     [('D.M', 'reads', 'D.Limit'), ('D.N', 'reads', 'Lib.Defaults.Size')], [('D.M', 'reads', 'Lib.Defaults.Limit')],
+     source='csharpstandard basic-concepts.md §7.8.1 (members of the enclosing type before using directives of the namespace body); namespaces.md §14.5.4', since='6')
+case('csharp', 'using-static-enum-members', "`using static Lib.Mode;` makes Mode's members simple names: `Fast` is Mode.Fast, not Other.Fast",
+     CS, {'A.cs': 'namespace Lib { public enum Mode { Fast, Slow } public enum Other { Fast, Slow } }\n', 'B.cs': 'using static Lib.Mode;\nnamespace App { public class Use { public Lib.Mode M() { return Fast; } } }\n'},
+     [('Use.M', 'references', 'Mode')], [('Use.M', 'references', 'Other')],
+     source='csharpstandard §14.5.4 using static directives')
+case('csharp', 'keyword-alias-is-system-type', "the keyword `string` is System.String whatever a project type is named `String`; the name `String` is the project's",
+     CS, {'A.cs': 'namespace App\n{\n    public class String\n    {\n        public static string Join(string a, string b) { return a + b; }\n    }\n\n    public class C\n    {\n        public string Keyword() { return string.Join("a", "b"); }\n\n        public string Named() { return String.Join("a", "b"); }\n    }\n}\n'},
+     [('C.Named', 'calls', 'String.Join')], [('C.Keyword', 'calls', 'String.Join')],
+     source='csharpstandard §8.2.5 / §8.3.5 (a keyword is an alias for the predefined type in System)')
+case('csharp', 'tuple-element-names', "a tuple's element is its field by element name or by ItemN, each with its own type",
+     CS, {'A.cs': 'namespace App\n{\n    public class Repo\n    {\n        public int Find() { return 1; }\n    }\n\n    public class Other\n    {\n        public int Find() { return 2; }\n    }\n\n    public class C\n    {\n        public (Repo left, Other right) Pair() { return (new Repo(), new Other()); }\n\n        public int Left() { var p = Pair(); return p.left.Find(); }\n\n        public int Right() { var p = Pair(); return p.right.Find(); }\n\n        public int Item() { var p = Pair(); return p.Item2.Find(); }\n    }\n}\n'},
+     [('C.Left', 'calls', 'Repo.Find'), ('C.Right', 'calls', 'Other.Find'), ('C.Item', 'calls', 'Other.Find')], [('C.Left', 'calls', 'Other.Find'), ('C.Right', 'calls', 'Repo.Find'), ('C.Item', 'calls', 'Repo.Find')],
+     source='csharpstandard §8.3.11.1 (elements are public fields Item1 … ItemN; named elements)')
+case('csharp', 'nullable-value-type-members', '`S?` is Nullable<S>: its `.Value` and the `?.` operand are S, whose members are the ones used',
+     CS, {'A.cs': 'namespace App\n{\n    public struct Point\n    {\n        public int Len() { return 1; }\n    }\n\n    public class Other\n    {\n        public int Len() { return 2; }\n    }\n\n    public class C\n    {\n        public int Run(Point? p)\n        {\n            return p.Value.Len();\n        }\n\n        public int Cond(Point? p)\n        {\n            return p?.Len() ?? 0;\n        }\n    }\n}\n'},
+     [('C.Run', 'calls', 'Point.Len'), ('C.Cond', 'calls', 'Point.Len')], [('C.Run', 'calls', 'Other.Len'), ('C.Cond', 'calls', 'Other.Len')],
+     source='csharpstandard §8.3.12 (a nullable value type, its Value property); §12.8.8')
+case('csharp', 'generic-outer-nested-type', "a nested type named inside a generic class is that class's, written without type arguments",
+     CS, {'A.cs': 'namespace App\n{\n    public class Outer<T>\n    {\n        public class Inner\n        {\n            public int Go() { return 1; }\n        }\n\n        public Inner i;\n\n        public int Run() { return i.Go(); }\n    }\n\n    public class Other\n    {\n        public class Inner\n        {\n            public int Go() { return 2; }\n        }\n    }\n}\n'},
+     [('Outer.Run', 'calls', 'Outer.Inner.Go')], [('Outer.Run', 'calls', 'Other.Inner.Go')],
+     source='csharpstandard §8.4.1 (a type_name identifies a constructed type though it does not specify type arguments: Outer<T>.Inner)')
+case('csharp', 'static-member-of-a-constructed-type', '`Box<int>.Make()` is the static member of the generic Box, `Box.Make()` of the non-generic one: the type arguments tell them apart in an expression too',
+     CS, {'A.cs': 'namespace App\n{\n    public class Box<T>\n    {\n        public static int Make() { return 1; }\n    }\n\n    public class Box\n    {\n        public static int Make() { return 2; }\n    }\n\n    public class C\n    {\n        public int Run() { return Box<int>.Make(); }\n\n        public int Plain() { return Box.Make(); }\n    }\n}\n'},
+     [('C.Run', 'calls', 'A.cs:App.Box.Make@5'), ('C.Plain', 'calls', 'A.cs:App.Box.Make@10')], [('C.Run', 'calls', 'A.cs:App.Box.Make@10'), ('C.Plain', 'calls', 'A.cs:App.Box.Make@5')],
+     source='csharpstandard §8.4.1 (constructed types can be used in expressions as simple names or when accessing a member; only types with the right number of type parameters are considered)')
+case('csharp', 'typeof-unbound-generic-arity', '`typeof(Pair<,>)` names the unbound generic type with as many type parameters as there are commas plus one',
+     CS, {'A.cs': 'using System;\n\nnamespace App\n{\n    public class Pair<A, B>\n    {\n    }\n\n    public class Pair<A>\n    {\n    }\n\n    public class C\n    {\n        public Type Run() { return typeof(Pair<,>); }\n    }\n}\n'},
+     [('C.Run', 'references', 'A.cs:App.Pair@5')], [('C.Run', 'references', 'A.cs:App.Pair@9')],
+     source='csharpstandard §8.4.4 (the only construct in which an unbound generic type can be referenced is typeof)')
+case('csharp', 'constraint-names-are-uses', 'the types a `where` clause names are uses of those types',
+     CS, {'A.cs': 'namespace App\n{\n    public interface IRepo\n    {\n    }\n\n    public class Base\n    {\n    }\n\n    public class C<T, U> where T : IRepo where U : Base\n    {\n    }\n}\n'},
+     [('C', 'references', 'App.IRepo'), ('C', 'references', 'App.Base')], [],
+     source='csharpstandard §8.4.5 / §15.2.5 (constraints name types); Roslyn Binder_Constraints.cs (BindTypeParameterConstraints)')
+case('csharp', 'class-type-parameter-first', 'in a generic class a name of its type parameters is that parameter, not a type of the namespace',
+     CS, {'A.cs': 'namespace App\n{\n    public class T\n    {\n    }\n\n    public class Box<T>\n    {\n        public int Get(T x) { return 1; }\n    }\n\n    public class C\n    {\n        public int Plain(T x) { return 2; }\n    }\n}\n'},
+     [('C.Plain', 'references', 'App.T')], [('Box.Get', 'references', 'App.T')],
+     source='csharpstandard §8.5, §7.8.1 (the type parameters of the class are looked up before the namespace)')
+case('csharp', 'type-parameter-constraint-members', 'a value of a type parameter has the members of the type its constraint names',
+     CS, {'A.cs': 'namespace App\n{\n    public interface IRepo\n    {\n        int Find();\n    }\n\n    public class Other\n    {\n        public int Find() { return 2; }\n    }\n\n    public class C\n    {\n        public int Run<T>(T r) where T : IRepo\n        {\n            return r.Find();\n        }\n    }\n}\n'},
+     [('C.Run', 'calls', 'IRepo.Find')], [('C.Run', 'calls', 'Other.Find')],
+     source='csharpstandard §8.5, §12.5 (member lookup on a type parameter depends on its constraints)')
+case('csharp', 'nullable-reference-annotation', '`T?` on a reference type is the type T: the annotation changes no meaning',
+     CS, {'A.cs': '#nullable enable\nnamespace App\n{\n    public class Repo\n    {\n        public int Find() { return 1; }\n    }\n\n    public class Other\n    {\n        public int Find() { return 2; }\n    }\n\n    public class C\n    {\n        public int Run(Repo? r)\n        {\n            return r!.Find();\n        }\n\n        public int Local()\n        {\n            Repo? r = null;\n            return r?.Find() ?? 0;\n        }\n    }\n}\n'},
+     [('C.Run', 'calls', 'Repo.Find'), ('C.Local', 'calls', 'Repo.Find')], [('C.Run', 'calls', 'Other.Find'), ('C.Local', 'calls', 'Other.Find')],
+     source='csharpstandard §8.9.1 (R and R? are represented by the same underlying type)')
+case('csharp', 'overload-base-conversion', 'an argument converts implicitly to a base class: only the overload taking it applies',
+     CS, {'A.cs': 'namespace App\n{\n    public class Animal\n    {\n    }\n\n    public class Dog : Animal\n    {\n    }\n\n    public class Log\n    {\n        public int Write(Animal a) { return 1; }\n\n        public int Write(string s) { return 2; }\n    }\n\n    public class C\n    {\n        public int Run(Log l, Dog d) { return l.Write(d); }\n    }\n}\n'},
+     [('C.Run', 'calls', 'A.cs:App.Log.Write@13')], [('C.Run', 'calls', 'A.cs:App.Log.Write@15')],
+     source='csharpstandard §10.2.8 (implicit reference conversions: class to its base classes), §12.6.4.2')
+case('csharp', 'overload-interface-conversion', 'an argument converts implicitly to an interface its class implements',
+     CS, {'A.cs': 'namespace App\n{\n    public interface IShape\n    {\n    }\n\n    public class Circle : IShape\n    {\n    }\n\n    public class Log\n    {\n        public int Write(IShape a) { return 1; }\n\n        public int Write(string s) { return 2; }\n    }\n\n    public class C\n    {\n        public int Run(Log l) { var c = new Circle(); return l.Write(c); }\n    }\n}\n'},
+     [('C.Run', 'calls', 'A.cs:App.Log.Write@13')], [('C.Run', 'calls', 'A.cs:App.Log.Write@15')],
+     source='csharpstandard §10.2.8 (from any class type S to any interface type T, provided S implements T)')
+case('csharp', 'overload-more-derived-parameter', 'of two parameter types the argument converts to, the more derived one is better',
+     CS, {'A.cs': 'namespace App\n{\n    public class Animal\n    {\n    }\n\n    public class Dog : Animal\n    {\n    }\n\n    public class Puppy : Dog\n    {\n    }\n\n    public class Log\n    {\n        public int Write(Animal a) { return 1; }\n\n        public int Write(Dog d) { return 2; }\n    }\n\n    public class C\n    {\n        public int Run(Log l, Puppy p) { return l.Write(p); }\n    }\n}\n'},
+     [('C.Run', 'calls', 'A.cs:App.Log.Write@19')], [('C.Run', 'calls', 'A.cs:App.Log.Write@17')],
+     source='csharpstandard §12.6.4.4 (better conversion target), §10.2.8')
+case('csharp', 'overload-numeric-conversion', 'an int variable or constant converts implicitly to long, never to string',
+     CS, {'A.cs': 'namespace App\n{\n    public class Log\n    {\n        public int Write(long n) { return 1; }\n\n        public int Write(string s) { return 2; }\n    }\n\n    public class C\n    {\n        public int Local(Log l, int n) { return l.Write(n); }\n\n        public int Constant(Log l) { return l.Write(5); }\n    }\n}\n'},
+     [('C.Local', 'calls', 'A.cs:App.Log.Write@5'), ('C.Constant', 'calls', 'A.cs:App.Log.Write@5')], [('C.Local', 'calls', 'A.cs:App.Log.Write@7'), ('C.Constant', 'calls', 'A.cs:App.Log.Write@7')],
+     source='csharpstandard §10.2.3 (implicit numeric conversions), §12.6.4.2')
+case('csharp', 'overload-constant-conversion', 'an int constant in range converts implicitly to byte',
+     CS, {'A.cs': 'namespace App\n{\n    public class Log\n    {\n        public int Write(byte n) { return 1; }\n\n        public int Write(string s) { return 2; }\n    }\n\n    public class C\n    {\n        public int Run(Log l) { return l.Write(5); }\n    }\n}\n'},
+     [('C.Run', 'calls', 'A.cs:App.Log.Write@5')], [('C.Run', 'calls', 'A.cs:App.Log.Write@7')],
+     source='csharpstandard §10.2.11 (implicit constant expression conversions)')
+case('csharp', 'overload-null-literal', 'the literal null converts to a reference type, never to a non-nullable value type',
+     CS, {'A.cs': 'namespace App\n{\n    public class Log\n    {\n        public int Write(int n) { return 1; }\n\n        public int Write(string s) { return 2; }\n    }\n\n    public class C\n    {\n        public int Run(Log l) { return l.Write(null); }\n    }\n}\n'},
+     [('C.Run', 'calls', 'A.cs:App.Log.Write@7')], [('C.Run', 'calls', 'A.cs:App.Log.Write@5')],
+     source='csharpstandard §10.2.7 (null literal conversions)')
+case('csharp', 'overload-type-parameter-bound', 'a value of a type parameter converts implicitly to its effective base class',
+     CS, {'A.cs': 'namespace App\n{\n    public class Animal\n    {\n    }\n\n    public class Log\n    {\n        public int Write(Animal a) { return 1; }\n\n        public int Write(string s) { return 2; }\n    }\n\n    public class C\n    {\n        public int Run<T>(Log l, T t) where T : Animal { return l.Write(t); }\n    }\n}\n'},
+     [('C.Run', 'calls', 'A.cs:App.Log.Write@9')], [('C.Run', 'calls', 'A.cs:App.Log.Write@11')],
+     source='csharpstandard §10.2.12 (implicit conversions involving type parameters)')
+case('csharp', 'lambda-parameter-from-declared-delegate', "a lambda's untyped parameter has the type of the declared delegate it is assigned to",
+     CS, {'A.cs': 'using System;\n\nnamespace App\n{\n    public class Repo\n    {\n        public int Find() { return 1; }\n    }\n\n    public class Other\n    {\n        public int Find() { return 2; }\n    }\n\n    public class C\n    {\n        public Func<Repo, int> Make()\n        {\n            Func<Repo, int> f = r => r.Find();\n            return f;\n        }\n    }\n}\n'},
+     [('C.Make', 'calls', 'Repo.Find')], [('C.Make', 'calls', 'Other.Find')],
+     source='csharpstandard §10.7.1; Roslyn Binder_Conversions.cs CreateAnonymousFunctionConversion')
+case('csharp', 'lambda-parameter-from-method-parameter', 'a lambda passed as an argument takes its parameter types from the delegate type of the parameter',
+     CS, {'A.cs': 'using System;\n\nnamespace App\n{\n    public class Repo\n    {\n        public int Find() { return 1; }\n    }\n\n    public class Other\n    {\n        public int Find() { return 2; }\n    }\n\n    public class C\n    {\n        static int Apply(Func<Repo, int> f) { return f(new Repo()); }\n\n        public int Run() { return Apply(r => r.Find()); }\n    }\n}\n'},
+     [('C.Run', 'calls', 'Repo.Find')], [('C.Run', 'calls', 'Other.Find')],
+     source='csharpstandard §10.7.1, §12.6.4.2; Roslyn Binder_Conversions.cs CreateAnonymousFunctionConversion')
+case('csharp', 'overload-by-lambda-arity', 'a lambda is compatible only with a delegate with as many parameters as it',
+     CS, {'A.cs': 'using System;\n\nnamespace App\n{\n    public class Runner\n    {\n        public int Apply(Func<int> f) { return 1; }\n\n        public int Apply(Func<int, int> f) { return 2; }\n    }\n\n    public class C\n    {\n        public int Run(Runner r) { return r.Apply(x => x + 1); }\n    }\n}\n'},
+     [('C.Run', 'calls', 'A.cs:App.Runner.Apply@9')], [('C.Run', 'calls', 'A.cs:App.Runner.Apply@7')],
+     source='csharpstandard §10.7.1 (D and F have the same number of parameters)')
+case('csharp', 'method-group-picks-overload-by-delegate', "a method group converted to a delegate is the overload applicable to the delegate's parameter types",
+     CS, {'A.cs': 'using System;\n\nnamespace App\n{\n    public class C\n    {\n        void Handle(int x) { }\n\n        void Handle(string s) { }\n\n        public Action<string> Make()\n        {\n            Action<string> a = Handle;\n            return a;\n        }\n    }\n}\n'},
+     [('C.Make', 'indirect_call', 'A.cs:App.C.Handle@9')], [('C.Make', 'indirect_call', 'A.cs:App.C.Handle@7')],
+     source='csharpstandard §10.8; Roslyn Binder_Conversions.cs CreateMethodGroupConversion, ResolveMethodGroup')
+case('csharp', 'method-group-extension', 'an extension method named through an instance is a method group that converts to a delegate',
+     CS, {'A.cs': 'using System;\n\nnamespace App\n{\n    public class Repo\n    {\n    }\n\n    public static class RepoExt\n    {\n        public static int Size(this Repo r) { return 1; }\n    }\n\n    public class Other\n    {\n        public int Size() { return 2; }\n    }\n\n    public class C\n    {\n        public Func<int> Make(Repo r)\n        {\n            Func<int> f = r.Size;\n            return f;\n        }\n    }\n}\n'},
+     [('C.Make', 'indirect_call', 'RepoExt.Size')], [('C.Make', 'indirect_call', 'Other.Size')],
+     source='csharpstandard §10.8 (an extension method denoted by member access on an instance expression)')
+case('csharp', 'method-group-overload-by-delegate-roslyn', "a method group converted to a delegate is the overload applicable to the delegate's parameter types (passed as an argument)",
+     CS, {'A.cs': 'using System;\n\nnamespace App\n{\n    public class C\n    {\n        static void Handle(int x) { }\n\n        static void Handle(string s) { }\n\n        static void Take(Action<int> a) { }\n\n        public void Run() { Take(Handle); }\n    }\n}\n'},
+     [('C.Run', 'indirect_call', 'A.cs:App.C.Handle@7')], [('C.Run', 'indirect_call', 'A.cs:App.C.Handle@9')],
+     source='Roslyn Binder_Conversions.cs CreateMethodGroupConversion, MethodGroupConversionHasErrors; csharpstandard §10.8')
+case('csharp', 'generic-method-constraint-is-a-use', "the types a generic method's `where` clause names are uses of those types",
+     CS, {'A.cs': 'namespace App\n{\n    public interface IRepo\n    {\n    }\n\n    public class Base\n    {\n    }\n\n    public class C\n    {\n        public void Run<T, U>() where T : IRepo where U : Base\n        {\n        }\n    }\n}\n'},
+     [('C.Run', 'references', 'App.IRepo'), ('C.Run', 'references', 'App.Base')], [],
+     source='Roslyn Binder_Constraints.cs (constraint type syntax is bound as a type); csharpstandard §15.2.5')
+case('csharp', 'extension-on-base-class', 'an extension method written for a base class is called on a value of a derived class; one written for a sibling class is not',
+     CS, {'A.cs': 'namespace App {\n  public class Animal { }\n  public class Dog : Animal { }\n  public class Cat : Animal { }\n  public static class AnimalExt { public static void Show(this Animal a) { } }\n  public static class CatExt { public static void Show(this Cat c) { } }\n  public class Run { public void Go(Dog d) { d.Show(); } }\n}\n'},
+     [('Run.Go', 'calls', 'AnimalExt.Show')], [('Run.Go', 'calls', 'CatExt.Show')],
+     source='csharpstandard §10.2.8 and expressions.md §12.8.10.3 (extension method invocations: an implicit identity, reference or boxing conversion from the expression to the first parameter)')
+case('csharp', 'extension-on-predefined-type', 'an extension written for `this string` is called on a string, one written for `this int` on an int',
+     CS, {'A.cs': 'namespace App {\n  public static class StrExt { public static string Twice(this string s) { return s + s; } }\n  public static class IntExt { public static int Twice(this int n) { return n * 2; } }\n  public class Run { public string Go(string s) { return s.Twice(); } public int Go2(int n) { return n.Twice(); } }\n}\n'},
+     [('Run.Go', 'calls', 'StrExt.Twice'), ('Run.Go2', 'calls', 'IntExt.Twice')], [('Run.Go', 'calls', 'IntExt.Twice'), ('Run.Go2', 'calls', 'StrExt.Twice')],
+     source='csharpstandard §8.3.5 (simple types are aliases of System structs) and §12.8.10.3')
+case('csharp', 'delegate-invocation-result', "calling a parameter of a declared delegate type gives the delegate's return type",
+     CS, {'A.cs': 'namespace App {\n  public class Item { public int Weigh() { return 1; } }\n  public class Other { public int Weigh() { return 2; } }\n  public delegate Item Maker();\n  public class Run { public int Go(Maker mk) { return mk().Weigh(); } }\n}\n'},
+     [('Run.Go', 'calls', 'Item.Weigh')], [('Run.Go', 'calls', 'Other.Weigh')],
+     source="csharpstandard §8.2.8 and expressions.md §12.8.10.4 (delegate invocations: the result is the delegate's return type)")
+case('csharp', 'array-element-type', "`xs[0].M()` on an `Item[]` is Item's M",
+     CS, {'A.cs': 'namespace App {\n  public class Item { public int Weigh() { return 1; } }\n  public class Other { public int Weigh() { return 2; } }\n  public class Run { public int Go(Item[] xs) { return xs[0].Weigh(); } }\n}\n'},
+     [('Run.Go', 'calls', 'Item.Weigh')], [('Run.Go', 'calls', 'Other.Weigh')],
+     source='csharpstandard §8.2.7 and expressions.md §12.8.12.2 (array access)')
+case('csharp', 'delegate-creation-method-group', "`new Handler(OnData)` is a use of the OnData overload that takes the delegate's parameter type",
+     CS, {'A.cs': 'namespace App {\n  public delegate void Handler(int x);\n  public class Run {\n    void OnData(int x) { }\n    void OnData(string s) { }\n    public Handler Make() { return new Handler(OnData); }\n  }\n}\n'},
+     [('Run.Make', 'indirect_call', 'A.cs:App.Run.OnData@4')], [('Run.Make', 'indirect_call', 'A.cs:App.Run.OnData@5')],
+     source='csharpstandard §10.8 and expressions.md §12.8.17.6 (delegate creation expressions)')
+case('csharp', 'lambda-parameter-from-generic-delegate', '`Func<Item,int> f = x => x.Weigh();` has x of type Item',
+     CS, {'A.cs': 'using System;\nnamespace App {\n  public class Item { public int Weigh() { return 1; } }\n  public class Other { public int Weigh() { return 2; } }\n  public class Run { public Func<Item,int> Make() { Func<Item,int> f = x => x.Weigh(); return f; } }\n}\n'},
+     [('Run.Make', 'calls', 'Item.Weigh')], [('Run.Make', 'calls', 'Other.Weigh')],
+     source='csharpstandard §10.7.1 and expressions.md §12.19.3 (anonymous function conversion to a delegate type)')
+case('csharp', 'cast-method-group-to-delegate', "`(Op)Inc` is a use of the Inc overload that takes Op's parameter type",
+     CS, {'A.cs': 'namespace App {\n  public delegate int Op(int a);\n  public class Run {\n    static int Inc(int a) { return a + 1; }\n    static int Inc(string s) { return 0; }\n    public object Go() { return (Op)Inc; }\n  }\n}\n'},
+     [('Run.Go', 'indirect_call', 'A.cs:App.Run.Inc@4')], [('Run.Go', 'indirect_call', 'A.cs:App.Run.Inc@5')],
+     source='Roslyn Binder_Conversions.cs BindCastCore, CreateMethodGroupConversion')
+case('csharp', 'type-parameter-several-constraints', "members of `t` typed `T : IShape, ISized`, `T : Node` (member of its base) and `T : U` with `U : IShape` are the constraints' members",
+     CS, {'A.cs': 'namespace App {\n  public interface IShape { void Draw(); }\n  public interface ISized { int Size(); }\n  public class Base { public void Prepare() { } }\n  public class Node : Base { }\n  public class Other { public void Draw() { } public int Size() { return 0; } public void Prepare() { } }\n  public class Run {\n    public void Go<T>(T t) where T : IShape, ISized { t.Draw(); t.Size(); }\n    public void Go2<T>(T t) where T : Node { t.Prepare(); }\n    public void Go3<T, U>(T t) where T : U where U : IShape { t.Draw(); }\n  }\n}\n'},
+     [('Run.Go', 'calls', 'IShape.Draw'), ('Run.Go', 'calls', 'ISized.Size'), ('Run.Go2', 'calls', 'Base.Prepare'), ('Run.Go3', 'calls', 'IShape.Draw')], [('Run.Go', 'calls', 'Other.Draw'), ('Run.Go', 'calls', 'Other.Size'), ('Run.Go2', 'calls', 'Other.Prepare'), ('Run.Go3', 'calls', 'Other.Draw')],
+     source='csharpstandard §8.5 and expressions.md §12.5 (member lookup in type parameters); Roslyn Binder_Constraints.cs')
+case('csharp', 'overload-nullable-conversion', '`Write(i)` with an int variable is the overload taking `int?`, not the one taking string',
+     CS, {'A.cs': 'namespace App\n{\n    public class Log\n    {\n        public int Write(int? n) { return 1; }\n\n        public int Write(string s) { return 2; }\n    }\n\n    public class C\n    {\n        public int M(Log l, int i) { return l.Write(i); }\n    }\n}\n'},
+     [('C.M', 'calls', 'A.cs:App.Log.Write@5')], [('C.M', 'calls', 'A.cs:App.Log.Write@7')],
+     source='csharpstandard §10.2.6; Roslyn Conversions.cs ClassifyImplicitBuiltInConversion')
+case('csharp', 'overload-enum-zero-literal', '`Write(0)` is the overload taking the enum, not the one taking string',
+     CS, {'A.cs': 'namespace App\n{\n    public enum Color { Red }\n\n    public class Log\n    {\n        public int Write(Color c) { return 1; }\n\n        public int Write(string s) { return 2; }\n    }\n\n    public class C\n    {\n        public int M(Log l) { return l.Write(0); }\n    }\n}\n'},
+     [('C.M', 'calls', 'A.cs:App.Log.Write@7')], [('C.M', 'calls', 'A.cs:App.Log.Write@9')],
+     source='csharpstandard §10.2.4')
+case('csharp', 'overload-boxing-conversion', '`Write(s)` with a struct is the overload taking the interface the struct implements, not the one taking string',
+     CS, {'A.cs': 'namespace App\n{\n    public interface IFoo { }\n\n    public struct S : IFoo { }\n\n    public class Log\n    {\n        public int Write(IFoo f) { return 1; }\n\n        public int Write(string s) { return 2; }\n    }\n\n    public class C\n    {\n        public int M(Log l, S s) { return l.Write(s); }\n    }\n}\n'},
+     [('C.M', 'calls', 'A.cs:App.Log.Write@9')], [('C.M', 'calls', 'A.cs:App.Log.Write@11')],
+     source='csharpstandard §10.2.9')
+case('csharp', 'overload-array-covariance', '`Write(ds)` with a `Dog[]` is the overload taking `Animal[]`, not the one taking string',
+     CS, {'A.cs': 'namespace App\n{\n    public class Animal { }\n\n    public class Dog : Animal { }\n\n    public class Log\n    {\n        public int Write(Animal[] a) { return 1; }\n\n        public int Write(string s) { return 2; }\n    }\n\n    public class C\n    {\n        public int M(Log l, Dog[] ds) { return l.Write(ds); }\n    }\n}\n'},
+     [('C.M', 'calls', 'A.cs:App.Log.Write@9')], [('C.M', 'calls', 'A.cs:App.Log.Write@11')],
+     source='csharpstandard §10.2.8')
+case('csharp', 'overload-base-interface-conversion', '`Write(b)` with an IBar (IBar : IFoo) is the overload taking IFoo, not the one taking string',
+     CS, {'A.cs': 'namespace App\n{\n    public interface IFoo { }\n\n    public interface IBar : IFoo { }\n\n    public class Log\n    {\n        public int Write(IFoo f) { return 1; }\n\n        public int Write(string s) { return 2; }\n    }\n\n    public class C\n    {\n        public int M(Log l, IBar b) { return l.Write(b); }\n    }\n}\n'},
+     [('C.M', 'calls', 'A.cs:App.Log.Write@9')], [('C.M', 'calls', 'A.cs:App.Log.Write@11')],
+     source='csharpstandard §10.2.8')
+case('csharp', 'generic-base-substitution', 'a base class written with type arguments gives its members, with each type parameter replaced by the argument written',
+     CS, {'A.cs': 'namespace App\n{\n    public class Item\n    {\n        public int Id() { return 1; }\n    }\n\n    public class Other\n    {\n        public int Id() { return 2; }\n    }\n\n    public class Base<U>\n    {\n        public U Get() { return default(U); }\n    }\n\n    public class Box<T> : Base<T>\n    {\n    }\n\n    public class C\n    {\n        public int M(Box<Item> b) { return b.Get().Id(); }\n    }\n}\n'},
+     [('C.M', 'calls', 'Base.Get'), ('C.M', 'calls', 'Item.Id')], [('C.M', 'calls', 'Other.Id')],
+     source='csharpstandard classes.md §15.2.4.2, §15.3.4 (inherited members of a constructed class type)')
+case('csharp', 'partial-interface-lists-union', 'the interfaces of a partial type are the union of those each part names',
+     CS, {'A.cs': 'namespace App\n{\n    public interface IA { }\n\n    public interface IB { }\n\n    public partial class C : IA\n    {\n    }\n\n    public partial class C : IB\n    {\n    }\n}\n'},
+     [('C', 'implements', 'IA'), ('C', 'implements', 'IB')], [],
+     source='csharpstandard classes.md §15.2.4.3')
+case('csharp', 'applicable-derived-method-hides-base', "of the methods applicable to a call, those declared in a base type of another candidate's type are dropped, even a better fit",
+     CS, {'A.cs': 'namespace App\n{\n    public class Base\n    {\n        public int M(int x) { return 1; }\n    }\n\n    public class Derived : Base\n    {\n        public int M(double x) { return 2; }\n    }\n\n    public class C\n    {\n        public int Call(Derived d) { return d.M(1); }\n    }\n}\n'},
+     [('C.Call', 'calls', 'Derived.M')], [('C.Call', 'calls', 'Base.M')],
+     source='csharpstandard expressions.md §12.8.10.2 (candidate set reduced to the most derived types), classes.md §15.3.5; Roslyn OverloadResolution.cs RemoveLessDerivedMembers')
+case('csharp', 'nested-type-hides-base-member', 'a nested type declared with `new` hides a member of a base class of its outer type, for `Derived.M.F()`',
+     CS, {'A.cs': 'namespace App\n{\n    public class Base\n    {\n        public static void M() { }\n    }\n\n    public class Derived : Base\n    {\n        public new class M\n        {\n            public static int F() { return 1; }\n        }\n    }\n\n    public class Test\n    {\n        public int Run() { return Derived.M.F(); }\n    }\n}\n'},
+     [('Test.Run', 'calls', 'Derived.M.F')], [('Test.Run', 'calls', 'Base.M')],
+     source='csharpstandard classes.md §15.3.9.4 (7.7.2.2 hiding through nesting)')
+case('csharp', 'nested-bare-name-outer-then-inherited', 'a bare name in a nested class is a member of the nested class, with its bases, before a member of the class around it',
+     CS, {'A.cs': 'namespace App\n{\n    public class Helper\n    {\n        public static int F() { return 1; }\n    }\n\n    public class C\n    {\n        private static int F() { return 2; }\n\n        public class Plain\n        {\n            public static int G() { return F(); }\n        }\n\n        public class Derived : Helper\n        {\n            public static int G() { return F(); }\n        }\n    }\n}\n'},
+     [('C.Plain.G', 'calls', 'C.F'), ('C.Derived.G', 'calls', 'Helper.F')], [('C.Derived.G', 'calls', 'C.F'), ('C.Plain.G', 'calls', 'Helper.F')],
+     source='csharpstandard classes.md §15.3.9.6, expressions.md §12.8.4 (simple names: each enclosing type, innermost first)')
+case('csharp', 'nested-generic-type-unqualified', "inside a generic class its generic nested type is named without the outer's type arguments, before a type of the namespace of that name",
+     CS, {'A.cs': 'namespace App\n{\n    public class Inner<U>\n    {\n        public static int F(U u) { return 1; }\n    }\n\n    public class Outer<T>\n    {\n        public class Inner<U>\n        {\n            public static int F(T t, U u) { return 2; }\n        }\n\n        public static int Call(T t) { return Inner<string>.F(t, "abc"); }\n    }\n}\n'},
+     [('Outer.Call', 'calls', 'Outer.Inner.F')], [('Outer.Call', 'calls', 'A.cs:App.Inner.F')],
+     source='csharpstandard classes.md §15.3.9.7')
+case('csharp', 'constant-reads-constant', "the value of a constant is read by a simple name or a member access, in another constant's expression too",
+     CS, {'A.cs': 'namespace App\n{\n    public class A\n    {\n        public const int X = B.Z + 1;\n\n        public const int Y = 10;\n    }\n\n    public class B\n    {\n        public const int Z = A.Y + 1;\n    }\n\n    public class C\n    {\n        public const int Y = 4;\n    }\n}\n'},
+     [('A', 'reads', 'B.Z'), ('B', 'reads', 'A.Y')], [('B', 'reads', 'C.Y')],
+     source='csharpstandard classes.md §15.4')
+case('csharp', 'multi-declarator-field', 'one declaration of several fields declares each as its own member',
+     CS, {'A.cs': 'namespace App\n{\n    public class A\n    {\n        public static int P = 1, Q, R = 100;\n    }\n\n    public class B\n    {\n        public static int Reset()\n        {\n            A.Q = 2;\n            return A.R;\n        }\n    }\n}\n'},
+     [('B.Reset', 'writes', 'A.Q'), ('B.Reset', 'reads', 'A.R')], [('B.Reset', 'reads', 'A.P'), ('B.Reset', 'writes', 'A.P')],
+     source='csharpstandard classes.md §15.5.1')
+case('csharp', 'field-initializer-uses', 'a variable initializer is bound in the class: its names are members of the class before a `using static` import',
+     CS, {'Other.cs': 'namespace App\n{\n    public class Other\n    {\n        public static int b = 5;\n    }\n}\n', 'A.cs': 'using static App.Other;\n\nnamespace App\n{\n    public class Helper\n    {\n        public static int Make() { return 1; }\n    }\n\n    public class Test\n    {\n        static int a = b + 1;\n\n        static int b = Helper.Make();\n\n        Helper own = new Helper();\n    }\n}\n'},
+     [('Test', 'reads', 'Test.b'), ('Test', 'calls', 'Helper.Make'), ('Test', 'calls', 'Helper')], [('Test', 'reads', 'Other.b')],
+     source='csharpstandard classes.md §15.5.6; expressions.md §12.8.4')
+case('csharp', 'params-expanded-form-yields-to-declared', 'the expanded form of a params method is not considered when a method of that very signature is declared',
+     CS, {'A.cs': 'namespace App\n{\n    public class T\n    {\n        public static int F(params object[] a) { return 1; }\n\n        public static int F() { return 2; }\n\n        public static int F(object a0, object a1) { return 3; }\n\n        public int None() { return F(); }\n\n        public int Two() { return F(1, 2); }\n\n        public int One() { return F(1); }\n    }\n}\n'},
+     [('T.None', 'calls', 'A.cs:App.T.F@7'), ('T.Two', 'calls', 'A.cs:App.T.F@9'), ('T.One', 'calls', 'A.cs:App.T.F@5')], [('T.None', 'calls', 'A.cs:App.T.F@5'), ('T.Two', 'calls', 'A.cs:App.T.F@5'), ('T.One', 'calls', 'A.cs:App.T.F@7'), ('T.One', 'calls', 'A.cs:App.T.F@9')],
+     source='csharpstandard classes.md §15.6.2.4; Roslyn OverloadResolution.cs (params expanded form worse)')
+case('csharp', 'default-argument-constant', "a default argument is an expression of the method's own scope",
+     CS, {'A.cs': 'namespace App\n{\n    public class Defaults\n    {\n        public const int Size = 4;\n    }\n\n    public class C\n    {\n        const int Size = 9;\n\n        public int M(int n = Defaults.Size) { return n; }\n\n        public int N(int n = Size) { return n; }\n    }\n}\n'},
+     [('C.M', 'reads', 'Defaults.Size'), ('C.N', 'reads', 'C.Size')], [('C.N', 'reads', 'Defaults.Size')],
+     source='csharpstandard classes.md §15.6.2.1; expressions.md §12.8.4')
+case('csharp', 'out-variable-type', "an `out` argument given as `out var x` is a local of the parameter's type",
+     CS, {'A.cs': 'namespace App\n{\n    public class Item\n    {\n        public int Id() { return 1; }\n    }\n\n    public class Other\n    {\n        public int Id() { return 2; }\n    }\n\n    public class C\n    {\n        bool TryGet(string k, out Item item) { item = null; return true; }\n\n        public int Var(string k)\n        {\n            if (TryGet(k, out var it)) { return it.Id(); }\n            return 0;\n        }\n\n        public int Typed(string k)\n        {\n            Item found;\n            TryGet(k, out found);\n            return found.Id();\n        }\n    }\n}\n'},
+     [('C.Var', 'calls', 'C.TryGet'), ('C.Var', 'calls', 'Item.Id'), ('C.Typed', 'calls', 'Item.Id')], [('C.Var', 'calls', 'Other.Id')],
+     source='csharpstandard classes.md §15.6.2.3.4; expressions.md §12.17 (declaration expressions)')
+case('csharp', 'static-type-picks-hidden-method', 'a non-virtual method is the one of the static type of the receiver, hiding or not',
+     CS, {'A.cs': 'namespace App\n{\n    public class A\n    {\n        public void F() { }\n    }\n\n    public class B : A\n    {\n        public new void F() { }\n    }\n\n    public class Test\n    {\n        public void ViaBase(B b)\n        {\n            A a = b;\n            a.F();\n        }\n\n        public void ViaDerived(B b)\n        {\n            b.F();\n        }\n    }\n}\n'},
+     [('Test.ViaBase', 'calls', 'A.F'), ('Test.ViaDerived', 'calls', 'B.F')], [('Test.ViaBase', 'calls', 'B.F'), ('Test.ViaDerived', 'calls', 'A.F')],
+     source='csharpstandard classes.md §15.6.4')
+case('csharp', 'override-call-binds-to-override', "a call of a virtual method is bound to the declaration of the receiver's static type, an override or a hiding `new virtual`",
+     CS, {'A.cs': 'namespace App\n{\n    public class A\n    {\n        public virtual void F() { }\n    }\n\n    public class B : A\n    {\n        public override void F() { }\n    }\n\n    public class C : B\n    {\n        public new virtual void F() { }\n    }\n\n    public class D : C\n    {\n        public override void F() { }\n    }\n\n    public class Test\n    {\n        public void ViaB(D d)\n        {\n            B b = d;\n            b.F();\n        }\n\n        public void ViaC(D d)\n        {\n            C c = d;\n            c.F();\n        }\n\n        public void ViaD(D d)\n        {\n            d.F();\n        }\n    }\n}\n'},
+     [('Test.ViaB', 'calls', 'B.F'), ('Test.ViaC', 'calls', 'C.F'), ('Test.ViaD', 'calls', 'D.F')], [('Test.ViaB', 'calls', 'A.F'), ('Test.ViaC', 'calls', 'B.F'), ('Test.ViaD', 'calls', 'C.F')],
+     source='csharpstandard classes.md §15.6.4, §15.6.5')
+case('csharp', 'partial-method-call', 'a call of a partial method is a use of the one method its two parts declare',
+     CS, {'A.cs': 'namespace App\n{\n    public partial class Customer\n    {\n        string name;\n\n        public string Name\n        {\n            set\n            {\n                OnNameChanging(value);\n                name = value;\n            }\n        }\n\n        partial void OnNameChanging(string newName);\n    }\n\n    public class Other\n    {\n        public void OnNameChanging(string newName) { }\n    }\n}\n', 'B.cs': 'namespace App\n{\n    public partial class Customer\n    {\n        partial void OnNameChanging(string newName)\n        {\n            name = newName;\n        }\n    }\n}\n'},
+     [('Customer.Name', 'calls', 'Customer.OnNameChanging')], [('Customer.Name', 'calls', 'Other.OnNameChanging')],
+     source='csharpstandard classes.md §15.6.9')
+case('csharp', 'extension-static-and-array-receiver', 'an extension method is the same method called as `Ext.M(x)`, and its first parameter may be an array type',
+     CS, {'A.cs': 'namespace App\n{\n    public static class Ext\n    {\n        public static int Slice(this string[] source, int n) { return n; }\n\n        public static int Twice(this string s) { return 2; }\n    }\n\n    public class C\n    {\n        public int Sugar(string[] xs) { return xs.Slice(1); }\n\n        public int Plain(string[] xs) { return Ext.Slice(xs, 1); }\n\n        public int Str(string s) { return Ext.Twice(s) + s.Twice(); }\n    }\n}\n'},
+     [('C.Sugar', 'calls', 'Ext.Slice'), ('C.Plain', 'calls', 'Ext.Slice'), ('C.Str', 'calls', 'Ext.Twice')], [],
+     source='csharpstandard classes.md §15.6.10')
+case('csharp', 'explicit-interface-member-is-no-class-member', "a method written `IFoo.Bar` is not the class's member `Bar`: `c.Bar()` is the public one, `((IFoo)c).Bar()` the interface's",
+     CS, {'A.cs': 'namespace App\n{\n    public interface IFoo\n    {\n        int Bar();\n    }\n\n    public class C : IFoo\n    {\n        public int Bar() { return 1; }\n\n        int IFoo.Bar() { return 2; }\n    }\n\n    public class User\n    {\n        public int Direct(C c) { return c.Bar(); }\n\n        public int ViaInterface(C c) { return ((IFoo)c).Bar(); }\n    }\n}\n'},
+     [('User.Direct', 'calls', 'A.cs:App.C.Bar@10'), ('User.ViaInterface', 'calls', 'IFoo.Bar')], [('User.Direct', 'calls', 'A.cs:App.C.Bar@12'), ('User.Direct', 'calls', 'IFoo.Bar'), ('User.ViaInterface', 'calls', 'A.cs:App.C.Bar@10'), ('User.ViaInterface', 'calls', 'A.cs:App.C.Bar@12')],
+     source='csharpstandard classes.md §15.6.1; interfaces.md §19.6.2')
+case('csharp', 'cast-reaches-hidden-property', "a property of the derived class hides the base's for reading and writing alike; a cast reaches the base's",
+     CS, {'A.cs': 'namespace App\n{\n    public class A\n    {\n        public int P { set { } }\n    }\n\n    public class B : A\n    {\n        public new int P { get { return 1; } }\n    }\n\n    public class C\n    {\n        public int Read(B b) { return b.P; }\n\n        public void Write(B b) { ((A)b).P = 1; }\n    }\n}\n'},
+     [('C.Read', 'reads', 'B.P'), ('C.Write', 'writes', 'A.P')], [('C.Read', 'reads', 'A.P'), ('C.Write', 'writes', 'B.P')],
+     source='csharpstandard classes.md §15.7.3')
+case('csharp', 'base-property-access', "`base.X` and `base.X = v` in an overriding property are the base property's reads and writes",
+     CS, {'A.cs': 'namespace App\n{\n    public class A\n    {\n        int y;\n\n        public virtual int X { get { return 0; } }\n\n        public virtual int Y\n        {\n            get { return y; }\n            set { y = value; }\n        }\n    }\n\n    public class B : A\n    {\n        public override int X { get { return base.X + 1; } }\n\n        public override int Y\n        {\n            get { return base.Y; }\n            set { base.Y = value; }\n        }\n    }\n}\n'},
+     [('B.X', 'reads', 'A.X'), ('B.Y', 'reads', 'A.Y'), ('B.Y', 'writes', 'A.Y')], [('B.X', 'reads', 'B.X'), ('B.Y', 'writes', 'B.Y')],
+     source='csharpstandard classes.md §15.7.6; expressions.md §12.8.15')
+case('csharp', 'auto-property-use', 'an auto-property is written in the constructor and read by its name; its initializer is bound in the class',
+     CS, {'A.cs': 'namespace App\n{\n    public class Item\n    {\n        public int Id() { return 1; }\n    }\n\n    public class Point\n    {\n        public int X { get; }\n\n        public Item Current { get; } = new Item();\n\n        public Point(int x)\n        {\n            X = x;\n        }\n\n        public int Use() { return X + Current.Id(); }\n    }\n}\n'},
+     [('Point.Point', 'writes', 'Point.X'), ('Point.Use', 'reads', 'Point.X'), ('Point.Use', 'reads', 'Point.Current'), ('Point.Use', 'calls', 'Item.Id')], [('Point.Use', 'writes', 'Point.X')],
+     source='csharpstandard classes.md §15.7.4')
+case('csharp', 'method-group-event-subscription', 'a method group attached to an event with `+=` or `new Handler(m)` is a use of the method',
+     CS, {'A.cs': 'namespace App\n{\n    public delegate void Handler(object sender);\n\n    public class Button\n    {\n        public event Handler Click;\n    }\n\n    public class Dialog\n    {\n        void OkClicked(object sender) { }\n\n        void Cancelled(object sender) { }\n\n        public void Wire(Button b)\n        {\n            b.Click += OkClicked;\n            b.Click -= new Handler(Cancelled);\n        }\n    }\n}\n'},
+     [('Dialog.Wire', 'indirect_call', 'Dialog.OkClicked'), ('Dialog.Wire', 'indirect_call', 'Dialog.Cancelled')], [],
+     source='csharpstandard classes.md §15.8.1; expressions.md §12.23.6 (event assignment), §12.8.17.5 (delegate creation)')
+case('csharp', 'indexer-use', 'an element access is a use of the indexer picked by the arguments, for reading or writing',
+     CS, {'A.cs': 'namespace App\n{\n    public class Grid\n    {\n        int[] cells = new int[10];\n\n        public int this[int i]\n        {\n            get { return cells[i]; }\n            set { cells[i] = value; }\n        }\n\n        public int this[int row, int col]\n        {\n            get { return cells[row * 3 + col]; }\n        }\n    }\n\n    public class C\n    {\n        public int Read(Grid g) { return g[1]; }\n\n        public void Write(Grid g) { g[1] = 5; }\n\n        public int Two(Grid g) { return g[1, 2]; }\n    }\n}\n'},
+     [('C.Read', 'reads', 'A.cs:App.Grid.this[]@7'), ('C.Write', 'writes', 'A.cs:App.Grid.this[]@7'), ('C.Two', 'reads', 'A.cs:App.Grid.this[]@13')], [('C.Two', 'reads', 'A.cs:App.Grid.this[]@7'), ('C.Read', 'reads', 'A.cs:App.Grid.this[]@13')],
+     source='csharpstandard classes.md §15.9, §15.9.2; expressions.md §12.8.12.4')
+case('csharp', 'base-indexer-access', '`base[i]` in an overriding indexer is the inherited indexer',
+     CS, {'A.cs': 'namespace App\n{\n    public class A\n    {\n        public virtual int this[int i] { get { return i; } }\n    }\n\n    public class B : A\n    {\n        public override int this[int i] { get { return base[i] + 1; } }\n    }\n}\n'},
+     [('B.this[]', 'reads', 'A.this[]')], [('B.this[]', 'reads', 'B.this[]')],
+     source='csharpstandard classes.md §15.9.2')
+case('csharp', 'user-defined-operator', 'an operator expression is a use of the user-defined operator of its operand types, also one a base class declares',
+     CS, {'A.cs': 'namespace App\n{\n    public class Vec\n    {\n        public static Vec operator +(Vec a, Vec b) { return a; }\n\n        public static Vec operator -(Vec a, Vec b) { return b; }\n\n        public static Vec operator ++(Vec a) { return a; }\n    }\n\n    public class Special : Vec\n    {\n    }\n\n    public class C\n    {\n        public Vec Add(Vec a, Vec b) { return a + b; }\n\n        public Vec Sub(Vec a, Vec b) { return a - b; }\n\n        public Vec Inc(Vec a) { a++; return a; }\n\n        public Vec Inherited(Special a, Special b) { return a + b; }\n    }\n}\n'},
+     [('C.Add', 'calls', 'Vec.operator+'), ('C.Sub', 'calls', 'Vec.operator-'), ('C.Inc', 'calls', 'Vec.operator++'), ('C.Inherited', 'calls', 'Vec.operator+')], [('C.Add', 'calls', 'Vec.operator-'), ('C.Sub', 'calls', 'Vec.operator+')],
+     source='csharpstandard classes.md §15.10; expressions.md §12.4.4 (binary operator overload resolution)')
+case('csharp', 'conversion-operator', 'an implicit or explicit conversion between a class and another type is a use of the conversion operator',
+     CS, {'A.cs': 'namespace App\n{\n    public struct Digit\n    {\n        byte value;\n\n        public static implicit operator byte(Digit d) { return d.value; }\n\n        public static explicit operator Digit(byte b) { return new Digit(); }\n    }\n\n    public class C\n    {\n        public byte Widen(Digit d) { byte b = d; return b; }\n\n        public Digit Narrow(byte b) { return (Digit)b; }\n    }\n}\n'},
+     [('C.Widen', 'calls', 'Digit.operator byte'), ('C.Narrow', 'calls', 'Digit.operator Digit')], [('C.Widen', 'calls', 'Digit.operator Digit'), ('C.Narrow', 'calls', 'Digit.operator byte')],
+     source='csharpstandard classes.md §15.10.4; conversions.md §10.5')
+case('csharp', 'implicit-base-constructor', "a constructor with no initializer calls the base class's parameterless constructor",
+     CS, {'A.cs': 'namespace App\n{\n    public class A\n    {\n        public A() { }\n\n        public A(int n) { }\n    }\n\n    public class B : A\n    {\n        public B(string s) { }\n    }\n}\n'},
+     [('B.B', 'calls', 'A.cs:App.A.A@5')], [('B.B', 'calls', 'A.cs:App.A.A@7')],
+     source='csharpstandard classes.md §15.11.2')
+case('csharp', 'constructor-initializer-parameter-hides-field', 'the parameters of a constructor are names of its initializer, before the fields',
+     CS, {'A.cs': 'namespace App\n{\n    public class A\n    {\n        public A(int v) { }\n    }\n\n    public class B : A\n    {\n        int x;\n\n        public B(int x) : base(x) { }\n    }\n}\n'},
+     [], [('B.B', 'reads', 'B.x')],
+     source='csharpstandard classes.md §15.11.2')
+case('csharp', 'foreach-over-iterator', "the variable of a `foreach` over an iterator method is the iterator's yield type",
+     CS, {'A.cs': 'using System.Collections.Generic;\n\nnamespace App\n{\n    public class Item\n    {\n        public int Id() { return 1; }\n    }\n\n    public class Other\n    {\n        public int Id() { return 2; }\n    }\n\n    public class C\n    {\n        IEnumerable<Item> Items()\n        {\n            yield return new Item();\n        }\n\n        public int Sum()\n        {\n            int n = 0;\n            foreach (var i in Items())\n            {\n                n += i.Id();\n            }\n            return n;\n        }\n    }\n}\n'},
+     [('C.Sum', 'calls', 'C.Items'), ('C.Sum', 'calls', 'Item.Id')], [('C.Sum', 'calls', 'Other.Id')],
+     source='csharpstandard classes.md §15.15.4; statements.md §13.9.5')
+case('csharp', 'override-is-no-candidate', "an `override` method is excluded from member lookup, so `d.M(1)` picks the derived class's own applicable `M(double)` over its override `M(int)`",
+     CS, {'A.cs': 'namespace App\n{\n    public class Base\n    {\n        public virtual int M(int a) { return 1; }\n    }\n\n    public class Derived : Base\n    {\n        public override int M(int a) { return 2; }\n\n        public int M(double a) { return 3; }\n    }\n\n    public class C\n    {\n        public int Go(Derived d) { return d.M(1); }\n    }\n}\n'},
+     [('C.Go', 'calls', 'A.cs:App.Derived.M@12')], [('C.Go', 'calls', 'A.cs:App.Derived.M@10'), ('C.Go', 'calls', 'A.cs:App.Base.M@5')],
+     source='csharpstandard §15.6.5 and expressions.md §12.5 member lookup (members with an override modifier are removed)')
+case('csharp', 'overload-by-ref-kind', '`Put(ref x)` is the overload whose parameter is a reference parameter, not the value one',
+     CS, {'A.cs': 'namespace App\n{\n    public class Log\n    {\n        public int Put(int a) { return 1; }\n\n        public int Put(ref int a) { return 2; }\n    }\n\n    public class C\n    {\n        public int Go(Log l) { int x = 1; return l.Put(ref x); }\n    }\n}\n'},
+     [('C.Go', 'calls', 'A.cs:App.Log.Put@7')], [('C.Go', 'calls', 'A.cs:App.Log.Put@5')],
+     source='csharpstandard §15.6.1 (signature of a method) and §12.6.4.2 (an argument with ref corresponds to a reference parameter)')
+case('csharp', 'constraint-through-type-parameter', "`t.Foo()` with `T : U` and `U : IFoo` is IFoo's member",
+     CS, {'A.cs': 'namespace App\n{\n    public interface IFoo { int Foo(); }\n\n    public class Other { public int Foo() { return 2; } }\n\n    public class Box<T, U> where T : U where U : IFoo\n    {\n        public int Run(T t) { return t.Foo(); }\n    }\n}\n'},
+     [('Box.Run', 'calls', 'IFoo.Foo')], [('Box.Run', 'calls', 'Other.Foo')],
+     source='csharpstandard §15.2.5 (type parameter constraints) and §15.3.? member lookup in type parameters (§12.5)')
+case('csharp', 'extension-on-constrained-type-parameter', '`t.Describe()` with `T : IFoo` is the extension written for IFoo',
+     CS, {'A.cs': 'namespace App\n{\n    public interface IFoo { }\n\n    public static class Ext\n    {\n        public static int Describe(this IFoo f) { return 1; }\n    }\n\n    public class Box<T> where T : IFoo\n    {\n        public int Run(T t) { return t.Describe(); }\n    }\n}\n'},
+     [('Box.Run', 'calls', 'Ext.Describe')], [],
+     source='csharpstandard §15.6.10 and §12.8.10.3 extension method invocations (an implicit reference or boxing conversion from the type parameter)')
+case('csharp', 'partial-base-in-other-part', "a bare name in a part that names no base is a member of the base another part names, before a type's member of that name elsewhere",
+     CS, {'A.cs': 'namespace App\n{\n    public class Base\n    {\n        public int Inherited() { return 1; }\n    }\n\n    public partial class Part : Base\n    {\n    }\n}\n', 'B.cs': 'namespace App\n{\n    public class Decoy\n    {\n        public int Inherited() { return 2; }\n    }\n\n    public partial class Part\n    {\n        public int Run() { return Inherited(); }\n    }\n}\n'},
+     [('Part.Run', 'calls', 'Base.Inherited')], [('Part.Run', 'calls', 'Decoy.Inherited')],
+     source='csharpstandard §15.2.7 (partial types: the base class of the type is that named by any part)')
+case('csharp', 'operator-forms-use-the-operator', "`a += b`, `a++`, `-a` and `a && b` call the operator methods of the operand's class",
+     CS, {'A.cs': 'namespace App\n{\n    public class V\n    {\n        public static V operator +(V a, V b) { return a; }\n\n        public static V operator ++(V a) { return a; }\n\n        public static V operator -(V a) { return a; }\n\n        public static bool operator true(V a) { return true; }\n\n        public static bool operator false(V a) { return false; }\n\n        public static V operator &(V a, V b) { return a; }\n    }\n\n    public class C\n    {\n        public V Add(V a, V b) { a += b; return a; }\n\n        public V Inc(V a) { a++; return a; }\n\n        public V Neg(V a) { return -a; }\n\n        public V Both(V a, V b) { return a && b; }\n    }\n}\n'},
+     [('C.Add', 'calls', 'V.operator+'), ('C.Inc', 'calls', 'V.operator++'), ('C.Neg', 'calls', 'V.operator-'), ('C.Both', 'calls', 'V.operator&'), ('C.Both', 'calls', 'V.operator false')], [('C.Add', 'calls', 'V.operator++'), ('C.Neg', 'calls', 'V.operator+'), ('C.Inc', 'calls', 'V.operator+')],
+     source='csharpstandard §15.10.2 unary operators, §15.10.3 binary operators, §12.13.? conditional logical operators (user-defined)')
+case('csharp', 'nested-type-reaches-private-of-container', "`o.secret` and `Shared()` in a nested class are the containing class's private field and static method, not a same-named member of another class",
+     CS, {'A.cs': 'namespace App\n{\n    public class Other\n    {\n        public int secret;\n\n        public static int Shared() { return 9; }\n    }\n\n    public class Outer\n    {\n        private int secret;\n\n        private static int Shared() { return 1; }\n\n        public class Inner\n        {\n            public int Peek(Outer o) { return o.secret + Shared(); }\n        }\n    }\n}\n'},
+     [('Outer.Inner.Peek', 'reads', 'Outer.secret'), ('Outer.Inner.Peek', 'calls', 'Outer.Shared')], [('Outer.Inner.Peek', 'reads', 'Other.secret'), ('Outer.Inner.Peek', 'calls', 'Other.Shared')],
+     source='csharpstandard §15.3.9.6 Access to private and protected members of the containing type')
+case('csharp', 'await-getawaiter-pattern', "`await j` where j's type declares GetAwaiter is a call of that type's GetAwaiter, not another type's",
+     CS, {'A.cs': 'using System.Runtime.CompilerServices;\nnamespace App {\n  public class Awaiter : INotifyCompletion {\n    public bool IsCompleted => true;\n    public void OnCompleted(System.Action a) { a(); }\n    public int GetResult() { return 1; }\n  }\n  public class Job { public Awaiter GetAwaiter() { return new Awaiter(); } }\n  public class Other { public Awaiter GetAwaiter() { return new Awaiter(); } }\n  public class Runner {\n    public async System.Threading.Tasks.Task<int> Run(Job j) { return await j; }\n  }\n}\n'},
+     [('Runner.Run', 'calls', 'Job.GetAwaiter')], [('Runner.Run', 'calls', 'Other.GetAwaiter')],
+     source='csharpstandard §15.14.3 (async functions); Roslyn Binder_Await.cs BindAwait')
+case('csharp', 'foreach-getenumerator-pattern', '`foreach (var i in b)` over a type with a GetEnumerator method calls it, and `i.V` is the field of the type of Cursor.Current',
+     CS, {'A.cs': 'namespace App {\n  public class Item { public int V; }\n  public class Bag {\n    public Cursor GetEnumerator() { return new Cursor(); }\n  }\n  public class Cursor {\n    public bool MoveNext() { return false; }\n    public Item Current { get { return null; } }\n  }\n  public class Other { public Item Current { get { return null; } } }\n  public class Use {\n    public int Sum(Bag b) { int t = 0; foreach (var i in b) { t += i.V; } return t; }\n  }\n}\n'},
+     [('Use.Sum', 'calls', 'Bag.GetEnumerator'), ('Use.Sum', 'reads', 'Item.V')], [('Use.Sum', 'reads', 'Other.Current')],
+     source='csharpstandard §15.15.6.2; Roslyn ForEachLoopBinder.cs GetEnumeratorInfo')
+case('csharp', 'setter-value-parameter', "inside a set accessor `value` is the implicit parameter of the property's type, not a field of that name",
+     CS, {'A.cs': 'namespace App {\n  public class A { public void Run() {} }\n  public class B { public void Run() {} }\n  public class C {\n    private A value;\n    private B _p;\n    public B P { get { return _p; } set { value.Run(); } }\n  }\n}\n'},
+     [('C.P', 'calls', 'B.Run')], [('C.P', 'calls', 'A.Run')],
+     source='csharpstandard §15.7.3; Roslyn Binder/InMethodBinder (accessor value parameter)')
+case('csharp', 'nested-type-parameter-hides-outer', "a nested generic class's type parameter named like the outer's is the nested one: members asked of it are those of its own constraint",
+     CS, {'A.cs': 'namespace App {\n  public class A { public void Run() {} }\n  public class B { public void Run() {} }\n  public class Outer<T> where T : A {\n    public class Inner<T> where T : B {\n      public void F(T t) { t.Run(); }\n    }\n  }\n}\n'},
+     [('Inner.F', 'calls', 'B.Run')], [('Inner.F', 'calls', 'A.Run')],
+     source='csharpstandard §15.3.9.7')
+case('csharp', 'params-normal-form-before-expanded', 'M(1, 2) calls M(int, int) rather than the expanded form of M(params int[])',
+     CS, {'A.cs': 'namespace App {\n  public class C {\n    public void M(params int[] xs) {}\n    public void M(int a, int b) {}\n    public void Use() { M(1, 2); }\n  }\n}\n'},
+     [('C.Use', 'calls', 'C.M')], [],
+     source='csharpstandard §15.6.2.4; Roslyn OverloadResolution.BetterFunctionMember (expanded vs normal form)')
+case('csharp', 'non-invocable-member-does-not-hide-method', "a field named like a base method, invoked, is no candidate: the call is the base class's method",
+     CS, {'A.cs': 'namespace App {\n  public class Base { public void M() {} }\n  public class Derived : Base { public new int M; }\n  public class U { public void F(Derived d) { d.M(); } }\n}\n'},
+     [('U.F', 'calls', 'Base.M')], [('U.F', 'reads', 'Derived.M')],
+     source='csharpstandard §15.3.5 with §12.5; Roslyn Binder.LookupSymbolsInSingleBinder (LookupOptions.MustBeInvocableIfMember)')
+case('csharp', 'await-foreach-pattern', '`await foreach (var x in b)` calls the GetAsyncEnumerator the type of b declares, and x has the Current type of what it returns',
+     CS, {'A.cs': 'namespace App {\n  public class It { public int Current => 0; public System.Threading.Tasks.ValueTask<bool> MoveNextAsync() => default; }\n  public class Bag { public It GetAsyncEnumerator() => new It(); }\n  public class U { public async System.Threading.Tasks.Task F(Bag b) { await foreach (var x in b) { } } }\n}\n'},
+     [('U.F', 'calls', 'Bag.GetAsyncEnumerator')], [],
+     source='csharpstandard §15.15.6.2; Roslyn Binder_Statements ForEachLoopBinder (GetAsyncEnumerator)')
+case('csharp', 'checked-operator', '`checked(a + b)` uses `operator checked +`, `unchecked(a + b)` the plain `operator +`',
+     CS, {'A.cs': 'namespace App {\n  public class V {\n    public static V operator +(V a, V b) => a;\n    public static V operator checked +(V a, V b) => b;\n  }\n  public class U { public V F(V a, V b) { return checked(a + b); } public V G(V a, V b) { return unchecked(a + b); } }\n}\n'},
+     [], [],
+     source='csharpstandard §15.10; Roslyn Binder_Operators.BindUnaryOperator/UserDefinedBinaryOperators (checked variants)', since='11')
+case('csharp', 'implicit-index-support', "`l[^1]` is a use of the int indexer of l's type and of its Count",
+     CS, {'A.cs': 'namespace App {\n  public class L { public int Count => 0; public string this[int i] => ""; }\n  public class U { public string F(L l) { return l[^1]; } }\n}\n'},
+     [('U.F', 'reads', 'L.Count')], [],
+     source='csharpstandard §15.9; Roslyn Binder_Indexer.cs (implicit Index support, TryBindImplicitIndexer)', since='8')
+case('csharp', 'object-initializer-member', '`new C { X = …, N = 1 }` writes C.X and C.N, the members of C, not names of the surrounding scope',
+     CS, {'A.cs': 'namespace App {\n  public class A { public void Run() {} }\n  public class C { public A X { get; set; } public int N; }\n  public class D {\n    public void F() { var c = new C { X = new A(), N = 1 }; }\n  }\n}\n'},
+     [('D.F', 'writes', 'C.X'), ('D.F', 'writes', 'C.N')], [],
+     source='csharpstandard §15.7.3 with §12.8.17.3; Roslyn Binder_InitializerExpressions.BindInitializerMemberAssignment')
+case('csharp', 'partial-struct', 'the members of a partial struct are those of all its parts',
+     CS, {'A1.cs': 'namespace App\n{\n    public partial struct S { int Helper() { return 1; } }\n}\n', 'A2.cs': 'namespace App\n{\n    public partial struct S { public int Run() { return Helper(); } }\n}\n'},
+     [('S.Run', 'calls', 'S.Helper')], [],
+     source='csharpstandard §16.2.4')
+case('csharp', 'class-and-interfaces-in-a-base-list', 'a base list names a class (inherits) and interfaces (implements); a struct names only interfaces',
+     CS, {'A.cs': 'namespace App\n{\n    public interface IStore { }\n    public interface IOther { }\n    public class Base { }\n    public class Repo : Base, IStore { }\n    public struct Item : IStore { }\n}\n'},
+     [('Repo', 'inherits', 'Base'), ('Repo', 'implements', 'IStore'), ('Item', 'implements', 'IStore')], [('Repo', 'implements', 'Base'), ('Repo', 'inherits', 'IStore'), ('Repo', 'implements', 'IOther')],
+     source='csharpstandard §19.6.1, §16.2.5')
+case('csharp', 'struct-overrides-a-valuetype-member', "a struct's own override of ToString is what `s.ToString()` means",
+     CS, {'A.cs': 'namespace App\n{\n    public struct Counter\n    {\n        int value;\n        public override string ToString() { return value.ToString(); }\n    }\n    public class Other { public override string ToString() { return ""; } }\n    public class A\n    {\n        public string Run(Counter c) { return c.ToString(); }\n    }\n}\n'},
+     [('A.Run', 'calls', 'Counter.ToString')], [('A.Run', 'calls', 'Other.ToString')],
+     source='csharpstandard §16.3.1, §16.4.3, §16.4.7 MeaningOfThis1')
+case('csharp', 'struct-default-constructor', '`new S()` of a struct without a parameterless constructor is the implicit one; a constructor with parameters is not called',
+     CS, {'A.cs': 'namespace App\n{\n    public struct Point\n    {\n        int x, y;\n        public Point(int x, int y) { this.x = x; this.y = y; }\n    }\n    public class A\n    {\n        public Point Zero() { return new Point(); }\n        public Point Made() { return new Point(1, 2); }\n    }\n}\n'},
+     [('A.Made', 'calls', 'Point.Point')], [('A.Zero', 'calls', 'Point.Point')],
+     source='csharpstandard §16.4.9 Constructors1')
+case('csharp', 'constraint-interface-member', 'a member asked of a type parameter is a member of its interface constraint',
+     CS, {'A.cs': 'namespace App\n{\n    public interface ICounter { void Increment(); }\n    public interface IOther { void Increment(); }\n    public struct Counter : ICounter { public void Increment() { } }\n    public class A\n    {\n        public static void Test<T>(T x) where T : ICounter, new()\n        {\n            T y = new T();\n            x.Increment();\n            y.Increment();\n        }\n    }\n}\n'},
+     [('A.Test', 'calls', 'ICounter.Increment')], [('A.Test', 'calls', 'IOther.Increment'), ('A.Test', 'calls', 'Counter.Increment')],
+     source='csharpstandard §16.4.7 MeaningOfThis2')
+case('csharp', 'struct-static-field-initializer', "the initializer of a static field of a struct names the struct's members",
+     CS, {'A.cs': 'namespace App\n{\n    public struct Point\n    {\n        public int X;\n        static Point Make() { return new Point(); }\n        public static readonly Point Origin = Make();\n    }\n    public class Other { static Other Make() { return null; } }\n}\n'},
+     [('Point', 'calls', 'Point.Make')], [('Point', 'calls', 'Other.Make')],
+     source='csharpstandard §16.4.8')
+case('csharp', 'array-element-access', "an element of an array is of the array's element type, whatever the rank and nesting",
+     CS, {'A.cs': 'namespace App\n{\n    public class Repo { public int Find() { return 1; } }\n    public class Other { public int Find() { return 2; } }\n    public class A\n    {\n        public int Flat(Repo[] a) { return a[0].Find(); }\n        public int Grid(Repo[,] g) { return g[0, 1].Find(); }\n        public int Jagged(Repo[][] j) { return j[0][1].Find(); }\n        public int Mixed(Repo[][,] m) { return m[0][1, 2].Find(); }\n        public int Last(Repo[] a) { return a[^1].Find(); }\n    }\n}\n'},
+     [('A.Flat', 'calls', 'Repo.Find'), ('A.Grid', 'calls', 'Repo.Find'), ('A.Jagged', 'calls', 'Repo.Find'), ('A.Mixed', 'calls', 'Repo.Find'), ('A.Last', 'calls', 'Repo.Find')], [('A.Flat', 'calls', 'Other.Find')],
+     source='csharpstandard §17.2.1, §17.4')
+case('csharp', 'extension-on-array-type', 'an extension written for an array type applies to values of that array type',
+     CS, {'A.cs': 'namespace App\n{\n    public class Repo { }\n    public class Other { }\n    public static class RepoExt { public static int Size(this Repo[] r) { return 1; } }\n    public static class OtherExt { public static int Size(this Other[] o) { return 2; } }\n    public class A\n    {\n        public int Run(Repo[] r) { return r.Size(); }\n    }\n}\n'},
+     [('A.Run', 'calls', 'RepoExt.Size')], [('A.Run', 'calls', 'OtherExt.Size')],
+     source='csharpstandard §17.2, §12.8.10.3')
+case('csharp', 'array-creation-element', '`new T[n]` is an array of T; its elements are T',
+     CS, {'A.cs': 'namespace App\n{\n    public class Repo { public int Find() { return 1; } }\n    public class Other { public int Find() { return 2; } }\n    public class A\n    {\n        public int Run()\n        {\n            var a = new Repo[3];\n            return a[0].Find();\n        }\n    }\n}\n'},
+     [('A.Run', 'calls', 'Repo.Find')], [('A.Run', 'calls', 'Other.Find')],
+     source='csharpstandard §17.3')
+case('csharp', 'array-slice-keeps-the-array-type', 'a range index on an array gives an array of the same element type',
+     CS, {'A.cs': 'namespace App\n{\n    public class Repo { public int Find() { return 1; } }\n    public class Other { public int Find() { return 2; } }\n    public class A\n    {\n        public int Run(Repo[] a) { return a[1..3][0].Find(); }\n    }\n}\n'},
+     [('A.Run', 'calls', 'Repo.Find')], [('A.Run', 'calls', 'Other.Find')],
+     source='csharpstandard §17.4', since='8.0')
+case('csharp', 'array-foreach-element', 'a `foreach` over an array of T gives T',
+     CS, {'A.cs': 'namespace App\n{\n    public class Repo { public int Find() { return 1; } }\n    public class Other { public int Find() { return 2; } }\n    public class A\n    {\n        public void Run(Repo[] a)\n        {\n            foreach (var r in a) { r.Find(); }\n        }\n    }\n}\n'},
+     [('A.Run', 'calls', 'Repo.Find')], [('A.Run', 'calls', 'Other.Find')],
+     source='csharpstandard §17.4 (foreach), §13.9.5')
+case('csharp', 'interface-inherited-member', 'a member of a base interface is a member of the derived interface',
+     CS, {'A.cs': 'namespace App\n{\n    public interface IControl { void Paint(); }\n    public interface IOther { void Paint(); }\n    public interface ITextBox : IControl { void SetText(string t); }\n    public interface IListBox : IControl { void SetItems(string[] items); }\n    public interface IComboBox : ITextBox, IListBox { }\n\n    public class A\n    {\n        public void Run(IComboBox c) { c.Paint(); c.SetText("x"); c.SetItems(null); }\n    }\n}\n'},
+     [('A.Run', 'calls', 'IControl.Paint'), ('A.Run', 'calls', 'ITextBox.SetText'), ('A.Run', 'calls', 'IListBox.SetItems')], [('A.Run', 'calls', 'IOther.Paint')],
+     source='csharpstandard §19.2.4, §19.4.1')
+case('csharp', 'interface-inherited-generic-member', 'a member inherited from a constructed interface has its type parameters replaced by the type arguments',
+     CS, {'A.cs': 'namespace App\n{\n    public interface IBase<T> { T Get(); }\n    public interface IDerived : IBase<Repo> { }\n    public class Repo { public int Find() { return 1; } }\n    public class Other { public int Find() { return 2; } }\n\n    public class A\n    {\n        public int Run(IDerived d) { return d.Get().Find(); }\n    }\n}\n'},
+     [('A.Run', 'calls', 'IBase.Get'), ('A.Run', 'calls', 'Repo.Find')], [('A.Run', 'calls', 'Other.Find')],
+     source='csharpstandard §19.2.4 BaseInterfaces2')
+case('csharp', 'extension-on-base-interface', 'an extension written for an interface applies to values of the interfaces derived from it',
+     CS, {'A.cs': 'namespace App\n{\n    public interface IBase { }\n    public interface IDerived : IBase { }\n    public interface IUnrelated { }\n    public static class BaseExt { public static int Size(this IBase b) { return 1; } }\n    public static class UnrelatedExt { public static int Size(this IUnrelated b) { return 2; } }\n    public class A\n    {\n        public int Run(IDerived d) { return d.Size(); }\n    }\n}\n'},
+     [('A.Run', 'calls', 'BaseExt.Size')], [('A.Run', 'calls', 'UnrelatedExt.Size')],
+     source='csharpstandard §19.2.4, §12.8.10.3')
+case('csharp', 'explicit-implementation-names-the-declaring-interface', 'an explicit implementation of an inherited member is qualified by the interface that declares it, not the derived one',
+     CS, {'A.cs': 'namespace App\n{\n    public interface IControl { void Paint(); }\n    public interface ITextBox : IControl { void SetText(string s); }\n    public class TextBox : ITextBox\n    {\n        void IControl.Paint() { }\n        void ITextBox.SetText(string s) { }\n    }\n    public class A\n    {\n        public void Run(ITextBox t) { t.Paint(); }\n    }\n}\n'},
+     [('A.Run', 'calls', 'IControl.Paint'), ('TextBox', 'implements', 'ITextBox')], [('TextBox', 'implements', 'IControl')],
+     source='csharpstandard §19.6.2 ExplicitInterfaceMemberImplementations5, §19.6.1')
+case('csharp', 'interface-member-hides-base', "a member a derived interface declares hides the base interface's member of its name",
+     CS, {'A.cs': 'namespace App\n{\n    public interface IBase { int Find(); }\n    public interface IDerived : IBase { new int Find(); }\n\n    public class A\n    {\n        public int Run(IDerived d) { return d.Find(); }\n        public int RunBase(IDerived d) { return ((IBase)d).Find(); }\n    }\n}\n'},
+     [('A.Run', 'calls', 'IDerived.Find'), ('A.RunBase', 'calls', 'IBase.Find')], [('A.Run', 'calls', 'IBase.Find'), ('A.RunBase', 'calls', 'IDerived.Find')],
+     source='csharpstandard §19.4.1, §19.4.11 (hiding)')
+case('csharp', 'interface-hidden-on-every-path', 'a member hidden on any access path is hidden on all of them',
+     CS, {'A.cs': 'namespace App\n{\n    public interface IBase { void F(int i); }\n    public interface ILeft : IBase { new void F(int i); }\n    public interface IRight : IBase { void G(); }\n    public interface IDerived : ILeft, IRight { }\n\n    public class A\n    {\n        public void Run(IDerived d) { d.F(1); }\n        public void ViaRight(IDerived d) { ((IRight)d).F(1); }\n    }\n}\n'},
+     [('A.Run', 'calls', 'ILeft.F'), ('A.ViaRight', 'calls', 'IBase.F')], [('A.Run', 'calls', 'IBase.F'), ('A.ViaRight', 'calls', 'ILeft.F')],
+     source='csharpstandard §19.4.11 InterfaceMemberAccess3')
+case('csharp', 'interface-overloads-of-two-bases', 'the members of unrelated base interfaces are all candidates of an invocation',
+     CS, {'A.cs': 'namespace App\n{\n    public interface IInteger { void Add(int i); }\n    public interface IDouble { void Add(double d); }\n    public interface INumber : IInteger, IDouble { }\n\n    public class A\n    {\n        public void Run(INumber n) { n.Add(1); }\n        public void RunDouble(INumber n) { n.Add(1.0); }\n        public void Cast(INumber n) { ((IDouble)n).Add(1); }\n    }\n}\n'},
+     [('A.Run', 'calls', 'IInteger.Add'), ('A.RunDouble', 'calls', 'IDouble.Add'), ('A.Cast', 'calls', 'IDouble.Add')], [('A.Run', 'calls', 'IDouble.Add'), ('A.RunDouble', 'calls', 'IInteger.Add'), ('A.Cast', 'calls', 'IInteger.Add')],
+     source='csharpstandard §19.4.11 InterfaceMemberAccess2')
+case('csharp', 'interface-default-method-names-base-member', 'a default method of an interface names the members of its base interfaces by their simple names',
+     CS, {'A.cs': 'namespace App\n{\n    public interface IA { int M(); }\n    public interface IOther { int M(); }\n    public interface IB : IA\n    {\n        int Twice() { return M() + M(); }\n    }\n}\n'},
+     [('IB.Twice', 'calls', 'IA.M')], [('IB.Twice', 'calls', 'IOther.M')],
+     source='csharpstandard §19.4.1 (members of an interface include the inherited ones), InterfaceMember example', since='8.0')
+case('csharp', 'partial-interface', 'the members of a partial interface are those of all its parts',
+     CS, {'A1.cs': 'namespace App\n{\n    public partial interface IStore { int Find(); }\n}\n', 'A2.cs': 'namespace App\n{\n    public partial interface IStore { int Count(); }\n    public class A\n    {\n        public int Run(IStore s) { return s.Find() + s.Count(); }\n    }\n}\n'},
+     [('A.Run', 'calls', 'IStore.Find'), ('A.Run', 'calls', 'IStore.Count')], [],
+     source='csharpstandard §19.4.1 (partial interface)')
+case('csharp', 'interface-static-member', 'a static member of an interface is named through the interface',
+     CS, {'A.cs': 'namespace App\n{\n    public interface IFactory\n    {\n        public const int Limit = 3;\n        static IFactory Make() { return null; }\n        static int Count() { return Limit; }\n    }\n    public class Other { public static int Count() { return 0; } }\n    public class A\n    {\n        public int Run() { IFactory f = IFactory.Make(); return IFactory.Count() + IFactory.Limit; }\n    }\n}\n'},
+     [('A.Run', 'calls', 'IFactory.Make'), ('A.Run', 'calls', 'IFactory.Count'), ('IFactory.Count', 'reads', 'IFactory.Limit')], [('A.Run', 'calls', 'Other.Count')],
+     source='csharpstandard §19.4.2, §19.4.3 (static interface members)', since='8.0')
+case('csharp', 'interface-nested-type', 'a type nested in an interface is a member of the interface, named through it',
+     CS, {'A.cs': 'namespace App\n{\n    public interface IOuter\n    {\n        public class Inner { public int Find() { return 1; } }\n    }\n    public class Other { public int Find() { return 2; } }\n    public class A\n    {\n        public int Run(IOuter.Inner i) { return i.Find(); }\n    }\n}\n'},
+     [('A.Run', 'calls', 'IOuter.Inner.Find'), ('A.Run', 'references', 'IOuter.Inner')], [('A.Run', 'calls', 'Other.Find')],
+     source='csharpstandard §19.4.9, §19.4.1', since='8.0')
+case('csharp', 'base-call-reaches-the-class-member', '`base.M()` binds to the member of the base class, never to the interface member it implements',
+     CS, {'A.cs': 'namespace App\n{\n    public interface I { void M(); }\n    public class B : I { public virtual void M() { } }\n    public class D : B\n    {\n        public override void M() { base.M(); }\n    }\n}\n'},
+     [('D.M', 'calls', 'B.M')], [('D.M', 'calls', 'I.M')],
+     source='csharpstandard §19.4.11 (base.M() binds to an implementation in a class type)')
+case('csharp', 'explicit-implementation-names-its-interface', "the interface in an explicit implementation's qualified name is the one the name means in that scope",
+     CS, {'A.cs': 'namespace Lib\n{\n    public interface IShape { void Area(); }\n}\nnamespace App\n{\n    public interface IShape { void Area(); }\n    public class Circle : Lib.IShape\n    {\n        void Lib.IShape.Area() { }\n    }\n    public class Square : IShape\n    {\n        void IShape.Area() { }\n    }\n}\n'},
+     [('Circle', 'implements', 'Lib.IShape'), ('Square', 'implements', 'App.IShape')], [('Circle', 'implements', 'App.IShape'), ('Square', 'implements', 'Lib.IShape')],
+     source='csharpstandard §19.5, §19.6.2')
+case('csharp', 'explicit-implementation-through-the-interface', 'an explicit interface member implementation is reached through the interface, never the class',
+     CS, {'A.cs': 'namespace App\n{\n    public interface IControl { void Paint(); }\n    public class Control : IControl\n    {\n        void IControl.Paint() { PaintControl(); }\n        public void Paint() { }\n        protected virtual void PaintControl() { }\n    }\n\n    public class A\n    {\n        public void ViaClass(Control c) { c.Paint(); }\n        public void ViaInterface(IControl c) { c.Paint(); }\n        public void ViaCast(Control c) { ((IControl)c).Paint(); }\n    }\n}\n'},
+     [('A.ViaClass', 'calls', 'Control.Paint'), ('A.ViaInterface', 'calls', 'IControl.Paint'), ('A.ViaCast', 'calls', 'IControl.Paint')], [('A.ViaClass', 'calls', 'IControl.Paint'), ('A.ViaInterface', 'calls', 'Control.Paint'), ('A.ViaCast', 'calls', 'Control.Paint')],
+     source='csharpstandard §19.6.2, §19.6.5')
+case('csharp', 'explicit-implementation-body', 'the body of an explicit interface member implementation sees the members of its class by their simple names',
+     CS, {'A.cs': 'namespace App\n{\n    public interface IDisposable2 { void Dispose(); }\n    public class MyFile : IDisposable2\n    {\n        void IDisposable2.Dispose() => Close();\n        public void Close() { }\n    }\n    public class Other { public void Close() { } }\n}\n'},
+     [('MyFile.Dispose', 'calls', 'MyFile.Close')], [('MyFile.Dispose', 'calls', 'Other.Close')],
+     source='csharpstandard §19.6.2 ExplicitInterfaceMemberImplementations2')
+case('csharp', 'interface-mapping-through-a-base-class', 'a public member of a base class implements an interface the derived class lists; a derived `new` member does not take its place',
+     CS, {'A.cs': 'namespace App\n{\n    public interface Interface1 { void F(); }\n    public class Class1 { public void F() { } public void G() { } }\n    public class Class2 : Class1, Interface1 { public new void G() { } }\n\n    public interface IControl { void Paint(); }\n    public class Control : IControl { public void Paint() { } }\n    public class TextBox : Control { public new void Paint() { } }\n}\n'},
+     [('Interface1.F', 'dispatches_to', 'Class1.F'), ('IControl.Paint', 'dispatches_to', 'Control.Paint')], [('IControl.Paint', 'dispatches_to', 'TextBox.Paint')],
+     source='csharpstandard §19.6.5 InterfaceMapping8, §19.6.6')
+case('csharp', 'new-member-overrides-nothing', 'a member declared `new` hides the base member: calls through the base do not reach it',
+     CS, {'A.cs': 'namespace App\n{\n    public class Class1 { public void G() { } public virtual void V() { } }\n    public class Class2 : Class1 { public new void G() { } public override void V() { } }\n    public class A\n    {\n        public void Run(Class1 c) { c.G(); }\n    }\n}\n'},
+     [('A.Run', 'calls', 'Class1.G'), ('Class1.V', 'dispatches_to', 'Class2.V')], [('Class1.G', 'dispatches_to', 'Class2.G'), ('A.Run', 'calls', 'Class2.G')],
+     source='csharpstandard §19.6.6 InterfaceImplementationInheritance1, §15.3.5')
+case('csharp', 'interface-mapping-one-member-for-two-interfaces', 'one public member implements the same-named members of every interface the class lists',
+     CS, {'A.cs': 'namespace App\n{\n    public interface IControl { void Paint(); }\n    public interface IForm { void Paint(); }\n    public class Page : IControl, IForm { public void Paint() { } }\n}\n'},
+     [('IControl.Paint', 'dispatches_to', 'Page.Paint'), ('IForm.Paint', 'dispatches_to', 'Page.Paint')], [],
+     source='csharpstandard §19.6.5 InterfaceMapping4')
+case('csharp', 'interface-reimplementation', 'a class that lists an inherited interface again maps it afresh: onto its own public member',
+     CS, {'A.cs': 'namespace App\n{\n    public interface IControl { void Paint(); }\n    public class Control : IControl { public void Paint() { } }\n    public class MyControl : Control, IControl { public new void Paint() { } }\n}\n'},
+     [('IControl.Paint', 'dispatches_to', 'MyControl.Paint')], [],
+     source='csharpstandard §19.6.7')
+case('csharp', 'enum-underlying-type-name', 'the integral type name of an enum is a type name, looked up like any other',
+     CS, {'A.cs': 'namespace App\n{\n    using Level = System.Byte;\n    public class Code { }\n    public enum Color : Level { Red, Green }\n}\n'},
+     [], [('Color', 'references', 'Code')],
+     source='csharpstandard §20.2')
+case('csharp', 'enum-member-initializer', "an enum member's initializer names the other members of its enum by their simple names, before a type of the same name around",
+     CS, {'A.cs': 'namespace App\n{\n    public class Blue { }\n    public enum Color\n    {\n        Red,\n        Blue,\n        Max = Blue\n    }\n}\n'},
+     [], [('Color.Max', 'references', 'App.Blue')],
+     source='csharpstandard §20.4')
+case('csharp', 'extension-on-enum-value', 'an enum member has the type of its enum: an extension of the enum applies to it',
+     CS, {'A.cs': 'namespace App\n{\n    public enum Color { Red, Green }\n    public enum Size { Small, Large }\n    public static class ColorExt { public static int Code(this Color c) { return 1; } }\n    public static class SizeExt { public static int Code(this Size s) { return 2; } }\n    public class A\n    {\n        public int Direct() { return Color.Red.Code(); }\n        public int ViaLocal() { var c = Color.Green; return c.Code(); }\n    }\n}\n'},
+     [('A.Direct', 'calls', 'ColorExt.Code'), ('A.ViaLocal', 'calls', 'ColorExt.Code')], [('A.Direct', 'calls', 'SizeExt.Code'), ('A.ViaLocal', 'calls', 'SizeExt.Code')],
+     source='csharpstandard §20.6')
+case('csharp', 'generic-delegate-type', 'a generic delegate type is named by its arity; type arguments give its parameter types',
+     CS, {'A.cs': 'namespace App\n{\n    public delegate T Make<T>();\n    public class Repo { public int Find() { return 1; } }\n    public class Other { public int Find() { return 2; } }\n    public class A\n    {\n        public int Run(Make<Repo> m) { return m().Find(); }\n    }\n}\n'},
+     [('A.Run', 'calls', 'Repo.Find')], [('A.Run', 'calls', 'Other.Find')],
+     source='csharpstandard §21.2')
+case('csharp', 'delegate-invoke-member', "`d.Invoke(…)` is the delegate type's Invoke, not a method of another type",
+     CS, {'A.cs': 'namespace App\n{\n    public delegate int D(int x);\n    public class Other { public int Invoke(int x) { return x; } }\n    public class A\n    {\n        public int Run(D d) { return d.Invoke(1); }\n    }\n}\n'},
+     [('A.Run', 'references', 'D')], [('A.Run', 'calls', 'Other.Invoke')],
+     source='csharpstandard §21.3')
+case('csharp', 'delegate-creation-names-a-method', "`new D(x.M)` names the method M of x's type",
+     CS, {'A.cs': 'namespace App\n{\n    public delegate void D(int x);\n    public class C { public static void M1(int i) { } public void M2(int i) { } }\n    public class Other { public static void M1(int i) { } public void M2(int i) { } }\n    public class Test\n    {\n        public D Static() { return new D(C.M1); }\n        public D Instance(C t) { return new D(t.M2); }\n    }\n}\n'},
+     [('Test.Static', 'indirect_call', 'C.M1'), ('Test.Instance', 'indirect_call', 'C.M2'), ('Test.Static', 'references', 'D')], [('Test.Static', 'indirect_call', 'Other.M1'), ('Test.Instance', 'indirect_call', 'Other.M2')],
+     source='csharpstandard §21.5')
+case('csharp', 'delegate-local-hides-method', 'a parameter of delegate type named like a method is what `name(args)` invokes',
+     CS, {'A.cs': 'namespace App\n{\n    public delegate void D(int x);\n    public class A\n    {\n        void Log(int x) { }\n        public void Run(D Log) { Log(1); }\n    }\n}\n'},
+     [('A.Run', 'references', 'D')], [('A.Run', 'calls', 'A.Log')],
+     source='csharpstandard §21.6, §12.8.4')
+case('csharp', 'delegate-field-invocation', 'invoking a field of delegate type is not a call of a method of its name',
+     CS, {'A.cs': 'namespace App\n{\n    public delegate int D(int x);\n    public class A\n    {\n        D handler;\n        int handle(int x) { return x; }\n        public int Run() { return handler(1); }\n    }\n    public class Other { public int handler(int x) { return x; } }\n}\n'},
+     [('A.Run', 'reads', 'A.handler')], [('A.Run', 'calls', 'Other.handler')],
+     source='csharpstandard §21.6')
+case('csharp', 'delegate-signature-types', "a delegate declaration's parameter and return types are uses of the types they name, the enclosing class's nested type before a namespace type",
+     CS, {'A.cs': 'namespace App\n{\n    public class Host\n    {\n        public class Seen { }\n        public delegate Seen Make(Seen s);\n    }\n}\n', 'B.cs': 'namespace App\n{\n    public class Seen { }\n}\n'},
+     [('Host.Make', 'references', 'Host.Seen')], [('Host.Make', 'references', 'B.cs:Seen')],
+     source='csharpstandard §21.2')
+case('csharp', 'extension-on-delegate', 'an extension written for a delegate type applies to a value of that delegate type',
+     CS, {'A.cs': 'namespace App\n{\n    public delegate int Count(Other o);\n    public delegate int Total(Other o);\n    public class Other { }\n\n    public static class ExtA\n    {\n        public static int Twice(this Count c) { return 2; }\n    }\n\n    public static class ExtB\n    {\n        public static int Twice(this Total c) { return 3; }\n    }\n\n    public class A\n    {\n        public int Run(Count c)\n        {\n            return c.Twice();\n        }\n    }\n}\n'},
+     [('A.Run', 'calls', 'ExtA.Twice')], [('A.Run', 'calls', 'ExtB.Twice')],
+     source='csharpstandard §21.2, §12.8.10.3')
+case('csharp', 'method-group-to-delegate', '`Op o = Target;` names the method Target; it is an indirect use',
+     CS, {'A.cs': 'namespace App\n{\n    public delegate int Op(int x);\n\n    public class A\n    {\n        public int Target(int x) { return x; }\n        public int Decoy(int x) { return x; }\n        public int Run()\n        {\n            Op o = Target;\n            return o(1);\n        }\n    }\n}\n'},
+     [('A.Run', 'indirect_call', 'A.Target')], [('A.Run', 'indirect_call', 'A.Decoy')],
+     source='csharpstandard §21.3, §10.8')
+case('csharp', 'interface-property-access', "`b.Current` on an IBox is IBox.Current, and the call on its result is the interface property's type's",
+     CS, {'A.cs': 'namespace App\n{\n    public class Seen { public int Mark() { return 1; } }\n    public class Other { public int Mark() { return 2; } }\n\n    public interface IBox\n    {\n        Seen Current { get; set; }\n        Seen this[int i] { get; }\n    }\n\n    public class Box : IBox\n    {\n        public Other Current { get; set; }\n        Seen IBox.Current { get; set; }\n        public Other this[int i] { get { return null; } }\n        Seen IBox.this[int i] { get { return null; } }\n    }\n\n    public class A\n    {\n        public int Run(IBox b)\n        {\n            return b.Current.Mark() + b[0].Mark();\n        }\n    }\n}\n'},
+     [('A.Run', 'reads', 'IBox.Current'), ('A.Run', 'calls', 'Seen.Mark')], [('A.Run', 'calls', 'Other.Mark'), ('A.Run', 'reads', 'Box.Current')],
+     source='csharpstandard §19.4.11')
+case('csharp', 'implicit-array-element', '`var xs = new[] { new Seen() }; xs[0].Mark()` is Seen.Mark',
+     CS, {'A.cs': 'namespace App\n{\n    public class Seen { public int Mark() { return 1; } }\n    public class Other { public int Mark() { return 2; } }\n\n    public class A\n    {\n        public int Run()\n        {\n            var xs = new[] { new Seen(), new Seen() };\n            return xs[0].Mark();\n        }\n    }\n}\n'},
+     [('A.Run', 'calls', 'Seen.Mark')], [('A.Run', 'calls', 'Other.Mark')],
+     source='csharpstandard §17.3, §12.8.17.5')
+case('csharp', 'extension-on-ref-struct-receiver', '`c.Bump()` on a Counter variable is the extension written `this ref Counter`',
+     CS, {'A.cs': 'namespace App\n{\n    public struct Counter { public int N; }\n    public struct Other { public int N; }\n\n    public static class ExtA\n    {\n        public static void Bump(this ref Counter c) { c.N++; }\n    }\n    public static class ExtB\n    {\n        public static void Bump(this ref Other c) { c.N--; }\n    }\n\n    public class A\n    {\n        public void Run()\n        {\n            Counter c = default;\n            c.Bump();\n        }\n    }\n}\n'},
+     [('A.Run', 'calls', 'ExtA.Bump')], [('A.Run', 'calls', 'ExtB.Bump')],
+     source='csharpstandard §16.4, §15.6.10', since='7.2')
+case('csharp', 'csharp-interface-static-abstract-through-type-parameter', 'T.Create() with T : IMake binds to IMake.Create, not Maker.Create or Other.Create',
+     CS, {'A.cs': 'namespace App {\n  public interface IMake { static abstract int Create(); }\n  public class Maker : IMake { public static int Create() { return 1; } }\n  public class Other { public static int Create() { return 2; } }\n  public static class Use { public static int Run<T>() where T : IMake { return T.Create(); } }\n}\n'},
+     [('Use.Run', 'calls', 'IMake.Create')], [('Use.Run', 'calls', 'Maker.Create'), ('Use.Run', 'calls', 'Other.Create')],
+     source='csharpstandard §19.4 (static abstract interface members); Roslyn Binder_Invocation.cs type-parameter member lookup', since='11')
+case('csharp', 'csharp-interface-default-method-via-interface', 'g.Hi() on an IGreet-typed local binds to IGreet.Hi (the default body), not to Plain2.Hi',
+     CS, {'A.cs': 'namespace App {\n  public interface IGreet { string Hi() { return "hi"; } }\n  public class Plain : IGreet { }\n  public class Plain2 { public string Hi() { return "x"; } }\n  public static class Use2 { public static string Run(Plain p) { IGreet g = p; return g.Hi(); } }\n}\n'},
+     [('Use2.Run', 'calls', 'IGreet.Hi')], [('Use2.Run', 'calls', 'Plain2.Hi')],
+     source='csharpstandard §19.4 (default interface methods; a class does not inherit them)', since='8')
+case('csharp', 'csharp-interface-two-closed-generic-implementations', "b.Get() on IBox<int> binds to the interface member IBox.Get, not to the class's explicit implementations",
+     CS, {'A.cs': 'namespace App {\n  public interface IBox<T> { T Get(); }\n  public class Two : IBox<int>, IBox<string> {\n    int IBox<int>.Get() { return Helper.A(); }\n    string IBox<string>.Get() { return Helper.B(); }\n  }\n  public static class Helper { public static int A() { return 1; } public static string B() { return ""; } }\n  public static class Use3 { public static int Run(Two t) { IBox<int> b = t; return b.Get(); } }\n}\n'},
+     [('Use3.Run', 'calls', 'IBox.Get')], [('Use3.Run', 'calls', 'Two.Get')],
+     source='csharpstandard §19.6 (explicit interface member implementations of different constructed interfaces)')
+case('csharp', 'invoked-name-skips-non-invocable', "when a name is invoked, a member of the derived type that is not invocable does not hide the base's method of that name",
+     CS, {'A.cs': 'namespace App\n{\n    public class Base\n    {\n        public int Run() { return 1; }\n    }\n\n    public class Derived : Base\n    {\n        public int Run = 5;\n    }\n\n    public class C\n    {\n        public int M(Derived d)\n        {\n            return d.Run();\n        }\n    }\n}\n'},
+     [('C.M', 'calls', 'Base.Run')], [('C.M', 'reads', 'Derived.Run')],
+     source='csharpstandard §12.5.1 (next, if the member is invoked, all non-invocable members are removed from the set); Roslyn Binder_Lookup.cs LookupOptions.MustBeInvocableIfMember')
+case('csharp', 'generic-method-by-type-arguments', 'a name written with K type arguments names only the methods with K type parameters',
+     CS, {'A.cs': 'namespace App\n{\n    public class Maker\n    {\n        public int Make() { return 0; }\n\n        public T Make<T>() { return default(T); }\n    }\n\n    public class C\n    {\n        public int M(Maker m)\n        {\n            return m.Make<int>();\n        }\n\n        public int N(Maker m)\n        {\n            return m.Make();\n        }\n    }\n}\n'},
+     [('C.M', 'calls', 'A.cs:App.Maker.Make@7'), ('C.N', 'calls', 'A.cs:App.Maker.Make@5')], [('C.M', 'calls', 'A.cs:App.Maker.Make@5'), ('C.N', 'calls', 'A.cs:App.Maker.Make@7')],
+     source='csharpstandard §12.5.1 (if K is not zero, all members with a different number of type parameters are removed); Roslyn Binder_Lookup.cs CheckArity')
+case('csharp', 'nested-type-sees-outer-static', "from a nested type a bare name is looked up in each enclosing type in turn, so an outer type's static member is in sight",
+     CS, {'A.cs': 'namespace App\n{\n    public class Decoy\n    {\n        public static int Helper() { return 2; }\n    }\n\n    public class Outer\n    {\n        public static int Helper() { return 1; }\n\n        public class Inner\n        {\n            public int M()\n            {\n                return Helper();\n            }\n        }\n    }\n}\n'},
+     [('Inner.M', 'calls', 'Outer.Helper')], [('Inner.M', 'calls', 'Decoy.Helper')],
+     source='csharpstandard §12.8.4 (for each instance type T, starting with the instance type of the immediately enclosing type declaration and continuing with each enclosing class or struct declaration); Roslyn Binder_Expressions.cs BindIdentifier')
+case('csharp', 'parenthesized-receiver', 'a parenthesized expression has the meaning of the expression inside',
+     CS, {'A.cs': 'namespace App\n{\n    public class Part\n    {\n        public int Size() { return 1; }\n    }\n\n    public class Decoy\n    {\n        public int Size() { return 2; }\n    }\n\n    public class C\n    {\n        public int M(Part p)\n        {\n            return (p).Size();\n        }\n    }\n}\n'},
+     [('C.M', 'calls', 'Part.Size')], [('C.M', 'calls', 'Decoy.Size')],
+     source='csharpstandard §12.8.5 (the result of the parenthesized_expression is the result of the contained expression); Roslyn Binder_Expressions.cs BindParenthesizedExpression')
+case('csharp', 'static-abstract-through-type-parameter', "`T.M()` with a type parameter constrained by an interface with a static abstract member names that interface's member",
+     CS, {'A.cs': 'namespace App\n{\n    public interface IMaker\n    {\n        static abstract int Make();\n    }\n\n    public class Decoy\n    {\n        public static int Make() { return 2; }\n    }\n\n    public class C\n    {\n        public int M<T>() where T : IMaker\n        {\n            return T.Make();\n        }\n    }\n}\n'},
+     [('C.M', 'calls', 'IMaker.Make')], [('C.M', 'calls', 'Decoy.Make')],
+     source="Roslyn Binder_Expressions.cs BindMemberAccessWithBoundLeft (a member access on a type parameter looks up its constraints' static abstract members); csharpstandard §12.8.7.1", since='11')
+case('csharp', 'null-conditional-dependent-access', 'after `a?.b` the dependent accesses `.c()` are members of the type of `a.b`',
+     CS, {'A.cs': 'namespace App\n{\n    public class Engine\n    {\n        public void Start() { }\n    }\n\n    public class Decoy\n    {\n        public void Start() { }\n    }\n\n    public class Car\n    {\n        public Engine Engine { get; set; }\n    }\n\n    public class C\n    {\n        public void M(Car car)\n        {\n            car?.Engine.Start();\n        }\n    }\n}\n'},
+     [('C.M', 'calls', 'Engine.Start'), ('C.M', 'reads', 'Car.Engine')], [('C.M', 'calls', 'Decoy.Start')],
+     source='csharpstandard §12.8.8 (a null_conditional_member_access: primary_expression ?. identifier (dependent_access)*); Roslyn Binder_Expressions.cs BindConditionalAccessExpression')
+case('csharp', 'indexer-by-argument', 'an indexer access picks, among the indexers of the type, the one applicable to the arguments',
+     CS, {'A.cs': 'namespace App\n{\n    public class Table\n    {\n        public int this[int row] { get { return row; } }\n\n        public string this[string key] { get { return key; } }\n    }\n\n    public class C\n    {\n        public int M(Table t)\n        {\n            return t[1];\n        }\n\n        public string N(Table t)\n        {\n            return t["a"];\n        }\n    }\n}\n'},
+     [('C.M', 'reads', 'A.cs:App.Table.this[]@5'), ('C.N', 'reads', 'A.cs:App.Table.this[]@7')], [('C.M', 'reads', 'A.cs:App.Table.this[]@7'), ('C.N', 'reads', 'A.cs:App.Table.this[]@5')],
+     source='csharpstandard §12.8.12.4 (the best indexer of the set of candidate indexers is identified using overload resolution); Roslyn Binder_Expressions.cs BindIndexerOrIndexedPropertyAccess')
+case('csharp', 'null-conditional-element-access', "`a?[i]` is an indexer access on a, and what follows it is a member of the indexer's type",
+     CS, {'A.cs': 'namespace App\n{\n    public class Item\n    {\n        public int Weight() { return 1; }\n    }\n\n    public class Decoy\n    {\n        public int Weight() { return 2; }\n    }\n\n    public class Shelf\n    {\n        public Item this[int i] { get { return null; } }\n    }\n\n    public class C\n    {\n        public int M(Shelf s)\n        {\n            return s?[0].Weight() ?? 0;\n        }\n    }\n}\n'},
+     [('C.M', 'calls', 'Item.Weight')], [('C.M', 'calls', 'Decoy.Weight')],
+     source='csharpstandard §12.8.13 (null_conditional_element_access with dependent_access); Roslyn Binder_Expressions.cs BindConditionalAccessExpression')
+case('csharp', 'base-indexer', '`base[i]` is an indexer access on the base class',
+     CS, {'A.cs': 'namespace App\n{\n    public class Base\n    {\n        public virtual int this[int i] { get { return i; } }\n    }\n\n    public class Decoy\n    {\n        public int this[int i] { get { return 0; } }\n    }\n\n    public class Derived : Base\n    {\n        public override int this[int i] { get { return base[i] + 1; } }\n    }\n}\n'},
+     [('Derived.this[]', 'reads', 'Base.this[]')], [('Derived.this[]', 'reads', 'Decoy.this[]')],
+     source='csharpstandard §12.8.15 (base[E] is evaluated exactly as ((B)this)[E]); Roslyn Binder_Expressions.cs BindIndexerAccess')
+case('csharp', 'object-initializer-targets', "an object initializer's member name is a member of the created type, written",
+     CS, {'A.cs': 'namespace App\n{\n    public class Point\n    {\n        public int X { get; set; }\n    }\n\n    public class Other\n    {\n        public int X { get; set; }\n    }\n\n    public class C\n    {\n        public Point M()\n        {\n            return new Point { X = 1 };\n        }\n    }\n}\n'},
+     [('C.M', 'writes', 'Point.X')], [('C.M', 'writes', 'Other.X')],
+     source='csharpstandard §12.8.17.2.2 (an identifier shall name an accessible field or property of the object being initialized); Roslyn Binder_Expressions.cs BindObjectInitializerMember')
+case('csharp', 'nested-object-initializer', "a nested object initializer's names are members of the type of the field or property it initializes",
+     CS, {'A.cs': 'namespace App\n{\n    public class Inner\n    {\n        public int Size { get; set; }\n    }\n\n    public class Decoy\n    {\n        public int Size { get; set; }\n    }\n\n    public class Outer\n    {\n        public Inner Part { get; } = new Inner();\n    }\n\n    public class C\n    {\n        public Outer M()\n        {\n            return new Outer { Part = { Size = 3 } };\n        }\n    }\n}\n'},
+     [('C.M', 'writes', 'Inner.Size')], [('C.M', 'writes', 'Decoy.Size')],
+     source='csharpstandard §12.8.17.2.2 (a nested object initializer: the assignments are treated as assignments to members of the field or property); Roslyn Binder_Expressions.cs BindObjectInitializerMember')
+case('csharp', 'collection-initializer-add', 'each element of a collection initializer calls the Add method of the collection',
+     CS, {'A.cs': 'using System.Collections;\n\nnamespace App\n{\n    public class Bag : IEnumerable\n    {\n        public void Add(int n) { }\n\n        public IEnumerator GetEnumerator() { return null; }\n    }\n\n    public class Other\n    {\n        public void Add(int n) { }\n    }\n\n    public class C\n    {\n        public Bag M()\n        {\n            return new Bag { 1, 2 };\n        }\n    }\n}\n'},
+     [('C.M', 'calls', 'Bag.Add')], [('C.M', 'calls', 'Other.Add')],
+     source='csharpstandard §12.8.17.2.3 (normal member lookup is applied to find a member named Add); Roslyn Binder_Expressions.cs BindCollectionInitializerElementAddMethod')
+case('csharp', 'typeof-names-a-type', '`typeof(T)` names the type the type-name lookup finds',
+     CS, {'A.cs': 'namespace Lib\n{\n    public class Widget { }\n}\n\nnamespace Far\n{\n    public class Widget { }\n}\n\nnamespace App\n{\n    using Lib;\n\n    public class C\n    {\n        public System.Type M()\n        {\n            return typeof(Widget);\n        }\n    }\n}\n'},
+     [('C.M', 'references', 'Lib.Widget')], [('C.M', 'references', 'Far.Widget')],
+     source='csharpstandard §12.8.18 (typeof_expression: a type); Roslyn Binder_Expressions.cs BindTypeOf')
+case('csharp', 'default-expression-names-a-type', '`default(T)` names the type the type-name lookup finds',
+     CS, {'A.cs': 'namespace Lib\n{\n    public struct Slot { }\n}\n\nnamespace Far\n{\n    public struct Slot { }\n}\n\nnamespace App\n{\n    using Lib;\n\n    public class C\n    {\n        public Slot M()\n        {\n            return default(Slot);\n        }\n    }\n}\n'},
+     [('C.M', 'references', 'Lib.Slot')], [('C.M', 'references', 'Far.Slot')],
+     source="csharpstandard §12.8.21 (explicitly_typed_default: 'default' '(' type ')'); Roslyn Binder_Expressions.cs BindDefaultExpression")
+case('csharp', 'nameof-names-its-target', '`nameof(T.M)` binds its named entity by the rules of simple names and member access',
+     CS, {'A.cs': 'namespace App\n{\n    public class Order\n    {\n        public int Total { get; set; }\n    }\n\n    public class Invoice\n    {\n        public int Total { get; set; }\n    }\n\n    public class C\n    {\n        public string M()\n        {\n            return nameof(Order.Total);\n        }\n    }\n}\n'},
+     [('C.M', 'references', 'Order.Total')], [('C.M', 'references', 'Invoice.Total')],
+     source='csharpstandard §12.8.23 (simple name and member access lookups are performed on the named_entity at compile time); Roslyn Binder_Expressions.cs BindNameofOperatorInternal')
+case('csharp', 'increment-calls-operator', "`v++` calls the user-defined operator ++ of the operand's type",
+     CS, {'A.cs': 'namespace App\n{\n    public class Counter\n    {\n        public static Counter operator ++(Counter c) { return c; }\n    }\n\n    public class Other\n    {\n        public static Other operator ++(Other c) { return c; }\n    }\n\n    public class C\n    {\n        public Counter M(Counter c)\n        {\n            c++;\n            return c;\n        }\n    }\n}\n'},
+     [('C.M', 'calls', 'Counter.operator++')], [('C.M', 'calls', 'Other.operator++')],
+     source='csharpstandard §12.9.7 / §12.8.16 (unary operator overload resolution selects the operator implementation); Roslyn Binder_Operators.cs BindIncrementOperator')
+case('csharp', 'await-custom-awaitable', "`await t` is `t.GetAwaiter().GetResult()`: a member of the awaited value is a member of GetResult's type",
+     CS, {'A.cs': 'using System;\nusing System.Runtime.CompilerServices;\n\nnamespace App\n{\n    public class Reply\n    {\n        public int Code() { return 1; }\n    }\n\n    public class Decoy\n    {\n        public int Code() { return 2; }\n    }\n\n    public class Waiter : INotifyCompletion\n    {\n        public bool IsCompleted { get { return true; } }\n\n        public Reply GetResult() { return null; }\n\n        public void OnCompleted(Action continuation) { }\n    }\n\n    public class Call\n    {\n        public Waiter GetAwaiter() { return null; }\n    }\n\n    public class C\n    {\n        public async System.Threading.Tasks.Task<int> M(Call c)\n        {\n            var r = await c;\n            return r.Code();\n        }\n    }\n}\n'},
+     [('C.M', 'calls', 'Reply.Code')], [('C.M', 'calls', 'Decoy.Code')],
+     source='csharpstandard §12.9.9.3 (await t is classified the same way as (t).GetAwaiter().GetResult()); Roslyn Binder_Await.cs BindAwait')
+case('csharp', 'switch-expression-type-pattern', "a switch expression arm's declaration pattern binds a variable of the type it names",
+     CS, {'A.cs': 'namespace App\n{\n    public class Shape { }\n\n    public class Circle : Shape\n    {\n        public int Radius() { return 1; }\n    }\n\n    public class Decoy\n    {\n        public int Radius() { return 2; }\n    }\n\n    public class C\n    {\n        public int M(Shape s)\n        {\n            return s switch\n            {\n                Circle c => c.Radius(),\n                _ => 0\n            };\n        }\n    }\n}\n'},
+     [('C.M', 'calls', 'Circle.Radius')], [('C.M', 'calls', 'Decoy.Radius')],
+     source='csharpstandard §12.11 (switch_expression_arm: pattern case_guard? => expression); Roslyn Binder_Patterns.cs BindDeclarationPattern')
+case('csharp', 'operator-by-operand-types', 'among the operators of one name, the one whose parameters fit the operand types is called',
+     CS, {'A.cs': 'namespace App\n{\n    public class Money\n    {\n        public static Money operator +(Money a, Money b) { return a; }\n\n        public static Money operator +(Money a, int b) { return a; }\n    }\n\n    public class C\n    {\n        public Money M(Money a, int n)\n        {\n            return a + n;\n        }\n    }\n}\n'},
+     [('C.M', 'calls', 'A.cs:App.Money.operator+@7')], [('C.M', 'calls', 'A.cs:App.Money.operator+@5')],
+     source='csharpstandard §12.12.5 (binary operator overload resolution); Roslyn Binder_Operators.cs BinaryOperatorOverloadResolution')
+case('csharp', 'unary-operator', "`-a` calls the user-defined unary operator of its operand's type",
+     CS, {'A.cs': 'namespace App\n{\n    public class Vec\n    {\n        public static Vec operator -(Vec a) { return a; }\n\n        public static Vec operator -(Vec a, Vec b) { return a; }\n    }\n\n    public class C\n    {\n        public Vec M(Vec a)\n        {\n            return -a;\n        }\n    }\n}\n'},
+     [('C.M', 'calls', 'A.cs:App.Vec.operator-@5')], [('C.M', 'calls', 'A.cs:App.Vec.operator-@7')],
+     source='csharpstandard §12.9.3 / §12.4.4 (unary operator overload resolution); Roslyn Binder_Operators.cs BindUnaryOperator')
+case('csharp', 'coalesce-type', '`a ?? b` has the type of a (its underlying type when nullable), so a member of it is a member of that type',
+     CS, {'A.cs': 'namespace App\n{\n    public class Part\n    {\n        public int Size() { return 1; }\n    }\n\n    public class Decoy\n    {\n        public int Size() { return 2; }\n    }\n\n    public class C\n    {\n        public int M(Part a, Part b)\n        {\n            var p = a ?? b;\n            return p.Size();\n        }\n    }\n}\n'},
+     [('C.M', 'calls', 'Part.Size')], [('C.M', 'calls', 'Decoy.Size')],
+     source='csharpstandard §12.17 (the type of a ?? b is A0, A or B); Roslyn Binder_Operators.cs BindNullCoalescingOperator')
+case('csharp', 'out-variable-declaration', 'an `out var` declared in an argument list has the declared type of the parameter',
+     CS, {'A.cs': 'namespace App\n{\n    public class Part\n    {\n        public int Size() { return 1; }\n    }\n\n    public class Decoy\n    {\n        public int Size() { return 2; }\n    }\n\n    public class Store\n    {\n        public bool TryGet(out Part p) { p = null; return true; }\n    }\n\n    public class C\n    {\n        public int M(Store s)\n        {\n            s.TryGet(out var p);\n            return p.Size();\n        }\n    }\n}\n'},
+     [('C.M', 'calls', 'Part.Size')], [('C.M', 'calls', 'Decoy.Size')],
+     source='csharpstandard §12.19 (in an argument_list the inferred type of the variable is the declared type of the corresponding parameter); Roslyn Binder_Expressions.cs BindDeclarationExpression')
+case('csharp', 'deconstruction-variable-types', 'a variable declared by `var (a, b) = ...` has the type of its tuple element',
+     CS, {'A.cs': 'namespace App\n{\n    public class Part\n    {\n        public int Size() { return 1; }\n    }\n\n    public class Decoy\n    {\n        public int Size() { return 2; }\n    }\n\n    public class C\n    {\n        public int M(Part p)\n        {\n            var (a, b) = (p, 1);\n            return a.Size() + b;\n        }\n    }\n}\n'},
+     [('C.M', 'calls', 'Part.Size')], [('C.M', 'calls', 'Decoy.Size')],
+     source='csharpstandard §12.19 (in a deconstructor the inferred type of the variable is the type of the corresponding tuple element); Roslyn Binder_Deconstruct.cs')
+case('csharp', 'conditional-type', '`c ? x : y` has the type of its arms, so a member of it is a member of that type',
+     CS, {'A.cs': 'namespace App\n{\n    public class Part\n    {\n        public int Size() { return 1; }\n    }\n\n    public class Decoy\n    {\n        public int Size() { return 2; }\n    }\n\n    public class C\n    {\n        public int M(bool c, Part a, Part b)\n        {\n            var p = c ? a : b;\n            return p.Size();\n        }\n    }\n}\n'},
+     [('C.M', 'calls', 'Part.Size')], [('C.M', 'calls', 'Decoy.Size')],
+     source='csharpstandard §12.20 (the second and third operands control the type of the conditional expression); Roslyn Binder_Operators.cs BindConditionalOperator')
+case('csharp', 'simple-assignment-writes-member', '`x.P = v` assigns the property or field the member lookup finds',
+     CS, {'A.cs': 'namespace App\n{\n    public class Box\n    {\n        public int Width { get; set; }\n    }\n\n    public class Decoy\n    {\n        public int Width { get; set; }\n    }\n\n    public class C\n    {\n        public void M(Box b)\n        {\n            b.Width = 3;\n            b.Width += 1;\n        }\n    }\n}\n'},
+     [('C.M', 'writes', 'Box.Width')], [('C.M', 'writes', 'Decoy.Width')],
+     source='csharpstandard §12.23.2 / §12.23.5 (the property or indexer element given by the left operand); Roslyn Binder_Operators.cs BindAssignment')
+case('csharp', 'compound-assignment-uses-operator', '`a += b` is `a = a + b`: it calls the user-defined operator +',
+     CS, {'A.cs': 'namespace App\n{\n    public class Vec\n    {\n        public static Vec operator +(Vec a, Vec b) { return a; }\n    }\n\n    public class Other\n    {\n        public static Other operator +(Other a, Other b) { return a; }\n    }\n\n    public class C\n    {\n        public Vec M(Vec a, Vec b)\n        {\n            a += b;\n            return a;\n        }\n    }\n}\n'},
+     [('C.M', 'calls', 'Vec.operator+')], [('C.M', 'calls', 'Other.operator+')],
+     source='csharpstandard §12.23.5 (x op= y is processed by applying binary operator overload resolution as if written x op y); Roslyn Binder_Operators.cs BindCompoundAssignment')
+case('csharp', 'event-assignment', '`e += h` adds to the event the lookup finds and `h` is the method its group names',
+     CS, {'A.cs': 'using System;\n\nnamespace App\n{\n    public class Button\n    {\n        public event Action Click;\n    }\n\n    public class Decoy\n    {\n        public event Action Click;\n    }\n\n    public class C\n    {\n        public void OnClick() { }\n\n        public void M(Button b)\n        {\n            b.Click += OnClick;\n        }\n    }\n}\n'},
+     [('C.M', 'references', 'C.OnClick')], [('C.M', 'references', 'Decoy')],
+     source='csharpstandard §12.23.6 (event assignment: += with an event access as the left operand); Roslyn Binder_Operators.cs BindEventAssignment')
+case('csharp', 'deconstruction-calls-deconstruct', "a deconstructing assignment calls the Deconstruct method of the right side's type",
+     CS, {'A.cs': 'namespace App\n{\n    public class Point\n    {\n        public void Deconstruct(out int x, out int y) { x = 0; y = 0; }\n    }\n\n    public class Other\n    {\n        public void Deconstruct(out int x, out int y) { x = 1; y = 1; }\n    }\n\n    public class C\n    {\n        public int M(Point p)\n        {\n            var (a, b) = p;\n            return a + b;\n        }\n    }\n}\n'},
+     [('C.M', 'calls', 'Point.Deconstruct')], [('C.M', 'calls', 'Other.Deconstruct')],
+     source='csharpstandard §12.7 / §12.23.3 (the right operand is deconstructed); Roslyn Binder_Deconstruct.cs MakeDeconstructInvocationExpression')
+case('csharp', 'deconstruct-overload-by-count', 'the Deconstruct overload is the one with as many out parameters as the left side has variables',
+     CS, {'A.cs': 'namespace App\n{\n    public class Point\n    {\n        public void Deconstruct(out int x, out int y) { x = 0; y = 0; }\n\n        public void Deconstruct(out int x, out int y, out int z) { x = 0; y = 0; z = 0; }\n    }\n\n    public class C\n    {\n        public int M(Point p)\n        {\n            var (a, b, c) = p;\n            return a + b + c;\n        }\n    }\n}\n'},
+     [('C.M', 'calls', 'A.cs:App.Point.Deconstruct@7')], [('C.M', 'calls', 'A.cs:App.Point.Deconstruct@5')],
+     source='csharpstandard §12.23.3.1 (it is a compile-time error if m != n); Roslyn Binder_Deconstruct.cs MakeDeconstructInvocationExpression')
+case('csharp', 'deconstruct-extension', 'a type with no Deconstruct member is deconstructed by an extension method',
+     CS, {'A.cs': 'namespace App\n{\n    public class Point\n    {\n    }\n\n    public static class PointExtensions\n    {\n        public static void Deconstruct(this Point p, out int x, out int y) { x = 0; y = 0; }\n    }\n\n    public class C\n    {\n        public int M(Point p)\n        {\n            var (a, b) = p;\n            return a + b;\n        }\n    }\n}\n'},
+     [('C.M', 'calls', 'PointExtensions.Deconstruct')], [('C.M', 'calls', 'Point.Deconstruct')],
+     source='csharpstandard §12.7 (deconstruction of a value of a type with an instance or extension Deconstruct); Roslyn Binder_Deconstruct.cs MakeDeconstructInvocationExpression')
+case('csharp', 'with-expression-members', 'a member named in a `with` initializer is a member of the type of the copied value, and the result has that type',
+     CS, {'A.cs': 'namespace App\n{\n    public record Person\n    {\n        public int Age { get; init; }\n\n        public int Years() { return Age; }\n    }\n\n    public record Decoy\n    {\n        public int Age { get; init; }\n\n        public int Years() { return 0; }\n    }\n\n    public class C\n    {\n        public int M(Person p)\n        {\n            return (p with { Age = 3 }).Years();\n        }\n    }\n}\n'},
+     [('C.M', 'writes', 'Person.Age'), ('C.M', 'calls', 'Person.Years')], [('C.M', 'writes', 'Decoy.Age'), ('C.M', 'calls', 'Decoy.Years')],
+     source="Roslyn Binder_WithExpression.cs BindWithExpression (the initializer is bound as an object initializer of the receiver's type; the result has the receiver's type)", since='9')
+case('csharp', 'lambda-parameter-shadows-enclosing-local', 'a lambda parameter may shadow a local of the enclosing method: inside the lambda the name is the parameter, typed as written',
+     CS, {'A.cs': 'using System;\nnamespace App\n{\n    public class Foo { public void Run() { } }\n    public class Other { public void Run() { } }\n    public class U\n    {\n        public void Go()\n        {\n            Other n = new Other();\n            Action<Foo> a = (Foo n) => n.Run();\n        }\n    }\n}\n'},
+     [('U.Go', 'calls', 'Foo.Run')], [('U.Go', 'calls', 'Other.Run')],
+     source='csharpstandard §12.8.4 and §7.7.1 (name hiding in nested functions, C# 8); Roslyn Binder.BindIdentifier / WithLambdaParametersBinder', since='8')
+case('csharp', 'qualified-alias-member-access', "alias::Type.Member: the alias names a namespace, so Type is that namespace's, not another namespace's type of the same name",
+     CS, {'Lib.cs': 'namespace App.Lib { public static class Util { public static void F() { } } }\n', 'Other.cs': 'namespace App.Other { public static class Util { public static void F() { } } }\n', 'U.cs': 'namespace App\n{\n    using L = App.Lib;\n    public class U { public void Go() { L::Util.F(); } }\n}\n'},
+     [('U.Go', 'calls', 'Lib.cs:Util.F')], [('U.Go', 'calls', 'Other.cs:Util.F')],
+     source='csharpstandard §12.8.7.1 (qualified_alias_member) and §14.8; Roslyn BindMemberAccess / BindAliasQualifier')
+case('csharp', 'await-extension-get-awaiter', 'await of a value whose GetAwaiter is an extension method: the call is a use of the extension and the result has the type GetResult returns',
+     CS, {'A.cs': 'using System;\nusing System.Runtime.CompilerServices;\nnamespace App\n{\n    public class Num { public void Show() { } }\n    public class Other { public void Show() { } }\n    public class Waiter : INotifyCompletion\n    {\n        public bool IsCompleted { get { return true; } }\n        public Num GetResult() { return new Num(); }\n        public void OnCompleted(Action a) { }\n    }\n    public static class Ext { public static Waiter GetAwaiter(this int n) { return new Waiter(); } }\n    public class U\n    {\n        public async void Go() { var r = await 3; r.Show(); }\n    }\n}\n'},
+     [('U.Go', 'calls', 'Ext.GetAwaiter'), ('U.Go', 'calls', 'Num.Show')], [('U.Go', 'calls', 'Other.Show')],
+     source='csharpstandard §12.9.9.2 (GetAwaiter instance or extension method); Roslyn Binder_Await.cs BindAwait / GetAwaitableExpressionInfo')
+case('csharp', 'cast-calls-explicit-conversion', 'a cast (T)s with a user-defined explicit conversion operator in T calls that operator, not that of another type',
+     CS, {'A.cs': 'namespace App\n{\n    public class Src { }\n    public class Dst { public static explicit operator Dst(Src s) { return new Dst(); } }\n    public class Dst2 { public static explicit operator Dst2(Src s) { return new Dst2(); } }\n    public class U\n    {\n        public Dst Go(Src s) { return (Dst)s; }\n    }\n}\n'},
+     [('U.Go', 'calls', 'Dst.operator Dst')], [('U.Go', 'calls', 'Dst2.operator Dst2')],
+     source='csharpstandard §12.9.8 and §10.5.5 (user-defined explicit conversions); Roslyn BindCast / Conversions.ClassifyConversionFromExpression (UserDefined)')
+case('csharp', 'lifted-user-operator', "a + b on Money? operands calls Money's operator+ (lifted), not another struct's",
+     CS, {'A.cs': 'namespace App\n{\n    public struct Money { public static Money operator +(Money a, Money b) { return a; } }\n    public struct Other { public static Other operator +(Other a, Other b) { return a; } }\n    public class U\n    {\n        public Money? Go(Money? a, Money? b) { return a + b; }\n    }\n}\n'},
+     [('U.Go', 'calls', 'Money.operator+')], [('U.Go', 'calls', 'Other.operator+')],
+     source='csharpstandard §12.4.8 / §12.12.5 (lifted operators); Roslyn Binder_Operators.cs BindSimpleBinaryOperator / OperatorOverloadResolution (lifted)')
+case('csharp', 'object-initializer-indexer', 'an indexer initializer `new Bag { ["x"] = 1 }` names the indexer of the created type',
+     CS, {'A.cs': 'namespace App {\n  public class Bag { public int this[string k] { get { return 0; } set { } } }\n  public class Other { public int this[string k] { get { return 0; } set { } } }\n  public class Use { public Bag Make() { return new Bag { ["x"] = 1 }; } }\n}\n'},
+     [('Use.Make', 'references', 'Bag.this[]')], [('Use.Make', 'references', 'Other.this[]')],
+     source='csharpstandard §12.8.17 (object initializers)')
+case('csharp', 'operator-of-base-class', "an operator is found in the base class of the operand's type",
+     CS, {'A.cs': 'namespace App {\n  public class B { public static B operator +(B x, B y) { return x; } }\n  public class D : B { }\n  public class Use { public void Go(D a, D b) { var c = a + b; } }\n}\n'},
+     [('Use.Go', 'calls', 'B.operator+')], [('Use.Go', 'calls', 'D.D')],
+     source='csharpstandard §12.12.5 / Binder_Operators.cs GetUserDefinedOperators')
+case('csharp', 'conditional-logical-operator', '`a && b` on a type with operator true/false and & calls operator false and operator &, not operator |',
+     CS, {'A.cs': 'namespace App {\n  public class F {\n    public static F operator &(F x, F y) { return x; }\n    public static F operator |(F x, F y) { return y; }\n    public static bool operator true(F x) { return true; }\n    public static bool operator false(F x) { return false; }\n  }\n  public class Use { public void Go(F a, F b) { var c = a && b; } }\n}\n'},
+     [('Use.Go', 'calls', 'F.operator&')], [('Use.Go', 'calls', 'F.operator|')],
+     source='csharpstandard §12.14.? user-defined conditional logical operators; Binder_Operators.cs BindUserDefinedConditionalLogicalOperator')
+case('csharp', 'deconstruction-declaration', '`var (a, b) = p;` calls Deconstruct of the type of p',
+     CS, {'A.cs': 'namespace App {\n  public class P { public int X; public int Y;\n    public void Deconstruct(out int x, out int y) { x = X; y = Y; }\n  }\n  public class Q { public void Deconstruct(out int x, out int y) { x = 0; y = 0; } }\n  public class Use { public void Go(P p) { var (a, b) = p; } }\n}\n'},
+     [('Use.Go', 'calls', 'P.Deconstruct')], [('Use.Go', 'calls', 'Q.Deconstruct')],
+     source='Binder_Deconstruct.cs')
+case('csharp', 'cs-operator-true-condition', 'if (f) with a struct declaring operator true calls it',
+     CS, {'A.cs': 'namespace App {\n  public struct Flag { public static bool operator true(Flag f) => true; public static bool operator false(Flag f) => false; }\n  public class Decoy { public static bool Other(Flag f) => false; }\n  public class Use { public int Run(Flag f) { if (f) { return 1; } return 0; } }\n}\n'},
+     [('Use.Run', 'calls', 'Flag.operator true')], [('Use.Run', 'calls', 'Decoy.Other')],
+     source='csharpstandard §12.20 / §12.24 (operator true); Binder_Operators BindConditionalOperator')
+case('csharp', 'cs-operator-not-equals', 'a != b calls operator != of the operand type',
+     CS, {'A.cs': 'namespace App {\n  public class V { public static bool operator ==(V a, V b) => true; public static bool operator !=(V a, V b) => false;\n    public override bool Equals(object o) => true; public override int GetHashCode() => 0; }\n  public class Use { public bool Run(V a, V b) { return a != b; } }\n}\n'},
+     [('Use.Run', 'calls', 'V.operator !=')], [('Use.Run', 'calls', 'V.operator ==')],
+     source='csharpstandard §12.12.8; Binder_Operators BindBinaryOperator')
+case('csharp', 'cs-operator-shift', 'b << 2 calls operator << not >>',
+     CS, {'A.cs': 'namespace App {\n  public struct B { public static B operator <<(B a, int n) => a; public static B operator >>(B a, int n) => a; }\n  public class Use { public B Run(B b) { return b << 2; } }\n}\n'},
+     [('Use.Run', 'calls', 'B.operator <<')], [('Use.Run', 'calls', 'B.operator >>')],
+     source='csharpstandard §12.11 shift operators; Binder_Operators')
+case('csharp', 'cs-checked-operator', 'checked(a + b) calls operator checked +, unchecked(a + b) the plain operator +',
+     CS, {'A.cs': 'namespace App {\n  public struct M { public static M operator +(M a, M b) => a; public static M operator checked +(M a, M b) => a; }\n  public class Use { public M Plain(M a, M b) { return unchecked(a + b); } public M Chk(M a, M b) { return checked(a + b); } }\n}\n'},
+     [('Use.Plain', 'calls', 'M.operator +'), ('Use.Chk', 'calls', 'M.operator checked +')], [('Use.Chk', 'calls', 'M.operator +'), ('Use.Plain', 'calls', 'M.operator checked +')],
+     source='csharpstandard §12.8.20 / §12.12; Binder_Operators (checked operators)', since='11')
+case('csharp', 'cs-static-abstract-operator-typeparam', 'a + b on T : IAdd<T> calls IAdd.operator +, not the implementation',
+     CS, {'A.cs': 'namespace App {\n  public interface IAdd<T> where T : IAdd<T> { static abstract T operator +(T a, T b); }\n  public struct N : IAdd<N> { public static N operator +(N a, N b) => a; }\n  public class Use { public T Sum<T>(T a, T b) where T : IAdd<T> { return a + b; } }\n}\n'},
+     [('Use.Sum', 'calls', 'IAdd.operator +')], [('Use.Sum', 'calls', 'N.operator +')],
+     source='csharpstandard §12.12.3; Binder_Operators (static abstract constraint lookup)', since='11')
+case('csharp', 'cs-null-conditional-nullable-struct', 's?.Value() / s?.P with S? s are members of S',
+     CS, {'A.cs': 'namespace App {\n  public struct S { public int Value() => 1; public int P => 2; }\n  public class Decoy { public int Value() => 3; public int P => 4; }\n  public class Use { public int? Run(S? s) { return s?.Value(); } public int? Run2(S? s) { return s?.P; } }\n}\n'},
+     [('Use.Run', 'calls', 'S.Value'), ('Use.Run2', 'reads', 'S.P')], [('Use.Run', 'calls', 'Decoy.Value'), ('Use.Run2', 'reads', 'Decoy.P')],
+     source='csharpstandard §12.8.8; Binder_Expressions BindConditionalAccessExpression')
+case('csharp', 'cs-implicit-index-range-support', 'b[^1] reads Bag.Count and the int indexer; b[1..] calls Bag.Slice',
+     CS, {'A.cs': 'namespace App {\n  public class Bag { public int Count => 3; public int this[int i] => i; public Bag Slice(int s, int l) => this; }\n  public class Decoy { public int Count => 1; public Decoy Slice(int s, int l) => null; }\n  public class Use { public int Run(Bag b) { return b[^1]; } public Bag Run2(Bag b) { return b[1..]; } }\n}\n'},
+     [('Use.Run', 'reads', 'Bag.Count'), ('Use.Run2', 'calls', 'Bag.Slice')], [('Use.Run', 'reads', 'Decoy.Count'), ('Use.Run2', 'calls', 'Decoy.Slice')],
+     source='csharpstandard §12.8.12 / ranges (implicit index support); Binder_Expressions BindImplicitIndexerAccess')
+case('csharp', 'cs-property-pattern-member', 'p switch { { X: 0 } => ... } reads Pt.X',
+     CS, {'A.cs': 'namespace App {\n  public class Pt { public int X { get; set; } public int Y { get; set; } }\n  public class Decoy { public int X { get; set; } }\n  public class Use { public int Run(Pt p) { return p switch { { X: 0 } => 1, _ => 2 }; } }\n}\n'},
+     [('Use.Run', 'reads', 'Pt.X')], [('Use.Run', 'reads', 'Decoy.X'), ('Use.Run', 'reads', 'Pt.Y')],
+     source='csharpstandard §11.2.5 property pattern, used in §12.11; Binder_Patterns via Binder_Expressions')
+case('csharp', 'cs-foreach-deconstruct', "the deconstruction variable of foreach calls the element type's Deconstruct",
+     CS, {'A.cs': 'using System.Collections.Generic;\nnamespace App {\n  public class Pair { public void Deconstruct(out int a, out int b) { a = 1; b = 2; } }\n  public class Decoy { public void Deconstruct(out int a, out int b) { a = 1; b = 2; } }\n  public class Use { public void Run(List<Pair> xs) { foreach (var (a, b) in xs) { } } }\n}\n'},
+     [('Use.Run', 'calls', 'Pair.Deconstruct')], [('Use.Run', 'calls', 'Decoy.Deconstruct')],
+     source='Binder_Deconstruct.cs BindDeconstruction (foreach variable)')
+case('csharp', 'operator-use-is-a-call', "`a + b` with a user-defined operator is a call of that operator declaration of the operand's type, not another type's",
+     CS, {'A.cs': 'using System;using System.Collections.Generic;using System.Linq;\nnamespace App\n{\n public struct Money { public int V; public static Money operator +(Money a, Money b) { return a; } }\n public struct Other { public static Other operator +(Other a, Other b) { return a; } }\n public class Use\n {\n     public Money Run(Money a, Money b) { return a + b; }\n     public Other Run2(Other a, Other b) { return a + b; }\n }\n}\n'},
+     [('Use.Run', 'calls', 'Money.operator+'), ('Use.Run2', 'calls', 'Other.operator+')], [('Use.Run', 'calls', 'Other.operator+'), ('Use.Run2', 'calls', 'Money.operator+')],
+     source='csharpstandard expressions.md §12.4.3, §12.4.5; Roslyn Binder_Operators.cs')
+case('csharp', 'operator-compound-assignment', "`a += b` is an overload use of operator `+` of a's type",
+     CS, {'A.cs': 'using System;using System.Collections.Generic;using System.Linq;\nnamespace App\n{\n public struct Money { public int V; public static Money operator +(Money a, Money b) { return a; } }\n public struct Other { public static Other operator +(Other a, Other b) { return a; } }\n public class Use\n {\n     public void Run(Money a, Money b) { a += b; }\n }\n}\n'},
+     [('Use.Run', 'calls', 'Money.operator+')], [('Use.Run', 'calls', 'Other.operator+')],
+     source='csharpstandard expressions.md §12.4.3 (an overload of operator * is also an overload of operator *=)')
+case('csharp', 'operator-unary', "`-x` is a call of the unary operator of x's type",
+     CS, {'A.cs': 'using System;using System.Collections.Generic;using System.Linq;\nnamespace App\n{\n public struct Temp { public int V; public static Temp operator -(Temp a) { return a; } }\n public struct Other { public static Other operator -(Other a) { return a; } }\n public class Use\n {\n     public Temp Run(Temp a) { return -a; }\n }\n}\n'},
+     [('Use.Run', 'calls', 'Temp.operator-')], [('Use.Run', 'calls', 'Other.operator-')],
+     source='csharpstandard expressions.md §12.4.4 (candidates provided by X)')
+case('csharp', 'operator-from-the-second-operand', 'a binary operator is also looked for in the type of the right operand',
+     CS, {'A.cs': 'using System;using System.Collections.Generic;using System.Linq;\nnamespace App\n{\n public struct Money { public int V; public static Money operator +(int n, Money m) { return m; } }\n public struct Other { public static Other operator +(int n, Other m) { return m; } }\n public class Use\n {\n     public Money Run(Money m) { return 1 + m; }\n }\n}\n'},
+     [('Use.Run', 'calls', 'Money.operator+')], [('Use.Run', 'calls', 'Other.operator+')],
+     source='csharpstandard expressions.md §12.4.5 (the union of the candidate operators provided by X and by Y)')
+case('csharp', 'operator-of-a-base-class', 'an operator declared in a base class is a candidate for the derived type',
+     CS, {'A.cs': 'using System;using System.Collections.Generic;using System.Linq;\nnamespace App\n{\n public class Base { public static Base operator +(Base a, Base b) { return a; } }\n public class Derived : Base { }\n public class Other { public static Other operator +(Other a, Other b) { return a; } }\n public class Use\n {\n     public Base Run(Derived a, Derived b) { return a + b; }\n }\n}\n'},
+     [('Use.Run', 'calls', 'Base.operator+')], [('Use.Run', 'calls', 'Other.operator+')],
+     source='csharpstandard expressions.md §12.4.6 (otherwise the candidates provided by the direct base class of T0)')
+case('csharp', 'operator-of-the-derived-type-first', 'if an operator of T is applicable, those of its base classes are not candidates',
+     CS, {'A.cs': 'using System;using System.Collections.Generic;using System.Linq;\nnamespace App\n{\n public class Base { public static Base operator +(Base a, Base b) { return a; } }\n public class Derived : Base { public static Derived operator +(Derived a, Derived b) { return a; } }\n public class Use\n {\n     public Derived Run(Derived a, Derived b) { return a + b; }\n     public Base Run2(Base a, Derived b) { return a + b; }\n }\n}\n'},
+     [('Use.Run', 'calls', 'Derived.operator+'), ('Use.Run2', 'calls', 'Base.operator+')], [('Use.Run', 'calls', 'Base.operator+'), ('Use.Run2', 'calls', 'Derived.operator+')],
+     source='csharpstandard expressions.md §12.4.6 (if at least one operator in T0 is applicable, the candidates are those of T0)')
+case('csharp', 'operator-equality', "`a == b` and `a != b` are calls of the type's own `==` and `!=`",
+     CS, {'A.cs': 'using System;using System.Collections.Generic;using System.Linq;\nnamespace App\n{\n public struct Money { public int V; public static bool operator ==(Money a, Money b) { return true; } public static bool operator !=(Money a, Money b) { return false; } public override bool Equals(object o) { return true; } public override int GetHashCode() { return 0; } }\n public struct Other { public static bool operator ==(Other a, Other b) { return true; } public static bool operator !=(Other a, Other b) { return false; } public override bool Equals(object o) { return true; } public override int GetHashCode() { return 0; } }\n public class Use\n {\n     public bool Run(Money a, Money b) { return a == b; }\n     public bool Run2(Money a, Money b) { return a != b; }\n }\n}\n'},
+     [('Use.Run', 'calls', 'Money.operator=='), ('Use.Run2', 'calls', 'Money.operator!=')], [('Use.Run', 'calls', 'Other.operator=='), ('Use.Run2', 'calls', 'Other.operator!='), ('Use.Run', 'calls', 'Money.operator!=')],
+     source='csharpstandard expressions.md §12.4.3 (overloadable binary operators), §12.4.5')
+case('csharp', 'conversion-operator-cast', 'a cast `(T)x` is a use of the user-defined conversion operator that converts to T',
+     CS, {'A.cs': 'using System;using System.Collections.Generic;using System.Linq;\nnamespace App\n{\n public struct Feet { public int V; }\n public struct Meters { public int V; public static explicit operator Meters(Feet f) { return new Meters(); } }\n public struct Yards { public static explicit operator Yards(Feet f) { return new Yards(); } }\n public class Use\n {\n     public Meters Run(Feet f) { return (Meters)f; }\n }\n}\n'},
+     [('Use.Run', 'calls', 'Meters.operator Meters')], [('Use.Run', 'calls', 'Yards.operator Yards')],
+     source='csharpstandard expressions.md §12.4.3 (cast operations are overloaded by user-defined conversions), conversions.md §10.5')
+case('csharp', 'derived-applicable-method-hides-base', "a method of the most derived type that is applicable removes the base's methods from the candidates, even when a base method is the better match",
+     CS, {'A.cs': 'using System;using System.Collections.Generic;using System.Linq;\nnamespace App\n{\n public class Base { public int G(int n) { return 1; } public int F(object o) { return 1; } }\n public class Derived : Base { public int G(object o) { return 2; } public int F(int n) { return 2; } }\n public class Use\n {\n     public int Run(Derived d) { return d.G(1); }\n     public int Run2(Derived d) { return ((Base)d).G(1); }\n     public int Run3(Derived d) { return d.F("s"); }\n     public int Run4(Derived d) { return d.F(1); }\n }\n}\n'},
+     [('Use.Run', 'calls', 'Derived.G'), ('Use.Run2', 'calls', 'Base.G'), ('Use.Run3', 'calls', 'Base.F'), ('Use.Run4', 'calls', 'Derived.F')], [('Use.Run', 'calls', 'Base.G'), ('Use.Run2', 'calls', 'Derived.G'), ('Use.Run3', 'calls', 'Derived.F'), ('Use.Run4', 'calls', 'Base.F')],
+     source='csharpstandard expressions.md §12.8.10.2 (the set of candidate methods is reduced to contain only methods from the most derived types); Roslyn OverloadResolution.cs RemoveLessDerivedMembers')
+case('csharp', 'override-called-through-its-type', "a call through a receiver of the derived type is the override, and its result has the override's (covariant) return type",
+     CS, {'A.cs': 'using System;using System.Collections.Generic;using System.Linq;\nnamespace App\n{\n public class Item { public void Go() { } }\n public class Base { public virtual Base Make() { return this; } public void Go() { } }\n public class Derived : Base { public override Derived Make() { return this; } public void Show() { } }\n public class Use\n {\n     public void Run(Derived d) { d.Make().Show(); }\n     public void Run2(Base b) { b.Make().Go(); }\n }\n}\n'},
+     [('Use.Run', 'calls', 'Derived.Make'), ('Use.Run', 'calls', 'Derived.Show'), ('Use.Run2', 'calls', 'Base.Make'), ('Use.Run2', 'calls', 'Base.Go')], [('Use.Run', 'calls', 'Base.Make'), ('Use.Run2', 'calls', 'Derived.Make')],
+     source='csharpstandard expressions.md §12.8.10.1 (the associated type is picked from the first declaration or override found starting with T); Roslyn OverloadResolution.cs RemoveLessDerivedMembers (member lookup keeps the overrides, so that the override is identified)', since='9')
+case('csharp', 'extension-when-the-instance-method-is-inapplicable', 'an instance method of the name that does not take the arguments does not stop the search: the extension that does is called',
+     CS, {'A.cs': 'using System;using System.Collections.Generic;using System.Linq;\nnamespace App\n{\n public class Repo { public int Find(int id) { return id; } }\n public static class RepoExt { public static int Find(this Repo r, string name) { return 0; } }\n public class Use\n {\n     public int Run(Repo r) { return r.Find("a"); }\n     public int Run2(Repo r) { return r.Find(1); }\n }\n}\n'},
+     [('Use.Run', 'calls', 'RepoExt.Find'), ('Use.Run2', 'calls', 'Repo.Find')], [('Use.Run', 'calls', 'Repo.Find'), ('Use.Run2', 'calls', 'RepoExt.Find')],
+     source='csharpstandard expressions.md §12.8.10.3 (if the normal processing of the invocation finds no applicable methods; example b.F("hello")); Roslyn Binder_Invocation.cs BindMethodGroupInvocation')
+case('csharp', 'extension-better-this-type', 'of the extensions of one namespace, overload resolution chooses by the type of the first parameter: the one written for the more derived type',
+     CS, {'A.cs': 'using System;using System.Collections.Generic;using System.Linq;\nnamespace App\n{\n public class Base { }\n public class Derived : Base { }\n public static class BaseExt { public static int Size(this Base b) { return 1; } }\n public static class DerivedExt { public static int Size(this Derived d) { return 2; } }\n public class Use\n {\n     public int Run(Derived d) { return d.Size(); }\n     public int Run2(Base b) { return b.Size(); }\n }\n}\n'},
+     [('Use.Run', 'calls', 'DerivedExt.Size'), ('Use.Run2', 'calls', 'BaseExt.Size')], [('Use.Run', 'calls', 'BaseExt.Size'), ('Use.Run2', 'calls', 'DerivedExt.Size')],
+     source='csharpstandard expressions.md §12.8.10.3 (overload resolution is applied to the candidate set), §12.6.4.5')
+case('csharp', 'extension-declared-before-imported', "an extension declared in a namespace comes before one the namespace imports with `using`, which comes before the enclosing namespace's",
+     CS, {'A.cs': 'namespace N1\n{\n    public static class D { public static int F(this int i) { return 1; } public static int G(this int i) { return 1; } }\n}\n\npublic static class C { public static int F(this int i) { return 0; } public static int G(this int i) { return 0; } public static int H(this int i) { return 0; } }\n\nnamespace N2\n{\n    using N1;\n\n    public static class E { public static int F(this int i) { return 2; } }\n\n    public class Use\n    {\n        public int Run() { return 1.F(); }\n        public int Run2() { return 2.G(); }\n        public int Run3() { return 3.H(); }\n    }\n}\n'},
+     [('Use.Run', 'calls', 'E.F'), ('Use.Run2', 'calls', 'D.G'), ('Use.Run3', 'calls', 'C.H')], [('Use.Run', 'calls', 'D.F'), ('Use.Run', 'calls', 'C.F'), ('Use.Run2', 'calls', 'C.G')],
+     source='csharpstandard expressions.md §12.8.10.3 (the example with C, D and E)')
+case('csharp', 'extension-receiver-conversion', 'an extension is eligible only if an identity, reference or boxing conversion leads from the receiver to its first parameter: an `int` receiver does not reach a `long` one',
+     CS, {'A.cs': 'using System;using System.Collections.Generic;using System.Linq;\nnamespace App\n{\n public static class Ext\n {\n     public static int Twice(this long n) { return 1; }\n     public static int Twice(this object o) { return 2; }\n }\n public static class Other { public static int Twice(this long n) { return 3; } }\n public class Use\n {\n     public int Run(int n) { return n.Twice(); }\n }\n}\n'},
+     [('Use.Run', 'calls', 'A.cs:App.Ext.Twice@7')], [('Use.Run', 'calls', 'A.cs:App.Ext.Twice@6'), ('Use.Run', 'calls', 'Other.Twice')],
+     source='csharpstandard expressions.md §12.8.10.3 (an implicit identity, reference or boxing conversion exists from expr to the type of the first parameter)')
+case('csharp', 'type-argument-list-picks-the-generic', 'a call written with type arguments takes only generic methods with that many type parameters; one written without them prefers the non-generic',
+     CS, {'A.cs': 'using System;using System.Collections.Generic;using System.Linq;\nnamespace App\n{\n public class Pick\n {\n     public int Take(int n) { return 1; }\n     public int Take<T>(T n) { return 2; }\n     public int Take<T, U>(T n) { return 3; }\n }\n public class Use\n {\n     public int Run(Pick p) { return p.Take(1); }\n     public int Run2(Pick p) { return p.Take<int>(1); }\n     public int Run3(Pick p) { return p.Take<int, string>(1); }\n }\n}\n'},
+     [('Use.Run', 'calls', 'A.cs:App.Pick.Take@6'), ('Use.Run2', 'calls', 'A.cs:App.Pick.Take@7'), ('Use.Run3', 'calls', 'A.cs:App.Pick.Take@8')], [('Use.Run', 'calls', 'A.cs:App.Pick.Take@7'), ('Use.Run2', 'calls', 'A.cs:App.Pick.Take@6'), ('Use.Run3', 'calls', 'A.cs:App.Pick.Take@7'), ('Use.Run2', 'calls', 'A.cs:App.Pick.Take@8')],
+     source='csharpstandard expressions.md §12.8.10.2 (a non-generic F is a candidate only when M has no type argument list; a generic F with a list needs as many type parameters)')
+case('csharp', 'inferred-generic-result', "the type arguments of a generic method are inferred from the arguments: the result is the argument's type",
+     CS, {'A.cs': 'using System;using System.Collections.Generic;using System.Linq;\nnamespace App\n{\n public class Item { public int Go() { return 1; } }\n public class Other { public int Go() { return 2; } }\n public class Use\n {\n     static T Id<T>(T x) { return x; }\n     public int Run() { return Id(new Item()).Go(); }\n }\n}\n'},
+     [('Use.Run', 'calls', 'Use.Id'), ('Use.Run', 'calls', 'Item.Go')], [('Use.Run', 'calls', 'Other.Go')],
+     source='csharpstandard expressions.md §12.6.3 (type inference), §12.8.10.2')
+case('csharp', 'receiver-decides-static-or-instance', 'a call through a value does not consider static overloads and one through a type does not consider instance ones, even when they fit better',
+     CS, {'A.cs': 'using System;using System.Collections.Generic;using System.Linq;\nnamespace App\n{\n public class Log\n {\n     public static int Write(int n) { return 1; }\n     public int Write(long n) { return 2; }\n }\n public class Use\n {\n     public int Run(Log l) { return l.Write(1); }\n     public int Run2() { return Log.Write(1); }\n }\n}\n'},
+     [('Use.Run', 'calls', 'A.cs:App.Log.Write@7'), ('Use.Run2', 'calls', 'A.cs:App.Log.Write@6')], [('Use.Run', 'calls', 'A.cs:App.Log.Write@6')],
+     source='csharpstandard expressions.md §12.6.4.2 (a static method is only applicable if the method group results from a simple_name or a member_access through a type; an instance method ... through a variable or value); Roslyn OverloadResolution.cs RemoveStaticInstanceMismatches')
+case('csharp', 'generic-constraint-excludes-candidate', 'a generic method whose inferred type arguments do not satisfy their constraints is not applicable',
+     CS, {'A.cs': 'using System;using System.Collections.Generic;using System.Linq;\nnamespace App\n{\n public class Pick\n {\n     public int Take<T>(T x) where T : struct { return 1; }\n     public int Take(object x) { return 2; }\n }\n public class Use\n {\n     public int Run(Pick p) { return p.Take("s"); }\n     public int Run2(Pick p) { return p.Take(1); }\n }\n}\n'},
+     [('Use.Run', 'calls', 'A.cs:App.Pick.Take@7'), ('Use.Run2', 'calls', 'A.cs:App.Pick.Take@6')], [('Use.Run', 'calls', 'A.cs:App.Pick.Take@6')],
+     source='csharpstandard expressions.md §12.6.4.2 (a generic method whose type arguments do not all satisfy their constraints is not applicable); Roslyn OverloadResolution.cs RemoveConstraintViolations')
+case('csharp', 'overload-value-over-in', 'a value argument takes the value parameter where an `in` one fits too; an `in` argument only the `in` parameter',
+     CS, {'A.cs': 'using System;using System.Collections.Generic;using System.Linq;\nnamespace App\n{\n public class M\n {\n     public int M1(int p) { return 1; }\n     public int M1(in int p) { return 2; }\n }\n public class Use\n {\n     public int Run(M m, int i) { return m.M1(i); }\n     public int Run2(M m, int i) { return m.M1(in i); }\n }\n}\n'},
+     [('Use.Run', 'calls', 'A.cs:App.M.M1@6'), ('Use.Run2', 'calls', 'A.cs:App.M.M1@7')], [('Use.Run', 'calls', 'A.cs:App.M.M1@7'), ('Use.Run2', 'calls', 'A.cs:App.M.M1@6')],
+     source='csharpstandard expressions.md §12.6.4.2, §12.6.4.4 (the method with the parameter-passing mode of value is the better choice)')
+case('csharp', 'overload-params-more-declared-parameters', 'of two `params` candidates applicable only in the expanded form with the same parameter types, the one with more declared parameters (fewer elements in the array) is better',
+     CS, {'A.cs': 'using System;using System.Collections.Generic;using System.Linq;\nnamespace App\n{\n public class Log\n {\n     public int Write(params int[] all) { return 1; }\n     public int Write(int first, params int[] rest) { return 2; }\n }\n public class Use\n {\n     public int Run(Log l) { return l.Write(1, 2); }\n }\n}\n'},
+     [('Use.Run', 'calls', 'A.cs:App.Log.Write@7')], [('Use.Run', 'calls', 'A.cs:App.Log.Write@6')],
+     source='csharpstandard expressions.md §12.6.4.3 (if both methods have params arrays and are applicable only in their expanded forms, the one whose params array has fewer elements is better)')
+case('csharp', 'overload-more-specific-generic', 'of generic candidates with the same parameter types after inference, the one declared with the more specific parameter type is better',
+     CS, {'A.cs': 'using System;using System.Collections.Generic;using System.Linq;\nnamespace App\n{\n public class Pick\n {\n     public int Take<T>(T x) { return 1; }\n     public int Take<T>(List<T> x) { return 2; }\n }\n public class Use\n {\n     public int Run(Pick p, List<int> xs) { return p.Take(xs); }\n }\n}\n'},
+     [('Use.Run', 'calls', 'A.cs:App.Pick.Take@7')], [('Use.Run', 'calls', 'A.cs:App.Pick.Take@6')],
+     source='csharpstandard expressions.md §12.6.4.3 (a type parameter is less specific than a non-type parameter; a constructed type is more specific)')
+case('csharp', 'overload-null-takes-the-more-specific', "a `null` argument picks the parameter whose type converts to the other's",
+     CS, {'A.cs': 'using System;using System.Collections.Generic;using System.Linq;\nnamespace App\n{\n public class Log\n {\n     public int Write(object o) { return 1; }\n     public int Write(string s) { return 2; }\n }\n public class Use\n {\n     public int Run(Log l) { return l.Write(null); }\n }\n}\n'},
+     [('Use.Run', 'calls', 'A.cs:App.Log.Write@7')], [('Use.Run', 'calls', 'A.cs:App.Log.Write@6')],
+     source='csharpstandard expressions.md §12.6.4.7 (better conversion target); Roslyn OverloadResolution.cs BetterConversionTarget')
+case('csharp', 'generic-class-overload-original-signature', 'when substituting the type arguments of a generic class makes two overloads identical, the one declared with the more specific parameter type is chosen',
+     CS, {'A.cs': 'using System;using System.Collections.Generic;using System.Linq;\nnamespace App\n{\n public class G1<U>\n {\n     public int F1(U u) { return 1; }\n     public int F1(int i) { return 2; }\n }\n public class Use\n {\n     public int Run(G1<int> g) { return g.F1(1); }\n }\n}\n'},
+     [('Use.Run', 'calls', 'A.cs:App.G1.F1@7')], [('Use.Run', 'calls', 'A.cs:App.G1.F1@6')],
+     source='csharpstandard expressions.md §12.6.4.8 (overload resolution will pick the most specific of the original signatures)')
+case('csharp', 'indexer-overload', "an element access selects among the indexers of the receiver's type by overload resolution",
+     CS, {'A.cs': 'using System;using System.Collections.Generic;using System.Linq;\nnamespace App\n{\n public class Table\n {\n     public int this[int i] { get { return i; } }\n     public string this[string k] { get { return k; } }\n }\n public class Use\n {\n     public int Run(Table t) { return t[1]; }\n     public string Run2(Table t) { return t["a"]; }\n }\n}\n'},
+     [('Use.Run', 'reads', 'A.cs:App.Table.this[]@6'), ('Use.Run2', 'reads', 'A.cs:App.Table.this[]@7')], [('Use.Run', 'reads', 'A.cs:App.Table.this[]@7'), ('Use.Run2', 'reads', 'A.cs:App.Table.this[]@6')],
+     source='csharpstandard expressions.md §12.6.1 (indexer access: overload resolution selects the best indexer), §12.6.4.1')
+case('csharp', 'delegate-invocation', 'calling a value of a delegate type invokes that delegate type',
+     CS, {'A.cs': 'using System;using System.Collections.Generic;using System.Linq;\nnamespace App\n{\n public delegate int Handler(int n);\n public delegate int Other(int n);\n public class Use\n {\n     public int Run(Handler h) { return h(1); }\n     public int Run2(Other o) { return o(1); }\n }\n}\n'},
+     [('Use.Run', 'calls', 'Handler'), ('Use.Run2', 'calls', 'Other')], [('Use.Run', 'calls', 'Other'), ('Use.Run2', 'calls', 'Handler')],
+     source='csharpstandard expressions.md §12.8.10.4; Roslyn Binder_Invocation.cs BindDelegateInvocation')
+case('csharp', 'nameof-method-in-scope', 'where a method named `nameof` is in scope the call is a call of it, otherwise `nameof(X)` names X',
+     CS, {'A.cs': 'using System;using System.Collections.Generic;using System.Linq;\nnamespace App\n{\n public class Use\n {\n     static int nameof(object o) { return 1; }\n     public int Run(int x) { return nameof(x); }\n }\n public class Item { public int Go() { return 1; } }\n public class Names\n {\n     public string Run() { return nameof(Item.Go); }\n }\n}\n'},
+     [('Use.Run', 'calls', 'Use.nameof'), ('Names.Run', 'references', 'Item.Go')], [('Names.Run', 'calls', 'Use.nameof')],
+     source='Roslyn Binder_Invocation.cs TryBindNameofOperator, InvocableNameofInScope')
+case('csharp', 'deconstruct-method-and-element-types', 'a deconstruction calls the `Deconstruct` method of the type, and each new variable has the type of its out parameter',
+     CS, {'A.cs': 'using System;using System.Collections.Generic;using System.Linq;\nnamespace App\n{\n public class Item { public void Go() { } }\n public class Thing { public void Go() { } }\n public class Pair\n {\n     public void Deconstruct(out Item a, out Thing b) { a = null; b = null; }\n }\n public class Use\n {\n     public void Run(Pair p)\n     {\n         var (a, b) = p;\n         a.Go();\n     }\n     public void Run2(Pair p)\n     {\n         (Item a, Thing b) = p;\n         b.Go();\n     }\n }\n}\n'},
+     [('Use.Run', 'calls', 'Pair.Deconstruct'), ('Use.Run', 'calls', 'Item.Go'), ('Use.Run2', 'calls', 'Pair.Deconstruct'), ('Use.Run2', 'calls', 'Thing.Go')], [('Use.Run', 'calls', 'Thing.Go'), ('Use.Run2', 'calls', 'Item.Go')],
+     source='csharpstandard expressions.md §12.7 (a unique instance or extension method S.Deconstruct with output parameters)')
+case('csharp', 'deconstruct-extension-method', 'a type with no `Deconstruct` method is deconstructed by an extension method of that name',
+     CS, {'A.cs': 'using System;using System.Collections.Generic;using System.Linq;\nnamespace App\n{\n public class Item { public void Go() { } }\n public class Thing { public void Go() { } }\n public class Pair { }\n public static class PairExt\n {\n     public static void Deconstruct(this Pair p, out Item a, out Thing b) { a = null; b = null; }\n }\n public class Use\n {\n     public void Run(Pair p)\n     {\n         var (a, b) = p;\n         b.Go();\n     }\n }\n}\n'},
+     [('Use.Run', 'calls', 'PairExt.Deconstruct'), ('Use.Run', 'calls', 'Thing.Go')], [('Use.Run', 'calls', 'Item.Go')],
+     source='csharpstandard expressions.md §12.7 (unique instance or extension method S.Deconstruct)')
+case('csharp', 'deconstruct-tuple-types', 'a tuple deconstructs into its elements, each with its element type',
+     CS, {'A.cs': 'using System;using System.Collections.Generic;using System.Linq;\nnamespace App\n{\n public class Item { public void Go() { } }\n public class Thing { public void Go() { } }\n public class Use\n {\n     public void Run((Item, Thing) t)\n     {\n         var (a, b) = t;\n         b.Go();\n     }\n }\n}\n'},
+     [('Use.Run', 'calls', 'Thing.Go')], [('Use.Run', 'calls', 'Item.Go')],
+     source='csharpstandard expressions.md §12.7 (a tuple type (T1, ..., Tn) is deconstructed as (E.Item1, ..., E.Itemn))')
+case('csharp', 'null-conditional-chain', 'in `a?.b?.M()` and `a?.F().M()` each member is looked up in the type of the part before it',
+     CS, {'A.cs': 'using System;using System.Collections.Generic;using System.Linq;\nnamespace App\n{\n public class Leaf { public void Go() { } }\n public class Other { public void Go() { } }\n public class Node { public Leaf Child { get { return null; } } public Leaf Find() { return null; } }\n public class Use\n {\n     public void Run(Node n) { n?.Child?.Go(); }\n     public void Run2(Node n) { n?.Find().Go(); }\n }\n}\n'},
+     [('Use.Run', 'reads', 'Node.Child'), ('Use.Run', 'calls', 'Leaf.Go'), ('Use.Run2', 'calls', 'Node.Find'), ('Use.Run2', 'calls', 'Leaf.Go')], [('Use.Run', 'calls', 'Other.Go'), ('Use.Run2', 'calls', 'Other.Go')],
+     source='csharpstandard expressions.md §12.8.11, §12.8.8 (P?A means the same as P.A when P is not null)')
+case('csharp', 'lambda-explicit-parameter-type', 'a parameter of an anonymous function written with its type has that type in the body',
+     CS, {'A.cs': 'using System;using System.Collections.Generic;using System.Linq;\nnamespace App\n{\n public class Item { public void Go() { } }\n public class Other { public void Go() { } }\n public class Use\n {\n     public void Run()\n     {\n         Action<Item> f = (Item i) => i.Go();\n         Action<Item> g = delegate (Item i) { i.Go(); };\n     }\n }\n}\n'},
+     [('Use.Run', 'calls', 'Item.Go')], [('Use.Run', 'calls', 'Other.Go')],
+     source='csharpstandard expressions.md §12.21.2, §12.21.3 (the parameters specified in the signature are available in the body)')
+case('csharp', 'lambda-parameter-hides-member', 'the parameter of an anonymous function hides a field of its name in the body only',
+     CS, {'A.cs': 'using System;using System.Collections.Generic;using System.Linq;\nnamespace App\n{\n public class Item { public void Go() { } }\n public class Other { public void Go() { } }\n public class Use\n {\n     Other x;\n     public void Run()\n     {\n         Action<Item> f = (Item x) => x.Go();\n     }\n     public void Run2()\n     {\n         x.Go();\n     }\n }\n}\n'},
+     [('Use.Run', 'calls', 'Item.Go'), ('Use.Run2', 'calls', 'Other.Go')], [('Use.Run', 'calls', 'Other.Go'), ('Use.Run2', 'calls', 'Item.Go'), ('Use.Run', 'reads', 'Use.x')],
+     source='csharpstandard expressions.md §12.21.2 (the scope of the parameters is the anonymous_function_body), §12.8.4')
+case('csharp', 'lambda-uses-outer-local', 'a name in the body of an anonymous function that is no parameter of it is looked up outward: an outer local hides a field',
+     CS, {'A.cs': 'using System;using System.Collections.Generic;using System.Linq;\nnamespace App\n{\n public class Item { public void Go() { } }\n public class Other { public void Go() { } }\n public class Use\n {\n     Other it;\n     public void Run()\n     {\n         Item it = new Item();\n         Action f = () => it.Go();\n         f();\n     }\n }\n}\n'},
+     [('Use.Run', 'calls', 'Item.Go')], [('Use.Run', 'calls', 'Other.Go'), ('Use.Run', 'reads', 'Use.it')],
+     source='csharpstandard expressions.md §12.21.3 (the body has access to the outer variables), §12.21.6')
+case('csharp', 'lambda-discard-parameters', 'two or more parameters named `_` are discards that name nothing; a single `_` is a parameter',
+     CS, {'A.cs': 'using System;using System.Collections.Generic;using System.Linq;\nnamespace App\n{\n public class Item { public void Go() { } }\n public class Other { public void Go() { } }\n public class Use\n {\n     Other _;\n     public void Run()\n     {\n         Func<Item, Item, int> f = (_, _) => { _ = null; return 1; };\n     }\n     public void Run2()\n     {\n         Action<Item> g = _ => _.Go();\n     }\n     public void Run3()\n     {\n         Func<Item, Item, int> h = (_, _) => { _.Go(); return 1; };\n     }\n }\n}\n'},
+     [('Use.Run2', 'calls', 'Item.Go'), ('Use.Run3', 'calls', 'Other.Go')], [('Use.Run3', 'calls', 'Item.Go'), ('Use.Run2', 'calls', 'Other.Go')],
+     source='Roslyn Binder_Lambda.cs (when there are two or more underscores, they are discards)', since='9')
+case('csharp', 'query-range-variable', 'the range variable of a `from` clause has the element type of the source and hides a field of its name in the whole query',
+     CS, {'A.cs': 'using System;using System.Collections;using System.Collections.Generic;using System.Linq;\nnamespace App\n{\n public class Customer { public bool Active() { return true; } public string Name() { return ""; } public int Id() { return 1; } public string Region() { return ""; } public Dept Dept() { return null; } public List<Order> Orders() { return null; } }\n public class Dept { public string Title() { return ""; } }\n public class Order { public int Total() { return 1; } public int CustId() { return 1; } }\n public class Other { public bool Active() { return true; } public string Name() { return ""; } }\n public class Use\n {\n     Other c;\n     public IEnumerable<string> Run(List<Customer> customers)\n     {\n         return from c in customers where c.Active() orderby c.Name() select c.Name();\n     }\n }\n}\n'},
+     [('Use.Run', 'calls', 'Customer.Active'), ('Use.Run', 'calls', 'Customer.Name')], [('Use.Run', 'calls', 'Other.Active'), ('Use.Run', 'calls', 'Other.Name'), ('Use.Run', 'reads', 'Use.c')],
+     source='csharpstandard expressions.md §12.22.1, §12.22.3.5; Roslyn Binder_Query.cs')
+case('csharp', 'query-explicit-range-type', '`from T x in e` gives the range variable the type T',
+     CS, {'A.cs': 'using System;using System.Collections;using System.Collections.Generic;using System.Linq;\nnamespace App\n{\n public class Customer { public bool Active() { return true; } }\n public class Other { public bool Active() { return true; } }\n public class Use\n {\n     public IEnumerable<Customer> Run(ArrayList customers)\n     {\n         return from Customer c in customers where c.Active() select c;\n     }\n }\n}\n'},
+     [('Use.Run', 'calls', 'Customer.Active')], [('Use.Run', 'calls', 'Other.Active')],
+     source='csharpstandard expressions.md §12.22.3.3 (translated into from x in (e).Cast<T>()); Roslyn Binder_Query.cs')
+case('csharp', 'query-let-and-second-from', 'a `let` variable has the type of its expression, a second `from` ranges over the elements of its expression, and earlier range variables stay in scope',
+     CS, {'A.cs': 'using System;using System.Collections;using System.Collections.Generic;using System.Linq;\nnamespace App\n{\n public class Customer { public int Id() { return 1; } public Dept Dept() { return null; } public List<Order> Orders() { return null; } }\n public class Dept { public string Title() { return ""; } }\n public class Order { public int Total() { return 1; } }\n public class Other { public int Total() { return 1; } public string Title() { return ""; } }\n public class Use\n {\n     public IEnumerable<string> Run(List<Customer> customers)\n     {\n         return from c in customers let d = c.Dept() where c.Id() > 0 select d.Title();\n     }\n     public IEnumerable<int> Run2(List<Customer> customers)\n     {\n         return from c in customers from o in c.Orders() select o.Total();\n     }\n }\n}\n'},
+     [('Use.Run', 'calls', 'Customer.Dept'), ('Use.Run', 'calls', 'Customer.Id'), ('Use.Run', 'calls', 'Dept.Title'), ('Use.Run2', 'calls', 'Customer.Orders'), ('Use.Run2', 'calls', 'Order.Total')], [('Use.Run', 'calls', 'Other.Title'), ('Use.Run2', 'calls', 'Other.Total')],
+     source='csharpstandard expressions.md §12.22.3.5, §12.22.3.8 (transparent identifiers)')
+case('csharp', 'query-join-and-continuation', '`join` ranges over its source and compares keys of the two range variables; a continuation `into g` ranges over the groups',
+     CS, {'A.cs': 'using System;using System.Collections;using System.Collections.Generic;using System.Linq;\nnamespace App\n{\n public class Customer { public int Id() { return 1; } public string Region() { return ""; } public string Name() { return ""; } }\n public class Order { public int CustId() { return 1; } public int Total() { return 1; } }\n public class Other { public int Total() { return 1; } public string Name() { return ""; } }\n public class Use\n {\n     public IEnumerable<int> Run(List<Customer> cs, List<Order> os)\n     {\n         return from c in cs join o in os on c.Id() equals o.CustId() select o.Total();\n     }\n     public IEnumerable<string> Run2(List<Customer> cs)\n     {\n         return from c in cs group c by c.Region() into g select g.First().Name();\n     }\n }\n}\n'},
+     [('Use.Run', 'calls', 'Customer.Id'), ('Use.Run', 'calls', 'Order.CustId'), ('Use.Run', 'calls', 'Order.Total'), ('Use.Run2', 'calls', 'Customer.Region'), ('Use.Run2', 'calls', 'Customer.Name')], [('Use.Run', 'calls', 'Other.Total'), ('Use.Run2', 'calls', 'Other.Name')],
+     source='csharpstandard expressions.md §12.22.3.2, §12.22.3.5')
+case('csharp', 'query-pattern-methods', "a query clause is a call of the source's method of that name (`where` is `Where`, `select` is `Select`), found as any method, an instance one before an extension; its lambdas take their parameter types from it",
+     CS, {'A.cs': 'using System;using System.Collections;using System.Collections.Generic;using System.Linq;\nnamespace App\n{\n public class Item { public bool Ok() { return true; } public int Val() { return 1; } }\n public class Other { public bool Ok() { return true; } public int Val() { return 1; } }\n public class Source\n {\n     public Source Where(Func<Item, bool> f) { return this; }\n     public Source Select(Func<Item, int> f) { return this; }\n }\n public static class SourceExt\n {\n     public static Source Where(this Source s, Func<Item, bool> f) { return s; }\n }\n public class Use\n {\n     public Source Run(Source src)\n     {\n         return from x in src where x.Ok() select x.Val();\n     }\n }\n}\n'},
+     [('Use.Run', 'calls', 'Source.Where'), ('Use.Run', 'calls', 'Source.Select'), ('Use.Run', 'calls', 'Item.Ok'), ('Use.Run', 'calls', 'Item.Val')], [('Use.Run', 'calls', 'SourceExt.Where'), ('Use.Run', 'calls', 'Other.Ok')],
+     source='csharpstandard expressions.md §12.22.3.1, §12.22.4 (the query-expression pattern); Roslyn Binder_Query.cs MakeQueryInvocation')
+case('csharp', 'inaccessible-method-not-candidate', 'a private method of the derived type is not a candidate from outside it; the accessible base method is called',
+     CS, {'A.cs': 'namespace App {\n  public class Base { public void Put(int x) {} }\n  public class Box : Base { private void Put(int x) {} }\n  public class User { public void Run(Box b) { b.Put(1); } }\n}\n'},
+     [('User.Run', 'calls', 'Base.Put')], [('User.Run', 'calls', 'Box.Put')],
+     source='csharpstandard §12.8.10.2; Roslyn OverloadResolution.cs (accessibility in candidate lookup)')
+case('csharp', 'type-parameter-receiver-constraint', 't.Draw() with T : IShape is IShape.Draw',
+     CS, {'A.cs': 'namespace App {\n  public interface IShape { void Draw(); }\n  public class Other { public void Draw() {} }\n  public class User { public void Run<T>(T t) where T : IShape { t.Draw(); } }\n}\n'},
+     [('User.Run', 'calls', 'IShape.Draw')], [('User.Run', 'calls', 'Other.Draw')],
+     source='csharpstandard §12.8.10.2 (member lookup on a type parameter, §12.5)')
+case('csharp', 'static-abstract-operator-via-constraint', "a + b on T : IAdd<T> is a use of IAdd.operator+, not of the implementing class's operator",
+     CS, {'A.cs': 'namespace App {\n  public interface IAdd<T> where T : IAdd<T> { static abstract T operator +(T a, T b); }\n  public class Money : IAdd<Money> { public static Money operator +(Money a, Money b) => a; }\n  public class User { public T Sum<T>(T a, T b) where T : IAdd<T> => a + b; }\n}\n'},
+     [('User.Sum', 'calls', 'IAdd.operator+')], [('User.Sum', 'calls', 'Money.operator+')],
+     source='csharpstandard §12.4.6, §12.4.4', since='11')
+case('csharp', 'out-var-has-parameter-type', '`if (s.TryGet(out var n)) n.Show();` is Num.Show',
+     CS, {'A.cs': 'namespace App {\n  public class Num { public void Show() {} }\n  public class Other { public void Show() {} }\n  public class Src { public bool TryGet(out Num n) { n = null; return true; } }\n  public class User { public void Run(Src s) { if (s.TryGet(out var n)) n.Show(); } }\n}\n'},
+     [('User.Run', 'calls', 'Num.Show')], [('User.Run', 'calls', 'Other.Show')],
+     source='csharpstandard §12.6.2 / §7.7.1; Roslyn Binder_Invocation.cs (out var inference)')
+case('csharp', 'query-trivial-select-omitted', '`from x in s where .. orderby a, b select x` calls Where, OrderBy and ThenBy, and no Select',
+     CS, {'A.cs': 'using System;\nnamespace App {\n  public class Src { public Src Where(Func<int,bool> f) => this; public Src Select(Func<int,int> f) => this; public Src OrderBy(Func<int,int> f) => this; public Src ThenBy(Func<int,int> f) => this; }\n  public class User { public void Run(Src s) { var q = from x in s where x > 0 orderby x, x select x; } }\n}\n'},
+     [('User.Run', 'calls', 'Src.Where'), ('User.Run', 'calls', 'Src.OrderBy'), ('User.Run', 'calls', 'Src.ThenBy')], [('User.Run', 'calls', 'Src.Select')],
+     source='csharpstandard §12.22.2.4; Roslyn Binder_Query.cs (select omitted when identity)')
+case('csharp', 'checked-operator-by-context', 'x + y inside checked(...) is the `operator checked +`, inside unchecked(...) the plain `operator +`',
+     CS, {'A.cs': 'namespace App {\n  public struct Money {\n    public static Money operator +(Money a, Money b) => a;\n    public static Money operator checked +(Money a, Money b) => a;\n  }\n  public class Host {\n    public Money Strict(Money x, Money y) { return checked(x + y); }\n    public Money Loose(Money x, Money y) { return unchecked(x + y); }\n  }\n}\n'},
+     [('Host.Strict', 'calls', 'Money.operatorchecked'), ('Host.Loose', 'calls', 'Money.operator+')], [('Host.Strict', 'calls', 'Money.operator+'), ('Host.Loose', 'calls', 'Money.operatorchecked')],
+     source='Roslyn Binder_Operators.cs / OverloadResolution.cs (checked operator preference); csharpstandard §12.4.3', since='11')
+case('csharp', 'static-abstract-call-on-type-parameter', '`T.Create()` with `where T : IMake<T>` binds to IMake.Create, never to the Create of an implementing class',
+     CS, {'A.cs': 'namespace App {\n  public interface IMake<T> { static abstract T Create(); }\n  public class Widget : IMake<Widget> { public static Widget Create() => new Widget(); }\n  public class Gadget { public static Gadget Create() => new Gadget(); }\n  public class Host {\n    public T Make<T>() where T : IMake<T> { return T.Create(); }\n  }\n}\n'},
+     [('Host.Make', 'calls', 'IMake.Create')], [('Host.Make', 'calls', 'Widget.Create'), ('Host.Make', 'calls', 'Gadget.Create')],
+     source='csharpstandard §12.8.10, §12.8.7 (member access on a type parameter); Roslyn Binder_Invocation.cs', since='11')
+case('csharp', 'lambda-parameter-hides-outer-local', "in `x => x.Hit()` the `x` is the lambda's parameter (type B), not the enclosing method's local `x` (type A)",
+     CS, {'A.cs': 'using System;\nnamespace App {\n  public class A { public void Hit() {} }\n  public class B { public void Hit() {} }\n  public class Host {\n    public void Shadow() {\n      A x = new A();\n      Func<B, int> f = x => { x.Hit(); return 1; };\n    }\n  }\n}\n'},
+     [('Host.Shadow', 'calls', 'B.Hit')], [('Host.Shadow', 'calls', 'A.Hit')],
+     source='csharpstandard §12.21; Roslyn Binder_Lambda.cs, LocalScopeBinder (name shadowing in nested functions)', since='8')
+case('csharp', 'derived-method-not-applicable-base-used', "a derived class's method of the name that does not take the arguments does not hide the base's that does",
+     CS, {'A.cs': 'namespace App\n{\n    public class Base\n    {\n        public int M(int x) { return x; }\n    }\n\n    public class Derived : Base\n    {\n        public int M(string s) { return 0; }\n\n        public int Run() { return M(1); }\n    }\n}\n'},
+     [('Derived.Run', 'calls', 'Base.M')], [('Derived.Run', 'calls', 'Derived.M')],
+     source='csharpstandard §12.8.10.2 (candidates are only the applicable methods, then reduced to the most derived types); Roslyn OverloadResolution.cs RemoveLessDerivedMembers')
+case('csharp', 'non-invocable-member-skipped', 'a field that is not of a delegate type does not hide a base method of its name when the name is invoked',
+     CS, {'A.cs': 'namespace App\n{\n    public class Base\n    {\n        public int Size() { return 1; }\n    }\n\n    public class Derived : Base\n    {\n        public int Size = 2;\n\n        public int Run() { return Size(); }\n    }\n}\n'},
+     [('Derived.Run', 'calls', 'Base.Size')], [('Derived.Run', 'reads', 'Derived.Size')],
+     source="csharpstandard §12.5 (member lookup, step 'if the member is invoked'), used by §12.8.10.2; Roslyn Binder_Lookup.cs MustBeInvocableIfMember")
+case('csharp', 'deconstruct-by-arity', '`var (x, y) = p` is a call of the two-out-parameter Deconstruct, not the three-out one',
+     CS, {'A.cs': 'namespace App\n{\n    public class P\n    {\n        public void Deconstruct(out int a, out int b) { a = 1; b = 2; }\n        public void Deconstruct(out int a, out int b, out int c) { a = 1; b = 2; c = 3; }\n    }\n\n    public class C\n    {\n        public int Run(P p) { var (x, y) = p; return x + y; }\n    }\n}\n'},
+     [('C.Run', 'calls', 'A.cs:App.P.Deconstruct@5')], [('C.Run', 'calls', 'A.cs:App.P.Deconstruct@6')],
+     source='csharpstandard §12.7 (Deconstruction: S.Deconstruct with n output parameters); Roslyn Binder_Deconstruct.cs')
+case('csharp', 'null-conditional-element-access-member', "`b?[0].Weight()` calls Weight of the indexer's type",
+     CS, {'A.cs': 'namespace App\n{\n    public class Item { public int Weight() { return 1; } }\n\n    public class Crate { public int Weight() { return 2; } }\n\n    public class Bag\n    {\n        public Item this[int i] { get { return null; } }\n    }\n\n    public class C\n    {\n        public Crate Weight;\n\n        public int Run(Bag b) { return b?[0].Weight() ?? 0; }\n    }\n}\n'},
+     [('C.Run', 'calls', 'Item.Weight')], [('C.Run', 'calls', 'Crate.Weight'), ('C.Run', 'reads', 'C.Weight')],
+     source='csharpstandard §12.8.11 and §12.8.13 (null-conditional element access: P?[A] is the element access on P, then the dependent accesses); Roslyn Binder_Expressions.cs BindConditionalAccessExpression')
+case('csharp', 'anonymous-method-parameter-type', "`delegate (Foo f) { f.Go(); }` calls Foo.Go, not the Go of the field f's type",
+     CS, {'A.cs': 'using System;\n\nnamespace App\n{\n    public class Foo { public int Go() { return 1; } }\n\n    public class Bar { public int Go() { return 2; } }\n\n    public class C\n    {\n        Bar f;\n\n        int Tick() { return 0; }\n\n        public void Run()\n        {\n            Action<Foo> a = delegate (Foo f) { f.Go(); };\n            Action b = delegate { Tick(); };\n        }\n    }\n}\n'},
+     [('C.Run', 'calls', 'Foo.Go'), ('C.Run', 'calls', 'C.Tick')], [('C.Run', 'calls', 'Bar.Go')],
+     source='csharpstandard §12.8.24 (anonymous method expressions; the explicit signature) with §12.21 (parameters in the body); Roslyn Binder_Lambda.cs')
+case('csharp', 'increment-operator-call', "`c++` is a call of `operator ++` of c's type",
+     CS, {'A.cs': 'namespace App\n{\n    public struct Counter\n    {\n        public int V;\n\n        public static Counter operator ++(Counter c) { c.V++; return c; }\n\n        public static Counter operator +(Counter c, int n) { c.V += n; return c; }\n    }\n\n    public class C\n    {\n        public Counter Run(Counter c) { c++; return c; }\n    }\n}\n'},
+     [('C.Run', 'calls', 'Counter.operator++')], [('C.Run', 'calls', 'Counter.operator+')],
+     source='csharpstandard §12.4.4 (unary operator overload resolution) and §12.9.6 (postfix increment: the user-defined operator); Roslyn Binder_Operators.cs BindIncrementOperator')
+case('csharp', 'query-continuation-ends-range-variables', '`x` after `into y` is the field x, not the range variable',
+     CS, {'A.cs': 'using System.Linq;\nusing System.Collections.Generic;\n\nnamespace App\n{\n    public class Row { public int Id; public int Size; }\n\n    public class Cfg { public int Size; }\n\n    public class C\n    {\n        Cfg x = null;\n\n        public IEnumerable<int> Run(List<Row> rows)\n        {\n            return from x in rows select x.Id into y select y + x.Size;\n        }\n    }\n}\n'},
+     [('C.Run', 'reads', 'Cfg.Size'), ('C.Run', 'reads', 'C.x')], [('C.Run', 'reads', 'Row.Size')],
+     source='csharpstandard §12.22.2.? (query continuations: `from x in e select v into y ...` is `from y in (from x in e select v) ...`); Roslyn Binder_Query.cs')
+case('csharp', 'inference-through-interface-and-array', '`First(list).Go()` and `Head(array).Go()` call Foo.Go',
+     CS, {'A.cs': 'using System.Collections.Generic;\n\nnamespace App\n{\n    public class Foo { public int Go() { return 1; } }\n\n    public class Bar { public int Go() { return 2; } }\n\n    public static class U\n    {\n        public static T First<T>(IEnumerable<T> xs) { return default(T); }\n\n        public static T Head<T>(T[] xs) { return xs[0]; }\n    }\n\n    public class C\n    {\n        public int Run(List<Foo> l, Foo[] a) { return U.First(l).Go() + U.Head(a).Go(); }\n    }\n}\n'},
+     [('C.Run', 'calls', 'Foo.Go')], [('C.Run', 'calls', 'Bar.Go')],
+     source="csharpstandard §12.6.3.10 (lower-bound inferences: constructed interface the argument's type implements; arrays)")
+case('csharp', 'constructor-overload-by-type', '`new T("a")` constructs with T(string), not T(int)',
+     CS, {'A.cs': 'namespace App\n{\n    public class T\n    {\n        public T(int x) { }\n        public T(string s) { }\n    }\n\n    public class C\n    {\n        public T Run() { return new T("a"); }\n    }\n}\n'},
+     [('C.Run', 'calls', 'A.cs:App.T.T@6')], [('C.Run', 'calls', 'A.cs:App.T.T@5')],
+     source='csharpstandard §12.8.17.2 (object creation: overload resolution of the instance constructors) with §12.6.4; Roslyn Binder_Expressions.cs BindClassCreationExpression')
+case('csharp', 'nested-lambda-outer-parameter', "`a` in the inner lambda is the outer lambda's `Foo a`, not the field a",
+     CS, {'A.cs': 'using System;\n\nnamespace App\n{\n    public class Foo { public int Go() { return 1; } }\n\n    public class Bar { public int Go() { return 2; } }\n\n    public class C\n    {\n        Bar a = null;\n\n        public void Run()\n        {\n            Func<Foo, Func<int, int>> f = (Foo a) => (int n) => a.Go() + n;\n        }\n    }\n}\n'},
+     [('C.Run', 'calls', 'Foo.Go')], [('C.Run', 'calls', 'Bar.Go')],
+     source='csharpstandard §12.21.1 (scope of a parameter is the body, which contains nested functions); Roslyn Binder_Lambda.cs')
+case('csharp', 'local-function-hides-method', '`Step(1)` beside a local function Step is the local function, not the method Step',
+     CS, {'A.cs': 'namespace App\n{\n    public class C\n    {\n        int Step(int x) { return x; }\n\n        public int Run()\n        {\n            int Step(int y) { return y + 1; }\n            return Step(1);\n        }\n    }\n}\n'},
+     [('C.Run', 'calls', 'Run.Step')], [('C.Run', 'calls', 'C.Step')],
+     source='csharpstandard §12.8.4 (simple names: local variable declaration space first) used by §12.8.10; Roslyn Binder_Lookup.cs LookupSymbolsInSingleBinder in LocalScopeBinder')
+case('csharp', 'nested-class-calls-enclosing-static', "`Helper()` in a nested class is the enclosing class's static; `Count()` is the nested class's own, not the enclosing one's",
+     CS, {'A.cs': 'namespace App\n{\n    public class Other { public static int Count() { return 9; } }\n\n    public class Outer\n    {\n        static int Helper() { return 1; }\n\n        static int Count() { return 2; }\n\n        public class Inner\n        {\n            static int Count() { return 3; }\n\n            public int Run() { return Helper() + Count(); }\n        }\n    }\n}\n'},
+     [('Inner.Run', 'calls', 'Outer.Helper'), ('Inner.Run', 'calls', 'Inner.Count')], [('Inner.Run', 'calls', 'Outer.Count'), ('Inner.Run', 'calls', 'Other.Count')],
+     source='csharpstandard §12.8.4 (simple names: each enclosing type in turn) used by §12.8.10.2; Roslyn Binder_Invocation.cs / Binder_Lookup.cs')
+case('csharp', 'property-pattern-member', 'the name left of the colon in a property pattern is a field or property of the input type, not of the enclosing class',
+     CS, {'A.cs': 'namespace App\n{\n    public class Person { public string Name; public int Age; }\n    public class Checker\n    {\n        public string Name;\n        public bool Run(Person p) { return p is { Name: "x" }; }\n        public bool Typed(object o) { return o is Person { Age: > 3 }; }\n    }\n}\n'},
+     [('Checker.Run', 'reads', 'Person.Name'), ('Checker.Typed', 'reads', 'Person.Age')], [('Checker.Run', 'reads', 'Checker.Name')],
+     source='csharpstandard patterns.md §11.2.6 property pattern; Roslyn Binder_Patterns.cs BindPropertyPatternClause', since='9.0')
+case('csharp', 'extended-property-pattern', "in `{ Home.City: ... }` Home is a member of the input type and City a member of Home's type",
+     CS, {'A.cs': 'namespace App\n{\n    public class Address { public string City; }\n    public class Person { public Address Home; }\n    public class Other { public string City; }\n    public class Checker\n    {\n        public bool Run(Person p) { return p is { Home.City: "Oslo" }; }\n    }\n}\n'},
+     [('Checker.Run', 'reads', 'Person.Home'), ('Checker.Run', 'reads', 'Address.City')], [('Checker.Run', 'reads', 'Other.City')],
+     source='csharpstandard patterns.md §11.2.6; Roslyn Binder_Patterns.cs BindPropertyPatternClause (ExpressionColon, IDS_FeatureExtendedPropertyPatterns)', since='10.0')
+case('csharp', 'positional-pattern-deconstruct', '`p is (var a, var b)` calls the instance Deconstruct of that arity; three subpatterns call the extension Deconstruct',
+     CS, {'A.cs': 'namespace App\n{\n    public class P\n    {\n        public void Deconstruct(out int a, out int b) { a = 1; b = 2; }\n    }\n    public static class Ext\n    {\n        public static void Deconstruct(this P p, out int a, out int b, out int c) { a = 1; b = 2; c = 3; }\n    }\n    public class Checker\n    {\n        public bool Two(P p) { return p is (var a, var b); }\n        public bool Three(P p) { return p is (var a, var b, var c); }\n    }\n}\n'},
+     [('Checker.Two', 'calls', 'P.Deconstruct'), ('Checker.Three', 'calls', 'Ext.Deconstruct')], [('Checker.Two', 'calls', 'Ext.Deconstruct'), ('Checker.Three', 'calls', 'P.Deconstruct')],
+     source='csharpstandard patterns.md §11.2.5 positional pattern (Deconstruct form); Roslyn Binder_Patterns.cs BindRecursivePattern, MakeDeconstructInvocationExpression', since='8.0')
+case('csharp', 'constant-pattern-before-type', '`x is B` where B names a type of the namespace and a constant of the class: the type pattern (Roslyn binds the type)',
+     CS, {'A.cs': 'namespace App\n{\n    public class B { }\n    public class A\n    {\n        public const int B = 1;\n        public bool Run(int x) { return x is B; }\n    }\n}\n'},
+     [('A.Run', 'references', 'App.B')], [('A.Run', 'reads', 'A.B')],
+     source='csharpstandard patterns.md §11.2.2; Roslyn Binder_Patterns.cs BindTypeOrConstantPattern / BindExpressionOrTypeForPattern')
+case('csharp', 'constant-pattern-case-label', '`case Limits.Max:` and `case Zero:` read the constants they name',
+     CS, {'A.cs': 'namespace App\n{\n    public static class Limits { public const int Max = 10; }\n    public class A\n    {\n        public const int Zero = 0;\n        public int Run(int x)\n        {\n            switch (x)\n            {\n                case Limits.Max: return 1;\n                case Zero: return 2;\n                default: return 3;\n            }\n        }\n    }\n}\n'},
+     [('A.Run', 'reads', 'Limits.Max'), ('A.Run', 'reads', 'A.Zero')], [],
+     source='csharpstandard patterns.md §11.2.2; statements.md §13.8.3')
+case('csharp', 'var-pattern-input-type', '`c is var d` gives d the type of c',
+     CS, {'A.cs': 'namespace App\n{\n    public class Circle { public int Area() { return 1; } }\n    public class Square { public int Area() { return 2; } }\n    public class C\n    {\n        public int Run(Circle c) { if (c is var d) { return d.Area(); } return 0; }\n    }\n}\n'},
+     [('C.Run', 'calls', 'Circle.Area')], [('C.Run', 'calls', 'Square.Area')],
+     source='csharpstandard patterns.md §11.2.4 var pattern; Roslyn Binder_Patterns.cs BindVarPattern')
+case('csharp', 'pattern-combinators', '`o is Circle or Square` and `o is not Tri` are uses of the three types',
+     CS, {'A.cs': 'namespace App\n{\n    public class Circle { }\n    public class Square { }\n    public class Tri { }\n    public class C\n    {\n        public bool Or(object o) { return o is Circle or Square; }\n        public bool Not(object o) { return o is not Tri; }\n    }\n}\n'},
+     [('C.Or', 'references', 'Circle'), ('C.Or', 'references', 'Square'), ('C.Not', 'references', 'Tri')], [],
+     source='csharpstandard patterns.md §11.2.8 pattern combinators; Roslyn Binder_Patterns.cs BindBinaryPattern / BindUnaryPattern', since='9.0')
+case('csharp', 'block-local-scope', 'a local declared in an inner block hides the field only inside that block',
+     CS, {'A.cs': 'namespace App\n{\n    public class Item { public int A() { return 1; } }\n    public class Other { public int A() { return 2; } }\n    public class C\n    {\n        public Other x = new Other();\n        public int In() { { Item x = new Item(); return x.A(); } }\n        public int Out()\n        {\n            { Item x = new Item(); x.A(); }\n            return x.A();\n        }\n    }\n}\n'},
+     [('C.In', 'calls', 'Item.A'), ('C.Out', 'calls', 'Other.A')], [('C.In', 'calls', 'Other.A')],
+     source='csharpstandard statements.md §13.3.1; Roslyn LocalScopeBinder / BlockBinder')
+case('csharp', 'for-variable-scope', 'a `for` variable hides the field of its name only inside the loop',
+     CS, {'A.cs': 'namespace App\n{\n    public class Item { public int A() { return 1; } }\n    public class Other { public int B() { return 2; } public int A() { return 3; } }\n    public class C\n    {\n        public Other i = new Other();\n        public int Run()\n        {\n            for (var i = new Item(); i != null; i = null) { i.A(); }\n            return i.B();\n        }\n    }\n}\n'},
+     [('C.Run', 'calls', 'Item.A'), ('C.Run', 'calls', 'Other.B')], [('C.Run', 'calls', 'Other.A')],
+     source='csharpstandard statements.md §13.6.2.1, §13.9.4; Roslyn ForLoopBinder')
+case('csharp', 'local-function-before-declaration', "a call written before a local function's declaration still means the local function, not the method of the class",
+     CS, {'A.cs': 'namespace App\n{\n    public class C\n    {\n        public int Helper() { return 1; }\n        public int Run()\n        {\n            return Helper();\n            int Helper() { return 2; }\n        }\n        public int Own() { return Helper(); }\n    }\n}\n'},
+     [('C.Run', 'calls', 'Run.Helper'), ('C.Own', 'calls', 'C.Helper')], [('C.Run', 'calls', 'C.Helper'), ('C.Own', 'calls', 'Run.Helper')],
+     source='csharpstandard statements.md §13.6.4; Roslyn LocalScopeBinder.BuildLocalFunctions')
+case('csharp', 'type-named-var', 'with a class named `var` in scope, `var v = new var();` declares a local of that class',
+     CS, {'A.cs': '#pragma warning disable CS8981\nnamespace App\n{\n    public class var { public int A() { return 1; } }\n    public class Other { public int A() { return 2; } }\n    public class C\n    {\n        public int Run() { var v = new var(); return v.A(); }\n    }\n}\n'},
+     [('C.Run', 'references', 'var'), ('C.Run', 'calls', 'var.A')], [('C.Run', 'calls', 'Other.A')],
+     source='csharpstandard statements.md §13.6.2.1; Roslyn Binder_Statements.cs BindDeclarationStatement (isVar via BindTypeOrVarKeyword)')
+case('csharp', 'switch-block-local-scope', 'a local declared in one switch section is the name in the other sections too',
+     CS, {'A.cs': 'namespace App\n{\n    public class Item { public int A() { return 1; } public int B() { return 3; } }\n    public class Other { public int A() { return 2; } public int B() { return 4; } }\n    public class C\n    {\n        public Other x = new Other();\n        public int Run(int k)\n        {\n            switch (k)\n            {\n                case 1:\n                    Item x = new Item();\n                    return x.A();\n                case 2:\n                    x = new Item();\n                    return x.B();\n            }\n            return 0;\n        }\n    }\n}\n'},
+     [('C.Run', 'calls', 'Item.A'), ('C.Run', 'calls', 'Item.B')], [('C.Run', 'calls', 'Other.B'), ('C.Run', 'calls', 'Other.A')],
+     source='csharpstandard statements.md §13.8.3; Roslyn SwitchBinder.BuildLocals')
+case('csharp', 'switch-section-pattern-scope', '`case Circle c when c.R > 0:` binds c in its section only; elsewhere c is the field',
+     CS, {'A.cs': 'namespace App\n{\n    public class Circle { public int R; public int Area() { return R; } public int Name() { return 1; } }\n    public class Other { public int Area() { return 0; } public int Name() { return 0; } }\n    public class Shapes\n    {\n        public Other c = new Other();\n        public int Run(object o)\n        {\n            switch (o)\n            {\n                case Circle c when c.R > 0:\n                    return c.Area();\n                case int n:\n                    return c.Name();\n                default:\n                    return 0;\n            }\n        }\n        public int Arm(object o) => o switch { Circle c => c.Area(), _ => c.Name() };\n    }\n}\n'},
+     [('Shapes.Run', 'calls', 'Circle.Area'), ('Shapes.Run', 'reads', 'Circle.R'), ('Shapes.Run', 'calls', 'Other.Name'), ('Shapes.Arm', 'calls', 'Circle.Area'), ('Shapes.Arm', 'calls', 'Other.Name')], [('Shapes.Run', 'calls', 'Circle.Name'), ('Shapes.Arm', 'calls', 'Circle.Name')],
+     source='csharpstandard statements.md §13.8.3, expressions.md §12.11; Roslyn SwitchBinder, SwitchExpressionArmBinder')
+case('csharp', 'pattern-variable-leaks-from-if', 'after `if (!(o is Foo s)) return;` s is the Foo local; after `while (o is Foo s)` s is the field again',
+     CS, {'A.cs': 'namespace App\n{\n    public class Foo { public int Hello() { return 1; } }\n    public class Other { public int Hello() { return 2; } }\n    public class Checker\n    {\n        public Other s = new Other();\n        public int Leaks(object o)\n        {\n            if (!(o is Foo s)) return 0;\n            return s.Hello();\n        }\n        public int Stays(object o)\n        {\n            while (o is Foo s) { return 1; }\n            return s.Hello();\n        }\n    }\n}\n'},
+     [('Checker.Leaks', 'calls', 'Foo.Hello'), ('Checker.Stays', 'calls', 'Other.Hello')], [('Checker.Leaks', 'calls', 'Other.Hello'), ('Checker.Stays', 'calls', 'Foo.Hello')],
+     source='csharpstandard basic-concepts.md §7.7, statements.md §13.8.2; Roslyn LocalScopeBinder.BuildLocals (ExpressionVariableFinder: if / switch leak, while does not)')
+case('csharp', 'foreach-project-ienumerable', '`foreach (var it in bag)` where Bag : IEnumerable<Item> makes it an Item',
+     CS, {'A.cs': 'using System.Collections;\nusing System.Collections.Generic;\nnamespace App\n{\n    public class Item { public int A() { return 1; } }\n    public class Bag : IEnumerable<Item>\n    {\n        public IEnumerator<Item> GetEnumerator() { return null; }\n        IEnumerator IEnumerable.GetEnumerator() { return null; }\n    }\n    public class C\n    {\n        public int Run(Bag bag)\n        {\n            int n = 0;\n            foreach (var it in bag) { n += it.A(); }\n            return n;\n        }\n    }\n}\n'},
+     [('C.Run', 'calls', 'Item.A')], [],
+     source='csharpstandard statements.md §13.9.5.2; Roslyn ForEachLoopBinder')
+case('csharp', 'foreach-extension-getenumerator', "foreach over a type whose only GetEnumerator is an extension method types the variable by that enumerator's Current",
+     CS, {'A.cs': 'namespace App\n{\n    public class Item { public int A() { return 1; } }\n    public class BagEnumerator\n    {\n        public Item Current { get { return null; } }\n        public bool MoveNext() { return false; }\n    }\n    public class Bag { }\n    public static class BagExt\n    {\n        public static BagEnumerator GetEnumerator(this Bag b) { return new BagEnumerator(); }\n    }\n    public class C\n    {\n        public int Run(Bag bag)\n        {\n            int n = 0;\n            foreach (var it in bag) { n += it.A(); }\n            return n;\n        }\n    }\n}\n'},
+     [('C.Run', 'calls', 'Item.A')], [],
+     source='csharpstandard statements.md §13.9.5.2 (C# 9 extension GetEnumerator); Roslyn ForEachLoopBinder.TryGetGetEnumeratorInfo', since='9.0')
+case('csharp', 'foreach-deconstruct', "the variables of a deconstructing foreach have the types of Deconstruct's out parameters",
+     CS, {'A.cs': 'namespace App\n{\n    public class Alpha { public int Go() { return 1; } }\n    public class Beta { public int Go() { return 2; } }\n    public class Pair { public void Deconstruct(out Alpha a, out Beta b) { a = null; b = null; } }\n    public class C\n    {\n        public int Run(Pair[] pairs)\n        {\n            int n = 0;\n            foreach (var (a, b) in pairs) { n += a.Go(); }\n            return n;\n        }\n    }\n}\n'},
+     [('C.Run', 'calls', 'Alpha.Go')], [('C.Run', 'calls', 'Beta.Go')],
+     source='csharpstandard statements.md §13.9.5.4; Roslyn ForEachLoopBinder (deconstruction iteration variable)', since='7.0')
+case('csharp', 'catch-variable-type', '`catch (AppError e) when (e.Code > 0) { e.Log(); }`: e is an AppError in the filter and block, the field e after them',
+     CS, {'A.cs': 'namespace App\n{\n    public class AppError : System.Exception { public int Code; public int Log() { return 1; } }\n    public class Other { public int Log() { return 2; } public int Code; }\n    public class C\n    {\n        public Other e = new Other();\n        public int Run()\n        {\n            try { return 0; }\n            catch (AppError e) when (e.Code > 0) { return e.Log(); }\n        }\n        public int After() { return e.Log(); }\n    }\n}\n'},
+     [('C.Run', 'calls', 'AppError.Log'), ('C.Run', 'reads', 'AppError.Code'), ('C.After', 'calls', 'Other.Log')], [('C.Run', 'calls', 'Other.Log'), ('C.Run', 'reads', 'Other.Code'), ('C.After', 'calls', 'AppError.Log')],
+     source='csharpstandard statements.md §13.11; Roslyn Binder_Statements.cs BindCatchBlock, CatchClauseBinder')
+case('csharp', 'using-resource-variable', '`using (var r = new Res())` and `using var r = new Res();` declare r as a Res, hiding the field r',
+     CS, {'A.cs': 'namespace App\n{\n    public class Res : System.IDisposable { public void Dispose() { } public int Run() { return 1; } }\n    public class Other { public int Run() { return 2; } }\n    public class C\n    {\n        public Other r = new Other();\n        public int Stmt() { using (var r = new Res()) { return r.Run(); } }\n        public int Decl() { using var r = new Res(); return r.Run(); }\n        public int Field() { return r.Run(); }\n    }\n}\n'},
+     [('C.Stmt', 'calls', 'Res.Run'), ('C.Decl', 'calls', 'Res.Run'), ('C.Field', 'calls', 'Other.Run')], [('C.Stmt', 'calls', 'Other.Run'), ('C.Decl', 'calls', 'Other.Run')],
+     source='csharpstandard statements.md §13.14.1, §13.14.2; Roslyn Binder_Statements.cs BindUsingStatementOrDeclarationParts', since='8.0')
+case('csharp', 'foreach-variable-scope', 'the iteration variable of a foreach is a name of the loop only; after it the name is the member again',
+     CS, {'A.cs': 'using System;\nusing System.Collections.Generic;\nusing System.Threading.Tasks;\nnamespace App\n{\n    public class Repo\n    {\n        public int Find() { return 1; }\n    }\n\n    public class Other\n    {\n        public int Find() { return 2; }\n    }\n\n    public class A\n    {\n        Other r;\n\n        public void Run(List<Repo> repos)\n        {\n            foreach (var r in repos)\n            {\n            }\n            r.Find();\n        }\n    }\n}\n'},
+     [('A.Run', 'calls', 'Other.Find')], [('A.Run', 'calls', 'Repo.Find')],
+     source="csharpstandard §13.9 foreach statement; Roslyn Binder_Statements.cs BindForEach (the iteration variable is declared in the loop's own scope)")
+case('csharp', 'foreach-pattern-before-interface', "a public GetEnumerator method of the collection type wins over its IEnumerable<T> implementation: the iteration variable is the pattern enumerator's Current",
+     CS, {'A.cs': 'using System;\nusing System.Collections.Generic;\nusing System.Threading.Tasks;\nnamespace App\n{\n    public class Repo\n    {\n        public int Find() { return 1; }\n    }\n\n    public class Other\n    {\n        public int Find() { return 2; }\n    }\n\n    public class BagEnum\n    {\n        public Repo Current { get { return null; } }\n        public bool MoveNext() { return false; }\n    }\n\n    public class Mixed : IEnumerable<Other>\n    {\n        public BagEnum GetEnumerator() { return null; }\n        IEnumerator<Other> IEnumerable<Other>.GetEnumerator() { return null; }\n        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() { return null; }\n    }\n\n    public class A\n    {\n        public void Run(Mixed m)\n        {\n            foreach (var x in m)\n            {\n                x.Find();\n            }\n        }\n    }\n}\n'},
+     [('A.Run', 'calls', 'Repo.Find')], [('A.Run', 'calls', 'Other.Find')],
+     source='csharpstandard §13.9.5.1 foreach (collection type determination); Roslyn Binder_Statements.cs GetEnumeratorInfoAndInferCollectionElementType (pattern before interface)')
+case('csharp', 'await-foreach-variable', 'the iteration variable of an `await foreach` over IAsyncEnumerable<T> is a T',
+     CS, {'A.cs': 'using System;\nusing System.Collections.Generic;\nusing System.Threading.Tasks;\nnamespace App\n{\n    public class Repo\n    {\n        public int Find() { return 1; }\n    }\n\n    public class Other\n    {\n        public int Find() { return 2; }\n    }\n\n    public class Feed\n    {\n        public async IAsyncEnumerable<Repo> Items()\n        {\n            await Task.Yield();\n            yield return null;\n        }\n    }\n\n    public class A\n    {\n        public async Task Run(Feed f)\n        {\n            await foreach (var x in f.Items())\n            {\n                x.Find();\n            }\n        }\n    }\n}\n'},
+     [('A.Run', 'calls', 'Repo.Find')], [('A.Run', 'calls', 'Other.Find')],
+     source='csharpstandard §13.9.5 asynchronous foreach; Roslyn Binder_Statements.cs BindForEach (isAsync: GetAsyncEnumerator)')
+case('csharp', 'deconstruction-declaration-types', "in `var (a, b) = p;` a and b are typed by the out parameters of p's Deconstruct method",
+     CS, {'A.cs': 'using System;\nusing System.Collections.Generic;\nusing System.Threading.Tasks;\nnamespace App\n{\n    public class Repo\n    {\n        public int Find() { return 1; }\n    }\n\n    public class Other\n    {\n        public int Find() { return 2; }\n    }\n\n    public class Pair\n    {\n        public void Deconstruct(out Repo a, out Other b) { a = null; b = null; }\n    }\n\n    public class A\n    {\n        public void Run(Pair p)\n        {\n            var (a, b) = p;\n            a.Find();\n        }\n    }\n}\n'},
+     [('A.Run', 'calls', 'Repo.Find')], [('A.Run', 'calls', 'Other.Find')],
+     source='csharpstandard §13.6.2 / §12.21.2 deconstruction; Roslyn Binder_Statements.cs BindDeconstruction (MakeDeconstructInvocationExpression)')
+case('csharp', 'out-var-types-and-hides', '`s.TryGet(out var r)` declares r, typed by the out parameter, in the enclosing block; a later `r.Find()` is on that local, not on the field r',
+     CS, {'A.cs': 'using System;\nusing System.Collections.Generic;\nusing System.Threading.Tasks;\nnamespace App\n{\n    public class Repo\n    {\n        public int Find() { return 1; }\n    }\n\n    public class Other\n    {\n        public int Find() { return 2; }\n    }\n\n    public class Source\n    {\n        public bool TryGet(out Repo r) { r = null; return true; }\n    }\n\n    public class A\n    {\n        Other r;\n\n        public void Run(Source s)\n        {\n            s.TryGet(out var r);\n            r.Find();\n        }\n    }\n}\n'},
+     [('A.Run', 'calls', 'Repo.Find')], [('A.Run', 'calls', 'Other.Find')],
+     source="csharpstandard §13.6 / §7.7 scopes of expression variables; Roslyn Binder_Statements.cs / ExpressionVariableFinder (out var declared in the enclosing statement's scope)")
+case('csharp', 'is-not-pattern-variable', '`if (o is not Repo r) return;` leaves r, a Repo, in scope after the statement, hiding a field r',
+     CS, {'A.cs': 'using System;\nusing System.Collections.Generic;\nusing System.Threading.Tasks;\nnamespace App\n{\n    public class Repo\n    {\n        public int Find() { return 1; }\n    }\n\n    public class Other\n    {\n        public int Find() { return 2; }\n    }\n\n    public class A\n    {\n        Other r;\n\n        public void Run(object o)\n        {\n            if (o is not Repo r) return;\n            r.Find();\n        }\n    }\n}\n'},
+     [('A.Run', 'calls', 'Repo.Find')], [('A.Run', 'calls', 'Other.Find')],
+     source='csharpstandard §11.2.1 / §13.8.2 pattern variables of an if condition leak into the block; Roslyn Binder_Patterns.cs BindDeclarationPattern under BindUnaryPattern')
+case('csharp', 'attribute-suffix-omitted', '`[Mark]` means `MarkAttribute`, not a non-attribute class `Mark`',
+     CS, {'A.cs': 'using System;\nnamespace App\n{\n    public class Mark\n    {\n    }\n\n    public class MarkAttribute : Attribute\n    {\n    }\n\n    [Mark]\n    public class Target\n    {\n    }\n}\n'},
+     [('Target', 'references', 'MarkAttribute')], [('Target', 'references', 'Mark')],
+     source='csharpstandard §23.3 (attribute_name resolution); Roslyn Binder_Lookup.LookupAttributeType')
+case('csharp', 'attribute-named-argument-member', '`[Help(Topic = ..., Level = ...)]`: the names are members of the attribute class (own or inherited), not of the decorated type',
+     CS, {'A.cs': 'using System;\nnamespace App\n{\n    public class BaseAttr : Attribute\n    {\n        public string Topic { get; set; }\n    }\n\n    public class HelpAttribute : BaseAttr\n    {\n        public string Level;\n    }\n\n    [Help(Topic = "t", Level = "l")]\n    public class Doc\n    {\n        public int Topic;\n        public int Level;\n    }\n}\n'},
+     [('Doc', 'writes', 'BaseAttr.Topic'), ('Doc', 'writes', 'HelpAttribute.Level')], [('Doc', 'writes', 'Doc.Topic'), ('Doc', 'writes', 'Doc.Level'), ('Doc', 'reads', 'Doc.Topic'), ('Doc', 'reads', 'Doc.Level')],
+     source='csharpstandard §23.2.3, §23.4.2; Roslyn Binder_Attributes.BindNamedAttributeArgumentName (LookupMembersWithFallback on the attribute type)')
+case('csharp', 'attribute-verbatim-name', '`[@Example]` is the class `Example`, `[ExampleAttribute]` is `ExampleAttribute`, though both exist',
+     CS, {'A.cs': 'using System;\nnamespace App\n{\n    public class Example : Attribute\n    {\n        public int Only1 { get; set; }\n    }\n\n    public class ExampleAttribute : Attribute\n    {\n        public int Only2 { get; set; }\n    }\n\n    [@Example(Only1 = 1)]\n    public class OnPlain\n    {\n    }\n\n    [ExampleAttribute(Only2 = 2)]\n    public class OnSuffixed\n    {\n    }\n}\n'},
+     [('OnPlain', 'references', 'Example'), ('OnSuffixed', 'references', 'ExampleAttribute')], [('OnPlain', 'references', 'ExampleAttribute'), ('OnSuffixed', 'references', 'Example')],
+     source='csharpstandard §23.3; Roslyn Binder_Lookup.LookupAttributeType (VerbatimNameAttributeTypeOnly)')
+case('csharp', 'attribute-name-per-file-usings', '`[Mark]` means the `MarkAttribute` of the namespace its own file imports',
+     CS, {'Marks.cs': 'using System;\nnamespace Left\n{\n    public class MarkAttribute : Attribute\n    {\n    }\n}\n\nnamespace Right\n{\n    public class MarkAttribute : Attribute\n    {\n    }\n}\n', 'A.cs': 'using Left;\nnamespace App\n{\n    [Mark]\n    public class OnLeft\n    {\n    }\n}\n', 'B.cs': 'using Right;\nnamespace App\n{\n    [Mark]\n    public class OnRight\n    {\n    }\n}\n'},
+     [('OnLeft', 'references', 'Left.MarkAttribute'), ('OnRight', 'references', 'Right.MarkAttribute')], [('OnLeft', 'references', 'Right.MarkAttribute'), ('OnRight', 'references', 'Left.MarkAttribute')],
+     source='csharpstandard §23.3, §7.8')
+case('csharp', 'attribute-partial-parts-own-usings', "each part of a partial type decorates the type, its attribute name resolved by that part's usings",
+     CS, {'Marks.cs': 'using System;\nnamespace Left\n{\n    public class MarkAttribute : Attribute\n    {\n    }\n}\n\nnamespace Right\n{\n    public class MarkAttribute : Attribute\n    {\n    }\n}\n\nnamespace Elsewhere\n{\n    public class MarkAttribute : Attribute\n    {\n    }\n}\n', 'A.cs': 'using Left;\nnamespace App\n{\n    [Mark]\n    public partial class P\n    {\n    }\n}\n', 'B.cs': 'using Right;\nnamespace App\n{\n    [Mark]\n    public partial class P\n    {\n    }\n}\n'},
+     [('P', 'references', 'Left.MarkAttribute'), ('P', 'references', 'Right.MarkAttribute')], [('P', 'references', 'Elsewhere.MarkAttribute')],
+     source='csharpstandard §23.3 (attributes of a type declared in multiple parts)')
+case('csharp', 'assembly-attribute', '`[assembly: Stamp]` means the `StampAttribute` of the namespace the file imports (the file is its source)',
+     CS, {'Marks.cs': 'using System;\nnamespace Marks\n{\n    public class StampAttribute : Attribute\n    {\n    }\n}\n\nnamespace Elsewhere\n{\n    public class StampAttribute : Attribute\n    {\n    }\n}\n', 'A.cs': 'using Marks;\n[assembly: Stamp]\nnamespace App\n{\n    public class X\n    {\n    }\n}\n'},
+     [('A.cs', 'references', 'Marks.StampAttribute')], [('A.cs', 'references', 'Elsewhere.StampAttribute')],
+     source='csharpstandard §23.3 (global_attribute_section)')
+case('csharp', 'attribute-target-specifier', '`[return: Mark]`, `[type: Mark]`, `[field: Mark]` and a parameter attribute name the same attribute class, on the declaration they are written on',
+     CS, {'A.cs': 'using System;\nnamespace App\n{\n    public class Mark\n    {\n    }\n\n    public class MarkAttribute : Attribute\n    {\n    }\n\n    [type: Mark]\n    public class Holder\n    {\n        [return: Mark]\n        public int M() { return 1; }\n\n        [field: Mark]\n        public int P { get; set; }\n\n        public void N([Mark] int x) { }\n    }\n}\n'},
+     [('Holder', 'references', 'MarkAttribute'), ('Holder.M', 'references', 'MarkAttribute'), ('Holder.P', 'references', 'MarkAttribute'), ('Holder.N', 'references', 'MarkAttribute')], [('Holder', 'references', 'Mark'), ('Holder.M', 'references', 'Mark'), ('Holder.P', 'references', 'Mark'), ('Holder.N', 'references', 'Mark')],
+     source='csharpstandard §23.3 (attribute_target_specifier); Roslyn Binder_Attributes (attributes filtered by MatchAttributeTarget, then bound alike)')
+case('csharp', 'attribute-argument-scope-member', "`[Limit(Limit)]` on a method or on the class itself: the argument is the class's own constant, not one a `using static` brings",
+     CS, {'A.cs': 'using System;\nusing static App.Other;\nnamespace App\n{\n    public static class Other\n    {\n        public const int Limit = 5;\n    }\n\n    public class LimitAttribute : Attribute\n    {\n        public LimitAttribute(string s) { }\n    }\n\n    public class Svc\n    {\n        public const string Limit = "one";\n\n        [Limit(Limit)]\n        public void Run() { }\n    }\n\n    [Limit(Limit)]\n    public class Plain\n    {\n        public const string Limit = "two";\n    }\n}\n'},
+     [('Svc.Run', 'reads', 'Svc.Limit'), ('Plain', 'reads', 'Plain.Limit')], [('Svc.Run', 'reads', 'Other.Limit'), ('Plain', 'reads', 'Other.Limit')],
+     source='csharpstandard §23.3, §12.8.4; Roslyn Binder_Attributes.BindAttributeArguments (binder of the attributed symbol, ContextualAttributeBinder)')
+case('csharp', 'attribute-constructor', '`[Help("x")]` calls `HelpAttribute`\'s constructor, not its base attribute\'s',
+     CS, {'A.cs': 'using System;\nnamespace App\n{\n    public class BaseAttr : Attribute\n    {\n        public BaseAttr(string s) { }\n    }\n\n    public class HelpAttribute : BaseAttr\n    {\n        public HelpAttribute(string s) : base(s) { }\n    }\n\n    [Help("x")]\n    public class Doc\n    {\n    }\n}\n'},
+     [('Doc', 'calls', 'HelpAttribute.HelpAttribute')], [('Doc', 'calls', 'BaseAttr.BaseAttr')],
+     source='csharpstandard §23.4.2; Roslyn Binder_Attributes.BindAttributeCore (TryPerformConstructorOverloadResolution)')
+case('csharp', 'attribute-lookup-skips-non-attribute', 'a class `Mark` that is no attribute is not what `[Mark]` means when `MarkAttribute` is declared in an outer namespace',
+     CS, {'A.cs': 'using System;\nnamespace App\n{\n    public class MarkAttribute : Attribute\n    {\n    }\n\n    namespace Inner\n    {\n        public class Mark\n        {\n        }\n\n        [Mark]\n        public class Target\n        {\n        }\n    }\n}\n'},
+     [('Target', 'references', 'MarkAttribute')], [('Target', 'references', 'Inner.Mark')],
+     source='Roslyn Binder_Lookup.LookupAttributeType / IsSingleViableAttributeType')
+case('csharp', 'csharp-attribute-argument-uses', "typeof(T) and a constant named in an attribute's arguments are uses, from the decorated method, of that type and constant",
+     CS, {'A.cs': 'using System;\nnamespace App {\n  public class Target { }\n  public class Other { }\n  public static class Consts { public const string Name = "n"; }\n  public class InfoAttribute : Attribute {\n    public InfoAttribute(Type t, string s) { }\n  }\n  public class Holder {\n    [Info(typeof(Target), Consts.Name)]\n    public void Run() { }\n  }\n}\n'},
+     [('Holder.Run', 'references', 'Target'), ('Holder.Run', 'reads', 'Consts.Name')], [('Holder.Run', 'references', 'Other')],
+     source='csharpstandard §23.3 (attribute arguments are expressions); Binder_Attributes.cs (BindAttributeArguments)')
+case('csharp', 'attribute-nested-class-shadows-outer', 'an attribute on a type is looked up in the scope of that type: its nested attribute class hides the outer one of the same name',
+     CS, {'A.cs': 'using System;\nnamespace App {\n  public class MarkAttribute : Attribute { public MarkAttribute(int n) {} }\n  [Mark("x")] public class Host {\n    public class MarkAttribute : Attribute { public MarkAttribute(string s) {} }\n    [Mark("y")] public void M() {}\n  }\n  [Mark(1)] public class Other {}\n}\n'},
+     [('Host', 'references', 'Host.MarkAttribute'), ('Host.M', 'references', 'Host.MarkAttribute'), ('Other', 'references', 'A.cs:MarkAttribute')], [('Host', 'references', 'A.cs:MarkAttribute'), ('Host.M', 'references', 'A.cs:MarkAttribute')],
+     source="csharpstandard §23.3; Roslyn Binder_Attributes.cs (the attributed symbol's binder); compiled: net8.0 builds with the nested constructor taking string")
+case('csharp', 'attribute-using-alias', 'an attribute written with a using alias name means the aliased attribute class',
+     CS, {'A.cs': 'using System;\nnamespace App {\n  public class StampAttribute : Attribute { }\n  public class Alias : Attribute { }\n}\nnamespace Use {\n  using Alias = App.StampAttribute;\n  [Alias] public class Target { }\n}\n'},
+     [('Target', 'references', 'StampAttribute')], [('Target', 'references', 'Alias')],
+     source='csharpstandard §23.3 (attribute_name is a type_name; using alias)')
+case('csharp', 'attribute-qualified-name', 'a namespace-qualified attribute name finds the suffixed class in that namespace only',
+     CS, {'A.cs': 'using System;\nnamespace One { public class MarkAttribute : Attribute { } }\nnamespace Two { public class MarkAttribute : Attribute { } }\nnamespace App {\n  [One.Mark] public class A { }\n  [global::Two.Mark] public class B { }\n}\n'},
+     [('A', 'references', 'One.MarkAttribute'), ('B', 'references', 'Two.MarkAttribute')], [('A', 'references', 'Two.MarkAttribute'), ('B', 'references', 'One.MarkAttribute')],
+     source='csharpstandard §23.3; Roslyn Binder_Attributes.cs (BindAttributeType, qualified name)')
+case('csharp', 'attribute-generic-arity', "a generic attribute's type arguments choose the class of that arity, not the non-generic class of the same name",
+     CS, {'A.cs': 'using System;\nnamespace App {\n  public class MarkAttribute : Attribute { }\n  public class MarkAttribute<T> : Attribute { }\n  public class Item { }\n  [Mark<Item>] public class Target { }\n  [Mark] public class Plain { }\n}\n'},
+     [('Target', 'references', 'MarkAttribute<T>'), ('Target', 'references', 'Item'), ('Plain', 'references', 'MarkAttribute')], [('Target', 'references', 'MarkAttribute')],
+     source='csharpstandard §23.2 (generic attribute classes since C# 11); Roslyn Binder_Attributes.cs', since='11')
+
 # --- running ------------------------------------------------------------------
 
 def _matches(node: dict[str, Any], want: str) -> bool:

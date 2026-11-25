@@ -799,11 +799,11 @@ Found by: the specification 20, a compiler 8, comparison 0, the grammar 4, the l
 | a member of the receiver's type comes before an extension method of the name | `member-before-extension` | – | yes |
 | `export inner.f` makes f a member of the object that writes it | `export-clause` | – | yes |
 
-### csharp (72 of 72)
+### csharp (207 of 397)
 
 C# Language Specification, 'Namespace and type names', 'Member lookup', 'Extension method invocations'.
 
-Found by: the specification 39, a compiler 8, comparison 6, the grammar 1, the language's own tools 18. With the place it was read in the language's own tools: 20.
+Found by: the specification 39, a compiler 8, comparison 6, the grammar 1, the language's own tools 18, a sweep of them 325. With the place it was read in the language's own tools: 345.
 
 | Rule | Case | Versions | Engine |
 |---|---|---|---|
@@ -879,6 +879,331 @@ Found by: the specification 39, a compiler 8, comparison 6, the grammar 1, the l
 | `Outer.Inner` names the nested type | `qualified-nested-type` | – | yes |
 | an argument declared with exactly a parameter's type picks that overload over one taking another constructed type | `identity-conversion-overload` | – | yes |
 | an extension method called in the middle of a chain gives its result, which the next extension is called on | `extension-result-in-a-chain` | – | yes |
+| a namespace and a generic type share a name: `Result.Item` goes through the namespace, `Result<int>` is the type | `namespace-and-generic-type-of-one-name` | – | **no**: no C.M -calls-> Result.Get |
+| a lambda parameter of a name hides a local of the method around, inside the lambda | `lambda-parameter-hides-local` | – | yes |
+| a local declared in one switch section is in scope in a later section, and hides a field of its name | `switch-section-local-scope` | – | yes |
+| a private member of a base is not accessible in a derived class outside it, so a bare name is the member of the class around | `inaccessible-base-member-skipped` | – | **no**: no Derived.M -calls-> Outer.Helper has Derived.M -calls-> Base.Helper |
+| a private member that hides an inherited one hides it only inside its own class: a further derived class names the base's | `inaccessible-hider-hides-nothing` | – | **no**: no MoreDerived.G -calls-> Base.F has MoreDerived.G -calls-> Derived.F |
+| a private nested type of a base class is not a meaning of a type name in the derived class: the namespace's type is | `inaccessible-nested-type-of-a-base` | – | **no**: no Derived.M -references-> A.cs:App.Item; Derived.M -calls-> Item.Run has Derived.M -references-> Base.Item |
+| a derived method hides base methods of the same signature only: a base overload of another signature is still called | `derived-overload-of-another-signature` | – | **no**: no Derived.UseInt -calls-> Base.Show has Derived.UseInt -calls-> Derived.Show |
+| a class's type parameter hides a namespace type of its name in the class, and only there | `class-type-parameter-hides-type` | – | yes |
+| a base class's type parameter is no name in a derived class: `T` there is the namespace's type | `type-parameter-scope-ends-with-its-class` | – | yes |
+| a local's scope ends with its block or its `for`: after it the name is the field again | `local-scope-ends-with-its-block` | – | **no**: no C.M -calls-> B.Run; C.N -calls-> B.Run has C.M -calls-> A.Run; C.N -calls-> A.Run |
+| a local of a name hides the field of that name in its whole block, its own declarator included | `local-hides-field-in-its-block` | – | yes |
+| where a type is written, a field of the same name is ignored | `field-named-like-a-type-is-no-type` | – | yes |
+| a member of a nested type hides every overload of the outer type's of its name: `F(1)` is the inner `F(long)`, not the outer `F(int)` | `inner-member-hides-outer-overloads` | – | yes |
+| an interface's `new` member hides the base interface's of its signature for a value typed by the derived interface | `interface-member-hides-base-interface-member` | – | yes |
+| inside a namespace, `Sub` is its nested namespace, not a global type of that name | `namespace-before-outer-type` | – | yes |
+| `global::Item` is the global namespace's type, `Item` the one of the namespace around | `global-alias-qualifier` | – | **no**: no C.M -calls-> Item.cs:Item.Run has C.M -calls-> A.cs:App.Item.Run |
+| `using L = Lib;` makes `L.Repo` the type of Lib, though `using Other;` imports another Repo | `using-alias-of-a-namespace` | – | yes |
+| `G<int>.H` is the type nested in G, not the namespace's `H` | `nested-type-of-a-constructed-type` | – | yes |
+| a name in a type's base list is looked up outside the type: an inherited nested type is not a meaning | `base-list-ignores-inherited-nested-types` | – | **no**: no Derived -references-> A.cs:App.Inner has Derived -references-> Base.Inner |
+| a member of a value typed by a type parameter is a member of its constraint (interface or base class) | `type-parameter-constraint-member` | – | yes |
+| `[Cache]` names the attribute class `CacheAttribute`, not a class `Cache` that is no attribute | `attribute-suffix` | – | **no**: no C.M -references-> CacheAttribute has C.M -references-> A.cs:App.Cache |
+| a local declared in a local function hides a local of the method around, inside the function only | `local-function-local-hides-outer-local` | – | yes |
+| in a `set` accessor `value` is the property's implicit parameter, not a field of that name | `setter-value-hides-field` | – | **no**: no C.Prop -calls-> A.Run has C.Prop -calls-> B.Run |
+| a `using static N.Outer;` makes the nested type Inner a name of the file | `using-static-nested-type` | – | yes |
+| an explicit interface implementation `void I.M()` is no member of its class by name: `M()` in the class means the inherited `B.M` | `explicit-interface-impl-not-found-by-name` | – | **no**: no C.Run -calls-> B.M has C.Run -calls-> C.M |
+| a local function hides a method of its name throughout its block, including a call written before its declaration | `local-function-hides-method-in-whole-block` | – | yes |
+| `if (o is Box x)` declares x for the if statement only: inside it x is the local, after it x is the field | `csharp-pattern-variable-if-scope` | – | yes |
+| `Make(out var x);` declares x in the enclosing block: a later `x.Open()` is the local, not the field x | `csharp-out-variable-block-scope` | – | **no**: has Holder.Leaks -reads-> Holder.x |
+| a type of the global namespace is visible from every namespace | `global-namespace-type` | – | yes |
+| the usings of a compilation unit have no effect on another | `using-is-per-file` | – | yes |
+| a namespace declared in several files is one: its types are visible before a `using`'s | `namespace-open-ended` | – | yes |
+| a `using` alias names a namespace, and `R.Repo` is that namespace's type | `alias-to-namespace` | – | yes |
+| a using alias is hidden by a type of the same name in a nested namespace | `alias-hidden-by-namespace-member` | – | yes |
+| an alias of an inner namespace body hides one of the same name of the file, which holds elsewhere | `alias-innermost-first` | – | **no**: no A.Run -calls-> Other/Repo.cs:Other.Repo.Find has A.Run -calls-> Lib/Repo.cs:Lib.Repo.Find |
+| each part of a partial type sees the aliases of its own namespace body | `alias-per-partial-part` | – | yes |
+| a using alias of a closed constructed type is that type | `alias-closed-generic` | – | **no**: no A.Run -calls-> Box.Get |
+| `using N;` imports no namespace of N: `Inner.Part` is the global Inner | `using-does-not-import-namespaces` | – | yes |
+| a using of the inner namespace body comes before a type of the namespace around | `inner-using-before-outer-type` | – | **no**: no C.Run -calls-> Lib.Repo.Find has C.Run -calls-> Outer.Repo.Find |
+| `using static C;` makes C's extension methods callable as extensions | `using-static-extension` | – | **no**: no A.Run -calls-> Ext.Shout |
+| `using static T;` imports what T declares, not what its bases declare | `using-static-not-inherited` | – | **no**: no A.Run -calls-> Util.Twice has A.Run -calls-> Base.Twice |
+| `global::Repo` is the type of the global namespace, not the one of the namespace around | `global-qualifier` | – | **no**: has A.Run -calls-> App.Repo.Find |
+| `S::Repo` looks S up only as an alias, never as the type S of the namespace | `alias-qualifier` | – | **no**: has A.Run -references-> App.S |
+| `global.Tool` is the alias named global; `global::Tool` is still the global namespace's | `alias-named-global` | – | yes |
+| a `using` after a file-scoped `namespace App.Sub;` is read before a type of the namespace App around it | `file-scoped-using-before-outer-namespace` | 10– | **no**: no C.M -references-> Lib.Repo; C.M -calls-> Lib.Repo.Find has C.M -references-> App.Repo |
+| an alias is the type it names as the qualifier of a static call and in `new` | `using-alias-as-qualifier` | – | yes |
+| `using static T;` imports T's static fields and properties as simple names | `using-static-fields-and-properties` | 6– | yes |
+| a member of the enclosing class comes before a name imported by `using static` | `using-static-hidden-by-own-member` | 6– | yes |
+| `using static Lib.Mode;` makes Mode's members simple names: `Fast` is Mode.Fast, not Other.Fast | `using-static-enum-members` | – | yes |
+| the keyword `string` is System.String whatever a project type is named `String`; the name `String` is the project's | `keyword-alias-is-system-type` | – | yes |
+| a tuple's element is its field by element name or by ItemN, each with its own type | `tuple-element-names` | – | **no**: no C.Left -calls-> Repo.Find; C.Right -calls-> Other.Find |
+| `S?` is Nullable<S>: its `.Value` and the `?.` operand are S, whose members are the ones used | `nullable-value-type-members` | – | **no**: no C.Run -calls-> Point.Len |
+| a nested type named inside a generic class is that class's, written without type arguments | `generic-outer-nested-type` | – | yes |
+| `Box<int>.Make()` is the static member of the generic Box, `Box.Make()` of the non-generic one: the type arguments tell them apart in an expression too | `static-member-of-a-constructed-type` | – | **no**: no C.Plain -calls-> A.cs:App.Box.Make@10 has C.Plain -calls-> A.cs:App.Box.Make@5 |
+| `typeof(Pair<,>)` names the unbound generic type with as many type parameters as there are commas plus one | `typeof-unbound-generic-arity` | – | yes |
+| the types a `where` clause names are uses of those types | `constraint-names-are-uses` | – | yes |
+| in a generic class a name of its type parameters is that parameter, not a type of the namespace | `class-type-parameter-first` | – | yes |
+| a value of a type parameter has the members of the type its constraint names | `type-parameter-constraint-members` | – | yes |
+| `T?` on a reference type is the type T: the annotation changes no meaning | `nullable-reference-annotation` | – | **no**: no C.Run -calls-> Repo.Find |
+| an argument converts implicitly to a base class: only the overload taking it applies | `overload-base-conversion` | – | yes |
+| an argument converts implicitly to an interface its class implements | `overload-interface-conversion` | – | yes |
+| of two parameter types the argument converts to, the more derived one is better | `overload-more-derived-parameter` | – | **no**: has C.Run -calls-> A.cs:App.Log.Write@17 |
+| an int variable or constant converts implicitly to long, never to string | `overload-numeric-conversion` | – | **no**: has C.Local -calls-> A.cs:App.Log.Write@7 |
+| an int constant in range converts implicitly to byte | `overload-constant-conversion` | – | yes |
+| the literal null converts to a reference type, never to a non-nullable value type | `overload-null-literal` | – | **no**: has C.Run -calls-> A.cs:App.Log.Write@5 |
+| a value of a type parameter converts implicitly to its effective base class | `overload-type-parameter-bound` | – | yes |
+| a lambda's untyped parameter has the type of the declared delegate it is assigned to | `lambda-parameter-from-declared-delegate` | – | **no**: no C.Make -calls-> Repo.Find |
+| a lambda passed as an argument takes its parameter types from the delegate type of the parameter | `lambda-parameter-from-method-parameter` | – | **no**: no C.Run -calls-> Repo.Find |
+| a lambda is compatible only with a delegate with as many parameters as it | `overload-by-lambda-arity` | – | **no**: has C.Run -calls-> A.cs:App.Runner.Apply@7 |
+| a method group converted to a delegate is the overload applicable to the delegate's parameter types | `method-group-picks-overload-by-delegate` | – | **no**: no C.Make -indirect_call-> A.cs:App.C.Handle@9 |
+| an extension method named through an instance is a method group that converts to a delegate | `method-group-extension` | – | **no**: no C.Make -indirect_call-> RepoExt.Size |
+| a method group converted to a delegate is the overload applicable to the delegate's parameter types (passed as an argument) | `method-group-overload-by-delegate-roslyn` | – | yes |
+| the types a generic method's `where` clause names are uses of those types | `generic-method-constraint-is-a-use` | – | yes |
+| an extension method written for a base class is called on a value of a derived class; one written for a sibling class is not | `extension-on-base-class` | – | yes |
+| an extension written for `this string` is called on a string, one written for `this int` on an int | `extension-on-predefined-type` | – | **no**: no Run.Go -calls-> StrExt.Twice; Run.Go2 -calls-> IntExt.Twice |
+| calling a parameter of a declared delegate type gives the delegate's return type | `delegate-invocation-result` | – | **no**: no Run.Go -calls-> Item.Weigh |
+| `xs[0].M()` on an `Item[]` is Item's M | `array-element-type` | – | yes |
+| `new Handler(OnData)` is a use of the OnData overload that takes the delegate's parameter type | `delegate-creation-method-group` | – | yes |
+| `Func<Item,int> f = x => x.Weigh();` has x of type Item | `lambda-parameter-from-generic-delegate` | – | **no**: no Run.Make -calls-> Item.Weigh |
+| `(Op)Inc` is a use of the Inc overload that takes Op's parameter type | `cast-method-group-to-delegate` | – | **no**: no Run.Go -indirect_call-> A.cs:App.Run.Inc@4 |
+| members of `t` typed `T : IShape, ISized`, `T : Node` (member of its base) and `T : U` with `U : IShape` are the constraints' members | `type-parameter-several-constraints` | – | **no**: no Run.Go -calls-> ISized.Size; Run.Go3 -calls-> IShape.Draw |
+| `Write(i)` with an int variable is the overload taking `int?`, not the one taking string | `overload-nullable-conversion` | – | yes |
+| `Write(0)` is the overload taking the enum, not the one taking string | `overload-enum-zero-literal` | – | yes |
+| `Write(s)` with a struct is the overload taking the interface the struct implements, not the one taking string | `overload-boxing-conversion` | – | yes |
+| `Write(ds)` with a `Dog[]` is the overload taking `Animal[]`, not the one taking string | `overload-array-covariance` | – | yes |
+| `Write(b)` with an IBar (IBar : IFoo) is the overload taking IFoo, not the one taking string | `overload-base-interface-conversion` | – | yes |
+| a base class written with type arguments gives its members, with each type parameter replaced by the argument written | `generic-base-substitution` | – | yes |
+| the interfaces of a partial type are the union of those each part names | `partial-interface-lists-union` | – | yes |
+| of the methods applicable to a call, those declared in a base type of another candidate's type are dropped, even a better fit | `applicable-derived-method-hides-base` | – | yes |
+| a nested type declared with `new` hides a member of a base class of its outer type, for `Derived.M.F()` | `nested-type-hides-base-member` | – | yes |
+| a bare name in a nested class is a member of the nested class, with its bases, before a member of the class around it | `nested-bare-name-outer-then-inherited` | – | yes |
+| inside a generic class its generic nested type is named without the outer's type arguments, before a type of the namespace of that name | `nested-generic-type-unqualified` | – | yes |
+| the value of a constant is read by a simple name or a member access, in another constant's expression too | `constant-reads-constant` | – | yes |
+| one declaration of several fields declares each as its own member | `multi-declarator-field` | – | yes |
+| a variable initializer is bound in the class: its names are members of the class before a `using static` import | `field-initializer-uses` | – | yes |
+| the expanded form of a params method is not considered when a method of that very signature is declared | `params-expanded-form-yields-to-declared` | – | **no**: has T.Two -calls-> A.cs:App.T.F@5 |
+| a default argument is an expression of the method's own scope | `default-argument-constant` | – | **no**: no C.N -reads-> C.Size |
+| an `out` argument given as `out var x` is a local of the parameter's type | `out-variable-type` | – | **no**: no C.Var -calls-> Item.Id |
+| a non-virtual method is the one of the static type of the receiver, hiding or not | `static-type-picks-hidden-method` | – | yes |
+| a call of a virtual method is bound to the declaration of the receiver's static type, an override or a hiding `new virtual` | `override-call-binds-to-override` | – | yes |
+| a call of a partial method is a use of the one method its two parts declare | `partial-method-call` | – | yes |
+| an extension method is the same method called as `Ext.M(x)`, and its first parameter may be an array type | `extension-static-and-array-receiver` | – | yes |
+| a method written `IFoo.Bar` is not the class's member `Bar`: `c.Bar()` is the public one, `((IFoo)c).Bar()` the interface's | `explicit-interface-member-is-no-class-member` | – | **no**: has User.Direct -calls-> A.cs:App.C.Bar@12 |
+| a property of the derived class hides the base's for reading and writing alike; a cast reaches the base's | `cast-reaches-hidden-property` | – | **no**: no C.Write -writes-> A.P |
+| `base.X` and `base.X = v` in an overriding property are the base property's reads and writes | `base-property-access` | – | **no**: no B.X -reads-> A.X; B.Y -reads-> A.Y; B.Y -writes-> A.Y |
+| an auto-property is written in the constructor and read by its name; its initializer is bound in the class | `auto-property-use` | – | **no**: no Point.Point -writes-> Point.X |
+| a method group attached to an event with `+=` or `new Handler(m)` is a use of the method | `method-group-event-subscription` | – | **no**: no Dialog.Wire -indirect_call-> Dialog.OkClicked |
+| an element access is a use of the indexer picked by the arguments, for reading or writing | `indexer-use` | – | **no**: no C.Read -reads-> A.cs:App.Grid.this[]@7; C.Write -writes-> A.cs:App.Grid.this[]@7; C.Two -reads-> A.cs:App.Grid.this[]@13 |
+| `base[i]` in an overriding indexer is the inherited indexer | `base-indexer-access` | – | **no**: no B.this[] -reads-> A.this[] |
+| an operator expression is a use of the user-defined operator of its operand types, also one a base class declares | `user-defined-operator` | – | **no**: no C.Add -calls-> Vec.operator+; C.Sub -calls-> Vec.operator-; C.Inc -calls-> Vec.operator++; C.Inherited -calls-> Vec.operator+ |
+| an implicit or explicit conversion between a class and another type is a use of the conversion operator | `conversion-operator` | – | **no**: no C.Widen -calls-> Digit.operator byte; C.Narrow -calls-> Digit.operator Digit |
+| a constructor with no initializer calls the base class's parameterless constructor | `implicit-base-constructor` | – | **no**: no B.B -calls-> A.cs:App.A.A@5 |
+| the parameters of a constructor are names of its initializer, before the fields | `constructor-initializer-parameter-hides-field` | – | yes |
+| the variable of a `foreach` over an iterator method is the iterator's yield type | `foreach-over-iterator` | – | yes |
+| an `override` method is excluded from member lookup, so `d.M(1)` picks the derived class's own applicable `M(double)` over its override `M(int)` | `override-is-no-candidate` | – | **no**: has C.Go -calls-> A.cs:App.Derived.M@10 |
+| `Put(ref x)` is the overload whose parameter is a reference parameter, not the value one | `overload-by-ref-kind` | – | **no**: has C.Go -calls-> A.cs:App.Log.Put@5 |
+| `t.Foo()` with `T : U` and `U : IFoo` is IFoo's member | `constraint-through-type-parameter` | – | **no**: no Box.Run -calls-> IFoo.Foo |
+| `t.Describe()` with `T : IFoo` is the extension written for IFoo | `extension-on-constrained-type-parameter` | – | yes |
+| a bare name in a part that names no base is a member of the base another part names, before a type's member of that name elsewhere | `partial-base-in-other-part` | – | yes |
+| `a += b`, `a++`, `-a` and `a && b` call the operator methods of the operand's class | `operator-forms-use-the-operator` | – | **no**: no C.Add -calls-> V.operator+; C.Inc -calls-> V.operator++; C.Neg -calls-> V.operator-; C.Both -calls-> V.operator&; C.Both -calls-> V.operator false |
+| `o.secret` and `Shared()` in a nested class are the containing class's private field and static method, not a same-named member of another class | `nested-type-reaches-private-of-container` | – | yes |
+| `await j` where j's type declares GetAwaiter is a call of that type's GetAwaiter, not another type's | `await-getawaiter-pattern` | – | **no**: no Runner.Run -calls-> Job.GetAwaiter |
+| `foreach (var i in b)` over a type with a GetEnumerator method calls it, and `i.V` is the field of the type of Cursor.Current | `foreach-getenumerator-pattern` | – | **no**: no Use.Sum -calls-> Bag.GetEnumerator; Use.Sum -reads-> Item.V |
+| inside a set accessor `value` is the implicit parameter of the property's type, not a field of that name | `setter-value-parameter` | – | **no**: no C.P -calls-> B.Run has C.P -calls-> A.Run |
+| a nested generic class's type parameter named like the outer's is the nested one: members asked of it are those of its own constraint | `nested-type-parameter-hides-outer` | – | yes |
+| M(1, 2) calls M(int, int) rather than the expanded form of M(params int[]) | `params-normal-form-before-expanded` | – | yes |
+| a field named like a base method, invoked, is no candidate: the call is the base class's method | `non-invocable-member-does-not-hide-method` | – | **no**: no U.F -calls-> Base.M |
+| `await foreach (var x in b)` calls the GetAsyncEnumerator the type of b declares, and x has the Current type of what it returns | `await-foreach-pattern` | – | **no**: no U.F -calls-> Bag.GetAsyncEnumerator |
+| `checked(a + b)` uses `operator checked +`, `unchecked(a + b)` the plain `operator +` | `checked-operator` | 11– | yes |
+| `l[^1]` is a use of the int indexer of l's type and of its Count | `implicit-index-support` | 8– | **no**: no U.F -reads-> L.Count |
+| `new C { X = …, N = 1 }` writes C.X and C.N, the members of C, not names of the surrounding scope | `object-initializer-member` | – | **no**: no D.F -writes-> C.X; D.F -writes-> C.N |
+| the members of a partial struct are those of all its parts | `partial-struct` | – | yes |
+| a base list names a class (inherits) and interfaces (implements); a struct names only interfaces | `class-and-interfaces-in-a-base-list` | – | yes |
+| a struct's own override of ToString is what `s.ToString()` means | `struct-overrides-a-valuetype-member` | – | yes |
+| `new S()` of a struct without a parameterless constructor is the implicit one; a constructor with parameters is not called | `struct-default-constructor` | – | **no**: has A.Zero -calls-> Point.Point |
+| a member asked of a type parameter is a member of its interface constraint | `constraint-interface-member` | – | yes |
+| the initializer of a static field of a struct names the struct's members | `struct-static-field-initializer` | – | yes |
+| an element of an array is of the array's element type, whatever the rank and nesting | `array-element-access` | – | **no**: no A.Jagged -calls-> Repo.Find; A.Mixed -calls-> Repo.Find |
+| an extension written for an array type applies to values of that array type | `extension-on-array-type` | – | yes |
+| `new T[n]` is an array of T; its elements are T | `array-creation-element` | – | **no**: no A.Run -calls-> Repo.Find |
+| a range index on an array gives an array of the same element type | `array-slice-keeps-the-array-type` | 8.0– | **no**: no A.Run -calls-> Repo.Find |
+| a `foreach` over an array of T gives T | `array-foreach-element` | – | yes |
+| a member of a base interface is a member of the derived interface | `interface-inherited-member` | – | yes |
+| a member inherited from a constructed interface has its type parameters replaced by the type arguments | `interface-inherited-generic-member` | – | yes |
+| an extension written for an interface applies to values of the interfaces derived from it | `extension-on-base-interface` | – | yes |
+| an explicit implementation of an inherited member is qualified by the interface that declares it, not the derived one | `explicit-implementation-names-the-declaring-interface` | – | yes |
+| a member a derived interface declares hides the base interface's member of its name | `interface-member-hides-base` | – | yes |
+| a member hidden on any access path is hidden on all of them | `interface-hidden-on-every-path` | – | yes |
+| the members of unrelated base interfaces are all candidates of an invocation | `interface-overloads-of-two-bases` | – | **no**: no A.RunDouble -calls-> IDouble.Add has A.RunDouble -calls-> IInteger.Add |
+| a default method of an interface names the members of its base interfaces by their simple names | `interface-default-method-names-base-member` | 8.0– | yes |
+| the members of a partial interface are those of all its parts | `partial-interface` | – | yes |
+| a static member of an interface is named through the interface | `interface-static-member` | 8.0– | yes |
+| a type nested in an interface is a member of the interface, named through it | `interface-nested-type` | 8.0– | yes |
+| `base.M()` binds to the member of the base class, never to the interface member it implements | `base-call-reaches-the-class-member` | – | yes |
+| the interface in an explicit implementation's qualified name is the one the name means in that scope | `explicit-implementation-names-its-interface` | – | yes |
+| an explicit interface member implementation is reached through the interface, never the class | `explicit-implementation-through-the-interface` | – | yes |
+| the body of an explicit interface member implementation sees the members of its class by their simple names | `explicit-implementation-body` | – | yes |
+| a public member of a base class implements an interface the derived class lists; a derived `new` member does not take its place | `interface-mapping-through-a-base-class` | – | **no**: no Interface1.F -dispatches_to-> Class1.F |
+| a member declared `new` hides the base member: calls through the base do not reach it | `new-member-overrides-nothing` | – | **no**: has Class1.G -dispatches_to-> Class2.G |
+| one public member implements the same-named members of every interface the class lists | `interface-mapping-one-member-for-two-interfaces` | – | yes |
+| a class that lists an inherited interface again maps it afresh: onto its own public member | `interface-reimplementation` | – | yes |
+| the integral type name of an enum is a type name, looked up like any other | `enum-underlying-type-name` | – | yes |
+| an enum member's initializer names the other members of its enum by their simple names, before a type of the same name around | `enum-member-initializer` | – | yes |
+| an enum member has the type of its enum: an extension of the enum applies to it | `extension-on-enum-value` | – | **no**: no A.Direct -calls-> ColorExt.Code |
+| a generic delegate type is named by its arity; type arguments give its parameter types | `generic-delegate-type` | – | **no**: no A.Run -calls-> Repo.Find |
+| `d.Invoke(…)` is the delegate type's Invoke, not a method of another type | `delegate-invoke-member` | – | yes |
+| `new D(x.M)` names the method M of x's type | `delegate-creation-names-a-method` | – | **no**: no Test.Static -indirect_call-> C.M1; Test.Instance -indirect_call-> C.M2 |
+| a parameter of delegate type named like a method is what `name(args)` invokes | `delegate-local-hides-method` | – | yes |
+| invoking a field of delegate type is not a call of a method of its name | `delegate-field-invocation` | – | **no**: no A.Run -reads-> A.handler |
+| a delegate declaration's parameter and return types are uses of the types they name, the enclosing class's nested type before a namespace type | `delegate-signature-types` | – | **no**: no Host.Make -references-> Host.Seen |
+| an extension written for a delegate type applies to a value of that delegate type | `extension-on-delegate` | – | **no**: no A.Run -calls-> ExtA.Twice |
+| `Op o = Target;` names the method Target; it is an indirect use | `method-group-to-delegate` | – | **no**: no A.Run -indirect_call-> A.Target |
+| `b.Current` on an IBox is IBox.Current, and the call on its result is the interface property's type's | `interface-property-access` | – | yes |
+| `var xs = new[] { new Seen() }; xs[0].Mark()` is Seen.Mark | `implicit-array-element` | – | **no**: no A.Run -calls-> Seen.Mark |
+| `c.Bump()` on a Counter variable is the extension written `this ref Counter` | `extension-on-ref-struct-receiver` | 7.2– | yes |
+| T.Create() with T : IMake binds to IMake.Create, not Maker.Create or Other.Create | `csharp-interface-static-abstract-through-type-parameter` | 11– | yes |
+| g.Hi() on an IGreet-typed local binds to IGreet.Hi (the default body), not to Plain2.Hi | `csharp-interface-default-method-via-interface` | 8– | yes |
+| b.Get() on IBox<int> binds to the interface member IBox.Get, not to the class's explicit implementations | `csharp-interface-two-closed-generic-implementations` | – | yes |
+| when a name is invoked, a member of the derived type that is not invocable does not hide the base's method of that name | `invoked-name-skips-non-invocable` | – | **no**: no C.M -calls-> Base.Run |
+| a name written with K type arguments names only the methods with K type parameters | `generic-method-by-type-arguments` | – | yes |
+| from a nested type a bare name is looked up in each enclosing type in turn, so an outer type's static member is in sight | `nested-type-sees-outer-static` | – | yes |
+| a parenthesized expression has the meaning of the expression inside | `parenthesized-receiver` | – | yes |
+| `T.M()` with a type parameter constrained by an interface with a static abstract member names that interface's member | `static-abstract-through-type-parameter` | 11– | yes |
+| after `a?.b` the dependent accesses `.c()` are members of the type of `a.b` | `null-conditional-dependent-access` | – | **no**: no C.M -reads-> Car.Engine |
+| an indexer access picks, among the indexers of the type, the one applicable to the arguments | `indexer-by-argument` | – | **no**: no C.M -reads-> A.cs:App.Table.this[]@5; C.N -reads-> A.cs:App.Table.this[]@7 |
+| `a?[i]` is an indexer access on a, and what follows it is a member of the indexer's type | `null-conditional-element-access` | – | **no**: no C.M -calls-> Item.Weight |
+| `base[i]` is an indexer access on the base class | `base-indexer` | – | **no**: no Derived.this[] -reads-> Base.this[] |
+| an object initializer's member name is a member of the created type, written | `object-initializer-targets` | – | **no**: no C.M -writes-> Point.X |
+| a nested object initializer's names are members of the type of the field or property it initializes | `nested-object-initializer` | – | **no**: no C.M -writes-> Inner.Size |
+| each element of a collection initializer calls the Add method of the collection | `collection-initializer-add` | – | **no**: no C.M -calls-> Bag.Add |
+| `typeof(T)` names the type the type-name lookup finds | `typeof-names-a-type` | – | yes |
+| `default(T)` names the type the type-name lookup finds | `default-expression-names-a-type` | – | yes |
+| `nameof(T.M)` binds its named entity by the rules of simple names and member access | `nameof-names-its-target` | – | **no**: no C.M -references-> Order.Total |
+| `v++` calls the user-defined operator ++ of the operand's type | `increment-calls-operator` | – | **no**: no C.M -calls-> Counter.operator++ |
+| `await t` is `t.GetAwaiter().GetResult()`: a member of the awaited value is a member of GetResult's type | `await-custom-awaitable` | – | **no**: no C.M -calls-> Reply.Code |
+| a switch expression arm's declaration pattern binds a variable of the type it names | `switch-expression-type-pattern` | – | yes |
+| among the operators of one name, the one whose parameters fit the operand types is called | `operator-by-operand-types` | – | **no**: no C.M -calls-> A.cs:App.Money.operator+@7 |
+| `-a` calls the user-defined unary operator of its operand's type | `unary-operator` | – | **no**: no C.M -calls-> A.cs:App.Vec.operator-@5 |
+| `a ?? b` has the type of a (its underlying type when nullable), so a member of it is a member of that type | `coalesce-type` | – | **no**: no C.M -calls-> Part.Size |
+| an `out var` declared in an argument list has the declared type of the parameter | `out-variable-declaration` | – | **no**: no C.M -calls-> Part.Size |
+| a variable declared by `var (a, b) = ...` has the type of its tuple element | `deconstruction-variable-types` | – | **no**: no C.M -calls-> Part.Size |
+| `c ? x : y` has the type of its arms, so a member of it is a member of that type | `conditional-type` | – | **no**: no C.M -calls-> Part.Size |
+| `x.P = v` assigns the property or field the member lookup finds | `simple-assignment-writes-member` | – | yes |
+| `a += b` is `a = a + b`: it calls the user-defined operator + | `compound-assignment-uses-operator` | – | **no**: no C.M -calls-> Vec.operator+ |
+| `e += h` adds to the event the lookup finds and `h` is the method its group names | `event-assignment` | – | **no**: no C.M -references-> C.OnClick |
+| a deconstructing assignment calls the Deconstruct method of the right side's type | `deconstruction-calls-deconstruct` | – | **no**: no C.M -calls-> Point.Deconstruct |
+| the Deconstruct overload is the one with as many out parameters as the left side has variables | `deconstruct-overload-by-count` | – | **no**: no C.M -calls-> A.cs:App.Point.Deconstruct@7 |
+| a type with no Deconstruct member is deconstructed by an extension method | `deconstruct-extension` | – | **no**: no C.M -calls-> PointExtensions.Deconstruct |
+| a member named in a `with` initializer is a member of the type of the copied value, and the result has that type | `with-expression-members` | 9– | **no**: no C.M -writes-> Person.Age; C.M -calls-> Person.Years |
+| a lambda parameter may shadow a local of the enclosing method: inside the lambda the name is the parameter, typed as written | `lambda-parameter-shadows-enclosing-local` | 8– | yes |
+| alias::Type.Member: the alias names a namespace, so Type is that namespace's, not another namespace's type of the same name | `qualified-alias-member-access` | – | **no**: no U.Go -calls-> Lib.cs:Util.F |
+| await of a value whose GetAwaiter is an extension method: the call is a use of the extension and the result has the type GetResult returns | `await-extension-get-awaiter` | – | **no**: no U.Go -calls-> Ext.GetAwaiter; U.Go -calls-> Num.Show |
+| a cast (T)s with a user-defined explicit conversion operator in T calls that operator, not that of another type | `cast-calls-explicit-conversion` | – | **no**: no U.Go -calls-> Dst.operator Dst |
+| a + b on Money? operands calls Money's operator+ (lifted), not another struct's | `lifted-user-operator` | – | **no**: no U.Go -calls-> Money.operator+ |
+| an indexer initializer `new Bag { ["x"] = 1 }` names the indexer of the created type | `object-initializer-indexer` | – | **no**: no Use.Make -references-> Bag.this[] |
+| an operator is found in the base class of the operand's type | `operator-of-base-class` | – | **no**: no Use.Go -calls-> B.operator+ |
+| `a && b` on a type with operator true/false and & calls operator false and operator &, not operator \| | `conditional-logical-operator` | – | **no**: no Use.Go -calls-> F.operator& |
+| `var (a, b) = p;` calls Deconstruct of the type of p | `deconstruction-declaration` | – | **no**: no Use.Go -calls-> P.Deconstruct |
+| if (f) with a struct declaring operator true calls it | `cs-operator-true-condition` | – | **no**: no Use.Run -calls-> Flag.operator true |
+| a != b calls operator != of the operand type | `cs-operator-not-equals` | – | **no**: no Use.Run -calls-> V.operator != |
+| b << 2 calls operator << not >> | `cs-operator-shift` | – | **no**: no Use.Run -calls-> B.operator << |
+| checked(a + b) calls operator checked +, unchecked(a + b) the plain operator + | `cs-checked-operator` | 11– | **no**: no Use.Plain -calls-> M.operator +; Use.Chk -calls-> M.operator checked + |
+| a + b on T : IAdd<T> calls IAdd.operator +, not the implementation | `cs-static-abstract-operator-typeparam` | 11– | **no**: no Use.Sum -calls-> IAdd.operator + |
+| s?.Value() / s?.P with S? s are members of S | `cs-null-conditional-nullable-struct` | – | **no**: no Use.Run2 -reads-> S.P |
+| b[^1] reads Bag.Count and the int indexer; b[1..] calls Bag.Slice | `cs-implicit-index-range-support` | – | **no**: no Use.Run -reads-> Bag.Count; Use.Run2 -calls-> Bag.Slice |
+| p switch { { X: 0 } => ... } reads Pt.X | `cs-property-pattern-member` | – | **no**: no Use.Run -reads-> Pt.X |
+| the deconstruction variable of foreach calls the element type's Deconstruct | `cs-foreach-deconstruct` | – | **no**: no Use.Run -calls-> Pair.Deconstruct |
+| `a + b` with a user-defined operator is a call of that operator declaration of the operand's type, not another type's | `operator-use-is-a-call` | – | **no**: no Use.Run -calls-> Money.operator+; Use.Run2 -calls-> Other.operator+ |
+| `a += b` is an overload use of operator `+` of a's type | `operator-compound-assignment` | – | **no**: no Use.Run -calls-> Money.operator+ |
+| `-x` is a call of the unary operator of x's type | `operator-unary` | – | **no**: no Use.Run -calls-> Temp.operator- |
+| a binary operator is also looked for in the type of the right operand | `operator-from-the-second-operand` | – | **no**: no Use.Run -calls-> Money.operator+ |
+| an operator declared in a base class is a candidate for the derived type | `operator-of-a-base-class` | – | **no**: no Use.Run -calls-> Base.operator+ |
+| if an operator of T is applicable, those of its base classes are not candidates | `operator-of-the-derived-type-first` | – | **no**: no Use.Run -calls-> Derived.operator+; Use.Run2 -calls-> Base.operator+ |
+| `a == b` and `a != b` are calls of the type's own `==` and `!=` | `operator-equality` | – | **no**: no Use.Run -calls-> Money.operator==; Use.Run2 -calls-> Money.operator!= |
+| a cast `(T)x` is a use of the user-defined conversion operator that converts to T | `conversion-operator-cast` | – | **no**: no Use.Run -calls-> Meters.operator Meters |
+| a method of the most derived type that is applicable removes the base's methods from the candidates, even when a base method is the better match | `derived-applicable-method-hides-base` | – | **no**: no Use.Run3 -calls-> Base.F has Use.Run3 -calls-> Derived.F |
+| a call through a receiver of the derived type is the override, and its result has the override's (covariant) return type | `override-called-through-its-type` | 9– | yes |
+| an instance method of the name that does not take the arguments does not stop the search: the extension that does is called | `extension-when-the-instance-method-is-inapplicable` | – | **no**: no Use.Run -calls-> RepoExt.Find has Use.Run -calls-> Repo.Find |
+| of the extensions of one namespace, overload resolution chooses by the type of the first parameter: the one written for the more derived type | `extension-better-this-type` | – | yes |
+| an extension declared in a namespace comes before one the namespace imports with `using`, which comes before the enclosing namespace's | `extension-declared-before-imported` | – | **no**: no Use.Run -calls-> E.F; Use.Run2 -calls-> D.G |
+| an extension is eligible only if an identity, reference or boxing conversion leads from the receiver to its first parameter: an `int` receiver does not reach a `long` one | `extension-receiver-conversion` | – | **no**: no Use.Run -calls-> A.cs:App.Ext.Twice@7 |
+| a call written with type arguments takes only generic methods with that many type parameters; one written without them prefers the non-generic | `type-argument-list-picks-the-generic` | – | yes |
+| the type arguments of a generic method are inferred from the arguments: the result is the argument's type | `inferred-generic-result` | – | **no**: no Use.Run -calls-> Item.Go |
+| a call through a value does not consider static overloads and one through a type does not consider instance ones, even when they fit better | `receiver-decides-static-or-instance` | – | **no**: has Use.Run -calls-> A.cs:App.Log.Write@6 |
+| a generic method whose inferred type arguments do not satisfy their constraints is not applicable | `generic-constraint-excludes-candidate` | – | **no**: has Use.Run -calls-> A.cs:App.Pick.Take@6 |
+| a value argument takes the value parameter where an `in` one fits too; an `in` argument only the `in` parameter | `overload-value-over-in` | – | **no**: has Use.Run -calls-> A.cs:App.M.M1@7; Use.Run2 -calls-> A.cs:App.M.M1@6 |
+| of two `params` candidates applicable only in the expanded form with the same parameter types, the one with more declared parameters (fewer elements in the array) is better | `overload-params-more-declared-parameters` | – | **no**: no Use.Run -calls-> A.cs:App.Log.Write@7 has Use.Run -calls-> A.cs:App.Log.Write@6 |
+| of generic candidates with the same parameter types after inference, the one declared with the more specific parameter type is better | `overload-more-specific-generic` | – | yes |
+| a `null` argument picks the parameter whose type converts to the other's | `overload-null-takes-the-more-specific` | – | **no**: has Use.Run -calls-> A.cs:App.Log.Write@6 |
+| when substituting the type arguments of a generic class makes two overloads identical, the one declared with the more specific parameter type is chosen | `generic-class-overload-original-signature` | – | yes |
+| an element access selects among the indexers of the receiver's type by overload resolution | `indexer-overload` | – | **no**: no Use.Run -reads-> A.cs:App.Table.this[]@6; Use.Run2 -reads-> A.cs:App.Table.this[]@7 |
+| calling a value of a delegate type invokes that delegate type | `delegate-invocation` | – | **no**: no Use.Run -calls-> Handler; Use.Run2 -calls-> Other |
+| where a method named `nameof` is in scope the call is a call of it, otherwise `nameof(X)` names X | `nameof-method-in-scope` | – | **no**: has Names.Run -calls-> Use.nameof |
+| a deconstruction calls the `Deconstruct` method of the type, and each new variable has the type of its out parameter | `deconstruct-method-and-element-types` | – | **no**: no Use.Run -calls-> Pair.Deconstruct; Use.Run -calls-> Item.Go; Use.Run2 -calls-> Pair.Deconstruct; Use.Run2 -calls-> Thing.Go |
+| a type with no `Deconstruct` method is deconstructed by an extension method of that name | `deconstruct-extension-method` | – | **no**: no Use.Run -calls-> PairExt.Deconstruct; Use.Run -calls-> Thing.Go |
+| a tuple deconstructs into its elements, each with its element type | `deconstruct-tuple-types` | – | **no**: no Use.Run -calls-> Thing.Go |
+| in `a?.b?.M()` and `a?.F().M()` each member is looked up in the type of the part before it | `null-conditional-chain` | – | **no**: no Use.Run -reads-> Node.Child |
+| a parameter of an anonymous function written with its type has that type in the body | `lambda-explicit-parameter-type` | – | yes |
+| the parameter of an anonymous function hides a field of its name in the body only | `lambda-parameter-hides-member` | – | yes |
+| a name in the body of an anonymous function that is no parameter of it is looked up outward: an outer local hides a field | `lambda-uses-outer-local` | – | yes |
+| two or more parameters named `_` are discards that name nothing; a single `_` is a parameter | `lambda-discard-parameters` | 9– | **no**: no Use.Run2 -calls-> Item.Go has Use.Run2 -calls-> Other.Go |
+| the range variable of a `from` clause has the element type of the source and hides a field of its name in the whole query | `query-range-variable` | – | **no**: no Use.Run -calls-> Customer.Active; Use.Run -calls-> Customer.Name has Use.Run -calls-> Other.Active; Use.Run -calls-> Other.Name; Use.Run -reads-> Use.c |
+| `from T x in e` gives the range variable the type T | `query-explicit-range-type` | – | **no**: no Use.Run -calls-> Customer.Active |
+| a `let` variable has the type of its expression, a second `from` ranges over the elements of its expression, and earlier range variables stay in scope | `query-let-and-second-from` | – | **no**: no Use.Run -calls-> Customer.Id; Use.Run -calls-> Dept.Title; Use.Run2 -calls-> Order.Total |
+| `join` ranges over its source and compares keys of the two range variables; a continuation `into g` ranges over the groups | `query-join-and-continuation` | – | **no**: no Use.Run -calls-> Customer.Id; Use.Run -calls-> Order.Total; Use.Run2 -calls-> Customer.Name |
+| a query clause is a call of the source's method of that name (`where` is `Where`, `select` is `Select`), found as any method, an instance one before an extension; its lambdas take their parameter types from it | `query-pattern-methods` | – | **no**: no Use.Run -calls-> Source.Where; Use.Run -calls-> Source.Select; Use.Run -calls-> Item.Ok; Use.Run -calls-> Item.Val |
+| a private method of the derived type is not a candidate from outside it; the accessible base method is called | `inaccessible-method-not-candidate` | – | **no**: no User.Run -calls-> Base.Put has User.Run -calls-> Box.Put |
+| t.Draw() with T : IShape is IShape.Draw | `type-parameter-receiver-constraint` | – | yes |
+| a + b on T : IAdd<T> is a use of IAdd.operator+, not of the implementing class's operator | `static-abstract-operator-via-constraint` | 11– | **no**: no User.Sum -calls-> IAdd.operator+ |
+| `if (s.TryGet(out var n)) n.Show();` is Num.Show | `out-var-has-parameter-type` | – | **no**: no User.Run -calls-> Num.Show |
+| `from x in s where .. orderby a, b select x` calls Where, OrderBy and ThenBy, and no Select | `query-trivial-select-omitted` | – | **no**: no User.Run -calls-> Src.Where; User.Run -calls-> Src.OrderBy; User.Run -calls-> Src.ThenBy |
+| x + y inside checked(...) is the `operator checked +`, inside unchecked(...) the plain `operator +` | `checked-operator-by-context` | 11– | **no**: no Host.Strict -calls-> Money.operatorchecked; Host.Loose -calls-> Money.operator+ |
+| `T.Create()` with `where T : IMake<T>` binds to IMake.Create, never to the Create of an implementing class | `static-abstract-call-on-type-parameter` | 11– | yes |
+| in `x => x.Hit()` the `x` is the lambda's parameter (type B), not the enclosing method's local `x` (type A) | `lambda-parameter-hides-outer-local` | 8– | **no**: no Host.Shadow -calls-> B.Hit |
+| a derived class's method of the name that does not take the arguments does not hide the base's that does | `derived-method-not-applicable-base-used` | – | **no**: no Derived.Run -calls-> Base.M has Derived.Run -calls-> Derived.M |
+| a field that is not of a delegate type does not hide a base method of its name when the name is invoked | `non-invocable-member-skipped` | – | **no**: no Derived.Run -calls-> Base.Size |
+| `var (x, y) = p` is a call of the two-out-parameter Deconstruct, not the three-out one | `deconstruct-by-arity` | – | **no**: no C.Run -calls-> A.cs:App.P.Deconstruct@5 |
+| `b?[0].Weight()` calls Weight of the indexer's type | `null-conditional-element-access-member` | – | **no**: no C.Run -calls-> Item.Weight |
+| `delegate (Foo f) { f.Go(); }` calls Foo.Go, not the Go of the field f's type | `anonymous-method-parameter-type` | – | **no**: no C.Run -calls-> Foo.Go has C.Run -calls-> Bar.Go |
+| `c++` is a call of `operator ++` of c's type | `increment-operator-call` | – | **no**: no C.Run -calls-> Counter.operator++ |
+| `x` after `into y` is the field x, not the range variable | `query-continuation-ends-range-variables` | – | yes |
+| `First(list).Go()` and `Head(array).Go()` call Foo.Go | `inference-through-interface-and-array` | – | **no**: no C.Run -calls-> Foo.Go |
+| `new T("a")` constructs with T(string), not T(int) | `constructor-overload-by-type` | – | yes |
+| `a` in the inner lambda is the outer lambda's `Foo a`, not the field a | `nested-lambda-outer-parameter` | – | yes |
+| `Step(1)` beside a local function Step is the local function, not the method Step | `local-function-hides-method` | – | yes |
+| `Helper()` in a nested class is the enclosing class's static; `Count()` is the nested class's own, not the enclosing one's | `nested-class-calls-enclosing-static` | – | yes |
+| the name left of the colon in a property pattern is a field or property of the input type, not of the enclosing class | `property-pattern-member` | 9.0– | **no**: no Checker.Run -reads-> Person.Name; Checker.Typed -reads-> Person.Age has Checker.Run -reads-> Checker.Name |
+| in `{ Home.City: ... }` Home is a member of the input type and City a member of Home's type | `extended-property-pattern` | 10.0– | **no**: no Checker.Run -reads-> Person.Home; Checker.Run -reads-> Address.City |
+| `p is (var a, var b)` calls the instance Deconstruct of that arity; three subpatterns call the extension Deconstruct | `positional-pattern-deconstruct` | 8.0– | **no**: no Checker.Two -calls-> P.Deconstruct; Checker.Three -calls-> Ext.Deconstruct |
+| `x is B` where B names a type of the namespace and a constant of the class: the type pattern (Roslyn binds the type) | `constant-pattern-before-type` | – | **no**: has A.Run -reads-> A.B |
+| `case Limits.Max:` and `case Zero:` read the constants they name | `constant-pattern-case-label` | – | yes |
+| `c is var d` gives d the type of c | `var-pattern-input-type` | – | **no**: no C.Run -calls-> Circle.Area |
+| `o is Circle or Square` and `o is not Tri` are uses of the three types | `pattern-combinators` | 9.0– | yes |
+| a local declared in an inner block hides the field only inside that block | `block-local-scope` | – | **no**: no C.Out -calls-> Other.A |
+| a `for` variable hides the field of its name only inside the loop | `for-variable-scope` | – | **no**: no C.Run -calls-> Other.B |
+| a call written before a local function's declaration still means the local function, not the method of the class | `local-function-before-declaration` | – | yes |
+| with a class named `var` in scope, `var v = new var();` declares a local of that class | `type-named-var` | – | **no**: no C.Run -references-> var; C.Run -calls-> var.A |
+| a local declared in one switch section is the name in the other sections too | `switch-block-local-scope` | – | yes |
+| `case Circle c when c.R > 0:` binds c in its section only; elsewhere c is the field | `switch-section-pattern-scope` | – | **no**: no Shapes.Run -calls-> Other.Name; Shapes.Arm -calls-> Other.Name has Shapes.Run -calls-> Circle.Name; Shapes.Arm -calls-> Circle.Name |
+| after `if (!(o is Foo s)) return;` s is the Foo local; after `while (o is Foo s)` s is the field again | `pattern-variable-leaks-from-if` | – | **no**: no Checker.Stays -calls-> Other.Hello has Checker.Stays -calls-> Foo.Hello |
+| `foreach (var it in bag)` where Bag : IEnumerable<Item> makes it an Item | `foreach-project-ienumerable` | – | **no**: no C.Run -calls-> Item.A |
+| foreach over a type whose only GetEnumerator is an extension method types the variable by that enumerator's Current | `foreach-extension-getenumerator` | 9.0– | **no**: no C.Run -calls-> Item.A |
+| the variables of a deconstructing foreach have the types of Deconstruct's out parameters | `foreach-deconstruct` | 7.0– | **no**: no C.Run -calls-> Alpha.Go |
+| `catch (AppError e) when (e.Code > 0) { e.Log(); }`: e is an AppError in the filter and block, the field e after them | `catch-variable-type` | – | **no**: no C.Run -calls-> AppError.Log; C.Run -reads-> AppError.Code has C.Run -calls-> Other.Log; C.Run -reads-> Other.Code |
+| `using (var r = new Res())` and `using var r = new Res();` declare r as a Res, hiding the field r | `using-resource-variable` | 8.0– | yes |
+| the iteration variable of a foreach is a name of the loop only; after it the name is the member again | `foreach-variable-scope` | – | **no**: no A.Run -calls-> Other.Find has A.Run -calls-> Repo.Find |
+| a public GetEnumerator method of the collection type wins over its IEnumerable<T> implementation: the iteration variable is the pattern enumerator's Current | `foreach-pattern-before-interface` | – | **no**: no A.Run -calls-> Repo.Find |
+| the iteration variable of an `await foreach` over IAsyncEnumerable<T> is a T | `await-foreach-variable` | – | yes |
+| in `var (a, b) = p;` a and b are typed by the out parameters of p's Deconstruct method | `deconstruction-declaration-types` | – | **no**: no A.Run -calls-> Repo.Find |
+| `s.TryGet(out var r)` declares r, typed by the out parameter, in the enclosing block; a later `r.Find()` is on that local, not on the field r | `out-var-types-and-hides` | – | **no**: no A.Run -calls-> Repo.Find has A.Run -calls-> Other.Find |
+| `if (o is not Repo r) return;` leaves r, a Repo, in scope after the statement, hiding a field r | `is-not-pattern-variable` | – | yes |
+| `[Mark]` means `MarkAttribute`, not a non-attribute class `Mark` | `attribute-suffix-omitted` | – | **no**: no Target -references-> MarkAttribute has Target -references-> Mark |
+| `[Help(Topic = ..., Level = ...)]`: the names are members of the attribute class (own or inherited), not of the decorated type | `attribute-named-argument-member` | – | **no**: no Doc -writes-> BaseAttr.Topic; Doc -writes-> HelpAttribute.Level |
+| `[@Example]` is the class `Example`, `[ExampleAttribute]` is `ExampleAttribute`, though both exist | `attribute-verbatim-name` | – | **no**: no OnPlain -references-> Example |
+| `[Mark]` means the `MarkAttribute` of the namespace its own file imports | `attribute-name-per-file-usings` | – | **no**: no OnLeft -references-> Left.MarkAttribute; OnRight -references-> Right.MarkAttribute |
+| each part of a partial type decorates the type, its attribute name resolved by that part's usings | `attribute-partial-parts-own-usings` | – | **no**: no P -references-> Left.MarkAttribute; P -references-> Right.MarkAttribute |
+| `[assembly: Stamp]` means the `StampAttribute` of the namespace the file imports (the file is its source) | `assembly-attribute` | – | **no**: no A.cs -references-> Marks.StampAttribute |
+| `[return: Mark]`, `[type: Mark]`, `[field: Mark]` and a parameter attribute name the same attribute class, on the declaration they are written on | `attribute-target-specifier` | – | **no**: no Holder -references-> MarkAttribute; Holder.M -references-> MarkAttribute; Holder.P -references-> MarkAttribute; Holder.N -references-> MarkAttribute has Holder -references-> Mark; Holder.M -references-> Mark |
+| `[Limit(Limit)]` on a method or on the class itself: the argument is the class's own constant, not one a `using static` brings | `attribute-argument-scope-member` | – | yes |
+| `[Help("x")]` calls `HelpAttribute`'s constructor, not its base attribute's | `attribute-constructor` | – | **no**: no Doc -calls-> HelpAttribute.HelpAttribute |
+| a class `Mark` that is no attribute is not what `[Mark]` means when `MarkAttribute` is declared in an outer namespace | `attribute-lookup-skips-non-attribute` | – | **no**: no Target -references-> MarkAttribute has Target -references-> Inner.Mark |
+| typeof(T) and a constant named in an attribute's arguments are uses, from the decorated method, of that type and constant | `csharp-attribute-argument-uses` | – | yes |
+| an attribute on a type is looked up in the scope of that type: its nested attribute class hides the outer one of the same name | `attribute-nested-class-shadows-outer` | – | **no**: no Host -references-> Host.MarkAttribute; Host.M -references-> Host.MarkAttribute; Other -references-> A.cs:MarkAttribute |
+| an attribute written with a using alias name means the aliased attribute class | `attribute-using-alias` | – | yes |
+| a namespace-qualified attribute name finds the suffixed class in that namespace only | `attribute-qualified-name` | – | **no**: no A -references-> One.MarkAttribute; B -references-> Two.MarkAttribute |
+| a generic attribute's type arguments choose the class of that arity, not the non-generic class of the same name | `attribute-generic-arity` | 11– | **no**: no Target -references-> MarkAttribute<T>; Plain -references-> MarkAttribute |
 
 ### rust (75 of 75)
 
@@ -1195,4 +1520,4 @@ Found by: the specification 31, a compiler 2, comparison 0, the grammar 1, the l
 | `A::hello insteadof B` picks A's method of two used traits | `trait-insteadof` | – | yes |
 | a method a trait brings comes before an inherited one, and the class's own before both | `trait-before-inherited` | – | yes |
 
-927 of 945 rules hold
+1062 of 1270 rules hold

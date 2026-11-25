@@ -1,6 +1,6 @@
 {
- "passed": 927,
- "total": 945,
+ "passed": 1062,
+ "total": 1270,
  "cases": [
   {
    "id": "python/module-function",
@@ -5796,6 +5796,3655 @@
    "id": "go/package-type-hides-the-predeclared-any",
    "ok": true,
    "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/namespace-and-generic-type-of-one-name",
+   "ok": false,
+   "missing": [
+    [
+     "C.M",
+     "calls",
+     "Result.Get"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/lambda-parameter-hides-local",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/switch-section-local-scope",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/inaccessible-base-member-skipped",
+   "ok": false,
+   "missing": [
+    [
+     "Derived.M",
+     "calls",
+     "Outer.Helper"
+    ]
+   ],
+   "unwanted": [
+    [
+     "Derived.M",
+     "calls",
+     "Base.Helper"
+    ]
+   ]
+  },
+  {
+   "id": "csharp/inaccessible-hider-hides-nothing",
+   "ok": false,
+   "missing": [
+    [
+     "MoreDerived.G",
+     "calls",
+     "Base.F"
+    ]
+   ],
+   "unwanted": [
+    [
+     "MoreDerived.G",
+     "calls",
+     "Derived.F"
+    ]
+   ]
+  },
+  {
+   "id": "csharp/inaccessible-nested-type-of-a-base",
+   "ok": false,
+   "missing": [
+    [
+     "Derived.M",
+     "references",
+     "A.cs:App.Item"
+    ],
+    [
+     "Derived.M",
+     "calls",
+     "Item.Run"
+    ]
+   ],
+   "unwanted": [
+    [
+     "Derived.M",
+     "references",
+     "Base.Item"
+    ]
+   ]
+  },
+  {
+   "id": "csharp/derived-overload-of-another-signature",
+   "ok": false,
+   "missing": [
+    [
+     "Derived.UseInt",
+     "calls",
+     "Base.Show"
+    ]
+   ],
+   "unwanted": [
+    [
+     "Derived.UseInt",
+     "calls",
+     "Derived.Show"
+    ]
+   ]
+  },
+  {
+   "id": "csharp/class-type-parameter-hides-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/type-parameter-scope-ends-with-its-class",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/local-scope-ends-with-its-block",
+   "ok": false,
+   "missing": [
+    [
+     "C.M",
+     "calls",
+     "B.Run"
+    ],
+    [
+     "C.N",
+     "calls",
+     "B.Run"
+    ]
+   ],
+   "unwanted": [
+    [
+     "C.M",
+     "calls",
+     "A.Run"
+    ],
+    [
+     "C.N",
+     "calls",
+     "A.Run"
+    ]
+   ]
+  },
+  {
+   "id": "csharp/local-hides-field-in-its-block",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/field-named-like-a-type-is-no-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/inner-member-hides-outer-overloads",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/interface-member-hides-base-interface-member",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/namespace-before-outer-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/global-alias-qualifier",
+   "ok": false,
+   "missing": [
+    [
+     "C.M",
+     "calls",
+     "Item.cs:Item.Run"
+    ]
+   ],
+   "unwanted": [
+    [
+     "C.M",
+     "calls",
+     "A.cs:App.Item.Run"
+    ]
+   ]
+  },
+  {
+   "id": "csharp/using-alias-of-a-namespace",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/nested-type-of-a-constructed-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/base-list-ignores-inherited-nested-types",
+   "ok": false,
+   "missing": [
+    [
+     "Derived",
+     "references",
+     "A.cs:App.Inner"
+    ]
+   ],
+   "unwanted": [
+    [
+     "Derived",
+     "references",
+     "Base.Inner"
+    ]
+   ]
+  },
+  {
+   "id": "csharp/type-parameter-constraint-member",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/attribute-suffix",
+   "ok": false,
+   "missing": [
+    [
+     "C.M",
+     "references",
+     "CacheAttribute"
+    ]
+   ],
+   "unwanted": [
+    [
+     "C.M",
+     "references",
+     "A.cs:App.Cache"
+    ]
+   ]
+  },
+  {
+   "id": "csharp/local-function-local-hides-outer-local",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/setter-value-hides-field",
+   "ok": false,
+   "missing": [
+    [
+     "C.Prop",
+     "calls",
+     "A.Run"
+    ]
+   ],
+   "unwanted": [
+    [
+     "C.Prop",
+     "calls",
+     "B.Run"
+    ]
+   ]
+  },
+  {
+   "id": "csharp/using-static-nested-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/explicit-interface-impl-not-found-by-name",
+   "ok": false,
+   "missing": [
+    [
+     "C.Run",
+     "calls",
+     "B.M"
+    ]
+   ],
+   "unwanted": [
+    [
+     "C.Run",
+     "calls",
+     "C.M"
+    ]
+   ]
+  },
+  {
+   "id": "csharp/local-function-hides-method-in-whole-block",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/csharp-pattern-variable-if-scope",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/csharp-out-variable-block-scope",
+   "ok": false,
+   "missing": [],
+   "unwanted": [
+    [
+     "Holder.Leaks",
+     "reads",
+     "Holder.x"
+    ]
+   ]
+  },
+  {
+   "id": "csharp/global-namespace-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/using-is-per-file",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/namespace-open-ended",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/alias-to-namespace",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/alias-hidden-by-namespace-member",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/alias-innermost-first",
+   "ok": false,
+   "missing": [
+    [
+     "A.Run",
+     "calls",
+     "Other/Repo.cs:Other.Repo.Find"
+    ]
+   ],
+   "unwanted": [
+    [
+     "A.Run",
+     "calls",
+     "Lib/Repo.cs:Lib.Repo.Find"
+    ]
+   ]
+  },
+  {
+   "id": "csharp/alias-per-partial-part",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/alias-closed-generic",
+   "ok": false,
+   "missing": [
+    [
+     "A.Run",
+     "calls",
+     "Box.Get"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/using-does-not-import-namespaces",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/inner-using-before-outer-type",
+   "ok": false,
+   "missing": [
+    [
+     "C.Run",
+     "calls",
+     "Lib.Repo.Find"
+    ]
+   ],
+   "unwanted": [
+    [
+     "C.Run",
+     "calls",
+     "Outer.Repo.Find"
+    ]
+   ]
+  },
+  {
+   "id": "csharp/using-static-extension",
+   "ok": false,
+   "missing": [
+    [
+     "A.Run",
+     "calls",
+     "Ext.Shout"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/using-static-not-inherited",
+   "ok": false,
+   "missing": [
+    [
+     "A.Run",
+     "calls",
+     "Util.Twice"
+    ]
+   ],
+   "unwanted": [
+    [
+     "A.Run",
+     "calls",
+     "Base.Twice"
+    ]
+   ]
+  },
+  {
+   "id": "csharp/global-qualifier",
+   "ok": false,
+   "missing": [],
+   "unwanted": [
+    [
+     "A.Run",
+     "calls",
+     "App.Repo.Find"
+    ]
+   ]
+  },
+  {
+   "id": "csharp/alias-qualifier",
+   "ok": false,
+   "missing": [],
+   "unwanted": [
+    [
+     "A.Run",
+     "references",
+     "App.S"
+    ]
+   ]
+  },
+  {
+   "id": "csharp/alias-named-global",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/file-scoped-using-before-outer-namespace",
+   "ok": false,
+   "missing": [
+    [
+     "C.M",
+     "references",
+     "Lib.Repo"
+    ],
+    [
+     "C.M",
+     "calls",
+     "Lib.Repo.Find"
+    ]
+   ],
+   "unwanted": [
+    [
+     "C.M",
+     "references",
+     "App.Repo"
+    ]
+   ]
+  },
+  {
+   "id": "csharp/using-alias-as-qualifier",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/using-static-fields-and-properties",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/using-static-hidden-by-own-member",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/using-static-enum-members",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/keyword-alias-is-system-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/tuple-element-names",
+   "ok": false,
+   "missing": [
+    [
+     "C.Left",
+     "calls",
+     "Repo.Find"
+    ],
+    [
+     "C.Right",
+     "calls",
+     "Other.Find"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/nullable-value-type-members",
+   "ok": false,
+   "missing": [
+    [
+     "C.Run",
+     "calls",
+     "Point.Len"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/generic-outer-nested-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/static-member-of-a-constructed-type",
+   "ok": false,
+   "missing": [
+    [
+     "C.Plain",
+     "calls",
+     "A.cs:App.Box.Make@10"
+    ]
+   ],
+   "unwanted": [
+    [
+     "C.Plain",
+     "calls",
+     "A.cs:App.Box.Make@5"
+    ]
+   ]
+  },
+  {
+   "id": "csharp/typeof-unbound-generic-arity",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/constraint-names-are-uses",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/class-type-parameter-first",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/type-parameter-constraint-members",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/nullable-reference-annotation",
+   "ok": false,
+   "missing": [
+    [
+     "C.Run",
+     "calls",
+     "Repo.Find"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/overload-base-conversion",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/overload-interface-conversion",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/overload-more-derived-parameter",
+   "ok": false,
+   "missing": [],
+   "unwanted": [
+    [
+     "C.Run",
+     "calls",
+     "A.cs:App.Log.Write@17"
+    ]
+   ]
+  },
+  {
+   "id": "csharp/overload-numeric-conversion",
+   "ok": false,
+   "missing": [],
+   "unwanted": [
+    [
+     "C.Local",
+     "calls",
+     "A.cs:App.Log.Write@7"
+    ]
+   ]
+  },
+  {
+   "id": "csharp/overload-constant-conversion",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/overload-null-literal",
+   "ok": false,
+   "missing": [],
+   "unwanted": [
+    [
+     "C.Run",
+     "calls",
+     "A.cs:App.Log.Write@5"
+    ]
+   ]
+  },
+  {
+   "id": "csharp/overload-type-parameter-bound",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/lambda-parameter-from-declared-delegate",
+   "ok": false,
+   "missing": [
+    [
+     "C.Make",
+     "calls",
+     "Repo.Find"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/lambda-parameter-from-method-parameter",
+   "ok": false,
+   "missing": [
+    [
+     "C.Run",
+     "calls",
+     "Repo.Find"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/overload-by-lambda-arity",
+   "ok": false,
+   "missing": [],
+   "unwanted": [
+    [
+     "C.Run",
+     "calls",
+     "A.cs:App.Runner.Apply@7"
+    ]
+   ]
+  },
+  {
+   "id": "csharp/method-group-picks-overload-by-delegate",
+   "ok": false,
+   "missing": [
+    [
+     "C.Make",
+     "indirect_call",
+     "A.cs:App.C.Handle@9"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/method-group-extension",
+   "ok": false,
+   "missing": [
+    [
+     "C.Make",
+     "indirect_call",
+     "RepoExt.Size"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/method-group-overload-by-delegate-roslyn",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/generic-method-constraint-is-a-use",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/extension-on-base-class",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/extension-on-predefined-type",
+   "ok": false,
+   "missing": [
+    [
+     "Run.Go",
+     "calls",
+     "StrExt.Twice"
+    ],
+    [
+     "Run.Go2",
+     "calls",
+     "IntExt.Twice"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/delegate-invocation-result",
+   "ok": false,
+   "missing": [
+    [
+     "Run.Go",
+     "calls",
+     "Item.Weigh"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/array-element-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/delegate-creation-method-group",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/lambda-parameter-from-generic-delegate",
+   "ok": false,
+   "missing": [
+    [
+     "Run.Make",
+     "calls",
+     "Item.Weigh"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/cast-method-group-to-delegate",
+   "ok": false,
+   "missing": [
+    [
+     "Run.Go",
+     "indirect_call",
+     "A.cs:App.Run.Inc@4"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/type-parameter-several-constraints",
+   "ok": false,
+   "missing": [
+    [
+     "Run.Go",
+     "calls",
+     "ISized.Size"
+    ],
+    [
+     "Run.Go3",
+     "calls",
+     "IShape.Draw"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/overload-nullable-conversion",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/overload-enum-zero-literal",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/overload-boxing-conversion",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/overload-array-covariance",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/overload-base-interface-conversion",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/generic-base-substitution",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/partial-interface-lists-union",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/applicable-derived-method-hides-base",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/nested-type-hides-base-member",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/nested-bare-name-outer-then-inherited",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/nested-generic-type-unqualified",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/constant-reads-constant",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/multi-declarator-field",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/field-initializer-uses",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/params-expanded-form-yields-to-declared",
+   "ok": false,
+   "missing": [],
+   "unwanted": [
+    [
+     "T.Two",
+     "calls",
+     "A.cs:App.T.F@5"
+    ]
+   ]
+  },
+  {
+   "id": "csharp/default-argument-constant",
+   "ok": false,
+   "missing": [
+    [
+     "C.N",
+     "reads",
+     "C.Size"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/out-variable-type",
+   "ok": false,
+   "missing": [
+    [
+     "C.Var",
+     "calls",
+     "Item.Id"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/static-type-picks-hidden-method",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/override-call-binds-to-override",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/partial-method-call",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/extension-static-and-array-receiver",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/explicit-interface-member-is-no-class-member",
+   "ok": false,
+   "missing": [],
+   "unwanted": [
+    [
+     "User.Direct",
+     "calls",
+     "A.cs:App.C.Bar@12"
+    ]
+   ]
+  },
+  {
+   "id": "csharp/cast-reaches-hidden-property",
+   "ok": false,
+   "missing": [
+    [
+     "C.Write",
+     "writes",
+     "A.P"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/base-property-access",
+   "ok": false,
+   "missing": [
+    [
+     "B.X",
+     "reads",
+     "A.X"
+    ],
+    [
+     "B.Y",
+     "reads",
+     "A.Y"
+    ],
+    [
+     "B.Y",
+     "writes",
+     "A.Y"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/auto-property-use",
+   "ok": false,
+   "missing": [
+    [
+     "Point.Point",
+     "writes",
+     "Point.X"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/method-group-event-subscription",
+   "ok": false,
+   "missing": [
+    [
+     "Dialog.Wire",
+     "indirect_call",
+     "Dialog.OkClicked"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/indexer-use",
+   "ok": false,
+   "missing": [
+    [
+     "C.Read",
+     "reads",
+     "A.cs:App.Grid.this[]@7"
+    ],
+    [
+     "C.Write",
+     "writes",
+     "A.cs:App.Grid.this[]@7"
+    ],
+    [
+     "C.Two",
+     "reads",
+     "A.cs:App.Grid.this[]@13"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/base-indexer-access",
+   "ok": false,
+   "missing": [
+    [
+     "B.this[]",
+     "reads",
+     "A.this[]"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/user-defined-operator",
+   "ok": false,
+   "missing": [
+    [
+     "C.Add",
+     "calls",
+     "Vec.operator+"
+    ],
+    [
+     "C.Sub",
+     "calls",
+     "Vec.operator-"
+    ],
+    [
+     "C.Inc",
+     "calls",
+     "Vec.operator++"
+    ],
+    [
+     "C.Inherited",
+     "calls",
+     "Vec.operator+"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/conversion-operator",
+   "ok": false,
+   "missing": [
+    [
+     "C.Widen",
+     "calls",
+     "Digit.operator byte"
+    ],
+    [
+     "C.Narrow",
+     "calls",
+     "Digit.operator Digit"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/implicit-base-constructor",
+   "ok": false,
+   "missing": [
+    [
+     "B.B",
+     "calls",
+     "A.cs:App.A.A@5"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/constructor-initializer-parameter-hides-field",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/foreach-over-iterator",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/override-is-no-candidate",
+   "ok": false,
+   "missing": [],
+   "unwanted": [
+    [
+     "C.Go",
+     "calls",
+     "A.cs:App.Derived.M@10"
+    ]
+   ]
+  },
+  {
+   "id": "csharp/overload-by-ref-kind",
+   "ok": false,
+   "missing": [],
+   "unwanted": [
+    [
+     "C.Go",
+     "calls",
+     "A.cs:App.Log.Put@5"
+    ]
+   ]
+  },
+  {
+   "id": "csharp/constraint-through-type-parameter",
+   "ok": false,
+   "missing": [
+    [
+     "Box.Run",
+     "calls",
+     "IFoo.Foo"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/extension-on-constrained-type-parameter",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/partial-base-in-other-part",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/operator-forms-use-the-operator",
+   "ok": false,
+   "missing": [
+    [
+     "C.Add",
+     "calls",
+     "V.operator+"
+    ],
+    [
+     "C.Inc",
+     "calls",
+     "V.operator++"
+    ],
+    [
+     "C.Neg",
+     "calls",
+     "V.operator-"
+    ],
+    [
+     "C.Both",
+     "calls",
+     "V.operator&"
+    ],
+    [
+     "C.Both",
+     "calls",
+     "V.operator false"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/nested-type-reaches-private-of-container",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/await-getawaiter-pattern",
+   "ok": false,
+   "missing": [
+    [
+     "Runner.Run",
+     "calls",
+     "Job.GetAwaiter"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/foreach-getenumerator-pattern",
+   "ok": false,
+   "missing": [
+    [
+     "Use.Sum",
+     "calls",
+     "Bag.GetEnumerator"
+    ],
+    [
+     "Use.Sum",
+     "reads",
+     "Item.V"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/setter-value-parameter",
+   "ok": false,
+   "missing": [
+    [
+     "C.P",
+     "calls",
+     "B.Run"
+    ]
+   ],
+   "unwanted": [
+    [
+     "C.P",
+     "calls",
+     "A.Run"
+    ]
+   ]
+  },
+  {
+   "id": "csharp/nested-type-parameter-hides-outer",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/params-normal-form-before-expanded",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/non-invocable-member-does-not-hide-method",
+   "ok": false,
+   "missing": [
+    [
+     "U.F",
+     "calls",
+     "Base.M"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/await-foreach-pattern",
+   "ok": false,
+   "missing": [
+    [
+     "U.F",
+     "calls",
+     "Bag.GetAsyncEnumerator"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/checked-operator",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/implicit-index-support",
+   "ok": false,
+   "missing": [
+    [
+     "U.F",
+     "reads",
+     "L.Count"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/object-initializer-member",
+   "ok": false,
+   "missing": [
+    [
+     "D.F",
+     "writes",
+     "C.X"
+    ],
+    [
+     "D.F",
+     "writes",
+     "C.N"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/partial-struct",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/class-and-interfaces-in-a-base-list",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/struct-overrides-a-valuetype-member",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/struct-default-constructor",
+   "ok": false,
+   "missing": [],
+   "unwanted": [
+    [
+     "A.Zero",
+     "calls",
+     "Point.Point"
+    ]
+   ]
+  },
+  {
+   "id": "csharp/constraint-interface-member",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/struct-static-field-initializer",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/array-element-access",
+   "ok": false,
+   "missing": [
+    [
+     "A.Jagged",
+     "calls",
+     "Repo.Find"
+    ],
+    [
+     "A.Mixed",
+     "calls",
+     "Repo.Find"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/extension-on-array-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/array-creation-element",
+   "ok": false,
+   "missing": [
+    [
+     "A.Run",
+     "calls",
+     "Repo.Find"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/array-slice-keeps-the-array-type",
+   "ok": false,
+   "missing": [
+    [
+     "A.Run",
+     "calls",
+     "Repo.Find"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/array-foreach-element",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/interface-inherited-member",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/interface-inherited-generic-member",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/extension-on-base-interface",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/explicit-implementation-names-the-declaring-interface",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/interface-member-hides-base",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/interface-hidden-on-every-path",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/interface-overloads-of-two-bases",
+   "ok": false,
+   "missing": [
+    [
+     "A.RunDouble",
+     "calls",
+     "IDouble.Add"
+    ]
+   ],
+   "unwanted": [
+    [
+     "A.RunDouble",
+     "calls",
+     "IInteger.Add"
+    ]
+   ]
+  },
+  {
+   "id": "csharp/interface-default-method-names-base-member",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/partial-interface",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/interface-static-member",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/interface-nested-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/base-call-reaches-the-class-member",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/explicit-implementation-names-its-interface",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/explicit-implementation-through-the-interface",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/explicit-implementation-body",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/interface-mapping-through-a-base-class",
+   "ok": false,
+   "missing": [
+    [
+     "Interface1.F",
+     "dispatches_to",
+     "Class1.F"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/new-member-overrides-nothing",
+   "ok": false,
+   "missing": [],
+   "unwanted": [
+    [
+     "Class1.G",
+     "dispatches_to",
+     "Class2.G"
+    ]
+   ]
+  },
+  {
+   "id": "csharp/interface-mapping-one-member-for-two-interfaces",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/interface-reimplementation",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/enum-underlying-type-name",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/enum-member-initializer",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/extension-on-enum-value",
+   "ok": false,
+   "missing": [
+    [
+     "A.Direct",
+     "calls",
+     "ColorExt.Code"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/generic-delegate-type",
+   "ok": false,
+   "missing": [
+    [
+     "A.Run",
+     "calls",
+     "Repo.Find"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/delegate-invoke-member",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/delegate-creation-names-a-method",
+   "ok": false,
+   "missing": [
+    [
+     "Test.Static",
+     "indirect_call",
+     "C.M1"
+    ],
+    [
+     "Test.Instance",
+     "indirect_call",
+     "C.M2"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/delegate-local-hides-method",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/delegate-field-invocation",
+   "ok": false,
+   "missing": [
+    [
+     "A.Run",
+     "reads",
+     "A.handler"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/delegate-signature-types",
+   "ok": false,
+   "missing": [
+    [
+     "Host.Make",
+     "references",
+     "Host.Seen"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/extension-on-delegate",
+   "ok": false,
+   "missing": [
+    [
+     "A.Run",
+     "calls",
+     "ExtA.Twice"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/method-group-to-delegate",
+   "ok": false,
+   "missing": [
+    [
+     "A.Run",
+     "indirect_call",
+     "A.Target"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/interface-property-access",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/implicit-array-element",
+   "ok": false,
+   "missing": [
+    [
+     "A.Run",
+     "calls",
+     "Seen.Mark"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/extension-on-ref-struct-receiver",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/csharp-interface-static-abstract-through-type-parameter",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/csharp-interface-default-method-via-interface",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/csharp-interface-two-closed-generic-implementations",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/invoked-name-skips-non-invocable",
+   "ok": false,
+   "missing": [
+    [
+     "C.M",
+     "calls",
+     "Base.Run"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/generic-method-by-type-arguments",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/nested-type-sees-outer-static",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/parenthesized-receiver",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/static-abstract-through-type-parameter",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/null-conditional-dependent-access",
+   "ok": false,
+   "missing": [
+    [
+     "C.M",
+     "reads",
+     "Car.Engine"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/indexer-by-argument",
+   "ok": false,
+   "missing": [
+    [
+     "C.M",
+     "reads",
+     "A.cs:App.Table.this[]@5"
+    ],
+    [
+     "C.N",
+     "reads",
+     "A.cs:App.Table.this[]@7"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/null-conditional-element-access",
+   "ok": false,
+   "missing": [
+    [
+     "C.M",
+     "calls",
+     "Item.Weight"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/base-indexer",
+   "ok": false,
+   "missing": [
+    [
+     "Derived.this[]",
+     "reads",
+     "Base.this[]"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/object-initializer-targets",
+   "ok": false,
+   "missing": [
+    [
+     "C.M",
+     "writes",
+     "Point.X"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/nested-object-initializer",
+   "ok": false,
+   "missing": [
+    [
+     "C.M",
+     "writes",
+     "Inner.Size"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/collection-initializer-add",
+   "ok": false,
+   "missing": [
+    [
+     "C.M",
+     "calls",
+     "Bag.Add"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/typeof-names-a-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/default-expression-names-a-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/nameof-names-its-target",
+   "ok": false,
+   "missing": [
+    [
+     "C.M",
+     "references",
+     "Order.Total"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/increment-calls-operator",
+   "ok": false,
+   "missing": [
+    [
+     "C.M",
+     "calls",
+     "Counter.operator++"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/await-custom-awaitable",
+   "ok": false,
+   "missing": [
+    [
+     "C.M",
+     "calls",
+     "Reply.Code"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/switch-expression-type-pattern",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/operator-by-operand-types",
+   "ok": false,
+   "missing": [
+    [
+     "C.M",
+     "calls",
+     "A.cs:App.Money.operator+@7"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/unary-operator",
+   "ok": false,
+   "missing": [
+    [
+     "C.M",
+     "calls",
+     "A.cs:App.Vec.operator-@5"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/coalesce-type",
+   "ok": false,
+   "missing": [
+    [
+     "C.M",
+     "calls",
+     "Part.Size"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/out-variable-declaration",
+   "ok": false,
+   "missing": [
+    [
+     "C.M",
+     "calls",
+     "Part.Size"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/deconstruction-variable-types",
+   "ok": false,
+   "missing": [
+    [
+     "C.M",
+     "calls",
+     "Part.Size"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/conditional-type",
+   "ok": false,
+   "missing": [
+    [
+     "C.M",
+     "calls",
+     "Part.Size"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/simple-assignment-writes-member",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/compound-assignment-uses-operator",
+   "ok": false,
+   "missing": [
+    [
+     "C.M",
+     "calls",
+     "Vec.operator+"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/event-assignment",
+   "ok": false,
+   "missing": [
+    [
+     "C.M",
+     "references",
+     "C.OnClick"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/deconstruction-calls-deconstruct",
+   "ok": false,
+   "missing": [
+    [
+     "C.M",
+     "calls",
+     "Point.Deconstruct"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/deconstruct-overload-by-count",
+   "ok": false,
+   "missing": [
+    [
+     "C.M",
+     "calls",
+     "A.cs:App.Point.Deconstruct@7"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/deconstruct-extension",
+   "ok": false,
+   "missing": [
+    [
+     "C.M",
+     "calls",
+     "PointExtensions.Deconstruct"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/with-expression-members",
+   "ok": false,
+   "missing": [
+    [
+     "C.M",
+     "writes",
+     "Person.Age"
+    ],
+    [
+     "C.M",
+     "calls",
+     "Person.Years"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/lambda-parameter-shadows-enclosing-local",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/qualified-alias-member-access",
+   "ok": false,
+   "missing": [
+    [
+     "U.Go",
+     "calls",
+     "Lib.cs:Util.F"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/await-extension-get-awaiter",
+   "ok": false,
+   "missing": [
+    [
+     "U.Go",
+     "calls",
+     "Ext.GetAwaiter"
+    ],
+    [
+     "U.Go",
+     "calls",
+     "Num.Show"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/cast-calls-explicit-conversion",
+   "ok": false,
+   "missing": [
+    [
+     "U.Go",
+     "calls",
+     "Dst.operator Dst"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/lifted-user-operator",
+   "ok": false,
+   "missing": [
+    [
+     "U.Go",
+     "calls",
+     "Money.operator+"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/object-initializer-indexer",
+   "ok": false,
+   "missing": [
+    [
+     "Use.Make",
+     "references",
+     "Bag.this[]"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/operator-of-base-class",
+   "ok": false,
+   "missing": [
+    [
+     "Use.Go",
+     "calls",
+     "B.operator+"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/conditional-logical-operator",
+   "ok": false,
+   "missing": [
+    [
+     "Use.Go",
+     "calls",
+     "F.operator&"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/deconstruction-declaration",
+   "ok": false,
+   "missing": [
+    [
+     "Use.Go",
+     "calls",
+     "P.Deconstruct"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/cs-operator-true-condition",
+   "ok": false,
+   "missing": [
+    [
+     "Use.Run",
+     "calls",
+     "Flag.operator true"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/cs-operator-not-equals",
+   "ok": false,
+   "missing": [
+    [
+     "Use.Run",
+     "calls",
+     "V.operator !="
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/cs-operator-shift",
+   "ok": false,
+   "missing": [
+    [
+     "Use.Run",
+     "calls",
+     "B.operator <<"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/cs-checked-operator",
+   "ok": false,
+   "missing": [
+    [
+     "Use.Plain",
+     "calls",
+     "M.operator +"
+    ],
+    [
+     "Use.Chk",
+     "calls",
+     "M.operator checked +"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/cs-static-abstract-operator-typeparam",
+   "ok": false,
+   "missing": [
+    [
+     "Use.Sum",
+     "calls",
+     "IAdd.operator +"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/cs-null-conditional-nullable-struct",
+   "ok": false,
+   "missing": [
+    [
+     "Use.Run2",
+     "reads",
+     "S.P"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/cs-implicit-index-range-support",
+   "ok": false,
+   "missing": [
+    [
+     "Use.Run",
+     "reads",
+     "Bag.Count"
+    ],
+    [
+     "Use.Run2",
+     "calls",
+     "Bag.Slice"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/cs-property-pattern-member",
+   "ok": false,
+   "missing": [
+    [
+     "Use.Run",
+     "reads",
+     "Pt.X"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/cs-foreach-deconstruct",
+   "ok": false,
+   "missing": [
+    [
+     "Use.Run",
+     "calls",
+     "Pair.Deconstruct"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/operator-use-is-a-call",
+   "ok": false,
+   "missing": [
+    [
+     "Use.Run",
+     "calls",
+     "Money.operator+"
+    ],
+    [
+     "Use.Run2",
+     "calls",
+     "Other.operator+"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/operator-compound-assignment",
+   "ok": false,
+   "missing": [
+    [
+     "Use.Run",
+     "calls",
+     "Money.operator+"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/operator-unary",
+   "ok": false,
+   "missing": [
+    [
+     "Use.Run",
+     "calls",
+     "Temp.operator-"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/operator-from-the-second-operand",
+   "ok": false,
+   "missing": [
+    [
+     "Use.Run",
+     "calls",
+     "Money.operator+"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/operator-of-a-base-class",
+   "ok": false,
+   "missing": [
+    [
+     "Use.Run",
+     "calls",
+     "Base.operator+"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/operator-of-the-derived-type-first",
+   "ok": false,
+   "missing": [
+    [
+     "Use.Run",
+     "calls",
+     "Derived.operator+"
+    ],
+    [
+     "Use.Run2",
+     "calls",
+     "Base.operator+"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/operator-equality",
+   "ok": false,
+   "missing": [
+    [
+     "Use.Run",
+     "calls",
+     "Money.operator=="
+    ],
+    [
+     "Use.Run2",
+     "calls",
+     "Money.operator!="
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/conversion-operator-cast",
+   "ok": false,
+   "missing": [
+    [
+     "Use.Run",
+     "calls",
+     "Meters.operator Meters"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/derived-applicable-method-hides-base",
+   "ok": false,
+   "missing": [
+    [
+     "Use.Run3",
+     "calls",
+     "Base.F"
+    ]
+   ],
+   "unwanted": [
+    [
+     "Use.Run3",
+     "calls",
+     "Derived.F"
+    ]
+   ]
+  },
+  {
+   "id": "csharp/override-called-through-its-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/extension-when-the-instance-method-is-inapplicable",
+   "ok": false,
+   "missing": [
+    [
+     "Use.Run",
+     "calls",
+     "RepoExt.Find"
+    ]
+   ],
+   "unwanted": [
+    [
+     "Use.Run",
+     "calls",
+     "Repo.Find"
+    ]
+   ]
+  },
+  {
+   "id": "csharp/extension-better-this-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/extension-declared-before-imported",
+   "ok": false,
+   "missing": [
+    [
+     "Use.Run",
+     "calls",
+     "E.F"
+    ],
+    [
+     "Use.Run2",
+     "calls",
+     "D.G"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/extension-receiver-conversion",
+   "ok": false,
+   "missing": [
+    [
+     "Use.Run",
+     "calls",
+     "A.cs:App.Ext.Twice@7"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/type-argument-list-picks-the-generic",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/inferred-generic-result",
+   "ok": false,
+   "missing": [
+    [
+     "Use.Run",
+     "calls",
+     "Item.Go"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/receiver-decides-static-or-instance",
+   "ok": false,
+   "missing": [],
+   "unwanted": [
+    [
+     "Use.Run",
+     "calls",
+     "A.cs:App.Log.Write@6"
+    ]
+   ]
+  },
+  {
+   "id": "csharp/generic-constraint-excludes-candidate",
+   "ok": false,
+   "missing": [],
+   "unwanted": [
+    [
+     "Use.Run",
+     "calls",
+     "A.cs:App.Pick.Take@6"
+    ]
+   ]
+  },
+  {
+   "id": "csharp/overload-value-over-in",
+   "ok": false,
+   "missing": [],
+   "unwanted": [
+    [
+     "Use.Run",
+     "calls",
+     "A.cs:App.M.M1@7"
+    ],
+    [
+     "Use.Run2",
+     "calls",
+     "A.cs:App.M.M1@6"
+    ]
+   ]
+  },
+  {
+   "id": "csharp/overload-params-more-declared-parameters",
+   "ok": false,
+   "missing": [
+    [
+     "Use.Run",
+     "calls",
+     "A.cs:App.Log.Write@7"
+    ]
+   ],
+   "unwanted": [
+    [
+     "Use.Run",
+     "calls",
+     "A.cs:App.Log.Write@6"
+    ]
+   ]
+  },
+  {
+   "id": "csharp/overload-more-specific-generic",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/overload-null-takes-the-more-specific",
+   "ok": false,
+   "missing": [],
+   "unwanted": [
+    [
+     "Use.Run",
+     "calls",
+     "A.cs:App.Log.Write@6"
+    ]
+   ]
+  },
+  {
+   "id": "csharp/generic-class-overload-original-signature",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/indexer-overload",
+   "ok": false,
+   "missing": [
+    [
+     "Use.Run",
+     "reads",
+     "A.cs:App.Table.this[]@6"
+    ],
+    [
+     "Use.Run2",
+     "reads",
+     "A.cs:App.Table.this[]@7"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/delegate-invocation",
+   "ok": false,
+   "missing": [
+    [
+     "Use.Run",
+     "calls",
+     "Handler"
+    ],
+    [
+     "Use.Run2",
+     "calls",
+     "Other"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/nameof-method-in-scope",
+   "ok": false,
+   "missing": [],
+   "unwanted": [
+    [
+     "Names.Run",
+     "calls",
+     "Use.nameof"
+    ]
+   ]
+  },
+  {
+   "id": "csharp/deconstruct-method-and-element-types",
+   "ok": false,
+   "missing": [
+    [
+     "Use.Run",
+     "calls",
+     "Pair.Deconstruct"
+    ],
+    [
+     "Use.Run",
+     "calls",
+     "Item.Go"
+    ],
+    [
+     "Use.Run2",
+     "calls",
+     "Pair.Deconstruct"
+    ],
+    [
+     "Use.Run2",
+     "calls",
+     "Thing.Go"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/deconstruct-extension-method",
+   "ok": false,
+   "missing": [
+    [
+     "Use.Run",
+     "calls",
+     "PairExt.Deconstruct"
+    ],
+    [
+     "Use.Run",
+     "calls",
+     "Thing.Go"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/deconstruct-tuple-types",
+   "ok": false,
+   "missing": [
+    [
+     "Use.Run",
+     "calls",
+     "Thing.Go"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/null-conditional-chain",
+   "ok": false,
+   "missing": [
+    [
+     "Use.Run",
+     "reads",
+     "Node.Child"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/lambda-explicit-parameter-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/lambda-parameter-hides-member",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/lambda-uses-outer-local",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/lambda-discard-parameters",
+   "ok": false,
+   "missing": [
+    [
+     "Use.Run2",
+     "calls",
+     "Item.Go"
+    ]
+   ],
+   "unwanted": [
+    [
+     "Use.Run2",
+     "calls",
+     "Other.Go"
+    ]
+   ]
+  },
+  {
+   "id": "csharp/query-range-variable",
+   "ok": false,
+   "missing": [
+    [
+     "Use.Run",
+     "calls",
+     "Customer.Active"
+    ],
+    [
+     "Use.Run",
+     "calls",
+     "Customer.Name"
+    ]
+   ],
+   "unwanted": [
+    [
+     "Use.Run",
+     "calls",
+     "Other.Active"
+    ],
+    [
+     "Use.Run",
+     "calls",
+     "Other.Name"
+    ],
+    [
+     "Use.Run",
+     "reads",
+     "Use.c"
+    ]
+   ]
+  },
+  {
+   "id": "csharp/query-explicit-range-type",
+   "ok": false,
+   "missing": [
+    [
+     "Use.Run",
+     "calls",
+     "Customer.Active"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/query-let-and-second-from",
+   "ok": false,
+   "missing": [
+    [
+     "Use.Run",
+     "calls",
+     "Customer.Id"
+    ],
+    [
+     "Use.Run",
+     "calls",
+     "Dept.Title"
+    ],
+    [
+     "Use.Run2",
+     "calls",
+     "Order.Total"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/query-join-and-continuation",
+   "ok": false,
+   "missing": [
+    [
+     "Use.Run",
+     "calls",
+     "Customer.Id"
+    ],
+    [
+     "Use.Run",
+     "calls",
+     "Order.Total"
+    ],
+    [
+     "Use.Run2",
+     "calls",
+     "Customer.Name"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/query-pattern-methods",
+   "ok": false,
+   "missing": [
+    [
+     "Use.Run",
+     "calls",
+     "Source.Where"
+    ],
+    [
+     "Use.Run",
+     "calls",
+     "Source.Select"
+    ],
+    [
+     "Use.Run",
+     "calls",
+     "Item.Ok"
+    ],
+    [
+     "Use.Run",
+     "calls",
+     "Item.Val"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/inaccessible-method-not-candidate",
+   "ok": false,
+   "missing": [
+    [
+     "User.Run",
+     "calls",
+     "Base.Put"
+    ]
+   ],
+   "unwanted": [
+    [
+     "User.Run",
+     "calls",
+     "Box.Put"
+    ]
+   ]
+  },
+  {
+   "id": "csharp/type-parameter-receiver-constraint",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/static-abstract-operator-via-constraint",
+   "ok": false,
+   "missing": [
+    [
+     "User.Sum",
+     "calls",
+     "IAdd.operator+"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/out-var-has-parameter-type",
+   "ok": false,
+   "missing": [
+    [
+     "User.Run",
+     "calls",
+     "Num.Show"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/query-trivial-select-omitted",
+   "ok": false,
+   "missing": [
+    [
+     "User.Run",
+     "calls",
+     "Src.Where"
+    ],
+    [
+     "User.Run",
+     "calls",
+     "Src.OrderBy"
+    ],
+    [
+     "User.Run",
+     "calls",
+     "Src.ThenBy"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/checked-operator-by-context",
+   "ok": false,
+   "missing": [
+    [
+     "Host.Strict",
+     "calls",
+     "Money.operatorchecked"
+    ],
+    [
+     "Host.Loose",
+     "calls",
+     "Money.operator+"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/static-abstract-call-on-type-parameter",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/lambda-parameter-hides-outer-local",
+   "ok": false,
+   "missing": [
+    [
+     "Host.Shadow",
+     "calls",
+     "B.Hit"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/derived-method-not-applicable-base-used",
+   "ok": false,
+   "missing": [
+    [
+     "Derived.Run",
+     "calls",
+     "Base.M"
+    ]
+   ],
+   "unwanted": [
+    [
+     "Derived.Run",
+     "calls",
+     "Derived.M"
+    ]
+   ]
+  },
+  {
+   "id": "csharp/non-invocable-member-skipped",
+   "ok": false,
+   "missing": [
+    [
+     "Derived.Run",
+     "calls",
+     "Base.Size"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/deconstruct-by-arity",
+   "ok": false,
+   "missing": [
+    [
+     "C.Run",
+     "calls",
+     "A.cs:App.P.Deconstruct@5"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/null-conditional-element-access-member",
+   "ok": false,
+   "missing": [
+    [
+     "C.Run",
+     "calls",
+     "Item.Weight"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/anonymous-method-parameter-type",
+   "ok": false,
+   "missing": [
+    [
+     "C.Run",
+     "calls",
+     "Foo.Go"
+    ]
+   ],
+   "unwanted": [
+    [
+     "C.Run",
+     "calls",
+     "Bar.Go"
+    ]
+   ]
+  },
+  {
+   "id": "csharp/increment-operator-call",
+   "ok": false,
+   "missing": [
+    [
+     "C.Run",
+     "calls",
+     "Counter.operator++"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/query-continuation-ends-range-variables",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/inference-through-interface-and-array",
+   "ok": false,
+   "missing": [
+    [
+     "C.Run",
+     "calls",
+     "Foo.Go"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/constructor-overload-by-type",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/nested-lambda-outer-parameter",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/local-function-hides-method",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/nested-class-calls-enclosing-static",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/property-pattern-member",
+   "ok": false,
+   "missing": [
+    [
+     "Checker.Run",
+     "reads",
+     "Person.Name"
+    ],
+    [
+     "Checker.Typed",
+     "reads",
+     "Person.Age"
+    ]
+   ],
+   "unwanted": [
+    [
+     "Checker.Run",
+     "reads",
+     "Checker.Name"
+    ]
+   ]
+  },
+  {
+   "id": "csharp/extended-property-pattern",
+   "ok": false,
+   "missing": [
+    [
+     "Checker.Run",
+     "reads",
+     "Person.Home"
+    ],
+    [
+     "Checker.Run",
+     "reads",
+     "Address.City"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/positional-pattern-deconstruct",
+   "ok": false,
+   "missing": [
+    [
+     "Checker.Two",
+     "calls",
+     "P.Deconstruct"
+    ],
+    [
+     "Checker.Three",
+     "calls",
+     "Ext.Deconstruct"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/constant-pattern-before-type",
+   "ok": false,
+   "missing": [],
+   "unwanted": [
+    [
+     "A.Run",
+     "reads",
+     "A.B"
+    ]
+   ]
+  },
+  {
+   "id": "csharp/constant-pattern-case-label",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/var-pattern-input-type",
+   "ok": false,
+   "missing": [
+    [
+     "C.Run",
+     "calls",
+     "Circle.Area"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/pattern-combinators",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/block-local-scope",
+   "ok": false,
+   "missing": [
+    [
+     "C.Out",
+     "calls",
+     "Other.A"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/for-variable-scope",
+   "ok": false,
+   "missing": [
+    [
+     "C.Run",
+     "calls",
+     "Other.B"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/local-function-before-declaration",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/type-named-var",
+   "ok": false,
+   "missing": [
+    [
+     "C.Run",
+     "references",
+     "var"
+    ],
+    [
+     "C.Run",
+     "calls",
+     "var.A"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/switch-block-local-scope",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/switch-section-pattern-scope",
+   "ok": false,
+   "missing": [
+    [
+     "Shapes.Run",
+     "calls",
+     "Other.Name"
+    ],
+    [
+     "Shapes.Arm",
+     "calls",
+     "Other.Name"
+    ]
+   ],
+   "unwanted": [
+    [
+     "Shapes.Run",
+     "calls",
+     "Circle.Name"
+    ],
+    [
+     "Shapes.Arm",
+     "calls",
+     "Circle.Name"
+    ]
+   ]
+  },
+  {
+   "id": "csharp/pattern-variable-leaks-from-if",
+   "ok": false,
+   "missing": [
+    [
+     "Checker.Stays",
+     "calls",
+     "Other.Hello"
+    ]
+   ],
+   "unwanted": [
+    [
+     "Checker.Stays",
+     "calls",
+     "Foo.Hello"
+    ]
+   ]
+  },
+  {
+   "id": "csharp/foreach-project-ienumerable",
+   "ok": false,
+   "missing": [
+    [
+     "C.Run",
+     "calls",
+     "Item.A"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/foreach-extension-getenumerator",
+   "ok": false,
+   "missing": [
+    [
+     "C.Run",
+     "calls",
+     "Item.A"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/foreach-deconstruct",
+   "ok": false,
+   "missing": [
+    [
+     "C.Run",
+     "calls",
+     "Alpha.Go"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/catch-variable-type",
+   "ok": false,
+   "missing": [
+    [
+     "C.Run",
+     "calls",
+     "AppError.Log"
+    ],
+    [
+     "C.Run",
+     "reads",
+     "AppError.Code"
+    ]
+   ],
+   "unwanted": [
+    [
+     "C.Run",
+     "calls",
+     "Other.Log"
+    ],
+    [
+     "C.Run",
+     "reads",
+     "Other.Code"
+    ]
+   ]
+  },
+  {
+   "id": "csharp/using-resource-variable",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/foreach-variable-scope",
+   "ok": false,
+   "missing": [
+    [
+     "A.Run",
+     "calls",
+     "Other.Find"
+    ]
+   ],
+   "unwanted": [
+    [
+     "A.Run",
+     "calls",
+     "Repo.Find"
+    ]
+   ]
+  },
+  {
+   "id": "csharp/foreach-pattern-before-interface",
+   "ok": false,
+   "missing": [
+    [
+     "A.Run",
+     "calls",
+     "Repo.Find"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/await-foreach-variable",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/deconstruction-declaration-types",
+   "ok": false,
+   "missing": [
+    [
+     "A.Run",
+     "calls",
+     "Repo.Find"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/out-var-types-and-hides",
+   "ok": false,
+   "missing": [
+    [
+     "A.Run",
+     "calls",
+     "Repo.Find"
+    ]
+   ],
+   "unwanted": [
+    [
+     "A.Run",
+     "calls",
+     "Other.Find"
+    ]
+   ]
+  },
+  {
+   "id": "csharp/is-not-pattern-variable",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/attribute-suffix-omitted",
+   "ok": false,
+   "missing": [
+    [
+     "Target",
+     "references",
+     "MarkAttribute"
+    ]
+   ],
+   "unwanted": [
+    [
+     "Target",
+     "references",
+     "Mark"
+    ]
+   ]
+  },
+  {
+   "id": "csharp/attribute-named-argument-member",
+   "ok": false,
+   "missing": [
+    [
+     "Doc",
+     "writes",
+     "BaseAttr.Topic"
+    ],
+    [
+     "Doc",
+     "writes",
+     "HelpAttribute.Level"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/attribute-verbatim-name",
+   "ok": false,
+   "missing": [
+    [
+     "OnPlain",
+     "references",
+     "Example"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/attribute-name-per-file-usings",
+   "ok": false,
+   "missing": [
+    [
+     "OnLeft",
+     "references",
+     "Left.MarkAttribute"
+    ],
+    [
+     "OnRight",
+     "references",
+     "Right.MarkAttribute"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/attribute-partial-parts-own-usings",
+   "ok": false,
+   "missing": [
+    [
+     "P",
+     "references",
+     "Left.MarkAttribute"
+    ],
+    [
+     "P",
+     "references",
+     "Right.MarkAttribute"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/assembly-attribute",
+   "ok": false,
+   "missing": [
+    [
+     "A.cs",
+     "references",
+     "Marks.StampAttribute"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/attribute-target-specifier",
+   "ok": false,
+   "missing": [
+    [
+     "Holder",
+     "references",
+     "MarkAttribute"
+    ],
+    [
+     "Holder.M",
+     "references",
+     "MarkAttribute"
+    ],
+    [
+     "Holder.P",
+     "references",
+     "MarkAttribute"
+    ],
+    [
+     "Holder.N",
+     "references",
+     "MarkAttribute"
+    ]
+   ],
+   "unwanted": [
+    [
+     "Holder",
+     "references",
+     "Mark"
+    ],
+    [
+     "Holder.M",
+     "references",
+     "Mark"
+    ]
+   ]
+  },
+  {
+   "id": "csharp/attribute-argument-scope-member",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/attribute-constructor",
+   "ok": false,
+   "missing": [
+    [
+     "Doc",
+     "calls",
+     "HelpAttribute.HelpAttribute"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/attribute-lookup-skips-non-attribute",
+   "ok": false,
+   "missing": [
+    [
+     "Target",
+     "references",
+     "MarkAttribute"
+    ]
+   ],
+   "unwanted": [
+    [
+     "Target",
+     "references",
+     "Inner.Mark"
+    ]
+   ]
+  },
+  {
+   "id": "csharp/csharp-attribute-argument-uses",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/attribute-nested-class-shadows-outer",
+   "ok": false,
+   "missing": [
+    [
+     "Host",
+     "references",
+     "Host.MarkAttribute"
+    ],
+    [
+     "Host.M",
+     "references",
+     "Host.MarkAttribute"
+    ],
+    [
+     "Other",
+     "references",
+     "A.cs:MarkAttribute"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/attribute-using-alias",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/attribute-qualified-name",
+   "ok": false,
+   "missing": [
+    [
+     "A",
+     "references",
+     "One.MarkAttribute"
+    ],
+    [
+     "B",
+     "references",
+     "Two.MarkAttribute"
+    ]
+   ],
+   "unwanted": []
+  },
+  {
+   "id": "csharp/attribute-generic-arity",
+   "ok": false,
+   "missing": [
+    [
+     "Target",
+     "references",
+     "MarkAttribute<T>"
+    ],
+    [
+     "Plain",
+     "references",
+     "MarkAttribute"
+    ]
+   ],
    "unwanted": []
   }
  ]

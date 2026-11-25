@@ -1200,6 +1200,23 @@ and a variable holding a function literal. Two engine changes tried for
 these were taken back after measuring (keeping every Go declaration of a
 name broke `v, ok := f()` redeclaring `v`; the own-value rule cost 11 uses).
 
+C#, the second: 190 clauses of the standard and Roslyn's binder files in 9
+groups (64 with no rule of name binding, settled by hand). 34 readers (three
+rounds of gap hunting; types, statements and interfaces found nothing in
+their last round, classes, expressions and invocation still 8 to 12 rows in
+the third) returned 561 rows: 338 new cases, 110 held, 88 not followed, 25
+sections with no rule. Of the 325 distinct new cases all compiled but one (a
+C# 9 pattern marked 8.0); Roslyn, asked through `verify_cases.py --binding`
+as go/types is for Go, contradicted two (a name two types end with, and a
+rule read backwards: `x is B` is the type pattern beside a constant `B`),
+and each was fixed by hand. The check itself learnt four things on the way:
+Roslyn lists the constructor a `new` or `: base(…)` chose, a use is the
+innermost definition's (but a field's type is its type's), a name the
+compiler wrote nothing of is no answer, and two definitions on one line say
+nothing of whose a use is. The inventory has 587 rules (492 held by a case,
+95 not followed) and 188 of the 190 sections read (`Binder_Operators.cs` and
+`Binder_Deconstruct.cs` got no row). The engine holds 207 of the 397 cases.
+
 **Phase 3: inference, by the numbers.** (Measured: see 'Phase 3: inference, by the numbers' above; nothing built.) Per language, what one step of
 inference would add (a closure parameter typed by the collection it is
 called on, a pattern binding), from the lists the oracles already produce,

@@ -259,6 +259,10 @@ def binding(c: dict[str, Any], tool: Path | list[str]) -> dict[str, Any]:
             outer = [a for a in around[1:] if not a[1] and a[0] < (1 << 29)]
             if outer:
                 return outer[0][2]
+        # (two definitions on the same lines, `{ int A() … int B() … }` on
+        # one line: the line cannot say whose the use is)
+        if len(around) > 1 and around[1][0] == around[0][0] and around[1][1] == around[0][1]:
+            return None
         return around[0][2]
 
     homes = [home(u) for u in uses]
