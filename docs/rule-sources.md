@@ -1215,7 +1215,16 @@ innermost definition's (but a field's type is its type's), a name the
 compiler wrote nothing of is no answer, and two definitions on one line say
 nothing of whose a use is. The inventory has 587 rules (492 held by a case,
 95 not followed) and 188 of the 190 sections read (`Binder_Operators.cs` and
-`Binder_Deconstruct.cs` got no row). The engine holds 207 of the 397 cases.
+`Binder_Deconstruct.cs` got no row). The engine held 207 of the 397 cases.
+The first fixes (block scopes, as in Go; `[Cache]` as `CacheAttribute`;
+user-defined operators; an object initializer writing the created type's
+members; the class a static member is reached through) bring it to 236, and
+on todoapi, restsharp, commandline and aspnetcore-realworld Roslyn finds
+12,307 of 12,520 judged edges right (10,731 of 10,944 before, 98.3% from
+98.1%) and 89.4% of the uses with an edge (80.0%). Open: implicit calls
+(`GetEnumerator`, `Deconstruct`, `GetAwaiter`, collection `Add`), indexers,
+query expressions, lambda parameters typed by their delegate, conversion
+operators, and the finer points of overload resolution.
 
 **Phase 3: inference, by the numbers.** (Measured: see 'Phase 3: inference, by the numbers' above; nothing built.) Per language, what one step of
 inference would add (a closure parameter typed by the collection it is

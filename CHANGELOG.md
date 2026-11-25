@@ -31,6 +31,14 @@ All notable changes to this project are documented here. The format is based on
   with the statement, array lengths and map keys as reads. Against
   `go/types` on cobra, chi, resty and gin-examples: 12,419 of 12,426 judged
   edges right (12,311 of 12,317 before), recall 86.0% (85.4%).
+  C# second: 190 clauses of the standard and Roslyn's binder, 325 new cases
+  (397 in all, every one asked of Roslyn through `verify_cases.py
+  --binding`), of which the engine held 207 and now 236: block scopes,
+  attribute names (`[Cache]` is `CacheAttribute`), user-defined operators,
+  object initializers writing the created type's members, and the class a
+  static member is reached through. Against Roslyn on four repositories:
+  12,307 of 12,520 judged edges right (10,731 of 10,944 before), recall
+  80.0% -> 89.4%.
 - **SCIP precision mode** (`GRAPHLORE_SCIP`, `src/graphlore/scip.py`). When
   the project has a SCIP index (`index.scip`, made by `scip-python`,
   `scip-typescript`, `rust-analyzer scip` and others), the edges the
