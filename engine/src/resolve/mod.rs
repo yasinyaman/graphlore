@@ -9363,6 +9363,18 @@ pub fn resolve(
                     p.resolve_path(f, None, &r.path, true)
                 } else if fam == Family::CSharp && r.kind == RefKind::Decorator {
                     p.csharp_attribute(f, scope_def, &r.path, strict)
+                } else if fam == Family::CSharp
+                    && r.path.last().is_some_and(|s| s.starts_with("operator checked "))
+                {
+                    // a `checked` context takes the checked operator, else the
+                    // plain one (the standard's 12.8.20)
+                    p.resolve_path(f, scope_def, &r.path, strict).or_else(|| {
+                        let mut plain = r.path.clone();
+                        if let Some(last) = plain.last_mut() {
+                            *last = format!("operator{}", &last["operator checked ".len()..]);
+                        }
+                        p.resolve_path(f, scope_def, &plain, strict)
+                    })
                 } else {
                     p.resolve_path(f, scope_def, &r.path, strict)
                 };

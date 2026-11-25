@@ -1223,8 +1223,9 @@ the second round (indexers; the calls the language makes by name:
 `GetEnumerator`, `Deconstruct`, `GetAwaiter`, a collection initializer's
 `Add`; `with`; an extension when the type's own method does not take the
 arguments) to 264, and the third (a lambda's parameters typed by its
-delegate, an overload taken by a lambda's parameter count, `out var`) to
-276. On todoapi, restsharp, commandline and aspnetcore-realworld Roslyn
+delegate, an overload taken by a lambda's parameter count, `out var`;
+user-defined operators by both operands, `checked`, `operator true` /
+`false` and conversions) to 288. On todoapi, restsharp, commandline and aspnetcore-realworld Roslyn
 finds 12,335 of 12,555 judged edges right (10,731 of 10,944 before) and
 89.6% of the uses with an edge (80.0%). The third round's nine new "wrong"
 rows are the check's own: eight `o.RedirectOptions = new RedirectOptions
@@ -1232,10 +1233,10 @@ rows are the check's own: eight `o.RedirectOptions = new RedirectOptions
 is the one the graph names), and one property whose attributes put its
 name five lines below its first line, past the check's slack; the one
 real miss is `messages.Concat(msgs)`, the library's `Enumerable.Concat`
-where the graph names the project's extension. Open: query expressions,
-conversion operators, `operator true` / `false`, the predefined types
-extensions are written for (`await 3`), and the finer points of overload
-resolution.
+where the graph names the project's extension. (Roslyn's check reads names,
+so operators are judged by the cases alone.) Open: query expressions, the
+predefined types extensions are written for (`await 3`), and the finer
+points of overload resolution.
 
 **Phase 3: inference, by the numbers.** (Measured: see 'Phase 3: inference, by the numbers' above; nothing built.) Per language, what one step of
 inference would add (a closure parameter typed by the collection it is

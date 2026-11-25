@@ -4436,13 +4436,33 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
         // (C# `a + b`, `-a`, `a++`, `a += b`: the user-defined operator of the
         // operand's type, the standard's 12.4.3 to 12.4.5; kept only where it
         // resolves to one)
+        // (each operand's type is asked, with the operands as the arguments
+        // that pick the overload; in a `checked` context the checked operator
+        // first; `a && b` is `operator false` and `operator &`, a condition
+        // `operator true`, a cast or a declaration a conversion operator)
         if facts.lang == Some(crate::lang::Lang::CSharp) {
-            if let Some((operand, op)) = csharp_operator(n, src) {
-                if let Some(mut path) =
-                    path_of(operand, src).filter(|p| !p.iter().any(|s| s == UNKNOWN))
-                {
-                    path.push(format!("operator{op}"));
+            for (operands, name, args) in csharp_operator_uses(n, src, &anc) {
+                let count = u8::try_from(args.len()).ok();
+                let hints: Vec<crate::facts::ArgFact> = args
+                    .iter()
+                    .map(|a| crate::facts::ArgFact { label: None, kind: arg_kind(*a, src) })
+                    .collect();
+                let mut seen: Vec<Vec<String>> = Vec::new();
+                for operand in operands {
+                    let Some(mut path) = operand.filter(|p| !p.iter().any(|s| s == UNKNOWN)) else {
+                        continue;
+                    };
+                    path.push(name.clone());
+                    if seen.contains(&path) {
+                        continue;
+                    }
+                    seen.push(path.clone());
+                    let at = refs.len();
                     push(&mut refs, n, RefKind::Call, path, "operator", None);
+                    if let Some(r) = refs.get_mut(at) {
+                        r.args = count;
+                        r.hints = hints.clone();
+                    }
                 }
             }
         }
@@ -6778,6 +6798,114 @@ fn csharp_indexer<'t>(
         _ => vec!["indexer"],
     };
     Some((path, list, uses))
+}
+
+/// C#: the user-defined operators an expression or statement uses: for each,
+/// the paths whose types are asked for it (an operand's, or the type a cast
+/// names), its name and the operands it is given.
+#[allow(clippy::type_complexity)]
+fn csharp_operator_uses<'t>(
+    n: Node<'t>,
+    src: &[u8],
+    anc: &[Node<'t>],
+) -> Vec<(Vec<Option<Vec<String>>>, String, Vec<Node<'t>>)> {
+    let pathed = |x: Node| path_of(x, src);
+    // (an operand the reader can name: no literal, no call's result)
+    let plain = |x: Node| {
+        matches!(
+            x.kind(),
+            "identifier"
+                | "member_access_expression"
+                | "this_expression"
+                | "element_access_expression"
+        )
+    };
+    // the nearest `checked` / `unchecked` around
+    let checked = anc
+        .iter()
+        .rev()
+        .find(|a| matches!(a.kind(), "checked_expression" | "checked_statement"))
+        .is_some_and(|a| a.child(0).is_some_and(|c| c.kind() == "checked"));
+    let mut out = Vec::new();
+    match n.kind() {
+        "binary_expression" => {
+            let (Some(l), Some(r)) =
+                (n.child_by_field_name("left"), n.child_by_field_name("right"))
+            else {
+                return out;
+            };
+            let op = n.child_by_field_name("operator").map(|o| text(o, src)).unwrap_or_default();
+            if op == "&&" || op == "||" {
+                let (test, bit) = if op == "&&" { ("false", "&") } else { ("true", "|") };
+                out.push((vec![pathed(l), pathed(r)], format!("operator{bit}"), vec![l, r]));
+                out.push((vec![pathed(l)], format!("operator {test}"), vec![l]));
+                return out;
+            }
+            if let Some((_, op)) = csharp_operator(n, src) {
+                let name = if checked && matches!(op.as_str(), "+" | "-" | "*" | "/") {
+                    format!("operator checked {op}")
+                } else {
+                    format!("operator{op}")
+                };
+                out.push((vec![pathed(l), pathed(r)], name, vec![l, r]));
+            }
+        }
+        "assignment_expression" | "prefix_unary_expression" | "postfix_unary_expression" => {
+            if let Some((operand, op)) = csharp_operator(n, src) {
+                let mut args = vec![operand];
+                let mut asked = vec![pathed(operand)];
+                if n.kind() == "assignment_expression" {
+                    if let Some(r) = n.child_by_field_name("right") {
+                        args.push(r);
+                        asked.push(pathed(r));
+                    }
+                }
+                let name =
+                    if checked && args.len() == 2 && matches!(op.as_str(), "+" | "-" | "*" | "/") {
+                        format!("operator checked {op}")
+                    } else {
+                        format!("operator{op}")
+                    };
+                out.push((asked, name, args));
+            }
+        }
+        // `if (flag)`, `while (flag)`, `flag ? a : b`: `operator true`
+        "if_statement" | "while_statement" | "do_statement" | "conditional_expression" => {
+            if let Some(c) = n.child_by_field_name("condition").filter(|c| plain(*c)) {
+                out.push((vec![pathed(c)], "operator true".into(), vec![c]));
+            }
+        }
+        // `(Meters)feet`: a conversion operator of either type
+        "cast_expression" => {
+            let (Some(t), Some(v)) =
+                (n.child_by_field_name("type"), n.child_by_field_name("value"))
+            else {
+                return out;
+            };
+            if matches!(t.kind(), "identifier" | "predefined_type") && plain(v) {
+                let name = format!("operator {}", text(t, src));
+                let ty = (t.kind() == "identifier").then(|| vec![text(t, src)]);
+                out.push((vec![ty, pathed(v)], name, vec![v]));
+            }
+        }
+        // `byte b = digit;`: an implicit conversion operator of the value's type
+        "variable_declaration" => {
+            let Some(t) = n
+                .child_by_field_name("type")
+                .filter(|t| matches!(t.kind(), "identifier" | "predefined_type"))
+            else {
+                return out;
+            };
+            for d in kids(n).into_iter().filter(|c| c.kind() == "variable_declarator") {
+                let value = kids(d).into_iter().skip(1).find(|c| c.is_named() && !is_comment(c));
+                if let Some(v) = value.filter(|v| plain(*v)) {
+                    out.push((vec![pathed(v)], format!("operator {}", text(t, src)), vec![v]));
+                }
+            }
+        }
+        _ => {}
+    }
+    out
 }
 
 /// Go's predeclared types, which an index never is.

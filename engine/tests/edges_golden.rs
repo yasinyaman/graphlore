@@ -3942,3 +3942,31 @@ fn csharp_lambda_parameters_and_out_variables() {
     assert!(got.contains(&(".Passed()".to_string(), "a_runner_apply_2".to_string())), "{got:?}");
     assert!(!got.contains(&(".Passed()".to_string(), "a_runner_apply".to_string())), "{got:?}");
 }
+
+// C# user-defined operators: either operand's type, the overload the operand
+// types pick, the checked operator in a `checked` context, `a && b` as
+// `operator false` and `operator &`, a condition as `operator true`, and a
+// cast or a declaration as a conversion operator
+#[test]
+fn csharp_operators_by_operands_context_and_conversion() {
+    let got = call_ids("cs-operators", &[(
+        "A.cs",
+        "namespace App\n{\n    public struct Money\n    {\n        public static Money operator +(Money a, Money b) { return a; }\n        public static Money operator +(Money a, int b) { return a; }\n        public static Money operator +(int n, Money m) { return m; }\n        public static Money operator checked -(Money a, Money b) { return a; }\n        public static Money operator -(Money a, Money b) { return a; }\n        public static bool operator true(Money m) { return true; }\n        public static bool operator false(Money m) { return false; }\n        public static Money operator &(Money a, Money b) { return a; }\n        public static explicit operator Money(int n) { return new Money(); }\n        public static implicit operator int(Money m) { return 0; }\n    }\n    public class C\n    {\n        public Money Add(Money a, int n) { return a + n; }\n        public Money Left(Money m) { return 1 + m; }\n        public Money Strict(Money a, Money b) { return checked(a - b); }\n        public Money Both(Money a, Money b) { return a && b; }\n        public int Test(Money a) { if (a) { return 1; } return 0; }\n        public Money Cast(int n) { return (Money)n; }\n        public int Widen(Money m) { int x = m; return x; }\n    }\n}\n",
+    )]);
+    let want = [
+        (".Add()", "a_money_operator_2"),
+        (".Left()", "a_money_operator_3"),
+        (".Strict()", "a_money_operator_checked"),
+        (".Both()", "a_money_operator_false"),
+        (".Both()", "a_money_operator_5"),
+        (".Test()", "a_money_operator_true"),
+        (".Cast()", "a_money_operator_money"),
+        (".Widen()", "a_money_operator_int"),
+    ];
+    for (from, to) in want {
+        assert!(got.contains(&(from.to_string(), to.to_string())), "{from} -> {to}: {got:?}");
+    }
+    for (from, to) in [(".Add()", "a_money_operator"), (".Strict()", "a_money_operator_4")] {
+        assert!(!got.contains(&(from.to_string(), to.to_string())), "{from} -> {to}: {got:?}");
+    }
+}

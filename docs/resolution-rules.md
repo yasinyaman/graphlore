@@ -799,7 +799,7 @@ Found by: the specification 20, a compiler 8, comparison 0, the grammar 4, the l
 | a member of the receiver's type comes before an extension method of the name | `member-before-extension` | – | yes |
 | `export inner.f` makes f a member of the object that writes it | `export-clause` | – | yes |
 
-### csharp (276 of 397)
+### csharp (288 of 397)
 
 C# Language Specification, 'Namespace and type names', 'Member lookup', 'Extension method invocations'.
 
@@ -988,7 +988,7 @@ Found by: the specification 39, a compiler 8, comparison 6, the grammar 1, the l
 | an element access is a use of the indexer picked by the arguments, for reading or writing | `indexer-use` | – | yes |
 | `base[i]` in an overriding indexer is the inherited indexer | `base-indexer-access` | – | yes |
 | an operator expression is a use of the user-defined operator of its operand types, also one a base class declares | `user-defined-operator` | – | yes |
-| an implicit or explicit conversion between a class and another type is a use of the conversion operator | `conversion-operator` | – | **no**: no C.Widen -calls-> Digit.operator byte; C.Narrow -calls-> Digit.operator Digit |
+| an implicit or explicit conversion between a class and another type is a use of the conversion operator | `conversion-operator` | – | yes |
 | a constructor with no initializer calls the base class's parameterless constructor | `implicit-base-constructor` | – | **no**: no B.B -calls-> A.cs:App.A.A@5 |
 | the parameters of a constructor are names of its initializer, before the fields | `constructor-initializer-parameter-hides-field` | – | yes |
 | the variable of a `foreach` over an iterator method is the iterator's yield type | `foreach-over-iterator` | – | yes |
@@ -997,7 +997,7 @@ Found by: the specification 39, a compiler 8, comparison 6, the grammar 1, the l
 | `t.Foo()` with `T : U` and `U : IFoo` is IFoo's member | `constraint-through-type-parameter` | – | **no**: no Box.Run -calls-> IFoo.Foo |
 | `t.Describe()` with `T : IFoo` is the extension written for IFoo | `extension-on-constrained-type-parameter` | – | yes |
 | a bare name in a part that names no base is a member of the base another part names, before a type's member of that name elsewhere | `partial-base-in-other-part` | – | yes |
-| `a += b`, `a++`, `-a` and `a && b` call the operator methods of the operand's class | `operator-forms-use-the-operator` | – | **no**: no C.Both -calls-> V.operator&; C.Both -calls-> V.operator false |
+| `a += b`, `a++`, `-a` and `a && b` call the operator methods of the operand's class | `operator-forms-use-the-operator` | – | yes |
 | `o.secret` and `Shared()` in a nested class are the containing class's private field and static method, not a same-named member of another class | `nested-type-reaches-private-of-container` | – | yes |
 | `await j` where j's type declares GetAwaiter is a call of that type's GetAwaiter, not another type's | `await-getawaiter-pattern` | – | yes |
 | `foreach (var i in b)` over a type with a GetEnumerator method calls it, and `i.V` is the field of the type of Cursor.Current | `foreach-getenumerator-pattern` | – | yes |
@@ -1074,8 +1074,8 @@ Found by: the specification 39, a compiler 8, comparison 6, the grammar 1, the l
 | `v++` calls the user-defined operator ++ of the operand's type | `increment-calls-operator` | – | yes |
 | `await t` is `t.GetAwaiter().GetResult()`: a member of the awaited value is a member of GetResult's type | `await-custom-awaitable` | – | yes |
 | a switch expression arm's declaration pattern binds a variable of the type it names | `switch-expression-type-pattern` | – | yes |
-| among the operators of one name, the one whose parameters fit the operand types is called | `operator-by-operand-types` | – | **no**: no C.M -calls-> A.cs:App.Money.operator+@7 |
-| `-a` calls the user-defined unary operator of its operand's type | `unary-operator` | – | **no**: no C.M -calls-> A.cs:App.Vec.operator-@5 |
+| among the operators of one name, the one whose parameters fit the operand types is called | `operator-by-operand-types` | – | yes |
+| `-a` calls the user-defined unary operator of its operand's type | `unary-operator` | – | yes |
 | `a ?? b` has the type of a (its underlying type when nullable), so a member of it is a member of that type | `coalesce-type` | – | **no**: no C.M -calls-> Part.Size |
 | an `out var` declared in an argument list has the declared type of the parameter | `out-variable-declaration` | – | yes |
 | a variable declared by `var (a, b) = ...` has the type of its tuple element | `deconstruction-variable-types` | – | **no**: no C.M -calls-> Part.Size |
@@ -1090,16 +1090,16 @@ Found by: the specification 39, a compiler 8, comparison 6, the grammar 1, the l
 | a lambda parameter may shadow a local of the enclosing method: inside the lambda the name is the parameter, typed as written | `lambda-parameter-shadows-enclosing-local` | 8– | yes |
 | alias::Type.Member: the alias names a namespace, so Type is that namespace's, not another namespace's type of the same name | `qualified-alias-member-access` | – | **no**: no U.Go -calls-> Lib.cs:Util.F |
 | await of a value whose GetAwaiter is an extension method: the call is a use of the extension and the result has the type GetResult returns | `await-extension-get-awaiter` | – | **no**: no U.Go -calls-> Ext.GetAwaiter; U.Go -calls-> Num.Show |
-| a cast (T)s with a user-defined explicit conversion operator in T calls that operator, not that of another type | `cast-calls-explicit-conversion` | – | **no**: no U.Go -calls-> Dst.operator Dst |
+| a cast (T)s with a user-defined explicit conversion operator in T calls that operator, not that of another type | `cast-calls-explicit-conversion` | – | yes |
 | a + b on Money? operands calls Money's operator+ (lifted), not another struct's | `lifted-user-operator` | – | yes |
 | an indexer initializer `new Bag { ["x"] = 1 }` names the indexer of the created type | `object-initializer-indexer` | – | yes |
 | an operator is found in the base class of the operand's type | `operator-of-base-class` | – | yes |
-| `a && b` on a type with operator true/false and & calls operator false and operator &, not operator \| | `conditional-logical-operator` | – | **no**: no Use.Go -calls-> F.operator& |
+| `a && b` on a type with operator true/false and & calls operator false and operator &, not operator \| | `conditional-logical-operator` | – | yes |
 | `var (a, b) = p;` calls Deconstruct of the type of p | `deconstruction-declaration` | – | yes |
-| if (f) with a struct declaring operator true calls it | `cs-operator-true-condition` | – | **no**: no Use.Run -calls-> Flag.operator true |
+| if (f) with a struct declaring operator true calls it | `cs-operator-true-condition` | – | yes |
 | a != b calls operator != of the operand type | `cs-operator-not-equals` | – | yes |
 | b << 2 calls operator << not >> | `cs-operator-shift` | – | yes |
-| checked(a + b) calls operator checked +, unchecked(a + b) the plain operator + | `cs-checked-operator` | 11– | **no**: no Use.Chk -calls-> M.operator checked + has Use.Chk -calls-> M.operator+ |
+| checked(a + b) calls operator checked +, unchecked(a + b) the plain operator + | `cs-checked-operator` | 11– | yes |
 | a + b on T : IAdd<T> calls IAdd.operator +, not the implementation | `cs-static-abstract-operator-typeparam` | 11– | yes |
 | s?.Value() / s?.P with S? s are members of S | `cs-null-conditional-nullable-struct` | – | **no**: no Use.Run2 -reads-> S.P |
 | b[^1] reads Bag.Count and the int indexer; b[1..] calls Bag.Slice | `cs-implicit-index-range-support` | – | **no**: no Use.Run -reads-> Bag.Count; Use.Run2 -calls-> Bag.Slice |
@@ -1108,11 +1108,11 @@ Found by: the specification 39, a compiler 8, comparison 6, the grammar 1, the l
 | `a + b` with a user-defined operator is a call of that operator declaration of the operand's type, not another type's | `operator-use-is-a-call` | – | yes |
 | `a += b` is an overload use of operator `+` of a's type | `operator-compound-assignment` | – | yes |
 | `-x` is a call of the unary operator of x's type | `operator-unary` | – | yes |
-| a binary operator is also looked for in the type of the right operand | `operator-from-the-second-operand` | – | **no**: no Use.Run -calls-> Money.operator+ |
+| a binary operator is also looked for in the type of the right operand | `operator-from-the-second-operand` | – | yes |
 | an operator declared in a base class is a candidate for the derived type | `operator-of-a-base-class` | – | yes |
-| if an operator of T is applicable, those of its base classes are not candidates | `operator-of-the-derived-type-first` | – | **no**: no Use.Run -calls-> Derived.operator+ |
+| if an operator of T is applicable, those of its base classes are not candidates | `operator-of-the-derived-type-first` | – | yes |
 | `a == b` and `a != b` are calls of the type's own `==` and `!=` | `operator-equality` | – | yes |
-| a cast `(T)x` is a use of the user-defined conversion operator that converts to T | `conversion-operator-cast` | – | **no**: no Use.Run -calls-> Meters.operator Meters |
+| a cast `(T)x` is a use of the user-defined conversion operator that converts to T | `conversion-operator-cast` | – | yes |
 | a method of the most derived type that is applicable removes the base's methods from the candidates, even when a base method is the better match | `derived-applicable-method-hides-base` | – | **no**: no Use.Run3 -calls-> Base.F has Use.Run3 -calls-> Derived.F |
 | a call through a receiver of the derived type is the override, and its result has the override's (covariant) return type | `override-called-through-its-type` | 9– | yes |
 | an instance method of the name that does not take the arguments does not stop the search: the extension that does is called | `extension-when-the-instance-method-is-inapplicable` | – | yes |
@@ -1149,7 +1149,7 @@ Found by: the specification 39, a compiler 8, comparison 6, the grammar 1, the l
 | a + b on T : IAdd<T> is a use of IAdd.operator+, not of the implementing class's operator | `static-abstract-operator-via-constraint` | 11– | yes |
 | `if (s.TryGet(out var n)) n.Show();` is Num.Show | `out-var-has-parameter-type` | – | yes |
 | `from x in s where .. orderby a, b select x` calls Where, OrderBy and ThenBy, and no Select | `query-trivial-select-omitted` | – | **no**: no User.Run -calls-> Src.Where; User.Run -calls-> Src.OrderBy; User.Run -calls-> Src.ThenBy |
-| x + y inside checked(...) is the `operator checked +`, inside unchecked(...) the plain `operator +` | `checked-operator-by-context` | 11– | **no**: no Host.Strict -calls-> Money.operator checked + has Host.Strict -calls-> Money.operator+ |
+| x + y inside checked(...) is the `operator checked +`, inside unchecked(...) the plain `operator +` | `checked-operator-by-context` | 11– | yes |
 | `T.Create()` with `where T : IMake<T>` binds to IMake.Create, never to the Create of an implementing class | `static-abstract-call-on-type-parameter` | 11– | yes |
 | in `x => x.Hit()` the `x` is the lambda's parameter (type B), not the enclosing method's local `x` (type A) | `lambda-parameter-hides-outer-local` | 8– | yes |
 | a derived class's method of the name that does not take the arguments does not hide the base's that does | `derived-method-not-applicable-base-used` | – | **no**: no Derived.Run -calls-> Base.M has Derived.Run -calls-> Derived.M |
@@ -1520,4 +1520,4 @@ Found by: the specification 31, a compiler 2, comparison 0, the grammar 1, the l
 | `A::hello insteadof B` picks A's method of two used traits | `trait-insteadof` | – | yes |
 | a method a trait brings comes before an inherited one, and the class's own before both | `trait-before-inherited` | – | yes |
 
-1131 of 1270 rules hold
+1143 of 1270 rules hold

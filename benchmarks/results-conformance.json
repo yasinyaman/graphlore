@@ -1,5 +1,5 @@
 {
- "passed": 1131,
+ "passed": 1143,
  "total": 1270,
  "cases": [
   {
@@ -6789,19 +6789,8 @@
   },
   {
    "id": "csharp/conversion-operator",
-   "ok": false,
-   "missing": [
-    [
-     "C.Widen",
-     "calls",
-     "Digit.operator byte"
-    ],
-    [
-     "C.Narrow",
-     "calls",
-     "Digit.operator Digit"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -6878,19 +6867,8 @@
   },
   {
    "id": "csharp/operator-forms-use-the-operator",
-   "ok": false,
-   "missing": [
-    [
-     "C.Both",
-     "calls",
-     "V.operator&"
-    ],
-    [
-     "C.Both",
-     "calls",
-     "V.operator false"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -7499,26 +7477,14 @@
   },
   {
    "id": "csharp/operator-by-operand-types",
-   "ok": false,
-   "missing": [
-    [
-     "C.M",
-     "calls",
-     "A.cs:App.Money.operator+@7"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
    "id": "csharp/unary-operator",
-   "ok": false,
-   "missing": [
-    [
-     "C.M",
-     "calls",
-     "A.cs:App.Vec.operator-@5"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -7648,14 +7614,8 @@
   },
   {
    "id": "csharp/cast-calls-explicit-conversion",
-   "ok": false,
-   "missing": [
-    [
-     "U.Go",
-     "calls",
-     "Dst.operator Dst"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -7678,14 +7638,8 @@
   },
   {
    "id": "csharp/conditional-logical-operator",
-   "ok": false,
-   "missing": [
-    [
-     "Use.Go",
-     "calls",
-     "F.operator&"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -7696,14 +7650,8 @@
   },
   {
    "id": "csharp/cs-operator-true-condition",
-   "ok": false,
-   "missing": [
-    [
-     "Use.Run",
-     "calls",
-     "Flag.operator true"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -7720,21 +7668,9 @@
   },
   {
    "id": "csharp/cs-checked-operator",
-   "ok": false,
-   "missing": [
-    [
-     "Use.Chk",
-     "calls",
-     "M.operator checked +"
-    ]
-   ],
-   "unwanted": [
-    [
-     "Use.Chk",
-     "calls",
-     "M.operator+"
-    ]
-   ]
+   "ok": true,
+   "missing": [],
+   "unwanted": []
   },
   {
    "id": "csharp/cs-static-abstract-operator-typeparam",
@@ -7809,14 +7745,8 @@
   },
   {
    "id": "csharp/operator-from-the-second-operand",
-   "ok": false,
-   "missing": [
-    [
-     "Use.Run",
-     "calls",
-     "Money.operator+"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -7827,14 +7757,8 @@
   },
   {
    "id": "csharp/operator-of-the-derived-type-first",
-   "ok": false,
-   "missing": [
-    [
-     "Use.Run",
-     "calls",
-     "Derived.operator+"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -7845,14 +7769,8 @@
   },
   {
    "id": "csharp/conversion-operator-cast",
-   "ok": false,
-   "missing": [
-    [
-     "Use.Run",
-     "calls",
-     "Meters.operator Meters"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -8298,21 +8216,9 @@
   },
   {
    "id": "csharp/checked-operator-by-context",
-   "ok": false,
-   "missing": [
-    [
-     "Host.Strict",
-     "calls",
-     "Money.operator checked +"
-    ]
-   ],
-   "unwanted": [
-    [
-     "Host.Strict",
-     "calls",
-     "Money.operator+"
-    ]
-   ]
+   "ok": true,
+   "missing": [],
+   "unwanted": []
   },
   {
    "id": "csharp/static-abstract-call-on-type-parameter",
