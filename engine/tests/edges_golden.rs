@@ -3832,3 +3832,19 @@ fn csharp_object_initializers_write_the_created_type_s_members() {
         "{writes:?}"
     );
 }
+
+#[test]
+fn csharp_a_static_member_s_type_is_used_too() {
+    let got = edges("cs-static-head", &[(
+        "A.cs",
+        "namespace App\n{\n    public static class Ensure { public static string NotNull(string s) { return s; } }\n    public class Maybe<T> { }\n    public static class Maybe { public static int Just(int x) { return x; } }\n    public class C\n    {\n        public string Name;\n        public string M(string s) { Maybe.Just(1); return Ensure.NotNull(s) + Name.Length; }\n    }\n}\n",
+    )]);
+    has(
+        &got,
+        &[
+            (".M()", "calls", ".NotNull()"),
+            (".M()", "references", "Ensure"),
+            (".M()", "references", "Maybe"),
+        ],
+    );
+}

@@ -9083,6 +9083,52 @@ pub fn resolve(
                 *p.cur.borrow_mut() = None;
                 *p.site.borrow_mut() = None;
                 *p.ref_kind.borrow_mut() = None;
+                // C# `Ensure.NotNull(x)`, `KnownHeaders.Accept`: the type a
+                // static member is reached through is used too (as C and
+                // C++'s scoped paths are)
+                if fam == Family::CSharp
+                    && r.path.len() >= 2
+                    && matches!(
+                        r.kind,
+                        RefKind::Call | RefKind::Attr | RefKind::Read | RefKind::Write
+                    )
+                    && matches!(&found, Some((Target::Def(_), _)))
+                    && !matches!(r.path[0].as_str(), "self" | "super" | "base" | "()")
+                    && !p.is_local_name(f, scope_def, &r.path[0])
+                {
+                    if let Some((Target::Def(c), Confidence::Extracted)) =
+                        p.resolve_path(f, scope_def, &r.path[..1], true)
+                    {
+                        // (written with no type argument: of `Maybe` and
+                        // `Maybe<T>`, the one that takes none)
+                        let c = if p.def(c).type_params.is_empty() {
+                            c
+                        } else {
+                            p.fqn_of(c.0, c.1)
+                                .and_then(|fq| {
+                                    p.fqn.get(&fq)?.iter().copied().find(|o| {
+                                        p.def(*o).kind.is_class_like()
+                                            && p.def(*o).type_params.is_empty()
+                                    })
+                                })
+                                .unwrap_or(c)
+                        };
+                        if p.def(c).kind.is_class_like() {
+                            if let Some(id) = p.node_id(c).filter(|id| *id != src) {
+                                edges.push(EdgeOut {
+                                    source: src.clone(),
+                                    target: id.to_string(),
+                                    relation: "references",
+                                    confidence: Confidence::Extracted,
+                                    file: f,
+                                    line: r.line,
+                                    context: "static",
+                                    runs: None,
+                                });
+                            }
+                        }
+                    }
+                }
                 // a guess by name alone on another object never links a
                 // definition to itself: `base.evaluate()` inside `evaluate()`
                 // is a wrapper handing on to what it wraps
