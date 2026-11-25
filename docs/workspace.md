@@ -18,8 +18,8 @@ GRAPHLORE_PROJECT_DIR=~/work python -m graphlore
     └── common/ (a git checkout)
 ```
 
-The native engine (the `engine` extra) is needed: graphify knows nothing of
-repositories inside a folder.
+The native engine builds it (a graph graphify wrote before 0.9.0 knows nothing
+of repositories inside a folder).
 
 ## Which folders are repositories
 

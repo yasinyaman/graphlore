@@ -112,12 +112,15 @@ def _graph_at(head: str, build: bool, repo: str = "") -> dict:
             "the graph is not built at the head commit"
             + (f" (it is at {built[:10]})" if built else "")
             + ": run `graphlore review` without --no-build, or build it first.")
-    if not engine.available():
+    refusal = engine.refusal(requested=engine.requested(), native_found=engine.available())
+    if refusal:
         raise ReviewError(
-            "the graph is not built at the head commit and graphlore's native engine is "
-            "not installed: pip install \"graphlore[engine]\", or build the graph first.")
+            "the graph is not built at the head commit, and it cannot be built here: "
+            + refusal.removeprefix("ERROR: "))
     exists = isinstance(graph, dict)
-    out = srv.graphlore_build(".", update=exists and bool(built), no_viz=True)
+    # graphlore_build's own steps, without the graph.html page a review never reads
+    out = srv._build_native(".", code_only=False, verbose=False, note="",
+                            update=exists and bool(built), viz_page=False)
     if out.startswith("ERROR"):
         raise ReviewError(out)
     graph = srv._load_graph()

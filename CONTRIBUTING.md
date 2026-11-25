@@ -26,7 +26,7 @@ cargo test --manifest-path engine/Cargo.toml
 ```
 graphlore/
 ├── src/graphlore/          # package
-│   ├── server.py           #   MCP server: 34 tools, prompts, resources, transports
+│   ├── server.py           #   MCP server: 33 tools, prompts, resources, transports
 │   ├── graph.py            #   graph.json loading, node/edge accessors, BFS, adjacency
 │   ├── spans.py            #   span engine: ast + tree-sitter, chunk→node join, structural diff
 │   ├── scope.py            #   analysis scope: vendored / external / test filtering
@@ -35,7 +35,7 @@ graphlore/
 │   ├── imports.py          #   import statements read from source: what they can mean, when they run
 │   ├── resolve.py          #   calls and imports through a module object, resolved from source
 │   ├── review.py           #   unreferenced code, same-named symbols, identical bodies, layer rules
-│   ├── engine.py           #   which extractor builds the graph (graphify CLI / native engine)
+│   ├── engine.py           #   the native engine that builds the graph (child process, spans fallback)
 │   └── config.py           #   project dir / out dir
 ├── engine/                 # the native extractor in Rust (separate package graphlore-engine)
 │   ├── src/generic.rs      #   the definition rule, ported from spans.py

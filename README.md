@@ -67,14 +67,15 @@ gemini extensions install https://github.com/yasinyaman/graphlore
 The other clients and what each plugin carries are in
 [clients](https://github.com/yasinyaman/graphlore/blob/master/docs/clients.md#install-as-a-plugin).
 
-**Any other MCP client**: install graphlore with its native engine, which builds
-the graph (prebuilt wheels, no Rust toolchain), then register the server.
+**Any other MCP client**: install graphlore (its native engine, which builds the
+graph, comes with it as a prebuilt wheel, no Rust toolchain), then register the
+server.
 
 ```bash
-pip install "graphlore[engine]"
+pip install graphlore
 ```
 
-or run it with nothing installed: `uvx --from "graphlore[engine]" graphlore`.
+or run it with nothing installed: `uvx graphlore`.
 
 Then let graphlore write your client's config, and the usage guide its agent
 reads (`AGENTS.md`, `GEMINI.md`, Copilot's instructions):
@@ -102,8 +103,7 @@ where it goes. For any other MCP client the block is:
 Each client's file, key and limits (tool caps, output truncation, prompts):
 [docs/clients.md](https://github.com/yasinyaman/graphlore/blob/master/docs/clients.md).
 
-Optional extras, installed as `graphlore[extra]`: `engine` (graphlore's native
-extractor, which builds the graph), `embed` (static code
+Optional extras, installed as `graphlore[extra]`: `embed` (static code
 embeddings for the built-in search behind `graphlore_locate`), `semble` (semble
 as that search instead, with `GRAPHLORE_SEMANTIC_BACKEND=semble`), `treesitter` (spans for non-Python
 languages; without it the native engine's compiled-in grammars give them), `tiktoken` (exact token
@@ -156,10 +156,10 @@ helps a model pick the right tool.
 | `graphlore_fetch` | A node's source code: the exact span, under a token budget |
 | `graphlore_communities` | The subsystems (Leiden communities) of the codebase |
 | `graphlore_freshness` | Is the graph stale against git: fresh, update or rebuild |
-| `graphlore_build` | Build or update the graph with graphlore's native engine (graphify when the engine is not installed) |
+| `graphlore_build` | Build or update the graph with graphlore's native engine |
 | `graphlore_project` | Show or switch the project directory the server reads |
 
-`GRAPHLORE_TOOLSET=full` exposes all 34: structure review (import and call
+`GRAPHLORE_TOOLSET=full` exposes all 33: structure review (import and call
 cycles, layer rules, bridges and cut points, dead-code candidates, same-named
 symbols, duplication, PageRank and betweenness),
 framework routes and package API usage, tests for a symbol, signatures, git
@@ -167,7 +167,7 @@ diffs, community naming, natural-language queries and paths between nodes. The C
 plugin runs on `full`.
 
 → [Tool reference](https://github.com/yasinyaman/graphlore/blob/master/docs/tools.md)
-(all 34 tools, resources, prompts) ·
+(all 33 tools, resources, prompts) ·
 [choosing a toolset](https://github.com/yasinyaman/graphlore/blob/master/docs/configuration.md#which-toolset)
 
 ## Benchmark
@@ -251,9 +251,8 @@ names.
 The analysis tools read local files and need no key. A few paths can reach the
 network: the first embedding search (`[embed]` or `[semble]`) downloads a model, the first use
 of a language downloads its tree-sitter grammar (the native engine's grammars
-are compiled in and download nothing), graphify, where it still builds the
-graph, can call an LLM backend when you set its key, and `graphlore_add`
-fetches a URL.
+are compiled in and download nothing, and a build reads local files only), and
+OAuth on the HTTP transport fetches the provider's keys.
 `GRAPHLORE_OFFLINE=1` refuses or restricts the ones graphlore controls; the
 table linked below also lists what it cannot constrain.
 → [What reaches the network, and when](https://github.com/yasinyaman/graphlore/blob/master/docs/configuration.md#what-reaches-the-network-and-when)
@@ -286,7 +285,7 @@ search answered.
 
 ### Why do I see only 12 tools?
 
-`lean` is the default surface. Set `GRAPHLORE_TOOLSET=full` for all 34.
+`lean` is the default surface. Set `GRAPHLORE_TOOLSET=full` for all 33.
 
 ### How does the graph stay up to date?
 
@@ -315,11 +314,11 @@ own. The old `GRAPHIFY_*` environment variables still work.
 
 - One active project at a time; `graphlore_project` switches it (stdio only).
   A folder of repositories can be that project (a workspace).
-- graphlore's own extractor (`engine/`, Rust, the `engine` extra) builds the
-  graph: definitions, spans, imports, calls, bases and type references in 14
-  languages, resolved from the source, with its own communities and incremental
-  updates. Without it the `graphify` CLI builds it; graphify, and with it
-  `graphlore_add` and `mode="deep"`, goes in the next release.
+- graphlore's own extractor (`engine/`, Rust, the `graphlore-engine` package it
+  depends on) builds the graph: definitions, spans, imports, calls, bases and
+  type references in 14 languages, resolved from the source, with its own
+  communities and incremental updates. It reads no documents with an LLM and
+  adds no external sources (papers, tweets) to the graph.
 - `graphlore review` reports on a change; it does not read or answer review
   threads.
 - Calls through an object, a callback or dynamic dispatch are not in the graph,
@@ -327,7 +326,7 @@ own. The old `GRAPHIFY_*` environment variables still work.
 
 ## Documentation
 
-- [Tool reference](https://github.com/yasinyaman/graphlore/blob/master/docs/tools.md): all 34 tools, resources, prompts, what a result carries
+- [Tool reference](https://github.com/yasinyaman/graphlore/blob/master/docs/tools.md): all 33 tools, resources, prompts, what a result carries
 - [MCP clients](https://github.com/yasinyaman/graphlore/blob/master/docs/clients.md): setting up Codex, Gemini CLI, Cursor, Copilot, Kimi, Zed, Windsurf, Cline and Claude, and what each one shows the model
 - [How graphlore works](https://github.com/yasinyaman/graphlore/blob/master/docs/concepts.md): resolved edges, import checks, analysis scope, freshness, the search bridge, naming communities
 - [Configuration](https://github.com/yasinyaman/graphlore/blob/master/docs/configuration.md): toolsets, HTTP transport and security, offline mode, environment variables

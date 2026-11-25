@@ -271,7 +271,7 @@ def build(repo: Path) -> None:
     if (repo / "graphify-out" / "graph.json").is_file():
         return
     env = {**os.environ, "GRAPHLORE_PROJECT_DIR": str(repo)}
-    code = "from graphlore import server; print(server.graphlore_build('.', no_viz=True))"
+    code = "from graphlore import server; print(server.graphlore_build('.'))"
     subprocess.run([sys.executable, "-c", code], cwd=repo, env=env, check=True)
 
 

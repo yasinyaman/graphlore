@@ -8,8 +8,9 @@ Back to the [README](../README.md) · [Tool reference](tools.md) ·
 
 ## What graphlore adds to the graph it reads
 
-This section is about graphs the graphify CLI built (the deprecated fallback);
-a native graph, the default, has these edges already (see below).
+This section is about graphs the graphify CLI built (before 0.9.0, which removed
+it as an extractor; such a graph is still read); a native graph has these edges
+already (see below).
 
 graphify's local extractor links `from pkg import helper; helper()` to the
 function, but not `from pkg import mod; mod.helper()` — and often not the import

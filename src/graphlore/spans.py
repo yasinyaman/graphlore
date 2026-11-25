@@ -171,15 +171,15 @@ def _ts_parser_for(rel: str, src: bytes | None = None) -> tuple[Any, str | None]
     """(parser, language) for a path via the optional tree-sitter backend.
 
     Returns (None, None) when tree-sitter / the language pack is not installed or
-    the language is unknown. tree-sitter ships with graphify, so it's usually
-    present; declared as the ``[treesitter]`` extra otherwise. Cached per language.
+    the language is unknown (the ``[treesitter]`` extra; without it the native
+    engine's grammars give the spans). Cached per language.
     With ``src``, a ``.h`` file that reads as C++ gets the C++ grammar.
     """
     try:
         # Build a parser from the core API (Parser + Language) rather than the
         # language pack's get_parser() wrapper — the wrapper's parse() signature
         # has churned across pack releases, while Parser(language).parse(bytes) is
-        # stable. tree-sitter ships with graphify.
+        # stable.
         from tree_sitter import Parser
         from tree_sitter_language_pack import detect_language_from_path, get_language
     except Exception:
@@ -290,9 +290,7 @@ def _spans_python(src: bytes) -> list[tuple[int, int, int, str]]:
         # Source this Python cannot parse (a newer one's syntax: 3.14's
         # `except A, B:`): the native engine's reading of Python, which is the
         # same rule on tree-sitter, rather than no definition at all
-        if engine.requested() != "graphify":
-            return engine.file_spans(src, "module.py") or spans
-        return spans
+        return engine.file_spans(src, "module.py") or spans
 
     def walk(node: ast.AST, prefix: str) -> None:
         for child in ast.iter_child_nodes(node):
@@ -905,11 +903,9 @@ def _spans_treesitter(src: bytes, rel: str) -> list[tuple[int, int, int, str]]:
     """
     parser, lang = _ts_parser_for(rel, src)
     if parser is None:
-        # No Python tree-sitter (or no grammar, offline): with the native engine
-        # chosen, its compiled-in grammars answer with the same rule.
-        if engine.requested() != "graphify":
-            return engine.file_spans(src, rel) or []
-        return []
+        # No Python tree-sitter (or no grammar, offline): the native engine's
+        # compiled-in grammars answer with the same rule (none when it is missing).
+        return engine.file_spans(src, rel) or []
     try:
         # (C, C++: an `#if` written once per configuration is parsed once)
         parsed = src

@@ -2530,7 +2530,8 @@ most of them:
   (`ruby/bare-name-as-a-hash-value`, `found_by("comparison")`) and the engine
   reads it (12 calls more in faraday, 6 in thor).
 
-So no language keeps graphify for its edges: the switch can come.
+So no language keeps graphify for its edges, and 0.9.0 drops it (the
+roadmap below, release B).
 
 ## Roadmap
 
@@ -2557,9 +2558,11 @@ So no language keeps graphify for its edges: the switch can come.
      installed, graphify otherwise. `graphlore_add`, `mode="deep"` and
      `no_viz` say they are going, and graphlore writes its own `graph.html`.
      Each engine release is published by pushing its `engine-vX.Y.Z` tag.
-   - **B:** graphify goes: `_run_cli`, the `graphify` extra, `graphlore_add`,
-     `mode`, `no_viz` and `GRAPHLORE_BIN`. Builds write `graphlore-out/` and
-     `.graphlore_labels.json`, and a `graphify-out/` graph is still read.
+   - **B (done in 0.9.0, but for the output directory):** graphify goes:
+     `_run_cli`, the `graphify` extra, `graphlore_add`, `mode`, `no_viz` and
+     `GRAPHLORE_BIN`; `graphlore-engine` is a dependency of graphlore. Left:
+     builds write `graphlore-out/` and `.graphlore_labels.json`, and a
+     `graphify-out/` graph is still read.
    - **C:** what reads graphify's graphs goes: `resolve.py`'s added edges,
      `ImportChecker`'s rejection of name-resolved imports, the
      `graphify-out/` and `GRAPHIFY_*` fallbacks.

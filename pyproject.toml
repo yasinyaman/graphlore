@@ -38,15 +38,17 @@ dependencies = [
     # `create_message`). The in-memory `Client(server)` used by the test suite is
     # also v2-only. Upper bound guards against a breaking 3.0 release.
     "mcp>=2.1,<3.0",
+    # graphlore's own extractor (engine/, Rust), which builds the graph: prebuilt
+    # abi3 wheels for Linux, macOS and Windows, so no Rust toolchain enters
+    # graphlore's install. Pinned to its minor; a release graphlore needs is
+    # published first.
+    "graphlore-engine>=0.5.79,<0.6",
 ]
 
 [project.optional-dependencies]
-# graphlore's own extractor (engine/, Rust): prebuilt abi3 wheels for Linux,
-# macOS and Windows, so no Rust toolchain enters graphlore's install. With it the
-# default GRAPHLORE_ENGINE=auto builds natively; graphify is the fallback.
-engine = ["graphlore-engine>=0.5.79,<0.6"]
-# Deprecated: the graphify CLI, the fallback extractor until the next release.
-graphify = ["graphifyy"]
+# Kept empty so `graphlore[engine]` still installs: the native engine is a
+# dependency of graphlore itself now.
+engine = []
 semble = ["semble>=0.3"]
 # The dense tier of the built-in search (GRAPHLORE_SEMANTIC_BACKEND unset or
 # builtin): static code embeddings, fused with its always-on BM25 tier. The first
@@ -67,7 +69,7 @@ tiktoken = ["tiktoken>=0.7"]
 # source changes. Off by default so the stdio server stays light.
 watch = ["watchdog>=4.0"]
 all = [
-    "graphlore-engine>=0.5.79,<0.6", "graphifyy", "semble>=0.3", "model2vec>=0.10", "numpy>=1.24",
+    "semble>=0.3", "model2vec>=0.10", "numpy>=1.24",
     "tree-sitter>=0.23,<1.0", "tree-sitter-language-pack>=1.11,<2.0",
     "tiktoken>=0.7", "watchdog>=4.0", "pyjwt[crypto]>=2.8",
 ]

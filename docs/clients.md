@@ -3,7 +3,7 @@
 graphlore is a local stdio MCP server. Every client below starts it the same
 way, as the command `graphlore` (installed as the [README](../README.md#quick-start)
 says), with `GRAPHLORE_PROJECT_DIR` naming the repository it reads (and
-`GRAPHLORE_TOOLSET=full` for all 34 tools; the default `lean` has 12).
+`GRAPHLORE_TOOLSET=full` for all 33 tools; the default `lean` has 12).
 `uvx --from "graphlore[engine,treesitter]" graphlore` starts it from PyPI with
 nothing installed (`--command uvx` below); the examples on this page use that
 form.
@@ -120,7 +120,7 @@ graphlore's tools loaded from the start instead, set `"alwaysLoad": true` in
 the server's entry of `.mcp.json` (all of a server's tools load then, and
 startup waits up to 5 seconds for them), or turn deferral off for every server
 with `ENABLE_TOOL_SEARCH=false`. The 12 `lean` tools' definitions are about
-17,000 characters (~5k tokens), the 34 of `full` about 50,000.
+17,000 characters (~5k tokens), the 33 of `full` about 50,000.
 Source: [code.claude.com/docs/en/mcp](https://code.claude.com/docs/en/mcp).
 
 **Hooks.** An agent asked to find a name often greps for it, then reads file

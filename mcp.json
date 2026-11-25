@@ -6,7 +6,7 @@
       "command": "uvx",
       "args": [
         "--from",
-        "graphlore[engine,graphify,treesitter,embed] @ .",
+        "graphlore[treesitter,embed] @ .",
         "graphlore"
       ],
       "cwd": "./",

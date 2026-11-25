@@ -1,16 +1,14 @@
-"""Which extractor builds the graph: the graphify CLI or graphlore's native engine.
+"""graphlore's native engine, the extractor that builds the graph.
 
 The native engine is the ``graphlore-engine`` distribution (import name
-``graphlore_engine``), written in Rust with its tree-sitter grammars compiled in.
-It is installed with the ``engine`` extra (prebuilt wheels): it extracts
-definitions with their real spans, containment, document headings, the imports,
-calls, bases and type references it resolves from the source, and communities by
-its own weighting; ``update=True`` parses only the files that changed.
-``GRAPHLORE_ENGINE`` picks the engine at call time:
-
-  auto (default)  native when installed, graphify for what native cannot do
-  native          the native engine; an error when it is not installed
-  graphify        the graphify CLI, as before (going in the next release)
+``graphlore_engine``), a dependency of graphlore written in Rust with its
+tree-sitter grammars compiled in (prebuilt wheels): it extracts definitions with
+their real spans, containment, document headings, the imports, calls, bases and
+type references it resolves from the source, and communities by its own
+weighting; ``update=True`` parses only the files that changed.
+``GRAPHLORE_ENGINE`` is read at call time: ``auto`` (the default) and ``native``
+both mean the native engine. ``graphify``, the external CLI that built the graph
+before, was removed in 0.9.0; a graph it wrote is still read (``graph_engine``).
 
 Nothing here imports ``graphlore_engine`` at module import: ``available`` asks
 ``importlib`` whether it exists, builds run it in a child process, and
@@ -28,19 +26,14 @@ from typing import Any
 
 from . import config
 
-ENGINES = ("graphify", "native", "auto")
+ENGINES = ("native", "auto")
 DEFAULT_ENGINE = "auto"
 # graph.json schema versions of the native engine this graphlore reads.
 SUPPORTED_SCHEMAS = frozenset({1, 2, 3, 4, 5, 6, 7})
 INSTALL_HINT = (
-    'Install it with: pip install "graphlore[engine]" (or pip install graphlore-engine; '
-    "from a checkout of graphlore: pip install maturin && maturin develop -m "
-    "engine/Cargo.toml --release)."
-)
-# Said when graphify answers a build: it is going, and what replaces it.
-GRAPHIFY_DEPRECATED = (
-    "graphify is deprecated as graphlore's extractor and goes in the next release; "
-    "the native engine replaces it. " + INSTALL_HINT
+    "graphlore-engine is a dependency of graphlore: reinstall graphlore, or "
+    "pip install graphlore-engine (from a checkout of graphlore: pip install maturin "
+    "&& maturin develop -m engine/Cargo.toml --release)."
 )
 # What a native graph does not have yet; said after every native build so an
 # empty answer is not mistaken for a codebase without structure.
@@ -83,76 +76,28 @@ def graph_engine(graph: object) -> str:
     return "graphify"
 
 
-def choose(
-    *,
-    requested: str,
-    native_found: bool,
-    graphify_found: bool,
-    mode: str = "",
-    update: bool = False,
-    cluster_only: bool = False,
-    existing: str | None = None,
-) -> tuple[str, str]:
-    """The engine a build runs with, and a note saying why when it is not plain.
+def refusal(*, requested: str, native_found: bool) -> str:
+    """Why a build cannot run, as an ``ERROR`` message; "" when it can.
 
-    Returns ``("graphify" | "native", note)``, or ``("error", message)`` with an
-    ``ERROR`` message when the request cannot be met. ``existing`` is the engine
-    of the graph already on disk, if any.
+    ``requested`` is ``GRAPHLORE_ENGINE`` (``requested()``), ``native_found``
+    whether the engine is installed (``available()``).
     """
+    if requested == "graphify":
+        return (
+            "ERROR: GRAPHLORE_ENGINE=graphify: the graphify CLI was removed as "
+            "graphlore's extractor in 0.9.0; graphlore's native engine builds the graph. "
+            "Unset GRAPHLORE_ENGINE (or set it to native)."
+        )
     if requested not in ENGINES:
-        return "error", (
+        return (
             f"ERROR: GRAPHLORE_ENGINE={requested!r} is not an engine "
             f"({', '.join(ENGINES)}). Unset it for the default (auto)."
         )
-    if requested == "graphify":
-        return "graphify", f"GRAPHLORE_ENGINE=graphify: {GRAPHIFY_DEPRECATED}"
-    unsupported = f"mode={mode!r} (graphify's LLM extraction)" if mode else ""
-    if requested == "native":
-        if not native_found:
-            return "error", (
-                "ERROR: GRAPHLORE_ENGINE=native, but the native engine (graphlore_engine) "
-                f"is not installed. {INSTALL_HINT}"
-            )
-        if unsupported:
-            return "error", (
-                f"ERROR: the native engine has no {unsupported} yet. "
-                "GRAPHLORE_ENGINE=graphify (or auto) runs it with graphify."
-            )
-        return "native", _update_note(update)
-    # auto
     if not native_found:
-        if not graphify_found:
-            return "error", (
-                "ERROR: no extractor is installed: neither graphlore's native engine "
-                f"(graphlore_engine) nor the graphify CLI. {INSTALL_HINT}"
-            )
-        return "graphify", (
-            "The native engine is not installed, so graphify built the graph. "
-            + GRAPHIFY_DEPRECATED
+        return (
+            "ERROR: graphlore's native engine (graphlore_engine) is not installed, "
+            f"and it is what builds the graph. {INSTALL_HINT}"
         )
-    if unsupported:
-        if graphify_found:
-            return "graphify", (
-                f"The native engine has no {unsupported}, so graphify ran it. mode= "
-                "goes with graphify in the next release."
-            )
-        return "error", (
-            f"ERROR: the native engine has no {unsupported}, and the graphify CLI "
-            "is not installed either. mode= goes with graphify in the next release; "
-            "build without it."
-        )
-    if (update or cluster_only) and existing == "graphify" and graphify_found:
-        what = "update=True" if update else "cluster_only=True"
-        return "graphify", (
-            f"The graph on disk is graphify's, so {what} went to graphify to keep "
-            "its edges and communities. graphlore_build(update=False) rebuilds it "
-            "with the native engine, which replaces graphify in the next release."
-        )
-    return "native", _update_note(update)
-
-
-def _update_note(update: bool) -> str:
-    del update  # the build reply says what an update reused
     return ""
 
 

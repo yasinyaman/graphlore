@@ -16,14 +16,6 @@
       "identifier": "graphlore",
       "version": "0.8.0",
       "runtimeHint": "uvx",
-      "runtimeArguments": [
-        {
-          "type": "named",
-          "name": "--with",
-          "value": "graphlore-engine",
-          "description": "Installs graphlore's native engine (prebuilt wheels); graphlore_build builds the graph with it."
-        }
-      ],
       "transport": {
         "type": "stdio"
       },
@@ -36,7 +28,7 @@
         },
         {
           "name": "GRAPHLORE_TOOLSET",
-          "description": "Tool surface: lean (12 core exploration tools), full (all 34) or locate (5, a locate-first surface).",
+          "description": "Tool surface: lean (12 core exploration tools), full (all 33) or locate (5, a locate-first surface).",
           "default": "lean",
           "choices": [
             "lean",

@@ -543,10 +543,6 @@ def test_community_resource_unknown(project):
     assert "No community" in server.community("999")
 
 
-def test_add_rejects_non_http(project):
-    assert "only http/https" in server.graphlore_add("ftp://x")
-
-
 def test_tool_and_prompt_registration(project):
     import asyncio
 
@@ -574,7 +570,8 @@ def test_tool_and_prompt_registration(project):
     assert "graphlore_routes" in names
     assert {"graphlore_project", "graphlore_unreferenced", "graphlore_layers",
             "graphlore_same_names", "graphlore_tests_for"} <= names
-    assert len(names) == 34
+    assert len(names) == 33
+    assert "graphlore_add" not in names     # it ran the graphify CLI, removed in 0.9.0
     assert "graphlore_bridges" in names
     assert prompts == {"onboard", "trace_bug", "explain_flow", "review"}
 
@@ -864,58 +861,26 @@ def test_path_containment_opt_in(tmp_path, monkeypatch):
 def test_build_rejects_escaping_path_when_restricted(tmp_path, monkeypatch):
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     monkeypatch.setattr(server, "RESTRICT_PATHS", True)
-    # guard returns before the CLI is ever invoked
+    # guard returns before the engine is ever invoked
     assert "escapes the project" in server.graphlore_build("/etc")
 
 
-def test_build_wires_flags_to_cli_args(tmp_path, monkeypatch):
-    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
-    monkeypatch.setenv("GRAPHLORE_ENGINE", "graphify")
-    captured = []
-    monkeypatch.setattr(server, "_run_cli", lambda args: captured.append(args) or "ok")
+# --- extraction engine: GRAPHLORE_ENGINE (native | auto; graphify removed) ------
 
-    server.graphlore_build(".", update=True, cluster_only=True, code_only=True)
-    assert captured[-1] == [".", "--update", "--cluster-only", "--no-viz", "--code-only"]
-
-    # graph.html is graphlore's own: graphify never writes one
-    server.graphlore_build(".", no_viz=False)
-    assert captured[-1] == [".", "--no-viz"]
-
-
-
-# --- extraction engine: GRAPHLORE_ENGINE (graphify | native | auto) -------------
-
-def test_engine_choose_routes_each_request():
-    choose = server.engine.choose
-    both = {"native_found": True, "graphify_found": True}
-    engine, note = choose(requested="graphify", **both)
-    assert engine == "graphify" and "deprecated" in note and "next release" in note
-    assert choose(requested="native", **both) == ("native", "")
-    assert choose(requested="native", **both, update=True) == ("native", "")
-    engine, msg = choose(requested="native", native_found=False, graphify_found=True)
-    assert engine == "error" and msg.startswith("ERROR") and "graphlore[engine]" in msg
-    engine, msg = choose(requested="native", **both, mode="deep")
-    assert engine == "error" and "GRAPHLORE_ENGINE=graphify" in msg
-    engine, note = choose(requested="auto", **both, mode="deep")
-    assert engine == "graphify" and "graphify ran it" in note and "next release" in note
-    engine, msg = choose(requested="auto", native_found=True, graphify_found=False, mode="deep")
-    assert engine == "error" and "build without it" in msg
-    # the native engine detects communities: cluster_only is its own
-    assert choose(requested="native", **both, cluster_only=True) == ("native", "")
-    assert choose(requested="auto", **both, cluster_only=True, existing="native")[0] == "native"
-    engine, note = choose(requested="auto", **both, cluster_only=True, existing="graphify")
-    assert engine == "graphify" and "cluster_only=True went to graphify" in note
-    assert choose(requested="auto", **both) == ("native", "")
-    engine, note = choose(requested="auto", **both, update=True, existing="graphify")
-    assert engine == "graphify" and "update=False" in note
-    assert choose(requested="auto", **both, update=True, existing="native")[0] == "native"
-    # without the engine, auto falls back to graphify and says the engine replaces it
-    engine, note = choose(requested="auto", native_found=False, graphify_found=True)
-    assert engine == "graphify" and "not installed" in note and "graphlore[engine]" in note
-    engine, msg = choose(requested="auto", native_found=False, graphify_found=False)
-    assert engine == "error" and "no extractor is installed" in msg
-    engine, msg = choose(requested="nativ", **both)
-    assert engine == "error" and "'nativ' is not an engine" in msg
+def test_engine_refusal_says_why_a_build_cannot_run():
+    refusal = server.engine.refusal
+    assert refusal(requested="auto", native_found=True) == ""
+    assert refusal(requested="native", native_found=True) == ""
+    msg = refusal(requested="auto", native_found=False)
+    assert msg.startswith("ERROR") and "not installed" in msg
+    assert "pip install graphlore-engine" in msg
+    assert "not installed" in refusal(requested="native", native_found=False)
+    # graphify is no extractor any more: the error says so, engine or not
+    for found in (True, False):
+        msg = refusal(requested="graphify", native_found=found)
+        assert msg.startswith("ERROR") and "removed" in msg and "0.9.0" in msg
+    msg = refusal(requested="nativ", native_found=True)
+    assert msg.startswith("ERROR") and "'nativ' is not an engine" in msg
 
 
 def test_engine_requested_reads_the_environment_per_call(monkeypatch):
@@ -948,7 +913,7 @@ _NATIVE_REPORT = {
 
 def _fake_native(monkeypatch, tmp_path, calls, report=None):
     """GRAPHLORE_ENGINE=native with the engine 'installed': engine.build writes a
-    native graph and returns `report`; _run_cli must not run."""
+    native graph and returns `report`."""
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     monkeypatch.setenv("GRAPHLORE_ENGINE", "native")
     monkeypatch.setattr(server.engine, "available", lambda: True)
@@ -963,10 +928,7 @@ def _fake_native(monkeypatch, tmp_path, calls, report=None):
         }), encoding="utf-8")
         return dict(report or _NATIVE_REPORT)
 
-    import pytest
-
     monkeypatch.setattr(server.engine, "build", build)
-    monkeypatch.setattr(server, "_run_cli", lambda *a, **k: pytest.fail("graphify ran"))
 
 
 def test_build_with_the_native_engine(tmp_path, monkeypatch):
@@ -985,13 +947,19 @@ def test_build_with_the_native_engine(tmp_path, monkeypatch):
     assert kw["commit"] is None                       # not a git repository
     server.graphlore_build(".", code_only=True, verbose=True)
     assert calls[-1][1]["documents"] is False
+    # every build writes graph.html beside graph.json
+    assert (tmp_path / "graphify-out" / "graph.html").is_file()
+    assert "graph.html written" in out
 
 
 def test_build_with_the_native_engine_refuses_what_it_cannot_do(tmp_path, monkeypatch):
     calls = []
     _fake_native(monkeypatch, tmp_path, calls)
-    out = server.graphlore_build(".", mode="deep")
-    assert out.startswith("ERROR") and "GRAPHLORE_ENGINE=graphify" in out
+    # graphify was removed as an extractor: asking for it is an error, not a build
+    monkeypatch.setenv("GRAPHLORE_ENGINE", "graphify")
+    out = server.graphlore_build(".")
+    assert out.startswith("ERROR") and "removed" in out and calls == []
+    monkeypatch.setenv("GRAPHLORE_ENGINE", "native")
     # cluster_only with no graph on disk says what to run first
     out = server.graphlore_build(".", cluster_only=True)
     assert out.startswith("ERROR") and "graphlore_build() first" in out
@@ -1003,21 +971,17 @@ def test_build_with_the_native_engine_refuses_what_it_cannot_do(tmp_path, monkey
     assert "not a directory" in server.graphlore_build("f.txt")
 
 
-def test_build_native_error_and_auto_fallbacks(tmp_path, monkeypatch):
+def test_build_native_error_and_a_graph_graphify_built(tmp_path, monkeypatch):
     calls = []
     _fake_native(monkeypatch, tmp_path, calls)
-    monkeypatch.setattr(server.engine, "build", lambda target, **kw: "ERROR: boom")
-    assert server.graphlore_build(".").startswith("ERROR: boom")
-    # auto over a graph graphify built: update=True stays with graphify
+    # a graph graphify built is replaced by the native engine, update=True included
     _write_graph(tmp_path, {"graph": {"graphify_version": "0.9"}, "nodes": [], "links": []})
     server._GRAPH_CACHE.clear()
     monkeypatch.setenv("GRAPHLORE_ENGINE", "auto")
-    monkeypatch.setattr(server.shutil, "which", lambda _b: "/fake/graphify")
-    captured = []
-    monkeypatch.setattr(server, "_run_cli", lambda args: captured.append(args) or "built")
     out = server.graphlore_build(".", update=True)
-    assert captured == [[".", "--update", "--no-viz"]]
-    assert "graph on disk is graphify's" in out
+    assert out.startswith("native engine") and calls[-1][1]["incremental"] is True
+    monkeypatch.setattr(server.engine, "build", lambda target, **kw: "ERROR: boom")
+    assert server.graphlore_build(".").startswith("ERROR: boom")
 
 
 def test_engine_build_runs_the_engine_in_a_child_process(tmp_path, monkeypatch):
@@ -1157,8 +1121,8 @@ def test_spans_fall_back_to_the_native_engine(monkeypatch):
     monkeypatch.setattr(spans, "_ts_parser_for", lambda rel, src=None: (None, None))
     monkeypatch.setattr(server.engine, "file_spans", lambda src, rel: [(1, 2, 1, "f")])
     assert spans._spans_treesitter(b"func f() {}\n", "a.go") == [(1, 2, 1, "f")]  # auto
-    monkeypatch.setenv("GRAPHLORE_ENGINE", "graphify")
-    assert spans._spans_treesitter(b"func f() {}\n", "a.go") == []    # graphify: unchanged
+    monkeypatch.setenv("GRAPHLORE_ENGINE", "graphify")    # no longer an engine: same spans
+    assert spans._spans_treesitter(b"func f() {}\n", "a.go") == [(1, 2, 1, "f")]
     monkeypatch.setenv("GRAPHLORE_ENGINE", "native")
     assert spans._spans_treesitter(b"func f() {}\n", "a.go") == [(1, 2, 1, "f")]
     monkeypatch.setattr(server.engine, "file_spans", lambda src, rel: None)
@@ -1955,14 +1919,6 @@ def test_start_watch_without_watchdog_degrades(monkeypatch):
     assert server._start_watch() is None  # missing extra -> logged + skipped, no crash
 
 
-def test_detect_backend(monkeypatch):
-    for env in server._BACKEND_ENV:
-        monkeypatch.delenv(env, raising=False)
-    assert server._detect_backend() is None
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
-    assert server._detect_backend() == "openai"
-
-
 # --- host-LLM sampling: capability test + naming round-trip (in-memory) -------
 
 def _run_in_memory(project, tool, args, sampling_callback=None, mode="auto"):
@@ -2717,8 +2673,8 @@ def test_lean_toolset_membership_is_valid():
 
 def test_lean_removals_keeps_core_drops_rest():
     removals = server._lean_removals(
-        ["graphlore_locate", "graphlore_overview", "graphlore_add", "graphlore_explain"])
-    assert "graphlore_add" in removals and "graphlore_explain" in removals
+        ["graphlore_locate", "graphlore_overview", "graphlore_validate", "graphlore_explain"])
+    assert "graphlore_validate" in removals and "graphlore_explain" in removals
     assert "graphlore_locate" not in removals and "graphlore_overview" not in removals
 
 
@@ -4287,7 +4243,7 @@ def test_validate_orphans_use_qualified_labels(tmp_path, monkeypatch):
     assert "__init__.py" not in orphans  # no bare, indistinguishable entries
 
 
-# --- query / path / explain over graph.json, and _run_cli plumbing ----------
+# --- query / path / explain over graph.json ------------------------------------
 
 
 def test_path_walks_edges_forward_then_backward_then_either_way(project):
@@ -4425,10 +4381,6 @@ def test_explain_gives_details_and_connections(project):
 
 
 def test_query_path_explain_need_no_graphify(project, monkeypatch):
-    import pytest
-
-    monkeypatch.setattr(server, "_run_cli", lambda *a, **k: pytest.fail("ran the CLI"))
-    monkeypatch.setattr(server.shutil, "which", lambda _b: None)
     assert not server.graphlore_query("client").startswith("ERROR")
     assert not server.graphlore_path("Client", "Response").startswith("ERROR")
     assert not server.graphlore_explain("Client").startswith("ERROR")
@@ -4437,43 +4389,6 @@ def test_query_path_explain_need_no_graphify(project, monkeypatch):
 class _FakeProc:
     def __init__(self, stdout="", stderr="", returncode=0):
         self.stdout, self.stderr, self.returncode = stdout, stderr, returncode
-
-
-def _fake_cli(monkeypatch, tmp_path, run):
-    """Route _run_cli through fakes: binary 'found', subprocess.run replaced, and a
-    build sent to graphify whatever engine is installed."""
-    monkeypatch.setenv("GRAPHLORE_ENGINE", "graphify")
-    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
-    monkeypatch.setattr(server.shutil, "which", lambda _b: "/fake/graphify")
-    monkeypatch.setattr(server.subprocess, "run", run)
-
-
-def test_run_cli_missing_binary_is_clean_error(tmp_path, monkeypatch):
-    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
-    monkeypatch.setattr(server.shutil, "which", lambda _b: None)
-    out = server.graphlore_add("https://example.com/paper")
-    assert out.startswith("ERROR:") and "pip install graphifyy" in out
-
-
-def test_run_cli_timeout_and_exit_code_and_oserror(tmp_path, monkeypatch):
-    def run_timeout(argv, **kwargs):
-        raise server.subprocess.TimeoutExpired(cmd=argv, timeout=1)
-
-    _fake_cli(monkeypatch, tmp_path, run_timeout)
-    assert "did not finish within" in server._run_cli(["add", "https://x"])
-
-    def run_fail(argv, **kwargs):
-        return _FakeProc(stderr="boom", returncode=3)
-
-    monkeypatch.setattr(server.subprocess, "run", run_fail)
-    assert server._run_cli(["add", "https://x"]) == "ERROR (exit 3):\nboom"
-
-    def run_oserror(argv, **kwargs):
-        raise FileNotFoundError("interpreter gone")
-
-    monkeypatch.setattr(server.subprocess, "run", run_oserror)
-    out = server._run_cli(["add", "https://x"])
-    assert out.startswith("ERROR: failed to run") and "interpreter gone" in out
 
 
 def test_js_internal_sources_not_counted_as_packages():
@@ -4691,64 +4606,15 @@ def test_impact_leaves_rationale_nodes_out(tmp_path, monkeypatch):
 # --- active project + build result ------------------------------------------
 
 
-def _fake_build(monkeypatch, log, writes=None):
-    """Replace _run_cli: return `log`, and write a graph.json where `writes` says.
-    The build goes to graphify (deprecated), whatever engine is installed."""
-    monkeypatch.setenv("GRAPHLORE_ENGINE", "graphify")
-
-    def run(args, cwd=None):
-        if writes is not None:
-            writes.mkdir(parents=True, exist_ok=True)
-            (writes / "graph.json").write_text(
-                json.dumps({"nodes": [{"id": "A", "label": "A"}], "links": []}),
-                encoding="utf-8",
-            )
-        return log
-
-    monkeypatch.setattr(server, "_run_cli", run)
-
-
-_BUILD_LOG = "\n".join([
-    "[graphify extract] scanning /repo",
-    "[graphify extract] found 774 code, 0 docs, 0 papers, 0 images",
-    "[graphify extract] 2 file(s) skipped as potentially sensitive: .env, keys.pem",
-    "[graphify extract] AST extraction on 774 code files...",
-    "  AST cache: 0/774 files served from cache (0%); 774 to extract",
-    "  AST extraction: 100/774 uncached files (12%) [8 workers]",
-    "  AST extraction: 200/774 uncached files (25%) [8 workers]",
-    "  AST extraction: 774/774 uncached files (100%) [8 workers]",
-    "  warning: 3 .sql file(s) contributed nothing to the graph: tree_sitter_sql "
-    "not installed.",
-    "  warning: 5 code file(s) yielded no symbols (0.01 MB)",
-    "[graphify extract] wrote /repo/graphify-out/graph.json: 13159 nodes, 32928 edges, "
-    "476 communities",
-    "[graphify extract] next: run `graphify cluster-only /repo`",
-])
-
-
-def test_build_returns_counts_and_warnings_by_default(tmp_path, monkeypatch):
-    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
-    _fake_build(monkeypatch, _BUILD_LOG, writes=tmp_path / "graphify-out")
-    out = server.graphlore_build(".")
-    assert "13159 nodes, 32928 edges, 476 communities" in out
-    assert "tree_sitter_sql" in out and "yielded no symbols" in out
-    assert "potentially sensitive" in out and "found 774 code" in out
-    assert "AST extraction" not in out and "next: run" not in out  # progress + hints
-    assert "verbose=True" in out and "graph.json ready" in out
-
-    full = server.graphlore_build(".", verbose=True)
-    assert "AST extraction: 200/774" in full and "next: run" in full
-
-
 def test_build_writes_graphlore_s_own_graph_html(tmp_path, monkeypatch):
-    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
-    _fake_build(monkeypatch, _BUILD_LOG, writes=tmp_path / "graphify-out")
+    _fake_native(monkeypatch, tmp_path, [])
     out = server.graphlore_build(".")
     page = tmp_path / "graphify-out" / "graph.html"
     assert "graph.html written" in out and server.viz.is_ours(page)
     page.unlink()
-    assert "graph.html" not in server.graphlore_build(".", no_viz=True)
-    assert not page.exists()
+    # no switch leaves it out: every build writes it again, an update too
+    assert "graph.html written" in server.graphlore_build(".", update=True)
+    assert page.exists()
 
 
 def _viz_graph():
@@ -5161,29 +5027,19 @@ def test_graph_html_follows_the_names_and_the_graph(tmp_path, monkeypatch):
     assert "could not be read" in server._write_viz(out / "broken.json")
 
 
-def test_build_log_that_cannot_be_condensed_is_returned_whole(tmp_path, monkeypatch):
-    monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
-    assert server._condense_build_log("ok") == "ok"  # never emptier than the log
-    _fake_build(monkeypatch, "ERROR (exit 2):\n  step 3/9 (33%) blew up")
-    assert server.graphlore_build(".") == "ERROR (exit 2):\n  step 3/9 (33%) blew up"
-
-
 def test_build_outside_the_project_says_the_graph_is_not_read(tmp_path, monkeypatch):
     project, sibling = tmp_path / "proj", tmp_path / "sibling"
     project.mkdir()
     sibling.mkdir()
-    monkeypatch.setattr(server.config, "PROJECT_DIR", project)
+    _fake_native(monkeypatch, project, [])
     monkeypatch.setattr(server, "RESTRICT_PATHS", False)
-    _fake_build(monkeypatch, "wrote graph.json: 1 nodes, 0 edges", sibling / "graphify-out")
     out = server.graphlore_build(str(sibling), code_only=True)
     assert "will NOT see it" in out and f'graphlore_project("{sibling}")' in out
     assert "graph.json ready" not in out
     assert "not found" in server.graphlore_overview()  # the read tools really don't
 
-    # a subfolder of the project is the same case: graphify writes inside it
+    # a subfolder of the project is the same case: the build writes inside it
     (project / "pkg").mkdir()
-    _fake_build(monkeypatch, "wrote graph.json: 1 nodes, 0 edges",
-                project / "pkg" / "graphify-out")
     assert "will NOT see it" in server.graphlore_build("pkg")
 
     # ...and switching makes the same graph readable
@@ -5226,7 +5082,7 @@ def test_build_notes_an_unignored_output_dir(tmp_path, monkeypatch):
         pytest.skip("git not available")
     monkeypatch.setattr(server.config, "PROJECT_DIR", tmp_path)
     git = _git_init(tmp_path)
-    _fake_build(monkeypatch, "wrote graph.json: 1 nodes, 0 edges", tmp_path / "graphify-out")
+    _fake_native(monkeypatch, tmp_path, [])
     out = server.graphlore_build(".")
     assert "neither ignored nor tracked by git" in out and ".gitignore" in out
     assert not (tmp_path / "graphify-out" / ".gitignore").exists()  # it only says so
@@ -7253,7 +7109,7 @@ def test_no_output_schema_advertised():
             return (await client.list_tools()).tools
 
     tools = asyncio.run(_go())
-    assert len(tools) == 34
+    assert len(tools) == 33
     assert all(t.output_schema is None for t in tools)
     by_name = {t.name: t for t in tools}
     # The wrapper keeps the real signature: parameters and docstrings survive.
@@ -7271,17 +7127,18 @@ def test_tool_functions_stay_plain_strings(project):
     assert server.graphlore_overview.__name__ == "graphlore_overview"
 
 
-def test_cli_error_sets_is_error(tmp_path, monkeypatch):
-    _fake_cli(monkeypatch, tmp_path, lambda argv, **kw: _FakeProc(stderr="boom", returncode=3))
-    res = _call_over_mcp("graphlore_add", {"url": "https://example.com/p"})
-    assert res.is_error is True
-    assert res.content[0].text.startswith("ERROR (exit 3)")
+def test_build_error_sets_is_error(tmp_path, monkeypatch):
+    calls = []
+    _fake_native(monkeypatch, tmp_path, calls)
+    monkeypatch.setenv("GRAPHLORE_ENGINE", "graphify")
+    res = _call_over_mcp("graphlore_build", {"path": "."})
+    assert res.is_error is True and res.structured_content["code"] == "engine"
+    assert res.content[0].text.startswith("ERROR") and calls == []
 
-    _fake_cli(monkeypatch, tmp_path, lambda argv, **kw: _FakeProc(stdout="all good"))
-    res = _call_over_mcp("graphlore_add", {"url": "https://example.com/p"})
-    assert res.is_error is False
-    assert res.structured_content["output"].startswith("all good")
-    assert "deprecated" in res.structured_content["output"]
+    monkeypatch.setenv("GRAPHLORE_ENGINE", "auto")
+    res = _call_over_mcp("graphlore_build", {"path": "."})
+    assert res.is_error is False and res.structured_content["engine"] == "native"
+    assert res.structured_content["output"].startswith("native engine")
 
 
 def test_structured_off_switch(project, monkeypatch):
@@ -7621,53 +7478,19 @@ def test_impact_and_subgraph_name_changed_files(tmp_path, monkeypatch):
 
 # --- GRAPHLORE_OFFLINE and repository-text framing --------------------------------
 
-def test_offline_refuses_add_and_deep_build(tmp_path, monkeypatch):
+def test_offline_builds_with_the_native_engine(tmp_path, monkeypatch):
+    # the engine reads local files only, documents included: offline changes nothing
     calls = []
-    _fake_cli(monkeypatch, tmp_path, lambda argv, **kw: calls.append(argv) or _FakeProc("ok"))
-    monkeypatch.setenv("GRAPHLORE_OFFLINE", "1")
-    out = server.graphlore_add("https://arxiv.org/abs/1706.03762")
-    assert out.startswith("ERROR: graphlore_add") and "GRAPHLORE_OFFLINE" in out
-    assert server.graphlore_build(".", mode="deep").startswith("ERROR: graphlore_build")
-    assert calls == []  # neither reached the CLI
-    res = _call_over_mcp("graphlore_add", {"url": "https://example.com/x"})
-    assert res.is_error is True and res.structured_content["code"] == "offline"
-
-
-def test_offline_forces_a_code_only_build(tmp_path, monkeypatch):
-    calls = []
-    _fake_cli(monkeypatch, tmp_path,
-              lambda argv, **kw: calls.append(list(argv)) or _FakeProc("ok"))
+    _fake_native(monkeypatch, tmp_path, calls)
     monkeypatch.setenv("GRAPHLORE_OFFLINE", "1")
     out = server.graphlore_build(".", update=True)
-    assert "--code-only" in calls[-1] and "--update" in calls[-1]
-    assert "GRAPHLORE_OFFLINE: built with --code-only" in out
-    server.graphlore_build(".", cluster_only=True)  # re-clustering reads no source
-    assert "--code-only" not in calls[-1]
-    monkeypatch.delenv("GRAPHLORE_OFFLINE")
-    server.graphlore_build(".")
-    assert "--code-only" not in calls[-1]
-
-
-def test_offline_strips_backend_keys_from_the_cli(tmp_path, monkeypatch):
-    envs = []
-    _fake_cli(monkeypatch, tmp_path,
-              lambda argv, **kw: envs.append(kw.get("env")) or _FakeProc("ok"))
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
-    server._run_cli(["label", "."])
-    assert envs[-1] is None  # online: inherited unchanged
-    monkeypatch.setenv("GRAPHLORE_OFFLINE", "1")
-    server._run_cli(["label", "."])
-    assert "OPENAI_API_KEY" not in envs[-1]
-    assert envs[-1]["HF_HUB_OFFLINE"] == "1" and "PATH" in envs[-1]
+    assert out.startswith("native engine") and "GRAPHLORE_OFFLINE" not in out
+    assert calls[-1][1]["documents"] is True and calls[-1][1]["incremental"] is True
 
 
 def test_naming_never_runs_the_graphify_cli(project, monkeypatch):
     # a backend key and a graphify binary used to send "auto" to `graphify label`
-    import pytest
-
     monkeypatch.setenv("GEMINI_API_KEY", "k")
-    monkeypatch.setattr(server.shutil, "which", lambda _b: "/fake/graphify")
-    monkeypatch.setattr(server, "_run_cli", lambda *a, **k: pytest.fail("ran the CLI"))
     auto = json.loads(_run_in_memory(project, "graphlore_label_communities", {"as_json": True}))
     assert auto["method"] == "derived"
     res = _call_over_mcp("graphlore_label_communities", {"method": "cli"})
@@ -8408,36 +8231,6 @@ def test_extractors_say_which_source_files_they_did_not_read(tmp_path, monkeypat
         ".lua": 2, ".swift": 1}
     assert "Not read — no extractor for these source files: 2 .lua." \
         in server.graphlore_package_apis()
-
-
-def test_build_without_a_key_falls_back_to_code_only(project, monkeypatch):
-    # graphify >= 0.9 refuses a default build of a repository with docs when no
-    # LLM key is set: every repository of the polyglot audit has a README
-    monkeypatch.setenv("GRAPHLORE_ENGINE", "graphify")
-    refusal = ("ERROR (exit 1):\nerror: no LLM API key found (8 doc/paper/image file(s) "
-               "need semantic extraction). Or pass --code-only to index just the code.")
-    calls = []
-
-    def fake(args, cwd=None):
-        calls.append(list(args))
-        return "Rebuilt: 5 nodes, 4 edges" if "--code-only" in args else refusal
-
-    monkeypatch.setattr(server, "_run_cli", fake)
-    out = server.graphlore_build(".")
-    assert calls == [[".", "--no-viz"], [".", "--no-viz", "--code-only"]]
-    assert not out.startswith("ERROR") and "built with --code-only" in out
-    # a semantic build asked for by name is not quietly turned into another one
-    calls.clear()
-    out = server.graphlore_build(".", mode="deep")
-    assert len(calls) == 1 and out.startswith("ERROR")
-    # a refusal with code_only already on is returned as it is
-    monkeypatch.setattr(server, "_run_cli", lambda args, cwd=None: refusal)
-    out = server.graphlore_build(".", code_only=True)
-    assert out.startswith("ERROR") and "graphlore_build(code_only=True)" not in out
-    # anything else that names the flag still gets the parameter's name
-    monkeypatch.setattr(server, "_run_cli", lambda args, cwd=None: (
-        "ERROR (exit 2):\nunknown corpus; pass --code-only to index just the code"))
-    assert "graphlore_build(code_only=True)" in server.graphlore_build(".")
 
 
 def test_php_imports_are_module_level():
@@ -9994,7 +9787,7 @@ def test_default_replies_stay_under_what_clients_keep(tmp_path, monkeypatch):
     some = next(server._node_id(n) for n in nodes if server._node_label(n).endswith("()"))
     needs = {"node": some, "node_a": some, "node_b": some, "nodes": [some],
              "pattern": "a", "query": "parse", "question": "parse"}
-    skip = {"graphlore_build", "graphlore_add", "graphlore_prune", "graphlore_set_labels",
+    skip = {"graphlore_build", "graphlore_prune", "graphlore_set_labels",
             "graphlore_label_communities", "graphlore_project", "graphlore_locate",
             "graphlore_duplication_scan", "graphlore_query", "graphlore_diff",
             "graphlore_sampling_status"}
@@ -10389,13 +10182,18 @@ def test_plugin_manifests_stay_in_sync():
                "gemini": gemini["mcpServers"]["graphlore"]}
     # every manifest builds the same package with the same extras from its own copy
     sources = {k: s["args"][1] for k, s in servers.items()}
+    # (the native engine is a dependency of graphlore itself: no extra brings it)
     assert sources == {
-        "claude": "graphlore[engine,graphify,treesitter,embed] @ ${CLAUDE_PLUGIN_ROOT}",
-        "agent": "graphlore[engine,graphify,treesitter,embed] @ .",
-        "gemini": "graphlore[engine,graphify,treesitter,embed] @ ${extensionPath}"}
+        "claude": "graphlore[treesitter,embed] @ ${CLAUDE_PLUGIN_ROOT}",
+        "agent": "graphlore[treesitter,embed] @ .",
+        "gemini": "graphlore[treesitter,embed] @ ${extensionPath}"}
     pyproject = (root / "pyproject.toml").read_text()
-    for extra in ("engine", "graphify", "treesitter", "embed"):
+    for extra in ("treesitter", "embed"):
         assert f"\n{extra} = [" in pyproject, extra
+    # the engine is required; `graphlore[engine]` is kept, empty, for old commands,
+    # and graphify is no extractor of graphlore's any more
+    assert '\n    "graphlore-engine>=' in pyproject and "\nengine = []" in pyproject
+    assert "\ngraphify = [" not in pyproject and '"graphifyy"' not in pyproject
     for s in servers.values():
         assert s["command"] == "uvx" and s["args"][0] == "--from" and s["args"][2] == "graphlore"
         assert s["env"]["GRAPHLORE_TOOLSET"] == "full"
@@ -10598,6 +10396,11 @@ def test_review_refuses_what_it_cannot_review(tmp_path, monkeypatch, capsys):
     assert change_review.run("HEAD~1", "HEAD~1", build=False) == 2
     assert "not the commit checked out" in capsys.readouterr().err
     assert change_review.run("HEAD~1", "HEAD", build=False, fail_on=("bogus",)) == 2
+    # a graph that must be built, where it cannot be: graphify is no extractor now
+    monkeypatch.setenv("GRAPHLORE_ENGINE", "graphify")
+    assert change_review.run("HEAD~1", "HEAD") == 2
+    assert "cannot be built here" in capsys.readouterr().err
+    monkeypatch.delenv("GRAPHLORE_ENGINE")
     # through the console script, with the same codes
     assert cli.main(["review", "--project", str(tmp_path), "--no-build"]) == 2
 

@@ -25,9 +25,9 @@ script `graphifyy` ships for its own embedded server.
 ## Claude Code plugin
 
 The plugin starts the server with [`uvx`](https://docs.astral.sh/uv/) from its
-own copy of this repository, so **`uv` must be installed**. It installs the
-`engine`, `graphify`, `treesitter` and `embed` extras into an isolated
-environment — graphlore's native engine included, as a prebuilt wheel — and points `GRAPHLORE_PROJECT_DIR` at the project you
+own copy of this repository, so **`uv` must be installed**. It installs graphlore
+with the `treesitter` and `embed` extras into an isolated environment —
+graphlore's native engine included, as a prebuilt wheel — and points `GRAPHLORE_PROJECT_DIR` at the project you
 opened. The first start downloads the dependencies and can take a while; later
 starts come from uv's cache. Without `uv`, use the manual setup below. The plugin
 sets `GRAPHLORE_TOOLSET=full`: its skill uses the review and naming tools that the
@@ -74,7 +74,7 @@ turn. Choose with `GRAPHLORE_TOOLSET`:
 | Value | Tools | Use when |
 |---|---|---|
 | `lean` (default) | 12 | Exploring, debugging, answering "where/how is X" |
-| `full` | all 34 | Reviewing structure (cycles, layers, dead or duplicated code), routes and package APIs, naming communities, diffs, the CLI passthroughs (`query`, `path`, `explain`, `add`) |
+| `full` | all 33 | Reviewing structure (cycles, layers, dead or duplicated code), routes and package APIs, naming communities, diffs, `query`, `path` and `explain` |
 | `locate` | 5 | One way in (`graphlore_locate`), one way to the code (`graphlore_fetch`), plus `overview` / `build` / `freshness`; falls back to `lean` only when `GRAPHLORE_SEMANTIC_BACKEND` names a backend that is not available |
 
 An unknown value falls back to `lean` with a warning on stderr; the boot banner
@@ -186,24 +186,20 @@ search index's BM25 tier. These are the exceptions:
 
 | Path | When it goes out | With `GRAPHLORE_OFFLINE=1` |
 |---|---|---|
-| `graphlore_add` | Always: it fetches the URL | Refused |
-| `graphlore_build` | `mode="deep"`, and a default build of doc/paper/image files, which graphify extracts with an LLM backend when a key is set | `mode` refused; `code_only` forced (local AST only) unless `cluster_only`, and the result says so |
 | Semantic search (`[semble]`: `graphlore_locate`, `graphlore_query`, `graphlore_duplication_scan`) | First use: semble downloads its embedding model from the Hugging Face Hub, then caches it; only with `GRAPHLORE_SEMANTIC_BACKEND=semble` | `HF_HUB_OFFLINE=1` / `TRANSFORMERS_OFFLINE=1` are set before semble is imported, so only a cached model loads; otherwise the error says how to prefetch it |
 | Built-in search, dense tier (`[embed]`: the same three tools) | First use: model2vec downloads `GRAPHLORE_EMBED_MODEL` (default `minishlab/potion-code-16M-v2`) from the Hugging Face Hub, then caches it | The same flags are set before model2vec is imported, so only a cached model loads; otherwise the index answers with BM25 alone and `backend.dense_unavailable` says why |
 | `GRAPHLORE_TOKENIZER=tiktoken` | First use: tiktoken fetches its encoding file unless cached | Not loaded; the chars/3.5 estimate is used |
-| tree-sitter grammars (`[treesitter]`) | First use of a language: the grammar is downloaded from GitHub releases and cached | Only grammars already in the cache are used; other files get no spans, unless the native engine is installed: its compiled-in grammars answer instead (not with `GRAPHLORE_ENGINE=graphify`) |
+| tree-sitter grammars (`[treesitter]`) | First use of a language: the grammar is downloaded from GitHub releases and cached | Only grammars already in the cache are used; for the other files the native engine's compiled-in grammars answer instead |
 | `graph.html` (written after a build) and the viewer (`viewer.html`, also on GitHub Pages) | Never: the page's code and data are in the file, a graph.json opened in it is read in the browser, and its Content Security Policy allows no request (the Pages copy is fetched once, like any web page, and sends nothing) | Unchanged |
 | A SCIP index (`GRAPHLORE_SCIP`) | Never: graphlore reads a local file an indexer made; it runs no indexer | Unchanged |
-| Native engine (`graphlore-engine`, the `engine` extra) | Never: its grammars are compiled into the wheel and a build reads local files only | Unchanged |
+| Native engine (`graphlore-engine`, `graphlore_build`) | Never: its grammars are compiled into the wheel and a build reads local files only | Unchanged |
 | A custom `GRAPHLORE_SEMANTIC_BACKEND` | Whatever that code does | **Not constrained** — graphlore cannot see inside it |
 | HTTP transports | Inbound only (the server listens) | Unchanged |
 | OAuth on HTTP (`GRAPHLORE_AUTH_ISSUER`, the `remote` extra) | At the first token: the provider's metadata (RFC 8414 / OpenID discovery) and its signing keys (JWKS), then the keys again when they change (cached an hour) | Refused at start-up: the server exits with the reason |
 
-What graphlore enforces is its own side: it refuses the calls above, strips the
-`*_API_KEY` variables it knows (`GEMINI_API_KEY`, `OPENAI_API_KEY`,
-`ANTHROPIC_API_KEY`, …) from the graphify subprocess, and sets the Hugging Face
-offline flags for itself and its children. What the `graphify` binary or a
-custom backend does beyond that is theirs. For a guarantee, pair the switch with
+What graphlore enforces is its own side: it refuses the calls above and sets the
+Hugging Face offline flags for itself and its children. What a custom backend
+does beyond that is its own. For a guarantee, pair the switch with
 a network policy (an egress firewall, a container without a route out). The
 boot banner on stderr prints `egress=offline` or `egress=on-demand`.
 
@@ -212,9 +208,9 @@ boot banner on stderr prints `egress=offline` or `egress=on-demand`.
 `engine/` in this repository is graphlore's own extractor, written in Rust and
 shipped as a separate package, `graphlore-engine`, whose wheels carry the
 tree-sitter grammars for Python, JavaScript, TypeScript/TSX, Go, Java, Kotlin,
-Scala, C#, Rust, Swift, C, C++, Ruby and PHP. It builds the graph by default
-(`GRAPHLORE_ENGINE=auto`); graphify answers only when it is not installed, and
-goes in the next release. A native graph
+Scala, C#, Rust, Swift, C, C++, Ruby and PHP. It builds the graph: graphify,
+the CLI that built it before, was removed as an extractor in 0.9.0 (a graph it
+wrote is still read). A native graph
 has a node per file, per definition (with its `start..end` span, `kind` and
 `qualname`), property, module-level constant and Markdown / reStructuredText
 heading (Sphinx `.txt` sources included), with a `documents` edge from a heading
@@ -230,12 +226,10 @@ by kind, confidence and directory, see
 across rebuilds, so names saved for them stay attached; every native build says
 so.
 
-It is graphlore's `engine` extra, prebuilt for Linux (glibc and musl, x86-64
-and ARM), macOS and Windows; no Rust toolchain is needed:
-
-```bash
-pip install "graphlore[engine]"      # or: pip install graphlore-engine
-```
+It is a dependency of graphlore, prebuilt for Linux (glibc and musl, x86-64
+and ARM), macOS and Windows, so `pip install graphlore` installs it; no Rust
+toolchain is needed. (The `engine` extra is kept, empty, so `graphlore[engine]`
+still installs.)
 
 From a checkout, with a Rust toolchain:
 
@@ -245,14 +239,13 @@ maturin build -m engine/Cargo.toml --release --out dist-engine
 pip install dist-engine/*.whl
 ```
 
-With the native engine, `graphlore_build`'s `update` parses only the files that
+`graphlore_build`'s `update` parses only the files that
 changed since the last native build (a facts cache in
 `graphify-out/cache/graphlore-native.bin`; resolution and communities still run
 over the whole project, so the graph is the one a full build writes, and the
 nodes of deleted files go), `cluster_only` detects the communities of the graph
-on disk again, `code_only` skips the document headings, `no_viz` has no effect,
-and `mode` is refused (`auto` sends it to graphify, and so it does `update` /
-`cluster_only` on a graph graphify built). The build runs in a child process bounded by
+on disk again, `code_only` skips the document headings, and every build writes
+`graph.html` beside graph.json. The build runs in a child process bounded by
 `GRAPHLORE_TIMEOUT`. `benchmarks/compare_engines.py REPO` compares its graph of
 a repository with graphify's, per language; [native-engine.md](native-engine.md)
 has the results on 31 repositories and the roadmap.
@@ -264,9 +257,8 @@ has the results on 31 repositories and the roadmap.
 | `GRAPHLORE_PROJECT_DIR` | `.` | Project root to extract the graph from |
 | `GRAPHLORE_PROJECT_FROM_CLIENT` | off | `1`: the project is not the working directory but the client's: its first workspace root (MCP `roots/list`, asked on the first tool call), else the directory `graphlore_project` is given; until then every other tool answers `code: project_unknown`. Ignored when `GRAPHLORE_PROJECT_DIR` is set. The [plugin](#plugins-for-other-clients) of a client that starts the server in the plugin's own directory sets it |
 | `GRAPHLORE_OUT_DIR` | `graphify-out` | Output folder name |
-| `GRAPHLORE_BIN` | `graphify` | CLI path |
-| `GRAPHLORE_ENGINE` | `auto` | What `graphlore_build` extracts with: `auto` (graphlore's native engine when it is installed, else graphify; graphify also for `mode` and for `update` / `cluster_only` of a graphify-built graph), `native` (the engine, the `graphlore-engine` package; an error when it is not installed) or `graphify` (the CLI; deprecated, goes in the next release). Another value is an error. See [The native engine](#the-native-engine) |
-| `GRAPHLORE_TIMEOUT` | `600` | CLI and native build timeout (seconds) |
+| `GRAPHLORE_ENGINE` | `auto` | What `graphlore_build` extracts with: `auto` and `native` both mean graphlore's native engine (the `graphlore-engine` package; an error when it is not installed). `graphify` was removed in 0.9.0 and is an error that says so, as is another value. See [The native engine](#the-native-engine) |
+| `GRAPHLORE_TIMEOUT` | `600` | Native build timeout (seconds) |
 | `GRAPHLORE_RESTRICT_PATHS` | `0` | Confine `graphlore_build`'s `path` to the project dir (auto-on for HTTP) |
 | `GRAPHLORE_TRANSPORT` | `stdio` | `stdio` \| `streamable-http` \| `sse` |
 | `GRAPHLORE_HOST` | `127.0.0.1` | Bind host for HTTP transports |
@@ -278,7 +270,7 @@ has the results on 31 repositories and the roadmap.
 | `GRAPHLORE_STATELESS_HTTP` | off | `1`: streamable HTTP with no session, each request answered on its own (no roots, no sampling). See [Transport](#transport-stdio-default-optional-http) |
 | `GRAPHLORE_JSON_RESPONSE` | off | `1`: streamable HTTP answers with a JSON body instead of an SSE stream |
 | `GRAPHLORE_ALLOWED_HOSTS` | _(unset)_ | DNS-rebinding `Host` allowlist for HTTP (comma-separated, `:*` port wildcards; `*` disables). Unset = SDK default: loopback-only when bound to loopback |
-| `GRAPHLORE_TOOLSET` | `lean` | `lean` (12 core exploration tools) \| `full` (all 34) \| `locate` (minimal locate-first surface; falls back to `lean` when the configured backend is unavailable). See [Which toolset](#which-toolset) |
+| `GRAPHLORE_TOOLSET` | `lean` | `lean` (12 core exploration tools) \| `full` (all 33) \| `locate` (minimal locate-first surface; falls back to `lean` when the configured backend is unavailable). See [Which toolset](#which-toolset) |
 | `GRAPHLORE_TOKENIZER` | _(heuristic)_ | `tiktoken` → exact token counts (needs the `[tiktoken]` extra); else chars/3.5 estimate |
 | `GRAPHLORE_SEMANTIC_BACKEND` | _(auto)_ | Search backend of `graphlore_locate` and the duplication scan: unset / `auto` / `builtin` → the built-in index, whether or not semble is installed; `semble` → semble only (the one way to use it); or `module.path:Factory` implementing `search`/`find_related` (its module is checked at boot, the factory at the first call) |
 | `GRAPHLORE_EMBED_MODEL` | `minishlab/potion-code-16M-v2` | The built-in index's dense tier (`[embed]` extra): a Hugging Face model id, a local model directory, or `off` for BM25 only |
@@ -293,6 +285,6 @@ has the results on 31 repositories and the roadmap.
 | `GRAPHLORE_STRUCTURED` | `1` | `0` → plain-text tool results, without `structuredContent` / `isError` |
 
 > Every variable is also honored under its legacy `GRAPHIFY_*` spelling (the
-> pre-rename names); when both are set, `GRAPHLORE_*` wins. Artifacts of the
-> wrapped Graphify CLI keep their own names regardless (`graphify-out/`,
-> `.graphify_labels.json`, the `graphify` binary).
+> pre-rename names); when both are set, `GRAPHLORE_*` wins. `graphify-out/` and
+> `.graphify_labels.json`, named after the Graphify CLI that built the graph
+> before 0.9.0, keep their names regardless.

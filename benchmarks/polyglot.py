@@ -2,7 +2,7 @@
 """Polyglot audit: run every graphlore tool on real repositories in 14 languages.
 
 benchmarks/multilang.py measures one tool (graphlore_locate) on six libraries.
-This script exercises the whole surface — all 34 tools, the resources and the
+This script exercises the whole surface — all 33 tools, the resources and the
 prompts — on real code in Python, JavaScript, TypeScript/TSX, Go, Java, Kotlin,
 Scala, C#, Rust, Swift, C, C++, Ruby and PHP, and turns what it sees into a
 list of findings. It needs no ground truth per repository: every check is an
@@ -1341,9 +1341,9 @@ def check_protocol(a: Audit, sub: Subject) -> None:
     async def go() -> None:
         async with Client(s.mcp) as client:
             tools = (await client.list_tools()).tools
-            if len(tools) != 34:
+            if len(tools) != 33:
                 a.finding("TOOL-COUNT", "high", "bug", "protocol",
-                          "list_tools does not return 34 tools", len(tools))
+                          "list_tools does not return 33 tools", len(tools))
             for tool in tools:
                 if not (tool.description or "").strip():
                     a.finding("TOOL-NO-DESCRIPTION", "medium", "bug", "protocol",
@@ -1586,7 +1586,10 @@ def main(argv: list[str] | None = None) -> None:
         if opts.engine == "native":
             build_native(root, repos, opts.rebuild)
         return
-    for key in s._BACKEND_ENV:  # no tool may reach an LLM backend from here
+    # no tool may reach an LLM backend from here (the keys graphify's backends
+    # read; graphlore's server no longer lists them since it runs no graphify)
+    for key in ("GEMINI_API_KEY", "GOOGLE_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY",
+                "DEEPSEEK_API_KEY", "KIMI_API_KEY", "MOONSHOT_API_KEY"):
         os.environ.pop(key, None)
     if opts.engine == "native":
         build_native(root, repos, opts.rebuild)

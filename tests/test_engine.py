@@ -250,8 +250,11 @@ def test_python_spans_of_source_this_python_cannot_parse(monkeypatch):
     else:
         pytest.skip("this Python parses PEP 758")
     assert spans._spans_python(src) == [(1, 2, 1, "get_db"), (5, 9, 5, "current")]
-    monkeypatch.setenv("GRAPHLORE_ENGINE", "graphify")  # graphify's choice: no engine
-    assert spans._spans_python(src) == []
+    # graphify is no engine any more: the setting leaves the fallback in place
+    monkeypatch.setenv("GRAPHLORE_ENGINE", "graphify")
+    assert spans._spans_python(src) == [(1, 2, 1, "get_db"), (5, 9, 5, "current")]
+    monkeypatch.setattr(spans.engine, "file_spans", lambda src, rel: None)
+    assert spans._spans_python(src) == []             # no engine: no spans, no error
 
 
 def test_native_python_spans_match_ast():

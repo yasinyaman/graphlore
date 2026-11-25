@@ -23,8 +23,8 @@ def env(name: str, default: str | None = None) -> str | None:
 
     The ``GRAPHIFY_*`` spellings predate the graphlore rename and are still
     honored so existing configs keep working; new configs should use
-    ``GRAPHLORE_*``. (Artifacts of the wrapped Graphify CLI — the ``graphify``
-    binary, ``graphify-out/``, ``.graphify_labels.json`` — keep their own names
+    ``GRAPHLORE_*``. (``graphify-out/`` and ``.graphify_labels.json``, named
+    after the Graphify CLI that built the graph before 0.9.0, keep their names
     regardless.)
     """
     value = os.environ.get(f"GRAPHLORE_{name}")

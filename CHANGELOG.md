@@ -6,6 +6,23 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Removed
+- **graphify as graphlore's extractor** (`docs/native-engine.md`, roadmap
+  release B). The native engine builds every graph: `graphlore-engine` is a
+  dependency of graphlore now (`pip install graphlore` / `uvx graphlore` is
+  enough; the `engine` extra is kept empty so `graphlore[engine]` still
+  installs), and the `graphify` extra and `graphifyy` are gone.
+  `GRAPHLORE_ENGINE` takes `auto` or `native`; `graphify` is refused with a
+  reason (`code: engine`), as is a build where the engine is not installed.
+  Gone with it: the `graphlore_add` tool (it only ran the graphify CLI; 33
+  tools now), `graphlore_build`'s `mode` (graphify's LLM extraction) and
+  `no_viz` (graph.html is always written), `GRAPHLORE_BIN`, and the graphify
+  CLI's subprocess, log condensing and offline key stripping. A graph graphify
+  wrote is still read, and `update=True` or `cluster_only=True` on one now runs
+  the native engine. The plugins install `graphlore[treesitter,embed]`. The
+  numbers that decided it are in `docs/native-engine.md` ("Before graphify
+  goes"). The output directory keeps its name in this release.
+
 ## [0.8.0] - 2026-11-24
 
 ### Added

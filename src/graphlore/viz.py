@@ -1,7 +1,7 @@
 """graph.html: an offline, self-contained view of graph.json.
 
-graphlore writes it next to graph.json after every build (``no_viz=True`` skips
-it), whichever engine built the graph, and again when community names change.
+graphlore writes it next to graph.json after every build, and again when
+community names change (a graph graphify wrote is drawn too).
 The page is one file: the drawing code is graphlore's own (``viewer.html``,
 canvas and plain JavaScript), the graph is embedded as JSON, and a Content
 Security Policy forbids every request, so opening it reaches no network.
