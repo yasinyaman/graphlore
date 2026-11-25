@@ -799,7 +799,7 @@ Found by: the specification 20, a compiler 8, comparison 0, the grammar 4, the l
 | a member of the receiver's type comes before an extension method of the name | `member-before-extension` | – | yes |
 | `export inner.f` makes f a member of the object that writes it | `export-clause` | – | yes |
 
-### csharp (233 of 397)
+### csharp (236 of 397)
 
 C# Language Specification, 'Namespace and type names', 'Member lookup', 'Extension method invocations'.
 
@@ -1008,7 +1008,7 @@ Found by: the specification 39, a compiler 8, comparison 6, the grammar 1, the l
 | `await foreach (var x in b)` calls the GetAsyncEnumerator the type of b declares, and x has the Current type of what it returns | `await-foreach-pattern` | – | **no**: no U.F -calls-> Bag.GetAsyncEnumerator |
 | `checked(a + b)` uses `operator checked +`, `unchecked(a + b)` the plain `operator +` | `checked-operator` | 11– | yes |
 | `l[^1]` is a use of the int indexer of l's type and of its Count | `implicit-index-support` | 8– | **no**: no U.F -reads-> L.Count |
-| `new C { X = …, N = 1 }` writes C.X and C.N, the members of C, not names of the surrounding scope | `object-initializer-member` | – | **no**: no D.F -writes-> C.X; D.F -writes-> C.N |
+| `new C { X = …, N = 1 }` writes C.X and C.N, the members of C, not names of the surrounding scope | `object-initializer-member` | – | yes |
 | the members of a partial struct are those of all its parts | `partial-struct` | – | yes |
 | a base list names a class (inherits) and interfaces (implements); a struct names only interfaces | `class-and-interfaces-in-a-base-list` | – | yes |
 | a struct's own override of ToString is what `s.ToString()` means | `struct-overrides-a-valuetype-member` | – | yes |
@@ -1065,8 +1065,8 @@ Found by: the specification 39, a compiler 8, comparison 6, the grammar 1, the l
 | an indexer access picks, among the indexers of the type, the one applicable to the arguments | `indexer-by-argument` | – | **no**: no C.M -reads-> A.cs:App.Table.this[]@5; C.N -reads-> A.cs:App.Table.this[]@7 |
 | `a?[i]` is an indexer access on a, and what follows it is a member of the indexer's type | `null-conditional-element-access` | – | **no**: no C.M -calls-> Item.Weight |
 | `base[i]` is an indexer access on the base class | `base-indexer` | – | **no**: no Derived.this[] -reads-> Base.this[] |
-| an object initializer's member name is a member of the created type, written | `object-initializer-targets` | – | **no**: no C.M -writes-> Point.X |
-| a nested object initializer's names are members of the type of the field or property it initializes | `nested-object-initializer` | – | **no**: no C.M -writes-> Inner.Size |
+| an object initializer's member name is a member of the created type, written | `object-initializer-targets` | – | yes |
+| a nested object initializer's names are members of the type of the field or property it initializes | `nested-object-initializer` | – | yes |
 | each element of a collection initializer calls the Add method of the collection | `collection-initializer-add` | – | **no**: no C.M -calls-> Bag.Add |
 | `typeof(T)` names the type the type-name lookup finds | `typeof-names-a-type` | – | yes |
 | `default(T)` names the type the type-name lookup finds | `default-expression-names-a-type` | – | yes |
@@ -1520,4 +1520,4 @@ Found by: the specification 31, a compiler 2, comparison 0, the grammar 1, the l
 | `A::hello insteadof B` picks A's method of two used traits | `trait-insteadof` | – | yes |
 | a method a trait brings comes before an inherited one, and the class's own before both | `trait-before-inherited` | – | yes |
 
-1088 of 1270 rules hold
+1091 of 1270 rules hold

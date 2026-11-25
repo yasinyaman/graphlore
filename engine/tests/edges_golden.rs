@@ -3805,3 +3805,30 @@ fn csharp_attributes_operators_and_block_scopes() {
         "{names:?}"
     );
 }
+
+#[test]
+fn csharp_object_initializers_write_the_created_type_s_members() {
+    let got = edges("cs-init", &[(
+        "A.cs",
+        "namespace App\n{\n    public class Inner { public int Size; }\n    public class C { public int X; public int N { get; set; } public Inner Inner = new Inner(); }\n    public class D\n    {\n        public int X;\n        public C F() { return new C { X = 1, N = 2, Inner = { Size = 3 } }; }\n    }\n}\n",
+    )]);
+    has(&got, &[(".F()", "writes", "X"), (".F()", "writes", "N"), (".F()", "writes", "Size")]);
+    // (the class's own X is not what the initializer writes)
+    let dir = project("cs-init-ids", &[(
+        "A.cs",
+        "namespace App\n{\n    public class C { public int X; }\n    public class D\n    {\n        public int X;\n        public C F() { return new C { X = 1 }; }\n    }\n}\n",
+    )]);
+    let (g, _) = build_graph(&BuildOptions::new(&dir)).unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+    let writes: Vec<String> = g["links"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|e| e["relation"] == "writes")
+        .map(|e| e["target"].as_str().unwrap().to_string())
+        .collect();
+    assert!(
+        writes.iter().any(|t| t.ends_with("_c_x")) && !writes.iter().any(|t| t.ends_with("_d_x")),
+        "{writes:?}"
+    );
+}

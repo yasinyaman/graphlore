@@ -1,5 +1,5 @@
 {
- "passed": 1088,
+ "passed": 1091,
  "total": 1270,
  "cases": [
   {
@@ -7060,19 +7060,8 @@
   },
   {
    "id": "csharp/object-initializer-member",
-   "ok": false,
-   "missing": [
-    [
-     "D.F",
-     "writes",
-     "C.X"
-    ],
-    [
-     "D.F",
-     "writes",
-     "C.N"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -7554,26 +7543,14 @@
   },
   {
    "id": "csharp/object-initializer-targets",
-   "ok": false,
-   "missing": [
-    [
-     "C.M",
-     "writes",
-     "Point.X"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
    "id": "csharp/nested-object-initializer",
-   "ok": false,
-   "missing": [
-    [
-     "C.M",
-     "writes",
-     "Inner.Size"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {

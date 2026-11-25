@@ -383,6 +383,15 @@ impl State {
                 let augmented = is_augmented(n, k, src);
                 let mut out = Vec::new();
                 targets(t, src, if augmented { "augmented" } else { "assign" }, &mut out, 0);
+                // C# `new C { X = 1, Inner = { Size = 2 } }`: a member of
+                // what is created (the standard's 12.8.17.3)
+                if let Some(prefix) = csharp_initialized(anc, src) {
+                    for (_, path, _) in out.iter_mut().filter(|(_, p, _)| p.len() == 1) {
+                        let mut full = prefix.clone();
+                        full.append(path);
+                        *path = full;
+                    }
+                }
                 for (node, path, ctx) in out {
                     // `x = 1` declares a local `x`; `$x = 1`, `@@x = 1` do not
                     if self.assignment_declares
@@ -907,6 +916,38 @@ fn up<'t>(anc: &[Node<'t>], i: usize) -> Option<Node<'t>> {
 }
 
 /// Whether `n` is written: assigned to, updated or deleted.
+/// C#: the path of what an object initializer's assignment writes a member
+/// of: `new C { X = 1 }` is `C`; nested, `new C { Inner = { Size = 2 } }` is
+/// `C`, `Inner`. None outside an object initializer.
+fn csharp_initialized(anc: &[Node], src: &[u8]) -> Option<Vec<String>> {
+    if crate::parse::current() != Some(crate::lang::Lang::CSharp) {
+        return None;
+    }
+    let mut names: Vec<String> = Vec::new();
+    let mut i = 0;
+    loop {
+        if up(anc, i)?.kind() != "initializer_expression" {
+            return None;
+        }
+        let holder = up(anc, i + 1)?;
+        match holder.kind() {
+            "object_creation_expression" => {
+                // (the type's member: a state path holds no `()`, and the
+                // type answers for the value it makes)
+                let mut p = path_of(holder.child_by_field_name("type")?, src)?;
+                names.reverse();
+                p.extend(names);
+                return Some(p);
+            }
+            "assignment_expression" => {
+                names.push(text(holder.child_by_field_name("left")?, src));
+                i += 2;
+            }
+            _ => return None,
+        }
+    }
+}
+
 /// Go `for k, v = range xs` and `case x = <-ch`: assignments (written
 /// with `:=`, they declare).
 fn go_assigning(n: Node, k: &str, src: &[u8]) -> bool {
