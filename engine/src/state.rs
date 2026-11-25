@@ -303,6 +303,12 @@ impl State {
     }
 
     /// Record what `n` reads, writes and declares. Called for every node.
+    /// Names a scope the walk found itself declares between two bytes (a C#
+    /// query's range variables): a use of one there is no variable's.
+    pub fn block(&mut self, lo: usize, hi: usize, name: String) {
+        self.blocked.push((lo, hi, name));
+    }
+
     pub fn visit<'t>(&mut self, n: Node<'t>, src: &[u8], anc: &[Node<'t>]) {
         let k = n.kind();
         if matches!(k, "global_statement" | "nonlocal_statement") {

@@ -3970,3 +3970,32 @@ fn csharp_operators_by_operands_context_and_conversion() {
         assert!(!got.contains(&(from.to_string(), to.to_string())), "{from} -> {to}: {got:?}");
     }
 }
+
+// C# query expressions: a range variable ranges over its source's elements
+// and hides a field of its name up to an `into`; `let` is its value, a second
+// `from` the elements of what it names; each clause calls the source's query
+// method, and a degenerate `select` none
+#[test]
+fn csharp_query_expressions() {
+    let got = call_ids("cs-queries", &[(
+        "A.cs",
+        "using System;\nusing System.Collections.Generic;\nnamespace App\n{\n    public class Order { public int Total() { return 1; } }\n    public class Customer { public bool Active() { return true; } public Dept Dept() { return null; } public List<Order> Orders() { return null; } }\n    public class Dept { public string Title() { return \"\"; } }\n    public class Other { public bool Active() { return true; } public int Total() { return 2; } public string Title() { return \"\"; } }\n    public class Item { public bool Ok() { return true; } }\n    public class Source { public Source Where(Func<Item, bool> f) { return this; } public Source Select(Func<Item, int> f) { return this; } }\n    public class C\n    {\n        Other c;\n        public IEnumerable<string> Let(List<Customer> cs) { return from c in cs let d = c.Dept() where c.Active() select d.Title(); }\n        public IEnumerable<int> Many(List<Customer> cs) { return from c in cs from o in c.Orders() select o.Total(); }\n        public Source Pattern(Source s) { return from x in s where x.Ok() select x; }\n    }\n}\n",
+    )]);
+    for (from, to) in [
+        (".Let()", "a_customer_active"),
+        (".Let()", "a_dept_title"),
+        (".Many()", "a_order_total"),
+        (".Pattern()", "a_source_where"),
+        (".Pattern()", "a_item_ok"),
+    ] {
+        assert!(got.contains(&(from.to_string(), to.to_string())), "{from} -> {to}: {got:?}");
+    }
+    for (from, to) in [
+        (".Let()", "a_other_active"),
+        (".Let()", "a_other_title"),
+        (".Many()", "a_other_total"),
+        (".Pattern()", "a_source_select"),
+    ] {
+        assert!(!got.contains(&(from.to_string(), to.to_string())), "{from} -> {to}: {got:?}");
+    }
+}

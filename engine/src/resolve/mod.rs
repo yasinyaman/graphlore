@@ -8382,6 +8382,15 @@ impl<'a> Project<'a> {
                 }
             }
         }
+        // a source of a query with no enumerator: what its `Select` or
+        // `Where` hands its delegate (the standard's 12.20.4)
+        for name in ["Select", "Where"] {
+            for m in self.members(c, name) {
+                if let Some(x) = self.csharp_lambda_param_of(m, 0, 0) {
+                    return Some(x);
+                }
+            }
+        }
         // `class Bag : IEnumerable<Item>`
         let def = self.def(c);
         def.base_targs.iter().find_map(|(base, args)| {

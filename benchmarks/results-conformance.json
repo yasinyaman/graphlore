@@ -1,5 +1,5 @@
 {
- "passed": 1143,
+ "passed": 1149,
  "total": 1270,
  "cases": [
   {
@@ -8042,118 +8042,32 @@
   },
   {
    "id": "csharp/query-range-variable",
-   "ok": false,
-   "missing": [
-    [
-     "Use.Run",
-     "calls",
-     "Customer.Active"
-    ],
-    [
-     "Use.Run",
-     "calls",
-     "Customer.Name"
-    ]
-   ],
-   "unwanted": [
-    [
-     "Use.Run",
-     "calls",
-     "Other.Active"
-    ],
-    [
-     "Use.Run",
-     "calls",
-     "Other.Name"
-    ],
-    [
-     "Use.Run",
-     "reads",
-     "Use.c"
-    ]
-   ]
+   "ok": true,
+   "missing": [],
+   "unwanted": []
   },
   {
    "id": "csharp/query-explicit-range-type",
-   "ok": false,
-   "missing": [
-    [
-     "Use.Run",
-     "calls",
-     "Customer.Active"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
    "id": "csharp/query-let-and-second-from",
-   "ok": false,
-   "missing": [
-    [
-     "Use.Run",
-     "calls",
-     "Customer.Id"
-    ],
-    [
-     "Use.Run",
-     "calls",
-     "Dept.Title"
-    ],
-    [
-     "Use.Run2",
-     "calls",
-     "Order.Total"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
    "id": "csharp/query-join-and-continuation",
-   "ok": false,
-   "missing": [
-    [
-     "Use.Run",
-     "calls",
-     "Customer.Id"
-    ],
-    [
-     "Use.Run",
-     "calls",
-     "Order.Total"
-    ],
-    [
-     "Use.Run2",
-     "calls",
-     "Customer.Name"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
    "id": "csharp/query-pattern-methods",
-   "ok": false,
-   "missing": [
-    [
-     "Use.Run",
-     "calls",
-     "Source.Where"
-    ],
-    [
-     "Use.Run",
-     "calls",
-     "Source.Select"
-    ],
-    [
-     "Use.Run",
-     "calls",
-     "Item.Ok"
-    ],
-    [
-     "Use.Run",
-     "calls",
-     "Item.Val"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -8194,24 +8108,8 @@
   },
   {
    "id": "csharp/query-trivial-select-omitted",
-   "ok": false,
-   "missing": [
-    [
-     "User.Run",
-     "calls",
-     "Src.Where"
-    ],
-    [
-     "User.Run",
-     "calls",
-     "Src.OrderBy"
-    ],
-    [
-     "User.Run",
-     "calls",
-     "Src.ThenBy"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {

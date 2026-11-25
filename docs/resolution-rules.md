@@ -799,7 +799,7 @@ Found by: the specification 20, a compiler 8, comparison 0, the grammar 4, the l
 | a member of the receiver's type comes before an extension method of the name | `member-before-extension` | – | yes |
 | `export inner.f` makes f a member of the object that writes it | `export-clause` | – | yes |
 
-### csharp (288 of 397)
+### csharp (294 of 397)
 
 C# Language Specification, 'Namespace and type names', 'Member lookup', 'Extension method invocations'.
 
@@ -1139,16 +1139,16 @@ Found by: the specification 39, a compiler 8, comparison 6, the grammar 1, the l
 | the parameter of an anonymous function hides a field of its name in the body only | `lambda-parameter-hides-member` | – | yes |
 | a name in the body of an anonymous function that is no parameter of it is looked up outward: an outer local hides a field | `lambda-uses-outer-local` | – | yes |
 | two or more parameters named `_` are discards that name nothing; a single `_` is a parameter | `lambda-discard-parameters` | 9– | yes |
-| the range variable of a `from` clause has the element type of the source and hides a field of its name in the whole query | `query-range-variable` | – | **no**: no Use.Run -calls-> Customer.Active; Use.Run -calls-> Customer.Name has Use.Run -calls-> Other.Active; Use.Run -calls-> Other.Name; Use.Run -reads-> Use.c |
-| `from T x in e` gives the range variable the type T | `query-explicit-range-type` | – | **no**: no Use.Run -calls-> Customer.Active |
-| a `let` variable has the type of its expression, a second `from` ranges over the elements of its expression, and earlier range variables stay in scope | `query-let-and-second-from` | – | **no**: no Use.Run -calls-> Customer.Id; Use.Run -calls-> Dept.Title; Use.Run2 -calls-> Order.Total |
-| `join` ranges over its source and compares keys of the two range variables; a continuation `into g` ranges over the groups | `query-join-and-continuation` | – | **no**: no Use.Run -calls-> Customer.Id; Use.Run -calls-> Order.Total; Use.Run2 -calls-> Customer.Name |
-| a query clause is a call of the source's method of that name (`where` is `Where`, `select` is `Select`), found as any method, an instance one before an extension; its lambdas take their parameter types from it | `query-pattern-methods` | – | **no**: no Use.Run -calls-> Source.Where; Use.Run -calls-> Source.Select; Use.Run -calls-> Item.Ok; Use.Run -calls-> Item.Val |
+| the range variable of a `from` clause has the element type of the source and hides a field of its name in the whole query | `query-range-variable` | – | yes |
+| `from T x in e` gives the range variable the type T | `query-explicit-range-type` | – | yes |
+| a `let` variable has the type of its expression, a second `from` ranges over the elements of its expression, and earlier range variables stay in scope | `query-let-and-second-from` | – | yes |
+| `join` ranges over its source and compares keys of the two range variables; a continuation `into g` ranges over the groups | `query-join-and-continuation` | – | yes |
+| a query clause is a call of the source's method of that name (`where` is `Where`, `select` is `Select`), found as any method, an instance one before an extension; its lambdas take their parameter types from it | `query-pattern-methods` | – | yes |
 | a private method of the derived type is not a candidate from outside it; the accessible base method is called | `inaccessible-method-not-candidate` | – | **no**: no User.Run -calls-> Base.Put has User.Run -calls-> Box.Put |
 | t.Draw() with T : IShape is IShape.Draw | `type-parameter-receiver-constraint` | – | yes |
 | a + b on T : IAdd<T> is a use of IAdd.operator+, not of the implementing class's operator | `static-abstract-operator-via-constraint` | 11– | yes |
 | `if (s.TryGet(out var n)) n.Show();` is Num.Show | `out-var-has-parameter-type` | – | yes |
-| `from x in s where .. orderby a, b select x` calls Where, OrderBy and ThenBy, and no Select | `query-trivial-select-omitted` | – | **no**: no User.Run -calls-> Src.Where; User.Run -calls-> Src.OrderBy; User.Run -calls-> Src.ThenBy |
+| `from x in s where .. orderby a, b select x` calls Where, OrderBy and ThenBy, and no Select | `query-trivial-select-omitted` | – | yes |
 | x + y inside checked(...) is the `operator checked +`, inside unchecked(...) the plain `operator +` | `checked-operator-by-context` | 11– | yes |
 | `T.Create()` with `where T : IMake<T>` binds to IMake.Create, never to the Create of an implementing class | `static-abstract-call-on-type-parameter` | 11– | yes |
 | in `x => x.Hit()` the `x` is the lambda's parameter (type B), not the enclosing method's local `x` (type A) | `lambda-parameter-hides-outer-local` | 8– | yes |
@@ -1520,4 +1520,4 @@ Found by: the specification 31, a compiler 2, comparison 0, the grammar 1, the l
 | `A::hello insteadof B` picks A's method of two used traits | `trait-insteadof` | – | yes |
 | a method a trait brings comes before an inherited one, and the class's own before both | `trait-before-inherited` | – | yes |
 
-1143 of 1270 rules hold
+1149 of 1270 rules hold

@@ -1225,18 +1225,20 @@ the second round (indexers; the calls the language makes by name:
 arguments) to 264, and the third (a lambda's parameters typed by its
 delegate, an overload taken by a lambda's parameter count, `out var`;
 user-defined operators by both operands, `checked`, `operator true` /
-`false` and conversions) to 288. On todoapi, restsharp, commandline and aspnetcore-realworld Roslyn
-finds 12,335 of 12,555 judged edges right (10,731 of 10,944 before) and
-89.6% of the uses with an edge (80.0%). The third round's nine new "wrong"
+`false` and conversions; query expressions) to 294. On todoapi, restsharp, commandline and aspnetcore-realworld Roslyn
+finds 12,355 of 12,575 judged edges right (10,731 of 10,944 before, 98.3%)
+and 89.9% of the uses with an edge (80.0%); query expressions alone found
+55 uses it had missed, with no wrong edge. The third round's nine new "wrong"
 rows are the check's own: eight `o.RedirectOptions = new RedirectOptions
 { … }` lines where Roslyn answers for the class only (the property written
 is the one the graph names), and one property whose attributes put its
 name five lines below its first line, past the check's slack; the one
 real miss is `messages.Concat(msgs)`, the library's `Enumerable.Concat`
 where the graph names the project's extension. (Roslyn's check reads names,
-so operators are judged by the cases alone.) Open: query expressions, the
-predefined types extensions are written for (`await 3`), and the finer
-points of overload resolution.
+so operators are judged by the cases alone.) Open: the predefined types
+extensions are written for (`await 3`), aliases and `global::`, attribute
+targets, accessibility, nullable value types, and the finer points of
+overload resolution.
 
 **Phase 3: inference, by the numbers.** (Measured: see 'Phase 3: inference, by the numbers' above; nothing built.) Per language, what one step of
 inference would add (a closure parameter typed by the collection it is

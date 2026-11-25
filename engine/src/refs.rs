@@ -4173,6 +4173,26 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                 push(&mut refs, n, RefKind::Type, p, "type_query", None);
             }
         }
+        // C# `from c in cs where … select …`: the range variables are names of
+        // the query (up to an `into`, which starts a scope of its own), and
+        // each clause a call of the source's query method (the standard's
+        // 12.20.3; context `language_call`, kept only where it resolves)
+        if facts.lang == Some(crate::lang::Lang::CSharp) && n.kind() == "query_expression" {
+            let (scopes, calls) = csharp_query(n, src);
+            for (lo, hi, params) in &scopes {
+                for (name, ..) in params {
+                    state.block(*lo, *hi, name.clone());
+                }
+            }
+            closures.extend(scopes);
+            for path in calls {
+                let at = refs.len();
+                push(&mut refs, n, RefKind::Call, path, "language_call", None);
+                if let Some(r) = refs.get_mut(at) {
+                    r.args = Some(1);
+                }
+            }
+        }
         if !by_node.contains_key(&n.id()) {
             // the parameters of a closure, a block or a handler that is no
             // definition of its own: names of its body only
@@ -6798,6 +6818,128 @@ fn csharp_indexer<'t>(
         _ => vec!["indexer"],
     };
     Some((path, list, uses))
+}
+
+/// C#: a query expression's scopes (its range variables, with the paths of
+/// what they range over, up to an `into` and after it) and the query methods
+/// its clauses call, each as the source's path and the method's name.
+fn csharp_query<'t>(n: Node<'t>, src: &[u8]) -> (Vec<ClosureScope>, Vec<Vec<String>>) {
+    let mut scopes: Vec<ClosureScope> = Vec::new();
+    let mut calls: Vec<Vec<String>> = Vec::new();
+    let mut params: Vec<Param> = Vec::new();
+    let mut start = n.start_byte();
+    let mut source: Option<Vec<String>> = None;
+    let mut ordered = false;
+    let mut clauses = 0usize;
+    let named =
+        |x: Node<'t>| kids(x).into_iter().filter(|c| !is_comment(c)).collect::<Vec<Node<'t>>>();
+    let ranged = |x: Node| -> Option<Vec<String>> {
+        let mut p = path_of(x, src).filter(|p| p[0] != UNKNOWN)?;
+        p.push(ITERATED.into());
+        Some(p)
+    };
+    let call = |source: &Option<Vec<String>>, name: &str, calls: &mut Vec<Vec<String>>| {
+        if let Some(mut p) = source.clone() {
+            p.push(name.into());
+            if !calls.contains(&p) {
+                calls.push(p);
+            }
+        }
+    };
+    let mut cursor = n.walk();
+    let children: Vec<Node> = n.children(&mut cursor).collect();
+    let mut i = 0;
+    while i < children.len() {
+        let c = children[i];
+        match c.kind() {
+            "from_clause" | "join_clause" => {
+                let ks = named(c);
+                let name = c
+                    .child_by_field_name("name")
+                    .or_else(|| ks.iter().copied().find(|x| x.kind() == "identifier"));
+                let ty = c.child_by_field_name("type").and_then(|t| first_type(t, src));
+                // the source: the first expression after `in`
+                let mut cur = c.walk();
+                let all: Vec<Node> = c.children(&mut cur).collect();
+                let after_in = all.iter().position(|x| x.kind() == "in").and_then(|k| {
+                    all[k + 1..].iter().copied().find(|x| x.is_named() && !is_comment(x))
+                });
+                if let Some(name) = name.map(|x| text(x, src)) {
+                    let path = match &ty {
+                        Some(t) => Some(t.clone()),
+                        None => after_in.and_then(ranged),
+                    };
+                    params.push((name, path.clone().unwrap_or_default(), ty.is_some()));
+                }
+                if c.kind() == "join_clause" {
+                    call(&source, "Join", &mut calls);
+                } else if source.is_none() {
+                    source = after_in.and_then(|x| path_of(x, src)).filter(|p| p[0] != UNKNOWN);
+                } else {
+                    call(&source, "SelectMany", &mut calls);
+                }
+                clauses += usize::from(source.is_some() && c.kind() != "from_clause");
+            }
+            "let_clause" => {
+                let ks = named(c);
+                if let (Some(name), Some(v)) = (ks.first(), ks.get(1)) {
+                    let path = path_of(*v, src).filter(|p| p[0] != UNKNOWN);
+                    params.push((text(*name, src), path.unwrap_or_default(), false));
+                }
+                call(&source, "Select", &mut calls);
+                clauses += 1;
+            }
+            "where_clause" => {
+                call(&source, "Where", &mut calls);
+                clauses += 1;
+            }
+            "order_by_clause" => {
+                for (k, _) in named(c).iter().enumerate() {
+                    let first = k == 0 && !ordered;
+                    call(&source, if first { "OrderBy" } else { "ThenBy" }, &mut calls);
+                }
+                ordered = true;
+                clauses += 1;
+            }
+            "group_clause" => {
+                call(&source, "GroupBy", &mut calls);
+                clauses += 1;
+            }
+            "select_clause" => {
+                // `select x` of the one range variable after other clauses is
+                // no call (the standard's 12.20.3.4)
+                let ks = named(c);
+                let degenerate = params.len() == 1
+                    && clauses > 0
+                    && ks.len() == 1
+                    && ks[0].kind() == "identifier"
+                    && text(ks[0], src) == params[0].0;
+                if !degenerate {
+                    call(&source, "Select", &mut calls);
+                }
+            }
+            "into" => {
+                // a continuation: the names so far end here, `into g` begins
+                if !params.is_empty() {
+                    scopes.push((start, c.start_byte(), std::mem::take(&mut params)));
+                }
+                start = c.start_byte();
+                if let Some(g) = children.get(i + 1).filter(|g| g.kind() == "identifier") {
+                    // (a group: what was grouped, as a collection of it)
+                    let path = source.clone().unwrap_or_default();
+                    params.push((text(*g, src), path, false));
+                    i += 1;
+                }
+                ordered = false;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    if !params.is_empty() {
+        scopes.push((start, n.end_byte(), params));
+    }
+    (scopes, calls)
 }
 
 /// C#: the user-defined operators an expression or statement uses: for each,
