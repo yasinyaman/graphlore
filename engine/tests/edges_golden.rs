@@ -3779,3 +3779,29 @@ fn go_receiver_type_parameters_and_generic_bounds() {
     has(&got, &[(".Go()", "calls", ".Run()"), ("Use()", "calls", ".Get()")]);
     assert!(!got.contains(&(".Get()".into(), "references".into(), "Config".into())), "{got:#?}");
 }
+
+#[test]
+fn csharp_attributes_operators_and_block_scopes() {
+    let got = edges("cs-attr-op", &[(
+        "A.cs",
+        "namespace App\n{\n    public class CacheAttribute : System.Attribute { }\n    public class Cache { }\n    public struct V\n    {\n        public static V operator +(V a, V b) { return a; }\n        public static V operator -(V a) { return a; }\n        public static bool operator true(V a) { return true; }\n        public static bool operator false(V a) { return false; }\n    }\n    public class A { public int Run() { return 1; } }\n    public class B { public int Run() { return 2; } }\n    public class C\n    {\n        private B y = new B();\n\n        [Cache]\n        public V Add(V a, V b)\n        {\n            a += b;\n            var c = a + b;\n            return -a;\n        }\n\n        public int M()\n        {\n            {\n                A y = new A();\n                y.Run();\n            }\n            return y.Run();\n        }\n    }\n}\n",
+    )]);
+    has(
+        &got,
+        &[
+            (".Add()", "references", "CacheAttribute"),
+            (".Add()", "calls", ".operator+()"),
+            (".Add()", "calls", ".operator-()"),
+        ],
+    );
+    assert!(!got.contains(&(".Add()".into(), "references".into(), "Cache".into())), "{got:#?}");
+    let spans = graphlore_engine::file_spans(
+        b"namespace App { public struct V { public static bool operator true(V a) => true; public static V operator checked +(V a, V b) => a; } }\n",
+        "A.cs",
+    );
+    let names: Vec<&str> = spans.iter().map(|s| s.3.as_str()).collect();
+    assert!(
+        names.contains(&"App.V.operator true") && names.contains(&"App.V.operator checked +"),
+        "{names:?}"
+    );
+}

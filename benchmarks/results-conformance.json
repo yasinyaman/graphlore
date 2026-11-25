@@ -1,5 +1,5 @@
 {
- "passed": 1062,
+ "passed": 1088,
  "total": 1270,
  "cases": [
   {
@@ -5913,31 +5913,9 @@
   },
   {
    "id": "csharp/local-scope-ends-with-its-block",
-   "ok": false,
-   "missing": [
-    [
-     "C.M",
-     "calls",
-     "B.Run"
-    ],
-    [
-     "C.N",
-     "calls",
-     "B.Run"
-    ]
-   ],
-   "unwanted": [
-    [
-     "C.M",
-     "calls",
-     "A.Run"
-    ],
-    [
-     "C.N",
-     "calls",
-     "A.Run"
-    ]
-   ]
+   "ok": true,
+   "missing": [],
+   "unwanted": []
   },
   {
    "id": "csharp/local-hides-field-in-its-block",
@@ -6025,21 +6003,9 @@
   },
   {
    "id": "csharp/attribute-suffix",
-   "ok": false,
-   "missing": [
-    [
-     "C.M",
-     "references",
-     "CacheAttribute"
-    ]
-   ],
-   "unwanted": [
-    [
-     "C.M",
-     "references",
-     "A.cs:App.Cache"
-    ]
-   ]
+   "ok": true,
+   "missing": [],
+   "unwanted": []
   },
   {
    "id": "csharp/local-function-local-hides-outer-local",
@@ -6875,29 +6841,8 @@
   },
   {
    "id": "csharp/user-defined-operator",
-   "ok": false,
-   "missing": [
-    [
-     "C.Add",
-     "calls",
-     "Vec.operator+"
-    ],
-    [
-     "C.Sub",
-     "calls",
-     "Vec.operator-"
-    ],
-    [
-     "C.Inc",
-     "calls",
-     "Vec.operator++"
-    ],
-    [
-     "C.Inherited",
-     "calls",
-     "Vec.operator+"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -6993,21 +6938,6 @@
    "id": "csharp/operator-forms-use-the-operator",
    "ok": false,
    "missing": [
-    [
-     "C.Add",
-     "calls",
-     "V.operator+"
-    ],
-    [
-     "C.Inc",
-     "calls",
-     "V.operator++"
-    ],
-    [
-     "C.Neg",
-     "calls",
-     "V.operator-"
-    ],
     [
      "C.Both",
      "calls",
@@ -7684,14 +7614,8 @@
   },
   {
    "id": "csharp/increment-calls-operator",
-   "ok": false,
-   "missing": [
-    [
-     "C.M",
-     "calls",
-     "Counter.operator++"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -7792,14 +7716,8 @@
   },
   {
    "id": "csharp/compound-assignment-uses-operator",
-   "ok": false,
-   "missing": [
-    [
-     "C.M",
-     "calls",
-     "Vec.operator+"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -7916,14 +7834,8 @@
   },
   {
    "id": "csharp/lifted-user-operator",
-   "ok": false,
-   "missing": [
-    [
-     "U.Go",
-     "calls",
-     "Money.operator+"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -7940,14 +7852,8 @@
   },
   {
    "id": "csharp/operator-of-base-class",
-   "ok": false,
-   "missing": [
-    [
-     "Use.Go",
-     "calls",
-     "B.operator+"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -7988,26 +7894,14 @@
   },
   {
    "id": "csharp/cs-operator-not-equals",
-   "ok": false,
-   "missing": [
-    [
-     "Use.Run",
-     "calls",
-     "V.operator !="
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
    "id": "csharp/cs-operator-shift",
-   "ok": false,
-   "missing": [
-    [
-     "Use.Run",
-     "calls",
-     "B.operator <<"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -8015,28 +7909,23 @@
    "ok": false,
    "missing": [
     [
-     "Use.Plain",
-     "calls",
-     "M.operator +"
-    ],
-    [
      "Use.Chk",
      "calls",
      "M.operator checked +"
     ]
    ],
-   "unwanted": []
+   "unwanted": [
+    [
+     "Use.Chk",
+     "calls",
+     "M.operator+"
+    ]
+   ]
   },
   {
    "id": "csharp/cs-static-abstract-operator-typeparam",
-   "ok": false,
-   "missing": [
-    [
-     "Use.Sum",
-     "calls",
-     "IAdd.operator +"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -8094,43 +7983,20 @@
   },
   {
    "id": "csharp/operator-use-is-a-call",
-   "ok": false,
-   "missing": [
-    [
-     "Use.Run",
-     "calls",
-     "Money.operator+"
-    ],
-    [
-     "Use.Run2",
-     "calls",
-     "Other.operator+"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
    "id": "csharp/operator-compound-assignment",
-   "ok": false,
-   "missing": [
-    [
-     "Use.Run",
-     "calls",
-     "Money.operator+"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
    "id": "csharp/operator-unary",
-   "ok": false,
-   "missing": [
-    [
-     "Use.Run",
-     "calls",
-     "Temp.operator-"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -8147,14 +8013,8 @@
   },
   {
    "id": "csharp/operator-of-a-base-class",
-   "ok": false,
-   "missing": [
-    [
-     "Use.Run",
-     "calls",
-     "Base.operator+"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -8165,30 +8025,14 @@
      "Use.Run",
      "calls",
      "Derived.operator+"
-    ],
-    [
-     "Use.Run2",
-     "calls",
-     "Base.operator+"
     ]
    ],
    "unwanted": []
   },
   {
    "id": "csharp/operator-equality",
-   "ok": false,
-   "missing": [
-    [
-     "Use.Run",
-     "calls",
-     "Money.operator=="
-    ],
-    [
-     "Use.Run2",
-     "calls",
-     "Money.operator!="
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -8673,14 +8517,8 @@
   },
   {
    "id": "csharp/static-abstract-operator-via-constraint",
-   "ok": false,
-   "missing": [
-    [
-     "User.Sum",
-     "calls",
-     "IAdd.operator+"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -8724,15 +8562,16 @@
     [
      "Host.Strict",
      "calls",
-     "Money.operatorchecked"
-    ],
+     "Money.operator checked +"
+    ]
+   ],
+   "unwanted": [
     [
-     "Host.Loose",
+     "Host.Strict",
      "calls",
      "Money.operator+"
     ]
-   ],
-   "unwanted": []
+   ]
   },
   {
    "id": "csharp/static-abstract-call-on-type-parameter",
@@ -8826,14 +8665,8 @@
   },
   {
    "id": "csharp/increment-operator-call",
-   "ok": false,
-   "missing": [
-    [
-     "C.Run",
-     "calls",
-     "Counter.operator++"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -8973,26 +8806,14 @@
   },
   {
    "id": "csharp/block-local-scope",
-   "ok": false,
-   "missing": [
-    [
-     "C.Out",
-     "calls",
-     "Other.A"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
    "id": "csharp/for-variable-scope",
-   "ok": false,
-   "missing": [
-    [
-     "C.Run",
-     "calls",
-     "Other.B"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -9054,21 +8875,9 @@
   },
   {
    "id": "csharp/pattern-variable-leaks-from-if",
-   "ok": false,
-   "missing": [
-    [
-     "Checker.Stays",
-     "calls",
-     "Other.Hello"
-    ]
-   ],
-   "unwanted": [
-    [
-     "Checker.Stays",
-     "calls",
-     "Foo.Hello"
-    ]
-   ]
+   "ok": true,
+   "missing": [],
+   "unwanted": []
   },
   {
    "id": "csharp/foreach-project-ienumerable",
@@ -9142,21 +8951,9 @@
   },
   {
    "id": "csharp/foreach-variable-scope",
-   "ok": false,
-   "missing": [
-    [
-     "A.Run",
-     "calls",
-     "Other.Find"
-    ]
-   ],
-   "unwanted": [
-    [
-     "A.Run",
-     "calls",
-     "Repo.Find"
-    ]
-   ]
+   "ok": true,
+   "missing": [],
+   "unwanted": []
   },
   {
    "id": "csharp/foreach-pattern-before-interface",
@@ -9214,21 +9011,9 @@
   },
   {
    "id": "csharp/attribute-suffix-omitted",
-   "ok": false,
-   "missing": [
-    [
-     "Target",
-     "references",
-     "MarkAttribute"
-    ]
-   ],
-   "unwanted": [
-    [
-     "Target",
-     "references",
-     "Mark"
-    ]
-   ]
+   "ok": true,
+   "missing": [],
+   "unwanted": []
   },
   {
    "id": "csharp/attribute-named-argument-member",
@@ -9249,48 +9034,20 @@
   },
   {
    "id": "csharp/attribute-verbatim-name",
-   "ok": false,
-   "missing": [
-    [
-     "OnPlain",
-     "references",
-     "Example"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
    "id": "csharp/attribute-name-per-file-usings",
-   "ok": false,
-   "missing": [
-    [
-     "OnLeft",
-     "references",
-     "Left.MarkAttribute"
-    ],
-    [
-     "OnRight",
-     "references",
-     "Right.MarkAttribute"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
    "id": "csharp/attribute-partial-parts-own-usings",
-   "ok": false,
-   "missing": [
-    [
-     "P",
-     "references",
-     "Left.MarkAttribute"
-    ],
-    [
-     "P",
-     "references",
-     "Right.MarkAttribute"
-    ]
-   ],
+   "ok": true,
+   "missing": [],
    "unwanted": []
   },
   {
@@ -9310,16 +9067,6 @@
    "ok": false,
    "missing": [
     [
-     "Holder",
-     "references",
-     "MarkAttribute"
-    ],
-    [
-     "Holder.M",
-     "references",
-     "MarkAttribute"
-    ],
-    [
      "Holder.P",
      "references",
      "MarkAttribute"
@@ -9330,18 +9077,7 @@
      "MarkAttribute"
     ]
    ],
-   "unwanted": [
-    [
-     "Holder",
-     "references",
-     "Mark"
-    ],
-    [
-     "Holder.M",
-     "references",
-     "Mark"
-    ]
-   ]
+   "unwanted": []
   },
   {
    "id": "csharp/attribute-argument-scope-member",
@@ -9363,21 +9099,9 @@
   },
   {
    "id": "csharp/attribute-lookup-skips-non-attribute",
-   "ok": false,
-   "missing": [
-    [
-     "Target",
-     "references",
-     "MarkAttribute"
-    ]
-   ],
-   "unwanted": [
-    [
-     "Target",
-     "references",
-     "Inner.Mark"
-    ]
-   ]
+   "ok": true,
+   "missing": [],
+   "unwanted": []
   },
   {
    "id": "csharp/csharp-attribute-argument-uses",
@@ -9389,16 +9113,6 @@
    "id": "csharp/attribute-nested-class-shadows-outer",
    "ok": false,
    "missing": [
-    [
-     "Host",
-     "references",
-     "Host.MarkAttribute"
-    ],
-    [
-     "Host.M",
-     "references",
-     "Host.MarkAttribute"
-    ],
     [
      "Other",
      "references",
@@ -9418,11 +9132,6 @@
    "ok": false,
    "missing": [
     [
-     "A",
-     "references",
-     "One.MarkAttribute"
-    ],
-    [
      "B",
      "references",
      "Two.MarkAttribute"
@@ -9438,14 +9147,15 @@
      "Target",
      "references",
      "MarkAttribute<T>"
-    ],
+    ]
+   ],
+   "unwanted": [
     [
-     "Plain",
+     "Target",
      "references",
      "MarkAttribute"
     ]
-   ],
-   "unwanted": []
+   ]
   }
  ]
 }

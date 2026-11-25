@@ -384,9 +384,20 @@ fn operator_name(node: Node, src: &[u8]) -> Option<String> {
     if node.kind() == "conversion_operator_declaration" {
         return node.child_by_field_name("type").map(|t| format!("operator {}", text(t, src)));
     }
+    // (`operator +` is `operator+`; a word after `operator` keeps its
+    // space, and what follows it: `operator true`, `operator checked +`)
     let all = all_kids(node);
     let at = all.iter().position(|c| c.kind() == "operator")?;
-    all.get(at + 1).map(|c| format!("operator{}", text(*c, src)))
+    let first = text(*all.get(at + 1)?, src);
+    if !first.starts_with(|c: char| c.is_ascii_alphabetic()) {
+        return Some(format!("operator{first}"));
+    }
+    let words: Vec<String> = all[at + 1..]
+        .iter()
+        .take_while(|c| c.kind() != "parameter_list")
+        .map(|c| text(*c, src))
+        .collect();
+    Some(format!("operator {}", words.join(" ")))
 }
 
 /// The other names of a definition that declares several (Swift `case a, b,

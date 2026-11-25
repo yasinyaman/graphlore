@@ -4358,6 +4358,19 @@ fn read_at(m: &dyn LanguageModule, root: Node, src: &[u8], facts: &mut FileFacts
                 }
             }
         }
+        // (C# `a + b`, `-a`, `a++`, `a += b`: the user-defined operator of the
+        // operand's type, the standard's 12.4.3 to 12.4.5; kept only where it
+        // resolves to one)
+        if facts.lang == Some(crate::lang::Lang::CSharp) {
+            if let Some((operand, op)) = csharp_operator(n, src) {
+                if let Some(mut path) =
+                    path_of(operand, src).filter(|p| !p.iter().any(|s| s == UNKNOWN))
+                {
+                    path.push(format!("operator{op}"));
+                    push(&mut refs, n, RefKind::Call, path, "operator", None);
+                }
+            }
+        }
         if facts.lang == Some(crate::lang::Lang::Kotlin) {
             let named = kids(n);
             let method = match n.kind() {
@@ -6315,6 +6328,37 @@ fn go_receiver_type_params(n: Node, src: &[u8]) -> Vec<String> {
         stack.extend(kids(x));
     }
     Vec::new()
+}
+
+/// C#: the operand whose type's operator an operator expression calls, and
+/// the operator (`a + b`: a, `+`; `a += b`: a, `+`; `-a`, `a++`: a, `-`, `++`).
+fn csharp_operator<'t>(n: Node<'t>, src: &[u8]) -> Option<(Node<'t>, String)> {
+    const BINARY: &[&str] =
+        &["+", "-", "*", "/", "%", "==", "!=", "<", ">", "<=", ">=", "<<", ">>", "&", "|", "^"];
+    match n.kind() {
+        "binary_expression" => {
+            let op = text(n.child_by_field_name("operator")?, src);
+            if !BINARY.contains(&op.as_str()) {
+                return None;
+            }
+            Some((n.child_by_field_name("left")?, op))
+        }
+        "assignment_expression" => {
+            let op = text(n.child_by_field_name("operator")?, src);
+            let bare = op.strip_suffix('=').filter(|b| !b.is_empty() && BINARY.contains(b))?;
+            Some((n.child_by_field_name("left")?, bare.to_string()))
+        }
+        "prefix_unary_expression" | "postfix_unary_expression" => {
+            let mut cursor = n.walk();
+            let op = n.children(&mut cursor).find(|c| !c.is_named())?;
+            let op = text(op, src);
+            matches!(op.as_str(), "-" | "+" | "!" | "~" | "++" | "--")
+                .then(|| kids(n).into_iter().find(|c| c.is_named() && !is_comment(c)))
+                .flatten()
+                .map(|x| (x, op))
+        }
+        _ => None,
+    }
 }
 
 /// Go's predeclared types, which an index never is.

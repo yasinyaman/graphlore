@@ -4836,19 +4836,19 @@ case('csharp', 'cs-operator-true-condition', 'if (f) with a struct declaring ope
      source='csharpstandard §12.20 / §12.24 (operator true); Binder_Operators BindConditionalOperator')
 case('csharp', 'cs-operator-not-equals', 'a != b calls operator != of the operand type',
      CS, {'A.cs': 'namespace App {\n  public class V { public static bool operator ==(V a, V b) => true; public static bool operator !=(V a, V b) => false;\n    public override bool Equals(object o) => true; public override int GetHashCode() => 0; }\n  public class Use { public bool Run(V a, V b) { return a != b; } }\n}\n'},
-     [('Use.Run', 'calls', 'V.operator !=')], [('Use.Run', 'calls', 'V.operator ==')],
+     [('Use.Run', 'calls', 'V.operator!=')], [('Use.Run', 'calls', 'V.operator==')],
      source='csharpstandard §12.12.8; Binder_Operators BindBinaryOperator')
 case('csharp', 'cs-operator-shift', 'b << 2 calls operator << not >>',
      CS, {'A.cs': 'namespace App {\n  public struct B { public static B operator <<(B a, int n) => a; public static B operator >>(B a, int n) => a; }\n  public class Use { public B Run(B b) { return b << 2; } }\n}\n'},
-     [('Use.Run', 'calls', 'B.operator <<')], [('Use.Run', 'calls', 'B.operator >>')],
+     [('Use.Run', 'calls', 'B.operator<<')], [('Use.Run', 'calls', 'B.operator>>')],
      source='csharpstandard §12.11 shift operators; Binder_Operators')
 case('csharp', 'cs-checked-operator', 'checked(a + b) calls operator checked +, unchecked(a + b) the plain operator +',
      CS, {'A.cs': 'namespace App {\n  public struct M { public static M operator +(M a, M b) => a; public static M operator checked +(M a, M b) => a; }\n  public class Use { public M Plain(M a, M b) { return unchecked(a + b); } public M Chk(M a, M b) { return checked(a + b); } }\n}\n'},
-     [('Use.Plain', 'calls', 'M.operator +'), ('Use.Chk', 'calls', 'M.operator checked +')], [('Use.Chk', 'calls', 'M.operator +'), ('Use.Plain', 'calls', 'M.operator checked +')],
+     [('Use.Plain', 'calls', 'M.operator+'), ('Use.Chk', 'calls', 'M.operator checked +')], [('Use.Chk', 'calls', 'M.operator+'), ('Use.Plain', 'calls', 'M.operator checked +')],
      source='csharpstandard §12.8.20 / §12.12; Binder_Operators (checked operators)', since='11')
 case('csharp', 'cs-static-abstract-operator-typeparam', 'a + b on T : IAdd<T> calls IAdd.operator +, not the implementation',
      CS, {'A.cs': 'namespace App {\n  public interface IAdd<T> where T : IAdd<T> { static abstract T operator +(T a, T b); }\n  public struct N : IAdd<N> { public static N operator +(N a, N b) => a; }\n  public class Use { public T Sum<T>(T a, T b) where T : IAdd<T> { return a + b; } }\n}\n'},
-     [('Use.Sum', 'calls', 'IAdd.operator +')], [('Use.Sum', 'calls', 'N.operator +')],
+     [('Use.Sum', 'calls', 'IAdd.operator+')], [('Use.Sum', 'calls', 'N.operator+')],
      source='csharpstandard §12.12.3; Binder_Operators (static abstract constraint lookup)', since='11')
 case('csharp', 'cs-null-conditional-nullable-struct', 's?.Value() / s?.P with S? s are members of S',
      CS, {'A.cs': 'namespace App {\n  public struct S { public int Value() => 1; public int P => 2; }\n  public class Decoy { public int Value() => 3; public int P => 4; }\n  public class Use { public int? Run(S? s) { return s?.Value(); } public int? Run2(S? s) { return s?.P; } }\n}\n'},
@@ -5044,7 +5044,7 @@ case('csharp', 'query-trivial-select-omitted', '`from x in s where .. orderby a,
      source='csharpstandard §12.22.2.4; Roslyn Binder_Query.cs (select omitted when identity)')
 case('csharp', 'checked-operator-by-context', 'x + y inside checked(...) is the `operator checked +`, inside unchecked(...) the plain `operator +`',
      CS, {'A.cs': 'namespace App {\n  public struct Money {\n    public static Money operator +(Money a, Money b) => a;\n    public static Money operator checked +(Money a, Money b) => a;\n  }\n  public class Host {\n    public Money Strict(Money x, Money y) { return checked(x + y); }\n    public Money Loose(Money x, Money y) { return unchecked(x + y); }\n  }\n}\n'},
-     [('Host.Strict', 'calls', 'Money.operatorchecked'), ('Host.Loose', 'calls', 'Money.operator+')], [('Host.Strict', 'calls', 'Money.operator+'), ('Host.Loose', 'calls', 'Money.operatorchecked')],
+     [('Host.Strict', 'calls', 'Money.operator checked +'), ('Host.Loose', 'calls', 'Money.operator+')], [('Host.Strict', 'calls', 'Money.operator+'), ('Host.Loose', 'calls', 'Money.operator checked +')],
      source='Roslyn Binder_Operators.cs / OverloadResolution.cs (checked operator preference); csharpstandard §12.4.3', since='11')
 case('csharp', 'static-abstract-call-on-type-parameter', '`T.Create()` with `where T : IMake<T>` binds to IMake.Create, never to the Create of an implementing class',
      CS, {'A.cs': 'namespace App {\n  public interface IMake<T> { static abstract T Create(); }\n  public class Widget : IMake<Widget> { public static Widget Create() => new Widget(); }\n  public class Gadget { public static Gadget Create() => new Gadget(); }\n  public class Host {\n    public T Make<T>() where T : IMake<T> { return T.Create(); }\n  }\n}\n'},

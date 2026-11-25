@@ -2687,9 +2687,9 @@ impl<'a> Project<'a> {
 
     /// The type of a local name or parameter seen from `d`.
     fn local_type(&self, f: usize, d: Option<usize>, name: &str) -> Option<(DefRef, Confidence)> {
-        // Go: a local of a block the use is not written in (`if x := f();
-        // …` ended with the `if`) types nothing there
-        if self.family[f] == Some(Family::Go)
+        // Go, C#: a local of a block the use is not written in (`if x :=
+        // f(); …` ended with the `if`, `{ var y = … }`) types nothing there
+        if matches!(self.family[f], Some(Family::Go | Family::CSharp))
             && (*self.site.borrow()).is_some_and(|(sf, _)| sf == f)
             && !self.is_local_name(f, d, name)
         {
@@ -4643,6 +4643,33 @@ impl<'a> Project<'a> {
         self.go_aliases(c)
             .into_iter()
             .find_map(|a| self.members(a, name).first().map(|&m| Target::Def(m)))
+    }
+
+    /// C# `[Cache]`: the attribute class `CacheAttribute` before a class
+    /// `Cache`; `[@Cache]` is `Cache` alone (the standard's 23.3).
+    fn csharp_attribute(
+        &self,
+        f: usize,
+        d: Option<usize>,
+        path: &[String],
+        strict: bool,
+    ) -> Option<(Target, Confidence)> {
+        let last = path.last()?;
+        if let Some(bare) = last.strip_prefix('@') {
+            let mut q = path.to_vec();
+            *q.last_mut()? = bare.to_string();
+            return self.resolve_path(f, d, &q, strict);
+        }
+        if !last.ends_with("Attribute") {
+            let mut q = path.to_vec();
+            q.last_mut()?.push_str("Attribute");
+            if let Some(found @ (Target::Def(t), _)) = self.resolve_path(f, d, &q, strict) {
+                if self.def(t).kind.is_class_like() {
+                    return Some(found);
+                }
+            }
+        }
+        self.resolve_path(f, d, path, strict)
     }
 
     /// Go: the aliases (`type A = T`) whose type is `c`.
@@ -9011,6 +9038,8 @@ pub fn resolve(
                     found
                 } else if r.from_owner.is_some() && heritage {
                     p.resolve_path(f, None, &r.path, true)
+                } else if fam == Family::CSharp && r.kind == RefKind::Decorator {
+                    p.csharp_attribute(f, scope_def, &r.path, strict)
                 } else {
                     p.resolve_path(f, scope_def, &r.path, strict)
                 };

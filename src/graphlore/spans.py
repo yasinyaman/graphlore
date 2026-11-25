@@ -572,12 +572,21 @@ def _ts_operator_name(node: Any) -> str | None:
     if node.type == "conversion_operator_declaration":
         typ = node.child_by_field_name("type")
         return None if typ is None else "operator " + typ.text.decode("utf-8", "replace")
+    # (a word after `operator` keeps its space, and what follows it:
+    # `operator true`, `operator checked +`)
+    after: list[str] = []
     seen = False
     for c in node.children:
         if seen:
-            return "operator" + c.text.decode("utf-8", "replace")
-        seen = c.type == "operator"
-    return None
+            if c.type == "parameter_list":
+                break
+            after.append(c.text.decode("utf-8", "replace"))
+        seen = seen or c.type == "operator"
+    if not after:
+        return None
+    if not after[0][:1].isascii() or not after[0][:1].isalpha():
+        return "operator" + after[0]
+    return "operator " + " ".join(after)
 
 
 _PP_SPACE = b" \t\n\x0c\r"  # what Rust's `is_ascii_whitespace` strips
