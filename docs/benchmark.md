@@ -117,7 +117,8 @@ nodes and 1.87 million edges.
 | full | 126 | 5.6 GB | parse 49 s, resolve 48 s, communities 12 s |
 | update, nothing changed | 23 | 4.7 GB | resolve 7 s (0 of 13,989 files resolved again), communities 3 s (kept) |
 | update, a function added to a file no other reads | 28 | 5.2 GB | resolve 8 s (1 file), communities 5 s (two partitions) |
-| update, a line added to `pkg/kubelet/kubelet.go` | 74 | 5.4 GB | resolve 41 s (876 files), communities 14 s |
+| update, a line added to a function body of `pkg/kubelet/kubelet.go` | 24 | 5.2 GB | resolve 8 s (126 files), communities 3 s (kept) |
+| update, a method added to `pkg/kubelet/kubelet.go` | 53 | 5.3 GB | resolve 35 s (876 files), communities 5 s |
 
 (Peak memory from the engine's report, `memory_mb`, which reads
 `/proc/self/status` after each phase.) An update parses only what changed and
@@ -131,9 +132,10 @@ what it called) they are kept as they are; otherwise detection runs, and
 settles in two partitions from the previous communities (2.2 s on kubernetes;
 seven, 8.1 s, before Leiden started from the groups the communities were
 split out of: [native-engine.md](native-engine.md#communities)). `kubelet.go` is read by
-the 876 files of its package and of those that use its types, which all
-resolve again (that row was measured before the last changes, which left the
-others within seconds of what it would be now). Before incremental resolution
+the 876 files of its package and of those that use its types. A body edited
+or a comment added changes none of its declarations, and only the 126 files
+that read its bodies resolve again (74 s before declarations were a part of
+their own); a method added is a declaration, and all 876 do. Before incremental resolution
 an update resolved every file: 67 s for each of the updates above, and the
 full build took 118 s and 5.0 GB; recording what each file reads costs the
 full build about a tenth of its time and 0.6 GB.

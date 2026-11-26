@@ -597,7 +597,9 @@ the same communities by every measure below (averages over the 45: modularity
 0.562 → 0.560, in the main directory 87.8% → 88.1%, test nodes in production
 communities 7.6% → 7.6%, agreement with graphify 0.780 → 0.781; agreement with
 the communities before 0.974). On kubernetes an update that changes the graph
-settles in two partitions (2.2 s, 8.1 s before). The previous ids are
+settles in two partitions (2.2 s, 8.1 s before), and an update moves fewer
+nodes to another community: 71 in all on the 45 (three seeded edits each),
+192 before, when 13 of those updates ended in a cycle or at the limit. The previous ids are
 kept by overlap, and a saved name stays while its community's members are the
 same or a strict majority of both its old and new members; others are dropped
 from `.graphify_labels.json`, and the build says how many.
@@ -658,10 +660,37 @@ so a cached answer hides no read from the file that takes it. An update writes
 the graph a full build of the same tree writes, byte for byte:
 `tests/incremental.rs` holds it on small projects (a file read by others, a
 name defined elsewhere later), `benchmarks/incremental_check.py` with seeded
-edits on whole repositories. A file's facts include its line numbers and byte
-offsets, so an edit that adds a line or a character moves what follows it and
-the files that read it resolve again; an edit that changes none of its facts
-(a number changed in place) resolves no other file.
+edits on whole repositories.
+
+What a file reads of another is recorded as all of it or as its declarations
+only (`trace::part`): the definitions, the references written in declarations
+(bases, decorators, a declared result), the locals of classes and namespaces,
+the imports and the file's other declaration facts, its scope and node ids
+(`engine/src/resolve/decl.rs`). Looking up a type, its members and bases, a
+function's signature or a module's names reads the declarations; following a
+function body (typing what it returns when no result is written, the members
+used on a local) reads all of the file. The declarations' print keeps each
+position as its rank among the file's declaration positions: resolution
+compares a file's positions only with one another, so a line added to a
+function body, or a comment, moves every position after it and leaves the
+print as it was. Such an edit resolves the file itself again and the files
+that read its bodies; one that changes a declaration (a method added, a
+signature, what a body without a written result returns) resolves every file
+that read the file. `GRAPHLORE_REUSE_VERIFY=1` resolves every file and says
+which of those whose resolution would have been reused came out otherwise:
+none on the 45 audit repositories (four seeded edits each) or on kubernetes.
+On the 45, the share of files whose resolution an update takes from the last
+build went from 84% to 90–93% (`incremental_check.py`, edits of every kind).
+
+On kubernetes (13,989 files), after an edit of `pkg/kubelet/kubelet.go`, which
+876 other files read:
+
+| edit of `kubelet.go` | files resolved again | update |
+|---|--:|--:|
+| a line added to a function body | 126 | 24 s |
+| a comment line added | 126 | 23 s |
+| a method added | 876 | 53–61 s |
+| before: any line added | 876 | 74 s |
 
 | | full build | update, nothing changed | update, one file changed |
 |---|--:|--:|--:|

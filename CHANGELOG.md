@@ -7,6 +7,21 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **An edit of a function body no longer resolves the files that only read
+  the file's declarations** (`docs/native-engine.md`, "Incremental updates";
+  `engine/src/resolve/decl.rs`). A read of another file is recorded as a read
+  of all of it or of its declarations (definitions, the references written in
+  declarations, class and namespace locals, imports, scope), whose print keeps
+  each position as its rank: a line added to a body or a comment moves the
+  positions after it and keeps their order. On kubernetes a line added to a
+  function body of `kubelet.go`, which 876 files read, resolves 126 of them
+  again and takes 24 s instead of 74 s; a method added still resolves all 876.
+  `GRAPHLORE_REUSE_VERIFY=1` resolves every file and says which reused
+  resolution would have come out otherwise (none on the audit repositories or
+  kubernetes), `GRAPHLORE_REUSE_WHY=1` why a file is resolved again,
+  `GRAPHLORE_TRACE_FILE=path` which sites read a file and how much of it.
+  `benchmarks/incremental_check.py` adds comment lines to its edits
+  (`--kinds`) and reports the nodes an update moved.
 - **An update resolves again only the files whose resolution read something
   that changed** (`docs/native-engine.md`, "Incremental updates";
   `engine/src/resolve/trace.rs`, `reuse.rs`). The engine records what each
@@ -40,6 +55,11 @@ All notable changes to this project are documented here. The format is based on
   build took 167 s and 7.6 GB, from 236 s and 11.4 GB.
 
 ### Fixed
+- **Native engine: a field assigned in another file resolves its readers
+  again.** A type's fields come from every file that assigns one (a Go method
+  in another file of the package), but a lookup recorded only the type's own
+  file, so an update could keep a reader's resolution after a field appeared
+  elsewhere. The fields are an index key with a print of their own now.
 - **Native engine: community detection settles.** Each settling pass started
   from the last pass's communities, after graphify's size and cohesion splits:
   Leiden merged the split parts again (on zod 355 of 356), the cohesion rule
