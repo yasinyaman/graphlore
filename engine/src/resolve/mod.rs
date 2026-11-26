@@ -29,6 +29,9 @@ use crate::resources::ResourceKind;
 
 mod http;
 mod modules;
+pub mod trace;
+
+use trace::{FileKeyed, Named, NamedSet, Trace, Traced};
 
 pub type DefRef = (usize, usize);
 
@@ -46,6 +49,20 @@ pub enum Family {
     Swift,
     C,
 }
+
+/// Every family, for a question asked of each.
+const FAMILIES: [Family; 10] = [
+    Family::Python,
+    Family::Ecma,
+    Family::Go,
+    Family::Jvm,
+    Family::CSharp,
+    Family::Rust,
+    Family::Php,
+    Family::Ruby,
+    Family::Swift,
+    Family::C,
+];
 
 impl Family {
     pub fn of(lang: Lang) -> Family {
@@ -1311,51 +1328,56 @@ const COMMON_METHODS: &[&str] = &[
     "each",
 ];
 
+/// A cache of resolution: each value with what working it out read.
+type Memo<K, V> = RefCell<HashMap<K, (V, Rc<trace::Frame>)>>;
+/// Per file: the lexical children of each definition by bare name.
+type Children = Vec<HashMap<usize, HashMap<String, Vec<usize>>>>;
+
 pub struct Project<'a> {
     pub root: PathBuf,
-    pub files: &'a [FileFacts],
-    pub by_path: HashMap<&'a str, usize>,
+    pub files: Traced<&'a [FileFacts]>,
+    pub by_path: Named<&'a str, usize>,
     pub family: Vec<Option<Family>>,
     pub manifests: Vec<(String, PathBuf)>,
     /// Per file: the workspace repository it is in (`""`: none, or the
     /// project is one repository).
     pub repo: Vec<String>,
     repos: Vec<String>,
-    hubs: &'a [String],
-    def_ids: &'a [Vec<Option<String>>],
+    hubs: Traced<&'a [String]>,
+    def_ids: Traced<&'a [Vec<Option<String>>]>,
     /// Per file: top-level definitions (no definition encloses them, or only
     /// namespaces) by bare name.
-    top: Vec<HashMap<String, Vec<usize>>>,
+    top: Traced<Vec<HashMap<String, Vec<usize>>>>,
     /// Per file: lexical children of each definition by bare name.
-    children: Vec<HashMap<usize, HashMap<String, Vec<usize>>>>,
+    children: Traced<Children>,
     /// Every definition by bare name.
-    by_name: HashMap<String, Vec<DefRef>>,
+    by_name: Named<String, Vec<DefRef>>,
     /// Extension functions and methods (`Def::receiver`), by name.
-    extensions: HashMap<String, Vec<DefRef>>,
+    extensions: Named<String, Vec<DefRef>>,
     /// Every definition by qualname.
-    by_qual: HashMap<String, Vec<DefRef>>,
+    by_qual: Named<String, Vec<DefRef>>,
     /// Package-qualified names (`a.b.C`, `Shop.Models.Item`) of the families
     /// that have packages or namespaces.
-    fqn: HashMap<String, Vec<DefRef>>,
+    fqn: Named<String, Vec<DefRef>>,
     /// Package / namespace names that exist, per family.
-    namespaces: HashSet<(Family, String)>,
+    namespaces: NamedSet<(Family, String)>,
     /// Package / namespace / module -> files.
-    pkg_files: HashMap<(Family, String), Vec<usize>>,
+    pkg_files: Named<(Family, String), Vec<usize>>,
     /// `(family, owner type name)` -> methods attached by owner (Go receivers,
     /// Rust impls, C++ `A::m`, Swift extensions).
-    owner_methods: HashMap<(Family, String), Vec<DefRef>>,
+    owner_methods: Named<(Family, String), Vec<DefRef>>,
     modsys: modules::ModuleSystems,
-    scopes: Vec<Scope>,
+    scopes: Traced<Vec<Scope>>,
     exts: RefCell<Vec<ExtNode>>,
     ext_index: RefCell<HashMap<(&'static str, String), usize>>,
-    bases_memo: RefCell<HashMap<DefRef, Vec<DefRef>>>,
+    bases_memo: Memo<DefRef, Vec<DefRef>>,
     /// `(file, definition, name)` -> typed local / parameter.
-    locals: HashMap<(usize, usize, String), usize>,
+    locals: FileKeyed<(usize, usize, String), usize>,
     /// The locals of one name in one definition, in the order they are
     /// declared, where there are several (Rust `let r = a(); let r = b();`).
-    shadows: HashMap<(usize, usize, String), Vec<usize>>,
+    shadows: FileKeyed<(usize, usize, String), Vec<usize>>,
     /// type -> field name -> the field's local (its declared or assigned type).
-    fields: HashMap<DefRef, HashMap<String, (usize, usize)>>,
+    fields: FileKeyed<DefRef, HashMap<String, (usize, usize)>>,
     depth: RefCell<usize>,
     /// Set while a type reference is resolved: names then mean types only
     /// (`Item Item { get; set; }`: the property's type, not the property).
@@ -1365,24 +1387,24 @@ pub struct Project<'a> {
     /// The receiver lambda the use being resolved sits in: `(file, index)`.
     recv: RefCell<Option<(usize, u16)>>,
     /// Names some type answers to without defining them (`FileFacts::attrs`).
-    attrs: HashSet<(Family, String)>,
+    attrs: NamedSet<(Family, String)>,
     /// The types that declare a name without defining it (`Def::attrs`).
-    attr_owners: HashMap<(Family, String), Vec<DefRef>>,
+    attr_owners: Named<(Family, String), Vec<DefRef>>,
     /// Per file: the member names used on each name, per definition.
     used_on: RefCell<HashMap<usize, Rc<UsedOn>>>,
     /// What `structural_type` found for a local: `(file, definition, name)`.
-    structural: RefCell<HashMap<(usize, usize, String), Option<DefRef>>>,
+    structural: Memo<(usize, usize, String), Option<DefRef>>,
     /// The types of locals already worked out: `(file, index of the local)`.
-    local_types: RefCell<HashMap<(usize, usize), Typed>>,
+    local_types: Memo<(usize, usize), Typed>,
     /// Whether a local assigned a value holds it in a sealed wrapper
     /// (`let r = load();` with `fn load() -> Result<Foo, E>`), per local.
-    sealed_locals: RefCell<HashMap<(usize, usize), bool>>,
+    sealed_locals: Memo<(usize, usize), bool>,
     /// How many parts the tuple a local's value is has (0: no tuple), per
     /// local.
-    tuple_locals: RefCell<HashMap<(usize, usize), usize>>,
+    tuple_locals: Memo<(usize, usize), usize>,
     /// What a call reference calls, with its overload picked, per reference
     /// (`call_target`): what an implicit member in its arguments is typed by.
-    call_targets: RefCell<HashMap<(usize, usize), Called>>,
+    call_targets: Memo<(usize, usize), Called>,
     /// Whether the reference being resolved was answered by a name alone
     /// (`fallback_method`, a single extension in sight): no scope said so.
     guessed: std::cell::Cell<bool>,
@@ -1390,7 +1412,7 @@ pub struct Project<'a> {
     /// read that ends there is of the field, which has no node
     embedded_hit: std::cell::Cell<Option<DefRef>>,
     /// The bindings a local's value gives, per local (`local_value_binds`).
-    value_binds: RefCell<HashMap<(usize, usize), Option<Binds>>>,
+    value_binds: Memo<(usize, usize), Option<Binds>>,
     /// The bindings the last path walked ended with.
     end_binds: RefCell<Option<Binds>>,
     /// A local's value is being typed: the method its path ends with is what
@@ -1417,9 +1439,31 @@ pub struct Project<'a> {
     /// One of them is `this`.
     self_arg: RefCell<bool>,
     /// The receiver type of each such lambda, once worked out.
-    recv_types: RefCell<HashMap<(usize, u16), Typed>>,
+    recv_types: Memo<(usize, u16), Typed>,
     /// Import -> files a resolved use went through it to.
     used: RefCell<HashMap<(usize, usize), HashSet<usize>>>,
+    /// What resolution reads, frame by frame (`trace.rs`).
+    pub trace: Rc<Trace>,
+    /// Tables of the whole project that a lookup would otherwise scan every
+    /// file for (`index_scans`), each asked by key: the definitions with
+    /// `Def::object` by (object, name); what `Object.create(X.prototype)`
+    /// builds, by X (file, object); the files registering a Mongoose model;
+    /// the request properties project code assigns; the files including RSpec
+    /// shared examples, by name (file, line); the modules `config.include`
+    /// names; the PHP classes by the last name of a written base.
+    object_members: Named<(String, String), Vec<DefRef>>,
+    created_from: Named<String, Vec<(usize, String)>>,
+    model_files: Named<String, Vec<usize>>,
+    request_props: NamedSet<String>,
+    example_includes: Named<String, Vec<(usize, u32)>>,
+    spec_includes: Named<String, Vec<Vec<String>>>,
+    php_bases: Named<String, Vec<DefRef>>,
+}
+
+impl trace::KeyText for Family {
+    fn feed(&self, h: &mut trace::Fnv) {
+        h.write(self.name().as_bytes());
+    }
 }
 
 /// The key of a qualified name in `by_qual`: Ruby writes one name both ways
@@ -1434,7 +1478,7 @@ fn qual_key(fam: Family, qualname: &str) -> String {
 
 /// The definition around definition `x` of file `f`: where what its
 /// signature writes is looked up.
-fn defs_parent(files: &[FileFacts], f: usize, x: usize) -> Option<usize> {
+fn defs_parent(files: &Traced<&[FileFacts]>, f: usize, x: usize) -> Option<usize> {
     files[f].defs[x].parent
 }
 
@@ -1492,11 +1536,14 @@ impl<'a> Project<'a> {
         manifests: Vec<(String, PathBuf)>,
         repos: &[String],
     ) -> Project<'a> {
-        let by_path = files.iter().enumerate().map(|(i, f)| (f.path.as_str(), i)).collect();
+        let trace = Rc::new(Trace::default());
+        let mut by_path = Named::new("by_path", trace.clone());
+        by_path.raw_mut().extend(files.iter().enumerate().map(|(i, f)| (f.path.as_str(), i)));
         let family: Vec<Option<Family>> = files.iter().map(|f| f.lang.map(Family::of)).collect();
+        let tr = || trace.clone();
         let mut p = Project {
             root: root.to_path_buf(),
-            files,
+            files: Traced::new(files, tr()),
             by_path,
             family,
             manifests,
@@ -1512,31 +1559,31 @@ impl<'a> Project<'a> {
                 })
                 .collect(),
             repos: repos.to_vec(),
-            hubs: &asm.hubs,
-            def_ids: &asm.def_ids,
-            top: Vec::new(),
-            children: Vec::new(),
-            by_name: HashMap::new(),
-            extensions: HashMap::new(),
-            by_qual: HashMap::new(),
-            fqn: HashMap::new(),
-            namespaces: HashSet::new(),
-            pkg_files: HashMap::new(),
-            owner_methods: HashMap::new(),
+            hubs: Traced::new(&asm.hubs, tr()),
+            def_ids: Traced::new(&asm.def_ids, tr()),
+            top: Traced::new(Vec::new(), tr()),
+            children: Traced::new(Vec::new(), tr()),
+            by_name: Named::new("by_name", tr()),
+            extensions: Named::new("extensions", tr()),
+            by_qual: Named::new("by_qual", tr()),
+            fqn: Named::new("fqn", tr()),
+            namespaces: NamedSet::new("namespaces", tr()),
+            pkg_files: Named::new("pkg_files", tr()),
+            owner_methods: Named::new("owner_methods", tr()),
             modsys: modules::ModuleSystems::default(),
-            scopes: Vec::new(),
+            scopes: Traced::new(Vec::new(), tr()),
             exts: RefCell::new(Vec::new()),
             ext_index: RefCell::new(HashMap::new()),
             bases_memo: RefCell::new(HashMap::new()),
-            locals: HashMap::new(),
-            shadows: HashMap::new(),
-            fields: HashMap::new(),
+            locals: FileKeyed::new(tr()),
+            shadows: FileKeyed::new(tr()),
+            fields: FileKeyed::new(tr()),
             depth: RefCell::new(0),
             types_only: RefCell::new(false),
             calling: RefCell::new(false),
             recv: RefCell::new(None),
-            attrs: HashSet::new(),
-            attr_owners: HashMap::new(),
+            attrs: NamedSet::new("attrs", tr()),
+            attr_owners: Named::new("attr_owners", tr()),
             used_on: RefCell::new(HashMap::new()),
             structural: RefCell::new(HashMap::new()),
             local_types: RefCell::new(HashMap::new()),
@@ -1558,11 +1605,20 @@ impl<'a> Project<'a> {
             self_arg: RefCell::new(false),
             recv_types: RefCell::new(HashMap::new()),
             used: RefCell::new(HashMap::new()),
+            trace: trace.clone(),
+            object_members: Named::new("object_members", tr()),
+            created_from: Named::new("created_from", tr()),
+            model_files: Named::new("model_files", tr()),
+            request_props: NamedSet::new("request_props", tr()),
+            example_includes: Named::new("example_includes", tr()),
+            spec_includes: Named::new("spec_includes", tr()),
+            php_bases: Named::new("php_bases", tr()),
         };
         p.index();
         p.index_locals();
+        p.index_scans();
         p.modsys = modules::ModuleSystems::build(&p);
-        p.scopes = (0..files.len()).map(|f| p.scope_of(f)).collect();
+        *p.scopes.raw_mut() = (0..files.len()).map(|f| p.scope_of(f)).collect();
         // the files a file's imported names live in (`use A\B\C`, `import a.b.C`)
         for f in 0..files.len() {
             let mut more = Vec::new();
@@ -1572,7 +1628,7 @@ impl<'a> Project<'a> {
                     more.push(g);
                 }
             }
-            p.scopes[f].imported.extend(more);
+            p.scopes.raw_mut()[f].imported.extend(more);
         }
         // Rust: what a module star-imported (`use crate::prelude::*;`)
         // passes on with `pub use crate::error::Error;`. Only a star import:
@@ -1604,10 +1660,10 @@ impl<'a> Project<'a> {
                 for (dir, star) in &global {
                     if file.path.starts_with(dir.as_str()) {
                         if let Target::Module(fs) = star {
-                            p.scopes[f].imported.extend(fs.iter().copied());
+                            p.scopes.raw_mut()[f].imported.extend(fs.iter().copied());
                         }
                         // (no import of this file's to count the use on)
-                        p.scopes[f].stars.push((star.clone(), usize::MAX));
+                        p.scopes.raw_mut()[f].stars.push((star.clone(), usize::MAX));
                     }
                 }
             }
@@ -1625,14 +1681,14 @@ impl<'a> Project<'a> {
                     }
                 }
             }
-            p.scopes[f].imported.extend(more);
+            p.scopes.raw_mut()[f].imported.extend(more);
         }
         // … and the files a module it imports passes on (`module.exports =
         // require('./lib/app')`, `exports.response = res`, `export * from`):
         // a package's entry stands for the files it is made of
         let passes: Vec<Vec<usize>> = (0..files.len()).map(|g| p.passes_on(g)).collect();
         if passes.iter().any(|x| !x.is_empty()) {
-            for (f, scope) in p.scopes.iter_mut().enumerate() {
+            for (f, scope) in p.scopes.raw_mut().iter_mut().enumerate() {
                 let mut seen: HashSet<usize> = HashSet::new();
                 let mut frontier: Vec<usize> = scope.imported.iter().copied().collect();
                 for _ in 0..3 {
@@ -1716,12 +1772,16 @@ impl<'a> Project<'a> {
             let mut children: HashMap<usize, HashMap<String, Vec<usize>>> = HashMap::new();
             let fam = self.family[fi];
             if let Some(fam) = fam {
-                self.attrs.extend(f.attrs.iter().map(|a| (fam, a.clone())));
+                self.attrs.raw_mut().extend(f.attrs.iter().map(|a| (fam, a.clone())));
             }
             for (di, d) in f.defs.iter().enumerate() {
                 if let Some(fam) = fam {
                     for a in &d.attrs {
-                        self.attr_owners.entry((fam, a.clone())).or_default().push((fi, di));
+                        self.attr_owners
+                            .raw_mut()
+                            .entry((fam, a.clone()))
+                            .or_default()
+                            .push((fi, di));
                     }
                 }
                 // a class with no name of its own answers to none, nor a
@@ -1770,31 +1830,35 @@ impl<'a> Project<'a> {
                 let Some(fam) = fam else { continue };
                 if let Some(b) = bare {
                     let q = specialized(&d.qualname).unwrap_or(b);
-                    self.by_qual.entry(qual_key(fam, q)).or_default().push((fi, di));
+                    self.by_qual.raw_mut().entry(qual_key(fam, q)).or_default().push((fi, di));
                 }
                 if self.def_ids[fi].get(di).is_some_and(|x| x.is_some()) {
-                    self.by_name.entry(d.name.clone()).or_default().push((fi, di));
+                    self.by_name.raw_mut().entry(d.name.clone()).or_default().push((fi, di));
                 }
                 // (an RSpec `let` is a name of its block only: the scoped
                 // lookup in `resolve_name_any` is its one way in)
                 if d.scope_lines.is_none() {
-                    self.by_qual.entry(qual_key(fam, &d.qualname)).or_default().push((fi, di));
+                    self.by_qual
+                        .raw_mut()
+                        .entry(qual_key(fam, &d.qualname))
+                        .or_default()
+                        .push((fi, di));
                 }
                 if d.receiver.is_some() && !d.decl_only {
-                    self.extensions.entry(d.name.clone()).or_default().push((fi, di));
+                    self.extensions.raw_mut().entry(d.name.clone()).or_default().push((fi, di));
                 }
                 if d.kind == DefKind::Namespace {
                     let ns = d.qualname.replace("::", ".");
-                    self.namespaces.insert((fam, ns.clone()));
-                    self.pkg_files.entry((fam, ns)).or_default().push(fi);
+                    self.namespaces.raw_mut().insert((fam, ns.clone()));
+                    self.pkg_files.raw_mut().entry((fam, ns)).or_default().push(fi);
                 }
                 if let Some(fq) = self.fqn_of(fi, di) {
-                    self.fqn.entry(fq).or_default().push((fi, di));
+                    self.fqn.raw_mut().entry(fq).or_default().push((fi, di));
                 }
                 if let Some(owner) = &d.owner {
                     if d.kind.is_callable() {
                         let bare = owner.rsplit(['.', ':']).next().unwrap_or(owner).to_string();
-                        self.owner_methods.entry((fam, bare)).or_default().push((fi, di));
+                        self.owner_methods.raw_mut().entry((fam, bare)).or_default().push((fi, di));
                     }
                 }
             }
@@ -1802,13 +1866,56 @@ impl<'a> Project<'a> {
                 let pkg = pkg.replace('\\', ".");
                 let mut parts: Vec<&str> = pkg.split('.').collect();
                 while !parts.is_empty() {
-                    self.namespaces.insert((fam, parts.join(".")));
+                    self.namespaces.raw_mut().insert((fam, parts.join(".")));
                     parts.pop();
                 }
-                self.pkg_files.entry((fam, pkg)).or_default().push(fi);
+                self.pkg_files.raw_mut().entry((fam, pkg)).or_default().push(fi);
             }
-            self.top.push(top);
-            self.children.push(children);
+            self.top.raw_mut().push(top);
+            self.children.raw_mut().push(children);
+        }
+    }
+
+    /// The tables `object_members` … `php_bases`, in file order (so that a
+    /// lookup lists its candidates in the order a scan of the files did).
+    fn index_scans(&mut self) {
+        let files = *self.files.raw();
+        for (g, facts) in files.iter().enumerate() {
+            for (i, x) in facts.defs.iter().enumerate() {
+                if let Some(o) = &x.object {
+                    let key = (o.clone(), x.name.clone());
+                    self.object_members.raw_mut().entry(key).or_default().push((g, i));
+                }
+                if let Some(p) = x.created_from.as_deref() {
+                    if p.len() >= 2 && p[p.len() - 1] == "prototype" && x.kind.is_state() {
+                        let entry = self.created_from.raw_mut().entry(p[p.len() - 2].clone());
+                        entry.or_default().push((g, x.name.clone()));
+                    }
+                }
+            }
+            for (m, _) in &facts.models {
+                let at = self.model_files.raw_mut().entry(m.clone()).or_default();
+                if at.last() != Some(&g) {
+                    at.push(g);
+                }
+            }
+            self.request_props.raw_mut().extend(facts.request_props.iter().cloned());
+            for (n, at) in &facts.example_includes {
+                self.example_includes.raw_mut().entry(n.clone()).or_default().push((g, *at));
+            }
+            if !facts.spec_includes.is_empty() {
+                let all = self.spec_includes.raw_mut().entry(String::new()).or_default();
+                all.extend(facts.spec_includes.iter().cloned());
+            }
+            if self.family.get(g).copied().flatten() == Some(Family::Php) {
+                for r in &facts.refs {
+                    if matches!(r.kind, RefKind::Inherits | RefKind::Base) {
+                        if let (Some(last), Some(d)) = (r.path.last(), r.from_def) {
+                            self.php_bases.raw_mut().entry(last.clone()).or_default().push((g, d));
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -1836,9 +1943,9 @@ impl<'a> Project<'a> {
             // (the one the index names is the first declared)
             locals.insert(key.clone(), v[0]);
         }
-        self.shadows = shadows;
-        self.locals = locals;
-        self.fields = fields;
+        *self.shadows.raw_mut() = shadows;
+        *self.locals.raw_mut() = locals;
+        *self.fields.raw_mut() = fields;
     }
 
     /// The type a local path names: a type, or the type a constructor or
@@ -2642,9 +2749,24 @@ impl<'a> Project<'a> {
     /// value of `x.apply { … }` / `with(x) { … }`, or what the function called
     /// declares for its lambda (`block: Builder.() -> Unit`).
     fn receiver_type(&self, f: usize, d: Option<usize>, i: u16) -> Option<(DefRef, Confidence)> {
-        if let Some(known) = self.recv_types.borrow().get(&(f, i)) {
+        if let Some((known, frame)) = self.recv_types.borrow().get(&(f, i)) {
+            self.trace.file(f);
+            self.trace.absorb(frame);
             return *known;
         }
+        self.trace.open();
+        let out = self.receiver_type_uncached(f, d, i);
+        let frame = self.trace.close();
+        self.recv_types.borrow_mut().insert((f, i), (out, frame));
+        out
+    }
+
+    fn receiver_type_uncached(
+        &self,
+        f: usize,
+        d: Option<usize>,
+        i: u16,
+    ) -> Option<(DefRef, Confidence)> {
         let scope = self.files[f].receivers.get(usize::from(i))?;
         // what names the receiver is written outside the lambda
         let before = self.recv.replace(scope.outer.map(|o| (f, o)));
@@ -2663,7 +2785,6 @@ impl<'a> Project<'a> {
         *self.calling.borrow_mut() = calling;
         *self.types_only.borrow_mut() = types;
         *self.recv.borrow_mut() = before;
-        self.recv_types.borrow_mut().insert((f, i), out);
         out
     }
 
@@ -2818,7 +2939,9 @@ impl<'a> Project<'a> {
         // typing a local can come back to it (`let session =
         // session(using: x)`: the value names the local): the second
         // time round it has no type
-        if let Some(known) = self.local_types.borrow().get(&(f, li)) {
+        if let Some((known, frame)) = self.local_types.borrow().get(&(f, li)) {
+            self.trace.file(f);
+            self.trace.absorb(frame);
             return *known;
         }
         // worked out from the top, the answer is the local's own and
@@ -2827,6 +2950,7 @@ impl<'a> Project<'a> {
         if !self.typing.borrow_mut().insert((f, li)) {
             return None;
         }
+        self.trace.open();
         // a local's type is the same whatever use asks for it: its
         // value's path is what is called there (`x = f()` -> `f`),
         // a written type is not
@@ -2842,8 +2966,9 @@ impl<'a> Project<'a> {
         *self.typing_value.borrow_mut() = typing_value;
         *self.calling.borrow_mut() = calling;
         self.typing.borrow_mut().remove(&(f, li));
+        let frame = self.trace.close();
         if whole {
-            self.local_types.borrow_mut().insert((f, li), out);
+            self.local_types.borrow_mut().insert((f, li), (out, frame));
         }
         out
     }
@@ -3278,6 +3403,8 @@ impl<'a> Project<'a> {
 
     /// The member names used on each name in each definition of file `f`.
     fn used_on(&self, f: usize) -> Rc<UsedOn> {
+        // (what file `f`'s references are: a read of that file)
+        self.trace.file(f);
         if let Some(known) = self.used_on.borrow().get(&f) {
             return known.clone();
         }
@@ -3325,10 +3452,21 @@ impl<'a> Project<'a> {
     /// duck typing writes no type, and a library's type could answer too.
     fn structural_type(&self, f: usize, d: usize, name: &str) -> Option<DefRef> {
         let key = (f, d, name.to_string());
-        if let Some(known) = self.structural.borrow().get(&key) {
+        if let Some((known, frame)) = self.structural.borrow().get(&key) {
+            self.trace.file(f);
+            self.trace.absorb(frame);
             return *known;
         }
-        self.structural.borrow_mut().insert(key.clone(), None); // a cycle ends here
+        // a cycle ends here
+        self.structural.borrow_mut().insert(key.clone(), (None, Rc::default()));
+        self.trace.open();
+        let found = self.structural_type_uncached(f, d, name);
+        let frame = self.trace.close();
+        self.structural.borrow_mut().insert(key, (found, frame));
+        found
+    }
+
+    fn structural_type_uncached(&self, f: usize, d: usize, name: &str) -> Option<DefRef> {
         let fam = self.family[f]?;
         let used = self.used_on(f);
         let names: Vec<&(String, bool)> = used
@@ -3371,7 +3509,6 @@ impl<'a> Project<'a> {
                 many.iter().copied().find(|b| many.iter().all(|c| c == b || self.is_a(*c, *b, 6)))
             }
         };
-        self.structural.borrow_mut().insert(key, found);
         found
     }
 
@@ -3635,37 +3772,25 @@ impl<'a> Project<'a> {
         if let Some((created, alias)) = proto {
             let mut cands: Vec<DefRef> = Vec::new();
             let mut built = false;
-            for (g, facts) in self.files.iter().enumerate() {
-                if self.family[g] != Some(Family::Ecma) {
-                    continue;
-                }
-                for obj in facts.defs.iter().filter(|x| {
-                    x.kind.is_state()
-                        && x.created_from.as_deref().is_some_and(|p| {
-                            p.len() >= 2
-                                && p[p.len() - 2] == created
-                                && p[p.len() - 1] == "prototype"
-                        })
-                }) {
-                    built = true;
-                    cands.extend(facts.defs.iter().enumerate().filter_map(|(i, y)| {
-                        (y.name == name && y.object.as_deref() == Some(obj.name.as_str()))
-                            .then_some((g, i))
-                    }));
-                }
+            let objects = self.created_from.get(created).into_iter().flatten();
+            for (g, obj) in objects.filter(|(g, _)| self.family[*g] == Some(Family::Ecma)) {
+                built = true;
+                let members = self.object_members.get(&(obj.clone(), name.to_string()));
+                cands.extend(members.into_iter().flatten().filter(|m| m.0 == *g).copied());
             }
             // (only a project that builds the object itself)
             if !built {
                 return None;
             }
             // (`app.response.message = function`: what the app adds to them)
-            for (g, facts) in self.files.iter().enumerate() {
-                if self.family[g] == Some(Family::Ecma) {
-                    cands.extend(facts.defs.iter().enumerate().filter_map(|(i, y)| {
-                        (y.name == name && y.object.as_deref() == Some(alias)).then_some((g, i))
-                    }));
-                }
-            }
+            let added = self.object_members.get(&(alias.to_string(), name.to_string()));
+            cands.extend(
+                added
+                    .into_iter()
+                    .flatten()
+                    .filter(|m| self.family[m.0] == Some(Family::Ecma))
+                    .copied(),
+            );
             return self.best(cands);
         }
         // the document a Mongoose model's static hands its callback (`User.
@@ -3692,12 +3817,10 @@ impl<'a> Project<'a> {
     /// `model` is registered with (`mongoose.model('Article', ArticleSchema)`).
     fn model_method(&self, model: &str, name: &str) -> Option<DefRef> {
         let mut cands: Vec<DefRef> = Vec::new();
-        for (g, facts) in self.files.iter().enumerate() {
-            if facts.models.iter().any(|(n, _)| n == model) {
-                cands.extend(facts.defs.iter().enumerate().filter_map(|(i, y)| {
-                    (y.name == name && y.object.as_deref() == Some("methods")).then_some((g, i))
-                }));
-            }
+        let methods = self.object_members.get(&("methods".to_string(), name.to_string()));
+        let methods: Vec<DefRef> = methods.into_iter().flatten().copied().collect();
+        for g in self.model_files.get(model).into_iter().flatten() {
+            cands.extend(methods.iter().filter(|m| m.0 == *g).copied());
         }
         self.best(cands)
     }
@@ -3705,15 +3828,8 @@ impl<'a> Project<'a> {
     /// Whether the project builds a framework's request or response object
     /// itself (`Object.create(http.IncomingMessage.prototype)`).
     fn builds_framework_object(&self) -> bool {
-        self.files.iter().any(|facts| {
-            facts.defs.iter().any(|x| {
-                x.created_from.as_deref().is_some_and(|p| {
-                    p.len() >= 2
-                        && p[p.len() - 1] == "prototype"
-                        && matches!(p[p.len() - 2].as_str(), "IncomingMessage" | "ServerResponse")
-                })
-            })
-        })
+        self.created_from.contains_key("IncomingMessage")
+            || self.created_from.contains_key("ServerResponse")
     }
 
     /// JS `req.article.removeComment()`, `const article = req.article`: the
@@ -3741,7 +3857,7 @@ impl<'a> Project<'a> {
             _ => None,
         };
         let Some(prop) = prop else { return false };
-        self.files.iter().any(|facts| facts.request_props.contains(&prop))
+        self.request_props.contains(&prop)
     }
 
     /// The path a local's declaration gives it (its type as written).
@@ -4408,10 +4524,14 @@ impl<'a> Project<'a> {
     }
 
     fn bases(&self, c: DefRef) -> Vec<DefRef> {
-        if let Some(b) = self.bases_memo.borrow().get(&c) {
+        if let Some((b, frame)) = self.bases_memo.borrow().get(&c) {
+            self.trace.file(c.0);
+            self.trace.absorb(frame);
             return b.clone();
         }
-        self.bases_memo.borrow_mut().insert(c, Vec::new()); // a cycle ends here
+        // a cycle ends here
+        self.bases_memo.borrow_mut().insert(c, (Vec::new(), Rc::default()));
+        self.trace.open();
         let mut out = self.written_bases(c);
         // a C# partial type has the bases any of its declarations writes
         for p in self.partials(c) {
@@ -4421,7 +4541,8 @@ impl<'a> Project<'a> {
                 }
             }
         }
-        self.bases_memo.borrow_mut().insert(c, out.clone());
+        let frame = self.trace.close();
+        self.bases_memo.borrow_mut().insert(c, (out.clone(), frame));
         out
     }
 
@@ -4619,11 +4740,11 @@ impl<'a> Project<'a> {
             .filter(|(_, a, b)| *a <= line && line <= *b)
             .min_by_key(|(_, a, b)| b - a)?;
         let mut found: Vec<DefRef> = Vec::new();
-        for (g, file) in self.files.iter().enumerate() {
-            if self.family[g] != Some(Family::Ruby) {
-                continue;
-            }
-            for (_, at) in file.example_includes.iter().filter(|(n, _)| *n == shared.0) {
+        let including = self.example_includes.get(&shared.0).into_iter().flatten();
+        for &(g, at) in including.filter(|(g, _)| self.family[*g] == Some(Family::Ruby)) {
+            let file = &self.files[g];
+            let at = &at;
+            {
                 let inner = self.top[g]
                     .get(name)
                     .into_iter()
@@ -4751,7 +4872,15 @@ impl<'a> Project<'a> {
 
     /// Go: the aliases (`type A = T`) whose type is `c`.
     fn go_aliases(&self, c: DefRef) -> Vec<DefRef> {
+        // one map of the whole project's aliases: what it holds is the key
+        // `go_aliases` (`alias_fingerprint`), not a read of every file
+        self.trace.key(trace::key_hash("go_aliases", ""));
         if self.go_alias_map.borrow().is_none() {
+            // (worked out from the top, whatever asks first)
+            let depth = self.depth.replace(0);
+            let saved = self.suspend();
+            let typing = self.typing.replace(HashSet::new());
+            self.trace.open();
             let mut map: HashMap<DefRef, Vec<DefRef>> = HashMap::new();
             for (f, file) in self.files.iter().enumerate() {
                 if self.family[f] != Some(Family::Go) {
@@ -4769,6 +4898,10 @@ impl<'a> Project<'a> {
                     }
                 }
             }
+            self.trace.discard();
+            *self.typing.borrow_mut() = typing;
+            self.restore(saved);
+            *self.depth.borrow_mut() = depth;
             *self.go_alias_map.borrow_mut() = Some(map);
         }
         self.go_alias_map.borrow().as_ref().and_then(|m| m.get(&c).cloned()).unwrap_or_default()
@@ -4902,9 +5035,11 @@ impl<'a> Project<'a> {
                 if let Some(d) = self.best(self.fqn.get(&full).into_iter().flatten().copied()) {
                     return Some(Target::Def(d));
                 }
-                let fam = self.namespaces.iter().find(|(_, n)| *n == full).map(|(f, _)| *f)?;
-                let _ = fam;
-                Some(Target::Ns(full))
+                // (a namespace of that name, in any family)
+                FAMILIES
+                    .iter()
+                    .any(|fam| self.namespaces.contains(&(*fam, full.clone())))
+                    .then_some(Target::Ns(full))
             }
             Target::Ext(e, rest) => {
                 let mut r = rest.clone();
@@ -5162,8 +5297,8 @@ impl<'a> Project<'a> {
     /// includes (`config.include M`): the one there is.
     fn spec_helper_member(&self, name: &str) -> Option<DefRef> {
         let mut found: Option<DefRef> = None;
-        for facts in self.files {
-            for path in &facts.spec_includes {
+        {
+            for path in self.spec_includes.get("").into_iter().flatten() {
                 let key = qual_key(Family::Ruby, &path.join("::"));
                 let modules = self.by_qual.get(&key).into_iter().flatten().copied();
                 for module in modules.filter(|m| self.def(*m).kind.is_class_like()) {
@@ -5187,6 +5322,7 @@ impl<'a> Project<'a> {
     fn note_use(&self, f: usize, imp: usize, t: &Target) {
         if let Target::Def((g, _)) = t {
             if *g != f {
+                self.trace.used(f, imp, *g);
                 self.used.borrow_mut().entry((f, imp)).or_default().insert(*g);
             }
         }
@@ -5512,8 +5648,13 @@ impl<'a> Project<'a> {
                 let own = &self.files[f].defs[x];
                 let bound = bound.filter(|_| !own.self_params.iter().any(|p| p == head))?;
                 let before = self.types_only.replace(true);
-                let named =
-                    self.resolve_path_inner(f, defs_parent(self.files, f, x), &bound, false, false);
+                let named = self.resolve_path_inner(
+                    f,
+                    defs_parent(&self.files, f, x),
+                    &bound,
+                    false,
+                    false,
+                );
                 *self.types_only.borrow_mut() = before;
                 let (t, _) = named?;
                 return if rest.is_empty() {
@@ -7026,13 +7167,16 @@ impl<'a> Project<'a> {
         if l.declared || l.path.is_empty() || l.path.last().is_some_and(|s| s.starts_with('[')) {
             return None;
         }
-        if let Some(known) = self.value_binds.borrow().get(&(f, li)) {
+        if let Some((known, frame)) = self.value_binds.borrow().get(&(f, li)) {
+            self.trace.file(f);
+            self.trace.absorb(frame);
             return known.clone();
         }
         let whole = self.typing.borrow().is_empty() && *self.depth.borrow() == 0;
         if *self.depth.borrow() > 3 || !self.typing.borrow_mut().insert((f, li)) {
             return None;
         }
+        self.trace.open();
         *self.depth.borrow_mut() += 1;
         let recv = self.recv.replace(None);
         let types = self.types_only.replace(false);
@@ -7052,8 +7196,9 @@ impl<'a> Project<'a> {
             }
             _ => None,
         };
+        let frame = self.trace.close();
         if whole {
-            self.value_binds.borrow_mut().insert((f, li), out.clone());
+            self.value_binds.borrow_mut().insert((f, li), (out.clone(), frame));
         }
         out
     }
@@ -7248,14 +7393,19 @@ impl<'a> Project<'a> {
             return None;
         }
         // the value is a call of a function that returns a tuple
-        let known = self.tuple_locals.borrow().get(&(f, li)).copied();
+        let known = self.tuple_locals.borrow().get(&(f, li)).cloned();
         let parts = match known {
-            Some(n) => n,
+            Some((n, frame)) => {
+                self.trace.file(f);
+                self.trace.absorb(&frame);
+                n
+            }
             None => {
                 let whole = self.typing.borrow().is_empty() && *self.depth.borrow() == 0;
                 if !self.typing.borrow_mut().insert((f, li)) {
                     return None;
                 }
+                self.trace.open();
                 let recv = self.recv.replace(None);
                 let value = self.resolve_path(f, Some(x), &l.path, true);
                 *self.recv.borrow_mut() = recv;
@@ -7266,8 +7416,9 @@ impl<'a> Project<'a> {
                     }
                     _ => 0,
                 };
+                let frame = self.trace.close();
                 if whole {
-                    self.tuple_locals.borrow_mut().insert((f, li), n);
+                    self.tuple_locals.borrow_mut().insert((f, li), (n, frame));
                 }
                 n
             }
@@ -7306,11 +7457,14 @@ impl<'a> Project<'a> {
     /// What call reference `ri` of file `f` calls, with the overload its
     /// arguments are for: a callable, or the one constructor that takes them.
     fn call_target(&self, f: usize, ri: usize) -> Option<(DefRef, Confidence)> {
-        if let Some(known) = self.call_targets.borrow().get(&(f, ri)) {
+        if let Some((known, frame)) = self.call_targets.borrow().get(&(f, ri)) {
+            self.trace.file(f);
+            self.trace.absorb(frame);
             return *known;
         }
         // (a call that comes back to itself has no answer)
-        self.call_targets.borrow_mut().insert((f, ri), None);
+        self.call_targets.borrow_mut().insert((f, ri), (None, Rc::default()));
+        self.trace.open();
         let r = &self.files[f].refs[ri];
         let d = r.from_def;
         let saved = self.suspend();
@@ -7344,7 +7498,8 @@ impl<'a> Project<'a> {
             _ => None,
         };
         self.restore(saved);
-        self.call_targets.borrow_mut().insert((f, ri), out);
+        let frame = self.trace.close();
+        self.call_targets.borrow_mut().insert((f, ri), (out, frame));
         out
     }
 
@@ -7769,8 +7924,10 @@ impl<'a> Project<'a> {
                 if l.path.is_empty() || l.path.last().is_some_and(|s| s == crate::refs::OPENED) {
                     return false;
                 }
-                if let Some(&known) = self.sealed_locals.borrow().get(&(f, li)) {
-                    return known;
+                if let Some((known, frame)) = self.sealed_locals.borrow().get(&(f, li)) {
+                    self.trace.file(f);
+                    self.trace.absorb(frame);
+                    return *known;
                 }
                 // (worked out from the top it is the local's own answer and
                 // kept, as `local_type` keeps a type)
@@ -7778,6 +7935,7 @@ impl<'a> Project<'a> {
                 if *self.depth.borrow() > 3 || !self.typing.borrow_mut().insert((f, li)) {
                     return false;
                 }
+                self.trace.open();
                 *self.depth.borrow_mut() += 1;
                 let recv = self.recv.replace(None);
                 let types = self.types_only.replace(false);
@@ -7788,8 +7946,9 @@ impl<'a> Project<'a> {
                 self.typing.borrow_mut().remove(&(f, li));
                 let sealed = matches!(value, Some((Target::Def(c), _))
                     if self.def(c).kind.is_callable() && self.def(c).sealed);
+                let frame = self.trace.close();
                 if whole {
-                    self.sealed_locals.borrow_mut().insert((f, li), sealed);
+                    self.sealed_locals.borrow_mut().insert((f, li), (sealed, frame));
                 }
                 return sealed;
             }
@@ -8163,21 +8322,11 @@ impl<'a> Project<'a> {
     /// Laravel's `auth()->user()` gives.
     fn authenticatable_model(&self) -> Option<DefRef> {
         let mut found = None;
-        for (fi, file) in self.files.iter().enumerate() {
-            if self.family[fi] != Some(Family::Php) {
-                continue;
+        for &(fi, d) in self.php_bases.get("Authenticatable").into_iter().flatten() {
+            if found.is_some_and(|x| x != (fi, d)) {
+                return None;
             }
-            for r in &file.refs {
-                if matches!(r.kind, RefKind::Inherits | RefKind::Base)
-                    && r.path.last().is_some_and(|n| n == "Authenticatable")
-                {
-                    let Some(d) = r.from_def else { continue };
-                    if found.is_some_and(|x| x != (fi, d)) {
-                        return None;
-                    }
-                    found = Some((fi, d));
-                }
-            }
+            found = Some((fi, d));
         }
         found.filter(|c| self.def(*c).kind.is_class_like())
     }
@@ -9306,6 +9455,8 @@ struct FileOut {
     orm: Vec<(String, String, usize, u32, bool)>,
     ext: Vec<(String, String, &'static str)>,
     stats: ResolveStats,
+    /// What resolving the file read (`trace.rs`).
+    frame: Rc<trace::Frame>,
 }
 
 /// The order the files' references are resolved in: file order, or for a
@@ -9328,6 +9479,30 @@ fn resolve_order(n: usize) -> Vec<usize> {
         _ => {}
     }
     order
+}
+
+/// Sizes of what each file's resolution read, on stderr (a measurement).
+fn trace_stats(per_file: &[FileOut]) {
+    let mut files: Vec<usize> = per_file.iter().map(|o| o.frame.files.len()).collect();
+    let mut keys: Vec<usize> = per_file.iter().map(|o| o.frame.keys.len()).collect();
+    let all = per_file.iter().filter(|o| o.frame.all).count();
+    files.sort_unstable();
+    keys.sort_unstable();
+    let q =
+        |v: &[usize], x: f64| v.get(((v.len() as f64 - 1.0) * x) as usize).copied().unwrap_or(0);
+    eprintln!(
+        "trace: {} files; files read p50 {} p90 {} p99 {} max {}; keys p50 {} p90 {} p99 {} max {}; reading all {}",
+        per_file.len(),
+        q(&files, 0.5),
+        q(&files, 0.9),
+        q(&files, 0.99),
+        files.last().unwrap_or(&0),
+        q(&keys, 0.5),
+        q(&keys, 0.9),
+        q(&keys, 0.99),
+        keys.last().unwrap_or(&0),
+        all
+    );
 }
 
 /// What `resolve` gives the build.
@@ -9394,6 +9569,8 @@ pub fn resolve(
             let facts = &files[f];
             let out = &mut per_file[f];
             let Some(fam) = p.family[f] else { continue };
+            p.trace.open();
+            p.trace.file(f);
             let st = &mut out.stats;
             for (ri, r) in facts.refs.iter().enumerate() {
                 let src = p.source_of(f, r);
@@ -9993,6 +10170,14 @@ pub fn resolve(
                     runs: None,
                 });
             }
+            out.frame = p.trace.close_file();
+        }
+        if std::env::var("GRAPHLORE_TRACE_STATS").is_ok_and(|v| v == "1") {
+            trace_stats(&per_file);
+            let mut scans: Vec<(u32, usize)> =
+                p.trace.scans.borrow().iter().map(|(k, v)| (*k, *v)).collect();
+            scans.sort_by_key(|x| std::cmp::Reverse(x.1));
+            eprintln!("trace: scans at line (0: unbalanced) {scans:?}");
         }
         let mut orm_uses: Vec<(String, String, usize, u32, bool)> = Vec::new();
         for (f, out) in per_file.into_iter().enumerate() {
