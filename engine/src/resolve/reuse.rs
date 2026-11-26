@@ -130,6 +130,24 @@ pub fn reusable(
         .map(|(k, _)| *k)
         .collect();
     let anything = changed.iter().any(|c| *c) || !changed_keys.is_empty();
+    if std::env::var("GRAPHLORE_REUSE_WHY").is_ok_and(|v| v == "1") {
+        for (f, stored) in prev.files.iter().enumerate() {
+            let Some(s) = stored else { continue };
+            let files: Vec<(usize, u32)> = s
+                .files
+                .iter()
+                .filter(|&&c| read_changed(c))
+                .map(|&c| crate::resolve::trace::part::of(c))
+                .collect();
+            let keys = s.keys.iter().filter(|k| changed_keys.contains(k)).count();
+            if changed[f] || !files.is_empty() || keys > 0 || (s.all && anything) {
+                eprintln!(
+                    "reuse why: file {f}: own {}, files read changed {files:?}, keys {keys}, all {}",
+                    changed[f], s.all
+                );
+            }
+        }
+    }
     prev.files
         .iter()
         .enumerate()

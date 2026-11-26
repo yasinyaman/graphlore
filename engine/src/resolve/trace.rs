@@ -535,6 +535,12 @@ impl KeyText for str {
     }
 }
 
+impl KeyText for usize {
+    fn feed(&self, h: &mut Fnv) {
+        h.write(&(*self as u64).to_le_bytes());
+    }
+}
+
 impl<A: KeyText, B: KeyText> KeyText for (A, B) {
     fn feed(&self, h: &mut Fnv) {
         self.0.feed(h);
@@ -741,6 +747,18 @@ impl<A: Print, B: Print> Print for (A, B) {
     fn print(&self, h: &mut Fnv) {
         self.0.print(h);
         self.1.print(h);
+    }
+}
+
+impl<V: Print> Print for HashMap<String, V> {
+    fn print(&self, h: &mut Fnv) {
+        let mut keys: Vec<&String> = self.keys().collect();
+        keys.sort_unstable();
+        h.write(&(keys.len() as u64).to_le_bytes());
+        for k in keys {
+            k.print(h);
+            self[k].print(h);
+        }
     }
 }
 

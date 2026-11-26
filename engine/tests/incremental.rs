@@ -270,3 +270,111 @@ fn the_previous_communities_come_from_the_cache_only_for_the_graph_it_wrote() {
     assert_eq!(content(a), content(b));
     fs::remove_dir_all(&root).unwrap();
 }
+
+/// A Go package whose type is read by two other files.
+fn readers_project(name: &str) -> PathBuf {
+    let root = std::env::temp_dir().join(format!("graphlore-incr-{name}-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    write_files(
+        &root,
+        &[
+            ("go.mod", "module example.com/app\n\ngo 1.22\n"),
+            (
+                "app/server.go",
+                "package app\n\ntype Server struct {\n\tname string\n}\n\nfunc (s *Server) Start() int {\n\treturn 1\n}\n\nfunc (s *Server) Name() string {\n\treturn s.name\n}\n",
+            ),
+            ("app/a.go", "package app\n\nfunc A(s *Server) int {\n\treturn s.Start()\n}\n"),
+            ("app/b.go", "package app\n\nfunc B(s *Server) string {\n\treturn s.Name()\n}\n"),
+            ("app/other.go", "package app\n\nfunc Alone() int {\n\treturn 1\n}\n"),
+        ],
+    );
+    age(&root);
+    build_graph(&opts(&root, false)).unwrap();
+    root
+}
+
+fn calls_to(g: &Value, target_end: &str) -> bool {
+    g["links"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|e| e["relation"] == "calls" && e["target"].as_str().unwrap().ends_with(target_end))
+}
+
+#[test]
+fn a_function_body_edited_leaves_the_readers_of_its_file_as_they_were() {
+    let root = readers_project("body");
+    // lines added to a method's body: every position after them moves, the
+    // declarations a.go and b.go read do not change
+    fs::write(
+        root.join("app/server.go"),
+        "package app\n\ntype Server struct {\n\tname string\n}\n\nfunc (s *Server) Start() int {\n\tn := len(s.name)\n\tn++\n\t_ = n\n\treturn 1\n}\n\nfunc (s *Server) Name() string {\n\treturn s.name\n}\n",
+    )
+    .unwrap();
+    let (updated, report, full) = update_and_full(&root);
+    assert_eq!(
+        report.incremental.resolve_reused, 3,
+        "reused {}",
+        report.incremental.resolve_reused
+    );
+    assert_eq!(updated, full);
+    assert!(calls_to(&updated, "start"));
+    // a comment line above the type: the same
+    let text = fs::read_to_string(root.join("app/server.go")).unwrap();
+    fs::write(
+        root.join("app/server.go"),
+        text.replace("type Server", "// Server serves.\ntype Server"),
+    )
+    .unwrap();
+    let (updated, report, full) = update_and_full(&root);
+    assert_eq!(
+        report.incremental.resolve_reused, 3,
+        "reused {}",
+        report.incremental.resolve_reused
+    );
+    assert_eq!(updated, full);
+    fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn a_declaration_changed_resolves_its_readers_again() {
+    let root = readers_project("signature");
+    // `Start` renamed: a.go's call names nothing now
+    let text = fs::read_to_string(root.join("app/server.go")).unwrap();
+    fs::write(root.join("app/server.go"), text.replace("Start()", "Begin()")).unwrap();
+    let (updated, report, full) = update_and_full(&root);
+    assert!(report.incremental.resolve_reused < 3, "reused {}", report.incremental.resolve_reused);
+    assert_eq!(updated, full);
+    assert!(!calls_to(&updated, "start"));
+    fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn what_a_body_returns_is_read_as_a_declaration() {
+    let root = std::env::temp_dir().join(format!("graphlore-incr-returns-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    write_files(
+        &root,
+        &[
+            (
+                "pkg/make.py",
+                "class Engine:\n    def run(self):\n        return 1\n\nclass Motor:\n    def run(self):\n        return 2\n\ndef make():\n    return Engine()\n",
+            ),
+            ("app.py", "from pkg.make import make\n\ndef main():\n    make().run()\n"),
+        ],
+    );
+    age(&root);
+    build_graph(&opts(&root, false)).unwrap();
+    // `make` has no result written: what it returns types `make().run()`
+    let text = fs::read_to_string(root.join("pkg/make.py")).unwrap();
+    fs::write(root.join("pkg/make.py"), text.replace("return Engine()", "return Motor()")).unwrap();
+    let (updated, report, full) = update_and_full(&root);
+    assert_eq!(
+        report.incremental.resolve_reused, 0,
+        "reused {}",
+        report.incremental.resolve_reused
+    );
+    assert_eq!(updated, full);
+    assert!(calls_to(&updated, "motor_run"), "app.py calls Motor.run after the update");
+    fs::remove_dir_all(&root).unwrap();
+}

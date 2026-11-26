@@ -44,6 +44,17 @@ fn decl_locals(facts: &FileFacts) -> impl Iterator<Item = &Local> {
         .filter(|l| l.from_def.and_then(|x| facts.defs.get(x)).is_some_and(holds_declarations))
 }
 
+/// What names local `li` of a file in a print: a declaration scope's local
+/// by its place among those (`decl_locals`), another by its index and a mark.
+pub fn local_id(facts: &FileFacts, li: usize) -> (bool, usize) {
+    let decl =
+        |l: &Local| l.from_def.and_then(|x| facts.defs.get(x)).is_some_and(holds_declarations);
+    match facts.locals.get(li) {
+        Some(l) if decl(l) => (true, facts.locals[..li].iter().filter(|l| decl(l)).count()),
+        _ => (false, li),
+    }
+}
+
 /// The ranks of a file's declaration positions: lines and bytes apart (a
 /// line is never compared with a byte).
 pub struct Ranks {
@@ -205,14 +216,12 @@ pub fn print(facts: &FileFacts, content: u64) -> (u64, Ranks) {
         }
         let _ = h.write(&buf);
     }
-    // the locals of declaration scopes, with their index among all the
-    // file's locals (what `fields` and `locals` name them by)
-    for (li, l) in facts.locals.iter().enumerate() {
-        if !l.from_def.and_then(|x| facts.defs.get(x)).is_some_and(holds_declarations) {
-            continue;
-        }
+    // the locals of declaration scopes, in their order (a local added to a
+    // body before them moves their index among all the file's locals, not
+    // their order: `local_id`)
+    for l in decl_locals(facts) {
         buf.clear();
-        let ranked = (li, ranked_local(l, &r));
+        let ranked = ranked_local(l, &r);
         if codec().serialize_into(&mut buf, &ranked).is_err() || names_a_position(&buf) {
             let _ = h.write(b"content");
             let _ = h.write(&content.to_le_bytes());

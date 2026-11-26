@@ -1432,7 +1432,7 @@ pub struct Project<'a> {
     /// declared, where there are several (Rust `let r = a(); let r = b();`).
     shadows: FileKeyed<(usize, usize, String), Vec<usize>>,
     /// type -> field name -> the field's local (its declared or assigned type).
-    fields: FileKeyed<DefRef, HashMap<String, (usize, usize)>>,
+    fields: Named<DefRef, HashMap<String, (usize, usize)>>,
     depth: RefCell<usize>,
     /// Set while a type reference is resolved: names then mean types only
     /// (`Item Item { get; set; }`: the property's type, not the property).
@@ -1638,7 +1638,7 @@ impl<'a> Project<'a> {
             bases_memo: RefCell::new(HashMap::new()),
             locals: FileKeyed::new(tr()),
             shadows: FileKeyed::new(tr()),
-            fields: FileKeyed::new(tr()),
+            fields: Named::new("fields", tr()),
             depth: RefCell::new(0),
             types_only: RefCell::new(false),
             calling: RefCell::new(false),
@@ -1966,6 +1966,22 @@ impl<'a> Project<'a> {
         self.php_bases.prints(&mut out);
         self.top_files.prints(&mut out);
         self.go_pkg.prints(&mut out);
+        // a type's fields, each local by what names it in a print (its index
+        // moves when a body before it gains a local)
+        for (c, map) in self.fields.raw() {
+            let mut names: Vec<(&String, &(usize, usize))> = map.iter().collect();
+            names.sort_unstable();
+            let mut h = trace::Fnv::new();
+            for (n, &(fi, li)) in names {
+                h.write(n.as_bytes());
+                h.sep();
+                let (decl, id) = decl::local_id(&self.files.raw()[fi], li);
+                h.write(&[u8::from(decl)]);
+                h.write(&(fi as u64).to_le_bytes());
+                h.write(&(id as u64).to_le_bytes());
+            }
+            out.insert(trace::key_hash("fields", c), h.0 | 1);
+        }
         // the Go aliases of the whole project, one key
         if self.family.contains(&Some(Family::Go)) {
             self.go_aliases((0, 0));
