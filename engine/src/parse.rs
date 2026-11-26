@@ -92,6 +92,25 @@ pub fn parse(lang: Lang, src: &[u8], deadline: Option<Duration>) -> Result<Tree,
 
 /// The facts of one source file. `lang` is the detected language (or `None` for
 /// a document, which `doc` then names).
+/// Nanoseconds spent in each step of `file_facts`, summed over the threads
+/// that read files (a measurement: `GRAPHLORE_TRACE_STATS=1`).
+pub static STEP_NS: [std::sync::atomic::AtomicU64; 6] = [
+    std::sync::atomic::AtomicU64::new(0),
+    std::sync::atomic::AtomicU64::new(0),
+    std::sync::atomic::AtomicU64::new(0),
+    std::sync::atomic::AtomicU64::new(0),
+    std::sync::atomic::AtomicU64::new(0),
+    std::sync::atomic::AtomicU64::new(0),
+];
+pub const STEPS: [&str; 6] =
+    ["prepare", "tree-sitter", "definitions", "test regions", "references", "http"];
+
+fn step(i: usize, since: &mut std::time::Instant) {
+    let now = std::time::Instant::now();
+    STEP_NS[i].fetch_add((now - *since).as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
+    *since = now;
+}
+
 pub fn file_facts(
     rel: &str,
     src: &[u8],
@@ -107,17 +126,24 @@ pub fn file_facts(
     }
     let mut facts = FileFacts::new(rel.to_string(), lang, false, src);
     let Some(lang) = lang else { return facts };
+    let mut at = std::time::Instant::now();
     let prepared = prepare(lang, src);
     let src = &prepared[..];
+    step(0, &mut at);
     match parse(lang, src, deadline) {
         Ok(tree) => {
+            step(1, &mut at);
             let root = tree.root_node();
             let module = lang.module();
             facts.parse.has_error = root.has_error();
             facts.defs = generic::walk_defs(module, root, src);
+            step(2, &mut at);
             facts.test_regions = module.test_regions(root, src);
+            step(3, &mut at);
             crate::refs::read(module, root, src, &mut facts);
+            step(4, &mut at);
             crate::http::read(lang, root, src, &mut facts);
+            step(5, &mut at);
             for d in facts.defs.iter_mut() {
                 d.is_test = facts
                     .test_regions

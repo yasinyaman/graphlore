@@ -10578,17 +10578,21 @@ type UsedNotes = HashMap<(usize, usize), HashSet<usize>>;
 
 /// How many workers resolve the files' references: one when a measurement
 /// counts reads per site (it reads one project's counters), else
-/// `GRAPHLORE_RESOLVE_THREADS` or rayon's number of threads.
-fn resolve_workers(measuring: bool) -> usize {
+/// `GRAPHLORE_RESOLVE_THREADS`, else rayon's number of threads and no more
+/// than one per `FILES_PER_WORKER` files to resolve (a worker builds the
+/// indexes again first).
+fn resolve_workers(measuring: bool, to_resolve: usize) -> usize {
     if measuring {
         return 1;
     }
-    std::env::var("GRAPHLORE_RESOLVE_THREADS")
-        .ok()
-        .and_then(|v| v.parse::<usize>().ok())
-        .unwrap_or_else(rayon::current_num_threads)
-        .max(1)
+    // (asked for by number: that many, whatever the files, for a check)
+    if let Some(n) = std::env::var("GRAPHLORE_RESOLVE_THREADS").ok().and_then(|v| v.parse().ok()) {
+        return std::cmp::max(n, 1);
+    }
+    rayon::current_num_threads().min(to_resolve / FILES_PER_WORKER).max(1)
 }
+
+const FILES_PER_WORKER: usize = 1000;
 
 /// What `resolve` gives the build.
 pub struct Resolution {
@@ -10683,7 +10687,11 @@ pub fn resolve(
             !std::env::var("GRAPHLORE_TRACE").is_ok_and(|v| v == "0"),
             std::sync::atomic::Ordering::Relaxed,
         );
-        let workers = resolve_workers(stats_on || watch.is_some());
+        // (a worker builds the indexes again: worth it for many files only)
+        let to_resolve =
+            (0..files.len()).filter(|&f| p.family[f].is_some() && (verify || !reuse_ok[f])).count();
+        let workers = resolve_workers(stats_on || watch.is_some(), to_resolve);
+        let timing = std::env::var("GRAPHLORE_RESOLVE_TIMES").is_ok_and(|v| v == "1");
         let runs: Vec<(usize, FileRun)> = if workers <= 1 {
             order
                 .iter()
@@ -10708,7 +10716,9 @@ pub fn resolve(
                             (&next, &order, &reuse_ok, &incremental);
                         let manifests = worker_manifests.clone();
                         scope.spawn(move || {
+                            let began = std::time::Instant::now();
                             let wp = Project::new(root, files, shared, manifests, repos);
+                            let built = began.elapsed();
                             let mut mine = Vec::new();
                             loop {
                                 let n = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -10727,6 +10737,14 @@ pub fn resolve(
                                 ));
                             }
                             let used = std::mem::take(&mut *wp.used.borrow_mut());
+                            if timing {
+                                eprintln!(
+                                    "resolve worker: indexes {} ms, {} files in {} ms",
+                                    built.as_millis(),
+                                    mine.len(),
+                                    (began.elapsed() - built).as_millis()
+                                );
+                            }
                             (mine, used)
                         })
                     })

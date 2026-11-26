@@ -327,6 +327,16 @@ fn build_inner(opts: &BuildOptions, want_graph: bool) -> Result<(Value, BuildRep
 
     let mut reads = reads;
     lap("parse", &mut phases);
+    if std::env::var("GRAPHLORE_TRACE_STATS").is_ok_and(|v| v == "1") {
+        let steps: Vec<String> = parse::STEPS
+            .iter()
+            .zip(&parse::STEP_NS)
+            .map(|(n, ns)| {
+                format!("{n} {} ms", ns.load(std::sync::atomic::Ordering::Relaxed) / 1_000_000)
+            })
+            .collect();
+        eprintln!("parse steps (summed over threads): {}", steps.join(", "));
+    }
     let reread = reread_shadowed(&mut reads, &found.files, opts.parse_timeout);
     lap("reread", &mut phases);
     let mut report = BuildReport {
