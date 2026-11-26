@@ -4027,3 +4027,42 @@ fn a_large_literal_reads_in_linear_time() {
     assert!(facts.defs.iter().any(|d| d.name == "table"));
     assert!(started.elapsed().as_secs() < 20, "took {:?}", started.elapsed());
 }
+
+// Go: a local's value names what is in scope where the local is declared. A
+// generated deepcopy function shadows `in` and `out` in every block (`in, out
+// := &in.X, &out.X`): each is the receiver's field, and typing one took the
+// whole chain of the blocks before it at every use (kubernetes'
+// zz_generated.deepcopy.go: 8.6 s for 571 references).
+#[test]
+fn go_a_local_s_value_is_read_where_it_is_declared() {
+    let src = "package app\n\ntype Inner struct{}\n\nfunc (i *Inner) Copy() {}\n\ntype Leaf struct{}\n\nfunc (l *Leaf) Copy() {}\n\ntype Outer struct {\n\tA *Leaf\n\tB *Inner\n}\n\nfunc (in *Outer) DeepCopyInto(out *Outer) {\n\tif in.A != nil {\n\t\tin, out := &in.A, &out.A\n\t\t(*in).Copy()\n\t\t_ = out\n\t}\n\tif in.B != nil {\n\t\tin, out := &in.B, &out.B\n\t\t(*in).Copy()\n\t\t_ = out\n\t}\n}\n";
+    let got = call_ids(
+        "go-shadowed-blocks",
+        &[("go.mod", "module example.com/app\n\ngo 1.22\n"), ("app/a.go", src)],
+    );
+    for to in ["app_a_inner_copy", "app_a_leaf_copy"] {
+        assert!(got.contains(&(".DeepCopyInto()".to_string(), to.to_string())), "{to}: {got:?}");
+    }
+}
+
+#[test]
+fn shadowed_block_locals_are_typed_in_linear_time() {
+    let mut fields = String::new();
+    let mut body = String::new();
+    for i in 0..300 {
+        fields.push_str(&format!("\tF{i} *Inner\n"));
+        body.push_str(&format!(
+            "\tif in.F{i} != nil {{\n\t\tin, out := &in.F{i}, &out.F{i}\n\t\t(*in).Copy()\n\t\t_ = out\n\t}}\n"
+        ));
+    }
+    let src = format!(
+        "package app\n\ntype Inner struct{{}}\n\nfunc (i *Inner) Copy() {{}}\n\ntype Outer struct {{\n{fields}}}\n\nfunc (in *Outer) DeepCopyInto(out *Outer) {{\n{body}}}\n"
+    );
+    let started = std::time::Instant::now();
+    let got = call_ids(
+        "go-shadowed-many",
+        &[("go.mod", "module example.com/app\n\ngo 1.22\n"), ("app/a.go", &src)],
+    );
+    assert!(got.contains(&(".DeepCopyInto()".to_string(), "app_a_inner_copy".to_string())));
+    assert!(started.elapsed().as_secs() < 20, "took {:?}", started.elapsed());
+}

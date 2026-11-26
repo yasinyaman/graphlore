@@ -124,6 +124,7 @@ name to the engine, so the case names it `fetchAll`.
 
 ## The rules
 
+
 ### python (52 of 52)
 
 The Python Language Reference, 'Naming and binding' (4.2) and 'The import system'.
@@ -292,11 +293,11 @@ Found by: the specification 30, a compiler 19, comparison 0, the grammar 2, the 
 | an import of a directory is the file its `package.json` names | `package-json-types-entry` | – | yes |
 | where a type is written, a value of the name does not hide the type around it | `type-meaning-skips-values` | – | yes |
 
-### go (299 of 317)
+### go (300 of 318)
 
 The Go Programming Language Specification, 'Declarations and scope', 'Selectors', 'Method sets'.
 
-Found by: the specification 23, a compiler 13, comparison 2, the grammar 5, the language's own tools 15, a sweep of them 259. With the place it was read in the language's own tools: 279.
+Found by: the specification 23, a compiler 13, comparison 2, the grammar 5, the language's own tools 15, a sweep of them 259, profiling the engine 1. With the place it was read in the language's own tools: 280.
 
 | Rule | Case | Versions | Engine |
 |---|---|---|---|
@@ -617,6 +618,7 @@ Found by: the specification 23, a compiler 13, comparison 2, the grammar 5, the 
 | two directories whose files share a package clause name are two packages: a bare helper() is the one of its own directory's package block | `same-clause-name-in-two-directories-is-two-packages` | – | yes |
 | a dot-imported function's declared result gives the local its type: r.Find() is the imported type's method | `dot-imported-function-result-types-a-local` | – | yes |
 | a package type named any hides the universe's any: x.Run() on a parameter of type any is the package interface's method | `package-type-hides-the-predeclared-any` | 1.18– | yes |
+| a local's value names what is in scope where the local is declared: `in := in.B` in a later block is the receiver's field, not the earlier block's `in` | `local-value-is-read-where-it-is-declared` | – | yes |
 
 ### java (62 of 62)
 
@@ -1431,7 +1433,7 @@ Found by: the specification 32, a compiler 0, comparison 0, the grammar 4, the l
 | a member of an inline namespace is a member of the namespace around | `inline-namespace` | – | yes |
 | `T::f()` in a member of T: the name before `::` is the class, not the constructor of its name | `class-before-its-constructor` | – | yes |
 
-### ruby (34 of 35)
+### ruby (35 of 35)
 
 Ruby documentation, 'Calling Methods' and Module#ancestors (method lookup), 'Modules and Classes' (constant lookup).
 
@@ -1473,7 +1475,7 @@ Found by: the specification 29, a compiler 0, comparison 1, the grammar 0, the l
 | a constant of a module around the use comes before one of the class's ancestors | `lexical-constant-before-ancestor` | – | yes |
 | a block's parameter is a name of the block: it hides a method of its name there | `block-parameter-hides-a-method` | – | yes |
 | a name is a local only after the assignment that makes it one: before it, it is a method call | `local-only-after-assignment` | – | yes |
-| a bare name that is no local is a method call as a hash's value too (`{ status: status }`); the key names nothing | `bare-name-as-a-hash-value` | – | **no**: no Resp.to_hash -calls-> Resp.status; Resp.to_hash -calls-> Resp.body |
+| a bare name that is no local is a method call as a hash's value too (`{ status: status }`); the key names nothing | `bare-name-as-a-hash-value` | – | yes |
 
 ### php (37 of 37)
 
@@ -1521,4 +1523,4 @@ Found by: the specification 31, a compiler 2, comparison 0, the grammar 1, the l
 | `A::hello insteadof B` picks A's method of two used traits | `trait-insteadof` | – | yes |
 | a method a trait brings comes before an inherited one, and the class's own before both | `trait-before-inherited` | – | yes |
 
-1149 of 1271 rules hold
+1151 of 1272 rules hold

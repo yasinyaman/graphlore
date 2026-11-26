@@ -1463,6 +1463,10 @@ pub struct Project<'a> {
     /// Whether the reference being resolved was answered by a name alone
     /// (`fallback_method`, a single extension in sight): no scope said so.
     guessed: std::cell::Cell<bool>,
+    /// Set when a typing was cut short by where it was asked from (a local
+    /// already being typed, the depth of the walk): what was worked out
+    /// since may differ elsewhere and is not kept (`local_type_at`).
+    cut: std::cell::Cell<bool>,
     /// The Go type an embedded field's name was taken for (`member`): a
     /// read that ends there is of the field, which has no node
     embedded_hit: std::cell::Cell<Option<DefRef>>,
@@ -1653,6 +1657,7 @@ impl<'a> Project<'a> {
             call_targets: RefCell::new(HashMap::new()),
             guessed: std::cell::Cell::new(false),
             embedded_hit: std::cell::Cell::new(None),
+            cut: std::cell::Cell::new(false),
             value_binds: RefCell::new(HashMap::new()),
             end_binds: RefCell::new(None),
             typing_value: RefCell::new(false),
@@ -2077,6 +2082,7 @@ impl<'a> Project<'a> {
         *self.end_binds.borrow_mut() = None;
         self.guessed.set(false);
         self.embedded_hit.set(None);
+        self.cut.set(false);
     }
 
     /// The Go files of a (directory, package).
@@ -2180,6 +2186,7 @@ impl<'a> Project<'a> {
         {
             let mut depth = self.depth.borrow_mut();
             if *depth > 3 {
+                self.cut.set(true);
                 return None;
             }
             *depth += 1;
@@ -3116,6 +3123,8 @@ impl<'a> Project<'a> {
                 // a redeclaration's own value names the declaration before
                 // it (`let agent = agent.clone();`)
                 while self.typing.borrow().contains(&(f, li)) {
+                    // (which one depends on what is being typed around)
+                    self.cut.set(true);
                     match self.declared_before(f, x, name, li) {
                         Some(prev) => li = prev,
                         None => break,
@@ -3166,11 +3175,16 @@ impl<'a> Project<'a> {
             return *known;
         }
         // worked out from the top, the answer is the local's own and
-        // is kept; inside another typing it may be cut short
+        // is kept; inside another typing it may be cut short, and is kept
+        // when nothing cut it (`cut`): typing locals that each name the one
+        // before (Go's `in, out := &in.X, &out.X`, hundreds of times in a
+        // generated file) types each once, not the whole chain at every use
         let whole = self.typing.borrow().is_empty() && *self.depth.borrow() == 0;
         if !self.typing.borrow_mut().insert((f, li)) {
+            self.cut.set(true);
             return None;
         }
+        let outer_cut = self.cut.replace(false);
         let at = self.trace.epoch();
         // a local's type is the same whatever use asks for it: its
         // value's path is what is called there (`x = f()` -> `f`),
@@ -3182,12 +3196,18 @@ impl<'a> Project<'a> {
         let calling = self.calling.replace(value && !held);
         let typing_value = self.typing_value.replace(value);
         let recv = self.recv.replace(None);
+        // (its value is written where it is declared: a name in it is the
+        // one in force there, not where the use being resolved is written)
+        let site = self.site.replace(Some((f, self.local_at(f, li).byte)));
         let out = self.local_type_of(f, x, li, name);
+        *self.site.borrow_mut() = site;
         *self.recv.borrow_mut() = recv;
         *self.typing_value.borrow_mut() = typing_value;
         *self.calling.borrow_mut() = calling;
         self.typing.borrow_mut().remove(&(f, li));
-        if whole {
+        let was_cut = self.cut.replace(outer_cut);
+        self.cut.set(outer_cut || was_cut);
+        if whole || !was_cut {
             self.local_types.borrow_mut().insert((f, li), (out, at));
         }
         out
@@ -3537,6 +3557,7 @@ impl<'a> Project<'a> {
         // a field, a call's result, or a chain of collection methods on
         // one (`xs.filter { … }.sortedBy { … }`, `xs.map { it.owner }`)
         if *self.depth.borrow() > 3 {
+            self.cut.set(true);
             return None;
         }
         *self.depth.borrow_mut() += 1;
@@ -7473,6 +7494,7 @@ impl<'a> Project<'a> {
         }
         let whole = self.typing.borrow().is_empty() && *self.depth.borrow() == 0;
         if *self.depth.borrow() > 3 || !self.typing.borrow_mut().insert((f, li)) {
+            self.cut.set(true);
             return None;
         }
         let at = self.trace.epoch();
@@ -10709,6 +10731,10 @@ pub fn resolve(
             // the results go back to their files' places
             let next = std::sync::atomic::AtomicUsize::new(0);
             let shared: &Assembled = &*asm;
+            // the largest files first, so that none is left for last while
+            // the other workers wait (where they go back to is by file)
+            let mut order = order.clone();
+            order.sort_by_key(|&f| std::cmp::Reverse(files[f].refs.len()));
             let done: Vec<(Vec<(usize, FileRun)>, UsedNotes)> = std::thread::scope(|scope| {
                 let handles: Vec<_> = (0..workers)
                     .map(|_| {
@@ -10723,18 +10749,25 @@ pub fn resolve(
                             loop {
                                 let n = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                                 let Some(&f) = order.get(n) else { break };
-                                mine.push((
+                                let at = std::time::Instant::now();
+                                let run = resolve_file(
+                                    &wp,
+                                    files,
                                     f,
-                                    resolve_file(
-                                        &wp,
-                                        files,
-                                        f,
-                                        reuse_ok,
-                                        verify,
-                                        diagnose,
-                                        incremental,
-                                    ),
-                                ));
+                                    reuse_ok,
+                                    verify,
+                                    diagnose,
+                                    incremental,
+                                );
+                                if timing && at.elapsed().as_millis() >= 500 {
+                                    eprintln!(
+                                        "resolve worker: {} took {} ms ({} references)",
+                                        files[f].path,
+                                        at.elapsed().as_millis(),
+                                        files[f].refs.len()
+                                    );
+                                }
+                                mine.push((f, run));
                             }
                             let used = std::mem::take(&mut *wp.used.borrow_mut());
                             if timing {

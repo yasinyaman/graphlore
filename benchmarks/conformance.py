@@ -5292,6 +5292,22 @@ case("ruby", "bare-name-as-a-hash-value", "a bare name that is no local is a met
      [("Resp.to_hash", "calls", "Resp.status"), ("Resp.to_hash", "calls", "Resp.body")], [("Resp.to_hash", "calls", "Other.status")],
      source="Ruby documentation 'Calling Methods' (a method called with no receiver and no arguments needs no parentheses); faraday lib/faraday/response.rb to_hash")
 
+# Found by profiling the engine on kubernetes: a generated deepcopy function
+# shadows `in` and `out` in every `if` block (`in, out := &in.X, &out.X`); the
+# value of each is written where it is declared, where the earlier blocks'
+# locals are out of scope and `in` is the receiver.
+found_by("profile")
+GO_SPEC = "The Go Programming Language Specification, 'Declarations and scope'"
+case("go", "local-value-is-read-where-it-is-declared", "a local's value names what is in scope where the local is declared: `in := in.B` in a later block is the receiver's field, not the earlier block's `in`",
+     GO_SPEC, {"go.mod": "module example.com/app\n\ngo 1.22\n",
+               "app/a.go": "package app\n\ntype Inner struct{}\n\nfunc (i *Inner) Copy() {}\n\n"
+                           "type Leaf struct{}\n\nfunc (l *Leaf) Copy() {}\n\n"
+                           "type Outer struct {\n\tA *Leaf\n\tB *Inner\n}\n\n"
+                           "func (in *Outer) Copy() {\n\tif in.A != nil {\n\t\tin := in.A\n\t\tin.Copy()\n\t}\n"
+                           "\tif in.B != nil {\n\t\tin := in.B\n\t\tin.Copy()\n\t}\n}\n"},
+     [("Outer.Copy", "calls", "Inner.Copy"), ("Outer.Copy", "calls", "Leaf.Copy")], [("Outer.Copy", "calls", "Outer.Copy")],
+     source="go/types: a local's scope begins after its ShortVarDecl (Scope.Insert in assignment.go shortVarDecl)")
+
 
 def run_case(c: dict[str, Any]) -> dict[str, Any]:
     with tempfile.TemporaryDirectory() as tmp:
@@ -5346,13 +5362,14 @@ def main() -> int:
         passed = sum(1 for c in mine if results[c["id"]]["ok"])
         if args.markdown:
             how = {h: sum(1 for c in mine if c["found"] == h)
-                   for h in ("specification", "compiler", "comparison", "grammar", "source", "sweep")}
+                   for h in ("specification", "compiler", "comparison", "grammar", "source", "sweep", "profile")}
             read = sum(1 for c in mine if c["source"])
             print(f"\n### {lang} ({passed} of {len(mine)})\n\n{mine[0]['where']}.\n")
             print(f"Found by: the specification {how['specification']}, a compiler {how['compiler']}, "
                   f"comparison {how['comparison']}, the grammar {how['grammar']}, "
                   f"the language's own tools {how['source']}"
-                  + (f", a sweep of them {how['sweep']}" if how["sweep"] else "") + ". "
+                  + (f", a sweep of them {how['sweep']}" if how["sweep"] else "")
+                  + (f", profiling the engine {how['profile']}" if how["profile"] else "") + ". "
                   f"With the place it was read in the language's own "
                   f"tools: {read}.\n")
             print("| Rule | Case | Versions | Engine |\n|---|---|---|---|")

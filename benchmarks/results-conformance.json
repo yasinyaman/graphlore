@@ -1,6 +1,6 @@
 {
- "passed": 1150,
- "total": 1271,
+ "passed": 1151,
+ "total": 1272,
  "cases": [
   {
    "id": "python/module-function",
@@ -8621,6 +8621,12 @@
   },
   {
    "id": "ruby/bare-name-as-a-hash-value",
+   "ok": true,
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "go/local-value-is-read-where-it-is-declared",
    "ok": true,
    "missing": [],
    "unwanted": []
