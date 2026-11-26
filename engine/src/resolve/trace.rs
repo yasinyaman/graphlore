@@ -61,6 +61,29 @@ pub mod part {
     }
 }
 
+/// A file's flattened frame as it is kept with the file's output: its reads
+/// only, no part (and so with no shared pointer: it can go to another thread).
+#[derive(Default, Clone, Debug)]
+pub struct Flat {
+    pub files: Box<[u32]>,
+    pub keys: Box<[u64]>,
+    pub all: bool,
+    pub used: Box<[(u32, u32, u32)]>,
+}
+
+impl Flat {
+    /// A file's frame (`Trace::close_file`, flattened: no parts).
+    pub fn of(frame: &Frame) -> Flat {
+        debug_assert!(frame.parts.is_empty());
+        Flat {
+            files: frame.files.clone(),
+            keys: frame.keys.clone(),
+            all: frame.all,
+            used: frame.used.clone(),
+        }
+    }
+}
+
 /// A frame being filled: a bit per file and a set of keys say what is in
 /// it already, so that a read is counted once.
 #[derive(Default)]

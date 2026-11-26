@@ -9755,7 +9755,7 @@ struct FileOut {
     ext: Vec<(String, String, &'static str)>,
     stats: ResolveStats,
     /// What resolving the file read (`trace.rs`).
-    frame: Rc<trace::Frame>,
+    frame: trace::Flat,
 }
 
 /// The order the files' references are resolved in: file order, or for a
@@ -9856,12 +9856,11 @@ impl FileOut {
             .iter()
             .map(|(id, label, eco)| (id.clone(), label.clone(), crate::cache::intern(eco)))
             .collect();
-        let frame = trace::Frame {
+        let frame = trace::Flat {
             files: s.files.clone().into_boxed_slice(),
             keys: s.keys.clone().into_boxed_slice(),
             all: s.all,
             used: s.used.clone().into_boxed_slice(),
-            parts: Box::new([]),
         };
         FileOut {
             edges,
@@ -9869,7 +9868,7 @@ impl FileOut {
             orm,
             ext,
             stats: ResolveStats { unresolved: s.unresolved, ..Default::default() },
-            frame: Rc::new(frame),
+            frame,
         }
     }
 
@@ -9902,6 +9901,693 @@ impl FileOut {
             used: self.frame.used.to_vec(),
         }
     }
+}
+
+/// One file's resolution: what it gave, whether it was the last build's, and
+/// for `GRAPHLORE_REUSE_VERIFY` whether it was checked and what came out
+/// otherwise.
+#[derive(Default)]
+struct FileRun {
+    out: FileOut,
+    reused: bool,
+    verified: bool,
+    differed: Option<String>,
+}
+
+/// Resolve file `f`'s references with `p` (or take them from the last build).
+fn resolve_file(
+    p: &Project,
+    files: &[FileFacts],
+    f: usize,
+    reuse_ok: &[bool],
+    verify: bool,
+    diagnose: bool,
+    incremental: &Incremental<'_>,
+) -> FileRun {
+    p.forget();
+    // an external node, in the order first seen in the file
+    let ext_in = |seen: &mut Vec<(String, String, &'static str)>,
+                  e: usize,
+                  rest: &[String],
+                  symbol: bool| {
+        let (id, label, eco) = p.ext_node_id(e, rest, symbol);
+        if !seen.iter().any(|s| s.0 == id) {
+            seen.push((id.clone(), label, eco));
+        }
+        id
+    };
+    let facts = &files[f];
+    let mut run = FileRun::default();
+    let Some(fam) = p.family[f] else { return run };
+    p.trace.current.set(f as u32);
+    if reuse_ok[f] && !verify {
+        if let Some(Some(stored)) = incremental.previous.map(|s| &s.files[f]) {
+            run.out = FileOut::from_stored(stored);
+            // (the import uses it noted, which the imports' edges read)
+            let mut used = p.used.borrow_mut();
+            for &(a, b, c) in &stored.used {
+                used.entry((a as usize, b as usize)).or_default().insert(c as usize);
+            }
+            run.reused = true;
+            return run;
+        }
+    }
+    let out = &mut run.out;
+    p.trace.open();
+    p.trace.file(f);
+    let st = &mut out.stats;
+    for (ri, r) in facts.refs.iter().enumerate() {
+        let src = p.source_of(f, r);
+        // a data model's table, read or written through the ORM
+        if let Some((table, write)) = p.orm_use(f, r) {
+            out.orm.push((table, src.clone(), f, r.line, write));
+        }
+        let heritage = matches!(
+            r.kind,
+            RefKind::Inherits
+                | RefKind::Implements
+                | RefKind::Base
+                | RefKind::MixesIn
+                | RefKind::Embeds
+        );
+        let scope_def =
+            if heritage { r.from_def.and_then(|d| facts.defs[d].parent) } else { r.from_def };
+        // attribute reads, values and bare Ruby names never fall back
+        // to a name guess
+        let state = matches!(r.kind, RefKind::Read | RefKind::Write);
+        let strict =
+            heritage || state || matches!(r.kind, RefKind::Attr) || r.context == "implicit_call";
+        // a bare Ruby name that is a local is the local, not a call
+        // (typed or not: `s = stubs; s.match(x)` calls nothing at `s`)
+        // (only once the local exists: in Ruby the first assignment
+        // the parser meets makes it, so a use above it is a call)
+        if r.context == "implicit_call"
+            && r.path.len() == 1
+            && p.is_local_name(f, scope_def, &r.path[0])
+            && !p.ruby_local_starts_after(f, scope_def, &r.path[0], r.byte)
+        {
+            continue;
+        }
+        // (`typeof x` in a type names the value `x`: a value meaning)
+        *p.types_only.borrow_mut() =
+            heritage || (r.kind == RefKind::Type && r.context != "type_query");
+        *p.calling.borrow_mut() = matches!(r.kind, RefKind::Call | RefKind::New);
+        *p.recv.borrow_mut() = r.recv.map(|i| (f, i));
+        *p.args.borrow_mut() = r.args;
+        *p.self_arg.borrow_mut() = r.self_arg;
+        let is_call = matches!(r.kind, RefKind::Call | RefKind::New);
+        *p.cur.borrow_mut() = is_call.then_some((f, ri));
+        *p.site.borrow_mut() = Some((f, r.byte));
+        *p.ref_kind.borrow_mut() = Some(r.kind);
+        p.guessed.set(false);
+        p.embedded_hit.set(None);
+        let found = if let Some(place) = &r.implicit {
+            // Swift `.status(301)`: a static member of the type the
+            // place it stands in asks for
+            let saved = p.suspend();
+            let found = p.implicit_member(f, scope_def, r, place);
+            p.restore(saved);
+            found
+        } else if r.from_owner.is_some() && heritage {
+            p.resolve_path(f, None, &r.path, true)
+        } else if fam == Family::CSharp && r.kind == RefKind::Decorator {
+            p.csharp_attribute(f, scope_def, &r.path, strict)
+        } else if fam == Family::CSharp
+            && r.path.last().is_some_and(|s| s.starts_with("operator checked "))
+        {
+            // a `checked` context takes the checked operator, else the
+            // plain one (the standard's 12.8.20)
+            p.resolve_path(f, scope_def, &r.path, strict).or_else(|| {
+                let mut plain = r.path.clone();
+                if let Some(last) = plain.last_mut() {
+                    *last = format!("operator{}", &last["operator checked ".len()..]);
+                }
+                p.resolve_path(f, scope_def, &plain, strict)
+            })
+        } else {
+            p.resolve_path(f, scope_def, &r.path, strict)
+        };
+        *p.types_only.borrow_mut() = false;
+        *p.calling.borrow_mut() = false;
+        *p.recv.borrow_mut() = None;
+        // which of several overloads: the one the arguments are for
+        let mut tied: Vec<DefRef> = Vec::new();
+        let found = match found {
+            Some((Target::Def(m), conf))
+                if is_call
+                    && p.def(m).kind.is_callable()
+                    && r.path.last().is_some_and(|s| s != "()") =>
+            {
+                *p.recv.borrow_mut() = r.recv.map(|i| (f, i));
+                let picked = p.pick_overload(f, scope_def, m, r);
+                *p.recv.borrow_mut() = None;
+                // one of several that fit alike: each is a guess
+                let conf = if picked.len() > 1 { Confidence::Inferred } else { conf };
+                tied = picked[1..].to_vec();
+                Some((Target::Def(picked[0]), conf))
+            }
+            other => other,
+        };
+        // `io.Copy(&f.basicWriter, r)`: the embedded field itself,
+        // no use of its type
+        if let Some(e) = p.embedded_hit.take() {
+            if matches!(&found, Some((Target::Def(t), _)) if *t == e)
+                && matches!(r.kind, RefKind::Read | RefKind::Attr)
+            {
+                *p.args.borrow_mut() = None;
+                *p.self_arg.borrow_mut() = false;
+                *p.cur.borrow_mut() = None;
+                *p.site.borrow_mut() = None;
+                *p.ref_kind.borrow_mut() = None;
+                continue;
+            }
+        }
+        *p.args.borrow_mut() = None;
+        *p.self_arg.borrow_mut() = false;
+        *p.cur.borrow_mut() = None;
+        *p.site.borrow_mut() = None;
+        *p.ref_kind.borrow_mut() = None;
+        // C# `Ensure.NotNull(x)`, `KnownHeaders.Accept`: the type a
+        // static member is reached through is used too (as C and
+        // C++'s scoped paths are)
+        if fam == Family::CSharp
+            && r.path.len() >= 2
+            && matches!(r.kind, RefKind::Call | RefKind::Attr | RefKind::Read | RefKind::Write)
+            && matches!(&found, Some((Target::Def(_), _)))
+            && !matches!(r.path[0].as_str(), "self" | "super" | "base" | "()")
+            && !p.is_local_name(f, scope_def, &r.path[0])
+        {
+            if let Some((Target::Def(c), Confidence::Extracted)) =
+                p.resolve_path(f, scope_def, &r.path[..1], true)
+            {
+                // (written with no type argument: of `Maybe` and
+                // `Maybe<T>`, the one that takes none)
+                let c = if p.def(c).type_params.is_empty() {
+                    c
+                } else {
+                    p.fqn_of(c.0, c.1)
+                        .and_then(|fq| {
+                            p.fqn.get(&fq)?.iter().copied().find(|o| {
+                                p.def(*o).kind.is_class_like() && p.def(*o).type_params.is_empty()
+                            })
+                        })
+                        .unwrap_or(c)
+                };
+                if p.def(c).kind.is_class_like() {
+                    if let Some(id) = p.node_id(c).filter(|id| *id != src) {
+                        out.edges.push(EdgeOut {
+                            source: src.clone(),
+                            target: id.to_string(),
+                            relation: "references",
+                            confidence: Confidence::Extracted,
+                            file: f,
+                            line: r.line,
+                            context: "static",
+                            runs: None,
+                        });
+                    }
+                }
+            }
+        }
+        // a guess by name alone on another object never links a
+        // definition to itself: `base.evaluate()` inside `evaluate()`
+        // is a wrapper handing on to what it wraps
+        if p.guessed.get() && tied.is_empty() && r.path.len() >= 2 {
+            if let Some((Target::Def(t), Confidence::Inferred)) = &found {
+                if t.0 == f && r.from_def == Some(t.1) {
+                    continue;
+                }
+            }
+        }
+        // a Kotlin operator (`a + b`) is the operator of a's type, never
+        // a guess by its name (`plus` of some other type)
+        if (matches!(r.context, "operator" | "language_call") || r.context.starts_with("indexer"))
+            && !matches!(
+                &found,
+                Some((Target::Def(t), Confidence::Extracted)) if p.def(*t).kind.is_callable()
+            )
+        {
+            continue;
+        }
+        // a local called (`handler(x)`, `builder::add`) is the value
+        // it holds being called, not its type being constructed
+        if is_call && r.path.len() == 1 && p.is_local_name(f, scope_def, &r.path[0]) {
+            if let Some((Target::Def(t), _)) = &found {
+                if p.def(*t).kind.is_class_like() {
+                    continue;
+                }
+            }
+        }
+        let built_type = match &found {
+            Some((Target::Def(t), _)) if p.def(*t).kind.is_class_like() => Some(*t),
+            _ => None,
+        };
+        // C#: a type is told from its namesakes by the number of type
+        // arguments it is written with (`RestResponse` beside
+        // `RestResponse<T>`); one written with arguments is never a
+        // type that takes none (`List<string>` beside a class `List`)
+        let found = match (found, r.arity) {
+            (Some((Target::Def(t), conf)), Some(want))
+                if fam == Family::CSharp && p.def(t).kind.is_class_like() =>
+            {
+                let want = usize::from(want);
+                let has = p.def(t).type_params.len();
+                let other = || {
+                    let fq = p.fqn_of(t.0, t.1)?;
+                    p.fqn.get(&fq)?.iter().copied().find(|o| {
+                        p.def(*o).kind.is_class_like() && p.def(*o).type_params.len() == want
+                    })
+                };
+                if has == want {
+                    Some((Target::Def(t), conf))
+                } else if let Some(o) = other() {
+                    Some((Target::Def(o), conf))
+                } else if want > 0 && has == 0 {
+                    None
+                } else {
+                    Some((Target::Def(t), conf))
+                }
+            }
+            (found, _) => found,
+        };
+        // Rust: `self.proxy` with no call is the field, beside a
+        // method of its name (a method is never read without a call)
+        let found = match found {
+            Some((Target::Def(t), conf))
+                if matches!(r.kind, RefKind::Attr | RefKind::Read | RefKind::Write)
+                    && r.path.len() >= 2
+                    && fam == Family::Rust
+                    && p.def(t).kind.is_callable() =>
+            {
+                let name = p.def(t).name.clone();
+                let field = p.class_of(t.0, Some(t.1)).and_then(|c| {
+                    p.members(c, &name).into_iter().find(|m| p.def(*m).kind == DefKind::Property)
+                });
+                Some((Target::Def(field.unwrap_or(t)), conf))
+            }
+            other => other,
+        };
+        let (target, relation, conf) = match found {
+            Some((Target::Def(t), conf)) => {
+                // `throw ParserError.noValue("x")`: a case built with
+                // what it carries is a use of its enum, and so is a
+                // case named as a value (`return Color.Red`)
+                let made = (matches!(r.kind, RefKind::Call | RefKind::New | RefKind::Attr)
+                    && p.def(t).kind == DefKind::EnumMember)
+                    .then(|| p.def(t).parent.map(|e| (t.0, e)))
+                    .flatten()
+                    .filter(|e| p.def(*e).kind.is_class_like());
+                let (t, kind) = match made {
+                    Some(e) => (e, RefKind::Type),
+                    None => (t, r.kind),
+                };
+                let Some(id) = p.node_id(t) else { continue };
+                let tk = p.def(t).kind;
+                let rel = match kind {
+                    RefKind::Call | RefKind::New => {
+                        // a C# indexer: read, written, or named by an
+                        // object initializer
+                        if r.context.starts_with("indexer") {
+                            if p.def(t).name != crate::refs::INDEXER {
+                                continue;
+                            }
+                            match r.context {
+                                "indexer=" => "writes",
+                                "indexer{}" => "references",
+                                _ => "reads",
+                            }
+                        // a Lombok accessor called: the field it reads
+                        // or writes
+                        } else if tk.is_state() && r.kind == RefKind::Call {
+                            let called = r.path.last().map(String::as_str).unwrap_or("");
+                            // (Go `s.run()` on a field of function
+                            // type: the field is read)
+                            if fam == Family::Go && called == p.def(t).name {
+                                "reads"
+                            } else if called != p.def(t).name {
+                                if called.starts_with("set") {
+                                    "writes"
+                                } else {
+                                    "reads"
+                                }
+                            } else {
+                                continue;
+                            }
+                        } else if !(tk.is_callable()
+                            || tk.is_class_like()
+                            || tk == DefKind::TypeAlias)
+                        {
+                            // a type alias called: a conversion (Go
+                            // `HandlerFunc(f)`)
+                            continue;
+                        } else if fam == Family::Go && r.kind == RefKind::Call && p.is_type_like(t)
+                        {
+                            // Go: a type called is a conversion, a use
+                            // of the type (`T{}` is the construction)
+                            "references"
+                        } else {
+                            "calls"
+                        }
+                    }
+                    RefKind::Inherits => "inherits",
+                    RefKind::Implements => "implements",
+                    RefKind::Base => {
+                        if tk == DefKind::Interface {
+                            "implements"
+                        } else {
+                            "inherits"
+                        }
+                    }
+                    RefKind::MixesIn => "mixes_in",
+                    RefKind::Embeds => "embeds",
+                    RefKind::Type => {
+                        if !(tk.is_class_like() || tk == DefKind::TypeAlias) {
+                            continue;
+                        }
+                        "references"
+                    }
+                    RefKind::Decorator => "references",
+                    // a member read on its own: state is read, a method
+                    // taken as a value is referred to
+                    RefKind::Attr if tk.is_state() => "reads",
+                    // C++ `port::CondVar cv;`: a type named through
+                    // its namespace (an enumerator named became a
+                    // reference to its enum above)
+                    RefKind::Attr
+                        if tk.is_class_like()
+                            && p.family[f] == Some(Family::C)
+                            && !p
+                                .def(t)
+                                .parent
+                                .is_some_and(|e| p.def((t.0, e)).kind == DefKind::Enum) =>
+                    {
+                        "references"
+                    }
+                    // a type named as a value through what holds it
+                    // (`take(MyClass.Nested)`, `Sealed.A -> …`)
+                    // (a generic method's bare name, `Maybe.Nothing<T>()`,
+                    // reaches here alone: no type named through anything)
+                    RefKind::Attr
+                        if tk.is_class_like()
+                                && conf == Confidence::Extracted
+                                && r.path.len() >= 2
+                                // (… which is the type or namespace it is
+                                // declared in, or a module: `Maybe.Nothing`
+                                // beside a class `Nothing` is the method)
+                                && p.def(t).parent.is_none_or(|up| {
+                                    p.def((t.0, up)).name == r.path[r.path.len() - 2]
+                                }) =>
+                    {
+                        "references"
+                    }
+                    RefKind::Attr => {
+                        if !tk.is_callable() {
+                            continue;
+                        }
+                        // Scala `r.size`: a method that takes nothing
+                        // is called by naming it
+                        let scala = p.files.decl(f).lang() == Some(crate::lang::Lang::Scala);
+                        if scala && p.def(t).params.is_none_or(|n| n == 0) {
+                            "calls"
+                        } else {
+                            "references"
+                        }
+                    }
+                    // a function named as a value (`const k = helper`,
+                    // `cb = helper`, `exports.f = helper`), where a bare
+                    // function name is one
+                    RefKind::Read
+                        if conf == Confidence::Extracted
+                            && r.path.len() == 1
+                            && r.context != "object"
+                            && (tk.is_class_like()
+                                || (tk.is_callable()
+                                    && matches!(
+                                        p.family[f],
+                                        Some(Family::Ecma | Family::Python | Family::Go)
+                                    ))) =>
+                    {
+                        "references"
+                    }
+                    RefKind::Read | RefKind::Write => {
+                        if !tk.is_state() {
+                            continue;
+                        }
+                        // a mutating method's name means a change only
+                        // on a collection or a builder
+                        if r.context == "mutate" && !p.def(t).container {
+                            continue;
+                        }
+                        // a constructor setting its own object's fields
+                        // builds it; it couples nothing
+                        if r.kind == RefKind::Write
+                            && tk == DefKind::Property
+                            && p.constructs(f, r.from_def)
+                        {
+                            continue;
+                        }
+                        if r.kind == RefKind::Read {
+                            "reads"
+                        } else {
+                            "writes"
+                        }
+                    }
+                    RefKind::Indirect => {
+                        if conf != Confidence::Extracted {
+                            continue;
+                        }
+                        if tk.is_callable() {
+                            // Ruby has no bare function values: a method
+                            // named as an argument is called there
+                            if p.family[f] == Some(Family::Ruby) {
+                                "calls"
+                            } else {
+                                "indirect_call"
+                            }
+                        } else if tk.is_class_like() {
+                            "uses" // a type handed over as a value
+                        } else {
+                            continue;
+                        }
+                    }
+                };
+                // a write known only from the method's name is a guess
+                let conf =
+                    if r.context == "mutate" { conf.max(Confidence::Inferred) } else { conf };
+                (id.to_string(), rel, conf)
+            }
+            Some((Target::Ext(e, rest), conf)) => match r.kind {
+                RefKind::Call | RefKind::New => {
+                    (ext_in(&mut out.ext, e, &rest, false), "calls", conf)
+                }
+                RefKind::Decorator => (ext_in(&mut out.ext, e, &rest, true), "references", conf),
+                RefKind::Type
+                | RefKind::Indirect
+                | RefKind::Attr
+                | RefKind::Read
+                | RefKind::Write => continue,
+                k => (ext_in(&mut out.ext, e, &rest, true), external_base(k, fam, &rest), conf),
+            },
+            Some(_) => continue,
+            None => {
+                if heritage || r.kind == RefKind::Decorator {
+                    // a base or decorator the project does not define
+                    let label = r.path.join(if fam == Family::Rust { "::" } else { "." });
+                    let e = p.ext(&label, fam.ecosystem());
+                    let id = ext_in(&mut out.ext, e, &[], false);
+                    let rel = if r.kind == RefKind::Decorator {
+                        "references"
+                    } else {
+                        external_base(r.kind, fam, &r.path)
+                    };
+                    (id, rel, Confidence::Extracted)
+                } else {
+                    // `Model.validate(x)`: the method comes from a base
+                    // the project does not define; the use is still of
+                    // `Model`
+                    let head_type = (r.kind == RefKind::Call
+                        && r.path.len() >= 2
+                        && !matches!(r.path[0].as_str(), "self" | "super" | "()")
+                        && !p.is_local_name(f, scope_def, &r.path[0]))
+                    .then(|| p.resolve_path(f, scope_def, &r.path[..1], true))
+                    .flatten();
+                    if diagnose && is_call {
+                        out.left.extend(p.explain_unresolved(f, scope_def, r));
+                    }
+                    if let Some((Target::Def(t), conf)) = head_type {
+                        if p.def(t).kind.is_class_like() {
+                            if let Some(id) = p.node_id(t) {
+                                if id != src {
+                                    out.edges.push(EdgeOut {
+                                        source: src,
+                                        target: id.to_string(),
+                                        relation: "references",
+                                        confidence: conf,
+                                        file: f,
+                                        line: r.line,
+                                        context: "call",
+                                        runs: None,
+                                    });
+                                }
+                                continue;
+                            }
+                        }
+                    }
+                    // a name that is no state is most of what is read
+                    if !matches!(r.kind, RefKind::Indirect | RefKind::Read | RefKind::Write) {
+                        st.unresolved += 1;
+                    }
+                    continue;
+                }
+            }
+        };
+        if target == src && relation != "calls" {
+            continue;
+        }
+        // constructing a type runs the constructor it declares
+        let built = match built_type {
+            Some(t) if relation == "calls" => p.constructors(t),
+            _ => Vec::new(),
+        };
+        // of several overloads, the one that takes as many arguments
+        // as the site passes; when that names none or several, no
+        // constructor is named (the type still is). A Kotlin class has
+        // a primary constructor that is no definition: there the
+        // overload that fits is a guess
+        // A Kotlin class's primary constructor is written in its
+        // header and is no definition: its parameters are the
+        // class's, and it competes with the secondary ones. When it
+        // is the one called, the type is all there is to name; when
+        // the class writes none (or the site does not decide), a
+        // secondary constructor that fits is a guess
+        let kotlin = facts.lang == Some(Lang::Kotlin);
+        let primary =
+            built_type.filter(|t| kotlin && !built.is_empty() && p.def(*t).params.is_some());
+        *p.recv.borrow_mut() = r.recv.map(|i| (f, i));
+        let scored: Vec<(DefRef, i32)> = built
+            .iter()
+            .chain(primary.iter())
+            .filter_map(|c| p.fit(f, scope_def, *c, r).map(|s| (*c, s)))
+            .collect();
+        *p.recv.borrow_mut() = None;
+        let fits = p.exact_first(p.top_fits(&scored), r);
+        let one = if built.len() == 1 && !kotlin {
+            built.first()
+        } else if fits.len() == 1 && (r.args.is_some() || built.len() == 1) {
+            fits.first().filter(|c| Some(**c) != primary)
+        } else {
+            None
+        };
+        let sure = !kotlin || primary.is_some();
+        let picked = one.and_then(|c| p.node_id(*c));
+        if let Some(id) = picked.filter(|id| *id != src) {
+            out.edges.push(EdgeOut {
+                source: src.clone(),
+                target: id.to_string(),
+                relation: "calls",
+                confidence: if sure { conf } else { Confidence::Inferred },
+                file: f,
+                line: r.line,
+                context: "constructor",
+                runs: None,
+            });
+        }
+        // the other overloads that fit the call as well as this one
+        if relation == "calls" {
+            for other in &tied {
+                let Some(id) = p.node_id(*other) else { continue };
+                if id != target {
+                    out.edges.push(EdgeOut {
+                        source: src.clone(),
+                        target: id.to_string(),
+                        relation,
+                        confidence: Confidence::Inferred,
+                        file: f,
+                        line: r.line,
+                        context: r.context,
+                        runs: None,
+                    });
+                }
+            }
+        }
+        out.edges.push(EdgeOut {
+            source: src,
+            target,
+            relation,
+            confidence: conf,
+            file: f,
+            line: r.line,
+            context: if r.kind == RefKind::Decorator {
+                "decorator"
+            } else if matches!(r.kind, RefKind::Read | RefKind::Attr) && relation == "references" {
+                "value"
+            } else {
+                r.context
+            },
+            runs: None,
+        });
+    }
+    out.frame = trace::Flat::of(&p.trace.close_file());
+    if verify && reuse_ok[f] {
+        if let Some(Some(stored)) = incremental.previous.map(|s| &s.files[f]) {
+            run.verified = true;
+            let now = out.to_stored();
+            let same = now.edges.len() == stored.edges.len()
+                && now.edges.iter().zip(&stored.edges).all(|(a, b)| {
+                    (&a.source, &a.target, a.relation, a.inferred, a.file, a.line)
+                        == (&b.source, &b.target, b.relation, b.inferred, b.file, b.line)
+                        && (a.context, a.runs) == (b.context, b.runs)
+                })
+                && now.orm == stored.orm
+                && now.ext == stored.ext
+                && now.unresolved == stored.unresolved;
+            if !same {
+                let gone: Vec<String> = stored
+                    .edges
+                    .iter()
+                    .filter(|b| {
+                        !now.edges.iter().any(|a| {
+                            a.source == b.source && a.target == b.target && a.relation == b.relation
+                        })
+                    })
+                    .take(3)
+                    .map(|b| format!("-{} {} {}", b.source, b.relation, b.target))
+                    .chain(
+                        now.edges
+                            .iter()
+                            .filter(|a| {
+                                !stored.edges.iter().any(|b| {
+                                    a.source == b.source
+                                        && a.target == b.target
+                                        && a.relation == b.relation
+                                })
+                            })
+                            .take(3)
+                            .map(|a| format!("+{} {} {}", a.source, a.relation, a.target)),
+                    )
+                    .collect();
+                run.differed = Some(format!("{} {gone:?}", facts.path));
+            }
+        }
+    }
+    run
+}
+
+/// The import uses noted while resolving (`Project::used`).
+type UsedNotes = HashMap<(usize, usize), HashSet<usize>>;
+
+/// How many workers resolve the files' references: one when a measurement
+/// counts reads per site (it reads one project's counters), else
+/// `GRAPHLORE_RESOLVE_THREADS` or rayon's number of threads.
+fn resolve_workers(measuring: bool) -> usize {
+    if measuring {
+        return 1;
+    }
+    std::env::var("GRAPHLORE_RESOLVE_THREADS")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or_else(rayon::current_num_threads)
+        .max(1)
 }
 
 /// What `resolve` gives the build.
@@ -9945,6 +10631,7 @@ pub fn resolve(
     let route_nodes: Vec<http::RouteNode>;
     {
         rss("before the indexes");
+        let worker_manifests = manifests.clone();
         let p = Project::new(root, files, asm, manifests, repos);
         rss("indexes");
         // what can be taken from the last build: a file whose reads are all
@@ -9970,17 +10657,6 @@ pub fn resolve(
         rss("prints");
         timings.push(("resolve.index", started.elapsed().as_millis()));
         let mut ext_seen: HashSet<String> = HashSet::new();
-        // an external node, in the order first seen: one file's, then all
-        let ext_in = |seen: &mut Vec<(String, String, &'static str)>,
-                      e: usize,
-                      rest: &[String],
-                      symbol: bool| {
-            let (id, label, eco) = p.ext_node_id(e, rest, symbol);
-            if !seen.iter().any(|s| s.0 == id) {
-                seen.push((id.clone(), label, eco));
-            }
-            id
-        };
         let mut ext_target_id = |node: (String, String, &'static str)| {
             if ext_seen.insert(node.0.clone()) {
                 ext_nodes.push(node);
@@ -10007,675 +10683,75 @@ pub fn resolve(
             !std::env::var("GRAPHLORE_TRACE").is_ok_and(|v| v == "0"),
             std::sync::atomic::Ordering::Relaxed,
         );
-        for (n, f) in order.into_iter().enumerate() {
-            p.forget();
-            if n % 500 == 0 {
-                rss(&format!("file {n}"));
-            }
-            let facts = &files[f];
-            let out = &mut per_file[f];
-            let Some(fam) = p.family[f] else { continue };
-            p.trace.current.set(f as u32);
-            if reuse_ok[f] && !verify {
-                if let Some(Some(stored)) = incremental.previous.map(|s| &s.files[f]) {
-                    *out = FileOut::from_stored(stored);
-                    // (the import uses it noted, which the imports' edges read)
-                    let mut used = p.used.borrow_mut();
-                    for &(a, b, c) in &stored.used {
-                        used.entry((a as usize, b as usize)).or_default().insert(c as usize);
+        let workers = resolve_workers(stats_on || watch.is_some());
+        let runs: Vec<(usize, FileRun)> = if workers <= 1 {
+            order
+                .iter()
+                .enumerate()
+                .map(|(n, &f)| {
+                    if n % 500 == 0 {
+                        rss(&format!("file {n}"));
                     }
-                    reused += 1;
-                    continue;
-                }
-            }
-            p.trace.open();
-            p.trace.file(f);
-            let st = &mut out.stats;
-            for (ri, r) in facts.refs.iter().enumerate() {
-                let src = p.source_of(f, r);
-                // a data model's table, read or written through the ORM
-                if let Some((table, write)) = p.orm_use(f, r) {
-                    out.orm.push((table, src.clone(), f, r.line, write));
-                }
-                let heritage = matches!(
-                    r.kind,
-                    RefKind::Inherits
-                        | RefKind::Implements
-                        | RefKind::Base
-                        | RefKind::MixesIn
-                        | RefKind::Embeds
-                );
-                let scope_def = if heritage {
-                    r.from_def.and_then(|d| facts.defs[d].parent)
-                } else {
-                    r.from_def
-                };
-                // attribute reads, values and bare Ruby names never fall back
-                // to a name guess
-                let state = matches!(r.kind, RefKind::Read | RefKind::Write);
-                let strict = heritage
-                    || state
-                    || matches!(r.kind, RefKind::Attr)
-                    || r.context == "implicit_call";
-                // a bare Ruby name that is a local is the local, not a call
-                // (typed or not: `s = stubs; s.match(x)` calls nothing at `s`)
-                // (only once the local exists: in Ruby the first assignment
-                // the parser meets makes it, so a use above it is a call)
-                if r.context == "implicit_call"
-                    && r.path.len() == 1
-                    && p.is_local_name(f, scope_def, &r.path[0])
-                    && !p.ruby_local_starts_after(f, scope_def, &r.path[0], r.byte)
-                {
-                    continue;
-                }
-                // (`typeof x` in a type names the value `x`: a value meaning)
-                *p.types_only.borrow_mut() =
-                    heritage || (r.kind == RefKind::Type && r.context != "type_query");
-                *p.calling.borrow_mut() = matches!(r.kind, RefKind::Call | RefKind::New);
-                *p.recv.borrow_mut() = r.recv.map(|i| (f, i));
-                *p.args.borrow_mut() = r.args;
-                *p.self_arg.borrow_mut() = r.self_arg;
-                let is_call = matches!(r.kind, RefKind::Call | RefKind::New);
-                *p.cur.borrow_mut() = is_call.then_some((f, ri));
-                *p.site.borrow_mut() = Some((f, r.byte));
-                *p.ref_kind.borrow_mut() = Some(r.kind);
-                p.guessed.set(false);
-                p.embedded_hit.set(None);
-                let found = if let Some(place) = &r.implicit {
-                    // Swift `.status(301)`: a static member of the type the
-                    // place it stands in asks for
-                    let saved = p.suspend();
-                    let found = p.implicit_member(f, scope_def, r, place);
-                    p.restore(saved);
-                    found
-                } else if r.from_owner.is_some() && heritage {
-                    p.resolve_path(f, None, &r.path, true)
-                } else if fam == Family::CSharp && r.kind == RefKind::Decorator {
-                    p.csharp_attribute(f, scope_def, &r.path, strict)
-                } else if fam == Family::CSharp
-                    && r.path.last().is_some_and(|s| s.starts_with("operator checked "))
-                {
-                    // a `checked` context takes the checked operator, else the
-                    // plain one (the standard's 12.8.20)
-                    p.resolve_path(f, scope_def, &r.path, strict).or_else(|| {
-                        let mut plain = r.path.clone();
-                        if let Some(last) = plain.last_mut() {
-                            *last = format!("operator{}", &last["operator checked ".len()..]);
-                        }
-                        p.resolve_path(f, scope_def, &plain, strict)
-                    })
-                } else {
-                    p.resolve_path(f, scope_def, &r.path, strict)
-                };
-                *p.types_only.borrow_mut() = false;
-                *p.calling.borrow_mut() = false;
-                *p.recv.borrow_mut() = None;
-                // which of several overloads: the one the arguments are for
-                let mut tied: Vec<DefRef> = Vec::new();
-                let found = match found {
-                    Some((Target::Def(m), conf))
-                        if is_call
-                            && p.def(m).kind.is_callable()
-                            && r.path.last().is_some_and(|s| s != "()") =>
-                    {
-                        *p.recv.borrow_mut() = r.recv.map(|i| (f, i));
-                        let picked = p.pick_overload(f, scope_def, m, r);
-                        *p.recv.borrow_mut() = None;
-                        // one of several that fit alike: each is a guess
-                        let conf = if picked.len() > 1 { Confidence::Inferred } else { conf };
-                        tied = picked[1..].to_vec();
-                        Some((Target::Def(picked[0]), conf))
-                    }
-                    other => other,
-                };
-                // `io.Copy(&f.basicWriter, r)`: the embedded field itself,
-                // no use of its type
-                if let Some(e) = p.embedded_hit.take() {
-                    if matches!(&found, Some((Target::Def(t), _)) if *t == e)
-                        && matches!(r.kind, RefKind::Read | RefKind::Attr)
-                    {
-                        *p.args.borrow_mut() = None;
-                        *p.self_arg.borrow_mut() = false;
-                        *p.cur.borrow_mut() = None;
-                        *p.site.borrow_mut() = None;
-                        *p.ref_kind.borrow_mut() = None;
-                        continue;
-                    }
-                }
-                *p.args.borrow_mut() = None;
-                *p.self_arg.borrow_mut() = false;
-                *p.cur.borrow_mut() = None;
-                *p.site.borrow_mut() = None;
-                *p.ref_kind.borrow_mut() = None;
-                // C# `Ensure.NotNull(x)`, `KnownHeaders.Accept`: the type a
-                // static member is reached through is used too (as C and
-                // C++'s scoped paths are)
-                if fam == Family::CSharp
-                    && r.path.len() >= 2
-                    && matches!(
-                        r.kind,
-                        RefKind::Call | RefKind::Attr | RefKind::Read | RefKind::Write
-                    )
-                    && matches!(&found, Some((Target::Def(_), _)))
-                    && !matches!(r.path[0].as_str(), "self" | "super" | "base" | "()")
-                    && !p.is_local_name(f, scope_def, &r.path[0])
-                {
-                    if let Some((Target::Def(c), Confidence::Extracted)) =
-                        p.resolve_path(f, scope_def, &r.path[..1], true)
-                    {
-                        // (written with no type argument: of `Maybe` and
-                        // `Maybe<T>`, the one that takes none)
-                        let c = if p.def(c).type_params.is_empty() {
-                            c
-                        } else {
-                            p.fqn_of(c.0, c.1)
-                                .and_then(|fq| {
-                                    p.fqn.get(&fq)?.iter().copied().find(|o| {
-                                        p.def(*o).kind.is_class_like()
-                                            && p.def(*o).type_params.is_empty()
-                                    })
-                                })
-                                .unwrap_or(c)
-                        };
-                        if p.def(c).kind.is_class_like() {
-                            if let Some(id) = p.node_id(c).filter(|id| *id != src) {
-                                out.edges.push(EdgeOut {
-                                    source: src.clone(),
-                                    target: id.to_string(),
-                                    relation: "references",
-                                    confidence: Confidence::Extracted,
-                                    file: f,
-                                    line: r.line,
-                                    context: "static",
-                                    runs: None,
-                                });
+                    (f, resolve_file(&p, files, f, &reuse_ok, verify, diagnose, &incremental))
+                })
+                .collect()
+        } else {
+            // each worker resolves with a project of its own (the per-file
+            // state is the worker's), taking the next file as it is done;
+            // the results go back to their files' places
+            let next = std::sync::atomic::AtomicUsize::new(0);
+            let shared: &Assembled = &*asm;
+            let done: Vec<(Vec<(usize, FileRun)>, UsedNotes)> = std::thread::scope(|scope| {
+                let handles: Vec<_> = (0..workers)
+                    .map(|_| {
+                        let (next, order, reuse_ok, incremental) =
+                            (&next, &order, &reuse_ok, &incremental);
+                        let manifests = worker_manifests.clone();
+                        scope.spawn(move || {
+                            let wp = Project::new(root, files, shared, manifests, repos);
+                            let mut mine = Vec::new();
+                            loop {
+                                let n = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                                let Some(&f) = order.get(n) else { break };
+                                mine.push((
+                                    f,
+                                    resolve_file(
+                                        &wp,
+                                        files,
+                                        f,
+                                        reuse_ok,
+                                        verify,
+                                        diagnose,
+                                        incremental,
+                                    ),
+                                ));
                             }
-                        }
-                    }
-                }
-                // a guess by name alone on another object never links a
-                // definition to itself: `base.evaluate()` inside `evaluate()`
-                // is a wrapper handing on to what it wraps
-                if p.guessed.get() && tied.is_empty() && r.path.len() >= 2 {
-                    if let Some((Target::Def(t), Confidence::Inferred)) = &found {
-                        if t.0 == f && r.from_def == Some(t.1) {
-                            continue;
-                        }
-                    }
-                }
-                // a Kotlin operator (`a + b`) is the operator of a's type, never
-                // a guess by its name (`plus` of some other type)
-                if (matches!(r.context, "operator" | "language_call")
-                    || r.context.starts_with("indexer"))
-                    && !matches!(
-                        &found,
-                        Some((Target::Def(t), Confidence::Extracted)) if p.def(*t).kind.is_callable()
-                    )
-                {
-                    continue;
-                }
-                // a local called (`handler(x)`, `builder::add`) is the value
-                // it holds being called, not its type being constructed
-                if is_call && r.path.len() == 1 && p.is_local_name(f, scope_def, &r.path[0]) {
-                    if let Some((Target::Def(t), _)) = &found {
-                        if p.def(*t).kind.is_class_like() {
-                            continue;
-                        }
-                    }
-                }
-                let built_type = match &found {
-                    Some((Target::Def(t), _)) if p.def(*t).kind.is_class_like() => Some(*t),
-                    _ => None,
-                };
-                // C#: a type is told from its namesakes by the number of type
-                // arguments it is written with (`RestResponse` beside
-                // `RestResponse<T>`); one written with arguments is never a
-                // type that takes none (`List<string>` beside a class `List`)
-                let found = match (found, r.arity) {
-                    (Some((Target::Def(t), conf)), Some(want))
-                        if fam == Family::CSharp && p.def(t).kind.is_class_like() =>
-                    {
-                        let want = usize::from(want);
-                        let has = p.def(t).type_params.len();
-                        let other = || {
-                            let fq = p.fqn_of(t.0, t.1)?;
-                            p.fqn.get(&fq)?.iter().copied().find(|o| {
-                                p.def(*o).kind.is_class_like()
-                                    && p.def(*o).type_params.len() == want
-                            })
-                        };
-                        if has == want {
-                            Some((Target::Def(t), conf))
-                        } else if let Some(o) = other() {
-                            Some((Target::Def(o), conf))
-                        } else if want > 0 && has == 0 {
-                            None
-                        } else {
-                            Some((Target::Def(t), conf))
-                        }
-                    }
-                    (found, _) => found,
-                };
-                // Rust: `self.proxy` with no call is the field, beside a
-                // method of its name (a method is never read without a call)
-                let found = match found {
-                    Some((Target::Def(t), conf))
-                        if matches!(r.kind, RefKind::Attr | RefKind::Read | RefKind::Write)
-                            && r.path.len() >= 2
-                            && fam == Family::Rust
-                            && p.def(t).kind.is_callable() =>
-                    {
-                        let name = p.def(t).name.clone();
-                        let field = p.class_of(t.0, Some(t.1)).and_then(|c| {
-                            p.members(c, &name)
-                                .into_iter()
-                                .find(|m| p.def(*m).kind == DefKind::Property)
-                        });
-                        Some((Target::Def(field.unwrap_or(t)), conf))
-                    }
-                    other => other,
-                };
-                let (target, relation, conf) = match found {
-                    Some((Target::Def(t), conf)) => {
-                        // `throw ParserError.noValue("x")`: a case built with
-                        // what it carries is a use of its enum, and so is a
-                        // case named as a value (`return Color.Red`)
-                        let made = (matches!(r.kind, RefKind::Call | RefKind::New | RefKind::Attr)
-                            && p.def(t).kind == DefKind::EnumMember)
-                            .then(|| p.def(t).parent.map(|e| (t.0, e)))
-                            .flatten()
-                            .filter(|e| p.def(*e).kind.is_class_like());
-                        let (t, kind) = match made {
-                            Some(e) => (e, RefKind::Type),
-                            None => (t, r.kind),
-                        };
-                        let Some(id) = p.node_id(t) else { continue };
-                        let tk = p.def(t).kind;
-                        let rel = match kind {
-                            RefKind::Call | RefKind::New => {
-                                // a C# indexer: read, written, or named by an
-                                // object initializer
-                                if r.context.starts_with("indexer") {
-                                    if p.def(t).name != crate::refs::INDEXER {
-                                        continue;
-                                    }
-                                    match r.context {
-                                        "indexer=" => "writes",
-                                        "indexer{}" => "references",
-                                        _ => "reads",
-                                    }
-                                // a Lombok accessor called: the field it reads
-                                // or writes
-                                } else if tk.is_state() && r.kind == RefKind::Call {
-                                    let called = r.path.last().map(String::as_str).unwrap_or("");
-                                    // (Go `s.run()` on a field of function
-                                    // type: the field is read)
-                                    if fam == Family::Go && called == p.def(t).name {
-                                        "reads"
-                                    } else if called != p.def(t).name {
-                                        if called.starts_with("set") {
-                                            "writes"
-                                        } else {
-                                            "reads"
-                                        }
-                                    } else {
-                                        continue;
-                                    }
-                                } else if !(tk.is_callable()
-                                    || tk.is_class_like()
-                                    || tk == DefKind::TypeAlias)
-                                {
-                                    // a type alias called: a conversion (Go
-                                    // `HandlerFunc(f)`)
-                                    continue;
-                                } else if fam == Family::Go
-                                    && r.kind == RefKind::Call
-                                    && p.is_type_like(t)
-                                {
-                                    // Go: a type called is a conversion, a use
-                                    // of the type (`T{}` is the construction)
-                                    "references"
-                                } else {
-                                    "calls"
-                                }
-                            }
-                            RefKind::Inherits => "inherits",
-                            RefKind::Implements => "implements",
-                            RefKind::Base => {
-                                if tk == DefKind::Interface {
-                                    "implements"
-                                } else {
-                                    "inherits"
-                                }
-                            }
-                            RefKind::MixesIn => "mixes_in",
-                            RefKind::Embeds => "embeds",
-                            RefKind::Type => {
-                                if !(tk.is_class_like() || tk == DefKind::TypeAlias) {
-                                    continue;
-                                }
-                                "references"
-                            }
-                            RefKind::Decorator => "references",
-                            // a member read on its own: state is read, a method
-                            // taken as a value is referred to
-                            RefKind::Attr if tk.is_state() => "reads",
-                            // C++ `port::CondVar cv;`: a type named through
-                            // its namespace (an enumerator named became a
-                            // reference to its enum above)
-                            RefKind::Attr
-                                if tk.is_class_like()
-                                    && p.family[f] == Some(Family::C)
-                                    && !p
-                                        .def(t)
-                                        .parent
-                                        .is_some_and(|e| p.def((t.0, e)).kind == DefKind::Enum) =>
-                            {
-                                "references"
-                            }
-                            // a type named as a value through what holds it
-                            // (`take(MyClass.Nested)`, `Sealed.A -> …`)
-                            // (a generic method's bare name, `Maybe.Nothing<T>()`,
-                            // reaches here alone: no type named through anything)
-                            RefKind::Attr
-                                if tk.is_class_like()
-                                    && conf == Confidence::Extracted
-                                    && r.path.len() >= 2
-                                    // (… which is the type or namespace it is
-                                    // declared in, or a module: `Maybe.Nothing`
-                                    // beside a class `Nothing` is the method)
-                                    && p.def(t).parent.is_none_or(|up| {
-                                        p.def((t.0, up)).name == r.path[r.path.len() - 2]
-                                    }) =>
-                            {
-                                "references"
-                            }
-                            RefKind::Attr => {
-                                if !tk.is_callable() {
-                                    continue;
-                                }
-                                // Scala `r.size`: a method that takes nothing
-                                // is called by naming it
-                                let scala =
-                                    p.files.decl(f).lang() == Some(crate::lang::Lang::Scala);
-                                if scala && p.def(t).params.is_none_or(|n| n == 0) {
-                                    "calls"
-                                } else {
-                                    "references"
-                                }
-                            }
-                            // a function named as a value (`const k = helper`,
-                            // `cb = helper`, `exports.f = helper`), where a bare
-                            // function name is one
-                            RefKind::Read
-                                if conf == Confidence::Extracted
-                                    && r.path.len() == 1
-                                    && r.context != "object"
-                                    && (tk.is_class_like()
-                                        || (tk.is_callable()
-                                            && matches!(
-                                                p.family[f],
-                                                Some(Family::Ecma | Family::Python | Family::Go)
-                                            ))) =>
-                            {
-                                "references"
-                            }
-                            RefKind::Read | RefKind::Write => {
-                                if !tk.is_state() {
-                                    continue;
-                                }
-                                // a mutating method's name means a change only
-                                // on a collection or a builder
-                                if r.context == "mutate" && !p.def(t).container {
-                                    continue;
-                                }
-                                // a constructor setting its own object's fields
-                                // builds it; it couples nothing
-                                if r.kind == RefKind::Write
-                                    && tk == DefKind::Property
-                                    && p.constructs(f, r.from_def)
-                                {
-                                    continue;
-                                }
-                                if r.kind == RefKind::Read {
-                                    "reads"
-                                } else {
-                                    "writes"
-                                }
-                            }
-                            RefKind::Indirect => {
-                                if conf != Confidence::Extracted {
-                                    continue;
-                                }
-                                if tk.is_callable() {
-                                    // Ruby has no bare function values: a method
-                                    // named as an argument is called there
-                                    if p.family[f] == Some(Family::Ruby) {
-                                        "calls"
-                                    } else {
-                                        "indirect_call"
-                                    }
-                                } else if tk.is_class_like() {
-                                    "uses" // a type handed over as a value
-                                } else {
-                                    continue;
-                                }
-                            }
-                        };
-                        // a write known only from the method's name is a guess
-                        let conf = if r.context == "mutate" {
-                            conf.max(Confidence::Inferred)
-                        } else {
-                            conf
-                        };
-                        (id.to_string(), rel, conf)
-                    }
-                    Some((Target::Ext(e, rest), conf)) => match r.kind {
-                        RefKind::Call | RefKind::New => {
-                            (ext_in(&mut out.ext, e, &rest, false), "calls", conf)
-                        }
-                        RefKind::Decorator => {
-                            (ext_in(&mut out.ext, e, &rest, true), "references", conf)
-                        }
-                        RefKind::Type
-                        | RefKind::Indirect
-                        | RefKind::Attr
-                        | RefKind::Read
-                        | RefKind::Write => continue,
-                        k => (
-                            ext_in(&mut out.ext, e, &rest, true),
-                            external_base(k, fam, &rest),
-                            conf,
-                        ),
-                    },
-                    Some(_) => continue,
-                    None => {
-                        if heritage || r.kind == RefKind::Decorator {
-                            // a base or decorator the project does not define
-                            let label = r.path.join(if fam == Family::Rust { "::" } else { "." });
-                            let e = p.ext(&label, fam.ecosystem());
-                            let id = ext_in(&mut out.ext, e, &[], false);
-                            let rel = if r.kind == RefKind::Decorator {
-                                "references"
-                            } else {
-                                external_base(r.kind, fam, &r.path)
-                            };
-                            (id, rel, Confidence::Extracted)
-                        } else {
-                            // `Model.validate(x)`: the method comes from a base
-                            // the project does not define; the use is still of
-                            // `Model`
-                            let head_type = (r.kind == RefKind::Call
-                                && r.path.len() >= 2
-                                && !matches!(r.path[0].as_str(), "self" | "super" | "()")
-                                && !p.is_local_name(f, scope_def, &r.path[0]))
-                            .then(|| p.resolve_path(f, scope_def, &r.path[..1], true))
-                            .flatten();
-                            if diagnose && is_call {
-                                out.left.extend(p.explain_unresolved(f, scope_def, r));
-                            }
-                            if let Some((Target::Def(t), conf)) = head_type {
-                                if p.def(t).kind.is_class_like() {
-                                    if let Some(id) = p.node_id(t) {
-                                        if id != src {
-                                            out.edges.push(EdgeOut {
-                                                source: src,
-                                                target: id.to_string(),
-                                                relation: "references",
-                                                confidence: conf,
-                                                file: f,
-                                                line: r.line,
-                                                context: "call",
-                                                runs: None,
-                                            });
-                                        }
-                                        continue;
-                                    }
-                                }
-                            }
-                            // a name that is no state is most of what is read
-                            if !matches!(r.kind, RefKind::Indirect | RefKind::Read | RefKind::Write)
-                            {
-                                st.unresolved += 1;
-                            }
-                            continue;
-                        }
-                    }
-                };
-                if target == src && relation != "calls" {
-                    continue;
-                }
-                // constructing a type runs the constructor it declares
-                let built = match built_type {
-                    Some(t) if relation == "calls" => p.constructors(t),
-                    _ => Vec::new(),
-                };
-                // of several overloads, the one that takes as many arguments
-                // as the site passes; when that names none or several, no
-                // constructor is named (the type still is). A Kotlin class has
-                // a primary constructor that is no definition: there the
-                // overload that fits is a guess
-                // A Kotlin class's primary constructor is written in its
-                // header and is no definition: its parameters are the
-                // class's, and it competes with the secondary ones. When it
-                // is the one called, the type is all there is to name; when
-                // the class writes none (or the site does not decide), a
-                // secondary constructor that fits is a guess
-                let kotlin = facts.lang == Some(Lang::Kotlin);
-                let primary = built_type
-                    .filter(|t| kotlin && !built.is_empty() && p.def(*t).params.is_some());
-                *p.recv.borrow_mut() = r.recv.map(|i| (f, i));
-                let scored: Vec<(DefRef, i32)> = built
-                    .iter()
-                    .chain(primary.iter())
-                    .filter_map(|c| p.fit(f, scope_def, *c, r).map(|s| (*c, s)))
-                    .collect();
-                *p.recv.borrow_mut() = None;
-                let fits = p.exact_first(p.top_fits(&scored), r);
-                let one = if built.len() == 1 && !kotlin {
-                    built.first()
-                } else if fits.len() == 1 && (r.args.is_some() || built.len() == 1) {
-                    fits.first().filter(|c| Some(**c) != primary)
-                } else {
-                    None
-                };
-                let sure = !kotlin || primary.is_some();
-                let picked = one.and_then(|c| p.node_id(*c));
-                if let Some(id) = picked.filter(|id| *id != src) {
-                    out.edges.push(EdgeOut {
-                        source: src.clone(),
-                        target: id.to_string(),
-                        relation: "calls",
-                        confidence: if sure { conf } else { Confidence::Inferred },
-                        file: f,
-                        line: r.line,
-                        context: "constructor",
-                        runs: None,
-                    });
-                }
-                // the other overloads that fit the call as well as this one
-                if relation == "calls" {
-                    for other in &tied {
-                        let Some(id) = p.node_id(*other) else { continue };
-                        if id != target {
-                            out.edges.push(EdgeOut {
-                                source: src.clone(),
-                                target: id.to_string(),
-                                relation,
-                                confidence: Confidence::Inferred,
-                                file: f,
-                                line: r.line,
-                                context: r.context,
-                                runs: None,
-                            });
-                        }
-                    }
-                }
-                out.edges.push(EdgeOut {
-                    source: src,
-                    target,
-                    relation,
-                    confidence: conf,
-                    file: f,
-                    line: r.line,
-                    context: if r.kind == RefKind::Decorator {
-                        "decorator"
-                    } else if matches!(r.kind, RefKind::Read | RefKind::Attr)
-                        && relation == "references"
-                    {
-                        "value"
-                    } else {
-                        r.context
-                    },
-                    runs: None,
-                });
-            }
-            out.frame = p.trace.close_file();
-            if verify && reuse_ok[f] {
-                if let Some(Some(stored)) = incremental.previous.map(|s| &s.files[f]) {
-                    verified += 1;
-                    let now = out.to_stored();
-                    let same = now.edges.len() == stored.edges.len()
-                        && now.edges.iter().zip(&stored.edges).all(|(a, b)| {
-                            (&a.source, &a.target, a.relation, a.inferred, a.file, a.line)
-                                == (&b.source, &b.target, b.relation, b.inferred, b.file, b.line)
-                                && (a.context, a.runs) == (b.context, b.runs)
+                            let used = std::mem::take(&mut *wp.used.borrow_mut());
+                            (mine, used)
                         })
-                        && now.orm == stored.orm
-                        && now.ext == stored.ext
-                        && now.unresolved == stored.unresolved;
-                    if !same {
-                        let gone: Vec<String> = stored
-                            .edges
-                            .iter()
-                            .filter(|b| {
-                                !now.edges.iter().any(|a| {
-                                    a.source == b.source
-                                        && a.target == b.target
-                                        && a.relation == b.relation
-                                })
-                            })
-                            .take(3)
-                            .map(|b| format!("-{} {} {}", b.source, b.relation, b.target))
-                            .chain(
-                                now.edges
-                                    .iter()
-                                    .filter(|a| {
-                                        !stored.edges.iter().any(|b| {
-                                            a.source == b.source
-                                                && a.target == b.target
-                                                && a.relation == b.relation
-                                        })
-                                    })
-                                    .take(3)
-                                    .map(|a| format!("+{} {} {}", a.source, a.relation, a.target)),
-                            )
-                            .collect();
-                        differed.push(format!("{} {gone:?}", facts.path));
-                    }
+                    })
+                    .collect();
+                handles.into_iter().map(|h| h.join().expect("a resolution worker")).collect()
+            });
+            let mut all = Vec::new();
+            let mut used = p.used.borrow_mut();
+            for (mine, notes) in done {
+                all.extend(mine);
+                for (k, v) in notes {
+                    used.entry(k).or_default().extend(v);
                 }
             }
+            all
+        };
+        for (f, run) in runs {
+            reused += usize::from(run.reused);
+            verified += usize::from(run.verified);
+            if let Some(d) = run.differed {
+                differed.push(d);
+            }
+            per_file[f] = run.out;
         }
+        differed.sort();
         if verify {
             eprintln!(
                 "reuse verify: {} of {verified} files whose resolution would be reused came out otherwise",
