@@ -107,53 +107,81 @@ codebase and query.</sub>
 ## Scale: kubernetes
 
 One large repository, measured on 2026-11-26 on a 4-core, 15 GB machine with
-engine 0.5.80 (`benchmarks/scale.py`): kubernetes at `3596eb6`, 18,946 files
-read (13,980 Go files outside `vendor/`, 4.2 million lines), giving 508,099
-nodes and 2.44 million edges (a 1.1 GB `graph.json`).
+engine 0.5.80 (`benchmarks/scale.py`): kubernetes at `3596eb6`. A build leaves
+out the Go module's `vendor/` (4,394 files of other projects' code; `GRAPHLORE_VENDOR=1`
+reads it), so it reads 13,989 files (4.2 million lines of Go), giving 263,363
+nodes and 1.87 million edges.
 
 | Build | seconds | peak memory | of which |
 |---|--:|--:|---|
-| full | 236 | 11.4 GB | parse 125 s, resolve 65 s, communities 22 s |
-| update, nothing changed | 120 | – | resolve 65 s, communities 21 s |
-| update, one file changed | 123 | – | resolve 67 s, communities 21 s |
+| full | 118 | 5.0 GB | parse 52 s, resolve 40 s, communities 14 s |
+| update, nothing changed | 67 | 4.4 GB | resolve 52 s, communities 20 s |
+| update, one file changed | 67 | 4.4 GB | resolve 54 s, communities 20 s |
 
-(The peak memory is the full build's; `getrusage` gives the largest of the
-child processes, so the updates report no lower number of their own.)
+(Peak memory from the engine's report, `memory_mb`, which reads
+`/proc/self/status` after each phase.) An update parses only what changed,
+but resolution and communities run over the whole project, so that an update
+writes the graph a full build would.
 
-The full build took 736 s before this measurement, 619 s of it parsing:
-a literal of many elements was read in quadratic time (each element asked its
+With `vendor/` read, as before this release (18,946 files, 508,099 nodes,
+2.44 million edges, a 1.1 GB `graph.json`):
+
+| | full build | peak memory |
+|---|--:|--:|
+| before | 236 s | 11.4 GB |
+| now | 167 s | 7.6 GB |
+
+Memory after each phase of that full build, resident (peak so far), in GB:
+
+| Phase | before | now |
+|---|--:|--:|
+| parse | 3.5 | 3.4 |
+| assemble | 5.9 | 5.9 |
+| resolve | 10.6 (11.0) | 7.0 (7.6) |
+| coupling | 10.9 | 7.0 |
+| communities | 11.2 | 7.2 |
+| write, cache | 11.1 (11.4) | 7.2 (7.6) |
+
+The facts of every file (3.5 GB here) were kept to the end of the build for
+the cache; they are written to it right after resolution now and let go. And
+the resolver's 2.4 million edges were JSON objects from resolution on, about
+1.6 KB each (`serde_json` keeps an object's keys in order): they stay typed to
+the write now (`engine/src/graph/links.rs`), which writes the same bytes. The
+graph is the same (byte for byte on the 45 audit repositories; on kubernetes
+apart from the communities of a warm start). What remains is the facts while
+resolution runs and the nodes as JSON objects.
+
+Before this measurement the full build took 736 s, 619 s of it parsing: a
+literal of many elements was read in quadratic time (each element asked its
 ancestors for a declared value, and the literal answered by reading every
 child), so `vendor/golang.org/x/text/unicode/norm/tables15.0.0.go` (395 KB)
 alone took 211 s and gnostic's `OpenAPIv3.pb.go` 120 s; they take 1.4 s and
-0.5 s now. An update parses only what changed, but resolution and
-communities run over the whole project (so that an update writes the graph a
-full build would), which is two minutes here. 4,394 of the files read are
-`vendor/`: the analysis scope leaves them out of the analysis, the build reads
-them. Reading the graph takes 13 s and 7.2 GB in the server. Query latency,
-over 39 definitions sampled with a fixed seed after one call that fills the
-per-graph caches:
+0.5 s now.
+
+Reading the graph takes 6.7 s and 3.7 GB in the server (13 s and 7.2 GB with
+`vendor/`). Query latency, over 39 definitions sampled with a fixed seed after
+one call that fills the per-graph caches:
 
 | Tool | first call | p50 | p95 |
 |---|--:|--:|--:|
-| `graphlore_neighbors` | 11.5 s | 2 ms | 107 ms |
+| `graphlore_neighbors` | 6.1 s | 1 ms | 83 ms |
 | `graphlore_subgraph` | 0.00 s | 3 ms | 24 ms |
-| `graphlore_node_details` | 2.0 s | 4 ms | 24 ms |
-| `graphlore_impact` | 10.9 s | 237 ms | 279 ms |
-| `graphlore_tests_for` | 4.8 s | 598 ms | 734 ms |
+| `graphlore_node_details` | 1.1 s | 2 ms | 13 ms |
+| `graphlore_impact` | 8.4 s | 87 ms | 111 ms |
+| `graphlore_tests_for` | 1.3 s | 243 ms | 279 ms |
 
 and the tools that read the whole graph, a second time: `graphlore_god_nodes`
-1.4 s, `graphlore_overview` 1.9 s, `graphlore_cycles` 7.1 s. Before this
+1.1 s, `graphlore_overview` 1.3 s, `graphlore_cycles` 8.7 s. Before this
 measurement every call of the node tools asked every node of the graph whether
 it is test code, and `node_details` and `tests_for` indexed every edge again:
 `neighbors` took 1.7 s at p50, `subgraph` 1.6 s, `node_details` 2.1 s and
-`tests_for` 5.2 s. Those indexes are now kept per graph, as the adjacency
-already was.
+`tests_for` 5.2 s (with `vendor/`). Those indexes are now kept per graph, as
+the adjacency already was.
 
 What this says: a graph of this size is served, the node tools answer in well
-under a second, and what costs is the build: the memory it holds and an update
-that resolves the whole project again. `graph.json` itself is not the
-bottleneck (13 s to read once per server); a change of storage is not called
-for by these numbers.
+under a second, and what costs is the build, chiefly an update that resolves
+the whole project again. `graph.json` itself is not the bottleneck (seconds to
+read once per server); a change of storage is not called for by these numbers.
 
 ```bash
 python benchmarks/scale.py /path/to/kubernetes --out /tmp/scale-out --touch pkg/kubelet/kubelet.go --json /tmp/scale.json

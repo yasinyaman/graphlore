@@ -18,9 +18,11 @@ All notable changes to this project are documented here. The format is based on
   resident and peak, from `/proc/self/status`, Linux only), and
   `benchmarks/scale.py` prints it.
 - **Scale, measured on kubernetes** (`docs/benchmark.md`, "Scale: kubernetes";
-  `benchmarks/scale.py`): 4.2 million lines of Go, 508,099 nodes and 2.44
-  million edges; a full build in 236 s and 11.4 GB, an update in 120–123 s,
-  the graph read in 13 s, and the node tools at a p50 of 2–598 ms.
+  `benchmarks/scale.py`): 4.2 million lines of Go, 263,363 nodes and 1.87
+  million edges with `vendor/` left out; a full build in 118 s and 5.0 GB, an
+  update in 67 s, the graph read in 6.7 s, and the node tools at a p50 of
+  1–243 ms. With `vendor/` read (508,099 nodes), 167 s and 7.6 GB, from 236 s
+  and 11.4 GB.
 
 ### Fixed
 - **Native engine: a literal of many elements reads in linear time.** Each
@@ -39,7 +41,8 @@ All notable changes to this project are documented here. The format is based on
   facts cache is written right after resolution), they are kept typed through
   coupling, communities and the write (`graph::links`: a JSON object per edge
   cost about ten times the edge), and the previous graph is read from the file
-  as a stream instead of whole.
+  as a stream instead of whole. On kubernetes with `vendor/` read, the peak
+  went from 11.4 to 7.6 GB.
 - **The node tools keep their indexes per graph** instead of rebuilding them on
   every call: the test nodes (`_test_node_ids`, for the production-first order
   of `graphlore_neighbors`, `graphlore_subgraph` and `graphlore_impact`), the
