@@ -114,14 +114,22 @@ nodes and 1.87 million edges.
 
 | Build | seconds | peak memory | of which |
 |---|--:|--:|---|
-| full | 118 | 5.0 GB | parse 52 s, resolve 40 s, communities 14 s |
-| update, nothing changed | 67 | 4.4 GB | resolve 52 s, communities 20 s |
-| update, one file changed | 67 | 4.4 GB | resolve 54 s, communities 20 s |
+| full | 149 | 5.7 GB | parse 61 s, resolve 52 s, communities 15 s |
+| update, nothing changed | 44 | 5.4 GB | resolve 11 s (0 of 13,989 files resolved again), communities 12 s |
+| update, a line added to a file no other reads | 39 | – | resolve 11 s (1 file), communities 12 s |
+| update, a line added to `pkg/kubelet/kubelet.go` | 74 | 5.4 GB | resolve 41 s (876 files), communities 14 s |
 
 (Peak memory from the engine's report, `memory_mb`, which reads
-`/proc/self/status` after each phase.) An update parses only what changed,
-but resolution and communities run over the whole project, so that an update
-writes the graph a full build would.
+`/proc/self/status` after each phase.) An update parses only what changed and
+resolves again only the files whose resolution read something that changed
+([native-engine.md](native-engine.md#incremental-updates)); the graph is the
+one a full build of the same tree writes, byte for byte (checked on this edit
+and by `benchmarks/incremental_check.py` on the audit repositories).
+`kubelet.go` is read by the 876 files of its package and of those that use
+its types, which all resolve again. Before incremental resolution an update
+resolved every file: 67 s for each of the updates above, and the full build
+took 118 s and 5.0 GB; recording what each file reads costs the full build
+about a quarter of its time.
 
 With `vendor/` read, as before this release (18,946 files, 508,099 nodes,
 2.44 million edges, a 1.1 GB `graph.json`):
@@ -179,9 +187,11 @@ it is test code, and `node_details` and `tests_for` indexed every edge again:
 the adjacency already was.
 
 What this says: a graph of this size is served, the node tools answer in well
-under a second, and what costs is the build, chiefly an update that resolves
-the whole project again. `graph.json` itself is not the bottleneck (seconds to
-read once per server); a change of storage is not called for by these numbers.
+under a second, and what costs is the build: an edit to a file many files read
+resolves all of those again, and an update's communities and caches take
+about 30 s whatever changed. `graph.json` itself is not the bottleneck
+(seconds to read once per server); a change of storage is not called for by
+these numbers.
 
 ```bash
 python benchmarks/scale.py /path/to/kubernetes --out /tmp/scale-out --touch pkg/kubelet/kubelet.go --json /tmp/scale.json

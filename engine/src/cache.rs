@@ -1,7 +1,7 @@
 //! The facts cache behind `update=True`: what each file yielded last time, keyed
 //! by its path and checked against its size, modification time and content
-//! hash, so an update parses only the files that changed. Resolution and
-//! communities always run over the whole project, so an update writes the same
+//! hash, so an update parses only the files that changed. Resolution reuses
+//! what it can on its own terms (`resolve/reuse.rs`); an update writes the
 //! graph a full build would.
 //!
 //! One file, `<out dir>/cache/graphlore-native.bin`, written atomically after
@@ -21,6 +21,9 @@ use serde::{Deserialize, Deserializer, Serialize};
 use crate::facts::FileFacts;
 
 pub const CACHE_DIR: &str = "cache";
+/// The layout of the cached facts (`Key::format`): 2 keeps a definition's
+/// byte range, which an update resolved without before.
+pub const FORMAT: u32 = 2;
 pub const CACHE_FILE: &str = "graphlore-native.bin";
 /// A file modified this close to the cache being written may have changed
 /// again within the same timestamp: its content hash decides.
@@ -43,6 +46,9 @@ struct Entry {
 /// Everything a cached fact depends on besides the file itself.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Key {
+    /// The layout of what is cached, raised when it changes within an engine
+    /// version (`FORMAT`): a cache of another layout is not read.
+    pub format: u32,
     pub engine_version: String,
     pub schema_version: u32,
     pub documents: bool,

@@ -241,9 +241,10 @@ pip install dist-engine/*.whl
 
 `graphlore_build`'s `update` parses only the files that
 changed since the last native build (a facts cache in
-`graphify-out/cache/graphlore-native.bin`; resolution and communities still run
-over the whole project, so the graph is the one a full build writes, and the
-nodes of deleted files go), `cluster_only` detects the communities of the graph
+`graphify-out/cache/graphlore-native.bin`) and resolves again only the files
+whose resolution read something that changed (`graphlore-resolved.bin` beside
+it); the graph is the one a full build writes, and the nodes of deleted files
+go, `cluster_only` detects the communities of the graph
 on disk again, `code_only` skips the document headings, and every build writes
 `graph.html` beside graph.json. The build runs in a child process bounded by
 `GRAPHLORE_TIMEOUT`. `benchmarks/compare_engines.py REPO` compares its graph of

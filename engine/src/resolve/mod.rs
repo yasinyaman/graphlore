@@ -1980,6 +1980,21 @@ impl<'a> Project<'a> {
         h.0
     }
 
+    /// No reference being resolved: the per-reference state of the walk as
+    /// it is before the first one.
+    fn neutral(&self) {
+        self.restore((false, false, None, None, None, false));
+        *self.site.borrow_mut() = None;
+        *self.ref_kind.borrow_mut() = None;
+        *self.asking.borrow_mut() = None;
+        *self.depth.borrow_mut() = 0;
+        self.typing.borrow_mut().clear();
+        *self.typing_value.borrow_mut() = false;
+        *self.end_binds.borrow_mut() = None;
+        self.guessed.set(false);
+        self.embedded_hit.set(None);
+    }
+
     /// The Go files of a (directory, package).
     pub(super) fn go_pkg_files(&self, key: &(String, String)) -> &[usize] {
         self.go_pkg.get(key).map(Vec::as_slice).unwrap_or(&[])
@@ -4652,6 +4667,18 @@ impl<'a> Project<'a> {
         }
         // a cycle ends here
         self.bases_memo.borrow_mut().insert(c, (Vec::new(), Rc::default()));
+        // worked out the same whoever asks first: kept across files, the
+        // answer must not carry the state of the reference that asked
+        let walk = self.suspend();
+        let site = self.site.replace(None);
+        let kind = self.ref_kind.replace(None);
+        let asking = self.asking.replace(None);
+        let depth = self.depth.replace(0);
+        let typing = self.typing.replace(HashSet::new());
+        let typing_value = self.typing_value.replace(false);
+        let end_binds = self.end_binds.replace(None);
+        let guessed = self.guessed.replace(false);
+        let embedded = self.embedded_hit.replace(None);
         self.trace.open_kept();
         let mut out = self.written_bases(c);
         // a C# partial type has the bases any of its declarations writes
@@ -4663,6 +4690,16 @@ impl<'a> Project<'a> {
             }
         }
         let frame = self.trace.close_kept();
+        self.embedded_hit.set(embedded);
+        self.guessed.set(guessed);
+        *self.end_binds.borrow_mut() = end_binds;
+        *self.typing_value.borrow_mut() = typing_value;
+        *self.typing.borrow_mut() = typing;
+        *self.depth.borrow_mut() = depth;
+        *self.asking.borrow_mut() = asking;
+        *self.ref_kind.borrow_mut() = kind;
+        *self.site.borrow_mut() = site;
+        self.restore(walk);
         self.bases_memo.borrow_mut().insert(c, (out.clone(), frame));
         out
     }
@@ -4726,6 +4763,16 @@ impl<'a> Project<'a> {
                 continue;
             }
             let outer = self.def(c).parent;
+            // the state the main loop gives a base it resolves (`bases` puts
+            // the asker's back): whoever asks first, the same answer
+            *self.types_only.borrow_mut() = true;
+            *self.calling.borrow_mut() = false;
+            *self.recv.borrow_mut() = r.recv.map(|i| (c.0, i));
+            *self.args.borrow_mut() = r.args;
+            *self.self_arg.borrow_mut() = r.self_arg;
+            *self.cur.borrow_mut() = None;
+            *self.site.borrow_mut() = Some((c.0, r.byte));
+            *self.ref_kind.borrow_mut() = Some(r.kind);
             if let Some((Target::Def(b), _)) = self.resolve_path(c.0, outer, &r.path, true) {
                 if b != c {
                     out.push((b, r.kind));
@@ -10431,6 +10478,11 @@ pub fn resolve(
             out.frame = p.trace.close_file();
         }
         rss("main loop");
+        // the passes after the main loop start from no file's cached work
+        // and no reference's state: which file was resolved last differs
+        // between an update and a full build
+        p.forget();
+        p.neutral();
         if std::env::var("GRAPHLORE_TRACE_STATS").is_ok_and(|v| v == "1") {
             trace_stats(&per_file);
             let mut scans: Vec<(u32, usize)> =

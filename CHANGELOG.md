@@ -7,6 +7,22 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **An update resolves again only the files whose resolution read something
+  that changed** (`docs/native-engine.md`, "Incremental updates";
+  `engine/src/resolve/trace.rs`, `reuse.rs`). The engine records what each
+  file's resolution reads (other files' facts, the keys it asks of the
+  project-wide indexes, a name not found included) and writes it with the
+  file's edges to `cache/graphlore-resolved.bin`; an update takes a file's
+  edges from there when nothing it read changed. The graph is the one a full
+  build writes, byte for byte (`tests/incremental.rs`;
+  `benchmarks/incremental_check.py` makes seeded edits to whole repositories
+  and compares each update with a full build). On kubernetes an update with
+  nothing changed takes 44 s instead of 67 s, one after a line added to a file
+  no other reads 39 s; one after a line added to `kubelet.go`, which 876 files
+  read, 74 s. The full build pays for the recording: 149 s and 5.7 GB instead
+  of 118 s and 5.0 GB. The report's `incremental` says how many files'
+  resolution was reused (`resolve_reused`), `phases_ms` splits resolution
+  (`resolve.index`, `resolve.main`, `resolve.post`).
 - **A Go module's `vendor/` is left out of a build** unless `GRAPHLORE_VENDOR=1`
   (the engine's `--vendor`, `read_vendor`): a directory named `vendor` with
   `modules.txt`, beside a `go.mod`, which `go mod vendor` writes. It holds other
@@ -17,17 +33,27 @@ All notable changes to this project are documented here. The format is based on
 - **The engine's report gives the memory after each phase** (`memory_mb`:
   resident and peak, from `/proc/self/status`, Linux only), and
   `benchmarks/scale.py` prints it.
-  `phases_ms` splits resolution too: `resolve.index` (the project's indexes),
-  `resolve.main` (each file's references) and `resolve.post` (dispatch,
-  resources, HTTP, imports); on a kubernetes update 2.3 s, 33.7 s and 3.5 s.
 - **Scale, measured on kubernetes** (`docs/benchmark.md`, "Scale: kubernetes";
   `benchmarks/scale.py`): 4.2 million lines of Go, 263,363 nodes and 1.87
-  million edges with `vendor/` left out; a full build in 118 s and 5.0 GB, an
-  update in 67 s, the graph read in 6.7 s, and the node tools at a p50 of
-  1–243 ms. With `vendor/` read (508,099 nodes), 167 s and 7.6 GB, from 236 s
-  and 11.4 GB.
+  million edges with `vendor/` left out; the graph read in 6.7 s, and the node
+  tools at a p50 of 1–243 ms. With `vendor/` read (508,099 nodes), a full
+  build took 167 s and 7.6 GB, from 236 s and 11.4 GB.
 
 ### Fixed
+- **Native engine: an update resolved C and C++ code otherwise than a full
+  build.** A definition's byte range was left out of the facts cache, and
+  resolution reads it (a struct's fields in source order for the functions put
+  in its slots, the bodies of anonymous structs and inline namespaces): on
+  hiredis an update found 27 of the 88 `dispatches_to` slot edges. It is
+  cached now (`cache::FORMAT` 2; a cache written before is not read).
+  `benchmarks/incremental_check.py` found it.
+- **Native engine: the bases of a type are the same whoever asks first.** They
+  were worked out with the state of the reference that asked (whether a type
+  was being named, where the use was), and kept: the `dispatches_to` edges of
+  overriding methods could differ with the order things were asked in. Each
+  base is resolved with the state the main loop gives a base reference, and
+  the passes after the main loop (dispatch, slots, resources) start from no
+  reference's state.
 - **Native engine: a literal of many elements reads in linear time.** Each
   element asked its ancestors for a declared value and the literal answered
   by reading all of its children, so a 400 KB Go table took 200 s

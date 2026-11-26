@@ -171,9 +171,9 @@ fn a_file_is_resolved_again_only_when_what_it_read_changed() {
     // nothing changed: every file's resolution is the last build's
     let (_, again) = build_graph(&opts(&root, true)).unwrap();
     assert_eq!(again.incremental.resolve_reused, 4);
-    // a comment on a line that was there: the facts are as they were (a
-    // line more would move what is after it), so is every file's resolution
-    fs::write(root.join("pkg/util.py"), "def double(x):\n    return 2 * x  # twice\n").unwrap();
+    // a number changed in place: the facts are as they were (a line or a
+    // byte more would move what is after it), so is every file's resolution
+    fs::write(root.join("pkg/util.py"), "def double(x):\n    return 3 * x\n").unwrap();
     let (updated, report, full) = update_and_full(&root);
     assert_eq!(report.incremental.resolve_reused, 4);
     assert_eq!(updated, full);

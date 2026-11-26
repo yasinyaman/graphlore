@@ -269,6 +269,7 @@ fn build_inner(opts: &BuildOptions, want_graph: bool) -> Result<(Value, BuildRep
     let mut phases: Vec<(&'static str, u128)> = Vec::new();
     phases.push(("walk", started.elapsed().as_millis()));
     let cache_key = cache::Key {
+        format: cache::FORMAT,
         engine_version: VERSION.to_string(),
         schema_version: SCHEMA_VERSION,
         documents: opts.documents,

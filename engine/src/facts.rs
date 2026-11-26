@@ -279,13 +279,14 @@ pub struct Def {
     /// until it is opened (`unwrap()`, `get()`, `await`, `?`, `.Result`).
     #[serde(default)]
     pub sealed: bool,
-    /// The tree-sitter node the definition came from, and its byte range:
-    /// for attaching references, never serialised.
+    /// The tree-sitter node the definition came from (for attaching
+    /// references while the file is read, never serialised), and its byte
+    /// range, which resolution reads too (a struct's fields in source order,
+    /// the bodies of anonymous structs and inline namespaces): kept in the
+    /// facts cache, or an update would resolve otherwise than a full build.
     #[serde(skip)]
     pub node_id: usize,
-    #[serde(skip)]
     pub start_byte: usize,
-    #[serde(skip)]
     pub end_byte: usize,
 }
 

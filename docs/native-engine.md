@@ -625,11 +625,31 @@ Every build writes `<out dir>/cache/graphlore-native.bin`: each file's facts
 with its size, modification time and content hash, for this engine version and
 these build options. `update=True` reuses the facts of a file whose size and
 modification time are unchanged (and older than the cache by two seconds), or
-whose content hashes the same, and parses the rest; resolution and communities
-run over the whole project, so an update writes the graph a full build would
-(a test checks), and the nodes of deleted files go. A cache from another
+whose content hashes the same, and parses the rest. A cache from another
 version or other options, or one that cannot be read, means a full parse.
 `verbose=True` shows the time per phase.
+
+Resolution is incremental too (`engine/src/resolve/trace.rs`, `reuse.rs`).
+While a file's references are resolved, the engine records what it read: the
+files whose facts it looked at, the keys it asked of the project-wide indexes
+(a name looked up and not found included) and the import uses it noted. Every
+build writes `<out dir>/cache/graphlore-resolved.bin`: each file's edges with
+those reads, a print of each file (a hash of its facts, its scope and its node
+ids) and a print of each key asked (what the index holds there). An update
+takes a file's edges from there when its own print, the prints of the files it
+read and the prints of the keys it asked are all unchanged, and resolves the
+rest; another set of paths, other manifests or another engine resolves every
+file. Communities and the passes over the whole graph (dispatch, HTTP,
+resources, coupling) run every time. The caches of resolution are emptied at
+each file but the bases of each type, which carry what working them out read,
+so a cached answer hides no read from the file that takes it. An update writes
+the graph a full build of the same tree writes, byte for byte:
+`tests/incremental.rs` holds it on small projects (a file read by others, a
+name defined elsewhere later), `benchmarks/incremental_check.py` with seeded
+edits on whole repositories. A file's facts include its line numbers and byte
+offsets, so an edit that adds a line or a character moves what follows it and
+the files that read it resolve again; an edit that changes none of its facts
+(a number changed in place) resolves no other file.
 
 | | full build | update, nothing changed | update, one file changed |
 |---|--:|--:|--:|
