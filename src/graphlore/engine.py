@@ -42,7 +42,7 @@ NATIVE_GAPS = (
     "their spans, containment, document headings and the code they name, the "
     "imports, calls, bases and type references it could resolve from the source, "
     "and communities by its own "
-    "weighting (edge kind, confidence and directory), not graphify's. "
+    "weighting (edge kind, confidence and directory). "
     "update=True parses only the files that changed."
 )
 # The same for a graph written before the engine detected communities.

@@ -7910,7 +7910,7 @@ def _render_prompt(head: str, steps: list[_Step], tail: str) -> str:
 def onboard() -> str:
     """Orient yourself to this codebase using the knowledge graph."""
     return _render_prompt(
-        "Help me understand this codebase using the graphify tools.",
+        "Help me understand this codebase using the graphlore tools.",
         [
             (("graphlore_overview", "Call graphlore_overview to get the lay of the land."),),
             (("graphlore_communities",

@@ -1299,19 +1299,12 @@ def check_sandbox(a: Audit, sub: Subject, repo_dir: Path, keep: bool) -> None:
                        and _ext(gl_graph._node_file(n)) in EXT_LANG)
 
         before = code_nodes(sub.nodes)
-        plain = a.text("build", path=".", expect_error=True)
-        if plain.startswith("ERROR") and "no LLM API key" in plain:
-            a.finding("BUILD-DEFAULT-NEEDS-KEY", "info", "upstream", "build",
-                      "graphlore_build() with its defaults fails without an LLM key when "
-                      "the repository holds docs; code_only=True builds",
-                      "named code_only=True" if "code_only=True" in plain
-                      else "the reply names only the CLI flag")
         (box / s.config.OUT_DIR_NAME / "graph.json").unlink(missing_ok=True)
         out = a.text("build", path=".", code_only=True)
         if out.startswith("ERROR"):
             a.status("build", "error")
             a.finding("BUILD-ERROR", "high", "bug", "build",
-                      "graphlore_build(code_only=True) fails with the installed graphify",
+                      "graphlore_build(code_only=True) fails with the native engine",
                       out[:240])
         else:
             _reset(box)
