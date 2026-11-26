@@ -126,6 +126,8 @@ def build(
         argv.append("--no-docs")
     if incremental:
         argv.append("--incremental")
+    if (config.env("VENDOR") or "").strip().lower() in ("1", "true", "yes"):
+        argv.append("--vendor")
     try:
         proc = subprocess.run(
             argv, capture_output=True, text=True, encoding="utf-8", errors="replace",
@@ -298,6 +300,13 @@ def render_report(report: dict[str, Any], verbose: bool = False, update: bool = 
             shown = sample if verbose else sample[:3]
             more = f", +{count - len(shown)} more" if count > len(shown) else ""
             lines.append(f"  {what}: {_plural(count, 'file')} ({', '.join(shown)}{more})")
+    vendored = report.get("vendored_skipped") or []
+    if vendored:
+        dirs = vendored if verbose else vendored[:3]
+        more = f", +{len(vendored) - len(dirs)} more" if len(vendored) > len(dirs) else ""
+        count = _plural(report.get("vendored_skipped_count", 0), "source file")
+        lines.append(f"  Go vendor/ left out: {count} in {', '.join(dirs)}{more} "
+                     "(GRAPHLORE_VENDOR=1 reads them)")
     if report.get("non_utf8_paths"):
         skipped = _plural(report["non_utf8_paths"], "file")
         lines.append(f"  skipped {skipped} whose name is not UTF-8")

@@ -1002,6 +1002,10 @@ def test_engine_build_runs_the_engine_in_a_child_process(tmp_path, monkeypatch):
     assert "--incremental" in seen[-1]
     assert "--no-docs" in argv
     assert argv[argv.index("--out") + 1] == str(tmp_path / "graphify-out" / "graph.json")
+    assert "--vendor" not in argv
+    monkeypatch.setenv("GRAPHLORE_VENDOR", "1")
+    server.engine.build(tmp_path, timeout=5)
+    assert "--vendor" in seen[-1]
 
     cases = [
         (lambda *a, **k: _FakeProc(stderr="ERROR: not a directory: /x", returncode=1),
@@ -1059,6 +1063,10 @@ def test_engine_render_report_lists_what_was_left_out():
     cold = dict(_NATIVE_REPORT, incremental={"cache": False, "parsed": 33})
     assert "no cache" in server.engine.render_report(cold, update=True)
     assert "no cache" not in server.engine.render_report(cold)
+    vendored = dict(_NATIVE_REPORT, vendored_skipped=["vendor"], vendored_skipped_count=4394)
+    assert ("Go vendor/ left out: 4394 source files in vendor (GRAPHLORE_VENDOR=1 reads them)"
+            in server.engine.render_report(vendored))
+    assert "vendor/ left out" not in server.engine.render_report(_NATIVE_REPORT)
 
 
 def test_no_communities_note_names_the_engine(tmp_path, monkeypatch):

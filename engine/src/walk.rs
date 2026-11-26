@@ -68,6 +68,33 @@ pub struct WalkResult {
     /// The repositories of a workspace, root-relative (`svc-a`,
     /// `services/billing`): empty for a project that is one repository.
     pub repos: Vec<String>,
+    /// Go `vendor/` directories left out (`go_vendor_dir`), root-relative,
+    /// with the number of source files in each.
+    pub vendored_skipped: Vec<(String, usize)>,
+}
+
+/// A Go module's `vendor/` directory, written by `go mod vendor`: copies of
+/// the dependencies, with `modules.txt` listing them, beside the module's
+/// `go.mod`. A build leaves it out unless asked (`read_vendor`): what it
+/// holds is other projects' code, often more of it than the project's own
+/// (4,394 of kubernetes' 18,946 Go files). The imports that name it become
+/// external modules, as they are without a vendor directory.
+fn go_vendor_dir(dir: &Path) -> bool {
+    dir.file_name().is_some_and(|n| n == "vendor")
+        && dir.join("modules.txt").is_file()
+        && dir.parent().is_some_and(|p| p.join("go.mod").is_file())
+}
+
+/// The source files under `dir` (what a build would have read there).
+fn count_sources(dir: &Path) -> usize {
+    WalkBuilder::new(dir)
+        .standard_filters(false)
+        .follow_links(false)
+        .build()
+        .flatten()
+        .filter(|e| e.file_type().is_some_and(|t| t.is_file()))
+        .filter(|e| lang::detect(&e.path().to_string_lossy(), None).is_some())
+        .count()
 }
 
 /// `/`-separated, root-relative; `None` for a name that is not valid UTF-8.
@@ -287,9 +314,17 @@ fn sphinx_txt_doc(rel: &str, roots: &[String]) -> Option<DocKind> {
     roots.iter().any(|r| r.is_empty() || rel.starts_with(&format!("{r}/"))).then_some(DocKind::Rst)
 }
 
-pub fn discover(root: &Path, out_dir_name: &str, documents: bool, max_bytes: u64) -> WalkResult {
+pub fn discover(
+    root: &Path,
+    out_dir_name: &str,
+    documents: bool,
+    max_bytes: u64,
+    read_vendor: bool,
+) -> WalkResult {
     let mut result = WalkResult::default();
     let out_dir = out_dir_name.to_string();
+    let vendored = std::sync::Arc::new(std::sync::Mutex::new(Vec::<PathBuf>::new()));
+    let left_out = vendored.clone();
     let walker = WalkBuilder::new(root)
         .hidden(true)
         .git_ignore(true)
@@ -310,6 +345,12 @@ pub fn discover(root: &Path, out_dir_name: &str, documents: bool, max_bytes: u64
                 }
                 // a virtualenv, whatever it is called
                 if e.path().join("pyvenv.cfg").exists() {
+                    return false;
+                }
+                if !read_vendor && go_vendor_dir(e.path()) {
+                    if let Ok(mut v) = left_out.lock() {
+                        v.push(e.path().to_path_buf());
+                    }
                     return false;
                 }
             }
@@ -339,10 +380,20 @@ pub fn discover(root: &Path, out_dir_name: &str, documents: bool, max_bytes: u64
     // In a workspace each repository is asked for its own files: the root's
     // `git ls-files` (when the root is a repository too) lists none of them.
     result.repos = workspace_repos(root, out_dir_name);
+    let mut skipped: Vec<PathBuf> = vendored.lock().map(|v| v.clone()).unwrap_or_default();
+    skipped.sort();
+    let skipped_rel: Vec<String> =
+        skipped.iter().filter_map(|d| rel_path(root, d)).map(|r| format!("{r}/")).collect();
+    for (dir, rel) in skipped.iter().zip(&skipped_rel) {
+        result.vendored_skipped.push((rel.trim_end_matches('/').to_string(), count_sources(dir)));
+    }
     let mut repos = vec![String::new()];
     repos.extend(result.repos.iter().cloned());
     for repo in &repos {
         for rel in tracked_but_ignored(root, repo, out_dir_name, &seen) {
+            if skipped_rel.iter().any(|d| rel.starts_with(d.as_str())) {
+                continue;
+            }
             let path = root.join(&rel);
             let Ok(meta) = std::fs::symlink_metadata(&path) else { continue };
             if meta.is_file() && seen.insert(rel.clone()) {

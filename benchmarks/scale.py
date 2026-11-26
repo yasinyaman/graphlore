@@ -45,6 +45,7 @@ def build(root: Path, out: Path, incremental: bool) -> dict:
         # (the peak of all children so far: each build is at least the last one)
         "max_rss_mb": round(max(peak, before) / 1024),
         "phases_ms": report.get("phases_ms"),
+        "memory_mb": report.get("memory_mb"),
         "incremental": report.get("incremental"),
         "nodes": report.get("nodes"), "edges": report.get("edges"), "files": report.get("files"),
     }

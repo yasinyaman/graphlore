@@ -9281,6 +9281,50 @@ struct EdgeOut {
     runs: Option<Runs>,
 }
 
+/// The edges resolution proved, still in their compact form: they become
+/// graph.json's link objects (about ten times their size) only with
+/// `into_values`, which the build calls once the files' facts are let go.
+pub struct PendingLinks {
+    kept: Vec<EdgeOut>,
+    paths: Vec<String>,
+    renamed: HashMap<String, String>,
+}
+
+impl PendingLinks {
+    pub fn len(&self) -> usize {
+        self.kept.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.kept.is_empty()
+    }
+
+    /// The link objects, in the order resolution kept them.
+    pub fn into_values(self) -> Vec<Value> {
+        let PendingLinks { kept, paths, renamed } = self;
+        let mut links = Vec::with_capacity(kept.len());
+        for e in kept {
+            let rename = |id: String| renamed.get(&id).cloned().unwrap_or(id);
+            let mut v = json!({
+                "source": rename(e.source),
+                "target": rename(e.target),
+                "relation": e.relation,
+                "confidence": e.confidence.label(),
+                "confidence_score": e.confidence.score(),
+                "weight": 1.0,
+                "source_file": paths[e.file],
+                "source_location": format!("L{}", e.line),
+                "context": e.context,
+            });
+            if let Some(r) = e.runs {
+                v["runs"] = json!(r.as_str());
+            }
+            links.push(v);
+        }
+        links
+    }
+}
+
 /// Every edge the files' facts prove, plus the external nodes they point at.
 pub fn resolve(
     root: &Path,
@@ -9289,7 +9333,7 @@ pub fn resolve(
     manifests: Vec<(String, PathBuf)>,
     repos: &[String],
     diagnose: bool,
-) -> (Vec<Value>, Vec<Value>, BTreeMap<String, ResolveStats>, Vec<Value>) {
+) -> (Vec<Value>, PendingLinks, BTreeMap<String, ResolveStats>, Vec<Value>) {
     let mut edges: Vec<EdgeOut> = Vec::new();
     // calls left without an edge whose name is one definition of the project
     let mut left: Vec<Value> = Vec::new();
@@ -10155,29 +10199,13 @@ pub fn resolve(
             }
         }
     }
-    let mut links = Vec::with_capacity(kept.len());
-    for e in kept {
+    for e in &kept {
         let fam = files[e.file].lang.map(Family::of).map(|f| f.name()).unwrap_or("?");
         let st = stats.entry(fam.to_string()).or_default();
         *st.edges.entry(e.relation.to_string()).or_default() += 1;
         if e.confidence == Confidence::Inferred {
             st.inferred += 1;
         }
-        let mut v = json!({
-            "source": e.source,
-            "target": e.target,
-            "relation": e.relation,
-            "confidence": e.confidence.label(),
-            "confidence_score": e.confidence.score(),
-            "weight": 1.0,
-            "source_file": files[e.file].path,
-            "source_location": format!("L{}", e.line),
-            "context": e.context,
-        });
-        if let Some(r) = e.runs {
-            v["runs"] = json!(r.as_str());
-        }
-        links.push(v);
     }
     // external ids are claimed last; one that a project node already holds
     // gets a suffix, and its edges follow
@@ -10247,15 +10275,10 @@ pub fn resolve(
         }
         nodes.push(v);
     }
-    if !renamed.is_empty() {
-        for l in links.iter_mut() {
-            for end in ["source", "target"] {
-                if let Some(new) = l[end].as_str().and_then(|t| renamed.get(t)) {
-                    l[end] = json!(new);
-                }
-            }
-        }
-    }
+    // (the ids of external nodes renamed above are put on their edges by
+    // `into_values`)
+    let links =
+        PendingLinks { kept, paths: files.iter().map(|f| f.path.clone()).collect(), renamed };
     (nodes, links, stats, left)
 }
 

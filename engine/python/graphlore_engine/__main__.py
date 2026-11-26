@@ -1,7 +1,7 @@
 """``python -m graphlore_engine``: the engine's command line.
 
     build ROOT [--out PATH] [--commit SHA] [--no-docs] [--out-dir-name NAME] [--incremental]
-               [--unresolved PATH]
+               [--unresolved PATH] [--vendor]
     cluster GRAPH
     spans FILE [--as PATH]
     languages
@@ -38,6 +38,8 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--unresolved", metavar="PATH",
                    help="also write the calls left without an edge whose name is one "
                         "definition of the project, each with the reason (JSON)")
+    b.add_argument("--vendor", action="store_true",
+                   help="also read a Go module's vendor/ directory (left out by default)")
     c = sub.add_parser("cluster", help="detect a graph.json's communities again")
     c.add_argument("graph")
     s = sub.add_parser("spans", help="print the definition spans of one file")
@@ -68,6 +70,7 @@ def main(argv: list[str] | None = None) -> int:
             args.root, out=out, commit=args.commit, documents=not args.no_docs,
             out_dir_name=args.out_dir_name, max_file_bytes=args.max_file_bytes,
             threads=args.threads, incremental=args.incremental, unresolved=args.unresolved,
+            read_vendor=args.vendor,
         )
     except RuntimeError as e:
         print(f"ERROR: {e}", file=sys.stderr)

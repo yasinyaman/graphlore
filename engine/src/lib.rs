@@ -69,6 +69,9 @@ pub struct BuildOptions {
     /// the reason): what `benchmarks/unresolved.py` reads. `None` writes
     /// nothing; graph.json is the same either way.
     pub unresolved: Option<PathBuf>,
+    /// Read a Go module's `vendor/` directory (`walk::go_vendor_dir`), which
+    /// a build leaves out by default.
+    pub read_vendor: bool,
 }
 
 impl BuildOptions {
@@ -84,6 +87,7 @@ impl BuildOptions {
             threads: None,
             incremental: false,
             unresolved: None,
+            read_vendor: false,
         }
     }
 }
@@ -240,10 +244,20 @@ pub fn build_graph(opts: &BuildOptions) -> Result<(Value, BuildReport), String> 
     if !root.is_dir() {
         return Err(format!("not a directory: {}", root.display()));
     }
-    let found = walk::discover(&root, &opts.out_dir_name, opts.documents, opts.max_file_bytes);
+    let found = walk::discover(
+        &root,
+        &opts.out_dir_name,
+        opts.documents,
+        opts.max_file_bytes,
+        opts.read_vendor,
+    );
     let mut phase = Instant::now();
+    let mut memory: BTreeMap<&'static str, [u64; 2]> = BTreeMap::new();
     let mut lap = |name: &'static str, phases: &mut Vec<(&'static str, u128)>| {
         phases.push((name, phase.elapsed().as_millis()));
+        if let Some(m) = memory_mb() {
+            memory.insert(name, m);
+        }
         phase = Instant::now();
     };
     let mut phases: Vec<(&'static str, u128)> = Vec::new();
@@ -287,6 +301,8 @@ pub fn build_graph(opts: &BuildOptions) -> Result<(Value, BuildReport), String> 
     let (too_large, n) = report::sample(found.too_large);
     report.too_large = too_large;
     report.too_large_count = n;
+    report.vendored_skipped_count = found.vendored_skipped.iter().map(|(_, n)| n).sum();
+    report.vendored_skipped = found.vendored_skipped.into_iter().map(|(d, _)| d).collect();
 
     let mut facts = Vec::new();
     let mut stamps = Vec::new();
@@ -359,9 +375,23 @@ pub fn build_graph(opts: &BuildOptions) -> Result<(Value, BuildReport), String> 
     }
     lap("resolve", &mut phases);
     assembled.nodes.extend(ext_nodes);
-    assembled.links.extend(edges);
     let documented = docs::link::edges(&facts, &assembled);
     report.doc_links = documented.len();
+    // what reads the facts is done: the cache keeps them, and they are let go
+    // before the graph's own phases (coupling, communities, the write), which
+    // read only nodes and links. (A cache holds each file's facts, whatever the
+    // graph's write does.)
+    if let (Some(path), true) = (&cache_path, opts.out.is_some()) {
+        // a cache that cannot be written costs the next update its speed, nothing else
+        report.incremental.cache_written =
+            cache::store(path, cache_key, facts.into_iter().zip(stamps).collect()).is_ok();
+        lap("cache", &mut phases);
+    } else {
+        drop(facts);
+        drop(stamps);
+    }
+    // the resolved edges become link objects only now, the facts let go
+    assembled.links.extend(edges.into_values());
     assembled.links.extend(documented);
     let (coupled, coupling) = coupling::detect(&mut assembled.nodes, &assembled.links);
     assembled.links.extend(coupled);
@@ -464,16 +494,25 @@ pub fn build_graph(opts: &BuildOptions) -> Result<(Value, BuildReport), String> 
         if let (Some(path), Some(labels)) = (&labels_path, &communities.labels) {
             write_labels(path, labels)?;
         }
-        if let Some(path) = &cache_path {
-            // a cache that cannot be written costs the next update its speed, nothing else
-            report.incremental.cache_written =
-                cache::store(path, cache_key, facts.into_iter().zip(stamps).collect()).is_ok();
-            lap("cache", &mut phases);
-        }
     }
     report.phases_ms = phases.into_iter().collect();
+    report.memory_mb = memory;
     report.elapsed_ms = started.elapsed().as_millis();
     Ok((graph, report))
+}
+
+/// The process's resident memory and its peak so far, in MB: `VmRSS` and
+/// `VmHWM` of /proc/self/status (Linux; None elsewhere).
+fn memory_mb() -> Option<[u64; 2]> {
+    let status = std::fs::read_to_string("/proc/self/status").ok()?;
+    let field = |name: &str| {
+        status.lines().find_map(|l| {
+            let kb: u64 =
+                l.strip_prefix(name)?.trim().trim_end_matches("kB").trim().parse().ok()?;
+            Some(kb / 1024)
+        })
+    };
+    Some([field("VmRSS:")?, field("VmHWM:")?])
 }
 
 /// Where graphlore and graphify keep the names given to communities.

@@ -259,6 +259,7 @@ has the results on 31 repositories and the roadmap.
 | `GRAPHLORE_OUT_DIR` | `graphify-out` | Output folder name |
 | `GRAPHLORE_ENGINE` | `auto` | What `graphlore_build` extracts with: `auto` and `native` both mean graphlore's native engine (the `graphlore-engine` package; an error when it is not installed). `graphify` was removed in 0.9.0 and is an error that says so, as is another value. See [The native engine](#the-native-engine) |
 | `GRAPHLORE_TIMEOUT` | `600` | Native build timeout (seconds) |
+| `GRAPHLORE_VENDOR` | unset | `1` also reads a Go module's `vendor/` directory (one with `vendor/modules.txt` beside a `go.mod`), which a build leaves out: copies of other projects' code, often more than the project's own. The build reply names the directories left out and how many source files they hold; without them, imports of vendored packages are external modules |
 | `GRAPHLORE_RESTRICT_PATHS` | `0` | Confine `graphlore_build`'s `path` to the project dir (auto-on for HTTP) |
 | `GRAPHLORE_TRANSPORT` | `stdio` | `stdio` \| `streamable-http` \| `sse` |
 | `GRAPHLORE_HOST` | `127.0.0.1` | Bind host for HTTP transports |

@@ -34,6 +34,10 @@ pub struct BuildReport {
     pub not_read: BTreeMap<String, usize>,
     pub too_large: Vec<String>,
     pub too_large_count: usize,
+    /// Go `vendor/` directories left out (`read_vendor` reads them), and the
+    /// source files in them.
+    pub vendored_skipped: Vec<String>,
+    pub vendored_skipped_count: usize,
     pub unreadable: Vec<String>,
     pub unreadable_count: usize,
     pub timed_out: Vec<String>,
@@ -50,6 +54,10 @@ pub struct BuildReport {
     pub coupling: crate::coupling::CouplingReport,
     /// Milliseconds per phase: walk, parse, assemble, resolve, communities, write, cache.
     pub phases_ms: BTreeMap<&'static str, u128>,
+    /// After each phase, the process's resident memory and its peak so far,
+    /// in MB (Linux only: read from /proc/self/status; empty elsewhere).
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub memory_mb: BTreeMap<&'static str, [u64; 2]>,
     pub max_file_bytes: u64,
     pub elapsed_ms: u128,
 }

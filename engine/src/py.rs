@@ -13,7 +13,7 @@ use crate::BuildOptions;
 #[pyfunction]
 #[pyo3(signature = (root, out=None, commit=None, documents=true, out_dir_name="graphify-out",
                     max_file_bytes=crate::DEFAULT_MAX_FILE_BYTES, parse_timeout_ms=10_000,
-                    threads=None, incremental=false, unresolved=None))]
+                    threads=None, incremental=false, unresolved=None, read_vendor=false))]
 #[allow(clippy::too_many_arguments)]
 fn build(
     py: Python<'_>,
@@ -27,6 +27,7 @@ fn build(
     threads: Option<usize>,
     incremental: bool,
     unresolved: Option<PathBuf>,
+    read_vendor: bool,
 ) -> PyResult<String> {
     let opts = BuildOptions {
         root,
@@ -39,6 +40,7 @@ fn build(
         threads,
         incremental,
         unresolved,
+        read_vendor,
     };
     let report = py.detach(|| crate::build(&opts)).map_err(PyRuntimeError::new_err)?;
     serde_json::to_string(&report).map_err(|e| PyRuntimeError::new_err(e.to_string()))

@@ -7,6 +7,16 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **A Go module's `vendor/` is left out of a build** unless `GRAPHLORE_VENDOR=1`
+  (the engine's `--vendor`, `read_vendor`): a directory named `vendor` with
+  `modules.txt`, beside a `go.mod`, which `go mod vendor` writes. It holds other
+  projects' code, often more of it than the project's own (4,394 of
+  kubernetes' 18,946 Go files); imports of its packages are external modules,
+  as they are without one. The build reply names the directories left out and
+  their source files (`vendored_skipped`, `vendored_skipped_count`).
+- **The engine's report gives the memory after each phase** (`memory_mb`:
+  resident and peak, from `/proc/self/status`, Linux only), and
+  `benchmarks/scale.py` prints it.
 - **Scale, measured on kubernetes** (`docs/benchmark.md`, "Scale: kubernetes";
   `benchmarks/scale.py`): 4.2 million lines of Go, 508,099 nodes and 2.44
   million edges; a full build in 236 s and 11.4 GB, an update in 120–123 s,
@@ -24,6 +34,10 @@ All notable changes to this project are documented here. The format is based on
   the same bytes twice).
 
 ### Changed
+- **Native engine: less memory per build, the same graph.json.** The resolved
+  edges stay in their compact form until the files' facts are let go (the
+  facts cache is written right after resolution), and the previous graph is
+  read from the file as a stream instead of whole.
 - **The node tools keep their indexes per graph** instead of rebuilding them on
   every call: the test nodes (`_test_node_ids`, for the production-first order
   of `graphlore_neighbors`, `graphlore_subgraph` and `graphlore_impact`), the

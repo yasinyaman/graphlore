@@ -149,8 +149,10 @@ impl Previous {
     /// The communities of the graph.json at `path`, reading only the fields
     /// they need (a graph of 250 MB takes a fraction of a full parse).
     pub fn read(path: &std::path::Path) -> Option<Self> {
-        let bytes = std::fs::read(path).ok()?;
-        let file: PrevFile = serde_json::from_slice(&bytes).ok()?;
+        // (read as a stream: the whole file in memory first was 1.1 GB more
+        // for kubernetes, to keep two fields of each node)
+        let reader = std::io::BufReader::with_capacity(1 << 20, std::fs::File::open(path).ok()?);
+        let file: PrevFile = serde_json::from_reader(reader).ok()?;
         let mut prev = Previous::default();
         for n in file.nodes {
             if let (Some(id), Some(c)) = (n.id, n.community.as_ref().and_then(Value::as_i64)) {
