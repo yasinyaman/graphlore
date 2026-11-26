@@ -10695,7 +10695,9 @@ pub fn resolve(
                 readers.len(),
                 files[w].path
             );
-            for (site, n) in rows.iter().take(40) {
+            // the sites that read all of it first, then the declarations'
+            let (whole, decls): (Vec<_>, Vec<_>) = rows.iter().partition(|(s, _)| s.1 % 2 == 0);
+            for (site, n) in whole.iter().take(25).chain(decls.iter().take(15)) {
                 let what = if site.1 % 2 == 1 { "decl" } else { "full" };
                 eprintln!("trace file: {n:>6} readers at {}:{} ({what})", site.0, site.1 / 2);
             }
