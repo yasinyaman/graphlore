@@ -1329,8 +1329,11 @@ const COMMON_METHODS: &[&str] = &[
     "each",
 ];
 
-/// A cache of resolution: each value with what working it out read.
-type Memo<K, V> = RefCell<HashMap<K, (V, Rc<trace::Frame>)>>;
+/// A cache of one file's resolution, emptied at each file (`forget`): each
+/// value with where it was worked out (`Trace::valid`).
+type Memo<K, V> = RefCell<HashMap<K, (V, u32)>>;
+/// A cache kept across files: each value with what working it out read.
+type KeptMemo<K, V> = RefCell<HashMap<K, (V, Rc<trace::Frame>)>>;
 /// Per file: the lexical children of each definition by bare name.
 type Children = Vec<HashMap<usize, HashMap<String, Vec<usize>>>>;
 
@@ -1371,7 +1374,7 @@ pub struct Project<'a> {
     scopes: Traced<Vec<Scope>>,
     exts: RefCell<Vec<ExtNode>>,
     ext_index: RefCell<HashMap<(&'static str, String), usize>>,
-    bases_memo: Memo<DefRef, Vec<DefRef>>,
+    bases_memo: KeptMemo<DefRef, Vec<DefRef>>,
     /// `(file, definition, name)` -> typed local / parameter.
     locals: FileKeyed<(usize, usize, String), usize>,
     /// The locals of one name in one definition, in the order they are
@@ -1716,6 +1719,10 @@ impl<'a> Project<'a> {
                 }
                 scope.imported.extend(seen);
             }
+        }
+        // Go's aliases, worked out once before any file's frame is open
+        if p.family.contains(&Some(Family::Go)) {
+            p.go_aliases((0, 0));
         }
         p
     }
@@ -2863,15 +2870,14 @@ impl<'a> Project<'a> {
     /// value of `x.apply { … }` / `with(x) { … }`, or what the function called
     /// declares for its lambda (`block: Builder.() -> Unit`).
     fn receiver_type(&self, f: usize, d: Option<usize>, i: u16) -> Option<(DefRef, Confidence)> {
-        if let Some((known, frame)) = self.recv_types.borrow().get(&(f, i)) {
-            self.trace.file(f);
-            self.trace.absorb(frame);
+        if let Some((known, _)) =
+            self.recv_types.borrow().get(&(f, i)).filter(|(_, at)| self.trace.valid(*at))
+        {
             return *known;
         }
-        self.trace.open();
+        let at = self.trace.epoch();
         let out = self.receiver_type_uncached(f, d, i);
-        let frame = self.trace.close();
-        self.recv_types.borrow_mut().insert((f, i), (out, frame));
+        self.recv_types.borrow_mut().insert((f, i), (out, at));
         out
     }
 
@@ -3053,9 +3059,9 @@ impl<'a> Project<'a> {
         // typing a local can come back to it (`let session =
         // session(using: x)`: the value names the local): the second
         // time round it has no type
-        if let Some((known, frame)) = self.local_types.borrow().get(&(f, li)) {
-            self.trace.file(f);
-            self.trace.absorb(frame);
+        if let Some((known, _)) =
+            self.local_types.borrow().get(&(f, li)).filter(|(_, at)| self.trace.valid(*at))
+        {
             return *known;
         }
         // worked out from the top, the answer is the local's own and
@@ -3064,7 +3070,7 @@ impl<'a> Project<'a> {
         if !self.typing.borrow_mut().insert((f, li)) {
             return None;
         }
-        self.trace.open();
+        let at = self.trace.epoch();
         // a local's type is the same whatever use asks for it: its
         // value's path is what is called there (`x = f()` -> `f`),
         // a written type is not
@@ -3080,9 +3086,8 @@ impl<'a> Project<'a> {
         *self.typing_value.borrow_mut() = typing_value;
         *self.calling.borrow_mut() = calling;
         self.typing.borrow_mut().remove(&(f, li));
-        let frame = self.trace.close();
         if whole {
-            self.local_types.borrow_mut().insert((f, li), (out, frame));
+            self.local_types.borrow_mut().insert((f, li), (out, at));
         }
         out
     }
@@ -3566,17 +3571,16 @@ impl<'a> Project<'a> {
     /// duck typing writes no type, and a library's type could answer too.
     fn structural_type(&self, f: usize, d: usize, name: &str) -> Option<DefRef> {
         let key = (f, d, name.to_string());
-        if let Some((known, frame)) = self.structural.borrow().get(&key) {
-            self.trace.file(f);
-            self.trace.absorb(frame);
+        if let Some((known, _)) =
+            self.structural.borrow().get(&key).filter(|(_, at)| self.trace.valid(*at))
+        {
             return *known;
         }
         // a cycle ends here
-        self.structural.borrow_mut().insert(key.clone(), (None, Rc::default()));
-        self.trace.open();
+        self.structural.borrow_mut().insert(key.clone(), (None, trace::ALWAYS));
+        let at = self.trace.epoch();
         let found = self.structural_type_uncached(f, d, name);
-        let frame = self.trace.close();
-        self.structural.borrow_mut().insert(key, (found, frame));
+        self.structural.borrow_mut().insert(key, (found, at));
         found
     }
 
@@ -4648,7 +4652,7 @@ impl<'a> Project<'a> {
         }
         // a cycle ends here
         self.bases_memo.borrow_mut().insert(c, (Vec::new(), Rc::default()));
-        self.trace.open();
+        self.trace.open_kept();
         let mut out = self.written_bases(c);
         // a C# partial type has the bases any of its declarations writes
         for p in self.partials(c) {
@@ -4658,7 +4662,7 @@ impl<'a> Project<'a> {
                 }
             }
         }
-        let frame = self.trace.close_flat();
+        let frame = self.trace.close_kept();
         self.bases_memo.borrow_mut().insert(c, (out.clone(), frame));
         out
     }
@@ -7284,16 +7288,16 @@ impl<'a> Project<'a> {
         if l.declared || l.path.is_empty() || l.path.last().is_some_and(|s| s.starts_with('[')) {
             return None;
         }
-        if let Some((known, frame)) = self.value_binds.borrow().get(&(f, li)) {
-            self.trace.file(f);
-            self.trace.absorb(frame);
+        if let Some((known, _)) =
+            self.value_binds.borrow().get(&(f, li)).filter(|(_, at)| self.trace.valid(*at))
+        {
             return known.clone();
         }
         let whole = self.typing.borrow().is_empty() && *self.depth.borrow() == 0;
         if *self.depth.borrow() > 3 || !self.typing.borrow_mut().insert((f, li)) {
             return None;
         }
-        self.trace.open();
+        let at = self.trace.epoch();
         *self.depth.borrow_mut() += 1;
         let recv = self.recv.replace(None);
         let types = self.types_only.replace(false);
@@ -7313,9 +7317,8 @@ impl<'a> Project<'a> {
             }
             _ => None,
         };
-        let frame = self.trace.close();
         if whole {
-            self.value_binds.borrow_mut().insert((f, li), (out.clone(), frame));
+            self.value_binds.borrow_mut().insert((f, li), (out.clone(), at));
         }
         out
     }
@@ -7512,17 +7515,13 @@ impl<'a> Project<'a> {
         // the value is a call of a function that returns a tuple
         let known = self.tuple_locals.borrow().get(&(f, li)).cloned();
         let parts = match known {
-            Some((n, frame)) => {
-                self.trace.file(f);
-                self.trace.absorb(&frame);
-                n
-            }
-            None => {
+            Some((n, at)) if self.trace.valid(at) => n,
+            _ => {
                 let whole = self.typing.borrow().is_empty() && *self.depth.borrow() == 0;
                 if !self.typing.borrow_mut().insert((f, li)) {
                     return None;
                 }
-                self.trace.open();
+                let at = self.trace.epoch();
                 let recv = self.recv.replace(None);
                 let value = self.resolve_path(f, Some(x), &l.path, true);
                 *self.recv.borrow_mut() = recv;
@@ -7533,9 +7532,8 @@ impl<'a> Project<'a> {
                     }
                     _ => 0,
                 };
-                let frame = self.trace.close();
                 if whole {
-                    self.tuple_locals.borrow_mut().insert((f, li), (n, frame));
+                    self.tuple_locals.borrow_mut().insert((f, li), (n, at));
                 }
                 n
             }
@@ -7574,14 +7572,14 @@ impl<'a> Project<'a> {
     /// What call reference `ri` of file `f` calls, with the overload its
     /// arguments are for: a callable, or the one constructor that takes them.
     fn call_target(&self, f: usize, ri: usize) -> Option<(DefRef, Confidence)> {
-        if let Some((known, frame)) = self.call_targets.borrow().get(&(f, ri)) {
-            self.trace.file(f);
-            self.trace.absorb(frame);
+        if let Some((known, _)) =
+            self.call_targets.borrow().get(&(f, ri)).filter(|(_, at)| self.trace.valid(*at))
+        {
             return *known;
         }
         // (a call that comes back to itself has no answer)
-        self.call_targets.borrow_mut().insert((f, ri), (None, Rc::default()));
-        self.trace.open();
+        self.call_targets.borrow_mut().insert((f, ri), (None, trace::ALWAYS));
+        let at = self.trace.epoch();
         let r = &self.files[f].refs[ri];
         let d = r.from_def;
         let saved = self.suspend();
@@ -7615,8 +7613,7 @@ impl<'a> Project<'a> {
             _ => None,
         };
         self.restore(saved);
-        let frame = self.trace.close();
-        self.call_targets.borrow_mut().insert((f, ri), (out, frame));
+        self.call_targets.borrow_mut().insert((f, ri), (out, at));
         out
     }
 
@@ -8041,9 +8038,12 @@ impl<'a> Project<'a> {
                 if l.path.is_empty() || l.path.last().is_some_and(|s| s == crate::refs::OPENED) {
                     return false;
                 }
-                if let Some((known, frame)) = self.sealed_locals.borrow().get(&(f, li)) {
-                    self.trace.file(f);
-                    self.trace.absorb(frame);
+                if let Some((known, _)) = self
+                    .sealed_locals
+                    .borrow()
+                    .get(&(f, li))
+                    .filter(|(_, at)| self.trace.valid(*at))
+                {
                     return *known;
                 }
                 // (worked out from the top it is the local's own answer and
@@ -8052,7 +8052,7 @@ impl<'a> Project<'a> {
                 if *self.depth.borrow() > 3 || !self.typing.borrow_mut().insert((f, li)) {
                     return false;
                 }
-                self.trace.open();
+                let at = self.trace.epoch();
                 *self.depth.borrow_mut() += 1;
                 let recv = self.recv.replace(None);
                 let types = self.types_only.replace(false);
@@ -8063,9 +8063,8 @@ impl<'a> Project<'a> {
                 self.typing.borrow_mut().remove(&(f, li));
                 let sealed = matches!(value, Some((Target::Def(c), _))
                     if self.def(c).kind.is_callable() && self.def(c).sealed);
-                let frame = self.trace.close();
                 if whole {
-                    self.sealed_locals.borrow_mut().insert((f, li), (sealed, frame));
+                    self.sealed_locals.borrow_mut().insert((f, li), (sealed, at));
                 }
                 return sealed;
             }

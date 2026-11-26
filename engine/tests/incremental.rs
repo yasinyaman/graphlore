@@ -171,9 +171,19 @@ fn a_file_is_resolved_again_only_when_what_it_read_changed() {
     // nothing changed: every file's resolution is the last build's
     let (_, again) = build_graph(&opts(&root, true)).unwrap();
     assert_eq!(again.incremental.resolve_reused, 4);
-    // the body of `double` changed: the files that read util.py resolve again
-    // (util.py, core.py, and pkg/__init__.py through core), other.py does not
-    fs::write(root.join("pkg/util.py"), "def double(x):\n    return x + x\n").unwrap();
+    // a comment on a line that was there: the facts are as they were (a
+    // line more would move what is after it), so is every file's resolution
+    fs::write(root.join("pkg/util.py"), "def double(x):\n    return 2 * x  # twice\n").unwrap();
+    let (updated, report, full) = update_and_full(&root);
+    assert_eq!(report.incremental.resolve_reused, 4);
+    assert_eq!(updated, full);
+    // what `double` calls changed: the files that read util.py resolve again
+    // (util.py, and core.py, which calls `double`), other.py does not
+    fs::write(
+        root.join("pkg/util.py"),
+        "def double(x):\n    return twice(x)\n\ndef twice(x):\n    return 2 * x\n",
+    )
+    .unwrap();
     let (updated, report, full) = update_and_full(&root);
     assert!(report.incremental.resolve_reused >= 1, "reused {}", report.incremental.resolve_reused);
     assert!(report.incremental.resolve_reused < 4, "reused {}", report.incremental.resolve_reused);

@@ -167,7 +167,14 @@ pub struct Trace {
     /// there are millions of frames, most of them alike.
     empty: Rc<Frame>,
     small: RefCell<HashMap<SmallKey, Rc<Frame>>>,
+    /// A counter that marks where a cached value was worked out, and the
+    /// marks at which the kept frames now open began (`valid`).
+    epoch: std::cell::Cell<u32>,
+    kept_starts: RefCell<Vec<u32>>,
 }
+
+/// The mark of a cache entry valid everywhere: a cycle's placeholder.
+pub const ALWAYS: u32 = u32::MAX;
 
 /// Whether reads are recorded at all: off, every frame is empty, and no
 /// file's resolution can be reused (a build that writes no cache).
@@ -253,9 +260,33 @@ impl Trace {
         frame
     }
 
-    /// Close the innermost frame flattened: for a cache kept across files,
-    /// whose frame must not hold the frames of other files' work alive.
-    pub fn close_flat(&self) -> Rc<Frame> {
+    /// The mark of a value about to be worked out.
+    pub fn epoch(&self) -> u32 {
+        self.epoch.get()
+    }
+
+    /// Whether a value of a cache emptied at each file, worked out at mark
+    /// `at`, can be taken here. What working it out read is in the file's
+    /// frame already, and so in every frame it was worked out inside; a
+    /// frame kept with a cache across files (`open_kept`) has only what was
+    /// worked out since it began, so an older value is worked out again.
+    pub fn valid(&self, at: u32) -> bool {
+        at == ALWAYS || self.kept_starts.borrow().last().is_none_or(|&start| at >= start)
+    }
+
+    /// Open a frame for a value kept across files (the bases of a type).
+    pub fn open_kept(&self) {
+        self.epoch.set(self.epoch.get() + 1);
+        self.kept_starts.borrow_mut().push(self.epoch.get());
+        self.open();
+    }
+
+    /// Close it flattened: a value kept across files holds no frame of other
+    /// files' work alive. The frame around takes it in.
+    pub fn close_kept(&self) -> Rc<Frame> {
+        self.kept_starts.borrow_mut().pop();
+        // (what is worked out after it is younger than any frame open)
+        self.epoch.set(self.epoch.get() + 1);
         if !enabled() {
             return self.empty.clone();
         }

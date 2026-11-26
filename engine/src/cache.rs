@@ -91,6 +91,28 @@ pub fn hash(bytes: &[u8]) -> u64 {
     h
 }
 
+/// A hash of a file's facts as the cache writes them: what other files can
+/// read of it, so that an edit that leaves the facts as they were (a comment,
+/// a blank line at the end) changes no other file's resolution.
+pub fn facts_hash(facts: &FileFacts) -> u64 {
+    struct Hasher(u64);
+    impl Write for Hasher {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            for &b in buf {
+                self.0 ^= u64::from(b);
+                self.0 = self.0.wrapping_mul(0x0000_0100_0000_01b3);
+            }
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut h = Hasher(0xcbf2_9ce4_8422_2325);
+    let _ = codec().serialize_into(&mut h, facts);
+    h.0
+}
+
 impl Cache {
     /// The cache at `path`, if it was written for `key`.
     pub fn load(path: &Path, key: &Key) -> Option<Cache> {

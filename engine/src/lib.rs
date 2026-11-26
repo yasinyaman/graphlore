@@ -394,7 +394,11 @@ fn build_inner(opts: &BuildOptions, want_graph: bool) -> Result<(Value, BuildRep
         (Some(path), Some(key), true) => resolve::reuse::load(path, key),
         _ => None,
     };
-    let content: Vec<u64> = stamps.iter().map(|s: &cache::Stamp| s.hash).collect();
+    // what other files read of each: its facts (`cache::facts_hash`)
+    let content: Vec<u64> = match resolve_key {
+        Some(_) => facts.par_iter().map(cache::facts_hash).collect(),
+        None => Vec::new(),
+    };
     let resolve::Resolution {
         nodes: ext_nodes,
         links: edges,
