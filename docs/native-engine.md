@@ -585,7 +585,19 @@ not reorder the rest, and the same graph gives the same communities on any
 machine. A build starts from the previous graph's communities and repeats the
 partition until a pass returns its own start (when graphify's splits make two
 states alternate, it keeps the one closest to where it began, which a rebuild
-from it keeps too); a first build settles the same way. The previous ids are
+from it keeps too); a first build settles the same way. Leiden starts from the
+groups the communities were split out of, which graph.json keeps as
+`graph.communities.parents`, and a split from the communities themselves.
+Started from the split communities, as it was before, Leiden
+merged the splits again (on zod 355 of 356), the cohesion rule split them
+again a little differently, and settling stopped at its limit of seven
+partitions on 11 of the 45 audit repositories and in a cycle on 4; it now
+reaches a fixed point on all 45 (4.5 partitions on average, 5.2 before) with
+the same communities by every measure below (averages over the 45: modularity
+0.562 → 0.560, in the main directory 87.8% → 88.1%, test nodes in production
+communities 7.6% → 7.6%, agreement with graphify 0.780 → 0.781; agreement with
+the communities before 0.974). On kubernetes an update that changes the graph
+settles in two partitions (2.2 s, 8.1 s before). The previous ids are
 kept by overlap, and a saved name stays while its community's members are the
 same or a strict majority of both its old and new members; others are dropped
 from `.graphify_labels.json`, and the build says how many.

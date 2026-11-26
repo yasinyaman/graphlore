@@ -114,9 +114,9 @@ nodes and 1.87 million edges.
 
 | Build | seconds | peak memory | of which |
 |---|--:|--:|---|
-| full | 127 | 5.6 GB | parse 52 s, resolve 50 s, communities 11 s |
-| update, nothing changed | 24 | 4.7 GB | resolve 7 s (0 of 13,989 files resolved again), communities 3 s (kept) |
-| update, a function added to a file no other reads | 34 | 5.2 GB | resolve 8 s (1 file), communities 11 s |
+| full | 126 | 5.6 GB | parse 49 s, resolve 48 s, communities 12 s |
+| update, nothing changed | 23 | 4.7 GB | resolve 7 s (0 of 13,989 files resolved again), communities 3 s (kept) |
+| update, a function added to a file no other reads | 28 | 5.2 GB | resolve 8 s (1 file), communities 5 s (two partitions) |
 | update, a line added to `pkg/kubelet/kubelet.go` | 74 | 5.4 GB | resolve 41 s (876 files), communities 14 s |
 
 (Peak memory from the engine's report, `memory_mb`, which reads
@@ -127,8 +127,10 @@ one a full build of the same tree writes, byte for byte (checked on these
 edits and by `benchmarks/incremental_check.py` on the audit repositories).
 When detection's input is the one the previous communities came from (no
 node, edge or weight changed: nothing, a comment, a function body that calls
-what it called) they are kept as they are; otherwise detection runs, and on
-kubernetes it settles for seven partitions (8.5 s). `kubelet.go` is read by
+what it called) they are kept as they are; otherwise detection runs, and
+settles in two partitions from the previous communities (2.2 s on kubernetes;
+seven, 8.1 s, before Leiden started from the groups the communities were
+split out of: [native-engine.md](native-engine.md#communities)). `kubelet.go` is read by
 the 876 files of its package and of those that use its types, which all
 resolve again (that row was measured before the last changes, which left the
 others within seconds of what it would be now). Before incremental resolution

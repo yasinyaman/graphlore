@@ -18,7 +18,7 @@ All notable changes to this project are documented here. The format is based on
   `benchmarks/incremental_check.py` makes seeded edits to whole repositories
   and compares each update with a full build; all 45 audit repositories
   agree). On kubernetes an update with nothing changed takes 24 s instead of
-  67 s, one after a function added to a file no other reads 34 s; one after a
+  67 s, one after a function added to a file no other reads 28 s; one after a
   line added to `kubelet.go`, which 876 files read, 74 s. The full build pays
   for the recording: 127 s and 5.6 GB instead of 118 s and 5.0 GB. The report's `incremental` says how many files'
   resolution was reused (`resolve_reused`), `phases_ms` splits resolution
@@ -40,6 +40,21 @@ All notable changes to this project are documented here. The format is based on
   build took 167 s and 7.6 GB, from 236 s and 11.4 GB.
 
 ### Fixed
+- **Native engine: community detection settles.** Each settling pass started
+  from the last pass's communities, after graphify's size and cohesion splits:
+  Leiden merged the split parts again (on zod 355 of 356), the cohesion rule
+  split them again a little differently, and settling stopped at its limit of
+  seven partitions (11 of the 45 audit repositories, and 4 in a cycle; every
+  update of kubernetes that changed the graph, 8.1 s). Leiden now starts from
+  the groups the communities were split out of, kept in graph.json as
+  `graph.communities.parents` (and in the cache's copy), and a split from the
+  communities: all 45 reach a fixed point, with the same communities by
+  every measure (`docs/native-engine.md`, "Communities": modularity, share in
+  the main directory, test mixing, agreement with graphify), and on kubernetes
+  such an update settles in two partitions (2.2 s; the update 28 s instead of
+  34 s). `GRAPHLORE_SETTLE_TRACE=1` prints what each pass did;
+  `benchmarks/incremental_check.py` gives the nodes an update moved to another
+  community and how settling ended.
 - **Native engine: a build that changed nothing moved communities.**
   Detection started from the previous communities and ran Leiden again, which
   need not return them: on kubernetes every update with nothing changed ran
